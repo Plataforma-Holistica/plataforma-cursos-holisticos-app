@@ -28,6 +28,13 @@ const noProviderSdks = {
 const DOMAIN_ONLY_LOCAL = "^(?!\\.{1,2}/|@/)";
 const DOMAIN_TEST_ONLY_LOCAL = "^(?!\\.{1,2}/|@/|vitest$|fast-check$)";
 
+// Las variables de entorno se leen en src/config/ y en ningún otro lado (TRD §11.4).
+const noProcessEnv = {
+  object: "process",
+  property: "env",
+  message: "Las variables de entorno se leen en src/config/env.ts: usa getEnv() (TRD §11.4).",
+};
+
 const domainImports = (regex) => [
   "error",
   {
@@ -65,7 +72,10 @@ export default defineConfig([
         { type: "job", pattern: "src/jobs" },
         { type: "payload", pattern: "src/payload" },
         { type: "messages", pattern: "src/messages" },
+        { type: "config", pattern: "src/config" },
       ],
+      // El archivo de arranque de Next no vive en ninguna carpeta de capa.
+      "boundaries/files": [{ category: "startup", pattern: "**/src/instrumentation.ts" }],
       "boundaries/legacy-templates": false,
       "import/resolver": {
         typescript: { alwaysTryTypes: true },
@@ -88,11 +98,16 @@ export default defineConfig([
             // Un adaptador conoce los tipos del dominio, y a ningún otro adaptador.
             {
               from: { element: { type: "adapter" } },
-              allow: { to: { element: { type: "domain" } } },
+              allow: { to: { element: { type: ["domain", "config"] } } },
             },
             {
               from: { element: { type: "service" } },
-              allow: { to: { element: { type: ["domain", "adapter"] } } },
+              allow: { to: { element: { type: ["domain", "adapter", "config"] } } },
+            },
+            // El arranque valida la configuración antes de atender una sola petición.
+            {
+              from: { file: { categories: "startup" } },
+              allow: { to: { element: { type: ["config", "service"] } } },
             },
             // Lectura estricta de la tabla: la entrada y los trabajos solo ven servicios.
             // Si una pantalla necesita un tipo del dominio, el servicio lo reexporta.
@@ -114,6 +129,13 @@ export default defineConfig([
     },
   },
   {
+    files: ["**/src/**/*.{ts,tsx}"],
+    ignores: ["**/src/config/**"],
+    rules: {
+      "no-restricted-properties": ["error", noProcessEnv],
+    },
+  },
+  {
     // Dominio puro (P1): sin paquetes, sin red, sin reloj y sin variables de entorno.
     files: ["**/src/domain/**/*.ts"],
     rules: {
@@ -125,6 +147,7 @@ export default defineConfig([
       ],
       "no-restricted-properties": [
         "error",
+        noProcessEnv,
         {
           object: "Date",
           property: "now",

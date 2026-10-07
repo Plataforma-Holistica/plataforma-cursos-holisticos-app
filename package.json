@@ -15,11 +15,17 @@
     "lint": "eslint .",
     "test": "vitest run",
     "secrets": "secretlint \"**/*\"",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:status": "supabase status",
     "prepare": "git config core.hooksPath .githooks"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
       "unrs-resolver"
+    ],
+    "onlyBuiltDependencies": [
+      "supabase"
     ],
     "auditConfig": {
       "ignoreGhsas": [
@@ -30,7 +36,8 @@
   "dependencies": {
     "next": "16.3.8",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@secretlint/secretlint-rule-preset-recommend": "13.0.7",
@@ -43,6 +50,7 @@
     "eslint-plugin-boundaries": "7.2.0",
     "fast-check": "4.10.2",
     "secretlint": "13.0.7",
+    "supabase": "2.120.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

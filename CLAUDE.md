@@ -52,6 +52,9 @@ pnpm lint        # lint, incluida la regla de capas
 pnpm test        # pruebas del dominio y la prueba de capas, sin red ni base
 pnpm secrets     # escaneo de secretos en todo el repositorio
 pnpm build       # compilación de producción
+pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
+pnpm db:status   # direcciones y llaves locales, las que pide .env.example
+pnpm db:stop     # lo apaga; los datos se conservan
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
@@ -81,12 +84,18 @@ La que fija el TRD §4.2.
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
 | `src/messages/` | Los textos visibles, en un solo archivo | Nada | Todo lo demás |
+| `src/config/` | Las variables de entorno, leídas y validadas en un solo lugar | Nada de la aplicación | Todo lo demás |
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Tres precisiones que la tabla no dice:
+falla. Cuatro precisiones que la tabla no dice:
 
+- **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
+  y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
+  `src/instrumentation.ts`, el arranque de Next, la valida antes de la primera petición y
+  termina el proceso si falta una variable. Una variable nueva se agrega al esquema de
+  `src/config/env.ts` y a `.env.example` en el mismo cambio.
 - **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos).
   Es la lectura estricta del TRD: si una pantalla necesita un tipo del dominio, el
   servicio lo reexporta.
@@ -103,7 +112,9 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 
 - la prueba se escribe antes que el código;
 - ningún cambio se fusiona sin que una persona lo lea línea por línea;
-- el agente **propone y se detiene**: no fusiona, no despliega y no aplica migraciones.
+- el agente **propone y se detiene**: no fusiona, no despliega y no aplica migraciones a
+  una base remota. En la base local sí las aplica, las veces que haga falta, porque sin
+  eso no puede escribir la prueba antes que el código (decisión del 2026-10-06).
 
 | Zona | Qué protege |
 |---|---|

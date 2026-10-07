@@ -177,6 +177,48 @@ const forbidden: Case[] = [
     rule: LAYERS,
   },
   {
+    name: "el dominio importa la configuración",
+    file: `${fixtures}/domain/access/probe.ts`,
+    code: `import { thing } from "../../config/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "una página importa la configuración",
+    file: `${fixtures}/app/probe.ts`,
+    code: `import { thing } from "../config/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "la configuración importa un servicio",
+    file: `${fixtures}/config/probe.ts`,
+    code: `import { thing } from "../services/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "el arranque importa un adaptador",
+    file: `${fixtures}/instrumentation.ts`,
+    code: `import { thing } from "./adapters/mux/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un servicio lee una variable de entorno por su cuenta",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => process.env.APP_ENV;\n`,
+    rule: "no-restricted-properties",
+  },
+  {
+    name: "un adaptador lee una variable de entorno por su cuenta",
+    file: `${fixtures}/adapters/stripe/probe.ts`,
+    code: `export const probe = () => process.env.STRIPE_SECRET_KEY;\n`,
+    rule: "no-restricted-properties",
+  },
+  {
+    name: "una página lee una variable de entorno por su cuenta",
+    file: `${fixtures}/app/probe.ts`,
+    code: `export const probe = () => process.env.NEXT_PUBLIC_SITE_URL;\n`,
+    rule: "no-restricted-properties",
+  },
+  {
     name: "un archivo de src/ fuera de toda capa",
     file: `${fixtures}/helpers/probe.ts`,
     code: `export const probe = 1;\n`,
@@ -225,6 +267,26 @@ const allowed: Omit<Case, "rule">[] = [
     name: "una página importa un servicio y los textos",
     file: `${fixtures}/app/probe.ts`,
     code: `import { thing as text } from "../messages/thing";\nimport { thing as service } from "../services/thing";\nexport const probe = [text, service];\n`,
+  },
+  {
+    name: "un servicio importa la configuración",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { thing } from "../config/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "un adaptador importa la configuración",
+    file: `${fixtures}/adapters/stripe/probe.ts`,
+    code: `import { thing } from "../../config/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "la configuración lee las variables de entorno y usa un paquete",
+    file: `${fixtures}/config/probe.ts`,
+    code: `import { z } from "zod";\nexport const probe = () => [z, process.env.APP_ENV];\n`,
+  },
+  {
+    name: "el arranque importa la configuración",
+    file: `${fixtures}/instrumentation.ts`,
+    code: `import { thing } from "./config/thing";\nexport const probe = thing;\n`,
   },
   {
     name: "un trabajo importa un servicio",
