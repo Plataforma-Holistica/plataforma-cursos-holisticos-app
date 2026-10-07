@@ -55,10 +55,13 @@ pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
 pnpm db:status   # direcciones y llaves locales, las que pide .env.example
 pnpm db:stop     # lo apaga; los datos se conservan
+pnpm db:reset    # borra la base local y la rehace: migraciones desde cero y semilla
+pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
+pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
-las pruebas de la capa que se tocó. La integración continua
+las pruebas de la capa que se tocó. Si se tocó la base: `db:reset` y `test:db`. La integración continua
 (`.github/workflows/ci.yml`) corre lo mismo más `secrets`, la auditoría de dependencias y
 `build`.
 
@@ -86,6 +89,8 @@ La que fija el TRD §4.2.
 | `src/messages/` | Los textos visibles, en un solo archivo | Nada | Todo lo demás |
 | `src/config/` | Las variables de entorno, leídas y validadas en un solo lugar | Nada de la aplicación | Todo lo demás |
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
+| `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
+| `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
@@ -102,6 +107,20 @@ falla. Cuatro precisiones que la tabla no dice:
 - **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
 - **Un archivo de `src/` fuera de estas carpetas es un error de lint.** Una carpeta nueva
   se declara primero en `eslint.config.mjs`, con su regla y su caso en la prueba.
+
+En la base, cuatro reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+
+- **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
+  sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
+  tabla queda cerrada.
+- **Ningún permiso por omisión.** `anon`, `authenticated` y `service_role` no reciben nada
+  que la migración no conceda a mano. `private.schema_violations()` debe devolver cero
+  filas, y `supabase/tests/01_estructura.test.sql` lo exige.
+- **Una persona con sesión casi no escribe.** Lo que depende de una validación va por el
+  servidor (`app_service`), que declara en la transacción por quién actúa
+  (`app.actor_id`, `app.actor_aal`) o que es el sistema (`app.actor_kind`).
+- **La prueba primero**, en `supabase/tests/`, y se la ve fallar antes de escribir la
+  migración. Las migraciones se aplican solo en la base local.
 
 Los archivos de `tests/architecture/fixtures/` violan las capas a propósito: son las
 muestras de esa prueba y no son código de la aplicación.

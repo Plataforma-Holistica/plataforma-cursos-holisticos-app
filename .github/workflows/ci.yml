@@ -1,7 +1,7 @@
 name: Integración continua
 
-# El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de base, de
-# integración y de extremo a extremo se agregan con las tareas que los crean.
+# El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de integración y de
+# extremo a extremo se agregan con las tareas que los crean.
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   verificar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +50,15 @@ jobs:
 
       - name: Pruebas del dominio y de capas
         run: pnpm test
+
+      # TRD §11.5, paso 4: la base se levanta vacía, corren todas las migraciones y la
+      # semilla desde cero, y después las pruebas de base (políticas por fila, libros de
+      # solo inserción, tabla expuesta sin política).
+      - name: Base local, migraciones desde cero
+        run: pnpm db:start
+
+      - name: Pruebas de base
+        run: pnpm test:db
 
       - name: Compilación
         run: pnpm build

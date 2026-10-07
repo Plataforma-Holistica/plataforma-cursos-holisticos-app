@@ -12,6 +12,10 @@
 # Toda migración del esquema propio: puede tocar un libro
 /supabase/migrations/      @SerchFGA
 
+# Las pruebas de base, que dicen qué se le niega a cada rol, y la semilla de parámetros
+/supabase/tests/           @SerchFGA
+/supabase/seeds/           @SerchFGA
+
 # Las reglas de capas y la integración continua, que protegen todo lo anterior
 /eslint.config.mjs         @SerchFGA
 /.github/                  @SerchFGA

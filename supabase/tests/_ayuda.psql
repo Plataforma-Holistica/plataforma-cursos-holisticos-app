@@ -1,0 +1,90 @@
+-- Ayuda común de las pruebas de base. Cada prueba la incluye con \ir dentro de su
+-- transacción, así que todo lo de aquí se deshace con el rollback final.
+--
+-- No es una prueba: por eso no termina en .sql y pg_prove no la corre sola.
+
+create extension if not exists pgtap with schema extensions;
+
+-- Quien corre las pruebas (postgres) creó app_service pero no puede asumirlo sin dárselo.
+grant app_service to postgres with set true, inherit false;
+-- Las funciones de pgTAP viven en extensions; app_service no lo usa fuera de las pruebas.
+grant usage on schema extensions to app_service;
+
+create schema pruebas;
+grant usage on schema pruebas to anon, authenticated, app_service;
+
+-- Olvida la sesión y las variables de transacción del paso anterior.
+create function pruebas.limpiar() returns void
+language sql
+as $$
+  select set_config('request.jwt.claims', '', true),
+         set_config('app.actor_id', '', true),
+         set_config('app.actor_kind', '', true),
+         set_config('app.actor_aal', '', true),
+         set_config('app.reason', '', true),
+         set_config('app.request_id', '', true),
+         set_config('role', 'none', true);
+$$;
+
+-- Camino del usuario: una persona con sesión. aal2 es «con segundo factor».
+create function pruebas.como_usuario(p_id uuid, p_aal text default 'aal1') returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('request.jwt.claims',
+           json_build_object('sub', p_id, 'role', 'authenticated', 'aal', p_aal)::text, true),
+         set_config('role', 'authenticated', true);
+$$;
+
+-- Visitante: sin sesión.
+create function pruebas.como_visitante() returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('request.jwt.claims', '{"role":"anon"}', true),
+         set_config('role', 'anon', true);
+$$;
+
+-- Camino de servicio: el servidor, que declara en la transacción por quién actúa.
+create function pruebas.como_servicio(p_actor uuid default null, p_aal text default 'aal2') returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', coalesce(p_actor::text, ''), true),
+         set_config('app.actor_aal', case when p_actor is null then '' else p_aal end, true),
+         set_config('role', 'app_service', true);
+$$;
+
+-- Un trabajo del sistema, por el camino de servicio.
+create function pruebas.como_sistema() returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_kind', 'system', true),
+         set_config('role', 'app_service', true);
+$$;
+
+-- El dueño de las tablas (el rol de las migraciones), sin autor declarado.
+create function pruebas.como_dueno() returns void
+language sql
+as $$ select pruebas.limpiar(); $$;
+
+-- Alta de una cuenta, como la haría Supabase Auth.
+create function pruebas.alta(p_id uuid, p_email text) returns void
+language sql
+as $$ insert into auth.users (id, email) values (p_id, p_email); $$;
+
+-- Da una capacidad como lo haría el guion de arranque: declarado como sistema.
+create function pruebas.dar_capacidad(p_profile uuid, p_capability text) returns void
+language plpgsql
+as $$
+begin
+  perform pruebas.como_sistema();
+  execute format(
+    'insert into public.admin_capabilities (profile_id, capability) values (%L, %L)',
+    p_profile, p_capability);
+  perform pruebas.limpiar();
+end
+$$;
+
+grant execute on all functions in schema pruebas to anon, authenticated, app_service;
