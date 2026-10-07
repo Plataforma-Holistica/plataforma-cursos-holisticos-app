@@ -1,0 +1,176 @@
+# CLAUDE.md
+
+Guía para trabajar en el código de la Plataforma. Sale de
+`../planeacion/09-guia-agente.md`: si esta guía y los documentos de planeación chocan,
+mandan ellos y esta guía se corrige.
+
+## Qué es este repositorio
+
+La Plataforma: cursos en video por suscripción, donde una parte del ingreso (el bote) se
+reparte entre los maestros según lo que vio cada alumno. Una sola aplicación Next.js con
+cuatro superficies: sitio público, área del alumno, portal del maestro y administración.
+
+Es un repositorio propio, anidado dentro del proyecto de documentación. La carpeta de
+arriba tiene la planeación y no se versiona aquí; este repositorio no se versiona allá.
+Conviene abrir la sesión desde la carpeta de arriba, para tener los dos a la mano.
+
+La documentación manda sobre el código:
+
+| Necesitas saber | Lee |
+|---|---|
+| Dónde está cada cosa | `../INDICE.md`, siempre primero |
+| Qué debe hacer una función y cómo se prueba | `../planeacion/01-prd.md` §5 (requisitos `RF`) y §6 (reglas `RN`) |
+| Con qué pieza y en qué capa | `../planeacion/02-trd.md` |
+| Cómo se ve una pantalla | `../planeacion/03-diseno-ui-ux.md`, por su `PA` |
+| Por dónde pasa el usuario | `../planeacion/04-flujo-app.md`, por su `FL` |
+| Qué tabla, qué política | `../planeacion/05-esquema-backend.md` |
+| Qué tarea sigue y cómo se verifica | `../planeacion/06-plan-implementacion.md`, por su `T` |
+| Cuánto vale una cifra de negocio | `../planeacion/00-fundamentos.md` §4 |
+
+No leas todo: varios documentos pasan de 3 000 líneas. Lee el índice y la sección que toca.
+
+## Antes de escribir código
+
+1. Ubica la tarea (`T-000`) en el plan y los requisitos que atiende.
+2. Lee los criterios de aceptación de esos requisitos. Son la definición de «funciona».
+3. Contrasta contra el PRD las secciones del TRD, del esquema y del diseño que la tarea
+   toca: se escribieron en paralelo y el PRD es el que manda.
+4. Si la tarea toca una de las tres zonas delicadas (abajo), detente y sigue su regla.
+5. Si el requisito es ambiguo o choca con otro documento, pregunta. No inventes la regla.
+
+## Comandos
+
+El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de base,
+integración, extremo a extremo y trabajos llegan con la tarea que los crea, y se escriben
+aquí ese mismo día.
+
+```bash
+pnpm install     # instala y activa el gancho de commit (.githooks/)
+pnpm dev         # aplicación en local, en http://localhost:3000
+pnpm typecheck   # tipos
+pnpm lint        # lint, incluida la regla de capas
+pnpm test        # pruebas del dominio y la prueba de capas, sin red ni base
+pnpm secrets     # escaneo de secretos en todo el repositorio
+pnpm build       # compilación de producción
+```
+
+Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
+las pruebas de la capa que se tocó. La integración continua
+(`.github/workflows/ci.yml`) corre lo mismo más `secrets`, la auditoría de dependencias y
+`build`.
+
+Versiones que no se suben sin revisar:
+
+- **Next.js 16.3**: Payload 3 exige 16.3.3 o superior. Esta versión cambió respecto a las
+  anteriores: su documentación exacta está en `node_modules/next/dist/docs/`, y se lee
+  antes de usar una API de Next.
+- **TypeScript 6.0**: el lint de TypeScript todavía no admite la 7.
+- **ESLint 9**: los plugins que trae `eslint-config-next` fallan con la 10. La 9 ya no
+  recibe correcciones, así que se sube en cuanto esos plugins lo permitan.
+
+## Estructura y capas
+
+La que fija el TRD §4.2.
+
+| Carpeta | Qué va | Puede importar | No puede |
+|---|---|---|---|
+| `src/domain/` | Reglas de negocio puras: acceso, progreso, consumo, reparto | Nada fuera de sí misma | Red, base, reloj, variables de entorno |
+| `src/adapters/` | Un adaptador por proveedor | El SDK de ese proveedor y tipos del dominio | Otros adaptadores, pantallas |
+| `src/services/` | Casos de uso: cargan datos, llaman al dominio, guardan | Dominio, adaptadores, cliente de base | Componentes de React |
+| `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
+| `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
+| `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
+| `src/messages/` | Los textos visibles, en un solo archivo | Nada | Todo lo demás |
+| `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
+
+Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
+`tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
+falla. Tres precisiones que la tabla no dice:
+
+- **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos).
+  Es la lectura estricta del TRD: si una pantalla necesita un tipo del dominio, el
+  servicio lo reexporta.
+- **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
+- **Un archivo de `src/` fuera de estas carpetas es un error de lint.** Una carpeta nueva
+  se declara primero en `eslint.config.mjs`, con su regla y su caso en la prueba.
+
+Los archivos de `tests/architecture/fixtures/` violan las capas a propósito: son las
+muestras de esa prueba y no son código de la aplicación.
+
+## Las tres zonas que se escriben despacio
+
+Un error aquí cuesta dinero o expone contenido. En las tres:
+
+- la prueba se escribe antes que el código;
+- ningún cambio se fusiona sin que una persona lo lea línea por línea;
+- el agente **propone y se detiene**: no fusiona, no despliega y no aplica migraciones.
+
+| Zona | Qué protege |
+|---|---|
+| Avisos de cobro | Que nadie tenga acceso sin pagar y que un cobro se registre una sola vez |
+| Control de acceso | Que nadie sin acceso reproduzca un video ni lea datos de otro |
+| Reparto, consolidación, cierre y toda migración que toque un libro | Que la suma de los pagos sea igual al bote, al centavo |
+
+Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
+`src/domain/consumption/`, `src/domain/payout/` y `supabase/migrations/`; los servicios y
+adaptadores de cada zona se agregan ahí cuando su tarea los crea.
+
+Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
+el cambio está mal aunque todo lo demás pase.
+
+## Lo que nunca se hace
+
+- Escribir una cifra de negocio en el código. Precio, IVA, porcentaje del bote, umbrales y
+  plazos salen de la tabla de parámetros.
+- Actualizar o borrar una fila de un libro (latidos, cobros, repartos, ajustes,
+  auditoría). Un error se corrige con una fila nueva.
+- Recalcular o modificar un periodo cerrado.
+- Firmar una dirección de video o de archivo fuera de la función única de medios.
+- Consultar la tabla de suscripciones desde una página para decidir qué mostrar. Se le
+  pregunta al servicio de acceso.
+- Dar por cierto lo que manda el navegador: un latido, el regreso de pagar, un rol.
+- Poner un secreto en el código, en el navegador o en un registro.
+- Escribir en registros, en correos o en analítica el historial de cursos de un alumno,
+  datos fiscales o bancarios, o el texto de un caso de moderación.
+- Escribir un texto visible fuera del archivo de mensajes.
+- Crear una tabla expuesta sin su política por fila en la misma migración.
+- Escribir una migración destructiva, o una migración de Payload que toque el esquema
+  propio, o al revés.
+- Usar datos reales fuera de producción.
+- Agregar una dependencia sin decir para qué y sin revisar quién la mantiene.
+- Construir algo de la lista «No entra en el MVP» del PRD, aunque parezca fácil.
+- Saltarse una verificación para que algo pase.
+- Copiar a este repositorio sueldos, porcentajes de sociedad o cualquier cosa de
+  `../negociacion/`.
+
+## Convenciones
+
+- **Idioma.** Identificadores en inglés. Comentarios, mensajes de commit y documentación en
+  español. Sin raya (el guion largo) en la redacción.
+- **Nombres.** Los del glosario de `../planeacion/00-fundamentos.md` §3: `teacher`,
+  `student`, `pool`, `watch_event`, `period`, `payout`.
+- **Dinero.** Centavos enteros, con su moneda. Nunca números con decimales.
+- **Tiempo.** Se guarda en UTC. El periodo se corta en `ZONA_HORARIA_PERIODO`. El reloj
+  entra al dominio como argumento.
+- **Entradas.** Toda entrada se valida en el borde del servidor, con un esquema por ruta.
+- **Commits.** En español, con la tarea y el requisito: «T-205 Latidos con validación
+  acumulada (RF-402)».
+
+## Definición de terminado
+
+1. Cumple los criterios de aceptación de sus requisitos, y hay una prueba que lo demuestra.
+2. Pasan tipos, lint y las pruebas de las capas tocadas.
+3. Si toca una pantalla, respeta su ficha del diseño y funciona con teclado y en teléfono.
+4. Si toca la base, la migración corre desde cero y trae su política y su prueba.
+5. Si toca una zona delicada, una persona la revisó y lo dijo por escrito.
+6. Si el código obligó a cambiar una decisión, el documento de planeación y `../INDICE.md`
+   quedaron al día en el mismo trabajo.
+
+## Cuándo detenerse y preguntar
+
+- La tarea pide algo que un documento prohíbe, o dos documentos se contradicen.
+- Hace falta una decisión marcada como abierta (`PQ` o `ADR` sin cerrar).
+- El cambio toca una zona delicada, un libro o un periodo cerrado.
+- Hay que crear, borrar o reconfigurar algo en un proveedor (cobro, video, correo, base de
+  producción).
+- Una prueba de las tres zonas falla y la salida fácil es cambiar la prueba.

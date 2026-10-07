@@ -1,0 +1,5 @@
+#!/bin/sh
+# Escaneo de secretos antes de cada commit (TRD §9.5). Revisa solo lo que entra al commit.
+# Se activa con `pnpm install`, que apunta core.hooksPath a esta carpeta.
+
+git diff --cached --name-only --diff-filter=ACM -z | xargs -0 -r pnpm exec secretlint

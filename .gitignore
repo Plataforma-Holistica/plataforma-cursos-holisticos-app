@@ -1,0 +1,29 @@
+# Dependencias y compilación
+node_modules/
+.next/
+out/
+dist/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+
+# Secretos y entornos: nunca se versionan
+.env
+.env.*
+!.env.example
+
+# Proveedores
+.vercel/
+supabase/.temp/
+supabase/.branches/
+
+# Pruebas
+playwright-report/
+test-results/
+
+# Sistema y editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.stackdump

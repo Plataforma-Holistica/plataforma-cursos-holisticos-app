@@ -1,0 +1,55 @@
+name: Integración continua
+
+# El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de base, de
+# integración y de extremo a extremo se agregan con las tareas que los crean.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Tipos
+        run: pnpm typecheck
+
+      - name: Lint, incluida la regla de capas
+        run: pnpm lint
+
+      - name: Escaneo de secretos
+        run: pnpm secrets
+
+      # Una sola excepción, en package.json (pnpm.auditConfig): GHSA-vfj7-8cjw-p6xm, de
+      # `braces`. No tiene versión corregida, solo llega por herramientas de desarrollo
+      # (lint) y exige patrones glob ajenos, que aquí no hay. Se quita en cuanto exista
+      # corrección.
+      - name: Auditoría de dependencias
+        run: pnpm audit --audit-level=high
+
+      - name: Pruebas del dominio y de capas
+        run: pnpm test
+
+      - name: Compilación
+        run: pnpm build

@@ -1,0 +1,17 @@
+# Las tres zonas que se escriben despacio (TRD §2 y §12.2). Un cambio en estas rutas no se
+# fusiona sin que una persona lo lea línea por línea. Las rutas de servicios y adaptadores
+# de cada zona se agregan cuando su tarea las crea.
+
+# Control de acceso
+/src/domain/access/        @SerchFGA
+
+# Medición y reparto
+/src/domain/consumption/   @SerchFGA
+/src/domain/payout/        @SerchFGA
+
+# Toda migración del esquema propio: puede tocar un libro
+/supabase/migrations/      @SerchFGA
+
+# Las reglas de capas y la integración continua, que protegen todo lo anterior
+/eslint.config.mjs         @SerchFGA
+/.github/                  @SerchFGA
