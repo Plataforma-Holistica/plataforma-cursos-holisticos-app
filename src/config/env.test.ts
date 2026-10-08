@@ -79,6 +79,40 @@ describe("parseEnv", () => {
     },
   );
 
+  // El registro de errores (RNF-16). En local no se manda nada si no se pide; en los
+  // entornos que atienden a personas, arrancar sin él sería quedarse a ciegas.
+  describe("SENTRY_DSN", () => {
+    // Por partes, por la misma razón que la dirección de la base.
+    const fakeDsn = ["https://clave-publica", "o1.ingest.sentry.example/1"].join("@");
+
+    it("es opcional en local", () => {
+      expect(parseEnv(valid)).not.toHaveProperty("SENTRY_DSN");
+      expect(parseEnv({ ...valid, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(fakeDsn);
+    });
+
+    it.each(["staging", "production"])("es obligatoria en %s", (appEnv) => {
+      expect(problemsOf({ ...valid, APP_ENV: appEnv })).toEqual(["SENTRY_DSN: falta"]);
+      expect(parseEnv({ ...valid, APP_ENV: appEnv, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(
+        fakeDsn,
+      );
+    });
+
+    it("se rechaza si no es una dirección http", () => {
+      expect(problemsOf({ ...valid, SENTRY_DSN: "clave-suelta" })).toEqual([
+        "SENTRY_DSN: tiene un valor inválido",
+      ]);
+    });
+
+    it("falta junto con las demás, en su lugar de la lista", () => {
+      expect(problemsOf({ APP_ENV: "staging" })).toEqual([
+        ...Object.keys(valid)
+          .filter((name) => name !== "APP_ENV")
+          .map((name) => `${name}: falta`),
+        "SENTRY_DSN: falta",
+      ]);
+    });
+  });
+
   it("nunca escribe el valor de una variable en el error", () => {
     const secret = `${fakeDatabaseUrl("no-debe-aparecer")} y z`;
     try {

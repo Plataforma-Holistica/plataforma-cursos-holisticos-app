@@ -17,12 +17,18 @@ const schema = z.object({
   DATABASE_URL: postgresUrl,
   // Directa: solo para migraciones.
   DATABASE_URL_DIRECT: postgresUrl,
+  // A dónde se mandan los errores (RNF-16). No es secreta: también llega al navegador.
+  SENTRY_DSN: httpUrl.optional(),
 });
 
 export type Env = z.infer<typeof schema>;
 
 type EnvName = keyof Env;
 const names = Object.keys(schema.shape) as EnvName[];
+
+// En local se puede trabajar sin ellas. Donde se atiende a personas, no: arrancar sin
+// registro de errores sería quedarse a ciegas.
+const requiredOutsideLocal: EnvName[] = ["SENTRY_DSN"];
 
 // El error nombra las variables y nunca sus valores: va a dar a los registros.
 export class EnvError extends Error {
@@ -41,14 +47,23 @@ export class EnvError extends Error {
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
   // Una variable vacía cuenta como ausente.
-  const present = Object.fromEntries(
-    names.map((name) => [name, source[name] === "" ? undefined : source[name]]),
-  );
+  const present: Partial<Record<EnvName, string>> = {};
+  for (const name of names) {
+    const value = source[name];
+    if (value !== undefined && value !== "") present[name] = value;
+  }
 
   const result = schema.safeParse(present);
-  if (result.success) return result.data;
+  const failed = new Set<PropertyKey | undefined>(
+    result.success ? [] : result.error.issues.map((issue) => issue.path[0]),
+  );
+  if (present.APP_ENV === "staging" || present.APP_ENV === "production") {
+    for (const name of requiredOutsideLocal) {
+      if (present[name] === undefined) failed.add(name);
+    }
+  }
+  if (result.success && failed.size === 0) return result.data;
 
-  const failed = new Set(result.error.issues.map((issue) => issue.path[0]));
   throw new EnvError(
     names
       .filter((name) => failed.has(name))
