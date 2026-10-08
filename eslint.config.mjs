@@ -7,16 +7,34 @@ import boundaries from "eslint-plugin-boundaries";
 // lado. `tests/architecture/layers.test.ts` comprueba cada regla: si se afloja una, esa
 // prueba falla.
 
-// SDK de proveedores y clientes de base. Solo los adaptadores y los servicios los tocan.
-const PROVIDER_SDKS = [
-  "@supabase/*",
-  "@mux/mux-node",
-  "stripe",
-  "facturapi",
-  "resend",
-  "pg",
-  "postgres",
+// El cliente de base y el SDK de Supabase no salen de src/adapters/supabase/ (ADR-31, TRD
+// §8.10): el servidor entra a la base con un rol que salta la seguridad por fila, y solo
+// ese adaptador sabe bajar al rol de la persona.
+const DATABASE_CLIENTS = ["pg", "pg-*", "postgres", "@supabase/*"];
+
+const noDatabaseClient = {
+  group: DATABASE_CLIENTS,
+  message:
+    "El cliente de base y el SDK de Supabase viven solo en src/adapters/supabase/: usa asUser, asServer o asSystem (TRD §8.10).",
+};
+
+// Lo mismo cuando el paquete se carga con import() o con require, que la regla de
+// arriba no ve.
+const DATABASE_CLIENT_SOURCE = "/^(pg|pg-.+|postgres|@supabase\\u002F.+)$/";
+
+const noDatabaseClientLoading = [
+  {
+    selector: `ImportExpression[source.value=${DATABASE_CLIENT_SOURCE}]`,
+    message: noDatabaseClient.message,
+  },
+  {
+    selector: `CallExpression[callee.name='require'][arguments.0.value=${DATABASE_CLIENT_SOURCE}]`,
+    message: noDatabaseClient.message,
+  },
 ];
+
+// SDK de proveedores. Solo su adaptador los toca.
+const PROVIDER_SDKS = [...DATABASE_CLIENTS, "@mux/mux-node", "stripe", "facturapi", "resend"];
 
 const noProviderSdks = {
   group: PROVIDER_SDKS,
@@ -136,6 +154,16 @@ export default defineConfig([
     },
   },
   {
+    // Va antes que los bloques de cada capa: en esta configuración el bloque posterior
+    // reemplaza la regla, no la suma, así que cada uno de ellos repite estos patrones.
+    files: ["**/src/**/*.{ts,tsx}"],
+    ignores: ["**/src/adapters/supabase/**"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [noDatabaseClient] }],
+      "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
+    },
+  },
+  {
     // Dominio puro (P1): sin paquetes, sin red, sin reloj y sin variables de entorno.
     files: ["**/src/domain/**/*.ts"],
     rules: {
@@ -165,6 +193,7 @@ export default defineConfig([
           selector: "NewExpression[callee.name='Date'][arguments.length=0]",
           message: "El reloj entra al dominio como argumento (P1).",
         },
+        ...noDatabaseClientLoading,
       ],
     },
   },
@@ -185,6 +214,7 @@ export default defineConfig([
               group: ["react", "react/*", "react-dom", "react-dom/*"],
               message: "Los servicios no conocen React: eso es de la capa de entrada (TRD §4.2).",
             },
+            noDatabaseClient,
           ],
         },
       ],
