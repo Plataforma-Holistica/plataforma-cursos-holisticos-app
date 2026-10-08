@@ -1,4 +1,5 @@
 import { EnvError, getEnv } from "@/config/env";
+import { reportRequestError, startErrorReporting } from "@/services/error-reporting/server";
 
 // Next llama a `register` una vez, antes de atender la primera petición. Si falta una
 // variable de entorno o tiene mala forma, la aplicación no inicia (TRD §11.4).
@@ -18,5 +19,11 @@ export function register() {
       console.error(error.message);
       process.exit(1);
     }
+
+    // Después de validar: el registro de errores lee su dirección de esas variables.
+    startErrorReporting();
   }
 }
+
+// Next llama a esto cada vez que falla una petición en el servidor (RNF-16).
+export const onRequestError = reportRequestError;
