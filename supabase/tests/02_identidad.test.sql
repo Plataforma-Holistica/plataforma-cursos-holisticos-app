@@ -105,8 +105,14 @@ select is(
   (select count(*)::int from public.admin_capabilities), 4,
   'configuración con segundo factor ve todas las capacidades');
 
+-- Contra lo que ve el dueño y no contra un número fijo: así no depende de cuántos
+-- perfiles haya en la base al correr.
+select pruebas.como_dueno();
+select count(*)::int as perfiles from public.profiles \gset
 select pruebas.como_usuario('50000000-0000-0000-0000-000000000001', 'aal2');
-select is((select count(*)::int from public.profiles), 6, 'soporte con segundo factor ve todos los perfiles');
+select is(
+  (select count(*)::int from public.profiles), :perfiles,
+  'soporte con segundo factor ve todos los perfiles');
 
 -- ---------------------------------------------------------------------------------------
 -- Revocar: surte efecto de inmediato, es de una sola escritura y deja dos con configuración.
