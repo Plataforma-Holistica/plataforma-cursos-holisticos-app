@@ -152,13 +152,20 @@ falla. Siete precisiones que la tabla no dice:
     error esperado (un duplicado) se evita con la consulta (`on conflict`), no con un
     `catch`.
 - **Ningún texto visible se escribe en una pantalla ni en un componente** (RNF-15). El
-  lint rechaza el texto entre etiquetas y en `aria-label`, `title`, `placeholder`, `alt`,
-  `label` y afines, dentro de `src/app/` y `src/ui/`. Un texto nuevo se escribe en su
-  bloque de `src/messages/es/` y se muestra así:
+  lint rechaza, dentro de `src/app/` y `src/ui/`, el texto entre etiquetas y todo texto
+  escrito a mano en un atributo o en una prop, también elegido con una condición
+  (`{ok ? "Listo" : "Falló"}`), y el título de una pantalla en `metadata`. La regla va al
+  revés de lo intuitivo: solo se permite escribir a mano en los atributos que no son para
+  la gente (`className`, `type`, `href`, `variant`…). Una prop nueva que no es texto se
+  agrega a `NON_TEXT_ATTRIBUTES` en `eslint.config.mjs`. Lo que el lint no ve es un texto
+  guardado en una constante o devuelto por una acción de servidor: eso lo cuida la
+  revisión. Un texto nuevo se escribe en su bloque de `src/messages/es/` y se muestra así:
   - sin marcadores, tal cual: `{messages.states.home.status}`;
   - con marcadores, con `t()`: `t(text.reference, { code })`. Un marcador de término
     (`{el_maestro}`, `{Plataforma}`) lo pone `t()` sola; un dato (`{count}`) se le pasa, y
-    si falta no compila;
+    si falta no compila. Un texto con marcadores no es un texto sino una plantilla: no
+    compila ni se pinta sin pasar por `t()`, así que sus llaves no llegan a la vista de
+    nadie por olvido;
   - la palabra del rol y el nombre de la Plataforma no se escriben nunca: se citan con su
     marcador. Viven en `es/terms.ts`, y una prueba recorre el catálogo para comprobarlo.
 
@@ -166,8 +173,9 @@ falla. Siete precisiones que la tabla no dice:
   archivo con `"use client"` importan solo su bloque (`@/messages/es/ui`,
   `@/messages/format`), para que el catálogo entero no viaje al navegador.
 - **Todo valor visual es un token** de `src/ui/theme.css`. No hay estilos en línea (los
-  rechaza el lint, y los rechazará la política de seguridad de contenido) ni paleta de
-  fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
+  rechaza el lint, y los rechazará la política de seguridad de contenido), ni valores
+  sueltos entre corchetes (`bg-[#fff]`, `w-[317px]`: también los rechaza el lint), ni
+  paleta de fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
 

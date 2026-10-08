@@ -460,6 +460,94 @@ const forbidden: Case[] = [
     code: `declare const Field: (props: { label: string }) => null;\nexport const Probe = () => <Field label={\`Correo\`} />;\n`,
     rule: SYNTAX,
   },
+  // Los huecos que encontró la revisión independiente: formas de escribir un texto a
+  // mano que la regla dejaba pasar.
+  {
+    name: "una pantalla elige entre dos textos escritos a mano",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = ({ ok }: { ok: boolean }) => <p>{ok ? "Listo" : "Falló"}</p>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla pinta un texto escrito a mano tras una condición",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = ({ x }: { x: boolean }) => <p>{x && "Texto a mano"}</p>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla pinta una plantilla de JavaScript con texto",
+    file: `${fixtures}/app/probe.tsx`,
+    code: "export const Probe = ({ n }: { n: number }) => <p>{`Hay ${n} cursos`}</p>;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla le pasa a un componente un texto a mano en una prop cualquiera",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Field: (props: { error: string }) => null;\nexport const Probe = () => <Field error="Escribe un correo válido." />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla le pasa el texto de carga de un botón escrito a mano",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Button: (props: { loadingLabel: string }) => null;\nexport const Probe = () => <Button loadingLabel={"Guardando…"} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla escribe a mano el título de su pestaña",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const metadata = { title: "Entrar" };\nexport const Probe = () => null;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla (.ts) escribe a mano la descripción de su pestaña",
+    file: `${fixtures}/app/probe.ts`,
+    code: `export const metadata = { description: "Cursos de bienestar" };\n`,
+    rule: SYNTAX,
+  },
+  // «Todo valor visual es un token»: un valor arbitrario de Tailwind es un valor suelto.
+  {
+    name: "un componente base usa un color suelto en una clase",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div className="bg-[#fff]" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla usa una medida suelta en una clase",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <div className="mt-2 w-[317px] p-4" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base guarda una medida suelta en una constante de clases",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `const BASE = "inline-flex min-h-[44px]";\nexport const Probe = () => <div className={BASE} />;\n`,
+    rule: SYNTAX,
+  },
+  // La excepción de las páginas de muestra es para páginas, no para cualquier archivo.
+  {
+    name: "un componente base se llama .dev.tsx para escribir texto a mano",
+    file: `${fixtures}/ui/probe.dev.tsx`,
+    code: `export const Probe = () => <p>Hola</p>;\n`,
+    rule: LITERALS,
+  },
+  {
+    name: "una pantalla importa un archivo de muestra, que solo existe en desarrollo",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `import { Probe as Sample } from "./muestra/page.dev";\nexport const Probe = Sample;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un componente base importa el catálogo entero por una ruta relativa",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { messages } from "../messages";\nexport const probe = messages;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un componente base importa el catálogo entero nombrando su archivo",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { messages } from "@/messages/index.ts";\nexport const probe = messages;\n`,
+    rule: IMPORTS,
+  },
   {
     name: "un componente base usa estilos en línea",
     file: `${fixtures}/ui/probe.tsx`,
@@ -528,6 +616,31 @@ const allowed: Omit<Case, "rule">[] = [
     name: "una pantalla importa un componente base",
     file: `${fixtures}/app/probe.ts`,
     code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "una pantalla elige entre dos textos del catálogo y entre dos clases",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const text: { ok: string; bad: string };\nexport const Probe = ({ ok }: { ok: boolean }) => (\n  <p className={ok ? "text-success" : "text-danger"} data-state={ok ? "ok" : "bad"}>\n    {ok ? text.ok : text.bad}\n  </p>\n);\n`,
+  },
+  {
+    name: "una pantalla escribe a mano lo que no es texto: tipos, nombres, direcciones y variantes",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Field: (props: { name: string; autoComplete: string; variant: string; label: string }) => null;\ndeclare const label: string;\nexport const Probe = () => (\n  <form method="post" action="/entrar">\n    <Field name="email" autoComplete="email" variant="simple" label={label} />\n    <a href="/ayuda" rel="noopener noreferrer" target="_blank" aria-current="page">{label}</a>\n    <input type="email" inputMode="email" id="correo" aria-describedby="correo-ayuda" role="textbox" />\n  </form>\n);\n`,
+  },
+  {
+    name: "una pantalla arma el título de su pestaña con el catálogo",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const title: string;\nexport const metadata = { title, robots: { index: false } };\nexport const Probe = () => null;\n`,
+  },
+  {
+    name: "un componente base usa tokens, variantes entre corchetes y variables de la hoja",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `const BASE = "duration-(--duration-fast) z-(--z-skip) [&_a]:inline-block [&_a]:py-3 aria-[busy=true]:opacity-60";\nexport const Probe = () => <div className={BASE} />;\n`,
+  },
+  {
+    name: "una página de muestra escribe sus textos de ejemplo a mano",
+    file: `${fixtures}/app/muestra/page.dev.tsx`,
+    code: `export default function Page() {\n  return <p title="Ejemplo">Hola</p>;\n}\n`,
   },
   {
     name: "un componente base recibe su texto y escribe clases y tipos a mano",

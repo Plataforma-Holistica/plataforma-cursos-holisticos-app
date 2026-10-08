@@ -2,6 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import { SearchX } from "lucide";
 import { describe, expect, it } from "vitest";
 
+import ErrorPage from "@/app/error";
+import { states } from "@/messages/es/states";
 import { terms } from "@/messages/es/terms";
 import { ui } from "@/messages/es/ui";
 import { Button } from "@/ui/button";
@@ -166,5 +168,17 @@ describe("FullScreenState", () => {
   it("no tiene faltas de accesibilidad", async () => {
     const { container } = render(<main>{state}</main>);
     expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("la pantalla de error (PA-18)", () => {
+  it("su pestaña dice qué pasó y de quién es el sitio, como las demás", () => {
+    render(<ErrorPage error={new Error("x")} retry={() => {}} />);
+    expect(document.title).toBe(`${states.error.title} · ${terms.Plataforma}`);
+  });
+
+  it("nunca muestra el mensaje del error", () => {
+    render(<ErrorPage error={new Error("columna email duplicada")} retry={() => {}} />);
+    expect(screen.queryByText(/columna email duplicada/)).not.toBeInTheDocument();
   });
 });
