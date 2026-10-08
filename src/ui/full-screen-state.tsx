@@ -49,7 +49,8 @@ export function FullScreenState({
         {primaryAction}
         {secondaryActions}
       </div>
-      {help && <div className="text-body-s">{help}</div>}
+      {/* El enlace de ayuda va solo, no dentro de una frase: se agranda hasta los 44 px. */}
+      {help && <div className="text-body-s [&_a]:inline-block [&_a]:py-3">{help}</div>}
       {reference && <p className="text-caption text-text-3">{reference}</p>}
     </div>
   );
