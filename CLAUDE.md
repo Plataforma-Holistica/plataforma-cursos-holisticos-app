@@ -46,10 +46,10 @@ ese mismo día.
 
 ```bash
 pnpm install     # instala y activa el gancho de commit (.githooks/)
-pnpm dev         # aplicación en local, en http://localhost:3000
+pnpm dev         # aplicación en local, en http://localhost:3000. La muestra de componentes: /muestra
 pnpm typecheck   # tipos
 pnpm lint        # lint, incluida la regla de capas
-pnpm test        # pruebas del dominio y la prueba de capas, sin red ni base
+pnpm test        # dominio, textos, capas y contraste, y los componentes en un DOM simulado. Sin red ni base
 pnpm secrets     # escaneo de secretos en todo el repositorio
 pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
@@ -93,24 +93,28 @@ La que fija el TRD §4.2.
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
-| `src/messages/` | Los textos visibles, en un solo archivo | Nada | Todo lo demás |
+| `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
+| `src/messages/` | Los textos visibles, en un solo lugar: un archivo por bloque en `es/`, el bloque de términos y `t()` | Nada | Todo lo demás |
 | `src/config/` | Las variables de entorno, leídas y validadas en un solo lugar | Nada de la aplicación | Todo lo demás |
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
+| `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
+| `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
 | `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Cinco precisiones que la tabla no dice:
+falla. Siete precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
   `src/instrumentation.ts`, el arranque de Next, la valida antes de la primera petición y
   termina el proceso si falta una variable. Una variable nueva se agrega al esquema de
   `src/config/env.ts` y a `.env.example` en el mismo cambio.
-- **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos).
+- **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos
+  y los componentes base).
   Es la lectura estricta del TRD: si una pantalla necesita un tipo del dominio, el
   servicio lo reexporta.
 - **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
@@ -130,6 +134,31 @@ falla. Cinco precisiones que la tabla no dice:
   y cada fila se valida con su esquema Zod. **Nunca se arma SQL pegando texto**: dentro de
   `asUser` un `reset role` recuperaría el salto de la seguridad por fila. Las funciones
   no se anidan: cada una toma una conexión.
+- **Ningún texto visible se escribe en una pantalla ni en un componente** (RNF-15). El
+  lint rechaza el texto entre etiquetas y en `aria-label`, `title`, `placeholder`, `alt`,
+  `label` y afines, dentro de `src/app/` y `src/ui/`. Un texto nuevo se escribe en su
+  bloque de `src/messages/es/` y se muestra así:
+  - sin marcadores, tal cual: `{messages.states.home.status}`;
+  - con marcadores, con `t()`: `t(text.reference, { code })`. Un marcador de término
+    (`{el_maestro}`, `{Plataforma}`) lo pone `t()` sola; un dato (`{count}`) se le pasa, y
+    si falta no compila;
+  - la palabra del rol y el nombre de la Plataforma no se escriben nunca: se citan con su
+    marcador. Viven en `es/terms.ts`, y una prueba recorre el catálogo para comprobarlo.
+
+  Una pantalla del servidor importa `@/messages`. Un componente de `src/ui/` y todo
+  archivo con `"use client"` importan solo su bloque (`@/messages/es/ui`,
+  `@/messages/format`), para que el catálogo entero no viaje al navegador.
+- **Todo valor visual es un token** de `src/ui/theme.css`. No hay estilos en línea (los
+  rechaza el lint, y los rechazará la política de seguridad de contenido) ni paleta de
+  fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
+  se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
+  valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
+
+Un componente base nuevo entra primero al inventario del diseño (`03` §5) y se construye
+sobre elementos nativos: la biblioteca de primitivas no está decidida (D-14). Su prueba va
+en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.ts`. Lo que
+un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
+revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
 En la base, cuatro reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
@@ -186,7 +215,9 @@ el cambio está mal aunque todo lo demás pase.
 - Poner un secreto en el código, en el navegador o en un registro.
 - Escribir en registros, en correos o en analítica el historial de cursos de un alumno,
   datos fiscales o bancarios, o el texto de un caso de moderación.
-- Escribir un texto visible fuera del archivo de mensajes.
+- Escribir un texto visible fuera del catálogo de `src/messages/`, o la palabra del rol
+  fuera de su bloque de términos.
+- Escribir un valor visual suelto o un estilo en línea, en vez de un token.
 - Crear una tabla expuesta sin su política por fila en la misma migración.
 - Escribir una migración destructiva, o una migración de Payload que toque el esquema
   propio, o al revés.
