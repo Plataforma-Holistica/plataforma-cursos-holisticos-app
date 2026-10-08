@@ -42,6 +42,34 @@ const noProviderSdks = {
     "Esta capa no habla con proveedores ni con la base: pídeselo a un servicio (TRD §4.2).",
 };
 
+// Ningún texto visible se escribe fuera del catálogo de src/messages/ (RNF-15). El texto
+// entre etiquetas lo cuida `react/jsx-no-literals`; esto cuida los atributos que también
+// se leen o se ven, sin estorbar a `className`, `type` o `role`.
+const TEXT_ATTRIBUTES =
+  "/^(aria-label|aria-description|aria-placeholder|aria-roledescription|aria-valuetext|title|placeholder|alt|label|legend|hint|description)$/";
+
+const noLiteralTextMessage =
+  "Los textos visibles salen del catálogo de src/messages/, nunca escritos aquí (RNF-15).";
+
+const noLiteralTextAttributes = [
+  {
+    selector: `JSXAttribute[name.name=${TEXT_ATTRIBUTES}] > Literal`,
+    message: noLiteralTextMessage,
+  },
+  {
+    selector: `JSXAttribute[name.name=${TEXT_ATTRIBUTES}] > JSXExpressionContainer > :matches(Literal, TemplateLiteral)`,
+    message: noLiteralTextMessage,
+  },
+];
+
+// Un componente que corre en el navegador se lleva todo lo que importa. El catálogo
+// entero no debe viajar: cada componente importa solo su bloque.
+const noWholeCatalog = {
+  group: ["@/messages", "@/messages/index"],
+  message:
+    "Un componente base importa solo su bloque de textos (@/messages/es/ui), no el catálogo entero.",
+};
+
 // En el dominio solo se importa código del propio dominio.
 const DOMAIN_ONLY_LOCAL = "^(?!\\.{1,2}/|@/)";
 const DOMAIN_TEST_ONLY_LOCAL = "^(?!\\.{1,2}/|@/|vitest$|fast-check$)";
@@ -86,6 +114,8 @@ export default defineConfig([
         { type: "domain", pattern: "src/domain" },
         { type: "adapter", pattern: "src/adapters/*", capture: ["provider"] },
         { type: "service", pattern: "src/services" },
+        // Componentes base, compartidos por las cuatro superficies. No conocen datos.
+        { type: "ui", pattern: "src/ui" },
         { type: "app", pattern: "src/app" },
         { type: "job", pattern: "src/jobs" },
         { type: "payload", pattern: "src/payload" },
@@ -131,7 +161,12 @@ export default defineConfig([
             // Si una pantalla necesita un tipo del dominio, el servicio lo reexporta.
             {
               from: { element: { type: "app" } },
-              allow: { to: { element: { type: ["service", "messages"] } } },
+              allow: { to: { element: { type: ["service", "messages", "ui"] } } },
+            },
+            // Un componente base solo conoce los textos. Los datos se los pasa la pantalla.
+            {
+              from: { element: { type: "ui" } },
+              allow: { to: { element: { type: "messages" } } },
             },
             {
               from: { element: { type: "job" } },
@@ -224,6 +259,28 @@ export default defineConfig([
     files: ["**/src/app/**/*.{ts,tsx}", "**/src/jobs/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noProviderSdks] }],
+    },
+  },
+  {
+    files: ["**/src/ui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [noProviderSdks, noWholeCatalog] }],
+    },
+  },
+  {
+    // Pantallas y componentes. Este bloque reemplaza la regla de sintaxis del bloque
+    // general de arriba: por eso repite la prohibición de cargar el cliente de base. La
+    // prueba de capas tiene un caso que falla si se pierde.
+    files: ["**/src/ui/**/*.tsx", "**/src/app/**/*.tsx"],
+    // Las pruebas escriben el texto que esperan. Las páginas `.dev.tsx` solo existen en
+    // desarrollo, para ver los componentes.
+    ignores: ["**/*.test.tsx", "**/*.dev.tsx"],
+    rules: {
+      "react/jsx-no-literals": ["error", { noStrings: true, ignoreProps: true }],
+      "no-restricted-syntax": ["error", ...noDatabaseClientLoading, ...noLiteralTextAttributes],
+      // Sin estilos en línea: los prohibirá la política de seguridad de contenido (TRD §9),
+      // y todo valor visual vive en un token.
+      "react/forbid-dom-props": ["error", { forbid: ["style"] }],
     },
   },
 ]);

@@ -13,6 +13,8 @@ const fixtures = "tests/architecture/fixtures/src";
 const LAYERS = "boundaries/dependencies";
 const IMPORTS = "no-restricted-imports";
 const SYNTAX = "no-restricted-syntax";
+const LITERALS = "react/jsx-no-literals";
+const DOM_PROPS = "react/forbid-dom-props";
 
 let eslint: ESLint;
 
@@ -298,6 +300,130 @@ const forbidden: Case[] = [
     code: `export const probe = () => import("pg");\n`,
     rule: SYNTAX,
   },
+  // T-109: los componentes base (src/ui/) no conocen datos. Solo importan los textos.
+  {
+    name: "un componente base importa un servicio",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../services/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un componente base importa un adaptador",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../adapters/mux/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un componente base importa el dominio",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../domain/shared/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un componente base importa una pantalla",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../app/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un componente base importa la configuración",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../config/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un servicio importa un componente base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "el dominio importa un componente base",
+    file: `${fixtures}/domain/access/probe.ts`,
+    code: `import { thing } from "../../ui/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un trabajo importa un componente base",
+    file: `${fixtures}/jobs/probe.ts`,
+    code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "los textos importan un componente base",
+    file: `${fixtures}/messages/probe.ts`,
+    code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
+    name: "un componente base importa el cliente de base",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un componente base importa el SDK de cobro",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import Stripe from "stripe";\nexport const probe = Stripe;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un componente base importa el catálogo entero, que así llegaría al navegador",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { messages } from "@/messages";\nexport const probe = messages;\n`,
+    rule: IMPORTS,
+  },
+  // Guardia: las reglas de texto de abajo viven en un bloque que reemplaza la regla de
+  // sintaxis. Si ese bloque pierde la prohibición del cliente de base, esto falla.
+  {
+    name: "un componente base (.tsx) carga el cliente de base con import() dinámico",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const probe = () => import("pg");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla (.tsx) carga el cliente de base con import() dinámico",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const probe = () => import("pg");\n`,
+    rule: SYNTAX,
+  },
+  // RNF-15: ningún texto visible se escribe fuera del catálogo de src/messages/.
+  {
+    name: "un componente base lleva un texto escrito dentro",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <p>Hola</p>;\n`,
+    rule: LITERALS,
+  },
+  {
+    name: "una pantalla lleva un texto escrito dentro",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <h1>{"Bienvenida"}</h1>;\n`,
+    rule: LITERALS,
+  },
+  {
+    name: "un componente base escribe a mano un nombre accesible",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <button type="button" aria-label="Cerrar" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla escribe a mano el texto de ejemplo de un campo",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <input placeholder={"Tu correo"} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla escribe a mano la etiqueta de un componente",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Field: (props: { label: string }) => null;\nexport const Probe = () => <Field label={\`Correo\`} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base usa estilos en línea",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div style={{ color: "red" }} />;\n`,
+    rule: DOM_PROPS,
+  },
 ];
 
 const allowed: Omit<Case, "rule">[] = [
@@ -345,6 +471,21 @@ const allowed: Omit<Case, "rule">[] = [
     name: "el adaptador de Supabase carga el cliente de base con import() dinámico",
     file: `${fixtures}/adapters/supabase/probe.ts`,
     code: `export const probe = () => import("pg");\n`,
+  },
+  {
+    name: "un componente base importa los textos",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import { thing } from "../messages/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "una pantalla importa un componente base",
+    file: `${fixtures}/app/probe.ts`,
+    code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "un componente base recibe su texto y escribe clases y tipos a mano",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = ({ text }: { text: string }) => (\n  <button type="button" className="h-control" aria-label={text}>\n    {text}\n  </button>\n);\n`,
   },
   {
     name: "una página importa un servicio y los textos",
