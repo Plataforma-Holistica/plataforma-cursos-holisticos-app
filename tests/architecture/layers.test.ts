@@ -368,6 +368,30 @@ const forbidden: Case[] = [
     rule: IMPORTS,
   },
   {
+    name: "una página importa el SDK del registro de errores",
+    file: `${fixtures}/app/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un componente base importa el SDK del registro de errores",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un trabajo importa el SDK del registro de errores",
+    file: `${fixtures}/jobs/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "el arranque del navegador importa un adaptador",
+    file: `${fixtures}/instrumentation-client.ts`,
+    code: `import { thing } from "./adapters/mux/thing";\nexport const probe = thing;\n`,
+    rule: LAYERS,
+  },
+  {
     name: "un componente base importa el catálogo entero, que así llegaría al navegador",
     file: `${fixtures}/ui/probe.ts`,
     code: `import { messages } from "@/messages";\nexport const probe = messages;\n`,
@@ -516,6 +540,16 @@ const allowed: Omit<Case, "rule">[] = [
     name: "el arranque importa la configuración",
     file: `${fixtures}/instrumentation.ts`,
     code: `import { thing } from "./config/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "el arranque del navegador importa un servicio",
+    file: `${fixtures}/instrumentation-client.ts`,
+    code: `import { thing } from "./services/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "el adaptador del registro de errores importa su SDK y la configuración",
+    file: `${fixtures}/adapters/sentry/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nimport { thing } from "../../config/thing";\nexport const probe = [Sentry, thing];\n`,
   },
   {
     name: "un trabajo importa un servicio",

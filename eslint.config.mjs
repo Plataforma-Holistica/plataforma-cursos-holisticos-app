@@ -34,7 +34,14 @@ const noDatabaseClientLoading = [
 ];
 
 // SDK de proveedores. Solo su adaptador los toca.
-const PROVIDER_SDKS = [...DATABASE_CLIENTS, "@mux/mux-node", "stripe", "facturapi", "resend"];
+const PROVIDER_SDKS = [
+  ...DATABASE_CLIENTS,
+  "@mux/mux-node",
+  "stripe",
+  "facturapi",
+  "resend",
+  "@sentry/*",
+];
 
 const noProviderSdks = {
   group: PROVIDER_SDKS,
@@ -124,8 +131,12 @@ export default defineConfig([
         { type: "messages", pattern: "src/messages" },
         { type: "config", pattern: "src/config" },
       ],
-      // El archivo de arranque de Next no vive en ninguna carpeta de capa.
-      "boundaries/files": [{ category: "startup", pattern: "**/src/instrumentation.ts" }],
+      // Los archivos de arranque de Next no viven en ninguna carpeta de capa: el del
+      // servidor y el del navegador.
+      "boundaries/files": [
+        { category: "startup", pattern: "**/src/instrumentation.ts" },
+        { category: "startup", pattern: "**/src/instrumentation-client.ts" },
+      ],
       "boundaries/legacy-templates": false,
       "import/resolver": {
         typescript: { alwaysTryTypes: true },
