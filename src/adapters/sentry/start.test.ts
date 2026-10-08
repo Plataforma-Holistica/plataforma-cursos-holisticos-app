@@ -80,7 +80,24 @@ describe("en el navegador", () => {
       environment: "staging",
       dataCollection: DATA_COLLECTION,
       beforeSend: expect.any(Function),
+      integrations: expect.any(Function),
     });
+  });
+
+  // Por omisión el navegador le avisa a Sentry de cada visita, haya error o no, para
+  // calcular qué porcentaje de visitas falla. Eso no es un error: no sale.
+  it("no avisa de cada visita: quita el conteo de sesiones y deja lo demás", async () => {
+    const { startBrowserErrorReporting } = await import("./browser");
+    browserEnv.publicEnv = { appEnv: "staging", sentryDsn: DSN };
+
+    startBrowserErrorReporting();
+
+    const { integrations } = sentry.init.mock.calls[0]?.[0] as {
+      integrations: (defaults: { name: string }[]) => { name: string }[];
+    };
+    expect(
+      integrations([{ name: "GlobalHandlers" }, { name: "BrowserSession" }, { name: "Dedupe" }]),
+    ).toEqual([{ name: "GlobalHandlers" }, { name: "Dedupe" }]);
   });
 
   it("reporta un error que atrapó una pantalla", async () => {
