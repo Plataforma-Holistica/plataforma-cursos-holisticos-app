@@ -107,12 +107,15 @@ export class TransactionAbortedError extends Error {
   }
 }
 
-/** Una consulta terminó la transacción por su cuenta (commit, rollback, end, abort). */
+/**
+ * Una consulta le quitó la transacción al adaptador: la terminó (commit, rollback, end,
+ * abort, con o sin `and chain`) o cambió con qué rol corre (`set role`, `reset role`).
+ */
 export class TransactionControlError extends Error {
   constructor() {
     super(
-      "Una consulta terminó la transacción. Quien la abre y la cierra es el adaptador: " +
-        "commit y rollback no se escriben en una consulta.",
+      "Una consulta terminó la transacción o cambió su rol. Quien la abre, la cierra y " +
+        "decide el rol es el adaptador: nada de eso se escribe en una consulta.",
     );
     this.name = "TransactionControlError";
   }

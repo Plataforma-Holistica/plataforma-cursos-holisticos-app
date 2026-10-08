@@ -45,9 +45,20 @@ export function buildPoolConfig(env: Pick<Env, "APP_ENV" | "DATABASE_URL">): Dat
     reject("no es una URL de Postgres.");
   }
 
+  // Un `%` suelto hace lanzar a la decodificación con un error que no nombra la variable.
+  let user: string;
+  let password: string;
+  let database: string;
+  try {
+    user = decodeURIComponent(url.username);
+    password = decodeURIComponent(url.password);
+    database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  } catch {
+    return reject("tiene el usuario, la contraseña o la base mal codificados.");
+  }
+
   // Una sola credencial para la aplicación. Por el concentrador el usuario lleva además
   // la referencia del proyecto: app_service.<ref>.
-  const user = decodeURIComponent(url.username);
   if (user !== "app_service" && !user.startsWith("app_service.")) {
     reject("debe entrar como app_service. Con otro rol la base no filtra igual.");
   }
@@ -60,16 +71,17 @@ export function buildPoolConfig(env: Pick<Env, "APP_ENV" | "DATABASE_URL">): Dat
     reject("no puede traer parámetros: ni de TLS ni de ningún otro tipo.");
   }
 
-  const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
   if (url.hostname === "" || database === "") {
     reject("debe traer el servidor y el nombre de la base.");
   }
+  // Sin contraseña en la URL, `pg` tomaría la de la variable PGPASSWORD del proceso.
+  if (password === "") reject("debe traer la contraseña.");
 
   return {
     host: url.hostname.replace(/^\[|\]$/g, ""),
     port: url.port === "" ? DEFAULT_PORT : Number(url.port),
     user,
-    password: decodeURIComponent(url.password),
+    password,
     database,
     // Sin TLS solo contra la propia máquina, que es la base local. A cualquier otro
     // servidor se entra verificando su certificado contra la raíz de Supabase, diga lo

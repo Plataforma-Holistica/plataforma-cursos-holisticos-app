@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 
 import { Pool, type PoolClient, type QueryConfig } from "pg";
 import type { ZodType } from "zod";
@@ -91,7 +92,14 @@ const PREPARE = `
     set_config('app.request_id', $6, true),
     set_config('statement_timeout', $7, true),
     set_config('lock_timeout', $8, true),
-    set_config('idle_in_transaction_session_timeout', $9, true)`;
+    set_config('idle_in_transaction_session_timeout', $9, true),
+    set_config('app.tx', $10, true)`;
+
+// Antes del commit: que la transacción siga siendo la que se preparó, con su rol. El
+// testigo `app.tx` es local a la transacción: si una consulta la terminó y abrió otra
+// («commit and chain»), la nueva no lo trae. Y el estado que reporta la base no cambia
+// con un `set role`, pero el rol sí.
+const CHECK = `select current_setting('app.tx', true) as tx, current_user::text as role`;
 
 let cached: Pool | undefined;
 
@@ -116,7 +124,20 @@ interface TxState {
 }
 
 function createTx(client: PoolClient, state: TxState): Tx {
-  async function run(query: SqlQuery) {
+  // Las consultas de una transacción corren una tras otra, aunque se pidan a la vez. Sin
+  // esta fila, `pg` ya tendría encolada la siguiente cuando una termina la transacción, y
+  // correría fuera de ella.
+  let last: Promise<unknown> = Promise.resolve();
+  function run(query: SqlQuery) {
+    const next = last.then(
+      () => runNow(query),
+      () => runNow(query),
+    );
+    last = next.catch(() => {});
+    return next;
+  }
+
+  async function runNow(query: SqlQuery) {
     if (state.ended) throw new TransactionControlError();
     if (!state.open) throw new TransactionClosedError();
     if (!isSqlQuery(query)) {
@@ -164,11 +185,16 @@ function createTx(client: PoolClient, state: TxState): Tx {
 }
 
 // Marca que se está dentro de la función de una transacción, para rechazar otra adentro.
-const inside = new AsyncLocalStorage<true>();
+// Todo lo que se agenda dentro hereda la marca para siempre (un temporizador, una promesa
+// sin esperar): por eso es un objeto que se apaga al terminar, y no un simple «sí».
+const inside = new AsyncLocalStorage<{ active: boolean }>();
 
 async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): Promise<T> {
   // Cada transacción toma una conexión y el grupo es chico: anidarlas lo agota y cuelga.
-  if (inside.getStore()) throw new NestedTransactionError();
+  if (inside.getStore()?.active) throw new NestedTransactionError();
+
+  const witness = randomUUID();
+  const marker = { active: true };
 
   const client = await pool().connect();
   const state: TxState = { open: false, ended: false };
@@ -192,6 +218,7 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
       STATEMENT_TIMEOUT,
       LOCK_TIMEOUT,
       IDLE_IN_TRANSACTION_TIMEOUT,
+      witness,
     ]);
     // Al final, ya con todo fijado: desde aquí la base filtra como esa persona.
     if (settings.role === "authenticated") await client.query("set local role authenticated");
@@ -200,11 +227,12 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
     let result: T;
     try {
       const tx = createTx(client, state);
-      result = await inside.run(true, () => fn(tx));
+      result = await inside.run(marker, () => fn(tx));
     } finally {
       // Antes del commit o del rollback: una consulta tardía de `fn` ya no puede correr
       // en esta conexión, que enseguida será de otra petición.
       state.open = false;
+      marker.active = false;
     }
 
     // La función terminó bien, pero eso no dice en qué quedó la transacción.
@@ -213,11 +241,19 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
     // contesta ROLLBACK sin error, y se reportaría como guardado lo que se deshizo.
     if (client.getTransactionStatus() !== IN_TRANSACTION) throw new TransactionAbortedError();
 
+    // Sigue siendo la transacción que se preparó, y con el rol con que se preparó.
+    const check = await client.query<{ tx: string | null; role: string }>(CHECK);
+    if (check.rows[0]?.tx !== witness || check.rows[0]?.role !== settings.role) {
+      state.ended = true;
+      throw new TransactionControlError();
+    }
+
     const committed = await client.query("commit");
     if (committed.command !== "COMMIT") throw new TransactionAbortedError();
     return result;
   } catch (error) {
     state.open = false;
+    marker.active = false;
     try {
       await client.query("rollback");
     } catch {

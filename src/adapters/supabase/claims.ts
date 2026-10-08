@@ -1,15 +1,12 @@
 import "server-only";
 
-import {
-  createClient,
-  isAuthRetryableFetchError,
-  type SupabaseClient,
-} from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { getEnv } from "@/config/env";
 
-import { ExpiredClaimsError, IdentityUnavailableError, UnverifiedClaimsError } from "./errors";
+import { ExpiredClaimsError, UnverifiedClaimsError } from "./errors";
+import { createKeyCache, type Jwk } from "./keys";
 
 // Quién es la persona, a partir del token de su sesión (TRD §8.10 y §9.2).
 //
@@ -85,8 +82,13 @@ const ACCEPTED_ALGORITHMS = new Set(["ES256", "RS256"]);
 
 /** Mira la cabecera del token, sin verificar nada: solo decide si vale la pena intentarlo. */
 export function hasAcceptedAlgorithm(accessToken: string): boolean {
+  return readTokenHeader(accessToken) !== null;
+}
+
+/** El algoritmo y la clave que el token dice usar, si son de los que se aceptan. */
+function readTokenHeader(accessToken: string): { alg: string; kid: string } | null {
   const parts = accessToken.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return null;
   try {
     const [header, body] = [parts[0], parts[1]].map(
       (part): unknown => JSON.parse(Buffer.from(part ?? "", "base64url").toString("utf8")),
@@ -94,18 +96,34 @@ export function hasAcceptedAlgorithm(accessToken: string): boolean {
     const isObject = (value: unknown) =>
       typeof value === "object" && value !== null && !Array.isArray(value);
     // Un cuerpo que no es un objeto haría tropezar al SDK de otra forma que una firma mala.
-    if (!isObject(header) || !isObject(body)) return false;
+    if (!isObject(header) || !isObject(body)) return null;
     const { alg, kid } = header as { alg?: unknown; kid?: unknown };
-    return (
-      typeof alg === "string" &&
-      ACCEPTED_ALGORITHMS.has(alg) &&
-      typeof kid === "string" &&
-      kid !== ""
-    );
+    if (typeof alg !== "string" || !ACCEPTED_ALGORITHMS.has(alg)) return null;
+    if (typeof kid !== "string" || kid === "") return null;
+    return { alg, kid };
   } catch {
-    return false;
+    return null;
   }
 }
+
+// Las claves públicas del proyecto, pedidas y recordadas aquí (ver `keys.ts`).
+async function fetchProjectKeys(): Promise<Jwk[]> {
+  const env = getEnv();
+  const response = await fetch(
+    `${withoutTrailingSlash(env.NEXT_PUBLIC_SUPABASE_URL)}/auth/v1/.well-known/jwks.json`,
+    {
+      headers: { apikey: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY },
+      signal: AbortSignal.timeout(5_000),
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) throw new Error(`El servidor de identidad contestó ${response.status}.`);
+  const body = (await response.json()) as { keys?: unknown } | null;
+  if (!Array.isArray(body?.keys)) throw new Error("El servidor de identidad no mandó claves.");
+  return body.keys as Jwk[];
+}
+
+const keyCache = createKeyCache({ fetchKeys: fetchProjectKeys });
 
 let cached: SupabaseClient | undefined;
 
@@ -125,23 +143,30 @@ function client(): SupabaseClient {
  * por qué: firma, vigencia, emisor, audiencia o rol.
  *
  * Lanza `IdentityUnavailableError` si no se pudo saber: las claves públicas se bajan del
- * servidor de identidad, y si no responde, la persona no dejó de tener sesión.
+ * servidor de identidad, y si no responde y la clave no se conocía, la persona no dejó
+ * de tener sesión. Un token mal hecho nunca produce ese error: quien lo manda no puede
+ * hacer que parezca una caída.
  */
 export async function verifyAccessToken(accessToken: string): Promise<VerifiedClaims | null> {
-  if (!hasAcceptedAlgorithm(accessToken)) return null;
+  const header = readTokenHeader(accessToken);
+  if (!header) return null;
+
+  // Lo único que sale a la red, y es de aquí de donde puede venir un «no se pudo saber».
+  const key = await keyCache.find(header.kid);
+  // Una clave que el proyecto no tiene, o un token que dice otro algoritmo que el de su
+  // clave: inválido, sin preguntarle a nadie.
+  if (!key || (key.alg !== undefined && key.alg !== header.alg)) return null;
+
   let payload: unknown;
   try {
-    const { data, error } = await client().auth.getClaims(accessToken);
-    if (error) {
-      if (isAuthRetryableFetchError(error)) throw new IdentityUnavailableError();
-      return null;
-    }
-    if (!data) return null;
+    // Con la clave en la mano el SDK no sale a la red: solo comprueba firma y vigencia.
+    // Lo que devuelva como error o lance es, entonces, un token que no sirve.
+    // El tipo de clave del SDK es más estricto que lo que publica el servidor.
+    const { data, error } = await client().auth.getClaims(accessToken, { keys: [key] as never });
+    if (error || !data) return null;
     payload = data.claims;
-  } catch (error) {
-    if (error instanceof IdentityUnavailableError) throw error;
-    // Lo que el SDK lanza en vez de devolver es un fallo de red al pedir las claves.
-    throw new IdentityUnavailableError();
+  } catch {
+    return null;
   }
 
   const issuer = `${withoutTrailingSlash(getEnv().NEXT_PUBLIC_SUPABASE_URL)}/auth/v1`;

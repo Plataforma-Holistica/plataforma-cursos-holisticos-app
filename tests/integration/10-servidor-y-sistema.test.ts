@@ -272,6 +272,54 @@ describe("la transacción", () => {
     expect(ranAfter).toBe(false);
   });
 
+  // «commit and chain» termina la transacción y abre otra: el estado que reporta la base
+  // es el mismo, pero la nueva ya no trae el rol, el autor ni los tiempos límite.
+  it.each([
+    ["commit and chain", sql`commit and chain`],
+    ["rollback and chain", sql`rollback and chain`],
+  ])("«%s» no cuela una transacción nueva sin preparar", async (_name, statement) => {
+    const attempt = asSystem({ reason: "prueba" }, async (tx) => {
+      await tx.execute(statement);
+      return "todo bien";
+    });
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+  });
+
+  it("varias consultas a la vez sobre la misma transacción corren una tras otra", async () => {
+    const rows = await asSystem({}, (tx) =>
+      Promise.all([1, 2, 3].map((n) => tx.query(sql`select ${n}::int as n`, count))),
+    );
+    expect(rows.map((result) => result[0]?.n)).toEqual([1, 2, 3]);
+  });
+
+  it("lo que va en fila detrás de un «commit» no llega a correr", async () => {
+    let ran = false;
+    const attempt = asSystem({}, (tx) =>
+      Promise.all([
+        tx.execute(sql`commit`),
+        tx.query(sql`select 1 as n`, count).then((result) => {
+          ran = true;
+          return result;
+        }),
+      ]),
+    );
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+    expect(ran).toBe(false);
+  });
+
+  // La marca de «estoy dentro de una transacción» se hereda a todo lo que se agenda ahí.
+  // Si no se apagara al terminar, un trabajo lanzado desde dentro quedaría vetado.
+  it("un trabajo agendado dentro puede abrir su propia transacción cuando la de afuera terminó", async () => {
+    let later: Promise<{ n: number }[]> | undefined;
+    await asSystem({}, async (tx) => {
+      await tx.query(sql`select 1 as n`, count);
+      later = new Promise<void>((resolve) => setTimeout(resolve, 20)).then(() =>
+        asSystem({}, (inner) => inner.query(sql`select 7 as n`, count)),
+      );
+    });
+    expect((await later)?.[0]?.n).toBe(7);
+  });
+
   it("una consulta es una sola sentencia: dos en el mismo texto se rechazan", async () => {
     const attempt = asSystem({}, (tx) => tx.execute(sql`select 1; select 2`));
     await expect(attempt).rejects.toBeInstanceOf(DatabaseError);

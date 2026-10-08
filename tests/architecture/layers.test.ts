@@ -313,6 +313,48 @@ const forbidden: Case[] = [
     rule: SYNTAX,
   },
   {
+    name: "un servicio se escribe en JavaScript, donde las reglas de capas no alcanzan",
+    file: `${fixtures}/services/probe.mjs`,
+    code: `import pg from "pg";\nexport const probe = pg;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga un paquete con require y un nombre que se arma al correr",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const require: (name: string) => unknown;\nexport const probe = (name: string) => require(name);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio importa el módulo de módulos entero para fabricarse un require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import Module from "node:module";\nexport const probe = Module.createRequire(import.meta.url)("pg");\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio llama a la etiqueta sql con call",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const sql: { call: (...args: unknown[]) => unknown };\nexport const probe = (text: string) => sql.call(null, [text]);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio escribe un commit dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`commit and chain`;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio cambia de rol dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`reset role`;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio reescribe quién actúa dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`select set_config('app.actor_id', 'otro', true)`;\n",
+    rule: SYNTAX,
+  },
+  {
     name: "el arranque importa el cliente de base",
     file: `${fixtures}/instrumentation.ts`,
     code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
@@ -666,6 +708,11 @@ const allowed: Omit<Case, "rule">[] = [
     name: "la configuración lee las variables de entorno y usa un paquete",
     file: `${fixtures}/config/probe.ts`,
     code: `import { z } from "zod";\nexport const probe = () => [z, process.env.APP_ENV];\n`,
+  },
+  {
+    name: "un servicio escribe una consulta normal, con palabras que solo se parecen a las prohibidas",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray, ...values: unknown[]) => unknown;\nexport const probe = (id: string) => sql`select role, committed_at, ended_at from public.profiles where id = ${id} on conflict do nothing`;\n",
   },
   {
     name: "el arranque importa la configuración",

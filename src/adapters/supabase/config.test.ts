@@ -75,6 +75,21 @@ describe("configuración de la conexión", () => {
     expect(config.ssl).toBe(false);
   });
 
+  it("rechaza una contraseña mal codificada sin soltar otro tipo de error", () => {
+    const url = ["postgresql://app_service", "cien%porciento@127.0.0.1:54322/postgres"].join(":");
+    expect(() => buildPoolConfig({ APP_ENV: "local", DATABASE_URL: url })).toThrow(/DATABASE_URL/);
+  });
+
+  // Sin contraseña en la URL, `pg` tomaría la de la variable PGPASSWORD del proceso.
+  it("rechaza una URL sin contraseña", () => {
+    for (const url of [
+      "postgresql://app_service@127.0.0.1:54322/postgres",
+      ["postgresql://app_service", "@127.0.0.1:54322/postgres"].join(":"),
+    ]) {
+      expect(() => buildPoolConfig({ APP_ENV: "local", DATABASE_URL: url })).toThrow(/DATABASE_URL/);
+    }
+  });
+
   it("rechaza una URL sin base, sin servidor o que no es de Postgres", () => {
     for (const url of [
       `postgresql://app_service:${password}@127.0.0.1:54322`,
