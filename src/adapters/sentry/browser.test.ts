@@ -8,7 +8,11 @@ import { DATA_COLLECTION } from "./options";
 // que reportar. Estas pruebas cuidan las dos cosas que eso podría romper: que un error
 // temprano no se pierda, y que el filtro siga puesto.
 
-const sentry = vi.hoisted(() => ({ init: vi.fn(), captureException: vi.fn() }));
+const sentry = vi.hoisted(() => ({
+  init: vi.fn(),
+  captureException: vi.fn(),
+  breadcrumbsIntegration: vi.fn((options: unknown) => ({ name: "Breadcrumbs", options })),
+}));
 vi.mock("@sentry/nextjs", () => sentry);
 
 const browserEnv = vi.hoisted(() => ({
@@ -65,13 +69,16 @@ describe("Sentry en el navegador", () => {
     expect(sentry.init).not.toHaveBeenCalled();
 
     await untilLoaded();
-    expect(sentry.init).toHaveBeenCalledExactlyOnceWith({
-      dsn: DSN,
-      environment: "staging",
-      dataCollection: DATA_COLLECTION,
-      beforeSend: expect.any(Function),
-      integrations: expect.any(Function),
-    });
+    expect(sentry.init).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        dsn: DSN,
+        environment: "staging",
+        dataCollection: DATA_COLLECTION,
+        beforeSend: expect.any(Function),
+        tracesSampleRate: 0,
+        integrations: expect.any(Function),
+      }),
+    );
   });
 
   // Por omisión el navegador le avisa a Sentry de cada visita, haya error o no, para
@@ -83,11 +90,21 @@ describe("Sentry en el navegador", () => {
     await untilLoaded();
 
     const { integrations } = sentry.init.mock.calls[0]?.[0] as {
-      integrations: (defaults: { name: string }[]) => { name: string }[];
+      integrations: (defaults: { name: string }[]) => { name: string; options?: unknown }[];
     };
-    expect(
-      integrations([{ name: "GlobalHandlers" }, { name: "BrowserSession" }, { name: "Dedupe" }]),
-    ).toEqual([{ name: "GlobalHandlers" }, { name: "Dedupe" }]);
+    const result = integrations([
+      { name: "GlobalHandlers" },
+      { name: "BrowserSession" },
+      { name: "BrowserTracing" },
+      { name: "Breadcrumbs" },
+      { name: "Console" },
+      { name: "Dedupe" },
+    ]);
+    expect(result.map(({ name }) => name)).toEqual(["GlobalHandlers", "Dedupe", "Breadcrumbs"]);
+    // El rastro de clics lleva el `aria-label` y el `title` de lo que se pulsó:
+    // «Continuar: Duelo y ansiedad» es un dato de quien toma ese curso. Y la consola,
+    // que en esta versión del SDK es una integración aparte, lo que se haya escrito ahí.
+    expect(result.at(-1)?.options).toEqual({ dom: false });
   });
 
   it("un error que ocurre antes de que llegue el SDK no se pierde", async () => {
@@ -102,8 +119,78 @@ describe("Sentry en el navegador", () => {
 
     await untilLoaded();
     await vi.waitFor(() => expect(sentry.captureException).toHaveBeenCalledTimes(2));
-    expect(sentry.captureException).toHaveBeenNthCalledWith(1, early);
-    expect(sentry.captureException).toHaveBeenNthCalledWith(2, rejected);
+    // Nadie los atrapó: van marcados así, para que en Sentry no pasen por errores menores.
+    expect(sentry.captureException).toHaveBeenNthCalledWith(1, early, {
+      mechanism: { type: "onerror", handled: false },
+    });
+    expect(sentry.captureException).toHaveBeenNthCalledWith(2, rejected, {
+      mechanism: { type: "onunhandledrejection", handled: false },
+    });
+  });
+
+  // Quien ve fallar la página suele irse. Si el SDK esperara su turno, ese error se
+  // perdería con la pestaña.
+  it("el primer error temprano pide el SDK en ese momento, sin esperar a que el navegador quede libre", async () => {
+    const { startBrowserErrorReporting } = await freshAdapter();
+
+    startBrowserErrorReporting();
+    throwInPage(new Error("falló al cobrar vida la página"));
+
+    await vi.waitFor(() => expect(sentry.init).toHaveBeenCalled());
+    await vi.waitFor(() => expect(sentry.captureException).toHaveBeenCalledOnce());
+  });
+
+  it("le pone tiempo máximo a la espera: en una pestaña de fondo el reposo puede no llegar nunca", async () => {
+    const requestIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    try {
+      const { startBrowserErrorReporting } = await freshAdapter();
+      startBrowserErrorReporting();
+      expect(requestIdleCallback).toHaveBeenCalledExactlyOnceWith(expect.any(Function), {
+        timeout: 2_000,
+      });
+      // El reposo llega: el SDK carga y quita sus oyentes, para no dejarlos puestos.
+      (requestIdleCallback.mock.calls[0]?.[0] as () => void)();
+      await vi.waitFor(() => expect(sentry.init).toHaveBeenCalled());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // Una pestaña abierta durante un despliegue pide un pedazo que ya no existe. Si ese
+  // fallo se recordara, esa pestaña no volvería a reportar nada.
+  it("si el SDK no llega, el siguiente error lo vuelve a pedir", async () => {
+    const { captureBrowserError } = await freshAdapter();
+    sentry.init.mockImplementationOnce(() => {
+      throw new Error("el pedazo ya no existe");
+    });
+
+    captureBrowserError(new Error("uno"));
+    await vi.waitFor(() => expect(sentry.init).toHaveBeenCalledOnce());
+    const second = new Error("dos");
+    captureBrowserError(second);
+
+    await vi.waitFor(() => expect(sentry.captureException).toHaveBeenCalledWith(second));
+    expect(sentry.init).toHaveBeenCalledTimes(2);
+  });
+
+  it("si una pantalla pidió el SDK antes del reposo, lo guardado se entrega una sola vez", async () => {
+    const { captureBrowserError, startBrowserErrorReporting } = await freshAdapter();
+    const early = new Error("temprano");
+    const sdkListener = vi.fn();
+    sentry.init.mockImplementationOnce(() => window.addEventListener("error", sdkListener));
+
+    startBrowserErrorReporting();
+    throwInPage(early);
+    captureBrowserError(new Error("de una pantalla"));
+    await vi.waitFor(() => expect(sentry.captureException).toHaveBeenCalledTimes(2));
+    await untilLoaded();
+    throwInPage(new Error("ya con el SDK"));
+    await vi.runAllTimersAsync();
+    window.removeEventListener("error", sdkListener);
+
+    expect(sentry.captureException).toHaveBeenCalledTimes(2);
+    expect(sdkListener).toHaveBeenCalledOnce();
   });
 
   it("cuando el SDK ya llegó, deja de guardar: de ahí en adelante atrapa él", async () => {
@@ -129,7 +216,7 @@ describe("Sentry en el navegador", () => {
     startBrowserErrorReporting();
     for (let i = 0; i < 50; i += 1) throwInPage(new Error(`fallo ${i}`));
 
-    await untilLoaded();
+    await vi.waitFor(() => expect(sentry.init).toHaveBeenCalled());
     await vi.runAllTimersAsync();
     expect(sentry.captureException).toHaveBeenCalledTimes(10);
   });

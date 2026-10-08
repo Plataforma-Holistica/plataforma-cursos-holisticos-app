@@ -19,6 +19,9 @@ const schema = z.object({
   DATABASE_URL_DIRECT: postgresUrl,
   // A dónde se mandan los errores (RNF-16). No es secreta: también llega al navegador.
   SENTRY_DSN: httpUrl.optional(),
+  // La pone Vercel, no una persona: `production`, `preview` o `development`. Sirve de
+  // segunda opinión sobre APP_ENV, que sí se escribe a mano en el panel.
+  VERCEL_ENV: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;

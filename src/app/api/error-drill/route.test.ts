@@ -31,6 +31,20 @@ describe("GET /api/error-drill", () => {
     expect(response.status).toBe(404);
   });
 
+  // APP_ENV lo pone una persona en el panel. Si se equivoca, que la ruta no exista
+  // depende también de lo que Vercel dice del despliegue, que nadie escribe a mano.
+  it("en un despliegue de producción de Vercel no existe, diga lo que diga APP_ENV", () => {
+    env.current = { APP_ENV: "staging", VERCEL_ENV: "production" };
+
+    expect(GET().status).toBe(404);
+  });
+
+  it("en una vista previa de Vercel sí falla a propósito", () => {
+    env.current = { APP_ENV: "staging", VERCEL_ENV: "preview" };
+
+    expect(() => GET()).toThrow(ErrorDrill);
+  });
+
   it("nunca se resuelve al compilar: fallaría la compilación", () => {
     expect(dynamic).toBe("force-dynamic");
   });

@@ -105,6 +105,15 @@ const noProviderSdks = {
     "Esta capa no habla con proveedores ni con la base: pídeselo a un servicio (TRD §4.2).",
 };
 
+// El SDK del registro de errores solo vive en su adaptador (RNF-16, TRD §10.5): ahí
+// están apagada la recolección y puesto el filtro de datos personales. Desde cualquier
+// otro lado, `Sentry.setUser({ email })` o `Sentry.logger` se los saltarían.
+const noSentrySdk = {
+  group: ["@sentry/*"],
+  message:
+    "El SDK de Sentry solo se usa en src/adapters/sentry/: pídele al servicio de src/services/error-reporting/ (TRD §10.5).",
+};
+
 // Ningún texto visible se escribe fuera del catálogo de src/messages/ (RNF-15).
 //
 // El texto entre etiquetas lo cuida `react/jsx-no-literals`. Lo demás, estas reglas, que
@@ -321,8 +330,27 @@ export default defineConfig([
     files: ["**/src/**/*.{ts,tsx}"],
     ignores: ["**/src/adapters/supabase/**"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
+      "no-restricted-imports": [
+        "error",
+        { patterns: [noDatabaseClient, noSentrySdk], paths: noOwnRequire },
+      ],
       "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
+    },
+  },
+  {
+    // El bloque de arriba no mira el adaptador de la base, así que aquí se le dice lo que
+    // le falta: tampoco él usa el SDK de Sentry.
+    files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [noSentrySdk] }],
+    },
+  },
+  {
+    // Y el adaptador de Sentry es el único que sí lo usa. Reemplaza la regla del bloque
+    // general, así que repite lo demás.
+    files: ["**/src/adapters/sentry/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
     },
   },
   {
@@ -392,6 +420,7 @@ export default defineConfig([
               message: "Los servicios no conocen React: eso es de la capa de entrada (TRD §4.2).",
             },
             noDatabaseClient,
+            noSentrySdk,
           ],
           paths: noOwnRequire,
         },

@@ -40,21 +40,40 @@ describe("buildOptions", () => {
     const event: ErrorEvent = {
       type: undefined,
       message: "ana@correo.com",
-      user: { id: "1", email: "ana@correo.com" },
+      user: { id: "5b1f0c1e-0000-4000-8000-000000000001", email: "ana@correo.com" },
     };
 
     expect(options.beforeSend(event)).toEqual({
       type: undefined,
       message: "[correo]",
-      user: { id: "1" },
+      user: { id: "5b1f0c1e-0000-4000-8000-000000000001" },
     });
   });
 
-  it("solo errores: sin trazas, sin registros y sin grabar sesiones", () => {
-    expect(options).not.toHaveProperty("tracesSampleRate");
-    expect(options).not.toHaveProperty("enableLogs");
+  // No basta con no pedirlas. El SDK lee por su cuenta la variable
+  // SENTRY_TRACES_SAMPLE_RATE: si alguien la pusiera en Vercel prendería las trazas, y
+  // las trazas no pasan por `beforeSend`. Aquí se apagan dichas, y con su propia puerta.
+  it("solo errores: las trazas van apagadas de forma explícita", () => {
+    expect(options.tracesSampleRate).toBe(0);
+    expect(options.beforeSendTransaction()).toBeNull();
+  });
+
+  it("solo errores: ni registros ni métricas salen, aunque algo los prenda", () => {
+    expect(options.enableLogs).toBe(false);
+    expect(options.beforeSendLog()).toBeNull();
+    expect(options.beforeSendMetric()).toBeNull();
+  });
+
+  it("no le manda cabeceras de rastreo a nadie: ni a la base, ni a cobros, ni al video", () => {
+    expect(options.tracePropagationTargets).toEqual([]);
+  });
+
+  it("recorta los textos largos antes de mandarlos", () => {
+    expect(options.maxValueLength).toBe(2_000);
+  });
+
+  it("sin grabación de sesiones", () => {
     expect(options).not.toHaveProperty("replaysSessionSampleRate");
     expect(options).not.toHaveProperty("replaysOnErrorSampleRate");
-    expect(options).not.toHaveProperty("integrations");
   });
 });

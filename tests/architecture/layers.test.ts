@@ -470,6 +470,36 @@ const forbidden: Case[] = [
     rule: IMPORTS,
   },
   {
+    name: "un servicio usa el SDK del registro de errores por su cuenta, sin el filtro",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "otro adaptador usa el SDK del registro de errores",
+    file: `${fixtures}/adapters/stripe/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "el adaptador de la base usa el SDK del registro de errores",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "el arranque importa el SDK del registro de errores directamente",
+    file: `${fixtures}/instrumentation.ts`,
+    code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "el adaptador del registro de errores importa el cliente de base",
+    file: `${fixtures}/adapters/sentry/probe.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
     name: "el arranque del navegador importa un adaptador",
     file: `${fixtures}/instrumentation-client.ts`,
     code: `import { thing } from "./adapters/mux/thing";\nexport const probe = thing;\n`,

@@ -42,5 +42,9 @@ export default withSentryConfig(nextConfig, {
   useRunAfterProductionCompileHook: uploadSourceMaps,
   // El complemento de compilación manda sus propias estadísticas de uso a Sentry.
   telemetry: false,
+  // Por omisión el SDK mete en el paquete del navegador la lista de todas las rutas de
+  // la aplicación, para nombrar sus trazas. No hay trazas, y la lista (con las rutas de
+  // administración) no tiene por qué ser pública.
+  routeManifestInjection: false,
   silent: !process.env.CI,
 });
