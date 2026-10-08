@@ -41,7 +41,12 @@ export function PasswordField({ label, name, autoComplete, id, hint, rules, erro
   useEffect(() => {
     const form = input.current?.form;
     if (!form) return;
-    const hide = () => setVisible(false);
+    const hide = () => {
+      // En el acto, sobre el propio campo: el navegador arma lo que envía en este mismo
+      // instante, y React no lo vuelve a dibujar hasta después.
+      if (input.current) input.current.type = "password";
+      setVisible(false);
+    };
     form.addEventListener("submit", hide, { capture: true });
     return () => form.removeEventListener("submit", hide, { capture: true });
   }, []);

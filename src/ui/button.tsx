@@ -48,21 +48,32 @@ interface CommonProps {
   className?: string;
 }
 
-interface AsButton extends CommonProps {
+// Cargando, el texto de reposo se oculta. Sin texto de carga quedaría un botón vacío y
+// sin nombre: por eso no se puede pedir `loading` sin `loadingLabel`.
+type Loading =
+  | {
+      loading?: false;
+      /** El texto en gerundio mientras carga: «Guardando…». */
+      loadingLabel?: string;
+    }
+  | {
+      /** Está trabajando: no acepta un segundo clic. */
+      loading: boolean;
+      loadingLabel: string;
+    };
+
+type AsButton = CommonProps &
+  Loading & {
   href?: undefined;
   type?: "button" | "submit";
   name?: string;
   value?: string;
   form?: string;
   onClick?: MouseEventHandler<HTMLButtonElement>;
-  /** Está trabajando: no acepta un segundo clic. Pide `loadingLabel`. */
-  loading?: boolean;
-  /** El texto en gerundio mientras carga: «Guardando…». */
-  loadingLabel?: string;
   disabled?: boolean;
   /** Por qué está inactivo. Un control deshabilitado siempre tiene al lado su razón. */
   disabledReason?: string;
-}
+};
 
 interface AsLink extends CommonProps {
   href: string;

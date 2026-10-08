@@ -109,11 +109,15 @@ const noProviderSdks = {
 const NON_TEXT_ATTRIBUTES =
   "/^(" +
   [
-    "className|class|id|name|type|href|src|srcSet|rel|target|method|action|encType|htmlFor|form",
+    "className|class|id|name|type|href|src|srcSet|rel|target|method|encType|htmlFor|form",
+    // El valor que un campo manda con el formulario, no lo que la gente lee.
+    "value",
+    // Un manejador no es un texto, aunque adentro compare o navegue con cadenas.
+    "on[A-Z][A-Za-z]*",
     "role|lang|dir|key|ref|slot|is|as|variant|size|tone",
     "autoComplete|autoCapitalize|autoCorrect|inputMode|enterKeyHint|spellCheck|pattern|accept",
     "loading|decoding|fetchPriority|crossOrigin|referrerPolicy|integrity|nonce|sandbox|allow",
-    "charSet|httpEquiv|content|media|sizes|scope|headers|wrap|list|step|min|max|capture",
+    "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",
     "xmlns|viewBox|fill|stroke|strokeLinecap|strokeLinejoin|strokeWidth|d|points|transform",
     "preserveAspectRatio|focusable|itemProp|itemType|property",
     "data-.+",
@@ -134,22 +138,56 @@ const JSX_CHILD = ":matches(JSXElement, JSXFragment) > JSXExpressionContainer";
 const noLiteralTextMessage =
   "Los textos visibles salen del catálogo de src/messages/, nunca escritos aquí (RNF-15). Si este atributo no es texto para la gente, agrégalo a NON_TEXT_ATTRIBUTES en eslint.config.mjs.";
 
+// `action` y `content` son de un formulario y de un `<meta>` en un elemento nativo, pero
+// en un componente suelen ser lo que se muestra (`<InlineAlert action=…>`,
+// `<Tooltip content=…>`). Se permiten a mano solo en los nativos.
+const NATIVE_ONLY_ATTRIBUTE =
+  "JSXOpeningElement[name.name=/^[A-Z]/] > JSXAttribute[name.name=/^(action|content)$/]";
+const NATIVE_ATTRIBUTE =
+  "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name=/^(action|content)$/]";
+
+// Dónde puede ir escrito un texto, además de directo: pegado con otro, en un arreglo, con
+// una conversión de tipo, o elegido con una condición.
+//
+// Siempre como hijo directo, nunca «en cualquier parte de adentro»: dentro de una condición
+// suele ir otra etiqueta, con sus propias clases, y esas no son texto.
+const CONCAT = "BinaryExpression[operator='+']";
+const WRAPPED = `:matches(${CHOICE}, ArrayExpression, TSAsExpression, ${CONCAT})`;
+const TEXT = `:matches(${HANDWRITTEN}, TemplateLiteral)`;
+
+// Las claves que, en un objeto que se le pasa a un componente, son texto para la gente:
+// `errors={[{ message: "…" }]}`, o una prop con su valor por omisión.
+const TEXT_KEYS =
+  "/^(message|label|title|description|placeholder|hint|error|caption|heading|summary|alt|legend|loadingLabel|disabledReason|reference|aria-label|aria-description)$/";
+
 const noLiteralText = [
-  // En un atributo: directo, entre llaves, como plantilla, o elegido con una condición.
-  `${TEXT_ATTRIBUTE} > ${HANDWRITTEN}`,
-  `${TEXT_ATTRIBUTE} > JSXExpressionContainer > ${HANDWRITTEN}`,
-  `${TEXT_ATTRIBUTE} > JSXExpressionContainer > TemplateLiteral`,
-  `${TEXT_ATTRIBUTE} > JSXExpressionContainer > ${CHOICE} > :matches(${HANDWRITTEN}, TemplateLiteral)`,
+  // En un atributo que no es de los permitidos: directo, entre llaves o envuelto.
+  `${TEXT_ATTRIBUTE}:not(${NATIVE_ATTRIBUTE}) > ${HANDWRITTEN}`,
+  `${TEXT_ATTRIBUTE}:not(${NATIVE_ATTRIBUTE}) > JSXExpressionContainer > ${TEXT}`,
+  `${TEXT_ATTRIBUTE}:not(${NATIVE_ATTRIBUTE}) > JSXExpressionContainer > ${WRAPPED} > ${TEXT}`,
+  `${TEXT_ATTRIBUTE}:not(${NATIVE_ATTRIBUTE}) > JSXExpressionContainer > ${CONCAT} > ${CONCAT} > ${TEXT}`,
+  `${NATIVE_ONLY_ATTRIBUTE} > ${HANDWRITTEN}`,
+  `${NATIVE_ONLY_ATTRIBUTE} > JSXExpressionContainer > ${TEXT}`,
   // Entre etiquetas: lo que `jsx-no-literals` no ve.
   `${JSX_CHILD} > TemplateLiteral`,
-  `${JSX_CHILD} > ${CHOICE} > :matches(${HANDWRITTEN}, TemplateLiteral)`,
+  `${JSX_CHILD} > ${WRAPPED} > ${TEXT}`,
+  `${JSX_CHILD} > ${CONCAT} > ${CONCAT} > ${TEXT}`,
+  // En un objeto, bajo una clave que es texto para la gente.
+  `Property[key.name=${TEXT_KEYS}] > ${TEXT}`,
+  `Property[key.value=${TEXT_KEYS}] > ${TEXT}`,
+  // Como valor por omisión de una prop que es texto.
+  `AssignmentPattern[left.name=${TEXT_KEYS}] > ${TEXT}`,
+  // Un objeto esparcido en una etiqueta mete atributos sin que ninguna regla los vea.
+  "JSXSpreadAttribute > ObjectExpression",
+  // El texto crudo de una plantilla, con sus llaves: solo `t()` la muestra.
+  "MemberExpression[property.name='template']",
 ].map((selector) => ({ selector, message: noLiteralTextMessage }));
 
 // El título y la descripción de la pestaña también los lee la gente.
 const noLiteralMetadata = [
   {
     selector:
-      "ExportNamedDeclaration VariableDeclarator[id.name='metadata'] Property[key.name=/^(title|description|default|template|siteName|applicationName)$/] > :matches(Literal[raw=/^[\"']/], TemplateLiteral)",
+      ":matches(ExportNamedDeclaration VariableDeclarator[id.name='metadata'], FunctionDeclaration[id.name='generateMetadata']) Property[key.name=/^(title|description|default|template|absolute|siteName|applicationName|keywords)$/] > :matches(Literal[raw=/^[\"']/], TemplateLiteral)",
     message:
       "El título y la descripción de una pantalla salen del catálogo de src/messages/ (RNF-15).",
   },
@@ -159,7 +197,12 @@ const noLiteralMetadata = [
 // (`bg-[#fff]`, `w-[317px]`) es un valor suelto. Las variantes entre corchetes
 // (`[&_a]:py-3`, `aria-[busy=true]:opacity-60`) y las variables de la hoja
 // (`z-(--z-skip)`) no lo son: terminan en dos puntos o van entre paréntesis.
-const LOOSE_VALUE = "/(-\\[[^\\]\\s]+\\]|(^|\\s)\\[[^\\]\\s]+\\])(\\s|\\u002F|$)/";
+// Cuatro formas: una utilidad con valor (`w-[317px]`, también con `!` o con opacidad
+// detrás), una propiedad suelta (`[color:red]`, sola o tras una variante), una opacidad
+// suelta (`bg-text/[0.37]`) y un punto de quiebre inventado (`min-[900px]:`). Un selector
+// de CSS entre corchetes (`[data-still]`, `[role=dialog]`) no es ninguna de ellas.
+const LOOSE_VALUE =
+  "/(-\\[[^\\]\\s]+\\](\\s|\\u002F|!|$)|(^|[\\s:])\\[[a-z-]+:[^\\]\\s]+\\]!?(\\s|$)|\\u002F\\[[^\\]\\s]+\\]|(^|[\\s:])(min|max)-\\[[^\\]\\s]+\\]:)/";
 const noLooseVisualValues = [
   `Literal[raw=/^["']/][value=${LOOSE_VALUE}]`,
   `TemplateElement[value.raw=${LOOSE_VALUE}]`,
@@ -174,10 +217,18 @@ const noLooseVisualValues = [
 // carpeta y su índice, vengan por el alias o por una ruta relativa, y deja pasar
 // `@/messages/es/ui` y `@/messages/format`.
 const noWholeCatalog = {
-  regex: "(^|/)messages(/index(\\.ts)?)?$",
+  regex: "(^|/)messages(/index(\\.[cm]?[jt]s)?)?$",
   message:
     "Un componente base importa solo su bloque de textos (@/messages/es/ui), no el catálogo entero.",
 };
+
+// Lo mismo cuando se carga con import(), que `no-restricted-imports` no ve.
+const noDevFileLoading = [
+  {
+    selector: "ImportExpression[source.value=/\\.dev(\\.tsx?)?$/]",
+    message: "Un archivo .dev solo existe en desarrollo: no se carga desde la aplicación.",
+  },
+];
 
 // Las páginas `.dev.tsx` solo existen con `pnpm dev`. Importar una desde código de verdad
 // la llevaría a producción, con sus textos de ejemplo.
@@ -415,6 +466,7 @@ export default defineConfig([
       "no-restricted-syntax": [
         "error",
         ...noDatabaseClientLoading,
+        ...noDevFileLoading,
         ...noLooseVisualValues,
         ...noLiteralMetadata,
       ],
@@ -422,16 +474,24 @@ export default defineConfig([
   },
   {
     // Las páginas de muestra escriben sus textos de ejemplo a mano, pero siguen sin poder
-    // cargar el cliente de base ni usar valores visuales sueltos.
+    // cargar el cliente de base, ni usar valores visuales sueltos, ni estilos en línea.
     files: ["**/src/app/**/page.dev.tsx"],
     rules: {
       "no-restricted-syntax": ["error", ...noDatabaseClientLoading, ...noLooseVisualValues],
+      "react/forbid-dom-props": ["error", { forbid: ["style"] }],
     },
   },
   {
     // Lo que además vale para el JSX. Reemplaza otra vez la regla de sintaxis, así que
     // repite todo lo del bloque anterior.
-    files: ["**/src/ui/**/*.tsx", "**/src/app/**/*.tsx"],
+    // También lo que Payload y los trabajos dibujen (el panel, un correo): sus textos
+    // salen del mismo catálogo.
+    files: [
+      "**/src/ui/**/*.tsx",
+      "**/src/app/**/*.tsx",
+      "**/src/payload/**/*.tsx",
+      "**/src/jobs/**/*.tsx",
+    ],
     // Las pruebas escriben el texto que esperan. Las páginas de muestra (`page.dev.tsx`)
     // solo existen en desarrollo, para ver los componentes: la excepción es para ellas,
     // no para cualquier archivo que se llame `.dev.tsx`.
@@ -441,6 +501,7 @@ export default defineConfig([
       "no-restricted-syntax": [
         "error",
         ...noDatabaseClientLoading,
+        ...noDevFileLoading,
         ...noLooseVisualValues,
         ...noLiteralMetadata,
         ...noLiteralText,

@@ -291,6 +291,27 @@ describe("FormErrorSummary", () => {
     expect(field).toHaveFocus();
   });
 
+  // Quien reenvía el formulario con el mismo error tiene que enterarse de que falló otra
+  // vez. Los errores son los mismos, así que lo que cambia es el intento.
+  it("vuelve a tomar el foco en cada intento de envío, aunque los errores no cambien", async () => {
+    const user = userEvent.setup();
+    const view = (attempt: number) => (
+      <>
+        <FormErrorSummary errors={errors.map((error) => ({ ...error }))} attempt={attempt} />
+        <TextField id="campo-correo" label="Correo" name="email" autoComplete="email" />
+      </>
+    );
+    const { rerender } = render(view(1));
+    const field = screen.getByLabelText("Correo");
+    await user.click(field);
+
+    rerender(view(1));
+    expect(field).toHaveFocus();
+
+    rerender(view(2));
+    expect(screen.getByRole("alert")).toHaveFocus();
+  });
+
   it("vuelve a tomar el foco cuando llega una tanda distinta de errores", async () => {
     const user = userEvent.setup();
     const view = (list: typeof errors) => (
@@ -379,5 +400,27 @@ describe("arreglos de la revisión independiente", () => {
     await user.click(screen.getByRole("button", { name: "Entrar" }));
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(field).toHaveAttribute("type", "password");
+  });
+
+  // El navegador arma lo que envía en el mismo instante. Si el campo esperara a que React
+  // lo vuelva a dibujar, saldría todavía como texto.
+  it("y ya es de contraseña en el instante del envío, no un momento después", async () => {
+    const user = userEvent.setup();
+    let typeAtSubmit: string | null = null;
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          typeAtSubmit = event.currentTarget.querySelector("input")?.getAttribute("type") ?? null;
+        }}
+      >
+        <PasswordField label="Contraseña" name="password" autoComplete="current-password" />
+        <button type="submit">Entrar</button>
+      </form>,
+    );
+    await user.click(screen.getByRole("button", { name: ui.password.showLabel }));
+
+    await user.click(screen.getByRole("button", { name: "Entrar" }));
+    expect(typeAtSubmit).toBe("password");
   });
 });
