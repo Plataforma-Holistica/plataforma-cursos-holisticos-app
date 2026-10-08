@@ -20,10 +20,15 @@ export function FormErrorSummary({ errors }: { errors: readonly FormError[] }) {
   const summary = useRef<HTMLDivElement>(null);
   const count = errors.length;
 
-  // Cada vez que llega una tanda nueva de errores.
+  // Qué errores son, como texto. El foco depende de esto y no del arreglo: una pantalla
+  // suele armar un arreglo nuevo en cada dibujado, y con eso el foco saltaría aquí con
+  // cada tecla.
+  const signature = errors.map((error) => `${error.fieldId}\u0000${error.message}`).join("\u0001");
+
+  // Cada vez que llega una tanda distinta de errores.
   useEffect(() => {
-    if (count > 0) summary.current?.focus();
-  }, [count, errors]);
+    if (signature !== "") summary.current?.focus();
+  }, [signature]);
 
   if (count === 0) return null;
 

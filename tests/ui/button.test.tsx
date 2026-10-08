@@ -68,6 +68,42 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  // `aria-busy` no se lee en voz alta, y un botón que se deshabilita se queda mudo. Quien
+  // no ve el botón necesita oír que su clic sirvió.
+  it("cargando: lo anuncia una región viva que ya estaba ahí antes de cargar", () => {
+    const { rerender } = render(<Button loadingLabel="Guardando…">Guardar cambios</Button>);
+    const status = screen.getByRole("status");
+    expect(status).toBeEmptyDOMElement();
+    expect(status).toHaveClass("sr-only");
+
+    rerender(
+      <Button loading loadingLabel="Guardando…">
+        Guardar cambios
+      </Button>,
+    );
+    expect(screen.getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("Guardando…");
+  });
+
+  it("un botón sin texto de carga no trae región viva", () => {
+    render(<Button>Guardar cambios</Button>);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("cargando no se ve apagado como un botón inactivo: su texto sigue siendo legible", () => {
+    const { rerender } = render(<Button disabled>Entrar</Button>);
+    expect(screen.getByRole("button")).toHaveClass("disabled:text-text-disabled");
+
+    rerender(
+      <Button loading loadingLabel="Entrando…">
+        Entrar
+      </Button>,
+    );
+    const button = screen.getByRole("button");
+    expect(button).not.toHaveClass("disabled:text-text-disabled");
+    expect(button).toHaveClass("disabled:text-text-2");
+  });
+
   it("cargando conserva su ancho: el texto de reposo sigue ahí, oculto", () => {
     render(
       <Button loading loadingLabel="Guardando…">

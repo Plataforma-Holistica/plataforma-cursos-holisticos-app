@@ -1,6 +1,8 @@
+import { defineMessages } from "../format";
+
 // Los textos de las pantallas que no son de ninguna superficie: la portada provisional y
 // los estados que sustituyen a la pantalla pedida (diseño, PA-18 y PA-19).
-export const states = {
+export const states = defineMessages({
   home: {
     status: "En construcción.",
   },
@@ -19,4 +21,4 @@ export const states = {
     home: "Ir al inicio",
     reference: "Código de referencia: {code}",
   },
-} as const;
+});

@@ -54,6 +54,11 @@ for (const [name, url] of [
   if (!LOCAL_HOSTS.has(url.hostname)) {
     fail(`${name} no apunta a la base local. Este guion solo corre contra 127.0.0.1 o localhost.`);
   }
+  // `pg` deja que los parámetros de la cadena manden sobre lo demás: con `?host=` este
+  // guion pasaría por local y le cambiaría la contraseña al rol de una base remota.
+  if ([...url.searchParams.keys()].length > 0) {
+    fail(`${name} no puede traer parámetros.`);
+  }
 }
 
 if (appUrl.username !== "app_service") {
@@ -74,7 +79,14 @@ if (!/^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/.tes
   fail("el verificador calculado no tiene la forma esperada.");
 }
 
-const client = new pg.Client({ connectionString: adminUrl.href });
+// A `pg` se le pasan las partes ya revisadas, nunca la cadena.
+const client = new pg.Client({
+  host: adminUrl.hostname.replace(/^\[|\]$/g, ""),
+  port: adminUrl.port === "" ? 5432 : Number(adminUrl.port),
+  user: decodeURIComponent(adminUrl.username),
+  password: decodeURIComponent(adminUrl.password),
+  database: decodeURIComponent(adminUrl.pathname.replace(/^\//, "")),
+});
 try {
   await client.connect();
   await client.query(`alter role app_service login password '${verifier}'`);

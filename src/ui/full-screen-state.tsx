@@ -27,6 +27,11 @@ export interface FullScreenStateProps {
   help?: ReactNode;
   /** Un código corto para dictarlo a soporte. Nunca un mensaje técnico. */
   reference?: ReactNode;
+  /**
+   * El título toma el foco al aparecer. Se apaga solo cuando el estado no es toda la
+   * pantalla (una muestra, una sección dentro de otra).
+   */
+  focusTitle?: boolean;
 }
 
 export function FullScreenState({
@@ -37,12 +42,15 @@ export function FullScreenState({
   secondaryActions,
   help,
   reference,
+  focusTitle = true,
 }: FullScreenStateProps) {
   return (
     <div className="mx-auto flex max-w-form flex-col items-start gap-6 px-4 py-16">
       <Icon icon={icon} size={24} className="text-text-2" />
       <div className="flex flex-col gap-3">
-        <FocusHeading className="text-h1 outline-none">{title}</FocusHeading>
+        <FocusHeading className="text-h1" focus={focusTitle}>
+          {title}
+        </FocusHeading>
         <div className="flex flex-col gap-2 text-body-l text-text-2">{children}</div>
       </div>
       <div className="flex w-full flex-col items-start gap-3 sm:flex-row sm:items-center">

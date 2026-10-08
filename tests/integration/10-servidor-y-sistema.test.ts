@@ -1,11 +1,22 @@
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { verifyAccessToken, type VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem, type Tx } from "@/adapters/supabase/db";
-import { DatabaseError, RowValidationError, TransactionClosedError } from "@/adapters/supabase/errors";
+import {
+  DatabaseError,
+  NestedTransactionError,
+  RowValidationError,
+  TransactionAbortedError,
+  TransactionClosedError,
+  TransactionControlError,
+  UnverifiedClaimsError,
+} from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
+
+import { createTestUser, deleteTestUsers, type TestUser } from "./helpers/users";
 
 // «Como servidor» y «como sistema» (ADR-31, TRD §8.10), contra la base local. Son el espejo
 // de `pruebas.como_servicio` y `pruebas.como_sistema` de supabase/tests/_ayuda.psql.
@@ -14,6 +25,21 @@ import { sql } from "@/adapters/supabase/sql";
 // revierte: audit_log no admite borrado y las pruebas de base cuentan sus renglones.
 
 class Revert extends Error {}
+
+// «Como servidor» actúa por una persona con sesión: hace falta una de verdad.
+let carla: TestUser;
+let carlaClaims: VerifiedClaims;
+
+beforeAll(async () => {
+  carla = await createTestUser();
+  const claims = await verifyAccessToken(carla.accessToken);
+  if (!claims) throw new Error("El token de la persona de prueba no se verificó.");
+  carlaClaims = claims;
+});
+
+afterAll(async () => {
+  await deleteTestUsers([carla].filter(Boolean));
+});
 
 /** Corre `work` y revierte la transacción al final, pase lo que pase. */
 async function reverted<T>(
@@ -127,31 +153,31 @@ describe("asSystem", () => {
 });
 
 describe("asServer", () => {
-  it("prepara la transacción con el autor declarado, sin token", async () => {
-    const actorId = randomUUID();
+  it("prepara la transacción con la persona de las claims verificadas, sin su token", async () => {
     const [row] = await asServer(
-      { actorId, aal: "aal2", reason: "sanción", requestId: "req-3" },
+      { claims: carlaClaims, reason: "sanción", requestId: "req-3" },
       (tx) => tx.query(readContext, context),
     );
     expect(row).toEqual({
       current_user: "app_service",
       session_user: "app_service",
       claims: "",
-      actor_id: actorId,
-      actor_aal: "aal2",
+      actor_id: carla.id,
+      // El nivel sale del token, no de quien llama.
+      actor_aal: "aal1",
       actor_kind: "",
       reason: "sanción",
       request_id: "req-3",
-      seen_actor: actorId,
+      seen_actor: carla.id,
       is_system: false,
     });
   });
 
   it("un cambio auditado queda a nombre de esa persona", async () => {
-    const actorId = randomUUID();
+    const actorId = carla.id;
     const profileId = randomUUID();
     const audit = await reverted(
-      (fn) => asServer({ actorId, aal: "aal2", reason: "moderación", requestId: "req-4" }, fn),
+      (fn) => asServer({ claims: carlaClaims, reason: "moderación", requestId: "req-4" }, fn),
       async (tx) => {
         await tx.execute(sql`insert into public.profiles (id) values (${profileId})`);
         await tx.execute(sql`
@@ -169,17 +195,25 @@ describe("asServer", () => {
   });
 
   it("la base decide por el autor: sin la capacidad, el cambio se rechaza", async () => {
-    const attempt = asServer({ actorId: randomUUID(), aal: "aal2" }, (tx) =>
-      tx.execute(proposeParameter),
-    );
+    const attempt = asServer({ claims: carlaClaims }, (tx) => tx.execute(proposeParameter));
     await expect(attempt).rejects.toBeInstanceOf(DatabaseError);
     await expect(attempt).rejects.toMatchObject({ code: "42501" });
   });
 
-  it("rechaza un autor que no es un identificador, antes de tocar la base", async () => {
-    await expect(
-      asServer({ actorId: "no-es-uuid", aal: "aal1" }, (tx) => tx.query(readContext, context)),
-    ).rejects.toThrow(/actorId/);
+  // Es el camino que salta la seguridad por fila: quién actúa y con qué nivel no puede
+  // salir de un objeto que arma quien llama.
+  it("no acepta un autor armado a mano: ni un identificador suelto ni una copia de las claims", async () => {
+    const forgeries = [
+      { claims: { ...carlaClaims } },
+      { claims: { userId: carla.id, aal: "aal2", sessionId: null } },
+      { actorId: carla.id, aal: "aal2" },
+      {},
+    ];
+    for (const forged of forgeries) {
+      await expect(
+        asServer(forged as never, (tx) => tx.query(readContext, context)),
+      ).rejects.toBeInstanceOf(UnverifiedClaimsError);
+    }
   });
 });
 
@@ -195,6 +229,114 @@ describe("la transacción", () => {
 
     const [row] = await asSystem({}, (tx) => tx.query(pendingParameters, count));
     expect(row?.n).toBe(0);
+  });
+
+  // Sobre una transacción abortada Postgres contesta ROLLBACK al commit, sin error. Si la
+  // función atrapó el error y siguió, sin esta comprobación reportaría éxito.
+  it("un error de la base que la función atrapa no pasa por un guardado", async () => {
+    const attempt = asSystem({}, async (tx) => {
+      await tx.execute(proposeParameter);
+      await tx.execute(sql`select 1/0`).catch(() => {});
+      return "guardado";
+    });
+    await expect(attempt).rejects.toBeInstanceOf(TransactionAbortedError);
+
+    const [row] = await asSystem({}, (tx) => tx.query(pendingParameters, count));
+    expect(row?.n).toBe(0);
+  });
+
+  // Quien abre y cierra la transacción es el adaptador. Una sentencia que la termine por
+  // su cuenta dejaría lo que sigue fuera de ella: sin rol, sin autor y sin deshacer.
+  it.each([
+    ["commit", sql`commit`],
+    ["rollback", sql`rollback`],
+    ["end", sql`end`],
+    ["abort", sql`abort`],
+  ])("«%s» escrito en una consulta se rechaza", async (_name, statement) => {
+    await expect(asSystem({}, (tx) => tx.execute(statement))).rejects.toBeInstanceOf(
+      TransactionControlError,
+    );
+  });
+
+  it("y se rechaza aunque la función atrape el error y diga que terminó bien", async () => {
+    let ranAfter = false;
+    const attempt = asSystem({}, async (tx) => {
+      await tx.execute(sql`commit`).catch(() => {});
+      await tx.query(sql`select 1 as n`, count).then(
+        () => (ranAfter = true),
+        () => {},
+      );
+      return "todo bien";
+    });
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+    expect(ranAfter).toBe(false);
+  });
+
+  // «commit and chain» termina la transacción y abre otra: el estado que reporta la base
+  // es el mismo, pero la nueva ya no trae el rol, el autor ni los tiempos límite.
+  it.each([
+    ["commit and chain", sql`commit and chain`],
+    ["rollback and chain", sql`rollback and chain`],
+  ])("«%s» no cuela una transacción nueva sin preparar", async (_name, statement) => {
+    const attempt = asSystem({ reason: "prueba" }, async (tx) => {
+      await tx.execute(statement);
+      return "todo bien";
+    });
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+  });
+
+  it("varias consultas a la vez sobre la misma transacción corren una tras otra", async () => {
+    const rows = await asSystem({}, (tx) =>
+      Promise.all([1, 2, 3].map((n) => tx.query(sql`select ${n}::int as n`, count))),
+    );
+    expect(rows.map((result) => result[0]?.n)).toEqual([1, 2, 3]);
+  });
+
+  it("lo que va en fila detrás de un «commit» no llega a correr", async () => {
+    let ran = false;
+    const attempt = asSystem({}, (tx) =>
+      Promise.all([
+        tx.execute(sql`commit`),
+        tx.query(sql`select 1 as n`, count).then((result) => {
+          ran = true;
+          return result;
+        }),
+      ]),
+    );
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+    expect(ran).toBe(false);
+  });
+
+  // La marca de «estoy dentro de una transacción» se hereda a todo lo que se agenda ahí.
+  // Si no se apagara al terminar, un trabajo lanzado desde dentro quedaría vetado.
+  it("un trabajo agendado dentro puede abrir su propia transacción cuando la de afuera terminó", async () => {
+    let later: Promise<{ n: number }[]> | undefined;
+    await asSystem({}, async (tx) => {
+      await tx.query(sql`select 1 as n`, count);
+      later = new Promise<void>((resolve) => setTimeout(resolve, 20)).then(() =>
+        asSystem({}, (inner) => inner.query(sql`select 7 as n`, count)),
+      );
+    });
+    expect((await later)?.[0]?.n).toBe(7);
+  });
+
+  it("una consulta es una sola sentencia: dos en el mismo texto se rechazan", async () => {
+    const attempt = asSystem({}, (tx) => tx.execute(sql`select 1; select 2`));
+    await expect(attempt).rejects.toBeInstanceOf(DatabaseError);
+    await expect(attempt).rejects.toMatchObject({ code: "42601" });
+  });
+
+  it("no se anidan: la de adentro se rechaza al instante, sin esperar una conexión", async () => {
+    const started = Date.now();
+    await expect(
+      asSystem({}, () => asSystem({}, (tx) => tx.query(sql`select 1 as n`, count))),
+    ).rejects.toBeInstanceOf(NestedTransactionError);
+    expect(Date.now() - started).toBeLessThan(2_000);
+
+    // Y una después de otra, que no es anidar, sigue funcionando.
+    await asSystem({}, (tx) => tx.query(sql`select 1 as n`, count));
+    const [row] = await asSystem({}, (tx) => tx.query(sql`select 2 as n`, count));
+    expect(row?.n).toBe(2);
   });
 
   it("una consulta tardía lanza: no corre en la transacción de otra petición", async () => {
@@ -215,7 +357,7 @@ describe("la transacción", () => {
       select pg_backend_pid() as pid, current_user::text as role,
         current_setting('app.sonda', true) as probe`;
 
-    const [first] = await asServer({ actorId: randomUUID(), aal: "aal2" }, async (tx) => {
+    const [first] = await asServer({ claims: carlaClaims }, async (tx) => {
       await tx.execute(sql`select set_config('app.sonda', 'dejada por otra petición', true)`);
       return tx.query(readProbe, probe);
     });

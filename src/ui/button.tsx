@@ -32,6 +32,11 @@ const BASE =
 const DISABLED =
   "disabled:cursor-not-allowed disabled:border-transparent disabled:bg-surface-2 disabled:text-text-disabled disabled:no-underline";
 
+// Cargando no es inactivo: el botón no acepta otro clic, pero su texto dice qué está
+// pasando y tiene que leerse. Mismo fondo, texto con contraste completo.
+const LOADING =
+  "disabled:cursor-progress disabled:border-transparent disabled:bg-surface-2 disabled:text-text-2 disabled:no-underline";
+
 // El texto de reposo y el de carga ocupan la misma celda: el botón mide lo que el más
 // ancho, y así no cambia de tamaño al cargar.
 const LAYER = "col-start-1 row-start-1 inline-flex items-center gap-2";
@@ -90,7 +95,7 @@ export function Button(props: ButtonProps) {
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       aria-describedby={disabledReason ? reasonId : undefined}
-      className={cx(classes, DISABLED)}
+      className={cx(classes, loading ? LOADING : DISABLED)}
     >
       <span className={cx(LAYER, loading && "invisible")} aria-hidden={loading || undefined}>
         {children}
@@ -104,11 +109,28 @@ export function Button(props: ButtonProps) {
     </button>
   );
 
-  if (!disabledReason) return button;
+  // `aria-busy` no se lee en voz alta, y un botón que se deshabilita se queda mudo. Esta
+  // región, que existe desde antes de cargar, es la que le dice a quien no lo ve que su
+  // clic sirvió.
+  const status = loadingLabel !== undefined && (
+    <span role="status" className="sr-only">
+      {loading ? loadingLabel : null}
+    </span>
+  );
+
+  if (!disabledReason) {
+    return (
+      <>
+        {button}
+        {status}
+      </>
+    );
+  }
 
   return (
     <span className={cx("inline-flex flex-col gap-2", variant === "primary" && "w-full sm:w-auto")}>
       {button}
+      {status}
       <span id={reasonId} className="text-caption text-text-3">
         {disabledReason}
       </span>

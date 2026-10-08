@@ -5,6 +5,7 @@ import "@/ui/theme.css";
 import { ServerCrash } from "lucide";
 import { useEffect } from "react";
 
+import { meta } from "@/messages/es/meta";
 import { states } from "@/messages/es/states";
 import { t } from "@/messages/format";
 import { reportCaughtError } from "@/services/error-reporting/browser";
@@ -27,7 +28,10 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
   return (
     <html lang="es-MX" className={`${displayFont.variable} ${textFont.variable}`}>
       <body>
-        <title>{text.title}</title>
+        <title>{t(meta.titleTemplate, { page: text.title })}</title>
+        {/* Lo que el armazón pone por las demás páginas, y que aquí no llega. */}
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="robots" content="noindex" />
         <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
           <FullScreenState
             icon={ServerCrash}

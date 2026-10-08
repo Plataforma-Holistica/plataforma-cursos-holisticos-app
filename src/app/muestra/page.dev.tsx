@@ -204,6 +204,7 @@ export default function SamplePage() {
             }
             help={<TextLink href="/">Pedir ayuda</TextLink>}
             reference="Código de referencia: 4f2a91"
+            focusTitle={false}
           >
             <p>Puede que la dirección esté mal o que ya no esté disponible.</p>
           </FullScreenState>

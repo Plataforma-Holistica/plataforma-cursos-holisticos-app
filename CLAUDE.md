@@ -127,23 +127,50 @@ falla. Ocho precisiones que la tabla no dice:
   `app_service`, que salta la seguridad por fila: por eso el resto llega con las tres
   funciones de `db.ts`, y siempre declara por quién actúa.
   - `asUser(claims, fn)`: lo que una persona lee o escribe por sí misma. La base filtra
-    por ella. Solo acepta las claims que devolvió `verifyAccessToken`.
-  - `asServer(actor, fn)`: una escritura que depende de una validación, a nombre de quien
-    la pidió.
-  - `asSystem(contexto, fn)`: un trabajo sin persona detrás.
+    por ella. Solo acepta las claims que devolvió `verifyAccessToken`, y solo mientras su
+    token no haya vencido.
+  - `asServer({ claims, reason, requestId }, fn)`: una escritura que depende de una
+    validación, a nombre de quien la pidió. Quién actúa y con qué nivel salen de esas
+    mismas claims verificadas: no se declaran a mano, porque este camino salta la
+    seguridad por fila.
+  - `asSystem(contexto, fn)`: un trabajo sin persona con sesión detrás (un aviso de cobro,
+    un cierre).
+
+  `verifyAccessToken` devuelve `null` si el token no es válido y lanza
+  `IdentityUnavailableError` si no se pudo saber: no es lo mismo, y a la persona no se le
+  trata como si no tuviera sesión. Las claves públicas las pide y las recuerda el propio
+  adaptador (`keys.ts`): un token mal hecho no sale a la red ni pasa por una caída.
 
   Toda consulta se escribe con la etiqueta `sql`, que manda los valores como parámetros,
   y cada fila se valida con su esquema Zod. **Nunca se arma SQL pegando texto**: dentro de
-  `asUser` un `reset role` recuperaría el salto de la seguridad por fila. Las funciones
-  no se anidan: cada una toma una conexión.
+  `asUser` un `reset role` recuperaría el salto de la seguridad por fila. La etiqueta lo
+  dificulta, no lo impide: `sql` se puede imitar, y por eso el lint prohíbe además
+  llamarla como función. Cuatro cosas que el adaptador rechaza al correr:
+  - una consulta con dos sentencias, con `commit`, `rollback`, `end` o `abort` (también
+    `and chain`), o que cambie de rol (`set role`, `reset role`): quien abre la
+    transacción, la cierra y decide su rol es el adaptador. El lint lo dice antes, al
+    escribirla;
+  - anidar una función dentro de otra: cada una toma una conexión. Se pasa el `tx`;
+  - usar el `tx` después de que su función terminó;
+  - **atrapar un error de la base y seguir.** La transacción ya está abortada y nada se
+    guarda: el adaptador lanza `TransactionAbortedError` en vez de reportar éxito. Un
+    error esperado (un duplicado) se evita con la consulta (`on conflict`), no con un
+    `catch`.
 - **Ningún texto visible se escribe en una pantalla ni en un componente** (RNF-15). El
-  lint rechaza el texto entre etiquetas y en `aria-label`, `title`, `placeholder`, `alt`,
-  `label` y afines, dentro de `src/app/` y `src/ui/`. Un texto nuevo se escribe en su
-  bloque de `src/messages/es/` y se muestra así:
+  lint rechaza, dentro de `src/app/` y `src/ui/`, el texto entre etiquetas y todo texto
+  escrito a mano en un atributo o en una prop, también elegido con una condición
+  (`{ok ? "Listo" : "Falló"}`), y el título de una pantalla en `metadata`. La regla va al
+  revés de lo intuitivo: solo se permite escribir a mano en los atributos que no son para
+  la gente (`className`, `type`, `href`, `variant`…). Una prop nueva que no es texto se
+  agrega a `NON_TEXT_ATTRIBUTES` en `eslint.config.mjs`. Lo que el lint no ve es un texto
+  guardado en una constante o devuelto por una acción de servidor: eso lo cuida la
+  revisión. Un texto nuevo se escribe en su bloque de `src/messages/es/` y se muestra así:
   - sin marcadores, tal cual: `{messages.states.home.status}`;
   - con marcadores, con `t()`: `t(text.reference, { code })`. Un marcador de término
     (`{el_maestro}`, `{Plataforma}`) lo pone `t()` sola; un dato (`{count}`) se le pasa, y
-    si falta no compila;
+    si falta no compila. Un texto con marcadores no es un texto sino una plantilla: no
+    compila ni se pinta sin pasar por `t()`, así que sus llaves no llegan a la vista de
+    nadie por olvido;
   - la palabra del rol y el nombre de la Plataforma no se escriben nunca: se citan con su
     marcador. Viven en `es/terms.ts`, y una prueba recorre el catálogo para comprobarlo.
 
@@ -151,8 +178,9 @@ falla. Ocho precisiones que la tabla no dice:
   archivo con `"use client"` importan solo su bloque (`@/messages/es/ui`,
   `@/messages/format`), para que el catálogo entero no viaje al navegador.
 - **Todo valor visual es un token** de `src/ui/theme.css`. No hay estilos en línea (los
-  rechaza el lint, y los rechazará la política de seguridad de contenido) ni paleta de
-  fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
+  rechaza el lint, y los rechazará la política de seguridad de contenido), ni valores
+  sueltos entre corchetes (`bg-[#fff]`, `w-[317px]`: también los rechaza el lint), ni
+  paleta de fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
 - **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK

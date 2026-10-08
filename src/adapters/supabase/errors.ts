@@ -71,3 +71,63 @@ export class UnverifiedClaimsError extends Error {
     this.name = "UnverifiedClaimsError";
   }
 }
+
+/** Las claims eran válidas cuando se verificaron, pero su token ya venció. */
+export class ExpiredClaimsError extends Error {
+  constructor() {
+    super("Las claims ya vencieron: hay que verificar un token vigente.");
+    this.name = "ExpiredClaimsError";
+  }
+}
+
+/**
+ * No se pudo saber si el token es válido: el servidor de identidad no respondió. No es lo
+ * mismo que un token inválido, y a la persona no se le debe tratar como si no tuviera
+ * sesión.
+ */
+export class IdentityUnavailableError extends Error {
+  constructor() {
+    super("El servidor de identidad no respondió: no se pudo verificar la sesión.");
+    this.name = "IdentityUnavailableError";
+  }
+}
+
+/**
+ * La función terminó bien, pero la transacción estaba abortada: una sentencia falló y
+ * alguien atrapó el error. Nada se guardó. Sin esta comprobación Postgres contestaría
+ * ROLLBACK al commit, sin error, y el adaptador reportaría éxito.
+ */
+export class TransactionAbortedError extends Error {
+  constructor() {
+    super(
+      "La transacción no se guardó: una sentencia falló antes y su error se atrapó. " +
+        "Un error de la base no se atrapa para seguir; si es esperado, se evita con la consulta.",
+    );
+    this.name = "TransactionAbortedError";
+  }
+}
+
+/**
+ * Una consulta le quitó la transacción al adaptador: la terminó (commit, rollback, end,
+ * abort, con o sin `and chain`) o cambió con qué rol corre (`set role`, `reset role`).
+ */
+export class TransactionControlError extends Error {
+  constructor() {
+    super(
+      "Una consulta terminó la transacción o cambió su rol. Quien la abre, la cierra y " +
+        "decide el rol es el adaptador: nada de eso se escribe en una consulta.",
+    );
+    this.name = "TransactionControlError";
+  }
+}
+
+/** Se abrió una transacción dentro de la función de otra. */
+export class NestedTransactionError extends Error {
+  constructor() {
+    super(
+      "asUser, asServer y asSystem no se anidan: cada una toma una conexión. " +
+        "Pasa el `tx` que ya tienes a quien lo necesite.",
+    );
+    this.name = "NestedTransactionError";
+  }
+}
