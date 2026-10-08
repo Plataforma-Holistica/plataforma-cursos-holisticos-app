@@ -24,7 +24,7 @@ export const ui = {
     required: "Para seguir hace falta que aceptes esto.",
   },
   link: {
-    newTab: "Se abre en otra pestaña",
+    newTab: "(se abre en otra pestaña)",
   },
   // El nombre de cada tono, para quien no ve el color ni el icono.
   alert: {

@@ -11,7 +11,8 @@ import { createElement } from "react";
 // Un icono nunca es la única señal: va junto a un texto, y entonces es decorativo. Solo
 // cuando va solo lleva `label`, y ese nombre sale del catálogo.
 
-const SIZES = { 16: "size-4", 20: "size-5", 24: "size-6" } as const;
+// 16, 20 y 24 son los tamaños de un icono. 40 existe solo para el indicador de carga.
+const SIZES = { 16: "size-4", 20: "size-5", 24: "size-6", 40: "size-10" } as const;
 
 export interface IconProps {
   icon: IconNode;
