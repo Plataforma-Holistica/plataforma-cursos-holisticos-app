@@ -106,13 +106,15 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Siete precisiones que la tabla no dice:
+falla. Ocho precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
   `src/instrumentation.ts`, el arranque de Next, la valida antes de la primera petición y
   termina el proceso si falta una variable. Una variable nueva se agrega al esquema de
-  `src/config/env.ts` y a `.env.example` en el mismo cambio.
+  `src/config/env.ts` y a `.env.example` en el mismo cambio. Lo poco que el navegador
+  puede saber vive aparte, en `src/config/public-env.ts`: `next.config.ts` lo copia de
+  las variables del servidor al compilar, para configurar cada valor una sola vez.
 - **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos
   y los componentes base).
   Es la lectura estricta del TRD: si una pantalla necesita un tipo del dominio, el
@@ -153,6 +155,24 @@ falla. Siete precisiones que la tabla no dice:
   fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
+- **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
+  (`@sentry/*`) solo se importa en `src/adapters/sentry/`. El arranque y las pantallas de
+  error piden al servicio `src/services/error-reporting/`: `server.ts` para el servidor y
+  `browser.ts` para el navegador, que no se mezclan porque el segundo viaja en la
+  descarga.
+  - Lo que el SDK recolecta por su cuenta (cabeceras, cookies, cuerpos, parámetros, datos
+    de la persona) está apagado en `options.ts`, categoría por categoría. Si una versión
+    nueva agrega una categoría, deja de compilar hasta que alguien la decida.
+  - Todo error pasa además por `scrubEvent` (`scrub.ts`) antes de salir: de la persona
+    queda su identificador, de la petición el método y la dirección sin parámetros, y los
+    correos se enmascaran. Es una red, no un permiso: **el mensaje de un error no lleva
+    el dato de una persona**, ni un `console.log` del navegador, que viaja como contexto.
+  - Solo errores: sin trazas, sin registros, sin grabación de sesiones y sin el aviso de
+    cada visita. Prender cualquiera de esas cosas es una decisión aparte.
+  - Sin `SENTRY_DSN` no se manda nada: así se trabaja en local. Fuera de local es
+    obligatoria. Los mapas de código solo se suben al compilar en Vercel.
+  - El simulacro: `GET /api/error-drill` falla a propósito (en producción responde 404),
+    y `/muestra/error`, solo con `pnpm dev`, rompe la pantalla desde el navegador.
 
 Un componente base nuevo entra primero al inventario del diseño (`03` §5) y se construye
 sobre elementos nativos: la biblioteca de primitivas no está decidida (D-14). Su prueba va
@@ -196,7 +216,9 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
 `src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
 `supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir; los servicios
-y adaptadores de cada zona se agregan ahí cuando su tarea los crea.
+y adaptadores de cada zona se agregan ahí cuando su tarea los crea. También tiene dueño
+`src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
+tercero.
 
 Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
 el cambio está mal aunque todo lo demás pase.
@@ -215,6 +237,8 @@ el cambio está mal aunque todo lo demás pase.
 - Poner un secreto en el código, en el navegador o en un registro.
 - Escribir en registros, en correos o en analítica el historial de cursos de un alumno,
   datos fiscales o bancarios, o el texto de un caso de moderación.
+- Mandar al registro de errores el dato de una persona: ni en el mensaje de un error, ni
+  como contexto, ni prendiendo una recolección que está apagada.
 - Escribir un texto visible fuera del catálogo de `src/messages/`, o la palabra del rol
   fuera de su bloque de términos.
 - Escribir un valor visual suelto o un estilo en línea, en vez de un token.

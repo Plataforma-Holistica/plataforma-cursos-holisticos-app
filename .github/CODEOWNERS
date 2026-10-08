@@ -18,6 +18,10 @@
 /supabase/tests/           @SerchFGA
 /supabase/seeds/           @SerchFGA
 
+# Lo que sale hacia un tercero: qué recolecta el registro de errores y el filtro de datos
+# personales por el que pasa cada error (TRD §10.5)
+/src/adapters/sentry/      @SerchFGA
+
 # Las reglas de capas y la integración continua, que protegen todo lo anterior
 /eslint.config.mjs         @SerchFGA
 /.github/                  @SerchFGA

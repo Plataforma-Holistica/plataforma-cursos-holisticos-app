@@ -7,8 +7,9 @@ provisional. Lo que sí hay:
 
 - **Esqueleto** (T-101): aplicación Next.js, las capas del TRD con el lint que las hace
   cumplir, la prueba de capas, el escaneo de secretos y la integración continua.
-- **Entornos** (T-102, a medias): variables validadas al arrancar, Supabase en local, y un
-  entorno de pruebas remoto. Faltan el registro de errores y producción.
+- **Entornos** (T-102, a medias): variables validadas al arrancar, Supabase en local, un
+  entorno de pruebas remoto, y el registro de errores con Sentry, que solo recibe errores
+  y sin datos personales. Falta producción.
 - **Base inicial** (T-103): identidad, parámetros de negocio con vigencia y auditoría.
   Cinco tablas con sus pruebas de base.
 - **Acceso a la base** (T-104, primera entrega): el adaptador de `src/adapters/supabase/`,
