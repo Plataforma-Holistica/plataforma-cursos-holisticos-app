@@ -40,9 +40,9 @@ No leas todo: varios documentos pasan de 3 000 líneas. Lee el índice y la secc
 
 ## Comandos
 
-El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de base,
-integración, extremo a extremo y trabajos llegan con la tarea que los crea, y se escriben
-aquí ese mismo día.
+El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de extremo
+a extremo, de Payload y de trabajos llegan con la tarea que los crea, y se escriben aquí
+ese mismo día.
 
 ```bash
 pnpm install     # instala y activa el gancho de commit (.githooks/)
@@ -55,15 +55,22 @@ pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
 pnpm db:status   # direcciones y llaves locales, las que pide .env.example
 pnpm db:stop     # lo apaga; los datos se conservan
-pnpm db:reset    # borra la base local y la rehace: migraciones desde cero y semilla
+pnpm db:reset    # borra la base local y la rehace: migraciones, semilla y db:login
+pnpm db:login    # le da a app_service entrada a la base local (ver .env.example)
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
+pnpm test:int    # pruebas de integración de tests/integration/, contra la base local
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
-las pruebas de la capa que se tocó. Si se tocó la base: `db:reset` y `test:db`. La integración continua
-(`.github/workflows/ci.yml`) corre lo mismo más `secrets`, la auditoría de dependencias y
-`build`.
+las pruebas de la capa que se tocó. Si se tocó la base: `db:reset` y `test:db`. Si se tocó
+un adaptador o un servicio que llega a la base: `test:int`, y después `test:db` otra vez,
+para comprobar que no dejó residuo. La integración continua (`.github/workflows/ci.yml`)
+corre lo mismo más `secrets`, la auditoría de dependencias y `build`.
+
+`pnpm db:login` hace falta una vez por base: la migración crea a `app_service` sin permiso
+de entrada, y ese guion se lo da con la contraseña de `DATABASE_URL`. Solo corre contra la
+base local. `db:reset` lo repite, porque rehacer la base borra los roles.
 
 Versiones que no se suben sin revisar:
 
@@ -82,7 +89,7 @@ La que fija el TRD §4.2.
 |---|---|---|---|
 | `src/domain/` | Reglas de negocio puras: acceso, progreso, consumo, reparto | Nada fuera de sí misma | Red, base, reloj, variables de entorno |
 | `src/adapters/` | Un adaptador por proveedor | El SDK de ese proveedor y tipos del dominio | Otros adaptadores, pantallas |
-| `src/services/` | Casos de uso: cargan datos, llaman al dominio, guardan | Dominio, adaptadores, cliente de base | Componentes de React |
+| `src/services/` | Casos de uso: cargan datos, llaman al dominio, guardan | Dominio y adaptadores. A la base llegan por `src/adapters/supabase/` | Componentes de React, el cliente de base y el SDK de Supabase |
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
@@ -91,10 +98,12 @@ La que fija el TRD §4.2.
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
+| `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
+| `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Cuatro precisiones que la tabla no dice:
+falla. Cinco precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -107,6 +116,20 @@ falla. Cuatro precisiones que la tabla no dice:
 - **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
 - **Un archivo de `src/` fuera de estas carpetas es un error de lint.** Una carpeta nueva
   se declara primero en `eslint.config.mjs`, con su regla y su caso en la prueba.
+- **El cliente de base (`pg`) y el SDK de Supabase solo se importan en
+  `src/adapters/supabase/`** (ADR-31, TRD §8.10). La aplicación entra a la base como
+  `app_service`, que salta la seguridad por fila: por eso el resto llega con las tres
+  funciones de `db.ts`, y siempre declara por quién actúa.
+  - `asUser(claims, fn)`: lo que una persona lee o escribe por sí misma. La base filtra
+    por ella. Solo acepta las claims que devolvió `verifyAccessToken`.
+  - `asServer(actor, fn)`: una escritura que depende de una validación, a nombre de quien
+    la pidió.
+  - `asSystem(contexto, fn)`: un trabajo sin persona detrás.
+
+  Toda consulta se escribe con la etiqueta `sql`, que manda los valores como parámetros,
+  y cada fila se valida con su esquema Zod. **Nunca se arma SQL pegando texto**: dentro de
+  `asUser` un `reset role` recuperaría el salto de la seguridad por fila. Las funciones
+  no se anidan: cada una toma una conexión.
 
 En la base, cuatro reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
@@ -142,8 +165,9 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 | Reparto, consolidación, cierre y toda migración que toque un libro | Que la suma de los pagos sea igual al bote, al centavo |
 
 Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
-`src/domain/consumption/`, `src/domain/payout/` y `supabase/migrations/`; los servicios y
-adaptadores de cada zona se agregan ahí cuando su tarea los crea.
+`src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
+`supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir; los servicios
+y adaptadores de cada zona se agregan ahí cuando su tarea los crea.
 
 Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
 el cambio está mal aunque todo lo demás pase.
