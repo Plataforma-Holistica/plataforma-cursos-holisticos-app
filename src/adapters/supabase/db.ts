@@ -11,6 +11,7 @@ import { getEnv } from "@/config/env";
 import { readVerifiedClaims, type VerifiedClaims } from "./claims";
 import { buildPoolConfig } from "./config";
 import {
+  DatabaseError,
   NestedTransactionError,
   RowValidationError,
   toDatabaseError,
@@ -116,6 +117,8 @@ function pool(): Pool {
 // una, «E» dentro de una abortada, «I» fuera de toda transacción.
 const IN_TRANSACTION = "T";
 const ABORTED = "E";
+// El SQLSTATE con que la base rechaza cualquier sentencia en una transacción abortada.
+const IN_FAILED_TRANSACTION = "25P02";
 
 interface TxState {
   open: boolean;
@@ -242,7 +245,19 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
     if (client.getTransactionStatus() !== IN_TRANSACTION) throw new TransactionAbortedError();
 
     // Sigue siendo la transacción que se preparó, y con el rol con que se preparó.
-    const check = await client.query<{ tx: string | null; role: string }>(CHECK);
+    let check;
+    try {
+      check = await client.query<{ tx: string | null; role: string }>(CHECK);
+    } catch (error) {
+      // El estado de arriba puede ir un paso atrás: tras una sentencia que falla, `pg`
+      // entrega el error antes de enterarse de que la transacción quedó abortada. Esta
+      // consulta sí lo sabe: sobre una transacción abortada, la base la rechaza.
+      const known = toDatabaseError(error);
+      if (known instanceof DatabaseError && known.code === IN_FAILED_TRANSACTION) {
+        throw new TransactionAbortedError();
+      }
+      throw error;
+    }
     if (check.rows[0]?.tx !== witness || check.rows[0]?.role !== settings.role) {
       state.ended = true;
       throw new TransactionControlError();
