@@ -1,8 +1,10 @@
+import { defineMessages } from "../format";
+
 // Los textos que viven dentro de los componentes base (src/ui/). Es el único bloque que un
 // componente importa: lo que una pantalla dice, se lo pasa la pantalla.
 //
 // Tono (diseño, sección 8): de tú, frases cortas, con punto final, sin admiraciones.
-export const ui = {
+export const ui = defineMessages({
   skipLink: "Saltar al contenido",
   field: {
     optional: "(opcional)",
@@ -35,4 +37,4 @@ export const ui = {
     danger: "Error:",
   },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
-} as const;
+});

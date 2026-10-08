@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { terms } from "./es/terms";
-import { createTranslator, type TermBlock } from "./format";
+import { createTranslator, template, type TermBlock } from "./format";
 import { messages } from "./index";
 
 // La prueba de la tarea T-109 (RNF-15): cambiar «maestro» en un lugar lo cambia en toda
@@ -11,10 +11,24 @@ const MARKER = /\{([^{}]*)\}/g;
 const DATA_MARKER = /^[a-z][A-Za-z0-9]*$/;
 const termKeys = new Set<string>(Object.keys(terms));
 
-/** Todos los textos del catálogo, con la ruta de su clave. El bloque de términos, aparte. */
+const isTemplate = (node: unknown): node is { template: string } =>
+  typeof node === "object" &&
+  node !== null &&
+  Object.keys(node).length === 1 &&
+  typeof (node as { template?: unknown }).template === "string";
+
+/**
+ * Todos los textos del catálogo, con la ruta de su clave. El bloque de términos, aparte.
+ * Un texto con marcadores vive como plantilla: aquí se lee su texto, y `templates` anota
+ * cuáles lo son.
+ */
+const templates = new Set<string>();
 function collect(node: unknown, path: string, out: Map<string, string>): Map<string, string> {
   if (typeof node === "string") out.set(path, node);
-  else if (typeof node === "object" && node !== null) {
+  else if (isTemplate(node)) {
+    out.set(path, node.template);
+    templates.add(path);
+  } else if (typeof node === "object" && node !== null) {
     for (const [key, value] of Object.entries(node)) collect(value, path ? `${path}.${key}` : key, out);
   }
   return out;
@@ -62,8 +76,12 @@ describe("catálogo de textos", () => {
   });
 
   it("cambiar la palabra del rol en el bloque de términos la cambia en todos los textos", () => {
-    const withTherapist = createTranslator(therapist);
-    const loose = withTherapist as (text: string, values: Record<string, string>) => string;
+    const withTherapist = createTranslator(therapist) as (
+      text: { template: string },
+      values: Record<string, string>,
+    ) => string;
+    const loose = (text: string, values: Record<string, string>) =>
+      withTherapist(template(text), values);
     const old = new RegExp(stem(terms), "i");
 
     // Los dos ejemplos del diseño (03, sección 8.5) y todo lo que haya en el catálogo.
@@ -106,9 +124,22 @@ describe("catálogo de textos", () => {
   });
 
   it("todos los textos se pueden mostrar con sus datos", () => {
-    const loose = createTranslator(terms) as (text: string, values: Record<string, string>) => string;
+    const translate = createTranslator(terms) as (
+      text: { template: string },
+      values: Record<string, string>,
+    ) => string;
     for (const [key, text] of texts) {
-      expect(loose(text, fill(text)), key).not.toMatch(/[{}]/);
+      const shown = templates.has(key) ? translate(template(text), fill(text)) : text;
+      expect(shown, key).not.toMatch(/[{}]/);
+    }
+  });
+
+  // Lo que impide que un texto con marcadores se pinte tal cual, con las llaves a la
+  // vista: en el catálogo no existe como texto. Solo `t()` lo convierte en uno.
+  it("un texto con marcadores es una plantilla, y uno sin marcadores es un texto", () => {
+    expect(templates.size).toBeGreaterThan(0);
+    for (const [key, text] of texts) {
+      expect(templates.has(key), key).toBe(markersOf(text).length > 0);
     }
   });
 
