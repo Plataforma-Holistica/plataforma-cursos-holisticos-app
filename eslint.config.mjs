@@ -64,11 +64,13 @@ const noLiteralTextAttributes = [
 
 // Un componente que corre en el navegador se lleva todo lo que importa. El catálogo
 // entero no debe viajar: cada componente importa solo su bloque.
-const noWholeCatalog = {
-  group: ["@/messages", "@/messages/index"],
+// Por nombre exacto y no por patrón: un patrón `@/messages` también atraparía
+// `@/messages/es/ui`, que es justo lo que sí se importa.
+const noWholeCatalog = ["@/messages", "@/messages/index"].map((name) => ({
+  name,
   message:
     "Un componente base importa solo su bloque de textos (@/messages/es/ui), no el catálogo entero.",
-};
+}));
 
 // En el dominio solo se importa código del propio dominio.
 const DOMAIN_ONLY_LOCAL = "^(?!\\.{1,2}/|@/)";
@@ -264,7 +266,7 @@ export default defineConfig([
   {
     files: ["**/src/ui/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noProviderSdks, noWholeCatalog] }],
+      "no-restricted-imports": ["error", { patterns: [noProviderSdks], paths: noWholeCatalog }],
     },
   },
   {

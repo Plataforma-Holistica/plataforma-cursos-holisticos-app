@@ -478,6 +478,11 @@ const allowed: Omit<Case, "rule">[] = [
     code: `import { thing } from "../messages/thing";\nexport const probe = thing;\n`,
   },
   {
+    name: "un componente base importa su bloque de textos por el alias",
+    file: "src/ui/probe.ts",
+    code: `import { ui } from "@/messages/es/ui";\nexport const probe = ui;\n`,
+  },
+  {
     name: "una pantalla importa un componente base",
     file: `${fixtures}/app/probe.ts`,
     code: `import { thing } from "../ui/thing";\nexport const probe = thing;\n`,
