@@ -4,9 +4,11 @@ import { defineConfig } from "vitest/config";
 
 const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
-// Dos proyectos. `unit` es lo que corre `pnpm test`: dominio, configuración y la prueba de
-// capas, sin red ni base. `integration` es `pnpm test:int`: necesita la base local arriba
-// y a app_service con entrada (`pnpm db:login`).
+// Tres proyectos. `pnpm test` corre `unit` y `ui`, sin red ni base:
+//   - `unit`: dominio, configuración, catálogo de textos y la prueba de capas.
+//   - `ui`: componentes y pantallas, con un DOM simulado.
+// `pnpm test:int` corre `integration`: necesita la base local arriba y a app_service con
+// entrada (`pnpm db:login`).
 export default defineConfig({
   resolve: {
     alias: {
@@ -23,6 +25,17 @@ export default defineConfig({
           name: "unit",
           include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
           exclude: ["node_modules/**", "tests/architecture/fixtures/**", "tests/integration/**"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "ui",
+          // Las pruebas de componentes y de pantallas son las `.test.tsx`.
+          include: ["src/**/*.test.tsx", "tests/**/*.test.tsx"],
+          exclude: ["node_modules/**", "tests/architecture/fixtures/**"],
+          environment: "jsdom",
+          setupFiles: ["./tests/setup/dom.ts"],
         },
       },
       {
