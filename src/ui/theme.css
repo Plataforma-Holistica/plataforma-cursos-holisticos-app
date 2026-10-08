@@ -1,0 +1,272 @@
+/*
+ * Los tokens del diseño (03-diseno-ui-ux.md, sección 3). Todo valor visual vive aquí: las
+ * pantallas y los componentes usan tokens, nunca valores sueltos.
+ *
+ * Sale del bloque de la sección 3.10 del diseño, con lo que ese bloque dejaba sin
+ * resolver. Un solo tema, oscuro (D-03). La marca todavía no existe: lo marcado MARCA es
+ * lo único que cambia cuando llegue. Las dos tipografías, que también son MARCA, se
+ * cargan en src/app/fonts.ts.
+ *
+ * tests/design/contrast.test.ts recalcula la tabla de contraste del diseño leyendo los
+ * colores de este archivo. Si cambia uno, esa prueba dice qué pares hay que revisar.
+ */
+@import "tailwindcss";
+
+/* 1. Valores */
+:root {
+  /* MARCA: acento */
+  --accent: #E2956B;
+  --accent-strong: #EDAE8A;
+  --accent-subtle: #3A241A;
+  --on-accent: #1F130C;
+  --focus: #F7C9AE;
+
+  /* Neutros */
+  --bg: #12100E;
+  --surface-1: #1B1815;
+  --surface-2: #24201C;
+  --surface-3: #2F2A25;
+  --border: #3A342E;
+  --border-control: #8C8277;
+  --text: #F4EFE8;
+  --text-2: #C7BEB2;
+  --text-3: #A0968A;
+  --text-disabled: #6F675E;
+
+  /* Estados. Nunca van solos: siempre con icono y con texto. */
+  --success: #7FCBA4;
+  --success-bg: #14271E;
+  --warning: #E8C766;
+  --warning-bg: #2B2412;
+  --danger: #F4918F;
+  --danger-bg: #2E1716;
+
+  /* Capas sobre imagen */
+  --scrim: rgb(0 0 0 / 0.72);
+  --veil: linear-gradient(to bottom, rgb(0 0 0 / 0), rgb(0 0 0 / 0.80));
+
+  /* Paleta «papel», para correos y PDF (sección 3.4). No tiene utilidades: un correo no
+     usa esta hoja, pero sus valores salen de aquí. */
+  --paper: #FAF7F2;
+  --paper-2: #F0EBE3;
+  --ink: #1F1B17;
+  --ink-2: #5A5249;
+  /* MARCA: acento sobre papel */
+  --paper-accent: #A8512A;
+  --paper-success: #1F6B45;
+  --paper-warning: #7A5A00;
+  --paper-danger: #B3322E;
+  --paper-border: #D9D1C5;
+
+  /* Tonos de portada, uno por práctica (sección 4). MARCA: se revisan con la identidad */
+  --cover-1: #8A4A33; --cover-1-deep: #4A2519; /* arcilla */
+  --cover-2: #80632A; --cover-2-deep: #453414; /* ocre */
+  --cover-3: #526B45; --cover-3-deep: #2A3823; /* musgo */
+  --cover-4: #2F6B5C; --cover-4-deep: #17372F; /* pino */
+  --cover-5: #2C6379; --cover-5-deep: #16333F; /* laguna */
+  --cover-6: #48508C; --cover-6-deep: #252A4B; /* índigo */
+  --cover-7: #6F4579; --cover-7-deep: #3A2440; /* ciruela */
+  --cover-8: #8A3E55; --cover-8-deep: #481F2C; /* vino */
+
+  /* Movimiento */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --delay-preview: 600ms;
+
+  /* Capas. De abajo hacia arriba; el enlace de salto va encima de todo. */
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-overlay: 30;
+  --z-toast: 40;
+  --z-skip: 50;
+
+  /* El halo que separa el anillo de foco de lo que tiene detrás. Es del color del fondo;
+     una superficie lo redefine con `halo-surface-*`. */
+  --focus-halo: var(--bg);
+
+  /* Escala de títulos en teléfono (menos de 640 px). Los demás estilos no cambian. */
+  --fs-display-xl: 2.25rem;  --lh-display-xl: 2.5rem;    /* 36 / 40 */
+  --fs-display-l: 1.875rem;  --lh-display-l: 2.125rem;   /* 30 / 34 */
+  --fs-h1: 1.625rem;         --lh-h1: 2rem;              /* 26 / 32 */
+  --fs-h2: 1.375rem;         --lh-h2: 1.75rem;           /* 22 / 28 */
+}
+
+@media (width >= 40rem) {
+  :root {
+    --fs-display-xl: 3.5rem;  --lh-display-xl: 3.75rem;  /* 56 / 60 */
+    --fs-display-l: 2.5rem;   --lh-display-l: 2.75rem;   /* 40 / 44 */
+    --fs-h1: 2rem;            --lh-h1: 2.375rem;         /* 32 / 38 */
+    --fs-h2: 1.5rem;          --lh-h2: 1.875rem;         /* 24 / 30 */
+  }
+}
+
+/* 2. Mapeo a utilidades. `inline` porque cada token apunta a otra variable. */
+@theme inline {
+  /* Se borra la paleta de fábrica: no debe existir `bg-red-500`. */
+  --color-*: initial;
+  --color-bg: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-control: var(--border-control);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-text-disabled: var(--text-disabled);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-on-accent: var(--on-accent);
+  --color-focus: var(--focus);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-scrim: var(--scrim);
+
+  /* `--brand-font-*` las pone next/font en <html> (src/app/fonts.ts). */
+  --font-display: var(--brand-font-display), "Arial Narrow", system-ui, sans-serif;
+  --font-text: var(--brand-font-text), system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* Nada más fino que 400 sobre fondo oscuro. */
+  --font-weight-*: initial;
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Cada estilo de texto trae su tamaño, su interlínea, su espaciado y su peso. */
+  --text-*: initial;
+  --text-display-xl: var(--fs-display-xl);
+  --text-display-xl--line-height: var(--lh-display-xl);
+  --text-display-xl--letter-spacing: -0.03em;
+  --text-display-xl--font-weight: 700;
+  --text-display-l: var(--fs-display-l);
+  --text-display-l--line-height: var(--lh-display-l);
+  --text-display-l--letter-spacing: -0.025em;
+  --text-display-l--font-weight: 700;
+  --text-h1: var(--fs-h1);
+  --text-h1--line-height: var(--lh-h1);
+  --text-h1--letter-spacing: -0.02em;
+  --text-h1--font-weight: 700;
+  --text-h2: var(--fs-h2);
+  --text-h2--line-height: var(--lh-h2);
+  --text-h2--letter-spacing: -0.015em;
+  --text-h2--font-weight: 700;
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.625rem;
+  --text-h3--letter-spacing: -0.01em;
+  --text-h3--font-weight: 600;
+  --text-body-l: 1.125rem;
+  --text-body-l--line-height: 1.75rem;
+  --text-body-l--font-weight: 400;
+  --text-body: 1rem;
+  --text-body--line-height: 1.625rem;
+  --text-body--font-weight: 400;
+  --text-body-s: 0.875rem;
+  --text-body-s--line-height: 1.375rem;
+  --text-body-s--font-weight: 400;
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.125rem;
+  --text-caption--letter-spacing: 0.01em;
+  --text-caption--font-weight: 400;
+  /* `label` va en mayúsculas por CSS (`uppercase`), nunca escrito así en el catálogo. */
+  --text-label: 0.75rem;
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.12em;
+  --text-label--font-weight: 600;
+  /* `stat` va con cifras tabulares (`tabular-nums`). */
+  --text-stat: 2.5rem;
+  --text-stat--line-height: 2.75rem;
+  --text-stat--letter-spacing: -0.01em;
+  --text-stat--font-weight: 600;
+
+  --spacing: 0.25rem; /* base de 4 px: p-4 son 16 px */
+  /* Altos de control: `h-control` (48 px, alumno), `h-control-sm` (40 px, administración).
+     `min-h-touch` y `size-touch` (44 px): el mínimo de lo que responde al toque. */
+  --spacing-control: 3rem;
+  --spacing-control-sm: 2.5rem;
+  --spacing-touch: 2.75rem;
+
+  --radius-*: initial;
+  --radius-none: 0;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-full: 9999px;
+
+  --shadow-*: initial;
+  --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.40);
+  --shadow-overlay: 0 8px 32px rgb(0 0 0 / 0.55);
+
+  --breakpoint-sm: 40rem;   /* 640 px */
+  --breakpoint-md: 48rem;   /* 768 px */
+  --breakpoint-lg: 64rem;   /* 1024 px */
+  --breakpoint-xl: 80rem;   /* 1280 px */
+  --breakpoint-2xl: 96rem;  /* 1536 px */
+
+  --container-reading: 68ch;
+  --container-page: 90rem;  /* 1440 px */
+  /* Un formulario y un estado de pantalla completa: 480 px. */
+  --container-form: 30rem;
+
+  --ease-*: initial;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* El velo sobre una imagen que lleva texto encima. */
+@utility bg-veil {
+  background-image: var(--veil);
+}
+
+/* Lo que vive sobre una superficie le dice al foco de qué color es su halo. */
+@utility halo-surface-1 {
+  --focus-halo: var(--surface-1);
+}
+@utility halo-surface-2 {
+  --focus-halo: var(--surface-2);
+}
+@utility halo-surface-3 {
+  --focus-halo: var(--surface-3);
+}
+
+/* 3. Base */
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--text);
+    color-scheme: dark;
+    /* El foco nunca queda debajo de una barra fija (WCAG 2.4.11) */
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: 5rem;
+  }
+  body {
+    @apply font-text text-body;
+  }
+  h1, h2, h3 {
+    @apply font-display;
+    text-wrap: balance;
+  }
+  /* El anillo de foco: 2 px, separado 2 px, con un halo del color de lo que tiene detrás.
+     No se quita nunca. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 6px var(--focus-halo);
+  }
+}
+
+/* 4. Movimiento reducido */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+    transition-property: opacity, color, background-color, border-color !important;
+    scroll-behavior: auto !important;
+  }
+}

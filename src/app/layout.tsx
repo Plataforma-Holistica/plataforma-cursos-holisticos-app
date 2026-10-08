@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { messages, t } from "@/messages";
+import "@/ui/theme.css";
 
 export const metadata: Metadata = {
   // Cada pantalla pone su nombre y aquí se le agrega el de la Plataforma.
