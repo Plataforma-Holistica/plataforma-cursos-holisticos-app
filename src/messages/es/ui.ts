@@ -26,12 +26,13 @@ export const ui = {
   link: {
     newTab: "(se abre en otra pestaña)",
   },
-  // El nombre de cada tono, para quien no ve el color ni el icono.
+  // El nombre de cada tono, para quien no ve el color ni el icono. Se lee antes del
+  // mensaje, y por eso lleva sus dos puntos.
   alert: {
-    neutral: "Nota",
-    success: "Listo",
-    warning: "Aviso",
-    danger: "Error",
+    neutral: "Nota:",
+    success: "Listo:",
+    warning: "Aviso:",
+    danger: "Error:",
   },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
 } as const;
