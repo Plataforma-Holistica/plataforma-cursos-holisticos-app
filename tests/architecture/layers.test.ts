@@ -600,6 +600,115 @@ const forbidden: Case[] = [
     code: `export const metadata = { description: "Cursos de bienestar" };\n`,
     rule: SYNTAX,
   },
+  // Segunda vuelta: lo que la regla «al revés» todavía dejaba pasar.
+  {
+    name: "una pantalla arma un nombre accesible pegando texto",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = ({ x }: { x: string }) => <button type="button" aria-label={"Eliminar " + x} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla le pasa al resumen de errores un mensaje escrito a mano",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Summary: (props: { errors: { fieldId: string; message: string }[] }) => null;\nexport const Probe = () => <Summary errors={[{ fieldId: "correo", message: "Escribe tu correo" }]} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla mete un nombre accesible por un objeto esparcido",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <button type="button" {...{ "aria-label": "Cerrar" }} />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base trae un texto a mano como valor por omisión de una prop",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = ({ label = "Guardar" }: { label?: string }) => <button type="button">{label}</button>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla pinta un texto a mano dentro de un arreglo",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <p>{["Hola"]}</p>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla pinta un texto a mano con una conversión de tipo",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const Probe = () => <p>{"Hola" as string}</p>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla le pasa a un componente un texto a mano como acción",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Alert: (props: { action: string }) => null;\nexport const Probe = () => <Alert action="Reintentar" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla le pasa a un componente un texto a mano como contenido",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Tooltip: (props: { content: string }) => null;\nexport const Probe = () => <Tooltip content="Esto no se puede deshacer" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla lee el texto crudo de una plantilla, con sus llaves",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const meta: { titleTemplate: { template: string } };\nexport const Probe = () => <p>{meta.titleTemplate.template}</p>;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla escribe a mano el título que devuelve generateMetadata",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export function generateMetadata() {\n  return { title: "Mis cursos" };\n}\nexport const Probe = () => null;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla escribe a mano un título absoluto",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const metadata = { title: { absolute: "Entrar" } };\nexport const Probe = () => null;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla carga una página de muestra con import()",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const probe = () => import("./muestra/page.dev");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una página de muestra usa estilos en línea",
+    file: `${fixtures}/app/muestra/page.dev.tsx`,
+    code: `export default function Page() {\n  return <div style={{ color: "red" }} />;\n}\n`,
+    rule: DOM_PROPS,
+  },
+  {
+    name: "un componente de Payload lleva un texto escrito dentro",
+    file: `${fixtures}/payload/probe.tsx`,
+    code: `export const Probe = () => <p>Hola</p>;\n`,
+    rule: LITERALS,
+  },
+  {
+    name: "un componente base usa una medida suelta marcada como importante",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div className="w-[317px]!" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base usa una propiedad suelta tras una variante",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div className="hover:[color:red]" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base usa una opacidad suelta",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div className="bg-text/[0.37]" />;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base inventa un punto de quiebre",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = () => <div className="min-[900px]:flex" />;\n`,
+    rule: SYNTAX,
+  },
   // «Todo valor visual es un token»: un valor arbitrario de Tailwind es un valor suelto.
   {
     name: "un componente base usa un color suelto en una clase",
@@ -732,6 +841,22 @@ const allowed: Omit<Case, "rule">[] = [
     name: "un componente base usa tokens, variantes entre corchetes y variables de la hoja",
     file: `${fixtures}/ui/probe.tsx`,
     code: `const BASE = "duration-(--duration-fast) z-(--z-skip) [&_a]:inline-block [&_a]:py-3 aria-[busy=true]:opacity-60";\nexport const Probe = () => <div className={BASE} />;\n`,
+  },
+  // Lo que la regla no debe estorbar: código corriente que no es texto para la gente.
+  {
+    name: "una pantalla usa valores de formulario, comparaciones y manejadores sin texto visible",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `declare const Field: (props: { name: string; value: string; label: string }) => null;\ndeclare const label: string;\ndeclare const go: (to: string) => void;\nexport const Probe = ({ kind }: { kind: string }) => (\n  <form>\n    <input type="hidden" name="intent" value="cancel" />\n    <select name="country" defaultChecked={false}>\n      <option value="mx">{label}</option>\n    </select>\n    <Field name="plan" value="yearly" label={kind === "one" ? label : label} />\n    <button type="button" onClick={() => go("/cuenta")} aria-current={kind === "one" ? "page" : undefined}>\n      {label}\n    </button>\n  </form>\n);\n`,
+  },
+  {
+    name: "un componente base busca un elemento por un selector entre corchetes",
+    file: `${fixtures}/ui/probe.ts`,
+    code: `export const probe = (root: Element) => [root.querySelector("[data-still]"), root.closest("[role=dialog]")];\n`,
+  },
+  {
+    name: "un componente base da valores por omisión a lo que no es texto",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const Probe = ({ variant = "primary", type = "button" }: { variant?: string; type?: "button" | "submit" }) => (\n  <button type={type} data-variant={variant} />\n);\n`,
   },
   {
     name: "una página de muestra escribe sus textos de ejemplo a mano",

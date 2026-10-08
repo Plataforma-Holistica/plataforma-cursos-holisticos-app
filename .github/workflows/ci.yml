@@ -45,6 +45,11 @@ jobs:
       # `braces`. No tiene versión corregida, solo llega por herramientas de desarrollo
       # (lint) y exige patrones glob ajenos, que aquí no hay. Se quita en cuanto exista
       # corrección.
+      #
+      # Y un valor forzado, también en package.json (pnpm.overrides): `handlebars` 4.7.10.
+      # `eslint-plugin-boundaries` pide la 4.7.9 exacta, que tiene dos avisos críticos
+      # desde octubre de 2026. Solo corre con el lint, pero la auditoría no distingue. Se
+      # quita en cuanto ese paquete pida una versión corregida.
       - name: Auditoría de dependencias
         run: pnpm audit --audit-level=high
 

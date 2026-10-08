@@ -16,7 +16,17 @@ export interface FormError {
   message: string;
 }
 
-export function FormErrorSummary({ errors }: { errors: readonly FormError[] }) {
+export interface FormErrorSummaryProps {
+  errors: readonly FormError[];
+  /**
+   * El número de intento de envío. Si la persona reenvía y los errores son los mismos, lo
+   * único que cambia es esto: sin él, el resumen no volvería a tomar el foco y quien usa
+   * lector de pantalla no se enteraría de que el envío falló otra vez.
+   */
+  attempt?: number;
+}
+
+export function FormErrorSummary({ errors, attempt }: FormErrorSummaryProps) {
   const summary = useRef<HTMLDivElement>(null);
   const count = errors.length;
 
@@ -25,10 +35,10 @@ export function FormErrorSummary({ errors }: { errors: readonly FormError[] }) {
   // cada tecla.
   const signature = errors.map((error) => `${error.fieldId}\u0000${error.message}`).join("\u0001");
 
-  // Cada vez que llega una tanda distinta de errores.
+  // Cada vez que llega una tanda distinta de errores, o un intento nuevo con los mismos.
   useEffect(() => {
     if (signature !== "") summary.current?.focus();
-  }, [signature]);
+  }, [signature, attempt]);
 
   if (count === 0) return null;
 

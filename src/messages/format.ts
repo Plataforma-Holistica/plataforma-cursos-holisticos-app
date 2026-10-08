@@ -19,9 +19,20 @@ import { terms } from "./es/terms";
 export type TermKey = keyof typeof terms;
 export type TermBlock = Readonly<Record<TermKey, string>>;
 
-/** Un texto con marcadores. Solo `t()` lo convierte en algo que se puede mostrar. */
-export interface Template<Text extends string = string> {
+// Una marca que solo existe en los tipos. Un objeto armado a mano con la misma forma
+// (`{ template: "..." }`) no la tiene, así que no pasa por plantilla: las únicas que
+// existen son las que hacen `template()` y `defineMessages()`.
+declare const made: unique symbol;
+
+/**
+ * Un texto con marcadores. Solo `t()` lo convierte en algo que se puede mostrar.
+ *
+ * Su campo `template` es el texto crudo, con las llaves. No se lee fuera de este módulo:
+ * el lint lo rechaza en pantallas y componentes.
+ */
+export interface Template<Text extends string> {
   readonly template: Text;
+  readonly [made]: true;
 }
 
 type Markers<Text extends string> = Text extends `${string}{${infer Name}}${infer Rest}`
@@ -30,9 +41,13 @@ type Markers<Text extends string> = Text extends `${string}{${infer Name}}${infe
 
 type DataMarkers<Text extends string> = Exclude<Markers<Text>, TermKey>;
 
-type Values<Text extends string> = [DataMarkers<Text>] extends [never]
-  ? []
-  : [values: Readonly<Record<DataMarkers<Text>, string | number>>];
+// Una plantilla cuyo texto ya no se conoce al compilar (se pasó como «una plantilla
+// cualquiera») no puede decir qué datos pide: entonces los valores son obligatorios.
+type Values<Text extends string> = string extends Text
+  ? [values: Readonly<Record<string, string | number>>]
+  : [DataMarkers<Text>] extends [never]
+    ? []
+    : [values: Readonly<Record<DataMarkers<Text>, string | number>>];
 
 export type Translator = <Text extends string>(
   text: Template<Text>,
@@ -51,7 +66,7 @@ export function template<const Text extends string>(text: Text): Template<Text> 
   if (hasLooseBraces(text)) {
     throw new Error(`Hay un marcador mal escrito en «${text}»: van así, {nombre}, sin espacios.`);
   }
-  return Object.freeze({ template: text });
+  return Object.freeze({ template: text }) as Template<Text>;
 }
 
 interface MessageTree {
@@ -95,7 +110,7 @@ export function defineMessages<const Tree extends MessageTree>(tree: Tree): Defi
 
 /** Un `t` que usa otro bloque de términos. Es lo que prueba que el cambio vive en un lugar. */
 export function createTranslator(block: TermBlock): Translator {
-  return (text: Template, ...rest: readonly unknown[]) => {
+  return (text: Template<string>, ...rest: readonly unknown[]) => {
     // Lo único que `t` sabe mostrar es una plantilla. Los tipos ya lo impiden; esto es
     // para quien los haya saltado.
     if (typeof text !== "object" || text === null || typeof text.template !== "string") {
@@ -116,10 +131,21 @@ export const t: Translator = createTranslator(terms);
 
 const pluralRules = new Intl.PluralRules("es-MX");
 
-/** Elige la forma de un texto según una cantidad: «1 dato», «2 datos». */
-export function plural<One, Other>(
+type AsTemplate<Form> = Form extends Template<string>
+  ? Form
+  : Form extends string
+    ? Template<Form>
+    : never;
+
+/**
+ * Elige la forma de un texto según una cantidad: «1 dato», «2 datos». Siempre devuelve
+ * una plantilla, para pasarla a `t()` con la cantidad: una forma puede no llevar el
+ * número («Falta un dato» / «Faltan {count} datos»).
+ */
+export function plural<One extends string | Template<string>, Other extends string | Template<string>>(
   count: number,
   forms: { readonly one: One; readonly other: Other },
-): One | Other {
-  return pluralRules.select(count) === "one" ? forms.one : forms.other;
+): AsTemplate<One> | AsTemplate<Other> {
+  const form = pluralRules.select(count) === "one" ? forms.one : forms.other;
+  return (typeof form === "string" ? template(form) : form) as AsTemplate<One> | AsTemplate<Other>;
 }

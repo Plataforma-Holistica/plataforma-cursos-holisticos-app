@@ -32,7 +32,17 @@ describe("t: sustituye los marcadores de un texto", () => {
 
   it("lanza si a un texto le falta un valor, en vez de enseñar las llaves", () => {
     const loose = template("Hola, {name}" as string);
-    expect(() => t(loose)).toThrow(/\{name\}/);
+    expect(() => t(loose, {})).toThrow(/\{name\}/);
+  });
+
+  // Una plantilla cuyo texto ya no se conoce al compilar (pasó por una función que la
+  // recibe como «una plantilla cualquiera») no puede decir qué datos pide. Entonces los
+  // valores son obligatorios: sin ellos compilaba y lanzaba al pintar.
+  it("una plantilla de texto desconocido exige que le pasen valores", () => {
+    const loose = template("Hola, {name}" as string);
+    // @ts-expect-error no se sabe qué datos pide: hay que pasarle valores
+    expect(() => t(loose)).toThrow();
+    expect(t(loose, { name: "Ana" })).toBe("Hola, Ana");
   });
 
   it("los tipos exigen cada dato y rechazan los que sobran", () => {
@@ -63,6 +73,13 @@ describe("una plantilla no se puede mostrar sin pasar por t", () => {
   it("t solo recibe plantillas: un texto suelto no compila", () => {
     // @ts-expect-error t no recibe texto suelto
     expect(() => t("Hola")).toThrow();
+  });
+
+  // La salida fácil ante el error de tipos era armar la plantilla a mano o leerle el
+  // texto. Ninguna de las dos compila fuera de este módulo.
+  it("una plantilla no se arma a mano: solo la hacen template y defineMessages", () => {
+    // @ts-expect-error un objeto con la misma forma no es una plantilla
+    expect(t({ template: "Hola, {Plataforma}" })).toContain("Hola");
   });
 
   it("no se puede cambiar después de creada", () => {
@@ -105,6 +122,20 @@ describe("defineMessages: un bloque del catálogo", () => {
   it("el bloque no se puede cambiar después", () => {
     expect(Object.isFrozen(block)).toBe(true);
     expect(Object.isFrozen(block.nested)).toBe(true);
+  });
+});
+
+describe("plural: una forma puede no llevar el número", () => {
+  const forms = defineMessages({
+    one: "Falta un dato",
+    other: "Faltan {count} datos",
+  });
+
+  it.each([
+    [1, "Falta un dato"],
+    [3, "Faltan 3 datos"],
+  ])("%d", (count, expected) => {
+    expect(t(plural(count, forms), { count })).toBe(expected);
   });
 });
 

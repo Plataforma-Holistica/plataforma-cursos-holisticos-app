@@ -85,6 +85,14 @@ describe("Button", () => {
     expect(status).toHaveTextContent("Guardando…");
   });
 
+  // Cargando, el texto de reposo se oculta. Sin texto de carga quedaría un botón vacío y
+  // sin nombre: por eso los tipos no dejan pedir lo uno sin lo otro.
+  it("no se puede poner a cargar sin decir qué está haciendo", () => {
+    // @ts-expect-error `loading` exige `loadingLabel`
+    const broken = <Button loading>Guardar cambios</Button>;
+    expect(broken).toBeDefined();
+  });
+
   it("un botón sin texto de carga no trae región viva", () => {
     render(<Button>Guardar cambios</Button>);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

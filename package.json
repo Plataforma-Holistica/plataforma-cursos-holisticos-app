@@ -36,6 +36,9 @@
       "ignoreGhsas": [
         "GHSA-vfj7-8cjw-p6xm"
       ]
+    },
+    "overrides": {
+      "handlebars": "4.7.10"
     }
   },
   "dependencies": {
