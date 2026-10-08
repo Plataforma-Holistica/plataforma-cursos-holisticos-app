@@ -1,10 +1,10 @@
-import { messages } from "@/messages/es";
+import { messages, t } from "@/messages";
 
 export default function HomePage() {
   return (
     <main>
-      <h1>{messages.app.name}</h1>
-      <p>{messages.home.status}</p>
+      <h1>{t(messages.meta.titleDefault)}</h1>
+      <p>{messages.states.home.status}</p>
     </main>
   );
 }

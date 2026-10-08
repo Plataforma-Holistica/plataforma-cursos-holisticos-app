@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { messages } from "@/messages/es";
+import { messages, t } from "@/messages";
 
 export const metadata: Metadata = {
-  title: messages.app.name,
+  // Cada pantalla pone su nombre y aquí se le agrega el de la Plataforma.
+  title: {
+    default: t(messages.meta.titleDefault),
+    template: t(messages.meta.titleTemplate, { page: "%s" }),
+  },
   // Nada se indexa mientras la Plataforma no se lance. Al lanzar, solo el sitio público
   // es indexable (RF-902).
   robots: { index: false, follow: false },
@@ -12,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="es">
+    <html lang="es-MX">
       <body>{children}</body>
     </html>
   );
