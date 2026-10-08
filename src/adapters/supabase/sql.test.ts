@@ -43,6 +43,23 @@ describe("etiqueta sql", () => {
     expect(() => sql(forged)).toThrow(/etiqueta/);
   });
 
+  // La comprobación no puede ser perfecta: en JavaScript una plantilla de verdad se puede
+  // imitar del todo. Esto para las imitaciones descuidadas; llamar a `sql(...)` como
+  // función, que es la única forma de pasarle una, lo prohíbe además el lint.
+  it.each([
+    ["congelado, con raw vacío", Object.freeze(Object.assign(["select " + "1"], { raw: [] }))],
+    [
+      "congelado, con raw sin congelar",
+      Object.freeze(Object.assign(["select " + "1"], { raw: ["select 1"] })),
+    ],
+    [
+      "con un pedazo que no es texto",
+      Object.freeze(Object.assign([7], { raw: Object.freeze(["7"]) })),
+    ],
+  ])("rechaza una plantilla imitada: %s", (_name, forged) => {
+    expect(() => sql(forged as unknown as TemplateStringsArray)).toThrow(/etiqueta/);
+  });
+
   it("isSqlQuery reconoce solo lo que produjo la etiqueta", () => {
     expect(isSqlQuery(sql`select 1`)).toBe(true);
     expect(isSqlQuery({ text: "select 1", values: [] })).toBe(false);

@@ -35,11 +35,17 @@ export function isSqlQuery(value: unknown): value is SqlQuery {
   return typeof value === "object" && value !== null && produced.has(value);
 }
 
+// Lo que tiene la plantilla que arma el propio lenguaje. No es una garantía: en
+// JavaScript se puede imitar del todo. Para las imitaciones descuidadas basta, y llamar a
+// `sql(...)` como función, que es la única forma de pasarle una, lo prohíbe el lint.
 function isTemplate(strings: unknown): strings is TemplateStringsArray {
+  if (!Array.isArray(strings) || !Object.isFrozen(strings)) return false;
+  const raw = (strings as { raw?: unknown }).raw;
   return (
-    Array.isArray(strings) &&
-    Object.isFrozen(strings) &&
-    Array.isArray((strings as { raw?: unknown }).raw)
+    Array.isArray(raw) &&
+    Object.isFrozen(raw) &&
+    raw.length === strings.length &&
+    strings.every((part) => typeof part === "string")
   );
 }
 

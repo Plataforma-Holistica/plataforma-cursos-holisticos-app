@@ -1,9 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { verifyAccessToken, type VerifiedClaims } from "@/adapters/supabase/claims";
-import { asSystem, asUser } from "@/adapters/supabase/db";
-import { DatabaseError, UnverifiedClaimsError } from "@/adapters/supabase/errors";
+import { asServer, asSystem, asUser } from "@/adapters/supabase/db";
+import {
+  DatabaseError,
+  ExpiredClaimsError,
+  UnverifiedClaimsError,
+} from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
 
 import { createTestUser, deleteTestUsers, type TestUser } from "./helpers/users";
@@ -41,6 +45,16 @@ describe("verifyAccessToken", () => {
   it("devuelve quién es la persona, con el token que firmó el servidor de identidad", () => {
     expect(anaClaims).toMatchObject({ userId: ana.id, aal: "aal1" });
     expect(betoClaims.userId).toBe(beto.id);
+  });
+
+  // Si el token local fuera de clave compartida, el SDK le preguntaría al servidor de
+  // identidad y estas pruebas no ejercitarían la verificación con claves públicas, que
+  // es la que corre fuera de local.
+  it("el token local va firmado con clave pública, como fuera de local", () => {
+    const header = JSON.parse(
+      Buffer.from(ana.accessToken.split(".")[0] ?? "", "base64url").toString("utf8"),
+    ) as { alg?: string };
+    expect(header.alg).toBe("ES256");
   });
 
   it("rechaza un texto que no es un token", async () => {
@@ -165,6 +179,60 @@ describe("asUser", () => {
     expect(asAna?.role).toBe("authenticated");
     expect(asAna?.claims).toContain(ana.id);
     expect(after).toEqual({ pid: asAna?.pid, role: "app_service", claims: "" });
+  });
+
+  it("tras un asUser que falla, la conexión también vuelve limpia", async () => {
+    const who = z.object({ role: z.string(), claims: z.string().nullable() });
+    await expect(
+      asUser(anaClaims, (tx) => tx.execute(sql`select 1/0`)),
+    ).rejects.toBeInstanceOf(DatabaseError);
+
+    const [after] = await asSystem({}, (tx) =>
+      tx.query(
+        sql`select current_user::text as role, current_setting('request.jwt.claims', true) as claims`,
+        who,
+      ),
+    );
+    expect(after).toEqual({ role: "app_service", claims: "" });
+  });
+
+  // Dentro de «como usuario» un commit devolvería la conexión a app_service, que salta
+  // la seguridad por fila. Ninguna consulta debe correr después.
+  it("un «commit» escrito en una consulta no saca a nadie del rol de la persona", async () => {
+    let seenRole: string | undefined;
+    const attempt = asUser(anaClaims, async (tx) => {
+      await tx.execute(sql`commit`).catch(() => {});
+      const rows = await tx
+        .query(sql`select current_user::text as role`, z.object({ role: z.string() }))
+        .catch(() => []);
+      seenRole = rows[0]?.role;
+    });
+    await expect(attempt).rejects.toThrow();
+    expect(seenRole).toBeUndefined();
+  });
+
+  it("dos personas a la vez: cada transacción ve solo a la suya", async () => {
+    const whoAmI = sql`select auth.uid() as id from pg_sleep(0.15)`;
+    const seen = await Promise.all(
+      [anaClaims, betoClaims, anaClaims, betoClaims].map((claims) =>
+        asUser(claims, (tx) => tx.query(whoAmI, ids)),
+      ),
+    );
+    expect(seen.map((rows) => rows[0]?.id)).toEqual([ana.id, beto.id, ana.id, beto.id]);
+  });
+
+  it("unas claims vencidas ya no sirven, aunque el objeto siga en memoria", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 60 * 1000 });
+    try {
+      await expect(
+        asUser(anaClaims, (tx) => tx.query(sql`select id from public.profiles`, ids)),
+      ).rejects.toBeInstanceOf(ExpiredClaimsError);
+      await expect(
+        asServer({ claims: anaClaims }, (tx) => tx.query(sql`select id from public.profiles`, ids)),
+      ).rejects.toBeInstanceOf(ExpiredClaimsError);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rechaza unas claims que el adaptador no verificó", async () => {
