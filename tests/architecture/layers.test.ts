@@ -271,6 +271,48 @@ const forbidden: Case[] = [
     rule: IMPORTS,
   },
   {
+    name: "un servicio carga un archivo interno del cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => import("pg/lib/index.js");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio importa un archivo interno del cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import Client from "pg/lib/client";\nexport const probe = Client;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio carga el cliente de base con una plantilla",
+    file: `${fixtures}/services/probe.ts`,
+    code: "export const probe = () => import(`pg`);\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga un paquete con un nombre que se arma al correr",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = (name: string) => import(name);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio se fabrica su propio require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { createRequire } from "node:module";\nexport const probe = createRequire(import.meta.url)("pg");\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio usa module.require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => module.require("pg");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio llama a sql(...) directamente",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const sql: (...args: unknown[]) => unknown;\nexport const probe = (text: string) => sql([text]);\n`,
+    rule: SYNTAX,
+  },
+  {
     name: "el arranque importa el cliente de base",
     file: `${fixtures}/instrumentation.ts`,
     code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,

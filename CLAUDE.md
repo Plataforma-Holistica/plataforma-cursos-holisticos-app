@@ -125,15 +125,32 @@ falla. Siete precisiones que la tabla no dice:
   `app_service`, que salta la seguridad por fila: por eso el resto llega con las tres
   funciones de `db.ts`, y siempre declara por quién actúa.
   - `asUser(claims, fn)`: lo que una persona lee o escribe por sí misma. La base filtra
-    por ella. Solo acepta las claims que devolvió `verifyAccessToken`.
-  - `asServer(actor, fn)`: una escritura que depende de una validación, a nombre de quien
-    la pidió.
-  - `asSystem(contexto, fn)`: un trabajo sin persona detrás.
+    por ella. Solo acepta las claims que devolvió `verifyAccessToken`, y solo mientras su
+    token no haya vencido.
+  - `asServer({ claims, reason, requestId }, fn)`: una escritura que depende de una
+    validación, a nombre de quien la pidió. Quién actúa y con qué nivel salen de esas
+    mismas claims verificadas: no se declaran a mano, porque este camino salta la
+    seguridad por fila.
+  - `asSystem(contexto, fn)`: un trabajo sin persona con sesión detrás (un aviso de cobro,
+    un cierre).
+
+  `verifyAccessToken` devuelve `null` si el token no es válido y lanza
+  `IdentityUnavailableError` si no se pudo saber: no es lo mismo, y a la persona no se le
+  trata como si no tuviera sesión.
 
   Toda consulta se escribe con la etiqueta `sql`, que manda los valores como parámetros,
   y cada fila se valida con su esquema Zod. **Nunca se arma SQL pegando texto**: dentro de
-  `asUser` un `reset role` recuperaría el salto de la seguridad por fila. Las funciones
-  no se anidan: cada una toma una conexión.
+  `asUser` un `reset role` recuperaría el salto de la seguridad por fila. La etiqueta lo
+  dificulta, no lo impide: `sql` se puede imitar, y por eso el lint prohíbe además
+  llamarla como función. Cuatro cosas que el adaptador rechaza al correr:
+  - una consulta con dos sentencias, o con `commit`, `rollback`, `end` o `abort`: quien
+    abre y cierra la transacción es el adaptador;
+  - anidar una función dentro de otra: cada una toma una conexión. Se pasa el `tx`;
+  - usar el `tx` después de que su función terminó;
+  - **atrapar un error de la base y seguir.** La transacción ya está abortada y nada se
+    guarda: el adaptador lanza `TransactionAbortedError` en vez de reportar éxito. Un
+    error esperado (un duplicado) se evita con la consulta (`on conflict`), no con un
+    `catch`.
 - **Ningún texto visible se escribe en una pantalla ni en un componente** (RNF-15). El
   lint rechaza el texto entre etiquetas y en `aria-label`, `title`, `placeholder`, `alt`,
   `label` y afines, dentro de `src/app/` y `src/ui/`. Un texto nuevo se escribe en su

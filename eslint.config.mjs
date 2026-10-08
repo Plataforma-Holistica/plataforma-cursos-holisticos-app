@@ -10,7 +10,8 @@ import boundaries from "eslint-plugin-boundaries";
 // El cliente de base y el SDK de Supabase no salen de src/adapters/supabase/ (ADR-31, TRD
 // §8.10): el servidor entra a la base con un rol que salta la seguridad por fila, y solo
 // ese adaptador sabe bajar al rol de la persona.
-const DATABASE_CLIENTS = ["pg", "pg-*", "postgres", "@supabase/*"];
+// Con sus archivos internos: `pg/lib/client` es el mismo cliente por otra puerta.
+const DATABASE_CLIENTS = ["pg", "pg/*", "pg-*", "postgres", "postgres/*", "@supabase/*"];
 
 const noDatabaseClient = {
   group: DATABASE_CLIENTS,
@@ -20,7 +21,8 @@ const noDatabaseClient = {
 
 // Lo mismo cuando el paquete se carga con import() o con require, que la regla de
 // arriba no ve.
-const DATABASE_CLIENT_SOURCE = "/^(pg|pg-.+|postgres|@supabase\\u002F.+)$/";
+const DATABASE_CLIENT_SOURCE =
+  "/^((pg|postgres)(\\u002F.+)?|pg-.+|@supabase\\u002F.+)$/";
 
 const noDatabaseClientLoading = [
   {
@@ -31,7 +33,32 @@ const noDatabaseClientLoading = [
     selector: `CallExpression[callee.name='require'][arguments.0.value=${DATABASE_CLIENT_SOURCE}]`,
     message: noDatabaseClient.message,
   },
+  {
+    // Un nombre que se arma al correr (una plantilla, una variable) no se puede revisar.
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Un import() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
+    selector: "CallExpression[callee.object.name='module'][callee.property.name='require']",
+    message: noDatabaseClient.message,
+  },
+  {
+    // `sql` es una etiqueta de plantilla. Llamada como función acepta una plantilla
+    // imitada, con texto armado, que es justo lo que la etiqueta existe para impedir.
+    selector: "CallExpression[callee.name='sql']",
+    message:
+      "sql se usa como etiqueta (sql`select ...`), nunca como función: así los valores viajan como parámetros (TRD §8.10).",
+  },
 ];
+
+// Fabricarse un `require` propio es otra forma de cargar un paquete sin que se vea.
+const noOwnRequire = ["node:module", "module"].map((name) => ({
+  name,
+  importNames: ["createRequire"],
+  message:
+    "createRequire carga paquetes a espaldas del lint. Si hace falta, va en el adaptador (TRD §8.10).",
+}));
 
 // SDK de proveedores. Solo su adaptador los toca.
 const PROVIDER_SDKS = [...DATABASE_CLIENTS, "@mux/mux-node", "stripe", "facturapi", "resend"];
@@ -196,7 +223,7 @@ export default defineConfig([
     files: ["**/src/**/*.{ts,tsx}"],
     ignores: ["**/src/adapters/supabase/**"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noDatabaseClient] }],
+      "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
       "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
     },
   },
@@ -253,6 +280,7 @@ export default defineConfig([
             },
             noDatabaseClient,
           ],
+          paths: noOwnRequire,
         },
       ],
     },
@@ -260,13 +288,16 @@ export default defineConfig([
   {
     files: ["**/src/app/**/*.{ts,tsx}", "**/src/jobs/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noProviderSdks] }],
+      "no-restricted-imports": ["error", { patterns: [noProviderSdks], paths: noOwnRequire }],
     },
   },
   {
     files: ["**/src/ui/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noProviderSdks], paths: noWholeCatalog }],
+      "no-restricted-imports": [
+        "error",
+        { patterns: [noProviderSdks], paths: [...noWholeCatalog, ...noOwnRequire] },
+      ],
     },
   },
   {
