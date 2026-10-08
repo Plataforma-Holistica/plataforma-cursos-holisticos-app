@@ -5,8 +5,14 @@ import { z, type ZodType } from "zod";
 
 import { getEnv } from "@/config/env";
 
+import { verifiedClaimsJson, type VerifiedClaims } from "./claims";
 import { buildPoolConfig } from "./config";
-import { RowValidationError, toDatabaseError, TransactionClosedError } from "./errors";
+import {
+  RowValidationError,
+  toDatabaseError,
+  TransactionClosedError,
+  UnverifiedClaimsError,
+} from "./errors";
 import { isSqlQuery, type SqlQuery } from "./sql";
 
 // El único camino del código a la base (ADR-31, TRD §8.10).
@@ -164,6 +170,34 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
   } finally {
     client.release(broken);
   }
+}
+
+/**
+ * Como usuario: lo que una persona lee o escribe por sí misma. La transacción baja al rol
+ * `authenticated` con su token, y la base filtra por ella aunque la consulta no lo haga.
+ *
+ * Solo acepta las claims que devolvió `verifyAccessToken`.
+ *
+ * El filtro protege de la consulta que olvida el `where`, no de SQL armado con texto de la
+ * persona: `set role` consulta al usuario de la sesión, así que un `reset role` dentro de
+ * la transacción recuperaría el salto de la seguridad por fila. Por eso las consultas
+ * solo se escriben con la etiqueta `sql`.
+ */
+export async function asUser<T>(claims: VerifiedClaims, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  const json = verifiedClaimsJson(claims);
+  if (json === undefined) throw new UnverifiedClaimsError();
+  return transaction(
+    {
+      role: "authenticated",
+      claims: json,
+      actorId: "",
+      actorAal: "",
+      actorKind: "",
+      reason: "",
+      requestId: "",
+    },
+    fn,
+  );
 }
 
 const actorId = z.uuid();
