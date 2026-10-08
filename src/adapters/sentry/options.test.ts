@@ -2,6 +2,7 @@ import type { ErrorEvent } from "@sentry/nextjs";
 import { describe, expect, it } from "vitest";
 
 import { buildOptions, DATA_COLLECTION } from "./options";
+import { SCAN_WINDOW } from "./scrub";
 
 // Desde la versión 11 del SDK, lo que se recolecta por omisión es todo: cabeceras,
 // cookies, cuerpos, parámetros, datos de la persona. Aquí se apaga, categoría por
@@ -50,11 +51,18 @@ describe("buildOptions", () => {
     });
   });
 
-  // No basta con no pedirlas. El SDK lee por su cuenta la variable
-  // SENTRY_TRACES_SAMPLE_RATE: si alguien la pusiera en Vercel prendería las trazas, y
-  // las trazas no pasan por `beforeSend`. Aquí se apagan dichas, y con su propia puerta.
-  it("solo errores: las trazas van apagadas de forma explícita", () => {
-    expect(options.tracesSampleRate).toBe(0);
+  // Un cero no es lo mismo que nada: para el SDK, una tasa de trazas definida, aunque sea
+  // cero, es «trazas prendidas». Con eso instala decenas de integraciones, parchea el
+  // cliente de la base y manda avisos de lo que descartó. Aquí la tasa no se define. Que
+  // nadie la defina desde una variable de entorno lo cuida `src/config/env.ts`.
+  it("solo errores: la tasa de trazas no se define, ni siquiera en cero", () => {
+    expect(options).not.toHaveProperty("tracesSampleRate");
+  });
+
+  // En el modo por omisión («stream») las trazas salen por partes, sin pasar por
+  // `beforeSendTransaction`. En el modo estático sí pasan, y ahí se detienen.
+  it("solo errores: si algo prendiera las trazas, no saldrían", () => {
+    expect(options.traceLifecycle).toBe("static");
     expect(options.beforeSendTransaction()).toBeNull();
   });
 
@@ -64,12 +72,21 @@ describe("buildOptions", () => {
     expect(options.beforeSendMetric()).toBeNull();
   });
 
+  // El SDK le avisa a Sentry de cuántos eventos descartó y por qué. No es un error.
+  it("solo errores: sin el aviso de lo que se descartó", () => {
+    expect(options.sendClientReports).toBe(false);
+  });
+
   it("no le manda cabeceras de rastreo a nadie: ni a la base, ni a cobros, ni al video", () => {
     expect(options.tracePropagationTargets).toEqual([]);
   });
 
-  it("recorta los textos largos antes de mandarlos", () => {
-    expect(options.maxValueLength).toBe(2_000);
+  // El SDK corta antes de que el filtro vea el texto, y corta a ciegas: puede dejar medio
+  // correo, sin la forma completa con que el filtro lo reconoce. Por eso su tope queda
+  // más allá de lo que el filtro revisa: el corte que cuenta es el del filtro.
+  it("le pone tope a los textos, pero más allá de lo que el filtro revisa", () => {
+    expect(options.maxValueLength).toBe(8_000);
+    expect(options.maxValueLength).toBeGreaterThan(SCAN_WINDOW);
   });
 
   it("sin grabación de sesiones", () => {

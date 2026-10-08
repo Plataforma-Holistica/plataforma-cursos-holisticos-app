@@ -493,6 +493,72 @@ const forbidden: Case[] = [
     code: `import * as Sentry from "@sentry/nextjs";\nexport const probe = Sentry;\n`,
     rule: IMPORTS,
   },
+  // Lo mismo con import() o con require, que la regla de importaciones no ve: desde ahí
+  // `Sentry.setUser` o `Sentry.logger` se saltarían el filtro igual.
+  {
+    name: "un servicio carga el SDK del registro de errores con import()",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga una parte del SDK del registro de errores con require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => require("@sentry/core");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una pantalla (.tsx) carga el SDK del registro de errores con import()",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un componente base (.tsx) carga el SDK del registro de errores con import()",
+    file: `${fixtures}/ui/probe.tsx`,
+    code: `export const probe = () => import("@sentry/browser");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "el dominio carga el SDK del registro de errores con import()",
+    file: `${fixtures}/domain/access/probe.ts`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "el adaptador de la base carga el SDK del registro de errores con import()",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "el arranque carga el SDK del registro de errores con import()",
+    file: `${fixtures}/instrumentation.ts`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
+  {
+    // `browser-sdk.ts` reexporta `init`: desde fuera serviría para encender el SDK otra
+    // vez, con otras opciones y sin el filtro.
+    name: "un servicio importa lo que el adaptador reexporta del SDK",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { init } from "@/adapters/sentry/browser-sdk";\nexport const probe = init;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio carga con import() lo que el adaptador reexporta del SDK",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => import("@/adapters/sentry/browser-sdk");\n`,
+    rule: SYNTAX,
+  },
+  {
+    // Pedir el paquete entero descarga casi el triple: lo que el navegador usa se pide por
+    // `browser-sdk.ts`, y lo demás se importa de forma fija.
+    name: "el propio adaptador del registro de errores pide el paquete entero con import()",
+    file: `${fixtures}/adapters/sentry/probe.ts`,
+    code: `export const probe = () => import("@sentry/nextjs");\n`,
+    rule: SYNTAX,
+  },
   {
     name: "el adaptador del registro de errores importa el cliente de base",
     file: `${fixtures}/adapters/sentry/probe.ts`,

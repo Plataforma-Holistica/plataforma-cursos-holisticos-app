@@ -191,27 +191,53 @@ falla. Ocho precisiones que la tabla no dice:
   - Lo que el SDK recolecta por su cuenta (cabeceras, cookies, cuerpos, parámetros, datos
     de la persona) está apagado en `options.ts`, categoría por categoría. Si una versión
     nueva agrega una categoría, deja de compilar hasta que alguien la decida.
-  - Todo error pasa además por `scrubEvent` (`scrub.ts`) antes de salir: de la persona
-    queda su identificador, de la petición el método y la dirección sin parámetros, y los
-    correos se enmascaran. Es una red, no un permiso: **el mensaje de un error no lleva
-    el dato de una persona**, ni un `console.log` del navegador, que viaja como contexto.
-  - Solo errores, en el servidor y en el navegador: sin trazas (apagadas con un cero
-    explícito, porque el SDK lee una variable de entorno por su cuenta), sin registros,
-    sin métricas, sin grabación de sesiones, sin el aviso de cada visita o de cada
-    petición, sin la consola ni los clics como contexto, y sin cabeceras de rastreo hacia
-    terceros. Prender cualquiera de esas cosas es una decisión aparte. Una prueba
-    enciende el SDK de verdad y revisa lo que saldría (`real-sdk.test.ts`).
-  - `@sentry/*` no se importa en ningún otro lado de `src/`: `Sentry.setUser` o
-    `Sentry.logger` desde un servicio se saltarían el filtro.
+  - Todo error pasa además por `scrubEvent` (`scrub.ts`) antes de salir. El filtro no
+    quita lo malo: arma un evento nuevo y copia solo lo que conoce, y cada valor solo si
+    tiene su forma. De la persona, su identificador; de la petición, el método y la
+    dirección sin parámetros; de la pila, dónde fue (archivo, función, línea), sin las
+    líneas de código ni las variables; y el entorno que anota el propio SDK. Lo que no
+    está en sus listas no sale: ni `extra`, ni una etiqueta o un contexto que alguien
+    agregue, ni un campo que traiga una versión nueva del SDK. Una etiqueta nueva se
+    agrega a `ALLOWED_TAGS`, a la vista de quien revisa.
+  - Todo texto que sale pasa por reglas que buscan formas (un correo, un RFC, una llave,
+    un teléfono): el mensaje del error, y lo que la pila hereda de él, porque el SDK arma
+    la pila leyendo ese texto. Reconocen formas, no significados: un nombre propio pasa.
+    Es una red, no un permiso: **el mensaje de un error no lleva el dato de una
+    persona**, ni texto que venga de fuera sin revisar, y tampoco se lanza un objeto con
+    datos como si fuera un error.
+  - Solo errores, en el servidor y en el navegador: sin trazas, sin registros, sin
+    métricas, sin grabación de sesiones, sin el aviso de cada visita o de cada petición,
+    sin la consola ni los clics como contexto, y sin cabeceras de rastreo hacia terceros.
+    La tasa de trazas no se define, ni en cero: para el SDK un cero ya es «trazas
+    prendidas». Como sin definir el SDK leería `SENTRY_TRACES_SAMPLE_RATE`, la aplicación
+    se niega a iniciar si esa variable existe. Prender cualquiera de esas cosas es una
+    decisión aparte.
+  - Las integraciones del SDK van por lista de permitidas, en `server.ts` y en
+    `browser.ts`: una que no está en la lista no se instala, aunque el SDK la traiga de
+    fábrica. Una nueva se agrega después de leer qué recolecta: `ContextLines` no está
+    porque abría cualquier archivo que la pila nombrara y mandaba sus líneas. Una prueba
+    enciende el SDK de verdad y revisa la lista exacta y lo que saldría
+    (`real-sdk.test.ts`): es la que avisa cuando una versión nueva del SDK cambia algo.
+  - Al salir hay una última puerta (`transport.ts`): lo que no es un error se descarta,
+    lo haya pedido quien lo haya pedido. Un aviso de trabajo programado o un comentario
+    de una persona no pasarían por el filtro; si algún día se quieren, esa puerta se abre
+    a propósito y con su propio filtro.
+  - `@sentry/*` no se importa en ningún otro lado de `src/`, tampoco con `import()` ni
+    con `require`: `Sentry.setUser` o `Sentry.logger` desde un servicio se saltarían el
+    filtro.
   - El arranque (`src/instrumentation.ts`) se compila también para Edge: lo que es solo
     de Node (`server.ts`) se carga dentro de su rama de Node, y lo que Next llama al
-    fallar una petición vive en `request-error.ts`.
+    fallar una petición vive en `request-error.ts`. Si el registro de errores no
+    enciende, la aplicación atiende igual y lo dice en los registros del servidor: al
+    revés que con las variables de entorno, sin las cuales no inicia.
   - En el navegador el SDK no viaja con la página, porque pesa y casi ninguna visita lo
     necesita: `browser.ts` lo pide aparte cuando el navegador queda libre, o en el momento
     de reportar, y guarda mientras tanto los errores que ocurran. Lo que se use del SDK
     se exporta en `browser-sdk.ts`: pedir el paquete entero descarga casi el triple.
   - Sin `SENTRY_DSN` no se manda nada: así se trabaja en local. Fuera de local es
-    obligatoria. Los mapas de código solo se suben al compilar en Vercel.
+    obligatoria, cifrada y con la forma que el SDK acepta (con otra, el SDK no falla: se
+    queda callado). Los mapas de código solo se suben al compilar en Vercel, y de ellos
+    saca Sentry el código que muestra junto a cada punto de la pila.
   - El simulacro: `GET /api/error-drill` falla a propósito (en producción responde 404),
     y `/muestra/error`, solo con `pnpm dev`, rompe la pantalla desde el navegador.
 

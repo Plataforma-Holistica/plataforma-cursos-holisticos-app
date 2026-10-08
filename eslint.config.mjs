@@ -109,10 +109,32 @@ const noProviderSdks = {
 // están apagada la recolección y puesto el filtro de datos personales. Desde cualquier
 // otro lado, `Sentry.setUser({ email })` o `Sentry.logger` se los saltarían.
 const noSentrySdk = {
-  group: ["@sentry/*"],
+  // Y lo que el adaptador reexporta del SDK para el navegador (`browser-sdk.ts`): trae
+  // `init`, que desde fuera serviría para encenderlo otra vez, con otras opciones.
+  group: ["@sentry/*", "**/adapters/sentry/browser-sdk"],
   message:
     "El SDK de Sentry solo se usa en src/adapters/sentry/: pídele al servicio de src/services/error-reporting/ (TRD §10.5).",
 };
+
+// Lo mismo con import() o con require, que la regla de arriba no ve. Vale también dentro
+// del adaptador: ahí el SDK se importa de forma fija, y lo que el navegador pide aparte
+// sale de `browser-sdk.ts`, porque pedir el paquete entero descarga casi el triple.
+const SENTRY_SDK_SOURCE = "/^(@sentry\\u002F.+|.*\\u002Fadapters\\u002Fsentry\\u002Fbrowser-sdk)$/";
+
+const noSentrySdkLoading = [
+  {
+    selector: `ImportExpression[source.value=${SENTRY_SDK_SOURCE}]`,
+    message: noSentrySdk.message,
+  },
+  {
+    selector: `CallExpression[callee.name='require'][arguments.0.value=${SENTRY_SDK_SOURCE}]`,
+    message: noSentrySdk.message,
+  },
+];
+
+// Las dos listas juntas: lo que ningún bloque de `src/` deja cargar a escondidas. Cada
+// bloque que fija la regla de sintaxis la repite, porque el posterior reemplaza al anterior.
+const noHiddenLoading = [...noDatabaseClientLoading, ...noSentrySdkLoading];
 
 // Ningún texto visible se escribe fuera del catálogo de src/messages/ (RNF-15).
 //
@@ -385,7 +407,7 @@ export default defineConfig([
         "error",
         { patterns: [noDatabaseClient, noSentrySdk], paths: noOwnRequire },
       ],
-      "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
+      "no-restricted-syntax": ["error", ...noHiddenLoading],
     },
   },
   {
@@ -394,6 +416,7 @@ export default defineConfig([
     files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noSentrySdk] }],
+      "no-restricted-syntax": ["error", ...noSentrySdkLoading],
     },
   },
   {
@@ -449,7 +472,7 @@ export default defineConfig([
           selector: "NewExpression[callee.name='Date'][arguments.length=0]",
           message: "El reloj entra al dominio como argumento (P1).",
         },
-        ...noDatabaseClientLoading,
+        ...noHiddenLoading,
       ],
     },
   },
@@ -505,7 +528,7 @@ export default defineConfig([
     rules: {
       "no-restricted-syntax": [
         "error",
-        ...noDatabaseClientLoading,
+        ...noHiddenLoading,
         ...noDevFileLoading,
         ...noLooseVisualValues,
         ...noLiteralMetadata,
@@ -517,7 +540,7 @@ export default defineConfig([
     // cargar el cliente de base, ni usar valores visuales sueltos, ni estilos en línea.
     files: ["**/src/app/**/page.dev.tsx"],
     rules: {
-      "no-restricted-syntax": ["error", ...noDatabaseClientLoading, ...noLooseVisualValues],
+      "no-restricted-syntax": ["error", ...noHiddenLoading, ...noLooseVisualValues],
       "react/forbid-dom-props": ["error", { forbid: ["style"] }],
     },
   },
@@ -540,7 +563,7 @@ export default defineConfig([
       "react/jsx-no-literals": ["error", { noStrings: true, ignoreProps: true }],
       "no-restricted-syntax": [
         "error",
-        ...noDatabaseClientLoading,
+        ...noHiddenLoading,
         ...noDevFileLoading,
         ...noLooseVisualValues,
         ...noLiteralMetadata,

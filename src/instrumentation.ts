@@ -23,8 +23,19 @@ export async function register() {
     // Después de validar: el registro de errores lee su dirección de esas variables. Se
     // carga aquí adentro, y no arriba, porque es solo de Node: en la compilación para Edge
     // este bloque entero se descarta, y con él la carga.
-    const { startErrorReporting } = await import("@/services/error-reporting/server");
-    startErrorReporting();
+    //
+    // Si el registro de errores no enciende, la aplicación atiende igual. Es al revés que
+    // con las variables: una falla del proveedor que avisa de las caídas no debe ser una
+    // caída. Queda dicho en los registros del servidor, que es donde alguien lo va a ver.
+    try {
+      const { startErrorReporting } = await import("@/services/error-reporting/server");
+      startErrorReporting();
+    } catch (error) {
+      console.error(
+        "El registro de errores no encendió. La aplicación sigue, pero sin avisar de sus fallas.",
+        error,
+      );
+    }
   }
 }
 
