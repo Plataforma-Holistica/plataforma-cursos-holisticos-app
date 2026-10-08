@@ -3,9 +3,11 @@
 import "@/ui/theme.css";
 
 import { ServerCrash } from "lucide";
+import { useEffect } from "react";
 
 import { states } from "@/messages/es/states";
 import { t } from "@/messages/format";
+import { reportCaughtError } from "@/services/error-reporting/browser";
 import { Button } from "@/ui/button";
 import { FullScreenState } from "@/ui/full-screen-state";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -20,6 +22,8 @@ import { displayFont, textFont } from "./fonts";
 const text = states.error;
 
 export default function GlobalError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  useEffect(() => reportCaughtError(error), [error]);
+
   return (
     <html lang="es-MX" className={`${displayFont.variable} ${textFont.variable}`}>
       <body>

@@ -1,9 +1,11 @@
 "use client";
 
 import { ServerCrash } from "lucide";
+import { useEffect } from "react";
 
 import { states } from "@/messages/es/states";
 import { t } from "@/messages/format";
+import { reportCaughtError } from "@/services/error-reporting/browser";
 import { Button } from "@/ui/button";
 import { FullScreenState } from "@/ui/full-screen-state";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -18,6 +20,9 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 const text = states.error;
 
 export default function ErrorPage({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  // Un error que esta pantalla atrapa ya no llega solo al registro de errores (RNF-16).
+  useEffect(() => reportCaughtError(error), [error]);
+
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
       <title>{text.title}</title>
