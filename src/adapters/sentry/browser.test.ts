@@ -108,12 +108,18 @@ describe("Sentry en el navegador", () => {
 
   it("cuando el SDK ya llegó, deja de guardar: de ahí en adelante atrapa él", async () => {
     const { startBrowserErrorReporting } = await freshAdapter();
+    // El SDK de verdad pone su propio oyente al encenderse. Este hace sus veces: sin
+    // ninguno, el error de la prueba quedaría sin atender y Vitest lo daría por fallo.
+    const sdkListener = vi.fn();
+    sentry.init.mockImplementationOnce(() => window.addEventListener("error", sdkListener));
 
     startBrowserErrorReporting();
     await untilLoaded();
     throwInPage(new Error("después de cargar"));
     await vi.runAllTimersAsync();
+    window.removeEventListener("error", sdkListener);
 
+    expect(sdkListener).toHaveBeenCalledOnce();
     expect(sentry.captureException).not.toHaveBeenCalled();
   });
 
