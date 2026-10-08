@@ -169,6 +169,10 @@ falla. Ocho precisiones que la tabla no dice:
     el dato de una persona**, ni un `console.log` del navegador, que viaja como contexto.
   - Solo errores: sin trazas, sin registros, sin grabación de sesiones y sin el aviso de
     cada visita. Prender cualquiera de esas cosas es una decisión aparte.
+  - En el navegador el SDK no viaja con la página, porque pesa y casi ninguna visita lo
+    necesita: `browser.ts` lo pide aparte cuando el navegador queda libre, o en el momento
+    de reportar, y guarda mientras tanto los errores que ocurran. Lo que se use del SDK
+    se exporta en `browser-sdk.ts`: pedir el paquete entero descarga casi el triple.
   - Sin `SENTRY_DSN` no se manda nada: así se trabaja en local. Fuera de local es
     obligatoria. Los mapas de código solo se suben al compilar en Vercel.
   - El simulacro: `GET /api/error-drill` falla a propósito (en producción responde 404),
