@@ -195,8 +195,17 @@ falla. Ocho precisiones que la tabla no dice:
     queda su identificador, de la petición el método y la dirección sin parámetros, y los
     correos se enmascaran. Es una red, no un permiso: **el mensaje de un error no lleva
     el dato de una persona**, ni un `console.log` del navegador, que viaja como contexto.
-  - Solo errores: sin trazas, sin registros, sin grabación de sesiones y sin el aviso de
-    cada visita. Prender cualquiera de esas cosas es una decisión aparte.
+  - Solo errores, en el servidor y en el navegador: sin trazas (apagadas con un cero
+    explícito, porque el SDK lee una variable de entorno por su cuenta), sin registros,
+    sin métricas, sin grabación de sesiones, sin el aviso de cada visita o de cada
+    petición, sin la consola ni los clics como contexto, y sin cabeceras de rastreo hacia
+    terceros. Prender cualquiera de esas cosas es una decisión aparte. Una prueba
+    enciende el SDK de verdad y revisa lo que saldría (`real-sdk.test.ts`).
+  - `@sentry/*` no se importa en ningún otro lado de `src/`: `Sentry.setUser` o
+    `Sentry.logger` desde un servicio se saltarían el filtro.
+  - El arranque (`src/instrumentation.ts`) se compila también para Edge: lo que es solo
+    de Node (`server.ts`) se carga dentro de su rama de Node, y lo que Next llama al
+    fallar una petición vive en `request-error.ts`.
   - En el navegador el SDK no viaja con la página, porque pesa y casi ninguna visita lo
     necesita: `browser.ts` lo pide aparte cuando el navegador queda libre, o en el momento
     de reportar, y guarda mientras tanto los errores que ocurran. Lo que se use del SDK
