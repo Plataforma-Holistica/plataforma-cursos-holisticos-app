@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { ui } from "@/messages/es/ui";
 
@@ -9,7 +9,8 @@ import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from ".
 
 // Campo de contraseña (diseño, sección 5.3). Lleva un botón para mostrarla u ocultarla.
 // Nunca bloquea el pegado ni el llenado automático (WCAG 3.3.8): no hay un solo manejador
-// sobre el campo.
+// sobre el campo. Lo único que escucha es el envío de su formulario, para volver a
+// ocultarla: enviada a la vista, el navegador la trataría como un texto cualquiera.
 //
 // Las reglas de una contraseña nueva no viven aquí: cuáles son lo decide el TRD, y la
 // pantalla las pasa ya armadas en `rules`, a la vista desde antes de escribir.
@@ -33,12 +34,24 @@ export function PasswordField({ label, name, autoComplete, id, hint, rules, erro
   const rulesId = `${fieldId}-rules`;
   const errorId = `${fieldId}-error`;
   const [visible, setVisible] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  // Antes de que el formulario salga, el campo vuelve a ser de contraseña: así no acaba
+  // en el historial de formularios y el gestor de contraseñas ofrece guardarla.
+  useEffect(() => {
+    const form = input.current?.form;
+    if (!form) return;
+    const hide = () => setVisible(false);
+    form.addEventListener("submit", hide, { capture: true });
+    return () => form.removeEventListener("submit", hide, { capture: true });
+  }, []);
 
   return (
     <div className="flex flex-col gap-2">
       <FieldLabel htmlFor={fieldId}>{label}</FieldLabel>
       <div className="relative">
         <input
+          ref={input}
           id={fieldId}
           name={name}
           type={visible ? "text" : "password"}

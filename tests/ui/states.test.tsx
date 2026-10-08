@@ -13,16 +13,37 @@ import { TextLink } from "@/ui/text-link";
 import { a11yViolations } from "../setup/a11y";
 
 describe("InlineAlert", () => {
-  it("un error interrumpe: es una alerta", () => {
+  // Una región viva solo anuncia lo que cambia después de que existe. Una nota fija no
+  // necesita serlo, y un error que ya viene pintado desde el servidor no se anuncia por
+  // llevar `role="alert"`: por eso es una opción, apagada.
+  it("por omisión es una nota fija: no interrumpe ni se anuncia sola", () => {
     render(<InlineAlert tone="danger">El correo o la contraseña no coinciden.</InlineAlert>);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("El correo o la contraseña no coinciden.")).toBeVisible();
+  });
+
+  it("con `live`, un error interrumpe: es una alerta", () => {
+    render(
+      <InlineAlert tone="danger" live>
+        El correo o la contraseña no coinciden.
+      </InlineAlert>,
+    );
     expect(screen.getByRole("alert")).toHaveTextContent("El correo o la contraseña no coinciden.");
   });
 
-  it.each(["neutral", "success", "warning"] as const)("el tono %s avisa sin interrumpir", (tone) => {
-    render(<InlineAlert tone={tone}>Te mandamos un correo.</InlineAlert>);
-    expect(screen.getByRole("status")).toHaveTextContent("Te mandamos un correo.");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
+  it.each(["neutral", "success", "warning"] as const)(
+    "con `live`, el tono %s avisa sin interrumpir",
+    (tone) => {
+      render(
+        <InlineAlert tone={tone} live>
+          Te mandamos un correo.
+        </InlineAlert>,
+      );
+      expect(screen.getByRole("status")).toHaveTextContent("Te mandamos un correo.");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
 
   it.each(["neutral", "success", "warning", "danger"] as const)(
     "el tono %s no depende del color: lleva icono y su nombre",
@@ -34,21 +55,27 @@ describe("InlineAlert", () => {
   );
 
   it("puede llevar un botón", () => {
-    render(
+    const { container } = render(
       <InlineAlert tone="warning" action={<Button variant="text">Reenviar el correo</Button>}>
         Todavía no verificas tu correo.
       </InlineAlert>,
     );
-    expect(within(screen.getByRole("status")).getByRole("button", { name: "Reenviar el correo" })).toBeVisible();
+    expect(
+      within(container).getByRole("button", { name: "Reenviar el correo" }),
+    ).toBeVisible();
   });
 
-  it("los cuatro tonos no tienen faltas de accesibilidad", async () => {
+  it("los cuatro tonos no tienen faltas de accesibilidad, fijos y vivos", async () => {
     const { container } = render(
       <>
         <InlineAlert tone="neutral">Nota.</InlineAlert>
         <InlineAlert tone="success">Guardado.</InlineAlert>
-        <InlineAlert tone="warning">Revisa tu correo.</InlineAlert>
-        <InlineAlert tone="danger">No se pudo guardar.</InlineAlert>
+        <InlineAlert tone="warning" live>
+          Revisa tu correo.
+        </InlineAlert>
+        <InlineAlert tone="danger" live>
+          No se pudo guardar.
+        </InlineAlert>
       </>,
     );
     expect(await a11yViolations(container)).toEqual([]);
@@ -95,6 +122,22 @@ describe("FullScreenState", () => {
     const title = screen.getByRole("heading", { level: 1, name: "No encontramos esa página" });
     expect(title).toHaveFocus();
     expect(title).toHaveAttribute("tabindex", "-1");
+  });
+
+  // Cuando es toda la pantalla, el título toma el foco. Dentro de otra pantalla (una
+  // muestra, una sección) no debe robárselo a lo que la persona estaba haciendo.
+  it("no toma el foco si se le pide que no", () => {
+    render(
+      <FullScreenState icon={SearchX} title="No encontramos esa página" primaryAction={null} focusTitle={false}>
+        <p>Texto.</p>
+      </FullScreenState>,
+    );
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveFocus();
+  });
+
+  it("el título no pierde su anillo de foco: quien navega con teclado ve dónde quedó", () => {
+    render(state);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveClass("outline-none");
   });
 
   it("trae su texto, una acción principal, las secundarias y una salida a ayuda", () => {

@@ -21,14 +21,22 @@ export interface InlineAlertProps {
   children: ReactNode;
   /** Un botón para resolver lo que el aviso dice. */
   action?: ReactNode;
+  /**
+   * El aviso aparece o cambia mientras la persona está en la pantalla (el resultado de
+   * guardar, un reenvío), y hay que anunciarlo. Apagado por omisión: una nota fija no se
+   * anuncia sola, y un error que ya viene pintado desde el servidor tampoco se anunciaría
+   * por llevar el papel de alerta. A ese lo anuncia el foco (`FormErrorSummary`).
+   */
+  live?: boolean;
 }
 
-export function InlineAlert({ tone, children, action }: InlineAlertProps) {
+export function InlineAlert({ tone, children, action, live = false }: InlineAlertProps) {
   const { icon, box, mark } = TONES[tone];
+  // Vivo: un error interrumpe a quien usa lector de pantalla; lo demás espera su turno.
+  const role = live ? (tone === "danger" ? "alert" : "status") : undefined;
   return (
-    // Un error interrumpe a quien usa lector de pantalla; lo demás espera su turno.
     <div
-      role={tone === "danger" ? "alert" : "status"}
+      role={role}
       className={cx("flex items-start gap-3 rounded-md border p-4 text-body text-text", box)}
     >
       <Icon icon={icon} className={cx("mt-0.5", mark)} />

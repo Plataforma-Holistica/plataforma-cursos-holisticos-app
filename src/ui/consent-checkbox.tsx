@@ -40,7 +40,9 @@ export function ConsentCheckbox(props: ConsentCheckboxProps) {
   const generated = useId();
   const fieldId = props.id ?? generated;
   const errorId = `${fieldId}-error`;
+  const descriptionId = `${fieldId}-description`;
   const invalid = props.invalid ?? false;
+  const explained = props.variant === "explained";
 
   const row = (
     <div className="flex flex-col gap-1">
@@ -50,7 +52,9 @@ export function ConsentCheckbox(props: ConsentCheckboxProps) {
         label={props.label}
         required
         invalid={invalid}
-        describedById={describedBy(invalid && errorId)}
+        // Quien llega a la casilla con el tabulador oye qué acepta (RF-108), y después
+        // el error si lo hay.
+        describedById={describedBy(explained && descriptionId, invalid && errorId)}
       />
       {invalid && <FieldError id={errorId}>{ui.consent.required}</FieldError>}
     </div>
@@ -61,7 +65,9 @@ export function ConsentCheckbox(props: ConsentCheckboxProps) {
   return (
     <fieldset className="flex flex-col gap-3 rounded-md border border-border bg-surface-1 p-4 halo-surface-1">
       <legend className="float-left w-full text-h3">{props.title}</legend>
-      <div className="clear-both flex flex-col gap-2 text-body text-text-2">{props.description}</div>
+      <div id={descriptionId} className="clear-both flex flex-col gap-2 text-body text-text-2">
+        {props.description}
+      </div>
       {row}
     </fieldset>
   );

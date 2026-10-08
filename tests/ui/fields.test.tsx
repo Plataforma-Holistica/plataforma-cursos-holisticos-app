@@ -271,6 +271,41 @@ describe("FormErrorSummary", () => {
     expect(screen.getByRole("alert")).toHaveFocus();
   });
 
+  // Una pantalla suele armar el arreglo de errores en cada dibujado. Si el foco dependiera
+  // de que el arreglo sea «otro», saltaría al resumen con cada tecla y no se podría
+  // avanzar por el formulario.
+  it("no vuelve a tomar el foco si los errores son los mismos, aunque el arreglo sea otro", async () => {
+    const user = userEvent.setup();
+    const view = (list: typeof errors) => (
+      <>
+        <FormErrorSummary errors={list} />
+        <TextField id="campo-correo" label="Correo" name="email" autoComplete="email" />
+      </>
+    );
+    const { rerender } = render(view(errors));
+    const field = screen.getByLabelText("Correo");
+    await user.click(field);
+    expect(field).toHaveFocus();
+
+    rerender(view(errors.map((error) => ({ ...error }))));
+    expect(field).toHaveFocus();
+  });
+
+  it("vuelve a tomar el foco cuando llega una tanda distinta de errores", async () => {
+    const user = userEvent.setup();
+    const view = (list: typeof errors) => (
+      <>
+        <FormErrorSummary errors={list} />
+        <TextField id="campo-correo" label="Correo" name="email" autoComplete="email" />
+      </>
+    );
+    const { rerender } = render(view(errors));
+    await user.click(screen.getByLabelText("Correo"));
+
+    rerender(view([{ fieldId: "campo-correo", message: "Ese correo ya tiene cuenta." }]));
+    expect(screen.getByRole("alert")).toHaveFocus();
+  });
+
   it("cada error es un enlace que lleva el foco a su campo", async () => {
     const user = userEvent.setup();
     render(
@@ -289,5 +324,60 @@ describe("FormErrorSummary", () => {
   it("no tiene faltas de accesibilidad", async () => {
     const { container } = render(<FormErrorSummary errors={errors} />);
     expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("arreglos de la revisión independiente", () => {
+  // RF-108: un consentimiento vale si la persona supo qué aceptaba. Quien llega a la
+  // casilla con el tabulador y un lector de pantalla tiene que oír la explicación.
+  it("la casilla de un consentimiento explicado lee qué se guarda y para qué", () => {
+    render(
+      <ConsentCheckbox
+        variant="explained"
+        name="history"
+        title="Tu historial de cursos"
+        description={<p>Guardamos qué lecciones viste para que sigas donde te quedaste.</p>}
+        label="Acepto que se guarde mi historial."
+      />,
+    );
+    expect(screen.getByRole("checkbox")).toHaveAccessibleDescription(
+      "Guardamos qué lecciones viste para que sigas donde te quedaste.",
+    );
+  });
+
+  it("y si además falta aceptarlo, lee la explicación y luego el error", () => {
+    render(
+      <ConsentCheckbox
+        variant="explained"
+        name="history"
+        invalid
+        title="Tu historial de cursos"
+        description={<p>Guardamos qué lecciones viste.</p>}
+        label="Acepto que se guarde mi historial."
+      />,
+    );
+    expect(screen.getByRole("checkbox")).toHaveAccessibleDescription(
+      `Guardamos qué lecciones viste. ${ui.consent.required}`,
+    );
+  });
+
+  // Un campo de texto con la contraseña a la vista puede acabar en el historial de
+  // formularios del navegador, y el gestor de contraseñas puede no ofrecer guardarla.
+  it("la contraseña vuelve a ocultarse al enviar el formulario, aunque estuviera a la vista", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn((event: { preventDefault: () => void }) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <PasswordField label="Contraseña" name="password" autoComplete="current-password" />
+        <button type="submit">Entrar</button>
+      </form>,
+    );
+    const field = screen.getByLabelText("Contraseña");
+    await user.click(screen.getByRole("button", { name: ui.password.showLabel }));
+    expect(field).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: "Entrar" }));
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(field).toHaveAttribute("type", "password");
   });
 });
