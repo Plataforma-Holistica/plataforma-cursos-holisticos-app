@@ -132,15 +132,18 @@ falla. Cinco precisiones que la tabla no dice:
 
   `verifyAccessToken` devuelve `null` si el token no es válido y lanza
   `IdentityUnavailableError` si no se pudo saber: no es lo mismo, y a la persona no se le
-  trata como si no tuviera sesión.
+  trata como si no tuviera sesión. Las claves públicas las pide y las recuerda el propio
+  adaptador (`keys.ts`): un token mal hecho no sale a la red ni pasa por una caída.
 
   Toda consulta se escribe con la etiqueta `sql`, que manda los valores como parámetros,
   y cada fila se valida con su esquema Zod. **Nunca se arma SQL pegando texto**: dentro de
   `asUser` un `reset role` recuperaría el salto de la seguridad por fila. La etiqueta lo
   dificulta, no lo impide: `sql` se puede imitar, y por eso el lint prohíbe además
   llamarla como función. Cuatro cosas que el adaptador rechaza al correr:
-  - una consulta con dos sentencias, o con `commit`, `rollback`, `end` o `abort`: quien
-    abre y cierra la transacción es el adaptador;
+  - una consulta con dos sentencias, con `commit`, `rollback`, `end` o `abort` (también
+    `and chain`), o que cambie de rol (`set role`, `reset role`): quien abre la
+    transacción, la cierra y decide su rol es el adaptador. El lint lo dice antes, al
+    escribirla;
   - anidar una función dentro de otra: cada una toma una conexión. Se pasa el `tx`;
   - usar el `tx` después de que su función terminó;
   - **atrapar un error de la base y seguir.** La transacción ya está abortada y nada se

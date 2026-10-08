@@ -44,20 +44,49 @@ const noDatabaseClientLoading = [
     message: noDatabaseClient.message,
   },
   {
+    selector: "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+    message:
+      "Un require() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
     // `sql` es una etiqueta de plantilla. Llamada como función acepta una plantilla
     // imitada, con texto armado, que es justo lo que la etiqueta existe para impedir.
     selector: "CallExpression[callee.name='sql']",
     message:
       "sql se usa como etiqueta (sql`select ...`), nunca como función: así los valores viajan como parámetros (TRD §8.10).",
   },
+  {
+    selector: "MemberExpression[object.name='sql'][property.name=/^(call|apply|bind)$/]",
+    message:
+      "sql se usa como etiqueta (sql`select ...`), nunca con call, apply o bind (TRD §8.10).",
+  },
+  // Quien abre la transacción, la cierra y decide con qué rol y por quién corre es el
+  // adaptador. El adaptador lo comprueba al correr (y rechaza); esto lo dice antes, al
+  // escribir. No pretende ser completo: una consulta armada para burlarlo lo burla.
+  {
+    // Una consulta que empieza por una sentencia de control.
+    selector:
+      "TaggedTemplateExpression[tag.name='sql'] > TemplateLiteral > TemplateElement:first-child[value.raw=/^\\s*(commit|rollback|abort|end|begin|start\\s+transaction|savepoint|release|prepare\\s+transaction|discard|reset)\\b/i]",
+    message:
+      "commit, rollback, begin y demás no se escriben en una consulta: la transacción la abre y la cierra el adaptador (TRD §8.10).",
+  },
+  {
+    // En cualquier parte de la consulta: cambiar de rol, reescribir quién actúa, o
+    // encadenar otra transacción. `set role = ...` en un update es una columna, y pasa.
+    selector:
+      "TaggedTemplateExpression[tag.name='sql'] TemplateElement[value.raw=/(\\b(set|reset)\\s+(local\\s+|session\\s+)?(role|session\\s+authorization)\\b(?!\\s*=)|set_config\\s*\\(\\s*'(role|session_authorization|request\\.jwt|app\\.)|\\band\\s+chain\\b)/i]",
+    message:
+      "Una consulta no cambia de rol ni reescribe por quién se actúa: eso lo fija el adaptador con asUser, asServer o asSystem (TRD §8.10).",
+  },
 ];
 
-// Fabricarse un `require` propio es otra forma de cargar un paquete sin que se vea.
+// Fabricarse un `require` propio es otra forma de cargar un paquete sin que se vea. Se
+// prohíbe el módulo entero: `import Module from "node:module"` y luego
+// `Module.createRequire` es lo mismo por otra puerta.
 const noOwnRequire = ["node:module", "module"].map((name) => ({
   name,
-  importNames: ["createRequire"],
   message:
-    "createRequire carga paquetes a espaldas del lint. Si hace falta, va en el adaptador (TRD §8.10).",
+    "node:module sirve para cargar paquetes a espaldas del lint (createRequire). Si hace falta, va en el adaptador (TRD §8.10).",
 }));
 
 // SDK de proveedores. Solo su adaptador los toca.
@@ -188,6 +217,21 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
       "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
+    },
+  },
+  {
+    // Todas las reglas de arriba y de abajo miran `.ts` y `.tsx`. Un archivo de JavaScript
+    // en src/ quedaría fuera de todas: no se escribe.
+    files: ["**/src/**/*.{js,jsx,mjs,cjs}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Program",
+          message:
+            "El código de src/ se escribe en TypeScript: las reglas de capas no alcanzan a un archivo de JavaScript.",
+        },
+      ],
     },
   },
   {

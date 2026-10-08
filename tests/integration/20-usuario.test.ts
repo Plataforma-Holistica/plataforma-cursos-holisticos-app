@@ -6,6 +6,7 @@ import { asServer, asSystem, asUser } from "@/adapters/supabase/db";
 import {
   DatabaseError,
   ExpiredClaimsError,
+  TransactionControlError,
   UnverifiedClaimsError,
 } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
@@ -207,8 +208,41 @@ describe("asUser", () => {
         .catch(() => []);
       seenRole = rows[0]?.role;
     });
-    await expect(attempt).rejects.toThrow();
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
     expect(seenRole).toBeUndefined();
+  });
+
+  // Estas no terminan la transacción, así que el estado no las delata. Las delata la
+  // comprobación de antes del commit: el rol tiene que seguir siendo el de la persona.
+  it.each([
+    ["reset role", sql`reset role`],
+    ["set role", sql`set role app_service`],
+    ["commit and chain", sql`commit and chain`],
+  ])("«%s» dentro de «como usuario» no se guarda ni pasa por éxito", async (_name, statement) => {
+    const attempt = asUser(anaClaims, async (tx) => {
+      await tx.execute(statement);
+      return "todo bien";
+    });
+    await expect(attempt).rejects.toBeInstanceOf(TransactionControlError);
+
+    // Y la conexión no quedó con ese rol para la petición siguiente.
+    const [after] = await asUser(betoClaims, (tx) =>
+      tx.query(sql`select current_user::text as role, auth.uid() as id`, z.object({ role: z.string(), id: z.uuid() })),
+    );
+    expect(after).toEqual({ role: "authenticated", id: beto.id });
+  });
+
+  it("un token con una clave que no existe se rechaza sin contarlo como caída", async () => {
+    const [, body, signature] = ana.accessToken.split(".");
+    const header = Buffer.from(JSON.stringify({ alg: "ES256", kid: "clave-inventada", typ: "JWT" })).toString("base64url");
+    expect(await verifyAccessToken(`${header}.${body}.${signature}`)).toBeNull();
+  });
+
+  it("un token que dice otro algoritmo con la clave buena se rechaza sin contarlo como caída", async () => {
+    const [rawHeader, body, signature] = ana.accessToken.split(".");
+    const real = JSON.parse(Buffer.from(rawHeader ?? "", "base64url").toString("utf8")) as { kid: string };
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: real.kid, typ: "JWT" })).toString("base64url");
+    expect(await verifyAccessToken(`${header}.${body}.${signature}`)).toBeNull();
   });
 
   it("dos personas a la vez: cada transacción ve solo a la suya", async () => {
