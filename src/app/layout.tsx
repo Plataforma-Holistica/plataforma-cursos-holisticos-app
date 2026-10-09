@@ -23,7 +23,7 @@ export const viewport: Viewport = {
   colorScheme: "dark",
   // El token `--bg` de src/ui/theme.css. Aquí va escrito porque el navegador lo lee antes
   // que la hoja de estilos; tests/design/theme.test.ts comprueba que sean el mismo.
-  themeColor: "#12100E",
+  themeColor: "#0F1019",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
