@@ -287,6 +287,21 @@ y adaptadores de cada zona se agregan ahí cuando su tarea los crea. También ti
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.
 
+**Cómo entra un cambio.** Toda solicitud la abre el agente, desde la terminal, y espera a
+que la integración continua pase. Lo que sigue depende de lo que toca:
+
+- **Toca una ruta con dueño** (las de `.github/CODEOWNERS`): GitHub no deja fusionarla sin
+  la aprobación de un dueño. Quien abre una solicitud no puede aprobarla, así que la
+  aprueba Sergio desde la otra de sus dos cuentas, las dos dueñas. El agente la propone y
+  se detiene. Ya aprobada, la fusiona Sergio, o el agente si Sergio se lo pide.
+- **No toca ninguna:** entra con la integración continua en verde. La fusiona el agente
+  cuando el cambio lo pidió Sergio; si lo propuso el agente por su cuenta, la deja
+  propuesta.
+
+La protección de `main` no se cambia para dejar pasar una solicitud: eso es reconfigurar
+un proveedor, y se pregunta. `main` no se despliega mientras producción no exista
+(`vercel.json`), así que fusionar no publica nada.
+
 Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
 el cambio está mal aunque todo lo demás pase.
 
