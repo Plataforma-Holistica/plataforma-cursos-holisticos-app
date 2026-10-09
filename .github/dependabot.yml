@@ -1,0 +1,10 @@
+# Dependabot propone las actualizaciones de las acciones de la integración continua, que
+# van fijadas por el identificador de su commit (.github/workflows/ci.yml). Sus
+# solicitudes tocan `.github/`, así que necesitan la aprobación de un dueño de código.
+# Las fallas de seguridad de los paquetes las avisa aparte, sin este archivo.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
