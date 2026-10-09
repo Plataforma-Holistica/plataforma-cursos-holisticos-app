@@ -14,32 +14,36 @@
 
 /* 1. Valores */
 :root {
-  /* MARCA: acento */
-  --accent: #E2956B;
-  --accent-strong: #EDAE8A;
-  --accent-subtle: #3A241A;
-  --on-accent: #1F130C;
-  --focus: #F7C9AE;
+  /* La paleta es «Noche índigo» (elegida por Sergio el 2026-10-08): la hora en que la
+     casa se calla y uno se sienta a aprender algo para sí mismo. */
 
-  /* Neutros */
-  --bg: #12100E;
-  --surface-1: #1B1815;
-  --surface-2: #24201C;
-  --surface-3: #2F2A25;
-  --border: #3A342E;
-  --border-control: #8C8277;
-  --text: #F4EFE8;
-  --text-2: #C7BEB2;
-  --text-3: #A0968A;
-  --text-disabled: #6F675E;
+  /* MARCA: acento. Oro champaña: la luz de una vela, lo valioso. Se usa poco. */
+  --accent: #E2CF92;
+  --accent-strong: #EEDFB3;
+  --accent-subtle: #302C1B;
+  --on-accent: #1D1808;
+  --focus: #F6EBC9;
 
-  /* Estados. Nunca van solos: siempre con icono y con texto. */
-  --success: #7FCBA4;
-  --success-bg: #14271E;
-  --warning: #E8C766;
-  --warning-bg: #2B2412;
-  --danger: #F4918F;
-  --danger-bg: #2E1716;
+  /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro. */
+  --bg: #0F1019;
+  --surface-1: #171926;
+  --surface-2: #1F2233;
+  --surface-3: #292D42;
+  --border: #343851;
+  --border-control: #8A8FB0;
+  --text: #F2F0F7;
+  --text-2: #C4C3D6;
+  --text-3: #9D9DB7;
+  --text-disabled: #6B6C87;
+
+  /* Estados. Nunca van solos: siempre con icono y con texto. El aviso es naranja y el
+     error un rojo rosado para quedar a más de 20 grados de tono del oro del acento. */
+  --success: #84CFAA;
+  --success-bg: #12271F;
+  --warning: #F2A272;
+  --warning-bg: #2E1D12;
+  --danger: #F58FA6;
+  --danger-bg: #30151C;
 
   /* Capas sobre imagen */
   --scrim: rgb(0 0 0 / 0.72);
@@ -51,8 +55,8 @@
   --paper-2: #F0EBE3;
   --ink: #1F1B17;
   --ink-2: #5A5249;
-  /* MARCA: acento sobre papel */
-  --paper-accent: #A8512A;
+  /* MARCA: acento sobre papel. El oro no se lee sobre claro: aquí el acento es el índigo. */
+  --paper-accent: #3F4488;
   --paper-success: #1F6B45;
   --paper-warning: #7A5A00;
   --paper-danger: #B3322E;

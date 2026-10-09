@@ -51,45 +51,45 @@ const SURFACES = ["bg", "surface-1", "surface-2", "surface-3"] as const;
 
 // Elemento, razón sobre cada superficie, mínimo.
 const onSurfaces: [string, [number, number, number, number], number][] = [
-  ["text", [16.59, 15.45, 14.13, 12.41], AA_TEXT],
-  ["text-2", [10.33, 9.62, 8.8, 7.73], AA_TEXT],
-  ["text-3", [6.53, 6.08, 5.56, 4.88], AA_TEXT],
-  ["accent", [7.9, 7.36, 6.73, 5.91], AA_TEXT],
-  ["accent-strong", [9.96, 9.27, 8.48, 7.45], AA_TEXT],
-  ["success", [9.92, 9.24, 8.45, 7.42], AA_TEXT],
-  ["warning", [11.56, 10.76, 9.85, 8.65], AA_TEXT],
-  ["danger", [8.4, 7.82, 7.15, 6.28], AA_TEXT],
-  ["border-control", [5.03, 4.69, 4.29, 3.76], AA_UI],
-  ["focus", [12.58, 11.71, 10.72, 9.41], AA_UI],
+  ["text", [16.76, 15.44, 13.92, 12], AA_TEXT],
+  ["text-2", [10.93, 10.07, 9.08, 7.83], AA_TEXT],
+  ["text-3", [7.16, 6.59, 5.94, 5.12], AA_TEXT],
+  ["accent", [12.24, 11.27, 10.16, 8.76], AA_TEXT],
+  ["accent-strong", [14.29, 13.16, 11.86, 10.23], AA_TEXT],
+  ["success", [10.36, 9.54, 8.6, 7.41], AA_TEXT],
+  ["warning", [9.18, 8.46, 7.63, 6.57], AA_TEXT],
+  ["danger", [8.44, 7.77, 7.01, 6.04], AA_TEXT],
+  ["border-control", [5.98, 5.51, 4.97, 4.28], AA_UI],
+  ["focus", [15.91, 14.66, 13.21, 11.39], AA_UI],
   // Sin mínimo: un control inactivo (1.4.3) y un borde decorativo.
-  ["text-disabled", [3.41, 3.17, 2.9, 2.55], EXEMPT],
-  ["border", [1.54, 1.43, 1.31, 1.15], EXEMPT],
+  ["text-disabled", [3.71, 3.42, 3.08, 2.66], EXEMPT],
+  ["border", [1.65, 1.52, 1.37, 1.18], EXEMPT],
 ];
 
 // Lo de adelante, el fondo, la razón, el mínimo.
 const pairs: [string, string, number, number][] = [
-  ["bg", "text", 16.59, AA_TEXT], // botón principal
-  ["on-accent", "accent", 7.56, AA_TEXT],
-  ["on-accent", "accent-strong", 9.52, AA_TEXT],
-  ["text", "accent-subtle", 12.68, AA_TEXT],
-  ["accent", "accent-subtle", 6.04, AA_TEXT],
-  ["success", "success-bg", 8.2, AA_TEXT],
-  ["text", "success-bg", 13.71, AA_TEXT],
-  ["warning", "warning-bg", 9.37, AA_TEXT],
-  ["text", "warning-bg", 13.46, AA_TEXT],
-  ["danger", "danger-bg", 7.43, AA_TEXT],
-  ["text", "danger-bg", 14.68, AA_TEXT],
-  ["text-2", "success-bg", 8.54, AA_TEXT],
-  ["text-2", "warning-bg", 8.38, AA_TEXT],
-  ["text-2", "danger-bg", 9.14, AA_TEXT],
-  ["accent", "surface-3", 5.91, AA_UI], // barra de progreso sobre su pista
+  ["bg", "text", 16.76, AA_TEXT], // botón principal
+  ["on-accent", "accent", 11.44, AA_TEXT],
+  ["on-accent", "accent-strong", 13.35, AA_TEXT],
+  ["text", "accent-subtle", 12.37, AA_TEXT],
+  ["accent", "accent-subtle", 9.03, AA_TEXT],
+  ["success", "success-bg", 8.59, AA_TEXT],
+  ["text", "success-bg", 13.91, AA_TEXT],
+  ["warning", "warning-bg", 7.83, AA_TEXT],
+  ["text", "warning-bg", 14.28, AA_TEXT],
+  ["danger", "danger-bg", 7.49, AA_TEXT],
+  ["text", "danger-bg", 14.86, AA_TEXT],
+  ["text-2", "success-bg", 9.07, AA_TEXT],
+  ["text-2", "warning-bg", 9.32, AA_TEXT],
+  ["text-2", "danger-bg", 9.7, AA_TEXT],
+  ["accent", "surface-3", 8.76, AA_UI], // barra de progreso sobre su pista
   // Paleta «papel», para correos y PDF.
   ["ink", "paper", 16.01, AA_TEXT],
   ["ink", "paper-2", 14.41, AA_TEXT],
   ["ink-2", "paper", 7.17, AA_TEXT],
   ["ink-2", "paper-2", 6.46, AA_TEXT],
-  ["paper-accent", "paper", 5.07, AA_TEXT],
-  ["paper-accent", "paper-2", 4.56, AA_TEXT],
+  ["paper-accent", "paper", 8.2, AA_TEXT],
+  ["paper-accent", "paper-2", 7.39, AA_TEXT],
   ["paper-success", "paper", 6.05, AA_TEXT],
   ["paper-success", "paper-2", 5.44, AA_TEXT],
   ["paper-warning", "paper", 5.97, AA_TEXT],
@@ -115,8 +115,8 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
 
   // El velo es negro a 0.72 sobre la imagen. El peor caso es una imagen blanca.
   it.each([
-    ["text", 8.12],
-    ["text-2", 5.06],
+    ["text", 8.22],
+    ["text-2", 5.36],
   ])("%s sobre una imagen blanca con el velo a 0.72", (element, expected) => {
     const veiled = Math.round(255 * (1 - 0.72));
     const value = ratio(rgbOf(element), [veiled, veiled, veiled]);
