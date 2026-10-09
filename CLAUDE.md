@@ -106,13 +106,15 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Siete precisiones que la tabla no dice:
+falla. Ocho precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
   `src/instrumentation.ts`, el arranque de Next, la valida antes de la primera petición y
   termina el proceso si falta una variable. Una variable nueva se agrega al esquema de
-  `src/config/env.ts` y a `.env.example` en el mismo cambio.
+  `src/config/env.ts` y a `.env.example` en el mismo cambio. Lo poco que el navegador
+  puede saber vive aparte, en `src/config/public-env.ts`: `next.config.ts` lo copia de
+  las variables del servidor al compilar, para configurar cada valor una sola vez.
 - **`src/app/` y `src/jobs/` importan solo servicios** (y `src/app/`, además, los textos
   y los componentes base).
   Es la lectura estricta del TRD: si una pantalla necesita un tipo del dominio, el
@@ -181,6 +183,63 @@ falla. Siete precisiones que la tabla no dice:
   paleta de fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
+- **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
+  (`@sentry/*`) solo se importa en `src/adapters/sentry/`. El arranque y las pantallas de
+  error piden al servicio `src/services/error-reporting/`: `server.ts` para el servidor y
+  `browser.ts` para el navegador, que no se mezclan porque el segundo viaja en la
+  descarga.
+  - Lo que el SDK recolecta por su cuenta (cabeceras, cookies, cuerpos, parámetros, datos
+    de la persona) está apagado en `options.ts`, categoría por categoría. Si una versión
+    nueva agrega una categoría, deja de compilar hasta que alguien la decida.
+  - Todo error pasa además por `scrubEvent` (`scrub.ts`) antes de salir. El filtro no
+    quita lo malo: arma un evento nuevo y copia solo lo que conoce, y cada valor solo si
+    tiene su forma. De la persona, su identificador; de la petición, el método y la
+    dirección sin parámetros; de la pila, dónde fue (archivo, función, línea), sin las
+    líneas de código ni las variables; y el entorno que anota el propio SDK. Lo que no
+    está en sus listas no sale: ni `extra`, ni una etiqueta o un contexto que alguien
+    agregue, ni un campo que traiga una versión nueva del SDK. Una etiqueta nueva se
+    agrega a `ALLOWED_TAGS`, a la vista de quien revisa.
+  - Todo texto que sale pasa por reglas que buscan formas (un correo, un RFC, una llave,
+    un teléfono): el mensaje del error, y lo que la pila hereda de él, porque el SDK arma
+    la pila leyendo ese texto. Reconocen formas, no significados: un nombre propio pasa.
+    Es una red, no un permiso: **el mensaje de un error no lleva el dato de una
+    persona**, ni texto que venga de fuera sin revisar, y tampoco se lanza un objeto con
+    datos como si fuera un error.
+  - Solo errores, en el servidor y en el navegador: sin trazas, sin registros, sin
+    métricas, sin grabación de sesiones, sin el aviso de cada visita o de cada petición,
+    sin la consola ni los clics como contexto, y sin cabeceras de rastreo hacia terceros.
+    La tasa de trazas no se define, ni en cero: para el SDK un cero ya es «trazas
+    prendidas». Como sin definir el SDK leería `SENTRY_TRACES_SAMPLE_RATE`, la aplicación
+    se niega a iniciar si esa variable existe. Prender cualquiera de esas cosas es una
+    decisión aparte.
+  - Las integraciones del SDK van por lista de permitidas, en `server.ts` y en
+    `browser.ts`: una que no está en la lista no se instala, aunque el SDK la traiga de
+    fábrica. Una nueva se agrega después de leer qué recolecta: `ContextLines` no está
+    porque abría cualquier archivo que la pila nombrara y mandaba sus líneas. Una prueba
+    enciende el SDK de verdad y revisa la lista exacta y lo que saldría
+    (`real-sdk.test.ts`): es la que avisa cuando una versión nueva del SDK cambia algo.
+  - Al salir hay una última puerta (`transport.ts`): lo que no es un error se descarta,
+    lo haya pedido quien lo haya pedido. Un aviso de trabajo programado o un comentario
+    de una persona no pasarían por el filtro; si algún día se quieren, esa puerta se abre
+    a propósito y con su propio filtro.
+  - `@sentry/*` no se importa en ningún otro lado de `src/`, tampoco con `import()` ni
+    con `require`: `Sentry.setUser` o `Sentry.logger` desde un servicio se saltarían el
+    filtro.
+  - El arranque (`src/instrumentation.ts`) se compila también para Edge: lo que es solo
+    de Node (`server.ts`) se carga dentro de su rama de Node, y lo que Next llama al
+    fallar una petición vive en `request-error.ts`. Si el registro de errores no
+    enciende, la aplicación atiende igual y lo dice en los registros del servidor: al
+    revés que con las variables de entorno, sin las cuales no inicia.
+  - En el navegador el SDK no viaja con la página, porque pesa y casi ninguna visita lo
+    necesita: `browser.ts` lo pide aparte cuando el navegador queda libre, o en el momento
+    de reportar, y guarda mientras tanto los errores que ocurran. Lo que se use del SDK
+    se exporta en `browser-sdk.ts`: pedir el paquete entero descarga casi el triple.
+  - Sin `SENTRY_DSN` no se manda nada: así se trabaja en local. Fuera de local es
+    obligatoria, cifrada y con la forma que el SDK acepta (con otra, el SDK no falla: se
+    queda callado). Los mapas de código solo se suben al compilar en Vercel, y de ellos
+    saca Sentry el código que muestra junto a cada punto de la pila.
+  - El simulacro: `GET /api/error-drill` falla a propósito (en producción responde 404),
+    y `/muestra/error`, solo con `pnpm dev`, rompe la pantalla desde el navegador.
 
 Un componente base nuevo entra primero al inventario del diseño (`03` §5) y se construye
 sobre elementos nativos: la biblioteca de primitivas no está decidida (D-14). Su prueba va
@@ -224,7 +283,9 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
 `src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
 `supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir; los servicios
-y adaptadores de cada zona se agregan ahí cuando su tarea los crea.
+y adaptadores de cada zona se agregan ahí cuando su tarea los crea. También tiene dueño
+`src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
+tercero.
 
 Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
 el cambio está mal aunque todo lo demás pase.
@@ -243,6 +304,8 @@ el cambio está mal aunque todo lo demás pase.
 - Poner un secreto en el código, en el navegador o en un registro.
 - Escribir en registros, en correos o en analítica el historial de cursos de un alumno,
   datos fiscales o bancarios, o el texto de un caso de moderación.
+- Mandar al registro de errores el dato de una persona: ni en el mensaje de un error, ni
+  como contexto, ni prendiendo una recolección que está apagada.
 - Escribir un texto visible fuera del catálogo de `src/messages/`, o la palabra del rol
   fuera de su bloque de términos.
 - Escribir un valor visual suelto o un estilo en línea, en vez de un token.

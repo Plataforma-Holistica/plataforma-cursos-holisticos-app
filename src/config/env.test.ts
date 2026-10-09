@@ -79,6 +79,85 @@ describe("parseEnv", () => {
     },
   );
 
+  // El registro de errores (RNF-16). En local no se manda nada si no se pide; en los
+  // entornos que atienden a personas, arrancar sin él sería quedarse a ciegas.
+  describe("SENTRY_DSN", () => {
+    // Por partes, por la misma razón que la dirección de la base.
+    const fakeDsn = ["https://0123456789abcdef", "o1.ingest.sentry.example/1"].join("@");
+
+    it("es opcional en local", () => {
+      expect(parseEnv(valid)).not.toHaveProperty("SENTRY_DSN");
+      expect(parseEnv({ ...valid, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(fakeDsn);
+    });
+
+    it.each(["staging", "production"])("es obligatoria en %s", (appEnv) => {
+      expect(problemsOf({ ...valid, APP_ENV: appEnv })).toEqual(["SENTRY_DSN: falta"]);
+      expect(parseEnv({ ...valid, APP_ENV: appEnv, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(
+        fakeDsn,
+      );
+    });
+
+    it("se rechaza si no es una dirección http", () => {
+      expect(problemsOf({ ...valid, SENTRY_DSN: "clave-suelta" })).toEqual([
+        "SENTRY_DSN: tiene un valor inválido",
+      ]);
+    });
+
+    // El SDK no falla con una dirección mal formada: avisa en la consola y se queda sin
+    // mandar nada. La aplicación arrancaría «con» registro de errores y sin él. Aquí se
+    // exige la forma que el SDK acepta: llave, servidor y número de proyecto.
+    it.each([
+      ["sin llave", "https://o1.ingest.sentry.example/1"],
+      ["sin proyecto", ["https://0123456789abcdef", "o1.ingest.sentry.example"].join("@")],
+      ["con una llave que no es de letras y números", ["https://0123-4567", "o1.ingest.sentry.example/1"].join("@")],
+      ["que es cualquier otra dirección", "https://example.com"],
+    ])("se rechaza una dirección %s, que el SDK descartaría en silencio", (_name, dsn) => {
+      expect(problemsOf({ ...valid, APP_ENV: "staging", SENTRY_DSN: dsn })).toEqual([
+        "SENTRY_DSN: tiene un valor inválido",
+      ]);
+    });
+
+    it.each(["staging", "production"])("en %s tiene que ir cifrada", (appEnv) => {
+      const plain = ["http://0123456789abcdef", "o1.ingest.sentry.example/1"].join("@");
+
+      expect(problemsOf({ ...valid, APP_ENV: appEnv, SENTRY_DSN: plain })).toEqual([
+        "SENTRY_DSN: tiene un valor inválido",
+      ]);
+      // En local sí: sirve para probar contra un receptor en la propia máquina.
+      expect(parseEnv({ ...valid, SENTRY_DSN: plain }).SENTRY_DSN).toBe(plain);
+    });
+
+    it("falta junto con las demás, en su lugar de la lista", () => {
+      expect(problemsOf({ APP_ENV: "staging" })).toEqual([
+        ...Object.keys(valid)
+          .filter((name) => name !== "APP_ENV")
+          .map((name) => `${name}: falta`),
+        "SENTRY_DSN: falta",
+      ]);
+    });
+  });
+
+  // El SDK de Sentry lee esta variable por su cuenta, sin pasar por aquí, y con ella
+  // prende las trazas: otra recolección, que no pasa por el filtro de los errores. Las
+  // trazas se deciden en el código y con su revisión, no desde el panel de Vercel.
+  describe("SENTRY_TRACES_SAMPLE_RATE", () => {
+    it.each(["1", "0.1", "0"])("no se admite, valga lo que valga (%s)", (value) => {
+      expect(problemsOf({ ...valid, SENTRY_TRACES_SAMPLE_RATE: value })).toEqual([
+        "SENTRY_TRACES_SAMPLE_RATE: no se admite",
+      ]);
+    });
+
+    it("vacía cuenta como ausente", () => {
+      expect(parseEnv({ ...valid, SENTRY_TRACES_SAMPLE_RATE: "" })).toEqual(valid);
+    });
+
+    it("se reporta junto con las que faltan", () => {
+      expect(
+        problemsOf({ ...valid, DATABASE_URL: undefined, SENTRY_TRACES_SAMPLE_RATE: "1" }),
+      ).toEqual(["DATABASE_URL: falta", "SENTRY_TRACES_SAMPLE_RATE: no se admite"]);
+    });
+  });
+
   it("nunca escribe el valor de una variable en el error", () => {
     const secret = `${fakeDatabaseUrl("no-debe-aparecer")} y z`;
     try {
