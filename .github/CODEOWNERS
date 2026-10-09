@@ -1,33 +1,38 @@
 # Las tres zonas que se escriben despacio (TRD §2 y §12.2). Un cambio en estas rutas no se
 # fusiona sin que una persona lo lea línea por línea. Las rutas de servicios y adaptadores
 # de cada zona se agregan cuando su tarea las crea.
+#
+# GitHub lo hace cumplir: `main` exige la aprobación de un dueño cuando una solicitud toca
+# una de estas rutas. Quien abre la solicitud no puede aprobarla, así que hay dos dueños,
+# las dos cuentas de Sergio: aprueba la que no la abrió. Una solicitud que no toca estas
+# rutas entra con la integración continua en verde.
 
 # Control de acceso
-/src/domain/access/        @SerchFGA
+/src/domain/access/        @SerchFGA @plataformaholisticadev
 # El único camino del código a la base: decide por quién se actúa (ADR-31)
-/src/adapters/supabase/    @SerchFGA
+/src/adapters/supabase/    @SerchFGA @plataformaholisticadev
 
 # Medición y reparto
-/src/domain/consumption/   @SerchFGA
-/src/domain/payout/        @SerchFGA
+/src/domain/consumption/   @SerchFGA @plataformaholisticadev
+/src/domain/payout/        @SerchFGA @plataformaholisticadev
 
 # Toda migración del esquema propio: puede tocar un libro
-/supabase/migrations/      @SerchFGA
+/supabase/migrations/      @SerchFGA @plataformaholisticadev
 
 # Las pruebas de base, que dicen qué se le niega a cada rol, y la semilla de parámetros
-/supabase/tests/           @SerchFGA
-/supabase/seeds/           @SerchFGA
+/supabase/tests/           @SerchFGA @plataformaholisticadev
+/supabase/seeds/           @SerchFGA @plataformaholisticadev
 
 # Lo que sale hacia un tercero: qué recolecta el registro de errores y el filtro de datos
 # personales por el que pasa cada error (TRD §10.5)
-/src/adapters/sentry/      @SerchFGA
+/src/adapters/sentry/      @SerchFGA @plataformaholisticadev
 
 # Las reglas de capas y la integración continua, que protegen todo lo anterior
-/eslint.config.mjs         @SerchFGA
-/.github/                  @SerchFGA
+/eslint.config.mjs         @SerchFGA @plataformaholisticadev
+/.github/                  @SerchFGA @plataformaholisticadev
 
 # Las pruebas que hacen cumplir esas reglas, y los guiones que tocan roles de la base
-/tests/architecture/       @SerchFGA
-/tests/integration/        @SerchFGA
-/vitest.config.ts          @SerchFGA
-/scripts/                  @SerchFGA
+/tests/architecture/       @SerchFGA @plataformaholisticadev
+/tests/integration/        @SerchFGA @plataformaholisticadev
+/vitest.config.ts          @SerchFGA @plataformaholisticadev
+/scripts/                  @SerchFGA @plataformaholisticadev
