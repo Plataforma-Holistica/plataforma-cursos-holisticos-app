@@ -12,6 +12,7 @@ const fixtures = "tests/architecture/fixtures/src";
 
 const LAYERS = "boundaries/dependencies";
 const IMPORTS = "no-restricted-imports";
+const SYNTAX = "no-restricted-syntax";
 
 let eslint: ESLint;
 
@@ -230,6 +231,157 @@ const forbidden: Case[] = [
     code: `import type { Cents } from "@/domain/shared/types";\nexport type Probe = Cents;\n`,
     rule: LAYERS,
   },
+  // ADR-31 (TRD §8.10): el cliente de base y el SDK de Supabase no salen de su adaptador.
+  {
+    name: "un servicio importa el cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio importa un paquete de la familia del cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import Pool from "pg-pool";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio importa el SDK de Supabase",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { createClient } from "@supabase/supabase-js";\nexport const probe = createClient;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "otro adaptador importa el cliente de base",
+    file: `${fixtures}/adapters/stripe/probe.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "la configuración importa el cliente de base",
+    file: `${fixtures}/config/probe.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "la configuración de Payload importa el SDK de Supabase",
+    file: `${fixtures}/payload/probe.ts`,
+    code: `import { createClient } from "@supabase/supabase-js";\nexport const probe = createClient;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio carga un archivo interno del cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => import("pg/lib/index.js");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio importa un archivo interno del cliente de base",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import Client from "pg/lib/client";\nexport const probe = Client;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio carga el cliente de base con una plantilla",
+    file: `${fixtures}/services/probe.ts`,
+    code: "export const probe = () => import(`pg`);\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga un paquete con un nombre que se arma al correr",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = (name: string) => import(name);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio se fabrica su propio require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { createRequire } from "node:module";\nexport const probe = createRequire(import.meta.url)("pg");\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio usa module.require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => module.require("pg");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio llama a sql(...) directamente",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const sql: (...args: unknown[]) => unknown;\nexport const probe = (text: string) => sql([text]);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio se escribe en JavaScript, donde las reglas de capas no alcanzan",
+    file: `${fixtures}/services/probe.mjs`,
+    code: `import pg from "pg";\nexport const probe = pg;\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga un paquete con require y un nombre que se arma al correr",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const require: (name: string) => unknown;\nexport const probe = (name: string) => require(name);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio importa el módulo de módulos entero para fabricarse un require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import Module from "node:module";\nexport const probe = Module.createRequire(import.meta.url)("pg");\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio llama a la etiqueta sql con call",
+    file: `${fixtures}/services/probe.ts`,
+    code: `declare const sql: { call: (...args: unknown[]) => unknown };\nexport const probe = (text: string) => sql.call(null, [text]);\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio escribe un commit dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`commit and chain`;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio cambia de rol dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`reset role`;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio reescribe quién actúa dentro de una consulta",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray) => unknown;\nexport const probe = sql`select set_config('app.actor_id', 'otro', true)`;\n",
+    rule: SYNTAX,
+  },
+  {
+    name: "el arranque importa el cliente de base",
+    file: `${fixtures}/instrumentation.ts`,
+    code: `import { Pool } from "pg";\nexport const probe = Pool;\n`,
+    rule: IMPORTS,
+  },
+  {
+    name: "un servicio carga el cliente de base con import() dinámico",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => import("pg");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "un servicio carga el SDK de Supabase con require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => require("@supabase/supabase-js");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "una página carga el cliente de base con import() dinámico",
+    file: `${fixtures}/app/probe.ts`,
+    code: `export const probe = () => import("pg");\n`,
+    rule: SYNTAX,
+  },
+  {
+    name: "el dominio carga el cliente de base con import() dinámico",
+    file: `${fixtures}/domain/access/probe.ts`,
+    code: `export const probe = () => import("pg");\n`,
+    rule: SYNTAX,
+  },
 ];
 
 const allowed: Omit<Case, "rule">[] = [
@@ -259,9 +411,24 @@ const allowed: Omit<Case, "rule">[] = [
     code: `import { thing } from "./thing";\nexport const probe = thing;\n`,
   },
   {
-    name: "un servicio importa dominio, adaptador y cliente de base",
+    name: "un servicio importa el dominio y un adaptador",
     file: `${fixtures}/services/probe.ts`,
-    code: `import { createClient } from "@supabase/supabase-js";\nimport { thing as adapter } from "../adapters/mux/thing";\nimport { thing as domain } from "../domain/payout/thing";\nexport const probe = [createClient, adapter, domain];\n`,
+    code: `import { thing as adapter } from "../adapters/mux/thing";\nimport { thing as domain } from "../domain/payout/thing";\nexport const probe = [adapter, domain];\n`,
+  },
+  {
+    name: "un servicio llega a la base por el adaptador de Supabase",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { thing } from "../adapters/supabase/thing";\nexport const probe = thing;\n`,
+  },
+  {
+    name: "el adaptador de Supabase importa el cliente de base y su SDK",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `import { createClient } from "@supabase/supabase-js";\nimport { Pool } from "pg";\nexport const probe = [createClient, Pool];\n`,
+  },
+  {
+    name: "el adaptador de Supabase carga el cliente de base con import() dinámico",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `export const probe = () => import("pg");\n`,
   },
   {
     name: "una página importa un servicio y los textos",
@@ -282,6 +449,11 @@ const allowed: Omit<Case, "rule">[] = [
     name: "la configuración lee las variables de entorno y usa un paquete",
     file: `${fixtures}/config/probe.ts`,
     code: `import { z } from "zod";\nexport const probe = () => [z, process.env.APP_ENV];\n`,
+  },
+  {
+    name: "un servicio escribe una consulta normal, con palabras que solo se parecen a las prohibidas",
+    file: `${fixtures}/services/probe.ts`,
+    code: "declare const sql: (strings: TemplateStringsArray, ...values: unknown[]) => unknown;\nexport const probe = (id: string) => sql`select role, committed_at, ended_at from public.profiles where id = ${id} on conflict do nothing`;\n",
   },
   {
     name: "el arranque importa la configuración",

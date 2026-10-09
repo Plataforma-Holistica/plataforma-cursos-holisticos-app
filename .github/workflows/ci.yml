@@ -1,7 +1,7 @@
 name: Integración continua
 
-# El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de integración y de
-# extremo a extremo se agregan con las tareas que los crean.
+# El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de extremo a extremo
+# se agregan con la tarea que los crea.
 
 on:
   pull_request:
@@ -45,6 +45,11 @@ jobs:
       # `braces`. No tiene versión corregida, solo llega por herramientas de desarrollo
       # (lint) y exige patrones glob ajenos, que aquí no hay. Se quita en cuanto exista
       # corrección.
+      #
+      # Y un valor forzado, también en package.json (pnpm.overrides): `handlebars` 4.7.10.
+      # `eslint-plugin-boundaries` pide la 4.7.9 exacta, que tiene dos avisos críticos
+      # desde octubre de 2026. Solo corre con el lint, pero la auditoría no distingue. Se
+      # quita en cuanto ese paquete pida una versión corregida.
       - name: Auditoría de dependencias
         run: pnpm audit --audit-level=high
 
@@ -59,6 +64,18 @@ jobs:
 
       - name: Pruebas de base
         run: pnpm test:db
+
+      # TRD §11.5, paso 5: el código contra la base real. Van después de las pruebas de
+      # base, que cuentan renglones y esperan la base recién nacida. La contraseña de
+      # app_service se inventa en cada corrida y no sale de ella.
+      - name: Entorno de las pruebas de integración
+        run: node scripts/ci-env.mjs
+
+      - name: Entrada de la aplicación a la base local
+        run: pnpm db:login
+
+      - name: Pruebas de integración
+        run: pnpm test:int
 
       - name: Compilación
         run: pnpm build

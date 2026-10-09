@@ -7,16 +7,90 @@ import boundaries from "eslint-plugin-boundaries";
 // lado. `tests/architecture/layers.test.ts` comprueba cada regla: si se afloja una, esa
 // prueba falla.
 
-// SDK de proveedores y clientes de base. Solo los adaptadores y los servicios los tocan.
-const PROVIDER_SDKS = [
-  "@supabase/*",
-  "@mux/mux-node",
-  "stripe",
-  "facturapi",
-  "resend",
-  "pg",
-  "postgres",
+// El cliente de base y el SDK de Supabase no salen de src/adapters/supabase/ (ADR-31, TRD
+// §8.10): el servidor entra a la base con un rol que salta la seguridad por fila, y solo
+// ese adaptador sabe bajar al rol de la persona.
+// Con sus archivos internos: `pg/lib/client` es el mismo cliente por otra puerta.
+const DATABASE_CLIENTS = ["pg", "pg/*", "pg-*", "postgres", "postgres/*", "@supabase/*"];
+
+const noDatabaseClient = {
+  group: DATABASE_CLIENTS,
+  message:
+    "El cliente de base y el SDK de Supabase viven solo en src/adapters/supabase/: usa asUser, asServer o asSystem (TRD §8.10).",
+};
+
+// Lo mismo cuando el paquete se carga con import() o con require, que la regla de
+// arriba no ve.
+const DATABASE_CLIENT_SOURCE =
+  "/^((pg|postgres)(\\u002F.+)?|pg-.+|@supabase\\u002F.+)$/";
+
+const noDatabaseClientLoading = [
+  {
+    selector: `ImportExpression[source.value=${DATABASE_CLIENT_SOURCE}]`,
+    message: noDatabaseClient.message,
+  },
+  {
+    selector: `CallExpression[callee.name='require'][arguments.0.value=${DATABASE_CLIENT_SOURCE}]`,
+    message: noDatabaseClient.message,
+  },
+  {
+    // Un nombre que se arma al correr (una plantilla, una variable) no se puede revisar.
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Un import() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
+    selector: "CallExpression[callee.object.name='module'][callee.property.name='require']",
+    message: noDatabaseClient.message,
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+    message:
+      "Un require() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
+    // `sql` es una etiqueta de plantilla. Llamada como función acepta una plantilla
+    // imitada, con texto armado, que es justo lo que la etiqueta existe para impedir.
+    selector: "CallExpression[callee.name='sql']",
+    message:
+      "sql se usa como etiqueta (sql`select ...`), nunca como función: así los valores viajan como parámetros (TRD §8.10).",
+  },
+  {
+    selector: "MemberExpression[object.name='sql'][property.name=/^(call|apply|bind)$/]",
+    message:
+      "sql se usa como etiqueta (sql`select ...`), nunca con call, apply o bind (TRD §8.10).",
+  },
+  // Quien abre la transacción, la cierra y decide con qué rol y por quién corre es el
+  // adaptador. El adaptador lo comprueba al correr (y rechaza); esto lo dice antes, al
+  // escribir. No pretende ser completo: una consulta armada para burlarlo lo burla.
+  {
+    // Una consulta que empieza por una sentencia de control.
+    selector:
+      "TaggedTemplateExpression[tag.name='sql'] > TemplateLiteral > TemplateElement:first-child[value.raw=/^\\s*(commit|rollback|abort|end|begin|start\\s+transaction|savepoint|release|prepare\\s+transaction|discard|reset)\\b/i]",
+    message:
+      "commit, rollback, begin y demás no se escriben en una consulta: la transacción la abre y la cierra el adaptador (TRD §8.10).",
+  },
+  {
+    // En cualquier parte de la consulta: cambiar de rol, reescribir quién actúa, o
+    // encadenar otra transacción. `set role = ...` en un update es una columna, y pasa.
+    selector:
+      "TaggedTemplateExpression[tag.name='sql'] TemplateElement[value.raw=/(\\b(set|reset)\\s+(local\\s+|session\\s+)?(role|session\\s+authorization)\\b(?!\\s*=)|set_config\\s*\\(\\s*'(role|session_authorization|request\\.jwt|app\\.)|\\band\\s+chain\\b)/i]",
+    message:
+      "Una consulta no cambia de rol ni reescribe por quién se actúa: eso lo fija el adaptador con asUser, asServer o asSystem (TRD §8.10).",
+  },
 ];
+
+// Fabricarse un `require` propio es otra forma de cargar un paquete sin que se vea. Se
+// prohíbe el módulo entero: `import Module from "node:module"` y luego
+// `Module.createRequire` es lo mismo por otra puerta.
+const noOwnRequire = ["node:module", "module"].map((name) => ({
+  name,
+  message:
+    "node:module sirve para cargar paquetes a espaldas del lint (createRequire). Si hace falta, va en el adaptador (TRD §8.10).",
+}));
+
+// SDK de proveedores. Solo su adaptador los toca.
+const PROVIDER_SDKS = [...DATABASE_CLIENTS, "@mux/mux-node", "stripe", "facturapi", "resend"];
 
 const noProviderSdks = {
   group: PROVIDER_SDKS,
@@ -136,6 +210,31 @@ export default defineConfig([
     },
   },
   {
+    // Va antes que los bloques de cada capa: en esta configuración el bloque posterior
+    // reemplaza la regla, no la suma, así que cada uno de ellos repite estos patrones.
+    files: ["**/src/**/*.{ts,tsx}"],
+    ignores: ["**/src/adapters/supabase/**"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
+      "no-restricted-syntax": ["error", ...noDatabaseClientLoading],
+    },
+  },
+  {
+    // Todas las reglas de arriba y de abajo miran `.ts` y `.tsx`. Un archivo de JavaScript
+    // en src/ quedaría fuera de todas: no se escribe.
+    files: ["**/src/**/*.{js,jsx,mjs,cjs}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Program",
+          message:
+            "El código de src/ se escribe en TypeScript: las reglas de capas no alcanzan a un archivo de JavaScript.",
+        },
+      ],
+    },
+  },
+  {
     // Dominio puro (P1): sin paquetes, sin red, sin reloj y sin variables de entorno.
     files: ["**/src/domain/**/*.ts"],
     rules: {
@@ -165,6 +264,7 @@ export default defineConfig([
           selector: "NewExpression[callee.name='Date'][arguments.length=0]",
           message: "El reloj entra al dominio como argumento (P1).",
         },
+        ...noDatabaseClientLoading,
       ],
     },
   },
@@ -185,7 +285,9 @@ export default defineConfig([
               group: ["react", "react/*", "react-dom", "react-dom/*"],
               message: "Los servicios no conocen React: eso es de la capa de entrada (TRD §4.2).",
             },
+            noDatabaseClient,
           ],
+          paths: noOwnRequire,
         },
       ],
     },
@@ -193,7 +295,7 @@ export default defineConfig([
   {
     files: ["**/src/app/**/*.{ts,tsx}", "**/src/jobs/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [noProviderSdks] }],
+      "no-restricted-imports": ["error", { patterns: [noProviderSdks], paths: noOwnRequire }],
     },
   },
 ]);

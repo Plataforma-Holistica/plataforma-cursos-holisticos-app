@@ -4,6 +4,8 @@
 
 # Control de acceso
 /src/domain/access/        @SerchFGA
+# El único camino del código a la base: decide por quién se actúa (ADR-31)
+/src/adapters/supabase/    @SerchFGA
 
 # Medición y reparto
 /src/domain/consumption/   @SerchFGA
@@ -19,3 +21,9 @@
 # Las reglas de capas y la integración continua, que protegen todo lo anterior
 /eslint.config.mjs         @SerchFGA
 /.github/                  @SerchFGA
+
+# Las pruebas que hacen cumplir esas reglas, y los guiones que tocan roles de la base
+/tests/architecture/       @SerchFGA
+/tests/integration/        @SerchFGA
+/vitest.config.ts          @SerchFGA
+/scripts/                  @SerchFGA
