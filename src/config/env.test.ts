@@ -137,6 +137,56 @@ describe("parseEnv", () => {
     });
   });
 
+  // Cada rama tiene su propia vista previa, con su propia dirección. Una variable fija no
+  // sirve: habría que ponerla a mano en Vercel rama por rama, y la vista previa de una
+  // rama nueva no podría arrancar. En una vista previa la dirección se deduce de la que
+  // Vercel le da a la rama.
+  describe("NEXT_PUBLIC_SITE_URL en una vista previa", () => {
+    const withoutSiteUrl = { ...valid, NEXT_PUBLIC_SITE_URL: undefined };
+    const branchHost = "plataforma-git-una-rama-equipo.vercel.app";
+    const preview = { ...withoutSiteUrl, VERCEL_ENV: "preview", VERCEL_BRANCH_URL: branchHost };
+
+    it("se deduce de la dirección que Vercel le da a la rama", () => {
+      expect(parseEnv(preview).NEXT_PUBLIC_SITE_URL).toBe(`https://${branchHost}`);
+    });
+
+    it("si está puesta a mano, manda la que está puesta", () => {
+      const explicit = "https://pruebas.plataforma.example";
+
+      expect(parseEnv({ ...preview, NEXT_PUBLIC_SITE_URL: explicit }).NEXT_PUBLIC_SITE_URL).toBe(
+        explicit,
+      );
+    });
+
+    // Producción tiene una sola dirección, la del dominio, y se escribe: una deducida
+    // cambiaría con cada despliegue, y de ella salen los enlaces de los correos.
+    it.each(["production", "development", undefined])(
+      "fuera de una vista previa no se deduce (VERCEL_ENV: %s)",
+      (vercelEnv) => {
+        expect(problemsOf({ ...preview, VERCEL_ENV: vercelEnv })).toEqual([
+          "NEXT_PUBLIC_SITE_URL: falta",
+        ]);
+      },
+    );
+
+    it("sin la dirección de la rama, falta", () => {
+      expect(problemsOf({ ...preview, VERCEL_BRANCH_URL: undefined })).toEqual([
+        "NEXT_PUBLIC_SITE_URL: falta",
+      ]);
+    });
+
+    it.each([
+      ["con protocolo", "https://plataforma-git-una-rama.vercel.app"],
+      ["con ruta", "plataforma-git-una-rama.vercel.app/entrar"],
+      ["con usuario", "alguien@plataforma-git-una-rama.vercel.app"],
+      ["con espacios", "plataforma git.vercel.app"],
+    ])("no se deduce de algo que no es el nombre de un servidor (%s)", (_name, host) => {
+      expect(problemsOf({ ...preview, VERCEL_BRANCH_URL: host })).toEqual([
+        "NEXT_PUBLIC_SITE_URL: falta",
+      ]);
+    });
+  });
+
   // El SDK de Sentry lee esta variable por su cuenta, sin pasar por aquí, y con ella
   // prende las trazas: otra recolección, que no pasa por el filtro de los errores. Las
   // trazas se deciden en el código y con su revisión, no desde el panel de Vercel.

@@ -27,7 +27,13 @@ const schema = z.object({
   // La pone Vercel, no una persona: `production`, `preview` o `development`. Sirve de
   // segunda opinión sobre APP_ENV, que sí se escribe a mano en el panel.
   VERCEL_ENV: z.string().optional(),
+  // También de Vercel: el nombre del servidor de la vista previa de la rama, sin
+  // protocolo. De ahí sale la dirección del sitio en una vista previa (abajo).
+  VERCEL_BRANCH_URL: z.string().optional(),
 });
+
+// El nombre de un servidor y nada más: sin protocolo, sin ruta, sin usuario.
+const hostName = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
 
 export type Env = z.infer<typeof schema>;
 
@@ -66,6 +72,19 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   for (const name of names) {
     const value = source[name];
     if (value !== undefined && value !== "") present[name] = value;
+  }
+
+  // Cada rama tiene su vista previa, con su propia dirección: una variable fija habría
+  // que ponerla a mano en Vercel, rama por rama. En una vista previa se deduce de la que
+  // Vercel le da a la rama. Solo ahí: producción tiene una sola dirección, la del
+  // dominio, y se escribe, porque de ella salen los enlaces de los correos.
+  if (
+    present.NEXT_PUBLIC_SITE_URL === undefined &&
+    present.VERCEL_ENV === "preview" &&
+    present.VERCEL_BRANCH_URL !== undefined &&
+    hostName.test(present.VERCEL_BRANCH_URL)
+  ) {
+    present.NEXT_PUBLIC_SITE_URL = `https://${present.VERCEL_BRANCH_URL}`;
   }
 
   const result = schema.safeParse(present);
