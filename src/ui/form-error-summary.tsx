@@ -1,0 +1,76 @@
+"use client";
+
+import { type MouseEvent, useEffect, useRef } from "react";
+
+import { ui } from "@/messages/es/ui";
+import { plural, t } from "@/messages/format";
+
+// Resumen de errores de un formulario (diseño, sección 5.3). Al enviar con errores el foco
+// viene aquí, arriba del formulario: dice cuántos datos hay por corregir y enlaza a cada
+// campo. Lo escrito no se pierde.
+
+export interface FormError {
+  /** El `id` del campo, el mismo que se le dio a su `TextField`. */
+  fieldId: string;
+  /** Qué pasó y cómo se arregla. El mismo texto que lleva el campo. */
+  message: string;
+}
+
+export interface FormErrorSummaryProps {
+  errors: readonly FormError[];
+  /**
+   * El número de intento de envío. Si la persona reenvía y los errores son los mismos, lo
+   * único que cambia es esto: sin él, el resumen no volvería a tomar el foco y quien usa
+   * lector de pantalla no se enteraría de que el envío falló otra vez.
+   */
+  attempt?: number;
+}
+
+export function FormErrorSummary({ errors, attempt }: FormErrorSummaryProps) {
+  const summary = useRef<HTMLDivElement>(null);
+  const count = errors.length;
+
+  // Qué errores son, como texto. El foco depende de esto y no del arreglo: una pantalla
+  // suele armar un arreglo nuevo en cada dibujado, y con eso el foco saltaría aquí con
+  // cada tecla.
+  const signature = errors.map((error) => `${error.fieldId}\u0000${error.message}`).join("\u0001");
+
+  // Cada vez que llega una tanda distinta de errores, o un intento nuevo con los mismos.
+  useEffect(() => {
+    if (signature !== "") summary.current?.focus();
+  }, [signature, attempt]);
+
+  if (count === 0) return null;
+
+  // Un enlace a un `id` desplaza la página, pero no en todos los navegadores mueve el foco.
+  function focusField(event: MouseEvent<HTMLAnchorElement>, fieldId: string) {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    event.preventDefault();
+    field.focus();
+  }
+
+  return (
+    <div
+      ref={summary}
+      role="alert"
+      tabIndex={-1}
+      className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg p-4"
+    >
+      <p className="text-body font-semibold text-text">{t(plural(count, ui.formErrors), { count })}</p>
+      <ul className="flex list-disc flex-col gap-1 pl-5">
+        {errors.map((error) => (
+          <li key={error.fieldId} className="text-body-s text-text">
+            <a
+              href={`#${error.fieldId}`}
+              onClick={(event) => focusField(event, error.fieldId)}
+              className="underline underline-offset-4 hover:text-accent-strong"
+            >
+              {error.message}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
