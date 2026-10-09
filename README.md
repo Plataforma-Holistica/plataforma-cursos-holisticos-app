@@ -43,3 +43,8 @@ El orden es el de `../planeacion/06-plan-implementacion.md`:
 - Remoto: crear el repositorio privado en GitHub y conectarlo (T-006). La integración
   continua no corre hasta entonces.
 - Proyecto propio en Vercel, distinto del que publica la documentación.
+- **`main` no se despliega todavía.** En Vercel `main` es producción, y producción aún no
+  tiene variables de entorno ni base: `vercel.json` apaga su despliegue automático
+  (`git.deploymentEnabled`). Las demás ramas siguen generando su vista previa, que es el
+  entorno de pruebas. Cuando producción exista (dominio, cuentas reales y sus variables),
+  se quita esa línea de `vercel.json` en la misma solicitud que la da de alta.
