@@ -51,8 +51,13 @@ Quien vaya a trabajar en él necesita además el PDF de los documentos, que se g
 ## Cómo entra un cambio
 
 `main` está protegida: todo entra por solicitud de cambio, con la integración continua en
-verde. Empujar a `main` despliega a producción en Vercel. Las zonas delicadas (control de
-acceso, cobro, reparto, migraciones) no se fusionan sin que una persona las lea línea por
-línea: están en `.github/CODEOWNERS`.
+verde. Las zonas delicadas (control de acceso, cobro, reparto, migraciones) no se fusionan
+sin que una persona las lea línea por línea: están en `.github/CODEOWNERS`.
+
+**`main` no se despliega todavía.** En Vercel `main` es producción, y producción aún no
+tiene variables de entorno ni base: `vercel.json` apaga su despliegue automático. Las demás
+ramas siguen generando su vista previa, que es el entorno de pruebas. Cuando producción
+exista (dominio, cuentas reales y sus variables), se quita esa línea de `vercel.json` en la
+misma solicitud que la da de alta.
 
 El orden de las tareas es el de `../planeacion/06-plan-implementacion.md`.
