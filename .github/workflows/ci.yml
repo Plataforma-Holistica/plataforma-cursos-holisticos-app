@@ -59,6 +59,12 @@ jobs:
       - name: Pruebas del dominio y de capas
         run: pnpm test
 
+      # TRD §12.2: las reglas de acceso exigen el 100 % de cobertura, archivo por archivo.
+      # Va aparte de las pruebas porque con cobertura una corrida parcial fallaría por los
+      # archivos que no tocó.
+      - name: Cobertura de las reglas de acceso
+        run: pnpm test:coverage
+
       # TRD §11.5, paso 4: la base se levanta vacía, corren todas las migraciones y la
       # semilla desde cero, y después las pruebas de base (políticas por fila, libros de
       # solo inserción, tabla expuesta sin política).

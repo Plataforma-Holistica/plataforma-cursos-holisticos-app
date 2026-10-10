@@ -18,6 +18,20 @@ export default defineConfig({
     },
   },
   test: {
+    // La cobertura solo se mide con `pnpm test:coverage`, y solo sobre las reglas de acceso
+    // (TRD §12.2): ahí el umbral es el 100 %, archivo por archivo, y sin él la integración
+    // continua no pasa. Va aparte de `pnpm test` porque con cobertura una corrida parcial
+    // fallaría por los archivos que no tocó. El porcentaje no ve lo que decide una expresión
+    // regular o una tabla: eso lo cuidan las tablas de casos y las propiedades.
+    coverage: {
+      provider: "v8",
+      include: ["src/domain/access/**/*.ts"],
+      exclude: ["**/*.test.ts"],
+      reporter: ["text"],
+      thresholds: {
+        "src/domain/access/**": { 100: true, perFile: true },
+      },
+    },
     projects: [
       {
         extends: true,

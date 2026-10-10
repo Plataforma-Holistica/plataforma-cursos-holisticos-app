@@ -50,6 +50,7 @@ pnpm dev         # aplicación en local, en http://localhost:3000. La muestra de
 pnpm typecheck   # tipos
 pnpm lint        # lint, incluida la regla de capas
 pnpm test        # dominio, textos, capas y contraste, y los componentes en un DOM simulado. Sin red ni base
+pnpm test:coverage   # las pruebas de `unit` con cobertura: src/domain/access/ debe dar 100 %, archivo por archivo
 pnpm secrets     # escaneo de secretos en todo el repositorio
 pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
@@ -68,6 +69,13 @@ las pruebas de la capa que se tocó. Si se tocó la base: `db:reset` y `test:db`
 un adaptador o un servicio que llega a la base: `test:int`, y después `test:db` otra vez,
 para comprobar que no dejó residuo. La integración continua (`.github/workflows/ci.yml`)
 corre lo mismo más `secrets`, la auditoría de dependencias y `build`.
+
+Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
+líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
+`tests/architecture/` los prohíbe): una rama que no se puede cubrir sobra, y se quita. El
+porcentaje no ve lo que decide una expresión regular o una tabla, así que no basta: cada
+regla lleva su tabla de casos y sus propiedades, y antes de proponer el cambio se rompe a
+mano cada condición para ver que alguna prueba falla.
 
 `pnpm db:login` hace falta una vez por base: la migración crea a `app_service` sin permiso
 de entrada, y ese guion se lo da con la contraseña de `DATABASE_URL`. Solo corre contra la
