@@ -77,6 +77,16 @@ jobs:
       - name: Entrada de la aplicación a la base local
         run: pnpm db:login
 
+      # Los textos legales de borrador (versión 0), que solo existen en una base local: sin
+      # ellos no se puede completar un registro. Las pruebas de base corren otra vez con
+      # ellos cargados, porque tienen que dar lo mismo en los dos estados: el de una base
+      # recién nacida, que es también el de una remota, y el de una máquina de desarrollo.
+      - name: Borradores legales
+        run: pnpm db:drafts
+
+      - name: Pruebas de base, con los borradores
+        run: pnpm test:db
+
       - name: Pruebas de integración
         run: pnpm test:int
 

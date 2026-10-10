@@ -88,6 +88,14 @@ from (values
   -- Constantes de producto
   ('INTENTOS_ANTES_DE_FRENO',   '5',                    'proposed'),
   ('VIGENCIA_ENLACE_CONTRASENA', '60',                  'proposed'),
+  ('FRENO_ESPERA_BASE',         '1',                    'proposed'),
+  ('FRENO_ESPERA_TOPE',         '15',                   'proposed'),
+  ('FRENO_OLVIDO',              '60',                   'proposed'),
+  ('FRENO_CONFIANZA_DIAS',      '30',                   'proposed'),
+  ('TOPE_INTENTOS_HORA',        '20',                   'proposed'),
+  ('TOPE_REGISTROS_HORA',       '20',                   'proposed'),
+  ('TOPE_ENVIOS_CORREO_HORA',   '5',                    'proposed'),
+  ('ESPERA_REENVIO',            '60',                   'proposed'),
   ('VIGENCIA_INVITACION_DIAS',  '7',                    'proposed'),
   ('TOLERANCIA_CONCILIACION_PCT', '500',                'proposed'),
   ('RECURSO_TAMANO_MAX',        '52428800',             'proposed')

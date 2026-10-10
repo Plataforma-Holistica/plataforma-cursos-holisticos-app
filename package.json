@@ -19,8 +19,9 @@
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:status": "supabase status",
-    "db:reset": "supabase db reset && node scripts/db-app-login.mjs",
+    "db:reset": "supabase db reset && node scripts/db-app-login.mjs && node scripts/db-legal-drafts.mjs",
     "db:login": "node scripts/db-app-login.mjs",
+    "db:drafts": "node scripts/db-legal-drafts.mjs",
     "db:migration": "supabase migration new",
     "test:db": "supabase test db",
     "prepare": "git config core.hooksPath .githooks"
