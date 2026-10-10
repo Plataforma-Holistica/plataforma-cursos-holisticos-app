@@ -10,7 +10,7 @@ import { type PasswordFlow, type PasswordOutcome, type PasswordSetResult, resolv
 // La tabla completa. No hay propiedades: son diez celdas y se escriben todas.
 const table: Array<[PasswordFlow, PasswordSetResult, PasswordOutcome]> = [
   ["complete_registration", "ok", { next: "done", claimAccount: true, clearThrottles: false, closeSessions: false }],
-  ["complete_registration", "same_password", { next: "done", claimAccount: true, clearThrottles: false, closeSessions: false }],
+  ["complete_registration", "same_password", { next: "done", claimAccount: true, clearThrottles: false, closeSessions: true }],
   ["complete_registration", "weak_password", { next: "recover_instead", claimAccount: false, clearThrottles: false, closeSessions: true }],
   ["complete_registration", "rejected", { next: "recover_instead", claimAccount: false, clearThrottles: false, closeSessions: true }],
   ["complete_registration", "unknown", { next: "outcome_unknown", claimAccount: false, clearThrottles: false, closeSessions: true }],
@@ -41,10 +41,12 @@ describe("resolvePasswordOutcome", () => {
     }
   });
 
-  it("si la contraseña no quedó fijada, la sesión del canje se cierra siempre", () => {
+  // La única celda en la que no hace falta cerrar sesiones: al completar el registro con
+  // éxito, fijar la contraseña por la API de administración ya las borró todas.
+  it("las sesiones se cierran siempre, salvo cuando Auth ya las borró al fijar la contraseña", () => {
     for (const [flow, result] of table) {
       const outcome = resolvePasswordOutcome(flow, result);
-      if (outcome.next !== "done") expect(outcome.closeSessions, `${flow} / ${result}`).toBe(true);
+      expect(outcome.closeSessions, `${flow} / ${result}`).toBe(!(flow === "complete_registration" && result === "ok"));
     }
   });
 });

@@ -62,8 +62,11 @@ jobs:
       # TRD §12.2: las reglas de acceso exigen el 100 % de cobertura, archivo por archivo.
       # Va aparte de las pruebas porque con cobertura una corrida parcial fallaría por los
       # archivos que no tocó.
+      # El comando va escrito aquí y no como `pnpm test:coverage`: este archivo tiene dueño y
+      # `package.json` no, y cambiar allá el guion dejaría este paso sin efecto sin que
+      # nadie lo aprobara.
       - name: Cobertura de las reglas de acceso
-        run: pnpm test:coverage
+        run: pnpm exec vitest run --project unit --coverage
 
       # TRD §11.5, paso 4: la base se levanta vacía, corren todas las migraciones y la
       # semilla desde cero, y después las pruebas de base (políticas por fila, libros de

@@ -54,6 +54,27 @@ describe("resolveClientIp", () => {
     },
   );
 
+  // Solo cuentan como IPv4 los cinco grupos de ceros seguidos de `ffff`. Con un grupo
+  // distinto de cero antes, es otra dirección, y no puede compartir clave con la IPv4.
+  it.each([
+    ["0:0:0:0:1:ffff:cb00:7107", "v6:0:0:0:0::/64"],
+    ["1::ffff:203.0.113.7", "v6:1:0:0:0::/64"],
+    ["::fffe:203.0.113.7", "v6:0:0:0:0::/64"],
+    ["::203.0.113.7", "v6:0:0:0:0::/64"],
+  ])("%s se parece a una IPv4 dentro de una IPv6, pero no lo es", (value, key) => {
+    expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key });
+  });
+
+  it("los bordes de 32 bits dan la misma clave escritos como IPv4 o dentro de una IPv6", () => {
+    for (const address of ["128.0.0.0", "255.255.255.255", "0.0.0.1", "127.255.255.255"]) {
+      const expected = { kind: "ip", key: `v4:${address}` };
+      expect(resolveClientIp(address, trusted)).toEqual(expected);
+      expect(resolveClientIp(`::ffff:${address}`, trusted)).toEqual(expected);
+    }
+    expect(resolveClientIp("::ffff:8000:0", trusted)).toEqual({ kind: "ip", key: "v4:128.0.0.0" });
+    expect(resolveClientIp("::ffff:ffff:ffff", trusted)).toEqual({ kind: "ip", key: "v4:255.255.255.255" });
+  });
+
   it.each([
     ["una lista de direcciones", "203.0.113.7, 198.51.100.1"],
     ["un espacio al final", "203.0.113.7 "],
@@ -81,6 +102,10 @@ describe("resolveClientIp", () => {
     ["una IPv4 en medio de una IPv6", "::203.0.113.7:1"],
     ["una IPv4 con puntos y sin dos puntos", "203.0.113.7.ffff"],
     ["texto", "desconocida"],
+    ["un espacio dentro de una IPv6", "2001:db8:: 1"],
+    ["un signo de porcentaje", "2001:db8::%1"],
+    ["una letra con acento", "2001:db8::é"],
+    ["una coma", "2001:db8::1,::2"],
   ])("no lee %s", (_name, value) => {
     expect(resolveClientIp(value, trusted)).toEqual({ kind: "unknown", reason: "malformed" });
   });
@@ -131,6 +156,21 @@ describe("resolveClientIp", () => {
         const otherNetwork = [(first[0] ?? 0) ^ 1, ...first.slice(1)];
         expect(key(otherNetwork)).not.toEqual(key(first));
       }),
+    );
+  });
+
+  // Con ocho grupos al azar nunca salen cinco ceros y un `ffff`: este generador los pone.
+  it("solo cinco grupos de ceros y un ffff hacen de una IPv6 una IPv4", () => {
+    const head = fc.array(fc.constantFrom(0, 0, 0, 1, 0xffff), { minLength: 6, maxLength: 6 });
+    fc.assert(
+      fc.property(head, group, group, (first, high, low) => {
+        const values = [...first, high, low];
+        const mapped = first.slice(0, 5).every((value) => value === 0) && first[5] === 0xffff;
+        const result = resolveClientIp(values.map(padded).join(":"), trusted);
+        const v4 = `v4:${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+        expect(result).toEqual({ kind: "ip", key: mapped ? v4 : prefix(values) });
+      }),
+      { numRuns: 500 },
     );
   });
 

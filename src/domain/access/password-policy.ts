@@ -31,6 +31,10 @@ export function checkPassword(password: string): PasswordCheck {
     } else if (unit >= 0xdc00 && unit <= 0xdfff) {
       // Una mitad baja suelta: no es texto válido, y cada sistema la codificaría distinto.
       return { ok: false, reason: "malformed" };
+    } else if (unit < 0x20 || (unit >= 0x7f && unit <= 0x9f)) {
+      // Caracteres de control: nadie los escribe en un campo de contraseña, y hay sistemas
+      // que cortan un texto en el primer carácter nulo.
+      return { ok: false, reason: "malformed" };
     } else if (unit < 0x80) {
       bytes += 1;
     } else if (unit < 0x800) {

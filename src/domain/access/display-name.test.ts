@@ -34,6 +34,17 @@ describe("parseDisplayName", () => {
     ["solo emojis", "😀😀"],
     ["un carácter de control dentro", "Ana\u0000Pérez"],
     ["un salto de línea dentro", "Ana\nPérez"],
+    ["un separador de línea de Unicode dentro", "Ana Pérez"],
+    ["un separador de párrafo de Unicode dentro", "Ana Pérez"],
+    ["una marca que invierte la dirección del texto", "Ana‮zeréP"],
+    ["una marca de aislamiento de dirección", "Ana⁦Pérez"],
+    ["un espacio de ancho cero dentro", "Ana​Pérez"],
+    ["la marca de orden de bytes dentro", "Ana﻿Pérez"],
+    ["una mitad suelta de un carácter", "Ana\ud83d"],
+    ["solo un relleno que Unicode cuenta como letra", "ㅤ"],
+    ["solo rellenos de otro bloque", "ᅟᅠ"],
+    ["solo el relleno de ancho medio", "ﾠ"],
+    ["un relleno junto a un nombre real", "Anaㅤ"],
   ])("rechaza por inválido %s", (_name, input) => {
     expect(parseDisplayName(input)).toEqual({ ok: false, reason: "invalid" });
   });
@@ -47,16 +58,29 @@ describe("parseDisplayName", () => {
     expect(parseDisplayName(emojis)).toEqual({ ok: true, name: emojis });
   });
 
+  // Nombres plausibles con ruido alrededor y en medio, para que la propiedad sí llegue a
+  // nombres aceptados: con texto al azar casi ninguno lo sería.
+  const piece = fc.constantFrom("Ana", "Pérez", "山田", "José", "2", "O'Brien", "-", " ", "  ", "\t", "\n", "​", "ㅤ", "😀", ".");
+  const candidate = fc.array(piece, { maxLength: 8 }).map((pieces) => pieces.join(""));
+
   it("lo que acepta se vuelve a aceptar igual: guardarlo y releerlo no cambia nada", () => {
     fc.assert(
-      fc.property(fc.string({ unit: "binary", maxLength: 140 }), (input) => {
+      fc.property(candidate, (input) => {
         const first = parseDisplayName(input);
         if (!first.ok) return;
         expect(parseDisplayName(first.name)).toEqual(first);
-        expect([...first.name].length).toBeGreaterThanOrEqual(1);
         expect([...first.name].length).toBeLessThanOrEqual(DISPLAY_NAME_MAX_LENGTH);
-        expect(first.name).toBe(first.name.trim());
+        expect(first.name).toBe(input.trim());
+        // Lo aceptado se ve: trae una letra o un número, y nada que rompa una línea.
+        expect(first.name).toMatch(/[\p{L}\p{N}]/u);
+        expect(first.name).not.toMatch(/[\n\t​ㅤ]/u);
       }),
     );
+  });
+
+  it("los generadores sí producen nombres aceptados y rechazados", () => {
+    const outcomes = fc.sample(candidate, 500).map((input) => parseDisplayName(input));
+    expect(outcomes.filter((outcome) => outcome.ok).length).toBeGreaterThan(50);
+    expect(outcomes.filter((outcome) => !outcome.ok).length).toBeGreaterThan(50);
   });
 });

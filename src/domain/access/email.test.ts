@@ -31,6 +31,25 @@ describe("parseEmail", () => {
     });
   });
 
+  // Si la etiqueta se cortara en el último signo, `ana+1+x@` y `ana+2+x@` serían buzones
+  // distintos y el tope de correos por buzón no los juntaría.
+  it("con varios signos de más, la etiqueta empieza en el primero", () => {
+    expect(parseEmail("ana+1+x@ejemplo.com")).toMatchObject({ ok: true, mailbox: "ana@ejemplo.com" });
+    expect(parseEmail("ana+2+x@ejemplo.com")).toMatchObject({ ok: true, mailbox: "ana@ejemplo.com" });
+  });
+
+  it("acepta un dominio con números mientras la última etiqueta tenga letras", () => {
+    expect(parseEmail("ana@3m.com")).toMatchObject({ ok: true, email: "ana@3m.com" });
+    expect(parseEmail("ana@ejemplo.c0m")).toMatchObject({ ok: true });
+  });
+
+  it("acepta un correo de exactamente el máximo de caracteres", () => {
+    const domain = `${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(58)}.mx`;
+    const email = `${"a".repeat(64)}@${domain}`;
+    expect(email.length).toBe(EMAIL_MAX_LENGTH);
+    expect(parseEmail(email)).toMatchObject({ ok: true, email });
+  });
+
   it("un signo de más al inicio no es una etiqueta", () => {
     expect(parseEmail("+ana@ejemplo.com")).toMatchObject({ ok: true, mailbox: "+ana@ejemplo.com" });
   });
@@ -63,6 +82,8 @@ describe("parseEmail", () => {
     ["con la parte local de más de 64 caracteres", `${"a".repeat(65)}@ejemplo.com`],
     ["con comillas", '"ana perez"@ejemplo.com'],
     ["con un carácter de control", "ana\u0000@ejemplo.com"],
+    ["con una dirección IP en lugar de dominio", "ana@127.0.0.1"],
+    ["con el dominio terminado en números", "ana@ejemplo.123"],
     ["con eñe", "peña@ejemplo.com"],
     ["con acento en el dominio", "ana@educación.mx"],
   ])("rechaza un correo %s", (_name, input) => {

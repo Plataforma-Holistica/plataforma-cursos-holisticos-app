@@ -35,8 +35,22 @@ describe("windowStart", () => {
     expect(windowStart(new Date(Number.NaN), HOUR_SECONDS)).toEqual({ ok: false, reason: "invalid_clock" });
   });
 
-  it.each([0, -60, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("un tamaño de %s segundos no da ventana", (size) => {
-    expect(windowStart(at("2026-10-10T14:37:21Z"), size)).toEqual({ ok: false, reason: "invalid_window" });
+  it.each([0, -60, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 1e13, Number.MAX_SAFE_INTEGER])(
+    "un tamaño de %s segundos no da ventana",
+    (size) => {
+      expect(windowStart(at("2026-10-10T14:37:21Z"), size)).toEqual({ ok: false, reason: "invalid_window" });
+    },
+  );
+
+  it("en el borde de lo que cabe en una fecha, no da ventana", () => {
+    expect(windowStart(new Date(-8.64e15), 7)).toEqual({ ok: false, reason: "invalid_clock" });
+  });
+
+  it("antes de 1970 la ventana también empieza antes del instante, no después", () => {
+    expect(windowStart(at("1969-12-31T23:30:00.000Z"), HOUR_SECONDS)).toEqual({
+      ok: true,
+      start: at("1969-12-31T23:00:00.000Z"),
+    });
   });
 
   const clock = fc.date({ min: at("2020-01-01T00:00:00Z"), max: at("2100-01-01T00:00:00Z"), noInvalidDate: true });

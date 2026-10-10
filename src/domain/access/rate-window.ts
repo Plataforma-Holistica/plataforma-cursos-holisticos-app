@@ -11,8 +11,8 @@
 
 export const HOUR_SECONDS = 3600;
 
-const isCount = (value: number) => Number.isInteger(value) && value >= 0;
-const isLimit = (value: number) => Number.isInteger(value) && value >= 1;
+const isCount = (value: number) => Number.isSafeInteger(value) && value >= 0;
+const isLimit = (value: number) => Number.isSafeInteger(value) && value >= 1;
 
 export type WindowStart =
   | { ok: true; /** El primer instante de la ventana que contiene al momento dado. */ start: Date }
@@ -22,9 +22,12 @@ export type WindowStart =
 export function windowStart(now: Date, windowSeconds: number): WindowStart {
   const time = now.getTime();
   if (Number.isNaN(time)) return { ok: false, reason: "invalid_clock" };
-  if (!isLimit(windowSeconds)) return { ok: false, reason: "invalid_window" };
   const size = windowSeconds * 1000;
-  return { ok: true, start: new Date(Math.floor(time / size) * size) };
+  if (!isLimit(windowSeconds) || !Number.isSafeInteger(size)) return { ok: false, reason: "invalid_window" };
+  const start = new Date(Math.floor(time / size) * size);
+  // En el borde de lo que cabe en una fecha, el inicio de la ventana se sale: no hay ventana.
+  if (Number.isNaN(start.getTime())) return { ok: false, reason: "invalid_clock" };
+  return { ok: true, start };
 }
 
 export type RegistrationDecision =

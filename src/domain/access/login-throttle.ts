@@ -21,8 +21,10 @@
 //
 // Aquí no hay base ni reloj: el servicio lee el par y las cuentas en una transacción corta
 // que asegura la fila y la bloquea, llama a `decideSignInAttempt`, escribe lo que devuelve
-// y suelta el candado antes de hablar con Auth. `now` es la hora de la base, no la del
-// servidor de la aplicación.
+// y suelta el candado antes de hablar con Auth. Después cierra con `settleSignIn`, en otra
+// transacción corta. Entre las dos, otros intentos del mismo par pudieron escribir: por eso
+// el cierre nunca escribe un estado calculado con la lectura de antes. `now` es la hora de
+// la base, no la del servidor de la aplicación.
 
 /** Los parámetros de 00-fundamentos §4, ya en segundos y en días. */
 export interface ThrottleParams {
@@ -75,10 +77,11 @@ export type SignInDecision =
   | { proceed: false; reason: "invalid_input" };
 
 const DAY_SECONDS = 86_400;
-const BLANK: PairState = { failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: null };
+// Solo para leer cuando el par no existe. Congelado y nunca devuelto: es un objeto compartido.
+const BLANK: PairState = Object.freeze({ failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: null });
 
-const isCount = (value: number) => Number.isInteger(value) && value >= 0;
-const isLimit = (value: number) => Number.isInteger(value) && value >= 1;
+const isCount = (value: number) => Number.isSafeInteger(value) && value >= 0;
+const isLimit = (value: number) => Number.isSafeInteger(value) && value >= 1;
 const isValidDate = (date: Date | null) => date === null || !Number.isNaN(date.getTime());
 
 function validParams(params: ThrottleParams): boolean {
@@ -88,6 +91,9 @@ function validParams(params: ThrottleParams): boolean {
     isLimit(params.maxWaitSeconds) &&
     params.maxWaitSeconds >= params.baseWaitSeconds &&
     isLimit(params.forgetAfterSeconds) &&
+    // El olvido tiene que durar más que la espera más larga. Si no, cumplir una espera ya
+    // es «tanto tiempo sin fallos», la cuenta vuelve a cero y el freno nunca escala.
+    params.forgetAfterSeconds > params.maxWaitSeconds &&
     isLimit(params.trustDays) &&
     isLimit(params.hourlyCap)
   );
@@ -144,14 +150,13 @@ export function decideSignInAttempt(facts: SignInFacts, now: Date, params: Throt
     pair.lastFailedAt !== null && now.getTime() - pair.lastFailedAt.getTime() >= params.forgetAfterSeconds * 1000;
   const failedCount = (forgotten ? 0 : pair.failedCount) + 1;
   const wait = waitSeconds(failedCount, params);
+  const lockedUntil = wait === 0 ? null : new Date(now.getTime() + wait * 1000);
+  // Un reloj en el borde de lo que cabe en una fecha daría una espera sin fecha, y una
+  // espera sin fecha no frena.
+  if (!isValidDate(lockedUntil)) return { proceed: false, reason: "invalid_input" };
   return {
     proceed: true,
-    pair: {
-      failedCount,
-      lockedUntil: wait === 0 ? null : new Date(now.getTime() + wait * 1000),
-      lastFailedAt: now,
-      lastSuccessAt: pair.lastSuccessAt,
-    },
+    pair: { failedCount, lockedUntil, lastFailedAt: now, lastSuccessAt: pair.lastSuccessAt },
   };
 }
 
@@ -161,13 +166,21 @@ export function decideSignInAttempt(facts: SignInFacts, now: Date, params: Throt
  *     una cuenta que la guarda no deja entrar (la marca prendida) se cierra como `failure`:
  *     si no, quien dio de alta un correo ajeno quedaría como par de confianza.
  *   - `failure`: Auth rechazó.
- *   - `unknown`: no se supo (Auth no contestó). No se castiga a nadie por eso.
+ *   - `unknown`: no se supo (Auth no contestó).
  */
 export type SignInOutcome = "success" | "failure" | "unknown";
 
 export interface SignInSettlement {
-  /** El par como debe quedar escrito. */
-  pair: PairState;
+  /**
+   * Lo que se escribe en el par, o nulo si el par no se toca.
+   *
+   * El cierre llega en otra transacción, cuando otros intentos del mismo par ya pudieron
+   * escribir. Por eso aquí nunca sale un estado calculado con la lectura de antes: pisaría
+   * a los demás, y cinco fallos en paralelo cerrados en desorden dejarían el par sin
+   * espera. Solo hay dos casos: no tocar nada, o el estado de «entró bien», que no depende
+   * de lo que hubiera.
+   */
+  pair: PairState | null;
   /**
    * Restar el uno que se sumó por adelantado a la cuenta de la dirección y a la de la
    * cuenta, en la misma ventana en que se sumó: los topes son de fallos.
@@ -178,21 +191,22 @@ export interface SignInSettlement {
 /**
  * Cierra un intento que procedió.
  *
- * @param decision Lo que devolvió `decideSignInAttempt`.
- * @param before El par como estaba antes de esa decisión.
+ *   - `failure`: nada que hacer. Ya se contó por adelantado, en el par y en los topes.
+ *   - `success`: el par vuelve a cero y queda de confianza; el intento se descuenta de los topes.
+ *   - `unknown`: el intento se descuenta de los topes, que son de fallos y este no se sabe
+ *     si lo fue; el par se queda con el intento contado. No se deshace, porque quien
+ *     pudiera provocar que Auth no conteste podría así probar contraseñas sin acumular fallos.
  */
-export function settleSignIn(
-  decision: Extract<SignInDecision, { proceed: true }>,
-  before: PairState | null,
-  outcome: SignInOutcome,
-  now: Date,
-): SignInSettlement {
-  if (outcome === "failure") return { pair: decision.pair, uncount: false };
-  if (outcome === "success") {
-    return { pair: { failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: now }, uncount: true };
-  }
-  return { pair: before ?? BLANK, uncount: true };
+export function settleSignIn(outcome: SignInOutcome, now: Date): SignInSettlement {
+  if (outcome === "failure") return { pair: null, uncount: false };
+  // Con un reloj inválido no se puede anotar cuándo entró: el par se queda como está.
+  if (outcome === "unknown" || Number.isNaN(now.getTime())) return { pair: null, uncount: true };
+  return { pair: { failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: now }, uncount: true };
 }
+
+export type RecoveryPair =
+  | { ok: true; pair: PairState }
+  | { ok: false; reason: "invalid_clock" };
 
 /**
  * El par de quien acaba de recuperar su contraseña (RF-103): sin fallos y de confianza.
@@ -200,6 +214,7 @@ export function settleSignIn(
  * fuera en un dispositivo nuevo. El servicio borra además los demás pares de la cuenta y
  * su cuenta de la hora: la confianza de antes de recuperar ya no vale.
  */
-export function pairAfterRecovery(now: Date): PairState {
-  return { failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: now };
+export function pairAfterRecovery(now: Date): RecoveryPair {
+  if (Number.isNaN(now.getTime())) return { ok: false, reason: "invalid_clock" };
+  return { ok: true, pair: { failedCount: 0, lockedUntil: null, lastFailedAt: null, lastSuccessAt: now } };
 }

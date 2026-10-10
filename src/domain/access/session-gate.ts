@@ -73,9 +73,30 @@ export type GateResult =
     }
   | { outcome: "pass" };
 
+const isVersion = (value: number | null): value is number =>
+  value !== null && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Los hechos de un texto tienen sentido. La base no puede producir otra cosa (las versiones
+ * son enteros que crecen, y un consentimiento se da sobre el texto vigente), pero la guarda
+ * no se apoya en eso: con un dato que no entiende, no deja pasar. Un número que no es un
+ * número haría falsas todas las comparaciones de abajo, y «falso» ahí significa «cumplido».
+ */
+function wellFormed(document: DocumentFacts): boolean {
+  const { currentVersion, reconsentFloor, latest } = document;
+  if (currentVersion === null) return reconsentFloor === null || isVersion(reconsentFloor);
+  if (!isVersion(currentVersion)) return false;
+  // Ni el piso ni lo aceptado pueden ir por delante de la versión vigente.
+  if (reconsentFloor !== null && !(isVersion(reconsentFloor) && reconsentFloor <= currentVersion)) return false;
+  if (latest === null) return true;
+  return isVersion(latest.version) && latest.version <= currentVersion;
+}
+
 function missingReason(document: DocumentFacts): MissingDocument["why"] | null {
   if (document.latest === null) return "never_given";
-  if (document.latest.action === "withdrawn") return "withdrawn";
+  // Todo lo que no sea «otorgado» cuenta como retirado: un valor que la guarda no conoce
+  // no puede valer como consentimiento.
+  if (document.latest.action !== "granted") return "withdrawn";
   if (document.reconsentFloor !== null && document.latest.version < document.reconsentFloor) return "new_version";
   return null;
 }
@@ -87,15 +108,18 @@ function missingReason(document: DocumentFacts): MissingDocument["why"] | null {
 export function resolveSessionGate(facts: GateFacts, requiredDocTypes: readonly string[]): GateResult {
   const { profile } = facts;
   if (profile === null) return { outcome: "blocked", reason: "no_profile" };
-  if (profile.status !== "active") return { outcome: "blocked", reason: profile.status };
-  if (profile.passwordResetRequired) return { outcome: "password_reset_required" };
+  if (profile.status === "suspended" || profile.status === "deleted") return { outcome: "blocked", reason: profile.status };
+  // Solo «activa» sigue. Un estado que la guarda no conoce no es una cuenta activa.
+  if (profile.status !== "active") return { outcome: "blocked", reason: "no_profile" };
+  // Solo un `false` exacto apaga la marca: si el dato no llegó, la marca se da por prendida.
+  if (profile.passwordResetRequired !== false) return { outcome: "password_reset_required" };
 
   const required: DocumentFacts[] = [];
   const broken: string[] = [];
-  for (const docType of requiredDocTypes) {
+  for (const docType of new Set(requiredDocTypes)) {
     const matches = facts.documents.filter((document) => document.docType === docType);
     const [only] = matches;
-    if (matches.length !== 1 || only === undefined) broken.push(docType);
+    if (matches.length !== 1 || only === undefined || !wellFormed(only)) broken.push(docType);
     else required.push(only);
   }
   if (requiredDocTypes.length === 0 || broken.length > 0) {
@@ -112,7 +136,8 @@ export function resolveSessionGate(facts: GateFacts, requiredDocTypes: readonly 
     return why === null ? [] : [{ docType: document.docType, why }];
   });
   const name = !parseDisplayName(profile.displayName).ok;
-  const adultDeclaration = profile.adultDeclaredAt === null;
+  // Declarada es una fecha de verdad: ni nula, ni ausente, ni una fecha inválida.
+  const adultDeclaration = !(profile.adultDeclaredAt instanceof Date) || Number.isNaN(profile.adultDeclaredAt.getTime());
   if (!name && !adultDeclaration && documents.length === 0) return { outcome: "pass" };
 
   const onlyNewVersions = !name && !adultDeclaration && documents.every((document) => document.why === "new_version");

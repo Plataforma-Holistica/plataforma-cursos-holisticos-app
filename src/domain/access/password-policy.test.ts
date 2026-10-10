@@ -45,6 +45,38 @@ describe("checkPassword", () => {
     expect(checkPassword(password)).toEqual({ ok: false, reason: "too_long" });
   });
 
+  // Los bordes de cada tamaño en UTF-8. Cada pareja fija un límite: el último carácter que
+  // ocupa tantos bytes, y el primero que ocupa uno más.
+  it.each([
+    ["de un byte, el último (U+007E)", "~", 72],
+    ["de dos bytes, el primero imprimible (U+00A0)", " ", 36],
+    ["de dos bytes, una vocal con acento", "é", 36],
+    ["de dos bytes, el último (U+07FF)", "߿", 36],
+    ["de tres bytes, el primero (U+0800)", "ࠀ", 24],
+    ["de tres bytes, el último (U+FFFF)", "￿", 24],
+    ["de cuatro bytes, el primero (U+10000)", "\u{10000}", 18],
+  ])("con caracteres %s caben exactamente los que suman 72 bytes", (_name, char, fits) => {
+    expect(utf8Bytes(char.repeat(fits))).toBe(72);
+    expect(checkPassword(char.repeat(fits))).toEqual({ ok: true });
+    expect(checkPassword(char.repeat(fits + 1))).toEqual({ ok: false, reason: "too_long" });
+  });
+
+  it.each([
+    ["un carácter nulo", "abcd\u0000efgh"],
+    ["un tabulador", "abcd\tefgh"],
+    ["un salto de línea", "abcdefgh\n"],
+    ["el carácter de borrado (U+007F)", "abcd\u007fefgh"],
+    ["un control de la segunda serie (U+0080)", "abcd\u0080efgh"],
+    ["el último control de la segunda serie (U+009F)", "abcd\u009fefgh"],
+  ])("rechaza por mal formada una contraseña con %s", (_name, password) => {
+    expect(checkPassword(password)).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("el espacio, que es el primer carácter que no es de control, sí vale", () => {
+    expect(checkPassword(" ".repeat(8))).toEqual({ ok: true });
+    expect(checkPassword("\u001f".repeat(8))).toEqual({ ok: false, reason: "malformed" });
+  });
+
   it.each([
     ["una mitad alta suelta al final", "abcdefgh\ud83d"],
     ["una mitad alta seguida de una letra", "abcd\ud83defgh"],
@@ -54,13 +86,32 @@ describe("checkPassword", () => {
     expect(checkPassword(password)).toEqual({ ok: false, reason: "malformed" });
   });
 
+  // Piezas de uno a cuatro bytes, mitades sueltas y un carácter de control, en cantidades
+  // que cruzan los dos límites: con texto al azar casi nunca se llega a 72 bytes.
+  const piece = fc.constantFrom("a", "~", "é", "߿", "ࠀ", "あ", "￿", "😀", "\u{10000}");
+  const odd = fc.constantFrom("\ud83d", "\ude00", "\u0007", "\u0085");
+  const anyPassword = fc
+    .array(fc.oneof({ weight: 30, arbitrary: piece }, { weight: 1, arbitrary: odd }), { maxLength: 80, size: "max" })
+    .map((pieces) => pieces.join(""));
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
+  it("los generadores sí llegan a los cuatro resultados", () => {
+    const seen = new Set(
+      fc.sample(anyPassword, 2000).map((password) => {
+        const result = checkPassword(password);
+        return result.ok ? "ok" : result.reason;
+      }),
+    );
+    expect([...seen].sort()).toEqual(["malformed", "ok", "too_long", "too_short"]);
+  });
+
   it("coincide con contar puntos de código y bytes en UTF-8", () => {
     fc.assert(
-      fc.property(fc.string({ unit: "binary", maxLength: 90 }), (password) => {
+      fc.property(anyPassword, (password) => {
         const result = checkPassword(password);
         const length = [...password].length;
         const bytes = utf8Bytes(password);
-        if (!password.isWellFormed()) {
+        if (!password.isWellFormed() || CONTROL.test(password)) {
           expect(result).toEqual({ ok: false, reason: "malformed" });
         } else if (length < PASSWORD_MIN_LENGTH) {
           expect(result).toEqual({ ok: false, reason: "too_short" });
@@ -70,6 +121,7 @@ describe("checkPassword", () => {
           expect(result).toEqual({ ok: true });
         }
       }),
+      { numRuns: 1000 },
     );
   });
 

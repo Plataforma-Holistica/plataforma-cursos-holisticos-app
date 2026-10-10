@@ -41,7 +41,11 @@ export function resolveReturnPath(input: string | null | undefined, allowedPrefi
   const query = mark === -1 ? "" : withoutFragment.slice(mark + 1);
   if (!PATHNAME.test(pathname) || !QUERY.test(query)) return { kind: "default", reason: "malformed" };
 
-  const allowed = allowedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  // Un destino mal escrito en la lista no abre nada: tiene que ser él mismo una ruta válida.
+  // Sin esto, un destino vacío en la lista aceptaría cualquier ruta.
+  const allowed = allowedPrefixes.some(
+    (prefix) => PATHNAME.test(prefix) && (pathname === prefix || pathname.startsWith(`${prefix}/`)),
+  );
   if (!allowed) return { kind: "default", reason: "not_allowed" };
 
   return { kind: "path", path: query === "" ? pathname : `${pathname}?${query}` };

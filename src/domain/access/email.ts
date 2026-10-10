@@ -19,6 +19,7 @@ const VISIBLE_ASCII = /^[\x21-\x7e]+$/;
 const LOCAL_PART = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
 // Una etiqueta del dominio: letras, dígitos y guiones, sin guion en los extremos, hasta 63.
 const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const HAS_LETTER = /[a-z]/;
 
 export type EmailResult =
   | {
@@ -57,6 +58,8 @@ export function parseEmail(input: string): EmailResult {
   if (labels.length < 2 || !labels.every((label) => DOMAIN_LABEL.test(label))) {
     return { ok: false, reason: "malformed" };
   }
+  // La última etiqueta lleva al menos una letra: `ana@127.0.0.1` es una dirección, no un dominio.
+  if (!HAS_LETTER.test(labels.at(-1) as string)) return { ok: false, reason: "malformed" };
 
   const plus = local.indexOf("+");
   const mailbox = plus > 0 ? `${local.slice(0, plus)}@${domain}` : email;

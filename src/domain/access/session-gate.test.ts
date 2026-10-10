@@ -222,6 +222,76 @@ describe("resolveSessionGate", () => {
     });
   });
 
+  it("un retiro manda aunque además haya una versión nueva de ese mismo texto", () => {
+    const facts = withDocument("terms", { currentVersion: 2, reconsentFloor: 2, latest: { version: 1, action: "withdrawn" } });
+    expect(gate(facts)).toEqual({
+      outcome: "incomplete",
+      variant: "complete_account",
+      missing: { name: false, adultDeclaration: false, documents: [{ docType: "terms", why: "withdrawn" }] },
+    });
+  });
+
+  it("sin texto vigente y sin ninguna versión que pida volver a aceptar, tampoco entra nadie", () => {
+    expect(gate(withDocument("terms", { currentVersion: null, reconsentFloor: null }))).toEqual({
+      outcome: "unavailable",
+      reason: "no_current_text",
+      docTypes: ["terms"],
+    });
+  });
+
+  // La base no puede producir estos hechos. La guarda no se apoya en eso: un número que no
+  // es un número haría falsas todas las comparaciones, y ahí «falso» significa «cumplido».
+  it.each<[string, Partial<DocumentFacts>]>([
+    ["la versión aceptada no es un número", { latest: { version: Number.NaN, action: "granted" } }],
+    ["la versión aceptada no es entera", { latest: { version: 0.5, action: "granted" } }],
+    ["la versión aceptada es negativa", { reconsentFloor: null, latest: { version: -1, action: "granted" } }],
+    ["la versión aceptada va por delante de la vigente", { currentVersion: 3, reconsentFloor: 3, latest: { version: 99, action: "granted" } }],
+    ["la versión que pide volver a aceptar no es un número", { reconsentFloor: Number.NaN }],
+    ["la versión que pide volver a aceptar va por delante de la vigente", { currentVersion: 1, reconsentFloor: 2 }],
+    ["la versión vigente no es un número", { currentVersion: Number.NaN }],
+    ["la versión vigente es negativa", { currentVersion: -1, reconsentFloor: null, latest: null }],
+    ["no hay texto vigente y la versión que pide volver a aceptar no es un número", { currentVersion: null, reconsentFloor: Number.NaN }],
+  ])("si %s, la guarda no deja pasar", (_name, changes) => {
+    expect(gate(withDocument("terms", changes))).toEqual({
+      outcome: "unavailable",
+      reason: "facts_incomplete",
+      docTypes: ["terms"],
+    });
+  });
+
+  it("un consentimiento con una acción que la guarda no conoce no vale como otorgado", () => {
+    const facts = withDocument("terms", { latest: { version: 1, action: "pending" as never } });
+    expect(gate(facts)).toMatchObject({ outcome: "incomplete", missing: { documents: [{ docType: "terms", why: "withdrawn" }] } });
+  });
+
+  it("si el dato de la marca no llegó, se da por prendida", () => {
+    expect(gate(withProfile({ passwordResetRequired: undefined as never }))).toEqual({ outcome: "password_reset_required" });
+    expect(gate(withProfile({ passwordResetRequired: null as never }))).toEqual({ outcome: "password_reset_required" });
+  });
+
+  it("un estado de cuenta que la guarda no conoce no es una cuenta activa", () => {
+    expect(gate(withProfile({ status: "locked" as never }))).toEqual({ outcome: "blocked", reason: "no_profile" });
+  });
+
+  it.each<[string, unknown]>([
+    ["no llegó", undefined],
+    ["es una fecha inválida", new Date(Number.NaN)],
+    ["es un texto y no una fecha", "2026-10-10"],
+  ])("si la declaración de edad %s, cuenta como faltante", (_name, value) => {
+    expect(gate(withProfile({ adultDeclaredAt: value as never }))).toMatchObject({
+      outcome: "incomplete",
+      missing: { adultDeclaration: true },
+    });
+  });
+
+  it("un tipo obligatorio nombrado dos veces se pide una sola vez", () => {
+    const facts = withDocument("terms", { latest: null });
+    expect(resolveSessionGate(facts, ["terms", "terms", ...REQUIRED])).toMatchObject({
+      outcome: "incomplete",
+      missing: { documents: [{ docType: "terms", why: "never_given" }] },
+    });
+  });
+
   it("sin tipos obligatorios declarados, la guarda no deja pasar: no se salta los textos por omisión", () => {
     expect(resolveSessionGate(complete, [])).toEqual({ outcome: "unavailable", reason: "facts_incomplete", docTypes: [] });
   });
@@ -233,19 +303,23 @@ describe("resolveSessionGate", () => {
 
   // Los generadores cargan la mano hacia las cuentas que llegan al último paso de la
   // guarda: si casi todas se detuvieran antes, las propiedades de abajo no probarían nada.
+  // Hechos como los que la base puede dar: ni el piso ni lo aceptado van por delante de la
+  // versión vigente. Los que no tienen sentido tienen su propia tabla, arriba.
   const anyDocument = (docType: string) =>
-    fc.record({
-      docType: fc.constant(docType),
-      currentVersion: fc.option(fc.integer({ min: 0, max: 5 }), { nil: null, freq: 20 }),
-      reconsentFloor: fc.option(fc.integer({ min: 0, max: 5 }), { nil: null }),
-      latest: fc.option(
-        fc.record({
-          version: fc.integer({ min: 0, max: 5 }),
-          action: fc.constantFrom("granted" as const, "granted" as const, "withdrawn" as const),
-        }),
-        { nil: null, freq: 4 },
-      ),
-    });
+    fc.integer({ min: 0, max: 5 }).chain((current) =>
+      fc.record({
+        docType: fc.constant(docType),
+        currentVersion: fc.option(fc.constant(current), { nil: null, freq: 20 }),
+        reconsentFloor: fc.option(fc.integer({ min: 0, max: current }), { nil: null }),
+        latest: fc.option(
+          fc.record({
+            version: fc.integer({ min: 0, max: current }),
+            action: fc.constantFrom("granted" as const, "granted" as const, "withdrawn" as const),
+          }),
+          { nil: null, freq: 4 },
+        ),
+      }),
+    );
 
   const anyFacts: fc.Arbitrary<GateFacts> = fc.record({
     profile: fc.option(
@@ -347,17 +421,20 @@ describe("resolveSessionGate", () => {
     );
   });
 
+  // El oráculo sale de los hechos, no de la salida de la guarda: «textos actualizados» solo
+  // cuando la persona ya tiene nombre y edad, nunca dejó de aceptar nada, y lo único que
+  // pasa es que alguno de los textos que aceptó quedó atrás.
   it("la variante de textos actualizados solo sale cuando todo lo que falta es una versión nueva", () => {
     fc.assert(
       fc.property(anyFacts, (facts) => {
         const result = gate(facts);
         if (result.outcome !== "incomplete") return;
-        const onlyNewVersions =
-          !result.missing.name &&
-          !result.missing.adultDeclaration &&
-          result.missing.documents.every((doc) => doc.why === "new_version");
-        expect(result.variant).toBe(onlyNewVersions ? "updated_texts" : "complete_account");
-        expect(result.missing.name || result.missing.adultDeclaration || result.missing.documents.length > 0).toBe(true);
+        const profile = facts.profile;
+        const everythingWasGiven =
+          profile?.displayName === "Ana" &&
+          profile.adultDeclaredAt !== null &&
+          facts.documents.every((doc) => doc.latest?.action === "granted");
+        expect(result.variant).toBe(everythingWasGiven ? "updated_texts" : "complete_account");
       }),
     );
   });

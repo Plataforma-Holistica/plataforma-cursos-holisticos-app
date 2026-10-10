@@ -22,7 +22,6 @@ export type ClientIp =
   | { kind: "unknown"; reason: "untrusted_proxy" | "absent" | "malformed" };
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const IPV6_CHARACTERS = /^[0-9a-fA-F:.]+$/;
 const HEX_GROUP = /^[0-9a-fA-F]{1,4}$/;
 
 /** La dirección como un número de 32 bits, o nulo si no está escrita en decimal corriente. */
@@ -44,8 +43,6 @@ const ipv4Key = (value: number) => `v4:${[24, 16, 8, 0].map((shift) => (value >>
 
 /** Los ocho grupos de la dirección, o nulo. */
 function parseIpv6(text: string): number[] | null {
-  if (!IPV6_CHARACTERS.test(text)) return null;
-
   // Una IPv4 al final (`::ffff:203.0.113.7`) se reescribe como sus dos grupos.
   let rest = text;
   if (rest.includes(".")) {

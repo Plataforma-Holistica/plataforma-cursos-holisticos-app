@@ -7,7 +7,13 @@
 /** El de la base: `char_length(display_name) between 1 and 120`, que cuenta caracteres. */
 export const DISPLAY_NAME_MAX_LENGTH = 120;
 
-const CONTROL = /\p{Cc}/u;
+// Lo que no puede ir en un nombre: caracteres de control, separadores de línea y de párrafo
+// (romperían donde se muestre), mitades sueltas de un carácter, las marcas que invierten la
+// dirección del texto (sirven para disfrazar un nombre), y los invisibles más comunes,
+// incluidos los «rellenos» que Unicode clasifica como letras y se ven como un espacio.
+// No pretende atrapar todo lo invisible de Unicode: atrapa lo que rompe una pantalla o deja
+// un nombre que se ve vacío. Lo que decide si un nombre es apropiado es la moderación.
+const FORBIDDEN = /[\p{Cc}\p{Zl}\p{Zp}\p{Cs}​⁠﻿‪-‮⁦-⁩ᅟᅠㅤﾠ]/u;
 const LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
 
 export type DisplayNameResult =
@@ -18,8 +24,7 @@ export function parseDisplayName(input: string | null): DisplayNameResult {
   const name = (input ?? "").trim();
   if (name === "") return { ok: false, reason: "empty" };
   if ([...name].length > DISPLAY_NAME_MAX_LENGTH) return { ok: false, reason: "too_long" };
-  // Sin caracteres de control (un salto de línea rompería donde se muestre), y con al menos
-  // una letra o un número: un nombre de puros signos o de caracteres invisibles se vería vacío.
-  if (CONTROL.test(name) || !LETTER_OR_NUMBER.test(name)) return { ok: false, reason: "invalid" };
+  // Y con al menos una letra o un número: un nombre de puros signos no es un nombre.
+  if (FORBIDDEN.test(name) || !LETTER_OR_NUMBER.test(name)) return { ok: false, reason: "invalid" };
   return { ok: true, name };
 }

@@ -59,7 +59,9 @@ const not = (next: PasswordOutcome["next"]): PasswordOutcome => ({
 const OUTCOMES: Record<PasswordFlow, Record<PasswordSetResult, PasswordOutcome>> = {
   complete_registration: {
     ok: FIXED_ON_REGISTRATION,
-    same_password: FIXED_ON_REGISTRATION,
+    // No debería pasar: la contraseña anterior es aleatoria. Si pasa, Auth no cambió nada y
+    // por tanto no borró ninguna sesión: se cierran aquí, como al recuperar.
+    same_password: { ...FIXED_ON_REGISTRATION, closeSessions: true },
     weak_password: not("recover_instead"),
     rejected: not("recover_instead"),
     unknown: not("outcome_unknown"),

@@ -21,6 +21,10 @@ describe("resolveReturnPath", () => {
     expect(resolveReturnPath(input, ALLOWED)).toEqual({ kind: "path", path });
   });
 
+  it("un signo de consulta sin nada detrás se quita", () => {
+    expect(resolveReturnPath("/inicio?", ALLOWED)).toEqual({ kind: "path", path: "/inicio" });
+  });
+
   it("descarta el fragmento", () => {
     expect(resolveReturnPath("/inicio#//sitio.test", ALLOWED)).toEqual({ kind: "path", path: "/inicio" });
   });
@@ -77,47 +81,87 @@ describe("resolveReturnPath", () => {
     expect(resolveReturnPath("/inicio", [])).toEqual({ kind: "default", reason: "not_allowed" });
   });
 
+  it.each([
+    ["vacío", ""],
+    ["que es solo la barra", "/"],
+    ["terminado en barra", "/inicio/"],
+    ["sin barra inicial", "inicio"],
+  ])("un destino %s en la lista no abre ninguna ruta", (_name, prefix) => {
+    expect(resolveReturnPath("/inicio", [prefix])).toEqual({ kind: "default", reason: "not_allowed" });
+    expect(resolveReturnPath("/inicio/algo", [prefix])).toEqual({ kind: "default", reason: "not_allowed" });
+  });
+
+  it("el largo máximo se acepta, y un carácter más no", () => {
+    const atLimit = `/cursos/${"a".repeat(RETURN_PATH_MAX_LENGTH - "/cursos/".length)}`;
+    expect(atLimit.length).toBe(RETURN_PATH_MAX_LENGTH);
+    expect(resolveReturnPath(atLimit, ALLOWED)).toEqual({ kind: "path", path: atLimit });
+    expect(resolveReturnPath(`${atLimit}a`, ALLOWED)).toEqual({ kind: "default", reason: "malformed" });
+  });
+
+  it("una barra en la consulta no se acepta", () => {
+    expect(resolveReturnPath("/inicio?a=/x", ALLOWED)).toEqual({ kind: "default", reason: "malformed" });
+  });
+
+  it("no tarda con entradas largas y hostiles", () => {
+    const hostileInputs = [`/${"a.".repeat(500)}`, `/${"a".repeat(1000)}!`, `/inicio?${"%4".repeat(500)}`, "/".repeat(1024)];
+    for (const input of hostileInputs) {
+      expect(resolveReturnPath(input, ALLOWED).kind).toBe("default");
+    }
+  });
+
   // El oráculo es el analizador de direcciones del propio entorno, que es el que usa el
   // navegador: si acepta una ruta, al resolverla contra el sitio el origen no cambia y la
   // ruta queda idéntica, sin que nada se normalice por el camino.
-  const hostile = fc.oneof(
-    fc.string({ unit: "binary", maxLength: 60 }),
-    fc.webUrl({ withQueryParameters: true, withFragments: true }),
-    fc
-      .array(
-        fc.constantFrom(
-          "/", "//", "\\", ".", "..", "%2e", "%2f", "%5c", "%09", "\t", "\n", " ", "@", ":", "?", "#",
-          "inicio", "cursos", "sitio.test", "https:", "a", "=", "&", "%20",
-        ),
-        { maxLength: 12 },
-      )
-      .map((parts) => parts.join("")),
+  // Las entradas se arman desde un destino permitido y se les cuelgan fichas, la mayoría
+  // inocuas y algunas hostiles: así buena parte se acepta y la propiedad tiene qué mirar.
+  // Con texto al azar casi ninguna pasaría de la primera revisión.
+  const token = fc.oneof(
+    { weight: 6, arbitrary: fc.constantFrom("/a", "/yoga-1", "/lecciones", "/3", "/v1.2", "/x_y~z", "?a=1", "&b=c%20d", "=", "#frag") },
+    {
+      weight: 1,
+      arbitrary: fc.constantFrom(
+        "/", "//", "/.", "/..", "\\", ".", "..", "%2e", "%2f", "%5c", "%09", "\t", "\n", " ", "@", ":", ";",
+        "//sitio.test", "https://sitio.test", "/%2e%2e", "?", "#", "%",
+      ),
+    },
   );
+  const candidate = fc
+    .tuple(fc.constantFrom("/inicio", "/cursos", "/a", "", "/otro"), fc.array(token, { maxLength: 6 }))
+    .map(([start, tokens]) => `${start}${tokens.join("")}`);
+  const PREFIXES = ["/inicio", "/cursos", "/a"];
 
-  it("toda ruta que acepta conserva el origen y queda idéntica al resolverla", () => {
+  it("toda ruta que acepta conserva el origen, queda idéntica al resolverla y cae en un destino permitido", () => {
     fc.assert(
-      fc.property(hostile, (input) => {
-        const result = resolveReturnPath(input, ["/inicio", "/cursos", "/a"]);
+      fc.property(candidate, (input) => {
+        const result = resolveReturnPath(input, PREFIXES);
         if (result.kind !== "path") return;
         const url = new URL(result.path, ORIGIN);
         expect(url.origin).toBe(ORIGIN);
         expect(`${url.pathname}${url.search}`).toBe(result.path);
         expect(url.hash).toBe("");
-        expect(result.path.startsWith("//")).toBe(false);
+        expect(PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))).toBe(true);
+        // Y es la entrada misma, sin el fragmento ni un signo de consulta vacío al final:
+        // nada más se reescribió por el camino.
+        expect(result.path).toBe(input.split("#")[0]?.replace(/\?$/, ""));
       }),
-      { numRuns: 2000 },
+      { numRuns: 3000 },
     );
   });
 
-  it("toda ruta que acepta cae en un destino permitido", () => {
+  it("los generadores sí producen rutas aceptadas y rechazadas, por cada motivo", () => {
+    const results = fc.sample(candidate, 3000).map((input) => resolveReturnPath(input, PREFIXES));
+    const accepted = results.filter((result) => result.kind === "path").length;
+    expect(accepted).toBeGreaterThan(300);
+    const reasons = new Set(results.flatMap((result) => (result.kind === "default" ? [result.reason] : [])));
+    expect([...reasons].sort()).toEqual(["absent", "malformed", "not_allowed"]);
+  });
+
+  it("ningún texto, por raro que sea, produce una ruta que salga del sitio", () => {
     fc.assert(
-      fc.property(hostile, (input) => {
-        const result = resolveReturnPath(input, ["/inicio", "/cursos"]);
+      fc.property(fc.oneof(fc.string({ unit: "binary", maxLength: 60 }), fc.webUrl({ withQueryParameters: true })), (input) => {
+        const result = resolveReturnPath(input, PREFIXES);
         if (result.kind !== "path") return;
-        const pathname = result.path.split("?")[0];
-        expect(
-          ["/inicio", "/cursos"].some((prefix) => pathname === prefix || pathname?.startsWith(`${prefix}/`)),
-        ).toBe(true);
+        expect(new URL(result.path, ORIGIN).origin).toBe(ORIGIN);
       }),
       { numRuns: 1000 },
     );
