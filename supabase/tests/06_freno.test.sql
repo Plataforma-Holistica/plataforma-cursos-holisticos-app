@@ -2,7 +2,7 @@
 -- Esquema de backend §5.9 y §16.2. Las dos tablas viven en private y solo las toca el servidor.
 begin;
 \ir _ayuda.psql
-select plan(25);
+select plan(26);
 
 -- ---------------------------------------------------------------------------------------
 -- Estructura: sin registro de escritura adelantada, con seguridad por fila y sin políticas.
@@ -28,8 +28,9 @@ select ok(
   'app_service lee, inserta, actualiza y borra en ' || t || ', y no la vacía')
 from unnest(array['rate_limit_counters', 'login_throttles']) as t;
 select ok(
-  not has_table_privilege(r, 'private.' || t, 'select, insert, update, delete, truncate'),
-  r || ' no tiene ningún permiso sobre ' || t)
+  not has_table_privilege(r, 'private.' || t, 'select, insert, update, delete, truncate')
+    and not has_any_column_privilege(r, 'private.' || t, 'select, insert, update'),
+  r || ' no tiene ningún permiso sobre ' || t || ', ni por columna')
 from unnest(array['rate_limit_counters', 'login_throttles']) as t,
      unnest(array['anon', 'authenticated', 'service_role']) as r;
 
@@ -64,8 +65,10 @@ select throws_ok(
 select lives_ok(
   $$delete from private.login_throttles where account_key = decode(repeat('a1', 32), 'hex')$$,
   'el servidor borra los frenos de una cuenta');
+-- Solo las huellas de esta prueba: la tabla puede traer frenos de una sesión de desarrollo.
 select results_eq(
-  $$select encode(account_key, 'hex') from private.login_throttles$$,
+  $$select encode(account_key, 'hex') from private.login_throttles
+    where account_key in (decode(repeat('a1', 32), 'hex'), decode(repeat('b2', 32), 'hex'))$$,
   array[repeat('b2', 32)],
   'se fueron los dos pares de esa cuenta y quedó el de la otra');
 
@@ -91,6 +94,14 @@ select is(
   'con permiso de lectura y filas presentes, una persona con sesión no ve ninguna');
 select pruebas.como_dueno();
 revoke select on private.login_throttles from authenticated;
+-- Y el vigilante avisa de un permiso así, aunque sea de una sola columna y solo de lectura.
+grant select (account_key) on private.login_throttles to authenticated;
+select isnt_empty(
+  $$select * from private.schema_violations()
+    where problem = 'unexpected column privilege for authenticated'
+      and object_name = 'private.login_throttles'$$,
+  'schema_violations() avisa si una persona recibe una columna del esquema privado');
+revoke select (account_key) on private.login_throttles from authenticated;
 
 -- ---------------------------------------------------------------------------------------
 -- Los ocho parámetros, por nombre: definidos, enteros, con su unidad y con valor vigente.

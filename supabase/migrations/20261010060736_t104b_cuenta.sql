@@ -62,6 +62,11 @@ create trigger profiles_password_flag before insert or update on public.profiles
 --   claimed          la marca estaba prendida y se apagó ahora
 --   already_claimed  ya estaba apagada (lo normal al recuperar la contraseña)
 --   ineligible       sin actor, sin perfil, cuenta que no está activa o correo sin confirmar
+--
+-- Límite, que vale para todo el camino de servicio (ADR-31): por quién se actúa lo declara
+-- el servidor. Las dos capas de arriba impiden que una consulta mal escrita apague la marca
+-- con un update; esta función impide equivocarse de cuenta. Ninguna detiene a quien ya
+-- pueda ejecutar consultas arbitrarias como app_service y declararse otra persona.
 
 create function private.claim_account() returns text
 language plpgsql security definer set search_path = ''
@@ -98,7 +103,8 @@ grant execute on function private.claim_account() to app_service;
 -- ---------------------------------------------------------------------------------------
 -- El vigilante aprende a ver permisos por columna (16.3). Hasta hoy leía solo los permisos
 -- de tabla: un `grant update (columna)` sobre un libro, o devolverle al servidor el permiso
--- de escribir profiles entera, no producían ninguna fila. Y consents entra a los libros.
+-- de escribir profiles entera, no producían ninguna fila. Tampoco lo concedido a PUBLIC.
+-- Y consents entra a los libros.
 
 create or replace function private.schema_violations()
 returns table (problem text, object_name text)
@@ -145,6 +151,29 @@ as $$
     and g.privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')
     and not (g.grantee = 'authenticated' and g.table_name = 'saved_courses'
              and g.privilege_type in ('INSERT', 'DELETE'))
+  union all
+  -- Lo mismo, columna por columna, que no sale en la consulta de arriba. La única escritura
+  -- por columnas prevista es la de la persona sobre sus propios datos de perfil.
+  select distinct 'unexpected column write privilege for ' || g.grantee, g.table_schema || '.' || g.table_name
+  from information_schema.column_privileges g
+  where g.grantee in ('anon', 'authenticated')
+    and g.table_schema in ('public', 'private')
+    and g.privilege_type in ('INSERT', 'UPDATE')
+    and not (g.grantee = 'authenticated' and g.table_schema = 'public' and g.table_name = 'profiles'
+             and g.privilege_type = 'UPDATE'
+             and g.column_name in ('display_name', 'country_code', 'country_is_self_declared', 'locale'))
+    and not (g.grantee = 'authenticated' and g.table_schema = 'public' and g.table_name = 'saved_courses'
+             and g.privilege_type = 'INSERT')
+  union all
+  -- Del esquema privado, ni una columna, ni para leer.
+  select distinct 'unexpected column privilege for ' || g.grantee, g.table_schema || '.' || g.table_name
+  from information_schema.column_privileges g
+  where g.table_schema = 'private' and g.grantee in ('anon', 'authenticated')
+  union all
+  -- Nada concedido a todos: PUBLIC incluye al visitante y a cualquier rol que llegue después.
+  select distinct 'privilege granted to PUBLIC', g.table_schema || '.' || g.table_name
+  from information_schema.column_privileges g
+  where g.grantee = 'PUBLIC' and g.table_schema in ('public', 'private')
   union all
   -- La clave secreta no toca tablas propias. Ningún rol de usuario toca el esquema privado.
   select 'unexpected privilege for ' || g.grantee, g.table_schema || '.' || g.table_name

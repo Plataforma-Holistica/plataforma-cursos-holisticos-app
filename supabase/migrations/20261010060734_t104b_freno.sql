@@ -42,7 +42,8 @@ grant select, insert, update, delete on private.rate_limit_counters, private.log
 
 -- ---------------------------------------------------------------------------------------
 -- Los parámetros del freno y de los topes (00-fundamentos.md §4). Los valores se cargan de
--- supabase/seeds/. ESPERA_REENVIO repite un valor que fija la configuración de Auth.
+-- supabase/seeds/. ESPERA_REENVIO repite un valor que fija la configuración de Auth
+-- (max_frequency), que se alinea cuando llegue esa configuración, con su prueba.
 
 insert into public.parameter_definitions (key, description, value_type, unit, group_name, affects_payout) values
   ('FRENO_ESPERA_BASE', 'Espera tras el fallo que activa el freno; cada fallo seguido la duplica', 'integer', 'minutos', 'product', false),

@@ -3,7 +3,7 @@
 -- no cargan, para dar lo mismo con ellos y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(63);
+select plan(70);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-legal@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-legal@prueba.test');
@@ -121,8 +121,12 @@ select throws_ok(
   '23514', null, 'una versión que ya existe no se vuelve a publicar');
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
-    values ('refund_policy', 2, 'T', 'B', now())$$,
-  '23514', null, 'una versión nueva no rige desde la misma fecha que la anterior');
+    values ('license_annex', 1, 'T', 'B', 'infinity')$$,
+  '23514', null, 'la vigencia es una fecha de verdad, no infinito');
+select throws_ok(
+  $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
+    values ('license_annex', 1, '  ', 'B', now())$$,
+  '23514', null, 'un texto sin título no se publica');
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('license_annex', 1, 'T', 'B', now() - interval '1 day')$$,
@@ -131,6 +135,24 @@ select lives_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('refund_policy', 2, 'Reembolsos', 'Texto nuevo', now() + interval '1 day')$$,
   'la versión siguiente, con vigencia posterior, sí se publica');
+-- Una vigencia equivocada no congela el tipo: la versión siguiente la corrige, porque el
+-- vigente es la versión más alta que ya rige, no la de fecha más reciente.
+select lives_ok(
+  $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
+    values ('teacher_privacy_notice', 1, 'Aviso', 'Publicado con la fecha mal', now() + interval '200 years')$$,
+  'una versión se puede publicar con una vigencia lejana por error');
+select lives_ok(
+  $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
+    values ('teacher_privacy_notice', 2, 'Aviso', 'Corregido', now())$$,
+  'y la versión siguiente la corrige, aunque rija antes');
+select is(
+  private.current_legal_document('teacher_privacy_notice'),
+  (select id from public.legal_documents where doc_type = 'teacher_privacy_notice' and version = 2),
+  'el vigente es la versión corregida');
+select is(
+  private.current_legal_document('teacher_privacy_notice', now() + interval '300 years'),
+  (select id from public.legal_documents where doc_type = 'teacher_privacy_notice' and version = 2),
+  'y lo sigue siendo el día en que llegue la fecha equivocada: manda la versión, no la fecha');
 select pruebas.como_sistema();
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
@@ -243,6 +265,7 @@ select id as refund1 from public.legal_documents where doc_type = 'refund_policy
 select id as refund2 from public.legal_documents where doc_type = 'refund_policy' and version = 2 \gset
 select id as cargo0 from public.legal_documents where doc_type = 'recurring_charge_consent' and version = 0 \gset
 select id as comunidad0 from public.legal_documents where doc_type = 'community_policy' and version = 0 \gset
+select id as comunidad1 from public.legal_documents where doc_type = 'community_policy' and version = 1 \gset
 
 select pruebas.como_servicio();
 select is(
@@ -307,6 +330,10 @@ select lives_ok(
            values ('a0000000-0000-0000-0000-000000000001', %L, 'withdrawn', 'account_settings')$$, :'refund1'),
   'retirar un consentimiento es una fila nueva');
 select throws_ok(
+  format($$insert into public.consents (profile_id, legal_document_id, action, origin)
+           values ('a0000000-0000-0000-0000-000000000001', %L, 'withdrawn', 'account_settings')$$, :'comunidad1'),
+  '23514', null, 'no se retira un consentimiento que nunca se dio');
+select throws_ok(
   format($$insert into public.consents (profile_id, legal_document_id, origin)
            values ('a0000000-0000-0000-0000-000000000001', %L, 'inventado')$$, :'refund1'),
   '23514', null, 'el origen sale de una lista cerrada');
@@ -360,9 +387,16 @@ select throws_ok(
 
 grant update (ip) on public.consents to app_service;
 select isnt_empty(
-  $$select * from private.schema_violations() where object_name = 'public.consents'$$,
+  $$select * from private.schema_violations()
+    where problem = 'ledger column writable by app_service' and object_name = 'public.consents'$$,
   'schema_violations() avisa si el servidor recibe permiso de editar una columna de un libro');
 revoke update (ip) on public.consents from app_service;
+grant insert on public.consents to public;
+select isnt_empty(
+  $$select * from private.schema_violations()
+    where problem = 'privilege granted to PUBLIC' and object_name = 'public.consents'$$,
+  'y si una tabla recibe un permiso para todos');
+revoke insert on public.consents from public;
 
 select pruebas.limpiar();
 select * from finish();

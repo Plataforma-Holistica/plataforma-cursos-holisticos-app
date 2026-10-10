@@ -27,14 +27,19 @@ create table public.legal_documents (
   published_at timestamptz not null default now(),     -- lo llena la base
   constraint legal_documents_version_uq unique (doc_type, version),
   constraint legal_documents_version_not_negative check (version >= 0),
-  constraint legal_documents_hash_length check (octet_length(body_sha256) = 32)
+  constraint legal_documents_hash_length check (octet_length(body_sha256) = 32),
+  constraint legal_documents_title_not_blank check (btrim(title) <> ''),
+  constraint legal_documents_body_not_blank check (btrim(body) <> ''),
+  constraint legal_documents_effective_finite check (isfinite(effective_from))
 );
 comment on table public.legal_documents is 'Cada versión de cada texto legal, con su huella y su vigencia (RF-713). Solo inserción.';
--- Versión vigente de un documento: private.current_legal_document().
-create index legal_documents_current_idx on public.legal_documents (doc_type, effective_from desc);
 
--- La única definición de «vigente»: la de mayor vigencia que ya empezó. La usan el guardián
--- de consents y los servicios de cuenta, para que no haya dos respuestas distintas.
+-- La única definición de «vigente»: la versión más alta entre las que ya rigen. La usan el
+-- guardián de consents y los servicios de cuenta, para que no haya dos respuestas distintas.
+-- Manda el número de versión y no la fecha: así una versión nueva siempre corrige a la
+-- anterior, aunque aquella se haya publicado con una vigencia equivocada, y un borrador
+-- (versión 0) nunca le gana a un texto publicado. El índice de la restricción única sirve
+-- a esta consulta.
 create function private.current_legal_document(
   p_doc_type public.legal_doc_type, p_at timestamptz default now()) returns uuid
 language sql stable security definer set search_path = ''
@@ -42,7 +47,7 @@ as $$
   select d.id
   from public.legal_documents d
   where d.doc_type = p_doc_type and d.effective_from <= p_at
-  order by d.effective_from desc, d.version desc
+  order by d.version desc
   limit 1
 $$;
 
@@ -53,16 +58,16 @@ grant execute on function private.current_legal_document(public.legal_doc_type, 
 --     con el ajuste que pone el guion de borradores (scripts/db-legal-drafts.mjs). El
 --     servidor puede poner cualquier ajuste, así que el ajuste solo no basta: por eso se
 --     mira además quién ejecuta, y por eso esta función no es "security definer";
---   · de la 1 en adelante las versiones crecen, ninguna rige hacia atrás ni antes que la
---     anterior, y desde la 2 la publica una persona. De la vigente depende a quién se le
---     vuelve a pedir el consentimiento (RF-108), y un libro no se corrige después.
+--   · de la 1 en adelante las versiones crecen, ninguna rige hacia atrás, y desde la 2 la
+--     publica una persona. De la vigente depende a quién se le vuelve a pedir el
+--     consentimiento (RF-108), y un libro no se corrige después: una versión mal publicada
+--     se corrige publicando la siguiente, que le gana por número.
 create function private.guard_legal_document() returns trigger
 language plpgsql set search_path = ''
 as $$
 declare
   v_owner name;
   v_last_version integer;
-  v_last_from timestamptz;
 begin
   new.body_sha256 := pg_catalog.sha256(pg_catalog.convert_to(new.body, 'UTF8'));
   new.published_by := private.actor_id();
@@ -80,7 +85,7 @@ begin
     return new;
   end if;
 
-  select max(d.version), max(d.effective_from) into v_last_version, v_last_from
+  select max(d.version) into v_last_version
   from public.legal_documents d where d.doc_type = new.doc_type;
   if v_last_version is not null and new.version <= v_last_version then
     raise exception '%.%: version % of % is not after version %',
@@ -88,10 +93,6 @@ begin
   end if;
   if new.effective_from < new.published_at then
     raise exception '%.%: a published version cannot take effect in the past',
-      tg_table_schema, tg_table_name using errcode = '23514';
-  end if;
-  if v_last_from is not null and new.effective_from <= v_last_from then
-    raise exception '%.%: a new version must take effect after the previous one',
       tg_table_schema, tg_table_name using errcode = '23514';
   end if;
   if new.version >= 2 and new.published_by is null then
@@ -157,7 +158,12 @@ create index consents_profile_idx on public.consents (profile_id, legal_document
 
 -- Un consentimiento es evidencia: lo registra la propia persona (el servidor declara por
 -- quién actúa, con el token que verificó), sobre el texto vigente, con la hora de la base.
--- Retirar es una fila nueva y puede apuntar a una versión anterior, que es la que se aceptó.
+-- Retirar es una fila nueva: apunta a la versión que la persona aceptó, que puede ser una
+-- anterior a la vigente, y solo se retira lo que antes se dio.
+--
+-- Límite, que vale para todo el camino de servicio (ADR-31): por quién se actúa lo declara
+-- el servidor. Esto impide que una ruta se equivoque de persona; no detiene a quien ya
+-- pueda ejecutar consultas arbitrarias como app_service.
 create function private.guard_consent() returns trigger
 language plpgsql security definer set search_path = ''
 as $$
@@ -177,6 +183,12 @@ begin
       raise exception '%.%: a consent must point to the document in force',
         tg_table_schema, tg_table_name using errcode = '23514';
     end if;
+  elsif not exists (
+      select 1 from public.consents c
+      where c.profile_id = new.profile_id and c.legal_document_id = new.legal_document_id
+        and c.action = 'granted') then
+    raise exception '%.%: only a consent that was given can be withdrawn',
+      tg_table_schema, tg_table_name using errcode = '23514';
   end if;
   return new;
 end

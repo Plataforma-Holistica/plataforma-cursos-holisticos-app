@@ -74,9 +74,11 @@ de entrada, y ese guion se lo da con la contraseña de `DATABASE_URL`. Solo corr
 base local. `db:reset` lo repite, porque rehacer la base borra los roles.
 
 `pnpm db:drafts` carga los tres textos legales sin los que no se completa un registro, como
-borradores de versión 0 marcados sin validez. Tampoco corre fuera de la base local, y la
-base rechaza una versión 0 que no venga de ese guion. Las pruebas de base pasan con los
-borradores cargados y sin ellos: la integración continua las corre en los dos estados.
+borradores de versión 0 marcados sin validez. Tampoco corre fuera de la base local. La
+base, por su parte, solo acepta una versión 0 del dueño de la tabla, declarado como
+sistema y con el ajuste que pone ese guion: el servidor no puede cargarla. Las pruebas de
+base pasan con los borradores cargados y sin ellos: la integración continua las corre en
+los dos estados.
 
 Versiones que no se suben sin revisar:
 

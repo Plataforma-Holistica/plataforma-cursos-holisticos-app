@@ -2,7 +2,7 @@
 -- Nace prendida y solo la apaga private.claim_account(), a nombre de la propia cuenta.
 begin;
 \ir _ayuda.psql
-select plan(43);
+select plan(45);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-cuenta@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-cuenta@prueba.test');
@@ -63,7 +63,9 @@ select throws_ok(
   $$update public.profiles set password_reset_required = false$$,
   '42501', null, 'el visitante tampoco');
 
--- Ni el dueño de la tabla, ni con el ajuste que usa la función puesto a mano.
+-- Ni el dueño de la tabla con un update suelto. (Con el ajuste puesto a mano el dueño sí
+-- podría: es el dueño, y también puede quitar el disparador. El guardián cuida de un
+-- descuido, no del dueño.)
 select pruebas.como_dueno();
 select throws_ok(
   $$update public.profiles set password_reset_required = false
@@ -72,7 +74,8 @@ select throws_ok(
 -- Se le devuelve al servidor el permiso de tabla, para probar la segunda capa sola.
 grant update on public.profiles to app_service;
 select isnt_empty(
-  $$select * from private.schema_violations() where object_name = 'public.profiles'$$,
+  $$select * from private.schema_violations()
+    where problem = 'password_reset_required writable by app_service' and object_name = 'public.profiles'$$,
   'schema_violations() avisa si el servidor recupera el permiso de escribir la marca');
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
 select set_config('app.claiming_account', 'on', true);
@@ -80,8 +83,19 @@ select throws_ok(
   $$update public.profiles set password_reset_required = false
     where id = 'a0000000-0000-0000-0000-000000000001'$$,
   '42501', null, 'con el permiso devuelto y el ajuste falsificado, el guardián la sigue cuidando');
+select throws_ok(
+  $$insert into public.profiles (id) values ('a0000000-0000-0000-0000-000000000001')
+    on conflict (id) do update set password_reset_required = false$$,
+  '42501', null, 'también si el cambio llega por un insert que actualiza al chocar');
 select pruebas.como_dueno();
 revoke update on public.profiles from app_service;
+-- Una persona con permiso de escribir otra columna de su perfil: el vigilante también avisa.
+grant update (status, suspended_for_fraud) on public.profiles to authenticated;
+select isnt_empty(
+  $$select * from private.schema_violations()
+    where problem = 'unexpected column write privilege for authenticated' and object_name = 'public.profiles'$$,
+  'schema_violations() avisa si una persona recibe permiso de escribir una columna de más');
+revoke update (status, suspended_for_fraud) on public.profiles from authenticated;
 grant update (display_name, status, country_code, country_is_self_declared, locale, adult_declared_at,
               suspended_at, suspended_by, suspension_reason, suspended_for_fraud, comment_ban_until,
               deleted_at)
