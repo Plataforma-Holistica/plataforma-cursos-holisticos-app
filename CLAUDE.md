@@ -55,8 +55,9 @@ pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
 pnpm db:status   # direcciones y llaves locales, las que pide .env.example
 pnpm db:stop     # lo apaga; los datos se conservan
-pnpm db:reset    # borra la base local y la rehace: migraciones, semilla y db:login
+pnpm db:reset    # borra la base local y la rehace: migraciones, semilla, db:login y db:drafts
 pnpm db:login    # le da a app_service entrada a la base local (ver .env.example)
+pnpm db:drafts   # carga en la base local los textos legales de borrador (versión 0)
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base local
@@ -71,6 +72,13 @@ corre lo mismo más `secrets`, la auditoría de dependencias y `build`.
 `pnpm db:login` hace falta una vez por base: la migración crea a `app_service` sin permiso
 de entrada, y ese guion se lo da con la contraseña de `DATABASE_URL`. Solo corre contra la
 base local. `db:reset` lo repite, porque rehacer la base borra los roles.
+
+`pnpm db:drafts` carga los tres textos legales sin los que no se completa un registro, como
+borradores de versión 0 marcados sin validez. Tampoco corre fuera de la base local. La
+base, por su parte, solo acepta una versión 0 del dueño de la tabla, declarado como
+sistema y con el ajuste que pone ese guion: el servidor no puede cargarla. Las pruebas de
+base pasan con los borradores cargados y sin ellos: la integración continua las corre en
+los dos estados.
 
 Versiones que no se suben sin revisar:
 
@@ -99,6 +107,7 @@ La que fija el TRD §4.2.
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
+| `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
 | `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
@@ -247,7 +256,7 @@ en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.t
 un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
 revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
-En la base, cuatro reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+En la base, seis reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
 - **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
   sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
@@ -260,6 +269,16 @@ En la base, cuatro reglas que salen de `../planeacion/05-esquema-backend.md` §1
   (`app.actor_id`, `app.actor_aal`) o que es el sistema (`app.actor_kind`).
 - **La prueba primero**, en `supabase/tests/`, y se la ve fallar antes de escribir la
   migración. Las migraciones se aplican solo en la base local.
+- **En `profiles` el servidor escribe por columnas.** `app_service` no tiene `update` de la
+  tabla entera: una columna nueva se le concede a mano en su migración, y si se olvida, el
+  servidor recibe un error en vez de un acceso de más. La marca `password_reset_required`
+  no se concede nunca: solo la apaga `private.claim_account()`, y un guardián la cuida
+  aunque alguien devuelva el permiso (TRD §9.2).
+- **Un ajuste de sesión no es una barrera.** El servidor puede poner cualquier
+  `set_config`, así que una regla que dependa solo de un ajuste se puede falsificar desde
+  una consulta mal escrita. Las reglas duras miran además quién ejecuta (`current_user`
+  contra el dueño de la tabla) o se apoyan en un permiso. Y el vigilante mira también los
+  permisos por columna, que no salen en los permisos de tabla.
 
 Los archivos de `tests/architecture/fixtures/` violan las capas a propósito: son las
 muestras de esa prueba y no son código de la aplicación.
@@ -282,8 +301,10 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 
 Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
 `src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
-`supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir; los servicios
-y adaptadores de cada zona se agregan ahí cuando su tarea los crea. También tiene dueño
+`supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir. De la cuenta
+ya están ahí, aunque todavía no existan, `src/services/account/`, `src/proxy.ts`, la
+configuración de Auth (`supabase/config.toml`, `supabase/templates/`) y `supabase/local/`.
+Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.
 

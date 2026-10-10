@@ -23,6 +23,8 @@ as $$
          set_config('app.actor_aal', '', true),
          set_config('app.reason', '', true),
          set_config('app.request_id', '', true),
+         set_config('app.legal_drafts', '', true),
+         set_config('app.claiming_account', '', true),
          set_config('role', 'none', true);
 $$;
 
@@ -73,6 +75,11 @@ as $$ select pruebas.limpiar(); $$;
 create function pruebas.alta(p_id uuid, p_email text) returns void
 language sql
 as $$ insert into auth.users (id, email) values (p_id, p_email); $$;
+
+-- Confirma el correo de una cuenta, como lo hace Supabase Auth al canjear el enlace.
+create function pruebas.confirmar(p_id uuid) returns void
+language sql
+as $$ update auth.users set email_confirmed_at = now() where id = p_id; $$;
 
 -- Da una capacidad como lo haría el guion de arranque: declarado como sistema.
 create function pruebas.dar_capacidad(p_profile uuid, p_capability text) returns void

@@ -9,6 +9,12 @@
 
 # Control de acceso
 /src/domain/access/        @SerchFGA @plataformaholisticadev
+/src/services/account/     @SerchFGA @plataformaholisticadev
+# El paso previo de cada petición: renueva la sesión y decide a dónde se manda
+/src/proxy.ts              @SerchFGA @plataformaholisticadev
+# La configuración de Auth y sus correos: confirmación, vigencias, contraseña mínima
+/supabase/config.toml      @SerchFGA @plataformaholisticadev
+/supabase/templates/       @SerchFGA @plataformaholisticadev
 # El único camino del código a la base: decide por quién se actúa (ADR-31)
 /src/adapters/supabase/    @SerchFGA @plataformaholisticadev
 
@@ -22,6 +28,8 @@
 # Las pruebas de base, que dicen qué se le niega a cada rol, y la semilla de parámetros
 /supabase/tests/           @SerchFGA @plataformaholisticadev
 /supabase/seeds/           @SerchFGA @plataformaholisticadev
+# Los textos legales de borrador, que solo se cargan en una base local
+/supabase/local/           @SerchFGA @plataformaholisticadev
 
 # Lo que sale hacia un tercero: qué recolecta el registro de errores y el filtro de datos
 # personales por el que pasa cada error (TRD §10.5)

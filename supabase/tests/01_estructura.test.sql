@@ -2,7 +2,7 @@
 -- Ninguna tabla sin seguridad por fila, ninguna función de más, ningún permiso de más.
 begin;
 \ir _ayuda.psql
-select plan(22);
+select plan(30);
 
 select is_empty(
   'select * from private.schema_violations()',
@@ -10,21 +10,30 @@ select is_empty(
 
 select has_table('public', t, 'existe public.' || t)
 from unnest(array['profiles', 'admin_capabilities', 'audit_log',
-                  'parameter_definitions', 'business_parameters']) as t;
+                  'parameter_definitions', 'business_parameters',
+                  'legal_documents', 'consents']) as t;
+select has_table('private', t, 'existe private.' || t)
+from unnest(array['rate_limit_counters', 'login_throttles']) as t;
 
--- El visitante no lee ninguna tabla propia.
+-- El visitante no lee ninguna tabla propia, salvo los textos legales (y de esos, sus
+-- columnas públicas: lo prueba 05_legal).
 select ok(
-  not has_table_privilege('anon', 'public.' || t, 'select'),
+  not has_any_column_privilege('anon', 'public.' || t, 'select'),
   'el visitante no tiene permiso de lectura sobre ' || t)
 from unnest(array['profiles', 'admin_capabilities', 'audit_log',
-                  'parameter_definitions', 'business_parameters']) as t;
+                  'parameter_definitions', 'business_parameters', 'consents']) as t;
+select ok(
+  has_any_column_privilege('anon', 'public.legal_documents', 'select')
+    and not has_table_privilege('anon', 'public.legal_documents', 'select'),
+  'el visitante lee los textos legales, por columnas y no la tabla entera');
 
 -- La clave secreta de Supabase no toca tablas propias.
 select ok(
   not has_table_privilege('service_role', 'public.' || t, 'select, insert, update, delete'),
   'service_role no tiene ningún permiso sobre ' || t)
 from unnest(array['profiles', 'admin_capabilities', 'audit_log',
-                  'parameter_definitions', 'business_parameters']) as t;
+                  'parameter_definitions', 'business_parameters',
+                  'legal_documents', 'consents']) as t;
 
 -- El permiso de entrada no se comprueba: la migración crea el rol sin él, y cada entorno
 -- se lo da fuera del repositorio (en local, `pnpm db:login`).
