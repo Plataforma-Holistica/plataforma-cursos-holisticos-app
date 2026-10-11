@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useActionState, useState } from "react";
+import { type FormEvent, useActionState } from "react";
 
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
@@ -14,6 +14,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
 import { NAME_ERRORS, NameField } from "../_lib/fields";
+import { useLocalChecks } from "../_lib/hooks";
 import { signOutAction } from "../_lib/session-actions";
 import { SuspendedScreen } from "../_lib/states";
 
@@ -141,29 +142,23 @@ export interface ConsentsScreenProps {
 export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
   const [state, action, pending] = useActionState(completeAccountAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  // `attempt` cuenta todas las revisiones del navegador, también las que salen bien: no
-  // retrocede, para que lo visto antes al salir de un campo no vuelva a mandar.
-  const [local, setLocal] = useState<{ fields: ConsentsFields | null; attempt: number }>({ fields: null, attempt: 0 });
+  const [local, checked] = useLocalChecks<ConsentsFields>();
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const input = readConsentsForm(new FormData(event.currentTarget));
     const fields = checkConsentsForm(view, input);
-    if (fields === null) {
-      setLocal((current) => ({ fields: null, attempt: current.attempt + 1 }));
-      return;
-    }
-    // No se envía, así que el formulario no se vacía: lo marcado se queda marcado.
-    event.preventDefault();
-    setLocal((current) => ({ fields, attempt: current.attempt + 1 }));
+    checked(fields);
+    // Con algo que corregir no se envía, así que el formulario no se vacía: lo marcado se
+    // queda marcado.
+    if (fields !== null) event.preventDefault();
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const round = sent + local.attempt;
-  const fields = local.fields ?? (state.kind === "invalid" ? state.fields : {});
+  const fields = local.found ?? (state.kind === "invalid" ? state.fields : {});
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino.
-  const answered = local.fields === null && !pending;
+  const answered = local.found === null && !pending;
   const name = state.kind === "idle" ? "" : state.name;
   const updated = view.variant === "updated_texts";
 
@@ -174,7 +169,7 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
         <p className="text-body-l text-text-2">{updated ? text.introUpdated : text.introComplete}</p>
       </div>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={round} />
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.failed} />
         {answered && state.kind === "repainted" && state.reason === "texts_changed" && (
           <InlineAlert key={sent} tone="warning" live>
             {text.textsChanged}
@@ -190,7 +185,7 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
           <input key={item.documentId} type="hidden" name="shown" value={shownValue(item)} />
         ))}
         {/* Cuando cambian los textos, o llega la respuesta de un envío, los campos se arman de nuevo. */}
-        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={round} />
+        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={sent + local.checks} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>

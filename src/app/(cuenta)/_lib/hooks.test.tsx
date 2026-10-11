@@ -1,7 +1,7 @@
 import { act, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { afterInteraction, pointerIsPressedInside, QUIET_MS, useDelayIsOver, useSeenOnBlur } from "./hooks";
+import { afterInteraction, pressedElement, QUIET_MS, useDelayIsOver, useLocalChecks, useSeenOnBlur } from "./hooks";
 
 // Cuándo se pinta lo que se vio al salir de un campo: cuando termina el clic o la tecla que
 // sacó el foco, no en medio. Que así no se pierde el clic lo prueba el extremo a extremo,
@@ -93,7 +93,8 @@ describe("lo que espera a que termine la interacción en curso", () => {
     fireEvent.pointerUp(document.body);
     vi.advanceTimersByTime(QUIET_MS * 10);
     expect(work).toHaveBeenCalledOnce();
-    expect(added).toHaveBeenCalledTimes(3);
+    // Sin botón abajo solo escucha el teclado.
+    expect(added.mock.calls.map(([type]) => type)).toEqual(["keyup"]);
     expect(removed.mock.calls.map(([type]) => type).sort()).toEqual(added.mock.calls.map(([type]) => type).sort());
     added.mockRestore();
     removed.mockRestore();
@@ -232,7 +233,7 @@ describe("lo que se le dice a un campo", () => {
   });
 });
 
-describe("lo que encontró la revisión de los arreglos", () => {
+describe("lo que encontraron las revisiones de los arreglos", () => {
   it("la misma ronda con otra duración es otra espera, y se cuenta entera", () => {
     const { result, rerender } = renderHook((props: { ms: number | null; round: number }) => useDelayIsOver(props.ms, props.round), {
       initialProps: { ms: 60_000 as number | null, round: 0 },
@@ -247,37 +248,92 @@ describe("lo que encontró la revisión de los arreglos", () => {
     expect(result.current).toBe(true);
   });
 
-  it("sabe sobre qué bajó el botón del ratón, mientras sigue abajo", () => {
-    const field = document.body.appendChild(document.createElement("div"));
-    const inside = field.appendChild(document.createElement("button"));
-    const outside = document.body.appendChild(document.createElement("button"));
-    expect(pointerIsPressedInside(field)).toBe(false);
-    fireEvent.pointerDown(inside);
-    expect(pointerIsPressedInside(field)).toBe(true);
-    fireEvent.pointerUp(inside);
-    expect(pointerIsPressedInside(field)).toBe(false);
-    fireEvent.pointerDown(outside);
-    expect(pointerIsPressedInside(field)).toBe(false);
-    fireEvent.pointerUp(outside);
-    field.remove();
-    outside.remove();
+  it("sabe sobre qué elemento bajó el botón del ratón, mientras sigue abajo", () => {
+    const button = document.body.appendChild(document.createElement("button"));
+    const icon = button.appendChild(document.createElement("span"));
+    expect(pressedElement()).toBeNull();
+    fireEvent.pointerDown(icon);
+    expect(pressedElement()).toBe(icon);
+    fireEvent.pointerUp(icon);
+    expect(pressedElement()).toBeNull();
+    // Lo que no es un elemento (el documento) no cuenta como uno.
+    fireEvent.pointerDown(document);
+    expect(pressedElement()).toBeNull();
+    fireEvent.pointerUp(document);
+    button.remove();
   });
 
   it.each([
     ["el menú del botón derecho", () => fireEvent.contextMenu(document.body)],
     ["soltar lo que se arrastraba", () => fireEvent.dragEnd(document.body)],
     ["cambiar de ventana", () => fireEvent.blur(window)],
-  ])("%s también suelta el botón: lo visto al salir de un campo no espera un clic que no viene", (_name, release) => {
+  ])("%s también suelta el botón, y con él lo que ya esperaba a que se soltara", (_name, release) => {
     const button = document.body.appendChild(document.createElement("button"));
+    const waiting = vi.fn();
     fireEvent.pointerDown(button);
-    expect(pointerIsPressedInside(document.body)).toBe(true);
+    // El foco salió de un campo con el botón abajo: su mensaje espera.
+    afterInteraction(waiting);
+    vi.advanceTimersByTime(60_000);
+    expect(waiting).not.toHaveBeenCalled();
+
     release();
-    expect(pointerIsPressedInside(document.body)).toBe(false);
-    // Sin botón abajo, lo siguiente ya no espera a que se suelte: sale con el teclado o solo.
-    const work = vi.fn();
-    afterInteraction(work);
+    expect(pressedElement()).toBeNull();
+    vi.advanceTimersByTime(0);
+    // No se queda esperando un clic que ya no viene.
+    expect(waiting).toHaveBeenCalledOnce();
+
+    // Y lo siguiente ya no espera a que se suelte nada: sale con el teclado o solo.
+    const next = vi.fn();
+    afterInteraction(next);
     vi.advanceTimersByTime(QUIET_MS + 1);
-    expect(work).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledOnce();
     button.remove();
+  });
+
+  it("lo que esperaba desde antes se pinta antes que lo que llegó después de soltar", () => {
+    const order: string[] = [];
+    fireEvent.pointerDown(document.body);
+    afterInteraction(() => order.push("vieja"));
+    fireEvent.contextMenu(document.body);
+    afterInteraction(() => order.push("nueva"));
+    vi.advanceTimersByTime(QUIET_MS + 1);
+    expect(order).toEqual(["vieja", "nueva"]);
+    // Y ninguna se repite con el siguiente clic.
+    fireEvent.pointerDown(document.body);
+    fireEvent.pointerUp(document.body);
+    vi.advanceTimersByTime(QUIET_MS + 1);
+    expect(order).toEqual(["vieja", "nueva"]);
+  });
+});
+
+describe("las revisiones del navegador antes de enviar", () => {
+  const checks = () => renderHook(() => useLocalChecks<string>());
+
+  it("de entrada no hay ninguna", () => {
+    expect(checks().result.current[0]).toEqual({ found: null, failed: 0, checks: 0 });
+  });
+
+  it("una que encuentra algo cuenta en las dos cuentas, y dice qué encontró", () => {
+    const { result } = checks();
+    act(() => result.current[1]("falta el nombre"));
+    expect(result.current[0]).toEqual({ found: "falta el nombre", failed: 1, checks: 1 });
+  });
+
+  it("una que no encuentra nada no mueve la cuenta de las fallidas: el resumen de errores no toma el foco en un envío bueno", () => {
+    const { result } = checks();
+    act(() => result.current[1]("falta el nombre"));
+    act(() => result.current[1](null));
+    expect(result.current[0]).toEqual({ found: null, failed: 1, checks: 2 });
+  });
+
+  it("la cuenta de todas nunca retrocede ni se queda quieta: lo visto antes al salir de un campo no vuelve a mandar", () => {
+    const { result } = checks();
+    const seen: number[] = [];
+    for (const found of ["a", null, null, "b", null]) {
+      act(() => result.current[1](found));
+      seen.push(result.current[0].checks);
+    }
+    expect(seen).toEqual([1, 2, 3, 4, 5]);
+    expect(result.current[0].failed).toBe(2);
   });
 });

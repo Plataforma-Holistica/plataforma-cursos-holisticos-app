@@ -747,9 +747,14 @@ describe("recuperar la contraseña, «cambiar» (PA-13)", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(password).not.toBeInvalid();
     expect(screen.queryByText("Tu contraseña necesita 8 caracteres o más.")).not.toBeInTheDocument();
-    // Al soltarlo, el clic llega al botón, y entonces sí se dice.
+    // Al soltarlo se pinta lo que se vio al salir del campo: «Guardar» está fuera de él, y
+    // pulsarlo sí es salir.
     fireEvent.pointerUp(button);
     fireEvent.mouseUp(button);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(password).toBeInvalid();
+    expect(screen.getByText("Tu contraseña necesita 8 caracteres o más.")).toBeVisible();
+    // Y el clic llega al botón.
     await user.click(button);
     expect(await screen.findByRole("alert")).toHaveTextContent("Tu contraseña necesita 8 caracteres o más.");
     expect(password).toBeInvalid();
@@ -921,5 +926,130 @@ describe("más de lo que encontró la revisión de los arreglos", () => {
     // Ya no se dice «no pudimos»: lo que hay que hacer ahora es corregir.
     expect(screen.queryByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).not.toBeInTheDocument();
     expect(actions.completeRegistrationAction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("lo que encontró la revisión de los segundos arreglos", () => {
+  it("con errores del servidor a la vista, un envío que el navegador da por bueno no le quita el foco al campo", async () => {
+    answers<ChangePasswordState>(actions.completeRecoveryAction, { kind: "invalid", problem: "malformed", attempt: 1 });
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "una clave larga{Enter}");
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveFocus();
+
+    // El segundo envío tarda. Mientras, el resumen sigue diciendo lo del anterior, pero no
+    // vuelve a tomar el foco: no hay un error nuevo que anunciar.
+    let finish: (state: ChangePasswordState) => void = () => undefined;
+    actions.completeRecoveryAction.mockReturnValue(new Promise<ChangePasswordState>((resolve) => (finish = resolve)));
+    const again = screen.getByLabelText("Contraseña nueva");
+    await user.click(again);
+    await user.keyboard("otra clave larga{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(again).toHaveFocus();
+    expect(screen.getByRole("alert")).not.toHaveFocus();
+
+    await act(async () => {
+      finish({ kind: "unavailable", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+
+  it("un error visto al salir del campo después de una revisión tampoco vuelve cuando el envío corregido va en camino", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    // Una revisión del navegador, con el campo vacío.
+    await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    // Después de ella, sale del campo con una contraseña corta: se anota.
+    await user.type(password, "corta");
+    await user.click(screen.getByRole("heading", { level: 1 }));
+    expect(password).toBeInvalid();
+
+    // La corrige y envía con Intro, sin salir del campo. La respuesta todavía no llega.
+    let finish: (state: ChangePasswordState) => void = () => undefined;
+    actions.completeRecoveryAction.mockReturnValue(new Promise<ChangePasswordState>((resolve) => (finish = resolve)));
+    await user.click(password);
+    await user.keyboard(" pero ya no{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(password).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "link_dead" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+  });
+
+  it("en «Completa tu cuenta», un nombre marcado al salir del campo no vuelve a marcarse cuando el envío corregido va en camino", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    const name = screen.getByLabelText("Nombre");
+    // Una revisión del navegador, con todo vacío.
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    // Después de ella, sale del campo con un nombre que no se puede guardar: se anota.
+    await user.type(name, "---");
+    await user.click(screen.getByRole("heading", { level: 1 }));
+    expect(name).toBeInvalid();
+
+    let finish: (state: CompleteState) => void = () => undefined;
+    actions.completeRegistrationAction.mockReturnValue(new Promise<CompleteState>((resolve) => (finish = resolve)));
+    await user.type(screen.getByLabelText("Contraseña"), "una clave larga");
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    await user.clear(name);
+    await user.type(name, "Ana{Enter}");
+    expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
+    expect(name).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "link_dead" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+  });
+
+  it("pulsar sobre la etiqueta o sobre la regla de la contraseña sí es salir del campo: solo «Mostrar» no lo es", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    const rule = screen.getByText("8 caracteres o más");
+    // Como donde pulsar un texto no mueve el foco a ningún lado: el campo lo pierde y nadie lo recibe.
+    fireEvent.pointerDown(rule);
+    fireEvent.blur(password);
+    fireEvent.pointerUp(rule);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(password).toBeInvalid();
+  });
+});
+
+describe("«Completa tu cuenta»: el foco con errores del servidor a la vista", () => {
+  it("un envío que el navegador da por bueno no le quita el foco al campo", async () => {
+    const user = userEvent.setup();
+    answers<CompleteState>(actions.completeRegistrationAction, { kind: "invalid", name: "Ana Prueba", fields: { name: "invalid" }, attempt: 1 });
+    render(complete);
+    await fillComplete(user);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+
+    let finish: (state: CompleteState) => void = () => undefined;
+    actions.completeRegistrationAction.mockReturnValue(new Promise<CompleteState>((resolve) => (finish = resolve)));
+    await user.type(screen.getByLabelText("Contraseña"), "una clave larga");
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(name);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
+    expect(name).toHaveFocus();
+
+    await act(async () => {
+      finish({ kind: "link_dead" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
   });
 });

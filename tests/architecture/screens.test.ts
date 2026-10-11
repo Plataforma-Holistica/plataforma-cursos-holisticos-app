@@ -275,6 +275,9 @@ describe("pedir un correo corre detrás de la respuesta", () => {
     // La lista de lo que sí sale armado existe y se leyó bien.
     expect(armed).toMatch(/\bsignIn\b/);
     expect(armed).not.toMatch(/\brequest(Registration|Recovery)\b/);
+    // Ni en esa lista ni exportadas de ninguna otra forma, en ese archivo.
+    expect(service).not.toMatch(/^export\b[^\n;]*\brequest(Registration|Recovery)\b/m);
+    expect(service).not.toMatch(/^export \{[^}]*\brequest(Registration|Recovery)\b[^}]*\}/m);
   });
 
   it("quien pide un correo usa los de ese archivo, y de ningún otro lado", () => {

@@ -49,13 +49,18 @@ export function useDelayIsOver(delayMs: number | null, round: number): boolean {
   return delayMs !== null && passed === id;
 }
 
-// Si hay un botón del ratón (o un dedo, o un lápiz) abajo, y sobre qué bajó. Se anota desde
-// que este código carga, porque el foco sale del campo después de que el botón baja.
+// Si hay un botón del ratón (o un dedo, o un lápiz) abajo, sobre qué bajó, y lo que espera a
+// que se suelte. Se anota desde que este código carga, porque el foco sale del campo
+// después de que el botón baja.
 let pointerIsDown = false;
 let pressedOn: EventTarget | null = null;
+const waitingForRelease: (() => void)[] = [];
 const released = () => {
   pointerIsDown = false;
   pressedOn = null;
+  // Lo que esperaba a que el clic terminara, en su orden y después de que el clic, que
+  // sigue a soltar el botón, llegó a su destino.
+  for (const work of waitingForRelease.splice(0)) setTimeout(work, 0);
 };
 if (typeof document !== "undefined") {
   document.addEventListener(
@@ -67,25 +72,21 @@ if (typeof document !== "undefined") {
     true,
   );
   // Soltar no siempre avisa: el menú del botón derecho o cambiar de ventana se lo tragan.
-  // Sin estas otras salidas el botón quedaría «abajo», y lo visto al salir de un campo
+  // Sin estas otras salidas el botón quedaría «abajo», y lo que espera a que se suelte
   // esperaría un clic que no viene.
   for (const type of ["pointerup", "pointercancel", "contextmenu", "dragend"]) document.addEventListener(type, released, true);
   window.addEventListener("blur", released);
 }
 
 /**
- * Si el botón del ratón está abajo sobre algo de dentro de `container`. Es para saber que
- * el foco salió de un campo hacia un botón que es parte de él: hay navegadores que no le
- * dan el foco a un botón al pulsarlo, y ahí el foco no dice a dónde fue.
+ * El elemento sobre el que está abajo el botón del ratón, o nulo si no hay ninguno abajo.
+ * Es para saber que el foco salió de un campo hacia un botón que es parte de él: hay
+ * navegadores que no le dan el foco a un botón al pulsarlo, y ahí el foco no dice a dónde fue.
  */
-export function pointerIsPressedInside(container: Node): boolean {
-  return pressedOn instanceof Node && container.contains(pressedOn);
+export function pressedElement(): Element | null {
+  return pressedOn instanceof Element ? pressedOn : null;
 }
 
-/** Con lo que termina un clic: se suelta el botón, o el gesto se cancela. */
-const POINTER_END = ["pointerup", "pointercancel"] as const;
-/** Con lo que termina la interacción cuando no hay botón abajo: además, se suelta la tecla. */
-const SETTLED = [...POINTER_END, "keyup"] as const;
 /** Lo que se espera cuando el foco salió sin botón abajo y no llega ninguna tecla. */
 export const QUIET_MS = 150;
 
@@ -96,24 +97,25 @@ export const QUIET_MS = 150;
  * Un clic en otro control saca el foco del campo al bajar el botón, antes de que el clic
  * exista. Si en ese instante aparece un mensaje de error, lo de abajo se recorre, el botón
  * se suelta sobre otra cosa y el clic se pierde: la persona pulsa «Guardar» y no pasa nada.
- * Por eso el mensaje espera a que el botón se suelte y el clic llegue a su destino. Con el
- * botón abajo, soltar una tecla no cuenta: el clic sigue en curso.
+ * Por eso, con el botón abajo, el mensaje espera a que se suelte y el clic llegue a su
+ * destino. Soltar una tecla ahí no cuenta: el clic sigue en curso.
  *
  * Sin botón abajo no hay clic que perder: espera a que se suelte la tecla, o un momento si
  * no llega ninguna, porque el foco también se mueve sin teclado ni ratón (el dictado, un
  * conmutador, un toque, que suelta antes de mover el foco).
  */
 export function afterInteraction(work: () => void): void {
-  const ends = pointerIsDown ? POINTER_END : SETTLED;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (pointerIsDown) {
+    waitingForRelease.push(work);
+    return;
+  }
   const run = () => {
     clearTimeout(timer);
-    for (const type of ends) document.removeEventListener(type, run, true);
-    // Después de que el clic, que sigue a soltar el botón, llegó a su destino.
+    document.removeEventListener("keyup", run, true);
     setTimeout(work, 0);
   };
-  for (const type of ends) document.addEventListener(type, run, true);
-  if (!pointerIsDown) timer = setTimeout(run, QUIET_MS);
+  const timer = setTimeout(run, QUIET_MS);
+  document.addEventListener("keyup", run, true);
 }
 
 /**
@@ -138,4 +140,34 @@ export function useSeenOnBlur<Problem extends string>(
   const see = (seen: Problem | null | undefined) =>
     afterInteraction(() => setLast(seen === undefined ? null : { round, seen }));
   return [shown, see];
+}
+
+/** Lo que lleva de las revisiones que el navegador hace de un formulario antes de enviarlo. */
+export interface LocalChecks<Found> {
+  /** Lo que encontró la última, o nulo si no encontró nada y el formulario se envió. */
+  found: Found | null;
+  /**
+   * Cuántas encontraron algo. Es lo que mueve el foco al resumen de errores: un envío sin
+   * nada que corregir no lo mueve, aunque todavía se vean los errores del envío anterior.
+   */
+  failed: number;
+  /**
+   * Cuántas hubo, encontraran algo o no. No retrocede: es contra lo que se mide si lo visto
+   * al salir de un campo sigue mandando (`useSeenOnBlur`).
+   */
+  checks: number;
+}
+
+/**
+ * Las revisiones del navegador antes de enviar. Son dos cuentas y no una a propósito: con
+ * una sola que retrocedía al enviar bien, un error visto antes al salir del campo volvía a
+ * pintarse; y con una sola que crecía siempre, el resumen tomaba el foco en un envío bueno.
+ *
+ * @returns Lo que llevan, y con qué anotar una revisión: lo que encontró, o nulo.
+ */
+export function useLocalChecks<Found>(): readonly [LocalChecks<Found>, (found: Found | null) => void] {
+  const [local, setLocal] = useState<LocalChecks<Found>>({ found: null, failed: 0, checks: 0 });
+  const record = (found: Found | null) =>
+    setLocal((current) => ({ found, failed: current.failed + (found === null ? 0 : 1), checks: current.checks + 1 }));
+  return [local, record];
 }

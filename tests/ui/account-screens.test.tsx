@@ -322,3 +322,60 @@ describe("los estados que sustituyen a una pantalla de la cuenta", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 });
+
+describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
+  const all = async (user: ReturnType<typeof userEvent.setup>) => {
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+  };
+
+  it("con errores del servidor a la vista, un envío que el navegador da por bueno no le quita el foco al campo", async () => {
+    answers<ConsentsState>(actions.completeAccountAction, { kind: "invalid", name: "Ana", fields: { name: "invalid" }, attempt: 1 });
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    await user.type(screen.getByLabelText("Nombre"), "Ana");
+    await all(user);
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+
+    // El segundo envío tarda: el resumen sigue diciendo lo del anterior, sin volver a tomar el foco.
+    let finish: (state: ConsentsState) => void = () => undefined;
+    actions.completeAccountAction.mockReturnValue(new Promise<ConsentsState>((resolve) => (finish = resolve)));
+    await all(user);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(name);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(name).toHaveFocus();
+
+    await act(async () => {
+      finish({ kind: "unavailable", name: "Ana", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+
+  it("un nombre marcado al salir del campo, después de una revisión, no vuelve a marcarse cuando el envío corregido va en camino", async () => {
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    await user.type(name, "---");
+    await user.click(screen.getByRole("heading", { level: 1 }));
+    expect(name).toBeInvalid();
+
+    let finish: (state: ConsentsState) => void = () => undefined;
+    actions.completeAccountAction.mockReturnValue(new Promise<ConsentsState>((resolve) => (finish = resolve)));
+    await all(user);
+    await user.clear(name);
+    await user.type(name, "Ana{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(name).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "unavailable", name: "Ana", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+});

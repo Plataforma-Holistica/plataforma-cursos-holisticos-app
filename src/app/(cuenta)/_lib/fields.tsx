@@ -11,7 +11,7 @@ import { Icon } from "@/ui/icon";
 import { PasswordField } from "@/ui/password-field";
 import { TextField } from "@/ui/text-field";
 
-import { pointerIsPressedInside, useSeenOnBlur } from "./hooks";
+import { pressedElement, useSeenOnBlur } from "./hooks";
 
 // Los campos que se repiten entre las pantallas de la cuenta: el nombre, el correo al que
 // se manda un enlace y la contraseña nueva. Los tres validan al salir del campo, y solo si
@@ -137,7 +137,9 @@ export function NewPasswordField({ id, label, problem, round = 0 }: NewPasswordF
     // escribir no se marca por querer verla. Se sabe por a dónde fue el foco o, donde un
     // botón no lo recibe al pulsarlo, por dónde bajó el botón del ratón.
     if (event.relatedTarget instanceof Node && wrapper.contains(event.relatedTarget)) return;
-    if (pointerIsPressedInside(wrapper)) return;
+    // Solo el botón: pulsar sobre la etiqueta o sobre la regla sí es salir del campo.
+    const button = pressedElement()?.closest("button") ?? null;
+    if (button !== null && wrapper.contains(button)) return;
     const field = wrapper.querySelector<HTMLInputElement>('input[name="password"]');
     if (field === null) return;
     const checked = checkPassword(field.value);

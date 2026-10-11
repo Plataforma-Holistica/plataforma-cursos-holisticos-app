@@ -267,7 +267,11 @@ falla. Doce precisiones que la tabla no dice:
     recorre lo de abajo y el clic se pierde. Y vale hasta la siguiente revisión del
     formulario: manda lo último que pasó. Los campos que se repiten (el nombre, el correo
     al que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`; un campo
-    nuevo con validación al salir se hace igual, no con su propio estado.
+    nuevo con validación al salir se hace igual, no con su propio estado. Una pantalla que
+    revisa antes de enviar lleva sus revisiones con `useLocalChecks`, que son dos cuentas
+    a propósito: las que encontraron algo, que mueven el foco al resumen de errores, y
+    todas, contra las que se mide qué manda en un campo. Con una sola, o un error viejo
+    volvía a pintarse o el resumen tomaba el foco en un envío bueno.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman

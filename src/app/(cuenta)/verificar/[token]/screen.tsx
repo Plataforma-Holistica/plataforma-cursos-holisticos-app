@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useActionState, useState } from "react";
+import { type FormEvent, useActionState } from "react";
 
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
@@ -13,6 +13,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
 import { NAME_ERRORS, NameField, NewPasswordField, passwordError } from "../../_lib/fields";
+import { useLocalChecks } from "../../_lib/hooks";
 import { NoCurrentTextScreen, RegistrationLinkDeadScreen, RegistrationUnfinishedScreen } from "../../_lib/states";
 import { shownValue, type ConsentItem } from "../../consentimientos/outcomes";
 
@@ -178,9 +179,7 @@ export interface CompleteScreenProps {
 export function CompleteScreen({ token, view }: CompleteScreenProps) {
   const [state, action, pending] = useActionState(completeRegistrationAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  // `attempt` cuenta todas las revisiones del navegador, también las que salen bien: no
-  // retrocede, para que lo visto antes al salir de un campo no vuelva a mandar.
-  const [local, setLocal] = useState<{ fields: CompleteFields | null; attempt: number }>({ fields: null, attempt: 0 });
+  const [local, checked] = useLocalChecks<CompleteFields>();
 
   if (state.kind === "link_dead") return <RegistrationLinkDeadScreen />;
   if (state.kind === "recover_instead") return <RegistrationUnfinishedScreen />;
@@ -188,28 +187,24 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const fields = checkCompleteForm(view, readCompleteForm(new FormData(event.currentTarget)));
-    if (fields === null) {
-      setLocal((current) => ({ fields: null, attempt: current.attempt + 1 }));
-      return;
-    }
-    // No se envía, así que el formulario no se vacía: lo escrito y lo marcado se quedan.
-    event.preventDefault();
-    setLocal((current) => ({ fields, attempt: current.attempt + 1 }));
+    checked(fields);
+    // Con algo que corregir no se envía, así que el formulario no se vacía: lo escrito y lo
+    // marcado se quedan.
+    if (fields !== null) event.preventDefault();
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const round = sent + local.attempt;
-  const fields = local.fields ?? (state.kind === "invalid" ? state.fields : {});
+  const fields = local.found ?? (state.kind === "invalid" ? state.fields : {});
   const name = state.kind === "idle" ? "" : state.name;
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino: si no, al
   // corregir un error del navegador volvería a anunciarse el aviso de antes.
-  const answered = local.fields === null && !pending;
+  const answered = local.found === null && !pending;
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.title}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={round} />
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.failed} />
         {answered && state.kind === "repainted" && (
           <InlineAlert key={sent} tone="warning" live>
             {consents.textsChanged}
@@ -225,7 +220,7 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
           <input key={item.documentId} type="hidden" name="shown" value={shownValue(item)} />
         ))}
         {/* Cuando cambian los textos, o llega la respuesta de un envío, los campos se arman de nuevo. */}
-        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={round} />
+        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={sent + local.checks} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>
