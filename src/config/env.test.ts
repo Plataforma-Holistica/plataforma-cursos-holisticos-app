@@ -17,6 +17,7 @@ const valid = {
   SUPABASE_SECRET_KEY: "clave-secreta-de-prueba",
   DATABASE_URL: fakeDatabaseUrl("contrasena-de-prueba"),
   DATABASE_URL_DIRECT: fakeDatabaseUrl("contrasena-de-prueba"),
+  RATE_LIMIT_HMAC_SECRET: "secreto-de-prueba-para-las-huellas-0123",
 };
 
 function problemsOf(source: Record<string, string | undefined>): string[] {
@@ -78,6 +79,24 @@ describe("parseEnv", () => {
       ]);
     },
   );
+
+  // Con este secreto se calculan las huellas del correo y de la dirección para el freno y
+  // los topes (TRD §9.9). Uno corto se adivina probando: se rechaza.
+  describe("RATE_LIMIT_HMAC_SECRET", () => {
+    it("pide 32 caracteres o más", () => {
+      expect(problemsOf({ ...valid, RATE_LIMIT_HMAC_SECRET: "x".repeat(31) })).toEqual([
+        "RATE_LIMIT_HMAC_SECRET: tiene un valor inválido",
+      ]);
+      expect(parseEnv({ ...valid, RATE_LIMIT_HMAC_SECRET: "x".repeat(32) }).RATE_LIMIT_HMAC_SECRET).toHaveLength(32);
+    });
+
+    it.each(["local", "staging", "production"])("es obligatoria también en %s", (appEnv) => {
+      const fakeDsn = ["https://0123456789abcdef", "o1.ingest.sentry.example/1"].join("@");
+      expect(problemsOf({ ...valid, APP_ENV: appEnv, SENTRY_DSN: fakeDsn, RATE_LIMIT_HMAC_SECRET: undefined })).toEqual([
+        "RATE_LIMIT_HMAC_SECRET: falta",
+      ]);
+    });
+  });
 
   // El registro de errores (RNF-16). En local no se manda nada si no se pide; en los
   // entornos que atienden a personas, arrancar sin él sería quedarse a ciegas.

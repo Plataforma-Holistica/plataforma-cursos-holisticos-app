@@ -22,6 +22,10 @@ const schema = z.object({
   DATABASE_URL: postgresUrl,
   // Directa: solo para migraciones.
   DATABASE_URL_DIRECT: postgresUrl,
+  // Secreta, solo en el servidor. Con ella se calculan las huellas del correo y de la
+  // dirección de quien pide, para el freno y los topes (TRD §9.9): la base no guarda ni
+  // el correo ni la dirección. Uno corto se adivina probando.
+  RATE_LIMIT_HMAC_SECRET: z.string().min(32),
   // A dónde se mandan los errores (RNF-16). No es secreta: también llega al navegador.
   SENTRY_DSN: z.string().regex(sentryDsn).optional(),
   // La pone Vercel, no una persona: `production`, `preview` o `development`. Sirve de

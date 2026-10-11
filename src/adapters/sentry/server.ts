@@ -68,6 +68,25 @@ export function serverIntegrations(defaults: Integration[]): Integration[] {
   ];
 }
 
+/** Lo más que se espera a que un evento salga antes de contestar. */
+const FLUSH_TIMEOUT_MS = 2_000;
+
+/**
+ * Manda un error que nadie lanzó: un fallo de operación que reporta un servicio. Pasa por
+ * el mismo filtro que los demás. Espera a que salga, porque una función de Vercel se
+ * congela al contestar y lo pendiente se perdería. Nunca lanza, y sin Sentry encendido no
+ * hace nada.
+ */
+export async function captureServerFailure(failure: Error): Promise<void> {
+  try {
+    if (!Sentry.getClient()) return;
+    Sentry.captureException(failure);
+    await Sentry.flush(FLUSH_TIMEOUT_MS);
+  } catch {
+    // Quien avisa de las fallas no debe ser una falla.
+  }
+}
+
 /** Sin `SENTRY_DSN` no se enciende: así es como se trabaja en local. */
 export function startServerErrorReporting(): void {
   const env = getEnv();

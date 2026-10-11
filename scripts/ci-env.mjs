@@ -41,6 +41,9 @@ const appUrl = new URL(status.DB_URL);
 appUrl.username = "app_service";
 appUrl.password = password;
 
+// El secreto de las huellas también se inventa en cada corrida.
+const hmacSecret = randomBytes(48).toString("base64url");
+
 const variables = {
   APP_ENV: "local",
   NEXT_PUBLIC_SITE_URL: "http://localhost:3000",
@@ -49,10 +52,11 @@ const variables = {
   SUPABASE_SECRET_KEY: status.SECRET_KEY,
   DATABASE_URL: appUrl.href,
   DATABASE_URL_DIRECT: status.DB_URL,
+  RATE_LIMIT_HMAC_SECRET: hmacSecret,
 };
 
 // Son valores de una base desechable, pero no tienen por qué salir en el registro.
-for (const secret of [password, status.SECRET_KEY]) console.log(`::add-mask::${secret}`);
+for (const secret of [password, status.SECRET_KEY, hmacSecret]) console.log(`::add-mask::${secret}`);
 
 appendFileSync(
   target,
