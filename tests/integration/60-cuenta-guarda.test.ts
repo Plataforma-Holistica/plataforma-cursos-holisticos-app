@@ -12,7 +12,15 @@ import { evaluateGate } from "@/services/account/gate";
 import { noteSession } from "@/services/account/store";
 
 import { claimedUser, clearThrottle, freshOrigin, notedSessions, testServices } from "./helpers/account";
-import { authAdmin, memoryJar, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
+import {
+  authAdmin,
+  failingFetch,
+  memoryJar,
+  networkDown,
+  sessionCount,
+  type KnownUser,
+  type MemoryJar,
+} from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -21,6 +29,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./he
 // en la base que la sesión sea de las que abrió la aplicación y que siga viva en Auth.
 
 const MINUTE = 60_000;
+const COOKIE = "plataforma-sesion";
 const emails: string[] = [];
 
 async function user(options: { complete?: boolean } = {}): Promise<KnownUser> {
@@ -78,6 +87,70 @@ describe("quién pasa", () => {
     // Un token que no verifica no dice de quién es: su correo no se muestra.
     const forged = memoryJar(new Map([["plataforma-sesion", "v1.a.b.c.cg"]]));
     expect(await testServices().sessionEmail(forged)).toBeNull();
+  });
+
+  it("cerrar lo que la guarda rechaza no le cierra la sesión a quien sí pasa", async () => {
+    const { account, jar } = await entered({ complete: true });
+    const services = testServices();
+    expect(await services.closeRejectedSession(jar)).toBe("kept");
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(await sessionCount(account.id)).toBe(1);
+    expect(await services.checkSession(jar)).toMatchObject({ kind: "pass" });
+
+    // Tampoco a quien le falta completar la cuenta: esa sesión sí vale.
+    const pending = await entered();
+    expect(await services.closeRejectedSession(pending.jar)).toBe("kept");
+    expect(await sessionCount(pending.account.id)).toBe(1);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("sin sesión no hay nada que cerrar", async () => {
+    const jar = memoryJar();
+    expect(await testServices().closeRejectedSession(jar)).toBe("none");
+    expect(jar.writes).toEqual([]);
+  });
+
+  it("una sesión que la aplicación no abrió se cierra: la cookie se borra y Auth la da por terminada", async () => {
+    const account = await user({ complete: true });
+    const direct = memoryJar();
+    expect((await createAuth().signIn(direct, account.email, account.password)).ok).toBe(true);
+    expect(await sessionCount(account.id)).toBe(1);
+
+    const services = testServices();
+    expect(await services.closeRejectedSession(direct)).toBe("sign_in");
+    expect(direct.get(COOKIE)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("si Auth no deja cerrarla, la cookie se borra igual y se reporta", async () => {
+    const account = await user({ complete: true });
+    const direct = memoryJar();
+    expect((await createAuth().signIn(direct, account.email, account.password)).ok).toBe(true);
+
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+    expect(await services.closeRejectedSession(direct)).toBe("sign_in");
+    expect(direct.get(COOKIE)).toBeUndefined();
+    expect(services.reported).toEqual(["session_not_closed"]);
+  });
+
+  it("cuando no se supo si la sesión vale, no se cierra", async () => {
+    const { account, jar } = await entered({ complete: true });
+    const real = createAuth();
+    const services = testServices({
+      auth: { ...real, readSession: () => Promise.resolve({ kind: "unknown" }) },
+    });
+    expect(await services.closeRejectedSession(jar)).toBe("kept");
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(await sessionCount(account.id)).toBe(1);
+  });
+
+  it("«Salir» que Auth no pudo cerrar se reporta", async () => {
+    const { jar } = await entered({ complete: true });
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+    expect(await services.signOut(jar)).toBe("unknown");
+    expect(jar.get(COOKIE)).toBeUndefined();
+    expect(services.reported).toEqual(["session_not_closed"]);
   });
 
   it("una cuenta completa que entró por el servicio pasa", async () => {

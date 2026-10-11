@@ -294,11 +294,40 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
    * «Salir»: borra la cookie y cierra en Auth solo esta sesión. Lo anotado no hace falta
    * borrarlo: sin sesión en Auth deja de reconocerse.
    */
-  function signOut(jar: CookieJar): Promise<adapter.Closing> {
-    return auth.signOut(jar);
+  async function signOut(jar: CookieJar): Promise<adapter.Closing> {
+    const closing = await auth.signOut(jar);
+    // La cookie ya se borró, pero en Auth la sesión sigue: quien tenga una copia la conserva.
+    if (closing !== "closed") await deps.report("session_not_closed");
+    return closing;
   }
 
-  return { checkSession, sessionEmail, signIn, signOut, ...createOnboarding(deps, { checkSession, admit }) };
+  /**
+   * Cierra la sesión de esta petición solo si la guarda la rechaza, y dice qué pasó. Es lo
+   * que hay detrás de la ruta a la que una página manda cuando la guarda contesta «esta
+   * sesión no vale»: una página no puede borrar una cookie.
+   *
+   * No le cree nada a quien llama. Con una sesión que sí vale, o cuando no se supo, no
+   * cierra nada: así un enlace puesto en otro sitio no le cierra la sesión a nadie.
+   *
+   * @returns `recover` o `sign_in`: se cerró, y a dónde manda la guarda. `none`: no había
+   *   sesión. `kept`: la sesión se quedó como estaba.
+   */
+  async function closeRejectedSession(jar: CookieJar): Promise<"recover" | "sign_in" | "none" | "kept"> {
+    const check = await checkSession(jar);
+    if (check.kind === "anonymous") return "none";
+    if (check.kind !== "must_sign_out") return "kept";
+    await signOut(jar);
+    return check.then;
+  }
+
+  return {
+    checkSession,
+    closeRejectedSession,
+    sessionEmail,
+    signIn,
+    signOut,
+    ...createOnboarding(deps, { checkSession, admit }),
+  };
 }
 
 const services = createAccountServices();
@@ -309,6 +338,7 @@ const services = createAccountServices();
 // y le pasa lo que su plataforma dé para eso.
 export const {
   checkSession,
+  closeRejectedSession,
   sessionEmail,
   signIn,
   signOut,
