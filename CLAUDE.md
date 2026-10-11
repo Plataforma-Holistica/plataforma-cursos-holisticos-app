@@ -133,7 +133,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Diez precisiones que la tabla no dice:
+falla. Once precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -160,8 +160,9 @@ falla. Diez precisiones que la tabla no dice:
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
     el paso previo y las acciones de servidor. Las dos solo miran la firma y la vigencia
-    del token: una sesión cerrada en otro lado pasa hasta 15 minutos más, y lo que no
-    pueda esperar le pregunta a Auth con `confirmSession`.
+    del token: una sesión cerrada en otro lado pasa hasta 15 minutos más. La guarda
+    (`checkSession`) lo comprueba en la base, y lo que no pase por ella y no pueda esperar
+    le pregunta a Auth con `confirmSession`.
   - Cada función contesta con una unión cerrada. `unknown` es «no se supo»: nunca se trata
     como éxito ni como «no hay sesión».
   - La cookie se borra solo con la lista cerrada de `auth-errors.ts`. Agregarle un código
@@ -174,11 +175,45 @@ falla. Diez precisiones que la tabla no dice:
     `setFirstPassword` y `slimDown`, las dos sobre una cuenta que sale de un enlace recién
     canjeado; una prueba lo exige. `auth-client.ts` no se importa fuera del adaptador: lo
     rechaza el lint.
+  - Cuando Auth rechaza con un código que no está en la lista de la operación, la
+    respuesta sigue siendo «no se supo» y el adaptador deja en el registro del servidor la
+    operación, el estado y el código. Nunca el mensaje, que puede traer un correo.
   - Un token firmado con una clave que no se conoce no es, sin más, un token inventado:
     puede ser de una clave recién rotada. Mientras no se haya vuelto a preguntar por las
     claves, la respuesta es «no se supo» y la cookie no se borra.
   - `createAuth({ fetch, now })` existe para las pruebas. El código de la aplicación usa
     las funciones ya armadas.
+- **Los servicios de cuenta viven en `src/services/account/`** (TRD §9.2). `account.ts`
+  llega a la base; `session.ts`, que es lo que importa el paso previo, no lo importa.
+  - `checkSession(reader)` es la guarda de sesión: toda página y toda acción con sesión la
+    llama, y obedece lo que contesta. Además de lo que decide el dominio, comprueba en la
+    base que la sesión sea de las que abrió la aplicación y que siga viva en Auth. Una
+    sesión abierta directo en Auth no pasa aunque su token verifique. No renueva: quien
+    puede escribir cookies llama antes a `refreshSession`.
+  - Una sesión solo se anota con `private.note_session()`, y solo la llama `signIn`. Exige
+    que el intento haya empezado después del último cambio de contraseña: Auth abre la
+    sesión sin volver a mirar la cuenta, y una entrada en vuelo sobrevive al cambio.
+  - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo
+    cierra después en otra transacción. La cookie se escribe en un tarro temporal: no
+    llega al navegador hasta que la guarda dejó entrar y la sesión quedó anotada.
+  - El freno y los topes se cuentan con candados consultivos (`lockAll`), siempre en el
+    orden dirección, cuenta, buzón, antes de cualquier candado de fila y sin crear filas
+    para decidir. Lo que se niega no deja nada.
+  - Lo que traduce una decisión a un resultado, a cómo se cierra el intento y a si la
+    sesión se queda es una tabla pura (`admission.ts`). Un caso nuevo se agrega ahí, con
+    su prueba, no en el servicio.
+  - `unavailable` es «no se supo»: nunca se trata como «sin sesión» ni como un «no».
+  - Un fallo que nadie lanzó pero que alguien tiene que saber se reporta con
+    `reportFailure(código)` (`src/services/error-reporting/server.ts`): lista cerrada,
+    mensaje fijo, sin datos de nadie. Un código nuevo se agrega a la lista.
+  - Las huellas del correo y de la dirección salen de `fingerprint.ts`, con
+    `RATE_LIMIT_HMAC_SECRET`. Ni el correo ni la dirección se guardan en los contadores.
+  - La dirección de quien pide solo se cree detrás de un despliegue de Vercel
+    (`origin.ts`). Desconocida, va a un cubo compartido y nunca queda como par de
+    confianza.
+  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report })` existe
+    para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
+    propia dirección (`tests/integration/helpers/account.ts`).
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en
   `src/adapters/supabase/`** (ADR-31, TRD §8.10). La aplicación entra a la base como
   `app_service`, que salta la seguridad por fila: por eso el resto llega con las tres

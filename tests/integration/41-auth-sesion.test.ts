@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { confirmSession, createAuth, readSession, refreshSession, signIn, signOut } from "@/adapters/supabase/auth";
 import {
@@ -161,6 +161,44 @@ describe("entrar", () => {
       reason: "rate_limited",
     });
     expect(jar.writes).toEqual([]);
+  });
+});
+
+describe("un rechazo de Auth que el adaptador no conoce", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const unlisted = (): Response =>
+    Response.json(
+      { code: "un_codigo_nuevo", message: "ana@ejemplo.mx no puede entrar" },
+      { status: 422, headers: { "x-supabase-api-version": "2024-01-01" } },
+    );
+
+  it("es «no se supo», y deja en el registro la operación, el estado y el código, sin el mensaje", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const account = await user();
+    const jar = memoryJar();
+    const auth = createAuth({ fetch: failingFetch(/\/token/, unlisted).fetch });
+
+    expect(await auth.signIn(jar, account.email, account.password)).toEqual({ ok: false, reason: "unknown" });
+    expect(jar.writes).toEqual([]);
+    expect(warn.mock.calls).toEqual([
+      ["Auth rechazó sign_in con un código que no está en su lista: estado 422, código un_codigo_nuevo."],
+    ]);
+  });
+
+  it("lo que sí conoce, o un corte de red, no deja aviso", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const account = await user();
+
+    expect(await signIn(memoryJar(), account.email, "otra-contraseña")).toMatchObject({ ok: false });
+    const limited = createAuth({ fetch: failingFetch(/\/token/, tooManyRequests).fetch });
+    expect(await limited.signIn(memoryJar(), account.email, account.password)).toMatchObject({ ok: false });
+    const down = createAuth({ fetch: failingFetch(/\/token/, networkDown).fetch });
+    expect(await down.signIn(memoryJar(), account.email, account.password)).toMatchObject({ ok: false });
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

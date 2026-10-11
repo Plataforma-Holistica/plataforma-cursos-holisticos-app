@@ -29,7 +29,7 @@ describe("resolveClientIp", () => {
     ["255.255.255.255", "v4:255.255.255.255"],
     ["10.0.0.1", "v4:10.0.0.1"],
   ])("lee la IPv4 %s", (value, key) => {
-    expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key });
+    expect(resolveClientIp(value, trusted)).toMatchObject({ kind: "ip", key });
   });
 
   it.each([
@@ -44,13 +44,13 @@ describe("resolveClientIp", () => {
     ["::2:3:4:5:6:7:8", "v6:0:2:3:4::/64"],
     ["64:ff9b::192.0.2.33", "v6:64:ff9b:0:0::/64"],
   ])("agrupa la IPv6 %s por su prefijo de 64 bits", (value, key) => {
-    expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key });
+    expect(resolveClientIp(value, trusted)).toMatchObject({ kind: "ip", key });
   });
 
   it.each(["::ffff:203.0.113.7", "::FFFF:203.0.113.7", "::ffff:cb00:7107", "0:0:0:0:0:ffff:cb00:7107"])(
     "una IPv4 escrita dentro de una IPv6 (%s) da la clave de la IPv4",
     (value) => {
-      expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key: "v4:203.0.113.7" });
+      expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key: "v4:203.0.113.7", address: "203.0.113.7" });
     },
   );
 
@@ -62,17 +62,21 @@ describe("resolveClientIp", () => {
     ["::fffe:203.0.113.7", "v6:0:0:0:0::/64"],
     ["::203.0.113.7", "v6:0:0:0:0::/64"],
   ])("%s se parece a una IPv4 dentro de una IPv6, pero no lo es", (value, key) => {
-    expect(resolveClientIp(value, trusted)).toEqual({ kind: "ip", key });
+    expect(resolveClientIp(value, trusted)).toMatchObject({ kind: "ip", key });
   });
 
   it("los bordes de 32 bits dan la misma clave escritos como IPv4 o dentro de una IPv6", () => {
     for (const address of ["128.0.0.0", "255.255.255.255", "0.0.0.1", "127.255.255.255"]) {
-      const expected = { kind: "ip", key: `v4:${address}` };
+      const expected = { kind: "ip", key: `v4:${address}`, address };
       expect(resolveClientIp(address, trusted)).toEqual(expected);
       expect(resolveClientIp(`::ffff:${address}`, trusted)).toEqual(expected);
     }
-    expect(resolveClientIp("::ffff:8000:0", trusted)).toEqual({ kind: "ip", key: "v4:128.0.0.0" });
-    expect(resolveClientIp("::ffff:ffff:ffff", trusted)).toEqual({ kind: "ip", key: "v4:255.255.255.255" });
+    expect(resolveClientIp("::ffff:8000:0", trusted)).toEqual({ kind: "ip", key: "v4:128.0.0.0", address: "128.0.0.0" });
+    expect(resolveClientIp("::ffff:ffff:ffff", trusted)).toEqual({
+      kind: "ip",
+      key: "v4:255.255.255.255",
+      address: "255.255.255.255",
+    });
   });
 
   it.each([
@@ -135,8 +139,9 @@ describe("resolveClientIp", () => {
       fc.property(groups, (values) => {
         // Una IPv4 dentro de una IPv6 tiene su propia regla y su propia prueba.
         fc.pre(!(values.slice(0, 5).every((value) => value === 0) && values[5] === 0xffff));
-        const expected = { kind: "ip", key: prefix(values) };
         const full = values.map((value) => value.toString(16)).join(":");
+        // La dirección canónica es esa misma: ocho grupos, sin ceros de más y sin abreviar.
+        const expected = { kind: "ip", key: prefix(values), address: full };
         expect(resolveClientIp(full, trusted)).toEqual(expected);
         expect(resolveClientIp(values.map(padded).join(":"), trusted)).toEqual(expected);
         expect(resolveClientIp(full.toUpperCase(), trusted)).toEqual(expected);
@@ -151,10 +156,13 @@ describe("resolveClientIp", () => {
       fc.property(groups, groups, (first, second) => {
         fc.pre(first[0] !== 0);
         const sameNetwork = [...first.slice(0, 4), ...second.slice(4)];
-        const key = (values: number[]) => resolveClientIp(values.map(padded).join(":"), trusted);
-        expect(key(sameNetwork)).toEqual(key(first));
+        const key = (values: number[]) => {
+          const result = resolveClientIp(values.map(padded).join(":"), trusted);
+          return result.kind === "ip" ? result.key : result.reason;
+        };
+        expect(key(sameNetwork)).toBe(key(first));
         const otherNetwork = [(first[0] ?? 0) ^ 1, ...first.slice(1)];
-        expect(key(otherNetwork)).not.toEqual(key(first));
+        expect(key(otherNetwork)).not.toBe(key(first));
       }),
     );
   });
@@ -168,7 +176,7 @@ describe("resolveClientIp", () => {
         const mapped = first.slice(0, 5).every((value) => value === 0) && first[5] === 0xffff;
         const result = resolveClientIp(values.map(padded).join(":"), trusted);
         const v4 = `v4:${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
-        expect(result).toEqual({ kind: "ip", key: mapped ? v4 : prefix(values) });
+        expect(result).toMatchObject({ kind: "ip", key: mapped ? v4 : prefix(values) });
       }),
       { numRuns: 500 },
     );
@@ -177,11 +185,44 @@ describe("resolveClientIp", () => {
   it("toda IPv4 da su clave, sola o escrita dentro de una IPv6", () => {
     fc.assert(
       fc.property(fc.ipV4(), (address) => {
-        const expected = { kind: "ip", key: `v4:${address}` };
+        const expected = { kind: "ip", key: `v4:${address}`, address };
         expect(resolveClientIp(address, trusted)).toEqual(expected);
         expect(resolveClientIp(`::ffff:${address}`, trusted)).toEqual(expected);
       }),
     );
+  });
+
+  // La dirección canónica es la que se guarda como evidencia de un consentimiento
+  // (`consents.ip`): una sola forma por dirección, que la base lee sin ambigüedad.
+  it.each([
+    ["203.0.113.7", "203.0.113.7"],
+    ["2001:DB8:85A3:8D3::1", "2001:db8:85a3:8d3:0:0:0:1"],
+    ["2001:0db8:85a3:08d3:ffff:ffff:ffff:ffff", "2001:db8:85a3:8d3:ffff:ffff:ffff:ffff"],
+    ["::1", "0:0:0:0:0:0:0:1"],
+    ["::", "0:0:0:0:0:0:0:0"],
+    ["64:ff9b::192.0.2.33", "64:ff9b:0:0:0:0:c000:221"],
+    ["::ffff:203.0.113.7", "203.0.113.7"],
+    ["0:0:0:0:0:ffff:cb00:7107", "203.0.113.7"],
+    ["::203.0.113.7", "0:0:0:0:0:0:cb00:7107"],
+  ])("la dirección canónica de %s es %s", (value, address) => {
+    expect(resolveClientIp(value, trusted)).toMatchObject({ kind: "ip", address });
+  });
+
+  it("la dirección canónica se lee de nuevo y da lo mismo: la clave y ella misma", () => {
+    fc.assert(
+      fc.property(fc.oneof(fc.ipV4(), fc.ipV6()), (value) => {
+        const first = resolveClientIp(value, trusted);
+        expect(first.kind).toBe("ip");
+        if (first.kind !== "ip") return;
+        expect(first.address).toMatch(/^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7})$/);
+        expect(resolveClientIp(first.address, trusted)).toEqual(first);
+      }),
+    );
+  });
+
+  it("sin dirección de fiar no hay dirección canónica que guardar", () => {
+    expect(resolveClientIp("203.0.113.7", { proxyTrusted: false })).not.toHaveProperty("address");
+    expect(resolveClientIp("desconocida", trusted)).not.toHaveProperty("address");
   });
 
   it("una IPv4 escrita en octal o en hexadecimal no se lee", () => {

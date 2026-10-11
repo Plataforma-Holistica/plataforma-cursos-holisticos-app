@@ -10,6 +10,9 @@ const sentry = vi.hoisted(() => ({
   captureRequestError: vi.fn(),
   httpIntegration: vi.fn((options: unknown) => ({ name: "Http", options })),
   makeNodeTransport: vi.fn(() => ({ send: nodeSend, flush: vi.fn() })),
+  getClient: vi.fn((): object | undefined => undefined),
+  captureException: vi.fn(),
+  flush: vi.fn(async (...args: [timeout?: number]) => args.length >= 0),
 }));
 const nodeSend = vi.hoisted(() => vi.fn(async () => ({})));
 vi.mock("@sentry/nextjs", () => sentry);
@@ -18,7 +21,7 @@ const serverEnv = vi.hoisted(() => ({ current: {} as Record<string, string | und
 vi.mock("@/config/env", () => ({ getEnv: () => serverEnv.current }));
 
 import { captureRequestError } from "./request-error";
-import { startServerErrorReporting } from "./server";
+import { captureServerFailure, startServerErrorReporting } from "./server";
 
 const DSN = ["https://clave-publica", "o1.ingest.sentry.example/1"].join("@");
 
@@ -167,6 +170,36 @@ describe("Sentry en el servidor", () => {
       sessions: false,
       tracePropagation: false,
       breadcrumbs: false,
+    });
+  });
+
+  // Un fallo de operación no lo lanza nadie: lo reporta un servicio. Una función de Vercel
+  // se congela al contestar, así que se espera a que el evento salga.
+  describe("un fallo que reporta un servicio", () => {
+    const failure = new Error("Falta un texto legal vigente.");
+
+    it("sin Sentry encendido no hace nada", async () => {
+      sentry.getClient.mockReturnValue(undefined);
+      await captureServerFailure(failure);
+      expect(sentry.captureException).not.toHaveBeenCalled();
+      expect(sentry.flush).not.toHaveBeenCalled();
+    });
+
+    it("con Sentry encendido lo captura y espera a que salga", async () => {
+      sentry.getClient.mockReturnValue({});
+      await captureServerFailure(failure);
+      expect(sentry.captureException).toHaveBeenCalledExactlyOnceWith(failure);
+      expect(sentry.flush).toHaveBeenCalledExactlyOnceWith(2_000);
+    });
+
+    it("si el SDK falla, no tumba a quien reporta", async () => {
+      sentry.getClient.mockReturnValue({});
+      sentry.flush.mockRejectedValueOnce(new Error("sin red"));
+      await expect(captureServerFailure(failure)).resolves.toBeUndefined();
+      sentry.captureException.mockImplementationOnce(() => {
+        throw new Error("el SDK lanzó");
+      });
+      await expect(captureServerFailure(failure)).resolves.toBeUndefined();
     });
   });
 

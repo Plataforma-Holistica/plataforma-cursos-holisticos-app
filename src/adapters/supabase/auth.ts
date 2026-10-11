@@ -25,7 +25,9 @@ import {
   sessionRevoked,
   signInFailure,
   signUpFailure,
+  unlistedRejection,
   type AuthFailure,
+  type AuthOperation,
   type RecoveryRequestFailure,
   type SignInFailure,
   type SignUpFailure,
@@ -159,6 +161,20 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * Clasifica un fallo con la lista de su operación. Si Auth contestó que no con un código
+ * que la lista no conoce, la respuesta sigue siendo «no se supo», y queda dicho en el
+ * registro del servidor: es lo único que distingue un código nuevo de una caída.
+ */
+function classify<T extends string>(operation: AuthOperation, failure: AuthFailure, table: (failure: AuthFailure) => T): T {
+  const reason = table(failure);
+  if (reason === "unknown") {
+    const notice = unlistedRejection(operation, failure);
+    if (notice) console.warn(notice);
+  }
+  return reason;
+}
+
 export function createAuth(dependencies: AuthDependencies = {}) {
   // Sin dependencias, el `fetch` y el reloj se buscan en cada llamada, no al cargar.
   const baseFetch = dependencies.fetch;
@@ -229,7 +245,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     const password = randomBytes(32).toString("base64url");
     try {
       const { data, error } = await oneShotClient(baseFetch).signUp({ email, password });
-      if (error) return signUpFailure(failureFromSdk(error));
+      if (error) return classify("sign_up", failureFromSdk(error), signUpFailure);
       // Con la confirmación prendida Auth no entrega sesión aquí. Si la entrega, alguien la
       // apagó: esa sesión se cierra y quien llama lo reporta.
       if (data.session) {
@@ -238,7 +254,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       }
       return "accepted";
     } catch (error) {
-      return signUpFailure(failureFromSdk(error));
+      return classify("sign_up", failureFromSdk(error), signUpFailure);
     }
   }
 
@@ -250,9 +266,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   async function requestPasswordRecovery(email: string): Promise<RecoveryRequest> {
     try {
       const { error } = await oneShotClient(baseFetch).resetPasswordForEmail(email);
-      return error ? recoveryRequestFailure(failureFromSdk(error)) : "accepted";
+      return error ? classify("recovery_request", failureFromSdk(error), recoveryRequestFailure) : "accepted";
     } catch (error) {
-      return recoveryRequestFailure(failureFromSdk(error));
+      return classify("recovery_request", failureFromSdk(error), recoveryRequestFailure);
     }
   }
 
@@ -272,7 +288,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     let accessToken: string | null = null;
     try {
       const { data, error } = await oneShotClient(baseFetch).verifyOtp({ token_hash: tokenHash, type: flow });
-      if (error) return { ok: false, reason: redeemFailure(failureFromSdk(error)) };
+      if (error) return { ok: false, reason: classify("redeem", failureFromSdk(error), redeemFailure) };
       accessToken = text(data.session?.access_token);
       const email = text(data.user?.email);
       if (!accessToken || !email || !data.user) return { ok: false, reason: "unknown" };
@@ -310,7 +326,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       return { ok: true, redeemed };
     } catch (error) {
       if (accessToken) await logout(accessToken, "local");
-      return { ok: false, reason: redeemFailure(failureFromSdk(error)) };
+      return { ok: false, reason: classify("redeem", failureFromSdk(error), redeemFailure) };
     }
   }
 
@@ -383,9 +399,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
         password,
         user_metadata: withoutMetadata(redemption),
       });
-      return error ? passwordSetFailure(failureFromSdk(error)) : "ok";
+      return error ? classify("set_password", failureFromSdk(error), passwordSetFailure) : "ok";
     } catch (error) {
-      return passwordSetFailure(failureFromSdk(error));
+      return classify("set_password", failureFromSdk(error), passwordSetFailure);
     }
   }
 
@@ -405,7 +421,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       body: { password, data: withoutMetadata(redemption) },
       fetch: baseFetch,
     });
-    return call.ok ? "ok" : passwordSetFailure(call.failure);
+    return call.ok ? "ok" : classify("set_password", call.failure, passwordSetFailure);
   }
 
   async function close(redeemed: RedeemedLink, scope: "local" | "global"): Promise<Closing> {
@@ -436,7 +452,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     let accessToken: string | null = null;
     try {
       const { data, error } = await oneShotClient(baseFetch).signInWithPassword({ email, password });
-      if (error) return { ok: false, reason: signInFailure(failureFromSdk(error)) };
+      if (error) return { ok: false, reason: classify("sign_in", failureFromSdk(error), signInFailure) };
       accessToken = text(data.session?.access_token);
       const refreshToken = text(data.session?.refresh_token);
       if (!accessToken || !refreshToken) return { ok: false, reason: "unknown" };
@@ -455,7 +471,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       return { ok: true, claims: inspection.claims };
     } catch (error) {
       if (accessToken) await logout(accessToken, "local");
-      return { ok: false, reason: signInFailure(failureFromSdk(error)) };
+      return { ok: false, reason: classify("sign_in", failureFromSdk(error), signInFailure) };
     }
   }
 

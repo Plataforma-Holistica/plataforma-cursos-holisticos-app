@@ -2,7 +2,7 @@
 
 El código de la plataforma de cursos por suscripción.
 
-**Estado al 2026-10-08:** cimientos. Todavía no hay ninguna pantalla más que la portada
+**Estado al 2026-10-11:** cimientos. Todavía no hay ninguna pantalla más que la portada
 provisional. Lo que sí hay:
 
 - **Esqueleto** (T-101): aplicación Next.js, las capas del TRD con el lint que las hace
@@ -14,6 +14,10 @@ provisional. Lo que sí hay:
   Cinco tablas con sus pruebas de base.
 - **Acceso a la base** (T-104, primera entrega): el adaptador de `src/adapters/supabase/`,
   único camino del código a la base.
+- **Cuenta** (T-104, segunda entrega, en curso): los textos legales y los consentimientos,
+  el freno de entrada, las reglas puras de registro, entrada y recuperación, la sesión por
+  cookie y, de los servicios, la guarda de sesión, entrar y salir. Faltan el registro, la
+  recuperación y las pantallas.
 - **Diseño** (T-109): el catálogo de textos, los tokens y los componentes base.
 
 Lo que está en revisión y lo que sigue lo dice `../PROGRESO.md`.

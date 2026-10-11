@@ -158,3 +158,22 @@ const SESSION_REVOKED = new Set(["session_not_found", "user_not_found", "user_ba
 export function sessionRevoked(failure: AuthFailure): boolean {
   return SESSION_REVOKED.has(codeOf(failure) ?? "");
 }
+
+/** Las operaciones cuyo rechazo se clasifica con una lista. */
+export type AuthOperation = "sign_up" | "recovery_request" | "redeem" | "set_password" | "sign_in";
+
+// Un código de Auth es un identificador en minúsculas. Lo que no tiene esa forma no se
+// escribe: podría ser un mensaje, y un mensaje puede traer el correo de alguien.
+const CODE_SHAPE = /^[a-z0-9_]{1,64}$/;
+
+/**
+ * El aviso que deja en el registro del servidor un rechazo de Auth que la lista de su
+ * operación no conoce, o `null` si no hubo rechazo. Sin él, un código nuevo de Auth se
+ * vería igual que una caída. Lleva la operación, el estado y el código: nada de quien pide.
+ */
+export function unlistedRejection(operation: AuthOperation, failure: AuthFailure): string | null {
+  if (failure.kind !== "rejected") return null;
+  const status = Number.isInteger(failure.status) && failure.status >= 100 && failure.status <= 599 ? failure.status : 0;
+  const code = failure.code !== null && CODE_SHAPE.test(failure.code) ? failure.code : "sin_codigo";
+  return `Auth rechazó ${operation} con un código que no está en su lista: estado ${status}, código ${code}.`;
+}
