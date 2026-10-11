@@ -16,13 +16,10 @@ import { errorDrillAllowed } from "@/services/error-reporting/server";
 
 export const dynamic = "force-dynamic";
 
-const MAX_PROBE_LENGTH = 64;
-
 export async function GET(request: NextRequest): Promise<Response> {
   if (!errorDrillAllowed()) return new Response(null, { status: 404 });
 
-  const probe = request.nextUrl.searchParams.get("probe") ?? "";
-  const result = probe.length <= MAX_PROBE_LENGTH ? drillOrigin(await requestOrigin(), probe) : null;
+  const result = drillOrigin(await requestOrigin(), request.nextUrl.searchParams.get("probe") ?? "");
   if (result === null) return new Response(null, { status: 400 });
 
   return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });

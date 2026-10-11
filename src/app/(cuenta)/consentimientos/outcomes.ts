@@ -22,9 +22,9 @@ export interface ConsentItem {
   version: number;
   /** Desde cuándo rige, ya escrito como fecha. */
   effectiveDate: string;
-  /** Dónde se lee completo, o nulo si no tiene página propia. */
+  /** Dónde se lee completo. Los textos que una cuenta acepta tienen todos su página. */
   href: string | null;
-  /** Los párrafos del texto, cuando se pinta completo junto a su casilla. Nulo si solo se enlaza. */
+  /** Los párrafos del texto, cuando además se pinta junto a su casilla. */
   explanation: string[] | null;
 }
 
@@ -61,7 +61,7 @@ export function consentsView(
         title: text.title,
         version: text.version,
         effectiveDate: tools.formatDate(text.effectiveFrom),
-        href: explained || slug === null ? null : `/legal/${slug}`,
+        href: slug === null ? null : `/legal/${slug}`,
         explanation: explained
           ? legalBlocks(text.body).flatMap((block) => (block.kind === "paragraph" ? [block.text] : []))
           : null,
@@ -129,7 +129,11 @@ export interface ConsentsForm {
  * Lo que no sea un texto, o venga desmedido, cuenta como vacío. Marcar un texto que no se
  * pintó no acepta nada.
  */
-export function readConsentsForm(form: FormData): ConsentsForm {
+export function readConsentsForm(form: unknown): ConsentsForm {
+  // Una acción de servidor es una puerta pública: lo que llega puede no ser un formulario.
+  if (!(form instanceof FormData)) {
+    return { name: "", adult: false, returnTo: "", accepted: [], acceptedTypes: [], unchecked: [] };
+  }
   const shown = new Map<string, string>();
   for (const entry of form.getAll("shown").slice(0, MAX_ENTRIES)) {
     const match = SHOWN.exec(textOf(entry, 128));

@@ -22,6 +22,8 @@
 /src/app/inicio/           @SerchFGA @plataformaholisticadev
 # La medición de la cabecera de la dirección, de la que dependen el freno y los topes
 /src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
+# Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta
+/src/messages/es/account.ts @SerchFGA @plataformaholisticadev
 # Los textos legales que la gente lee antes de aceptar
 /src/app/legal/            @SerchFGA @plataformaholisticadev
 /src/services/legal/       @SerchFGA @plataformaholisticadev

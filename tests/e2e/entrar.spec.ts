@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { a11yViolations } from "./support/a11y";
+import { hydrated } from "./support/actions";
 import { clearCounters, parameter, person, SESSION_COOKIE, sessionCount, type Person } from "./support/stack";
 
 // Entrar y salir (FL-05; diseño PA-11), de extremo a extremo: la aplicación compilada
@@ -71,6 +72,7 @@ test("un campo vacío o un correo sin forma se marca en el campo, con un resumen
   await expect(page.getByLabel("Correo")).toHaveAttribute("aria-invalid", "true");
 
   // Al salir del campo, un correo sin forma se marca sin esperar al envío.
+  await hydrated(page);
   await page.getByLabel("Correo").fill("esto no es un correo");
   await page.getByLabel("Contraseña", { exact: true }).focus();
   await expect(page.getByText("Ese correo no tiene forma de correo. Revísalo.")).toBeVisible();
@@ -88,6 +90,7 @@ test("el fallo que agota los intentos frena, dice a qué hora y deshabilita el b
   }
   // El que agota los intentos todavía se evalúa; el siguiente ya no.
   await signIn(page, { email: ana.email, password: "equivocada-final" });
+  await expect(page.getByRole("alert").filter({ hasText: "El correo o la contraseña no coinciden." })).toBeVisible();
   await signIn(page, { email: ana.email, password: ana.password });
   await expect(page.getByRole("alert").filter({ hasText: /Demasiados intentos\. Podrás probar de nuevo a las \d{1,2}:\d{2}/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Entrar" })).toBeDisabled();
@@ -122,7 +125,11 @@ test("una cuenta cuya contraseña no se fijó desde su buzón no entra: se le ma
   // La pantalla de recuperar dice por qué se llegó ahí: el aviso viaja en una cookie corta,
   // con una clave, no en la dirección.
   const notice = (await page.context().cookies()).find((cookie) => cookie.name === "plataforma-aviso");
-  expect(notice).toMatchObject({ value: "choose_password", httpOnly: true, sameSite: "Lax" });
+  expect(notice).toMatchObject({ value: "choose_password", httpOnly: true, sameSite: "Lax", path: "/" });
+  // Dura lo justo para llegar a la pantalla siguiente: un minuto.
+  const life = (notice?.expires ?? 0) - Date.now() / 1000;
+  expect(life).toBeGreaterThan(30);
+  expect(life).toBeLessThanOrEqual(61);
   expect(await sessionCookie(page)).toBeUndefined();
   expect(await sessionCount(sinReclamar.id)).toBe(0);
 });

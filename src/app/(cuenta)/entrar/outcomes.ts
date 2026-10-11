@@ -27,6 +27,34 @@ export type SignInOutcome =
   | { kind: "throttled"; retryAt: string }
   | { kind: "suspended" };
 
+const MAX_EMAIL = 320;
+const MAX_PASSWORD = 1_024;
+const MAX_RETURN = 2_048;
+
+const textOf = (value: FormDataEntryValue | null, max: number): string =>
+  typeof value === "string" && value.length <= max ? value : "";
+
+export interface SignInForm {
+  email: string;
+  password: string;
+  /** El destino guardado (`volver`), tal como llegó. */
+  returnTo: string;
+}
+
+/**
+ * Lo que llega del formulario. Una acción de servidor es una puerta pública: el formulario
+ * lo arma quien pide, y hasta puede no ser un formulario. Lo que no sea un texto, falte o
+ * venga desmedido cuenta como vacío.
+ */
+export function readSignInForm(form: unknown): SignInForm {
+  if (!(form instanceof FormData)) return { email: "", password: "", returnTo: "" };
+  return {
+    email: textOf(form.get("email"), MAX_EMAIL),
+    password: textOf(form.get("password"), MAX_PASSWORD),
+    returnTo: textOf(form.get("volver"), MAX_RETURN),
+  };
+}
+
 /**
  * Lo que se puede revisar sin preguntarle a nadie: que venga un correo con forma y una
  * contraseña. No delata nada de ninguna cuenta. Nulo si no hay nada que corregir.

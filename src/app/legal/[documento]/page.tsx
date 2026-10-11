@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
+import { cache } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { messages, t } from "@/messages";
@@ -22,13 +23,14 @@ interface Props {
   params: Promise<{ documento: string }>;
 }
 
-async function load(slug: string) {
+// Una sola lectura por petición: el título de la pestaña y la página piden lo mismo.
+const load = cache(async (slug: string) => {
   const docType = docTypeOfSlug(slug);
   if (docType === null) return { kind: "not_found" } as const;
-  // Se lee de la base en cada petición: un texto recién publicado se ve de inmediato.
+  // La página no se arma al compilar: el servicio decide cuánto recuerda lo leído.
   await connection();
   return currentLegalText(docType);
-}
+});
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const read = await load((await params).documento);

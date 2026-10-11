@@ -71,7 +71,7 @@ export type { RequestOrigin } from "./origin";
 export type { CookieJar, CookieOptions, CookieReader };
 export type { VerifiedClaims } from "@/adapters/supabase/claims";
 // La forma de un enlace de correo: una página la revisa antes de pintar su formulario.
-export { isLinkToken } from "@/adapters/supabase/auth";
+export { isLinkToken } from "@/adapters/supabase/tokens";
 
 interface OpenedAttempt {
   decision: SignInDecision;

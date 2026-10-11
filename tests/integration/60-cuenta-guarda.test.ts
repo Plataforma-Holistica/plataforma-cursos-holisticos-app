@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { z } from "zod";
 
 import { createAuth, signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
+import { decodeSessionCookie, encodeSessionCookie } from "@/adapters/supabase/auth-cookies";
 import { asServer, asSystem, type Tx } from "@/adapters/supabase/db";
 import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
@@ -15,6 +16,7 @@ import { claimedUser, clearThrottle, freshOrigin, notedSessions, testServices } 
 import {
   authAdmin,
   failingFetch,
+  knownUser,
   memoryJar,
   networkDown,
   sessionCount,
@@ -84,9 +86,24 @@ describe("quién pasa", () => {
     const { account, jar } = await entered({ complete: true });
     expect(await testServices().sessionEmail(jar)).toBe(account.email);
     expect(await testServices().sessionEmail(memoryJar())).toBeNull();
-    // Un token que no verifica no dice de quién es: su correo no se muestra.
-    const forged = memoryJar(new Map([["plataforma-sesion", "v1.a.b.c.cg"]]));
-    expect(await testServices().sessionEmail(forged)).toBeNull();
+    // Una cookie que no se entiende no dice de quién es.
+    const malformed = memoryJar(new Map([[COOKIE, "v1.a.b.c.cg"]]));
+    expect(await testServices().sessionEmail(malformed)).toBeNull();
+  });
+
+  it("el correo de un token al que le cambiaron el cuerpo no se muestra: primero se verifica la firma", async () => {
+    const { jar } = await entered({ complete: true });
+    const tokens = decodeSessionCookie(jar.get(COOKIE) ?? "");
+    if (!tokens) throw new Error("La cookie de prueba no se entiende.");
+    const [header = "", payload = "", signature = ""] = tokens.accessToken.split(".");
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
+    const altered = Buffer.from(JSON.stringify({ ...claims, email: "otra-persona@prueba.test" })).toString("base64url");
+    const forged = encodeSessionCookie({ ...tokens, accessToken: `${header}.${altered}.${signature}` });
+    if (!forged) throw new Error("No se pudo armar la cookie alterada.");
+
+    const services = testServices();
+    expect(await services.sessionEmail(memoryJar(new Map([[COOKIE, forged]])))).toBeNull();
+    expect(await services.checkSession(memoryJar(new Map([[COOKIE, forged]])))).toEqual({ kind: "anonymous" });
   });
 
   it("cerrar lo que la guarda rechaza no le cierra la sesión a quien sí pasa", async () => {
@@ -121,6 +138,33 @@ describe("quién pasa", () => {
     expect(direct.get(COOKIE)).toBeUndefined();
     expect(await sessionCount(account.id)).toBe(0);
     expect(services.reported).toEqual([]);
+  });
+
+  it("una sesión anotada de una cuenta con la marca de contraseña prendida se cierra, y se le manda a recuperar", async () => {
+    // No debería existir: una sesión solo se anota con la marca apagada. Es la segunda
+    // capa: si algún día existe, no entra. Se arma como dueño de la base.
+    const account = await knownUser();
+    emails.push(account.email);
+    const flagged = await ownerQuery<{ pending: boolean }>(
+      "select password_reset_required as pending from public.profiles where id = $1",
+      [account.id],
+    );
+    const jar = memoryJar();
+    expect((await createAuth().signIn(jar, account.email, account.password)).ok).toBe(true);
+    const read = await readSession(jar);
+    if (read.kind !== "session" || read.claims.sessionId === null) throw new Error("La sesión de prueba no se leyó.");
+    await ownerQuery("insert into private.app_sessions (session_id, profile_id) values ($1, $2)", [
+      read.claims.sessionId,
+      account.id,
+    ]);
+
+    const services = testServices();
+    // Una cuenta que nunca canjeó un enlace de su buzón nace con la marca prendida.
+    expect(flagged[0]?.pending).toBe(true);
+    expect(await services.checkSession(jar)).toEqual({ kind: "must_sign_out", then: "recover" });
+    expect(await services.closeRejectedSession(jar)).toBe("recover");
+    expect(jar.get(COOKIE)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
   });
 
   it("si Auth no deja cerrarla, la cookie se borra igual y se reporta", async () => {

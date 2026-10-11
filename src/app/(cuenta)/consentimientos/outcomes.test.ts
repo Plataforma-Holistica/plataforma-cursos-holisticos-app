@@ -35,7 +35,8 @@ const texts = [
   text("course_history_consent", "Tu historial de cursos", "# Tu historial\n\nPrimero.\n\nSegundo,\ncon dos renglones."),
 ];
 const facts = { texts, minimumAge: 18 };
-const slugOf = (docType: string) => ({ terms: "terminos", student_privacy_notice: "privacidad" })[docType] ?? null;
+const slugOf = (docType: string) =>
+  ({ terms: "terminos", student_privacy_notice: "privacidad", course_history_consent: "historial-de-cursos" })[docType] ?? null;
 const formatDate = (iso: string) => `fecha(${iso.slice(0, 10)})`;
 
 const pendingAll: PendingAccount = {
@@ -69,7 +70,8 @@ describe("lo que la pantalla pide", () => {
           title: "Tu historial de cursos",
           version: 3,
           effectiveDate: "fecha(2026-11-12)",
-          href: null,
+          // También el que se pinta junto a su casilla se puede leer completo en su página.
+          href: "/legal/historial-de-cursos",
           // El título del cuerpo no se repite: el bloque ya lleva el del texto.
           explanation: ["Primero.", "Segundo, con dos renglones."],
         },
@@ -101,10 +103,23 @@ describe("lo que la pantalla pide", () => {
       },
     });
     expect(updated.variant).toBe("updated_texts");
-    expect(updated.items.map((item) => [item.docType, item.explanation])).toEqual([
-      ["terms", null],
-      ["course_history_consent", null],
+    expect(updated.items).toEqual([
+      { docType: "terms", documentId: ID.terms, title: "Términos y condiciones", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/terminos", explanation: null },
+      {
+        docType: "course_history_consent",
+        documentId: ID.course_history_consent,
+        title: "Tu historial de cursos",
+        version: 3,
+        effectiveDate: "fecha(2026-11-12)",
+        href: "/legal/historial-de-cursos",
+        explanation: null,
+      },
     ]);
+  });
+
+  it("un texto sin página propia no lleva enlace", () => {
+    const noPages = consentsView(pendingAll, facts, { slugOf: () => null, formatDate });
+    expect(noPages.items.map((item) => item.href)).toEqual([null, null, null]);
   });
 
   it("un tipo que falta y no tiene texto vigente no se pinta: no hay qué aceptar", () => {
@@ -182,6 +197,20 @@ describe("lo que llega del formulario", () => {
     expect(read).toEqual({ name: "", adult: false, returnTo: "", accepted: [], acceptedTypes: [], unchecked: ["terms"] });
     expect(readConsentsForm(form([["name", "x".repeat(2_000)]])).name).toBe("");
   });
+
+  it.each([null, undefined, "name=Ana", 42, {}, new URLSearchParams("name=Ana")])(
+    "lo que no es un formulario cuenta como un formulario vacío: %j",
+    (notAForm) => {
+      expect(readConsentsForm(notAForm)).toEqual({
+        name: "",
+        adult: false,
+        returnTo: "",
+        accepted: [],
+        acceptedTypes: [],
+        unchecked: [],
+      });
+    },
+  );
 
   it("no acepta una lista sin fin de textos", () => {
     const many = Array.from({ length: 40 }, (_, index): [string, string] => ["shown", `t${"a".repeat(index)}=${ID.terms}`]);

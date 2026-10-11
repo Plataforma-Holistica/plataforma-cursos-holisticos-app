@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PendingAccount, SignInResult } from "@/services/account/account";
 
-import { checkSignInForm, signInOutcome } from "./outcomes";
+import { checkSignInForm, readSignInForm, signInOutcome } from "./outcomes";
 
 // Qué hace la pantalla de entrar con lo que contesta el servicio (diseño, PA-11; FL-05).
 
@@ -43,10 +43,12 @@ describe("lo que contesta el servicio de entrada", () => {
       { kind: "throttled", retryAt },
       { kind: "must_recover" },
     ];
-    for (const result of results) {
+    const destinations = results.map((result) => {
       const outcome = signInOutcome(result, "/inicio");
-      if (outcome.kind === "redirect") expect(outcome.to).toBe("/recuperar");
-    }
+      return outcome.kind === "redirect" ? outcome.to : null;
+    });
+    // Ninguno llega al destino guardado: el único que sale, sale a recuperar.
+    expect(destinations).toEqual([null, null, null, null, null, "/recuperar"]);
   });
 
   it.each(["", "//otro.example", "https://otro.example", "/entrar", "/consentimientos", "/sesion/cerrar"])(
@@ -82,5 +84,53 @@ describe("lo que se revisa del formulario antes de preguntarle a nadie", () => {
   it("no opina de la contraseña más allá de que venga: cuál es la correcta solo lo sabe Auth", () => {
     expect(checkSignInForm({ email: "ana@prueba.test", password: "a" })).toBeNull();
     expect(checkSignInForm({ email: "ana@prueba.test", password: "x".repeat(500) })).toBeNull();
+  });
+});
+
+describe("lo que llega del formulario", () => {
+  function form(entries: [string, string | Blob][]): FormData {
+    const data = new FormData();
+    for (const [name, value] of entries) data.append(name, value);
+    return data;
+  }
+  const empty = { email: "", password: "", returnTo: "" };
+
+  it("el correo, la contraseña y el destino, tal como llegaron", () => {
+    expect(readSignInForm(form([["email", " Ana@Prueba.test "], ["password", " secreta "], ["volver", "/inicio?x=1"]]))).toEqual({
+      email: " Ana@Prueba.test ",
+      password: " secreta ",
+      returnTo: "/inicio?x=1",
+    });
+  });
+
+  it("lo que falta cuenta como vacío", () => {
+    expect(readSignInForm(form([]))).toEqual(empty);
+    expect(readSignInForm(form([["email", "ana@prueba.test"]]))).toEqual({ ...empty, email: "ana@prueba.test" });
+  });
+
+  it("lo que no es un texto cuenta como vacío", () => {
+    const file = new Blob(["x"]);
+    expect(readSignInForm(form([["email", file], ["password", file], ["volver", file]]))).toEqual(empty);
+  });
+
+  it.each([
+    ["email", 320],
+    ["password", 1_024],
+    ["volver", 2_048],
+  ] as const)("%s: hasta %i caracteres pasa, uno más cuenta como vacío", (name, max) => {
+    const key = name === "volver" ? "returnTo" : name;
+    expect(readSignInForm(form([[name, "x".repeat(max)]]))[key]).toHaveLength(max);
+    expect(readSignInForm(form([[name, "x".repeat(max + 1)]]))[key]).toBe("");
+  });
+
+  it.each([null, undefined, "email=ana", 42, {}, [], new URLSearchParams("email=ana@prueba.test")])(
+    "lo que no es un formulario cuenta como un formulario vacío: %j",
+    (notAForm) => {
+      expect(readSignInForm(notAForm)).toEqual(empty);
+    },
+  );
+
+  it("con el nombre repetido toma el primero", () => {
+    expect(readSignInForm(form([["volver", "/inicio"], ["volver", "//otro.example"]])).returnTo).toBe("/inicio");
   });
 });

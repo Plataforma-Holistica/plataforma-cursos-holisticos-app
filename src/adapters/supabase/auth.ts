@@ -33,6 +33,7 @@ import {
 } from "./auth-errors";
 import { ensureIdentityKeys, inspectAccessToken, type TokenInspection, type VerifiedClaims } from "./claims";
 import { IdentityUnavailableError } from "./errors";
+import { emailClaim, isLinkToken } from "./tokens";
 
 // Lo que los servicios le piden a Supabase Auth (TRD §8.10 y §9.2).
 //
@@ -70,32 +71,6 @@ const REFRESH_MARGIN_MS = 90_000;
 const REFRESH_TIMEOUT_MS = 3_000;
 /** Tras una renovación fallida por un motivo pasajero, cuánto pasa antes de volver a intentar. */
 const REFRESH_PAUSE_MS = 10_000;
-
-const TOKEN_HASH = /^[A-Za-z0-9_-]{8,256}$/;
-
-/**
- * Si un texto puede ser la huella del enlace de un correo. No dice que el enlace sirva: eso
- * solo se sabe al canjearlo. Sirve para no pintar un formulario, ni preguntarle a Auth, por
- * una dirección que nadie pudo haber recibido.
- */
-export function isLinkToken(value: string): boolean {
-  return TOKEN_HASH.test(value);
-}
-
-/**
- * El correo que dice un token cuya firma ya se verificó. Es para mostrárselo a su dueña
- * («Entraste como…»): nada se decide con él. La identidad sigue siendo el identificador de
- * las claims verificadas.
- */
-function emailClaim(accessToken: string): string | null {
-  try {
-    const body: unknown = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString("utf8"));
-    const email = typeof body === "object" && body !== null ? (body as { email?: unknown }).email : undefined;
-    return typeof email === "string" && email !== "" && email.length <= 254 ? email : null;
-  } catch {
-    return null;
-  }
-}
 
 // Un token de acceso normal mide menos de la mitad. Uno más largo que esto no cabría en la
 // cookie, y pasado cierto tamaño ni siquiera se le puede mandar a Auth en una cabecera.

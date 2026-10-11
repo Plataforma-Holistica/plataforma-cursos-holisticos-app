@@ -58,9 +58,24 @@ function TextConsent({ item, invalid }: { item: ConsentItem; invalid: boolean })
         id={itemId(item.docType)}
         name={acceptName(item.docType)}
         title={item.title}
-        description={item.explanation.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
+        description={
+          <>
+            {item.explanation.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+            <p>
+              {details}
+              {item.href !== null && (
+                <>
+                  {SPACE}
+                  <TextLink href={item.href} external>
+                    {text.readText}
+                  </TextLink>
+                </>
+              )}
+            </p>
+          </>
+        }
         label={t(text.historyGrant)}
         invalid={invalid}
       />

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import { a11yViolations } from "./support/a11y";
+import { hydrated } from "./support/actions";
 import {
   clearCounters,
   currentTextIds,
@@ -52,8 +53,15 @@ test("a una cuenta sin completar se le pide lo que falta antes que cualquier otr
   await expect(page).toHaveTitle("Antes de seguir · La Plataforma");
   // Ninguna casilla viene marcada.
   for (const box of await page.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
-  // El historial se lee completo, junto a su casilla.
-  await expect(page.getByRole("group", { name: /Tu historial de cursos/ })).toContainText("la ley la trata como dato sensible");
+  // El historial se lee completo, junto a su casilla: cada párrafo del texto de la base.
+  const [history] = await ownerQuery<{ body: string }>(
+    "select body from public.legal_documents where id = private.current_legal_document('course_history_consent')",
+  );
+  const paragraphs = (history?.body ?? "").split(/\n\s*\n/).filter((block) => block.trim() !== "" && !block.startsWith("#"));
+  expect(paragraphs.length).toBeGreaterThan(1);
+  for (const paragraph of paragraphs) {
+    await expect(page.getByRole("group", { name: /Tu historial de cursos/ })).toContainText(paragraph.replace(/\s+/g, " ").trim());
+  }
 
   // Escribir la dirección a mano no se la salta, y recuerda a dónde iba.
   await page.goto("/inicio");
@@ -66,16 +74,37 @@ test("a una cuenta sin completar se le pide lo que falta antes que cualquier otr
   await expect(page).toHaveURL("/inicio");
   expect(await profileName(nueva.id)).toBe("Ana de Prueba");
   expect(await grantedDocTypes(nueva.id)).toEqual(["course_history_consent", "student_privacy_notice", "terms"]);
+  // La evidencia de cada consentimiento: desde qué navegador se dio, y que fue en esta pantalla.
+  const evidence = await ownerQuery<{ origin: string; user_agent: string | null }>(
+    "select distinct origin, user_agent from public.consents where profile_id = $1",
+    [nueva.id],
+  );
+  expect(evidence).toEqual([{ origin: "login_prompt", user_agent: await page.evaluate(() => navigator.userAgent) }]);
 
   // Ya completa, la pantalla que pedía lo que faltaba la manda a su inicio.
   await page.goto("/consentimientos");
   await expect(page).toHaveURL("/inicio");
 });
 
+test("después de completar la cuenta se va a donde se iba", async ({ page }) => {
+  const nueva = await person("claimed");
+  await page.goto("/entrar?volver=%2Finicio%3Fpestana%3D2");
+  await page.getByLabel("Correo").fill(nueva.email);
+  await page.getByLabel("Contraseña", { exact: true }).fill(nueva.password);
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page).toHaveURL("/consentimientos?volver=%2Finicio%3Fpestana%3D2");
+
+  await page.getByLabel("Nombre").fill("Ana de Prueba");
+  await tickEverything(page);
+  await page.getByRole("button", { name: "Aceptar y seguir" }).click();
+  await expect(page).toHaveURL("/inicio?pestana=2");
+});
+
 test("lo que falta se dice antes de enviar, sin perder lo ya marcado", async ({ page }) => {
   const nueva = await person("claimed");
   await signIn(page, nueva);
   await expect(page).toHaveURL("/consentimientos");
+  await hydrated(page);
 
   await page.getByLabel("Tengo 18 años cumplidos o más.").check();
   await page.getByRole("button", { name: "Aceptar y seguir" }).click();
@@ -216,9 +245,18 @@ test("la ruta que cierra sesiones no le cierra la suya a quien sí pasa", async 
   expect((await sessionCookie(page))?.value).toBe(before?.value);
   expect(await sessionCount(ana.id)).toBe(1);
 
+  // Una petición HEAD no corre la ruta: ni siquiera cuando la sesión sí habría que cerrarla.
+  expect(await forgetNotedSessions(ana.id)).toBe(1);
   const head = await page.request.head("/sesion/cerrar", { maxRedirects: 0 });
   expect(head.status()).toBe(405);
+  expect((await sessionCookie(page))?.value).toBe(before?.value);
   expect(await sessionCount(ana.id)).toBe(1);
+
+  // Con esa misma sesión, la lectura sí la cierra.
+  await page.goto("/sesion/cerrar");
+  await expect(page).toHaveURL("/entrar");
+  expect(await sessionCookie(page)).toBeUndefined();
+  expect(await sessionCount(ana.id)).toBe(0);
 });
 
 test("sin sesión, la ruta que cierra sesiones solo manda a entrar", async ({ page }) => {
@@ -301,4 +339,14 @@ test("ninguna pantalla de la cuenta se guarda en caché", async ({ page }) => {
   await signIn(page, ana);
   await expect(page).toHaveURL("/inicio");
   expect((await page.request.get("/inicio")).headers()["cache-control"]).toMatch(/no-store/);
+  // La redirección de la ruta que cierra sesiones, que pone su cabecera a mano.
+  const closing = await page.request.get("/sesion/cerrar", { maxRedirects: 0 });
+  expect(closing.status()).toBe(307);
+  expect(closing.headers()["cache-control"]).toBe("private, no-cache, no-store, must-revalidate, max-age=0");
+
+  const nueva = await person("claimed");
+  await page.context().clearCookies();
+  await signIn(page, nueva);
+  await expect(page).toHaveURL("/consentimientos");
+  expect((await page.request.get("/consentimientos")).headers()["cache-control"]).toMatch(/no-store/);
 });

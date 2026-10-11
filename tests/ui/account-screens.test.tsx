@@ -95,13 +95,15 @@ describe("la pantalla de entrar (PA-11)", () => {
   });
 
   it("cumplida la espera, el botón vuelve a servir sin recargar", async () => {
+    // La espera es de diez minutos y se mira con uno de margen a cada lado: lo que tarde
+    // de verdad en escribir y enviar no cambia el resultado.
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const retryAt = new Date(Date.now() + 30_000).toISOString();
+    const retryAt = new Date(Date.now() + 600_000).toISOString();
     await submitSignIn({ kind: "throttled", email: "ana@prueba.test", retryAt, attempt: 1 });
     expect(await screen.findByRole("button", { name: "Entrar" })).toBeDisabled();
-    await act(() => vi.advanceTimersByTimeAsync(29_000));
+    await act(() => vi.advanceTimersByTimeAsync(540_000));
     expect(screen.getByRole("button", { name: "Entrar" })).toBeDisabled();
-    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
     expect(screen.getByRole("button", { name: "Entrar" })).toBeEnabled();
   });
 
@@ -166,7 +168,7 @@ const complete: ConsentsView = {
   items: [
     item("terms", "Términos y condiciones"),
     item("student_privacy_notice", "Aviso de privacidad"),
-    item("course_history_consent", "Tu historial de cursos", { href: null, explanation: ["Primer párrafo.", "Segundo párrafo."] }),
+    item("course_history_consent", "Tu historial de cursos", { explanation: ["Primer párrafo.", "Segundo párrafo."] }),
   ],
   signature: Object.values(ID).join(","),
 };
@@ -193,7 +195,14 @@ describe("la pantalla que pide lo que le falta a la cuenta (PA-15)", () => {
     expect(within(history).getByLabelText(HISTORY)).not.toBeChecked();
     // El texto completo se lee en otra pestaña, para no perder lo escrito.
     const links = screen.getAllByRole("link", { name: /Leer el texto/ });
-    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/legal/terms", "/legal/student_privacy_notice"]);
+    // También el del historial, que además se pinta junto a su casilla.
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/legal/terms",
+      "/legal/student_privacy_notice",
+      "/legal/course_history_consent",
+    ]);
+    expect(within(history).getByRole("link", { name: /Leer el texto/ })).toBeVisible();
+    expect(history).toHaveTextContent("Versión 2, vigente desde el 12 de noviembre de 2026.");
     for (const link of links) expect(link).toHaveAttribute("target", "_blank");
     // Lo que se pintó viaja oculto: es lo que la persona acepta al marcar.
     expect([...container.querySelectorAll('input[name="shown"]')].map((input) => input.getAttribute("value"))).toEqual([
