@@ -11,6 +11,7 @@ const valid = {
   iss: issuer,
   aud: "authenticated",
   exp: 4_102_444_800,
+  iat: 1_700_000_000,
   session_id: "b0000000-0000-4000-8000-000000000002",
   email: "ana@prueba.test",
 };
@@ -46,6 +47,8 @@ describe("validación propia de las claims", () => {
     ["un nivel de autenticación desconocido", { aal: "aal3" }],
     ["sin nivel de autenticación", { aal: undefined }],
     ["sin fecha de vencimiento", { exp: undefined }],
+    ["sin fecha de emisión", { iat: undefined }],
+    ["una emisión que no es un número", { iat: "ayer" }],
     ["un vencimiento que no es un número", { exp: "mañana" }],
   ])("rechaza %s", (_name, change) => {
     expect(parseClaims({ ...valid, ...change }, { issuer })).toBeNull();
@@ -62,7 +65,7 @@ describe("validación propia de las claims", () => {
   it("parsear no es verificar: el resultado no sirve para asUser", () => {
     const parsed = parseClaims(valid, { issuer });
     expect(isVerifiedClaims(parsed)).toBe(false);
-    expect(isVerifiedClaims({ userId: valid.sub, aal: "aal2", sessionId: null })).toBe(false);
+    expect(isVerifiedClaims({ userId: valid.sub, aal: "aal2", sessionId: null, issuedAt: 0 })).toBe(false);
   });
 });
 

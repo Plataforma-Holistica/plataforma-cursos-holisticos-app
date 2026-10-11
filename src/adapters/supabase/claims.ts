@@ -1,19 +1,19 @@
 import "server-only";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { getEnv } from "@/config/env";
 
+import { verifierClient } from "./auth-client";
 import { ExpiredClaimsError, UnverifiedClaimsError } from "./errors";
 import { createKeyCache, type Jwk } from "./keys";
 
 // Quién es la persona, a partir del token de su sesión (TRD §8.10 y §9.2).
 //
-// El token se verifica antes de usarlo, con `getClaims()` del SDK: firma y vigencia contra
-// las claves públicas del proyecto, sin ir al servidor de identidad en cada petición. Eso
-// no detecta una sesión revocada; donde importe se usa `getUser()`, que llega con la
-// entrega que lo necesite.
+// El token se verifica antes de usarlo, con `getClaims()` del SDK: la firma contra las
+// claves públicas del proyecto, sin ir al servidor de identidad en cada petición. La
+// vigencia se compara aquí. Eso no detecta una sesión revocada: donde importe se le
+// pregunta a Auth (`confirmSession`, en `auth.ts`).
 
 /** Lo que el adaptador sabe de una persona después de verificar su token. */
 export interface VerifiedClaims {
@@ -22,6 +22,12 @@ export interface VerifiedClaims {
   /** `aal2` si la sesión pasó el segundo factor. */
   readonly aal: "aal1" | "aal2";
   readonly sessionId: string | null;
+  /**
+   * Cuándo se emitió el token, en milisegundos. Un token conserva su firma hasta que
+   * vence, aunque su sesión ya se haya cerrado: con esto se puede descartar uno emitido
+   * antes de un momento dado sin preguntarle a Auth.
+   */
+  readonly issuedAt: number;
 }
 
 // `getClaims()` solo mira la firma y la vigencia. Esto es lo que además se exige, para
@@ -34,6 +40,8 @@ const claimsSchema = z.looseObject({
   aud: z.union([z.string(), z.array(z.string())]),
   // Segundos desde 1970. De aquí sale hasta cuándo sirven las claims ya verificadas.
   exp: z.number(),
+  // Segundos desde 1970: cuándo se emitió.
+  iat: z.number(),
   session_id: z.string().optional(),
   is_anonymous: z.boolean().optional(),
 });
@@ -125,59 +133,82 @@ async function fetchProjectKeys(): Promise<Jwk[]> {
 
 const keyCache = createKeyCache({ fetchKeys: fetchProjectKeys });
 
-let cached: SupabaseClient | undefined;
-
-// Un solo cliente: guarda en memoria las claves públicas del proyecto. No lleva sesión de
-// nadie (no persiste ni renueva), solo se le pasan tokens para verificar.
-function client(): SupabaseClient {
-  if (cached) return cached;
-  const env = getEnv();
-  cached = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-  return cached;
-}
+/** Lo que se sabe de un token después de mirar su firma y su vigencia. */
+export type TokenInspection =
+  | { state: "valid"; claims: VerifiedClaims; expiresAt: number }
+  /**
+   * Lo firmó el proyecto y es de una persona, pero ya venció. No sirve para actuar: solo
+   * dice que vale la pena intentar renovar la sesión, y que quien lo trae no lo inventó.
+   */
+  | { state: "expired"; userId: string; sessionId: string | null }
+  | { state: "invalid" };
 
 /**
- * Verifica el token de acceso de una sesión. Devuelve `null` si no es válido, sin decir
- * por qué: firma, vigencia, emisor, audiencia o rol.
+ * Mira el token de acceso de una sesión: firma, emisor, audiencia, rol y vigencia. No dice
+ * por qué uno es inválido.
  *
  * Lanza `IdentityUnavailableError` si no se pudo saber: las claves públicas se bajan del
  * servidor de identidad, y si no responde y la clave no se conocía, la persona no dejó
  * de tener sesión. Un token mal hecho nunca produce ese error: quien lo manda no puede
  * hacer que parezca una caída.
+ *
+ * `now` existe para las pruebas de la renovación, que necesitan un token «por vencer» sin
+ * esperar a que lo esté. Las claims que salen de aquí vencen, para `asUser` y `asServer`,
+ * con el reloj de verdad.
  */
-export async function verifyAccessToken(accessToken: string): Promise<VerifiedClaims | null> {
+export async function inspectAccessToken(
+  accessToken: string,
+  now: () => number = Date.now,
+): Promise<TokenInspection> {
   const header = readTokenHeader(accessToken);
-  if (!header) return null;
+  if (!header) return { state: "invalid" };
 
   // Lo único que sale a la red, y es de aquí de donde puede venir un «no se pudo saber».
   const key = await keyCache.find(header.kid);
   // Una clave que el proyecto no tiene, o un token que dice otro algoritmo que el de su
   // clave: inválido, sin preguntarle a nadie.
-  if (!key || (key.alg !== undefined && key.alg !== header.alg)) return null;
+  if (!key || (key.alg !== undefined && key.alg !== header.alg)) return { state: "invalid" };
 
   let payload: unknown;
   try {
-    // Con la clave en la mano el SDK no sale a la red: solo comprueba firma y vigencia.
+    // Con la clave en la mano el SDK no sale a la red: solo comprueba la firma. La
+    // vigencia se compara abajo, para poder distinguir un token vencido de uno inventado.
     // Lo que devuelva como error o lance es, entonces, un token que no sirve.
     // El tipo de clave del SDK es más estricto que lo que publica el servidor.
-    const { data, error } = await client().auth.getClaims(accessToken, { keys: [key] as never });
-    if (error || !data) return null;
+    const { data, error } = await verifierClient().getClaims(accessToken, {
+      jwks: { keys: [key] as never },
+      allowExpired: true,
+    });
+    if (error || !data) return { state: "invalid" };
     payload = data.claims;
   } catch {
-    return null;
+    return { state: "invalid" };
   }
 
   const issuer = `${withoutTrailingSlash(getEnv().NEXT_PUBLIC_SUPABASE_URL)}/auth/v1`;
   const claims = parseClaims(payload, { issuer });
-  if (!claims) return null;
+  if (!claims) return { state: "invalid" };
+
+  const expiresAt = claims.exp * 1000;
+  if (now() >= expiresAt) {
+    return { state: "expired", userId: claims.sub, sessionId: claims.session_id ?? null };
+  }
 
   const result: VerifiedClaims = Object.freeze({
     userId: claims.sub,
     aal: claims.aal,
     sessionId: claims.session_id ?? null,
+    issuedAt: claims.iat * 1000,
   });
-  verified.set(result, { json: JSON.stringify(claims), expiresAt: claims.exp * 1000 });
-  return result;
+  verified.set(result, { json: JSON.stringify(claims), expiresAt });
+  return { state: "valid", claims: result, expiresAt };
+}
+
+/**
+ * Verifica el token de acceso de una sesión. Devuelve `null` si no es válido o ya venció,
+ * sin decir por qué. Lanza `IdentityUnavailableError` si no se pudo saber.
+ */
+export async function verifyAccessToken(accessToken: string): Promise<VerifiedClaims | null> {
+  const inspection = await inspectAccessToken(accessToken);
+  return inspection.state === "valid" ? inspection.claims : null;
 }
