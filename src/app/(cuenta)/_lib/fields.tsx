@@ -11,10 +11,13 @@ import { Icon } from "@/ui/icon";
 import { PasswordField } from "@/ui/password-field";
 import { TextField } from "@/ui/text-field";
 
+import { afterInteraction } from "./hooks";
+
 // Los dos campos que se repiten entre las pantallas de la cuenta: el correo con el que se
 // pide un enlace y la contraseña nueva. Los dos validan al salir del campo, y solo si ya
 // traen algo (diseño, sección 5.5): un campo vacío se marca al enviar. Las reglas son las
-// mismas del dominio que usa el servidor, que es el que manda.
+// mismas del dominio que usa el servidor, que es el que manda. Lo que se ve al salir del
+// campo se pinta cuando termina el clic o la tecla que sacó el foco (`afterInteraction`).
 //
 // Quien los usa los arma de nuevo (con `key`) cuando llega la respuesta de un envío: así lo
 // que se vio al salir del campo no tapa lo que dijo el servidor.
@@ -49,8 +52,8 @@ export function EmailField({ id, defaultValue, problem, hint }: EmailFieldProps)
     const field = event.target;
     if (!(field instanceof HTMLInputElement) || field.name !== "email") return;
     // Vacío, vuelve a mandar lo que dijo el último envío.
-    if (field.value.trim() === "") return setOnBlur(undefined);
-    setOnBlur(parseEmail(field.value).ok ? null : "invalid");
+    const seen = field.value.trim() === "" ? undefined : parseEmail(field.value).ok ? null : "invalid";
+    afterInteraction(() => setOnBlur(seen));
   }
 
   return (
@@ -101,10 +104,10 @@ export function NewPasswordField({ id, label, problem }: NewPasswordFieldProps) 
   function validate(event: FocusEvent<HTMLDivElement>) {
     const value = passwordOf(event.target);
     if (value === null) return;
-    // Vacío, vuelve a mandar lo que dijo el último envío.
-    if (value === "") return setOnBlur(undefined);
     const checked = checkPassword(value);
-    setOnBlur(checked.ok ? null : checked.reason);
+    // Vacío, vuelve a mandar lo que dijo el último envío.
+    const seen = value === "" ? undefined : checked.ok ? null : checked.reason;
+    afterInteraction(() => setOnBlur(seen));
   }
 
   return (

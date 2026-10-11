@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -620,6 +620,27 @@ describe("recuperar la contraseña, «cambiar» (PA-13)", () => {
     await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
     expect(actions.completeRecoveryAction).toHaveBeenCalledOnce();
     expect(formOf(actions.completeRecoveryAction)).toEqual({ token: TOKEN, password: "corta pero ya no" });
+  });
+
+  it("el error al salir del campo no se pinta a medio clic: un botón que se recorre pierde el clic", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    const button = screen.getByRole("button", { name: "Guardar contraseña" });
+    // El botón del ratón baja sobre «Guardar» y el foco sale del campo: todavía no hay clic.
+    fireEvent.pointerDown(button);
+    fireEvent.mouseDown(button);
+    fireEvent.blur(password);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(password).not.toBeInvalid();
+    expect(screen.queryByText("Tu contraseña necesita 8 caracteres o más.")).not.toBeInTheDocument();
+    // Al soltarlo, el clic llega al botón, y entonces sí se dice.
+    fireEvent.pointerUp(button);
+    fireEvent.mouseUp(button);
+    await user.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Tu contraseña necesita 8 caracteres o más.");
+    expect(password).toBeInvalid();
   });
 
   it("no se supo: lo dice, y el campo vuelve vacío", async () => {

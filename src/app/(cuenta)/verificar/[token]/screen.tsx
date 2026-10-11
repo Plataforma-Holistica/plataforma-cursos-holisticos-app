@@ -15,6 +15,7 @@ import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
 import { NewPasswordField, passwordError } from "../../_lib/fields";
+import { afterInteraction } from "../../_lib/hooks";
 import { NoCurrentTextScreen, RegistrationLinkDeadScreen, RegistrationUnfinishedScreen } from "../../_lib/states";
 import { shownValue, type ConsentItem } from "../../consentimientos/outcomes";
 
@@ -149,7 +150,7 @@ function Fields({ view, name, fields }: { view: CompleteView; name: string; fiel
     if (!(field instanceof HTMLInputElement) || field.name !== "name") return;
     if (field.value.trim() === "") return;
     const parsed = parseDisplayName(field.value);
-    setNameOnBlur(parsed.ok ? null : parsed.reason);
+    afterInteraction(() => setNameOnBlur(parsed.ok ? null : parsed.reason));
   }
 
   return (

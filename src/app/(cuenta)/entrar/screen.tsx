@@ -15,7 +15,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
-import { useHydrated, useWaitIsOver } from "../_lib/hooks";
+import { afterInteraction, useHydrated, useWaitIsOver } from "../_lib/hooks";
 import { SuspendedScreen } from "../_lib/states";
 
 import { signInAction } from "./actions";
@@ -54,7 +54,8 @@ function Fields({ email, fields }: { email: string; fields: SignInFields }) {
     const field = event.target;
     if (!(field instanceof HTMLInputElement) || field.name !== "email") return;
     if (field.value.trim() === "") return;
-    setEmailError(parseEmail(field.value).ok ? undefined : "invalid");
+    const seen = parseEmail(field.value).ok ? undefined : "invalid";
+    afterInteraction(() => setEmailError(seen));
   }
 
   return (

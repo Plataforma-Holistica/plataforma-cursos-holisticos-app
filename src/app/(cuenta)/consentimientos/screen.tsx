@@ -15,6 +15,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
+import { afterInteraction } from "../_lib/hooks";
 import { signOutAction } from "../_lib/session-actions";
 import { SuspendedScreen } from "../_lib/states";
 
@@ -115,7 +116,7 @@ function Fields({ view, name, fields }: { view: ConsentsView; name: string; fiel
     if (!(field instanceof HTMLInputElement) || field.name !== "name") return;
     if (field.value.trim() === "") return;
     const parsed = parseDisplayName(field.value);
-    setNameOnBlur(parsed.ok ? null : parsed.reason);
+    afterInteraction(() => setNameOnBlur(parsed.ok ? null : parsed.reason));
   }
 
   return (
