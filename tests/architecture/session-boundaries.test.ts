@@ -111,7 +111,7 @@ describe("la llave secreta de Supabase", () => {
     expect(naming.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/config/env.ts"]);
   });
 
-  it("la API de administración solo se usa en las dos funciones que parten de un canje", () => {
+  it("la API de administración solo se usa en cuatro funciones del adaptador", () => {
     // Toda aparición del nombre, no solo las llamadas: guardarlo en otra variable o
     // importarlo con otro nombre también cuenta.
     const naming = sources.filter((source) => /\badminApi\b/.test(source.text)).map((source) => source.file);
@@ -125,20 +125,26 @@ describe("la llave secreta de Supabase", () => {
       if (from === -1) throw new Error(`auth.ts ya no tiene la función ${name}.`);
       return auth.slice(from, auth.indexOf("\n  }\n", from));
     };
-    const allowed = bodyOf("setFirstPassword") + bodyOf("slimDown");
+    // Invitar no parte de un canje: recibe un correo y no toca ninguna cuenta que ya
+    // exista. Las otras tres actúan sobre la cuenta de un enlace recién canjeado.
+    const users = ["requestSignUp", "setFirstPassword", "setRecoveredPassword", "slimDown"];
     const count = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].length;
 
-    // Una importación, y una llamada en cada una de las dos funciones. Nada más.
-    expect(count(auth, /\badminApi\b/g)).toBe(3);
+    // Una importación, y una llamada en cada una de las cuatro funciones. Nada más.
+    expect(count(auth, /\badminApi\b/g)).toBe(5);
     expect(count(auth, /import \{[^}]*\badminApi\b[^}]*\} from "\.\/auth-client";/g)).toBe(1);
-    expect(count(allowed, /\badminApi\(baseFetch\)\./g)).toBe(2);
-    expect(count(bodyOf("setFirstPassword"), /\badminApi\(/g)).toBe(1);
-    expect(count(bodyOf("slimDown"), /\badminApi\(/g)).toBe(1);
+    expect(count(users.map(bodyOf).join(""), /\badminApi\(baseFetch\)\./g)).toBe(4);
+    for (const name of users) expect(count(bodyOf(name), /\badminApi\(/g)).toBe(1);
+    // Y cada una, lo suyo: una sola invita, y ninguna otra función del archivo fija contraseñas.
+    expect(count(auth, /\.inviteUserByEmail\(/g)).toBe(1);
+    expect(count(bodyOf("requestSignUp"), /\.inviteUserByEmail\(/g)).toBe(1);
+    expect(count(auth, /\.updateUserById\(/g)).toBe(3);
+    expect(count(bodyOf("requestSignUp"), /\.updateUserById\(/g)).toBe(0);
   });
 
   it("ningún otro archivo construye por su cuenta un cliente de administración", () => {
     const building = sources
-      .filter((source) => /GoTrueAdminApi|AuthAdminApi|auth\.admin\b|\.admin\.(?:updateUserById|createUser|deleteUser|generateLink|signOut)/.test(source.text))
+      .filter((source) => /GoTrueAdminApi|AuthAdminApi|auth\.admin\b|\.admin\.(?:updateUserById|createUser|deleteUser|generateLink|signOut|inviteUserByEmail)/.test(source.text))
       .map((source) => source.file);
     expect(building).toEqual(["src/adapters/supabase/auth-client.ts"]);
   });

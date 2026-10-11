@@ -80,7 +80,8 @@ let admin: GoTrueAdminApi | undefined;
 
 /**
  * La API de administración de Auth, con la llave secreta. Salta todo permiso: se usa en un
- * solo archivo (`auth.ts`: `setFirstPassword` y `slimDown`), y una prueba de arquitectura lo exige.
+ * solo archivo (`auth.ts`: `requestSignUp`, `setFirstPassword`, `setRecoveredPassword` y
+ * `slimDown`), y una prueba de arquitectura lo exige.
  */
 export function adminApi(base?: Fetch): GoTrueAdminApi {
   if (base) return newAdminApi(base);

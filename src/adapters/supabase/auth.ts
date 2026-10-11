@@ -1,7 +1,5 @@
 import "server-only";
 
-import { randomBytes } from "node:crypto";
-
 import { getEnv } from "@/config/env";
 import type { PasswordSetResult } from "@/domain/access/password-outcome";
 
@@ -19,6 +17,7 @@ import {
   alreadyClosed,
   failureFromSdk,
   passwordSetFailure,
+  recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
   sessionLostOnRefresh,
@@ -41,16 +40,17 @@ import { IdentityUnavailableError } from "./errors";
 // aquí, y lo que no se reconoce es «no se supo»: ni un éxito ni un motivo para cerrarle la
 // sesión a nadie.
 //
-// Siete cosas que quien llama tiene que saber, porque el adaptador no las decide:
+// Ocho cosas que quien llama tiene que saber, porque el adaptador no las decide:
 //
 // - `signIn` distingue `banned` y `email_not_confirmed`, y Auth contesta el primero antes
 //   de revisar la contraseña y el segundo solo con la contraseña correcta. Mostrarlos tal
 //   cual delata el estado de una cuenta: el servicio los aplana.
-// - `mail_rate_limited` también delata. Auth lo contesta solo cuando la cuenta existe y
-//   recibió un correo hace poco: pedir dos veces seguidas la recuperación de un correo
-//   distingue al que tiene cuenta del que no, y lo mismo al registrar un correo sin
-//   confirmar. El servicio contesta lo de siempre, y de todos modos no llega a pedirlo: su
-//   propia espera entre correos va antes (TRD §9.9).
+// - `requestSignUp` contesta `existing_account` cuando el correo ya tiene cuenta, y Auth no
+//   pone espera entre dos invitaciones al mismo correo. Las dos cosas son del servicio:
+//   contesta lo de siempre, y su propia espera entre correos va antes (TRD §9.9).
+// - `mail_rate_limited` también delata al recuperar. Auth lo contesta solo cuando la cuenta
+//   existe y recibió un correo hace poco: pedir dos veces seguidas la recuperación de un
+//   correo distingue al que tiene cuenta del que no. El servicio contesta lo de siempre.
 // - `signIn` no cierra la sesión que el tarro ya traiga. Quien entra con una sesión
 //   abierta la cierra antes con `signOut`, o esa queda abierta en Auth sin dueño.
 // - `refreshSession` puede contestar `session` con un token al que le quedan segundos: si
@@ -58,8 +58,8 @@ import { IdentityUnavailableError } from "./errors";
 //   ver vencer esas claims a la mitad (`ExpiredClaimsError`).
 // - `confirmSession` va después de `refreshSession`. Con un token vencido Auth no dice si
 //   la sesión vive, y la respuesta es `unknown`.
-// - Con `same_password` Auth no cambió nada y por tanto no cerró ninguna sesión. Si
-//   después `closeAllSessions` contesta `unknown`, la recuperación no terminó bien.
+// - `setRecoveredPassword` dice por qué camino guardó. Por administración no sale el
+//   aviso «tu contraseña cambió» (CO-26): quien llama lo reporta.
 // - `readSession` y `refreshSession` solo miran la firma y la vigencia del token. Una
 //   sesión cerrada en otro lado sigue pasando hasta que su token vence (15 minutos): lo
 //   que no pueda esperar ese tiempo le pregunta a Auth con `confirmSession`.
@@ -99,6 +99,16 @@ export type SignInResult =
 
 export type SignUpRequest = "accepted" | SignUpFailure;
 export type RecoveryRequest = "accepted" | RecoveryRequestFailure;
+
+export interface RecoveredPassword {
+  result: PasswordSetResult;
+  /**
+   * Con qué se guardó, o se intentó guardar. `session`: la sesión del canje, que es lo que
+   * hace salir el aviso «tu contraseña cambió» y cierra las demás sesiones. `administration`:
+   * la API de administración, que no manda el aviso y borra todas las sesiones.
+   */
+  via: "session" | "administration";
+}
 export type Closing = "closed" | "unknown";
 export type SessionLiveness = "alive" | "revoked" | "unknown";
 
@@ -233,26 +243,20 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   }
 
   /**
-   * Pide el registro de un correo: Auth da de alta la cuenta sin confirmar y manda el
-   * enlace de verificación. La contraseña es aleatoria, nadie la conoce y no se guarda:
-   * la de verdad la fija quien abre el enlace (`setFirstPassword`).
+   * Pide el registro de un correo. Es una invitación, por la API de administración: Auth
+   * no acepta altas de nadie más. La cuenta nace sin confirmar y sin contraseña, y Auth
+   * manda el enlace de verificación; la contraseña la fija quien abre el enlace
+   * (`setFirstPassword`). Así nadie puede plantar una contraseña en el correo de otro.
    *
-   * Contesta `accepted` igual para un correo nuevo, uno sin confirmar y uno que ya tiene
-   * cuenta. A este último Auth no le manda nada. `mail_rate_limited` solo sale para un
-   * correo sin confirmar que recibió su enlace hace poco: quien llama no lo muestra.
+   * A Auth solo se le manda el correo. Para uno nuevo y para uno que no ha confirmado
+   * contesta `accepted`, y a este último le manda otro enlace: el anterior deja de servir.
+   * Para uno que ya tiene cuenta contesta `existing_account` y Auth no manda nada: quien
+   * llama no lo muestra.
    */
   async function requestSignUp(email: string): Promise<SignUpRequest> {
-    const password = randomBytes(32).toString("base64url");
     try {
-      const { data, error } = await oneShotClient(baseFetch).signUp({ email, password });
-      if (error) return classify("sign_up", failureFromSdk(error), signUpFailure);
-      // Con la confirmación prendida Auth no entrega sesión aquí. Si la entrega, alguien la
-      // apagó: esa sesión se cierra y quien llama lo reporta.
-      if (data.session) {
-        await logout(data.session.access_token, "local");
-        return "misconfigured";
-      }
-      return "accepted";
+      const { error } = await adminApi(baseFetch).inviteUserByEmail(email);
+      return error ? classify("sign_up", failureFromSdk(error), signUpFailure) : "accepted";
     } catch (error) {
       return classify("sign_up", failureFromSdk(error), signUpFailure);
     }
@@ -272,6 +276,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     }
   }
 
+  // El tipo con el que Auth canjea el enlace de cada flujo. El de verificación sale de una
+  // invitación.
+  const LINK_TYPE = { signup: "invite", recovery: "recovery" } as const;
+
   async function redeem(tokenHash: string, flow: RedeemedLink["flow"]): Promise<RedeemResult> {
     // Lo que no tiene forma de huella no se le manda a Auth.
     if (!TOKEN_HASH.test(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
@@ -287,7 +295,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
 
     let accessToken: string | null = null;
     try {
-      const { data, error } = await oneShotClient(baseFetch).verifyOtp({ token_hash: tokenHash, type: flow });
+      const { data, error } = await oneShotClient(baseFetch).verifyOtp({
+        token_hash: tokenHash,
+        type: LINK_TYPE[flow],
+      });
       if (error) return { ok: false, reason: classify("redeem", failureFromSdk(error), redeemFailure) };
       accessToken = text(data.session?.access_token);
       const email = text(data.user?.email);
@@ -336,8 +347,8 @@ export function createAuth(dependencies: AuthDependencies = {}) {
    * borran con la API de administración (la cuenta sale de un canje recién hecho, no de
    * quien llama) y la sesión se renueva, para tener un token que ya no los cargue.
    *
-   * Solo ocurre si alguien dio de alta el correo directo en Auth con ese relleno: sin
-   * esto, quien abre el enlace de su buzón no podría recuperar su cuenta.
+   * Solo ocurre con una cuenta que traiga ese relleno de antes, de cuando Auth aceptaba
+   * altas de cualquiera: sin esto, quien abre el enlace de su buzón no podría recuperarla.
    */
   async function slimDown(
     session: { claims: VerifiedClaims; metadataKeys: string[] },
@@ -360,17 +371,18 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   }
 
   /**
-   * Canjea el enlace de verificación (CO-01). Solo acepta uno de ese tipo: con `signup`,
-   * Auth rechaza un enlace de recuperación.
+   * Canjea el enlace de verificación (CO-01). Solo acepta uno de ese tipo: Auth rechaza
+   * aquí un enlace de recuperación. Al canjear, Auth le pone a la cuenta una contraseña al
+   * azar que no le entrega a nadie: `setFirstPassword` la reemplaza.
    */
   const redeemSignupLink = (tokenHash: string) => redeem(tokenHash, "signup");
 
   /** Canjea el enlace de recuperación (CO-07). Auth rechaza aquí uno de verificación. */
   const redeemRecoveryLink = (tokenHash: string) => redeem(tokenHash, "recovery");
 
-  // La aplicación no usa los metadatos de la cuenta, y cualquiera puede escribirlos al dar
-  // de alta un correo ajeno directo en Auth. Viajan dentro del token de acceso: unos pocos
-  // kilobytes harían que la sesión no cupiera en la cookie. Se borran al fijar la
+  // La aplicación no usa los metadatos de la cuenta, y una cuenta puede traerlos de antes,
+  // de cuando Auth aceptaba altas de cualquiera. Viajan dentro del token de acceso: unos
+  // pocos kilobytes harían que la sesión no cupiera en la cookie. Se borran al fijar la
   // contraseña, que es cuando la cuenta pasa a ser de quien controla el buzón.
   const withoutMetadata = (redemption: Redemption): Record<string, null> | undefined =>
     redemption.metadataKeys.length === 0
@@ -386,8 +398,8 @@ export function createAuth(dependencies: AuthDependencies = {}) {
 
   /**
    * Fija la primera contraseña de una cuenta, al completar el registro. Va por la API de
-   * administración de Auth, que fuera de aquí solo se usa en `slimDown`: no manda el aviso «tu contraseña cambió» a quien
-   * apenas se registra, y borra toda sesión de la cuenta, también la del canje.
+   * administración de Auth: no manda el aviso «tu contraseña cambió» a quien apenas se
+   * registra, y borra toda sesión de la cuenta, también la del canje.
    *
    * Solo acepta un canje de verificación, y una sola vez.
    */
@@ -406,14 +418,21 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   }
 
   /**
-   * Guarda la contraseña nueva de quien recupera su cuenta, con la sesión del canje. Auth
-   * manda el aviso «tu contraseña cambió» (CO-26) y cierra las demás sesiones.
+   * Guarda la contraseña nueva de quien recupera su cuenta. Primero con la sesión del
+   * canje: Auth manda el aviso «tu contraseña cambió» (CO-26) y cierra las demás sesiones.
+   *
+   * Hay dos casos en que eso no sirve y la persona sí controla el buzón. Uno: la sesión
+   * del canje ya no existe, porque quien tiene otra sesión de la cuenta las cerró todas;
+   * puede hacerlo en bucle, y sin otro camino la dueña no recuperaría nunca. Dos: la
+   * contraseña es la que ya tenía, y entonces Auth no cambia ni cierra nada. En los dos se
+   * fija por la API de administración, que la guarda y borra todas las sesiones en un solo
+   * paso. Por ese camino el aviso no sale: `via` lo dice.
    *
    * Solo acepta un canje de recuperación, y una sola vez.
    */
-  async function setRecoveredPassword(redeemed: RedeemedLink, password: string): Promise<PasswordSetResult> {
+  async function setRecoveredPassword(redeemed: RedeemedLink, password: string): Promise<RecoveredPassword> {
     const redemption = take(redeemed, "recovery");
-    if (!redemption) return "rejected";
+    if (!redemption) return { result: "rejected", via: "session" };
     const call = await callAuth({
       method: "PUT",
       path: "/user",
@@ -421,7 +440,20 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       body: { password, data: withoutMetadata(redemption) },
       fetch: baseFetch,
     });
-    return call.ok ? "ok" : classify("set_password", call.failure, passwordSetFailure);
+    if (call.ok) return { result: "ok", via: "session" };
+    if (!recoveryNeedsAdministration(call.failure)) {
+      return { result: classify("set_password", call.failure, passwordSetFailure), via: "session" };
+    }
+    try {
+      const { error } = await adminApi(baseFetch).updateUserById(redemption.userId, {
+        password,
+        user_metadata: withoutMetadata(redemption),
+      });
+      const result = error ? classify("set_password", failureFromSdk(error), passwordSetFailure) : "ok";
+      return { result, via: "administration" };
+    } catch (error) {
+      return { result: classify("set_password", failureFromSdk(error), passwordSetFailure), via: "administration" };
+    }
   }
 
   async function close(redeemed: RedeemedLink, scope: "local" | "global"): Promise<Closing> {

@@ -180,7 +180,11 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-enable_signup = true
+# Apagadas: una cuenta solo nace de una invitación que manda el servidor (TRD 9.2, fila
+# «Registro»). Con las altas abiertas, cualquiera planta una contraseña en el correo de
+# otra persona. No confundir con el `enable_signup` de [auth.email], que apagado quita
+# la entrada por correo.
+enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
@@ -258,13 +262,21 @@ otp_expiry = 3600
 # correo propio con T-310). CO-01, CO-07 y CO-26 del catálogo, más los dos que Auth manda
 # por su cuenta y que aquí no llevan enlace ni código. Ninguna plantilla usa
 # `.ConfirmationURL` ni `.Token`: los enlaces llevan la huella y abren una página propia.
-# `invite` y `reauthentication` se quedan de fábrica: no sirven para entrar.
+# `reauthentication` se queda de fábrica: no sirve para entrar.
+#
+# CO-01 sale por dos plantillas con el mismo texto. `invite` es la que manda el registro.
+# `confirmation` es la que Auth usa si alguien le pide directo el reenvío de una cuenta
+# que no ha confirmado: su enlace se canjea igual.
 #
 # Una clave mal escrita aquí se ignora sin error, y sale la plantilla de fábrica: por eso
 # tests/integration/30-auth-config.test.ts comprueba cada correo en el buzón.
 [auth.email.template.confirmation]
 subject = "Confirma tu correo"
 content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.invite]
+subject = "Confirma tu correo"
+content_path = "./supabase/templates/invite.html"
 
 [auth.email.template.recovery]
 subject = "Cambia tu contraseña"

@@ -61,6 +61,33 @@ async function parameter(key: string): Promise<number> {
   return value;
 }
 
+/** Atrasa la hora en que se mandó el último correo de verificación de una cuenta. */
+async function backdateConfirmation(email: string, seconds: number): Promise<void> {
+  await ownerQuery(
+    "update auth.users set confirmation_sent_at = now() - make_interval(secs => $2) where email = $1",
+    [email, seconds],
+  );
+}
+
+/** Una llamada directa a Auth, como la haría cualquiera con la llave que se le dé. */
+async function post(path: string, body: unknown, key: string): Promise<{ status: number; code: unknown }> {
+  const response = await fetch(`${env("NEXT_PUBLIC_SUPABASE_URL")}/auth/v1${path}`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const answer = (await response.json().catch(() => null)) as { error_code?: unknown; code?: unknown } | null;
+  return { status: response.status, code: answer?.error_code ?? answer?.code ?? null };
+}
+
+async function accountsOf(addresses: readonly string[]): Promise<number> {
+  const rows = await ownerQuery<{ count: string }>(
+    "select count(*)::text as count from auth.users where email = any($1::text[])",
+    [addresses],
+  );
+  return Number(rows[0]?.count);
+}
+
 /** Atrasa la hora en que se mandó el último correo de recuperación de una cuenta. */
 async function backdateRecovery(email: string, seconds: number): Promise<void> {
   await ownerQuery(
@@ -93,6 +120,64 @@ describe("lo que el Auth local tiene configurado", () => {
     // Con una sola apagada, registrar un correo ya confirmado contesta «ya existe».
     expect(settings.mailer_autoconfirm).toBe(false);
     expect(settings.phone_autoconfirm).toBe(false);
+    // Y no acepta altas: una cuenta solo nace de una invitación del servidor.
+    expect(settings.disable_signup).toBe(true);
+  });
+
+  it("desde fuera no se crea una cuenta por ninguna puerta, ni con la llave secreta en la del registro", async () => {
+    // Si se pudiera, cualquiera plantaría una contraseña en el correo de otra persona.
+    const publishable = env("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    const tried = [newEmail(), newEmail(), newEmail(), newEmail(), newEmail()];
+    const [signUpEmail, otpEmail, magicEmail, rawOtpEmail, secretEmail] = tried as [string, string, string, string, string];
+
+    const signedUp = await visitor().auth.signUp({ email: signUpEmail, password: `P-${randomUUID()}` });
+    expect(signedUp.error?.code).toBe("signup_disabled");
+    expect(signedUp.data.session).toBeNull();
+
+    const byCode = await visitor().auth.signInWithOtp({ email: otpEmail, options: { shouldCreateUser: true } });
+    expect(byCode.error?.code).toBe("signup_disabled");
+
+    expect(await post("/magiclink", { email: magicEmail }, publishable)).toEqual({ status: 422, code: "signup_disabled" });
+    expect(await post("/otp", { email: rawOtpEmail, create_user: true }, publishable)).toEqual({
+      status: 422,
+      code: "signup_disabled",
+    });
+    expect(
+      await post("/signup", { email: secretEmail, password: `P-${randomUUID()}` }, env("SUPABASE_SECRET_KEY")),
+    ).toEqual({ status: 422, code: "signup_disabled" });
+
+    const anonymous = await visitor().auth.signInAnonymously();
+    expect(anonymous.error?.code).toBe("anonymous_provider_disabled");
+    expect(anonymous.data.session).toBeNull();
+
+    expect(await accountsOf(tried)).toBe(0);
+    // Un correo centinela, pedido después: cuando llega, los otros ya habrían llegado.
+    const sentinel = newEmail();
+    await admin().auth.admin.inviteUserByEmail(sentinel);
+    await waitForMails(sentinel, 1);
+    for (const address of tried) expect(await mailsTo(address)).toEqual([]);
+  });
+
+  it("la invitación da de alta la cuenta sin contraseña y sin confirmar", async () => {
+    const email = newEmail();
+    const invited = await admin().auth.admin.inviteUserByEmail(email);
+    expect(invited.error).toBeNull();
+    const rows = await ownerQuery<{ has_password: boolean; confirmed: boolean }>(
+      "select coalesce(encrypted_password, '') <> '' as has_password, email_confirmed_at is not null as confirmed from auth.users where email = $1",
+      [email],
+    );
+    expect(rows).toEqual([{ has_password: false, confirmed: false }]);
+  });
+
+  it("invitar un correo que ya tiene cuenta dice que existe, y no le manda nada", async () => {
+    const user = await confirmedUser();
+    const again = await admin().auth.admin.inviteUserByEmail(user.email);
+    expect(again.error?.code).toBe("email_exists");
+
+    const sentinel = newEmail();
+    await admin().auth.admin.inviteUserByEmail(sentinel);
+    await waitForMails(sentinel, 1);
+    expect(await mailsTo(user.email)).toEqual([]);
   });
 
   it("el token de acceso dura 15 minutos", async () => {
@@ -199,13 +284,17 @@ describe("lo que el Auth local tiene configurado", () => {
 });
 
 describe("los correos que manda el Auth local", () => {
-  it("CO-01: registrar un correo nuevo manda el enlace a /verificar, sin sesión, y el perfil nace con la marca", async () => {
+  it("CO-01: invitar un correo nuevo manda el enlace a /verificar, sin sesión, y el perfil nace con la marca", async () => {
     const lifetime = await parameter("VIGENCIA_ENLACE_CONTRASENA");
     const email = newEmail();
 
-    const signedUp = await visitor().auth.signUp({ email, password: `P-${randomUUID()}` });
-    expect(signedUp.error).toBeNull();
-    expect(signedUp.data.session).toBeNull();
+    const invited = await admin().auth.admin.inviteUserByEmail(email);
+    expect(invited.error).toBeNull();
+    const sessions = await ownerQuery<{ count: string }>(
+      "select count(*)::text as count from auth.sessions s join auth.users u on u.id = s.user_id where u.email = $1",
+      [email],
+    );
+    expect(sessions[0]?.count).toBe("0");
 
     const mail = await lastMailTo(email);
     expect(mail.subject).toBe("Confirma tu correo");
@@ -223,6 +312,28 @@ describe("los correos que manda el Auth local", () => {
       [email],
     );
     expect(profile).toEqual([{ password_reset_required: true }]);
+  });
+
+  it("CO-01, si alguien pide el reenvío directo en Auth: sale el mismo correo, y su enlace se canjea igual", async () => {
+    // Auth sigue atendiendo el reenvío de una cuenta invitada que no ha confirmado, y ahí
+    // usa la plantilla de confirmación, no la de invitación: las dos son el mismo correo.
+    const email = newEmail();
+    await admin().auth.admin.inviteUserByEmail(email);
+    const first = await lastMailTo(email);
+    await backdateConfirmation(email, (await parameter("ESPERA_REENVIO")) + 5);
+
+    expect((await visitor().auth.resend({ type: "signup", email })).error).toBeNull();
+    const again = await lastMailTo(email, 2);
+
+    expect(again.subject).toBe("Confirma tu correo");
+    const strip = (html: string, hash: string) => html.replaceAll(hash, "");
+    expect(strip(again.html, tokenHashIn(again, "verificar"))).toBe(strip(first.html, tokenHashIn(first, "verificar")));
+    for (const link of linksIn(again)) expect(link.startsWith(`${SITE}/`)).toBe(true);
+    expectNoWayIn(strip(again.html, tokenHashIn(again, "verificar")));
+
+    const redeemed = await visitor().auth.verifyOtp({ token_hash: tokenHashIn(again, "verificar"), type: "invite" });
+    expect(redeemed.error).toBeNull();
+    expect(redeemed.data.session).not.toBeNull();
   });
 
   it("CO-07: pedir la recuperación manda el enlace a /recuperar", async () => {
@@ -288,17 +399,4 @@ describe("los correos que manda el Auth local", () => {
     for (const previous of await mailsTo(user.email)) expectNoWayIn(previous.html);
   });
 
-  it("registrar un correo que ya tiene cuenta contesta igual y no manda nada", async () => {
-    const user = await confirmedUser();
-    const again = await visitor().auth.signUp({ email: user.email, password: `P-${randomUUID()}` });
-    expect(again.error).toBeNull();
-    expect(again.data.session).toBeNull();
-    expect(again.data.user?.id).not.toBe(user.id);
-
-    // Un correo centinela, pedido después: cuando llega, el otro ya habría llegado.
-    const sentinel = newEmail();
-    await visitor().auth.signUp({ email: sentinel, password: `P-${randomUUID()}` });
-    await waitForMails(sentinel, 1);
-    expect(await mailsTo(user.email)).toEqual([]);
-  });
 });
