@@ -12,7 +12,7 @@ const sentry = vi.hoisted(() => ({
   makeNodeTransport: vi.fn(() => ({ send: nodeSend, flush: vi.fn() })),
   getClient: vi.fn((): object | undefined => undefined),
   captureException: vi.fn(),
-  flush: vi.fn(async (_timeout?: number) => true),
+  flush: vi.fn(async (...args: [timeout?: number]) => args.length >= 0),
 }));
 const nodeSend = vi.hoisted(() => vi.fn(async () => ({})));
 vi.mock("@sentry/nextjs", () => sentry);

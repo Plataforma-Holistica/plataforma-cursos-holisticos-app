@@ -33,8 +33,9 @@ export interface TestUserOptions {
 
 // La marca solo la apaga private.claim_account(), a nombre de la propia cuenta. El
 // ayudante la llama como dueño de la base, declarando por quién actúa: es el atajo de las
-// pruebas para no pasar por el correo.
-async function claimAccount(id: string): Promise<void> {
+// pruebas para no pasar por el correo. De paso deja escrita la fecha desde la que vale su
+// contraseña, sin la cual la aplicación no le anota sesiones.
+export async function claimAccount(id: string): Promise<void> {
   const owner = new Client({ connectionString: env("DATABASE_URL_DIRECT") });
   await owner.connect();
   try {
@@ -80,12 +81,71 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
   for (const user of users) await admin.auth.admin.deleteUser(user.id);
 
   // Como dueño de la base: la aplicación no tiene permiso de borrar perfiles.
-  const owner = new Client({ connectionString: env("DATABASE_URL_DIRECT") });
+  const ids = users.map((user) => user.id);
+  const owner = new Client({ connectionString: localOwnerUrl() });
   await owner.connect();
   try {
-    await owner.query("delete from public.profiles where id = any($1::uuid[])", [
-      users.map((user) => user.id),
+    await owner.query("begin");
+    // Un consentimiento es un libro: no se borra ni como dueño, y cuelga de `profiles`. Para
+    // no dejar residuo, y solo aquí, se desactiva su guardián dentro de la transacción. Solo
+    // corre contra la base local y solo toca a las personas de prueba; una prueba de base
+    // (05_legal) exige que el guardián esté habilitado.
+    const consented = await owner.query(
+      "select 1 from public.consents where profile_id = any($1::uuid[]) limit 1",
+      [ids],
+    );
+    if ((consented.rowCount ?? 0) > 0) {
+      await owner.query("alter table public.consents disable trigger consents_guard");
+      await owner.query("delete from public.consents where profile_id = any($1::uuid[])", [ids]);
+      await owner.query("alter table public.consents enable trigger consents_guard");
+    }
+    await owner.query("delete from public.profiles where id = any($1::uuid[])", [ids]);
+    await owner.query("commit");
+  } catch (error) {
+    await owner.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    await owner.end();
+  }
+}
+
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** La dirección del dueño de la base, después de comprobar que es la base local. */
+function localOwnerUrl(): string {
+  const url = env("DATABASE_URL_DIRECT");
+  const parsed = new URL(url);
+  if (!LOCAL_HOSTS.has(parsed.hostname) || [...parsed.searchParams.keys()].length > 0) {
+    throw new Error("La limpieza de las pruebas solo corre contra la base local.");
+  }
+  return url;
+}
+
+/**
+ * Deja la cuenta completa, como quien terminó su registro: nombre, edad declarada y los
+ * tres consentimientos sobre los textos vigentes. Como dueño, declarando por quién actúa.
+ */
+export async function completeAccountAsOwner(id: string, name = "Persona de prueba"): Promise<void> {
+  const owner = new Client({ connectionString: localOwnerUrl() });
+  await owner.connect();
+  try {
+    await owner.query("begin");
+    await owner.query("select set_config('app.actor_id', $1, true)", [id]);
+    await owner.query("update public.profiles set display_name = $2, adult_declared_at = now() where id = $1", [
+      id,
+      name,
     ]);
+    const inserted = await owner.query(
+      `insert into public.consents (profile_id, legal_document_id, origin)
+       select $1, private.current_legal_document(t.doc_type), 'signup'
+       from unnest(array['terms', 'student_privacy_notice', 'course_history_consent']::public.legal_doc_type[]) as t (doc_type)`,
+      [id],
+    );
+    await owner.query("commit");
+    if (inserted.rowCount !== 3) throw new Error("No se guardaron los tres consentimientos de prueba.");
+  } catch (error) {
+    await owner.query("rollback").catch(() => undefined);
+    throw error;
   } finally {
     await owner.end();
   }

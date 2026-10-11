@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const adapter = vi.hoisted(() => ({
-  captureServerFailure: vi.fn(async (_failure: Error) => undefined),
+  captureServerFailure: vi.fn(async (...failures: [Error]) => void failures),
   startServerErrorReporting: vi.fn(),
 }));
 vi.mock("@/adapters/sentry/server", () => adapter);

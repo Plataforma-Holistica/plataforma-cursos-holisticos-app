@@ -3,7 +3,7 @@
 -- no cargan, para dar lo mismo con ellos y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(70);
+select plan(71);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-legal@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-legal@prueba.test');
@@ -381,6 +381,14 @@ select throws_ok(
   $$truncate public.consents$$,
   '42501', 'append-only ledger public.consents: TRUNCATE is not allowed',
   'ni se vacía la tabla');
+
+-- El guardián está habilitado. La limpieza de las pruebas de integración lo desactiva un
+-- instante, dentro de una transacción, para borrar a sus personas de prueba: si un día
+-- quedara apagado, un consentimiento se podría editar o borrar sin que nada avisara.
+select is(
+  (select tgenabled::text from pg_trigger
+   where tgrelid = 'public.consents'::regclass and tgname = 'consents_guard'),
+  'O', 'el guardián de consents está habilitado');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante ve los permisos por columna: se le da uno de más y tiene que avisar.
