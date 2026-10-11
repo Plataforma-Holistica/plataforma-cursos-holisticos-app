@@ -372,6 +372,20 @@ describe("lo que el formulario de registro necesita leer", () => {
     ]);
     expect(Object.fromEntries(facts.texts.map((text) => [text.docType, text.documentId]))).toEqual(texts);
     for (const text of facts.texts) expect(text.title).not.toBe("");
+    // El cuerpo y la vigencia son los de la base: PA-14 pinta de ahí el bloque del historial
+    // y PA-15 dice desde cuándo rige cada texto.
+    const stored = await ownerQuery<{ id: string; body: string; effective: Date; version: number }>(
+      "select id::text as id, body, effective_from as effective, version from public.legal_documents where id = any($1::uuid[])",
+      [Object.values(texts)],
+    );
+    expect(stored).toHaveLength(3);
+    for (const row of stored) {
+      const text = facts.texts.find((entry) => entry.documentId === row.id);
+      expect(text?.body).toBe(row.body);
+      expect(text?.version).toBe(row.version);
+      expect(text?.effectiveFrom).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+      expect(new Date(text?.effectiveFrom ?? "").getTime()).toBe(row.effective.getTime());
+    }
     expect(facts.minimumAge).toBe(await parameter("EDAD_MINIMA"));
     expect(facts.linkLifetimeMinutes).toBe(await parameter("VIGENCIA_ENLACE_CONTRASENA"));
     expect(facts.resendWaitSeconds).toBe(await parameter("ESPERA_REENVIO"));
@@ -379,7 +393,8 @@ describe("lo que el formulario de registro necesita leer", () => {
 
   it("fuera de local, un borrador no es un texto vigente: no hay formulario, y se reporta", async () => {
     const services = testServices({ isLocal: () => false });
-    expect(await services.accountFormFacts()).toEqual({ kind: "unavailable" });
+    // No es «no se supo»: PA-14 pinta otra cosa cuando lo que falta es el texto.
+    expect(await services.accountFormFacts()).toEqual({ kind: "no_current_text" });
     expect(services.reported).toEqual(["gate_no_current_text"]);
   });
 });

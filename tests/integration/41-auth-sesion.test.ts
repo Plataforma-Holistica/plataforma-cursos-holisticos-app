@@ -106,7 +106,7 @@ describe("entrar", () => {
     expect(jar.writes[0]?.value.length).toBeLessThan(1_500);
 
     const read = await readSession(jar);
-    expect(read).toMatchObject({ kind: "session", claims: { userId: account.id } });
+    expect(read).toMatchObject({ kind: "session", claims: { userId: account.id }, email: account.email });
     if (read.kind === "session") {
       expect(read.claims.sessionId).toMatch(/^[0-9a-f-]{36}$/);
       expect(Math.abs(read.claims.issuedAt - Date.now())).toBeLessThan(MINUTE);

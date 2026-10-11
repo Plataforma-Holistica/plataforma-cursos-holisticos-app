@@ -58,6 +58,7 @@ describe("reportFailure", () => {
       "registration_incomplete",
       "recovery_incomplete",
       "recovery_notice_not_sent",
+      "legal_text_unavailable",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);
     expect(new Set(messages).size).toBe(codes.length);

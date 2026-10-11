@@ -33,7 +33,9 @@ import {
   loadFormParams,
   markRegistrationStarted,
   profileState,
+  readableTexts,
   saveIdentity,
+  type ReadableText,
 } from "./records";
 import {
   countHit,
@@ -67,12 +69,8 @@ export type MailRequestResult =
   /** No se supo. No depende del correo. */
   | { kind: "unavailable" };
 
-export interface LegalText {
-  docType: string;
-  documentId: string;
-  version: number;
-  title: string;
-}
+/** Un texto vigente, con lo que una pantalla necesita para mostrarlo y dejarlo aceptar. */
+export type LegalText = ReadableText;
 
 export type AccountFormFacts =
   | {
@@ -86,6 +84,9 @@ export type AccountFormFacts =
       /** `ESPERA_REENVIO`, en segundos. */
       resendWaitSeconds: number;
     }
+  /** Falta el texto vigente de un tipo obligatorio: no hay qué aceptar, y nadie completa su cuenta. */
+  | { kind: "no_current_text" }
+  /** No se supo. */
   | { kind: "unavailable" };
 
 export type RegistrationCompletion =
@@ -274,10 +275,10 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
 
   /** Lo que las pantallas de registro y de «completa tu cuenta» necesitan leer. */
   async function accountFormFacts(): Promise<AccountFormFacts> {
-    let facts: { texts: CurrentText[]; params: Awaited<ReturnType<typeof loadFormParams>> };
+    let facts: { texts: (ReadableText | null)[]; params: Awaited<ReturnType<typeof loadFormParams>> };
     try {
       facts = await asSystem({ reason: "account_form_facts" }, async (tx) => ({
-        texts: await currentTexts(tx, deps.isLocal()),
+        texts: await readableTexts(tx, deps.isLocal()),
         params: await loadFormParams(tx),
       }));
     } catch {
@@ -286,11 +287,11 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     }
     const texts: LegalText[] = [];
     for (const text of facts.texts) {
-      if (text.documentId === null || text.version === null || text.title === null) {
+      if (text === null) {
         await deps.report("gate_no_current_text");
-        return { kind: "unavailable" };
+        return { kind: "no_current_text" };
       }
-      texts.push({ docType: text.docType, documentId: text.documentId, version: text.version, title: text.title });
+      texts.push(text);
     }
     return { kind: "ready", texts, ...facts.params };
   }

@@ -73,13 +73,38 @@ const REFRESH_PAUSE_MS = 10_000;
 
 const TOKEN_HASH = /^[A-Za-z0-9_-]{8,256}$/;
 
+/**
+ * Si un texto puede ser la huella del enlace de un correo. No dice que el enlace sirva: eso
+ * solo se sabe al canjearlo. Sirve para no pintar un formulario, ni preguntarle a Auth, por
+ * una dirección que nadie pudo haber recibido.
+ */
+export function isLinkToken(value: string): boolean {
+  return TOKEN_HASH.test(value);
+}
+
+/**
+ * El correo que dice un token cuya firma ya se verificó. Es para mostrárselo a su dueña
+ * («Entraste como…»): nada se decide con él. La identidad sigue siendo el identificador de
+ * las claims verificadas.
+ */
+function emailClaim(accessToken: string): string | null {
+  try {
+    const body: unknown = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString("utf8"));
+    const email = typeof body === "object" && body !== null ? (body as { email?: unknown }).email : undefined;
+    return typeof email === "string" && email !== "" && email.length <= 254 ? email : null;
+  } catch {
+    return null;
+  }
+}
+
 // Un token de acceso normal mide menos de la mitad. Uno más largo que esto no cabría en la
 // cookie, y pasado cierto tamaño ni siquiera se le puede mandar a Auth en una cabecera.
 const MAX_USABLE_TOKEN_LENGTH = 3_000;
 
 export type SessionRead =
   | { kind: "none" }
-  | { kind: "session"; claims: VerifiedClaims }
+  /** `email`: el correo que dice el token, para mostrarlo. Nulo si no lo trae. */
+  | { kind: "session"; claims: VerifiedClaims; email: string | null }
   /** La cookie es de una sesión de verdad, pero su token ya venció y aquí no se renueva. */
   | { kind: "expired" }
   | { kind: "unknown" };
@@ -287,7 +312,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
 
   async function redeem(tokenHash: string, flow: RedeemedLink["flow"]): Promise<RedeemResult> {
     // Lo que no tiene forma de huella no se le manda a Auth.
-    if (!TOKEN_HASH.test(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
+    if (!isLinkToken(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
 
     // El enlace sirve una sola vez. Sin las claves públicas a la mano no se podría
     // verificar la sesión que devuelve: se pregunta antes de gastarlo.
@@ -531,7 +556,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     const cookie = readSessionCookie(reader, secure());
     if (cookie.kind !== "tokens") return { kind: "none" };
     const inspection = await inspect(cookie.tokens.accessToken);
-    if (inspection.state === "valid") return { kind: "session", claims: inspection.claims };
+    if (inspection.state === "valid") {
+      return { kind: "session", claims: inspection.claims, email: emailClaim(cookie.tokens.accessToken) };
+    }
     if (inspection.state === "expired") return { kind: "expired" };
     return inspection.state === "unavailable" ? { kind: "unknown" } : { kind: "none" };
   }

@@ -71,6 +71,15 @@ describe("quién pasa", () => {
     expect(await testServices().checkSession(memoryJar())).toEqual({ kind: "anonymous" });
   });
 
+  it("el correo de la sesión es el de la cuenta que entró, y sin sesión no hay correo", async () => {
+    const { account, jar } = await entered({ complete: true });
+    expect(await testServices().sessionEmail(jar)).toBe(account.email);
+    expect(await testServices().sessionEmail(memoryJar())).toBeNull();
+    // Un token que no verifica no dice de quién es: su correo no se muestra.
+    const forged = memoryJar(new Map([["plataforma-sesion", "v1.a.b.c.cg"]]));
+    expect(await testServices().sessionEmail(forged)).toBeNull();
+  });
+
   it("una cuenta completa que entró por el servicio pasa", async () => {
     const { account, jar } = await entered({ complete: true });
     const checked = await testServices().checkSession(jar);
@@ -194,7 +203,7 @@ describe("solo las sesiones que abrió la aplicación", () => {
           ...real,
           readSession: async (reader) => {
             const read = await real.readSession(reader);
-            return read.kind === "session" ? { kind: "session", claims: { ...read.claims, sessionId } } : read;
+            return read.kind === "session" ? { ...read, claims: { ...read.claims, sessionId } } : read;
           },
         },
       });

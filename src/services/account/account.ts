@@ -69,6 +69,9 @@ export type {
 } from "./onboarding";
 export type { RequestOrigin } from "./origin";
 export type { CookieJar, CookieOptions, CookieReader };
+export type { VerifiedClaims } from "@/adapters/supabase/claims";
+// La forma de un enlace de correo: una página la revisa antes de pintar su formulario.
+export { isLinkToken } from "@/adapters/supabase/auth";
 
 interface OpenedAttempt {
   decision: SignInDecision;
@@ -279,6 +282,15 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
   }
 
   /**
+   * El correo de la sesión de esta petición, para mostrárselo a su dueña. Nulo si no hay
+   * sesión que verifique. No autoriza nada: quien lo pinta ya pasó por `checkSession`.
+   */
+  async function sessionEmail(reader: CookieReader): Promise<string | null> {
+    const read = await auth.readSession(reader);
+    return read.kind === "session" ? read.email : null;
+  }
+
+  /**
    * «Salir»: borra la cookie y cierra en Auth solo esta sesión. Lo anotado no hace falta
    * borrarlo: sin sesión en Auth deja de reconocerse.
    */
@@ -286,7 +298,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     return auth.signOut(jar);
   }
 
-  return { checkSession, signIn, signOut, ...createOnboarding(deps, { checkSession, admit }) };
+  return { checkSession, sessionEmail, signIn, signOut, ...createOnboarding(deps, { checkSession, admit }) };
 }
 
 const services = createAccountServices();
@@ -297,6 +309,7 @@ const services = createAccountServices();
 // y le pasa lo que su plataforma dé para eso.
 export const {
   checkSession,
+  sessionEmail,
   signIn,
   signOut,
   accountFormFacts,
