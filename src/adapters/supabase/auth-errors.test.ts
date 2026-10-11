@@ -18,6 +18,7 @@ import {
   sessionRevoked,
   signInFailure,
   signUpFailure,
+  unlistedRejection,
   type AuthFailure,
 } from "./auth-errors";
 
@@ -215,4 +216,38 @@ describe("cerrar y preguntar por una sesión", () => {
       expect(sessionRevoked(failure)).toBe(false);
     },
   );
+});
+
+describe("el aviso de un rechazo que ninguna lista conoce", () => {
+  it("dice la operación, el estado y el código", () => {
+    expect(unlistedRejection("sign_in", rejected("un_codigo_nuevo", 422))).toBe(
+      "Auth rechazó sign_in con un código que no está en su lista: estado 422, código un_codigo_nuevo.",
+    );
+  });
+
+  it("sin respuesta de Auth no hay aviso: no hubo rechazo", () => {
+    expect(unlistedRejection("sign_in", unreachable)).toBeNull();
+  });
+
+  it.each([
+    ["sin código", null],
+    ["vacío", ""],
+    ["con espacios, como un mensaje", "Invalid login credentials"],
+    ["con un correo", "ana@ejemplo.mx"],
+    ["con mayúsculas", "Bad_Jwt"],
+    ["con salto de línea", "bad_jwt\notra línea"],
+    ["más largo que un código", "a".repeat(65)],
+  ])("un código %s no se escribe: sale `sin_codigo`", (_caso, code) => {
+    expect(unlistedRejection("redeem", rejected(code, 400))).toBe(
+      "Auth rechazó redeem con un código que no está en su lista: estado 400, código sin_codigo.",
+    );
+  });
+
+  it("un código de 64 caracteres sí cabe", () => {
+    expect(unlistedRejection("sign_up", rejected("a".repeat(64), 400))).toContain(`código ${"a".repeat(64)}.`);
+  });
+
+  it.each([Number.NaN, 400.5, Number.POSITIVE_INFINITY, -1, 1000])("un estado que no es de HTTP sale como 0: %s", (status) => {
+    expect(unlistedRejection("set_password", rejected("un_codigo_nuevo", status))).toContain("estado 0,");
+  });
 });
