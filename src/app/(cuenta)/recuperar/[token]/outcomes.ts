@@ -48,7 +48,8 @@ export function checkNewPassword(password: string): PasswordProblem | null {
 }
 
 export type ChangePasswordOutcome =
-  | { kind: "redirect"; to: string; notice: Notice | null }
+  /** `closeSession`: la acción cierra la sesión de este navegador antes de irse. */
+  | { kind: "redirect"; to: string; notice: Notice | null; closeSession: boolean }
   | { kind: "invalid"; problem: PasswordProblem }
   | { kind: "unavailable" }
   | { kind: "link_dead" }
@@ -57,8 +58,11 @@ export type ChangePasswordOutcome =
 export function completeRecoveryOutcome(result: RecoveryCompletion): ChangePasswordOutcome {
   switch (result.kind) {
     case "done":
-      // No abre sesión: se cerraron todas, y la persona entra con su contraseña nueva.
-      return { kind: "redirect", to: ROUTES.signIn, notice: "password_changed" };
+      // No abre sesión: se cerraron todas las de esa cuenta, y la persona entra con su
+      // contraseña nueva. La de este navegador también se cierra, sea de la cuenta que sea:
+      // con otra cuenta abierta, la pantalla de entrar mandaría a su inicio, el aviso no se
+      // vería y la persona quedaría dentro de una cuenta que no es la que acaba de recuperar.
+      return { kind: "redirect", to: ROUTES.signIn, notice: "password_changed", closeSession: true };
     case "invalid":
       return { kind: "invalid", problem: result.reason };
     case "link_dead":

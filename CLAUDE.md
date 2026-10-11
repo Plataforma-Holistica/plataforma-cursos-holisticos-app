@@ -194,9 +194,12 @@ falla. Doce precisiones que la tabla no dice:
   - La guarda en las páginas le pregunta a `checkSession` y obedece. Qué hace cada tipo de
     pantalla con cada respuesta es una tabla pura, `guard-steps.ts`. `unavailable` nunca
     se trata como «sin sesión».
-  - Toda ruta y todo archivo de acciones de servidor entra a su lista en esa misma prueba,
-    con el servicio por el que pasa. Las rutas solo atienden lecturas. La marca
-    `"use server"` va al inicio del archivo, nunca dentro de una función.
+  - Toda ruta y toda acción de servidor entra a su lista en esa misma prueba. Las acciones
+    van una por una, con lo que el cuerpo de cada una tiene que llamar, y un archivo de
+    acciones no exporta ninguna que no esté ahí. Eso atrapa el olvido; lo que cada acción
+    hace con cada respuesta lo prueban `tests/actions/` y su tabla. Las rutas solo
+    atienden lecturas. La marca `"use server"` va al inicio del archivo, nunca dentro de
+    una función.
   - No hay armazones ni plantillas además del de la raíz: pintarían antes que la guarda de
     su página.
   - La decisión de cada pantalla vive en una tabla pura, `outcomes.ts`, junto a ella y con
@@ -239,7 +242,18 @@ falla. Doce precisiones que la tabla no dice:
     enlace, cuánto se espera) se lee cuando el servicio ya contestó, nunca antes
     (`link-facts.ts`). Por eso una prueba de extremo a extremo que afirme «no llegó
     ningún correo» espera antes un correo de control, y todo caso espera sus correos
-    antes de terminar: la limpieza no debe ganarle a un alta que viene en camino.
+    antes de terminar: la limpieza no debe ganarle a un alta que viene en camino. Ese
+    archivo es el único de `src/app/` que arma servicios de cuenta, y una prueba lo
+    exige: armados sin `defer` correrían en línea. Si `after()` no puede encolar el
+    trabajo, corre en el acto y se reporta (`mail_not_deferred`).
+  - Lo que una página pública de la cuenta lee de la base pasa por `formFacts`
+    (`link-facts.ts`), que lo recuerda cinco segundos, también cuando no se supo: esas
+    páginas usan la misma reserva de conexiones con la que la gente entra. Una acción a la
+    que el servicio le dice que un texto cambió llama a `forgetFormFacts` antes de volver
+    a pintar.
+  - Una espera que el navegador solo cuenta (el botón «Reenviar») le llega como tiempo que
+    falta, no como hora (`useDelayIsOver`): su reloj no la acorta. Una hora que además se
+    le dice a la persona (el freno de entrar) sí viaja como hora.
   - La página de un enlace del correo no llama a Auth ni gasta el enlace: pinta el
     formulario, y el servicio lo canjea al enviar, con todo ya revisado. Lo que no tiene
     forma de enlace (`isLinkToken`) no se le pregunta a nadie, ni en la página ni en la
@@ -247,10 +261,13 @@ falla. Doce precisiones que la tabla no dice:
   - El correo de un registro a medias viaja a «Revisa tu correo» en una cookie corta
     (`pending-registration.ts`), sin firma: nada se decide con ella, y lo que no sea
     exactamente lo que este código escribió cuenta como ausente.
-  - Lo que se pinta al salir de un campo pasa por `afterInteraction`
-    (`src/app/(cuenta)/_lib/hooks.ts`): un mensaje que aparece al bajar el botón del ratón
-    recorre lo de abajo y el clic se pierde. Los dos campos que se repiten (el correo al
-    que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`.
+  - Lo que se pinta al salir de un campo pasa por `useSeenOnBlur`
+    (`src/app/(cuenta)/_lib/hooks.ts`). Se pinta cuando termina el clic o la tecla que
+    sacó el foco (`afterInteraction`): un mensaje que aparece al bajar el botón del ratón
+    recorre lo de abajo y el clic se pierde. Y vale hasta la siguiente revisión del
+    formulario: manda lo último que pasó. Los campos que se repiten (el nombre, el correo
+    al que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`; un campo
+    nuevo con validación al salir se hace igual, no con su propio estado.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman

@@ -3,10 +3,11 @@ import { connection } from "next/server";
 
 import { longDate } from "@/app/_lib/dates";
 import { messages } from "@/messages";
-import { accountFormFacts, isLinkToken } from "@/services/account/account";
+import { isLinkToken } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { slugOfDocType } from "@/services/legal/texts";
 
+import { formFacts } from "../../_lib/link-facts";
 import { NoCurrentTextScreen, RegistrationLinkDeadScreen, UnavailableScreen } from "../../_lib/states";
 
 import { completeView } from "./outcomes";
@@ -23,13 +24,15 @@ import { CompleteScreen } from "./screen";
 export const metadata: Metadata = { title: messages.account.complete.title };
 
 export default async function CompletePage({ params }: { params: Promise<{ token: string }> }) {
-  // Se pinta en cada petición: los textos vigentes salen de la base.
+  // Se pinta en cada petición, y no se guarda en caché: lleva la huella de un enlace.
   await connection();
   const { token } = await params;
   // Lo que no tiene forma de enlace no llega a la base ni a Auth.
   if (!isLinkToken(token)) return <RegistrationLinkDeadScreen />;
 
-  const facts = await accountFormFacts();
+  // Con unos segundos de memoria: la página es pública, y cualquier dirección con forma de
+  // enlace llega hasta aquí.
+  const facts = await formFacts();
   if (facts.kind === "no_current_text") return <NoCurrentTextScreen withSession={false} />;
   // Reintentar es volver a abrir el mismo enlace, que sigue sin gastarse.
   const self = `${ROUTES.verify}/${token}`;

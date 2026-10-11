@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   readNotice: vi.fn(),
   readRegistration: vi.fn(),
   rememberRegistration: vi.fn(),
+  forgetRegistration: vi.fn(),
   connection: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@/app/_lib/guard", () => ({ visitorOnly: mocks.visitorOnly }));
@@ -23,6 +24,7 @@ vi.mock("@/services/account/notice", () => ({ readNotice: mocks.readNotice }));
 vi.mock("@/services/account/pending-registration", () => ({
   readRegistration: mocks.readRegistration,
   rememberRegistration: mocks.rememberRegistration,
+  forgetRegistration: mocks.forgetRegistration,
 }));
 vi.mock("@/services/legal/texts", async () => ({ ...(await import("@/services/legal/slugs")) }));
 vi.mock("next/server", async (original) => ({ ...(await original<typeof import("next/server")>()), connection: mocks.connection }));
@@ -33,6 +35,7 @@ vi.mock("@/app/(cuenta)/recuperar/actions", () => ({ requestRecoveryAction: vi.f
 vi.mock("@/app/(cuenta)/recuperar/[token]/actions", () => ({ completeRecoveryAction: vi.fn() }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
+import { forgetFormFacts } from "@/app/(cuenta)/_lib/link-facts";
 import ChangePasswordPage from "@/app/(cuenta)/recuperar/[token]/page";
 import RecoverPage from "@/app/(cuenta)/recuperar/page";
 import SignUpPage from "@/app/(cuenta)/registro/page";
@@ -61,6 +64,8 @@ const facts = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Lo que las páginas recuerdan de la base no pasa de un caso al siguiente.
+  forgetFormFacts();
   mocks.cookieReader.mockResolvedValue(reader);
   mocks.readNotice.mockReturnValue(null);
   mocks.readRegistration.mockReturnValue(null);
@@ -105,6 +110,17 @@ describe("la página de «Revisa tu correo» (PA-14)", () => {
     expect(button).toHaveAccessibleDescription("Podrás reenviarlo en 1 minuto.");
   });
 
+  it("con un registro anotado tampoco lee la base en cada visita", async () => {
+    mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 5_000 });
+    mocks.accountFormFacts.mockResolvedValue(facts);
+    for (let visit = 0; visit < 3; visit += 1) {
+      const { unmount } = render(await CheckMailPage());
+      expect(screen.getByText("Dura 1 hora.")).toBeVisible();
+      unmount();
+    }
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+  });
+
   it("con un envío de hace más que la espera: «Reenviar» ya sirve", async () => {
     mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 61_000 });
     mocks.accountFormFacts.mockResolvedValue(facts);
@@ -141,6 +157,26 @@ describe("la página de «Completa tu cuenta» (PA-14)", () => {
     expect(screen.getByText(/Versión 2, vigente desde el 12 de noviembre de 2026\./)).toBeVisible();
     // Se pinta haya o no sesión.
     expect(mocks.visitorOnly).not.toHaveBeenCalled();
+  });
+
+  it("es pública y no lee la base en cada visita: lo leído se recuerda unos segundos, sea cual sea la huella", async () => {
+    mocks.accountFormFacts.mockResolvedValue(facts);
+    for (const token of [TOKEN, "otra-huella-distinta", TOKEN]) {
+      const { unmount } = render(await CompletePage(at(token)));
+      expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+      unmount();
+    }
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+  });
+
+  it("tampoco cuando la base no contesta: el fallo se recuerda igual", async () => {
+    mocks.accountFormFacts.mockResolvedValue({ kind: "unavailable" });
+    for (let visit = 0; visit < 3; visit += 1) {
+      const { unmount } = render(await CompletePage(at(TOKEN)));
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Algo falló de nuestro lado");
+      unmount();
+    }
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
   });
 
   it.each(["corto", "con espacio dentro", "con/diagonal", "x".repeat(257), "ñandú-ñandú"])(

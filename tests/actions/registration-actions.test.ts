@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     completeRegistration: logged("completeRegistration", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     completeRecovery: logged("completeRecovery", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     signOut: logged("signOut", () => Promise.resolve("closed")),
+    signIn: logged("signIn", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     rememberRegistration: logged("rememberRegistration", () => undefined),
     readRegistration: logged("readRegistration", (): unknown => null),
     forgetRegistration: logged("forgetRegistration", () => undefined),
@@ -43,10 +44,12 @@ vi.mock("@/app/_lib/mail-requests", () => ({
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar, requestOrigin: mocks.requestOrigin }));
 vi.mock("@/services/account/account", async () => ({
-  accountFormFacts: mocks.accountFormFacts,
+  // El de verdad siempre contesta con una promesa, también cuando aquí se le encola un valor.
+  accountFormFacts: () => Promise.resolve(mocks.accountFormFacts()),
   completeRegistration: mocks.completeRegistration,
   completeRecovery: mocks.completeRecovery,
   signOut: mocks.signOut,
+  signIn: mocks.signIn,
   isLinkToken: (await import("@/adapters/supabase/tokens")).isLinkToken,
 }));
 vi.mock("@/services/account/pending-registration", () => ({
@@ -58,7 +61,15 @@ vi.mock("@/services/account/notice", () => ({ clearNotice: mocks.clearNotice, le
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { linkLifetimeSeconds, pendingRequestFacts } from "@/app/(cuenta)/_lib/link-facts";
+import {
+  forgetFormFacts,
+  FORM_FACTS_MEMORY_MS,
+  formFacts,
+  linkLifetimeSeconds,
+  pendingRequestFacts,
+  rememberRequest,
+} from "@/app/(cuenta)/_lib/link-facts";
+import { signInAction } from "@/app/(cuenta)/entrar/actions";
 import { completeRecoveryAction } from "@/app/(cuenta)/recuperar/[token]/actions";
 import { requestRecoveryAction } from "@/app/(cuenta)/recuperar/actions";
 import { requestRegistrationAction } from "@/app/(cuenta)/registro/actions";
@@ -104,6 +115,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   calls.order = [];
   calls.next.clear();
+  // Lo que las pantallas recuerdan de la base no pasa de un caso al siguiente.
+  forgetFormFacts();
   mocks.cookieJar.mockResolvedValue(jar);
   mocks.requestOrigin.mockResolvedValue(origin);
 });
@@ -150,8 +163,25 @@ describe("pedir el registro (PA-10)", () => {
       once("accountFormFacts", answer);
       await expect(requestRegistrationAction(IDLE, emailForm("ana@prueba.test"))).rejects.toThrow("redirige a /verificar");
       expect(mocks.rememberRegistration).not.toHaveBeenCalled();
+      expect(mocks.forgetRegistration).not.toHaveBeenCalled();
     },
   );
+
+  it("aceptado sin saber cuánto dura, con otro correo anotado de antes: lo olvida, para no decir que el enlace se mandó ahí", async () => {
+    once("accountFormFacts", { kind: "unavailable" });
+    once("readRegistration", { email: "otra@prueba.test", sentAt: 1 });
+    await expect(requestRegistrationAction(IDLE, emailForm("ana@prueba.test"))).rejects.toThrow("redirige a /verificar");
+    expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(mocks.rememberRegistration).not.toHaveBeenCalled();
+    expect(calls.order).toEqual(["requestRegistration", "accountFormFacts", "readRegistration", "forgetRegistration", "redirect"]);
+  });
+
+  it("aceptado sin saber cuánto dura, con ese mismo correo ya anotado: lo deja", async () => {
+    once("accountFormFacts", { kind: "unavailable" });
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1 });
+    await expect(requestRegistrationAction(IDLE, emailForm(" Ana@Prueba.test "))).rejects.toThrow("redirige a /verificar");
+    expect(mocks.forgetRegistration).not.toHaveBeenCalled();
+  });
 
   it.each(["wait", "unavailable"] as const)("%s: lo dice, conserva el correo y no anota ni redirige", async (reason) => {
     once("requestRegistration", { kind: reason });
@@ -205,18 +235,16 @@ describe("«Reenviar» (PA-14)", () => {
   it("la espera que contesta termina cuando pasa `ESPERA_REENVIO` desde ahora", async () => {
     once("readRegistration", { email: "ana@prueba.test", sentAt: 1 });
     once("accountFormFacts", facts);
-    const before = Date.now();
-    const state = await resendAction(IDLE);
-    if (state.kind !== "sent" || state.wait === null) throw new Error("se esperaba una espera");
-    const until = Date.parse(state.wait.until);
-    expect(until).toBeGreaterThanOrEqual(before + 90_000);
-    expect(until).toBeLessThanOrEqual(Date.now() + 90_000);
+    // Un tiempo, no una hora: el navegador lo deja pasar sin comparar relojes.
+    expect(await resendAction(IDLE)).toEqual({ kind: "sent", wait: { remainingMs: 90_000, seconds: 90 }, attempt: 1 });
   });
 
   it("aceptado sin saber la espera: lo dice igual, y no vuelve a escribir la cookie", async () => {
     once("readRegistration", { email: "ana@prueba.test", sentAt: 1 });
     expect(await resendAction({ kind: "sent", wait: null, attempt: 2 })).toEqual({ kind: "sent", wait: null, attempt: 3 });
     expect(mocks.rememberRegistration).not.toHaveBeenCalled();
+    // El correo anotado es el mismo al que se reenvió: se queda.
+    expect(mocks.forgetRegistration).not.toHaveBeenCalled();
   });
 
   it.each(["wait", "unavailable"] as const)("%s: lo dice, y la cookie se queda como estaba", async (reason) => {
@@ -300,6 +328,27 @@ describe("completar la cuenta desde el enlace (PA-14)", () => {
     expect(await completeRegistrationAction(IDLE, completeForm())).toEqual({ kind: "repainted", name: "Ana Prueba", attempt: 1 });
     expect(mocks.refresh).toHaveBeenCalledOnce();
     expect(mocks.forgetRegistration).not.toHaveBeenCalled();
+  });
+
+  it.each(["texts_changed", "texts_unavailable"] as const)(
+    "%s: lo que se recordaba de los textos se olvida, y la página vuelve a leerlos",
+    async (kind) => {
+      once("accountFormFacts", facts);
+      await formFacts();
+      once("completeRegistration", { kind });
+      await completeRegistrationAction(IDLE, completeForm());
+      await formFacts();
+      expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["unavailable", "link_dead", "recover_instead"] as const)("%s: lo recordado se queda", async (kind) => {
+    once("accountFormFacts", facts);
+    await formFacts();
+    once("completeRegistration", { kind });
+    await completeRegistrationAction(IDLE, completeForm());
+    await formFacts();
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
   });
 
   it("datos por corregir: dice cuáles, con las casillas que faltaron, y no pide la página de nuevo", async () => {
@@ -412,11 +461,19 @@ describe("cambiar la contraseña desde el enlace (PA-13)", () => {
     expect(mocks.completeRecovery).toHaveBeenCalledExactlyOnceWith({ tokenHash: TOKEN, password: "  con espacios  " }, origin);
   });
 
-  it("hecho: a entrar, con el aviso de que la contraseña cambió, y sin abrir sesión", async () => {
+  it("hecho: cierra la sesión de este navegador, sea de quien sea, y va a entrar con el aviso", async () => {
     once("completeRecovery", { kind: "done" });
     await expect(completeRecoveryAction(IDLE, changeForm())).rejects.toThrow("redirige a /entrar");
+    // Con otra cuenta abierta, la pantalla de entrar mandaría a su inicio y el aviso no se vería.
+    expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith(jar);
     expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "password_changed");
-    expect(calls.order).toEqual(["completeRecovery", "leaveNotice", "redirect"]);
+    expect(calls.order).toEqual(["completeRecovery", "signOut", "leaveNotice", "redirect"]);
+  });
+
+  it.each(["link_dead", "request_new_link", "unavailable"] as const)("%s: no cierra ninguna sesión", async (kind) => {
+    once("completeRecovery", { kind });
+    await completeRecoveryAction(IDLE, changeForm());
+    expect(mocks.signOut).not.toHaveBeenCalled();
   });
 
   it.each(["too_short", "too_long", "malformed"] as const)("contraseña que no cumple la regla (%s): el error en su campo", async (reason) => {
@@ -454,14 +511,105 @@ describe("lo que se lee de los parámetros después de pedir un correo", () => {
   it.each([{ kind: "unavailable" }, { kind: "no_current_text" }])("si no se supo (%j), nulo", async (answer) => {
     once("accountFormFacts", answer);
     expect(await linkLifetimeSeconds()).toBeNull();
+    forgetFormFacts();
     once("accountFormFacts", answer);
     expect(await pendingRequestFacts(Date.now())).toBeNull();
   });
 
   it("de un registro anotado: lo que dura el enlace y la espera que le queda a «Reenviar»", async () => {
     once("accountFormFacts", facts);
-    expect(await pendingRequestFacts(Date.now() - 10_000)).toMatchObject({ lifetimeSeconds: 3_600, wait: { seconds: 90 } });
-    once("accountFormFacts", facts);
+    const pending = await pendingRequestFacts(Date.now() - 10_000);
+    expect(pending).toMatchObject({ lifetimeSeconds: 3_600, wait: { seconds: 90 } });
+    expect(pending?.wait?.remainingMs).toBeGreaterThan(79_000);
+    expect(pending?.wait?.remainingMs).toBeLessThanOrEqual(80_000);
     expect(await pendingRequestFacts(Date.now() - 91_000)).toEqual({ lifetimeSeconds: 3_600, wait: null });
+  });
+});
+
+describe("lo que las pantallas públicas recuerdan de la base", () => {
+  const T0 = Date.parse("2026-10-11T18:00:00.000Z");
+
+  it("se lee a lo más una vez cada tanto: pasado ese tiempo, se vuelve a leer", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T0);
+      once("accountFormFacts", facts);
+      expect(await formFacts()).toBe(facts);
+      vi.setSystemTime(T0 + FORM_FACTS_MEMORY_MS - 1);
+      expect(await formFacts()).toBe(facts);
+      expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+
+      vi.setSystemTime(T0 + FORM_FACTS_MEMORY_MS);
+      const newer = { ...facts, minimumAge: 21 };
+      once("accountFormFacts", newer);
+      expect(await formFacts()).toBe(newer);
+      expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("también recuerda que no se supo: una base caída no recibe una lectura por visita", async () => {
+    once("accountFormFacts", { kind: "unavailable" });
+    expect(await formFacts()).toEqual({ kind: "unavailable" });
+    expect(await formFacts()).toEqual({ kind: "unavailable" });
+    expect(await linkLifetimeSeconds()).toBeNull();
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+  });
+
+  it("muchos que piden a la vez comparten una sola lectura", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    once("accountFormFacts", new Promise((resolve) => (release = resolve)));
+    const asked = [formFacts(), formFacts(), linkLifetimeSeconds()];
+    release(facts);
+    expect(await Promise.all(asked)).toEqual([facts, facts, 3_600]);
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+  });
+
+  it("olvidar lo recordado hace que la siguiente lectura llegue a la base", async () => {
+    once("accountFormFacts", facts);
+    await formFacts();
+    forgetFormFacts();
+    await formFacts();
+    expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("con el reloj echado atrás no se queda con lo recordado para siempre", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(T0);
+      once("accountFormFacts", facts);
+      await formFacts();
+      vi.setSystemTime(T0 - 60_000);
+      await formFacts();
+      expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("anotar un registro usa lo recordado, sin otra lectura", async () => {
+    once("accountFormFacts", facts);
+    await formFacts();
+    expect(await rememberRequest(jar, "ana@prueba.test")).toEqual({ remainingMs: 90_000, seconds: 90 });
+    expect(mocks.rememberRegistration).toHaveBeenCalledOnce();
+    expect(mocks.accountFormFacts).toHaveBeenCalledOnce();
+  });
+});
+
+describe("entrar (PA-11), con un registro a medias anotado en el navegador", () => {
+  const signInForm = () => form([["email", "ana@prueba.test"], ["password", "una clave larga"]]);
+
+  it("quien entra ya no tiene un correo por revisar: se olvida antes de irse", async () => {
+    once("signIn", { kind: "entered", pending: null });
+    await expect(signInAction(IDLE, signInForm())).rejects.toThrow("redirige a /inicio");
+    expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(calls.order).toEqual(["clearNotice", "signIn", "forgetRegistration", "redirect"]);
+  });
+
+  it.each(["invalid_credentials", "capped", "unavailable"] as const)("%s: no entró, y lo anotado se queda", async (kind) => {
+    once("signIn", { kind });
+    expect(await signInAction(IDLE, signInForm())).toMatchObject({ kind: "failed", reason: kind });
+    expect(mocks.forgetRegistration).not.toHaveBeenCalled();
   });
 });

@@ -5,11 +5,14 @@
 // antes de `ESPERA_REENVIO` se le pida lo que se le pida. Aquí solo se decide si el botón se
 // pinta deshabilitado, para no ofrecer un envío que no va a salir.
 
-/** Hasta cuándo queda deshabilitado «Reenviar», y de cuánto es la espera. */
+/** Cuánto le falta a «Reenviar» para volver a servir, y de cuánto es la espera entera. */
 export interface ResendWait {
-  /** En formato ISO. */
-  until: string;
-  /** `ESPERA_REENVIO`, en segundos. */
+  /**
+   * Lo que falta, en milisegundos, contado por el servidor al contestar. No es una hora: el
+   * navegador solo deja pasar ese tiempo, y así su reloj no acorta ni alarga la espera.
+   */
+  remainingMs: number;
+  /** `ESPERA_REENVIO`, en segundos: lo que se le dice a la persona. */
   seconds: number;
 }
 
@@ -28,8 +31,8 @@ const MAX_WAIT_SECONDS = 86_400;
 export function resendWait(sentAt: number, waitSeconds: number, now: number): ResendWait | null {
   if (!Number.isFinite(sentAt) || !Number.isFinite(now)) return null;
   if (!Number.isInteger(waitSeconds) || waitSeconds <= 0 || waitSeconds > MAX_WAIT_SECONDS) return null;
-  const until = Math.min(sentAt, now) + waitSeconds * 1_000;
-  return until > now ? { until: new Date(until).toISOString(), seconds: waitSeconds } : null;
+  const remainingMs = Math.min(sentAt, now) + waitSeconds * 1_000 - now;
+  return remainingMs > 0 ? { remainingMs, seconds: waitSeconds } : null;
 }
 
 /** Lo que la pantalla pinta después de pedir un reenvío. */

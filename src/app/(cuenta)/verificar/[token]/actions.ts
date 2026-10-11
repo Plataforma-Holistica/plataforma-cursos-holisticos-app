@@ -8,6 +8,7 @@ import { forgetRegistration } from "@/services/account/pending-registration";
 
 import { leaveFor } from "../../_lib/exit";
 import { nextAttempt } from "../../_lib/form-state";
+import { forgetFormFacts } from "../../_lib/link-facts";
 
 import { completeRegistrationOutcome, readCompleteForm, type CompleteState } from "./outcomes";
 
@@ -43,8 +44,9 @@ export async function completeRegistrationAction(previous: CompleteState, form: 
 
   switch (outcome.kind) {
     case "repaint":
-      // La página se vuelve a pedir, y llega con los textos vigentes. Sin esto, con
-      // JavaScript la pantalla se quedaría con los de antes.
+      // La página se vuelve a pedir, y llega con los textos vigentes: lo que se recordaba de
+      // ellos ya no vale. Sin esto, con JavaScript la pantalla se quedaría con los de antes.
+      forgetFormFacts();
       refresh();
       return { kind: "repainted", name: input.name, attempt };
     case "invalid":
@@ -52,6 +54,8 @@ export async function completeRegistrationAction(previous: CompleteState, form: 
     case "unavailable":
       return { kind: "unavailable", name: input.name, attempt };
     case "texts_unavailable":
+      forgetFormFacts();
+      return { kind: outcome.kind };
     case "link_dead":
     case "recover_instead":
       return { kind: outcome.kind };

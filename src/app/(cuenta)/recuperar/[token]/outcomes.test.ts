@@ -54,7 +54,7 @@ describe("la regla de la contraseña, antes de enviar", () => {
 
 describe("lo que contesta el servicio", () => {
   it.each<[RecoveryCompletion, ChangePasswordOutcome]>([
-    [{ kind: "done" }, { kind: "redirect", to: "/entrar", notice: "password_changed" }],
+    [{ kind: "done" }, { kind: "redirect", to: "/entrar", notice: "password_changed", closeSession: true }],
     [{ kind: "invalid", reason: "too_short" }, { kind: "invalid", problem: "too_short" }],
     [{ kind: "invalid", reason: "too_long" }, { kind: "invalid", problem: "too_long" }],
     [{ kind: "invalid", reason: "malformed" }, { kind: "invalid", problem: "malformed" }],

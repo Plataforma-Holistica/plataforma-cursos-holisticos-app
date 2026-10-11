@@ -159,15 +159,24 @@ test("recuperar un correo sin cuenta contesta lo mismo, y no manda nada", async 
 test("antes de la espera, pedir otro enlace contesta lo mismo y no manda nada; pasada, sí", async ({ page, browser }) => {
   const ana = await person();
   const first = await recoveryLink(page, ana.email);
+  const wait = (await parameter("ESPERA_REENVIO")) + 1;
+  const lastMailRows = () =>
+    ownerQuery<{ bucket: string }>("select bucket from private.rate_limit_counters where bucket like 'mail:recover:last:%'");
 
+  // Auth lleva su propia espera entre dos correos a la misma cuenta. Se le quita de en medio
+  // antes de la segunda petición: así, si no sale otro correo, es porque la aplicación no lo
+  // pidió, y no porque Auth lo haya rechazado.
+  await ageAuthRecoveryMail(ana.email, wait);
+  expect(await lastMailRows()).toHaveLength(1);
   await requestRecovery(page, ana.email);
   await expect(page.getByText(SENT)).toBeVisible();
   await controlMail(browser);
   expect(await mailsTo(ana.email)).toHaveLength(1);
+  // El envío anotado sigue anotado: no se deshizo, que es lo que pasa cuando Auth rechaza.
+  // Son dos filas: la de Ana y la del correo de control.
+  expect(await lastMailRows()).toHaveLength(2);
 
-  const wait = (await parameter("ESPERA_REENVIO")) + 1;
-  expect(await ageLastMails(wait)).toBeGreaterThan(0);
-  // Auth lleva además su propia espera entre dos correos a la misma cuenta.
+  expect(await ageLastMails(wait)).toBe(2);
   await ageAuthRecoveryMail(ana.email, wait);
   await requestRecovery(page, ana.email);
   await expect(page.getByText(SENT)).toBeVisible();
@@ -268,7 +277,9 @@ test("el mensaje al salir del campo no le quita el clic a quien tarda en soltar 
   // Una persona tarda en soltar el botón del ratón; un guion, no. Al bajarlo, el foco sale
   // del campo. Si el mensaje del campo se pintara en ese momento, el botón se recorrería y
   // el clic caería en otro lado: no pasaría nada.
-  await page.getByRole("button", { name: "Guardar contraseña" }).click({ delay: 500 });
+  // El clic va pegado al borde de arriba del botón: con que el botón baje unos pixeles, el
+  // puntero ya no está sobre él. Así el caso no depende de cuánto mida el mensaje.
+  await page.getByRole("button", { name: "Guardar contraseña" }).click({ delay: 500, position: { x: 12, y: 3 } });
   const summary = page.getByRole("alert").filter({ hasText: "por corregir" });
   await expect(summary).toBeFocused();
   await expect(page.getByLabel("Contraseña nueva")).toHaveAttribute("aria-invalid", "true");
@@ -351,9 +362,16 @@ test("las acciones de la recuperación aguantan un formulario que su pantalla nu
   const emails: Record<string, Field>[] = [{}, { email: file }, { email: "x".repeat(5_000) }];
   for (const fields of emails) {
     const response = await postAction(request, "/recuperar", { ...ask, ...fields });
-    expect(response.status(), JSON.stringify(Object.keys(fields))).toBeLessThan(400);
+    // La acción sí corrió, y contestó con la pantalla y su error: no es que no se haya llamado.
+    expect(response.status(), JSON.stringify(Object.keys(fields))).toBe(200);
+    expect(await response.text()).toContain("Escribe tu correo.");
   }
   expect(await ownerQuery("select 1 from private.rate_limit_counters")).toHaveLength(0);
+  // Y con un correo de verdad, la misma puerta sí llega al servicio.
+  const real = await postAction(request, "/recuperar", { ...ask, email: testEmail() });
+  expect(real.status()).toBe(200);
+  expect(await real.text()).toContain("Si ese correo tiene cuenta");
+  expect((await ownerQuery("select 1 from private.rate_limit_counters")).length).toBeGreaterThan(0);
 
   const token = "f".repeat(56);
   const change = actionFields(await (await page.request.get(`/recuperar/${token}`)).text());
@@ -365,10 +383,36 @@ test("las acciones de la recuperación aguantan un formulario que su pantalla nu
   ];
   for (const fields of odd) {
     const response = await postAction(request, `/recuperar/${token}`, { ...change, ...fields });
-    expect(response.status(), JSON.stringify(Object.keys(fields))).toBeLessThan(400);
+    expect(response.status(), JSON.stringify(Object.keys(fields))).toBe(200);
     expect(response.headers().location).toBeUndefined();
-    expect(await response.text()).not.toContain(NEW_PASSWORD);
+    const body = await response.text();
+    expect(body).not.toContain(NEW_PASSWORD);
+    // La acción sí corrió: contestó con un error de la contraseña o con «ese enlace ya no sirve».
+    expect(body).toMatch(/Ese enlace ya no sirve|Esa contraseña es demasiado larga|Tu contraseña necesita/);
   }
+});
+
+test("recuperar una cuenta con otra abierta en ese navegador la cierra, y lleva a entrar con el aviso", async ({ page, context }) => {
+  const ana = await person();
+  const otra = await person();
+  // El enlace de Ana se pide desde un navegador sin sesión.
+  const token = await recoveryLink(page, ana.email);
+
+  // Y se abre en uno donde está abierta la cuenta de otra persona.
+  await signIn(page, otra);
+  await expect(page).toHaveURL("/inicio");
+  await page.goto(`/recuperar/${token}`);
+  await savePassword(page, NEW_PASSWORD);
+
+  // No se queda dentro de la otra cuenta sin que nada se lo diga: llega a entrar, con el aviso.
+  await expect(page).toHaveURL("/entrar");
+  await expect(page.getByText(CHANGED)).toBeVisible();
+  expect((await context.cookies()).find((cookie) => cookie.name === SESSION_COOKIE)).toBeUndefined();
+  expect(await sessionCount(otra.id)).toBe(0);
+
+  await signIn(page, { email: ana.email, password: NEW_PASSWORD });
+  await expect(page).toHaveURL("/inicio");
+  await expect(page.getByText(`Entraste como ${ana.email}.`)).toBeVisible();
 });
 
 test("pedir una recuperación desde otro sitio se rechaza y no deja rastro", async ({ page, request, browser }) => {

@@ -26,7 +26,7 @@ export async function completeRecoveryAction(previous: ChangePasswordState, form
   const result = await completeRecovery({ tokenHash: input.token, password: input.password }, await requestOrigin());
   const outcome = completeRecoveryOutcome(result);
 
-  // A entrar, con el aviso de que la contraseña cambió.
+  // A entrar, sin sesión en este navegador y con el aviso de que la contraseña cambió.
   if (outcome.kind === "redirect") return leaveFor(await cookieJar(), outcome);
 
   switch (outcome.kind) {

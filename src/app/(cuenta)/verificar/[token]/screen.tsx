@@ -1,21 +1,18 @@
 "use client";
 
-import { type FocusEvent, type FormEvent, useActionState, useState } from "react";
+import { type FormEvent, useActionState, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
-import { parseDisplayName } from "@/services/account/field-rules";
 import { Button } from "@/ui/button";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
 import { SPACE } from "@/ui/cx";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
-import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
-import { NewPasswordField, passwordError } from "../../_lib/fields";
-import { afterInteraction } from "../../_lib/hooks";
+import { NAME_ERRORS, NameField, NewPasswordField, passwordError } from "../../_lib/fields";
 import { NoCurrentTextScreen, RegistrationLinkDeadScreen, RegistrationUnfinishedScreen } from "../../_lib/states";
 import { shownValue, type ConsentItem } from "../../consentimientos/outcomes";
 
@@ -43,12 +40,6 @@ const PASSWORD_ID = "completar-contrasena";
 const ADULT_ID = "completar-edad";
 const boxId = (name: string) => `completar-${name.replace(/[^a-z_]/g, "-")}`;
 const IDLE: CompleteState = { kind: "idle" };
-
-const NAME_ERRORS = {
-  empty: account.fields.nameRequired,
-  too_long: account.fields.nameTooLong,
-  invalid: account.fields.nameInvalid,
-} as const;
 
 function TextReference({ item, label }: { item: ConsentItem; label: string }) {
   if (item.href === null) return label;
@@ -140,30 +131,19 @@ function Box({ box, invalid }: { box: ConsentBox; invalid: boolean }) {
   );
 }
 
-function Fields({ view, name, fields }: { view: CompleteView; name: string; fields: CompleteFields }) {
-  // Lo que se vio al salir del campo manda sobre lo que dijo el último envío.
-  const [nameOnBlur, setNameOnBlur] = useState<CompleteFields["name"] | null | undefined>(undefined);
-  const nameError = nameOnBlur === undefined ? fields.name : (nameOnBlur ?? undefined);
+interface FieldsProps {
+  view: CompleteView;
+  name: string;
+  fields: CompleteFields;
+  /** Cuenta las revisiones del formulario, las del navegador y las del servidor. */
+  round: number;
+}
 
-  function validateOnBlur(event: FocusEvent<HTMLDivElement>) {
-    const field = event.target;
-    if (!(field instanceof HTMLInputElement) || field.name !== "name") return;
-    if (field.value.trim() === "") return;
-    const parsed = parseDisplayName(field.value);
-    afterInteraction(() => setNameOnBlur(parsed.ok ? null : parsed.reason));
-  }
-
+function Fields({ view, name, fields, round }: FieldsProps) {
   return (
-    <div className="flex flex-col gap-6" onBlur={validateOnBlur}>
-      <TextField
-        id={NAME_ID}
-        label={account.fields.name}
-        name="name"
-        autoComplete="name"
-        defaultValue={name}
-        error={nameError ? NAME_ERRORS[nameError] : undefined}
-      />
-      <NewPasswordField id={PASSWORD_ID} label={account.fields.password} problem={fields.password} />
+    <div className="flex flex-col gap-6">
+      <NameField id={NAME_ID} defaultValue={name} problem={fields.name} round={round} />
+      <NewPasswordField id={PASSWORD_ID} label={account.fields.password} problem={fields.password} round={round} />
       <ConsentCheckbox id={ADULT_ID} name="adult" label={t(consents.adult, { age: view.minimumAge })} invalid={fields.adult ?? false} />
       {view.boxes.map((box) => (
         <Box key={box.name} box={box} invalid={fields.boxes?.includes(box.name) ?? false} />
@@ -216,20 +196,24 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
+  const round = sent + (local?.attempt ?? 0);
   const fields = local?.fields ?? (state.kind === "invalid" ? state.fields : {});
   const name = state.kind === "idle" ? "" : state.name;
+  // Lo que dijo el último envío deja de decirse mientras hay otro en camino: si no, al
+  // corregir un error del navegador volvería a anunciarse el aviso de antes.
+  const answered = local === null && !pending;
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.title}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + (local?.attempt ?? 0)} />
-        {local === null && state.kind === "repainted" && (
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={round} />
+        {answered && state.kind === "repainted" && (
           <InlineAlert key={sent} tone="warning" live>
             {consents.textsChanged}
           </InlineAlert>
         )}
-        {local === null && state.kind === "unavailable" && (
+        {answered && state.kind === "unavailable" && (
           <InlineAlert key={sent} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
@@ -239,7 +223,7 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
           <input key={item.documentId} type="hidden" name="shown" value={shownValue(item)} />
         ))}
         {/* Cuando cambian los textos, o llega la respuesta de un envío, los campos se arman de nuevo. */}
-        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} />
+        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={round} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>

@@ -14,7 +14,7 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
-import { useWaitIsOver } from "../_lib/hooks";
+import { useDelayIsOver } from "../_lib/hooks";
 
 import { notMyEmailAction, resendAction } from "./actions";
 import type { ResendState, ResendWait } from "./outcomes";
@@ -37,11 +37,11 @@ export interface CheckMailScreenProps {
 
 function Resend({ wait: initialWait }: { wait: ResendWait | null }) {
   const [state, action, pending] = useActionState(resendAction, IDLE);
-  // Después de un reenvío, la espera es la que contestó la acción.
-  const wait = state.kind === "sent" ? state.wait : initialWait;
-  const waitIsOver = useWaitIsOver(wait?.until ?? null);
-  const locked = wait !== null && !waitIsOver;
   const attempt = state.kind === "idle" ? 0 : state.attempt;
+  // Después de un reenvío, la espera es la que contestó la acción, y se cuenta de nuevo.
+  const wait = state.kind === "sent" ? state.wait : initialWait;
+  const waitIsOver = useDelayIsOver(wait?.remainingMs ?? null, state.kind === "sent" ? attempt : 0);
+  const locked = wait !== null && !waitIsOver;
 
   return (
     <div className="flex w-full flex-col gap-4">

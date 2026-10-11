@@ -54,14 +54,20 @@ export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
       <h1 className="text-h1">{text.changeTitle}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
         <FormErrorSummary errors={errors} attempt={sent + (local?.attempt ?? 0)} />
-        {local === null && state.kind === "unavailable" && (
+        {local === null && !pending && state.kind === "unavailable" && (
           <InlineAlert key={sent} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
         )}
         <input type="hidden" name="token" value={token} />
         {/* Con la respuesta de un envío el campo se arma de nuevo, vacío. */}
-        <NewPasswordField key={sent} id={PASSWORD_ID} label={account.fields.newPassword} problem={problem} />
+        <NewPasswordField
+          key={sent}
+          id={PASSWORD_ID}
+          label={account.fields.newPassword}
+          problem={problem}
+          round={local?.attempt ?? 0}
+        />
         <Button type="submit" loading={pending} loadingLabel={text.saving}>
           {text.save}
         </Button>

@@ -129,7 +129,10 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   // El correo viaja en una cookie corta que el código de la página no puede leer, no en la dirección.
   const pending = await cookieOf(context, PENDING_COOKIE);
   expect(pending).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
-  expect((pending?.expires ?? 0) - Date.now() / 1_000).toBeLessThanOrEqual(lifetime * 60 + 5);
+  // Dura lo que el enlace: ni es de sesión, ni vive más.
+  const life = (pending?.expires ?? 0) - Date.now() / 1_000;
+  expect(life).toBeGreaterThan(lifetime * 60 - 60);
+  expect(life).toBeLessThanOrEqual(lifetime * 60 + 5);
   expect(page.url()).not.toContain(encodeURIComponent(email));
   // Recién enviado, «Reenviar» espera, y lo dice.
   await expect(page.getByRole("button", { name: "Reenviar" })).toBeDisabled();
@@ -190,6 +193,10 @@ test("registrar un correo que ya tiene cuenta da la misma pantalla, y no le lleg
   await page.getByLabel("Contraseña", { exact: true }).fill(ana.password);
   await page.getByRole("button", { name: "Entrar" }).click();
   await expect(page).toHaveURL("/inicio");
+  // Quien entra ya no tiene un correo por revisar en este navegador.
+  expect(await cookieOf(page.context(), PENDING_COOKIE)).toBeUndefined();
+  await page.goto("/verificar");
+  await expect(page.getByText(SENT_GENERIC)).toBeVisible();
 });
 
 test("un correo sin forma se marca en el campo y no se pide nada", async ({ page }) => {
@@ -519,8 +526,10 @@ test("las acciones del registro aguantan un formulario que su pantalla nunca man
   const emails: Record<string, Field>[] = [{}, { email: file }, { email: "x".repeat(5_000) }, { email: "ana@prueba.test\u0000" }];
   for (const fields of emails) {
     const response = await postAction(request, "/registro", { ...signUp, ...fields });
-    expect(response.status(), JSON.stringify(Object.keys(fields))).toBeLessThan(400);
+    // La acción sí corrió, y contestó con la pantalla y su error: no es que no se haya llamado.
+    expect(response.status(), JSON.stringify(Object.keys(fields))).toBe(200);
     expect(response.headers().location).toBeUndefined();
+    expect(await response.text()).toMatch(/Escribe tu correo\.|Ese correo no tiene forma de correo/);
   }
   expect(await ownerQuery("select 1 from private.rate_limit_counters")).toHaveLength(0);
 
@@ -534,9 +543,13 @@ test("las acciones del registro aguantan un formulario que su pantalla nunca man
   ];
   for (const fields of odd) {
     const response = await postAction(request, `/verificar/${token}`, { ...complete, ...fields });
-    expect(response.status(), JSON.stringify(Object.keys(fields))).toBeLessThan(400);
+    expect(response.status(), JSON.stringify(Object.keys(fields))).toBe(200);
     expect(response.headers().location).toBeUndefined();
-    expect(await response.text()).not.toContain(PASSWORD);
+    const body = await response.text();
+    expect(body).not.toContain(PASSWORD);
+    // La acción sí corrió: contestó con sus errores, con el aviso del texto que cambió o con
+    // «ese enlace ya no sirve».
+    expect(body).toMatch(/por corregir|Actualizamos un texto|Ese enlace ya no sirve/);
   }
 });
 

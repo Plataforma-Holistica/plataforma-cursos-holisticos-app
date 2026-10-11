@@ -24,6 +24,7 @@ const FAILURES = {
   mail_limits_unavailable: "Los topes de correo no pudieron leer sus parámetros o sus cuentas: nadie puede pedir registro ni recuperación.",
   registration_mail_failed: "El servidor de identidad no mandó un correo de registro que se le pidió.",
   recovery_mail_failed: "El servidor de identidad no mandó un correo de recuperación que se le pidió.",
+  mail_not_deferred: "Pedir un correo no se pudo mandar detrás de la respuesta y corrió dentro de ella: lo que tarda puede delatar si ese correo tiene cuenta.",
   registration_incomplete: "Un registro se quedó a medias después de gastar su enlace: esa persona tiene que recuperar su contraseña.",
   recovery_incomplete: "Una recuperación se quedó a medias después de gastar su enlace: esa persona tiene que pedir otro.",
   recovery_notice_not_sent: "Una contraseña se recuperó por el camino de administración: el aviso de cambio de contraseña no salió.",

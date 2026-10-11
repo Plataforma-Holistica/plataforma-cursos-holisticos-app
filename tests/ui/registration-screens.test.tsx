@@ -131,7 +131,7 @@ describe("la pantalla de registro (PA-10)", () => {
   });
 });
 
-const inAMinute = () => ({ until: new Date(Date.now() + 60_000).toISOString(), seconds: 60 });
+const inAMinute = () => ({ remainingMs: 60_000, seconds: 60 });
 
 describe("«Revisa tu correo» (PA-14)", () => {
   it("con el correo anotado: dice a dónde se mandó y cuánto dura, y deja reenviar o corregir el correo", async () => {
@@ -183,7 +183,7 @@ describe("«Revisa tu correo» (PA-14)", () => {
 
   it("cumplida la espera, el botón vuelve a servir sin recargar", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const wait = { until: new Date(Date.now() + 600_000).toISOString(), seconds: 600 };
+    const wait = { remainingMs: 600_000, seconds: 600 };
     render(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={wait} />);
     expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
     await act(() => vi.advanceTimersByTimeAsync(540_000));
@@ -203,6 +203,36 @@ describe("«Revisa tu correo» (PA-14)", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAccessibleDescription("Podrás reenviarlo en 1 minuto.");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("cumplida la primera espera, un reenvío vuelve a bloquear el botón por la espera nueva, aunque dure lo mismo", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    const wait = { remainingMs: 600_000, seconds: 600 };
+    answers<ResendState>(actions.resendAction, { kind: "sent", wait, attempt: 1 });
+    render(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={wait} />);
+    await act(() => vi.advanceTimersByTimeAsync(660_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Reenviar" }));
+    expect(await screen.findByText("Listo, lo mandamos otra vez.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(540_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
+  });
+
+  it("la espera se cuenta desde que llega al navegador, no contra su reloj: una hora adelantada no la acorta", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // El reloj de este navegador va un día adelantado respecto al del servidor.
+    vi.setSystemTime(Date.now() + 86_400_000);
+    render(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={{ remainingMs: 600_000, seconds: 600 }} />);
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(540_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
   });
 
   it("tras reenviar sin saber la espera, el botón sigue sirviendo", async () => {
@@ -472,7 +502,8 @@ describe("«Completa tu cuenta» (PA-14)", () => {
     render(complete);
     const password = screen.getByLabelText("Contraseña");
     await user.click(password);
-    await user.tab();
+    // Hacia fuera del campo: el tabulador iría a «Mostrar», que es parte de él.
+    await user.click(screen.getByLabelText("Nombre"));
     expect(password).not.toBeInvalid();
     await user.type(password, "corta");
     await user.click(screen.getByLabelText("Nombre"));
@@ -482,6 +513,87 @@ describe("«Completa tu cuenta» (PA-14)", () => {
     await user.click(screen.getByLabelText("Nombre"));
     expect(password).not.toBeInvalid();
     expect(actions.completeRegistrationAction).not.toHaveBeenCalled();
+  });
+
+  it("un nombre que estaba bien al salir del campo, borrado y enviado con Intro, se marca en su campo y no solo en el resumen", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    const name = screen.getByLabelText("Nombre");
+    await user.type(name, "Ana");
+    await user.tab();
+    expect(name).not.toBeInvalid();
+    await user.clear(name);
+    await user.keyboard("{Enter}");
+    const summary = await screen.findByRole("alert");
+    expect(within(summary).getByRole("link", { name: "Escribe tu nombre." })).toBeVisible();
+    // Manda lo último que pasó: la revisión al enviar, no lo que se vio antes al salir del campo.
+    expect(name).toBeInvalid();
+    expect(name).toHaveAccessibleDescription("Escribe tu nombre.");
+    expect(actions.completeRegistrationAction).not.toHaveBeenCalled();
+  });
+
+  it("el error de un nombre demasiado largo no se queda pegado cuando el campo queda vacío", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(name);
+    await user.paste("x".repeat(121));
+    await user.tab();
+    expect(name).toBeInvalid();
+    await user.clear(name);
+    await user.tab();
+    expect(name).not.toBeInvalid();
+    expect(screen.queryByText("Ese nombre es demasiado largo. Escribe uno más corto.")).not.toBeInTheDocument();
+  });
+
+  it("lo corregido después de una revisión deja de marcarse al salir del campo", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    const name = screen.getByLabelText("Nombre");
+    expect(name).toBeInvalid();
+    await user.type(name, "Ana");
+    await user.tab();
+    expect(name).not.toBeInvalid();
+  });
+
+  it("pulsar «Mostrar» no marca como corta una contraseña a medio escribir; salir del campo, sí", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    const password = screen.getByLabelText("Contraseña");
+    await user.type(password, "corta");
+    await user.click(screen.getByRole("button", { name: "Mostrar la contraseña" }));
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).not.toBeInvalid();
+    // Del botón «Mostrar» hacia fuera sí es salir del campo.
+    await user.click(screen.getByLabelText("Nombre"));
+    expect(password).toBeInvalid();
+    expect(password).toHaveAccessibleDescription(/Tu contraseña necesita 8 caracteres o más\./);
+  });
+
+  it("mientras un envío está en camino, el aviso del envío anterior no vuelve a decirse", async () => {
+    answers<CompleteState>(actions.completeRegistrationAction, { kind: "unavailable", name: "Ana Prueba", attempt: 1 });
+    const user = userEvent.setup();
+    render(complete);
+    await fillComplete(user);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+
+    // El segundo envío no termina: mientras tanto, la pantalla no repite «no pudimos».
+    let finish: (state: CompleteState) => void = () => undefined;
+    actions.completeRegistrationAction.mockReturnValue(new Promise<CompleteState>((resolve) => (finish = resolve)));
+    await fillComplete(user);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
+    expect(screen.queryByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).not.toBeInTheDocument();
+
+    // Y si contesta lo mismo, se vuelve a decir. (Además, React no suelta las demás acciones
+    // mientras una siga en camino: hay que terminarla.)
+    await act(async () => {
+      finish({ kind: "unavailable", name: "Ana Prueba", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
   });
 
   it("al salir del campo, un nombre demasiado largo se marca", async () => {
