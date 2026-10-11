@@ -224,7 +224,14 @@ falla. Doce precisiones que la tabla no dice:
     formulario no lleva `Referrer-Policy: no-referrer`: rompe el envío sin JavaScript
     (TRD §9.2, fila «Cookies», y §9.8).
   - Un texto legal se lee con `currentLegalText` (`src/services/legal/`): solo los tipos
-    públicos y solo el vigente. Su cuerpo se pinta como texto, nunca como HTML.
+    públicos y solo el vigente. Su cuerpo se pinta como texto, nunca como HTML. El
+    servicio recuerda lo leído treinta segundos, porque su página es pública y usa la
+    reserva de conexiones con la que la gente entra. Por eso el enlace desde una casilla
+    de consentimiento lleva la versión que la casilla anuncia (`?v=3`): si lo recordado
+    es anterior, se vuelve a leer, y nadie lee una versión y acepta otra.
+  - Una acción de la cuenta sale hacia otra pantalla por `leaveFor`
+    (`src/app/(cuenta)/_lib/exit.ts`), con lo que dijo su tabla: cierra la sesión que ya
+    no vale, deja el aviso y redirige, en ese orden.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
