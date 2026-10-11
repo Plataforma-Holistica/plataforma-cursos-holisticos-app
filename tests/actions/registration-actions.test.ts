@@ -613,3 +613,65 @@ describe("entrar (PA-11), con un registro a medias anotado en el navegador", () 
     expect(mocks.forgetRegistration).not.toHaveBeenCalled();
   });
 });
+
+describe("lo recordado de la base, cuando se olvida con una lectura en camino", () => {
+  it("una lectura que empezó antes de olvidar se entrega, pero no se recuerda", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    once("accountFormFacts", new Promise((resolve) => (release = resolve)));
+    const early = formFacts();
+    // El servicio acaba de decir que un texto cambió: esa lectura pudo empezar antes.
+    forgetFormFacts();
+    release(facts);
+    expect(await early).toBe(facts);
+
+    const newer = { ...facts, minimumAge: 21 };
+    once("accountFormFacts", newer);
+    expect(await formFacts()).toBe(newer);
+    expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("quien pregunta después de olvidar no se cuelga de la lectura que ya venía: empieza otra, y es la que se recuerda", async () => {
+    let releaseOld: (value: unknown) => void = () => undefined;
+    once("accountFormFacts", new Promise((resolve) => (releaseOld = resolve)));
+    const early = formFacts();
+    forgetFormFacts();
+
+    const newer = { ...facts, minimumAge: 21 };
+    once("accountFormFacts", newer);
+    expect(await formFacts()).toBe(newer);
+    // La vieja termina después: no pisa lo que se recordó, ni suelta la lectura de nadie.
+    releaseOld(facts);
+    expect(await early).toBe(facts);
+    expect(await formFacts()).toBe(newer);
+    expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+  });
+
+  it("si la lectura revienta, no se recuerda nada roto: la siguiente vuelve a leer", async () => {
+    once("accountFormFacts", Promise.reject(new Error("la base se cayó a media lectura")));
+    await expect(formFacts()).rejects.toThrow("la base se cayó");
+    once("accountFormFacts", facts);
+    expect(await formFacts()).toBe(facts);
+    expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("dos lecturas en camino a la vez", () => {
+  it("la vieja, al terminar, no suelta la nueva: quien llega después se cuelga de la nueva y no empieza una tercera", async () => {
+    let releaseOld: (value: unknown) => void = () => undefined;
+    let releaseNew: (value: unknown) => void = () => undefined;
+    once("accountFormFacts", new Promise((resolve) => (releaseOld = resolve)));
+    const early = formFacts();
+    forgetFormFacts();
+    once("accountFormFacts", new Promise((resolve) => (releaseNew = resolve)));
+    const second = formFacts();
+
+    releaseOld(facts);
+    expect(await early).toBe(facts);
+    // La nueva sigue en camino: la tercera petición la comparte.
+    const third = formFacts();
+    const newer = { ...facts, minimumAge: 21 };
+    releaseNew(newer);
+    expect(await Promise.all([second, third])).toEqual([newer, newer]);
+    expect(mocks.accountFormFacts).toHaveBeenCalledTimes(2);
+  });
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { MailCheck } from "lucide";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { durationText } from "@/app/_lib/dates";
 import { account } from "@/messages/es/account";
@@ -38,9 +38,13 @@ export interface CheckMailScreenProps {
 function Resend({ wait: initialWait }: { wait: ResendWait | null }) {
   const [state, action, pending] = useActionState(resendAction, IDLE);
   const attempt = state.kind === "idle" ? 0 : state.attempt;
-  // Después de un reenvío, la espera es la que contestó la acción, y se cuenta de nuevo.
-  const wait = state.kind === "sent" ? state.wait : initialWait;
-  const waitIsOver = useDelayIsOver(wait?.remainingMs ?? null, state.kind === "sent" ? attempt : 0);
+  // La espera en curso es la del último reenvío que salió; mientras no haya ninguno, la que
+  // traía la página. Un reenvío que no sale no la cambia ni la vuelve a empezar: si ya había
+  // pasado, el botón sigue sirviendo.
+  const [lastSent, setLastSent] = useState<{ wait: ResendWait | null; round: number } | null>(null);
+  if (state.kind === "sent" && lastSent?.round !== state.attempt) setLastSent({ wait: state.wait, round: state.attempt });
+  const wait = lastSent === null ? initialWait : lastSent.wait;
+  const waitIsOver = useDelayIsOver(wait?.remainingMs ?? null, lastSent?.round ?? 0);
   const locked = wait !== null && !waitIsOver;
 
   return (

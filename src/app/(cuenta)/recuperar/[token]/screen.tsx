@@ -29,7 +29,9 @@ export interface ChangePasswordScreenProps {
 export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
   const [state, action, pending] = useActionState(completeRecoveryAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, setLocal] = useState<{ problem: PasswordProblem; attempt: number } | null>(null);
+  // `attempt` cuenta todas las revisiones del navegador, también las que salen bien: no
+  // retrocede, para que lo visto antes al salir del campo no vuelva a mandar.
+  const [local, setLocal] = useState<{ problem: PasswordProblem | null; attempt: number }>({ problem: null, attempt: 0 });
 
   if (state.kind === "link_dead") return <RecoveryLinkDeadScreen />;
   if (state.kind === "request_new_link") return <RecoveryUnfinishedScreen />;
@@ -37,24 +39,24 @@ export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const problem = checkNewPassword(readChangePasswordForm(new FormData(event.currentTarget)).password);
     if (problem === null) {
-      setLocal(null);
+      setLocal((current) => ({ problem: null, attempt: current.attempt + 1 }));
       return;
     }
     // No se envía: una contraseña que no cumple la regla no le gasta el enlace a nadie.
     event.preventDefault();
-    setLocal((current) => ({ problem, attempt: (current?.attempt ?? 0) + 1 }));
+    setLocal((current) => ({ problem, attempt: current.attempt + 1 }));
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const problem = local?.problem ?? (state.kind === "invalid" ? state.problem : undefined);
+  const problem = local.problem ?? (state.kind === "invalid" ? state.problem : undefined);
   const errors: FormError[] = problem ? [{ fieldId: PASSWORD_ID, message: passwordError(problem) }] : [];
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.changeTitle}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={errors} attempt={sent + (local?.attempt ?? 0)} />
-        {local === null && !pending && state.kind === "unavailable" && (
+        <FormErrorSummary errors={errors} attempt={sent + local.attempt} />
+        {local.problem === null && !pending && state.kind === "unavailable" && (
           <InlineAlert key={sent} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
@@ -66,7 +68,7 @@ export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
           id={PASSWORD_ID}
           label={account.fields.newPassword}
           problem={problem}
-          round={local?.attempt ?? 0}
+          round={local.attempt}
         />
         <Button type="submit" loading={pending} loadingLabel={text.saving}>
           {text.save}

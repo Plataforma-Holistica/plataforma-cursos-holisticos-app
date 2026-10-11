@@ -269,6 +269,14 @@ describe("pedir un correo corre detrás de la respuesta", () => {
     expect(code).toMatch(/try \{\s*after\(work\);\s*\} catch \{/);
   });
 
+  it("el servicio no entrega esas dos ya armadas: quien las quiere tiene que decir cómo corren detrás", () => {
+    const service = everything.find((source) => source.file === "src/services/account/account.ts")?.code ?? "";
+    const armed = /export const \{([^}]*)\} = services;/.exec(service)?.[1] ?? "";
+    // La lista de lo que sí sale armado existe y se leyó bien.
+    expect(armed).toMatch(/\bsignIn\b/);
+    expect(armed).not.toMatch(/\brequest(Registration|Recovery)\b/);
+  });
+
   it("quien pide un correo usa los de ese archivo, y de ningún otro lado", () => {
     const users = outside.filter((source) => /\b(requestRegistration|requestRecovery)\(/.test(source.code));
     expect(users.map((source) => source.file).sort()).toEqual([

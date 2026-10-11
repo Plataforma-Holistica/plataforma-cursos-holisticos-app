@@ -178,7 +178,9 @@ export interface CompleteScreenProps {
 export function CompleteScreen({ token, view }: CompleteScreenProps) {
   const [state, action, pending] = useActionState(completeRegistrationAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, setLocal] = useState<{ fields: CompleteFields; attempt: number } | null>(null);
+  // `attempt` cuenta todas las revisiones del navegador, también las que salen bien: no
+  // retrocede, para que lo visto antes al salir de un campo no vuelva a mandar.
+  const [local, setLocal] = useState<{ fields: CompleteFields | null; attempt: number }>({ fields: null, attempt: 0 });
 
   if (state.kind === "link_dead") return <RegistrationLinkDeadScreen />;
   if (state.kind === "recover_instead") return <RegistrationUnfinishedScreen />;
@@ -187,21 +189,21 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const fields = checkCompleteForm(view, readCompleteForm(new FormData(event.currentTarget)));
     if (fields === null) {
-      setLocal(null);
+      setLocal((current) => ({ fields: null, attempt: current.attempt + 1 }));
       return;
     }
     // No se envía, así que el formulario no se vacía: lo escrito y lo marcado se quedan.
     event.preventDefault();
-    setLocal((current) => ({ fields, attempt: (current?.attempt ?? 0) + 1 }));
+    setLocal((current) => ({ fields, attempt: current.attempt + 1 }));
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const round = sent + (local?.attempt ?? 0);
-  const fields = local?.fields ?? (state.kind === "invalid" ? state.fields : {});
+  const round = sent + local.attempt;
+  const fields = local.fields ?? (state.kind === "invalid" ? state.fields : {});
   const name = state.kind === "idle" ? "" : state.name;
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino: si no, al
   // corregir un error del navegador volvería a anunciarse el aviso de antes.
-  const answered = local === null && !pending;
+  const answered = local.fields === null && !pending;
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">

@@ -38,23 +38,48 @@ export function useWaitIsOver(until: string | null): boolean {
  * @param round Cuál espera es: al llegar otra, aunque dure lo mismo, se cuenta de nuevo.
  */
 export function useDelayIsOver(delayMs: number | null, round: number): boolean {
-  const [passed, setPassed] = useState<number | null>(null);
+  // Qué espera es la que ya pasó: la misma ronda con otra duración es otra espera.
+  const id = `${round}:${delayMs}`;
+  const [passed, setPassed] = useState<string | null>(null);
   useEffect(() => {
     if (delayMs === null) return;
-    const timer = setTimeout(() => setPassed(round), Math.min(Math.max(0, delayMs), MAX_TIMER_MS));
+    const timer = setTimeout(() => setPassed(id), Math.min(Math.max(0, delayMs), MAX_TIMER_MS));
     return () => clearTimeout(timer);
-  }, [delayMs, round]);
-  return delayMs !== null && passed === round;
+  }, [delayMs, id]);
+  return delayMs !== null && passed === id;
 }
 
-// Si hay un botón del ratón (o un dedo, o un lápiz) abajo. Se anota desde que este código
-// carga, porque el foco sale del campo después de que el botón baja.
+// Si hay un botón del ratón (o un dedo, o un lápiz) abajo, y sobre qué bajó. Se anota desde
+// que este código carga, porque el foco sale del campo después de que el botón baja.
 let pointerIsDown = false;
+let pressedOn: EventTarget | null = null;
+const released = () => {
+  pointerIsDown = false;
+  pressedOn = null;
+};
 if (typeof document !== "undefined") {
-  document.addEventListener("pointerdown", () => void (pointerIsDown = true), true);
-  for (const type of ["pointerup", "pointercancel"]) {
-    document.addEventListener(type, () => void (pointerIsDown = false), true);
-  }
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      pointerIsDown = true;
+      pressedOn = event.target;
+    },
+    true,
+  );
+  // Soltar no siempre avisa: el menú del botón derecho o cambiar de ventana se lo tragan.
+  // Sin estas otras salidas el botón quedaría «abajo», y lo visto al salir de un campo
+  // esperaría un clic que no viene.
+  for (const type of ["pointerup", "pointercancel", "contextmenu", "dragend"]) document.addEventListener(type, released, true);
+  window.addEventListener("blur", released);
+}
+
+/**
+ * Si el botón del ratón está abajo sobre algo de dentro de `container`. Es para saber que
+ * el foco salió de un campo hacia un botón que es parte de él: hay navegadores que no le
+ * dan el foco a un botón al pulsarlo, y ahí el foco no dice a dónde fue.
+ */
+export function pointerIsPressedInside(container: Node): boolean {
+  return pressedOn instanceof Node && container.contains(pressedOn);
 }
 
 /** Con lo que termina un clic: se suelta el botón, o el gesto se cancela. */

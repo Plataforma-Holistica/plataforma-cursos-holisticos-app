@@ -805,3 +805,121 @@ describe("las pantallas de un enlace que ya no sirve", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 });
+
+describe("lo que encontró la revisión de los arreglos", () => {
+  it("un reenvío que no sale, después de uno que sí salió, no vuelve a bloquear el botón", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    const wait = { remainingMs: 600_000, seconds: 600 };
+    const { rerender } = render(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={null} />);
+
+    answers<ResendState>(actions.resendAction, { kind: "sent", wait, attempt: 1 });
+    await user.click(screen.getByRole("button", { name: "Reenviar" }));
+    expect(await screen.findByText("Listo, lo mandamos otra vez.")).toBeVisible();
+    // La respuesta escribió la cookie, y Next volvió a pintar la página con su propia espera.
+    rerender(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={{ remainingMs: 599_000, seconds: 600 }} />);
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(660_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
+
+    answers<ResendState>(actions.resendAction, { kind: "failed", reason: "unavailable", attempt: 2 });
+    await user.click(screen.getByRole("button", { name: "Reenviar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos hacerlo. Intenta de nuevo en un momento.");
+    // La espera del reenvío anterior ya había pasado: se puede intentar otra vez ya.
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
+    expect(screen.queryByText(/Podrás reenviarlo/)).not.toBeInTheDocument();
+
+    // Y otro reenvío que sí sale vuelve a contar su espera.
+    answers<ResendState>(actions.resendAction, { kind: "sent", wait, attempt: 3 });
+    await user.click(screen.getByRole("button", { name: "Reenviar" }));
+    expect(await screen.findByText("Listo, lo mandamos otra vez.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(660_000));
+    expect(screen.getByRole("button", { name: "Reenviar" })).toBeEnabled();
+  });
+
+  it("lo visto al salir del campo no vuelve a mandar cuando el envío corregido ya va en camino", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    // Con el tabulador hasta «Guardar»: al salir del campo se anota que es corta.
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Guardar contraseña" })).toHaveFocus();
+    expect(password).toBeInvalid();
+    // La revisión del navegador, con Intro sobre el botón: dice lo mismo, y el foco no vuelve
+    // a pasar por el campo.
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Tu contraseña necesita 8 caracteres o más.");
+
+    // Corregida y enviada con Intro, sin salir del campo: la respuesta todavía no llega.
+    let finish: (state: ChangePasswordState) => void = () => undefined;
+    actions.completeRecoveryAction.mockReturnValue(new Promise<ChangePasswordState>((resolve) => (finish = resolve)));
+    await user.click(password);
+    await user.keyboard(" pero ya no{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    // Mientras tanto el campo no vuelve a decir que es corta: eso se vio dos revisiones atrás.
+    expect(password).not.toBeInvalid();
+    expect(screen.queryByText("Tu contraseña necesita 8 caracteres o más.")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "unavailable", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos hacerlo. Intenta de nuevo en un momento.");
+  });
+
+  it("donde un botón no recibe el foco al pulsarlo, «Mostrar» tampoco marca la contraseña a medio escribir", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    const show = screen.getByRole("button", { name: "Mostrar la contraseña" });
+    // Como en Safari: el botón baja sobre «Mostrar», el campo pierde el foco y nadie lo recibe.
+    fireEvent.pointerDown(show);
+    fireEvent.blur(password);
+    fireEvent.pointerUp(show);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 250)));
+    expect(password).not.toBeInvalid();
+
+    // Con el botón abajo sobre otra cosa, sí es salir del campo.
+    const heading = screen.getByRole("heading", { level: 1 });
+    fireEvent.pointerDown(heading);
+    fireEvent.blur(password);
+    fireEvent.pointerUp(heading);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(password).toBeInvalid();
+  });
+});
+
+describe("más de lo que encontró la revisión de los arreglos", () => {
+  it("con el tabulador, pasar del campo a «Mostrar» tampoco marca la contraseña a medio escribir", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Mostrar la contraseña" })).toHaveFocus();
+    expect(password).not.toBeInvalid();
+    // De «Mostrar» hacia fuera sí es salir del campo.
+    await user.tab();
+    expect(password).toBeInvalid();
+  });
+
+  it("lo que el navegador encuentra por corregir tapa el aviso del envío anterior", async () => {
+    answers<CompleteState>(actions.completeRegistrationAction, { kind: "unavailable", name: "Ana Prueba", attempt: 1 });
+    const user = userEvent.setup();
+    render(complete);
+    await fillComplete(user);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+
+    // La respuesta vació la contraseña y las casillas: enviar así lo detiene el navegador.
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByText(/Hay 4 datos por corregir/)).toBeVisible();
+    // Ya no se dice «no pudimos»: lo que hay que hacer ahora es corregir.
+    expect(screen.queryByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).not.toBeInTheDocument();
+    expect(actions.completeRegistrationAction).toHaveBeenCalledOnce();
+  });
+});

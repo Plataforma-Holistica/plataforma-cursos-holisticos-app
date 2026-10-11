@@ -24,6 +24,8 @@ export const FORM_FACTS_MEMORY_MS = 5_000;
 
 let remembered: { at: number; facts: AccountFormFacts } | null = null;
 let reading: Promise<AccountFormFacts> | null = null;
+/** Cuántas veces se ha olvidado: una lectura que empezó antes de un olvido ya no se recuerda. */
+let forgotten = 0;
 
 /**
  * Lo que necesita un formulario público de la cuenta, leído de la base a lo más una vez cada
@@ -39,20 +41,30 @@ export function formFacts(): Promise<AccountFormFacts> {
   if (remembered !== null && now >= remembered.at && now - remembered.at < FORM_FACTS_MEMORY_MS) {
     return Promise.resolve(remembered.facts);
   }
-  reading ??= accountFormFacts()
+  if (reading !== null) return reading;
+  const startedAfter = forgotten;
+  const mine: Promise<AccountFormFacts> = accountFormFacts()
     .then((facts) => {
-      remembered = { at: Date.now(), facts };
+      // Si entre tanto se olvidó, esta lectura pudo empezar antes del cambio: se entrega a
+      // quien la esperaba, pero no se recuerda.
+      if (forgotten === startedAfter) remembered = { at: Date.now(), facts };
       return facts;
     })
     .finally(() => {
-      reading = null;
+      if (reading === mine) reading = null;
     });
-  return reading;
+  reading = mine;
+  return mine;
 }
 
-/** Olvida lo recordado: el servicio acaba de decir que un texto ya no es el vigente. */
+/**
+ * Olvida lo recordado: el servicio acaba de decir que un texto ya no es el vigente. Quien
+ * pregunte después no se cuelga de una lectura que ya venía en camino: empieza otra.
+ */
 export function forgetFormFacts(): void {
   remembered = null;
+  reading = null;
+  forgotten += 1;
 }
 
 /** Lo que dura un enlace del correo (`VIGENCIA_ENLACE_CONTRASENA`), en segundos, o nulo si no se supo. */

@@ -1,7 +1,7 @@
 import { act, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { afterInteraction, QUIET_MS, useDelayIsOver, useSeenOnBlur } from "./hooks";
+import { afterInteraction, pointerIsPressedInside, QUIET_MS, useDelayIsOver, useSeenOnBlur } from "./hooks";
 
 // Cuándo se pinta lo que se vio al salir de un campo: cuando termina el clic o la tecla que
 // sacó el foco, no en medio. Que así no se pierde el clic lo prueba el extremo a extremo,
@@ -229,5 +229,55 @@ describe("lo que se le dice a un campo", () => {
     rerender({ checked: "corto", round: 1 });
     settle();
     expect(result.current[0]).toBe("corto");
+  });
+});
+
+describe("lo que encontró la revisión de los arreglos", () => {
+  it("la misma ronda con otra duración es otra espera, y se cuenta entera", () => {
+    const { result, rerender } = renderHook((props: { ms: number | null; round: number }) => useDelayIsOver(props.ms, props.round), {
+      initialProps: { ms: 60_000 as number | null, round: 0 },
+    });
+    act(() => void vi.advanceTimersByTime(60_000));
+    expect(result.current).toBe(true);
+    rerender({ ms: 59_000, round: 0 });
+    expect(result.current).toBe(false);
+    act(() => void vi.advanceTimersByTime(58_999));
+    expect(result.current).toBe(false);
+    act(() => void vi.advanceTimersByTime(1));
+    expect(result.current).toBe(true);
+  });
+
+  it("sabe sobre qué bajó el botón del ratón, mientras sigue abajo", () => {
+    const field = document.body.appendChild(document.createElement("div"));
+    const inside = field.appendChild(document.createElement("button"));
+    const outside = document.body.appendChild(document.createElement("button"));
+    expect(pointerIsPressedInside(field)).toBe(false);
+    fireEvent.pointerDown(inside);
+    expect(pointerIsPressedInside(field)).toBe(true);
+    fireEvent.pointerUp(inside);
+    expect(pointerIsPressedInside(field)).toBe(false);
+    fireEvent.pointerDown(outside);
+    expect(pointerIsPressedInside(field)).toBe(false);
+    fireEvent.pointerUp(outside);
+    field.remove();
+    outside.remove();
+  });
+
+  it.each([
+    ["el menú del botón derecho", () => fireEvent.contextMenu(document.body)],
+    ["soltar lo que se arrastraba", () => fireEvent.dragEnd(document.body)],
+    ["cambiar de ventana", () => fireEvent.blur(window)],
+  ])("%s también suelta el botón: lo visto al salir de un campo no espera un clic que no viene", (_name, release) => {
+    const button = document.body.appendChild(document.createElement("button"));
+    fireEvent.pointerDown(button);
+    expect(pointerIsPressedInside(document.body)).toBe(true);
+    release();
+    expect(pointerIsPressedInside(document.body)).toBe(false);
+    // Sin botón abajo, lo siguiente ya no espera a que se suelte: sale con el teclado o solo.
+    const work = vi.fn();
+    afterInteraction(work);
+    vi.advanceTimersByTime(QUIET_MS + 1);
+    expect(work).toHaveBeenCalledOnce();
+    button.remove();
   });
 });

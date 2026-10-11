@@ -141,7 +141,9 @@ export interface ConsentsScreenProps {
 export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
   const [state, action, pending] = useActionState(completeAccountAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, setLocal] = useState<{ fields: ConsentsFields; attempt: number } | null>(null);
+  // `attempt` cuenta todas las revisiones del navegador, también las que salen bien: no
+  // retrocede, para que lo visto antes al salir de un campo no vuelva a mandar.
+  const [local, setLocal] = useState<{ fields: ConsentsFields | null; attempt: number }>({ fields: null, attempt: 0 });
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
@@ -149,19 +151,19 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
     const input = readConsentsForm(new FormData(event.currentTarget));
     const fields = checkConsentsForm(view, input);
     if (fields === null) {
-      setLocal(null);
+      setLocal((current) => ({ fields: null, attempt: current.attempt + 1 }));
       return;
     }
     // No se envía, así que el formulario no se vacía: lo marcado se queda marcado.
     event.preventDefault();
-    setLocal((current) => ({ fields, attempt: (current?.attempt ?? 0) + 1 }));
+    setLocal((current) => ({ fields, attempt: current.attempt + 1 }));
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const round = sent + (local?.attempt ?? 0);
-  const fields = local?.fields ?? (state.kind === "invalid" ? state.fields : {});
+  const round = sent + local.attempt;
+  const fields = local.fields ?? (state.kind === "invalid" ? state.fields : {});
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino.
-  const answered = local === null && !pending;
+  const answered = local.fields === null && !pending;
   const name = state.kind === "idle" ? "" : state.name;
   const updated = view.variant === "updated_texts";
 
