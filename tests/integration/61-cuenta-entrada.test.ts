@@ -410,18 +410,37 @@ describe("la dirección que no se conoce", () => {
 
 describe("lo que ni siquiera se le pregunta a Auth", () => {
   // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie.
-  it("una contraseña más larga que el máximo no llega a Auth ni se cuenta", async () => {
+  // El máximo se cuenta en bytes: 25 signos de euro son 25 caracteres y 75 bytes.
+  it.each([
+    ["73 letras", "x".repeat(73)],
+    ["25 signos de euro, que son 75 bytes", "€".repeat(25)],
+  ])("una contraseña más larga que el máximo (%s) no llega a Auth ni se cuenta", async (_name, password) => {
     const account = await claimed({ complete: true });
     const spy = recordingFetch();
     const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
     const jar = memoryJar();
-    expect(await services.signIn(jar, { email: account.email, password: "x".repeat(73) }, freshOrigin())).toEqual({
+    expect(await services.signIn(jar, { email: account.email, password }, freshOrigin())).toEqual({
       kind: "invalid_credentials",
     });
     expect(spy.calls).toEqual([]);
     expect(jar.writes).toEqual([]);
     expect(await throttleRows()).toBe(0);
     expect(services.slept).toEqual([500]);
+  });
+
+  it.each([
+    ["72 letras", "x".repeat(72)],
+    ["24 signos de euro, que son 72 bytes", "€".repeat(24)],
+  ])("una del máximo exacto (%s) sí se le pregunta a Auth, y cuenta", async (_name, password) => {
+    const account = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+    expect(await services.signIn(memoryJar(), { email: account.email, password }, origin)).toEqual({
+      kind: "invalid_credentials",
+    });
+    expect(spy.calls.some((path) => path.includes("/token"))).toBe(true);
+    expect(await pairOf(keysOf(account.email, origin))).toMatchObject({ failed_count: 1 });
   });
 });
 
@@ -570,6 +589,31 @@ describe("cuando la guarda no puede decidir a mitad de una entrada", () => {
     expect(jar.writes).toEqual([]);
     expect(await sessionCount(account.id)).toBe(0);
     expect(await pairOf(keysOf(account.email, origin))).toMatchObject({ failed_count: 1, last_success_at: null });
+  });
+});
+
+describe("cuando la cookie no se puede escribir", () => {
+  // Pasa si alguien llama a entrar desde donde no se pueden escribir cookies. Sin cookie no
+  // hay entrada, y la sesión que Auth abrió no puede quedarse abierta sin dueño.
+  it("nadie entra, la sesión se cierra, y se reporta", async () => {
+    const account = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const services = testServices();
+    const sealed = {
+      get: () => undefined,
+      set: () => {
+        throw new Error("aquí no se escriben cookies");
+      },
+    };
+
+    expect(await services.signIn(sealed, account, origin)).toEqual({ kind: "unavailable" });
+
+    expect(services.reported).toEqual(["session_cookie_not_written"]);
+    expect(await sessionCount(account.id)).toBe(0);
+    // No se supo: los topes se descuentan y el par conserva el intento.
+    const keys = keysOf(account.email, origin);
+    expect(await pairOf(keys)).toMatchObject({ failed_count: 1, last_success_at: null });
+    expect(await hitsOf(signInBuckets(keys).ip)).toBe(0);
   });
 });
 

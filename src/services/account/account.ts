@@ -242,20 +242,26 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const staging = stagingJar();
     const entered = await auth.signIn(staging, parsed.email, input.password);
 
-    const admission = entered.ok ? await admit(entered, opened.startedText) : authRefusal(entered.reason);
-    if (admission.report) await deps.report(admission.report);
-
-    // Auth abrió una sesión que no se queda: se cierra. Nadie tiene sus tokens y la
-    // aplicación no la reconoce, pero si no se pudo cerrar, alguien tiene que saberlo.
-    if (entered.ok && !admission.admit && (await auth.signOut(staging)) !== "closed") {
-      await deps.report("session_not_closed");
-    }
+    let admission = entered.ok ? await admit(entered, opened.startedText) : authRefusal(entered.reason);
 
     // Lo que el navegador traía antes de esta entrada, guardado aparte: la cookie nueva se
     // escribe encima con el mismo nombre.
     const before = new Map(staging.writes.map((write) => [write.name, jar.get(write.name)]));
     if (admission.admit) {
-      for (const write of staging.writes) jar.set(write.name, write.value, write.options);
+      try {
+        for (const write of staging.writes) jar.set(write.name, write.value, write.options);
+      } catch {
+        // El tarro no dejó escribir: alguien llamó desde donde no se pueden escribir
+        // cookies. Sin cookie no hay entrada.
+        admission = { result: { kind: "unavailable" }, outcome: "unknown", admit: false, report: "session_cookie_not_written" };
+      }
+    }
+    if (admission.report) await deps.report(admission.report);
+
+    // Auth abrió una sesión que no se queda: se cierra. Nadie tiene sus tokens, pero si no
+    // se pudo cerrar, alguien tiene que saberlo.
+    if (entered.ok && !admission.admit && (await auth.signOut(staging)) !== "closed") {
+      await deps.report("session_not_closed");
     }
 
     try {
@@ -266,9 +272,10 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     }
 
     if (admission.admit) {
-      // La sesión que el navegador traía se cierra hasta el final, cuando la nueva ya entró
-      // y su cookie ya está en el tarro: una contraseña mal tecleada no deja a nadie sin la
-      // sesión que tenía, y un Auth lento al cerrar no retrasa la entrada de la cookie.
+      // La sesión que el navegador traía se cierra hasta el final, cuando la nueva ya entró,
+      // su cookie ya está en el tarro y el intento ya se cerró en el freno: una contraseña
+      // mal tecleada no deja a nadie sin la sesión que tenía, y un Auth que falla al cerrar
+      // no deja la entrada a medias.
       const previous = { get: (name: string) => (before.has(name) ? before.get(name) : jar.get(name)), set: () => undefined };
       if ((await auth.signOut(previous)) !== "closed") await deps.report("session_not_closed");
     }

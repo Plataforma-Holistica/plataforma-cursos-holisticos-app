@@ -212,9 +212,10 @@ export type RecoveryPair =
 /**
  * El par de quien acaba de recuperar su contraseña (RF-103): sin fallos y de confianza.
  * Quien recupera controla el buzón, y esta es su salida cuando el tope de la cuenta lo dejó
- * fuera en un dispositivo nuevo. El servicio les quita además la confianza a los demás
- * pares de la cuenta y borra su cuenta de la hora: la confianza de antes de recuperar ya
- * no vale. Sus fallos se conservan: borrarlos le reiniciaría la cuenta a quien ataca.
+ * fuera en un dispositivo nuevo. A quien la usa le toca además quitarles la confianza a
+ * los demás pares de la cuenta y borrar su cuenta de la hora: la confianza de antes de
+ * recuperar ya no vale. Sus fallos se conservan: borrarlos le reiniciaría la cuenta a
+ * quien ataca.
  */
 export function pairAfterRecovery(now: Date): RecoveryPair {
   if (Number.isNaN(now.getTime())) return { ok: false, reason: "invalid_clock" };

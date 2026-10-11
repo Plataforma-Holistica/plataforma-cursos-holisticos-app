@@ -3,7 +3,7 @@
 -- sesión solo se anota si su intento empezó después del último cambio de contraseña.
 begin;
 \ir _ayuda.psql
-select plan(65);
+select plan(66);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-sesiones@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-sesiones@prueba.test');
@@ -81,6 +81,9 @@ select is(private.claim_account(), 'claimed', 'la cuenta se reclama');
 select is(
   private.note_session('5e550000-0000-0000-0000-000000000001', now()),
   'stale', 'un intento que empezó antes del cambio de contraseña no se anota');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp() - interval '130 seconds'),
+  'stale', 'y si además tardó de más, manda lo primero: la contraseña ya no vale');
 select is(
   private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp() + interval '1 second'),
   'skewed', 'uno que dice haber empezado en el futuro tampoco, y se distingue: el reloj no es de fiar');

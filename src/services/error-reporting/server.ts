@@ -18,6 +18,7 @@ const FAILURES = {
   session_oversized: "Una sesión no cabe en su cookie: esa cuenta no entra hasta recuperar su contraseña.",
   session_not_noted: "El servidor de identidad abrió una sesión que la aplicación no pudo anotar.",
   session_not_closed: "Una sesión que ya no debía seguir no se pudo cerrar en el servidor de identidad.",
+  session_cookie_not_written: "Una entrada no pudo escribir su cookie: se llamó desde donde no se pueden escribir.",
   sign_in_settle_failed: "Una entrada no se pudo cerrar en el freno: su intento quedó contado como fallo.",
   client_ip_unknown: "Fuera de local no se supo de qué dirección viene una petición: todas comparten un tope.",
 } as const;

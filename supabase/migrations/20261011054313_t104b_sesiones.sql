@@ -155,11 +155,15 @@ begin
 
   -- Después del candado: si un reclamo iba delante, su fecha ya está escrita.
   v_now := pg_catalog.clock_timestamp();
-  if p_started > v_now or p_started < v_now - interval '2 minutes' then
+  if p_started > v_now then
     return 'skewed';
   end if;
+  -- Antes que la tardanza: si la contraseña ya no vale, eso es lo que se contesta.
   if p_started < v_changed then
     return 'stale';
+  end if;
+  if p_started < v_now - interval '2 minutes' then
+    return 'skewed';
   end if;
 
   if not exists (

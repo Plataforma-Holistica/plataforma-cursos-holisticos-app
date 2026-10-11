@@ -2,9 +2,10 @@
 // Auth: borran personas, vacían el freno y los contadores, y desactivan un guardián para
 // limpiar. Nada de eso puede correr contra algo que no sea la pila local.
 //
-// La comprobación se hace dos veces a propósito: una antes de la primera prueba
-// (`assertLocalStack`, desde `global-setup.ts`) y otra cada vez que alguien abre una
-// conexión como dueño (`localOwnerUrl`).
+// `assertLocalStack` corre una vez, antes de la primera prueba (`global-setup.ts`): es lo
+// único que cuida a quien usa la llave secreta de Auth o entra como la aplicación, y ahí
+// mira solo a dónde apunta cada dirección. La conexión como dueño de la base se cuida
+// además cada vez que se abre (`localOwnerUrl`), y también por su usuario y su contraseña.
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 

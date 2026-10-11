@@ -236,11 +236,14 @@ describe("reclamar y anotar a la vez", () => {
       () => (settled = true),
     );
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(settled).toBe(false);
+    const waited = !settled;
 
+    // Pase lo que pase, el reclamo se suelta: si no, se quedaría abierto hasta vencer.
     release();
     expect(await claiming).toBe("already_claimed");
+    // Lo que prueba el orden: la anotación vio la fecha que el reclamo confirmó.
     expect(await noting).toBe("stale");
+    expect(waited).toBe(true);
     expect(await notedSessions(account.id)).toBe(0);
   });
 
