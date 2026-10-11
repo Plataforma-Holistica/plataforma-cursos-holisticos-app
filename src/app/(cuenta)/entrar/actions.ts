@@ -1,11 +1,10 @@
 "use server";
 
-import { redirect } from "next/navigation";
-
+import { leaveFor } from "../_lib/exit";
 import { nextAttempt } from "../_lib/form-state";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
 import { signIn } from "@/services/account/account";
-import { clearNotice, leaveNotice } from "@/services/account/notice";
+import { clearNotice } from "@/services/account/notice";
 
 import { checkSignInForm, readSignInForm, signInOutcome, type SignInState } from "./outcomes";
 
@@ -28,10 +27,7 @@ export async function signInAction(previous: SignInState, form: FormData): Promi
   clearNotice(jar);
   const outcome = signInOutcome(await signIn(jar, { email, password }, await requestOrigin()), returnTo);
 
-  if (outcome.kind === "redirect") {
-    if (outcome.notice) leaveNotice(jar, outcome.notice);
-    redirect(outcome.to);
-  }
+  if (outcome.kind === "redirect") return leaveFor(jar, outcome);
   if (outcome.kind === "suspended") return { kind: "suspended" };
   return { ...outcome, email, attempt };
 }

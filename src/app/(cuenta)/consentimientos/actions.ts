@@ -1,12 +1,11 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { redirect } from "next/navigation";
 
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
-import { completeAccount, signOut } from "@/services/account/account";
-import { leaveNotice } from "@/services/account/notice";
+import { completeAccount } from "@/services/account/account";
 
+import { leaveFor } from "../_lib/exit";
 import { nextAttempt } from "../_lib/form-state";
 
 import { completeAccountOutcome, readConsentsForm, type ConsentsState } from "./outcomes";
@@ -30,12 +29,8 @@ export async function completeAccountAction(previous: ConsentsState, form: FormD
   );
   const outcome = completeAccountOutcome(result, input.returnTo, input.unchecked);
 
-  if (outcome.kind === "redirect") {
-    // La guarda dijo que esta sesión ya no vale: se cierra antes de irse.
-    if (outcome.closeSession) await signOut(jar);
-    if (outcome.notice) leaveNotice(jar, outcome.notice);
-    redirect(outcome.to);
-  }
+  // Si la guarda dijo que esta sesión ya no vale, se cierra antes de irse.
+  if (outcome.kind === "redirect") return leaveFor(jar, outcome);
 
   switch (outcome.kind) {
     case "repaint":
