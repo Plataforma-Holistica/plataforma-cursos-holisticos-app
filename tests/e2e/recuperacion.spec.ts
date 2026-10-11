@@ -261,6 +261,19 @@ test("una contraseña que no cumple la regla no gasta el enlace; usado, dice que
   await expect(page).toHaveURL("/inicio");
 });
 
+test("el mensaje al salir del campo no le quita el clic a quien tarda en soltar el botón", async ({ page }) => {
+  await page.goto(`/recuperar/${"g".repeat(56)}`);
+  await hydrated(page);
+  await page.getByLabel("Contraseña nueva").fill("corta");
+  // Una persona tarda en soltar el botón del ratón; un guion, no. Al bajarlo, el foco sale
+  // del campo. Si el mensaje del campo se pintara en ese momento, el botón se recorrería y
+  // el clic caería en otro lado: no pasaría nada.
+  await page.getByRole("button", { name: "Guardar contraseña" }).click({ delay: 500 });
+  const summary = page.getByRole("alert").filter({ hasText: "por corregir" });
+  await expect(summary).toBeFocused();
+  await expect(page.getByLabel("Contraseña nueva")).toHaveAttribute("aria-invalid", "true");
+});
+
 test("sin JavaScript también se recupera la contraseña", async ({ browser }) => {
   const ana = await person();
   await inContext(browser, { javaScriptEnabled: false }, async (page) => {

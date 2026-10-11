@@ -146,6 +146,7 @@ La que fija el TRD §4.2.
 | `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
+| `tests/actions/` | Pruebas de las acciones de servidor con sus servicios simulados: qué le pasa cada una a su servicio, en qué orden, y qué hace con cada respuesta | Las acciones de `src/app/` | Dar por probado lo que hace el servicio: eso lo prueban `tests/integration/` y el extremo a extremo |
 | `tests/e2e/` | Pruebas de extremo a extremo con Playwright (`*.spec.ts`): un navegador de verdad contra la aplicación compilada, la pila local y su buzón, con JavaScript y sin él. Las corre `pnpm test:e2e` | Los ayudantes de `tests/integration/helpers/` que no cargan código de la aplicación | Correr contra algo que no sea la pila local, y dejar residuo |
 | `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
 | `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
@@ -232,6 +233,24 @@ falla. Doce precisiones que la tabla no dice:
   - Una acción de la cuenta sale hacia otra pantalla por `leaveFor`
     (`src/app/(cuenta)/_lib/exit.ts`), con lo que dijo su tabla: cierra la sesión que ya
     no vale, deja el aviso y redirige, en ese orden.
+  - Pedir un correo (registro, reenvío, recuperación) pasa por
+    `src/app/_lib/mail-requests.ts`, que le da al servicio el `after()` de Next: la llamada
+    a Auth corre detrás de la respuesta. Lo que la pantalla dice después (cuánto dura el
+    enlace, cuánto se espera) se lee cuando el servicio ya contestó, nunca antes
+    (`link-facts.ts`). Por eso una prueba de extremo a extremo que afirme «no llegó
+    ningún correo» espera antes un correo de control, y todo caso espera sus correos
+    antes de terminar: la limpieza no debe ganarle a un alta que viene en camino.
+  - La página de un enlace del correo no llama a Auth ni gasta el enlace: pinta el
+    formulario, y el servicio lo canjea al enviar, con todo ya revisado. Lo que no tiene
+    forma de enlace (`isLinkToken`) no se le pregunta a nadie, ni en la página ni en la
+    acción. Esas rutas llevan `Referrer-Policy: same-origin` desde `next.config.ts`.
+  - El correo de un registro a medias viaja a «Revisa tu correo» en una cookie corta
+    (`pending-registration.ts`), sin firma: nada se decide con ella, y lo que no sea
+    exactamente lo que este código escribió cuenta como ausente.
+  - Lo que se pinta al salir de un campo pasa por `afterInteraction`
+    (`src/app/(cuenta)/_lib/hooks.ts`): un mensaje que aparece al bajar el botón del ratón
+    recorre lo de abajo y el clic se pierde. Los dos campos que se repiten (el correo al
+    que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -506,7 +525,8 @@ están ahí `src/services/account/`, `src/proxy.ts`, la configuración de Auth
 entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
 `src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
 `src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
-`playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio.
+`playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio. Con
+las de registro y recuperación se sumó `tests/actions/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

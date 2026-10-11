@@ -2,9 +2,10 @@
 
 El código de la plataforma de cursos por suscripción.
 
-**Estado al 2026-10-11:** cimientos. En `main` todavía no hay ninguna pantalla más que la
-portada provisional; las primeras de la cuenta (entrar, completar la cuenta y un inicio
-provisional) están propuestas en la solicitud 13. Lo que sí hay:
+**Estado al 2026-10-11:** cimientos, y las primeras pantallas. En `main` están la portada
+provisional y las de entrada de la cuenta (entrar, completar la cuenta y un inicio
+provisional); las de registro, verificación y recuperación están propuestas en la
+solicitud 14. Lo que hay:
 
 - **Esqueleto** (T-101): aplicación Next.js, las capas del TRD con el lint que las hace
   cumplir, la prueba de capas, el escaneo de secretos y la integración continua.
@@ -15,15 +16,17 @@ provisional) están propuestas en la solicitud 13. Lo que sí hay:
   Cinco tablas con sus pruebas de base.
 - **Acceso a la base** (T-104, primera entrega): el adaptador de `src/adapters/supabase/`,
   único camino del código a la base.
-- **Cuenta** (T-104, segunda entrega, en curso): los textos legales y los consentimientos,
+- **Cuenta** (T-104, segunda entrega): los textos legales y los consentimientos,
   el freno de entrada, las reglas puras de registro, entrada y recuperación, la sesión por
   cookie y los servicios: la guarda de sesión, entrar y salir, y registrarse (por
   invitación del servidor), recuperar la contraseña y completar la cuenta. Las pantallas
-  van en dos solicitudes. La primera está propuesta (solicitud 13): entrar (`/entrar`),
+  van en dos solicitudes. La primera (solicitud 13, en `main`): entrar (`/entrar`),
   completar la cuenta (`/consentimientos`), la cuenta suspendida, un inicio provisional
   (`/inicio`), los textos legales en versión mínima (`/legal/[documento]`), la guarda en
   cada página, la redirección del paso previo y las pruebas de extremo a extremo con
-  Playwright. Falta la segunda: registro, verificación y recuperación.
+  Playwright. La segunda (solicitud 14, propuesta): registro (`/registro`), verificación
+  del correo (`/verificar` y `/verificar/[token]`) y recuperación de la contraseña
+  (`/recuperar` y `/recuperar/[token]`). Con ella termina la entrega.
 - **Diseño** (T-109): el catálogo de textos, los tokens y los componentes base.
 
 Lo que está en revisión y lo que sigue lo dice `../PROGRESO.md`.
