@@ -98,40 +98,78 @@ describe("decideRegistration", () => {
 });
 
 describe("decideMailSend", () => {
-  const params = { hourlyCap: 5 };
+  const params = { hourlyCap: 5, resendWaitSeconds: 60 };
+  const now = at("2026-10-11T10:00:30.000Z");
+  const ago = (ms: number) => new Date(now.getTime() - ms);
 
-  it("manda si el buzón no llegó a su tope y ya pasó la espera", () => {
-    expect(decideMailSend({ mailboxHitsThisHour: 0, mailboxHitsThisWait: 0 }, params)).toEqual({ send: true });
-    expect(decideMailSend({ mailboxHitsThisHour: 4, mailboxHitsThisWait: 0 }, params)).toEqual({ send: true });
+  it("manda si el buzón no llegó a su tope y nunca se le mandó nada", () => {
+    expect(decideMailSend({ mailboxHitsThisHour: 0, lastSentAt: null }, now, params)).toEqual({ send: true });
+    expect(decideMailSend({ mailboxHitsThisHour: 4, lastSentAt: null }, now, params)).toEqual({ send: true });
   });
 
-  it("no manda si ya se mandó otro dentro de la espera", () => {
-    expect(decideMailSend({ mailboxHitsThisHour: 1, mailboxHitsThisWait: 1 }, params)).toEqual({
+  // La espera se mide desde el último correo, no por minuto de reloj: a las 10:00:59 y a
+  // las 10:01:00 son dos minutos distintos y un segundo de diferencia.
+  it.each([
+    ["en el mismo instante", 0, false],
+    ["un segundo después, aunque ya sea otro minuto del reloj", 1_000, false],
+    ["un milisegundo antes de cumplirse", 59_999, false],
+    ["justo al cumplirse", 60_000, true],
+    ["mucho después", 3_600_000, true],
+  ])("con el último correo %s", (_name, elapsedMs, send) => {
+    const decision = decideMailSend({ mailboxHitsThisHour: 1, lastSentAt: ago(elapsedMs) }, now, params);
+    expect(decision).toEqual(send ? { send: true } : { send: false, reason: "resend_wait" });
+  });
+
+  it("no manda si el buzón ya llegó a su tope de la hora, aunque la espera haya pasado", () => {
+    expect(decideMailSend({ mailboxHitsThisHour: 5, lastSentAt: ago(3_000_000) }, now, params)).toEqual({
       send: false,
-      reason: "resend_wait",
+      reason: "mailbox_hourly_cap",
     });
-  });
-
-  it("no manda si el buzón ya llegó a su tope de la hora", () => {
-    expect(decideMailSend({ mailboxHitsThisHour: 5, mailboxHitsThisWait: 0 }, params)).toEqual({
+    expect(decideMailSend({ mailboxHitsThisHour: 5, lastSentAt: null }, now, params)).toEqual({
       send: false,
       reason: "mailbox_hourly_cap",
     });
   });
 
   it("si coinciden las dos cosas, el motivo es el tope, que es el que dura más", () => {
-    expect(decideMailSend({ mailboxHitsThisHour: 5, mailboxHitsThisWait: 1 }, params)).toEqual({
+    expect(decideMailSend({ mailboxHitsThisHour: 5, lastSentAt: ago(1_000) }, now, params)).toEqual({
       send: false,
       reason: "mailbox_hourly_cap",
     });
   });
 
+  it("un último correo con hora del futuro no manda: el reloj retrocedió y no se adivina", () => {
+    expect(decideMailSend({ mailboxHitsThisHour: 1, lastSentAt: ago(-1) }, now, params)).toEqual({
+      send: false,
+      reason: "resend_wait",
+    });
+    // Tampoco con la espera en cero.
+    expect(
+      decideMailSend({ mailboxHitsThisHour: 1, lastSentAt: ago(-1) }, now, { hourlyCap: 5, resendWaitSeconds: 0 }),
+    ).toEqual({ send: false, reason: "resend_wait" });
+  });
+
+  it("con la espera en cero solo frena el tope", () => {
+    const noWait = { hourlyCap: 5, resendWaitSeconds: 0 };
+    expect(decideMailSend({ mailboxHitsThisHour: 1, lastSentAt: ago(0) }, now, noWait)).toEqual({ send: true });
+    expect(decideMailSend({ mailboxHitsThisHour: 5, lastSentAt: ago(0) }, now, noWait)).toEqual({
+      send: false,
+      reason: "mailbox_hourly_cap",
+    });
+  });
+
+  const good = { mailboxHitsThisHour: 0, lastSentAt: null };
   it.each([
-    ["una cuenta de la hora negativa", { mailboxHitsThisHour: -1, mailboxHitsThisWait: 0 }, { hourlyCap: 5 }],
-    ["una cuenta de la espera que no es entera", { mailboxHitsThisHour: 0, mailboxHitsThisWait: 0.5 }, { hourlyCap: 5 }],
-    ["un tope de cero", { mailboxHitsThisHour: 0, mailboxHitsThisWait: 0 }, { hourlyCap: 0 }],
-  ])("con %s no manda", (_name, facts, badParams) => {
-    expect(decideMailSend(facts, badParams)).toEqual({ send: false, reason: "invalid_input" });
+    ["una cuenta de la hora negativa", { mailboxHitsThisHour: -1, lastSentAt: null }, now, params],
+    ["una cuenta de la hora que no es entera", { mailboxHitsThisHour: 0.5, lastSentAt: null }, now, params],
+    ["un último correo sin fecha válida", { mailboxHitsThisHour: 0, lastSentAt: new Date(Number.NaN) }, now, params],
+    ["un reloj inválido", good, new Date(Number.NaN), params],
+    ["un tope de cero", good, now, { hourlyCap: 0, resendWaitSeconds: 60 }],
+    ["una espera negativa", good, now, { hourlyCap: 5, resendWaitSeconds: -1 }],
+    ["una espera que no es entera", good, now, { hourlyCap: 5, resendWaitSeconds: 0.5 }],
+    ["una espera que no cabe en milisegundos", good, now, { hourlyCap: 5, resendWaitSeconds: Number.MAX_SAFE_INTEGER }],
+  ])("con %s no manda", (_name, facts, clock, badParams) => {
+    expect(decideMailSend(facts, clock, badParams)).toEqual({ send: false, reason: "invalid_input" });
   });
 
   it("nunca manda más de lo que dice el tope dentro de una hora", () => {
@@ -140,11 +178,36 @@ describe("decideMailSend", () => {
         let sent = 0;
         for (let i = 0; i < attempts; i += 1) {
           // Cada intento llega ya pasada la espera: lo único que frena es el tope.
-          if (decideMailSend({ mailboxHitsThisHour: sent, mailboxHitsThisWait: 0 }, { hourlyCap: cap }).send) {
-            sent += 1;
-          }
+          const facts = { mailboxHitsThisHour: sent, lastSentAt: sent === 0 ? null : ago(3_600_000) };
+          if (decideMailSend(facts, now, { hourlyCap: cap, resendWaitSeconds: 60 }).send) sent += 1;
         }
         expect(sent).toBe(Math.min(cap, attempts));
+      }),
+    );
+  });
+
+  it("entre dos correos seguidos siempre pasa la espera completa", () => {
+    const wait = fc.integer({ min: 0, max: 3_600 });
+    const gaps = fc.array(fc.integer({ min: 0, max: 200_000 }), { minLength: 1, maxLength: 40 });
+    fc.assert(
+      fc.property(wait, gaps, (seconds, steps) => {
+        const sentAt: number[] = [];
+        let clock = now.getTime();
+        for (const step of steps) {
+          clock += step;
+          const last = sentAt.at(-1);
+          const decision = decideMailSend(
+            { mailboxHitsThisHour: 0, lastSentAt: last === undefined ? null : new Date(last) },
+            new Date(clock),
+            { hourlyCap: 1_000, resendWaitSeconds: seconds },
+          );
+          if (decision.send) sentAt.push(clock);
+        }
+        for (let i = 1; i < sentAt.length; i += 1) {
+          expect((sentAt[i] as number) - (sentAt[i - 1] as number)).toBeGreaterThanOrEqual(seconds * 1000);
+        }
+        // Y el primero siempre sale: sin correo anterior no hay espera.
+        expect(sentAt[0]).toBe(now.getTime() + (steps[0] as number));
       }),
     );
   });

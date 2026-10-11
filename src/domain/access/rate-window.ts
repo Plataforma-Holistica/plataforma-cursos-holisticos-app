@@ -52,24 +52,41 @@ export type MailDecision =
   | { send: false; reason: "mailbox_hourly_cap" | "resend_wait" | "invalid_input" };
 
 /**
- * Si se le manda otro correo a un buzón: registro, reenvío y recuperación suman al mismo
- * tope (`TOPE_ENVIOS_CORREO_HORA`), y entre dos correos pasa la espera (`ESPERA_REENVIO`).
- * La espera se cuenta como una ventana propia, del tamaño de la espera, con tope de uno.
+ * Si se le manda otro correo a un buzón. Registro y recuperación llevan cada uno su cupo:
+ * quien llama pasa las cuentas del suyo. Dos reglas: el tope de la hora
+ * (`TOPE_ENVIOS_CORREO_HORA`) y la espera entre dos correos (`ESPERA_REENVIO`).
+ *
+ * La espera se mide desde el último correo, no por ventana de reloj: con ventanas, uno a
+ * las 10:00:59 y otro a las 10:01:00 saldrían con un segundo de diferencia. Si el último
+ * correo tiene hora del futuro, el reloj retrocedió: no se manda hasta que lo alcance.
  */
 export function decideMailSend(
   facts: {
     /** Correos ya contados a este buzón en la hora. */
     mailboxHitsThisHour: number;
-    /** Correos ya contados a este buzón en la ventana de la espera. */
-    mailboxHitsThisWait: number;
+    /** Cuándo salió el último correo a este buzón, o nulo si no hay ninguno anotado. */
+    lastSentAt: Date | null;
   },
-  params: { hourlyCap: number },
+  now: Date,
+  params: { hourlyCap: number; /** En segundos. Cero es sin espera. */ resendWaitSeconds: number },
 ): MailDecision {
-  if (!isCount(facts.mailboxHitsThisHour) || !isCount(facts.mailboxHitsThisWait) || !isLimit(params.hourlyCap)) {
+  const waitMs = params.resendWaitSeconds * 1000;
+  const last = facts.lastSentAt === null ? null : facts.lastSentAt.getTime();
+  if (
+    !isCount(facts.mailboxHitsThisHour) ||
+    !isLimit(params.hourlyCap) ||
+    !isCount(params.resendWaitSeconds) ||
+    !Number.isSafeInteger(waitMs) ||
+    Number.isNaN(now.getTime()) ||
+    Number.isNaN(last)
+  ) {
     return { send: false, reason: "invalid_input" };
   }
   // Primero el tope, que dura más: si coinciden, ese es el motivo.
   if (facts.mailboxHitsThisHour >= params.hourlyCap) return { send: false, reason: "mailbox_hourly_cap" };
-  if (facts.mailboxHitsThisWait >= 1) return { send: false, reason: "resend_wait" };
+  if (last !== null) {
+    const elapsed = now.getTime() - last;
+    if (elapsed < 0 || elapsed < waitMs) return { send: false, reason: "resend_wait" };
+  }
   return { send: true };
 }
