@@ -90,3 +90,36 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
     await owner.end();
   }
 }
+
+/** Una dirección de prueba nueva. Todas llevan el mismo prefijo, para poder barrerlas. */
+export function testEmail(): string {
+  return `it-${randomUUID()}@prueba.test`;
+}
+
+/** Una consulta como dueño de la base: para mirar o atrasar lo que la aplicación no puede. */
+export async function ownerQuery<Row extends Record<string, unknown>>(
+  text: string,
+  values: readonly unknown[] = [],
+): Promise<Row[]> {
+  const owner = new Client({ connectionString: env("DATABASE_URL_DIRECT") });
+  await owner.connect();
+  try {
+    const result = await owner.query<Row>(text, [...values]);
+    return result.rows;
+  } finally {
+    await owner.end();
+  }
+}
+
+/**
+ * Borra las cuentas de prueba por su correo, con su perfil. Sirve para las que nacieron
+ * por el registro, de las que la prueba no conoce el identificador.
+ */
+export async function deleteTestUsersByEmail(emails: readonly string[]): Promise<void> {
+  if (emails.length === 0) return;
+  const rows = await ownerQuery<{ id: string }>(
+    "select id from auth.users where email = any($1::text[])",
+    [emails.map((email) => email.toLowerCase())],
+  );
+  await deleteTestUsers(rows.map((row) => ({ id: row.id, email: "", accessToken: "" })));
+}
