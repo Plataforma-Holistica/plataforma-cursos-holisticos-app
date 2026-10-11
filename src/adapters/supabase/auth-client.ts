@@ -55,11 +55,11 @@ function publicHeaders(): Record<string, string> {
 const withoutSession = { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false };
 
 /** Un cliente de Auth para una sola llamada. No se guarda ni se comparte. */
-export function oneShotClient(base: Fetch = fetch): GoTrueClient {
+export function oneShotClient(base?: Fetch): GoTrueClient {
   return new GoTrueClient({
     url: authUrl(),
     headers: publicHeaders(),
-    fetch: bounded(base, SDK_TIMEOUT_MS),
+    fetch: bounded(base ?? fetch, SDK_TIMEOUT_MS),
     ...withoutSession,
   });
 }
@@ -82,9 +82,9 @@ let admin: GoTrueAdminApi | undefined;
  * La API de administración de Auth, con la llave secreta. Salta todo permiso: se usa en un
  * solo archivo (`auth.ts`: `setFirstPassword` y `slimDown`), y una prueba de arquitectura lo exige.
  */
-export function adminApi(base: Fetch = fetch): GoTrueAdminApi {
-  if (base !== fetch) return newAdminApi(base);
-  admin ??= newAdminApi(base);
+export function adminApi(base?: Fetch): GoTrueAdminApi {
+  if (base) return newAdminApi(base);
+  admin ??= newAdminApi(fetch);
   return admin;
 }
 
@@ -107,7 +107,7 @@ export interface AuthCallOptions {
   accessToken?: string;
   body?: unknown;
   timeoutMs?: number;
-  fetch?: Fetch;
+  fetch?: Fetch | undefined;
 }
 
 /**

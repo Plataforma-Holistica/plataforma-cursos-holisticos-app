@@ -134,7 +134,28 @@ const noSentrySdkLoading = [
 
 // Las dos listas juntas: lo que ningún bloque de `src/` deja cargar a escondidas. Cada
 // bloque que fija la regla de sintaxis la repite, porque el posterior reemplaza al anterior.
-const noHiddenLoading = [...noDatabaseClientLoading, ...noSentrySdkLoading];
+// Las cookies y las cabeceras de la petición se leen en un solo archivo (TRD §4.2): el
+// adaptador de Auth recibe un tarro que ese archivo le arma, y no conoce a Next. El
+// `import` de `next/headers` lo prohíbe una regla aparte, más abajo; aquí van las otras
+// dos formas de cargarlo, que valen para todos, también para ese archivo.
+const REQUEST_HEADERS_MESSAGE =
+  "next/headers solo se importa en src/app/_lib/request-context.ts: los demás reciben de ahí lo que necesiten de la petición (TRD §4.2).";
+const noRequestHeadersLoading = [
+  {
+    selector: "ImportExpression[source.value='next/headers']",
+    message: REQUEST_HEADERS_MESSAGE,
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.value='next/headers']",
+    message: REQUEST_HEADERS_MESSAGE,
+  },
+];
+
+const noHiddenLoading = [
+  ...noDatabaseClientLoading,
+  ...noSentrySdkLoading,
+  ...noRequestHeadersLoading,
+];
 
 // Ningún texto visible se escribe fuera del catálogo de src/messages/ (RNF-15).
 //
@@ -332,6 +353,8 @@ export default defineConfig([
       "boundaries/files": [
         { category: "startup", pattern: "**/src/instrumentation.ts" },
         { category: "startup", pattern: "**/src/instrumentation-client.ts" },
+        // El paso previo: Next lo corre antes de cada petición a su alcance.
+        { category: "proxy", pattern: "**/src/proxy.ts" },
       ],
       "boundaries/legacy-templates": false,
       "import/resolver": {
@@ -365,6 +388,12 @@ export default defineConfig([
             {
               from: { file: { categories: "startup" } },
               allow: { to: { element: { type: ["config", "service"] } } },
+            },
+            // El paso previo renueva la sesión por un servicio y nada más: no lee la base,
+            // no corre la guarda y no es el control (TRD §4.2 y §9.2).
+            {
+              from: { file: { categories: "proxy" } },
+              allow: { to: { element: { type: "service" } } },
             },
             // Lectura estricta de la tabla: la entrada y los trabajos solo ven servicios.
             // Si una pantalla necesita un tipo del dominio, el servicio lo reexporta.
@@ -416,7 +445,7 @@ export default defineConfig([
     files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noSentrySdk] }],
-      "no-restricted-syntax": ["error", ...noSentrySdkLoading],
+      "no-restricted-syntax": ["error", ...noSentrySdkLoading, ...noRequestHeadersLoading],
     },
   },
   {
@@ -425,6 +454,19 @@ export default defineConfig([
     files: ["**/src/adapters/sentry/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
+    },
+  },
+  {
+    // `next/headers` en un solo archivo. Va con la regla de TypeScript, que es otra regla
+    // que `no-restricted-imports`: así no hay que repetirla en cada bloque de capa, que se
+    // reemplazan entre sí.
+    files: ["**/src/**/*.{ts,tsx}"],
+    ignores: ["**/src/app/_lib/request-context.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        { paths: [{ name: "next/headers", message: REQUEST_HEADERS_MESSAGE }] },
+      ],
     },
   },
   {

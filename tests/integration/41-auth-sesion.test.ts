@@ -341,6 +341,41 @@ describe("renovar la sesión", () => {
     expect(jar.writes).toEqual([]);
   });
 
+  it("si la renovación trae la sesión de otra cuenta, no la escribe", async () => {
+    const { account, jar } = await signedIn();
+    const other = await signedIn();
+    const theirs = tokensIn(other.jar);
+    const swapped = failingFetch(/\/token/, () =>
+      Response.json({ access_token: theirs.accessToken, refresh_token: theirs.refreshToken }),
+    );
+    const auth = createAuth({ now: nearExpiry, fetch: swapped.fetch });
+
+    // Se queda con la sesión que había, mientras su token valga, y no toca la cookie.
+    expect(await auth.refreshSession(jar)).toMatchObject({ kind: "session", claims: { userId: account.id } });
+    expect(swapped.calls).toHaveLength(1);
+    expect(jar.writes).toEqual([]);
+  });
+
+  it("si la renovación trae otra sesión de la misma cuenta, tampoco la escribe", async () => {
+    const { account, jar } = await signedIn();
+    const second = memoryJar();
+    await signIn(second, account.email, account.password);
+    const theirs = tokensIn(second);
+    const swapped = failingFetch(/\/token/, () =>
+      Response.json({ access_token: theirs.accessToken, refresh_token: theirs.refreshToken }),
+    );
+    const auth = createAuth({ now: nearExpiry, fetch: swapped.fetch });
+    expect((await auth.refreshSession(jar)).kind).toBe("session");
+    expect(jar.writes).toEqual([]);
+  });
+
+  it("si el token que trae la renovación no vale, no se supo: la cookie no se toca", async () => {
+    const { jar } = await signedIn();
+    // Con el reloj fijo 16 minutos adelante, el token nuevo también nace vencido.
+    expect(await createAuth({ now: pastExpiry }).refreshSession(jar)).toEqual({ kind: "unknown" });
+    expect(jar.writes).toEqual([]);
+  });
+
   it("tras un fallo pasajero, esa instancia no vuelve a salir a la red enseguida", async () => {
     const { jar } = await signedIn();
     const failing = failingFetch(/\/token/, tooManyRequests);
@@ -472,6 +507,21 @@ describe("salir", () => {
     expect(await later.signOut(jar)).toBe("closed");
     expect(spy.calls).toEqual(["/auth/v1/token?grant_type=refresh_token", "/auth/v1/logout?scope=local"]);
     expect(jar.writes).toEqual(cleared);
+    expect(await sessionCount(account.id)).toBe(0);
+  });
+
+  it("con el token vencido, la sesión se cierra con el token nuevo, no con el vencido", async () => {
+    const { account, jar } = await signedIn();
+    const old = tokensIn(jar).accessToken;
+    // Auth rechaza un token vencido: se simula para el que traía la cookie.
+    const picky: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      const isLogout = String(input instanceof Request ? input.url : input).includes("/logout");
+      return isLogout && headers.get("authorization") === `Bearer ${old}`
+        ? Promise.resolve(Response.json({ code: "bad_jwt", message: "x" }, { status: 403 }))
+        : fetch(input, init);
+    };
+    expect(await createAuth({ now: pastExpiry, fetch: picky }).signOut(jar)).toBe("closed");
     expect(await sessionCount(account.id)).toBe(0);
   });
 });

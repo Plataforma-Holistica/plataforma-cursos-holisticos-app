@@ -600,6 +600,16 @@ describe("scrubEvent: el texto del mensaje", () => {
     ["el valor que chocó en la base", "duplicate key: Key (rfc)=(XAXX010101000) already exists.", "duplicate key: Key (rfc)=([valor])"],
     ["la fila que rechazó la base", "Failing row contains (7, Ana Pérez, ana, 1990-01-01).", "Failing row contains ([fila])"],
     ["una fila rechazada que ocupa varias líneas", "Failing row contains (7, Ana\nPérez, ana).\nfin", "Failing row contains ([fila])"],
+    // El enlace de un correo lleva la huella en la ruta, no en un parámetro (TRD §9.2).
+    ["la huella de un enlace de verificación", "GET /verificar/9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c respondió 500", "GET /verificar/[token] respondió 500"],
+    ["la huella de un enlace de recuperación, en una dirección completa", "abrió https://sitio.example/recuperar/pkce_9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c y falló", "abrió https://sitio.example/recuperar/[token] y falló"],
+    ["la huella de un enlace, con parámetros detrás", "GET /verificar/abc123def456?volver=%2Finicio", "GET /verificar/[token]"],
+    ["la huella de un enlace entre corchetes", "ruta [/recuperar/abc123def456] no existe", "ruta [/recuperar/[token]] no existe"],
+    ["el token de una baja de correos", "GET /correos/baja/abc.DEF-123_xyz dio 404", "GET /correos/baja/[token] dio 404"],
+    ["el token de una invitación al portal", "GET /portal/invitacion/abc123 dio 410", "GET /portal/invitacion/[token] dio 410"],
+    ["el token de una invitación de administración", "GET /admin/invitacion/abc123 dio 410", "GET /admin/invitacion/[token] dio 410"],
+    ["una huella suelta", "el canje de 9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c falló", "el canje de [token] falló"],
+    ["una huella suelta con su prefijo", "el canje de pkce_9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c falló", "el canje de [token] falló"],
   ])("enmascara %s", (_name, text, expected) => {
     expect(masked(text)).toBe(expected);
   });
@@ -614,6 +624,11 @@ describe("scrubEvent: el texto del mensaje", () => {
     "tardó 10:15:30 en responder la versión 1.2.3",
     "el pedido 123456 de abc y el código 990132 xyz",
     "no hay token ni password en la petición",
+    "GET /verificar respondió 200 y /recuperar también",
+    "la ruta /verificar/[token] y la ruta /recuperar/[token]",
+    "GET /verificarlo/abc123 y /cursos/recuperar-la-calma/leccion",
+    "el commit 3635472d1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
+    "sha256 9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a",
   ])("no toca lo que no es un dato de nadie: %j", (text) => {
     expect(masked(text)).toBe(text);
   });
@@ -777,5 +792,34 @@ describe("scrubEvent: cuando el propio filtro falla", () => {
     // Con identificador y hora propios: sin ellos Sentry podría no aceptar el aviso.
     expect(clean.event_id).toMatch(/^[0-9a-f]{32}$/);
     expect(clean.timestamp).toBeTypeOf("number");
+  });
+});
+
+describe("el enlace de un correo, en todo lo que lleva una ruta", () => {
+  const hash = "9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c";
+
+  it("la huella no sale en la dirección, en el nombre de la petición, en el contexto ni en el rastro", () => {
+    const clean = scrubEvent(
+      event({
+        transaction: `POST /recuperar/${hash}`,
+        request: { method: "POST", url: `https://plataforma.example/verificar/${hash}?volver=%2Finicio` },
+        contexts: { nextjs: { request_path: `/verificar/${hash}` } },
+        breadcrumbs: [
+          { category: "navigation", data: { from: `/verificar/${hash}`, to: `/recuperar/pkce_${hash}` } },
+        ],
+        exception: {
+          values: [{ type: "Error", value: `No se pudo completar /verificar/${hash}` }],
+        },
+      }),
+    );
+
+    expect(JSON.stringify(clean)).not.toContain(hash);
+    expect(clean.transaction).toBe("POST /recuperar/[token]");
+    expect(clean.request).toEqual({ method: "POST", url: "https://plataforma.example/verificar/[token]" });
+    expect(clean.contexts?.nextjs).toEqual({ request_path: "/verificar/[token]" });
+    expect(clean.breadcrumbs).toEqual([
+      { category: "navigation", data: { from: "/verificar/[token]", to: "/recuperar/[token]" } },
+    ]);
+    expect(clean.exception?.values?.[0]?.value).toBe("No se pudo completar /verificar/[token]");
   });
 });

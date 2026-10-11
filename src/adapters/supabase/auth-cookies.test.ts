@@ -89,6 +89,7 @@ describe("el valor de la cookie", () => {
 
   it.each([
     ["un token de acceso que no tiene tres partes", { accessToken: "aaa.bbb", refreshToken: "r" }],
+    ["un token de acceso con una parte de más", { accessToken: "aaa.bbb.ccc.ddd", refreshToken: "r" }],
     ["un token de acceso con un carácter ajeno", { accessToken: "aaa.b~b.ccc", refreshToken: "r" }],
     ["un token de renovación vacío", { accessToken: "aaa.bbb.ccc", refreshToken: "" }],
   ])("no codifica %s", (_name, session) => {

@@ -55,6 +55,16 @@ const SECRET_RULES: readonly Rule[] = [
   [/((?:https?|wss?):\/\/[^\s?#"'<>]{1,2000})[?#][^\s"'<>]*/g, "$1"],
   // Una ruta relativa, con sus parámetros: «GET /cuenta/verificar?token_hash=...».
   [/(^|[\s"'(=:`[,{])(\/[^\s?#"'<>)`]{0,500})[?#][^\s"'<>)`]*/g, "$1$2"],
+  // El enlace de un correo lleva su huella en la ruta, no en un parámetro: se quita el
+  // segmento que sigue a una ruta con token (04-flujo-app §6.1). `[token]`, que es como
+  // Next nombra esa ruta, no es un token.
+  [
+    /(\/(?:verificar|recuperar|correos\/baja|portal\/invitacion|admin\/invitacion)\/)(?!\[token\])[^\s/?#"'<>)`\]]{1,300}/g,
+    "$1[token]",
+  ],
+  // Y la huella suelta, con la forma en que la manda el servidor de identidad: 56 dígitos
+  // hexadecimales, con o sin su prefijo. Ni un commit (40) ni un sha256 (64) miden eso.
+  [/(?<![A-Za-z0-9_-])(?:pkce_)?[0-9a-f]{56}(?![A-Za-z0-9_-])/g, "[token]"],
   // Lo que la base repite cuando rechaza una fila: el valor que chocó (hasta el fin de la
   // línea) y la fila entera (hasta el fin del texto, porque puede traer saltos de línea).
   // En inglés y en español, que es como responde según su configuración.

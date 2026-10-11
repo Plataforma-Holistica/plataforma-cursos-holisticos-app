@@ -45,6 +45,7 @@ describe("leer un error del SDK", () => {
   it.each([
     ["un corte de red", new AuthRetryableFetchError("fetch failed", 0)],
     ["un 503 de la pasarela", new AuthRetryableFetchError("Service Unavailable", 503)],
+    ["lo que el SDK reintentaría, con el estado que sea", new AuthRetryableFetchError("Too Many", 429)],
     ["un error interno de Auth", new AuthApiError("boom", 500, "unexpected_failure")],
     ["un error que el SDK no entiende", new AuthUnknownError("?", new Error("?"))],
     ["algo que no es un error del SDK", new Error("otra cosa")],

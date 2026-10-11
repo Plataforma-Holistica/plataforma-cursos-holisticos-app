@@ -211,6 +211,25 @@ describe("canjear el enlace de verificación", () => {
     const auth = createAuth({ fetch: failingFetch(/\/verify/, networkDown).fetch });
     expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "unknown" });
   });
+
+  it("si la sesión que devuelve el canje no es de la cuenta que dice, no se usa y se cierra", async () => {
+    const account = await user();
+    const real = await authVisitor().auth.signInWithPassword({
+      email: account.email,
+      password: account.password,
+    });
+    const session = real.data.session;
+    if (!session) throw new Error("La persona de prueba no entró.");
+    // Auth no contesta así: se simula un canje cuyo usuario no es el del token.
+    const mismatched = failingFetch(/\/verify/, () =>
+      Response.json({ ...session, user: { ...session.user, id: "a0000000-0000-4000-8000-000000000001" } }),
+    );
+    const auth = createAuth({ fetch: mismatched.fetch });
+
+    expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "unknown" });
+    expect(mismatched.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
+    expect(await sessionCount(account.id)).toBe(0);
+  });
 });
 
 describe("fijar la primera contraseña", () => {
@@ -300,6 +319,19 @@ describe("fijar la primera contraseña", () => {
     expect(jar.writes[0]?.value.length).toBeLessThan(SESSION_COOKIE_MAX_LENGTH / 2);
   });
 
+  it("borra también unos metadatos pequeños, que no estorbaban", async () => {
+    const email = newEmail();
+    await authVisitor().auth.signUp({ email, password: password(), options: { data: { apodo: "x".repeat(200) } } });
+    const result = await redeemSignupLink(tokenHashIn(await lastMailTo(email), "verificar"));
+    if (!result.ok) throw new Error("El enlace no se canjeó.");
+    expect(await setFirstPassword(result.redeemed, password())).toBe("ok");
+    const stored = await ownerQuery<{ meta: Record<string, unknown> }>(
+      "select raw_user_meta_data as meta from auth.users where email = $1",
+      [email],
+    );
+    expect(stored[0]?.meta).toEqual({});
+  });
+
   it("sin ese borrado, la sesión de esa cuenta no cabría en la cookie", async () => {
     // La otra mitad de la prueba de arriba: que el relleno sí es de los que estorban.
     const account = await user();
@@ -374,7 +406,10 @@ describe("recuperar la contraseña", () => {
     const account = await user();
     const redeemed = await recovering(account);
     expect(await closeAllSessions(redeemed)).toBe("closed");
-    expect(await setRecoveredPassword(redeemed, password())).toBe("rejected");
+    // Ni siquiera se le pregunta a Auth.
+    const spy = recordingFetch();
+    expect(await createAuth({ fetch: spy.fetch }).setRecoveredPassword(redeemed, password())).toBe("rejected");
+    expect(spy.calls).toEqual([]);
     expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(true);
   });
 
@@ -401,6 +436,18 @@ describe("recuperar la contraseña", () => {
     expect(stored[0]).toEqual({ meta: {}, confirmed: true });
     await closeAllSessions(result.redeemed);
     expect((await signIn(memoryJar(), email, chosen)).ok).toBe(true);
+  });
+
+  it("al recuperar borra también unos metadatos pequeños", async () => {
+    const account = await user();
+    await authAdmin().auth.admin.updateUserById(account.id, { user_metadata: { apodo: "x".repeat(200) } });
+    const redeemed = await recovering(account);
+    expect(await setRecoveredPassword(redeemed, password())).toBe("ok");
+    const stored = await ownerQuery<{ meta: Record<string, unknown> }>(
+      "select raw_user_meta_data as meta from auth.users where id = $1",
+      [account.id],
+    );
+    expect(stored[0]?.meta).toEqual({});
   });
 
   it("descartar el canje cierra solo su sesión", async () => {

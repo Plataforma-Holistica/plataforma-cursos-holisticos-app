@@ -12,6 +12,7 @@ const fixtures = "tests/architecture/fixtures/src";
 
 const LAYERS = "boundaries/dependencies";
 const IMPORTS = "no-restricted-imports";
+const REQUEST_HEADERS = "@typescript-eslint/no-restricted-imports";
 const SYNTAX = "no-restricted-syntax";
 const LITERALS = "react/jsx-no-literals";
 const DOM_PROPS = "react/forbid-dom-props";
@@ -825,9 +826,109 @@ const forbidden: Case[] = [
     code: `export const Probe = () => <div style={{ color: "red" }} />;\n`,
     rule: DOM_PROPS,
   },
+  {
+    name: "el paso previo importa un adaptador",
+    file: `${fixtures}/proxy.ts`,
+    code: `import { thing } from "./adapters/mux/thing";
+export const probe = thing;
+`,
+    rule: LAYERS,
+  },
+  {
+    name: "el paso previo importa el dominio",
+    file: `${fixtures}/proxy.ts`,
+    code: `import { thing } from "./domain/shared/thing";
+export const probe = thing;
+`,
+    rule: LAYERS,
+  },
+  {
+    name: "el paso previo importa la configuración",
+    file: `${fixtures}/proxy.ts`,
+    code: `import { thing } from "./config/thing";
+export const probe = thing;
+`,
+    rule: LAYERS,
+  },
+  {
+    name: "el paso previo lee las cookies con next/headers",
+    file: `${fixtures}/proxy.ts`,
+    code: `import { cookies } from "next/headers";
+export const probe = cookies;
+`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "un adaptador lee las cookies con next/headers",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `import { cookies } from "next/headers";
+export const probe = cookies;
+`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "un servicio lee las cabeceras con next/headers",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { headers } from "next/headers";
+export const probe = headers;
+`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "una pantalla lee las cookies con next/headers por su cuenta",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `import { cookies } from "next/headers";
+export const probe = cookies;
+`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "otro archivo de src/app/_lib lee las cookies con next/headers",
+    file: `${fixtures}/app/_lib/otro.ts`,
+    code: `import { cookies } from "next/headers";
+export const probe = cookies;
+`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "una pantalla carga next/headers con import()",
+    file: `${fixtures}/app/probe.tsx`,
+    code: `export const probe = () => import("next/headers");
+`,
+    rule: "no-restricted-syntax",
+  },
+  {
+    name: "un servicio carga next/headers con require",
+    file: `${fixtures}/services/probe.ts`,
+    code: `export const probe = () => require("next/headers");
+`,
+    rule: "no-restricted-syntax",
+  },
+  {
+    name: "un adaptador de la base carga next/headers con import()",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `export const probe = () => import("next/headers");
+`,
+    rule: "no-restricted-syntax",
+  },
 ];
 
 const allowed: Omit<Case, "rule">[] = [
+  {
+    name: "el paso previo importa un servicio y next/server",
+    file: `${fixtures}/proxy.ts`,
+    code: `import { NextResponse } from "next/server";
+import { thing } from "./services/thing";
+export const probe = [NextResponse, thing];
+`,
+  },
+  {
+    name: "request-context es el único que lee cookies y cabeceras con next/headers",
+    file: `${fixtures}/app/_lib/request-context.ts`,
+    code: `import { cookies, headers } from "next/headers";
+export const probe = [cookies, headers];
+`,
+  },
   {
     name: "el dominio importa al propio dominio",
     file: `${fixtures}/domain/access/probe.ts`,

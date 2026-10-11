@@ -132,8 +132,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export function createAuth(dependencies: AuthDependencies = {}) {
-  const baseFetch = dependencies.fetch ?? fetch;
-  const now = dependencies.now ?? Date.now;
+  // Sin dependencias, el `fetch` y el reloj se buscan en cada llamada, no al cargar.
+  const baseFetch = dependencies.fetch;
+  const now = dependencies.now ?? (() => Date.now());
   const secure = () => isSecureSite(getEnv().NEXT_PUBLIC_SITE_URL);
 
   // Estado de esta instancia del servidor, no una garantía: en otra instancia no existe.
