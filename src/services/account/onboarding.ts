@@ -14,8 +14,10 @@ import type { Admission, PendingAccount, SessionCheck } from "./admission";
 import { stagingJar, type AccountDependencies } from "./deps";
 import { buckets, fingerprint, type Fingerprint } from "./fingerprint";
 import {
+  accountClaimed,
   checkAccountForm,
   checkRegistrationForm,
+  linkOpensRegistration,
   matchAccepted,
   type AccountForm,
   type CurrentText,
@@ -162,8 +164,6 @@ type Counted =
   | { kind: "quiet" }
   | { kind: "send"; window: Date; sentText: string };
 
-const claimedStates = new Set(["claimed", "already_claimed"]);
-
 export function createOnboarding(deps: AccountDependencies, core: OnboardingCore) {
   const { auth } = deps;
 
@@ -301,27 +301,26 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const entered = await auth.signIn(staging, email, password);
     if (!entered.ok) return { kind: "ready_sign_in" };
 
-    const admission = await core.admit(entered, startedText);
+    const { result, report } = await core.admit(entered, startedText);
     const before = new Map(staging.writes.map((write) => [write.name, jar.get(write.name)]));
-    let report = admission.report;
-    let landed = admission.admit && admission.result.kind === "entered";
-    if (landed) {
+    // La guarda dejó entrar y la sesión quedó anotada: su cookie pasa al tarro de verdad.
+    let failure = report;
+    if (result.kind === "entered") {
       try {
         for (const write of staging.writes) jar.set(write.name, write.value, write.options);
       } catch {
-        landed = false;
-        report = "session_cookie_not_written";
+        failure = "session_cookie_not_written";
       }
     }
-    if (!landed || admission.result.kind !== "entered") {
-      if (report) await deps.report(report);
+    if (result.kind !== "entered" || failure) {
+      if (failure) await deps.report(failure);
       await expectClosed(auth.signOut(staging));
       return { kind: "ready_sign_in" };
     }
     // La sesión que el navegador traía, de otra cuenta, se cierra al final.
     const previous = { get: (name: string) => (before.has(name) ? before.get(name) : jar.get(name)), set: () => undefined };
     await expectClosed(auth.signOut(previous));
-    return admission.result;
+    return result;
   }
 
   /**
@@ -367,8 +366,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     let goesOn: boolean;
     try {
       goesOn = await asServer({ claims: redeemed.claims, reason: "registration_state" }, async (tx) => {
-        const state = await profileState(tx, profileId);
-        if (!state || state.status !== "active" || !state.pending) return false;
+        if (!linkOpensRegistration(await profileState(tx, profileId))) return false;
         // Auth deja pasar dos canjes simultáneos del mismo enlace: solo el primero sigue.
         return markRegistrationStarted(tx, buckets.signUpRedeemed(profileId));
       });
@@ -393,7 +391,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
         await saveIdentity(tx, profileId, { name: checked.name, adult: true });
         await grantConsents(tx, profileId, match.documentIds, "signup", from, deps.isLocal());
         // Si la cuenta no se puede reclamar, no se guarda nada.
-        if (!claimedStates.has(await claimAccount(tx))) throw new Error("La cuenta no se pudo reclamar.");
+        if (!accountClaimed(await claimAccount(tx))) throw new Error("La cuenta no se pudo reclamar.");
         return (await dbClock(tx)).text;
       });
     let startedText: string;
@@ -443,7 +441,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
           await lockAll(tx, [keys.ip, keys.account]);
           // Una cuenta que no se puede reclamar (suspendida) se queda con su contraseña
           // nueva y sin dispositivo de confianza.
-          if (!claimedStates.has(await claimAccount(tx)) || !outcome.clearThrottles) return;
+          if (!accountClaimed(await claimAccount(tx)) || !outcome.clearThrottles) return;
           const trusted = pairAfterRecovery((await dbClock(tx)).date);
           // De una dirección que no se conoce no queda ningún par de confianza.
           await trustAfterRecovery(tx, keys, from.known && trusted.ok ? trusted.pair : null, buckets.signInAccount(keys.account));

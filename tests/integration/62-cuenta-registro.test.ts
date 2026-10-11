@@ -35,7 +35,7 @@ import {
   userIdOf,
 } from "./helpers/auth";
 import { lastMailTo, mailsTo, tokenHashIn, waitForMails } from "./helpers/mailbox";
-import { deleteTestUsersByEmail, testEmail } from "./helpers/users";
+import { claimAccount, deleteTestUsersByEmail, ownerQuery, testEmail } from "./helpers/users";
 
 // Pedir el registro y completarlo desde el enlace (RF-101, RF-108, RF-109; TRD §9.2, filas
 // «Registro», «Quién fija la contraseña» y «Verificación de correo», y §9.9), contra la
@@ -515,6 +515,29 @@ describe("completar el registro desde el enlace", () => {
     });
   });
 
+  it("si la cookie no se puede escribir, nadie queda dentro: la cuenta quedó lista y la sesión se cierra", async () => {
+    const { email, hash, id } = await invited();
+    const chosen = password();
+    const services = testServices();
+    const sealed = {
+      get: () => undefined,
+      set: () => {
+        throw new Error("aquí no se escriben cookies");
+      },
+    };
+
+    expect(await services.completeRegistration(sealed, form(hash, { password: chosen }), freshOrigin())).toEqual({
+      kind: "ready_sign_in",
+    });
+
+    expect(services.reported).toEqual(["session_cookie_not_written"]);
+    expect(await sessionCount(id)).toBe(0);
+    expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba" });
+    expect(await testServices().signIn(memoryJar(), { email, password: chosen }, freshOrigin())).toMatchObject({
+      kind: "entered",
+    });
+  });
+
   it("al entrar cierra la sesión que el navegador traía", async () => {
     const other = await claimedUser();
     emails.push(other.email);
@@ -528,6 +551,28 @@ describe("completar el registro desde el enlace", () => {
 
     expect(await sessionCount(other.id)).toBe(0);
     expect(await services.checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: id } });
+  });
+
+  it("si Auth todavía canjea el enlace de una cuenta ya reclamada, el servicio no cambia nada y cierra solo ese canje", async () => {
+    // Auth mata el enlace de invitación cuando la cuenta se confirma por otro camino. Aquí
+    // se arma a mano el caso en que no lo hiciera: confirmada y reclamada, con su enlace vivo.
+    const { hash, id } = await invited();
+    await ownerQuery("update auth.users set email_confirmed_at = now() where id = $1", [id]);
+    await claimAccount(id);
+
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+    expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toEqual({ kind: "link_dead" });
+
+    // Auth sí lo canjeó: lo que detuvo el registro fue la marca apagada, no un enlace muerto.
+    expect(spy.calls.filter((path) => path.startsWith("/auth/v1/verify"))).toHaveLength(1);
+    expect(spy.calls.filter((path) => path.startsWith("/auth/v1/logout"))).toEqual(["/auth/v1/logout?scope=local"]);
+    // No se fijó ninguna contraseña ni se guardó nada del formulario, y no quedó sesión.
+    expect(spy.calls.some((path) => path.includes("/admin/"))).toBe(false);
+    expect(await sessionCount(id)).toBe(0);
+    expect(await profileOf(id)).toMatchObject({ pending: false, display_name: null, adult: false });
+    expect(await consentsOf(id)).toEqual([]);
+    expect(services.reported).toEqual([]);
   });
 
   it("el enlace de una cuenta que ya se reclamó no cambia nada", async () => {

@@ -25,8 +25,6 @@ export interface FieldErrors {
   texts?: "required";
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 export type AcceptedMatch =
   /** `documentIds`: lo aceptado, sin repetir. Todos son textos vigentes. */
   | { kind: "ok"; documentIds: string[] }
@@ -58,9 +56,23 @@ export function matchAccepted(
   }
   const inForce = new Set(current.map((text) => text.documentId));
   const given = [...new Set(accepted.map((id) => id.toLowerCase()))];
-  if (given.some((id) => !UUID.test(id) || !inForce.has(id))) return { kind: "stale" };
+  // Lo que no es el identificador de un texto vigente, sea lo que sea, no llega a la base.
+  if (given.some((id) => !inForce.has(id))) return { kind: "stale" };
   if (needs.some((id) => !given.includes(id))) return { kind: "missing" };
   return { kind: "ok", documentIds: given };
+}
+
+/**
+ * Si el enlace de verificación recién canjeado sirve para completar esa cuenta: activa y
+ * sin reclamar. El de una cuenta que ya se reclamó, o que no puede entrar, no cambia nada.
+ */
+export function linkOpensRegistration(state: { status: string; pending: boolean } | null): boolean {
+  return state !== null && state.status === "active" && state.pending;
+}
+
+/** Lo que contesta `private.claim_account()` cuando la cuenta quedó reclamada. */
+export function accountClaimed(state: string): boolean {
+  return state === "claimed" || state === "already_claimed";
 }
 
 export interface RegistrationForm {

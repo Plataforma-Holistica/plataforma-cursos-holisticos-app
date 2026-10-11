@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";
 
-import { checkAccountForm, checkRegistrationForm, matchAccepted, type CurrentText } from "./forms";
+import {
+  accountClaimed,
+  checkAccountForm,
+  checkRegistrationForm,
+  linkOpensRegistration,
+  matchAccepted,
+  type CurrentText,
+} from "./forms";
 
 // Lo que los formularios de la cuenta mandan, revisado antes de tocar nada (RF-101, RF-108,
 // RF-109; flujo de la app FL-03 y FL-06). Aquí nada se gasta: ni el enlace ni un intento.
@@ -65,6 +72,28 @@ describe("matchAccepted", () => {
     expect(matchAccepted(without, ["terms"], [A])).toEqual({ kind: "ok", documentIds: [A] });
     // Ni un tipo que hace falta y del que no se sabe nada.
     expect(matchAccepted([terms], all, [A])).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("lo que se sabe de la cuenta de un enlace recién canjeado", () => {
+  it("el enlace de verificación solo completa una cuenta activa que nadie ha reclamado", () => {
+    expect(linkOpensRegistration({ status: "active", pending: true })).toBe(true);
+  });
+
+  it.each([
+    ["sin perfil", null],
+    ["ya reclamada", { status: "active", pending: false }],
+    ["suspendida", { status: "suspended", pending: true }],
+    ["eliminada", { status: "deleted", pending: true }],
+    ["con un estado que no se conoce", { status: "", pending: true }],
+  ])("una cuenta %s no", (_name, state) => {
+    expect(linkOpensRegistration(state)).toBe(false);
+  });
+
+  it("la cuenta quedó reclamada si la base dijo que la reclamó o que ya lo estaba, y con nada más", () => {
+    expect(accountClaimed("claimed")).toBe(true);
+    expect(accountClaimed("already_claimed")).toBe(true);
+    for (const other of ["ineligible", "", "CLAIMED", "noted"]) expect(accountClaimed(other)).toBe(false);
   });
 });
 

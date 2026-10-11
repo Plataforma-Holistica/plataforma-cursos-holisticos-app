@@ -252,6 +252,8 @@ describe("completar la recuperación", () => {
     await seedHits(signInBuckets(here).account, 7);
     const stranger = keysOf(testEmail(), origin);
     await seedPair(stranger, { failed_count: 2, last_success_at: trusted });
+    const farStranger = keysOf(testEmail(), freshOrigin());
+    await seedPair(farStranger, { failed_count: 1, last_success_at: trusted });
 
     const hash = await recoveryLink(account);
     const chosen = password();
@@ -271,6 +273,7 @@ describe("completar la recuperación", () => {
     expect((await pairOf(elsewhere))?.last_failed_at).not.toBeNull();
     expect(await pairOf(stranger)).toMatchObject({ failed_count: 2 });
     expect((await pairOf(stranger))?.last_success_at).not.toBeNull();
+    expect((await pairOf(farStranger))?.last_success_at).not.toBeNull();
     expect(await bucketRows(signInBuckets(here).account)).toBe(0);
 
     expect(await services.signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "invalid_credentials" });
@@ -516,9 +519,11 @@ describe("completar una cuenta ya abierta", () => {
       kind: "invalid",
       fields: { texts: "required" },
     });
-    expect(await services.completeAccount(jar, { accepted: [texts.course_history_consent] }, freshOrigin())).toEqual({
+    // Marca los tres: los dos que ya tenía dados no se anotan otra vez.
+    expect(await services.completeAccount(jar, { accepted: Object.values(texts) }, freshOrigin())).toEqual({
       kind: "complete",
     });
+    expect(await consentsOf(account.id)).toHaveLength(5);
     const history = (await consentsOf(account.id)).filter((consent) => consent.doc_type === "course_history_consent");
     expect(history.map((consent) => [consent.action, consent.origin])).toEqual([
       ["granted", "signup"],

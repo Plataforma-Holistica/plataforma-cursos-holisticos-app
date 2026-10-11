@@ -84,9 +84,7 @@ export function decideMailSend(
   }
   // Primero el tope, que dura más: si coinciden, ese es el motivo.
   if (facts.mailboxHitsThisHour >= params.hourlyCap) return { send: false, reason: "mailbox_hourly_cap" };
-  if (last !== null) {
-    const elapsed = now.getTime() - last;
-    if (elapsed < 0 || elapsed < waitMs) return { send: false, reason: "resend_wait" };
-  }
+  // Un último correo con hora del futuro da un tiempo negativo, que nunca alcanza la espera.
+  if (last !== null && now.getTime() - last < waitMs) return { send: false, reason: "resend_wait" };
   return { send: true };
 }
