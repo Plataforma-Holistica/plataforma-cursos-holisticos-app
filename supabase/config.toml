@@ -160,13 +160,16 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# Igual a NEXT_PUBLIC_SITE_URL: de aquí salen los enlaces de los correos.
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Vacía a propósito: ningún flujo de la Plataforma redirige desde Auth.
+additional_redirect_urls = []
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
-jwt_expiry = 3600
+# 15 minutos (TRD 9.2, fila «Token de acceso»).
+jwt_expiry = 900
 # JWT issuer URL. If not set, defaults to auth.external_url.
 # jwt_issuer = ""
 # Path to JWT signing key. DO NOT commit your signing keys file to git.
@@ -183,7 +186,8 @@ enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 6
+# El mínimo de la política del dominio (src/domain/access/password-policy.ts).
+minimum_password_length = 8
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
 password_requirements = ""
@@ -227,14 +231,17 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
-secure_password_change = false
+secure_password_change = true
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
+# El parámetro ESPERA_REENVIO.
+max_frequency = "60s"
 # Number of characters used in the email OTP.
-otp_length = 6
+# Lo más largo que admite Auth: que el código numérico no se pueda adivinar.
+otp_length = 10
 # Number of seconds before the email OTP expires (defaults to 1 hour).
+# El parámetro VIGENCIA_ENLACE_CONTRASENA, en segundos.
 otp_expiry = 3600
 
 # Use a production-ready SMTP server
@@ -247,22 +254,44 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# Los correos de autenticación, mientras los manda Supabase Auth (pasan al proveedor de
+# correo propio con T-310). CO-01, CO-07 y CO-26 del catálogo, más los dos que Auth manda
+# por su cuenta y que aquí no llevan enlace ni código. Ninguna plantilla usa
+# `.ConfirmationURL` ni `.Token`: los enlaces llevan la huella y abren una página propia.
+# `invite` y `reauthentication` se quedan de fábrica: no sirven para entrar.
+#
+# Una clave mal escrita aquí se ignora sin error, y sale la plantilla de fábrica: por eso
+# tests/integration/30-auth-config.test.ts comprueba cada correo en el buzón.
+[auth.email.template.confirmation]
+subject = "Confirma tu correo"
+content_path = "./supabase/templates/confirmation.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./supabase/templates/password_changed_notification.html"
+[auth.email.template.recovery]
+subject = "Cambia tu contraseña"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "Alguien pidió un enlace de acceso"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.email_change]
+subject = "Alguien pidió cambiar el correo de tu cuenta"
+content_path = "./supabase/templates/email_change.html"
+
+# La ruta de un aviso se resuelve distinto que la de una plantilla: esta forma sirve en
+# las dos maneras en que la CLI la lee.
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Tu contraseña cambió"
+content_path = "./templates/password_changed.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
 enable_signup = false
 # If enabled, users need to confirm their phone number before signing in.
-enable_confirmations = false
+# Prendida aunque el SMS no se use: con una sola confirmación apagada, registrar un correo
+# que ya tiene cuenta contesta «ya existe» (TRD 9.2, fila «Registro»).
+enable_confirmations = true
 # Template for sending OTP to users
 template = "Your code is {{ .Code }}"
 # Controls the minimum amount of time that must pass before sending another sms otp.

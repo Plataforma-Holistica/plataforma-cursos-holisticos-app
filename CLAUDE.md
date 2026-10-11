@@ -61,7 +61,7 @@ pnpm db:login    # le da a app_service entrada a la base local (ver .env.example
 pnpm db:drafts   # carga en la base local los textos legales de borrador (versión 0)
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
-pnpm test:int    # pruebas de integración de tests/integration/, contra la base local
+pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
@@ -88,6 +88,14 @@ sistema y con el ajuste que pone ese guion: el servidor no puede cargarla. Las p
 base pasan con los borradores cargados y sin ellos: la integración continua las corre en
 los dos estados.
 
+El Auth local se configura en `supabase/config.toml`, y sus correos en
+`supabase/templates/`. Una clave mal escrita ahí se ignora sin error y sale el valor o la
+plantilla de fábrica: por eso `tests/integration/30-auth-config.test.ts` comprueba cada
+valor por lo que Auth hace, y cada plantilla por el correo que llega al buzón local.
+Después de tocar cualquiera de los dos: `pnpm db:stop` y `pnpm db:start`, para que Auth
+lo tome. Nada de eso llega al proyecto remoto: subirlo (`supabase config push`) es
+reconfigurar un proveedor, y se pregunta.
+
 Versiones que no se suben sin revisar:
 
 - **Next.js 16.3**: Payload 3 exige 16.3.3 o superior. Esta versión cambió respecto a las
@@ -106,6 +114,7 @@ La que fija el TRD §4.2.
 | `src/domain/` | Reglas de negocio puras: acceso, progreso, consumo, reparto | Nada fuera de sí misma | Red, base, reloj, variables de entorno |
 | `src/adapters/` | Un adaptador por proveedor | El SDK de ese proveedor y tipos del dominio | Otros adaptadores, pantallas |
 | `src/services/` | Casos de uso: cargan datos, llaman al dominio, guardan | Dominio y adaptadores. A la base llegan por `src/adapters/supabase/` | Componentes de React, el cliente de base y el SDK de Supabase |
+| `src/proxy.ts` | El paso previo de Next: renueva la sesión antes de cada petición | Servicios y `next/server` | La base, la guarda de sesión, `next/headers`, decidir quién pasa |
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
@@ -115,6 +124,7 @@ La que fija el TRD §4.2.
 | `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
+| `supabase/templates/` | Las plantillas de los correos que manda Supabase Auth, mientras no los manda el proveedor de correo propio | | La dirección o el código que arma Auth: los enlaces llevan la huella y abren una página propia |
 | `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
@@ -123,7 +133,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Ocho precisiones que la tabla no dice:
+falla. Diez precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -139,6 +149,36 @@ falla. Ocho precisiones que la tabla no dice:
 - **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
 - **Un archivo de `src/` fuera de estas carpetas es un error de lint.** Una carpeta nueva
   se declara primero en `eslint.config.mjs`, con su regla y su caso en la prueba.
+- **`next/headers` solo se importa en `src/app/_lib/request-context.ts`** (TRD §4.2), que
+  llega con las pantallas. Las cookies y las cabeceras de la petición se leen ahí y en
+  ningún otro lado: el adaptador de Auth recibe un tarro (`CookieJar`) y no conoce a Next.
+  El paso previo, `src/proxy.ts`, arma el suyo sobre la petición y la respuesta. Solo
+  importa servicios y hace una sola cosa: renovar la sesión. No lee la base, no corre la
+  guarda y no es el control: haber pasado por él no dice que alguien tenga sesión. Una
+  prueba sigue sus importaciones y exige que no lleguen a `db.ts`.
+- **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
+  TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
+  - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
+    el paso previo y las acciones de servidor. Las dos solo miran la firma y la vigencia
+    del token: una sesión cerrada en otro lado pasa hasta 15 minutos más, y lo que no
+    pueda esperar le pregunta a Auth con `confirmSession`.
+  - Cada función contesta con una unión cerrada. `unknown` es «no se supo»: nunca se trata
+    como éxito ni como «no hay sesión».
+  - La cookie se borra solo con la lista cerrada de `auth-errors.ts`. Agregarle un código
+    es decidir que con él se le cierra la sesión a alguien: un 429 o un corte de Auth no
+    están ahí a propósito.
+  - `signIn` distingue `banned` y `email_not_confirmed`. El servicio los aplana, porque
+    delatan el estado de una cuenta.
+  - El SDK de Auth se usa con un cliente de un solo uso (`oneShotClient`): uno compartido
+    guardaría la sesión del último que entró. La API de administración solo se llama desde
+    `setFirstPassword` y `slimDown`, las dos sobre una cuenta que sale de un enlace recién
+    canjeado; una prueba lo exige. `auth-client.ts` no se importa fuera del adaptador: lo
+    rechaza el lint.
+  - Un token firmado con una clave que no se conoce no es, sin más, un token inventado:
+    puede ser de una clave recién rotada. Mientras no se haya vuelto a preguntar por las
+    claves, la respuesta es «no se supo» y la cookie no se borra.
+  - `createAuth({ fetch, now })` existe para las pruebas. El código de la aplicación usa
+    las funciones ya armadas.
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en
   `src/adapters/supabase/`** (ADR-31, TRD §8.10). La aplicación entra a la base como
   `app_service`, que salta la seguridad por fila: por eso el resto llega con las tres
@@ -310,8 +350,8 @@ Un error aquí cuesta dinero o expone contenido. En las tres:
 Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/access/`,
 `src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
 `supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir. De la cuenta
-ya están ahí, aunque todavía no existan, `src/services/account/`, `src/proxy.ts`, la
-configuración de Auth (`supabase/config.toml`, `supabase/templates/`) y `supabase/local/`.
+están ahí `src/services/account/`, `src/proxy.ts`, la configuración de Auth
+(`supabase/config.toml`, `supabase/templates/`) y `supabase/local/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

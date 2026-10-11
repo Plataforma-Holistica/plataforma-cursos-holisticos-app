@@ -134,7 +134,58 @@ const noSentrySdkLoading = [
 
 // Las dos listas juntas: lo que ningún bloque de `src/` deja cargar a escondidas. Cada
 // bloque que fija la regla de sintaxis la repite, porque el posterior reemplaza al anterior.
-const noHiddenLoading = [...noDatabaseClientLoading, ...noSentrySdkLoading];
+// Las cookies y las cabeceras de la petición se leen en un solo archivo (TRD §4.2): el
+// adaptador de Auth recibe un tarro que ese archivo le arma, y no conoce a Next. El
+// `import` de `next/headers` lo prohíbe una regla aparte, más abajo; aquí van las otras
+// dos formas de cargarlo, que valen para todos, también para ese archivo.
+const REQUEST_HEADERS_MESSAGE =
+  "next/headers solo se importa en src/app/_lib/request-context.ts: los demás reciben de ahí lo que necesiten de la petición (TRD §4.2).";
+const noRequestHeadersLoading = [
+  {
+    selector: "ImportExpression[source.value='next/headers']",
+    message: REQUEST_HEADERS_MESSAGE,
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.value='next/headers']",
+    message: REQUEST_HEADERS_MESSAGE,
+  },
+];
+
+// Un nombre que se arma al correr no se puede revisar. Estas dos reglas ya están en la
+// lista del cliente de base; aquí van sueltas para el adaptador de la base, que no lleva
+// esa lista porque es el único que sí importa `pg`.
+const noUnnamedLoading = [
+  {
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Un import() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+    message:
+      "Un require() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+];
+
+// Los clientes de Auth (el de administración, con la llave secreta) no salen del adaptador
+// de la base: los servicios usan las funciones de `auth.ts` (TRD §8.10).
+const AUTH_CLIENT_MESSAGE =
+  "Los clientes de Auth no salen de src/adapters/supabase/: se usan las funciones de auth.ts (TRD §8.10).";
+const noRequestHeaders = {
+  // Con comodín: `next/headers.js` y los archivos internos de Next son la misma puerta.
+  group: ["next/headers", "next/headers.*", "next/dist/**"],
+  message: REQUEST_HEADERS_MESSAGE,
+};
+const noAuthClient = {
+  group: ["**/adapters/supabase/auth-client", "**/adapters/supabase/auth-client.*"],
+  message: AUTH_CLIENT_MESSAGE,
+};
+
+const noHiddenLoading = [
+  ...noDatabaseClientLoading,
+  ...noSentrySdkLoading,
+  ...noRequestHeadersLoading,
+];
 
 // Ningún texto visible se escribe fuera del catálogo de src/messages/ (RNF-15).
 //
@@ -332,6 +383,8 @@ export default defineConfig([
       "boundaries/files": [
         { category: "startup", pattern: "**/src/instrumentation.ts" },
         { category: "startup", pattern: "**/src/instrumentation-client.ts" },
+        // El paso previo: Next lo corre antes de cada petición a su alcance.
+        { category: "proxy", pattern: "**/src/proxy.ts" },
       ],
       "boundaries/legacy-templates": false,
       "import/resolver": {
@@ -365,6 +418,12 @@ export default defineConfig([
             {
               from: { file: { categories: "startup" } },
               allow: { to: { element: { type: ["config", "service"] } } },
+            },
+            // El paso previo renueva la sesión por un servicio y nada más: no lee la base,
+            // no corre la guarda y no es el control (TRD §4.2 y §9.2).
+            {
+              from: { file: { categories: "proxy" } },
+              allow: { to: { element: { type: "service" } } },
             },
             // Lectura estricta de la tabla: la entrada y los trabajos solo ven servicios.
             // Si una pantalla necesita un tipo del dominio, el servicio lo reexporta.
@@ -416,7 +475,12 @@ export default defineConfig([
     files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noSentrySdk] }],
-      "no-restricted-syntax": ["error", ...noSentrySdkLoading],
+      "no-restricted-syntax": [
+        "error",
+        ...noSentrySdkLoading,
+        ...noRequestHeadersLoading,
+        ...noUnnamedLoading,
+      ],
     },
   },
   {
@@ -425,6 +489,31 @@ export default defineConfig([
     files: ["**/src/adapters/sentry/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noDatabaseClient], paths: noOwnRequire }],
+    },
+  },
+  {
+    // `next/headers` en un solo archivo. Va con la regla de TypeScript, que es otra regla
+    // que `no-restricted-imports`: así no hay que repetirla en cada bloque de capa, que se
+    // reemplazan entre sí.
+    //
+    // La misma regla guarda otra puerta: los clientes de Auth, que no salen del adaptador
+    // de la base. Los dos bloques de abajo son sus dos excepciones, y como un bloque
+    // posterior reemplaza la regla, cada uno repite lo que sí le toca.
+    files: ["**/src/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noRequestHeaders, noAuthClient] }],
+    },
+  },
+  {
+    files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noRequestHeaders] }],
+    },
+  },
+  {
+    files: ["**/src/app/_lib/request-context.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noAuthClient] }],
     },
   },
   {
