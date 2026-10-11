@@ -18,6 +18,12 @@ export type ClientIp =
        * prefijo porque una sola conexión doméstica tiene 2^64 direcciones a su disposición.
        */
       key: string;
+      /**
+       * La dirección en una sola forma: la IPv4 en decimal, o los ocho grupos de la IPv6 sin
+       * ceros de más y sin abreviar. Es la que se guarda como evidencia de un consentimiento
+       * (`consents.ip`), no la que se usa para contar.
+       */
+      address: string;
     }
   | { kind: "unknown"; reason: "untrusted_proxy" | "absent" | "malformed" };
 
@@ -39,7 +45,9 @@ function parseIpv4(text: string): number | null {
   return value;
 }
 
-const ipv4Key = (value: number) => `v4:${[24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join(".")}`;
+const ipv4Text = (value: number) => [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join(".");
+
+const ipv4 = (value: number): ClientIp => ({ kind: "ip", key: `v4:${ipv4Text(value)}`, address: ipv4Text(value) });
 
 /** Los ocho grupos de la dirección, o nulo. */
 function parseIpv6(text: string): number[] | null {
@@ -76,20 +84,15 @@ export function resolveClientIp(
   if (realIp === null || realIp === undefined || realIp === "") return { kind: "unknown", reason: "absent" };
 
   const v4 = parseIpv4(realIp);
-  if (v4 !== null) return { kind: "ip", key: ipv4Key(v4) };
+  if (v4 !== null) return ipv4(v4);
 
   const groups = parseIpv6(realIp);
   if (groups === null) return { kind: "unknown", reason: "malformed" };
 
   // Una IPv4 escrita dentro de una IPv6 (`::ffff:a.b.c.d`) es esa IPv4: misma clave.
   if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
-    return { kind: "ip", key: ipv4Key(groups.slice(6).reduce((value, group) => value * 0x10000 + group, 0)) };
+    return ipv4(groups.slice(6).reduce((value, group) => value * 0x10000 + group, 0));
   }
-  return {
-    kind: "ip",
-    key: `v6:${groups
-      .slice(0, 4)
-      .map((group) => group.toString(16))
-      .join(":")}::/64`,
-  };
+  const hex = groups.map((group) => group.toString(16));
+  return { kind: "ip", key: `v6:${hex.slice(0, 4).join(":")}::/64`, address: hex.join(":") };
 }
