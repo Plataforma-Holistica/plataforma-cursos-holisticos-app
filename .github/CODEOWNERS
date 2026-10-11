@@ -9,8 +9,9 @@
 
 # Control de acceso
 /src/domain/access/        @SerchFGA @plataformaholisticadev
+# Los servicios de cuenta: la guarda de sesión aplicada, entrar y salir
 /src/services/account/     @SerchFGA @plataformaholisticadev
-# El paso previo de cada petición: renueva la sesión y decide a dónde se manda
+# El paso previo de cada petición: solo renueva la sesión. No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
 # La configuración de Auth y sus correos: confirmación, vigencias, contraseña mínima
 /supabase/config.toml      @SerchFGA @plataformaholisticadev
