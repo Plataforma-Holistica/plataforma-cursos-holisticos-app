@@ -82,13 +82,23 @@ describe("los cubos de los contadores", () => {
     ["signUpIp", "signup:ip:"],
     ["recoverIp", "recover:ip:"],
     ["signUpMail", "mail:signup:"],
+    ["signUpMailLast", "mail:signup:last:"],
     ["recoverMail", "mail:recover:"],
+    ["recoverMailLast", "mail:recover:last:"],
   ] as const)("%s empieza con %s y sigue con la huella", (name, prefix) => {
     expect(buckets[name](print)).toBe(`${prefix}${print.hex}`);
   });
 
+  it("la marca de un enlace ya canjeado lleva el identificador de la cuenta, no una huella", () => {
+    const id = "a0000000-0000-4000-8000-00000000000a";
+    expect(buckets.signUpRedeemed(id)).toBe(`signup:redeemed:${id}`);
+  });
+
   it("cada uso tiene su cubo: la misma huella no comparte contador entre dos usos", () => {
-    const names = Object.values(buckets).map((bucket) => bucket(print));
+    const { signUpRedeemed, ...byPrint } = buckets;
+    const names = [...Object.values(byPrint).map((bucket) => bucket(print)), signUpRedeemed(print.hex)];
     expect(new Set(names).size).toBe(names.length);
+    // Y ningún cubo es el comienzo de otro: el de «último correo» no se confunde con el de la hora.
+    for (const name of names) expect(names.filter((other) => other.startsWith(name))).toEqual([name]);
   });
 });

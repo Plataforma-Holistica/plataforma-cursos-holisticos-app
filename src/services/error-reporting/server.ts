@@ -21,6 +21,12 @@ const FAILURES = {
   session_cookie_not_written: "Una entrada no pudo escribir su cookie: se llamó desde donde no se pueden escribir.",
   sign_in_settle_failed: "Una entrada no se pudo cerrar en el freno: su intento quedó contado como fallo.",
   client_ip_unknown: "Fuera de local no se supo de qué dirección viene una petición: todas comparten un tope.",
+  mail_limits_unavailable: "Los topes de correo no pudieron leer sus parámetros o sus cuentas: nadie puede pedir registro ni recuperación.",
+  registration_mail_failed: "El servidor de identidad no mandó un correo de registro que se le pidió.",
+  recovery_mail_failed: "El servidor de identidad no mandó un correo de recuperación que se le pidió.",
+  registration_incomplete: "Un registro se quedó a medias después de gastar su enlace: esa persona tiene que recuperar su contraseña.",
+  recovery_incomplete: "Una recuperación se quedó a medias después de gastar su enlace: esa persona tiene que pedir otro.",
+  recovery_notice_not_sent: "Una contraseña se recuperó por el camino de administración: el aviso de cambio de contraseña no salió.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;

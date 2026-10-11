@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light only">
+    <title>Confirma tu correo</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#FAF7F2;color:#1F1B17;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;">
+    <div style="display:none;max-height:0;overflow:hidden;">Abre el enlace para elegir tu contraseña y terminar tu registro.</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAF7F2;">
+      <tr>
+        <td align="center" style="padding:24px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
+            <tr>
+              <td style="padding:0 0 24px 0;font-size:18px;font-weight:700;color:#1F1B17;">La Plataforma</td>
+            </tr>
+            <tr>
+              <td style="padding:0 0 24px 0;">
+                <h1 style="margin:0 0 16px 0;font-size:24px;line-height:1.3;font-weight:700;color:#1F1B17;">Confirma tu correo</h1>
+                <p style="margin:0 0 16px 0;">Alguien registró esta dirección en La Plataforma. Si fuiste tú, confirma tu correo para elegir tu contraseña y terminar tu registro.</p>
+                <p style="margin:0 0 24px 0;">
+                  <a href="{{ .SiteURL }}/verificar/{{ .TokenHash }}" style="display:inline-block;background-color:#1F1B17;color:#FAF7F2;text-decoration:none;font-weight:700;line-height:48px;height:48px;padding:0 24px;border-radius:8px;">Confirmar mi correo</a>
+                </p>
+                <p style="margin:0 0 8px 0;color:#5A5249;">Si el botón no funciona, copia esta dirección:</p>
+                <p style="margin:0 0 16px 0;word-break:break-all;"><a href="{{ .SiteURL }}/verificar/{{ .TokenHash }}" style="color:#3F4488;">{{ .SiteURL }}/verificar/{{ .TokenHash }}</a></p>
+                <p style="margin:0 0 16px 0;">El enlace dura 1 hora y sirve una vez.</p>
+                <p style="margin:0 0 16px 0;">Si no te registraste, no hagas nada: sin este enlace nadie puede usar tu correo para entrar.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 0 0 0;border-top:1px solid #D9D1C5;font-size:16px;color:#5A5249;">
+                <p style="margin:0 0 8px 0;">Recibes este correo porque alguien escribió esta dirección al registrarse en La Plataforma.</p>
+                <p style="margin:0;"><a href="{{ .SiteURL }}/ayuda" style="color:#3F4488;">Ayuda</a></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

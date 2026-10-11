@@ -50,19 +50,23 @@ export function failureFromResponse(status: number, body: unknown): AuthFailure 
 const codeOf = (failure: AuthFailure): string | null =>
   failure.kind === "rejected" ? failure.code : null;
 
-const SIGN_UP = new Map<string, "mail_rate_limited" | "signup_disabled" | "rejected" | "misconfigured">([
+const SIGN_UP = new Map<string, "existing_account" | "mail_rate_limited" | "signup_disabled" | "rejected">([
   ["over_email_send_rate_limit", "mail_rate_limited"],
   ["signup_disabled", "signup_disabled"],
   ["email_provider_disabled", "signup_disabled"],
   ["validation_failed", "rejected"],
   ["email_address_invalid", "rejected"],
-  // Con las dos confirmaciones prendidas Auth no dice «ya existe». Si lo dice, alguien
-  // apagó una: la respuesta delataría qué correos tienen cuenta.
-  ["user_already_exists", "misconfigured"],
-  ["email_exists", "misconfigured"],
+  // El registro es una invitación, y a quien ya tiene cuenta Auth no lo invita: lo dice.
+  // Esa respuesta no sale del servidor, porque delata qué correos tienen cuenta.
+  ["user_already_exists", "existing_account"],
+  ["email_exists", "existing_account"],
 ]);
 
-export type SignUpFailure = "mail_rate_limited" | "signup_disabled" | "rejected" | "misconfigured" | "unknown";
+/**
+ * Por qué una invitación no salió. `existing_account` no es una falla: el correo ya tiene
+ * una cuenta confirmada y no se le manda nada.
+ */
+export type SignUpFailure = "existing_account" | "mail_rate_limited" | "signup_disabled" | "rejected" | "unknown";
 
 export function signUpFailure(failure: AuthFailure): SignUpFailure {
   return SIGN_UP.get(codeOf(failure) ?? "") ?? "unknown";
@@ -95,6 +99,16 @@ const PASSWORD_REJECTED = new Set([
   "reauthentication_needed",
   "insufficient_aal",
 ]);
+
+/**
+ * Auth no guardó la contraseña con la sesión del canje por algo que no es culpa de la
+ * contraseña ni de la cuenta: la sesión ya no existe (alguien las cerró todas), o la
+ * contraseña es la que ya tenía. Solo con estos dos se pasa al camino de administración.
+ */
+export function recoveryNeedsAdministration(failure: AuthFailure): boolean {
+  const code = codeOf(failure);
+  return code === "session_not_found" || code === "same_password";
+}
 
 /** El resultado de pedirle a Auth que fije una contraseña, cuando no fue un éxito. */
 export function passwordSetFailure(failure: AuthFailure): Exclude<PasswordSetResult, "ok"> {

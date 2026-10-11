@@ -13,7 +13,7 @@ import {
 } from "@/domain/access/login-throttle";
 import { PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
 import { HOUR_SECONDS, windowStart } from "@/domain/access/rate-window";
-import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
+import { reportFailure } from "@/services/error-reporting/server";
 
 import {
   authRefusal,
@@ -27,8 +27,10 @@ import {
   type SessionCheck,
   type SignInResult,
 } from "./admission";
+import { stagingJar, type AccountDependencies } from "./deps";
 import { buckets, fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
+import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
 import {
   countHit,
@@ -43,35 +45,30 @@ import {
   writePair,
   type PairKeys,
 } from "./store";
-import { atLeast, SIGN_IN_FLOOR_MS, type Timing } from "./timing";
+import { atLeast, SIGN_IN_FLOOR_MS } from "./timing";
 
-// Los servicios de cuenta (RF-102; TRD §9.2 y §9.9): la guarda de sesión aplicada, entrar y
-// salir. Reciben de quien tiene la petición un tarro de cookies y de dónde viene.
+// Los servicios de cuenta (RF-101, RF-102, RF-103; TRD §9.2 y §9.9). Aquí están la guarda
+// de sesión aplicada, entrar y salir; registrarse, recuperar la contraseña y completar una
+// cuenta viven en `onboarding.ts` y se arman aquí. Reciben de quien tiene la petición un
+// tarro de cookies y de dónde viene.
 //
 // Este archivo llega a la base. `session.ts`, que es lo que importa el paso previo, no lo
 // importa: quien renueva la sesión antes de cada petición no debe poder abrir una
 // transacción.
 
 export type { PendingAccount, SessionCheck, SignInResult } from "./admission";
+export type { AccountDependencies, AuthPort } from "./deps";
+export type { AccountForm, FieldErrors, RegistrationForm } from "./forms";
+export type {
+  AccountCompletion,
+  AccountFormFacts,
+  LegalText,
+  MailRequestResult,
+  RecoveryCompletion,
+  RegistrationCompletion,
+} from "./onboarding";
 export type { RequestOrigin } from "./origin";
 export type { CookieJar, CookieOptions, CookieReader };
-
-/** Lo que estos servicios usan del adaptador de Auth. */
-export type AuthPort = Pick<typeof adapter, "signIn" | "signOut" | "readSession">;
-
-export interface AccountDependencies {
-  auth: AuthPort;
-  /** Hay delante un alojamiento que pone la cabecera de la dirección y pisa la de quien pide. */
-  proxyTrusted: () => boolean;
-  /**
-   * Corre en local. Ahí un borrador (versión 0) vale como texto legal vigente, y no saber
-   * de qué dirección viene una petición es lo normal: nadie pone la cabecera.
-   */
-  isLocal: () => boolean;
-  /** El reloj y la espera del piso de tiempo de respuesta. */
-  timing: Timing | undefined;
-  report: (code: FailureCode) => Promise<void>;
-}
 
 interface OpenedAttempt {
   decision: SignInDecision;
@@ -83,21 +80,6 @@ interface OpenedAttempt {
 
 const utf8 = new TextEncoder();
 
-/** Un tarro que solo recuerda lo que se le escribe: la cookie no llega al navegador. */
-function stagingJar(): CookieJar & { writes: { name: string; value: string; options: CookieOptions }[] } {
-  const values = new Map<string, string>();
-  const writes: { name: string; value: string; options: CookieOptions }[] = [];
-  return {
-    writes,
-    get: (name) => values.get(name),
-    set(name, value, options) {
-      writes.push({ name, value, options });
-      if (options.maxAge === 0) values.delete(name);
-      else values.set(name, value);
-    },
-  };
-}
-
 export function createAccountServices(overrides: Partial<AccountDependencies> = {}) {
   const deps: AccountDependencies = {
     auth: adapter,
@@ -105,6 +87,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     isLocal: () => getEnv().APP_ENV === "local",
     timing: undefined,
     report: reportFailure,
+    defer: (work) => work(),
     ...overrides,
   };
   const { auth } = deps;
@@ -303,9 +286,21 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     return auth.signOut(jar);
   }
 
-  return { checkSession, signIn, signOut };
+  return { checkSession, signIn, signOut, ...createOnboarding(deps, { checkSession, admit }) };
 }
 
 const services = createAccountServices();
 
-export const { checkSession, signIn, signOut } = services;
+// `requestRegistration` y `requestRecovery` no salen ya armados a propósito: sin un
+// `defer` que mande la llamada a Auth detrás de la respuesta, el tiempo que tarda delata si
+// el correo tiene cuenta. Quien tiene la petición arma los suyos con `createAccountServices`
+// y le pasa lo que su plataforma dé para eso.
+export const {
+  checkSession,
+  signIn,
+  signOut,
+  accountFormFacts,
+  completeRegistration,
+  completeRecovery,
+  completeAccount,
+} = services;

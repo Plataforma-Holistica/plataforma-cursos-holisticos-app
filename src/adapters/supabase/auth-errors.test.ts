@@ -12,6 +12,7 @@ import {
   failureFromResponse,
   failureFromSdk,
   passwordSetFailure,
+  recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
   sessionLostOnRefresh,
@@ -99,8 +100,8 @@ describe("registrar", () => {
     ["email_provider_disabled", "signup_disabled"],
     ["validation_failed", "rejected"],
     ["email_address_invalid", "rejected"],
-    ["user_already_exists", "misconfigured"],
-    ["email_exists", "misconfigured"],
+    ["user_already_exists", "existing_account"],
+    ["email_exists", "existing_account"],
   ])("%s es %s", (code, expected) => {
     expect(signUpFailure(rejected(code))).toBe(expected);
   });
@@ -151,6 +152,32 @@ describe("fijar una contraseña", () => {
 
   it.each(strangers)("lo que no reconoce no es un éxito ni un rechazo: %j", (failure) => {
     expect(passwordSetFailure(failure)).toBe("unknown");
+  });
+});
+
+describe("recuperar: cuándo se pasa al camino de administración", () => {
+  it.each(["session_not_found", "same_password"])("con %s, sí", (code) => {
+    expect(recoveryNeedsAdministration(rejected(code, 403))).toBe(true);
+  });
+
+  // Ni lo que es culpa de la contraseña o de la cuenta, ni lo que no se supo: por
+  // administración se saltaría justo la revisión que falló.
+  it.each([
+    "weak_password",
+    "validation_failed",
+    "bad_jwt",
+    "session_expired",
+    "user_not_found",
+    "user_banned",
+    "reauthentication_needed",
+    "insufficient_aal",
+    "over_request_rate_limit",
+  ])("con %s, no", (code) => {
+    expect(recoveryNeedsAdministration(rejected(code, 403))).toBe(false);
+  });
+
+  it.each(strangers)("ni con lo que no se reconoce: %j", (failure) => {
+    expect(recoveryNeedsAdministration(failure)).toBe(false);
   });
 });
 

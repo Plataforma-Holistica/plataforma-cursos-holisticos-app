@@ -74,8 +74,19 @@ async function recovering(account: KnownUser): Promise<RedeemedLink> {
 /** Llega cuando ya llegó todo lo que se pidió antes: sirve para afirmar que algo no llegó. */
 async function sentinel(): Promise<void> {
   const email = newEmail();
-  await authVisitor().auth.signUp({ email, password: `P-${randomUUID()}` });
+  await authAdmin().auth.admin.inviteUserByEmail(email);
   await waitForMails(email, 1);
+}
+
+/** Cómo quedó guardada la cuenta de un correo en Auth. */
+async function stored(email: string) {
+  const rows = await ownerQuery<{ has_password: boolean; confirmed: boolean; meta: Record<string, unknown> }>(
+    `select coalesce(encrypted_password, '') <> '' as has_password, email_confirmed_at is not null as confirmed,
+            raw_user_meta_data as meta
+     from auth.users where email = $1`,
+    [email],
+  );
+  return rows[0];
 }
 
 const password = () => `P-${randomUUID()}`;
@@ -85,69 +96,69 @@ afterAll(async () => {
 });
 
 describe("pedir el registro", () => {
-  it("un correo nuevo recibe el enlace y no queda ninguna sesión", async () => {
+  it("un correo nuevo recibe el enlace, y la cuenta nace sin contraseña, sin confirmar y sin sesión", async () => {
     const email = newEmail();
     expect(await requestSignUp(email)).toBe("accepted");
-    await waitForMails(email, 1);
+    expect((await waitForMails(email, 1)).map((mail) => mail.subject)).toEqual(["Confirma tu correo"]);
+    expect(await stored(email)).toEqual({ has_password: false, confirmed: false, meta: {} });
     expect(await sessionCount(await userIdOf(email))).toBe(0);
   });
 
-  it("un correo que ya tiene cuenta contesta igual y no recibe nada", async () => {
+  it("sin contraseña no hay con qué entrar: ni vacía ni inventada", async () => {
+    const email = newEmail();
+    expect(await requestSignUp(email)).toBe("accepted");
+    for (const guess of ["", "cualquiera-123"]) {
+      const tried = await authVisitor().auth.signInWithPassword({ email, password: guess });
+      expect(tried.data.session).toBeNull();
+    }
+    expect(await sessionCount(await userIdOf(email))).toBe(0);
+  });
+
+  it("un correo que ya tiene cuenta lo dice aparte, no recibe nada y su cuenta no cambia", async () => {
     const existing = await user();
-    expect(await requestSignUp(existing.email)).toBe("accepted");
+    expect(await requestSignUp(existing.email)).toBe("existing_account");
     await sentinel();
     expect(await mailsTo(existing.email)).toEqual([]);
     // La contraseña de la cuenta no cambió por haberla registrado otra vez.
     expect((await signIn(memoryJar(), existing.email, existing.password)).ok).toBe(true);
   });
 
-  it("pedirlo dos veces seguidas para un correo sin confirmar da el límite de correos", async () => {
+  it("pedirlo otra vez para un correo sin confirmar manda otro enlace, y el anterior deja de servir", async () => {
+    // Auth no pone espera entre dos invitaciones: la espera es del servicio (TRD §9.9).
     const email = newEmail();
     expect(await requestSignUp(email)).toBe("accepted");
-    expect(await requestSignUp(email)).toBe("mail_rate_limited");
+    const first = tokenHashIn(await lastMailTo(email), "verificar");
+    expect(await requestSignUp(email)).toBe("accepted");
+    const second = tokenHashIn(await lastMailTo(email, 2), "verificar");
+
+    expect(second).not.toBe(first);
+    expect(await redeemSignupLink(first)).toEqual({ ok: false, reason: "invalid_or_expired" });
+    expect((await redeemSignupLink(second)).ok).toBe(true);
   });
 
-  it("la contraseña que usa no la conoce nadie: registrar no deja entrar", async () => {
+  it("a Auth solo le manda el correo, por la puerta de las invitaciones: ni contraseña ni datos", async () => {
     const email = newEmail();
-    const seen: string[] = [];
-    const spy = failingFetch(/^$/, networkDown);
+    const seen: { path: string; body: string }[] = [];
     const auth = createAuth({
       fetch: (input, init) => {
-        if (typeof init?.body === "string") seen.push(init.body);
-        return spy.fetch(input, init);
-      },
-    });
-    expect(await auth.requestSignUp(email)).toBe("accepted");
-    const sent = JSON.parse(seen[0] ?? "{}") as { password?: string };
-    // 32 bytes aleatorios en base64url: 43 caracteres, dentro del máximo de Auth.
-    expect(sent.password).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(Buffer.byteLength(sent.password ?? "")).toBeLessThanOrEqual(PASSWORD_MAX_BYTES);
-
-    const again = createAuth({
-      fetch: (input, init) => {
-        if (typeof init?.body === "string") seen.push(init.body);
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        seen.push({ path: url.pathname, body: typeof init?.body === "string" ? init.body : "" });
         return fetch(input, init);
       },
     });
-    await again.requestSignUp(newEmail());
-    const other = JSON.parse(seen[1] ?? "{}") as { password?: string };
-    expect(other.password).not.toBe(sent.password);
+    expect(await auth.requestSignUp(email)).toBe("accepted");
+    expect(seen.map((call) => call.path)).toEqual(["/auth/v1/invite"]);
+    expect(JSON.parse(seen[0]?.body ?? "{}")).toEqual({ email });
   });
 
-  it("si Auth entrega una sesión al registrar, la cierra y lo dice", async () => {
-    // Solo pasa con la confirmación de correo apagada: se simula la respuesta.
-    const existing = await user();
-    const session = await authVisitor().auth.signInWithPassword({
-      email: existing.email,
-      password: existing.password,
-    });
-    expect(await sessionCount(existing.id)).toBe(1);
-    const fake = failingFetch(/\/signup/, () => Response.json(session.data.session));
-    const auth = createAuth({ fetch: fake.fetch });
-
-    expect(await auth.requestSignUp(existing.email)).toBe("misconfigured");
-    expect(fake.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
-    expect(await sessionCount(existing.id)).toBe(0);
+  it("el límite de correos de Auth sale como tal", async () => {
+    const limited = failingFetch(/\/invite/, () =>
+      Response.json(
+        { code: "over_email_send_rate_limit", message: "x" },
+        { status: 429, headers: { "x-supabase-api-version": "2024-01-01" } },
+      ),
+    );
+    expect(await createAuth({ fetch: limited.fetch }).requestSignUp(newEmail())).toBe("mail_rate_limited");
   });
 
   it("sin respuesta de Auth, no se supo", async () => {
@@ -235,8 +246,47 @@ describe("canjear el enlace de verificación", () => {
     const hash = tokenHashIn(await lastMailTo(email), "verificar");
     const blind = createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) });
 
-    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "unknown" });
+    // El enlace ya se gastó, y quien llama lo tiene que saber: reintentar con él no sirve.
+    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "spent" });
     expect(await sessionCount(await userIdOf(email))).toBe(0);
+    expect(await redeemSignupLink(hash)).toEqual({ ok: false, reason: "invalid_or_expired" });
+  });
+
+  it("si algo falla después de que Auth canjeó, el enlace se da por gastado y su sesión se cierra", async () => {
+    // Un error cualquiera al revisar la sesión, que no es «no hay claves».
+    const first = newEmail();
+    await requestSignUp(first);
+    const broken = createAuth({ inspectToken: () => Promise.reject(new Error("falla inesperada")) });
+    expect(await broken.redeemSignupLink(tokenHashIn(await lastMailTo(first), "verificar"))).toEqual({
+      ok: false,
+      reason: "spent",
+    });
+    expect(await sessionCount(await userIdOf(first))).toBe(0);
+
+    // Unos metadatos que no dejan usar la sesión, y que no se pudieron borrar.
+    const second = newEmail();
+    await requestSignUp(second);
+    const hash = tokenHashIn(await lastMailTo(second), "verificar");
+    await authAdmin().auth.admin.updateUserById(await userIdOf(second), { user_metadata: { relleno: "x".repeat(6_000) } });
+    const down = failingFetch(/\/admin\//, networkDown);
+    const stuck = createAuth({ fetch: down.fetch });
+    expect(await stuck.redeemSignupLink(hash)).toEqual({ ok: false, reason: "spent" });
+    // Esa sesión no se alcanza a cerrar: su token es tan largo que ni llega a Auth en una
+    // cabecera. Nadie tiene sus tokens, y la borra la recuperación, que es la salida.
+    expect(down.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
+
+    // Un canje que contesta con sesión pero sin decir de quién es.
+    const account = await user();
+    const real = await authVisitor().auth.signInWithPassword({ email: account.email, password: account.password });
+    const session = real.data.session;
+    if (!session) throw new Error("La persona de prueba no entró.");
+    const nameless = failingFetch(/\/verify/, () => Response.json({ ...session, user: null }));
+    expect(await createAuth({ fetch: nameless.fetch }).redeemSignupLink("a".repeat(56))).toEqual({
+      ok: false,
+      reason: "spent",
+    });
+    expect(nameless.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
+    expect(await sessionCount(account.id)).toBe(0);
   });
 
   it("si la sesión que devuelve el canje no es de la cuenta que dice, no se usa y se cierra", async () => {
@@ -253,7 +303,7 @@ describe("canjear el enlace de verificación", () => {
     );
     const auth = createAuth({ fetch: mismatched.fetch });
 
-    expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "unknown" });
+    expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "spent" });
     expect(mismatched.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
     expect(await sessionCount(account.id)).toBe(0);
   });
@@ -319,27 +369,23 @@ describe("fijar la primera contraseña", () => {
     expect(await auth.setFirstPassword(redeemed, password())).toBe("unknown");
   });
 
-  it("borra los metadatos que alguien haya escrito al dar de alta el correo, y la sesión cabe", async () => {
-    // Quien da de alta un correo ajeno directo en Auth puede colgarle lo que quiera.
+  it("borra los metadatos que la cuenta traiga colgados, y la sesión cabe", async () => {
+    // Desde fuera ya no se puede dar de alta un correo, pero una cuenta que venga de antes
+    // puede traer lo que sea: se le cuelga por administración, que es como se ve en la base.
     const email = newEmail();
-    const planted = await authVisitor().auth.signUp({
-      email,
-      password: password(),
-      options: { data: { relleno: "x".repeat(6_000), otro: { anidado: true } } },
+    expect(await requestSignUp(email)).toBe("accepted");
+    const hash = tokenHashIn(await lastMailTo(email), "verificar");
+    const planted = await authAdmin().auth.admin.updateUserById(await userIdOf(email), {
+      user_metadata: { relleno: "x".repeat(6_000), otro: { anidado: true } },
     });
     expect(planted.error).toBeNull();
 
-    const hash = tokenHashIn(await lastMailTo(email), "verificar");
     const result = await redeemSignupLink(hash);
     if (!result.ok) throw new Error("El enlace no se canjeó.");
     const chosen = password();
     expect(await setFirstPassword(result.redeemed, chosen)).toBe("ok");
 
-    const stored = await ownerQuery<{ meta: Record<string, unknown> }>(
-      "select raw_user_meta_data as meta from auth.users where email = $1",
-      [email],
-    );
-    expect(stored[0]?.meta).toEqual({});
+    expect((await stored(email))?.meta).toEqual({});
 
     const jar = memoryJar();
     expect((await signIn(jar, email, chosen)).ok).toBe(true);
@@ -349,15 +395,23 @@ describe("fijar la primera contraseña", () => {
 
   it("borra también unos metadatos pequeños, que no estorbaban", async () => {
     const email = newEmail();
-    await authVisitor().auth.signUp({ email, password: password(), options: { data: { apodo: "x".repeat(200) } } });
-    const result = await redeemSignupLink(tokenHashIn(await lastMailTo(email), "verificar"));
+    expect(await requestSignUp(email)).toBe("accepted");
+    const hash = tokenHashIn(await lastMailTo(email), "verificar");
+    await authAdmin().auth.admin.updateUserById(await userIdOf(email), { user_metadata: { apodo: "x".repeat(200) } });
+    const result = await redeemSignupLink(hash);
     if (!result.ok) throw new Error("El enlace no se canjeó.");
     expect(await setFirstPassword(result.redeemed, password())).toBe("ok");
-    const stored = await ownerQuery<{ meta: Record<string, unknown> }>(
-      "select raw_user_meta_data as meta from auth.users where email = $1",
-      [email],
-    );
-    expect(stored[0]?.meta).toEqual({});
+    expect((await stored(email))?.meta).toEqual({});
+  });
+
+  it("la contraseña temporal que Auth pone al canjear una invitación no sobrevive", async () => {
+    // Al canjear, Auth le pone a la cuenta invitada una contraseña al azar que nadie ve.
+    const { email, redeemed } = await registered();
+    expect((await stored(email))?.has_password).toBe(true);
+    const before = await ownerQuery<{ hash: string }>("select encrypted_password as hash from auth.users where email = $1", [email]);
+    expect(await setFirstPassword(redeemed, password())).toBe("ok");
+    const after = await ownerQuery<{ hash: string }>("select encrypted_password as hash from auth.users where email = $1", [email]);
+    expect(after[0]?.hash).not.toBe(before[0]?.hash);
   });
 
   it("sin ese borrado, la sesión de esa cuenta no cabría en la cookie", async () => {
@@ -396,7 +450,7 @@ describe("recuperar la contraseña", () => {
     expect(await sessionCount(account.id)).toBe(2);
 
     const chosen = password();
-    expect(await setRecoveredPassword(redeemed, chosen)).toBe("ok");
+    expect(await setRecoveredPassword(redeemed, chosen)).toEqual({ result: "ok", via: "session" });
     // Auth cerró la otra y dejó la del canje.
     expect(await sessionCount(account.id)).toBe(1);
     expect((await lastMailTo(account.email, 2)).subject).toBe("Tu contraseña cambió");
@@ -410,72 +464,134 @@ describe("recuperar la contraseña", () => {
     expect((await signIn(memoryJar(), account.email, chosen)).ok).toBe(true);
   });
 
-  it("con la contraseña que ya tenía, Auth no cierra nada: lo cierra closeAllSessions", async () => {
+  it("con la contraseña que ya tenía, la fija por administración: no queda ninguna sesión y el aviso no sale", async () => {
+    // Por su sesión Auth contesta «es la misma» y no cierra nada: las sesiones de antes
+    // seguirían vivas. Por administración la vuelve a guardar y las borra todas.
     const account = await user();
     await authVisitor().auth.signInWithPassword({ email: account.email, password: account.password });
     const redeemed = await recovering(account);
-
-    expect(await setRecoveredPassword(redeemed, account.password)).toBe("same_password");
     expect(await sessionCount(account.id)).toBe(2);
-    expect(await closeAllSessions(redeemed)).toBe("closed");
+
+    expect(await setRecoveredPassword(redeemed, account.password)).toEqual({ result: "ok", via: "administration" });
+
     expect(await sessionCount(account.id)).toBe(0);
+    expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(true);
+    await sentinel();
+    expect((await mailsTo(account.email)).map((mail) => mail.subject)).toEqual(["Cambia tu contraseña"]);
+    expect(await closeAllSessions(redeemed)).toBe("closed");
+  });
+
+  it("si alguien cerró la sesión del canje antes de guardar, la fija por administración", async () => {
+    // Quien tiene una sesión de la cuenta puede cerrarlas todas en bucle, y con ellas la
+    // del canje: sin este camino, la dueña del buzón no podría recuperar nunca.
+    const account = await user();
+    const intruder = authVisitor();
+    await intruder.auth.signInWithPassword({ email: account.email, password: account.password });
+    const redeemed = await recovering(account);
+    expect((await intruder.auth.signOut({ scope: "global" })).error).toBeNull();
+    expect(await sessionCount(account.id)).toBe(0);
+
+    const chosen = password();
+    expect(await setRecoveredPassword(redeemed, chosen)).toEqual({ result: "ok", via: "administration" });
+
+    expect(await sessionCount(account.id)).toBe(0);
+    expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(false);
+    expect((await signIn(memoryJar(), account.email, chosen)).ok).toBe(true);
+  });
+
+  it("por administración no pasa una contraseña que Auth rechaza, ni se intenta si el rechazo fue otro", async () => {
+    // Débil: Auth lo dice por la sesión, y ahí se queda.
+    const weak = await recovering(await user());
+    const spy = recordingFetch();
+    expect(await createAuth({ fetch: spy.fetch }).setRecoveredPassword(weak, "a".repeat(PASSWORD_MIN_LENGTH - 1))).toEqual({
+      result: "weak_password",
+      via: "session",
+    });
+    expect(spy.calls.some((path) => path.includes("/admin/"))).toBe(false);
+
+    // Sesión cerrada y contraseña débil: el segundo camino la rechaza igual.
+    const account = await user();
+    const intruder = authVisitor();
+    await intruder.auth.signInWithPassword({ email: account.email, password: account.password });
+    const redeemed = await recovering(account);
+    await intruder.auth.signOut({ scope: "global" });
+    expect(await setRecoveredPassword(redeemed, "a".repeat(PASSWORD_MIN_LENGTH - 1))).toEqual({
+      result: "weak_password",
+      via: "administration",
+    });
+    expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(true);
+  });
+
+  it("si el segundo camino no contesta, no se supo", async () => {
+    const account = await user();
+    const redeemed = await recovering(account);
+    const down = createAuth({ fetch: failingFetch(/\/admin\//, networkDown).fetch });
+    expect(await down.setRecoveredPassword(redeemed, account.password)).toEqual({
+      result: "unknown",
+      via: "administration",
+    });
   });
 
   it("no acepta un canje de verificación, y un canje alcanza para un solo intento", async () => {
     const { redeemed: fromSignup } = await registered();
-    expect(await setRecoveredPassword(fromSignup, password())).toBe("rejected");
+    expect(await setRecoveredPassword(fromSignup, password())).toEqual({ result: "rejected", via: "session" });
 
     const redeemed = await recovering(await user());
-    expect(await setRecoveredPassword(redeemed, password())).toBe("ok");
-    expect(await setRecoveredPassword(redeemed, password())).toBe("rejected");
+    expect(await setRecoveredPassword(redeemed, password())).toEqual({ result: "ok", via: "session" });
+    const spy = recordingFetch();
+    expect(await createAuth({ fetch: spy.fetch }).setRecoveredPassword(redeemed, password())).toEqual({
+      result: "rejected",
+      via: "session",
+    });
+    expect(spy.calls).toEqual([]);
   });
 
-  it("un canje ya cerrado no fija ninguna contraseña", async () => {
+  it("un canje ya cerrado no fija ninguna contraseña, por ningún camino", async () => {
     const account = await user();
     const redeemed = await recovering(account);
     expect(await closeAllSessions(redeemed)).toBe("closed");
     // Ni siquiera se le pregunta a Auth.
     const spy = recordingFetch();
-    expect(await createAuth({ fetch: spy.fetch }).setRecoveredPassword(redeemed, password())).toBe("rejected");
+    expect(await createAuth({ fetch: spy.fetch }).setRecoveredPassword(redeemed, password())).toEqual({
+      result: "rejected",
+      via: "session",
+    });
     expect(spy.calls).toEqual([]);
     expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(true);
   });
 
-  it("recuperar confirma el correo de una cuenta que no lo había confirmado, y borra sus metadatos", async () => {
+  it("recuperar confirma el correo de una cuenta invitada que no abrió su enlace, y borra sus metadatos", async () => {
     const email = newEmail();
-    await authVisitor().auth.signUp({
-      email,
-      password: password(),
-      options: { data: { relleno: "x".repeat(6_000) } },
-    });
+    expect(await requestSignUp(email)).toBe("accepted");
     await waitForMails(email, 1);
+    await authAdmin().auth.admin.updateUserById(await userIdOf(email), {
+      user_metadata: { relleno: "x".repeat(6_000) },
+    });
 
     expect(await requestPasswordRecovery(email)).toBe("accepted");
     const hash = tokenHashIn(await lastMailTo(email, 2), "recuperar");
     const result = await redeemRecoveryLink(hash);
     if (!result.ok) throw new Error("El enlace no se canjeó.");
     const chosen = password();
-    expect(await setRecoveredPassword(result.redeemed, chosen)).toBe("ok");
+    expect(await setRecoveredPassword(result.redeemed, chosen)).toEqual({ result: "ok", via: "session" });
 
-    const stored = await ownerQuery<{ meta: Record<string, unknown>; confirmed: boolean }>(
-      "select raw_user_meta_data as meta, email_confirmed_at is not null as confirmed from auth.users where email = $1",
-      [email],
-    );
-    expect(stored[0]).toEqual({ meta: {}, confirmed: true });
+    expect(await stored(email)).toEqual({ has_password: true, meta: {}, confirmed: true });
     await closeAllSessions(result.redeemed);
     expect((await signIn(memoryJar(), email, chosen)).ok).toBe(true);
   });
 
-  it("al recuperar borra también unos metadatos pequeños", async () => {
+  it("al recuperar borra también unos metadatos pequeños, por los dos caminos", async () => {
     const account = await user();
     await authAdmin().auth.admin.updateUserById(account.id, { user_metadata: { apodo: "x".repeat(200) } });
     const redeemed = await recovering(account);
-    expect(await setRecoveredPassword(redeemed, password())).toBe("ok");
-    const stored = await ownerQuery<{ meta: Record<string, unknown> }>(
-      "select raw_user_meta_data as meta from auth.users where id = $1",
-      [account.id],
-    );
-    expect(stored[0]?.meta).toEqual({});
+    expect(await setRecoveredPassword(redeemed, password())).toEqual({ result: "ok", via: "session" });
+    expect((await stored(account.email))?.meta).toEqual({});
+
+    const other = await user();
+    await authAdmin().auth.admin.updateUserById(other.id, { user_metadata: { apodo: "x".repeat(200) } });
+    const again = await recovering(other);
+    expect(await setRecoveredPassword(again, other.password)).toEqual({ result: "ok", via: "administration" });
+    expect((await stored(other.email))?.meta).toEqual({});
   });
 
   it("descartar el canje cierra solo su sesión", async () => {
@@ -487,7 +603,7 @@ describe("recuperar la contraseña", () => {
     expect(await discardRedemption(redeemed)).toBe("closed");
     expect(await sessionCount(account.id)).toBe(1);
     // Y ya no sirve para cambiar nada.
-    expect(await setRecoveredPassword(redeemed, password())).toBe("rejected");
+    expect(await setRecoveredPassword(redeemed, password())).toEqual({ result: "rejected", via: "session" });
   });
 
   it("sin respuesta de Auth, no se supo y no se cerró", async () => {

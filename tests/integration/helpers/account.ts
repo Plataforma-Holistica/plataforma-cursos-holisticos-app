@@ -72,6 +72,36 @@ export async function holdLock(print: Fingerprint): Promise<() => Promise<void>>
   return () => owner.end();
 }
 
+/**
+ * Como `holdProfile`, pero se suelta sola en cuanto el primero que esperaba esa fila se
+ * rindió: el siguiente intento la consigue. `released` termina cuando la soltó, y falla si
+ * nadie llegó a esperarla: así una prueba de «el segundo intento lo logra» no pasa sin
+ * que haya habido un primero que falló.
+ */
+export async function holdProfileUntilFirstGivesUp(userId: string): Promise<{ released: Promise<void> }> {
+  const release = await holdProfile(userId);
+  const watch = async (): Promise<void> => {
+    const deadline = Date.now() + 20_000;
+    let first: string | null = null;
+    try {
+      while (Date.now() < deadline) {
+        const rows = await ownerQuery<{ waiter: string }>(
+          `select pid::text || ' ' || query_start::text as waiter from pg_stat_activity
+           where usename = 'app_service' and wait_event_type = 'Lock' order by query_start limit 1`,
+        );
+        const waiter = rows[0]?.waiter ?? null;
+        if (first === null) first = waiter;
+        else if (waiter !== first) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("Nadie esperó la fila del perfil, o el primero nunca se rindió.");
+    } finally {
+      await release();
+    }
+  };
+  return { released: watch() };
+}
+
 /** Vacía el freno y los contadores: cada caso empieza de cero. */
 export async function clearThrottle(): Promise<void> {
   await ownerQuery("delete from private.login_throttles");
@@ -171,4 +201,117 @@ export async function notedSessions(userId: string): Promise<number> {
     [userId],
   );
   return rows[0]?.n ?? -1;
+}
+
+/** Los cubos del registro de un correo desde una dirección. El cupo de correos va por buzón. */
+export function registrationBuckets(mailbox: string, origin: RequestOrigin) {
+  const print = fingerprint("mailbox", mailbox.toLowerCase());
+  return {
+    ip: buckets.signUpIp(resolveOrigin(origin, true).ip),
+    mail: buckets.signUpMail(print),
+    last: buckets.signUpMailLast(print),
+  };
+}
+
+/** Los de la recuperación. Su cupo va por correo exacto. */
+export function recoveryBuckets(email: string, origin: RequestOrigin) {
+  const print = fingerprint("account", email.toLowerCase());
+  return {
+    ip: buckets.recoverIp(resolveOrigin(origin, true).ip),
+    mail: buckets.recoverMail(print),
+    last: buckets.recoverMailLast(print),
+  };
+}
+
+/** Cuántas filas tiene un cubo, sea cual sea su ventana. */
+export async function bucketRows(bucket: string): Promise<number> {
+  const rows = await ownerQuery<{ n: number }>(
+    "select count(*)::int as n from private.rate_limit_counters where bucket = $1",
+    [bucket],
+  );
+  return rows[0]?.n ?? -1;
+}
+
+/** Atrasa la hora del último correo anotado en un cubo: así pasa la espera sin esperar. */
+export async function ageLastMail(bucket: string, seconds: number): Promise<void> {
+  await ownerQuery(
+    "update private.rate_limit_counters set window_start = window_start - make_interval(secs => $2) where bucket = $1",
+    [bucket, seconds],
+  );
+}
+
+/** Anota un último correo en un cubo, hace `secondsAgo` segundos. */
+export async function seedLastMail(bucket: string, secondsAgo = 0): Promise<void> {
+  await ownerQuery(
+    "insert into private.rate_limit_counters (bucket, window_start, hits) values ($1, clock_timestamp() - make_interval(secs => $2), 1)",
+    [bucket, secondsAgo],
+  );
+}
+
+/** Un parámetro de negocio entero, como lo tiene la base. */
+export async function parameter(key: string): Promise<number> {
+  const rows = await ownerQuery<{ value: number }>("select private.parameter_value($1) as value", [key]);
+  const value = rows[0]?.value;
+  if (typeof value !== "number") throw new Error(`El parámetro ${key} no es un número.`);
+  return value;
+}
+
+/** Los identificadores de los tres textos vigentes que pide una cuenta, por tipo. */
+export async function currentTextIds(): Promise<Record<"terms" | "student_privacy_notice" | "course_history_consent", string>> {
+  const rows = await ownerQuery<{ doc_type: string; id: string }>(
+    `select t.doc_type::text as doc_type, private.current_legal_document(t.doc_type)::text as id
+     from unnest(array['terms', 'student_privacy_notice', 'course_history_consent']::public.legal_doc_type[]) as t (doc_type)`,
+  );
+  const ids = Object.fromEntries(rows.map((row) => [row.doc_type, row.id]));
+  if (rows.length !== 3 || rows.some((row) => !row.id)) throw new Error("Falta un texto legal vigente: corre pnpm db:drafts.");
+  return ids as Record<"terms" | "student_privacy_notice" | "course_history_consent", string>;
+}
+
+export interface ProfileRow {
+  display_name: string | null;
+  adult: boolean;
+  pending: boolean;
+  status: string;
+}
+
+export async function profileOf(userId: string): Promise<ProfileRow | null> {
+  const rows = await ownerQuery<ProfileRow & Record<string, unknown>>(
+    `select display_name, adult_declared_at is not null as adult, password_reset_required as pending, status::text as status
+     from public.profiles where id = $1`,
+    [userId],
+  );
+  return rows[0] ?? null;
+}
+
+export interface ConsentRow {
+  doc_type: string;
+  action: string;
+  origin: string;
+  ip: string | null;
+  user_agent: string | null;
+}
+
+/** Los consentimientos de una cuenta, ordenados por tipo. */
+export async function consentsOf(userId: string): Promise<ConsentRow[]> {
+  return ownerQuery<ConsentRow & Record<string, unknown>>(
+    `select d.doc_type::text as doc_type, c.action::text as action, c.origin, host(c.ip) as ip, c.user_agent
+     from public.consents c join public.legal_documents d on d.id = c.legal_document_id
+     where c.profile_id = $1 order by d.doc_type::text, c.occurred_at`,
+    [userId],
+  );
+}
+
+/**
+ * Toma, desde otra sesión de la base, el candado de la fila de un perfil: lo que el
+ * servicio intente escribir ahí espera hasta su tiempo límite. Devuelve cómo soltarlo.
+ */
+export async function holdProfile(userId: string): Promise<() => Promise<void>> {
+  const owner = new Client({ connectionString: localOwnerUrl() });
+  await owner.connect();
+  await owner.query("begin");
+  await owner.query("select 1 from public.profiles where id = $1 for update", [userId]);
+  return async () => {
+    await owner.query("rollback").catch(() => undefined);
+    await owner.end();
+  };
 }

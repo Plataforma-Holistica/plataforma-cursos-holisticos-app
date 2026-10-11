@@ -14,9 +14,11 @@ import { failureFromResponse, type AuthFailure } from "./auth-errors";
 //   sesión o manda un correo: registrar, pedir la recuperación, entrar y canjear. El
 //   cliente se crea para esa llamada y se tira: el SDK guarda en memoria la sesión de quien
 //   entra, y en un cliente compartido la del último quedaría a la mano del siguiente.
-// - El SDK de administración, con la llave secreta, para dos cosas, las dos sobre una
-//   cuenta que sale de un enlace recién canjeado: fijar la primera contraseña al completar
-//   el registro, y borrar unos metadatos tan grandes que no dejan usar la sesión.
+// - El SDK de administración, con la llave secreta, para cuatro cosas. Una recibe solo un
+//   correo: invitar al pedir el registro. Las otras tres actúan sobre la cuenta de un
+//   enlace recién canjeado: fijar la primera contraseña al completar el registro, el
+//   segundo camino de la recuperación, y borrar unos metadatos tan grandes que no dejan
+//   usar la sesión.
 // - La llamada directa, para lo que el SDK haría con estado o con reintentos: renovar
 //   (reintenta hasta 30 segundos), cerrar una sesión, guardar la contraseña recuperada y
 //   preguntar si una sesión vive.
@@ -80,7 +82,8 @@ let admin: GoTrueAdminApi | undefined;
 
 /**
  * La API de administración de Auth, con la llave secreta. Salta todo permiso: se usa en un
- * solo archivo (`auth.ts`: `setFirstPassword` y `slimDown`), y una prueba de arquitectura lo exige.
+ * solo archivo (`auth.ts`: `requestSignUp`, `setFirstPassword`, `setRecoveredPassword` y
+ * `slimDown`), y una prueba de arquitectura lo exige.
  */
 export function adminApi(base?: Fetch): GoTrueAdminApi {
   if (base) return newAdminApi(base);
