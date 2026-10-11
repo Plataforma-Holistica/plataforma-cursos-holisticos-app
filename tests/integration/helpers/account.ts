@@ -1,11 +1,14 @@
 import { randomInt } from "node:crypto";
 
+import { Client } from "pg";
+
 import { createAccountServices, type AccountDependencies } from "@/services/account/account";
 import { buckets, fingerprint, type Fingerprint } from "@/services/account/fingerprint";
 import { resolveOrigin, type RequestOrigin } from "@/services/account/origin";
 import type { FailureCode } from "@/services/error-reporting/server";
 
 import { knownUser, type KnownUser } from "./auth";
+import { localOwnerUrl } from "./local";
 import { claimAccount, ownerQuery } from "./users";
 
 // Lo que las pruebas de los servicios de cuenta necesitan alrededor: servicios armados con
@@ -55,6 +58,18 @@ export async function claimedUser(): Promise<KnownUser> {
   const user = await knownUser();
   await claimAccount(user.id);
   return user;
+}
+
+/**
+ * Toma, desde otra sesión de la base, el candado consultivo de esa huella: lo mismo que
+ * hace un intento que va delante y no ha terminado. Devuelve cómo soltarlo.
+ */
+export async function holdLock(print: Fingerprint): Promise<() => Promise<void>> {
+  const owner = new Client({ connectionString: localOwnerUrl() });
+  await owner.connect();
+  await owner.query("select pg_advisory_lock($1::bigint)", [print.lockKey.toString()]);
+  // Cerrar la sesión suelta el candado.
+  return () => owner.end();
 }
 
 /** Vacía el freno y los contadores: cada caso empieza de cero. */

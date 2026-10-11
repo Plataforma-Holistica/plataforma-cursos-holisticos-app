@@ -13,6 +13,18 @@
 -- Lo que esto no cubre: quien ya tiene una sesión viva en Auth puede cambiar la contraseña
 -- por fuera y entrar después por la aplicación. Cerrarlo pide sellar la contraseña, que se
 -- decide aparte (TRD §9.2, «lo que no cubre»).
+--
+-- Tres cosas que esta migración da por sentadas:
+--
+--   · No rellena private.account_security. Ninguna base tiene todavía una cuenta reclamada
+--     antes de esta migración; si la tuviera, esa cuenta no anotaría sesiones hasta
+--     recuperar su contraseña. Falla cerrado.
+--   · «Viva en Auth» mira solo auth.sessions.not_after. Los topes de duración y de
+--     inactividad de Auth (timebox, inactivity_timeout) no se guardan ahí, y hoy están
+--     apagados en supabase/config.toml: si se prenden, esto se revisa.
+--   · El orden entre reclamar y anotar depende de que cada sentencia vea lo ya confirmado
+--     (read committed, que es como abre sus transacciones el adaptador). Con otro
+--     aislamiento las dos funciones se niegan a correr.
 
 -- ---------------------------------------------------------------------------------------
 -- Tablas. Privadas y sin permisos para nadie: solo las tocan las funciones de abajo.
@@ -55,6 +67,11 @@ begin
   if v_actor is null then
     return 'ineligible';
   end if;
+  -- Con una foto fija de la base, el borrado de abajo no vería una sesión anotada y
+  -- confirmada mientras este reclamo esperaba el candado.
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.claim_account() needs read committed isolation' using errcode = '25000';
+  end if;
   -- Con candado: dos reclamos a la vez de la misma cuenta se ordenan, y solo uno apaga. Es
   -- el mismo candado que toma private.note_session(): una sesión se anota antes del
   -- reclamo, y el reclamo la borra, o después, y ve la fecha nueva.
@@ -92,8 +109,10 @@ $$;
 -- p_started es la hora de la base que el servicio leyó ANTES de preguntarle a Auth.
 --
 --   noted       quedó anotada (o ya lo estaba)
---   stale       el intento empezó antes del último cambio de contraseña, viene del futuro,
---               o tardó más de lo que tarda cualquier llamada a Auth
+--   stale       el intento empezó antes del último cambio de contraseña: Auth lo aceptó
+--               con una contraseña que ya no vale
+--   skewed      el intento viene del futuro, o tardó más de lo que tarda cualquier llamada
+--               a Auth: el reloj no es de fiar, y no se sabe
 --   unclaimed   la marca de contraseña sigue prendida, o la cuenta no tiene fecha de reclamo
 --   gone        Auth no tiene esa sesión para esa cuenta, o ya pasó su fecha tope
 --   ineligible  sin actor, sin perfil, cuenta que no está activa, o faltan datos
@@ -115,6 +134,11 @@ begin
   if v_actor is null or p_session is null or p_started is null then
     return 'ineligible';
   end if;
+  -- Con una foto fija de la base, la fecha de abajo sería la de antes de un reclamo que
+  -- acaba de confirmar, y su entrada vieja quedaría anotada.
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.note_session() needs read committed isolation' using errcode = '25000';
+  end if;
   select p.status, p.password_reset_required into v_status, v_pending
   from public.profiles p where p.id = v_actor for update;
   if not found or v_status <> 'active' then
@@ -131,7 +155,10 @@ begin
 
   -- Después del candado: si un reclamo iba delante, su fecha ya está escrita.
   v_now := pg_catalog.clock_timestamp();
-  if p_started < v_changed or p_started > v_now or p_started < v_now - interval '2 minutes' then
+  if p_started > v_now or p_started < v_now - interval '2 minutes' then
+    return 'skewed';
+  end if;
+  if p_started < v_changed then
     return 'stale';
   end if;
 

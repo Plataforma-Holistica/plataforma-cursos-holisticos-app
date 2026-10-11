@@ -10,6 +10,7 @@ import {
   clearThrottle,
   freshOrigin,
   hitsOf,
+  holdLock,
   keysOf,
   notedSessions,
   pairOf,
@@ -61,6 +62,27 @@ async function fail(account: KnownUser, origin = freshOrigin(), count = 1, servi
     results.push(await services.signIn(memoryJar(), { email: account.email, password: WRONG }, origin));
   }
   return { origin, results, keys: keysOf(account.email, origin) };
+}
+
+/**
+ * Un Auth que detiene la entrada justo después de contestar: el intento ya está contado y
+ * la sesión ya existe, pero el servicio todavía no lo sabe. `arrived` avisa que llegó ahí;
+ * `release` la deja seguir.
+ */
+function gatedAuth() {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let arrive: () => void = () => undefined;
+  const arrived = new Promise<void>((resolve) => (arrive = resolve));
+  const gated: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (String(input instanceof Request ? input.url : input).includes("/token")) {
+      arrive();
+      await held;
+    }
+    return response;
+  };
+  return { auth: createAuth({ fetch: gated }), arrived, release };
 }
 
 beforeAll(async () => {
@@ -331,6 +353,116 @@ describe("la dirección que no se conoce", () => {
 
     expect((await services.signIn(memoryJar(), account, second)).kind).toBe("entered");
     expect(await pairOf(keys)).toMatchObject({ failed_count: 0, last_success_at: null });
+    // En local es lo normal: nadie pone la cabecera.
+    expect(services.reported).toEqual([]);
+  });
+
+  it("fuera de local es un fallo de operación: se reporta en cada intento", async () => {
+    const account = await claimed({ complete: true });
+    const services = testServices({ proxyTrusted: () => false, isLocal: () => false });
+    expect(await services.signIn(memoryJar(), { email: account.email, password: WRONG }, freshOrigin())).toEqual({
+      kind: "invalid_credentials",
+    });
+    expect(services.reported).toEqual(["client_ip_unknown"]);
+  });
+
+  it("con la dirección conocida no se reporta nada, tampoco fuera de local", async () => {
+    const account = await claimed({ complete: true });
+    const services = testServices({ isLocal: () => false });
+    await services.signIn(memoryJar(), { email: account.email, password: WRONG }, freshOrigin());
+    expect(services.reported).toEqual([]);
+  });
+});
+
+describe("lo que ni siquiera se le pregunta a Auth", () => {
+  // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie.
+  it("una contraseña más larga que el máximo no llega a Auth ni se cuenta", async () => {
+    const account = await claimed({ complete: true });
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+    const jar = memoryJar();
+    expect(await services.signIn(jar, { email: account.email, password: "x".repeat(73) }, freshOrigin())).toEqual({
+      kind: "invalid_credentials",
+    });
+    expect(spy.calls).toEqual([]);
+    expect(jar.writes).toEqual([]);
+    expect(await throttleRows()).toBe(0);
+    expect(services.slept).toEqual([500]);
+  });
+});
+
+describe("cuando el freno no puede contar", () => {
+  // Otro intento del mismo cubo va delante y no termina: el candado no se consigue, la
+  // transacción vence, y sin poder contar no se le pregunta nada a Auth.
+  it.each(["ip", "account"] as const)(
+    "si no consigue el candado de la huella (%s), nadie pasa, no se le pregunta a Auth, y se reporta",
+    async (which) => {
+      const account = await claimed({ complete: true });
+      const origin = freshOrigin();
+      const keys = keysOf(account.email, origin);
+      const spy = recordingFetch();
+      const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+      const jar = memoryJar();
+      const unlock = await holdLock(keys[which]);
+      try {
+        expect(await services.signIn(jar, account, origin)).toEqual({ kind: "unavailable" });
+      } finally {
+        await unlock();
+      }
+      expect(services.reported).toEqual(["throttle_unavailable"]);
+      expect(spy.calls).toEqual([]);
+      expect(jar.writes).toEqual([]);
+      expect(await throttleRows()).toBe(0);
+    },
+  );
+
+  // La entrada ya pasó la guarda y quedó anotada cuando el cierre del freno falla: entra
+  // igual. El intento queda contado como fallo, que es el lado seguro, y se reporta.
+  it("si el cierre del intento falla, quien ya entró entra igual, y se reporta", async () => {
+    const account = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const keys = keysOf(account.email, origin);
+    const gate = gatedAuth();
+    const services = testServices({ auth: gate.auth });
+    const jar = memoryJar();
+
+    const pending = services.signIn(jar, account, origin);
+    await gate.arrived;
+    const unlock = await holdLock(keys.account);
+    gate.release();
+    let result;
+    try {
+      result = await pending;
+    } finally {
+      await unlock();
+    }
+
+    expect(result).toEqual({ kind: "entered", pending: null });
+    expect(services.reported).toEqual(["sign_in_settle_failed"]);
+    expect(await testServices().checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: account.id } });
+    expect(await pairOf(keys)).toMatchObject({ failed_count: 1, last_success_at: null });
+    expect(await hitsOf(signInBuckets(keys).account)).toBe(1);
+  });
+
+  // El uno que se sumó por adelantado ya no está (alguien vació la cuenta entre tanto):
+  // descontarlo no puede bajar de cero ni tumbar el cierre.
+  it("descontar un intento de una cuenta que ya está en cero no falla ni baja de cero", async () => {
+    const account = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const keys = keysOf(account.email, origin);
+    const gate = gatedAuth();
+    const services = testServices({ auth: gate.auth });
+
+    const pending = services.signIn(memoryJar(), account, origin);
+    await gate.arrived;
+    await ownerQuery("update private.rate_limit_counters set hits = 0");
+    gate.release();
+
+    expect((await pending).kind).toBe("entered");
+    expect(services.reported).toEqual([]);
+    expect(await hitsOf(signInBuckets(keys).ip)).toBe(0);
+    expect(await hitsOf(signInBuckets(keys).account)).toBe(0);
+    expect(await pairOf(keys)).toMatchObject({ failed_count: 0 });
   });
 });
 
@@ -364,6 +496,77 @@ describe("la marca de contraseña y la cuenta", () => {
     const keys = keysOf(account.email, origin);
     expect(await pairOf(keys)).toMatchObject({ failed_count: 1, last_success_at: null });
     expect(await hitsOf(signInBuckets(keys).ip)).toBe(0);
+  });
+});
+
+describe("cuando la guarda no puede decidir a mitad de una entrada", () => {
+  // Auth ya abrió la sesión. Si lo que sigue falla, esa sesión no puede quedar abierta ni
+  // su cookie llegar al navegador.
+  it("no entra, la sesión se cierra, no se supo, y se reporta", async () => {
+    const account = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const jar = memoryJar();
+    const services = testServices({
+      isLocal: () => {
+        throw new Error("no se pudo saber");
+      },
+    });
+
+    expect(await services.signIn(jar, account, origin)).toEqual({ kind: "unavailable" });
+
+    expect(services.reported).toEqual(["gate_unavailable"]);
+    expect(jar.writes).toEqual([]);
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await notedSessions(account.id)).toBe(0);
+    const keys = keysOf(account.email, origin);
+    expect(await pairOf(keys)).toMatchObject({ failed_count: 1, last_success_at: null });
+    expect(await hitsOf(signInBuckets(keys).ip)).toBe(0);
+  });
+
+  it("una cuenta sin perfil: lo mismo que una contraseña equivocada, y sin sesión", async () => {
+    const account = await claimed();
+    await ownerQuery("delete from public.profiles where id = $1", [account.id]);
+    const origin = freshOrigin();
+    const jar = memoryJar();
+    const services = testServices();
+
+    expect(await services.signIn(jar, account, origin)).toEqual({ kind: "invalid_credentials" });
+
+    expect(services.reported).toEqual([]);
+    expect(jar.writes).toEqual([]);
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await pairOf(keysOf(account.email, origin))).toMatchObject({ failed_count: 1, last_success_at: null });
+  });
+});
+
+describe("cuando la sesión que sobra no se puede cerrar", () => {
+  const logoutDown = () => createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch });
+
+  it("una entrada que no se admite deja su sesión abierta en Auth: se reporta", async () => {
+    const account = await unclaimed();
+    const services = testServices({ auth: logoutDown() });
+    const jar = memoryJar();
+
+    expect(await services.signIn(jar, account, freshOrigin())).toEqual({ kind: "must_recover" });
+
+    expect(jar.writes).toEqual([]);
+    expect(services.reported).toEqual(["session_not_closed"]);
+    // Nadie tiene sus tokens, y la aplicación no la reconoce.
+    expect(await notedSessions(account.id)).toBe(0);
+  });
+
+  it("la sesión que el navegador traía: quien entra, entra igual, y se reporta", async () => {
+    const ana = await claimed({ complete: true });
+    const beto = await claimed({ complete: true });
+    const jar = memoryJar();
+    expect((await testServices().signIn(jar, ana, freshOrigin())).kind).toBe("entered");
+
+    const services = testServices({ auth: logoutDown() });
+    expect((await services.signIn(jar, beto, freshOrigin())).kind).toBe("entered");
+
+    expect(services.reported).toEqual(["session_not_closed"]);
+    expect(await testServices().checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: beto.id } });
+    expect(await sessionCount(ana.id)).toBe(1);
   });
 });
 

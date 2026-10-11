@@ -3,7 +3,7 @@
 -- sesión solo se anota si su intento empezó después del último cambio de contraseña.
 begin;
 \ir _ayuda.psql
-select plan(57);
+select plan(65);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-sesiones@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-sesiones@prueba.test');
@@ -43,7 +43,8 @@ from unnest(array['app_sessions', 'account_security']) as t,
 select ok(
   has_function_privilege('app_service', f, 'execute')
     and not has_function_privilege('authenticated', f, 'execute')
-    and not has_function_privilege('anon', f, 'execute'),
+    and not has_function_privilege('anon', f, 'execute')
+    and not has_function_privilege('service_role', f, 'execute'),
   'solo el servidor ejecuta ' || f)
 from unnest(array['private.note_session(uuid, timestamptz)', 'private.session_recognized(uuid)']) as f;
 select is_empty(
@@ -66,6 +67,11 @@ select is(
   private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp()),
   'ineligible', 'el sistema no anota sesiones');
 
+select pruebas.como_servicio('a0000000-0000-0000-0000-0000000000ee');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp()),
+  'ineligible', 'un actor sin perfil no anota nada');
+
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
 select is(
   private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp()),
@@ -77,7 +83,7 @@ select is(
   'stale', 'un intento que empezó antes del cambio de contraseña no se anota');
 select is(
   private.note_session('5e550000-0000-0000-0000-000000000001', clock_timestamp() + interval '1 second'),
-  'stale', 'ni uno que dice haber empezado en el futuro');
+  'skewed', 'uno que dice haber empezado en el futuro tampoco, y se distingue: el reloj no es de fiar');
 select is(
   private.note_session(null, clock_timestamp()),
   'ineligible', 'sin identificador de sesión no se anota');
@@ -110,16 +116,24 @@ update private.account_security set password_changed_at = now() - interval '10 m
   where profile_id = 'a0000000-0000-0000-0000-000000000001';
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
 select is(
-  private.note_session('5e550000-0000-0000-0000-000000000002', now() - interval '5 minutes'),
-  'stale', 'un intento de hace cinco minutos no se anota, aunque sea posterior al cambio');
+  private.note_session('5e550000-0000-0000-0000-000000000002', clock_timestamp() - interval '130 seconds'),
+  'skewed', 'un intento de hace más de dos minutos no se anota, aunque sea posterior al cambio');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000002', clock_timestamp() - interval '110 seconds'),
+  'noted', 'uno de hace menos de dos minutos sí');
 select is(
   private.note_session('5e550000-0000-0000-0000-000000000002', clock_timestamp()),
-  'noted', 'y uno de ahora sí');
+  'noted', 'y uno de ahora también');
 
 -- Una cuenta con la marca apagada pero sin fecha de reclamo: no se sabe desde cuándo vale
 -- su contraseña.
 select pruebas.como_dueno();
+insert into private.account_security (profile_id, password_changed_at)
+  values ('a0000000-0000-0000-0000-000000000004', now() - interval '1 hour');
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000004');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000006', clock_timestamp()),
+  'unclaimed', 'con la marca prendida no se anota, aunque la cuenta ya tenga fecha');
 select is(private.claim_account(), 'claimed', 'otra cuenta se reclama');
 select pruebas.como_dueno();
 delete from private.account_security where profile_id = 'a0000000-0000-0000-0000-000000000004';
@@ -128,9 +142,21 @@ select is(
   private.note_session('5e550000-0000-0000-0000-000000000006', clock_timestamp()),
   'unclaimed', 'sin fecha de reclamo no se anota, aunque la marca esté apagada');
 
--- Una cuenta que no está activa.
+-- Una cuenta que no está activa: eliminada o suspendida.
+select pruebas.como_dueno();
+select set_config('app.actor_kind', 'system', true);
+update public.profiles set status = 'deleted', deleted_at = now()
+  where id = 'a0000000-0000-0000-0000-000000000004';
+select pruebas.como_servicio('a0000000-0000-0000-0000-000000000004');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000006', clock_timestamp()),
+  'ineligible', 'una cuenta eliminada no anota sesiones');
+
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000003');
 select is(private.claim_account(), 'claimed', 'la tercera cuenta se reclama');
+select is(
+  private.note_session('5e550000-0000-0000-0000-000000000005', clock_timestamp()),
+  'noted', 'y anota una sesión mientras está activa');
 select pruebas.como_dueno();
 select set_config('app.actor_kind', 'system', true);
 update public.profiles set status = 'suspended', suspended_at = now(), suspension_reason = 'Prueba'
@@ -157,6 +183,22 @@ select is(
 select is(
   private.session_recognized('5e550000-0000-0000-0000-000000000001'),
   'not_noted', 'ni la sesión anotada de otra persona');
+
+-- Una fila que no debería existir: anotada para una cuenta, con la sesión de otra en Auth.
+-- Solo el dueño puede escribirla; aun así no se reconoce.
+select pruebas.como_dueno();
+insert into private.app_sessions (session_id, profile_id)
+  values ('5e550000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000001');
+select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
+select is(
+  private.session_recognized('5e550000-0000-0000-0000-000000000003'),
+  'gone', 'una sesión anotada a nombre de una cuenta, pero que en Auth es de otra, no se reconoce');
+select pruebas.como_dueno();
+delete from private.app_sessions where session_id = '5e550000-0000-0000-0000-000000000003';
+-- Y algo anotado de la otra cuenta cuya sesión Auth ya no tiene: nadie más debe borrarlo.
+insert into private.app_sessions (session_id, profile_id)
+  values ('5e550000-0000-0000-0000-0000000000aa', 'a0000000-0000-0000-0000-000000000002');
+
 select pruebas.como_servicio();
 select is(
   private.session_recognized('5e550000-0000-0000-0000-000000000001'),
@@ -185,6 +227,9 @@ select results_eq(
     where profile_id = 'a0000000-0000-0000-0000-000000000001' order by session_id$$,
   array['5e550000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000007'],
   'al anotar se borra la fila de la sesión que Auth ya no tiene, y no las demás');
+select is(
+  (select count(*)::int from private.app_sessions where profile_id = 'a0000000-0000-0000-0000-000000000002'),
+  1, 'y no se limpia lo anotado de otra cuenta');
 
 -- ---------------------------------------------------------------------------------------
 -- Reclamar otra vez (recuperar la contraseña) borra lo anotado y mueve la fecha.
@@ -203,7 +248,7 @@ select ok(
   'y la fecha del cambio de contraseña avanzó');
 select is(
   (select count(*)::int from private.app_sessions where profile_id = 'a0000000-0000-0000-0000-000000000002'),
-  0, 'sin tocar nada de otra cuenta (que no tenía nada anotado)');
+  1, 'sin tocar lo anotado de otra cuenta');
 
 -- Una cuenta que no puede reclamarse también pierde lo anotado y cambia de fecha: si
 -- alguien fijó su contraseña, lo de antes ya no vale.
@@ -214,6 +259,9 @@ select ok(
   (select password_changed_at = (select max(password_changed_at) from private.account_security)
    from private.account_security where profile_id = 'a0000000-0000-0000-0000-000000000003'),
   'pero su fecha de cambio sí se mueve');
+select is(
+  (select count(*)::int from private.app_sessions where profile_id = 'a0000000-0000-0000-0000-000000000003'),
+  0, 'y lo que tenía anotado se borra');
 
 -- ---------------------------------------------------------------------------------------
 -- Nadie más llama a las funciones ni toca las tablas.

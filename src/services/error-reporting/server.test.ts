@@ -48,6 +48,7 @@ describe("reportFailure", () => {
       "throttle_unavailable",
       "session_oversized",
       "session_not_noted",
+      "session_not_closed",
       "sign_in_settle_failed",
       "client_ip_unknown",
     ] as const;

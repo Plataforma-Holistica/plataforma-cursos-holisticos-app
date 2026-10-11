@@ -170,11 +170,6 @@ export async function noteSession(tx: Tx, sessionId: string, startedText: string
   return row?.state ?? "";
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Un identificador de sesión con forma de serlo. Uno que no la tiene no llega a la base. */
-export const isSessionId = (value: string | null): value is string => value !== null && UUID.test(value);
-
 /** Si la aplicación reconoce esa sesión para quien actúa en esta transacción. */
 export async function sessionRecognition(tx: Tx, sessionId: string): Promise<string> {
   const [row] = await tx.query(sql`select private.session_recognized(${sessionId}::uuid) as state`, stateRow);

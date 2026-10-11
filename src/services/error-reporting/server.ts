@@ -17,6 +17,7 @@ const FAILURES = {
   throttle_unavailable: "El freno de intentos no pudo leer sus parámetros o sus cuentas: nadie puede entrar.",
   session_oversized: "Una sesión no cabe en su cookie: esa cuenta no entra hasta recuperar su contraseña.",
   session_not_noted: "El servidor de identidad abrió una sesión que la aplicación no pudo anotar.",
+  session_not_closed: "Una sesión que ya no debía seguir no se pudo cerrar en el servidor de identidad.",
   sign_in_settle_failed: "Una entrada no se pudo cerrar en el freno: su intento quedó contado como fallo.",
   client_ip_unknown: "Fuera de local no se supo de qué dirección viene una petición: todas comparten un tope.",
 } as const;

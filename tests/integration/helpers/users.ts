@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 
+import { localOwnerUrl } from "./local";
+
 // Personas de prueba con una sesión de verdad: se dan de alta en el Auth local, inician
 // sesión con su contraseña y devuelven su token. Así el token que llega al adaptador lo
 // firmó el servidor de identidad, y el perfil lo creó el disparador de la base.
@@ -36,7 +38,7 @@ export interface TestUserOptions {
 // pruebas para no pasar por el correo. De paso deja escrita la fecha desde la que vale su
 // contraseña, sin la cual la aplicación no le anota sesiones.
 export async function claimAccount(id: string): Promise<void> {
-  const owner = new Client({ connectionString: env("DATABASE_URL_DIRECT") });
+  const owner = new Client({ connectionString: localOwnerUrl() });
   await owner.connect();
   try {
     await owner.query("begin");
@@ -74,15 +76,32 @@ export async function createTestUser(options: TestUserOptions = {}): Promise<Tes
   return { id: created.data.user.id, email, accessToken: signedIn.data.session.access_token };
 }
 
-/** Borra a la persona y su perfil. El perfil no se va solo: no cuelga de auth.users. */
+// Todas las personas de prueba nacen con un correo de esta forma (`testEmail`).
+const TEST_EMAIL = "^it-[^@]+@prueba[.]test$";
+
+/**
+ * Borra a la persona y su perfil. El perfil no se va solo: no cuelga de auth.users.
+ *
+ * Solo contra la pila local, y solo a quien tiene correo de prueba: si alguno de los
+ * identificadores es de otra persona, no borra a nadie.
+ */
 export async function deleteTestUsers(users: readonly TestUser[]): Promise<void> {
   if (users.length === 0) return;
+  const ownerUrl = localOwnerUrl();
+  const ids = users.map((user) => user.id);
+  const strangers = await ownerQuery<{ id: string }>(
+    "select id::text as id from auth.users where id = any($1::uuid[]) and (email is null or email !~ $2)",
+    [ids, TEST_EMAIL],
+  );
+  if (strangers.length > 0) {
+    throw new Error("La limpieza de las pruebas solo borra personas de prueba (it-…@prueba.test).");
+  }
+
   const admin = createClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("SUPABASE_SECRET_KEY"), noSession);
   for (const user of users) await admin.auth.admin.deleteUser(user.id);
 
   // Como dueño de la base: la aplicación no tiene permiso de borrar perfiles.
-  const ids = users.map((user) => user.id);
-  const owner = new Client({ connectionString: localOwnerUrl() });
+  const owner = new Client({ connectionString: ownerUrl });
   await owner.connect();
   try {
     await owner.query("begin");
@@ -107,18 +126,6 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
   } finally {
     await owner.end();
   }
-}
-
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
-
-/** La dirección del dueño de la base, después de comprobar que es la base local. */
-function localOwnerUrl(): string {
-  const url = env("DATABASE_URL_DIRECT");
-  const parsed = new URL(url);
-  if (!LOCAL_HOSTS.has(parsed.hostname) || [...parsed.searchParams.keys()].length > 0) {
-    throw new Error("La limpieza de las pruebas solo corre contra la base local.");
-  }
-  return url;
 }
 
 /**
@@ -156,12 +163,15 @@ export function testEmail(): string {
   return `it-${randomUUID()}@prueba.test`;
 }
 
-/** Una consulta como dueño de la base: para mirar o atrasar lo que la aplicación no puede. */
+/**
+ * Una consulta como dueño de la base: para mirar o atrasar lo que la aplicación no puede.
+ * Solo contra la base local.
+ */
 export async function ownerQuery<Row extends Record<string, unknown>>(
   text: string,
   values: readonly unknown[] = [],
 ): Promise<Row[]> {
-  const owner = new Client({ connectionString: env("DATABASE_URL_DIRECT") });
+  const owner = new Client({ connectionString: localOwnerUrl() });
   await owner.connect();
   try {
     const result = await owner.query<Row>(text, [...values]);

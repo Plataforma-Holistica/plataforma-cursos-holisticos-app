@@ -1,7 +1,8 @@
 import "server-only";
 
+import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
-import type { SignInOutcome } from "@/domain/access/login-throttle";
+import type { SignInDecision, SignInOutcome } from "@/domain/access/login-throttle";
 import type { GateResult, MissingDocument } from "@/domain/access/session-gate";
 
 import type { FailureCode } from "@/services/error-reporting/server";
@@ -47,7 +48,12 @@ export function gateViewOf(result: GateResult): GateView {
 }
 
 /** Lo que contesta `private.note_session()`. Lo que no esté en la lista no es `noted`. */
-export type NoteState = "noted" | "stale" | "unclaimed" | "gone" | "ineligible";
+export type NoteState = "noted" | "stale" | "skewed" | "unclaimed" | "gone" | "ineligible";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Un identificador de sesión con forma de serlo. Uno que no la tiene no llega a la base. */
+export const isSessionId = (value: string | null): value is string => value !== null && UUID.test(value);
 
 export type SignInResult =
   /** Entró. `pending` dice si antes de seguir hay que completar la cuenta (PA-15). */
@@ -79,6 +85,44 @@ const refused = (
   outcome: SignInOutcome,
   report: FailureCode | null = null,
 ): Admission => ({ result, outcome, admit: false, report });
+
+/**
+ * Un intento que el freno no deja seguir. No se le pregunta a Auth y no se cuenta: no hay
+ * nada que cerrar después.
+ */
+export function refusalOf(decision: Extract<SignInDecision, { proceed: false }>): {
+  result: SignInResult;
+  report: FailureCode | null;
+} {
+  switch (decision.reason) {
+    case "throttled":
+      return { result: { kind: "throttled", retryAt: decision.retryAt }, report: null };
+    // Cuál de los dos topes fue no se dice: el de la cuenta delata que alguien más la intenta.
+    case "ip_hourly_cap":
+    case "account_hourly_cap":
+      return { result: { kind: "capped" }, report: null };
+    case "invalid_input":
+      return { result: { kind: "unavailable" }, report: "throttle_unavailable" };
+  }
+}
+
+/** Auth no dio sesión. `reason` es lo que contestó el adaptador. */
+export function authRefusal(reason: Extract<AuthSignIn, { ok: false }>["reason"]): Admission {
+  switch (reason) {
+    // Auth distingue los tres. Mostrarlos delataría el estado de la cuenta.
+    case "invalid_credentials":
+    case "email_not_confirmed":
+    case "banned":
+      return refused({ kind: "invalid_credentials" }, "failure");
+    // La contraseña era correcta, pero la sesión no cabe en la cookie. Recuperar borra lo
+    // que la infla.
+    case "oversized_session":
+      return refused({ kind: "must_recover" }, "unknown", "session_oversized");
+    // El límite de Auth, o no contestó: no se supo, y no es un fallo de quien intenta.
+    default:
+      return refused({ kind: "unavailable" }, "unknown");
+  }
+}
 
 /**
  * Una entrada que Auth aceptó: la contraseña era la de la cuenta. `noted` es lo que
@@ -123,6 +167,8 @@ export function decideAdmission(view: GateView, noted: NoteState | null): Admiss
       return refused({ kind: "invalid_credentials" }, "failure");
     case "unclaimed":
       return refused({ kind: "must_recover" }, "failure");
+    // `skewed` (el reloj de la base no es de fiar), `gone`, `ineligible`, o algo que la
+    // base no debería contestar: no se supo. No es una contraseña equivocada.
     default:
       return refused({ kind: "unavailable" }, "unknown", "session_not_noted");
   }
@@ -143,14 +189,23 @@ export type SessionCheck =
  * y `view` lo que decidió la guarda, o `null` si no se llegó a evaluar.
  *
  * Primero la sesión: una que la aplicación no abrió, o que Auth ya no tiene, no entra a
- * ningún lado, sea de la cuenta que sea.
+ * ningún lado, sea de la cuenta que sea. Se cierra solo cuando la base dijo que no vale:
+ * una respuesta que no se entiende es «no se supo», y con eso no se le cierra a nadie.
  */
 export function sessionCheckOf(
   recognition: string,
   view: GateView | null,
   claims: VerifiedClaims,
 ): { check: SessionCheck; report: FailureCode | null } {
-  if (recognition !== "recognized") return { check: { kind: "must_sign_out", then: "sign_in" }, report: null };
+  switch (recognition) {
+    case "recognized":
+      break;
+    case "not_noted":
+    case "gone":
+      return { check: { kind: "must_sign_out", then: "sign_in" }, report: null };
+    default:
+      return { check: { kind: "unavailable" }, report: "gate_unavailable" };
+  }
   if (view === null) return { check: { kind: "unavailable" }, report: "gate_unavailable" };
   switch (view.kind) {
     case "pass":

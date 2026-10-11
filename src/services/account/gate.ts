@@ -40,6 +40,10 @@ const documentRow = z.object({
  * «Vigente» tiene una sola definición, `private.current_legal_document()`, la misma que usa
  * el guardián de `consents`. El piso es la versión más alta, entre las que ya rigen, que
  * pide volver a aceptar.
+ *
+ * El último consentimiento de un tipo es el más reciente. Su hora es la de su transacción,
+ * así que dos escritos en una sola empatan: manda la versión más alta y, si también
+ * empatan, el retiro, que es lo que no deja pasar.
  */
 export async function evaluateGate(tx: Tx, profileId: string, draftsAllowed: boolean): Promise<GateView> {
   const [profile] = await tx.query(
@@ -63,7 +67,7 @@ export async function evaluateGate(tx: Tx, profileId: string, draftsAllowed: boo
           from public.consents c
           join public.legal_documents d on d.id = c.legal_document_id
           where c.profile_id = ${profileId}::uuid and d.doc_type = t.doc_type
-          order by c.occurred_at desc, d.version desc
+          order by c.occurred_at desc, d.version desc, (c.action = 'withdrawn') desc
           limit 1
         ) as latest on true`,
     documentRow,

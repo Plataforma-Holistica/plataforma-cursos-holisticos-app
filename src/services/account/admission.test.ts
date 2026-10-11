@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { GateResult } from "@/domain/access/session-gate";
 
-import { decideAdmission, gateViewOf, sessionCheckOf, type GateView, type NoteState } from "./admission";
+import {
+  authRefusal,
+  decideAdmission,
+  gateViewOf,
+  isSessionId,
+  refusalOf,
+  sessionCheckOf,
+  type GateView,
+  type NoteState,
+} from "./admission";
 
 // Qué hace la aplicación con lo que decidieron la guarda y la base (TRD §9.2, filas «Freno
 // progresivo» y «Lo que entra sin pasar por el formulario»). Son tablas: cada celda dice
@@ -37,7 +46,7 @@ describe("gateViewOf: lo que decidió el dominio, como lo usa el servicio", () =
 });
 
 describe("decideAdmission: una entrada que Auth aceptó", () => {
-  const notes: (NoteState | null)[] = ["noted", "stale", "unclaimed", "gone", "ineligible", null];
+  const notes: (NoteState | null)[] = ["noted", "stale", "skewed", "unclaimed", "gone", "ineligible", null];
 
   it("pasa y queda anotada: entra, y el intento se cierra como bueno", () => {
     expect(decideAdmission({ kind: "pass" }, "noted")).toEqual({
@@ -77,7 +86,7 @@ describe("decideAdmission: una entrada que Auth aceptó", () => {
     });
   });
 
-  it.each<NoteState | null>(["gone", "ineligible", null])(
+  it.each<NoteState | null>(["gone", "ineligible", "skewed", null])(
     "si la sesión no se pudo anotar (%s), no entra, no se supo, y se reporta",
     (noted) => {
       expect(decideAdmission({ kind: "pass" }, noted)).toEqual({
@@ -88,6 +97,14 @@ describe("decideAdmission: una entrada que Auth aceptó", () => {
       });
     },
   );
+
+  it("una respuesta de la base que no está en la lista tampoco anota: no se supo", () => {
+    expect(decideAdmission({ kind: "pass" }, "algo-nuevo" as NoteState)).toMatchObject({
+      result: { kind: "unavailable" },
+      outcome: "unknown",
+      admit: false,
+    });
+  });
 
   // Una contraseña correcta en una cuenta con la marca prendida se cierra como fallo: si
   // no, quien dio de alta un correo ajeno quedaría como dispositivo de confianza.
@@ -154,7 +171,19 @@ describe("decideAdmission: una entrada que Auth aceptó", () => {
 });
 
 describe("sessionCheckOf: una entrada con sesión", () => {
-  it.each(["not_noted", "gone", "unknown", "algo-que-la-base-no-dice"])(
+  it.each(["unknown", "", "algo-que-la-base-no-dice"])(
+    "una respuesta que no dice si la sesión vale (%j) no cierra la sesión de nadie: no se supo, y se reporta",
+    (recognition) => {
+      for (const view of [{ kind: "pass" } as GateView, { kind: "suspended" } as GateView, null]) {
+        expect(sessionCheckOf(recognition, view, claims)).toEqual({
+          check: { kind: "unavailable" },
+          report: "gate_unavailable",
+        });
+      }
+    },
+  );
+
+  it.each(["not_noted", "gone"])(
     "una sesión que la aplicación no reconoce (%s) se cierra, sea de la cuenta que sea",
     (recognition) => {
       for (const view of [{ kind: "pass" } as GateView, { kind: "suspended" } as GateView, null]) {
@@ -216,5 +245,85 @@ describe("sessionCheckOf: una entrada con sesión", () => {
       check: { kind: "unavailable" },
       report: "gate_unavailable",
     });
+  });
+});
+
+describe("refusalOf: un intento que el freno no deja seguir", () => {
+  const retryAt = new Date("2026-10-11T06:00:00.000Z");
+
+  it("frenado: dice a qué hora se puede volver a intentar", () => {
+    expect(refusalOf({ proceed: false, reason: "throttled", retryAt })).toEqual({
+      result: { kind: "throttled", retryAt },
+      report: null,
+    });
+  });
+
+  it.each(["ip_hourly_cap", "account_hourly_cap"] as const)("tope por hora (%s): sin hora, y sin decir cuál", (reason) => {
+    expect(refusalOf({ proceed: false, reason })).toEqual({ result: { kind: "capped" }, report: null });
+  });
+
+  it("parámetros o cuentas sin sentido: no pasa nadie, no se supo, y se reporta", () => {
+    expect(refusalOf({ proceed: false, reason: "invalid_input" })).toEqual({
+      result: { kind: "unavailable" },
+      report: "throttle_unavailable",
+    });
+  });
+});
+
+describe("authRefusal: Auth no dio sesión", () => {
+  // Auth distingue los tres. Mostrarlos delataría el estado de la cuenta.
+  it.each(["invalid_credentials", "email_not_confirmed", "banned"] as const)(
+    "%s: un solo mensaje, y cuenta como fallo",
+    (reason) => {
+      expect(authRefusal(reason)).toEqual({
+        result: { kind: "invalid_credentials" },
+        outcome: "failure",
+        admit: false,
+        report: null,
+      });
+    },
+  );
+
+  it.each(["rate_limited", "unknown"] as const)("%s: no se supo, y no es un fallo de quien intenta", (reason) => {
+    expect(authRefusal(reason)).toEqual({
+      result: { kind: "unavailable" },
+      outcome: "unknown",
+      admit: false,
+      report: null,
+    });
+  });
+
+  it("la sesión no cabe en la cookie: la contraseña era buena, va a recuperar y se reporta", () => {
+    expect(authRefusal("oversized_session")).toEqual({
+      result: { kind: "must_recover" },
+      outcome: "unknown",
+      admit: false,
+      report: "session_oversized",
+    });
+  });
+
+  it("un motivo que la lista no conoce es «no se supo»", () => {
+    expect(authRefusal("otro" as never)).toMatchObject({ result: { kind: "unavailable" }, outcome: "unknown" });
+  });
+});
+
+describe("isSessionId: un identificador de sesión con forma de serlo", () => {
+  it.each(["5e550000-0000-4000-8000-000000000001", "5E550000-0000-4000-8000-00000000ABCD"])("%s lo es", (value) => {
+    expect(isSessionId(value)).toBe(true);
+  });
+
+  it.each([
+    null,
+    "",
+    "s",
+    "5e550000-0000-4000-8000-00000000000",
+    "5e550000-0000-4000-8000-0000000000011",
+    "5e550000000040008000000000000001",
+    " 5e550000-0000-4000-8000-000000000001",
+    "5e550000-0000-4000-8000-000000000001\n",
+    "5e550000-0000-4000-8000-00000000000g",
+    "'; select 1; --",
+  ])("%j no lo es", (value) => {
+    expect(isSessionId(value)).toBe(false);
   });
 });

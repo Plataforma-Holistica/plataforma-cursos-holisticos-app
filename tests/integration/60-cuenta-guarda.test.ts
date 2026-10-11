@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
 
+import { Client } from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { createAuth, signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
-import { asSystem, type Tx } from "@/adapters/supabase/db";
+import { asServer, asSystem, type Tx } from "@/adapters/supabase/db";
 import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
 import { evaluateGate } from "@/services/account/gate";
+import { noteSession } from "@/services/account/store";
 
-import { claimedUser, clearThrottle, freshOrigin, testServices } from "./helpers/account";
+import { claimedUser, clearThrottle, freshOrigin, notedSessions, testServices } from "./helpers/account";
 import { authAdmin, memoryJar, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
+import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // La guarda de sesión aplicada (TRD §9.2, fila «Lo que entra sin pasar por el formulario»,
@@ -108,6 +112,28 @@ describe("quién pasa", () => {
   });
 });
 
+describe("el último consentimiento, cuando dos empatan", () => {
+  // La hora de un consentimiento es la de su transacción: dos del mismo texto escritos en
+  // una sola quedan con la misma. Ante el empate manda el retiro, que es lo que no deja pasar.
+  it("otorgado y retirado en la misma transacción: cuenta como retirado", async () => {
+    const { account, jar } = await entered({ complete: true });
+    await ownerQuery(
+      `with actor as (select set_config('app.actor_id', $1, true)),
+       retirado as (
+         insert into public.consents (profile_id, legal_document_id, action, origin)
+         select $1::uuid, private.current_legal_document('terms'), 'withdrawn', 'account_settings' from actor
+         returning 1)
+       insert into public.consents (profile_id, legal_document_id, action, origin)
+       select $1::uuid, private.current_legal_document('terms'), 'granted', 'account_settings' from actor`,
+      [account.id],
+    );
+    expect(await testServices().checkSession(jar)).toMatchObject({
+      kind: "incomplete",
+      missing: { documents: [{ docType: "terms", why: "withdrawn" }] },
+    });
+  });
+});
+
 describe("solo las sesiones que abrió la aplicación", () => {
   // Con la llave publicable, que es pública, cualquiera le pide una sesión directo a Auth.
   it("una sesión abierta directo en Auth, con la contraseña correcta, no pasa", async () => {
@@ -155,6 +181,86 @@ describe("solo las sesiones que abrió la aplicación", () => {
     const other = await testServices().checkSession(second.jar);
     expect(one).toMatchObject({ kind: "pass", claims: { userId: first.account.id } });
     expect(other).toMatchObject({ kind: "pass", claims: { userId: second.account.id } });
+  });
+
+  // Un token que verifica pero no dice de qué sesión es no se puede reconocer: se cierra,
+  // sin llegar a la base.
+  it("un token sin identificador de sesión, o con uno sin forma, no pasa", async () => {
+    const { jar } = await entered({ complete: true });
+    const real = createAuth();
+    for (const sessionId of [null, "no-es-un-identificador"]) {
+      const services = testServices({
+        auth: {
+          ...real,
+          readSession: async (reader) => {
+            const read = await real.readSession(reader);
+            return read.kind === "session" ? { kind: "session", claims: { ...read.claims, sessionId } } : read;
+          },
+        },
+      });
+      expect(await services.checkSession(jar)).toEqual({ kind: "must_sign_out", then: "sign_in" });
+      expect(services.reported).toEqual([]);
+    }
+  });
+});
+
+describe("reclamar y anotar a la vez", () => {
+  const stateRow = z.object({ state: z.string() });
+
+  // El orden lo da el candado del perfil, que toman las dos funciones. Aquí el reclamo se
+  // queda abierto, sin confirmar; la anotación de una entrada que empezó antes tiene que
+  // esperarlo y, al seguir, ver su fecha.
+  it("la anotación espera al reclamo en curso y ve su fecha: la entrada vieja no se anota", async () => {
+    const account = await user({ complete: true });
+    const direct = await authSignIn(memoryJar(), account.email, account.password);
+    if (!direct.ok || !direct.claims.sessionId) throw new Error("La persona de prueba no entró a Auth.");
+    const { claims } = direct;
+    const sessionId = direct.claims.sessionId;
+    const [clock] = await ownerQuery<{ started: string }>("select clock_timestamp()::text as started");
+    if (!clock) throw new Error("La base no devolvió su hora.");
+
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reach: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    const claiming = asServer({ claims, reason: "prueba" }, async (tx) => {
+      const [row] = await tx.query(sql`select private.claim_account() as state`, stateRow);
+      reach();
+      await held;
+      return row?.state;
+    });
+    await reached;
+
+    let settled = false;
+    const noting = asServer({ claims, reason: "prueba" }, (tx) => noteSession(tx, sessionId, clock.started)).finally(
+      () => (settled = true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(settled).toBe(false);
+
+    release();
+    expect(await claiming).toBe("already_claimed");
+    expect(await noting).toBe("stale");
+    expect(await notedSessions(account.id)).toBe(0);
+  });
+
+  // Ese orden supone que cada sentencia ve lo ya confirmado. Con una foto fija de la base,
+  // las dos funciones se niegan a correr.
+  it.each([
+    ["anotar", "select private.note_session(gen_random_uuid(), clock_timestamp())"],
+    ["reclamar", "select private.claim_account()"],
+  ])("con un aislamiento que no es el de siempre, %s lanza", async (_name, call) => {
+    const account = await user();
+    const owner = new Client({ connectionString: localOwnerUrl() });
+    await owner.connect();
+    try {
+      await owner.query("begin isolation level repeatable read");
+      await owner.query("select set_config('app.actor_id', $1, true)", [account.id]);
+      await expect(owner.query(call)).rejects.toMatchObject({ code: "25000" });
+    } finally {
+      await owner.query("rollback").catch(() => undefined);
+      await owner.end();
+    }
   });
 });
 
@@ -204,7 +310,7 @@ describe("cuando no se puede saber", () => {
   // consentimiento válido, nadie entra, y eso es un fallo de operación.
   it("fuera de local, un texto que solo existe como borrador deja la guarda sin poder decidir", async () => {
     const { jar } = await entered({ complete: true });
-    const staging = testServices({ draftsAllowed: () => false });
+    const staging = testServices({ isLocal: () => false });
     expect(await staging.checkSession(jar)).toEqual({ kind: "unavailable" });
     expect(staging.reported).toEqual(["gate_no_current_text"]);
   });
@@ -217,6 +323,18 @@ describe("los hechos de los textos, leídos de la base", () => {
     tx.execute(sql`
       insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
       values ('terms', 1, 'Términos', 'Texto publicado', now(), ${requiresReconsent})`);
+
+  // Una versión se puede publicar con fecha: mientras no rija, no le pide nada a nadie.
+  it("una versión que todavía no rige no pide volver a aceptar, aunque lo vaya a pedir", async () => {
+    const account = await user({ complete: true });
+    const view = await reverted(async (tx) => {
+      await tx.execute(sql`
+        insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
+        values ('terms', 1, 'Términos', 'Texto por venir', now() + interval '1 day', true)`);
+      return evaluateGate(tx, account.id, true);
+    });
+    expect(view).toEqual({ kind: "pass" });
+  });
 
   it("una versión nueva que pide volver a aceptar se le presenta como texto actualizado", async () => {
     const account = await user({ complete: true });

@@ -11,11 +11,15 @@ import {
   type SignInDecision,
   type SignInOutcome,
 } from "@/domain/access/login-throttle";
+import { PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
 import { HOUR_SECONDS, windowStart } from "@/domain/access/rate-window";
 import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
 
 import {
+  authRefusal,
   decideAdmission,
+  isSessionId,
+  refusalOf,
   sessionCheckOf,
   type Admission,
   type GateView,
@@ -29,7 +33,6 @@ import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
 import {
   countHit,
   dbClock,
-  isSessionId,
   loadThrottleParams,
   lockAll,
   noteSession,
@@ -60,8 +63,11 @@ export interface AccountDependencies {
   auth: AuthPort;
   /** Hay delante un alojamiento que pone la cabecera de la dirección y pisa la de quien pide. */
   proxyTrusted: () => boolean;
-  /** Un borrador (versión 0) vale como texto legal vigente. Solo en local. */
-  draftsAllowed: () => boolean;
+  /**
+   * Corre en local. Ahí un borrador (versión 0) vale como texto legal vigente, y no saber
+   * de qué dirección viene una petición es lo normal: nadie pone la cabecera.
+   */
+  isLocal: () => boolean;
   /** El reloj y la espera del piso de tiempo de respuesta. */
   timing: Timing | undefined;
   report: (code: FailureCode) => Promise<void>;
@@ -72,8 +78,10 @@ interface OpenedAttempt {
   /** La hora de la base en que empezó el intento, antes de preguntarle a Auth. */
   startedText: string;
   /** La ventana en la que se sumó, para descontar en la misma. */
-  window: Date | null;
+  window: Date;
 }
+
+const utf8 = new TextEncoder();
 
 /** Un tarro que solo recuerda lo que se le escribe: la cookie no llega al navegador. */
 function stagingJar(): CookieJar & { writes: { name: string; value: string; options: CookieOptions }[] } {
@@ -94,7 +102,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
   const deps: AccountDependencies = {
     auth: adapter,
     proxyTrusted: proxyIsTrusted,
-    draftsAllowed: () => getEnv().APP_ENV === "local",
+    isLocal: () => getEnv().APP_ENV === "local",
     timing: undefined,
     report: reportFailure,
     ...overrides,
@@ -123,7 +131,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       seen = await asServer({ claims, reason: "session_gate" }, async (tx) => {
         const recognition = await sessionRecognition(tx, sessionId);
         if (recognition !== "recognized") return { recognition, view: null };
-        return { recognition, view: await evaluateGate(tx, claims.userId, deps.draftsAllowed()) };
+        return { recognition, view: await evaluateGate(tx, claims.userId, deps.isLocal()) };
       });
     } catch {
       await deps.report("gate_unavailable");
@@ -140,9 +148,8 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const clock = await dbClock(tx);
     const params = await loadThrottleParams(tx);
     const window = windowStart(clock.date, HOUR_SECONDS);
-    if (!window.ok) {
-      return { decision: { proceed: false, reason: "invalid_input" }, startedText: clock.text, window: null };
-    }
+    // Sin ventana no hay dónde contar: no pasa nadie.
+    if (!window.ok) throw new Error("La hora de la base no cae en ninguna ventana.");
     const ipBucket = buckets.signInIp(keys.ip);
     const accountBucket = buckets.signInAccount(keys.account);
     const decision = decideSignInAttempt(
@@ -178,7 +185,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
         // Una dirección que no se conoce es un cubo compartido: nadie queda de confianza ahí.
         await writePair(tx, keys, knownOrigin ? settlement.pair : { ...settlement.pair, lastSuccessAt: null });
       }
-      if (settlement.uncount && window) {
+      if (settlement.uncount) {
         await uncountHit(tx, buckets.signInIp(keys.ip), window);
         await uncountHit(tx, buckets.signInAccount(keys.account), window);
       }
@@ -190,7 +197,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const verified = claims.claims;
     try {
       const seen = await asServer({ claims: verified, reason: "sign_in" }, async (tx) => {
-        const view = await evaluateGate(tx, verified.userId, deps.draftsAllowed());
+        const view = await evaluateGate(tx, verified.userId, deps.isLocal());
         if (view.kind !== "pass" && view.kind !== "incomplete") return { view, noted: null };
         if (!isSessionId(verified.sessionId)) return { view, noted: null };
         return { view, noted: (await noteSession(tx, verified.sessionId, startedText)) as NoteState };
@@ -209,9 +216,12 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const parsed = parseEmail(input.email);
     // Un correo sin forma no tiene cuenta ni huella: para quien pide, es no acertar.
     if (!parsed.ok) return { kind: "invalid_credentials" };
+    // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie, y no hace
+    // falta mandársela a Auth para saberlo.
+    if (utf8.encode(input.password).length > PASSWORD_MAX_BYTES) return { kind: "invalid_credentials" };
 
     const from = resolveOrigin(origin, deps.proxyTrusted());
-    if (!from.known && getEnv().APP_ENV !== "local") await deps.report("client_ip_unknown");
+    if (!from.known && !deps.isLocal()) await deps.report("client_ip_unknown");
     const keys: PairKeys = { account: fingerprint("account", parsed.email), ip: from.ip };
 
     let opened: OpenedAttempt;
@@ -222,16 +232,9 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       return { kind: "unavailable" };
     }
     if (!opened.decision.proceed) {
-      switch (opened.decision.reason) {
-        case "throttled":
-          return { kind: "throttled", retryAt: opened.decision.retryAt };
-        case "ip_hourly_cap":
-        case "account_hourly_cap":
-          return { kind: "capped" };
-        case "invalid_input":
-          await deps.report("throttle_unavailable");
-          return { kind: "unavailable" };
-      }
+      const refusal = refusalOf(opened.decision);
+      if (refusal.report) await deps.report(refusal.report);
+      return refusal.result;
     }
 
     // La cookie se escribe aquí, no en el tarro de verdad: no llega al navegador hasta que
@@ -239,34 +242,19 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const staging = stagingJar();
     const entered = await auth.signIn(staging, parsed.email, input.password);
 
-    let admission: Admission;
-    if (entered.ok) {
-      admission = await admit(entered, opened.startedText);
-      if (!admission.admit) await auth.signOut(staging);
-    } else {
-      switch (entered.reason) {
-        // Auth distingue los tres. Mostrarlos delataría el estado de la cuenta.
-        case "invalid_credentials":
-        case "email_not_confirmed":
-        case "banned":
-          admission = { result: { kind: "invalid_credentials" }, outcome: "failure", admit: false, report: null };
-          break;
-        // La contraseña era correcta, pero la sesión no cabe en la cookie. Recuperar borra
-        // lo que la infla.
-        case "oversized_session":
-          admission = { result: { kind: "must_recover" }, outcome: "unknown", admit: false, report: "session_oversized" };
-          break;
-        default:
-          admission = { result: { kind: "unavailable" }, outcome: "unknown", admit: false, report: null };
-      }
-    }
+    const admission = entered.ok ? await admit(entered, opened.startedText) : authRefusal(entered.reason);
     if (admission.report) await deps.report(admission.report);
 
+    // Auth abrió una sesión que no se queda: se cierra. Nadie tiene sus tokens y la
+    // aplicación no la reconoce, pero si no se pudo cerrar, alguien tiene que saberlo.
+    if (entered.ok && !admission.admit && (await auth.signOut(staging)) !== "closed") {
+      await deps.report("session_not_closed");
+    }
+
+    // Lo que el navegador traía antes de esta entrada, guardado aparte: la cookie nueva se
+    // escribe encima con el mismo nombre.
+    const before = new Map(staging.writes.map((write) => [write.name, jar.get(write.name)]));
     if (admission.admit) {
-      // La sesión que el navegador traía se cierra hasta ahora: una contraseña mal tecleada
-      // no deja a nadie sin la sesión que tenía. Se cierra leyendo el tarro de verdad, sin
-      // escribirle: lo que sigue le pone la cookie nueva encima.
-      await auth.signOut({ get: (name) => jar.get(name), set: () => undefined });
       for (const write of staging.writes) jar.set(write.name, write.value, write.options);
     }
 
@@ -275,6 +263,14 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     } catch {
       // El intento quedó contado como fallo. Quien ya entró, entra igual.
       await deps.report("sign_in_settle_failed");
+    }
+
+    if (admission.admit) {
+      // La sesión que el navegador traía se cierra hasta el final, cuando la nueva ya entró
+      // y su cookie ya está en el tarro: una contraseña mal tecleada no deja a nadie sin la
+      // sesión que tenía, y un Auth lento al cerrar no retrasa la entrada de la cookie.
+      const previous = { get: (name: string) => (before.has(name) ? before.get(name) : jar.get(name)), set: () => undefined };
+      if ((await auth.signOut(previous)) !== "closed") await deps.report("session_not_closed");
     }
     return admission.result;
   }
