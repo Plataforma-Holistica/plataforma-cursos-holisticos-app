@@ -305,7 +305,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const before = new Map(staging.writes.map((write) => [write.name, jar.get(write.name)]));
     // La guarda dejó entrar y la sesión quedó anotada: su cookie pasa al tarro de verdad.
     let failure = report;
-    if (result.kind === "entered") {
+    if (result.kind === "entered" && !failure) {
       try {
         for (const write of staging.writes) jar.set(write.name, write.value, write.options);
       } catch {
@@ -354,7 +354,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const redemption = await auth.redeemSignupLink(form.tokenHash);
     if (!redemption.ok) {
       if (redemption.reason !== "spent") return { kind: redemption.reason === "invalid_or_expired" ? "link_dead" : "unavailable" };
-      // Auth canjeó el enlace y su sesión no se pudo usar: el adaptador ya la cerró.
+      // Auth canjeó el enlace y su sesión no se pudo usar: el adaptador ya pidió cerrarla.
       await deps.report("registration_incomplete");
       return { kind: "recover_instead" };
     }

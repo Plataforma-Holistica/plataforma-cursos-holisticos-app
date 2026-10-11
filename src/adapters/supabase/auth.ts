@@ -308,7 +308,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       accessToken = text(data.session?.access_token);
       const email = text(data.user?.email);
       // Desde aquí Auth ya canjeó el enlace: lo que falle es `spent`, no `unknown`.
-      if (!accessToken || !email || !data.user) return { ok: false, reason: "spent" };
+      if (!accessToken || !email || !data.user) {
+        if (accessToken) await logout(accessToken, "local");
+        return { ok: false, reason: "spent" };
+      }
 
       const inspection = await inspect(accessToken);
       // Si su sesión no se puede verificar, no se usa: se cierra.

@@ -533,8 +533,11 @@ describe("completar la recuperación", () => {
     const { released } = await holdProfileUntilFirstGivesUp(account.id);
     const services = testServices();
 
-    expect(await services.completeRecovery({ tokenHash: hash, password: password() }, origin)).toEqual({ kind: "done" });
-    await released;
+    try {
+      expect(await services.completeRecovery({ tokenHash: hash, password: password() }, origin)).toEqual({ kind: "done" });
+    } finally {
+      await released;
+    }
 
     expect(services.reported).toEqual([]);
     expect((await pairOf(keysOf(account.email, origin)))?.last_success_at).not.toBeNull();
@@ -544,8 +547,12 @@ describe("completar la recuperación", () => {
     const account = await claimed();
     const hash = await recoveryLink(account);
     const stuck = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
-    expect(await stuck.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin())).toEqual({ kind: "done" });
+    const chosen = password();
+    expect(await stuck.completeRecovery({ tokenHash: hash, password: chosen }, freshOrigin())).toEqual({ kind: "done" });
     expect(stuck.reported).toEqual(["session_not_closed"]);
+    expect(await testServices().signIn(memoryJar(), { email: account.email, password: chosen }, freshOrigin())).toMatchObject({
+      kind: "entered",
+    });
   });
 });
 

@@ -252,6 +252,43 @@ describe("canjear el enlace de verificación", () => {
     expect(await redeemSignupLink(hash)).toEqual({ ok: false, reason: "invalid_or_expired" });
   });
 
+  it("si algo falla después de que Auth canjeó, el enlace se da por gastado y su sesión se cierra", async () => {
+    // Un error cualquiera al revisar la sesión, que no es «no hay claves».
+    const first = newEmail();
+    await requestSignUp(first);
+    const broken = createAuth({ inspectToken: () => Promise.reject(new Error("falla inesperada")) });
+    expect(await broken.redeemSignupLink(tokenHashIn(await lastMailTo(first), "verificar"))).toEqual({
+      ok: false,
+      reason: "spent",
+    });
+    expect(await sessionCount(await userIdOf(first))).toBe(0);
+
+    // Unos metadatos que no dejan usar la sesión, y que no se pudieron borrar.
+    const second = newEmail();
+    await requestSignUp(second);
+    const hash = tokenHashIn(await lastMailTo(second), "verificar");
+    await authAdmin().auth.admin.updateUserById(await userIdOf(second), { user_metadata: { relleno: "x".repeat(6_000) } });
+    const down = failingFetch(/\/admin\//, networkDown);
+    const stuck = createAuth({ fetch: down.fetch });
+    expect(await stuck.redeemSignupLink(hash)).toEqual({ ok: false, reason: "spent" });
+    // Esa sesión no se alcanza a cerrar: su token es tan largo que ni llega a Auth en una
+    // cabecera. Nadie tiene sus tokens, y la borra la recuperación, que es la salida.
+    expect(down.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
+
+    // Un canje que contesta con sesión pero sin decir de quién es.
+    const account = await user();
+    const real = await authVisitor().auth.signInWithPassword({ email: account.email, password: account.password });
+    const session = real.data.session;
+    if (!session) throw new Error("La persona de prueba no entró.");
+    const nameless = failingFetch(/\/verify/, () => Response.json({ ...session, user: null }));
+    expect(await createAuth({ fetch: nameless.fetch }).redeemSignupLink("a".repeat(56))).toEqual({
+      ok: false,
+      reason: "spent",
+    });
+    expect(nameless.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
+    expect(await sessionCount(account.id)).toBe(0);
+  });
+
   it("si la sesión que devuelve el canje no es de la cuenta que dice, no se usa y se cierra", async () => {
     const account = await user();
     const real = await authVisitor().auth.signInWithPassword({

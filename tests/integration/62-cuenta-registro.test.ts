@@ -529,8 +529,11 @@ describe("completar el registro desde el enlace", () => {
     // La fila se suelta cuando el primer intento se rinde: si no hubo primero, la prueba falla.
     const { released } = await holdProfileUntilFirstGivesUp(id);
     const services = testServices();
-    expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
-    await released;
+    try {
+      expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+    } finally {
+      await released;
+    }
     expect(services.reported).toEqual([]);
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba", adult: true });
     expect(await consentsOf(id)).toHaveLength(3);
