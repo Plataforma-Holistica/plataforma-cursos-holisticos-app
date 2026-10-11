@@ -32,6 +32,8 @@ const PUBLIC_PAGES = [
 const ROUTE_HANDLERS: Record<string, RegExp | "public"> = {
   // El simulacro del registro de errores: no existe en producción.
   "src/app/api/error-drill/route.ts": /\berrorDrillAllowed\(\)/,
+  // La medición de la cabecera de la dirección: tampoco existe en producción.
+  "src/app/api/origin-drill/route.ts": /\berrorDrillAllowed\(\)/,
   // Cierra una sesión solo si la guarda la rechaza: eso lo decide el servicio.
   "src/app/sesion/cerrar/route.ts": /\bcloseRejectedSession\(/,
 };

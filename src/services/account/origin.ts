@@ -62,3 +62,36 @@ export function resolveOrigin(origin: RequestOrigin, proxyTrusted: boolean): Res
   }
   return { ip: fingerprint("ip", UNKNOWN_IP), known: false, address: null, userAgent };
 }
+
+/** Lo que contesta la medición de la cabecera de la dirección. Nunca trae una dirección. */
+export interface OriginDrill {
+  /** La cabecera llegó. */
+  present: boolean;
+  /** Lo que llegó es una dirección. Si no, toda petición iría al cubo de las desconocidas. */
+  readable: boolean;
+  /** Lo que llegó es la dirección que mandó quien hizo la prueba: la cabecera se puede falsificar. */
+  matchesProbe: boolean;
+  /** Este despliegue le cree a la cabecera (`proxyIsTrusted`). */
+  trusted: boolean;
+}
+
+/**
+ * La medición de la cabecera de la dirección (TRD §9.2, fila «Dirección de quien pide»).
+ * Quien prueba manda una petición con la cabecera falsificada y esa misma dirección como
+ * sonda. Si el alojamiento pisa la cabecera, lo que llega es otra dirección; si llega la
+ * falsificada, los topes por dirección y el dispositivo de confianza no valen nada.
+ *
+ * Compara direcciones ya leídas, no textos: la misma dirección escrita de otra forma
+ * cuenta como la misma. Nulo si la sonda no es una dirección.
+ */
+export function drillOrigin(origin: RequestOrigin, probe: string): OriginDrill | null {
+  const expected = resolveClientIp(probe, { proxyTrusted: true });
+  if (expected.kind !== "ip") return null;
+  const seen = resolveClientIp(origin.realIp, { proxyTrusted: true });
+  return {
+    present: origin.realIp !== null && origin.realIp !== "",
+    readable: seen.kind === "ip",
+    matchesProbe: seen.kind === "ip" && seen.address === expected.address,
+    trusted: proxyIsTrusted(),
+  };
+}

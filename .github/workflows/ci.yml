@@ -18,7 +18,8 @@ concurrency:
 jobs:
   verificar:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Con el navegador y el extremo a extremo, una corrida completa pasa de los 20 minutos de antes.
+    timeout-minutes: 30
     steps:
       # Cada acción va por el identificador exacto de su commit, no por su etiqueta: una
       # etiqueta se puede mover a otro código sin que aquí cambie nada. Dependabot propone
@@ -101,3 +102,19 @@ jobs:
 
       - name: Compilación
         run: pnpm build
+
+      # TRD §11.5: el extremo a extremo de la cuenta (FL-02, FL-03, FL-05 y FL-06), con un
+      # navegador de verdad contra la aplicación recién compilada, la pila local de Supabase
+      # y su buzón. Va después de compilar: prueba esa compilación, no otra.
+      - name: Navegador para el extremo a extremo
+        run: pnpm exec playwright install --with-deps chromium
+
+      # El comando va escrito aquí y no como `pnpm test:e2e`, por lo mismo que el de la
+      # cobertura: este archivo tiene dueño y `package.json` no.
+      - name: Pruebas de extremo a extremo
+        run: pnpm exec playwright test
+
+      # Las pruebas de base cuentan renglones: si el extremo a extremo dejó a una persona de
+      # prueba o un contador, aquí se nota.
+      - name: Pruebas de base, después del extremo a extremo
+        run: pnpm test:db
