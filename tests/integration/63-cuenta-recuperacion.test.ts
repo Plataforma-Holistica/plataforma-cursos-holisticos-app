@@ -16,6 +16,7 @@ import {
   freshOrigin,
   hitsOf,
   holdProfile,
+  holdProfileUntilFirstGivesUp,
   keysOf,
   notedSessions,
   pairOf,
@@ -119,6 +120,44 @@ describe("pedir la recuperación", () => {
     expect(await mailsTo(nobody)).toEqual([]);
   });
 
+  it("el mismo correo con otras mayúsculas y con espacios gasta el mismo cupo", async () => {
+    const account = await claimed();
+    const origin = freshOrigin();
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+
+    expect(await services.requestRecovery({ email: ` ${account.email.toUpperCase()} ` }, origin)).toEqual({ kind: "accepted" });
+    expect(await services.requestRecovery({ email: account.email }, origin)).toEqual({ kind: "accepted" });
+
+    expect(spy.calls).toEqual(["/auth/v1/recover"]);
+    expect(await hitsOf(recoveryBuckets(account.email, origin).mail)).toBe(1);
+    expect(await waitForMails(account.email, 1)).toHaveLength(1);
+  });
+
+  it("dos peticiones a la vez para el mismo correo mandan un solo enlace, y la respuesta sale antes de preguntarle a Auth", async () => {
+    const account = await claimed();
+    const spy = recordingFetch();
+    const later: (() => Promise<void>)[] = [];
+    const services = testServices({
+      auth: createAuth({ fetch: spy.fetch }),
+      defer: (work) => {
+        later.push(work);
+        return Promise.resolve();
+      },
+    });
+
+    const results = await Promise.all(
+      [freshOrigin(), freshOrigin()].map((origin) => services.requestRecovery({ email: account.email }, origin)),
+    );
+
+    expect(results).toEqual([{ kind: "accepted" }, { kind: "accepted" }]);
+    expect(spy.calls).toEqual([]);
+    expect(later).toHaveLength(1);
+    await later[0]?.();
+    expect(spy.calls).toEqual(["/auth/v1/recover"]);
+    expect(await waitForMails(account.email, 1)).toHaveLength(1);
+  });
+
   it("un correo sin forma se dice, y no se cuenta ni llega a Auth", async () => {
     const spy = recordingFetch();
     const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
@@ -147,7 +186,7 @@ describe("pedir la recuperación", () => {
       wait + 5,
     ]);
     expect(await services.requestRecovery({ email: account.email }, origin)).toEqual({ kind: "accepted" });
-    expect(await mailsTo(account.email)).toHaveLength(2);
+    expect(await waitForMails(account.email, 2)).toHaveLength(2);
     expect(services.reported).toEqual([]);
   });
 
@@ -159,7 +198,7 @@ describe("pedir la recuperación", () => {
     await seedLastMail(signUp.last);
 
     expect(await testServices().requestRecovery({ email: account.email }, freshOrigin())).toEqual({ kind: "accepted" });
-    expect(await mailsTo(account.email)).toHaveLength(1);
+    expect(await waitForMails(account.email, 1)).toHaveLength(1);
   });
 
   it("pedir la recuperación de las variantes con + de un correo no le gasta el cupo a la cuenta de verdad", async () => {
@@ -177,7 +216,7 @@ describe("pedir la recuperación", () => {
     }
 
     expect(await services.requestRecovery({ email: real }, freshOrigin())).toEqual({ kind: "accepted" });
-    expect(await mailsTo(real)).toHaveLength(1);
+    expect(await waitForMails(real, 1)).toHaveLength(1);
   });
 
   it("el tope por dirección se dice, y lo que niega no cuenta ni llega a Auth", async () => {
@@ -211,7 +250,7 @@ describe("pedir la recuperación", () => {
     expect(await bucketRows(cubes.last)).toBe(0);
     expect(await hitsOf(cubes.ip)).toBe(1);
     expect(await testServices().requestRecovery({ email: account.email }, origin)).toEqual({ kind: "accepted" });
-    expect(await mailsTo(account.email)).toHaveLength(1);
+    expect(await waitForMails(account.email, 1)).toHaveLength(1);
   });
 
   it("si alguien se la pidió a Auth directo hace un momento, contesta igual y no lo reporta", async () => {
@@ -227,7 +266,7 @@ describe("pedir la recuperación", () => {
     expect(services.reported).toEqual([]);
     expect(await hitsOf(recoveryBuckets(account.email, origin).mail)).toBe(1);
     await sentinel();
-    expect(await mailsTo(account.email)).toHaveLength(1);
+    expect(await waitForMails(account.email, 1)).toHaveLength(1);
   });
 });
 
@@ -422,16 +461,70 @@ describe("completar la recuperación", () => {
     expect(await pairOf(keysOf(account.email, origin))).toBeNull();
   }, 30_000);
 
-  it("de una dirección que no se conoce no queda ningún dispositivo de confianza", async () => {
+  it("de una dirección que no se conoce no queda ningún dispositivo de confianza, y los demás la pierden igual", async () => {
     const account = await claimed();
     const hash = await recoveryLink(account);
+    await clearThrottle();
     const unknown = { realIp: null, userAgent: null };
+    const elsewhere = keysOf(account.email, freshOrigin());
+    const trusted = new Date(Date.now() - 86_400_000);
+    await seedPair(elsewhere, { failed_count: 2, last_failed_at: trusted, last_success_at: trusted });
+    await seedHits(signInBuckets(elsewhere).account, 4);
+    await seedHits(signInBuckets(elsewhere).ip, 6);
     const services = testServices();
 
     expect(await services.completeRecovery({ tokenHash: hash, password: password() }, unknown)).toEqual({ kind: "done" });
 
-    const shared = { account: keysOf(account.email, freshOrigin()).account, ip: resolveOrigin(unknown, true).ip };
-    expect((await pairOf(shared))?.last_success_at ?? null).toBeNull();
+    // Ni el cubo compartido de las desconocidas ni ningún otro par de la cuenta queda de confianza.
+    const shared = { account: elsewhere.account, ip: resolveOrigin(unknown, true).ip };
+    expect(await pairOf(shared)).toBeNull();
+    expect(await pairOf(elsewhere)).toMatchObject({ failed_count: 2, last_success_at: null });
+    expect(await bucketRows(signInBuckets(elsewhere).account)).toBe(0);
+    // La cuenta de la hora de una dirección no es de la cuenta: se queda.
+    expect(await hitsOf(signInBuckets(elsewhere).ip)).toBe(6);
+  });
+
+  it("si Auth no guarda la contraseña de una cuenta sin reclamar, la marca sigue prendida", async () => {
+    // La marca solo se apaga con la contraseña fijada de verdad.
+    const email = newEmail();
+    expect(await testServices().requestRegistration({ email }, freshOrigin())).toEqual({ kind: "accepted" });
+    await waitForMails(email, 1);
+    const hash = await recoveryLink({ email }, 2);
+    const id = (await ownerQuery<{ id: string }>("select id::text as id from auth.users where email = $1", [email]))[0]?.id ?? "";
+    const origin = freshOrigin();
+    const broken = testServices({ auth: createAuth({ fetch: failingFetch(/\/auth\/v1\/user$/, networkDown).fetch }) });
+    const chosen = password();
+
+    expect(await broken.completeRecovery({ tokenHash: hash, password: chosen }, origin)).toEqual({ kind: "request_new_link" });
+
+    expect(await profileOf(id)).toMatchObject({ pending: true });
+    expect(await pairOf(keysOf(email, origin))).toBeNull();
+    expect(await sessionCount(id)).toBe(0);
+    expect(await testServices().signIn(memoryJar(), { email, password: chosen }, freshOrigin())).toEqual({
+      kind: "invalid_credentials",
+    });
+  });
+
+  it("si la base falla una vez al reclamar, el segundo intento lo logra", async () => {
+    const account = await claimed();
+    const hash = await recoveryLink(account);
+    const origin = freshOrigin();
+    const { released } = await holdProfileUntilFirstGivesUp(account.id);
+    const services = testServices();
+
+    expect(await services.completeRecovery({ tokenHash: hash, password: password() }, origin)).toEqual({ kind: "done" });
+    await released;
+
+    expect(services.reported).toEqual([]);
+    expect((await pairOf(keysOf(account.email, origin)))?.last_success_at).not.toBeNull();
+  }, 30_000);
+
+  it("si las sesiones no se pueden cerrar, la contraseña quedó guardada y alguien tiene que saberlo", async () => {
+    const account = await claimed();
+    const hash = await recoveryLink(account);
+    const stuck = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+    expect(await stuck.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin())).toEqual({ kind: "done" });
+    expect(stuck.reported).toEqual(["session_not_closed"]);
   });
 });
 

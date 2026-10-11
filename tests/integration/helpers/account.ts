@@ -72,6 +72,36 @@ export async function holdLock(print: Fingerprint): Promise<() => Promise<void>>
   return () => owner.end();
 }
 
+/**
+ * Como `holdProfile`, pero se suelta sola en cuanto el primero que esperaba esa fila se
+ * rindió: el siguiente intento la consigue. `released` termina cuando la soltó, y falla si
+ * nadie llegó a esperarla: así una prueba de «el segundo intento lo logra» no pasa sin
+ * que haya habido un primero que falló.
+ */
+export async function holdProfileUntilFirstGivesUp(userId: string): Promise<{ released: Promise<void> }> {
+  const release = await holdProfile(userId);
+  const watch = async (): Promise<void> => {
+    const deadline = Date.now() + 20_000;
+    let first: string | null = null;
+    try {
+      while (Date.now() < deadline) {
+        const rows = await ownerQuery<{ waiter: string }>(
+          `select pid::text || ' ' || query_start::text as waiter from pg_stat_activity
+           where usename = 'app_service' and wait_event_type = 'Lock' order by query_start limit 1`,
+        );
+        const waiter = rows[0]?.waiter ?? null;
+        if (first === null) first = waiter;
+        else if (waiter !== first) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("Nadie esperó la fila del perfil, o el primero nunca se rindió.");
+    } finally {
+      await release();
+    }
+  };
+  return { released: watch() };
+}
+
 /** Vacía el freno y los contadores: cada caso empieza de cero. */
 export async function clearThrottle(): Promise<void> {
   await ownerQuery("delete from private.login_throttles");

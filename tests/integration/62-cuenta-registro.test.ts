@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createAuth } from "@/adapters/supabase/auth";
+import { buckets } from "@/services/account/fingerprint";
 import { resolveOrigin } from "@/services/account/origin";
 
 import {
@@ -16,6 +17,7 @@ import {
   hitsOf,
   holdLock,
   holdProfile,
+  holdProfileUntilFirstGivesUp,
   notedSessions,
   parameter,
   profileOf,
@@ -151,7 +153,7 @@ describe("pedir el registro", () => {
 
     await sentinel();
     // El que no había confirmado recibe otro enlace; el que ya tiene cuenta, nada.
-    expect(await mailsTo(pendingOne)).toHaveLength(2);
+    expect(await waitForMails(pendingOne, 2)).toHaveLength(2);
     expect(await mailsTo(existing.email)).toEqual([]);
   });
 
@@ -186,7 +188,7 @@ describe("pedir el registro", () => {
     await ageLastMail(cubes.last, 10);
     expect(await services.requestRegistration({ email }, origin)).toEqual({ kind: "accepted" });
     expect(spy.calls).toEqual(["/auth/v1/invite"]);
-    expect(await mailsTo(email)).toHaveLength(2);
+    expect(await waitForMails(email, 2)).toHaveLength(2);
     expect(await hitsOf(cubes.mail)).toBe(2);
     expect(await bucketRows(cubes.last)).toBe(1);
   });
@@ -202,7 +204,7 @@ describe("pedir el registro", () => {
     expect(await services.requestRegistration({ email: second }, freshOrigin())).toEqual({ kind: "accepted" });
 
     await sentinel();
-    expect(await mailsTo(first)).toHaveLength(1);
+    expect(await waitForMails(first, 1)).toHaveLength(1);
     expect(await mailsTo(second)).toEqual([]);
   });
 
@@ -249,7 +251,7 @@ describe("pedir el registro", () => {
     const services = testServices();
     for (let i = 0; i < 3; i += 1) await services.requestRegistration({ email }, origin);
     expect(await hitsOf(registrationBuckets(email, origin).ip)).toBe(3);
-    expect(await mailsTo(email)).toHaveLength(1);
+    expect(await waitForMails(email, 1)).toHaveLength(1);
   });
 
   it("si Auth no contesta, la respuesta es la misma, se reporta, y el envío no queda anotado", async () => {
@@ -267,7 +269,7 @@ describe("pedir el registro", () => {
     expect(await hitsOf(cubes.ip)).toBe(1);
     // Y se puede volver a pedir enseguida.
     expect(await testServices().requestRegistration({ email }, origin)).toEqual({ kind: "accepted" });
-    expect(await mailsTo(email)).toHaveLength(1);
+    expect(await waitForMails(email, 1)).toHaveLength(1);
   });
 
   it("la respuesta sale antes de preguntarle a Auth: la invitación corre detrás", async () => {
@@ -288,7 +290,7 @@ describe("pedir el registro", () => {
 
     await later[0]?.();
     expect(spy.calls).toEqual(["/auth/v1/invite"]);
-    expect(await mailsTo(email)).toHaveLength(1);
+    expect(await waitForMails(email, 1)).toHaveLength(1);
   });
 
   it("si los contadores no se pueden leer, no pasa nadie, se reporta, y no depende del correo", async () => {
@@ -304,6 +306,57 @@ describe("pedir el registro", () => {
     expect(services.reported).toEqual(["mail_limits_unavailable"]);
     expect(spy.calls).toEqual([]);
     expect(await throttleRows()).toBe(0);
+  });
+});
+
+describe("pedir el registro: a la vez, y sin saber de dónde viene", () => {
+  it("dos peticiones a la vez para el mismo buzón, desde direcciones distintas, mandan un solo correo", async () => {
+    const email = newEmail();
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+    const origins = [freshOrigin(), freshOrigin()] as const;
+
+    const results = await Promise.all(origins.map((origin) => services.requestRegistration({ email }, origin)));
+
+    expect(results).toEqual([{ kind: "accepted" }, { kind: "accepted" }]);
+    expect(spy.calls).toEqual(["/auth/v1/invite"]);
+    const cubes = registrationBuckets(email, origins[0]);
+    expect(await hitsOf(cubes.mail)).toBe(1);
+    expect(await bucketRows(cubes.last)).toBe(1);
+    expect(await waitForMails(email, 1)).toHaveLength(1);
+  });
+
+  it("sin un alojamiento de fiar delante, la cabecera no se cree: todas las peticiones comparten un tope", async () => {
+    const services = testServices({ proxyTrusted: () => false });
+    const first = freshOrigin();
+    const second = freshOrigin();
+
+    expect(await services.requestRegistration({ email: newEmail() }, first)).toEqual({ kind: "accepted" });
+    expect(await services.requestRegistration({ email: newEmail() }, second)).toEqual({ kind: "accepted" });
+
+    expect(await hitsOf(buckets.signUpIp(resolveOrigin(first, false).ip))).toBe(2);
+    expect(resolveOrigin(first, false).ip.hex).toBe(resolveOrigin(second, false).ip.hex);
+    // Nada quedó contado a las direcciones que decía la cabecera.
+    expect(await hitsOf(buckets.signUpIp(resolveOrigin(first, true).ip))).toBe(0);
+    expect(await hitsOf(buckets.signUpIp(resolveOrigin(second, true).ip))).toBe(0);
+    // En local no saber de dónde viene es lo normal. Fuera de local se reporta.
+    expect(services.reported).toEqual([]);
+    const deployed = testServices({ proxyTrusted: () => false, isLocal: () => false });
+    expect(await deployed.requestRegistration({ email: newEmail() }, first)).toEqual({ kind: "accepted" });
+    expect(deployed.reported).toEqual(["client_ip_unknown"]);
+  });
+
+  it("el mismo correo con otras mayúsculas y con espacios es el mismo buzón", async () => {
+    const email = newEmail();
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+    const origin = freshOrigin();
+
+    expect(await services.requestRegistration({ email }, origin)).toEqual({ kind: "accepted" });
+    expect(await services.requestRegistration({ email: `  ${email.toUpperCase()} ` }, origin)).toEqual({ kind: "accepted" });
+
+    expect(spy.calls).toEqual(["/auth/v1/invite"]);
+    expect(await hitsOf(registrationBuckets(email, origin).mail)).toBe(1);
   });
 });
 
@@ -459,15 +512,12 @@ describe("completar el registro desde el enlace", () => {
 
   it("si guardar falla una vez, el segundo intento lo logra", async () => {
     const { hash, id } = await invited();
-    const release = await holdProfile(id);
-    // Se suelta después del tiempo límite del primer intento y antes del segundo.
-    const freed = new Promise((resolve) => setTimeout(resolve, 6_000)).then(release);
+    // La fila se suelta cuando el primer intento se rinde: si no hubo primero, la prueba falla.
+    const { released } = await holdProfileUntilFirstGivesUp(id);
     const services = testServices();
-    try {
-      expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
-    } finally {
-      await freed;
-    }
+    expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+    await released;
+    expect(services.reported).toEqual([]);
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba", adult: true });
     expect(await consentsOf(id)).toHaveLength(3);
   }, 30_000);
@@ -573,6 +623,63 @@ describe("completar el registro desde el enlace", () => {
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: null, adult: false });
     expect(await consentsOf(id)).toEqual([]);
     expect(services.reported).toEqual([]);
+  });
+
+  it("deja la marca de que su enlace ya se usó, y con esa marca puesta otro canje no sigue", async () => {
+    const done = await invited();
+    expect(await testServices().completeRegistration(memoryJar(), form(done.hash), freshOrigin())).toMatchObject({
+      kind: "entered",
+    });
+    expect(await bucketRows(buckets.signUpRedeemed(done.id))).toBe(1);
+
+    // Otra cuenta, con la marca ya puesta: es lo que ve el segundo de dos canjes simultáneos.
+    const { hash, id } = await invited();
+    await ownerQuery(
+      "insert into private.rate_limit_counters (bucket, window_start, hits) values ($1, 'epoch', 1)",
+      [buckets.signUpRedeemed(id)],
+    );
+    const spy = recordingFetch();
+    const services = testServices({ auth: createAuth({ fetch: spy.fetch }) });
+
+    expect(await services.completeRegistration(memoryJar(), form(hash), freshOrigin())).toEqual({ kind: "link_dead" });
+
+    expect(spy.calls.some((path) => path.includes("/admin/"))).toBe(false);
+    expect(spy.calls.filter((path) => path.startsWith("/auth/v1/logout"))).toEqual(["/auth/v1/logout?scope=local"]);
+    expect(await sessionCount(id)).toBe(0);
+    expect(await profileOf(id)).toMatchObject({ pending: true, display_name: null });
+  });
+
+  it("si al final la guarda no deja entrar, la cuenta quedó lista pero no hay cookie ni sesión", async () => {
+    const { hash, id } = await invited();
+    // Los textos dejan de valer justo cuando se pide la entrada: la guarda ya no puede decidir.
+    let local = true;
+    const auth = createAuth({
+      fetch: (input, init) => {
+        if (String(input instanceof Request ? input.url : input).includes("grant_type=password")) local = false;
+        return fetch(input, init);
+      },
+    });
+    const services = testServices({ auth, isLocal: () => local });
+    const jar = memoryJar();
+
+    expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toEqual({ kind: "ready_sign_in" });
+
+    expect(services.reported).toEqual(["gate_no_current_text"]);
+    expect(jar.writes).toEqual([]);
+    expect(await sessionCount(id)).toBe(0);
+    expect(await notedSessions(id)).toBe(0);
+    expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba" });
+  });
+
+  it("de una dirección que no se conoce, el consentimiento queda sin dirección: no se inventa una", async () => {
+    const { hash, id } = await invited();
+    const services = testServices();
+    expect(
+      await services.completeRegistration(memoryJar(), form(hash), { realIp: "no-es-una-direccion", userAgent: null }),
+    ).toMatchObject({ kind: "entered" });
+    const consents = await consentsOf(id);
+    expect(consents).toHaveLength(3);
+    for (const consent of consents) expect(consent).toMatchObject({ ip: null, user_agent: null });
   });
 
   it("el enlace de una cuenta que ya se reclamó no cambia nada", async () => {
