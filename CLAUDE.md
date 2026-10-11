@@ -172,9 +172,10 @@ falla. Once precisiones que la tabla no dice:
     delatan el estado de una cuenta.
   - El SDK de Auth se usa con un cliente de un solo uso (`oneShotClient`): uno compartido
     guardaría la sesión del último que entró. La API de administración solo se llama desde
-    `setFirstPassword` y `slimDown`, las dos sobre una cuenta que sale de un enlace recién
-    canjeado; una prueba lo exige. `auth-client.ts` no se importa fuera del adaptador: lo
-    rechaza el lint.
+    cuatro funciones de `auth.ts`: `requestSignUp`, que invita un correo, y tres que
+    actúan sobre la cuenta de un enlace recién canjeado, `setFirstPassword`, `slimDown` y
+    el segundo camino de `setRecoveredPassword`. Una prueba lo exige. `auth-client.ts` no
+    se importa fuera del adaptador: lo rechaza el lint.
   - Cuando Auth rechaza con un código que no está en la lista de la operación, la
     respuesta sigue siendo «no se supo» y el adaptador deja en el registro del servidor la
     operación, el estado y el código. Nunca el mensaje, que puede traer un correo.
@@ -185,12 +186,16 @@ falla. Once precisiones que la tabla no dice:
     las funciones ya armadas.
 - **Los servicios de cuenta viven en `src/services/account/`** (TRD §9.2). `account.ts`
   llega a la base; `session.ts`, que es lo que importa el paso previo, no lo importa.
+  Registrarse, recuperar la contraseña y completar una cuenta viven en `onboarding.ts`,
+  con sus revisiones puras en `forms.ts` y lo que leen y escriben de la persona en
+  `records.ts`; `account.ts` los arma.
   - `checkSession(reader)` es la guarda de sesión: toda página y toda acción con sesión la
     llama, y obedece lo que contesta. Además de lo que decide el dominio, comprueba en la
     base que la sesión sea de las que abrió la aplicación y que siga viva en Auth. Una
     sesión abierta directo en Auth no pasa aunque su token verifique. No renueva: quien
     puede escribir cookies llama antes a `refreshSession`.
-  - Una sesión solo se anota con `private.note_session()`, y solo la llama `signIn`. Exige
+  - Una sesión solo se anota con `private.note_session()`, y solo la llaman `signIn` y la
+    entrada con la que termina `completeRegistration`. Exige
     que el intento haya empezado después del último cambio de contraseña: Auth abre la
     sesión sin volver a mirar la cuenta, y una entrada en vuelo sobrevive al cambio.
   - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo
@@ -211,7 +216,37 @@ falla. Once precisiones que la tabla no dice:
   - La dirección de quien pide solo se cree detrás de un despliegue de Vercel
     (`origin.ts`). Desconocida, va a un cubo compartido y nunca queda como par de
     confianza.
-  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report })` existe
+  - El registro es una invitación del servidor (`requestSignUp`, por la API de
+    administración). Auth no acepta altas de fuera (`enable_signup = false` en `[auth]` de
+    `supabase/config.toml`; no es el de `[auth.email]`), y la cuenta nace sin confirmar y
+    sin contraseña. El enlace se canjea con el tipo `invite`. CO-01 sale por dos
+    plantillas con el mismo texto, `invite` y `confirmation`, y una prueba compara que
+    sean el mismo correo.
+  - Pedir el registro y pedir la recuperación llevan cupos de correo separados: el del
+    registro por buzón, el de la recuperación por correo exacto. Cada uno tiene además su
+    tope por dirección, el único que se le dice a la persona. La espera entre dos correos
+    se mide desde el último envío, no por ventana de reloj (TRD §9.9).
+  - `requestRegistration` y `requestRecovery` contestan siempre lo mismo pasado el tope
+    por dirección: exista o no la cuenta, se haya mandado algo o no. La llamada a Auth
+    corre detrás de la respuesta, por la dependencia `defer`: sin nada que la mande
+    detrás corre en línea, y las pantallas le pasan el `after()` de Next. Por eso estas
+    dos no salen ya armadas de `account.ts`: quien tiene la petición arma las suyas con
+    `createAccountServices`. Si Auth no manda el correo, también cuando lo rechaza por su
+    propia espera, lo anotado se deshace y se reporta.
+  - Canjear contesta `spent` cuando Auth gastó el enlace pero su sesión no se pudo usar.
+    No es `unknown`: el enlace ya no sirve, y el servicio manda a recuperar o a pedir otro.
+  - Canjear un enlace lo gasta. `completeRegistration` revisa antes todo lo que se puede
+    revisar (datos y textos vigentes), y después del canje toda salida cierra la sesión
+    del canje y dice qué hacer con un enlace que ya no sirve. Antes de fijar la contraseña
+    deja una marca por cuenta: Auth deja pasar dos canjes simultáneos del mismo enlace, y
+    solo el primero sigue. El orden está en el TRD §9.2, fila «Verificación de correo», y
+    no se cambia sin leerlo.
+  - `completeRecovery` cierra todas las sesiones siempre, falle lo que falle antes, y no
+    abre sesión. `setRecoveredPassword` guarda con la sesión del canje y, si esa sesión ya
+    no existe o la contraseña es la que ya tenía, por la API de administración: por ese
+    camino el aviso CO-26 no sale, y se reporta. Los demás pares de la cuenta pierden la
+    confianza y conservan sus fallos.
+  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer })` existe
     para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
     propia dirección (`tests/integration/helpers/account.ts`).
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en

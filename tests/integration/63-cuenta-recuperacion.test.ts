@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createAuth } from "@/adapters/supabase/auth";
+import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { resolveOrigin } from "@/services/account/origin";
 
 import {
@@ -253,18 +254,22 @@ describe("pedir la recuperación", () => {
     expect(await waitForMails(account.email, 1)).toHaveLength(1);
   });
 
-  it("si alguien se la pidió a Auth directo hace un momento, contesta igual y no lo reporta", async () => {
-    // Auth lleva su espera por cuenta: ese correo ya salió, y el buzón ya tiene su enlace.
+  it("si Auth no lo manda por su propia espera, contesta igual, lo reporta y no lo deja anotado", async () => {
+    // Auth lleva su espera por cuenta, y cualquiera puede gastarla pidiéndole directo un
+    // correo para ese buzón. El del servicio no salió: no se da por mandado.
     const account = await claimed();
     expect((await authVisitor().auth.resetPasswordForEmail(account.email)).error).toBeNull();
     await waitForMails(account.email, 1);
     const origin = freshOrigin();
+    const cubes = recoveryBuckets(account.email, origin);
     const services = testServices();
 
     expect(await services.requestRecovery({ email: account.email }, origin)).toEqual({ kind: "accepted" });
 
-    expect(services.reported).toEqual([]);
-    expect(await hitsOf(recoveryBuckets(account.email, origin).mail)).toBe(1);
+    expect(services.reported).toEqual(["recovery_mail_failed"]);
+    expect(await hitsOf(cubes.mail)).toBe(0);
+    expect(await bucketRows(cubes.last)).toBe(0);
+    expect(await hitsOf(cubes.ip)).toBe(1);
     await sentinel();
     expect(await waitForMails(account.email, 1)).toHaveLength(1);
   });
@@ -364,6 +369,22 @@ describe("completar la recuperación", () => {
     expect(await testServices().completeRecovery({ tokenHash: hash, password: password() }, freshOrigin())).toEqual({
       kind: "done",
     });
+  });
+
+  it("si el enlace se gastó pero su sesión no se pudo usar, pide otro enlace: no dice que este siga sirviendo", async () => {
+    const account = await claimed();
+    const hash = await recoveryLink(account);
+    const blind = testServices({
+      auth: createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) }),
+    });
+
+    expect(await blind.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin())).toEqual({
+      kind: "request_new_link",
+    });
+
+    expect(blind.reported).toEqual(["recovery_incomplete"]);
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await testServices().signIn(memoryJar(), account, freshOrigin())).toMatchObject({ kind: "entered" });
   });
 
   it("con la contraseña que ya tenía también cierra todo; el aviso no sale, y se reporta", async () => {

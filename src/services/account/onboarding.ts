@@ -239,9 +239,9 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
           flow === "registration"
             ? // A quien ya tiene cuenta Auth no le manda nada, y eso no es una falla.
               ["accepted", "existing_account"].includes(await auth.requestSignUp(email))
-            : // El límite de Auth por cuenta: alguien se lo pidió directo hace un momento, y
-              // ese correo ya salió.
-              ["accepted", "mail_rate_limited"].includes(await auth.requestPasswordRecovery(email));
+            : // La espera de Auth por cuenta no cuenta como mandado: la gasta cualquiera que le
+              // pida directo un correo para ese buzón, y el del servicio no salió.
+              (await auth.requestPasswordRecovery(email)) === "accepted";
         if (delivered) return;
         // El correo no salió: se borra lo anotado, para que se pueda volver a pedir.
         try {
@@ -352,7 +352,12 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     if (match.kind === "missing") return { kind: "invalid", fields: { texts: "required" } };
 
     const redemption = await auth.redeemSignupLink(form.tokenHash);
-    if (!redemption.ok) return { kind: redemption.reason === "invalid_or_expired" ? "link_dead" : "unavailable" };
+    if (!redemption.ok) {
+      if (redemption.reason !== "spent") return { kind: redemption.reason === "invalid_or_expired" ? "link_dead" : "unavailable" };
+      // Auth canjeó el enlace y su sesión no se pudo usar: el adaptador ya la cerró.
+      await deps.report("registration_incomplete");
+      return { kind: "recover_instead" };
+    }
     const { redeemed } = redemption;
     const profileId = redeemed.claims.userId;
 
@@ -422,7 +427,11 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const from = resolveOrigin(origin, deps.proxyTrusted());
 
     const redemption = await auth.redeemRecoveryLink(input.tokenHash);
-    if (!redemption.ok) return { kind: redemption.reason === "invalid_or_expired" ? "link_dead" : "unavailable" };
+    if (!redemption.ok) {
+      if (redemption.reason !== "spent") return { kind: redemption.reason === "invalid_or_expired" ? "link_dead" : "unavailable" };
+      await deps.report("recovery_incomplete");
+      return { kind: "request_new_link" };
+    }
     const { redeemed } = redemption;
 
     // Desde aquí el enlace ya se gastó.
@@ -457,7 +466,9 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       }
     }
 
-    // Siempre, falle lo que falle antes: ninguna sesión de la cuenta sobrevive a esto.
+    // Siempre, falle lo que falle antes. Lo que esto no alcanza: una entrada que Auth tenía
+    // a medias con la contraseña vieja nace después del cierre. La aplicación no la
+    // reconoce, pero sigue viva en Auth (TRD §9.2, el sello de la contraseña, sin decidir).
     await expectClosed(auth.closeAllSessions(redeemed));
     if (!done) {
       await deps.report("recovery_incomplete");

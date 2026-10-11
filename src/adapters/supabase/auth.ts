@@ -131,7 +131,12 @@ export interface RedeemedLink {
 
 export type RedeemResult =
   | { ok: true; redeemed: RedeemedLink }
-  | { ok: false; reason: "invalid_or_expired" | "unknown" };
+  /**
+   * `invalid_or_expired`: el enlace no sirve. `unknown`: no se supo, y el enlace sigue
+   * sirviendo. `spent`: Auth lo canjeó, pero su sesión no se pudo usar y se cerró: el
+   * enlace ya no sirve, y a la persona hay que darle otra salida.
+   */
+  | { ok: false; reason: "invalid_or_expired" | "unknown" | "spent" };
 
 interface Redemption {
   /** La cuenta, guardada aparte: no se lee del objeto que anda por fuera. */
@@ -302,13 +307,14 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       if (error) return { ok: false, reason: classify("redeem", failureFromSdk(error), redeemFailure) };
       accessToken = text(data.session?.access_token);
       const email = text(data.user?.email);
-      if (!accessToken || !email || !data.user) return { ok: false, reason: "unknown" };
+      // Desde aquí Auth ya canjeó el enlace: lo que falle es `spent`, no `unknown`.
+      if (!accessToken || !email || !data.user) return { ok: false, reason: "spent" };
 
       const inspection = await inspect(accessToken);
-      // El enlace ya se gastó. Si su sesión no se puede verificar, no se usa: se cierra.
+      // Si su sesión no se puede verificar, no se usa: se cierra.
       if (inspection.state !== "valid" || inspection.claims.userId !== data.user.id) {
         await logout(accessToken, "local");
-        return { ok: false, reason: "unknown" };
+        return { ok: false, reason: "spent" };
       }
 
       const metadata: unknown = data.user.user_metadata;
@@ -321,7 +327,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
         const slim = await slimDown(session, text(data.session?.refresh_token));
         if (!slim) {
           await logout(accessToken, "local");
-          return { ok: false, reason: "unknown" };
+          return { ok: false, reason: "spent" };
         }
         session = slim;
         accessToken = slim.accessToken;
@@ -336,7 +342,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       });
       return { ok: true, redeemed };
     } catch (error) {
-      if (accessToken) await logout(accessToken, "local");
+      if (accessToken) {
+        await logout(accessToken, "local");
+        return { ok: false, reason: "spent" };
+      }
       return { ok: false, reason: classify("redeem", failureFromSdk(error), redeemFailure) };
     }
   }
@@ -465,8 +474,12 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   }
 
   /**
-   * Cierra todas las sesiones de la cuenta, también la del canje. Se puede volver a llamar
-   * si contestó `unknown`, mientras el token del canje no haya vencido.
+   * Cierra todas las sesiones de la cuenta, con la del canje. Se puede volver a llamar si
+   * contestó `unknown`, mientras el token del canje no haya vencido.
+   *
+   * Si la sesión del canje ya no existe (la borró fijar la contraseña por administración,
+   * o alguien más), contesta `closed` sin haber cerrado nada: ya no hay con qué. Y no
+   * alcanza a una entrada que Auth tenía a medias y que nace después (TRD §9.2).
    */
   const closeAllSessions = (redeemed: RedeemedLink) => close(redeemed, "global");
 

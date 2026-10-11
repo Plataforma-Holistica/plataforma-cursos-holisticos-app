@@ -16,8 +16,9 @@ provisional. Lo que sí hay:
   único camino del código a la base.
 - **Cuenta** (T-104, segunda entrega, en curso): los textos legales y los consentimientos,
   el freno de entrada, las reglas puras de registro, entrada y recuperación, la sesión por
-  cookie y, de los servicios, la guarda de sesión, entrar y salir. Faltan el registro, la
-  recuperación y las pantallas.
+  cookie y los servicios: la guarda de sesión, entrar y salir, y registrarse (por
+  invitación del servidor), recuperar la contraseña y completar la cuenta. Faltan las
+  pantallas.
 - **Diseño** (T-109): el catálogo de textos, los tokens y los componentes base.
 
 Lo que está en revisión y lo que sigue lo dice `../PROGRESO.md`.

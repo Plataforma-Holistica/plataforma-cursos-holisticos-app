@@ -125,8 +125,9 @@ describe("la llave secreta de Supabase", () => {
       if (from === -1) throw new Error(`auth.ts ya no tiene la función ${name}.`);
       return auth.slice(from, auth.indexOf("\n  }\n", from));
     };
-    // Invitar no parte de un canje: recibe un correo y no toca ninguna cuenta que ya
-    // exista. Las otras tres actúan sobre la cuenta de un enlace recién canjeado.
+    // Invitar no parte de un canje: recibe un correo. A una cuenta confirmada no le hace
+    // nada; a una que no ha confirmado le manda otro enlace, y el anterior deja de servir.
+    // Las otras tres actúan sobre la cuenta de un enlace recién canjeado.
     const users = ["requestSignUp", "setFirstPassword", "setRecoveredPassword", "slimDown"];
     const count = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].length;
 

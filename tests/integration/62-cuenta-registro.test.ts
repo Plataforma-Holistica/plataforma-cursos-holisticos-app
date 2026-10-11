@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createAuth } from "@/adapters/supabase/auth";
+import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { buckets } from "@/services/account/fingerprint";
 import { resolveOrigin } from "@/services/account/origin";
 
@@ -492,6 +493,19 @@ describe("completar el registro desde el enlace", () => {
     const down = testServices({ auth: createAuth({ fetch: failingFetch(/\/verify/, networkDown).fetch }) });
     expect(await down.completeRegistration(memoryJar(), form(hash), freshOrigin())).toEqual({ kind: "unavailable" });
     expect(await testServices().completeRegistration(memoryJar(), form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+  });
+
+  it("si el enlace se gastó pero su sesión no se pudo usar, manda a recuperar: no dice que el enlace siga sirviendo", async () => {
+    const { hash, id } = await invited();
+    const blind = testServices({
+      auth: createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) }),
+    });
+
+    expect(await blind.completeRegistration(memoryJar(), form(hash), freshOrigin())).toEqual({ kind: "recover_instead" });
+
+    expect(blind.reported).toEqual(["registration_incomplete"]);
+    expect(await sessionCount(id)).toBe(0);
+    expect(await profileOf(id)).toMatchObject({ pending: true, display_name: null });
   });
 
   it("si la contraseña no se pudo fijar, manda a recuperar, no deja sesión y la marca sigue prendida", async () => {

@@ -291,12 +291,14 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
 
 const services = createAccountServices();
 
+// `requestRegistration` y `requestRecovery` no salen ya armados a propósito: sin un
+// `defer` que mande la llamada a Auth detrás de la respuesta, el tiempo que tarda delata si
+// el correo tiene cuenta. Quien tiene la petición arma los suyos con `createAccountServices`
+// y le pasa lo que su plataforma dé para eso.
 export const {
   checkSession,
   signIn,
   signOut,
-  requestRegistration,
-  requestRecovery,
   accountFormFacts,
   completeRegistration,
   completeRecovery,

@@ -249,6 +249,18 @@ describe("lo que el Auth local tiene configurado", () => {
     await waitForMails(user.email, 2);
   });
 
+  it("pedirle directo un enlace de acceso gasta la espera de la recuperación de esa cuenta", async () => {
+    // Lo puede hacer cualquiera con la llave publicable. Por eso el servicio no da por
+    // mandado un correo de recuperación que Auth rechazó por su espera.
+    const user = await confirmedUser();
+    const asked = await visitor().auth.signInWithOtp({ email: user.email, options: { shouldCreateUser: false } });
+    expect(asked.error).toBeNull();
+    await waitForMails(user.email, 1);
+
+    const recovery = await visitor().auth.resetPasswordForEmail(user.email);
+    expect(recovery.error?.code).toBe("over_email_send_rate_limit");
+  });
+
   it("cambiar la contraseña con una sesión de más de un día pide volver a identificarse", async () => {
     const user = await confirmedUser();
     const password = `P-${randomUUID()}`;

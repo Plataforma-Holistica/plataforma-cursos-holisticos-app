@@ -246,8 +246,10 @@ describe("canjear el enlace de verificación", () => {
     const hash = tokenHashIn(await lastMailTo(email), "verificar");
     const blind = createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) });
 
-    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "unknown" });
+    // El enlace ya se gastó, y quien llama lo tiene que saber: reintentar con él no sirve.
+    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "spent" });
     expect(await sessionCount(await userIdOf(email))).toBe(0);
+    expect(await redeemSignupLink(hash)).toEqual({ ok: false, reason: "invalid_or_expired" });
   });
 
   it("si la sesión que devuelve el canje no es de la cuenta que dice, no se usa y se cierra", async () => {
@@ -264,7 +266,7 @@ describe("canjear el enlace de verificación", () => {
     );
     const auth = createAuth({ fetch: mismatched.fetch });
 
-    expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "unknown" });
+    expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "spent" });
     expect(mismatched.calls.some((path) => path.startsWith("/auth/v1/logout?scope=local"))).toBe(true);
     expect(await sessionCount(account.id)).toBe(0);
   });
