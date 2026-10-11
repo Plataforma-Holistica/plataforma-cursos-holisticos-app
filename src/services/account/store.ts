@@ -156,6 +156,93 @@ export async function uncountHit(tx: Tx, bucket: string, window: Date): Promise<
   );
 }
 
+const mailParamsRow = z.object({
+  ip_cap: z.number().int(),
+  mail_cap: z.number().int(),
+  resend_wait: z.number().int(),
+});
+
+export interface MailParams {
+  /** Peticiones por hora desde una dirección (`TOPE_REGISTROS_HORA`). */
+  ipHourlyCap: number;
+  /** Correos por hora a un mismo destino (`TOPE_ENVIOS_CORREO_HORA`). */
+  mailHourlyCap: number;
+  /** `ESPERA_REENVIO`, que ya viene en segundos. */
+  resendWaitSeconds: number;
+}
+
+/** Los parámetros de los topes de correo. Uno que falte o que no sea un entero lanza. */
+export async function loadMailParams(tx: Tx): Promise<MailParams> {
+  const [row] = await tx.query(
+    sql`select
+          private.parameter_value('TOPE_REGISTROS_HORA') as ip_cap,
+          private.parameter_value('TOPE_ENVIOS_CORREO_HORA') as mail_cap,
+          private.parameter_value('ESPERA_REENVIO') as resend_wait`,
+    mailParamsRow,
+  );
+  if (!row) throw new Error("La base no devolvió los parámetros de los topes de correo.");
+  return { ipHourlyCap: row.ip_cap, mailHourlyCap: row.mail_cap, resendWaitSeconds: row.resend_wait };
+}
+
+/** Los dos cubos del cupo de correos de un destino: la cuenta de la hora y el último envío. */
+export interface MailBuckets {
+  readonly hour: string;
+  readonly last: string;
+}
+
+const lastRow = z.object({ sent: z.date() });
+
+/** Cuándo salió el último correo anotado a ese destino, o nulo si no hay ninguno. */
+export async function readLastSent(tx: Tx, bucket: string): Promise<Date | null> {
+  const [row] = await tx.query(
+    sql`select window_start as sent from private.rate_limit_counters
+        where bucket = ${bucket} order by window_start desc limit 1`,
+    lastRow,
+  );
+  return row?.sent ?? null;
+}
+
+/**
+ * Anota un envío: suma uno a la hora y deja, como única fila de su cubo, la hora de este
+ * correo. `sentText` es la hora de la base como texto, para que vuelva a ella entera.
+ */
+export async function noteSend(tx: Tx, cubes: MailBuckets, window: Date, sentText: string): Promise<void> {
+  await countHit(tx, cubes.hour, window);
+  await tx.execute(sql`delete from private.rate_limit_counters where bucket = ${cubes.last}`);
+  await tx.execute(
+    sql`insert into private.rate_limit_counters (bucket, window_start, hits)
+        values (${cubes.last}, ${sentText}::timestamptz, 1)`,
+  );
+}
+
+/**
+ * Deshace ese envío, que al final no salió: resta el uno de su hora y borra su fila de
+ * «último», solo si sigue siendo la suya. Si entre tanto se anotó otro, ese se queda.
+ */
+export async function unnoteSend(tx: Tx, cubes: MailBuckets, window: Date, sentText: string): Promise<void> {
+  await uncountHit(tx, cubes.hour, window);
+  await tx.execute(
+    sql`delete from private.rate_limit_counters
+        where bucket = ${cubes.last} and window_start = ${sentText}::timestamptz`,
+  );
+}
+
+/**
+ * Lo que deja en el freno una recuperación (`pairAfterRecovery`): este par como diga el
+ * dominio, si se conoce su dirección; los demás pares de la cuenta sin confianza, con sus
+ * fallos; y la cuenta de la hora de la cuenta, borrada.
+ */
+export async function trustAfterRecovery(tx: Tx, keys: PairKeys, pair: PairState | null, accountBucket: string): Promise<void> {
+  const keep = pair !== null;
+  if (pair) await writePair(tx, keys, pair);
+  await tx.execute(
+    sql`update private.login_throttles set last_success_at = null
+        where account_key = ${keys.account.bytes} and last_success_at is not null
+          and (not ${keep}::boolean or ip_key <> ${keys.ip.bytes})`,
+  );
+  await tx.execute(sql`delete from private.rate_limit_counters where bucket = ${accountBucket}`);
+}
+
 const stateRow = z.object({ state: z.string() });
 
 /**

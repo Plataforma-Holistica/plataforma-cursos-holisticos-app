@@ -45,8 +45,14 @@ export const buckets = {
   signUpIp: bucket("signup:ip:"),
   /** Recuperaciones pedidas en la hora, por dirección. */
   recoverIp: bucket("recover:ip:"),
-  /** Correos de registro, por buzón. */
+  /** Correos de registro de la hora, por buzón. */
   signUpMail: bucket("mail:signup:"),
-  /** Correos de recuperación, por correo. */
+  /** Cuándo salió el último correo de registro a un buzón: una sola fila, con esa hora. */
+  signUpMailLast: bucket("mail:signup:last:"),
+  /** Correos de recuperación de la hora, por correo exacto. */
   recoverMail: bucket("mail:recover:"),
+  /** Cuándo salió el último correo de recuperación a un correo: una sola fila, con esa hora. */
+  recoverMailLast: bucket("mail:recover:last:"),
+  /** La marca de que el enlace de verificación de una cuenta ya se canjeó. Lleva su identificador, no una huella. */
+  signUpRedeemed: (profileId: string) => `signup:redeemed:${profileId}`,
 } as const;

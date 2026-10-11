@@ -52,6 +52,12 @@ describe("reportFailure", () => {
       "session_cookie_not_written",
       "sign_in_settle_failed",
       "client_ip_unknown",
+      "mail_limits_unavailable",
+      "registration_mail_failed",
+      "recovery_mail_failed",
+      "registration_incomplete",
+      "recovery_incomplete",
+      "recovery_notice_not_sent",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);
     expect(new Set(messages).size).toBe(codes.length);
