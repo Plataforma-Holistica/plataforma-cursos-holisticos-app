@@ -9,6 +9,17 @@ const PAGE_EXTENSIONS = ["tsx", "ts"];
 function nextConfig(phase: string): NextConfig {
   return {
     poweredByHeader: false,
+    // Las páginas a las que se llega desde un correo llevan en su dirección la huella del
+    // enlace. Con esta política esa dirección no viaja en la cabecera `Referer` hacia otro
+    // sitio. No es `no-referrer`: con ella un navegador manda los formularios con origen
+    // nulo, y Next rechaza la acción (TRD §9.8).
+    headers: () =>
+      Promise.resolve(
+        ["/verificar/:token", "/recuperar/:token"].map((source) => ({
+          source,
+          headers: [{ key: "Referrer-Policy", value: "same-origin" }],
+        })),
+      ),
     // `next dev` agrega por su cuenta un bloque en inglés a CLAUDE.md. La guía de este
     // repositorio se escribe a mano y sale de la planeación, así que se apaga.
     agentRules: false,
