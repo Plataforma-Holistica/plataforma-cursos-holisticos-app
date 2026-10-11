@@ -156,6 +156,14 @@ describe("el alcance del paso previo", () => {
     "/admin",
     "/api/error-drill",
     "/cursos/respiracion.consciente",
+    // Terminan como una extensión, pero sin punto: no son archivos.
+    "/cursos/masaje-holistico",
+    "/cursos/reiki-basico",
+    "/portal/historico",
+    "/admin/publico",
+    "/terapias/svg",
+    "/cursos/png",
+    "/faviconxico",
     "/_next/data/x/inicio.json",
   ])("cubre %s", (url) => {
     expect(matches(url)).toBe(true);

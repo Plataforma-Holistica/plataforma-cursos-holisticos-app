@@ -110,6 +110,8 @@ describe("el paso previo contra el Auth local", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
+  // Va al final a propósito: un corte deja en pausa la renovación de esta instancia, y con
+  // el reloj adelantado esa pausa dura, para la hora de verdad, el resto del archivo.
   it("con Auth inalcanzable deja pasar, sin borrar la cookie y sin tardar", async () => {
     const { cookie } = await signedIn();
     advanceClock(16);

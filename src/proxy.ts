@@ -54,5 +54,5 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 export const config = {
   // Todo menos los archivos estáticos. Es amplio a propósito: una acción de servidor es
   // una petición a la ruta de su página, y fuera de este alcance no pasaría por aquí.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?)$).*)"],
 };

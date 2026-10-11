@@ -141,6 +141,12 @@ export type TokenInspection =
    * dice que vale la pena intentar renovar la sesión, y que quien lo trae no lo inventó.
    */
   | { state: "expired"; userId: string; sessionId: string | null }
+  /**
+   * Dice estar firmado con una clave que no está entre las conocidas, y no se ha vuelto a
+   * preguntar por ella. Puede ser un token inventado o uno firmado con una clave recién
+   * rotada: no es motivo para tratar a nadie como si no tuviera sesión.
+   */
+  | { state: "unknown_key" }
   | { state: "invalid" };
 
 /**
@@ -164,10 +170,13 @@ export async function inspectAccessToken(
   if (!header) return { state: "invalid" };
 
   // Lo único que sale a la red, y es de aquí de donde puede venir un «no se pudo saber».
-  const key = await keyCache.find(header.kid);
+  const found = await keyCache.lookup(header.kid);
+  if (found.kind === "unchecked") return { state: "unknown_key" };
   // Una clave que el proyecto no tiene, o un token que dice otro algoritmo que el de su
   // clave: inválido, sin preguntarle a nadie.
-  if (!key || (key.alg !== undefined && key.alg !== header.alg)) return { state: "invalid" };
+  if (found.kind === "absent") return { state: "invalid" };
+  const key = found.key;
+  if (key.alg !== undefined && key.alg !== header.alg) return { state: "invalid" };
 
   let payload: unknown;
   try {
@@ -202,6 +211,15 @@ export async function inspectAccessToken(
   });
   verified.set(result, { json: JSON.stringify(claims), expiresAt });
   return { state: "valid", claims: result, expiresAt };
+}
+
+/**
+ * Deja a la mano las claves públicas del proyecto. Lanza `IdentityUnavailableError` si
+ * nunca se han podido bajar. Quien va a gastar algo que no se recupera (el enlace de un
+ * correo) lo pregunta antes: sin claves no podría verificar la sesión que le den.
+ */
+export function ensureIdentityKeys(): Promise<void> {
+  return keyCache.ready();
 }
 
 /**

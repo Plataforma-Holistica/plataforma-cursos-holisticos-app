@@ -75,6 +75,8 @@ function expectNoWayIn(html: string): void {
   expect(html).not.toMatch(/token=/);
   // El código numérico equivalente al enlace mide 10 dígitos.
   expect(html).not.toMatch(/\b\d{10}\b/);
+  // Ni la huella, que escrita en el correo se podría canjear directo en Auth.
+  expect(html).not.toMatch(/[0-9a-f]{56}/);
 }
 
 afterAll(async () => {
@@ -160,6 +162,20 @@ describe("lo que el Auth local tiene configurado", () => {
     await backdateRecovery(user.email, wait + 5);
     expect((await visitor().auth.resetPasswordForEmail(user.email)).error).toBeNull();
     await waitForMails(user.email, 2);
+  });
+
+  it("cambiar la contraseña con una sesión de más de un día pide volver a identificarse", async () => {
+    const user = await confirmedUser();
+    const password = `P-${randomUUID()}`;
+    await admin().auth.admin.updateUserById(user.id, { password });
+    const client = visitor();
+    await client.auth.signInWithPassword({ email: user.email, password });
+    await ownerQuery("update auth.sessions set created_at = now() - interval '25 hours' where user_id = $1", [
+      user.id,
+    ]);
+
+    const changed = await client.auth.updateUser({ password: `P-${randomUUID()}` });
+    expect(changed.error?.code).toBe("reauthentication_needed");
   });
 
   it("guarda el correo igual que lo normaliza el dominio", async () => {

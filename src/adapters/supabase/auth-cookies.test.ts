@@ -152,6 +152,11 @@ describe("leer, escribir y borrar en un tarro", () => {
     expect(readSessionCookie(jar, secure)).toEqual({ kind: "tokens", tokens: session });
   });
 
+  it("con su nombre, la cookie más larga que se escribe cabe en lo que guarda un navegador", () => {
+    // Un navegador guarda 4096 bytes por cookie, contando el nombre y el signo de igual.
+    expect(sessionCookieName(true).length + 1 + SESSION_COOKIE_MAX_LENGTH).toBeLessThanOrEqual(4096 - 256);
+  });
+
   it("lo que no cabe no se escribe", () => {
     const jar = jarWith();
     const huge = { accessToken: `${"a".repeat(SESSION_COOKIE_MAX_LENGTH)}.b.c`, refreshToken: "r" };

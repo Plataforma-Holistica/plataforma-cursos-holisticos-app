@@ -30,7 +30,7 @@ import {
   type SignInFailure,
   type SignUpFailure,
 } from "./auth-errors";
-import { inspectAccessToken, type TokenInspection, type VerifiedClaims } from "./claims";
+import { ensureIdentityKeys, inspectAccessToken, type TokenInspection, type VerifiedClaims } from "./claims";
 import { IdentityUnavailableError } from "./errors";
 
 // Lo que los servicios le piden a Supabase Auth (TRD §8.10 y §9.2).
@@ -39,11 +39,23 @@ import { IdentityUnavailableError } from "./errors";
 // aquí, y lo que no se reconoce es «no se supo»: ni un éxito ni un motivo para cerrarle la
 // sesión a nadie.
 //
-// Tres cosas que quien llama tiene que saber, porque el adaptador no las decide:
+// Siete cosas que quien llama tiene que saber, porque el adaptador no las decide:
 //
 // - `signIn` distingue `banned` y `email_not_confirmed`, y Auth contesta el primero antes
 //   de revisar la contraseña y el segundo solo con la contraseña correcta. Mostrarlos tal
 //   cual delata el estado de una cuenta: el servicio los aplana.
+// - `mail_rate_limited` también delata. Auth lo contesta solo cuando la cuenta existe y
+//   recibió un correo hace poco: pedir dos veces seguidas la recuperación de un correo
+//   distingue al que tiene cuenta del que no, y lo mismo al registrar un correo sin
+//   confirmar. El servicio contesta lo de siempre, y de todos modos no llega a pedirlo: su
+//   propia espera entre correos va antes (TRD §9.9).
+// - `signIn` no cierra la sesión que el tarro ya traiga. Quien entra con una sesión
+//   abierta la cierra antes con `signOut`, o esa queda abierta en Auth sin dueño.
+// - `refreshSession` puede contestar `session` con un token al que le quedan segundos: si
+//   no logró renovar, devuelve la sesión que hay mientras valga. Una acción larga puede
+//   ver vencer esas claims a la mitad (`ExpiredClaimsError`).
+// - `confirmSession` va después de `refreshSession`. Con un token vencido Auth no dice si
+//   la sesión vive, y la respuesta es `unknown`.
 // - Con `same_password` Auth no cambió nada y por tanto no cerró ninguna sesión. Si
 //   después `closeAllSessions` contesta `unknown`, la recuperación no terminó bien.
 // - `readSession` y `refreshSession` solo miran la firma y la vigencia del token. Una
@@ -88,12 +100,16 @@ export type RecoveryRequest = "accepted" | RecoveryRequestFailure;
 export type Closing = "closed" | "unknown";
 export type SessionLiveness = "alive" | "revoked" | "unknown";
 
+declare const redeemedLink: unique symbol;
+
 /**
  * Lo que queda después de canjear el enlace de un correo. Solo lo produce este módulo: el
  * identificador de cuenta que recibe la API de administración sale de aquí y de ningún
  * otro lado. Un objeto con la misma forma, armado en otro lugar, no sirve.
  */
 export interface RedeemedLink {
+  /** Sin valor: existe para que un objeto armado a mano no pase por uno de estos ni al compilar. */
+  readonly [redeemedLink]: never;
   readonly flow: "signup" | "recovery";
   /** Las claims de la sesión del canje. Esa sesión nunca llega al navegador. */
   readonly claims: VerifiedClaims;
@@ -106,6 +122,8 @@ export type RedeemResult =
   | { ok: false; reason: "invalid_or_expired" | "unknown" };
 
 interface Redemption {
+  /** La cuenta, guardada aparte: no se lee del objeto que anda por fuera. */
+  userId: string;
   accessToken: string;
   /** Las claves de los metadatos de la cuenta al canjear: se borran al fijar la contraseña. */
   metadataKeys: string[];
@@ -120,9 +138,19 @@ export interface AuthDependencies {
   fetch?: Fetch;
   /** Solo para pruebas: un reloj adelantado, para tener un token «por vencer» sin esperar. */
   now?: () => number;
+  /** Solo para pruebas: unas claves públicas que no se pueden bajar, o una recién rotada. */
+  inspectToken?: (accessToken: string, now: () => number) => Promise<TokenInspection>;
+  /** Solo para pruebas: lo mismo, para la comprobación que va antes de canjear un enlace. */
+  keysReady?: () => Promise<void>;
 }
 
-type Inspection = TokenInspection | { state: "unavailable" };
+// «No se pudo saber» junta dos casos: las claves públicas no se pudieron bajar, o el token
+// dice una clave que todavía no se ha vuelto a preguntar. En ninguno de los dos se trata a
+// la persona como si no tuviera sesión, ni se borra su cookie.
+type Inspection = Exclude<TokenInspection, { state: "unknown_key" }> | { state: "unavailable" };
+
+// Lo que le pasa a todos, no a una sesión: Auth no contesta, o su límite de peticiones.
+const isOutage = (failure: AuthFailure): boolean => failure.kind === "unreachable" || failure.status === 429;
 
 type Renewal = { ok: true; tokens: SessionTokens } | { ok: false; failure: AuthFailure };
 
@@ -141,9 +169,13 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   let refreshPausedUntil = 0;
   const renewing = new Map<string, Promise<Renewal>>();
 
+  const inspectToken = dependencies.inspectToken ?? inspectAccessToken;
+  const keysReady = dependencies.keysReady ?? ensureIdentityKeys;
+
   async function inspect(accessToken: string): Promise<Inspection> {
     try {
-      return await inspectAccessToken(accessToken, now);
+      const inspection = await inspectToken(accessToken, now);
+      return inspection.state === "unknown_key" ? { state: "unavailable" } : inspection;
     } catch (error) {
       if (error instanceof IdentityUnavailableError) return { state: "unavailable" };
       throw error;
@@ -190,7 +222,8 @@ export function createAuth(dependencies: AuthDependencies = {}) {
    * la de verdad la fija quien abre el enlace (`setFirstPassword`).
    *
    * Contesta `accepted` igual para un correo nuevo, uno sin confirmar y uno que ya tiene
-   * cuenta. A este último Auth no le manda nada.
+   * cuenta. A este último Auth no le manda nada. `mail_rate_limited` solo sale para un
+   * correo sin confirmar que recibió su enlace hace poco: quien llama no lo muestra.
    */
   async function requestSignUp(email: string): Promise<SignUpRequest> {
     const password = randomBytes(32).toString("base64url");
@@ -209,7 +242,11 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     }
   }
 
-  /** Pide el correo de recuperación. Contesta `accepted` exista o no la cuenta. */
+  /**
+   * Pide el correo de recuperación. Contesta `accepted` exista o no la cuenta, salvo
+   * `mail_rate_limited`, que solo sale para una cuenta que existe y recibió un correo hace
+   * poco: quien llama no lo muestra.
+   */
   async function requestPasswordRecovery(email: string): Promise<RecoveryRequest> {
     try {
       const { error } = await oneShotClient(baseFetch).resetPasswordForEmail(email);
@@ -222,6 +259,15 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   async function redeem(tokenHash: string, flow: RedeemedLink["flow"]): Promise<RedeemResult> {
     // Lo que no tiene forma de huella no se le manda a Auth.
     if (!TOKEN_HASH.test(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
+
+    // El enlace sirve una sola vez. Sin las claves públicas a la mano no se podría
+    // verificar la sesión que devuelve: se pregunta antes de gastarlo.
+    try {
+      await keysReady();
+    } catch (error) {
+      if (error instanceof IdentityUnavailableError) return { ok: false, reason: "unknown" };
+      throw error;
+    }
 
     let accessToken: string | null = null;
     try {
@@ -254,8 +300,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
         accessToken = slim.accessToken;
       }
 
-      const redeemed: RedeemedLink = Object.freeze({ flow, claims: session.claims, email });
+      const redeemed = Object.freeze({ flow, claims: session.claims, email }) as RedeemedLink;
       redemptions.set(redeemed, {
+        userId: session.claims.userId,
         accessToken: session.accessToken,
         metadataKeys: session.metadataKeys,
         spent: false,
@@ -332,7 +379,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     const redemption = take(redeemed, "signup");
     if (!redemption) return "rejected";
     try {
-      const { error } = await adminApi(baseFetch).updateUserById(redeemed.claims.userId, {
+      const { error } = await adminApi(baseFetch).updateUserById(redemption.userId, {
         password,
         user_metadata: withoutMetadata(redemption),
       });
@@ -381,7 +428,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
    */
   const discardRedemption = (redeemed: RedeemedLink) => close(redeemed, "local");
 
-  /** Entra con correo y contraseña, y escribe la cookie de sesión en el tarro. */
+  /**
+   * Entra con correo y contraseña, y escribe la cookie de sesión en el tarro. No cierra la
+   * sesión que el tarro ya traiga: eso lo hace antes quien llama, con `signOut`.
+   */
   async function signIn(jar: CookieJar, email: string, password: string): Promise<SignInResult> {
     let accessToken: string | null = null;
     try {
@@ -427,7 +477,11 @@ export function createAuth(dependencies: AuthDependencies = {}) {
    * paso previo y las acciones de servidor, que son quienes pueden escribirla.
    *
    * La cookie se borra en tres casos y solo en esos: no se entiende, su token no lo firmó
-   * el proyecto, o Auth dijo que la sesión ya no existe. Un fallo pasajero no la toca.
+   * el proyecto, o Auth dijo que la sesión ya no existe. Un fallo pasajero no la toca, y
+   * tampoco un token firmado con una clave por la que todavía no se ha vuelto a preguntar.
+   *
+   * `session` no promete un token recién renovado: si la renovación falló por algo
+   * pasajero, es la sesión que había, con lo que le quede de vida.
    */
   async function refreshSession(jar: CookieJar): Promise<SessionRefresh> {
     const isSecure = secure();
@@ -461,7 +515,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
         clearSessionCookie(jar, isSecure);
         return { kind: "lost" };
       }
-      refreshPausedUntil = now() + REFRESH_PAUSE_MS;
+      // La pausa es de toda la instancia: solo la pone lo que le pasa a todos. El fallo
+      // de una sola sesión no detiene la renovación de las demás.
+      if (isOutage(renewal.failure)) refreshPausedUntil = now() + REFRESH_PAUSE_MS;
       return fallback;
     }
 
@@ -476,7 +532,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
 
   /**
    * Le pregunta a Auth si la sesión de la cookie sigue viva. Es una petición por llamada:
-   * se usa donde un token ya emitido no puede seguir valiendo, no en cada pantalla.
+   * se usa donde un token ya emitido no puede seguir valiendo, no en cada pantalla, y
+   * después de `refreshSession`: con un token vencido Auth no dice nada de la sesión y la
+   * respuesta es `unknown`. Sin cookie, o con una que no se entiende, es `revoked`.
    *
    * No detecta una sesión cuya familia de tokens Auth revocó por reutilización: ahí la
    * sesión sigue en su tabla y lo que falla es la siguiente renovación.

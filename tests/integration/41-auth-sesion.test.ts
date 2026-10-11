@@ -20,6 +20,9 @@ import {
   type KnownUser,
   type MemoryJar,
 } from "./helpers/auth";
+import { inspectAccessToken } from "@/adapters/supabase/claims";
+import { IdentityUnavailableError } from "@/adapters/supabase/errors";
+
 import { deleteTestUsersByEmail } from "./helpers/users";
 
 // El adaptador de Auth, contra el Auth local: entrar, leer la sesión, renovarla y salir
@@ -392,6 +395,27 @@ describe("renovar la sesión", () => {
     expect(failing.calls).toHaveLength(2);
   });
 
+  it("el fallo de una sola sesión no detiene la renovación de las demás", async () => {
+    const { jar } = await signedIn();
+    const other = await signedIn();
+    // Un rechazo que no es de todos: Auth contestó, con un código que no se conoce.
+    let rejected = 0;
+    const picky: typeof fetch = (input, init) => {
+      if (rejected === 0 && String(input).includes("/token")) {
+        rejected += 1;
+        return Promise.resolve(Response.json({ code: "algo_nuevo", message: "x" }, { status: 400 }));
+      }
+      return fetch(input, init);
+    };
+    const auth = createAuth({ now: nearExpiry, fetch: picky });
+
+    await auth.refreshSession(jar);
+    expect(jar.writes).toEqual([]);
+    // La otra persona renueva enseguida, en la misma instancia.
+    expect((await auth.refreshSession(other.jar)).kind).toBe("session");
+    expect(other.jar.writes).toHaveLength(1);
+  });
+
   it("con un token de renovación que Auth no conoce, la sesión se perdió y la cookie se borra", async () => {
     const { jar } = await signedIn();
     const tokens = tokensIn(jar);
@@ -431,6 +455,124 @@ describe("renovar la sesión", () => {
     },
     30_000,
   );
+});
+
+describe("cuando no se puede saber si el token vale", () => {
+  // Las claves públicas no se pudieron bajar, o el token dice una clave por la que todavía
+  // no se ha vuelto a preguntar (una recién rotada). No es «no hay sesión».
+  const blind = [
+    ["las claves públicas no se pueden bajar", () => Promise.reject(new IdentityUnavailableError())],
+    ["el token dice una clave que no se ha vuelto a preguntar", () => Promise.resolve({ state: "unknown_key" as const })],
+  ] as const;
+
+  it.each(blind)("%s: leer contesta que no se supo", async (_name, inspectToken) => {
+    const { jar } = await signedIn();
+    expect(await createAuth({ inspectToken }).readSession(jar)).toEqual({ kind: "unknown" });
+  });
+
+  it.each(blind)("%s: renovar no borra la cookie ni le pregunta a Auth", async (_name, inspectToken) => {
+    const { jar } = await signedIn();
+    const before = jar.get(COOKIE);
+    const spy = recordingFetch();
+    const auth = createAuth({ inspectToken, fetch: spy.fetch, now: pastExpiry });
+
+    expect(await auth.refreshSession(jar)).toEqual({ kind: "unknown" });
+    expect(jar.writes).toEqual([]);
+    expect(jar.get(COOKIE)).toBe(before);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it.each(blind)("%s: entrar no escribe la cookie, y cierra la sesión que Auth creó", async (_name, inspectToken) => {
+    const account = await user();
+    const jar = memoryJar();
+    expect(await createAuth({ inspectToken }).signIn(jar, account.email, account.password)).toEqual({
+      ok: false,
+      reason: "unknown",
+    });
+    expect(jar.writes).toEqual([]);
+    expect(await sessionCount(account.id)).toBe(0);
+  });
+
+  it.each(blind)("%s: salir borra la cookie y cierra la sesión igual", async (_name, inspectToken) => {
+    const { account, jar } = await signedIn();
+    expect(await createAuth({ inspectToken }).signOut(jar)).toBe("closed");
+    expect(jar.writes).toEqual(cleared);
+    expect(await sessionCount(account.id)).toBe(0);
+  });
+});
+
+describe("un token firmado con una clave que no se conoce", () => {
+  /** El mismo token, diciendo que lo firmó otra clave. */
+  function withOtherKey(tokens: SessionTokens): string {
+    const [header = "", payload, signature] = tokens.accessToken.split(".");
+    const parsed = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as Record<string, unknown>;
+    const other = Buffer.from(JSON.stringify({ ...parsed, kid: "una-clave-que-no-existe" })).toString("base64url");
+    const value = encodeSessionCookie({ ...tokens, accessToken: `${other}.${payload}.${signature}` });
+    if (!value) throw new Error("No se pudo armar la cookie.");
+    return value;
+  }
+
+  it("recién preguntadas las claves, no se sabe si es inventado o de una clave nueva: la cookie no se borra", async () => {
+    // Entrar acaba de usar las claves: se preguntaron hace menos de un minuto.
+    const { jar } = await signedIn();
+    const odd = jarWithCookie(withOtherKey(tokensIn(jar)));
+    const spy = recordingFetch();
+    const auth = createAuth({ fetch: spy.fetch });
+
+    expect(await inspectAccessToken(tokensIn(odd).accessToken)).toEqual({ state: "unknown_key" });
+    expect(await auth.readSession(odd)).toEqual({ kind: "unknown" });
+    expect(await auth.refreshSession(odd)).toEqual({ kind: "unknown" });
+    expect(odd.writes).toEqual([]);
+    expect(spy.calls).toEqual([]);
+  });
+});
+
+describe("los límites de tiempo y el margen", () => {
+  it("con dos minutos de vida no renueva; con poco más de un minuto, sí", async () => {
+    const { jar } = await signedIn();
+    const spy = recordingFetch();
+    // El token dura 15 minutos y el margen es de 90 segundos.
+    await createAuth({ now: () => Date.now() + 13 * MINUTE, fetch: spy.fetch }).refreshSession(jar);
+    expect(spy.calls).toEqual([]);
+    await createAuth({ now: () => Date.now() + 13.75 * MINUTE, fetch: spy.fetch }).refreshSession(jar);
+    expect(spy.calls).toEqual(["/auth/v1/token?grant_type=refresh_token"]);
+  });
+
+  it("toda llamada a Auth lleva tiempo límite y no pasa por ninguna caché", async () => {
+    const account = await user();
+    const seen: { path: string; signal: unknown; cache: unknown }[] = [];
+    const watching: typeof fetch = (input, init) => {
+      seen.push({ path: new URL(String(input)).pathname, signal: init?.signal, cache: init?.cache });
+      return fetch(input, init);
+    };
+    const auth = createAuth({ fetch: watching, now: nearExpiry });
+    const jar = memoryJar();
+
+    await auth.signIn(jar, account.email, account.password);
+    await auth.refreshSession(jar);
+    await auth.confirmSession(jar);
+    await auth.requestPasswordRecovery(account.email);
+    await auth.signOut(jar);
+
+    expect(seen.map((call) => call.path)).toEqual([
+      "/auth/v1/token",
+      "/auth/v1/token",
+      "/auth/v1/user",
+      "/auth/v1/recover",
+      "/auth/v1/logout",
+    ]);
+    for (const call of seen) {
+      expect(call.signal).toBeInstanceOf(AbortSignal);
+      expect(call.cache).toBe("no-store");
+    }
+  });
+
+  it("una respuesta de éxito que no se entiende no cuenta como éxito", async () => {
+    const { account, jar } = await signedIn();
+    const odd = createAuth({ fetch: failingFetch(/\/logout/, () => new Response("<html>ok</html>")).fetch });
+    expect(await odd.signOut(jar)).toBe("unknown");
+    expect(await sessionCount(account.id)).toBe(1);
+  });
 });
 
 describe("preguntarle a Auth si la sesión vive", () => {
@@ -478,6 +620,15 @@ describe("salir", () => {
     expect(await readSession(jar)).toEqual({ kind: "none" });
     expect(await sessionCount(account.id)).toBe(1);
     expect(await confirmSession(other)).toBe("alive");
+  });
+
+  it("con una cookie inventada no le pregunta nada a Auth", async () => {
+    const { jar } = await signedIn();
+    const fake = jarWithCookie(forged(tokensIn(jar)));
+    const spy = recordingFetch();
+    expect(await createAuth({ fetch: spy.fetch }).signOut(fake)).toBe("closed");
+    expect(spy.calls).toEqual([]);
+    expect(fake.writes).toEqual(cleared);
   });
 
   it("sin cookie no hay nada que cerrar ni que borrar", async () => {

@@ -891,6 +891,54 @@ export const probe = cookies;
     rule: REQUEST_HEADERS,
   },
   {
+    name: "un servicio importa next/headers por su archivo",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { cookies } from "next/headers.js";\nexport const probe = cookies;\n`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "un servicio importa las cookies de las tripas de Next",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { cookies } from "next/dist/server/request/cookies";\nexport const probe = cookies;\n`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "un servicio importa los clientes de Auth del adaptador",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { adminApi } from "../adapters/supabase/auth-client";\nexport const probe = adminApi;\n`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "un servicio importa los clientes de Auth con otro nombre",
+    file: `${fixtures}/services/probe.ts`,
+    code: `import { adminApi as elevated } from "@/adapters/supabase/auth-client";\nexport const probe = elevated;\n`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "request-context importa los clientes de Auth del adaptador",
+    file: `${fixtures}/app/_lib/request-context.ts`,
+    code: `import { adminApi } from "@/adapters/supabase/auth-client";\nexport const probe = adminApi;\n`,
+    rule: REQUEST_HEADERS,
+  },
+  {
+    name: "el adaptador de la base carga un módulo con el nombre en comillas invertidas",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: "export const probe = () => import(`./thing`);\n",
+    rule: "no-restricted-syntax",
+  },
+  {
+    name: "el adaptador de la base carga next/headers con el nombre en comillas invertidas",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: "export const probe = () => import(`next/headers`);\n",
+    rule: "no-restricted-syntax",
+  },
+  {
+    name: "el adaptador de la base carga un módulo cuyo nombre se arma al correr",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `export const probe = (name: string) => import(name);\n`,
+    rule: "no-restricted-syntax",
+  },
+  {
     name: "una pantalla carga next/headers con import()",
     file: `${fixtures}/app/probe.tsx`,
     code: `export const probe = () => import("next/headers");
@@ -921,6 +969,11 @@ const allowed: Omit<Case, "rule">[] = [
 import { thing } from "./services/thing";
 export const probe = [NextResponse, thing];
 `,
+  },
+  {
+    name: "el adaptador de la base importa sus propios clientes de Auth",
+    file: `${fixtures}/adapters/supabase/probe.ts`,
+    code: `import { thing } from "./auth-client";\nexport const probe = thing;\n`,
   },
   {
     name: "request-context es el único que lee cookies y cabeceras con next/headers",

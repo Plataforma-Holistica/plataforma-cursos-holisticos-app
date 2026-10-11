@@ -25,10 +25,13 @@ function sourceFiles(dir: string): string[] {
 }
 
 // Toda forma de traer otro módulo: `import … from`, `export … from`, `import "x"`,
-// `import("x")` y `require("x")`. También los que solo traen tipos: si un día dejan de
-// serlo, la cadena ya estaba vigilada.
+// `import("x")` y `require("x")`, con comillas o con comillas invertidas. También los que
+// solo traen tipos: si un día dejan de serlo, la cadena ya estaba vigilada.
 const SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["']([^"']+)["']/g;
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'`]([^"'`]+)["'`]/g;
+
+/** Los nombres que `SPECIFIER` saca de un texto. */
+const specifiersIn = (text: string) => [...text.matchAll(SPECIFIER)].map((match) => match[1]);
 
 function resolveLocal(from: string, specifier: string): string | null {
   const base = specifier.startsWith("@/")
@@ -62,6 +65,22 @@ function reachableFrom(entry: string): { files: Set<string>; packages: Set<strin
   return { files, packages };
 }
 
+describe("cómo se sigue una importación", () => {
+  it.each([
+    ['import { a } from "./x";', "./x"],
+    ["import { a } from './x';", "./x"],
+    ['export { a } from "./x";', "./x"],
+    ['export type { A } from "./x";', "./x"],
+    ['import "./x";', "./x"],
+    ['const load = () => import("./x");', "./x"],
+    ["const load = () => import(`./x`);", "./x"],
+    ['const x = require("./x");', "./x"],
+    ["const x = require(`./x`);", "./x"],
+  ])("ve %s", (code, expected) => {
+    expect(specifiersIn(code)).toEqual([expected]);
+  });
+});
+
 describe("lo que el paso previo termina cargando", () => {
   const reached = reachableFrom(join(src, "proxy.ts"));
   const files = [...reached.files].map(posix);
@@ -92,18 +111,29 @@ describe("la llave secreta de Supabase", () => {
     expect(naming.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/config/env.ts"]);
   });
 
-  it("la API de administración solo se llama desde las dos funciones que parten de un canje", () => {
-    const callers = sources.filter((source) => /\badminApi\s*\(/.test(source.text)).map((source) => source.file);
-    expect(callers.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/adapters/supabase/auth.ts"]);
+  it("la API de administración solo se usa en las dos funciones que parten de un canje", () => {
+    // Toda aparición del nombre, no solo las llamadas: guardarlo en otra variable o
+    // importarlo con otro nombre también cuenta.
+    const naming = sources.filter((source) => /\badminApi\b/.test(source.text)).map((source) => source.file);
+    expect(naming.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/adapters/supabase/auth.ts"]);
 
-    // En auth.ts: dentro de qué función está cada llamada.
     const auth = sources.find((source) => source.file === "src/adapters/supabase/auth.ts")?.text ?? "";
-    const enclosing = [...auth.matchAll(/\badminApi\s*\(/g)].map((call) => {
-      const before = auth.slice(0, call.index);
-      const names = [...before.matchAll(/^ {2}async function (\w+)\(/gm)].map((match) => match[1]);
-      return names.at(-1);
-    });
-    expect(enclosing.sort()).toEqual(["setFirstPassword", "slimDown"]);
+    // El cuerpo de cada función del adaptador: desde su encabezado hasta la llave que la
+    // cierra, que es la primera que vuelve a su misma sangría.
+    const bodyOf = (name: string): string => {
+      const from = auth.indexOf(`  async function ${name}(`);
+      if (from === -1) throw new Error(`auth.ts ya no tiene la función ${name}.`);
+      return auth.slice(from, auth.indexOf("\n  }\n", from));
+    };
+    const allowed = bodyOf("setFirstPassword") + bodyOf("slimDown");
+    const count = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].length;
+
+    // Una importación, y una llamada en cada una de las dos funciones. Nada más.
+    expect(count(auth, /\badminApi\b/g)).toBe(3);
+    expect(count(auth, /import \{[^}]*\badminApi\b[^}]*\} from "\.\/auth-client";/g)).toBe(1);
+    expect(count(allowed, /\badminApi\(baseFetch\)\./g)).toBe(2);
+    expect(count(bodyOf("setFirstPassword"), /\badminApi\(/g)).toBe(1);
+    expect(count(bodyOf("slimDown"), /\badminApi\(/g)).toBe(1);
   });
 
   it("ningún otro archivo construye por su cuenta un cliente de administración", () => {

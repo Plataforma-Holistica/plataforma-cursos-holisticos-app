@@ -172,7 +172,11 @@ falla. Diez precisiones que la tabla no dice:
   - El SDK de Auth se usa con un cliente de un solo uso (`oneShotClient`): uno compartido
     guardaría la sesión del último que entró. La API de administración solo se llama desde
     `setFirstPassword` y `slimDown`, las dos sobre una cuenta que sale de un enlace recién
-    canjeado; una prueba lo exige.
+    canjeado; una prueba lo exige. `auth-client.ts` no se importa fuera del adaptador: lo
+    rechaza el lint.
+  - Un token firmado con una clave que no se conoce no es, sin más, un token inventado:
+    puede ser de una clave recién rotada. Mientras no se haya vuelto a preguntar por las
+    claves, la respuesta es «no se supo» y la cookie no se borra.
   - `createAuth({ fetch, now })` existe para las pruebas. El código de la aplicación usa
     las funciones ya armadas.
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en

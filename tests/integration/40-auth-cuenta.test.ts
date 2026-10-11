@@ -16,6 +16,7 @@ import {
   type RedeemedLink,
 } from "@/adapters/supabase/auth";
 import { SESSION_COOKIE_MAX_LENGTH } from "@/adapters/supabase/auth-cookies";
+import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";
 
 import {
@@ -212,6 +213,32 @@ describe("canjear el enlace de verificación", () => {
     expect(await auth.redeemSignupLink("a".repeat(56))).toEqual({ ok: false, reason: "unknown" });
   });
 
+  it("sin las claves públicas a la mano no gasta el enlace", async () => {
+    const email = newEmail();
+    await requestSignUp(email);
+    const hash = tokenHashIn(await lastMailTo(email), "verificar");
+    const spy = recordingFetch();
+    const blind = createAuth({
+      fetch: spy.fetch,
+      keysReady: () => Promise.reject(new IdentityUnavailableError()),
+    });
+
+    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "unknown" });
+    expect(spy.calls).toEqual([]);
+    // El enlace sigue sirviendo cuando las claves vuelven.
+    expect((await redeemSignupLink(hash)).ok).toBe(true);
+  });
+
+  it("si la sesión del canje no se puede verificar, no se usa y se cierra", async () => {
+    const email = newEmail();
+    await requestSignUp(email);
+    const hash = tokenHashIn(await lastMailTo(email), "verificar");
+    const blind = createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) });
+
+    expect(await blind.redeemSignupLink(hash)).toEqual({ ok: false, reason: "unknown" });
+    expect(await sessionCount(await userIdOf(email))).toBe(0);
+  });
+
   it("si la sesión que devuelve el canje no es de la cuenta que dice, no se usa y se cierra", async () => {
     const account = await user();
     const real = await authVisitor().auth.signInWithPassword({
@@ -267,7 +294,8 @@ describe("fijar la primera contraseña", () => {
 
   it("no acepta un objeto con la forma de un canje, armado en otro lado", async () => {
     const { redeemed } = await registered();
-    const forged: RedeemedLink = { flow: "signup", claims: redeemed.claims, email: redeemed.email };
+    // Los tipos ya lo rechazan: hay que forzarlos para llegar a probarlo al correr.
+    const forged = { flow: "signup", claims: redeemed.claims, email: redeemed.email } as unknown as RedeemedLink;
     expect(await setFirstPassword(forged, password())).toBe("rejected");
     expect(await closeAllSessions(forged)).toBe("unknown");
     expect(await discardRedemption(forged)).toBe("unknown");

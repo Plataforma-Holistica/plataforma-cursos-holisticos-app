@@ -151,6 +151,36 @@ const noRequestHeadersLoading = [
   },
 ];
 
+// Un nombre que se arma al correr no se puede revisar. Estas dos reglas ya están en la
+// lista del cliente de base; aquí van sueltas para el adaptador de la base, que no lleva
+// esa lista porque es el único que sí importa `pg`.
+const noUnnamedLoading = [
+  {
+    selector: "ImportExpression[source.type!='Literal']",
+    message:
+      "Un import() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+  {
+    selector: "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+    message:
+      "Un require() lleva escrito el nombre de lo que carga: así el lint puede ver qué es (TRD §8.10).",
+  },
+];
+
+// Los clientes de Auth (el de administración, con la llave secreta) no salen del adaptador
+// de la base: los servicios usan las funciones de `auth.ts` (TRD §8.10).
+const AUTH_CLIENT_MESSAGE =
+  "Los clientes de Auth no salen de src/adapters/supabase/: se usan las funciones de auth.ts (TRD §8.10).";
+const noRequestHeaders = {
+  // Con comodín: `next/headers.js` y los archivos internos de Next son la misma puerta.
+  group: ["next/headers", "next/headers.*", "next/dist/**"],
+  message: REQUEST_HEADERS_MESSAGE,
+};
+const noAuthClient = {
+  group: ["**/adapters/supabase/auth-client", "**/adapters/supabase/auth-client.*"],
+  message: AUTH_CLIENT_MESSAGE,
+};
+
 const noHiddenLoading = [
   ...noDatabaseClientLoading,
   ...noSentrySdkLoading,
@@ -445,7 +475,12 @@ export default defineConfig([
     files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [noSentrySdk] }],
-      "no-restricted-syntax": ["error", ...noSentrySdkLoading, ...noRequestHeadersLoading],
+      "no-restricted-syntax": [
+        "error",
+        ...noSentrySdkLoading,
+        ...noRequestHeadersLoading,
+        ...noUnnamedLoading,
+      ],
     },
   },
   {
@@ -460,13 +495,25 @@ export default defineConfig([
     // `next/headers` en un solo archivo. Va con la regla de TypeScript, que es otra regla
     // que `no-restricted-imports`: así no hay que repetirla en cada bloque de capa, que se
     // reemplazan entre sí.
+    //
+    // La misma regla guarda otra puerta: los clientes de Auth, que no salen del adaptador
+    // de la base. Los dos bloques de abajo son sus dos excepciones, y como un bloque
+    // posterior reemplaza la regla, cada uno repite lo que sí le toca.
     files: ["**/src/**/*.{ts,tsx}"],
-    ignores: ["**/src/app/_lib/request-context.ts"],
     rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        { paths: [{ name: "next/headers", message: REQUEST_HEADERS_MESSAGE }] },
-      ],
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noRequestHeaders, noAuthClient] }],
+    },
+  },
+  {
+    files: ["**/src/adapters/supabase/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noRequestHeaders] }],
+    },
+  },
+  {
+    files: ["**/src/app/_lib/request-context.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", { patterns: [noAuthClient] }],
     },
   },
   {
