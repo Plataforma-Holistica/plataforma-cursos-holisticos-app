@@ -27,6 +27,7 @@ const FAILURES = {
   registration_incomplete: "Un registro se quedó a medias después de gastar su enlace: esa persona tiene que recuperar su contraseña.",
   recovery_incomplete: "Una recuperación se quedó a medias después de gastar su enlace: esa persona tiene que pedir otro.",
   recovery_notice_not_sent: "Una contraseña se recuperó por el camino de administración: el aviso de cambio de contraseña no salió.",
+  legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;

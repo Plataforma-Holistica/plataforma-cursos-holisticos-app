@@ -11,8 +11,24 @@
 /src/domain/access/        @SerchFGA @plataformaholisticadev
 # Los servicios de cuenta: la guarda de sesión aplicada, entrar y salir
 /src/services/account/     @SerchFGA @plataformaholisticadev
-# El paso previo de cada petición: solo renueva la sesión. No decide quién pasa
+# El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
+# No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
+# La puerta de las pantallas: el lector único de la petición, la guarda de cada página, las
+# acciones de servidor de la cuenta y la ruta que cierra una sesión rechazada
+/src/app/_lib/             @SerchFGA @plataformaholisticadev
+/src/app/(cuenta)/         @SerchFGA @plataformaholisticadev
+/src/app/sesion/           @SerchFGA @plataformaholisticadev
+/src/app/inicio/           @SerchFGA @plataformaholisticadev
+# La medición de la cabecera de la dirección, de la que dependen el freno y los topes
+/src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
+# Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta
+/src/messages/es/account.ts @SerchFGA @plataformaholisticadev
+# Los textos legales que la gente lee antes de aceptar
+/src/app/legal/            @SerchFGA @plataformaholisticadev
+/src/services/legal/       @SerchFGA @plataformaholisticadev
+# Las cabeceras de las páginas con enlace de correo
+/next.config.ts            @SerchFGA @plataformaholisticadev
 # La configuración de Auth y sus correos: confirmación, vigencias, contraseña mínima
 /supabase/config.toml      @SerchFGA @plataformaholisticadev
 /supabase/templates/       @SerchFGA @plataformaholisticadev
@@ -43,5 +59,9 @@
 # Las pruebas que hacen cumplir esas reglas, y los guiones que tocan roles de la base
 /tests/architecture/       @SerchFGA @plataformaholisticadev
 /tests/integration/        @SerchFGA @plataformaholisticadev
+/tests/proxy/              @SerchFGA @plataformaholisticadev
+# El extremo a extremo: entra a la base local como dueño y usa la llave secreta de Auth
+/tests/e2e/                @SerchFGA @plataformaholisticadev
+/playwright.config.ts      @SerchFGA @plataformaholisticadev
 /vitest.config.ts          @SerchFGA @plataformaholisticadev
 /scripts/                  @SerchFGA @plataformaholisticadev

@@ -41,6 +41,48 @@ export async function currentTexts(tx: Tx, draftsAllowed: boolean): Promise<Curr
   });
 }
 
+/** Un texto vigente, completo: lo que una pantalla necesita para mostrarlo. */
+export interface ReadableText {
+  docType: string;
+  documentId: string;
+  version: number;
+  title: string;
+  body: string;
+  /** Desde cuándo rige, en UTC y en formato ISO. */
+  effectiveFrom: string;
+}
+
+const readableRow = textRow.extend({ body: z.string().nullable(), effective_from: z.string().nullable() });
+
+/**
+ * Los textos vigentes de los tipos obligatorios, completos y en su orden, o `null` en el
+ * lugar del que no tiene texto vigente. La misma definición de «vigente» que `currentTexts`.
+ */
+export async function readableTexts(tx: Tx, draftsAllowed: boolean): Promise<(ReadableText | null)[]> {
+  const rows = await tx.query(
+    sql`select t.doc_type::text as doc_type, d.id::text as id, d.version, d.title, d.body,
+               to_char(d.effective_from at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as effective_from
+        from unnest(${[...REQUIRED_DOC_TYPES]}::public.legal_doc_type[]) with ordinality as t (doc_type, position)
+        left join public.legal_documents d on d.id = private.current_legal_document(t.doc_type)
+        order by t.position`,
+    readableRow,
+  );
+  return rows.map((row) => {
+    if (row.id === null || row.version === null || row.title === null || row.body === null || row.effective_from === null) {
+      return null;
+    }
+    if (row.version === 0 && !draftsAllowed) return null;
+    return {
+      docType: row.doc_type,
+      documentId: row.id,
+      version: row.version,
+      title: row.title,
+      body: row.body,
+      effectiveFrom: row.effective_from,
+    };
+  });
+}
+
 const profileStateRow = z.object({ status: z.string(), pending: z.boolean() });
 
 /** El estado de la cuenta y su marca de contraseña, o nulo si no tiene perfil. */

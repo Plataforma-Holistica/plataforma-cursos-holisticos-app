@@ -1,5 +1,6 @@
 import "server-only";
 
+import { account } from "./es/account";
 import { meta } from "./es/meta";
 import { states } from "./es/states";
 import { terms } from "./es/terms";
@@ -16,6 +17,6 @@ import { ui } from "./es/ui";
 //   - Claves en inglés y en camelCase, como el resto de los identificadores.
 //   - Las palabras que pueden cambiar por marca viven en `es/terms.ts` y se citan con un
 //     marcador. Ver `format.ts`.
-export const messages = { terms, ui, states, meta } as const;
+export const messages = { terms, ui, states, meta, account } as const;
 
 export { plural, t } from "./format";

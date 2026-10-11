@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { z } from "zod";
 
 import { createAuth, signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
+import { decodeSessionCookie, encodeSessionCookie } from "@/adapters/supabase/auth-cookies";
 import { asServer, asSystem, type Tx } from "@/adapters/supabase/db";
 import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
@@ -12,7 +13,16 @@ import { evaluateGate } from "@/services/account/gate";
 import { noteSession } from "@/services/account/store";
 
 import { claimedUser, clearThrottle, freshOrigin, notedSessions, testServices } from "./helpers/account";
-import { authAdmin, memoryJar, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
+import {
+  authAdmin,
+  failingFetch,
+  knownUser,
+  memoryJar,
+  networkDown,
+  sessionCount,
+  type KnownUser,
+  type MemoryJar,
+} from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -21,6 +31,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./he
 // en la base que la sesión sea de las que abrió la aplicación y que siga viva en Auth.
 
 const MINUTE = 60_000;
+const COOKIE = "plataforma-sesion";
 const emails: string[] = [];
 
 async function user(options: { complete?: boolean } = {}): Promise<KnownUser> {
@@ -69,6 +80,121 @@ afterAll(async () => {
 describe("quién pasa", () => {
   it("sin cookie no hay sesión", async () => {
     expect(await testServices().checkSession(memoryJar())).toEqual({ kind: "anonymous" });
+  });
+
+  it("el correo de la sesión es el de la cuenta que entró, y sin sesión no hay correo", async () => {
+    const { account, jar } = await entered({ complete: true });
+    expect(await testServices().sessionEmail(jar)).toBe(account.email);
+    expect(await testServices().sessionEmail(memoryJar())).toBeNull();
+    // Una cookie que no se entiende no dice de quién es.
+    const malformed = memoryJar(new Map([[COOKIE, "v1.a.b.c.cg"]]));
+    expect(await testServices().sessionEmail(malformed)).toBeNull();
+  });
+
+  it("el correo de un token al que le cambiaron el cuerpo no se muestra: primero se verifica la firma", async () => {
+    const { jar } = await entered({ complete: true });
+    const tokens = decodeSessionCookie(jar.get(COOKIE) ?? "");
+    if (!tokens) throw new Error("La cookie de prueba no se entiende.");
+    const [header = "", payload = "", signature = ""] = tokens.accessToken.split(".");
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
+    const altered = Buffer.from(JSON.stringify({ ...claims, email: "otra-persona@prueba.test" })).toString("base64url");
+    const forged = encodeSessionCookie({ ...tokens, accessToken: `${header}.${altered}.${signature}` });
+    if (!forged) throw new Error("No se pudo armar la cookie alterada.");
+
+    const services = testServices();
+    expect(await services.sessionEmail(memoryJar(new Map([[COOKIE, forged]])))).toBeNull();
+    expect(await services.checkSession(memoryJar(new Map([[COOKIE, forged]])))).toEqual({ kind: "anonymous" });
+  });
+
+  it("cerrar lo que la guarda rechaza no le cierra la sesión a quien sí pasa", async () => {
+    const { account, jar } = await entered({ complete: true });
+    const services = testServices();
+    expect(await services.closeRejectedSession(jar)).toBe("kept");
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(await sessionCount(account.id)).toBe(1);
+    expect(await services.checkSession(jar)).toMatchObject({ kind: "pass" });
+
+    // Tampoco a quien le falta completar la cuenta: esa sesión sí vale.
+    const pending = await entered();
+    expect(await services.closeRejectedSession(pending.jar)).toBe("kept");
+    expect(await sessionCount(pending.account.id)).toBe(1);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("sin sesión no hay nada que cerrar", async () => {
+    const jar = memoryJar();
+    expect(await testServices().closeRejectedSession(jar)).toBe("none");
+    expect(jar.writes).toEqual([]);
+  });
+
+  it("una sesión que la aplicación no abrió se cierra: la cookie se borra y Auth la da por terminada", async () => {
+    const account = await user({ complete: true });
+    const direct = memoryJar();
+    expect((await createAuth().signIn(direct, account.email, account.password)).ok).toBe(true);
+    expect(await sessionCount(account.id)).toBe(1);
+
+    const services = testServices();
+    expect(await services.closeRejectedSession(direct)).toBe("sign_in");
+    expect(direct.get(COOKIE)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("una sesión anotada de una cuenta con la marca de contraseña prendida se cierra, y se le manda a recuperar", async () => {
+    // No debería existir: una sesión solo se anota con la marca apagada. Es la segunda
+    // capa: si algún día existe, no entra. Se arma como dueño de la base.
+    const account = await knownUser();
+    emails.push(account.email);
+    const flagged = await ownerQuery<{ pending: boolean }>(
+      "select password_reset_required as pending from public.profiles where id = $1",
+      [account.id],
+    );
+    const jar = memoryJar();
+    expect((await createAuth().signIn(jar, account.email, account.password)).ok).toBe(true);
+    const read = await readSession(jar);
+    if (read.kind !== "session" || read.claims.sessionId === null) throw new Error("La sesión de prueba no se leyó.");
+    await ownerQuery("insert into private.app_sessions (session_id, profile_id) values ($1, $2)", [
+      read.claims.sessionId,
+      account.id,
+    ]);
+
+    const services = testServices();
+    // Una cuenta que nunca canjeó un enlace de su buzón nace con la marca prendida.
+    expect(flagged[0]?.pending).toBe(true);
+    expect(await services.checkSession(jar)).toEqual({ kind: "must_sign_out", then: "recover" });
+    expect(await services.closeRejectedSession(jar)).toBe("recover");
+    expect(jar.get(COOKIE)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
+  });
+
+  it("si Auth no deja cerrarla, la cookie se borra igual y se reporta", async () => {
+    const account = await user({ complete: true });
+    const direct = memoryJar();
+    expect((await createAuth().signIn(direct, account.email, account.password)).ok).toBe(true);
+
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+    expect(await services.closeRejectedSession(direct)).toBe("sign_in");
+    expect(direct.get(COOKIE)).toBeUndefined();
+    expect(services.reported).toEqual(["session_not_closed"]);
+  });
+
+  it("cuando no se supo si la sesión vale, no se cierra", async () => {
+    const { account, jar } = await entered({ complete: true });
+    const real = createAuth();
+    const services = testServices({
+      auth: { ...real, readSession: () => Promise.resolve({ kind: "unknown" }) },
+    });
+    expect(await services.closeRejectedSession(jar)).toBe("kept");
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(await sessionCount(account.id)).toBe(1);
+  });
+
+  it("«Salir» que Auth no pudo cerrar se reporta", async () => {
+    const { jar } = await entered({ complete: true });
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+    expect(await services.signOut(jar)).toBe("unknown");
+    expect(jar.get(COOKIE)).toBeUndefined();
+    expect(services.reported).toEqual(["session_not_closed"]);
   });
 
   it("una cuenta completa que entró por el servicio pasa", async () => {
@@ -194,7 +320,7 @@ describe("solo las sesiones que abrió la aplicación", () => {
           ...real,
           readSession: async (reader) => {
             const read = await real.readSession(reader);
-            return read.kind === "session" ? { kind: "session", claims: { ...read.claims, sessionId } } : read;
+            return read.kind === "session" ? { ...read, claims: { ...read.claims, sessionId } } : read;
           },
         },
       });

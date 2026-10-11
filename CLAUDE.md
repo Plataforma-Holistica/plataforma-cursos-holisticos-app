@@ -40,9 +40,8 @@ No leas todo: varios documentos pasan de 3 000 líneas. Lee el índice y la secc
 
 ## Comandos
 
-El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de extremo
-a extremo, de Payload y de trabajos llegan con la tarea que los crea, y se escriben aquí
-ese mismo día.
+El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de Payload
+y de trabajos llegan con la tarea que los crea, y se escriben aquí ese mismo día.
 
 ```bash
 pnpm install     # instala y activa el gancho de commit (.githooks/)
@@ -62,13 +61,30 @@ pnpm db:drafts   # carga en la base local los textos legales de borrador (versi�
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
+pnpm test:e2e    # extremo a extremo de tests/e2e/ (Playwright): un navegador contra la aplicación compilada y la pila local
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
 las pruebas de la capa que se tocó. Si se tocó la base: `db:reset` y `test:db`. Si se tocó
 un adaptador o un servicio que llega a la base: `test:int`, y después `test:db` otra vez,
-para comprobar que no dejó residuo. La integración continua (`.github/workflows/ci.yml`)
-corre lo mismo más `secrets`, la auditoría de dependencias y `build`.
+para comprobar que no dejó residuo. Si se tocó una pantalla, una ruta, una acción de
+servidor o el paso previo: `test:e2e`, y después `test:db` otra vez, por lo mismo. La
+integración continua (`.github/workflows/ci.yml`) corre lo mismo más `secrets`, la
+auditoría de dependencias y `build`; después de compilar instala Chromium, corre el
+extremo a extremo (con el comando escrito en `ci.yml`, no con el guion de `package.json`)
+y las pruebas de base una vez más.
+
+`pnpm test:e2e` necesita tres cosas. La pila local arriba y lista (`db:start`, `db:login` y
+`db:drafts`, o `db:reset`). El puerto 3000 libre: Playwright compila la aplicación él
+mismo (`next build && next start`) y la sirve en `http://localhost:3000`, que es a donde
+apuntan los enlaces de los correos del Auth local; si ahí ya hay algo (un `pnpm dev`),
+falla y lo dice, porque probar contra lo que haya no prueba nada. Y Chromium instalado,
+una vez por máquina: `pnpm exec playwright install chromium`. Antes de levantar nada
+comprueba que todo lo que va a tocar es la pila local, y le apaga el registro de errores.
+Corre con un solo trabajador y en dos proyectos: escritorio, y teléfono para los casos
+marcados `@telefono`. Los archivos son `*.spec.ts`, para que Vitest no los tome por suyos.
+Las reglas de accesibilidad corren con el `axe-core` que ya estaba, inyectado en la
+página. No corre contra una vista previa: ahí no hay buzón que leer.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -114,8 +130,10 @@ La que fija el TRD §4.2.
 | `src/domain/` | Reglas de negocio puras: acceso, progreso, consumo, reparto | Nada fuera de sí misma | Red, base, reloj, variables de entorno |
 | `src/adapters/` | Un adaptador por proveedor | El SDK de ese proveedor y tipos del dominio | Otros adaptadores, pantallas |
 | `src/services/` | Casos de uso: cargan datos, llaman al dominio, guardan | Dominio y adaptadores. A la base llegan por `src/adapters/supabase/` | Componentes de React, el cliente de base y el SDK de Supabase |
-| `src/proxy.ts` | El paso previo de Next: renueva la sesión antes de cada petición | Servicios y `next/server` | La base, la guarda de sesión, `next/headers`, decidir quién pasa |
+| `src/proxy.ts` | El paso previo de Next: renueva la sesión antes de cada petición y, en una lectura, manda a entrar a quien pide una pantalla con sesión sin tener ninguna | Servicios y `next/server` | La base, la guarda de sesión, `next/headers`, decidir quién pasa |
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
+| `src/app/_lib/` | Lo que comparten todas las pantallas: `request-context.ts`, el único archivo que lee la petición; `guard.ts`, la guarda en las páginas; y `guard-steps.ts`, la tabla pura de qué hace cada tipo de pantalla con cada respuesta de la guarda | Servicios | Decidir quién pasa: eso lo contesta `checkSession` |
+| `src/app/(cuenta)/` | Las pantallas de la cuenta, cada una en su carpeta: `page.tsx` (llama a la guarda), `screen.tsx` (el formulario, que corre en el navegador), `actions.ts` (la acción de servidor) y `outcomes.ts` (la tabla pura de la pantalla). Lo que comparten, en su `_lib/` | Servicios, componentes base y textos | Un armazón o una plantilla propios: pintarían antes que la guarda de su página |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
 | `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
@@ -128,12 +146,13 @@ La que fija el TRD §4.2.
 | `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
+| `tests/e2e/` | Pruebas de extremo a extremo con Playwright (`*.spec.ts`): un navegador de verdad contra la aplicación compilada, la pila local y su buzón, con JavaScript y sin él. Las corre `pnpm test:e2e` | Los ayudantes de `tests/integration/helpers/` que no cargan código de la aplicación | Correr contra algo que no sea la pila local, y dejar residuo |
 | `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
 | `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Once precisiones que la tabla no dice:
+falla. Doce precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -149,13 +168,70 @@ falla. Once precisiones que la tabla no dice:
 - **Un adaptador vive en su carpeta**, `src/adapters/<proveedor>/`, y no importa de otra.
 - **Un archivo de `src/` fuera de estas carpetas es un error de lint.** Una carpeta nueva
   se declara primero en `eslint.config.mjs`, con su regla y su caso en la prueba.
-- **`next/headers` solo se importa en `src/app/_lib/request-context.ts`** (TRD §4.2), que
-  llega con las pantallas. Las cookies y las cabeceras de la petición se leen ahí y en
-  ningún otro lado: el adaptador de Auth recibe un tarro (`CookieJar`) y no conoce a Next.
-  El paso previo, `src/proxy.ts`, arma el suyo sobre la petición y la respuesta. Solo
-  importa servicios y hace una sola cosa: renovar la sesión. No lee la base, no corre la
-  guarda y no es el control: haber pasado por él no dice que alguien tenga sesión. Una
-  prueba sigue sus importaciones y exige que no lleguen a `db.ts`.
+- **`next/headers` solo se importa en `src/app/_lib/request-context.ts`** (TRD §4.2). Las
+  cookies y las cabeceras de la petición se leen ahí y en ningún otro lado: da
+  `cookieReader()` a las páginas, `cookieJar()` a las acciones y a las rutas, y
+  `requestOrigin()`, que entrega `x-real-ip` y `user-agent` tal como llegaron. Una ruta
+  tampoco lee `request.headers` por su cuenta. El adaptador de Auth recibe un tarro
+  (`CookieJar`) y no conoce a Next. El paso previo, `src/proxy.ts`, arma el suyo sobre la
+  petición y la respuesta. Solo importa servicios (`session.ts` y `navigation.ts`, que es
+  puro) y hace dos cosas: renovar la sesión y mandar a entrar a quien pide una pantalla
+  con sesión sin tener ninguna. Esa redirección es optimista y corta: solo en lecturas
+  (`GET` y `HEAD`; un 307 a un envío lo reenviaría a otra pantalla), solo en las rutas de
+  `SESSION_ROUTES`, y solo cuando la renovación contestó que no hay sesión o que se
+  perdió («no se supo» no redirige). Lleva lo que la renovación escribió y no se guarda en
+  caché. No lee la base, no corre la guarda y no es el control: haber pasado por él no
+  dice que alguien tenga sesión. Una prueba sigue sus importaciones y exige que no lleguen
+  a `db.ts`.
+- **Una pantalla se arma siempre igual** (TRD §4.2 y §9.3). Las reglas para quien escriba
+  una:
+  - Toda página llama a la guarda que le toca (`requireSession`,
+    `requireIncompleteSession` o `visitorOnly`, de `src/app/_lib/guard.ts`) o entra a la
+    lista de públicas de `tests/architecture/screens.test.ts`. Una pantalla con sesión se
+    agrega además a `SESSION_ROUTES` (`src/services/account/navigation.ts`) y atiende sus
+    dos estados: cuenta suspendida (PA-35) y «no se supo» (PA-18, con «Reintentar»).
+  - La guarda en las páginas le pregunta a `checkSession` y obedece. Qué hace cada tipo de
+    pantalla con cada respuesta es una tabla pura, `guard-steps.ts`. `unavailable` nunca
+    se trata como «sin sesión».
+  - Toda ruta y todo archivo de acciones de servidor entra a su lista en esa misma prueba,
+    con el servicio por el que pasa. Las rutas solo atienden lecturas. La marca
+    `"use server"` va al inicio del archivo, nunca dentro de una función.
+  - No hay armazones ni plantillas además del de la raíz: pintarían antes que la guarda de
+    su página.
+  - La decisión de cada pantalla vive en una tabla pura, `outcomes.ts`, junto a ella y con
+    su prueba: traduce lo que contesta el servicio a un destino o a lo que se pinta. Un
+    caso nuevo se agrega ahí, no en la acción ni en el componente.
+  - Una acción no le cree nada al estado anterior ni al formulario. Del estado anterior
+    solo lee el número de intento. Lo que llega lo arma quien pide, y puede no ser un
+    formulario: lo que no sea un texto, falte o venga desmedido cuenta como vacío. El
+    servicio vuelve a correr la guarda. Una contraseña nunca vuelve en la respuesta.
+  - Los formularios funcionan sin JavaScript: acción de servidor más `useActionState`.
+    Con JavaScript, después de una acción la página no se vuelve a pedir si la acción no
+    lo pide: cuando hace falta, la acción llama a `refresh()`. La validación al salir del
+    campo usa las mismas reglas del dominio, que reexporta
+    `src/services/account/field-rules.ts`, y solo si el campo ya trae algo.
+  - Los textos van al catálogo (`src/messages/es/account.ts` para la cuenta). Un
+    componente de cliente importa solo su bloque y nada del servidor: la prueba lo revisa.
+  - A dónde se va lo decide `navigation.ts`: `resolveDestination` es el único lector de
+    `volver`, contra una lista de destinos permitidos. Un aviso entre dos pantallas viaja
+    en una cookie de 60 segundos con una clave de lista cerrada (`notice.ts`), nunca en la
+    dirección.
+  - Una página no puede borrar una cookie: para cerrar una sesión que la guarda rechazó
+    manda a `/sesion/cerrar`, que vuelve a correr la guarda y solo cierra si ella lo dice.
+    «Salir» es una acción de servidor.
+  - El origen de una acción de servidor lo verifica Next. No se agrega una verificación
+    propia, y «nulo» nunca entra a los orígenes permitidos. Por eso una página con
+    formulario no lleva `Referrer-Policy: no-referrer`: rompe el envío sin JavaScript
+    (TRD §9.2, fila «Cookies», y §9.8).
+  - Un texto legal se lee con `currentLegalText` (`src/services/legal/`): solo los tipos
+    públicos y solo el vigente. Su cuerpo se pinta como texto, nunca como HTML. El
+    servicio recuerda lo leído treinta segundos, porque su página es pública y usa la
+    reserva de conexiones con la que la gente entra. Por eso el enlace desde una casilla
+    de consentimiento lleva la versión que la casilla anuncia (`?v=3`): si lo recordado
+    es anterior, se vuelve a leer, y nadie lee una versión y acepta otra.
+  - Una acción de la cuenta sale hacia otra pantalla por `leaveFor`
+    (`src/app/(cuenta)/_lib/exit.ts`), con lo que dijo su tabla: cierra la sesión que ya
+    no vale, deja el aviso y redirige, en ese orden.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -215,7 +291,12 @@ falla. Once precisiones que la tabla no dice:
     `RATE_LIMIT_HMAC_SECRET`. Ni el correo ni la dirección se guardan en los contadores.
   - La dirección de quien pide solo se cree detrás de un despliegue de Vercel
     (`origin.ts`). Desconocida, va a un cubo compartido y nunca queda como par de
-    confianza.
+    confianza. `GET /api/origin-drill` sirve para medir esa cabecera en una vista previa:
+    recibe una dirección de prueba y contesta cuatro banderas, nunca una dirección. En
+    producción no existe.
+  - `sessionEmail(reader)` da el correo del token ya verificado, solo para mostrarlo. No
+    autoriza nada. `signOut` reporta `session_not_closed` si Auth no pudo cerrar, y
+    `closeRejectedSession` es lo que hay detrás de `/sesion/cerrar`.
   - El registro es una invitación del servidor (`requestSignUp`, por la API de
     administración). Auth no acepta altas de fuera (`enable_signup = false` en `[auth]` de
     `supabase/config.toml`; no es el de `[auth.email]`), y la cuenta nace sin confirmar y
@@ -421,7 +502,11 @@ Las rutas de las tres zonas están en `.github/CODEOWNERS`. Hoy son `src/domain/
 `src/domain/consumption/`, `src/domain/payout/`, `src/adapters/supabase/` y
 `supabase/migrations/`, más las pruebas y los guiones que las hacen cumplir. De la cuenta
 están ahí `src/services/account/`, `src/proxy.ts`, la configuración de Auth
-(`supabase/config.toml`, `supabase/templates/`) y `supabase/local/`.
+(`supabase/config.toml`, `supabase/templates/`) y `supabase/local/`. Con las pantallas de
+entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
+`src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
+`src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
+`playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.
@@ -454,7 +539,10 @@ el cambio está mal aunque todo lo demás pase.
 - Firmar una dirección de video o de archivo fuera de la función única de medios.
 - Consultar la tabla de suscripciones desde una página para decidir qué mostrar. Se le
   pregunta al servicio de acceso.
-- Dar por cierto lo que manda el navegador: un latido, el regreso de pagar, un rol.
+- Dar por cierto lo que manda el navegador: un latido, el regreso de pagar, un rol, el
+  estado anterior de un formulario.
+- Servir una página sin su guarda y fuera de la lista de públicas, o una ruta o una acción
+  de servidor fuera de su lista.
 - Poner un secreto en el código, en el navegador o en un registro.
 - Escribir en registros, en correos o en analítica el historial de cursos de un alumno,
   datos fiscales o bancarios, o el texto de un caso de moderación.
@@ -490,7 +578,8 @@ el cambio está mal aunque todo lo demás pase.
 
 1. Cumple los criterios de aceptación de sus requisitos, y hay una prueba que lo demuestra.
 2. Pasan tipos, lint y las pruebas de las capas tocadas.
-3. Si toca una pantalla, respeta su ficha del diseño y funciona con teclado y en teléfono.
+3. Si toca una pantalla, respeta su ficha del diseño, funciona con teclado, en teléfono y
+   sin JavaScript, y pasa su extremo a extremo.
 4. Si toca la base, la migración corre desde cero y trae su política y su prueba.
 5. Si toca una zona delicada, una persona la revisó y lo dijo por escrito.
 6. Si el código obligó a cambiar una decisión, el documento de planeación y `../INDICE.md`

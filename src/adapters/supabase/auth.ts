@@ -33,6 +33,7 @@ import {
 } from "./auth-errors";
 import { ensureIdentityKeys, inspectAccessToken, type TokenInspection, type VerifiedClaims } from "./claims";
 import { IdentityUnavailableError } from "./errors";
+import { emailClaim, isLinkToken } from "./tokens";
 
 // Lo que los servicios le piden a Supabase Auth (TRD §8.10 y §9.2).
 //
@@ -71,15 +72,14 @@ const REFRESH_TIMEOUT_MS = 3_000;
 /** Tras una renovación fallida por un motivo pasajero, cuánto pasa antes de volver a intentar. */
 const REFRESH_PAUSE_MS = 10_000;
 
-const TOKEN_HASH = /^[A-Za-z0-9_-]{8,256}$/;
-
 // Un token de acceso normal mide menos de la mitad. Uno más largo que esto no cabría en la
 // cookie, y pasado cierto tamaño ni siquiera se le puede mandar a Auth en una cabecera.
 const MAX_USABLE_TOKEN_LENGTH = 3_000;
 
 export type SessionRead =
   | { kind: "none" }
-  | { kind: "session"; claims: VerifiedClaims }
+  /** `email`: el correo que dice el token, para mostrarlo. Nulo si no lo trae. */
+  | { kind: "session"; claims: VerifiedClaims; email: string | null }
   /** La cookie es de una sesión de verdad, pero su token ya venció y aquí no se renueva. */
   | { kind: "expired" }
   | { kind: "unknown" };
@@ -287,7 +287,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
 
   async function redeem(tokenHash: string, flow: RedeemedLink["flow"]): Promise<RedeemResult> {
     // Lo que no tiene forma de huella no se le manda a Auth.
-    if (!TOKEN_HASH.test(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
+    if (!isLinkToken(tokenHash)) return { ok: false, reason: "invalid_or_expired" };
 
     // El enlace sirve una sola vez. Sin las claves públicas a la mano no se podría
     // verificar la sesión que devuelve: se pregunta antes de gastarlo.
@@ -531,7 +531,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     const cookie = readSessionCookie(reader, secure());
     if (cookie.kind !== "tokens") return { kind: "none" };
     const inspection = await inspect(cookie.tokens.accessToken);
-    if (inspection.state === "valid") return { kind: "session", claims: inspection.claims };
+    if (inspection.state === "valid") {
+      return { kind: "session", claims: inspection.claims, email: emailClaim(cookie.tokens.accessToken) };
+    }
     if (inspection.state === "expired") return { kind: "expired" };
     return inspection.state === "unavailable" ? { kind: "unknown" } : { kind: "none" };
   }

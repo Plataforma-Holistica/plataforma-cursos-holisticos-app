@@ -1,69 +1,16 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import { posix, reachableFrom, sourceFiles, specifiersIn, src, withoutTypeImports } from "./sources";
 
 // Dos cosas de la sesión que el lint no alcanza a ver (TRD §4.2, §8.10 y §9.3):
 //
 // - El paso previo corre antes de cada petición y no debe poder abrir una transacción. El
 //   lint solo mira las importaciones directas; aquí se sigue la cadena completa.
 // - La llave secreta de Supabase salta todo permiso. Se lee en un solo archivo, y la API
-//   de administración que la usa se llama desde dos funciones, las dos sobre una cuenta
-//   que sale de un enlace recién canjeado.
-
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const src = join(root, "src");
-const posix = (path: string) => relative(root, path).replaceAll("\\", "/");
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(path);
-    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
-  });
-}
-
-// Toda forma de traer otro módulo: `import … from`, `export … from`, `import "x"`,
-// `import("x")` y `require("x")`, con comillas o con comillas invertidas. También los que
-// solo traen tipos: si un día dejan de serlo, la cadena ya estaba vigilada.
-const SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'`]([^"'`]+)["'`]/g;
-
-/** Los nombres que `SPECIFIER` saca de un texto. */
-const specifiersIn = (text: string) => [...text.matchAll(SPECIFIER)].map((match) => match[1]);
-
-function resolveLocal(from: string, specifier: string): string | null {
-  const base = specifier.startsWith("@/")
-    ? join(src, specifier.slice(2))
-    : specifier.startsWith(".")
-      ? resolve(dirname(from), specifier)
-      : null;
-  if (base === null) return null;
-  const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
-  const found = candidates.find((candidate) => existsSync(candidate) && /\.tsx?$/.test(candidate));
-  if (!found) throw new Error(`No se pudo seguir la importación "${specifier}" de ${posix(from)}.`);
-  return found;
-}
-
-/** Todo lo que un archivo termina cargando: sus archivos de `src/` y sus paquetes. */
-function reachableFrom(entry: string): { files: Set<string>; packages: Set<string> } {
-  const files = new Set<string>();
-  const packages = new Set<string>();
-  const pending = [entry];
-  while (pending.length > 0) {
-    const file = pending.pop();
-    if (file === undefined || files.has(file)) continue;
-    files.add(file);
-    for (const match of readFileSync(file, "utf8").matchAll(SPECIFIER)) {
-      const specifier = match[1] ?? "";
-      const local = resolveLocal(file, specifier);
-      if (local) pending.push(local);
-      else packages.add(specifier);
-    }
-  }
-  return { files, packages };
-}
+//   de administración que la usa se llama desde cuatro funciones del adaptador.
 
 describe("cómo se sigue una importación", () => {
   it.each([
@@ -78,6 +25,28 @@ describe("cómo se sigue una importación", () => {
     ["const x = require(`./x`);", "./x"],
   ])("ve %s", (code, expected) => {
     expect(specifiersIn(code)).toEqual([expected]);
+  });
+
+  it.each([
+    'import type { A } from "./x";',
+    'export type { A } from "./x";',
+    "import type { A, B } from './x'",
+    'import type A from "./x";',
+    'import type {\n  A,\n  B,\n} from "./x";',
+  ])("una sentencia que solo trae tipos no viaja: %s", (code) => {
+    expect(specifiersIn(withoutTypeImports(code))).toEqual([]);
+  });
+
+  it.each([
+    ['import { type A, b } from "./x";', "./x"],
+    ['import { a } from "./x";', "./x"],
+    ['export { a } from "./x";', "./x"],
+    ['import "./x";', "./x"],
+    ['const type = 1; import { a } from "./x";', "./x"],
+    ['export type A = B;\nimport { c } from "./x";', "./x"],
+    ['import type { A } from "./tipos";\nimport { b } from "./x";', "./x"],
+  ])("lo demás sí viaja: %s", (code, expected) => {
+    expect(specifiersIn(withoutTypeImports(code))).toEqual([expected]);
   });
 });
 
@@ -96,6 +65,16 @@ describe("lo que el paso previo termina cargando", () => {
     expect(files).not.toContain("src/adapters/supabase/db.ts");
     expect(files.filter((file) => /\/(db|sql|codecs|config|root-ca)\.ts$/.test(file) && file.includes("supabase"))).toEqual([]);
     expect([...reached.packages].filter((name) => /^pg($|[-/])|^postgres($|\/)/.test(name))).toEqual([]);
+  });
+
+  it("llega a la navegación, que le dice qué rutas piden sesión, y esta no llega a nada más", () => {
+    expect(files).toContain("src/services/account/navigation.ts");
+    const navigation = reachableFrom(join(src, "services/account/navigation.ts"));
+    expect([...navigation.files].map(posix).sort()).toEqual([
+      "src/domain/access/return-path.ts",
+      "src/services/account/navigation.ts",
+    ]);
+    expect([...navigation.packages]).toEqual([]);
   });
 
   it("no llega a otro adaptador ni a una pantalla", () => {

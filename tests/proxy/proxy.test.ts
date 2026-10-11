@@ -15,11 +15,12 @@ const refresh = vi.mocked(refreshSession);
 
 const options: CookieOptions = { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 34_560_000 };
 
-function request(cookies: Record<string, string> = {}, path = "/inicio"): NextRequest {
+// Por omisión, una ruta que no pide sesión: ahí el paso previo solo renueva.
+function request(cookies: Record<string, string> = {}, path = "/cursos/yoga", method = "GET"): NextRequest {
   const header = Object.entries(cookies)
     .map(([name, value]) => `${name}=${value}`)
     .join("; ");
-  return new NextRequest(`https://plataforma.example${path}`, header ? { headers: { cookie: header } } : {});
+  return new NextRequest(`https://plataforma.example${path}`, { method, ...(header ? { headers: { cookie: header } } : {}) });
 }
 
 /** Lo que haría la renovación con el tarro que el paso previo le arma. */
@@ -133,13 +134,117 @@ describe("el paso previo", () => {
     expect(forwarded(response)).toBeNull();
   });
 
-  it("no redirige ni contesta por su cuenta", async () => {
+  it("fuera de las rutas con sesión no redirige ni contesta por su cuenta", async () => {
     refresh.mockResolvedValue({ kind: "lost" });
     const response = await proxy(request({}, "/portal/finanzas"));
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();
   });
+});
+
+// La redirección optimista (flujo de la app §6.2 y §6.3): ahorra pintar una pantalla a
+// quien llega sin sesión. No es el control: la guarda de cada página decide.
+describe("la redirección a entrar", () => {
+  const location = (response: Response) => response.headers.get("location");
+
+  it("sin sesión, una ruta con sesión manda a entrar y guarda a dónde se iba", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/inicio"));
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe("https://plataforma.example/entrar?volver=%2Finicio");
+    expect(response.headers.get("x-middleware-next")).toBeNull();
+  });
+
+  it("guarda también la consulta, dentro del destino", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/inicio/algo?pestana=2&volver=%2F%2Fotro.example"));
+    expect(location(response)).toBe(
+      "https://plataforma.example/entrar?volver=%2Finicio%2Falgo%3Fpestana%3D2%26volver%3D%252F%252Fotro.example",
+    );
+  });
+
+  it("no guarda el parámetro interno con que Next pide una pantalla", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/inicio?_rsc=abc12&pestana=2"));
+    expect(location(response)).toBe("https://plataforma.example/entrar?volver=%2Finicio%3Fpestana%3D2");
+  });
+
+  it("un destino que no se puede guardar no impide mandar a entrar", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, `/inicio?x=${"a".repeat(2_000)}`));
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe("https://plataforma.example/entrar");
+  });
+
+  it("la sesión perdida también manda a entrar, y el borrado de su cookie viaja en la redirección", async () => {
+    refresh.mockImplementation((jar) => {
+      jar.set("__Host-plataforma-sesion", "", { ...options, maxAge: 0 });
+      return Promise.resolve({ kind: "lost" });
+    });
+    const response = await proxy(request({ "__Host-plataforma-sesion": "v1.vieja.b.c.cg" }, "/consentimientos"));
+    expect(response.status).toBe(307);
+    // `/consentimientos` no es un destino al que se vuelva: después de entrar decide la guarda.
+    expect(location(response)).toBe("https://plataforma.example/entrar");
+    expect(response.headers.get("set-cookie")).toBe(
+      "__Host-plataforma-sesion=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=lax",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-cache, no-store, must-revalidate, max-age=0");
+  });
+
+  it("una redirección no se guarda en caché aunque no escriba nada", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/inicio"));
+    expect(response.headers.get("cache-control")).toBe("private, no-cache, no-store, must-revalidate, max-age=0");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("con sesión deja pasar: quién entra lo decide la guarda de la página", async () => {
+    refresh.mockResolvedValue({ kind: "session", claims: { userId: "u", aal: "aal1", sessionId: null, issuedAt: 0 } });
+    const response = await proxy(request({ "plataforma-sesion": "v1.a.b.c.cg" }, "/inicio"));
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(location(response)).toBeNull();
+  });
+
+  it("cuando no se supo, no manda a entrar: no es lo mismo que no tener sesión", async () => {
+    refresh.mockResolvedValue({ kind: "unknown" });
+    const response = await proxy(request({ "plataforma-sesion": "v1.a.b.c.cg" }, "/inicio"));
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(location(response)).toBeNull();
+  });
+
+  it("si la renovación lanza, tampoco: deja pasar", async () => {
+    refresh.mockRejectedValue(new Error("sin red"));
+    const response = await proxy(request({}, "/inicio"));
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(location(response)).toBeNull();
+  });
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])(
+    "un envío (%s) nunca se redirige: un 307 lo reenviaría a otra pantalla, y su acción correría ahí",
+    async (method) => {
+      refresh.mockResolvedValue({ kind: "none" });
+      const response = await proxy(request({}, "/inicio", method));
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(location(response)).toBeNull();
+    },
+  );
+
+  it("una petición HEAD se trata como una lectura", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/inicio", "HEAD"));
+    expect(response.status).toBe(307);
+  });
+
+  it.each(["/", "/entrar", "/entrar?volver=%2Finicio", "/registro", "/recuperar", "/recuperar/abc", "/verificar/abc", "/sesion/cerrar", "/iniciox", "/legal/terminos"])(
+    "una ruta que no pide sesión no se redirige: %s",
+    async (path) => {
+      refresh.mockResolvedValue({ kind: "none" });
+      const response = await proxy(request({}, path));
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(location(response)).toBeNull();
+    },
+  );
 });
 
 describe("el alcance del paso previo", () => {
