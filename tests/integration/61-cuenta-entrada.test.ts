@@ -317,6 +317,40 @@ describe("los topes por hora", () => {
     expect(await testServices().signIn(memoryJar(), account, origin)).toEqual({ kind: "capped" });
   });
 
+  // El tope de la cuenta suma lo de todas las direcciones: es lo que detiene a quien
+  // reparte los intentos entre muchas. Aquí lo llena un fallo de verdad, no la prueba.
+  it("los fallos de direcciones distintas llenan el tope de la cuenta, y la siguiente no procede", async () => {
+    const account = await claimed({ complete: true });
+    const first = freshOrigin();
+    const bucket = signInBuckets(keysOf(account.email, first)).account;
+    await seedHits(bucket, params.hourlyCap - 1);
+
+    const services = testServices();
+    expect(await services.signIn(memoryJar(), { email: account.email, password: WRONG }, first)).toEqual({
+      kind: "invalid_credentials",
+    });
+    expect(await hitsOf(bucket)).toBe(params.hourlyCap);
+    expect(await services.signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "capped" });
+    // Lo que se niega no se cuenta.
+    expect(await hitsOf(bucket)).toBe(params.hourlyCap);
+  });
+
+  it("los fallos contra cuentas distintas llenan el tope de la dirección, y la siguiente no procede", async () => {
+    const one = await claimed({ complete: true });
+    const other = await claimed({ complete: true });
+    const origin = freshOrigin();
+    const bucket = signInBuckets(keysOf(one.email, origin)).ip;
+    await seedHits(bucket, params.hourlyCap - 1);
+
+    const services = testServices();
+    expect(await services.signIn(memoryJar(), { email: one.email, password: WRONG }, origin)).toEqual({
+      kind: "invalid_credentials",
+    });
+    expect(await hitsOf(bucket)).toBe(params.hourlyCap);
+    expect(await services.signIn(memoryJar(), other, origin)).toEqual({ kind: "capped" });
+    expect(await hitsOf(bucket)).toBe(params.hourlyCap);
+  });
+
   it("pero el dispositivo de siempre sí: el tope de la cuenta no frena al par que entró bien hace poco", async () => {
     const account = await claimed({ complete: true });
     const origin = freshOrigin();
