@@ -21,6 +21,8 @@ const fileNames = sources.map((source) => source.file);
 const PUBLIC_PAGES = [
   // La portada provisional.
   "src/app/page.tsx",
+  // Los textos legales, que cualquiera lee sin sesión.
+  "src/app/legal/[documento]/page.tsx",
   // La muestra de componentes, que solo existe con `pnpm dev`.
   "src/app/muestra/page.dev.tsx",
   "src/app/muestra/error/page.dev.tsx",
