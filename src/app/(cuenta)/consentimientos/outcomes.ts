@@ -109,6 +109,19 @@ export const acceptName = (docType: string): string => `accept:${docType}`;
 /** El valor del campo oculto que dice qué texto se pintó para un tipo. */
 export const shownValue = (item: Pick<ConsentItem, "docType" | "documentId">): string => `${item.docType}=${item.documentId}`;
 
+/**
+ * Los textos que el formulario dice haber pintado, por tipo: salen de sus campos ocultos.
+ * Lo que no tenga la forma de `shownValue` no cuenta. Lo usa también PA-14.
+ */
+export function readShown(form: FormData): Map<string, string> {
+  const shown = new Map<string, string>();
+  for (const entry of form.getAll("shown").slice(0, MAX_ENTRIES)) {
+    const match = SHOWN.exec(textOf(entry, 128));
+    if (match?.[1] !== undefined && match[2] !== undefined) shown.set(match[1], match[2]);
+  }
+  return shown;
+}
+
 export interface ConsentsForm {
   name: string;
   adult: boolean;
@@ -135,11 +148,7 @@ export function readConsentsForm(form: unknown): ConsentsForm {
   if (!(form instanceof FormData)) {
     return { name: "", adult: false, returnTo: "", accepted: [], acceptedTypes: [], unchecked: [] };
   }
-  const shown = new Map<string, string>();
-  for (const entry of form.getAll("shown").slice(0, MAX_ENTRIES)) {
-    const match = SHOWN.exec(textOf(entry, 128));
-    if (match?.[1] !== undefined && match[2] !== undefined) shown.set(match[1], match[2]);
-  }
+  const shown = readShown(form);
   // Cada casilla lleva el tipo de su texto en el nombre: `accept:terms`.
   const marked = (docType: string) => form.get(acceptName(docType)) === "on";
   const acceptedTypes = [...shown.keys()].filter(marked);

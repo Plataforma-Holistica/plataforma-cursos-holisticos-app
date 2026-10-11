@@ -32,6 +32,8 @@ export const account = defineMessages({
     newPassword: "Contraseña nueva",
     // La regla de una contraseña nueva, a la vista desde antes de escribir.
     passwordRule: "{min} caracteres o más",
+    // Para quien no ve la marca: se lee antes de la regla cuando ya se cumple.
+    passwordRuleMet: "Cumplida:",
     passwordTooShort: "Tu contraseña necesita {min} caracteres o más.",
     passwordTooLong: "Esa contraseña es demasiado larga. Elige una más corta.",
     passwordInvalid: "Esa contraseña tiene caracteres que no podemos guardar. Elige otra.",
@@ -85,6 +87,8 @@ export const account = defineMessages({
     submitting: "Confirmando…",
     // «Acepto los Términos y el Aviso de privacidad.»
     acceptBefore: "Acepto los",
+    acceptJoin: "y el",
+    acceptEnd: ".",
     legalMissing: "Falta aceptar los Términos y el Aviso de privacidad.",
     historyMissing: "Falta tu permiso para guardar tu historial de cursos.",
     linkDeadTitle: "Ese enlace ya no sirve",

@@ -48,6 +48,13 @@ const PUBLIC_PAGES = [
   "src/app/page.tsx",
   // Los textos legales, que cualquiera lee sin sesión.
   "src/app/legal/[documento]/page.tsx",
+  // «Revisa tu correo» y «Completa tu cuenta» (PA-14): una cuenta sin verificar no tiene
+  // sesión, y el enlace del correo se abre en cualquier navegador.
+  "src/app/(cuenta)/verificar/page.tsx",
+  "src/app/(cuenta)/verificar/[token]/page.tsx",
+  // Recuperar la contraseña (PA-13): quien la olvidó puede tener o no una sesión abierta.
+  "src/app/(cuenta)/recuperar/page.tsx",
+  "src/app/(cuenta)/recuperar/[token]/page.tsx",
   // La muestra de componentes, que solo existe con `pnpm dev`.
   "src/app/muestra/page.dev.tsx",
   "src/app/muestra/error/page.dev.tsx",
@@ -72,6 +79,20 @@ const SERVER_ACTIONS: Record<string, RegExp> = {
   "src/app/(cuenta)/entrar/actions.ts": /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
   // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
   "src/app/(cuenta)/consentimientos/actions.ts": /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
+  // Pedir el registro: el servicio cuenta el intento y aplica los topes antes de invitar a nadie.
+  "src/app/(cuenta)/registro/actions.ts":
+    /mailRequestOutcome\(await requestRegistration\(\{ email \}, await requestOrigin\(\)\)\)[\s\S]*return leaveFor\(jar, \{ to: ROUTES\.verify, notice: null \}\);/,
+  // Reenviar: el mismo servicio, con el correo que este navegador tiene anotado y ningún otro.
+  "src/app/(cuenta)/verificar/actions.ts":
+    /const pending = readRegistration\(jar\);\s*if \(pending === null\) return leaveFor\([\s\S]*mailRequestOutcome\(await requestRegistration\(\{ email: pending\.email \}, await requestOrigin\(\)\)\)/,
+  // Completar la cuenta desde el enlace: el servicio revisa datos y textos antes de canjearlo.
+  "src/app/(cuenta)/verificar/[token]/actions.ts":
+    /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRegistration\(\s*jar,[\s\S]*forgetRegistration\(jar\);\s*return leaveFor\(jar, outcome\);/,
+  // Pedir la recuperación: contesta lo mismo exista o no la cuenta.
+  "src/app/(cuenta)/recuperar/actions.ts": /mailRequestOutcome\(await requestRecovery\(\{ email \}, await requestOrigin\(\)\)\)/,
+  // Cambiar la contraseña desde el enlace: el servicio la revisa antes de canjearlo, y no abre sesión.
+  "src/app/(cuenta)/recuperar/[token]/actions.ts":
+    /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRecovery\(\{ tokenHash: input\.token, password: input\.password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(await cookieJar\(\), outcome\);/,
   // Salir: solo usa la cookie de quien pide.
   "src/app/(cuenta)/_lib/session-actions.ts": /await signOut\(await cookieJar\(\)\)/,
 };
