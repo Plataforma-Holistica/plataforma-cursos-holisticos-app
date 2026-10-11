@@ -53,6 +53,13 @@ test("a una cuenta sin completar se le pide lo que falta antes que cualquier otr
   await expect(page).toHaveTitle("Antes de seguir · La Plataforma");
   // Ninguna casilla viene marcada.
   for (const box of await page.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
+  // Cada texto se lee en otra pestaña, y el enlace lleva la versión que su casilla anuncia.
+  const links = page.getByRole("link", { name: /Leer el texto/ });
+  await expect(links).toHaveCount(3);
+  for (const link of await links.all()) {
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("href", /^\/legal\/(terminos|privacidad|historial-de-cursos)\?v=0$/);
+  }
   // El historial se lee completo, junto a su casilla: cada párrafo del texto de la base.
   const [history] = await ownerQuery<{ body: string }>(
     "select body from public.legal_documents where id = private.current_legal_document('course_history_consent')",
@@ -306,6 +313,9 @@ test("una acción enviada desde otro sitio se rechaza y no deja rastro", async (
 test("un texto legal se lee con su versión y su fecha, y uno que no existe no se encuentra @telefono", async ({ page }) => {
   await page.goto("/legal/terminos");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Términos y condiciones");
+  await expect(page).toHaveTitle(/^Términos y condiciones.* · La Plataforma$/);
+  // El título de la página es el del texto: el cuerpo no lo repite un nivel abajo.
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
   await expect(page.getByText(/^Versión 0 · vigente desde el \d{1,2} de \p{L}+ de \d{4}$/u)).toBeVisible();
   await expect(page.getByText("Borrador sin validez legal. Solo existe en una base de desarrollo.")).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);

@@ -12,9 +12,10 @@ import { isPublicDocType } from "./slugs";
 // Leer un texto legal para mostrarlo (RF-903; diseño PA-07). Solo los tipos que cualquiera
 // puede leer sin sesión, y solo su versión vigente.
 //
-// La página que los pinta es pública: cualquiera la pide, sin sesión, las veces que quiera.
-// Por eso lo leído se recuerda unos segundos, y un tipo que no es público ni llega a la
-// base: la reserva de conexiones es la misma con la que la gente entra.
+// La página que los pinta es pública: cualquiera la pide, sin sesión, las veces que quiera,
+// y la reserva de conexiones es la misma con la que la gente entra. Por eso un tipo que no
+// es público ni llega a la base, lo leído se recuerda unos segundos, las peticiones que
+// coinciden comparten una sola lectura, y un fallo también se recuerda un momento.
 
 export { legalBlocks, type LegalBlock } from "./blocks";
 export { docTypeOfSlug, LEGAL_SLUGS, PUBLIC_DOC_TYPES, slugOfDocType } from "./slugs";
@@ -44,12 +45,15 @@ export interface LegalDependencies {
   now: () => number;
 }
 
-/**
- * Cuánto se recuerda lo leído. Un texto recién publicado tarda esto, a lo más, en verse en
- * su página. A nadie le hace aceptar un texto viejo: lo que se acepta se compara con el
- * vigente al enviar (`matchAccepted`), en la base.
- */
+/** Cuánto se recuerda lo leído. Un texto recién publicado tarda esto, a lo más, en verse en su página. */
 export const LEGAL_TEXT_MEMORY_MS = 30_000;
+/**
+ * Lo menos que pasa entre dos lecturas del mismo tipo cuando alguien pide una versión más
+ * nueva que la recordada. Sin esto, pedir una versión que no existe saltaría la memoria.
+ */
+export const LEGAL_TEXT_REREAD_MS = 1_000;
+/** Cuánto se recuerda un fallo: mientras tanto no se vuelve a la base ni se reporta otra vez. */
+export const LEGAL_TEXT_FAILURE_MS = 5_000;
 
 const row = z.object({
   id: z.string(),
@@ -59,6 +63,12 @@ const row = z.object({
   effective_from: z.string(),
 });
 
+/** Lo que la base contestó por un tipo: su texto vigente, o nulo si no tiene. */
+interface Entry {
+  at: number;
+  found: z.infer<typeof row> | null;
+}
+
 export function createLegalTexts(overrides: Partial<LegalDependencies> = {}) {
   const deps: LegalDependencies = {
     isLocal: () => getEnv().APP_ENV === "local",
@@ -66,16 +76,16 @@ export function createLegalTexts(overrides: Partial<LegalDependencies> = {}) {
     now: () => Date.now(),
     ...overrides,
   };
-  // Lo que la base contestó por tipo: el texto vigente, o nulo si no tiene. A lo más, una
-  // entrada por tipo público. Un «no se supo» no se recuerda.
-  const remembered = new Map<string, { at: number; found: z.infer<typeof row> | null }>();
+  // A lo más, una entrada por tipo público en cada uno.
+  const remembered = new Map<string, Entry>();
+  const failedAt = new Map<string, number>();
+  const reading = new Map<string, Promise<Entry | null>>();
 
-  /** El texto vigente de un tipo público. Un tipo fuera de la lista no llega a la base. */
-  async function currentLegalText(docType: string): Promise<LegalTextRead> {
-    if (!isPublicDocType(docType)) return { kind: "not_found" };
-
-    let entry = remembered.get(docType);
-    if (entry === undefined || deps.now() - entry.at >= LEGAL_TEXT_MEMORY_MS) {
+  /** Lee de la base, una sola vez aunque varias peticiones coincidan. Nulo si no se supo. */
+  function read(docType: string): Promise<Entry | null> {
+    const flying = reading.get(docType);
+    if (flying) return flying;
+    const attempt = (async () => {
       try {
         const [found] = await asSystem({ reason: "legal_text_read" }, (tx) =>
           tx.query(
@@ -86,15 +96,49 @@ export function createLegalTexts(overrides: Partial<LegalDependencies> = {}) {
             row,
           ),
         );
-        entry = { at: deps.now(), found: found ?? null };
+        const entry = { at: deps.now(), found: found ?? null };
         remembered.set(docType, entry);
+        return entry;
       } catch {
+        failedAt.set(docType, deps.now());
         await deps.report("legal_text_unavailable");
-        return { kind: "unavailable" };
+        return null;
+      } finally {
+        reading.delete(docType);
       }
+    })();
+    reading.set(docType, attempt);
+    return attempt;
+  }
+
+  /**
+   * El texto vigente de un tipo público. Un tipo fuera de la lista no llega a la base.
+   *
+   * @param atLeastVersion La versión que quien pregunta ya vio anunciada: la que pinta el
+   *   formulario desde el que se llega a leer. Si lo recordado es anterior, se vuelve a
+   *   leer: nadie lee una versión y acepta otra porque la memoria se quedó atrás.
+   */
+  async function currentLegalText(docType: string, atLeastVersion?: number): Promise<LegalTextRead> {
+    if (!isPublicDocType(docType)) return { kind: "not_found" };
+
+    const now = deps.now();
+    let entry = remembered.get(docType);
+    const fresh = entry !== undefined && now - entry.at < LEGAL_TEXT_MEMORY_MS;
+    const behind =
+      entry !== undefined &&
+      atLeastVersion !== undefined &&
+      (entry.found?.version ?? -1) < atLeastVersion &&
+      now - entry.at >= LEGAL_TEXT_REREAD_MS;
+    if (!fresh || behind) {
+      const failed = failedAt.get(docType);
+      // Acaba de fallar: no se le pregunta otra vez a una base que no contesta.
+      if (failed !== undefined && now - failed < LEGAL_TEXT_FAILURE_MS) return { kind: "unavailable" };
+      const latest = await read(docType);
+      if (latest === null) return { kind: "unavailable" };
+      entry = latest;
     }
 
-    const { found } = entry;
+    const found = entry?.found ?? null;
     // Un borrador solo existe en una base local, y solo ahí se muestra.
     if (found === null || (found.version === 0 && !deps.isLocal())) return { kind: "not_found" };
     return {

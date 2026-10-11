@@ -104,8 +104,9 @@ jobs:
         run: pnpm build
 
       # TRD §11.5: el extremo a extremo de la cuenta (FL-02, FL-03, FL-05 y FL-06), con un
-      # navegador de verdad contra la aplicación recién compilada, la pila local de Supabase
-      # y su buzón. Va después de compilar: prueba esa compilación, no otra.
+      # navegador de verdad contra la aplicación, la pila local de Supabase y su buzón. Va
+      # después de compilar, pero no usa esa compilación: Playwright compila la suya, sin
+      # registro de errores, para que nunca se pruebe una de antes (`playwright.config.ts`).
       - name: Navegador para el extremo a extremo
         run: pnpm exec playwright install --with-deps chromium
 

@@ -26,10 +26,13 @@ const app = join(src, "app");
 /** El código sin sus comentarios: una llamada escrita en un comentario no es una llamada. */
 const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-const sources = sourceFiles(app).map((path) => {
+const read = (path: string) => {
   const text = readFileSync(path, "utf8");
   return { path, file: posix(path), text, code: withoutComments(text) };
-});
+};
+const sources = sourceFiles(app).map(read);
+/** Todo el código de la aplicación, no solo sus pantallas. */
+const everything = sourceFiles(src).map(read);
 const fileNames = sources.map((source) => source.file);
 const codeOf = (file: string) => sources.find((source) => source.file === file)?.code ?? "";
 
@@ -66,9 +69,9 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
  */
 const SERVER_ACTIONS: Record<string, RegExp> = {
   // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
-  "src/app/(cuenta)/entrar/actions.ts": /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)/,
+  "src/app/(cuenta)/entrar/actions.ts": /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
   // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
-  "src/app/(cuenta)/consentimientos/actions.ts": /await completeAccount\(\s*jar,/,
+  "src/app/(cuenta)/consentimientos/actions.ts": /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
   // Salir: solo usa la cookie de quien pide.
   "src/app/(cuenta)/_lib/session-actions.ts": /await signOut\(await cookieJar\(\)\)/,
 };
@@ -130,7 +133,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
   });
 
   it("no hay armazones ni plantillas además del de la raíz: pintarían antes que la guarda de su página", () => {
-    const frames = fileNames.filter((file) => /\/(layout|template|default)\.tsx?$/.test(file));
+    const frames = fileNames.filter((file) => /\/(layout|template|default|loading)\.tsx?$/.test(file));
     expect(frames).toEqual(["src/app/layout.tsx"]);
   });
 });
@@ -150,19 +153,22 @@ describe("toda ruta está en la lista, con lo que la cuida", () => {
     const methods = [...codeOf(file).matchAll(/export (?:async )?function ([A-Z]+)\(/g)].map((match) => match[1]);
     expect(methods.filter((method) => method !== "GET" && method !== "HEAD")).toEqual([]);
     expect(methods).toContain("GET");
+    // Tampoco exportado de otra forma: como constante, o con otro nombre.
+    expect(codeOf(file)).not.toMatch(/\b(POST|PUT|PATCH|DELETE|OPTIONS)\b/);
   });
 });
 
 describe("todo archivo de acciones de servidor está en la lista, con el servicio por el que pasa", () => {
   const isServerAction = (code: string) => /^\s*["']use server["'];?/.test(code);
-  const actionFiles = sources.filter((source) => isServerAction(source.code)).map((source) => source.file);
+  // En todo el código: una acción de servidor fuera de `src/app` también sería una puerta.
+  const actionFiles = everything.filter((source) => isServerAction(source.code)).map((source) => source.file);
 
   it("no hay acciones fuera de la lista ni la lista nombra archivos que no existen", () => {
     expect(actionFiles.sort()).toEqual(Object.keys(SERVER_ACTIONS).sort());
   });
 
   it("la marca de acción de servidor solo va al inicio de un archivo, nunca dentro de una función", () => {
-    const inline = sources.filter((source) => /["']use server["']/.test(source.code) && !isServerAction(source.code));
+    const inline = everything.filter((source) => /["']use server["']/.test(source.code) && !isServerAction(source.code));
     expect(inline.map((source) => source.file)).toEqual([]);
   });
 
@@ -236,18 +242,26 @@ describe("la petición se lee en un solo archivo", () => {
     const reading = others
       .filter(
         (source) =>
-          /\b\w+\.(?:headers|cookies)\.(?:get|getAll|has|entries|forEach)\(/.test(source.code) ||
-          /\{[^{}]*\b(?:headers|cookies)\b[^{}]*\}\s*:\s*(?:Next)?Request\b/.test(source.code),
+          /\b(?:request|req)\.(?:headers|cookies)\b/.test(source.code) ||
+          /\b\w+\.(?:headers|cookies)\.(?:get|getAll|has|entries|forEach|keys|values)\(/.test(source.code) ||
+          /\{[^{}]*\b(?:headers|cookies)\b[^{}]*\}\s*(?::\s*(?:Next)?Request\b|=\s*(?:request|req)\b)/.test(source.code),
       )
       .map((source) => source.file);
     expect(reading).toEqual([]);
+  });
+
+  it("el lector saca de las cabeceras exactamente dos cosas", () => {
+    const names = [...codeOf(READER).matchAll(/list\.get\("([^"]+)"\)/g)].map((match) => match[1]);
+    expect(names.sort()).toEqual(["user-agent", "x-real-ip"]);
   });
 
   it("lee de la petición la cabecera de la dirección que pone el alojamiento, y ninguna otra dirección", () => {
     const reader = codeOf(READER);
     expect(reader).toMatch(/realIp: list\.get\("x-real-ip"\)/);
     expect(reader).toMatch(/userAgent: list\.get\("user-agent"\)/);
-    // `x-forwarded-for` la escribe quien pide: no se lee en ningún lado.
-    expect(sources.filter((source) => /x-forwarded-for/i.test(source.code)).map((source) => source.file)).toEqual([]);
+    // Las demás cabeceras que dicen traer una dirección las escribe quien pide, o son de
+    // otro alojamiento: no se nombran en ningún lado del código.
+    const others = /["'`](?:x-forwarded-for|x-vercel-forwarded-for|x-client-ip|cf-connecting-ip|true-client-ip|forwarded)["'`]/i;
+    expect(everything.filter((source) => others.test(source.code)).map((source) => source.file)).toEqual([]);
   });
 });

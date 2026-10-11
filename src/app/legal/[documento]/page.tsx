@@ -21,19 +21,30 @@ const text = messages.account.legal;
 
 interface Props {
   params: Promise<{ documento: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/**
+ * La versión que anuncia el formulario desde el que se llega (`?v=3`), o nada. No elige qué
+ * versión se pinta, que es siempre la vigente: le dice al servicio que no se conforme con
+ * una más vieja que recuerde, para que nadie lea una versión y acepte otra.
+ */
+function announcedVersion(value: string | string[] | undefined): number | undefined {
+  if (typeof value !== "string" || !/^\d{1,6}$/.test(value)) return undefined;
+  return Number(value);
 }
 
 // Una sola lectura por petición: el título de la pestaña y la página piden lo mismo.
-const load = cache(async (slug: string) => {
+const load = cache(async (slug: string, version: number | undefined) => {
   const docType = docTypeOfSlug(slug);
   if (docType === null) return { kind: "not_found" } as const;
   // La página no se arma al compilar: el servicio decide cuánto recuerda lo leído.
   await connection();
-  return currentLegalText(docType);
+  return currentLegalText(docType, version);
 });
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const read = await load((await params).documento);
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+  const read = await load((await params).documento, announcedVersion((await searchParams).v));
   return read.kind === "found" ? { title: read.text.title } : {};
 }
 
@@ -47,9 +58,9 @@ function Block({ block }: { block: LegalBlock }) {
   return <h4 className={HEADINGS[3]}>{block.text}</h4>;
 }
 
-export default async function LegalPage({ params }: Props) {
+export default async function LegalPage({ params, searchParams }: Props) {
   const slug = (await params).documento;
-  const read = await load(slug);
+  const read = await load(slug, announcedVersion((await searchParams).v));
   if (read.kind === "not_found") notFound();
   // No se supo: no es lo mismo que un texto que no existe. El servicio ya lo reportó.
   const self = `/legal/${slug}`;

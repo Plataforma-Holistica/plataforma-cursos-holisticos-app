@@ -44,7 +44,7 @@ vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }
 import ConsentsPage from "@/app/(cuenta)/consentimientos/page";
 import SignInPage from "@/app/(cuenta)/entrar/page";
 import HomePage from "@/app/inicio/page";
-import LegalPage from "@/app/legal/[documento]/page";
+import LegalPage, { generateMetadata as generateLegalMetadata } from "@/app/legal/[documento]/page";
 
 const reader = { get: () => undefined };
 const claims = { userId: "u", aal: "aal1", sessionId: null, issuedAt: 0 };
@@ -123,7 +123,7 @@ describe("la pantalla que pide lo que le falta a la cuenta", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Actualizamos nuestros textos");
     expect(screen.getAllByRole("checkbox")).toHaveLength(1);
     expect(screen.getByRole("checkbox")).toHaveAccessibleName(/Leí y acepto: Términos\. Versión 2, vigente desde el 12 de noviembre de 2026\./);
-    expect(screen.getByRole("link", { name: /Leer el texto/ })).toHaveAttribute("href", "/legal/terminos");
+    expect(screen.getByRole("link", { name: /Leer el texto/ })).toHaveAttribute("href", "/legal/terminos?v=2");
     // El destino viaja con el formulario: después de aceptar se va a donde se iba.
     expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/inicio?pestana=2");
   });
@@ -200,7 +200,12 @@ describe("la página de entrar", () => {
 });
 
 const legalText = { docType: "terms", documentId: "d", version: 3, title: "Términos y condiciones", body: "", effectiveFrom: "2026-11-12T06:00:00.000Z" };
-const legalPage = (documento: string) => LegalPage({ params: Promise.resolve({ documento }) });
+const legalProps = (documento: string, search: Record<string, string | string[] | undefined> = {}) => ({
+  params: Promise.resolve({ documento }),
+  searchParams: Promise.resolve(search),
+});
+const legalPage = (documento: string, search: Record<string, string | string[] | undefined> = {}) =>
+  LegalPage(legalProps(documento, search));
 
 describe("la página de un texto legal", () => {
   it("pinta el título, la versión, la fecha y el cuerpo, sin repetir el título", async () => {
@@ -209,7 +214,7 @@ describe("la página de un texto legal", () => {
       text: { ...legalText, body: "# Términos y condiciones\n\nPrimer párrafo.\n\n## Pagos\n\nSegundo párrafo." },
     });
     render(await legalPage("terminos"));
-    expect(mocks.currentLegalText).toHaveBeenCalledWith("terms");
+    expect(mocks.currentLegalText).toHaveBeenCalledExactlyOnceWith("terms", undefined);
     expect(screen.getAllByRole("heading").map((heading) => `${heading.tagName} ${heading.textContent}`)).toEqual([
       "H1 Términos y condiciones",
       "H3 Pagos",
@@ -254,7 +259,31 @@ describe("la página de un texto legal", () => {
   it("un texto sin versión vigente no se encuentra", async () => {
     mocks.currentLegalText.mockResolvedValue({ kind: "not_found" });
     await expect(legalPage("privacidad")).rejects.toThrow("no encontrado");
-    expect(mocks.currentLegalText).toHaveBeenCalledWith("student_privacy_notice");
+    expect(mocks.currentLegalText).toHaveBeenCalledWith("student_privacy_notice", undefined);
+  });
+
+  it("la versión que anuncia el formulario llega al servicio, y lo que no es un número no llega", async () => {
+    mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, body: "Texto." } });
+    render(await legalPage("terminos", { v: "3" }));
+    expect(mocks.currentLegalText).toHaveBeenLastCalledWith("terms", 3);
+
+    for (const v of ["", "abc", "-1", "3.5", "1e3", " 3", "9999999", ["3", "4"], undefined]) {
+      mocks.currentLegalText.mockClear();
+      render(await legalPage("terminos", { v }));
+      expect(mocks.currentLegalText, JSON.stringify(v)).toHaveBeenLastCalledWith("terms", undefined);
+    }
+  });
+
+  it("el título de la pestaña es el del texto, y sin texto no hay título propio", async () => {
+    mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, body: "Texto." } });
+    expect(await generateLegalMetadata(legalProps("terminos", { v: "3" }))).toEqual({ title: "Términos y condiciones" });
+    expect(mocks.currentLegalText).toHaveBeenLastCalledWith("terms", 3);
+
+    mocks.currentLegalText.mockResolvedValue({ kind: "not_found" });
+    expect(await generateLegalMetadata(legalProps("terminos"))).toEqual({});
+    mocks.currentLegalText.mockResolvedValue({ kind: "unavailable" });
+    expect(await generateLegalMetadata(legalProps("terminos"))).toEqual({});
+    expect(await generateLegalMetadata(legalProps("no-existe"))).toEqual({});
   });
 
   it("cuando no se pudo leer, no es «no encontrado»: ofrece reintentar en esa misma dirección", async () => {

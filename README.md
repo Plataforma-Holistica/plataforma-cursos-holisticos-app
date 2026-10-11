@@ -2,8 +2,9 @@
 
 El código de la plataforma de cursos por suscripción.
 
-**Estado al 2026-10-11:** cimientos. Todavía no hay ninguna pantalla más que la portada
-provisional. Lo que sí hay:
+**Estado al 2026-10-11:** cimientos. En `main` todavía no hay ninguna pantalla más que la
+portada provisional; las primeras de la cuenta (entrar, completar la cuenta y un inicio
+provisional) están propuestas en la solicitud 13. Lo que sí hay:
 
 - **Esqueleto** (T-101): aplicación Next.js, las capas del TRD con el lint que las hace
   cumplir, la prueba de capas, el escaneo de secretos y la integración continua.
@@ -17,8 +18,12 @@ provisional. Lo que sí hay:
 - **Cuenta** (T-104, segunda entrega, en curso): los textos legales y los consentimientos,
   el freno de entrada, las reglas puras de registro, entrada y recuperación, la sesión por
   cookie y los servicios: la guarda de sesión, entrar y salir, y registrarse (por
-  invitación del servidor), recuperar la contraseña y completar la cuenta. Faltan las
-  pantallas.
+  invitación del servidor), recuperar la contraseña y completar la cuenta. Las pantallas
+  van en dos solicitudes. La primera está propuesta (solicitud 13): entrar (`/entrar`),
+  completar la cuenta (`/consentimientos`), la cuenta suspendida, un inicio provisional
+  (`/inicio`), los textos legales en versión mínima (`/legal/[documento]`), la guarda en
+  cada página, la redirección del paso previo y las pruebas de extremo a extremo con
+  Playwright. Falta la segunda: registro, verificación y recuperación.
 - **Diseño** (T-109): el catálogo de textos, los tokens y los componentes base.
 
 Lo que está en revisión y lo que sigue lo dice `../PROGRESO.md`.
@@ -40,6 +45,27 @@ sale cada valor. Los demás comandos y las reglas de trabajo están en `CLAUDE.m
 
 Con `pnpm dev`, `http://localhost:3000/muestra` enseña los componentes base. Esa página no
 existe en producción.
+
+Las pruebas de extremo a extremo corren con `pnpm test:e2e`. Necesitan la pila local arriba
+y lista (`pnpm db:start`, `pnpm db:login` y `pnpm db:drafts`), el puerto 3000 libre (sin un
+`pnpm dev` corriendo: Playwright compila la aplicación y la sirve ahí él mismo) y Chromium
+instalado una vez (`pnpm exec playwright install chromium`).
+
+## Cómo está ordenado
+
+Las capas y lo que cada una puede importar están en `CLAUDE.md`. Lo que llegó con las
+pantallas de la cuenta:
+
+- `src/app/_lib/`: lo que comparten todas las pantallas. El único archivo que lee la
+  petición (`request-context.ts`) y la guarda que llama cada página (`guard.ts`).
+- `src/app/(cuenta)/`: las pantallas de la cuenta. Cada una con su página, su formulario,
+  su acción de servidor y la tabla pura que decide qué hace (`outcomes.ts`).
+- `tests/e2e/`: las pruebas de extremo a extremo (`*.spec.ts`).
+
+Tres reglas para quien escriba una pantalla. Dos las exige una prueba de arquitectura: toda
+página llama a la guarda o entra a la lista de públicas, y toda ruta y toda acción de
+servidor entra a su lista. La tercera la prueba el extremo a extremo: los formularios
+funcionan sin JavaScript. Las demás están en `CLAUDE.md`.
 
 ## Dónde está la documentación
 

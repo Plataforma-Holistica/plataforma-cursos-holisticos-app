@@ -168,13 +168,19 @@ async function throttle(page: Page, who: Person): Promise<Date> {
     await expect(page.getByText("El correo o la contraseña no coinciden.")).toBeVisible();
   }
   await signIn(page, who);
-  const [row] = await ownerQuery<{ locked_until: Date }>("select locked_until from private.login_throttles");
+  const [row] = await ownerQuery<{ locked_until: Date }>(
+    "select locked_until from private.login_throttles where locked_until is not null order by locked_until desc limit 1",
+  );
   if (!row?.locked_until) throw new Error("El freno no dejó una espera.");
   return row.locked_until;
 }
 
 const clock = (date: Date, timeZone: string) =>
   new Intl.DateTimeFormat("es-MX", { hour: "numeric", minute: "2-digit", timeZone }).format(date);
+
+// La hora la escribe aquí Node y allá el navegador, y no siempre ponen el mismo espacio
+// entre la hora y «a. m.»: se comparan con los espacios emparejados.
+const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
 
 async function inContext<T>(browser: Browser, options: Parameters<Browser["newContext"]>[0], work: (page: Page) => Promise<T>): Promise<T> {
   const context = await browser.newContext(options);
@@ -193,7 +199,11 @@ test("la hora del freno se dice en la zona de quien lee", async ({ browser }) =>
     // servidor, este caso lo notaría.
     expect(clock(until, "Asia/Tokyo")).not.toBe(clock(until, "America/Mexico_City"));
     const alert = page.getByRole("alert").filter({ hasText: "Demasiados intentos." });
-    await expect(alert).toHaveText(new RegExp(`Podrás probar de nuevo a las ${clock(until, "Asia/Tokyo")}\\.$`));
+    await expect(alert).toBeVisible();
+    // Espera a que el navegador haya vuelto a escribir la hora en su zona.
+    await expect
+      .poll(async () => spaced((await alert.textContent()) ?? ""))
+      .toContain(spaced(`Demasiados intentos. Podrás probar de nuevo a las ${clock(until, "Asia/Tokyo")}.`));
     await expect(alert).not.toContainText("hora del centro de México");
     await expect(page.getByRole("button", { name: "Entrar" })).toBeDisabled();
   });
@@ -203,9 +213,11 @@ test("sin JavaScript, la hora del freno va en la del centro de México, lo dice,
   const ana = await person();
   await inContext(browser, { javaScriptEnabled: false, timezoneId: "Asia/Tokyo", locale: "es-MX" }, async (page) => {
     const until = await throttle(page, ana);
-    await expect(
-      page.getByText(`Demasiados intentos. Podrás probar de nuevo a las ${clock(until, "America/Mexico_City")}, hora del centro de México.`),
-    ).toBeVisible();
+    const message = page.getByText("hora del centro de México");
+    await expect(message).toBeVisible();
+    expect(spaced((await message.textContent()) ?? "")).toContain(
+      spaced(`Demasiados intentos. Podrás probar de nuevo a las ${clock(until, "America/Mexico_City")}, hora del centro de México.`),
+    );
     const button = page.getByRole("button", { name: "Entrar" });
     await expect(button).toBeDisabled();
     await expect(button).toHaveAccessibleDescription("Podrás intentarlo de nuevo cuando pase la espera.");

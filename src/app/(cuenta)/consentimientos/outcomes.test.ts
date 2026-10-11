@@ -62,8 +62,8 @@ describe("lo que la pantalla pide", () => {
       askAdult: true,
       minimumAge: 18,
       items: [
-        { docType: "terms", documentId: ID.terms, title: "Términos y condiciones", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/terminos", explanation: null },
-        { docType: "student_privacy_notice", documentId: ID.student_privacy_notice, title: "Aviso de privacidad", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/privacidad", explanation: null },
+        { docType: "terms", documentId: ID.terms, title: "Términos y condiciones", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/terminos?v=3", explanation: null },
+        { docType: "student_privacy_notice", documentId: ID.student_privacy_notice, title: "Aviso de privacidad", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/privacidad?v=3", explanation: null },
         {
           docType: "course_history_consent",
           documentId: ID.course_history_consent,
@@ -71,7 +71,7 @@ describe("lo que la pantalla pide", () => {
           version: 3,
           effectiveDate: "fecha(2026-11-12)",
           // También el que se pinta junto a su casilla se puede leer completo en su página.
-          href: "/legal/historial-de-cursos",
+          href: "/legal/historial-de-cursos?v=3",
           // El título del cuerpo no se repite: el bloque ya lleva el del texto.
           explanation: ["Primero.", "Segundo, con dos renglones."],
         },
@@ -104,14 +104,15 @@ describe("lo que la pantalla pide", () => {
     });
     expect(updated.variant).toBe("updated_texts");
     expect(updated.items).toEqual([
-      { docType: "terms", documentId: ID.terms, title: "Términos y condiciones", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/terminos", explanation: null },
+      // El enlace lleva la versión que la casilla anuncia: la página no enseña una anterior.
+      { docType: "terms", documentId: ID.terms, title: "Términos y condiciones", version: 3, effectiveDate: "fecha(2026-11-12)", href: "/legal/terminos?v=3", explanation: null },
       {
         docType: "course_history_consent",
         documentId: ID.course_history_consent,
         title: "Tu historial de cursos",
         version: 3,
         effectiveDate: "fecha(2026-11-12)",
-        href: "/legal/historial-de-cursos",
+        href: "/legal/historial-de-cursos?v=3",
         explanation: null,
       },
     ]);

@@ -61,7 +61,8 @@ export function consentsView(
         title: text.title,
         version: text.version,
         effectiveDate: tools.formatDate(text.effectiveFrom),
-        href: slug === null ? null : `/legal/${slug}`,
+        // Con la versión que aquí se anuncia: la página no enseña una más vieja.
+        href: slug === null ? null : `/legal/${slug}?v=${text.version}`,
         explanation: explained
           ? legalBlocks(text.body).flatMap((block) => (block.kind === "paragraph" ? [block.text] : []))
           : null,
