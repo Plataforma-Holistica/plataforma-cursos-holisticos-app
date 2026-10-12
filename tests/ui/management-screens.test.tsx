@@ -1005,8 +1005,9 @@ describe("el bloque de la contraseña (PA-25)", () => {
       expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       // El botón que se pulsó ya no existe: el foco lo toma la nota, que es además lo que se
-      // lo dice a quien usa lector de pantalla. Sin eso caería al documento.
-      expect(note).toHaveFocus();
+      // lo dice a quien usa lector de pantalla. Sin eso caería al documento. Lo toma en un
+      // efecto, que corre un instante después de pintar: se espera, no se supone.
+      await vi.waitFor(() => expect(note).toHaveFocus());
       // Con el foco en la nota, no hace falta decirlo además por la región viva.
       expect(within(block()).getByRole("status")).toBeEmptyDOMElement();
       expect(await a11yViolations(container)).toEqual([]);
@@ -1035,7 +1036,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
       expect(nameField()).toHaveValue("Ana María");
       // Pero se entera: se lo dice una región viva que existía desde antes de la respuesta.
       // Es el mismo elemento: una región que nace con su texto no siempre se anuncia.
-      expect(within(block()).getByRole("status")).toHaveTextContent(NOTE);
+      await vi.waitFor(() => expect(within(block()).getByRole("status")).toHaveTextContent(NOTE));
       expect(within(block()).getByRole("status")).toBe(voice);
     });
   });
