@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { CookieJar, CookieOptions } from "@/adapters/supabase/auth-cookies";
 
+import { totpCode } from "./totp";
 import { ownerQuery, testEmail } from "./users";
 
 // Lo que las pruebas del adaptador de Auth necesitan alrededor: un tarro de cookies en
@@ -140,3 +141,35 @@ export const tooManyRequests = (): Response =>
     { code: "over_request_rate_limit", message: "x" },
     { status: 429, headers: { "x-supabase-api-version": "2024-01-01" } },
   );
+
+export interface EnrolledFactor {
+  factorId: string;
+  /** El secreto de la aplicación de códigos: con él se calculan los códigos (`totpCode`). */
+  secret: string;
+}
+
+/**
+ * Le da a esa cuenta un segundo factor verificado, hablando directo con Auth como lo haría
+ * su dueña. Verificarlo cierra las demás sesiones de primer nivel de la cuenta, así que va
+ * antes de abrir las que la prueba necesite. La sesión con la que lo hizo se cierra.
+ */
+export async function secondFactorFor(user: Pick<KnownUser, "email" | "password">): Promise<EnrolledFactor> {
+  const client = authVisitor();
+  const entered = await client.auth.signInWithPassword({ email: user.email, password: user.password });
+  if (entered.error) throw new Error(`La persona de prueba no entró para dar de alta su factor: ${entered.error.code}`);
+  const factor = await client.auth.mfa.enroll({ factorType: "totp" });
+  if (factor.error) throw new Error(`El factor de prueba no se dio de alta: ${factor.error.code}`);
+  const verified = await client.auth.mfa.challengeAndVerify({ factorId: factor.data.id, code: totpCode(factor.data.totp.secret) });
+  if (verified.error) throw new Error(`El factor de prueba no se verificó: ${verified.error.code}`);
+  await client.auth.signOut({ scope: "local" });
+  return { factorId: factor.data.id, secret: factor.data.totp.secret };
+}
+
+/** Los factores verificados de una cuenta, según la base de Auth. */
+export async function verifiedFactors(userId: string): Promise<string[]> {
+  const rows = await ownerQuery<{ id: string }>(
+    "select id::text as id from auth.mfa_factors where user_id = $1 and status = 'verified' order by created_at",
+    [userId],
+  );
+  return rows.map((row) => row.id);
+}

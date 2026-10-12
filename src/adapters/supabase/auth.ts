@@ -19,6 +19,7 @@ import {
   passwordSetFailure,
   provenPasswordFailure,
   provenPasswordLimited,
+  recoveryForSecondFactor,
   recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
@@ -110,6 +111,11 @@ export interface RecoveredPassword {
    * la API de administración, que no manda el aviso y borra todas las sesiones.
    */
   via: "session" | "administration";
+  /**
+   * Fue por administración porque la cuenta tiene segundo factor: con la sesión del canje,
+   * que es de primer nivel, Auth no deja. Para esa cuenta no es una falla: es su camino.
+   */
+  secondFactor?: true;
 }
 export type Closing = "closed" | "unknown";
 export type SessionLiveness = "alive" | "revoked" | "unknown";
@@ -467,12 +473,14 @@ export function createAuth(dependencies: AuthDependencies = {}) {
    * Guarda la contraseña nueva de quien recupera su cuenta. Primero con la sesión del
    * canje: Auth manda el aviso «tu contraseña cambió» (CO-26) y cierra las demás sesiones.
    *
-   * Hay dos casos en que eso no sirve y la persona sí controla el buzón. Uno: la sesión
+   * Hay tres casos en que eso no sirve y la persona sí controla el buzón. Uno: la sesión
    * del canje ya no existe, porque quien tiene otra sesión de la cuenta las cerró todas;
    * puede hacerlo en bucle, y sin otro camino la dueña no recuperaría nunca. Dos: la
-   * contraseña es la que ya tenía, y entonces Auth no cambia ni cierra nada. En los dos se
-   * fija por la API de administración, que la guarda y borra todas las sesiones en un solo
-   * paso. Por ese camino el aviso no sale: `via` lo dice.
+   * contraseña es la que ya tenía, y entonces Auth no cambia ni cierra nada. Tres: la cuenta
+   * tiene segundo factor, y Auth exige una sesión de segundo nivel que un enlace no da. En
+   * los tres se fija por la API de administración, que la guarda y borra todas las sesiones
+   * en un solo paso. Por ese camino el aviso no sale: `via` lo dice. Los factores de la
+   * cuenta no se tocan.
    *
    * Solo acepta un canje de recuperación, y una sola vez.
    */
@@ -490,15 +498,16 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     if (!recoveryNeedsAdministration(call.failure)) {
       return { result: classify("set_password", call.failure, passwordSetFailure), via: "session" };
     }
+    const why = recoveryForSecondFactor(call.failure) ? ({ secondFactor: true } as const) : {};
     try {
       const { error } = await adminApi(baseFetch).updateUserById(redemption.userId, {
         password,
         user_metadata: withoutMetadata(redemption),
       });
       const result = error ? classify("set_password", failureFromSdk(error), passwordSetFailure) : "ok";
-      return { result, via: "administration" };
+      return { result, via: "administration", ...why };
     } catch (error) {
-      return { result: classify("set_password", failureFromSdk(error), passwordSetFailure), via: "administration" };
+      return { result: classify("set_password", failureFromSdk(error), passwordSetFailure), via: "administration", ...why };
     }
   }
 

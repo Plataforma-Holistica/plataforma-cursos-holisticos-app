@@ -256,6 +256,12 @@ describe("cambiar la contraseña (PA-25)", () => {
     expect(calls.order).toEqual(["changePassword"]);
   });
 
+  it("una cuenta con segundo factor: contesta que la recupere, sin pedir la página de nuevo", async () => {
+    once("changePassword", { kind: "second_factor" });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "recover_only" });
+    expect(calls.order).toEqual(["changePassword"]);
+  });
+
   it("frenado, con el tope lleno y cuando no se supo: lo dice, sin irse a ningún lado", async () => {
     once("changePassword", { kind: "throttled", retryAt: new Date("2026-10-12T18:30:00.000Z") });
     expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({

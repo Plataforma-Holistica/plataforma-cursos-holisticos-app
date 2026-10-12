@@ -142,6 +142,9 @@ describe("describeUserAgent", () => {
     WIN, MAC, LINUX, ANDROID, IPHONE, IPAD, CHROME_OS, KIT,
     "Chrome/126.0", "CriOS/126", "Edg/126", "EdgA/1", "EdgiOS/1", "Edge/18", "OPR/111", "OPiOS/16", "SamsungBrowser/25",
     "Firefox/127", "FxiOS/127", "Version/17.5", "Safari/605", "Mobile", " ", "/", "(", ")", "😀", "\u0000",
+    // Safari pide dos marcas en su orden y ninguna de las demás: con las piezas sueltas
+    // salía una vez de cada mil, y la propiedad de abajo casi nunca lo ejercitaba.
+    "Version/17.5 Safari/605",
   );
   const candidate = fc.array(piece, { maxLength: 10 }).map((pieces) => pieces.join(" "));
 
@@ -156,8 +159,13 @@ describe("describeUserAgent", () => {
     );
   });
 
+  // Con semilla fija: lo que se comprueba es que los generadores pueden dar cada valor, no
+  // la suerte del día. Sin ella, y antes de que Safari tuviera su pieza, alguna corrida no
+  // lo producía y la prueba fallaba sin que nada hubiera cambiado (pasó el 2026-10-12).
+  // Medido ese día con 300 semillas: ya ninguna se queda sin un navegador, y la que menos
+  // Safari da, da 42 de 3 000.
   it("los generadores sí producen cada navegador y cada sistema", () => {
-    const devices = fc.sample(candidate, 3_000).map((input) => describeUserAgent(input));
+    const devices = fc.sample(candidate, { numRuns: 3_000, seed: 20261012 }).map((input) => describeUserAgent(input));
     expect(new Set(devices.map((device) => device.browser))).toEqual(new Set([...BROWSERS, null]));
     expect(new Set(devices.map((device) => device.system))).toEqual(new Set([...SYSTEMS, null]));
   });

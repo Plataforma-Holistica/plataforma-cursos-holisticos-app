@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { ROUTES } from "@/services/account/navigation";
@@ -23,6 +23,12 @@ import { checkPasswordForm, readPasswordForm, type PasswordFields, type Password
 // Una contraseña nunca vuelve en una respuesta: después de cada envío los dos campos se
 // arman de nuevo, vacíos. Lo que el navegador detiene antes de enviar no cuenta como un
 // intento, y deja lo escrito como está.
+//
+// Una cuenta con segundo factor no ve el formulario: Auth le exige una sesión de segundo
+// nivel para cambiar la contraseña, así que la cambia recuperándola desde su correo. El
+// bloque se lo dice. Lo sabe la página al pintar, y si la cuenta ganó su factor con la
+// pantalla ya abierta, lo descubre el envío. En ese caso el formulario desaparece con la
+// respuesta, y la nota toma el foco que el botón dejó sin dueño.
 
 const text = account.manage;
 // Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
@@ -36,12 +42,14 @@ const CURRENT_ERRORS = { required: text.currentPasswordRequired, mismatch: text.
 const NOTHING: PasswordFields = {};
 
 export interface PasswordBlockProps {
+  /** La cuenta tiene un segundo factor verificado, como lo leyó la página. */
+  recoverOnly: boolean;
   state: PasswordState;
   action: (form: FormData) => void;
   pending: boolean;
 }
 
-export function PasswordBlock({ state, action, pending }: PasswordBlockProps) {
+export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordBlockProps) {
   const sent = "attempt" in state ? state.attempt : 0;
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
   const [local, checked] = useLocalChecks<PasswordFields>(sent);
@@ -50,6 +58,30 @@ export function PasswordBlock({ state, action, pending }: PasswordBlockProps) {
   // Después de qué respuesta se volvió a escribir. Lo que esa respuesta dijo era de otro texto.
   const [editedAfter, setEditedAfter] = useState<number | null>(null);
   const waitIsOver = useWaitIsOver(state.kind === "throttled" ? state.retryAt : null);
+  const note = useRef<HTMLParagraphElement>(null);
+  const spoken = useRef<HTMLSpanElement>(null);
+  const discovered = state.kind === "recover_only";
+
+  // Cuando un envío descubre el segundo factor, el botón que se pulsó desaparece con el
+  // formulario y el foco cae al documento: lo toma la nota, que es además lo que se lo dice
+  // a quien usa lector de pantalla. Solo si quedó sin dueño: a quien ya se fue a otra cosa
+  // no se le quita, y se le dice por la región viva de `spoken`, que existe desde antes.
+  // Pintada con la página, sin envío de por medio, la nota no toma nada. Si el envío fue
+  // antes de que la página cobrara vida, la respuesta llega ya pintada y la nota toma el
+  // foco al montar: es la respuesta de ese envío.
+  useEffect(() => {
+    if (!discovered) return;
+    if (document.activeElement === null || document.activeElement === document.body) {
+      note.current?.focus();
+      return;
+    }
+    const voice = spoken.current;
+    if (voice === null) return;
+    voice.textContent = text.passwordWithSecondFactor;
+    return () => {
+      voice.textContent = "";
+    };
+  }, [discovered]);
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const found = checkPasswordForm(readPasswordForm(new FormData(event.currentTarget)));
@@ -73,11 +105,31 @@ export function PasswordBlock({ state, action, pending }: PasswordBlockProps) {
   // El freno no depende de lo que se escriba: mientras dure la espera, no hay otro intento.
   const locked = state.kind === "throttled" && !waitIsOver;
 
+  if (recoverOnly || state.kind === "recover_only") {
+    return (
+      <section id={PASSWORD_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
+        <h2 id={TITLE_ID} className="text-h3">
+          {text.passwordTitle}
+        </h2>
+        <span ref={spoken} role="status" className="sr-only" />
+        <p ref={note} tabIndex={-1}>
+          {text.passwordWithSecondFactor}
+        </p>
+        <p className="text-body-s">
+          <TextLink href={ROUTES.recover}>{text.recoverPassword}</TextLink>
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section id={PASSWORD_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
       <h2 id={TITLE_ID} className="text-h3">
         {text.passwordTitle}
       </h2>
+      {/* La misma región viva que pinta la otra rama, en el mismo lugar: así ya existe cuando
+          un envío descubre el segundo factor, y una que nace con su texto no siempre se anuncia. */}
+      <span ref={spoken} role="status" className="sr-only" />
       <form
         action={action}
         onSubmit={checkBeforeSending}

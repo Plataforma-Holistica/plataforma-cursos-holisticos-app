@@ -23,6 +23,7 @@ import {
   closeOtherSessions as closeOthersInBase,
   closeSession as closeInBase,
   dbClock,
+  hasVerifiedFactor,
   listSessions,
   notePasswordChange,
   type PairKeys,
@@ -91,9 +92,17 @@ export interface PasswordChangeErrors {
   next?: "too_short" | "too_long" | "malformed" | "same" | "weak";
 }
 
+/** Si la cuenta tiene un segundo factor verificado. De eso depende cómo cambia su contraseña. */
+export type AccountSecondFactor = { kind: "ready"; verified: boolean } | { kind: "unavailable" };
+
 export type PasswordChange =
   /** Cambió, las demás sesiones se cerraron, y este navegador quedó con una sesión nueva. */
   | { kind: "changed" }
+  /**
+   * La cuenta tiene segundo factor: no cambia su contraseña desde aquí, la recupera desde
+   * su correo. No se intentó nada.
+   */
+  | { kind: "second_factor" }
   | { kind: "invalid"; fields: PasswordChangeErrors }
   /** Frenado, como al entrar: son los mismos intentos. */
   | { kind: "throttled"; retryAt: Date }
@@ -289,6 +298,20 @@ export function createManagement(
   }
 
   /**
+   * Si la cuenta tiene un segundo factor verificado (RF-106). Recibe las claims con las que
+   * la guarda dejó pasar a su página. Va como servidor: lo contesta una función de la base
+   * que solo él ejecuta, y que solo mira a quien actúa.
+   */
+  async function accountSecondFactor(claims: VerifiedClaims): Promise<AccountSecondFactor> {
+    try {
+      return { kind: "ready", verified: await asServer({ claims, reason: "account_second_factor" }, hasVerifiedFactor) };
+    } catch {
+      await deps.report("account_unavailable");
+      return { kind: "unavailable" };
+    }
+  }
+
+  /**
    * Fecha el cambio de contraseña en la base y borra lo anotado de la cuenta. Devuelve la
    * hora de la base de después, que es desde cuándo puede empezar la entrada con la
    * contraseña nueva; o nulo si no se pudo.
@@ -332,6 +355,10 @@ export function createManagement(
    *
    * Después del paso 5 ya no hay vuelta: si algo falla, la cuenta se queda sin sesiones y
    * la persona entra de nuevo. Nunca queda una sesión abierta con la contraseña de antes.
+   *
+   * Una cuenta con segundo factor no pasa de la guarda: Auth le exige una sesión de segundo
+   * nivel para cambiar la contraseña, y la de la comprobación es de primer nivel. Esa cuenta
+   * la cambia recuperándola desde su correo (decisión del 2026-10-12).
    */
   async function changePassword(
     jar: CookieJar,
@@ -340,6 +367,11 @@ export function createManagement(
   ): Promise<PasswordChange> {
     const check = await core.checkSession(jar);
     if (check.kind !== "pass") return { kind: "session", check };
+
+    // Antes de mirar lo escrito: la respuesta no depende de eso, y no se cuenta un intento.
+    const factor = await accountSecondFactor(check.claims);
+    if (factor.kind === "unavailable") return { kind: "unavailable" };
+    if (factor.verified) return { kind: "second_factor" };
 
     const problems = checkPasswordChange(input.current, input.next);
     if (problems !== null) return { kind: "invalid", fields: problems };
@@ -442,5 +474,13 @@ export function createManagement(
     return { kind: "signed_out", password: "changed" };
   }
 
-  return { accountProfile, changeName, accountSessions, closeSession, closeOtherSessions, changePassword };
+  return {
+    accountProfile,
+    changeName,
+    accountSessions,
+    closeSession,
+    closeOtherSessions,
+    accountSecondFactor,
+    changePassword,
+  };
 }

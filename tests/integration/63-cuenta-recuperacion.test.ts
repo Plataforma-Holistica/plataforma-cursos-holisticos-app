@@ -39,7 +39,9 @@ import {
   memoryJar,
   networkDown,
   recordingFetch,
+  secondFactorFor,
   sessionCount,
+  verifiedFactors,
   type KnownUser,
 } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
@@ -385,6 +387,28 @@ describe("completar la recuperación", () => {
     expect(blind.reported).toEqual(["recovery_incomplete"]);
     expect(await sessionCount(account.id)).toBe(0);
     expect(await testServices().signIn(memoryJar(), account, freshOrigin())).toMatchObject({ kind: "entered" });
+  });
+
+  // Con segundo factor, el camino de administración no es una falla: es el único que hay.
+  // Pero tampoco pasa en silencio: a esa cuenta no le sale el aviso de cambio de contraseña,
+  // y que alguien con su buzón le cambió la contraseña es algo que una persona debe saber.
+  it("una cuenta con segundo factor recupera su contraseña con el buzón, y queda dicho con su propio reporte", async () => {
+    const account = await claimed();
+    const factor = await secondFactorFor(account);
+    const hash = await recoveryLink(account);
+    const services = testServices();
+    const chosen = password();
+
+    expect(await services.completeRecovery({ tokenHash: hash, password: chosen }, freshOrigin())).toEqual({ kind: "done" });
+
+    expect(services.reported).toEqual(["recovery_with_second_factor"]);
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await services.signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "invalid_credentials" });
+    expect(await services.signIn(memoryJar(), { email: account.email, password: chosen }, freshOrigin())).toMatchObject({
+      kind: "entered",
+    });
+    // Recuperar la contraseña no quita ni cambia el segundo factor.
+    expect(await verifiedFactors(account.id)).toEqual([factor.factorId]);
   });
 
   it("con la contraseña que ya tenía también cierra todo; el aviso no sale, y se reporta", async () => {

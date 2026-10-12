@@ -448,8 +448,12 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const saved = await auth.setRecoveredPassword(redeemed, input.password);
     const outcome = resolvePasswordOutcome("recovery", saved.result);
     let done = outcome.next === "done";
-    // Por el camino de administración el aviso «tu contraseña cambió» no sale.
-    if (done && saved.via === "administration") await deps.report("recovery_notice_not_sent");
+    // Por el camino de administración el aviso «tu contraseña cambió» no sale. Para una
+    // cuenta con segundo factor ese es su único camino: no es una falla, pero tampoco pasa
+    // en silencio. Lleva su propio reporte.
+    if (done && saved.via === "administration") {
+      await deps.report(saved.secondFactor === true ? "recovery_with_second_factor" : "recovery_notice_not_sent");
+    }
 
     if (done && outcome.claimAccount) {
       const account = parseEmail(redeemed.email);

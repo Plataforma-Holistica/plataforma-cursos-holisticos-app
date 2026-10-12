@@ -8,6 +8,7 @@ import { PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";
 import { terms } from "@/messages/es/terms";
 
 import { lastMailTo, linksIn, mailsTo, tokenHashIn, waitForMails } from "./helpers/mailbox";
+import { totpCode, wrongCode } from "./helpers/totp";
 import {
   createTestUser,
   deleteTestUsers,
@@ -41,6 +42,7 @@ const admin = (): SupabaseClient =>
 
 const users: TestUser[] = [];
 const emails: string[] = [];
+const factors: string[] = [];
 
 async function confirmedUser(): Promise<TestUser> {
   const user = await createTestUser();
@@ -109,6 +111,8 @@ function expectNoWayIn(html: string): void {
 afterAll(async () => {
   await deleteTestUsers(users);
   await deleteTestUsersByEmail(emails);
+  // Lo que el freno de códigos anotó de los factores de prueba: no cuelga de ninguna cuenta.
+  await ownerQuery("delete from private.second_factor_attempts where factor_id = any($1::uuid[])", [factors]);
 });
 
 describe("lo que el Auth local tiene configurado", () => {
@@ -292,6 +296,98 @@ describe("lo que el Auth local tiene configurado", () => {
       created.data.user?.id,
     ]);
     expect(stored[0]?.email).toBe(parsed.email);
+  });
+});
+
+describe("el segundo factor que el Auth local tiene configurado", () => {
+  /** Una persona que ya entró con su contraseña, y el cliente que guarda su sesión. */
+  async function signedIn(): Promise<{ user: TestUser; password: string; client: SupabaseClient }> {
+    const user = await confirmedUser();
+    const password = `P-${randomUUID()}`;
+    await admin().auth.admin.updateUserById(user.id, { password });
+    const client = visitor();
+    const entered = await client.auth.signInWithPassword({ email: user.email, password });
+    if (entered.error) throw new Error("La persona de prueba no entró.");
+    return { user, password, client };
+  }
+
+  /** Da de alta un factor por aplicación de códigos, sin verificarlo. */
+  async function enrolled(client: SupabaseClient): Promise<{ factorId: string; secret: string }> {
+    const factor = await client.auth.mfa.enroll({ factorType: "totp" });
+    if (factor.error) throw new Error(`El factor de prueba no se dio de alta: ${factor.error.code}`);
+    factors.push(factor.data.id);
+    return { factorId: factor.data.id, secret: factor.data.totp.secret };
+  }
+
+  const sessionsOf = (userId: string) =>
+    ownerQuery<{ aal: string; factor: string | null }>(
+      "select aal::text as aal, factor_id::text as factor from auth.sessions where user_id = $1",
+      [userId],
+    );
+
+  it("se da de alta un factor por aplicación de códigos y, verificado, la sesión sube de nivel", async () => {
+    const { user, client } = await signedIn();
+    const { factorId, secret } = await enrolled(client);
+    expect(await sessionsOf(user.id)).toEqual([{ aal: "aal1", factor: null }]);
+
+    const verified = await client.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) });
+    expect(verified.error).toBeNull();
+    // Es la misma sesión, y Auth anota en ella el nivel y con qué factor se verificó.
+    expect(await sessionsOf(user.id)).toEqual([{ aal: "aal2", factor: factorId }]);
+  });
+
+  it("los códigos equivocados se frenan en el gancho de la base: al llegar al límite Auth rechaza y cierra todas las sesiones de la cuenta", async () => {
+    const threshold = await parameter("INTENTOS_ANTES_DE_FRENO");
+    const { user, password, client } = await signedIn();
+    const { factorId, secret } = await enrolled(client);
+    // Otra sesión de la misma cuenta, en otro navegador, que no intenta nada.
+    const elsewhere = visitor();
+    await elsewhere.auth.signInWithPassword({ email: user.email, password });
+    const challenge = await client.auth.mfa.challenge({ factorId });
+    if (challenge.error) throw new Error("El reto de prueba no se creó.");
+    const attempt = (code: string) => client.auth.mfa.verify({ factorId, challengeId: challenge.data.id, code });
+
+    // Un código equivocado no gasta el reto: se sigue probando con el mismo.
+    for (let failure = 1; failure < threshold; failure += 1) {
+      expect((await attempt(wrongCode(secret))).error?.code, `fallo ${failure}`).toBe("mfa_verification_failed");
+    }
+    expect(await sessionsOf(user.id)).toHaveLength(2);
+    expect((await attempt(wrongCode(secret))).error?.code).toBe("mfa_verification_rejected");
+    // No solo la del intento: Auth cierra todas las de la cuenta, también la del otro
+    // navegador. A quien se equivocó de más hay que decirle que vuelva a entrar.
+    expect(await sessionsOf(user.id)).toEqual([]);
+
+    // Frenado, tampoco el código correcto, ni entrando de nuevo: el freno es del factor.
+    const again = visitor();
+    await again.auth.signInWithPassword({ email: user.email, password });
+    const locked = await again.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) });
+    expect(locked.error?.code).toBe("mfa_verification_rejected");
+    expect(await sessionsOf(user.id)).toEqual([]);
+  });
+
+  it("con un factor verificado, cambiar la contraseña con una sesión de primer nivel se rechaza", async () => {
+    const { user, password, client } = await signedIn();
+    const { factorId, secret } = await enrolled(client);
+    expect((await client.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) })).error).toBeNull();
+
+    // Entrar con la contraseña sigue dando una sesión de primer nivel.
+    const first = visitor();
+    await first.auth.signInWithPassword({ email: user.email, password });
+    const changed = await first.auth.updateUser({ password: `P-${randomUUID()}` });
+    expect(changed.error?.code).toBe("insufficient_aal");
+    // Con la sesión verificada sí.
+    expect((await client.auth.updateUser({ password: `P-${randomUUID()}` })).error).toBeNull();
+  });
+
+  it("con un factor verificado, dar de alta otro pide la sesión de segundo nivel", async () => {
+    const { user, password, client } = await signedIn();
+    const { factorId, secret } = await enrolled(client);
+    expect((await client.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) })).error).toBeNull();
+
+    const first = visitor();
+    await first.auth.signInWithPassword({ email: user.email, password });
+    const other = await first.auth.mfa.enroll({ factorType: "totp", friendlyName: "otro" });
+    expect(other.error?.code).toBe("insufficient_aal");
   });
 });
 

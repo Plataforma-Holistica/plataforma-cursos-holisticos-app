@@ -263,6 +263,18 @@ export async function sessionRecognition(tx: Tx, sessionId: string): Promise<str
   return row?.state ?? "";
 }
 
+const verifiedRow = z.object({ verified: z.boolean() });
+
+/**
+ * Si quien actúa en esta transacción tiene un segundo factor verificado en Auth. Uno que
+ * quedó a medias no cuenta.
+ */
+export async function hasVerifiedFactor(tx: Tx): Promise<boolean> {
+  const [row] = await tx.query(sql`select private.has_verified_factor() as verified`, verifiedRow);
+  if (!row) throw new Error("La base no dijo si la cuenta tiene segundo factor.");
+  return row.verified;
+}
+
 /**
  * Fecha el cambio de contraseña de quien actúa en esta transacción y borra lo que tenía
  * anotado: desde aquí, una entrada que empezó antes ya no se anota. Devuelve lo que

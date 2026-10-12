@@ -1,4 +1,4 @@
-import { knownUser, sessionCount, userIdOf, type KnownUser } from "../../integration/helpers/auth";
+import { knownUser, secondFactorFor, sessionCount, userIdOf, type KnownUser } from "../../integration/helpers/auth";
 import { lastMailTo, mailsTo, tokenHashIn, waitForMails } from "../../integration/helpers/mailbox";
 import {
   claimAccount,
@@ -13,7 +13,19 @@ import {
 // pruebas de integración, los que no cargan código de la aplicación: aquí la aplicación es
 // lo que se prueba, y corre en su propio proceso.
 
-export { claimAccount, completeAccountAsOwner, lastMailTo, mailsTo, ownerQuery, sessionCount, testEmail, tokenHashIn, userIdOf, waitForMails };
+export {
+  claimAccount,
+  completeAccountAsOwner,
+  lastMailTo,
+  mailsTo,
+  ownerQuery,
+  secondFactorFor,
+  sessionCount,
+  testEmail,
+  tokenHashIn,
+  userIdOf,
+  waitForMails,
+};
 export type { KnownUser };
 
 /** El nombre de la cookie de sesión en local, que va por http y sin prefijo. */

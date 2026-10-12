@@ -14,6 +14,7 @@ import {
   passwordSetFailure,
   provenPasswordFailure,
   provenPasswordLimited,
+  recoveryForSecondFactor,
   recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
@@ -196,6 +197,16 @@ describe("cambiar la contraseña con sesión, desde la cuenta", () => {
 describe("recuperar: cuándo se pasa al camino de administración", () => {
   it.each(["session_not_found", "same_password"])("con %s, sí", (code) => {
     expect(recoveryNeedsAdministration(rejected(code, 403))).toBe(true);
+    expect(recoveryForSecondFactor(rejected(code, 403))).toBe(false);
+  });
+
+  // La cuenta tiene segundo factor y la sesión del canje es de primer nivel: Auth no deja
+  // cambiar la contraseña con ella. Quien abrió el enlace sí controla el buzón, y con el
+  // buzón se recupera la contraseña (decisión del 2026-10-12). Lo que el segundo factor
+  // protege, entrar a administración, sigue pidiéndolo.
+  it("con insufficient_aal, sí, y se sabe que fue por el segundo factor", () => {
+    expect(recoveryNeedsAdministration(rejected("insufficient_aal", 401))).toBe(true);
+    expect(recoveryForSecondFactor(rejected("insufficient_aal", 401))).toBe(true);
   });
 
   // Ni lo que es culpa de la contraseña o de la cuenta, ni lo que no se supo: por
@@ -208,10 +219,10 @@ describe("recuperar: cuándo se pasa al camino de administración", () => {
     "user_not_found",
     "user_banned",
     "reauthentication_needed",
-    "insufficient_aal",
     "over_request_rate_limit",
   ])("con %s, no", (code) => {
     expect(recoveryNeedsAdministration(rejected(code, 403))).toBe(false);
+    expect(recoveryForSecondFactor(rejected(code, 403))).toBe(false);
   });
 
   it.each(strangers)("ni con lo que no se reconoce: %j", (failure) => {

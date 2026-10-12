@@ -61,6 +61,7 @@ describe("reportFailure", () => {
       "registration_incomplete",
       "recovery_incomplete",
       "recovery_notice_not_sent",
+      "recovery_with_second_factor",
       "legal_text_unavailable",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);

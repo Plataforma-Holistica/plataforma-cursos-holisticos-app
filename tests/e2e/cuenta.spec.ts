@@ -8,6 +8,7 @@ import {
   lastMailTo,
   ownerQuery,
   person,
+  secondFactorFor,
   SESSION_COOKIE,
   sessionCount,
   type Person,
@@ -953,4 +954,62 @@ test("la acción de cambiar la contraseña aguanta lo que su pantalla nunca mand
   // La sesión de este navegador se cambió por la nueva con esa misma respuesta.
   await page.goto("/cuenta");
   await expect(nameField(page)).toHaveValue("Ana de Prueba");
+});
+
+// ---------------------------------------------------------------------------------------
+// Una cuenta con segundo factor (RF-106): su contraseña no se cambia desde la cuenta.
+
+const WITH_SECOND_FACTOR = "Tu cuenta tiene segundo factor. Para cambiar tu contraseña, recupérala desde tu correo.";
+
+for (const javaScript of [true, false]) {
+  test(`una cuenta con segundo factor no ve el formulario de contraseña: se le dice cómo cambiarla (${javaScript ? "con" : "sin"} JavaScript) @telefono`, async ({ browser }) => {
+    const ana = await person();
+    await secondFactorFor(ana);
+    await inContext(browser, { javaScriptEnabled: javaScript }, async (page) => {
+      await openAccount(page, ana);
+      if (javaScript) await hydrated(page);
+
+      await expect(passwordBlock(page).getByText(WITH_SECOND_FACTOR)).toBeVisible();
+      await expect(currentField(page)).toHaveCount(0);
+      await expect(newField(page)).toHaveCount(0);
+      await expect(changeButton(page)).toHaveCount(0);
+      // Los demás bloques siguen como siempre.
+      await expect(nameField(page)).toHaveValue("Ana de Prueba");
+      await expect(sessionRows(page)).toHaveCount(1);
+      if (javaScript) expect(await a11yViolations(page)).toEqual([]);
+
+      await passwordBlock(page).getByRole("link", { name: "Recuperar mi contraseña" }).click();
+      await expect(page).toHaveURL("/recuperar");
+      await expect(page.getByRole("heading", { level: 1, name: "Recupera tu contraseña" })).toBeVisible();
+    });
+  });
+}
+
+test("la acción de cambiar la contraseña, mandada por una cuenta con segundo factor, no cambia nada ni cuenta un intento", async ({ page, browser }) => {
+  const ana = await person();
+  const otra = await person();
+  await secondFactorFor(ana);
+  // Los campos de la acción salen de la pantalla de una cuenta que sí ve el formulario.
+  const hidden = await inContext(browser, {}, async (other) => {
+    await openAccount(other, otra);
+    return actionFields(await (await other.request.get("/cuenta")).text(), 1);
+  });
+  await openAccount(page, ana);
+  const attempts = async () =>
+    (await ownerQuery<{ failed: number }>("select coalesce(sum(failed_count), 0)::int as failed from private.login_throttles"))[0]?.failed;
+  const counted = await attempts();
+
+  const tried: string[] = [];
+  for (const current of [ana.password, "una-que-no-es-la-suya"]) {
+    const next = chosen();
+    tried.push(next);
+    const response = await postAction(page.request, "/cuenta", { ...hidden, current, password: next });
+    expect(response.status(), current).toBe(200);
+  }
+  // Lo que la respuesta pinta no dice nada: esa página trae la nota de todos modos. Que la
+  // acción no hizo nada se ve en lo que quedó: ningún intento contado, ni con la contraseña
+  // equivocada, y la contraseña de siempre, ninguna de las que se mandaron.
+  expect(await attempts()).toBe(counted);
+  expect(await entersWith(browser, ana, ana.password)).toBe(true);
+  for (const next of tried) expect(await entersWith(browser, ana, next), "una de las mandadas").toBe(false);
 });
