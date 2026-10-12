@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { account } from "@/messages/es/account";
 import { Button } from "@/ui/button";
+import { SPACE } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
 
 import { CLOSE_OTHERS, type SessionsState } from "./outcomes";
@@ -89,6 +90,8 @@ export function SessionsBlock({ sessions, state, action, pending }: SessionsBloc
               ) : (
                 <Button type="submit" name="close" value={session.id} variant="secondary" size="md" disabled={pending}>
                   {text.closeOne}
+                  {/* Sin el espacio, el nombre del botón se leería «Cerrarla sesión de…». */}
+                  {SPACE}
                   <span className="sr-only">{session.closeDetail}</span>
                 </Button>
               )}

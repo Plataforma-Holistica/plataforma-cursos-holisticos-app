@@ -338,7 +338,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
 
 const sessionsBlock = () => screen.getByRole("region", { name: "Sesiones abiertas" });
 const closeOthers = () => within(sessionsBlock()).getByRole("button", { name: "Cerrar todas las demás" });
-const closeButtonOf = (row: SessionRow) => within(sessionsBlock()).getByRole("button", { name: `Cerrar${row.closeDetail}` });
+const closeButtonOf = (row: SessionRow) => within(sessionsBlock()).getByRole("button", { name: `Cerrar ${row.closeDetail}` });
 
 /** Pinta la pantalla con esas sesiones, pulsa ese botón y espera, con la acción contestando `state`. */
 async function closeWith(sessions: SessionRow[], press: () => HTMLElement, state: SessionsState) {

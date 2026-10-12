@@ -6,17 +6,24 @@ import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 
 const decode = (text: string) => text.replaceAll("&quot;", '"').replaceAll("&amp;", "&").replaceAll("&#x27;", "'");
 
-/** Los campos ocultos del primer formulario de una página que tenga una acción de servidor. */
-export function actionFields(html: string): Record<string, string> {
+/**
+ * Los campos ocultos de un formulario de una página que tenga una acción de servidor: el
+ * primero, o el que toque por su posición entre los que la tienen (una pantalla por bloques
+ * trae varios).
+ */
+export function actionFields(html: string, position = 0): Record<string, string> {
+  let found = 0;
   for (const [, form = ""] of html.matchAll(/<form[^>]*>([\s\S]*?)<\/form>/g)) {
     const hidden: Record<string, string> = {};
     for (const [input] of form.matchAll(/<input[^>]*type="hidden"[^>]*>/g)) {
       const name = /name="([^"]*)"/.exec(input)?.[1];
       if (name) hidden[decode(name)] = decode(/value="([^"]*)"/.exec(input)?.[1] ?? "");
     }
-    if (Object.keys(hidden).some((name) => name.startsWith("$ACTION"))) return hidden;
+    if (!Object.keys(hidden).some((name) => name.startsWith("$ACTION"))) continue;
+    if (found === position) return hidden;
+    found += 1;
   }
-  throw new Error("La página no trae ningún formulario con una acción de servidor.");
+  throw new Error("La página no trae ese formulario con una acción de servidor.");
 }
 
 export type Field = string | { name: string; mimeType: string; buffer: Buffer };
