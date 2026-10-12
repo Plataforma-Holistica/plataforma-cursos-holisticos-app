@@ -54,14 +54,14 @@ export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
         <FormErrorSummary errors={errors} attempt={sent + local.checks} />
         {local.found === null && !pending && state.kind === "unavailable" && (
-          <InlineAlert key={sent} tone="danger" live>
+          <InlineAlert key={`fallo-${sent}`} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
         )}
         <input type="hidden" name="token" value={token} />
         {/* Con la respuesta de un envío el campo se arma de nuevo, vacío. */}
         <NewPasswordField
-          key={sent}
+          key={`campo-${sent}`}
           id={PASSWORD_ID}
           label={account.fields.newPassword}
           problem={problem}

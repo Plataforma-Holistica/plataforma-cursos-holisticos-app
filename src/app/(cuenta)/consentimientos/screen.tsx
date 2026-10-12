@@ -173,12 +173,12 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
         <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.checks} />
         {answered && state.kind === "repainted" && state.reason === "texts_changed" && (
-          <InlineAlert key={sent} tone="warning" live>
+          <InlineAlert key={`cambio-${sent}`} tone="warning" live>
             {text.textsChanged}
           </InlineAlert>
         )}
         {answered && state.kind === "unavailable" && (
-          <InlineAlert key={sent} tone="danger" live>
+          <InlineAlert key={`fallo-${sent}`} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
         )}
@@ -187,7 +187,7 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
           <input key={item.documentId} type="hidden" name="shown" value={shownValue(item)} />
         ))}
         {/* Cuando cambian los textos, o llega la respuesta de un envío, los campos se arman de nuevo. */}
-        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} round={sent + local.checks} />
+        <Fields key={`campos-${view.signature}:${sent}`} view={view} name={name} fields={fields} round={sent + local.checks} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>

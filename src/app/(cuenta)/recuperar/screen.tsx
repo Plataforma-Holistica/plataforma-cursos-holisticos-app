@@ -47,17 +47,19 @@ export function RecoverScreen({ notice }: RecoverScreenProps) {
       <form action={action} noValidate className="flex flex-col gap-6">
         {notice !== null && state.kind === "idle" && <InlineAlert tone="warning">{notice}</InlineAlert>}
         <FormErrorSummary errors={errors} attempt={attempt} />
+        {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
+            intento con los campos del siguiente, y el aviso viejo se queda en pantalla. */}
         {state.kind === "sent" && (
-          <InlineAlert key={attempt} tone="success" live>
+          <InlineAlert key={`enviado-${attempt}`} tone="success" live>
             {lifetime === "" ? text.sent : t(text.sentLasts, { duration: lifetime })}
           </InlineAlert>
         )}
         {state.kind === "failed" && (
-          <InlineAlert key={attempt} tone="danger" live>
+          <InlineAlert key={`fallo-${attempt}`} tone="danger" live>
             {state.reason === "wait" ? account.signUp.wait : account.common.unavailable}
           </InlineAlert>
         )}
-        <EmailField key={attempt} id={EMAIL_ID} defaultValue={email} problem={problem} />
+        <EmailField key={`campo-${attempt}`} id={EMAIL_ID} defaultValue={email} problem={problem} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>

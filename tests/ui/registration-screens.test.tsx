@@ -1165,3 +1165,69 @@ describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra
     expect(actions.completeRegistrationAction).not.toHaveBeenCalled();
   });
 });
+
+describe("dos respuestas seguidas, sin recargar, dejan un solo aviso", () => {
+  it("al pedir el registro", async () => {
+    const message = "No pudimos hacerlo. Intenta de nuevo en un momento.";
+    const { user } = await submitSignUp({ kind: "failed", email: "ana@prueba.test", reason: "unavailable", attempt: 1 });
+    expect(await screen.findAllByText(message)).toHaveLength(1);
+    for (const attempt of [2, 3]) {
+      answers<MailRequestState>(actions.requestRegistrationAction, { kind: "failed", email: "ana@prueba.test", reason: "unavailable", attempt });
+      await user.click(screen.getByRole("button", { name: "Crear mi cuenta" }));
+      await vi.waitFor(() => expect(actions.requestRegistrationAction).toHaveBeenCalledTimes(attempt));
+      await screen.findByRole("button", { name: "Crear mi cuenta" });
+      expect(screen.getAllByText(message)).toHaveLength(1);
+    }
+    answers<MailRequestState>(actions.requestRegistrationAction, { kind: "failed", email: "ana@prueba.test", reason: "wait", attempt: 4 });
+    await user.click(screen.getByRole("button", { name: "Crear mi cuenta" }));
+    expect(await screen.findByText("Espera un momento antes de intentarlo de nuevo.")).toBeVisible();
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  });
+
+  it("al pedir la recuperación: el «te mandamos un enlace» de antes no se queda junto al fallo de después", async () => {
+    const { user } = await submitRecover({ kind: "sent", lifetimeSeconds: 3_600, attempt: 1 });
+    expect(await screen.findAllByText(/Si ese correo tiene cuenta/)).toHaveLength(1);
+
+    answers<MailRequestState>(actions.requestRecoveryAction, { kind: "sent", lifetimeSeconds: 3_600, attempt: 2 });
+    await user.type(screen.getByLabelText("Correo"), "ana@prueba.test");
+    await user.click(screen.getByRole("button", { name: "Mandarme el enlace" }));
+    await vi.waitFor(() => expect(actions.requestRecoveryAction).toHaveBeenCalledTimes(2));
+    await screen.findByRole("button", { name: "Mandarme el enlace" });
+    expect(screen.getAllByText(/Si ese correo tiene cuenta/)).toHaveLength(1);
+
+    answers<MailRequestState>(actions.requestRecoveryAction, { kind: "failed", email: "ana@prueba.test", reason: "unavailable", attempt: 3 });
+    await user.type(screen.getByLabelText("Correo"), "ana@prueba.test");
+    await user.click(screen.getByRole("button", { name: "Mandarme el enlace" }));
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+    expect(screen.queryByText(/Si ese correo tiene cuenta/)).not.toBeInTheDocument();
+  });
+
+  it("al cambiar la contraseña", async () => {
+    const message = "No pudimos hacerlo. Intenta de nuevo en un momento.";
+    const { user } = await submitChange({ kind: "unavailable", attempt: 1 });
+    expect(await screen.findAllByText(message)).toHaveLength(1);
+
+    // Enviar vacío lo detiene el navegador: el aviso de antes se va, queda el resumen.
+    await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+    expect(await screen.findByText(/por corregir/)).toBeVisible();
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+
+    answers<ChangePasswordState>(actions.completeRecoveryAction, { kind: "unavailable", attempt: 2 });
+    await user.type(screen.getByLabelText("Contraseña nueva"), "una clave larga");
+    await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+    await vi.waitFor(() => expect(actions.completeRecoveryAction).toHaveBeenCalledTimes(2));
+    expect(await screen.findAllByText(message)).toHaveLength(1);
+  });
+
+  it("al reenviar el correo de registro", async () => {
+    answers<ResendState>(actions.resendAction, { kind: "failed", reason: "unavailable", attempt: 1 });
+    const user = userEvent.setup();
+    render(<CheckMailScreen email="ana@prueba.test" lifetimeSeconds={3_600} wait={null} />);
+    for (const attempt of [1, 2, 3]) {
+      answers<ResendState>(actions.resendAction, { kind: "failed", reason: "unavailable", attempt });
+      await user.click(screen.getByRole("button", { name: "Reenviar" }));
+      await vi.waitFor(() => expect(actions.resendAction).toHaveBeenCalledTimes(attempt));
+      expect(await screen.findAllByRole("alert")).toHaveLength(1);
+    }
+  });
+});

@@ -50,12 +50,12 @@ function Resend({ wait: initialWait }: { wait: ResendWait | null }) {
   return (
     <div className="flex w-full flex-col gap-4">
       {state.kind === "sent" && (
-        <InlineAlert key={attempt} tone="success" live>
+        <InlineAlert key={`enviado-${attempt}`} tone="success" live>
           {text.resent}
         </InlineAlert>
       )}
       {state.kind === "failed" && (
-        <InlineAlert key={attempt} tone="danger" live>
+        <InlineAlert key={`fallo-${attempt}`} tone="danger" live>
           {state.reason === "wait" ? account.signUp.wait : account.common.unavailable}
         </InlineAlert>
       )}

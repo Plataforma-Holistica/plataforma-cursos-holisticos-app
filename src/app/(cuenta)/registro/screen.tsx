@@ -44,12 +44,14 @@ export function SignUpScreen({ termsHref, privacyHref }: SignUpScreenProps) {
       <h1 className="text-h1">{text.title}</h1>
       <form action={action} noValidate className="flex flex-col gap-6">
         <FormErrorSummary errors={errors} attempt={attempt} />
+        {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
+            intento con los campos del siguiente, y el aviso viejo se queda en pantalla. */}
         {state.kind === "failed" && (
-          <InlineAlert key={attempt} tone="danger" live>
+          <InlineAlert key={`fallo-${attempt}`} tone="danger" live>
             {state.reason === "wait" ? text.wait : account.common.unavailable}
           </InlineAlert>
         )}
-        <EmailField key={attempt} id={EMAIL_ID} defaultValue={email} problem={problem} hint={text.hint} />
+        <EmailField key={`campo-${attempt}`} id={EMAIL_ID} defaultValue={email} problem={problem} hint={text.hint} />
         <Disclaimer variant="signUp" />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}

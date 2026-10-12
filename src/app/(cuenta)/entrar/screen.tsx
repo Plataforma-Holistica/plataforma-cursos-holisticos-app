@@ -117,14 +117,16 @@ export function SignInScreen({ returnTo, notice }: SignInScreenProps) {
       <form action={action} noValidate className="flex flex-col gap-6">
         {notice !== null && state.kind === "idle" && <InlineAlert tone="success">{notice}</InlineAlert>}
         <FormErrorSummary errors={errors} attempt={attempt} />
+        {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
+            intento con los campos del siguiente, y el aviso viejo se queda en pantalla. */}
         {failure !== null && (
-          <InlineAlert key={attempt} tone="danger" live>
+          <InlineAlert key={`fallo-${attempt}`} tone="danger" live>
             {failure}
           </InlineAlert>
         )}
-        {state.kind === "throttled" && <ThrottledAlert key={attempt} retryAt={state.retryAt} />}
+        {state.kind === "throttled" && <ThrottledAlert key={`freno-${attempt}`} retryAt={state.retryAt} />}
         <input type="hidden" name={RETURN_PARAM} value={returnTo} />
-        <Fields key={attempt} email={state.kind === "idle" ? "" : state.email} fields={fields} />
+        <Fields key={`campos-${attempt}`} email={state.kind === "idle" ? "" : state.email} fields={fields} />
         <Button
           type="submit"
           loading={pending}

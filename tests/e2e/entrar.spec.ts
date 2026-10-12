@@ -62,6 +62,21 @@ test("con el correo o la contraseña equivocados dice lo mismo, exista o no la c
   await expect(page.getByRole("alert").filter({ hasText: "El correo o la contraseña no coinciden." })).toBeVisible();
 });
 
+test("dos intentos fallidos seguidos, sin recargar, dejan un solo aviso", async ({ page }) => {
+  const ana = await person();
+  const message = page.getByText("El correo o la contraseña no coinciden.");
+  await signIn(page, { email: ana.email, password: "no-es-la-suya" });
+  await expect(message).toHaveCount(1);
+  await hydrated(page);
+  // Sobre la misma pantalla, sin volver a abrirla: el aviso del intento anterior no se queda.
+  for (const wrong of ["tampoco-es-esta", "ni-esta-otra"]) {
+    await page.getByLabel("Contraseña", { exact: true }).fill(wrong);
+    await page.getByRole("button", { name: "Entrar" }).click();
+    await expect(page.getByLabel("Contraseña", { exact: true })).toHaveValue("");
+    await expect(message).toHaveCount(1);
+  }
+});
+
 test("un campo vacío o un correo sin forma se marca en el campo, con un resumen que toma el foco", async ({ page }) => {
   await page.goto("/entrar");
   await page.getByRole("button", { name: "Entrar" }).click();

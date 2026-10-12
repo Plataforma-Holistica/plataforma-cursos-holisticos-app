@@ -46,9 +46,11 @@ const reader = { get: () => undefined };
 const TOKEN = "abcdefgh12345678";
 const at = (token: string) => ({ params: Promise.resolve({ token }) });
 
+let texts = 0;
 const text = (docType: string, title: string) => ({
   docType,
-  documentId: `${docType.length.toString().padStart(8, "0")}-1111-4111-8111-111111111111`,
+  // Cada texto con su identificador, como en la base: dos tipos pueden medir lo mismo.
+  documentId: `${(texts += 1).toString().padStart(8, "0")}-1111-4111-8111-111111111111`,
   version: 2,
   title,
   body: "Texto.",

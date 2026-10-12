@@ -396,3 +396,29 @@ describe("PA-15: el resumen vuelve a tomar el foco cuando la misma revisión fal
     expect(actions.completeAccountAction).not.toHaveBeenCalled();
   });
 });
+
+describe("PA-11: dos fallos seguidos, sin recargar", () => {
+  it("dejan un solo aviso: el del intento anterior no se queda en pantalla", async () => {
+    const message = "El correo o la contraseña no coinciden.";
+    const { user } = await submitSignIn({ kind: "failed", email: "ana@prueba.test", reason: "invalid_credentials", attempt: 1 });
+    expect(await screen.findAllByText(message)).toHaveLength(1);
+
+    for (const attempt of [2, 3]) {
+      answers<SignInState>(actions.signInAction, { kind: "failed", email: "ana@prueba.test", reason: "invalid_credentials", attempt });
+      await user.type(screen.getByLabelText("Contraseña"), "otra-equivocada");
+      await user.click(screen.getByRole("button", { name: "Entrar" }));
+      await screen.findByDisplayValue("ana@prueba.test");
+      expect(actions.signInAction).toHaveBeenCalledTimes(attempt);
+      expect(screen.getAllByText(message)).toHaveLength(1);
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    }
+
+    // Y al cambiar de respuesta, el aviso de antes se va.
+    answers<SignInState>(actions.signInAction, { kind: "failed", email: "ana@prueba.test", reason: "capped", attempt: 4 });
+    await user.type(screen.getByLabelText("Contraseña"), "otra-equivocada");
+    await user.click(screen.getByRole("button", { name: "Entrar" }));
+    expect(await screen.findByText("Demasiados intentos. Vuelve a probar más tarde.")).toBeVisible();
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+});
