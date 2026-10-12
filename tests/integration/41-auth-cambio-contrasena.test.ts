@@ -13,7 +13,16 @@ import {
 } from "@/adapters/supabase/auth";
 import { PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";
 
-import { authVisitor, failingFetch, knownUser, memoryJar, networkDown, sessionCount, type KnownUser } from "./helpers/auth";
+import {
+  authVisitor,
+  failingFetch,
+  knownUser,
+  memoryJar,
+  networkDown,
+  sessionCount,
+  tooManyRequests,
+  type KnownUser,
+} from "./helpers/auth";
 import { lastMailTo, mailsTo } from "./helpers/mailbox";
 import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -158,6 +167,16 @@ describe("cambiar la contraseña con esa prueba", () => {
     const proof = await slow.provePassword(account.email, account.password);
     if (!proof.ok) throw new Error("La contraseña de prueba no se comprobó.");
     expect(await slow.changeProvenPassword(proof.proven, password())).toBe("unknown");
+    expect(await entersWith(account, account.password)).toBe(true);
+  });
+
+  // Un límite de peticiones Auth lo contesta antes de tocar nada: se sabe que no cambió.
+  it("con el límite de peticiones de Auth, se rechaza: no es «no se supo»", async () => {
+    const account = await user();
+    const limited = createAuth({ fetch: failingFetch(/\/auth\/v1\/user$/, tooManyRequests).fetch });
+    const proof = await limited.provePassword(account.email, account.password);
+    if (!proof.ok) throw new Error("La contraseña de prueba no se comprobó.");
+    expect(await limited.changeProvenPassword(proof.proven, password())).toBe("rejected");
     expect(await entersWith(account, account.password)).toBe(true);
   });
 

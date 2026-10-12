@@ -220,12 +220,13 @@ export function createManagement(
   }
 
   /**
-   * Un cierre que la base no hizo. Antes de darlo por caída se le vuelve a preguntar a la
-   * guarda de sesión: si la sesión con la que se pide se cerró a media operación (otro
-   * cierre iba delante), no es una falla, y se contesta lo que la guarda dice ahora. Si
-   * insiste en que pasa, o tampoco supo, lo que falló fue cerrar, y se reporta.
+   * Algo que la base o Auth no hicieron, con una sesión que había pasado la guarda. Antes de
+   * darlo por caída se le vuelve a preguntar a la guarda de sesión: si la sesión con la que
+   * se pide dejó de valer a media operación (otro cierre iba delante, la cuenta cambió), no
+   * es una falla, y se contesta lo que la guarda dice ahora. Si insiste en que pasa, o
+   * tampoco supo, eso no explica el fallo: se reporta.
    */
-  async function refusedClosing(reader: CookieReader): Promise<Extract<SessionClosing, { kind: "session" | "unavailable" }>> {
+  async function refusedNow(reader: CookieReader): Promise<Extract<SessionClosing, { kind: "session" | "unavailable" }>> {
     const now = await core.checkSession(reader);
     if (now.kind !== "pass" && now.kind !== "unavailable") return { kind: "session", check: now };
     await deps.report("account_unavailable");
@@ -261,7 +262,7 @@ export function createManagement(
       }
     }
     if (state === "closed" || state === "not_found" || state === "current") return { kind: state };
-    return refusedClosing(reader);
+    return refusedNow(reader);
   }
 
   /**
@@ -284,7 +285,7 @@ export function createManagement(
       }
     }
     if (count !== null) return { kind: "closed", count };
-    return refusedClosing(reader);
+    return refusedNow(reader);
   }
 
   /**
@@ -394,10 +395,7 @@ export function createManagement(
       // La contraseña era la suya, pero la cuenta dejó de pasar a media operación (se
       // suspendió, se le prendió la marca, cambió un texto): se contesta lo que la guarda
       // dice ahora.
-      const now = await core.checkSession(jar);
-      if (now.kind !== "pass" && now.kind !== "unavailable") return { kind: "session", check: now };
-      await deps.report("account_unavailable");
-      return { kind: "unavailable" };
+      return refusedNow(jar);
     }
 
     const saved = await auth.changeProvenPassword(proof.proven, input.next);
@@ -406,10 +404,11 @@ export function createManagement(
       return { kind: "invalid", fields: { next: saved === "same_password" ? "same" : "weak" } };
     }
     if (saved === "rejected") {
-      // Auth dijo que no, y no cambió nada: la sesión de este navegador sigue valiendo.
+      // Auth dijo que no, y no cambió nada. Puede ser que la sesión de la comprobación ya no
+      // exista: desde otro navegador cerraron las demás, o recuperaron la contraseña. Entonces
+      // la de este navegador tampoco vale, y eso no es una caída: lo dice la guarda.
       await expectClosed(auth.discardProof(proof.proven));
-      await deps.report("account_unavailable");
-      return { kind: "unavailable" };
+      return refusedNow(jar);
     }
 
     // Desde aquí la contraseña cambió, o no se sabe. En los dos casos el cambio se fecha: si

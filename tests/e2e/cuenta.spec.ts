@@ -899,12 +899,17 @@ test("la acción de cambiar la contraseña aguanta lo que su pantalla nunca mand
     { ...hidden, current: "x".repeat(1_025), password: next },
     { ...hidden, current: "x".repeat(50_000), password: next },
   ];
+  const attempts = async () =>
+    (await ownerQuery<{ failed: number }>("select coalesce(sum(failed_count), 0)::int as failed from private.login_throttles"))[0]?.failed;
+  const counted = await attempts();
   for (const fields of odd) {
     const response = await postAction(page.request, "/cuenta", fields);
     expect(response.status()).toBe(200);
     expect(await response.text()).toContain(NO_CURRENT);
   }
+  expect(await attempts()).toBe(counted);
   // Con la contraseña de otra cuenta, y diciendo que la cuenta es la otra: no es la suya.
+  // Esto sí cuenta: es un intento con una contraseña que no es la de la cuenta.
   const foreign = await postAction(page.request, "/cuenta", {
     ...hidden,
     current: otra.password,
@@ -919,6 +924,7 @@ test("la acción de cambiar la contraseña aguanta lo que su pantalla nunca mand
   // Una contraseña nunca vuelve en la respuesta.
   expect(refused).not.toContain(otra.password);
   expect(refused).not.toContain(next);
+  expect(await attempts()).toBe((counted ?? 0) + 1);
 
   // Lo que el formulario diga sobre de quién es la cuenta no se lee: cambia la de la sesión.
   const pointed = await postAction(page.request, "/cuenta", {

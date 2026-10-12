@@ -35,6 +35,7 @@ import {
   networkDown,
   recordingFetch,
   sessionCount,
+  tooManyRequests,
   type KnownUser,
   type MemoryJar,
 } from "./helpers/auth";
@@ -645,6 +646,49 @@ describe("cuando Auth no acepta la contraseña nueva", () => {
   });
 });
 
+describe("cuando Auth rechaza guardar por algo que no es la contraseña", () => {
+  // Un límite de peticiones no deja duda: no se guardó. No se cierra nada.
+  it("con el límite de peticiones de Auth: nada cambió, la sesión sigue, y se reporta", async () => {
+    const who = await account();
+    const here = await open(who);
+    const there = await open(who);
+    const before = await changedAt(who.id);
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/auth\/v1\/user$/, tooManyRequests).fetch }) });
+
+    expect(await services.changePassword(here.jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+      kind: "unavailable",
+    });
+    expect(services.reported).toEqual(["account_unavailable"]);
+    expect(await sessionCount(who.id)).toBe(2);
+    expect(await changedAt(who.id)).toBe(before);
+    expect(await guard(here.jar)).toMatchObject({ kind: "pass", claims: { sessionId: here.claims.sessionId } });
+    expect(await guard(there.jar)).toMatchObject({ kind: "pass" });
+    expect(await accepts(who, who.password)).toBe(true);
+  });
+
+  // Entre la comprobación y el guardado, las sesiones de la cuenta se cierran desde otro
+  // lado. Auth rechaza guardar porque la sesión de la comprobación ya no existe. La de este
+  // navegador tampoco: no es una caída, y se contesta lo que la guarda dice ahora.
+  it("si las sesiones se cerraron desde otro lado a media operación: lo dice la guarda, y no se reporta", async () => {
+    const who = await account();
+    const here = await open(who);
+    const { auth } = authWith((real) => ({
+      changeProvenPassword: async (proven, password) => {
+        await ownerQuery("delete from auth.sessions where user_id = $1", [who.id]);
+        return real.changeProvenPassword(proven, password);
+      },
+    }));
+    const services = testServices({ auth });
+
+    expect(await services.changePassword(here.jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+      kind: "session",
+      check: CLOSED,
+    });
+    expect(services.reported).toEqual([]);
+    expect(await accepts(who, who.password)).toBe(true);
+  });
+});
+
 describe("cuando no se sabe si la contraseña cambió", () => {
   it("si Auth no contesta al guardarla: la cuenta queda sin sesiones, este navegador sin cookie, y se reporta", async () => {
     const who = await account();
@@ -855,6 +899,41 @@ describe("lo que estaba en vuelo mientras cambiaba la contraseña", () => {
     expect(await guard(here.jar)).toMatchObject({ kind: "pass" });
   });
 
+  // Lo que la fecha consigue, visto desde fuera del servicio. Una sesión viva en Auth, de
+  // la cuenta, cuyo intento empezó antes del cambio: la base ya no la anota. Sin fechar, la
+  // anotaría, porque el intento es posterior a la fecha de antes.
+  it("después del cambio, una sesión viva cuyo intento empezó antes ya no se puede anotar", async () => {
+    const who = await account();
+    const here = await open(who);
+    const chosen = fresh();
+    const started = (await ownerQuery<{ at: string }>("select clock_timestamp()::text as at"))[0]?.at ?? "";
+
+    expect(await testServices().changePassword(here.jar, { current: who.password, next: chosen }, freshOrigin())).toEqual({
+      kind: "changed",
+    });
+
+    // Una sesión que Auth tiene viva y la aplicación no anotó, como la de una entrada en vuelo.
+    expect((await authSignIn(memoryJar(), who.email, chosen)).ok).toBe(true);
+    const loose = await ownerQuery<{ id: string }>(
+      `select s.id::text as id from auth.sessions s
+       where s.user_id = $1 and not exists (select 1 from private.app_sessions x where x.session_id = s.id)`,
+      [who.id],
+    );
+    expect(loose).toHaveLength(1);
+    const note = async (at: string) =>
+      (
+        await ownerQuery<{ state: string }>(
+          `with actor as (select set_config('app.actor_id', $1, true))
+           select private.note_session($2::uuid, $3::timestamptz) as state from actor`,
+          [who.id, loose[0]?.id, at],
+        )
+      )[0]?.state;
+    expect(await note(started)).toBe("stale");
+    // La misma sesión, con un intento que empieza ahora, sí: lo que la detuvo fue la fecha.
+    const now = (await ownerQuery<{ at: string }>("select clock_timestamp()::text as at"))[0]?.at ?? "";
+    expect(await note(now)).toBe("noted");
+  });
+
   // Fechar el cambio toma un candado de fila del perfil, el mismo que toma anotar una sesión:
   // así una entrada se anota antes, y el cambio la borra, o después, y ve la fecha nueva.
   // Con el perfil retenido por otra sesión de la base, fechar espera en lugar de adelantarse.
@@ -890,9 +969,9 @@ describe("lo que estaba en vuelo mientras cambiaba la contraseña", () => {
     expect(await changedAt(who.id)).toBeGreaterThan(before);
   });
 
-  // Dos navegadores de la misma cuenta la cambian a la vez. Gane quien gane, no queda una
-  // sesión abierta que no haya terminado en «cambió», y a lo más queda una.
-  it("dos cambios a la vez desde dos sesiones de la cuenta no dejan una sesión de más", async () => {
+  // Dos navegadores de la misma cuenta la cambian a la vez. Gane quien gane, la aplicación
+  // no reconoce una sesión que no haya terminado en «cambió», y a lo más reconoce una.
+  it("dos cambios a la vez desde dos sesiones de la cuenta no dejan una sesión reconocida de más", async () => {
     const who = await account();
     const one = await open(who);
     const two = await open(who);
@@ -906,6 +985,7 @@ describe("lo que estaba en vuelo mientras cambiaba la contraseña", () => {
     if (passes[0]) expect(first).toEqual({ kind: "changed" });
     if (passes[1]) expect(second).toEqual({ kind: "changed" });
     expect([first.kind, second.kind].some((kind) => kind === "changed" || kind === "signed_out")).toBe(true);
+    expect(await notedSessions(who.id)).toBe(passes.filter(Boolean).length);
     expect(await accepts(who, who.password)).toBe(false);
   });
 });

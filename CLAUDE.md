@@ -400,8 +400,12 @@ falla. Doce precisiones que la tabla no dice:
     sabe cuál contraseña vale: el cambio se fecha de todos modos, se cierra todo y se
     reporta (`password_change_unconfirmed`). Si lo que falla es fechar, se reporta
     `password_change_incomplete`. Cuando la entrada de la comprobación se niega por algo
-    que no es la contraseña, antes de darlo por caída se le vuelve a preguntar a la
-    guarda, como al cambiar el nombre.
+    que no es la contraseña, o Auth rechaza guardar, antes de darlo por caída se le
+    vuelve a preguntar a la guarda, como al cambiar el nombre: la sesión de la
+    comprobación pudo cerrarse desde otro lado, y entonces la del navegador tampoco vale.
+    Un límite de peticiones de Auth al guardar es un rechazo y no un «no se supo»
+    (`provenPasswordFailure`): Auth lo contesta antes de tocar nada, y «no se supo»
+    aquí cierra todas las sesiones de la cuenta.
   - `private.note_password_change()` no es `private.claim_account()`: fecha y borra lo
     anotado, pero nunca apaga la marca de contraseña ni le crea fecha a una cuenta que no
     la tiene. La marca dice que la contraseña la fijó quien controla el buzón, y quien la

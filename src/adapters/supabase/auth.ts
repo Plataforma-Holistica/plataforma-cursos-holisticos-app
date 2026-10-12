@@ -17,6 +17,7 @@ import {
   alreadyClosed,
   failureFromSdk,
   passwordSetFailure,
+  provenPasswordFailure,
   recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
@@ -573,7 +574,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
       body: { password },
       fetch: baseFetch,
     });
-    return call.ok ? "ok" : classify("set_password", call.failure, passwordSetFailure);
+    return call.ok ? "ok" : classify("set_password", call.failure, provenPasswordFailure);
   }
 
   async function closeProof(proven: ProvenPassword, scope: "local" | "global"): Promise<Closing> {

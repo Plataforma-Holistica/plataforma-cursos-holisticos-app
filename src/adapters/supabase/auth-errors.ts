@@ -118,6 +118,16 @@ export function passwordSetFailure(failure: AuthFailure): Exclude<PasswordSetRes
   return PASSWORD_REJECTED.has(code) ? "rejected" : "unknown";
 }
 
+/**
+ * Lo mismo, para el cambio con sesión desde la cuenta. Ahí un «no se supo» cierra todas las
+ * sesiones de la cuenta, porque no se sabe cuál contraseña vale. Un límite de peticiones
+ * Auth lo contesta antes de tocar nada: se sabe que no la guardó, y se dice como un no.
+ */
+export function provenPasswordFailure(failure: AuthFailure): Exclude<PasswordSetResult, "ok"> {
+  if (codeOf(failure) === "over_request_rate_limit") return "rejected";
+  return passwordSetFailure(failure);
+}
+
 const SIGN_IN = new Map<string, "invalid_credentials" | "email_not_confirmed" | "banned" | "rate_limited">([
   ["invalid_credentials", "invalid_credentials"],
   // Un correo o una contraseña sin forma: el servicio los valida antes, y si aun así
