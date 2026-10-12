@@ -10,7 +10,7 @@ import { parseDisplayName, type DisplayNameResult } from "@/domain/access/displa
 
 import type { SessionCheck } from "./admission";
 import type { AccountDependencies } from "./deps";
-import { saveIdentity } from "./records";
+import { saveName } from "./records";
 
 // Administrar la cuenta (RF-109; flujo de la app FL-27; diseño PA-25): lo que una persona
 // con sesión cambia de su propia cuenta. Por ahora, el nombre. Las sesiones abiertas y la
@@ -41,7 +41,7 @@ export interface ManagementCore {
 
 const nameRow = z.object({ display_name: z.string().nullable() });
 
-export function createManagement(deps: AccountDependencies, core: ManagementCore) {
+export function createManagement(deps: Pick<AccountDependencies, "report">, core: ManagementCore) {
   /**
    * Lo que la pantalla de la cuenta pinta de la persona. Recibe las claims con las que la
    * guarda dejó pasar a su página, y lee como esa persona: la base filtra por ella.
@@ -74,9 +74,12 @@ export function createManagement(deps: AccountDependencies, core: ManagementCore
     if (!parsed.ok) return { kind: "invalid", reason: parsed.reason };
 
     try {
-      await asServer({ claims: check.claims, reason: "change_name" }, (tx) =>
-        saveIdentity(tx, check.claims.userId, { name: parsed.name, adult: false }),
-      );
+      await asServer({ claims: check.claims, reason: "change_name" }, async (tx) => {
+        // Sin perfil no se guardó nada, y no se dice que sí: la cuenta se fue entre la guarda y aquí.
+        if (!(await saveName(tx, check.claims.userId, parsed.name))) {
+          throw new Error("Una sesión que pasó la guarda no tiene perfil.");
+        }
+      });
     } catch {
       await deps.report("account_unavailable");
       return { kind: "unavailable" };

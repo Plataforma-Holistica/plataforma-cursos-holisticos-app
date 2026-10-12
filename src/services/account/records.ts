@@ -95,14 +95,18 @@ export async function profileState(tx: Tx, profileId: string): Promise<{ status:
   return row ?? null;
 }
 
+/** Guarda el nombre. Dice si había un perfil donde guardarlo. */
+export async function saveName(tx: Tx, profileId: string, name: string): Promise<boolean> {
+  const saved = await tx.execute(sql`update public.profiles set display_name = ${name} where id = ${profileId}::uuid`);
+  return saved === 1;
+}
+
 /**
  * Guarda el nombre, si viene, y la declaración de edad, si se pide. La declaración lleva
  * la hora de la base y no se pisa: la primera es la que vale.
  */
 export async function saveIdentity(tx: Tx, profileId: string, identity: { name: string | null; adult: boolean }): Promise<void> {
-  if (identity.name !== null) {
-    await tx.execute(sql`update public.profiles set display_name = ${identity.name} where id = ${profileId}::uuid`);
-  }
+  if (identity.name !== null) await saveName(tx, profileId, identity.name);
   if (identity.adult) {
     await tx.execute(
       sql`update public.profiles set adult_declared_at = now()
