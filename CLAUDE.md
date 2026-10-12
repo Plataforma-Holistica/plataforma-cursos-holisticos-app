@@ -723,6 +723,11 @@ En la base, siete reglas que salen de `../planeacion/05-esquema-backend.md` §16
   factor llamando directo a Auth: por eso no se le cree al token. Quien no tiene la
   capacidad no llega a leer nada de Auth, porque esas funciones viven en políticas de
   tablas que lee cualquier cuenta. Sin el parámetro, o con uno que no vale, no pasa nadie.
+  El campo `aal` de las claims no sirve para decidir esto, tampoco en la guarda de una
+  pantalla. Tres políticas restrictivas viejas (`*_require_aal2`) todavía lo leen con
+  `private.is_aal2()`: no abren nada, porque van sumadas con «y» a una política que pasa
+  por la puerta, pero en esas tablas un token de primer nivel no lee aunque su sesión ya
+  esté verificada.
   Quién ata un factor llega con las invitaciones; mientras, nadie pasa la puerta. En las
   pruebas de base, «segundo nivel» es una sesión de equipo de verdad: la deja
   `pruebas.equipar()`, que llaman `pruebas.como_usuario(…, 'aal2')` y, para quien tiene

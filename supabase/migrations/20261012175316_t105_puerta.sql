@@ -48,7 +48,8 @@ create trigger audit_changes after insert or update or delete on private.admin_f
 -- ---------------------------------------------------------------------------------------
 -- Con qué sesión se actúa. En el camino del usuario la dice su token; en el de servicio la
 -- declara el servidor, que la saca del token que verificó: es el mismo trato que
--- app.actor_id. Lo que no tiene forma de identificador no se convierte: no hay sesión.
+-- app.actor_id, y como ahí, el camino se elige por si hay una persona en el token, no por
+-- el rol. Lo que no tiene forma de identificador no se convierte: no hay sesión.
 -- La forma se mira en un `case` antes de convertir, que es lo que garantiza el orden.
 
 create function private.actor_session() returns uuid
@@ -112,17 +113,21 @@ begin
   end if;
   -- La verificación: del código, y reciente. Auth mueve esa hora al volver a verificar y no
   -- al renovar el token (medido). Sin el parámetro, o con uno que no vale, no pasa nadie.
+  -- (second_factor_limit nació para el freno de los códigos: lee cualquier parámetro que
+  -- sea un entero de 1 en adelante, sin lanzar.)
   v_hours := private.second_factor_limit('VIGENCIA_SEGUNDO_FACTOR_HORAS');
   if v_hours is null then
     raise warning 'private.team_session: falta VIGENCIA_SEGUNDO_FACTOR_HORAS, o no es un entero de 1 en adelante. Nadie del equipo pasa.';
     return false;
   end if;
   -- En segundos y no con un intervalo: restarle a la hora un intervalo de muchas horas se
-  -- sale del rango de una fecha, y eso lanzaría.
+  -- sale del rango de una fecha, y eso lanzaría. Esa hora la pone el reloj de Auth, no el
+  -- de la base: se le perdonan cinco minutos de adelanto, y una fechada más allá no cuenta.
   return exists (
     select 1 from auth.mfa_amr_claims c
     where c.session_id = p_session and c.authentication_method = 'totp'
-      and extract(epoch from (v_now - c.updated_at)) < v_hours::bigint * 3600);
+      and extract(epoch from (v_now - c.updated_at)) < v_hours::bigint * 3600
+      and extract(epoch from (v_now - c.updated_at)) > -300);
 end
 $$;
 

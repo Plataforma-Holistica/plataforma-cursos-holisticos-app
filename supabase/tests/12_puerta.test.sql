@@ -7,7 +7,7 @@
 -- rompe cada una de esas condiciones, de una en una, por los dos caminos.
 begin;
 \ir _ayuda.psql
-select plan(71);
+select plan(77);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -69,13 +69,15 @@ select ok(
   not has_function_privilege('app_service', 'private.team_session(uuid, uuid)', 'execute')
     and not has_function_privilege('authenticated', 'private.team_session(uuid, uuid)', 'execute')
     and not has_function_privilege('anon', 'private.team_session(uuid, uuid)', 'execute')
-    and not has_function_privilege('service_role', 'private.team_session(uuid, uuid)', 'execute'),
+    and not has_function_privilege('service_role', 'private.team_session(uuid, uuid)', 'execute')
+    and not has_function_privilege('supabase_auth_admin', 'private.team_session(uuid, uuid)', 'execute'),
   'la puerta no se llama desde fuera: nadie le pregunta por la sesión de otro');
 select ok(
   not has_function_privilege('app_service', 'private.actor_session()', 'execute')
     and not has_function_privilege('authenticated', 'private.actor_session()', 'execute')
     and not has_function_privilege('anon', 'private.actor_session()', 'execute')
-    and not has_function_privilege('service_role', 'private.actor_session()', 'execute'),
+    and not has_function_privilege('service_role', 'private.actor_session()', 'execute')
+    and not has_function_privilege('supabase_auth_admin', 'private.actor_session()', 'execute'),
   'ni la función que lee con qué sesión se actúa');
 select ok(
   has_function_privilege('authenticated', 'private.has_capability(public.capability)', 'execute')
@@ -256,6 +258,21 @@ select ok(not pruebas.pasa_servicio('c0000000-0000-0000-0000-000000000001', ''),
 select pruebas.como_sistema();
 select ok(not private.actor_has_capability('config'), 'el sistema no es del equipo: no pasa por aquí');
 select pruebas.limpiar();
+-- Los dos caminos no se cruzan. Con una persona en el token, la sesión es la del token:
+-- una declarada aparte no la suple. Y la pregunta de la sesión no lee lo declarado.
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'c0000000-0000-0000-0000-000000000001', 'role', 'authenticated', 'aal', 'aal2')::text, true);
+select set_config('app.actor_session', pruebas.sesion('c0000000-0000-0000-0000-000000000001')::text, true);
+select set_config('role', 'authenticated', true);
+select ok(not private.has_capability('config'),
+  'un token sin sesión no pasa, aunque haya una sesión válida declarada aparte');
+select pruebas.limpiar();
+select set_config('app.actor_id', 'c0000000-0000-0000-0000-000000000001', true);
+select set_config('app.actor_session', pruebas.sesion('c0000000-0000-0000-0000-000000000001')::text, true);
+select set_config('role', 'app_service', true);
+select ok(not private.has_capability('config'),
+  'y la pregunta de la sesión del token contesta que no por el camino de servicio: ahí no hay token');
+select pruebas.limpiar();
 
 -- La verificación: reciente y del segundo factor.
 update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '11 hours 59 minutes'
@@ -267,6 +284,15 @@ update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '12 hou
 select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
   'una de hace más ya no: hay que dar el código otra vez');
 select ok(not pruebas.pasa_servicio('c0000000-0000-0000-0000-000000000001'), 'por ningún camino');
+-- La hora la pone el reloj de Auth, que puede ir un poco adelantado. Mucho, no.
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '1 minute'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
+  'una verificación fechada un minuto adelante pasa: es desfase de relojes');
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '1 hour'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
+  'una fechada una hora adelante no: no puede ser de ahora');
 update auth.mfa_amr_claims set updated_at = clock_timestamp(), authentication_method = 'password'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
@@ -342,6 +368,25 @@ update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '61 min
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000002');
 select ok(not pruebas.pasa_con_vigencia('1'), 'con una hora, la de hace 61 minutos ya no pasa');
 select ok(pruebas.pasa_con_vigencia('2'), 'y con dos, sí: la ventana sale del parámetro');
+
+-- ---------------------------------------------------------------------------------------
+-- Primero la capacidad. Estas preguntas viven en políticas de tablas que lee cualquier
+-- cuenta: quien no tiene la capacidad no debe llegar a la puerta, ni a nada de Auth. Aquí la
+-- puerta se cambia por una que lanza, para verlo.
+
+create or replace function private.team_session(p_user uuid, p_session uuid) returns boolean
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  raise exception 'la puerta no debía consultarse';
+end
+$$;
+select ok(not pruebas.pasa('a0000000-0000-0000-0000-000000000001'),
+  'quien no tiene la capacidad no llega a la puerta: contesta que no sin consultarla');
+select throws_ok(
+  $$select pruebas.pasa('c0000000-0000-0000-0000-000000000002')$$,
+  'P0001', 'la puerta no debía consultarse',
+  'y quien sí la tiene, llega');
 
 select pruebas.limpiar();
 select * from finish();

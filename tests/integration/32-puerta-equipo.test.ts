@@ -142,19 +142,34 @@ describe("la puerta del equipo, contra una sesión de verdad", () => {
     expect(await asks(person, token, { bound: factor, noted: false })).toEqual(STOPPED);
   });
 
-  it("renovar el token no la tumba ni la rejuvenece: cuenta cuándo se dio el código", async () => {
+  it("renovar el token no la tumba", async () => {
     const { person, client } = await entered();
     const factor = await verifiedFactor(client, "el suyo");
 
     const refreshed = await client.auth.refreshSession();
     expect(refreshed.error).toBeNull();
-    const token = await tokenOf(client);
-    expect(await asks(person, token, { bound: factor })).toEqual(PASSES);
+    expect(await asks(person, await tokenOf(client), { bound: factor })).toEqual(PASSES);
+  });
 
-    // La verificación se hizo vieja: hay que dar el código otra vez, por más que el token
-    // se haya renovado hace un instante.
-    const aged = "update auth.mfa_amr_claims set updated_at = now() - interval '13 hours' where session_id = $1";
-    expect(await asks(person, token, { bound: factor, tweak: aged })).toEqual(STOPPED);
+  it("ni la rejuvenece: cuenta cuándo se dio el código, no cuándo se renovó el token", async () => {
+    const { person, client } = await entered();
+    const factor = await verifiedFactor(client, "el suyo");
+    const before = await tokenOf(client);
+
+    // La verificación se hace vieja de verdad, con la fila ya escrita por Auth. La cuenta
+    // se borra al terminar, y sus filas de Auth con ella.
+    await ownerQuery("update auth.mfa_amr_claims set updated_at = now() - interval '13 hours' where session_id = $1", [
+      before.sessionId,
+    ]);
+    expect(await asks(person, before, { bound: factor })).toEqual(STOPPED);
+
+    // Y después se renueva el token. Si Auth moviera esa hora al renovar, la ventana no se
+    // cerraría nunca: aquí se vería.
+    const refreshed = await client.auth.refreshSession();
+    expect(refreshed.error).toBeNull();
+    const after = await tokenOf(client);
+    expect(after.sessionId).toBe(before.sessionId);
+    expect(await asks(person, after, { bound: factor })).toEqual(STOPPED);
   });
 
   it("quien cambia su factor llamando directo a Auth deja de pasar: el nuevo no es el atado", async () => {

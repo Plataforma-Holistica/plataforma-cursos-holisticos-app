@@ -186,7 +186,9 @@ select throws_ok(
   '42501', null, 'el servidor no carga un borrador aunque se declare sistema y ponga el ajuste');
 select pruebas.como_dueno();
 select set_config('app.actor_id', 'c0000000-0000-0000-0000-000000000001', true);
-select set_config('app.actor_aal', 'aal2', true);
+-- Con su sesión de equipo declarada: así quien lo rechaza es el guardián de los borradores,
+-- que es el que se prueba, y no el que exige la capacidad de configuración.
+select set_config('app.actor_session', pruebas.sesion('c0000000-0000-0000-0000-000000000001')::text, true);
 select set_config('app.legal_drafts', 'on', true);
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)

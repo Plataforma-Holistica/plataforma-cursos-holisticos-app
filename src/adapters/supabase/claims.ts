@@ -19,7 +19,11 @@ import { createKeyCache, type Jwk } from "./keys";
 export interface VerifiedClaims {
   /** El identificador de su perfil: el mismo que `auth.users.id`. */
   readonly userId: string;
-  /** `aal2` si la sesión pasó el segundo factor. */
+  /**
+   * `aal2` si la sesión había pasado el segundo factor cuando se emitió el token. No decide
+   * quién es del equipo: un token ya emitido lo sigue diciendo hasta que vence. Eso lo
+   * decide la base, leyendo la sesión (T-105).
+   */
   readonly aal: "aal1" | "aal2";
   readonly sessionId: string | null;
   /**
