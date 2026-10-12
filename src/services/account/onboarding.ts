@@ -130,8 +130,11 @@ export type AccountCompletion =
 /** Lo que estos servicios usan de los de entrada. */
 export interface OnboardingCore {
   checkSession: (reader: CookieReader) => Promise<SessionCheck>;
-  /** Corre la guarda sobre una entrada que Auth aceptó y, si deja entrar, anota la sesión. */
-  admit: (entered: AuthSignIn & { ok: true }, startedText: string) => Promise<Admission>;
+  /**
+   * Corre la guarda sobre una entrada que Auth aceptó y, si deja entrar, anota la sesión con
+   * el navegador desde el que se abrió.
+   */
+  admit: (entered: AuthSignIn & { ok: true }, startedText: string, userAgent: string | null) => Promise<Admission>;
 }
 
 interface MailFlow {
@@ -297,12 +300,18 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
   }
 
   /** La entrada con la que termina un registro: la cookie al tarro, o la sesión cerrada. */
-  async function enter(jar: CookieJar, email: string, password: string, startedText: string): Promise<RegistrationCompletion> {
+  async function enter(
+    jar: CookieJar,
+    email: string,
+    password: string,
+    startedText: string,
+    userAgent: string | null,
+  ): Promise<RegistrationCompletion> {
     const staging = stagingJar();
     const entered = await auth.signIn(staging, email, password);
     if (!entered.ok) return { kind: "ready_sign_in" };
 
-    const { result, report } = await core.admit(entered, startedText);
+    const { result, report } = await core.admit(entered, startedText, userAgent);
     const before = new Map(staging.writes.map((write) => [write.name, jar.get(write.name)]));
     // La guarda dejó entrar y la sesión quedó anotada: su cookie pasa al tarro de verdad.
     let failure = report;
@@ -411,7 +420,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       }
     }
 
-    return enter(jar, redeemed.email, checked.password, startedText);
+    return enter(jar, redeemed.email, checked.password, startedText, from.userAgent);
   }
 
   /**

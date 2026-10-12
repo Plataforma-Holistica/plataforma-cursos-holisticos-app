@@ -42,6 +42,7 @@ import {
   readHits,
   readPair,
   sessionRecognition,
+  tagSession,
   uncountHit,
   writePair,
   type PairKeys,
@@ -60,7 +61,7 @@ import { atLeast, SIGN_IN_FLOOR_MS } from "./timing";
 export type { PendingAccount, SessionCheck, SignInResult } from "./admission";
 export type { AccountDependencies, AuthPort } from "./deps";
 export type { AccountForm, FieldErrors, RegistrationForm } from "./forms";
-export type { AccountProfile, NameChange } from "./management";
+export type { AccountProfile, AccountSessions, NameChange, OpenSession, OthersClosing, SessionClosing } from "./management";
 export type {
   AccountCompletion,
   AccountFormFacts,
@@ -72,6 +73,8 @@ export type {
 export type { RequestOrigin } from "./origin";
 export type { CookieJar, CookieOptions, CookieReader };
 export type { VerifiedClaims } from "@/adapters/supabase/claims";
+// De qué navegador y sistema dice ser una sesión: la pantalla de la cuenta lo pone en palabras.
+export type { Browser, Device, System } from "@/domain/access/user-agent";
 // La forma de un enlace de correo: una página la revisa antes de pintar su formulario.
 export { isLinkToken } from "@/adapters/supabase/tokens";
 
@@ -180,15 +183,24 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     });
   }
 
-  /** Una entrada que Auth aceptó: corre la guarda y, si deja entrar, anota la sesión. */
-  async function admit(claims: adapter.SignInResult & { ok: true }, startedText: string): Promise<Admission> {
+  /**
+   * Una entrada que Auth aceptó: corre la guarda y, si deja entrar, anota la sesión, con el
+   * navegador desde el que se abrió para que su dueña la reconozca después en su lista.
+   */
+  async function admit(
+    claims: adapter.SignInResult & { ok: true },
+    startedText: string,
+    userAgent: string | null,
+  ): Promise<Admission> {
     const verified = claims.claims;
     try {
       const seen = await asServer({ claims: verified, reason: "sign_in" }, async (tx) => {
         const view = await evaluateGate(tx, verified.userId, deps.isLocal());
         if (view.kind !== "pass" && view.kind !== "incomplete") return { view, noted: null };
         if (!isSessionId(verified.sessionId)) return { view, noted: null };
-        return { view, noted: (await noteSession(tx, verified.sessionId, startedText)) as NoteState };
+        const noted = (await noteSession(tx, verified.sessionId, startedText)) as NoteState;
+        if (noted === "noted") await tagSession(tx, verified.sessionId, userAgent);
+        return { view, noted };
       });
       return decideAdmission(seen.view, seen.noted);
     } catch {
@@ -230,7 +242,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     const staging = stagingJar();
     const entered = await auth.signIn(staging, parsed.email, input.password);
 
-    let admission = entered.ok ? await admit(entered, opened.startedText) : authRefusal(entered.reason);
+    let admission = entered.ok ? await admit(entered, opened.startedText, from.userAgent) : authRefusal(entered.reason);
 
     // Lo que el navegador traía antes de esta entrada, guardado aparte: la cookie nueva se
     // escribe encima con el mismo nombre.
@@ -351,4 +363,7 @@ export const {
   completeAccount,
   accountProfile,
   changeName,
+  accountSessions,
+  closeSession,
+  closeOtherSessions,
 } = services;
