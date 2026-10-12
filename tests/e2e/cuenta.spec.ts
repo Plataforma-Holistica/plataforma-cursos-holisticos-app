@@ -999,11 +999,17 @@ test("la acción de cambiar la contraseña, mandada por una cuenta con segundo f
     (await ownerQuery<{ failed: number }>("select coalesce(sum(failed_count), 0)::int as failed from private.login_throttles"))[0]?.failed;
   const counted = await attempts();
 
+  const tried: string[] = [];
   for (const current of [ana.password, "una-que-no-es-la-suya"]) {
-    const response = await postAction(page.request, "/cuenta", { ...hidden, current, password: chosen() });
+    const next = chosen();
+    tried.push(next);
+    const response = await postAction(page.request, "/cuenta", { ...hidden, current, password: next });
     expect(response.status(), current).toBe(200);
-    expect(await response.text(), current).toContain(WITH_SECOND_FACTOR);
   }
+  // Lo que la respuesta pinta no dice nada: esa página trae la nota de todos modos. Que la
+  // acción no hizo nada se ve en lo que quedó: ningún intento contado, ni con la contraseña
+  // equivocada, y la contraseña de siempre, ninguna de las que se mandaron.
   expect(await attempts()).toBe(counted);
   expect(await entersWith(browser, ana, ana.password)).toBe(true);
+  for (const next of tried) expect(await entersWith(browser, ana, next), "una de las mandadas").toBe(false);
 });

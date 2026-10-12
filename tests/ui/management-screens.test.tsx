@@ -993,14 +993,42 @@ describe("el bloque de la contraseña (PA-25)", () => {
       expect(screen.queryByRole("button", { name: "Cambiar contraseña" })).not.toBeInTheDocument();
       // Los demás bloques siguen como siempre.
       expect(nameField()).toHaveValue("Ana");
+      // Pintada con la página, la nota no le quita el foco a nadie.
+      expect(within(block()).getByText(NOTE)).not.toHaveFocus();
       expect(await a11yViolations(container)).toEqual([]);
     });
 
     it("si la cuenta ganó su segundo factor con la pantalla ya abierta, el envío lo descubre y el bloque cambia", async () => {
-      await change({ kind: "recover_only" });
-      expect(await within(block()).findByText(NOTE)).toBeVisible();
+      const { container } = await change({ kind: "recover_only" });
+      const note = await within(block()).findByText(NOTE);
+      expect(note).toBeVisible();
       expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      // El botón que se pulsó ya no existe: el foco lo toma la nota, que es además lo que se
+      // lo dice a quien usa lector de pantalla. Sin eso caería al documento.
+      expect(note).toHaveFocus();
+      expect(await a11yViolations(container)).toEqual([]);
+    });
+
+    it("la nota no le quita el foco a quien ya se fue a escribir a otro bloque", async () => {
+      let finish: (state: PasswordState) => void = () => undefined;
+      mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+      const user = userEvent.setup();
+      render(<AccountScreen name="Ana" email="ana@prueba.test" sessions={ALONE} />);
+      await user.type(currentField(), OLD);
+      await user.type(newField(), NEW);
+      await user.click(changeButton());
+      // Mientras la respuesta va en camino, la persona se pone a escribir su nombre.
+      await user.click(nameField());
+      await user.type(nameField(), " María");
+
+      await act(async () => {
+        finish({ kind: "recover_only" });
+        await Promise.resolve();
+      });
+      expect(await within(block()).findByText(NOTE)).toBeVisible();
+      expect(nameField()).toHaveFocus();
+      expect(nameField()).toHaveValue("Ana María");
     });
   });
 

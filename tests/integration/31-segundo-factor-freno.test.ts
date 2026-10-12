@@ -60,6 +60,12 @@ describe("dos intentos del mismo factor a la vez", () => {
       await expect(second.query(HOOK, [failedAttempt(mine)])).rejects.toMatchObject({ code: "55P03" });
       await second.query("rollback");
 
+      // El mismo factor escrito en mayúsculas es el mismo factor: espera el mismo candado.
+      await second.query("begin");
+      await second.query("set local lock_timeout = '400ms'");
+      await expect(second.query(HOOK, [failedAttempt(mine.toUpperCase())])).rejects.toMatchObject({ code: "55P03" });
+      await second.query("rollback");
+
       // El de otro factor pasa sin esperar.
       await second.query("begin");
       await second.query("set local lock_timeout = '400ms'");
@@ -79,6 +85,9 @@ describe("dos intentos del mismo factor a la vez", () => {
     expect(await failuresOf(other)).toBe(1);
   });
 
+  // Complemento del caso de arriba, que es el que prueba el candado sin depender de la
+  // suerte. Aquí cuatro llamadas compiten de verdad: sin candado casi siempre se pisarían,
+  // pero no siempre, así que este caso solo no bastaría.
   it("cuatro fallos a la vez, por cuatro conexiones, cuentan cuatro", async () => {
     const mine = factor();
     const clients = await Promise.all([connected(), connected(), connected(), connected()]);

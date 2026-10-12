@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { ROUTES } from "@/services/account/navigation";
@@ -27,7 +27,8 @@ import { checkPasswordForm, readPasswordForm, type PasswordFields, type Password
 // Una cuenta con segundo factor no ve el formulario: Auth le exige una sesión de segundo
 // nivel para cambiar la contraseña, así que la cambia recuperándola desde su correo. El
 // bloque se lo dice. Lo sabe la página al pintar, y si la cuenta ganó su factor con la
-// pantalla ya abierta, lo descubre el envío.
+// pantalla ya abierta, lo descubre el envío. En ese caso el formulario desaparece con la
+// respuesta, y la nota toma el foco que el botón dejó sin dueño.
 
 const text = account.manage;
 // Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
@@ -57,6 +58,18 @@ export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordB
   // Después de qué respuesta se volvió a escribir. Lo que esa respuesta dijo era de otro texto.
   const [editedAfter, setEditedAfter] = useState<number | null>(null);
   const waitIsOver = useWaitIsOver(state.kind === "throttled" ? state.retryAt : null);
+  const note = useRef<HTMLParagraphElement>(null);
+  const discovered = state.kind === "recover_only";
+
+  // Cuando un envío descubre el segundo factor, el botón que se pulsó desaparece con el
+  // formulario y el foco cae al documento: lo toma la nota, que es además lo que se lo dice
+  // a quien usa lector de pantalla. Solo si quedó sin dueño: a quien ya se fue a otra cosa
+  // no se le quita. Pintada con la página no toma nada.
+  useEffect(() => {
+    if (!discovered) return;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    note.current?.focus();
+  }, [discovered]);
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const found = checkPasswordForm(readPasswordForm(new FormData(event.currentTarget)));
@@ -86,7 +99,9 @@ export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordB
         <h2 id={TITLE_ID} className="text-h3">
           {text.passwordTitle}
         </h2>
-        <p>{text.passwordWithSecondFactor}</p>
+        <p ref={note} tabIndex={-1}>
+          {text.passwordWithSecondFactor}
+        </p>
         <p className="text-body-s">
           <TextLink href={ROUTES.recover}>{text.recoverPassword}</TextLink>
         </p>

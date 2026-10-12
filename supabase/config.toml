@@ -333,8 +333,11 @@ max_frequency = "5s"
 # El freno de los códigos del segundo factor (T-105, RF-106). Auth llama a esta función de
 # la base en cada intento de verificar un código, venga de la aplicación o de quien llame
 # directo a Auth, y obedece si contesta que no. Si la función falta o lanza, Auth rechaza
-# toda verificación: nadie del equipo entra. En el proyecto alojado, que este gancho se
-# pueda prender depende del plan contratado.
+# toda verificación: nadie del equipo entra. Cuando contesta que no, Auth además cierra
+# todas las sesiones de esa cuenta.
+# En el proyecto alojado, la documentación de Supabase lo da solo en los planes Teams y
+# Enterprise (leído el 2026-10-12): con otro plan no se puede prender, y el freno de los
+# códigos no existe. Es una decisión de la lista de salida, no de este archivo.
 [auth.hook.mfa_verification_attempt]
 enabled = true
 uri = "pg-functions://postgres/private/second_factor_attempt"

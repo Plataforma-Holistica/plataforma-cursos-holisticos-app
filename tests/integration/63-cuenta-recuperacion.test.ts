@@ -390,7 +390,9 @@ describe("completar la recuperación", () => {
   });
 
   // Con segundo factor, el camino de administración no es una falla: es el único que hay.
-  it("una cuenta con segundo factor recupera su contraseña con el buzón, y no se reporta como falla", async () => {
+  // Pero tampoco pasa en silencio: a esa cuenta no le sale el aviso de cambio de contraseña,
+  // y que alguien con su buzón le cambió la contraseña es algo que una persona debe saber.
+  it("una cuenta con segundo factor recupera su contraseña con el buzón, y queda dicho con su propio reporte", async () => {
     const account = await claimed();
     const factor = await secondFactorFor(account);
     const hash = await recoveryLink(account);
@@ -399,7 +401,7 @@ describe("completar la recuperación", () => {
 
     expect(await services.completeRecovery({ tokenHash: hash, password: chosen }, freshOrigin())).toEqual({ kind: "done" });
 
-    expect(services.reported).toEqual([]);
+    expect(services.reported).toEqual(["recovery_with_second_factor"]);
     expect(await sessionCount(account.id)).toBe(0);
     expect(await services.signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "invalid_credentials" });
     expect(await services.signIn(memoryJar(), { email: account.email, password: chosen }, freshOrigin())).toMatchObject({

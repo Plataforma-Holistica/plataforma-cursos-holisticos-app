@@ -7,7 +7,7 @@
 -- factor verificado, que es lo que decide cómo cambia su contraseña.
 begin;
 \ir _ayuda.psql
-select plan(34);
+select plan(52);
 
 select pruebas.alta('e0000000-0000-0000-0000-000000000001', 'con-factor@prueba.test');
 select pruebas.alta('e0000000-0000-0000-0000-000000000002', 'sin-factor@prueba.test');
@@ -85,7 +85,7 @@ select results_eq(
   $$values (4, null::boolean)$$,
   'van cuatro fallos anotados, sin espera');
 select is(pruebas.intento('fac70000-0000-0000-0000-000000000001', false), 'reject',
-  'el fallo que llega al límite se rechaza: Auth cierra esa sesión');
+  'el fallo que llega al límite se rechaza: Auth cierra las sesiones de esa cuenta');
 select results_eq(
   $$select fallos, espera, frenado from pruebas.freno('fac70000-0000-0000-0000-000000000001')$$,
   $$values (5, interval '1 minute', true)$$,
@@ -168,6 +168,33 @@ select is(
 select is(
   (select fallos from pruebas.freno('fac70000-0000-0000-0000-000000000003')),
   2, 'y se suma a los de ese factor');
+select is(
+  private.second_factor_attempt(jsonb_build_object(
+    'factor_id', 'fac70000-0000-0000-0000-000000000003', 'valid', 'true')) ->> 'decision',
+  'continue', 'un acierto es el booleano de JSON: un texto que diga «true» sigue su curso');
+select is(
+  (select fallos from pruebas.freno('fac70000-0000-0000-0000-000000000003')),
+  3, 'pero como un fallo más');
+
+-- El mismo factor escrito en mayúsculas es el mismo factor: misma cuenta y mismo candado.
+-- Con un candado propio, dos intentos a la vez del mismo factor se pisarían la cuenta.
+create function pruebas.candados() returns int
+language sql
+as $$
+  select count(*)::int from pg_catalog.pg_locks l
+  where l.locktype = 'advisory' and l.pid = pg_catalog.pg_backend_pid() and l.granted;
+$$;
+select set_config('pruebas.candados', pruebas.candados()::text, true);
+select is(
+  private.second_factor_attempt(jsonb_build_object(
+    'factor_id', 'FAC70000-0000-0000-0000-000000000003', 'valid', false)) ->> 'decision',
+  'continue', 'un factor escrito en mayúsculas se atiende');
+select is(
+  (select fallos from pruebas.freno('fac70000-0000-0000-0000-000000000003')),
+  4, 'y es el mismo factor: se suma a su cuenta');
+select is(
+  pruebas.candados(), current_setting('pruebas.candados')::int,
+  'con el mismo candado, no con uno propio');
 
 -- ---------------------------------------------------------------------------------------
 -- ¿Quien actúa tiene un factor verificado?
@@ -178,6 +205,58 @@ select pruebas.como_servicio('e0000000-0000-0000-0000-000000000003');
 select is(private.has_verified_factor(), false, 'con uno que quedó a medias: no');
 select pruebas.como_servicio('e0000000-0000-0000-0000-000000000002');
 select is(private.has_verified_factor(), false, 'sin ninguno: no, aunque otra cuenta lo tenga');
+
+-- ---------------------------------------------------------------------------------------
+-- Sin sus parámetros el gancho no se queda sin freno: rechaza todo. Va al final porque
+-- cambia, dentro de esta transacción, de dónde salen los parámetros.
+
+select pruebas.como_dueno();
+create table pruebas.parametro_falso (key text primary key, value jsonb);
+create or replace function private.parameter_value(p_key text, p_at timestamptz default now()) returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select case
+    when exists (select 1 from pruebas.parametro_falso f where f.key = p_key)
+      then (select f.value from pruebas.parametro_falso f where f.key = p_key)
+    else (select b.value from public.business_parameters b
+          where b.key = p_key and b.effective_from <= p_at and b.canceled_at is null
+          order by b.effective_from desc limit 1)
+  end
+$$;
+
+-- Qué decide el gancho con un parámetro cambiado (nulo: falta), ante el código correcto de
+-- un factor sin fallos: lo que con sus parámetros en orden siempre pasa.
+create function pruebas.con_parametro(p_key text, p_value jsonb) returns text
+language plpgsql
+as $$
+declare
+  v_decision text;
+begin
+  insert into pruebas.parametro_falso values (p_key, p_value);
+  v_decision := private.second_factor_attempt(jsonb_build_object(
+    'factor_id', 'fac70000-0000-0000-0000-000000000002', 'valid', true)) ->> 'decision';
+  delete from pruebas.parametro_falso;
+  return v_decision;
+end
+$$;
+
+select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', null), 'reject',
+  'sin INTENTOS_ANTES_DE_FRENO no pasa nadie, ni con el código correcto');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', null), 'reject', 'sin FRENO_ESPERA_BASE, tampoco');
+select is(pruebas.con_parametro('FRENO_ESPERA_TOPE', null), 'reject', 'sin FRENO_ESPERA_TOPE, tampoco');
+select is(pruebas.con_parametro('FRENO_OLVIDO', null), 'reject', 'sin FRENO_OLVIDO, tampoco');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '0'), 'reject', 'un parámetro en cero no sirve');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '-1'), 'reject', 'ni uno negativo');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '1.5'), 'reject', 'ni uno con decimales');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '"1"'), 'reject', 'ni un texto, aunque diga un número');
+select is(pruebas.con_parametro('FRENO_OLVIDO', '99999999999'), 'reject',
+  'ni uno que no cabe en un entero: se rechaza, no se lanza');
+select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1001'), 'reject', 'ni uno por encima de su máximo');
+select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1000'), 'continue', 'en su máximo, sí');
+select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1'), 'continue', 'y en uno, también');
+select is_empty(
+  $$select 1 from private.second_factor_attempts where factor_id = 'fac70000-0000-0000-0000-000000000002'$$,
+  'y nada de eso deja una fila');
 
 select pruebas.limpiar();
 select * from finish();

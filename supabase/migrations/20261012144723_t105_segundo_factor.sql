@@ -17,7 +17,7 @@
 -- La tabla del freno. Privada y sin permisos para nadie: solo la toca el gancho.
 --
 -- No apunta a auth.mfa_factors: es del esquema de Supabase. Una fila de un factor que ya no
--- existe no estorba, y se olvida sola como cualquier otra.
+-- existe no estorba; quedan ahí hasta que una tarea de limpieza las quite.
 
 create table private.second_factor_attempts (
   factor_id uuid primary key,                 -- el mismo valor que auth.mfa_factors.id
@@ -30,6 +30,25 @@ comment on table private.second_factor_attempts is 'Fallos seguidos de cada fact
 alter table private.second_factor_attempts enable row level security;
 
 -- ---------------------------------------------------------------------------------------
+-- Un parámetro del freno, en minutos o en intentos: un entero entre 1 y su máximo, o nulo
+-- si falta o no lo es. Nunca lanza, tampoco con un número que no cabe en un entero: de eso
+-- depende que el gancho pueda rechazar en vez de tumbarse. La forma se mira antes de
+-- convertir, cada cosa en su `case`, que es lo único que garantiza el orden.
+
+create function private.second_factor_limit(p_key text, p_max integer) returns integer
+language sql stable set search_path = ''
+as $$
+  select case when n.value between 1 and p_max then n.value end
+  from (
+    select case
+      when pg_catalog.jsonb_typeof(v.value) = 'number' and (v.value #>> '{}') ~ '^[0-9]{1,7}$'
+        then (v.value #>> '{}')::integer
+    end as value
+    from (select private.parameter_value(p_key) as value) as v
+  ) as n
+$$;
+
+-- ---------------------------------------------------------------------------------------
 -- El gancho. Auth lo llama en cada intento de verificación, antes de contestar, con
 -- `{factor_id, user_id, factor_type, valid, metadata}`. Contesta `continue` o `reject`.
 --
@@ -39,10 +58,13 @@ alter table private.second_factor_attempts enable row level security;
 -- también. Mientras dura la espera no pasa ni el código correcto: si pasara, la espera no
 -- frenaría a quien adivina.
 --
---   · Cuando esto contesta `reject`, Auth además cierra la sesión del intento (medido): quien
---     adivina tiene que volver a entrar, y la persona que se equivocó de más, también.
---   · Si esta función lanza, Auth rechaza toda verificación (medido). Falla cerrado, y por
---     eso lo que no se entiende se rechaza en vez de lanzar.
+--   · Cuando esto contesta `reject`, Auth además cierra TODAS las sesiones de esa cuenta,
+--     no solo la del intento (medido). Quien adivina tiene que volver a entrar, y la dueña
+--     de la cuenta también: entra de nuevo, o recupera su contraseña desde su correo.
+--   · Si esta función lanza, Auth rechaza toda verificación (medido). Por eso no lanza con
+--     nada que pueda llegarle: lo que no entiende lo rechaza. Y falla cerrado también con
+--     sus parámetros: si falta uno, o no es un entero dentro de sus límites, rechaza todo
+--     hasta que se corrija, en vez de quedarse sin freno.
 --   · Los intentos de un mismo factor van uno tras otro, con un candado consultivo: dos a la
 --     vez no se pisan la cuenta.
 
@@ -54,26 +76,32 @@ declare
   v_reject constant jsonb := pg_catalog.jsonb_build_object(
     'decision', 'reject', 'message', 'Too many second factor attempts.');
   v_text text := second_factor_attempt.event ->> 'factor_id';
-  v_valid boolean := coalesce((second_factor_attempt.event ->> 'valid') = 'true', false);
+  -- Solo el booleano de JSON es un acierto: un texto que diga «true» no lo es.
+  v_valid boolean := coalesce((second_factor_attempt.event -> 'valid') = 'true'::jsonb, false);
   v_factor uuid;
   v_now timestamptz;
-  v_threshold integer := (private.parameter_value('INTENTOS_ANTES_DE_FRENO'))::integer;
-  v_base interval := pg_catalog.make_interval(mins => (private.parameter_value('FRENO_ESPERA_BASE'))::integer);
-  v_top interval := pg_catalog.make_interval(mins => (private.parameter_value('FRENO_ESPERA_TOPE'))::integer);
-  v_forget interval := pg_catalog.make_interval(mins => (private.parameter_value('FRENO_OLVIDO'))::integer);
+  v_threshold integer := private.second_factor_limit('INTENTOS_ANTES_DE_FRENO', 1000);
+  v_base integer := private.second_factor_limit('FRENO_ESPERA_BASE', 1440);
+  v_top integer := private.second_factor_limit('FRENO_ESPERA_TOPE', 10080);
+  v_forget integer := private.second_factor_limit('FRENO_OLVIDO', 525600);
   v_count integer;
   v_locked timestamptz;
   v_last timestamptz;
-  v_wait interval;
+  v_wait integer;
 begin
   -- Un intento que no dice de qué factor es, o cuyo factor no tiene forma de serlo.
   if v_text is null
      or v_text !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
     return v_reject;
   end if;
+  -- Sin sus cuatro parámetros no hay regla que aplicar: no pasa nadie.
+  if v_threshold is null or v_base is null or v_top is null or v_forget is null then
+    return v_reject;
+  end if;
   v_factor := v_text::uuid;
 
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('second_factor:' || v_text, 0));
+  -- Con el identificador ya en su forma única: escrito en mayúsculas es el mismo factor.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('second_factor:' || v_factor::text, 0));
   v_now := pg_catalog.clock_timestamp();
 
   select a.failed_count, a.locked_until, a.last_failed_at into v_count, v_locked, v_last
@@ -85,7 +113,7 @@ begin
   end if;
 
   -- Fallos viejos: se olvidan, y la cuenta empieza de nuevo.
-  if found and v_last < v_now - v_forget then
+  if found and v_last < v_now - pg_catalog.make_interval(mins => v_forget) then
     delete from private.second_factor_attempts a where a.factor_id = v_factor;
     v_count := null;
   end if;
@@ -101,8 +129,8 @@ begin
   else
     -- El doble por cada fallo de más, sin pasar del tope. El exponente se acota antes de
     -- elevar: con muchos fallos acumulados, la potencia se desbordaría.
-    v_wait := least(v_base * pg_catalog.power(2, least(v_count - v_threshold, 20)), v_top);
-    v_locked := v_now + v_wait;
+    v_wait := least(v_base::bigint * (2 ^ least(v_count - v_threshold, 20))::bigint, v_top::bigint)::integer;
+    v_locked := v_now + pg_catalog.make_interval(mins => v_wait);
   end if;
 
   insert into private.second_factor_attempts as a (factor_id, failed_count, last_failed_at, locked_until)

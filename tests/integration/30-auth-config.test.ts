@@ -336,10 +336,13 @@ describe("el segundo factor que el Auth local tiene configurado", () => {
     expect(await sessionsOf(user.id)).toEqual([{ aal: "aal2", factor: factorId }]);
   });
 
-  it("los códigos equivocados se frenan en el gancho de la base: al llegar al límite Auth rechaza y cierra la sesión", async () => {
+  it("los códigos equivocados se frenan en el gancho de la base: al llegar al límite Auth rechaza y cierra todas las sesiones de la cuenta", async () => {
     const threshold = await parameter("INTENTOS_ANTES_DE_FRENO");
     const { user, password, client } = await signedIn();
     const { factorId, secret } = await enrolled(client);
+    // Otra sesión de la misma cuenta, en otro navegador, que no intenta nada.
+    const elsewhere = visitor();
+    await elsewhere.auth.signInWithPassword({ email: user.email, password });
     const challenge = await client.auth.mfa.challenge({ factorId });
     if (challenge.error) throw new Error("El reto de prueba no se creó.");
     const attempt = (code: string) => client.auth.mfa.verify({ factorId, challengeId: challenge.data.id, code });
@@ -348,7 +351,10 @@ describe("el segundo factor que el Auth local tiene configurado", () => {
     for (let failure = 1; failure < threshold; failure += 1) {
       expect((await attempt(wrongCode(secret))).error?.code, `fallo ${failure}`).toBe("mfa_verification_failed");
     }
+    expect(await sessionsOf(user.id)).toHaveLength(2);
     expect((await attempt(wrongCode(secret))).error?.code).toBe("mfa_verification_rejected");
+    // No solo la del intento: Auth cierra todas las de la cuenta, también la del otro
+    // navegador. A quien se equivocó de más hay que decirle que vuelva a entrar.
     expect(await sessionsOf(user.id)).toEqual([]);
 
     // Frenado, tampoco el código correcto, ni entrando de nuevo: el freno es del factor.
