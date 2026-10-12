@@ -30,6 +30,7 @@ import {
 import { stagingJar, type AccountDependencies } from "./deps";
 import { buckets, fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
+import { createManagement } from "./management";
 import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
 import {
@@ -59,6 +60,7 @@ import { atLeast, SIGN_IN_FLOOR_MS } from "./timing";
 export type { PendingAccount, SessionCheck, SignInResult } from "./admission";
 export type { AccountDependencies, AuthPort } from "./deps";
 export type { AccountForm, FieldErrors, RegistrationForm } from "./forms";
+export type { AccountProfile, NameChange } from "./management";
 export type {
   AccountCompletion,
   AccountFormFacts,
@@ -327,6 +329,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     signIn,
     signOut,
     ...createOnboarding(deps, { checkSession, admit }),
+    ...createManagement(deps, { checkSession }),
   };
 }
 
@@ -346,4 +349,6 @@ export const {
   completeRegistration,
   completeRecovery,
   completeAccount,
+  accountProfile,
+  changeName,
 } = services;

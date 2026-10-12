@@ -1,8 +1,8 @@
 import { defineMessages } from "../format";
 
-// Los textos de las pantallas de la cuenta (diseño, PA-10 a PA-15, PA-35 y PA-07):
+// Los textos de las pantallas de la cuenta (diseño, PA-10 a PA-15, PA-25, PA-35 y PA-07):
 // registrarse, verificar el correo, entrar, recuperar la contraseña, completar la cuenta,
-// la cuenta suspendida y los textos legales.
+// administrarla, la cuenta suspendida y los textos legales.
 //
 // Tono (diseño, sección 8): de tú, frases cortas, con punto final, sin admiraciones. Un
 // mensaje de error dice qué pasó y cómo se arregla, y nunca revela si un correo tiene
@@ -145,6 +145,20 @@ export const account = defineMessages({
     title: "Inicio",
     signedInAs: "Entraste como {email}.",
     status: "En construcción.",
+    account: "Cuenta",
+  },
+  // PA-25. Por ahora, el nombre y el correo a la vista: las sesiones y la contraseña llegan
+  // en sus propias solicitudes, y cambiar de correo espera al correo propio (T-310).
+  manage: {
+    pageTitle: "Cuenta",
+    title: "Cuenta",
+    nameTitle: "Nombre",
+    save: "Guardar",
+    saving: "Guardando…",
+    saved: "Guardado.",
+    emailTitle: "Correo",
+    emailNote: "Por ahora no se puede cambiar desde aquí.",
+    backHome: "Volver al inicio",
   },
   // PA-15.
   consents: {

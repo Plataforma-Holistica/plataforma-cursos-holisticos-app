@@ -29,6 +29,7 @@ const FAILURES = {
   recovery_incomplete: "Una recuperación se quedó a medias después de gastar su enlace: esa persona tiene que pedir otro.",
   recovery_notice_not_sent: "Una contraseña se recuperó por el camino de administración: el aviso de cambio de contraseña no salió.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
+  account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;

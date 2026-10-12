@@ -64,6 +64,8 @@ describe("el inicio provisional", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inicio");
     expect(screen.getByText("Entraste como ana@prueba.test.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+    // Mientras no haya menú de la cuenta, de aquí sale el enlace a PA-25.
+    expect(screen.getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
   });
 
   it("a una cuenta suspendida no le pinta el inicio: ve PA-35, con «Cerrar sesión»", async () => {
@@ -72,6 +74,7 @@ describe("el inicio provisional", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Salir" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Cuenta" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
   });
