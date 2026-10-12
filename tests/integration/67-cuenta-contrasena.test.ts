@@ -34,6 +34,7 @@ import {
   memoryJar,
   networkDown,
   recordingFetch,
+  secondFactorFor,
   sessionCount,
   tooManyRequests,
   type KnownUser,
@@ -146,6 +147,7 @@ beforeEach(async () => {
 afterAll(async () => {
   // Por si la prueba que le quita este permiso al servidor murió antes de devolverlo.
   await ownerQuery(`grant execute on function ${NOTE} to app_service`);
+  await ownerQuery("grant execute on function private.has_verified_factor() to app_service");
   await clearThrottle();
   await deleteTestUsersByEmail(emails);
 });
@@ -213,6 +215,73 @@ describe("cambiar la contraseña con la actual correcta", () => {
     expect(await pairOf(keysOf(who.email, origin, false))).toMatchObject({ failed_count: 0, last_success_at: null });
     // En local es lo normal: nadie pone la cabecera.
     expect(services.reported).toEqual([]);
+  });
+});
+
+describe("una cuenta con segundo factor", () => {
+  // Con un factor verificado, Auth exige una sesión de segundo nivel para cambiar la
+  // contraseña, y la de la comprobación es de primer nivel. No hay nada que intentar: esa
+  // cuenta la cambia recuperándola desde su correo.
+  it("no cambia su contraseña desde aquí: se le dice, sin contar un intento ni preguntarle a Auth", async () => {
+    const who = await account();
+    await secondFactorFor(who);
+    const { jar } = await open(who);
+    const rows = await throttleRows();
+    const { services, calls } = watched();
+
+    expect(await services.changePassword(jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+      kind: "second_factor",
+    });
+    // Tampoco depende de lo escrito: con todo vacío contesta lo mismo.
+    expect(await services.changePassword(jar, { current: "", next: "" }, freshOrigin())).toEqual({ kind: "second_factor" });
+
+    expect(asked(calls, TOKEN) + asked(calls, USER)).toBe(0);
+    expect(await throttleRows()).toBe(rows);
+    expect(services.reported).toEqual([]);
+    expect(await guard(jar)).toMatchObject({ kind: "pass" });
+    expect(await accepts(who, who.password)).toBe(true);
+  });
+
+  it("un factor que quedó a medias no cuenta: la contraseña se cambia como siempre", async () => {
+    const who = await account();
+    const half = authVisitor();
+    await half.auth.signInWithPassword({ email: who.email, password: who.password });
+    expect((await half.auth.mfa.enroll({ factorType: "totp" })).error).toBeNull();
+    const { jar } = await open(who);
+
+    expect(await testServices().changePassword(jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+      kind: "changed",
+    });
+  });
+
+  it("lo que la pantalla lee: si la cuenta tiene un factor verificado", async () => {
+    const con = await account();
+    await secondFactorFor(con);
+    const sin = await account();
+    const one = await open(con);
+    const two = await open(sin);
+    const services = testServices();
+
+    expect(await services.accountSecondFactor(one.claims)).toEqual({ kind: "ready", verified: true });
+    expect(await services.accountSecondFactor(two.claims)).toEqual({ kind: "ready", verified: false });
+    expect(services.reported).toEqual([]);
+  });
+
+  it("si la base no deja preguntar, no se supo: no se ofrece el formulario a ciegas, y se reporta", async () => {
+    const who = await account();
+    const { jar, claims } = await open(who);
+    const services = testServices();
+    await ownerQuery("revoke execute on function private.has_verified_factor() from app_service");
+    try {
+      expect(await services.accountSecondFactor(claims)).toEqual({ kind: "unavailable" });
+      expect(await services.changePassword(jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+        kind: "unavailable",
+      });
+    } finally {
+      await ownerQuery("grant execute on function private.has_verified_factor() to app_service");
+    }
+    expect(services.reported).toEqual(["account_unavailable", "account_unavailable"]);
+    expect(await accepts(who, who.password)).toBe(true);
   });
 });
 

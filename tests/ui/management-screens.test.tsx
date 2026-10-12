@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
   cookieReader: vi.fn(),
   accountProfile: vi.fn(),
+  accountSecondFactor: vi.fn(),
   sessionEmail: vi.fn(),
 }));
 vi.mock("@/app/(cuenta)/cuenta/actions", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader 
 vi.mock("@/services/account/account", () => ({
   accountProfile: mocks.accountProfile,
   accountSessions: mocks.accountSessions,
+  accountSecondFactor: mocks.accountSecondFactor,
   sessionEmail: mocks.sessionEmail,
 }));
 
@@ -622,11 +624,15 @@ describe("la página de la cuenta", () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana de Prueba" });
     mocks.accountSessions.mockResolvedValue(openSessions);
+    mocks.accountSecondFactor.mockResolvedValue({ kind: "ready", verified: false });
     mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
     render(await AccountPage());
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/cuenta");
     expect(mocks.accountProfile).toHaveBeenCalledExactlyOnceWith(claims);
     expect(mocks.accountSessions).toHaveBeenCalledExactlyOnceWith(claims);
+    expect(mocks.accountSecondFactor).toHaveBeenCalledExactlyOnceWith(claims);
+    // Sin segundo factor, la contraseña se cambia aquí.
+    expect(screen.getByLabelText("Contraseña actual")).toBeVisible();
     expect(mocks.sessionEmail).toHaveBeenCalledExactlyOnceWith(reader);
     expect(nameField()).toHaveValue("Ana de Prueba");
     expect(screen.getByText("ana@prueba.test")).toBeVisible();
@@ -974,6 +980,30 @@ describe("el bloque de la contraseña (PA-25)", () => {
     expect(currentField()).not.toBeInvalid();
   });
 
+  describe("en una cuenta con segundo factor", () => {
+    const NOTE = "Tu cuenta tiene segundo factor. Para cambiar tu contraseña, recupérala desde tu correo.";
+
+    it("no hay formulario: dice cómo cambiarla y enlaza a recuperarla", async () => {
+      const { container } = render(<AccountScreen name="Ana" email="ana@prueba.test" sessions={ALONE} secondFactor />);
+      expect(block()).toHaveAttribute("id", "bloque-contrasena");
+      expect(within(block()).getByText(NOTE)).toBeVisible();
+      expect(within(block()).getByRole("link", { name: "Recuperar mi contraseña" })).toHaveAttribute("href", "/recuperar");
+      expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Contraseña nueva")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cambiar contraseña" })).not.toBeInTheDocument();
+      // Los demás bloques siguen como siempre.
+      expect(nameField()).toHaveValue("Ana");
+      expect(await a11yViolations(container)).toEqual([]);
+    });
+
+    it("si la cuenta ganó su segundo factor con la pantalla ya abierta, el envío lo descubre y el bloque cambia", async () => {
+      await change({ kind: "recover_only" });
+      expect(await within(block()).findByText(NOTE)).toBeVisible();
+      expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
   it("cambiar la contraseña no toca el bloque del nombre: lo escrito ahí sigue", async () => {
     mocks.changePasswordAction.mockResolvedValue({ kind: "changed", attempt: 1 });
     const user = userEvent.setup();
@@ -985,5 +1015,33 @@ describe("el bloque de la contraseña (PA-25)", () => {
     expect(await screen.findByText(CHANGED)).toBeVisible();
     expect(nameField()).toHaveValue("Ana de Prueba");
     expect(savedNotice()).not.toBeInTheDocument();
+  });
+});
+
+describe("la página de la cuenta, con segundo factor", () => {
+  const sessions = {
+    kind: "ready",
+    sessions: [{ id: HERE, openedAt: "2026-10-10T18:00:00.000Z", lastActiveAt: null, device: { browser: "chrome", system: "windows" }, current: true }],
+  };
+
+  beforeEach(() => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana de Prueba" });
+    mocks.accountSessions.mockResolvedValue(sessions);
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
+  });
+
+  it("a una cuenta con un factor verificado le pinta la nota y no el formulario", async () => {
+    mocks.accountSecondFactor.mockResolvedValue({ kind: "ready", verified: true });
+    render(await AccountPage());
+    expect(screen.getByRole("link", { name: "Recuperar mi contraseña" })).toHaveAttribute("href", "/recuperar");
+    expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
+  });
+
+  it("si no se supo, no pinta la cuenta a medias: ofrece reintentar", async () => {
+    mocks.accountSecondFactor.mockResolvedValue({ kind: "unavailable" });
+    render(await AccountPage());
+    expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/cuenta");
+    expect(screen.queryByRole("textbox", { name: "Nombre" })).not.toBeInTheDocument();
   });
 });

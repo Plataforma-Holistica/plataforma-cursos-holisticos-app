@@ -101,13 +101,26 @@ const PASSWORD_REJECTED = new Set([
 ]);
 
 /**
+ * La cuenta tiene un segundo factor verificado, y la sesión del canje es de primer nivel:
+ * Auth exige segundo nivel para cambiar la contraseña (medido el 2026-10-12).
+ */
+export function recoveryForSecondFactor(failure: AuthFailure): boolean {
+  return codeOf(failure) === "insufficient_aal";
+}
+
+/**
  * Auth no guardó la contraseña con la sesión del canje por algo que no es culpa de la
- * contraseña ni de la cuenta: la sesión ya no existe (alguien las cerró todas), o la
- * contraseña es la que ya tenía. Solo con estos dos se pasa al camino de administración.
+ * contraseña ni de la cuenta: la sesión ya no existe (alguien las cerró todas), la
+ * contraseña es la que ya tenía, o la cuenta tiene segundo factor. Solo con estos tres se
+ * pasa al camino de administración.
+ *
+ * El tercero es una decisión (2026-10-12): con el buzón se recupera la contraseña, también
+ * la de una cuenta con segundo factor. Lo que ese factor protege sigue pidiéndolo: sin él
+ * no se entra a administración, no se cambia la contraseña otra vez ni se tocan los factores.
  */
 export function recoveryNeedsAdministration(failure: AuthFailure): boolean {
   const code = codeOf(failure);
-  return code === "session_not_found" || code === "same_password";
+  return code === "session_not_found" || code === "same_password" || recoveryForSecondFactor(failure);
 }
 
 /** El resultado de pedirle a Auth que fije una contraseña, cuando no fue un éxito. */

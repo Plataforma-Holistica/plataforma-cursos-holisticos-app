@@ -62,9 +62,11 @@ export interface AccountScreenProps {
   email: string | null;
   /** Las sesiones abiertas de la cuenta, ya puestas en palabras. La de ahora siempre viene. */
   sessions: readonly SessionRow[];
+  /** La cuenta tiene un segundo factor verificado: su contraseña se cambia recuperándola. */
+  secondFactor?: boolean;
 }
 
-export function AccountScreen({ name, email, sessions }: AccountScreenProps) {
+export function AccountScreen({ name, email, sessions, secondFactor = false }: AccountScreenProps) {
   const [state, action, pending] = useActionState(changeNameAction, IDLE, NAME_PERMALINK);
   const [closing, closeAction, closingPending] = useActionState(closeSessionsAction, SESSIONS_IDLE, SESSIONS_PERMALINK);
   const [password, passwordAction, passwordPending] = useActionState(changePasswordAction, PASSWORD_IDLE, PASSWORD_PERMALINK);
@@ -148,7 +150,7 @@ export function AccountScreen({ name, email, sessions }: AccountScreenProps) {
         {email !== null && <p>{email}</p>}
         <p className="text-body-s text-text-2">{text.emailNote}</p>
       </section>
-      <PasswordBlock state={password} action={passwordAction} pending={passwordPending} />
+      <PasswordBlock recoverOnly={secondFactor} state={password} action={passwordAction} pending={passwordPending} />
       <SessionsBlock sessions={sessions} state={closing} action={closeAction} pending={closingPending} />
       <p className="text-body-s">
         <TextLink href={ROUTES.home}>{text.backHome}</TextLink>

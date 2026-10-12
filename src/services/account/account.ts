@@ -63,6 +63,7 @@ export type { AccountDependencies, AuthPort } from "./deps";
 export type { AccountForm, FieldErrors, RegistrationForm } from "./forms";
 export type {
   AccountProfile,
+  AccountSecondFactor,
   AccountSessions,
   NameChange,
   OpenSession,
@@ -388,5 +389,6 @@ export const {
   accountSessions,
   closeSession,
   closeOtherSessions,
+  accountSecondFactor,
   changePassword,
 } = services;

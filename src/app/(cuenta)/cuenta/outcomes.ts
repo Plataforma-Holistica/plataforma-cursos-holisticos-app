@@ -165,6 +165,8 @@ export type PasswordState =
   /** `retryAt`: cuándo se puede volver a intentar, en formato ISO. */
   | { kind: "throttled"; retryAt: string; attempt: number }
   | { kind: "failed"; reason: "capped" | "unavailable"; attempt: number }
+  /** La cuenta tiene segundo factor: el bloque deja de ofrecer el formulario. */
+  | { kind: "recover_only" }
   | { kind: "suspended" };
 
 const MAX_PASSWORD = 1_024;
@@ -196,12 +198,16 @@ export type PasswordOutcome =
   | { kind: "changed" }
   | { kind: "invalid"; fields: PasswordFields }
   | { kind: "throttled"; retryAt: string }
-  | { kind: "capped" };
+  | { kind: "capped" }
+  | { kind: "recover_only" };
 
 export function changePasswordOutcome(result: PasswordChange): PasswordOutcome {
   switch (result.kind) {
     case "changed":
       return { kind: "changed" };
+    case "second_factor":
+      // No es un error ni hay a dónde ir: el bloque dice cómo se cambia en esa cuenta.
+      return { kind: "recover_only" };
     case "invalid":
       return { kind: "invalid", fields: result.fields };
     case "throttled":

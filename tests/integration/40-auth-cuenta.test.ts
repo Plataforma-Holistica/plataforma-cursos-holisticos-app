@@ -27,8 +27,10 @@ import {
   memoryJar,
   networkDown,
   recordingFetch,
+  secondFactorFor,
   sessionCount,
   userIdOf,
+  verifiedFactors,
   type KnownUser,
 } from "./helpers/auth";
 import { lastMailTo, mailsTo, tokenHashIn, waitForMails } from "./helpers/mailbox";
@@ -479,6 +481,24 @@ describe("recuperar la contraseña", () => {
     await sentinel();
     expect((await mailsTo(account.email)).map((mail) => mail.subject)).toEqual(["Cambia tu contraseña"]);
     expect(await closeAllSessions(redeemed)).toBe("closed");
+  });
+
+  it("con segundo factor, la sesión del canje no alcanza: la fija por administración, y el factor sigue", async () => {
+    // Con un factor verificado Auth exige una sesión de segundo nivel para cambiar la
+    // contraseña, y la de un enlace es de primer nivel. Quien abrió el enlace controla el buzón.
+    const account = await user();
+    const factor = await secondFactorFor(account);
+    const redeemed = await recovering(account);
+    expect(redeemed.claims.aal).toBe("aal1");
+
+    const chosen = password();
+    expect(await setRecoveredPassword(redeemed, chosen)).toEqual({ result: "ok", via: "administration", secondFactor: true });
+
+    expect(await sessionCount(account.id)).toBe(0);
+    expect((await signIn(memoryJar(), account.email, account.password)).ok).toBe(false);
+    expect((await signIn(memoryJar(), account.email, chosen)).ok).toBe(true);
+    // La contraseña cambió; el segundo factor, no.
+    expect(await verifiedFactors(account.id)).toEqual([factor.factorId]);
   });
 
   it("si alguien cerró la sesión del canje antes de guardar, la fija por administración", async () => {

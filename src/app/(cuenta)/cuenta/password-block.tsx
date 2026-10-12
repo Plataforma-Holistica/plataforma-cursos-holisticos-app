@@ -23,6 +23,11 @@ import { checkPasswordForm, readPasswordForm, type PasswordFields, type Password
 // Una contraseña nunca vuelve en una respuesta: después de cada envío los dos campos se
 // arman de nuevo, vacíos. Lo que el navegador detiene antes de enviar no cuenta como un
 // intento, y deja lo escrito como está.
+//
+// Una cuenta con segundo factor no ve el formulario: Auth le exige una sesión de segundo
+// nivel para cambiar la contraseña, así que la cambia recuperándola desde su correo. El
+// bloque se lo dice. Lo sabe la página al pintar, y si la cuenta ganó su factor con la
+// pantalla ya abierta, lo descubre el envío.
 
 const text = account.manage;
 // Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
@@ -36,12 +41,14 @@ const CURRENT_ERRORS = { required: text.currentPasswordRequired, mismatch: text.
 const NOTHING: PasswordFields = {};
 
 export interface PasswordBlockProps {
+  /** La cuenta tiene un segundo factor verificado, como lo leyó la página. */
+  recoverOnly: boolean;
   state: PasswordState;
   action: (form: FormData) => void;
   pending: boolean;
 }
 
-export function PasswordBlock({ state, action, pending }: PasswordBlockProps) {
+export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordBlockProps) {
   const sent = "attempt" in state ? state.attempt : 0;
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
   const [local, checked] = useLocalChecks<PasswordFields>(sent);
@@ -72,6 +79,20 @@ export function PasswordBlock({ state, action, pending }: PasswordBlockProps) {
   const round = sent + local.checks;
   // El freno no depende de lo que se escriba: mientras dure la espera, no hay otro intento.
   const locked = state.kind === "throttled" && !waitIsOver;
+
+  if (recoverOnly || state.kind === "recover_only") {
+    return (
+      <section id={PASSWORD_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
+        <h2 id={TITLE_ID} className="text-h3">
+          {text.passwordTitle}
+        </h2>
+        <p>{text.passwordWithSecondFactor}</p>
+        <p className="text-body-s">
+          <TextLink href={ROUTES.recover}>{text.recoverPassword}</TextLink>
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section id={PASSWORD_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">

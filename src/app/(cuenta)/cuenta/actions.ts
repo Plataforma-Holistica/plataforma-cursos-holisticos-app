@@ -117,6 +117,8 @@ export async function changePasswordAction(previous: PasswordState, form: FormDa
       return { kind: "throttled", retryAt: outcome.retryAt, attempt };
     case "capped":
       return { kind: "failed", reason: "capped", attempt };
+    case "recover_only":
+      return { kind: "recover_only" };
     case "suspended":
       return { kind: "suspended" };
     case "unavailable":

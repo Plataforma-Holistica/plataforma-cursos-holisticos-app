@@ -266,6 +266,10 @@ describe("qué hace el bloque de la contraseña con lo que contesta el servicio"
     });
   });
 
+  it("una cuenta con segundo factor: el bloque le dice que la recupere, sin irse a ningún lado", () => {
+    expect(changePasswordOutcome({ kind: "second_factor" })).toEqual({ kind: "recover_only" });
+  });
+
   it("con el tope por hora, y cuando no se supo", () => {
     expect(changePasswordOutcome({ kind: "capped" })).toEqual({ kind: "capped" });
     expect(changePasswordOutcome({ kind: "unavailable" })).toEqual({ kind: "unavailable" });

@@ -172,6 +172,9 @@ export const account = defineMessages({
     changingPassword: "Cambiando…",
     passwordChanged: "Tu contraseña cambió. Cerramos tus demás sesiones.",
     forgotCurrent: "No recuerdo mi contraseña actual",
+    // Con segundo factor la contraseña no se cambia desde la cuenta: se recupera por correo.
+    passwordWithSecondFactor: "Tu cuenta tiene segundo factor. Para cambiar tu contraseña, recupérala desde tu correo.",
+    recoverPassword: "Recuperar mi contraseña",
     backHome: "Volver al inicio",
     sessionsTitle: "Sesiones abiertas",
     sessionsIntro: "Los navegadores en los que tu cuenta tiene una sesión abierta.",

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { requireSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
-import { accountProfile, accountSessions, sessionEmail } from "@/services/account/account";
+import { accountProfile, accountSecondFactor, accountSessions, sessionEmail } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 
 import { SuspendedScreen, UnavailableScreen } from "../_lib/states";
@@ -13,7 +13,8 @@ import { AccountScreen } from "./screen";
 
 // PA-25 · Cuenta (`/cuenta`). Pide sesión y cuenta completa. Lo que pinta de la persona se
 // lee con las claims con que la guarda la dejó pasar: su nombre, como ella misma, y sus
-// sesiones abiertas, que la base solo entrega de quien actúa.
+// sesiones abiertas, que la base solo entrega de quien actúa. Y si la cuenta tiene segundo
+// factor, porque entonces su contraseña no se cambia desde aquí.
 
 export const metadata: Metadata = { title: messages.account.manage.pageTitle };
 
@@ -28,6 +29,16 @@ export default async function AccountPage() {
   const sessions = await accountSessions(session.claims);
   if (sessions.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.account} withSession />;
 
+  const factor = await accountSecondFactor(session.claims);
+  if (factor.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.account} withSession />;
+
   const email = await sessionEmail(await cookieReader());
-  return <AccountScreen name={profile.name ?? ""} email={email} sessions={sessionRows(sessions.sessions)} />;
+  return (
+    <AccountScreen
+      name={profile.name ?? ""}
+      email={email}
+      sessions={sessionRows(sessions.sessions)}
+      secondFactor={factor.verified}
+    />
+  );
 }
