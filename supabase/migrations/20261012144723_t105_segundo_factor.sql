@@ -35,8 +35,10 @@ alter table private.second_factor_attempts enable row level security;
 -- depende que el gancho pueda rechazar en vez de tumbarse. La forma se mira antes de
 -- convertir, un paso por sentencia.
 --
--- No tiene máximo propio: acepta todo entero positivo, que es lo que el guardián de los
--- parámetros deja guardar. Con cualquiera de ellos el cálculo de la espera cabe.
+-- No tiene máximo propio: acepta todo entero positivo que quepa, y con cualquiera de ellos
+-- el cálculo de la espera cabe. Que la combinación tenga sentido no lo mira esta función.
+-- El guardián de los parámetros deja guardar además cero, negativos y enteros más grandes:
+-- con esos el gancho rechaza todo. Que no se puedan guardar es asunto del guardián.
 
 create function private.second_factor_limit(p_key text) returns integer
 language plpgsql stable set search_path = ''
@@ -112,7 +114,12 @@ begin
   end if;
   -- Sin sus cuatro parámetros no hay regla que aplicar: no pasa nadie, y queda dicho.
   if v_threshold is null or v_base is null or v_top is null or v_forget is null then
-    raise warning 'private.second_factor_attempt: falta un parámetro del freno, o no es un entero de 1 en adelante. Se rechaza toda verificación del segundo factor.';
+    raise warning 'private.second_factor_attempt: se rechaza toda verificación del segundo factor. Falta, o no es un entero de 1 en adelante: %',
+      pg_catalog.concat_ws(', ',
+        case when v_threshold is null then 'INTENTOS_ANTES_DE_FRENO' end,
+        case when v_base is null then 'FRENO_ESPERA_BASE' end,
+        case when v_top is null then 'FRENO_ESPERA_TOPE' end,
+        case when v_forget is null then 'FRENO_OLVIDO' end);
     return v_unavailable;
   end if;
   v_factor := v_text::uuid;
@@ -140,7 +147,8 @@ begin
     return v_continue;
   end if;
 
-  v_count := coalesce(v_count, 0) + 1;
+  -- La cuenta se queda en el entero más grande: sumarle uno lanzaría.
+  v_count := least(coalesce(v_count, 0), 2147483646) + 1;
   if v_count < v_threshold then
     v_locked := null;
   else

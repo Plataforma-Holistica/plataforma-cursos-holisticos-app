@@ -7,7 +7,7 @@
 -- factor verificado, que es lo que decide cómo cambia su contraseña.
 begin;
 \ir _ayuda.psql
-select plan(59);
+select plan(61);
 
 select pruebas.alta('e0000000-0000-0000-0000-000000000001', 'con-factor@prueba.test');
 select pruebas.alta('e0000000-0000-0000-0000-000000000002', 'sin-factor@prueba.test');
@@ -259,9 +259,9 @@ select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '[5]'), 'reject', 'ni una l
 select is(pruebas.con_parametro('FRENO_OLVIDO', '9999999999999999999999'), 'reject',
   'ni uno que no cabe en ningún entero: se rechaza, no se lanza');
 select is(pruebas.con_parametro('FRENO_OLVIDO', '2147483648'), 'reject', 'tampoco por uno');
--- De uno en adelante vale cualquier entero, que es lo que acepta quien guarda los
--- parámetros: un máximo propio de esta función dejaría al equipo sin entrar con un valor
--- que la pantalla de parámetros habría aceptado.
+-- De uno en adelante vale cualquier entero que quepa: esta función no pone un máximo
+-- propio. Quien guarda los parámetros acepta además cero, negativos y enteros más grandes:
+-- con esos el gancho rechaza todo, como arriba.
 select is(pruebas.con_parametro('FRENO_OLVIDO', '2147483647'), 'continue', 'el entero más grande, sí');
 select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1'), 'continue', 'y uno, también');
 select is_empty(
@@ -292,6 +292,17 @@ select results_eq(
   $$select fallos, espera from pruebas.freno('fac70000-0000-0000-0000-000000000002')$$,
   $$values (2, make_interval(mins => 2147483647))$$,
   'con la espera en su tope');
+-- Tampoco la cuenta de fallos: en el entero más grande se queda ahí. No se llega fallando
+-- códigos, pero si lanzara, ese factor se quedaría sin freno.
+update private.second_factor_attempts
+  set failed_count = 2147483647, locked_until = clock_timestamp() - interval '1 second'
+  where factor_id = 'fac70000-0000-0000-0000-000000000002';
+select is(pruebas.intento('fac70000-0000-0000-0000-000000000002', false), 'reject',
+  'con la cuenta de fallos en el entero más grande, otro fallo frena igual');
+select results_eq(
+  $$select fallos, espera from pruebas.freno('fac70000-0000-0000-0000-000000000002')$$,
+  $$values (2147483647, make_interval(mins => 2147483647))$$,
+  'y la cuenta no pasa de ahí');
 
 select pruebas.limpiar();
 select * from finish();
