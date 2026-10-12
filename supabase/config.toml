@@ -330,6 +330,15 @@ max_frequency = "5s"
 # enabled = true
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
+# El freno de los códigos del segundo factor (T-105, RF-106). Auth llama a esta función de
+# la base en cada intento de verificar un código, venga de la aplicación o de quien llame
+# directo a Auth, y obedece si contesta que no. Si la función falta o lanza, Auth rechaza
+# toda verificación: nadie del equipo entra. En el proyecto alojado, que este gancho se
+# pueda prender depende del plan contratado.
+[auth.hook.mfa_verification_attempt]
+enabled = true
+uri = "pg-functions://postgres/private/second_factor_attempt"
+
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
 [auth.sms.twilio]
 enabled = false
@@ -339,14 +348,19 @@ message_service_sid = ""
 auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 
 # Multi-factor-authentication is available to Supabase Pro plan.
+# (Ese comentario es de fábrica. La documentación de Supabase dice que TOTP es gratuito y
+# viene prendido en todo proyecto alojado: se confirma en el panel antes de producción.)
 [auth.mfa]
 # Control how many MFA factors can be enrolled at once per user.
 max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
+# Prendido desde T-105: es el segundo factor de los administradores (RF-106). Queda
+# prendido para toda cuenta. Con un factor verificado, Auth exige una sesión de segundo
+# nivel para cambiar la contraseña: por eso esas cuentas la cambian recuperándola.
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
 [auth.mfa.phone]
