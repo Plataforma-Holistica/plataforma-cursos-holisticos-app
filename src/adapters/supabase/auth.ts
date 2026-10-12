@@ -150,6 +150,38 @@ interface Redemption {
 
 const redemptions = new WeakMap<object, Redemption>();
 
+declare const provenPassword: unique symbol;
+
+/**
+ * La prueba de que quien pide sabe la contraseña actual de una cuenta: lo que queda después
+ * de entrar con ella para cambiarla. Solo lo produce este módulo, con una entrada recién
+ * hecha, y es lo único con lo que se cambia la contraseña de una cuenta que ya tiene sesión.
+ *
+ * Existe porque Auth no pide la contraseña actual: con cualquier sesión de menos de un día
+ * deja fijar otra. Si la contraseña se cambiara con la sesión del navegador, a quien se
+ * llevara una cookie le bastaría eso para quedarse con la cuenta. Un objeto con la misma
+ * forma, armado en otro lugar, no sirve.
+ */
+export interface ProvenPassword {
+  /** Sin valor: existe para que un objeto armado a mano no pase por uno de estos ni al compilar. */
+  readonly [provenPassword]: never;
+  /** Las claims de la sesión con que se comprobó. Esa sesión nunca llega al navegador. */
+  readonly claims: VerifiedClaims;
+}
+
+export type PasswordProof =
+  /** `claims` va también aquí arriba: es lo que la guarda necesita para admitir esa entrada. */
+  | { ok: true; claims: VerifiedClaims; proven: ProvenPassword }
+  | { ok: false; reason: SignInFailure };
+
+interface Proof {
+  accessToken: string;
+  /** Una prueba alcanza para un solo intento de cambiar la contraseña. */
+  spent: boolean;
+}
+
+const proofs = new WeakMap<object, Proof>();
+
 export interface AuthDependencies {
   /** Solo para pruebas: simular un servidor de identidad que no contesta o que limita. */
   fetch?: Fetch;
@@ -493,6 +525,76 @@ export function createAuth(dependencies: AuthDependencies = {}) {
   const discardRedemption = (redeemed: RedeemedLink) => close(redeemed, "local");
 
   /**
+   * Comprueba la contraseña actual de una cuenta entrando con ella, sin escribir ninguna
+   * cookie: la sesión que abre se queda aquí, y solo sirve para `changeProvenPassword`.
+   * Quien llama tiene que cerrarla después, con `discardProof` o `closeAllWithProof`.
+   *
+   * Es una entrada como cualquier otra para Auth: cuenta para su límite y contesta lo mismo
+   * que `signIn`. Quien llama pone el freno de intentos antes.
+   */
+  async function provePassword(email: string, password: string): Promise<PasswordProof> {
+    let accessToken: string | null = null;
+    try {
+      const { data, error } = await oneShotClient(baseFetch).signInWithPassword({ email, password });
+      if (error) return { ok: false, reason: classify("sign_in", failureFromSdk(error), signInFailure) };
+      accessToken = text(data.session?.access_token);
+      if (!accessToken) return { ok: false, reason: "unknown" };
+
+      const inspection = await inspect(accessToken);
+      if (inspection.state !== "valid") {
+        await logout(accessToken, "local");
+        return { ok: false, reason: "unknown" };
+      }
+      const proven = Object.freeze({ claims: inspection.claims }) as ProvenPassword;
+      proofs.set(proven, { accessToken, spent: false });
+      return { ok: true, claims: inspection.claims, proven };
+    } catch (error) {
+      if (accessToken) await logout(accessToken, "local");
+      return { ok: false, reason: classify("sign_in", failureFromSdk(error), signInFailure) };
+    }
+  }
+
+  /**
+   * Cambia la contraseña de la cuenta cuya contraseña actual se acaba de comprobar. Va con
+   * la sesión de esa comprobación: Auth manda el aviso «tu contraseña cambió» (CO-26) y
+   * cierra todas las demás sesiones de la cuenta. La de la comprobación sigue viva.
+   *
+   * No tiene segundo camino por la API de administración: si la contraseña es la que ya
+   * tenía, o Auth la rechaza, no cambia nada. Una prueba alcanza para un solo intento.
+   */
+  async function changeProvenPassword(proven: ProvenPassword, password: string): Promise<PasswordSetResult> {
+    const proof = proofs.get(proven);
+    if (!proof || proof.spent) return "rejected";
+    proof.spent = true;
+    const call = await callAuth({
+      method: "PUT",
+      path: "/user",
+      accessToken: proof.accessToken,
+      body: { password },
+      fetch: baseFetch,
+    });
+    return call.ok ? "ok" : classify("set_password", call.failure, passwordSetFailure);
+  }
+
+  async function closeProof(proven: ProvenPassword, scope: "local" | "global"): Promise<Closing> {
+    const proof = proofs.get(proven);
+    if (!proof) return "unknown";
+    // Cerrada o no, esta prueba ya no cambia ninguna contraseña.
+    proof.spent = true;
+    return logout(proof.accessToken, scope);
+  }
+
+  /** Cierra solo la sesión de la comprobación, sin tocar las demás. */
+  const discardProof = (proven: ProvenPassword) => closeProof(proven, "local");
+
+  /**
+   * Cierra todas las sesiones de la cuenta, con la de la comprobación: para cuando el cambio
+   * quedó a medias y no se sabe qué sesión vale. Se puede volver a llamar si contestó
+   * `unknown`, mientras el token de la comprobación no haya vencido.
+   */
+  const closeAllWithProof = (proven: ProvenPassword) => closeProof(proven, "global");
+
+  /**
    * Entra con correo y contraseña, y escribe la cookie de sesión en el tarro. No cierra la
    * sesión que el tarro ya traiga: eso lo hace antes quien llama, con `signOut`.
    */
@@ -650,6 +752,10 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     setRecoveredPassword,
     closeAllSessions,
     discardRedemption,
+    provePassword,
+    changeProvenPassword,
+    discardProof,
+    closeAllWithProof,
     signIn,
     readSession,
     refreshSession,
@@ -669,6 +775,10 @@ export const {
   setRecoveredPassword,
   closeAllSessions,
   discardRedemption,
+  provePassword,
+  changeProvenPassword,
+  discardProof,
+  closeAllWithProof,
   signIn,
   readSession,
   refreshSession,

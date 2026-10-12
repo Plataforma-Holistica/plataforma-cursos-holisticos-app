@@ -24,6 +24,10 @@ export type AuthPort = Pick<
   | "setRecoveredPassword"
   | "closeAllSessions"
   | "discardRedemption"
+  | "provePassword"
+  | "changeProvenPassword"
+  | "discardProof"
+  | "closeAllWithProof"
 >;
 
 export interface AccountDependencies {
