@@ -20,7 +20,7 @@ as $$
   select set_config('request.jwt.claims', '', true),
          set_config('app.actor_id', '', true),
          set_config('app.actor_kind', '', true),
-         set_config('app.actor_aal', '', true),
+         set_config('app.actor_session', '', true),
          set_config('app.reason', '', true),
          set_config('app.request_id', '', true),
          set_config('app.legal_drafts', '', true),
@@ -28,14 +28,78 @@ as $$
          set_config('role', 'none', true);
 $$;
 
--- Camino del usuario: una persona con sesión. aal2 es «con segundo factor».
-create function pruebas.como_usuario(p_id uuid, p_aal text default 'aal1') returns void
-language sql
+-- La sesión y el factor de pruebas de una persona: siempre los mismos, derivados de su
+-- identificador.
+create function pruebas.sesion(p_id uuid) returns uuid
+language sql immutable
+as $$ select md5('sesion:' || p_id::text)::uuid $$;
+
+create function pruebas.factor(p_id uuid) returns uuid
+language sql immutable
+as $$ select md5('factor:' || p_id::text)::uuid $$;
+
+-- Deja a una persona con todo lo que la puerta del equipo pide además de la capacidad
+-- (T-105): la cuenta reclamada, un factor verificado y atado a ella, y su sesión de pruebas
+-- anotada por la aplicación y en segundo nivel con ese factor, verificada ahora. Lo deja el
+-- dueño, como lo dejarían Supabase Auth y la aceptación de una invitación. Se puede llamar
+-- más de una vez.
+create function pruebas.equipar(p_id uuid) returns void
+language plpgsql
 as $$
-  select pruebas.limpiar();
-  select set_config('request.jwt.claims',
-           json_build_object('sub', p_id, 'role', 'authenticated', 'aal', p_aal)::text, true),
-         set_config('role', 'authenticated', true);
+begin
+  perform pruebas.limpiar();
+  perform set_config('app.claiming_account', 'on', true);
+  update public.profiles set password_reset_required = false where id = p_id;
+  perform set_config('app.claiming_account', '', true);
+  insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret)
+  values (pruebas.factor(p_id), p_id, 'equipo', 'totp', 'verified', now(), now(), 'JBSWY3DPEHPK3PXP')
+  on conflict (id) do update set status = 'verified';
+  insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
+  values (pruebas.sesion(p_id), p_id, 'aal2', pruebas.factor(p_id), now(), now())
+  on conflict (id) do update set aal = 'aal2', factor_id = excluded.factor_id, not_after = null;
+  insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+  values (md5('verificacion:' || p_id::text)::uuid, pruebas.sesion(p_id), 'totp', now(), now())
+  on conflict (id) do update set updated_at = now();
+  insert into private.app_sessions (session_id, profile_id) values (pruebas.sesion(p_id), p_id)
+  on conflict (session_id) do nothing;
+  -- Atar un factor queda en la auditoría, y aquí no hay persona que lo haga.
+  perform set_config('app.actor_kind', 'system', true);
+  insert into private.admin_factors (profile_id, factor_id) values (p_id, pruebas.factor(p_id))
+  on conflict (profile_id) do nothing;
+  perform set_config('app.actor_kind', '', true);
+end
+$$;
+
+-- Baja la sesión de pruebas de una persona a primer nivel, como queda en Auth la de quien
+-- entró con su contraseña y no ha dado su código. Si no tiene sesión de pruebas, no hace nada.
+create function pruebas.sin_codigo(p_id uuid) returns void
+language plpgsql
+as $$
+begin
+  perform pruebas.limpiar();
+  update auth.sessions set aal = 'aal1', factor_id = null where id = pruebas.sesion(p_id);
+  delete from auth.mfa_amr_claims where session_id = pruebas.sesion(p_id);
+end
+$$;
+
+-- Camino del usuario: una persona con sesión. aal2 es «con segundo factor», y desde T-105
+-- eso no lo dice el token: la base lo lee de la sesión. Por eso con aal2 la persona queda
+-- equipada de verdad, y con aal1 su sesión de pruebas baja a primer nivel.
+create function pruebas.como_usuario(p_id uuid, p_aal text default 'aal1') returns void
+language plpgsql
+as $$
+begin
+  if p_aal = 'aal2' then
+    perform pruebas.equipar(p_id);
+  else
+    perform pruebas.sin_codigo(p_id);
+  end if;
+  perform pruebas.limpiar();
+  perform set_config('request.jwt.claims',
+            json_build_object('sub', p_id, 'role', 'authenticated', 'aal', p_aal,
+                              'session_id', pruebas.sesion(p_id))::text, true),
+          set_config('role', 'authenticated', true);
+end
 $$;
 
 -- Visitante: sin sesión.
@@ -47,14 +111,26 @@ as $$
          set_config('role', 'anon', true);
 $$;
 
--- Camino de servicio: el servidor, que declara en la transacción por quién actúa.
+-- Camino de servicio: el servidor, que declara en la transacción por quién actúa y con qué
+-- sesión. El nivel no se declara: la base lo lee de la sesión, igual que en el otro camino.
+-- Por omisión quien tiene o tuvo una capacidad queda equipado, que es como actúa de verdad
+-- alguien del equipo; a las demás cuentas no se les toca nada, porque casi todas las pruebas
+-- que pasan por aquí son de cuentas comunes y miran su marca y sus sesiones.
 create function pruebas.como_servicio(p_actor uuid default null, p_aal text default 'aal2') returns void
-language sql
+language plpgsql
 as $$
-  select pruebas.limpiar();
-  select set_config('app.actor_id', coalesce(p_actor::text, ''), true),
-         set_config('app.actor_aal', case when p_actor is null then '' else p_aal end, true),
-         set_config('role', 'app_service', true);
+begin
+  perform pruebas.limpiar();
+  if p_actor is not null and p_aal <> 'aal2' then
+    perform pruebas.sin_codigo(p_actor);
+  elsif exists (select 1 from public.admin_capabilities c where c.profile_id = p_actor) then
+    perform pruebas.equipar(p_actor);
+  end if;
+  perform pruebas.limpiar();
+  perform set_config('app.actor_id', coalesce(p_actor::text, ''), true),
+          set_config('app.actor_session', coalesce(pruebas.sesion(p_actor)::text, ''), true),
+          set_config('role', 'app_service', true);
+end
 $$;
 
 -- Un trabajo del sistema, por el camino de servicio.

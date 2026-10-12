@@ -43,9 +43,10 @@ export interface Tx {
 /** Una persona, por la que el servidor escribe después de validar. */
 export interface ServerActor {
   /**
-   * Las claims que devolvió `verifyAccessToken`. De ahí salen quién actúa y con qué nivel
-   * (la base exige `aal2` para lo administrativo): no los declara quien llama, porque
-   * este es el camino que salta la seguridad por fila.
+   * Las claims que devolvió `verifyAccessToken`. De ahí salen quién actúa y con qué sesión:
+   * no los declara quien llama, porque este es el camino que salta la seguridad por fila.
+   * El nivel no viaja: para lo administrativo la base lo lee de esa sesión, que es lo que
+   * Supabase Auth tiene, y no del token, que puede decir de más hasta que vence (T-105).
    */
   claims: VerifiedClaims;
   /** Por qué se hace el cambio. Queda en la auditoría. */
@@ -64,7 +65,7 @@ interface Settings {
   role: "app_service" | "authenticated";
   claims: string;
   actorId: string;
-  actorAal: string;
+  actorSession: string;
   actorKind: string;
   reason: string;
   requestId: string;
@@ -87,7 +88,7 @@ const PREPARE = `
     set_config('request.jwt.claim.sub', '', true),
     set_config('request.jwt.claim.role', '', true),
     set_config('app.actor_id', $2, true),
-    set_config('app.actor_aal', $3, true),
+    set_config('app.actor_session', $3, true),
     set_config('app.actor_kind', $4, true),
     set_config('app.reason', $5, true),
     set_config('app.request_id', $6, true),
@@ -214,7 +215,7 @@ async function transaction<T>(settings: Settings, fn: (tx: Tx) => Promise<T>): P
     await client.query(PREPARE, [
       settings.claims,
       settings.actorId,
-      settings.actorAal,
+      settings.actorSession,
       settings.actorKind,
       settings.reason,
       settings.requestId,
@@ -302,7 +303,7 @@ export async function asUser<T>(claims: VerifiedClaims, fn: (tx: Tx) => Promise<
       role: "authenticated",
       claims: json,
       actorId: "",
-      actorAal: "",
+      actorSession: "",
       actorKind: "",
       reason: "",
       requestId: "",
@@ -327,7 +328,7 @@ export async function asServer<T>(actor: ServerActor, fn: (tx: Tx) => Promise<T>
       role: "app_service",
       claims: "",
       actorId: claims.userId,
-      actorAal: claims.aal,
+      actorSession: claims.sessionId ?? "",
       actorKind: "",
       reason: actor.reason ?? "",
       requestId: actor.requestId ?? "",
@@ -343,7 +344,7 @@ export async function asSystem<T>(context: SystemContext, fn: (tx: Tx) => Promis
       role: "app_service",
       claims: "",
       actorId: "",
-      actorAal: "",
+      actorSession: "",
       actorKind: "system",
       reason: context.reason ?? "",
       requestId: context.requestId ?? "",

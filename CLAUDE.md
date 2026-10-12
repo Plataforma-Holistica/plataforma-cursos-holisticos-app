@@ -584,9 +584,10 @@ falla. Doce precisiones que la tabla no dice:
     por ella. Solo acepta las claims que devolvió `verifyAccessToken`, y solo mientras su
     token no haya vencido.
   - `asServer({ claims, reason, requestId }, fn)`: una escritura que depende de una
-    validación, a nombre de quien la pidió. Quién actúa y con qué nivel salen de esas
+    validación, a nombre de quien la pidió. Quién actúa y con qué sesión salen de esas
     mismas claims verificadas: no se declaran a mano, porque este camino salta la
-    seguridad por fila.
+    seguridad por fila. El nivel ya no viaja: para lo administrativo la base lo lee de
+    esa sesión (abajo, «la puerta del equipo»).
   - `asSystem(contexto, fn)`: un trabajo sin persona con sesión detrás (un aviso de cobro,
     un cierre).
 
@@ -701,7 +702,7 @@ en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.t
 un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
 revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
-En la base, seis reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+En la base, siete reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
 - **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
   sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
@@ -710,8 +711,22 @@ En la base, seis reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   que la migración no conceda a mano. `private.schema_violations()` debe devolver cero
   filas, y `supabase/tests/01_estructura.test.sql` lo exige.
 - **Una persona con sesión casi no escribe.** Lo que depende de una validación va por el
-  servidor (`app_service`), que declara en la transacción por quién actúa
-  (`app.actor_id`, `app.actor_aal`) o que es el sistema (`app.actor_kind`).
+  servidor (`app_service`), que declara en la transacción por quién actúa y con qué
+  sesión (`app.actor_id`, `app.actor_session`) o que es el sistema (`app.actor_kind`).
+- **Ser del equipo lo dice la base, no el token** (T-105). `private.has_capability()` y
+  `private.actor_has_capability()`, que usan todas las políticas y los disparadores
+  administrativos, pasan por una sola puerta (`private.team_session()`), en cada consulta.
+  Pide una capacidad activa, un factor atado a la persona (`private.admin_factors`) y una
+  sesión que la aplicación abrió y que Supabase Auth tiene en segundo nivel con ese mismo
+  factor, verificada hace menos de `VIGENCIA_SEGUNDO_FACTOR_HORAS`. Un token ya emitido
+  sigue diciendo `aal2` hasta que vence, y con una sesión verificada cualquiera cambia su
+  factor llamando directo a Auth: por eso no se le cree al token. Quien no tiene la
+  capacidad no llega a leer nada de Auth, porque esas funciones viven en políticas de
+  tablas que lee cualquier cuenta. Sin el parámetro, o con uno que no vale, no pasa nadie.
+  Quién ata un factor llega con las invitaciones; mientras, nadie pasa la puerta. En las
+  pruebas de base, «segundo nivel» es una sesión de equipo de verdad: la deja
+  `pruebas.equipar()`, que llaman `pruebas.como_usuario(…, 'aal2')` y, para quien tiene
+  una capacidad, `pruebas.como_servicio()`.
 - **La prueba primero**, en `supabase/tests/`, y se la ve fallar antes de escribir la
   migración. Las migraciones se aplican solo en la base local.
 - **En `profiles` el servidor escribe por columnas.** `app_service` no tiene `update` de la

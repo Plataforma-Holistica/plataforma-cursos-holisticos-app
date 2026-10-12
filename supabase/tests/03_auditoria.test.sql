@@ -11,6 +11,12 @@ select pruebas.alta('f0000000-0000-0000-0000-000000000001', 'finanzas@prueba.tes
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000001', 'config');
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000002', 'config');
 select pruebas.dar_capacidad('f0000000-0000-0000-0000-000000000001', 'finance');
+-- Desde T-105 una sesión de segundo nivel es un hecho de la base, y atar un factor deja su
+-- renglón de auditoría. Quien va a actuar así queda equipado desde ahora, para que más abajo
+-- cambiar de persona no escriba nada: esta prueba cuenta renglones.
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('f0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('a0000000-0000-0000-0000-000000000001');
 
 -- Un cambio hecho por una persona, con motivo y con la liga al registro técnico.
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
