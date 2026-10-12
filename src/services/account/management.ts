@@ -92,9 +92,10 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
     } catch {
       // Antes de darlo por caída se le vuelve a preguntar a la guarda de sesión: una cuenta
       // que cambió a media operación no es una falla, y se contesta lo que la guarda dice
-      // ahora. Si insiste en que pasa, lo que falló fue guardar, y eso sí se reporta.
+      // ahora. Si insiste en que pasa, o tampoco supo, eso no explica el fallo: lo que falló
+      // fue guardar, y se reporta aquí, sin contar con que la guarda reporte lo suyo.
       const now = await core.checkSession(reader);
-      if (now.kind !== "pass") return { kind: "session", check: now };
+      if (now.kind !== "pass" && now.kind !== "unavailable") return { kind: "session", check: now };
       await deps.report("account_unavailable");
       return { kind: "unavailable" };
     }

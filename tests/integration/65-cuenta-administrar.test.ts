@@ -69,12 +69,19 @@ async function auditRows(): Promise<number> {
   return rows[0]?.n ?? -1;
 }
 
-/** Espera a que el servidor quede detenido por un candado: su escritura ya llegó a la fila. */
-async function serverWaitsForLock(): Promise<void> {
+/**
+ * Espera a que el servidor quede detenido por esa sesión de la base: su escritura ya llegó
+ * a la fila que ella tiene tomada. Mira quién bloquea, no solo que alguien espere: otro
+ * candado cualquiera daría un «ya espera» falso, y la prueba pasaría sin correr la carrera.
+ */
+async function serverWaitsFor(blocker: Client): Promise<void> {
+  const held = await blocker.query<{ pid: number }>("select pg_backend_pid() as pid");
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const rows = await ownerQuery<{ n: number }>(
-      "select count(*)::int as n from pg_stat_activity where usename = 'app_service' and wait_event_type = 'Lock'",
+      `select count(*)::int as n from pg_stat_activity
+       where usename = 'app_service' and wait_event_type = 'Lock' and $1::int = any(pg_blocking_pids(pid))`,
+      [held.rows[0]?.pid ?? -1],
     );
     if ((rows[0]?.n ?? 0) > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -82,8 +89,17 @@ async function serverWaitsForLock(): Promise<void> {
   throw new Error("El servidor nunca llegó a esperar la fila del perfil.");
 }
 
-/** El servicio con una guarda que contesta lo que se le diga, y lo que reportó. */
-function managementWith(check: SessionCheck) {
+/**
+ * El servicio con una guarda que contesta lo que se le diga, y lo que reportó. Con varias
+ * respuestas las da en orden, y repite la última.
+ */
+function managementWith(...checks: [SessionCheck, ...SessionCheck[]]) {
+  const answers: SessionCheck[] = [...checks];
+  const next = (): SessionCheck => {
+    const [first, ...later] = answers;
+    if (later.length > 0) answers.shift();
+    return first ?? checks[0];
+  };
   const reported: FailureCode[] = [];
   const management = createManagement(
     {
@@ -93,7 +109,7 @@ function managementWith(check: SessionCheck) {
         return Promise.resolve();
       },
     },
-    { checkSession: () => Promise.resolve(check) },
+    { checkSession: () => Promise.resolve(next()) },
   );
   return { ...management, reported };
 }
@@ -330,13 +346,14 @@ describe("sin una sesión que pase la guarda no se cambia nada", () => {
     const services = testServices();
     const owner = new Client({ connectionString: localOwnerUrl() });
     await owner.connect();
+    let changing: ReturnType<typeof services.changeName> | undefined;
     try {
       await owner.query("begin");
       await owner.query("select set_config('app.actor_id', $1, true)", [account.id]);
       await owner.query("update public.profiles set adult_declared_at = null where id = $1", [account.id]);
 
-      const changing = services.changeName(jar, { name: "Beatriz" });
-      await serverWaitsForLock();
+      changing = services.changeName(jar, { name: "Beatriz" });
+      await serverWaitsFor(owner);
       await owner.query("commit");
 
       // No es una caída: se contesta lo que la guarda dice ahora, y no se reporta nada.
@@ -346,6 +363,8 @@ describe("sin una sesión que pase la guarda no se cambia nada", () => {
       });
     } finally {
       await owner.query("rollback").catch(() => undefined);
+      // Si algo falló arriba, el cambio que esperaba la fila sigue vivo: se le deja terminar aquí.
+      await changing?.catch(() => undefined);
       await owner.end();
     }
     expect(services.reported).toEqual([]);
@@ -367,6 +386,15 @@ describe("sin una sesión que pase la guarda no se cambia nada", () => {
     expect(await management.changeName(jar, { name: "Beatriz" })).toEqual({ kind: "unavailable" });
     expect(management.reported).toEqual(["account_unavailable"]);
     expect(await profileOf(account.id)).toMatchObject({ display_name: null });
+  });
+
+  // Si guardar falla y la guarda, al volver a preguntarle, tampoco supo, eso no explica el
+  // fallo: lo que falló fue guardar, y alguien tiene que saberlo.
+  it("si guardar falla y la guarda después no supo, se reporta como fallo al guardar", async () => {
+    const claims = await claimsWithoutProfile();
+    const management = managementWith({ kind: "pass", claims }, { kind: "unavailable" });
+    expect(await management.changeName(memoryJar(), { name: "Beatriz" })).toEqual({ kind: "unavailable" });
+    expect(management.reported).toEqual(["account_unavailable"]);
   });
 
   it("si la cuenta desapareció entre la guarda y la escritura, no dice «guardado»", async () => {

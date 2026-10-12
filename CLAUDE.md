@@ -342,8 +342,9 @@ falla. Doce precisiones que la tabla no dice:
     importa y una prueba lo fija: se guarda primero, que es lo que toma la fila, y se
     evalúa después. Si guardar falla, antes de darlo por caída se le vuelve a preguntar a
     la guarda de sesión: una cuenta que cambió a media operación no es una falla, y se
-    contesta lo que la guarda dice ahora. Solo si insiste en que pasa es «no se supo», y
-    se reporta. Una escritura que no tocó una fila tampoco es «guardado». Una prueba
+    contesta lo que la guarda dice ahora. Si insiste en que pasa, o tampoco supo, es «no
+    se supo» y se reporta ahí mismo, sin contar con que la guarda reporte lo suyo. Una
+    escritura que no tocó una fila tampoco es «guardado». Una prueba
     exige que la lectura vaya por `asUser` y la escritura por `asServer`.
   - El correo que la pantalla de la cuenta muestra es el de `sessionEmail`. No se le
     pregunta a Auth porque hoy ningún camino cambia un correo; cuando exista el cambio de
