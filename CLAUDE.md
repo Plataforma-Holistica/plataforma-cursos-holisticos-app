@@ -301,9 +301,11 @@ falla. Doce precisiones que la tabla no dice:
       bloque lleva un solo estado. Lo que el formulario manda es qué botón se pulsó, y
       nada sobre de quién es la cuenta. Cuando el botón pulsado desaparece con la
       respuesta (su fila se fue), no hay a dónde devolver el foco: lo toma el aviso del
-      resultado, que entonces no es además una región viva. Solo lo toma si el foco quedó
-      sin dueño o sigue en el bloque: a quien ya se fue a escribir a otro lado no se lo
-      quita. Lo que dice «Cerrando…» sí es una región viva, y existe desde antes de cargar.
+      resultado, que entonces no es además una región viva. Lo toma si nadie más lo tiene:
+      si el foco está en algo que contiene al aviso (el documento, la pantalla, el bloque)
+      o en el propio bloque. A quien ya se fue a escribir a otro lado no se lo quita, y
+      entonces el resultado se le dice por una región viva aparte, que existe desde antes
+      de cargar, igual que la que dice «Cerrando…»: sin eso no se enteraría.
     - Los estados de todos los bloques viven en la pantalla, no en cada bloque: cualquiera
       puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
     - Lo que un bloque pinta de la base llega ya en palabras desde la página (`rows.ts`):
@@ -346,7 +348,8 @@ falla. Doce precisiones que la tabla no dice:
   `management.ts`: por ahora, lo que la pantalla de la cuenta pinta, el cambio de nombre y
   las sesiones abiertas.
   - `accountSessions(claims)` da las sesiones abiertas de la cuenta, que son las anotadas y
-    vivas, y dice cuál es la de quien pide. Si la de quien pide no viene (se cerró desde
+    vivas, y dice cuál es la de quien pide: lo decide la base, que compara identificadores
+    y no textos, igual que al cerrar. Si la de quien pide no viene (se cerró desde
     otro lado entre la guarda y la lectura) contesta «no se supo» sin reportar nada: no es
     una caída, y lo siguiente que la persona pida pasa otra vez por la guarda. «Última
     actividad» es la última vez que Auth renovó el token de esa sesión: no se mueve con
@@ -401,11 +404,14 @@ falla. Doce precisiones que la tabla no dice:
     transacción. Son la única manera en que el servidor borra una sesión de Auth: no tiene
     permisos sobre esa tabla. Ninguna recibe de quién es la cuenta. Las dos reciben la
     sesión con la que se pide, que tiene que ser de quien actúa, estar anotada y seguir
-    viva, y que no se cierra por ahí. Toman el candado de fila del perfil, el mismo de
-    `note_session` y de `claim_account`, y se niegan a correr fuera de read committed: sin
-    el candado, dos «cerrar las demás» a la vez desde dos sesiones de la misma cuenta se
-    borraban una a la otra y la cuenta quedaba sin ninguna. Con él van una tras otra, y la
-    segunda no cierra nada. «Las demás» se borran por cuenta y no por lo anotado: así se
+    viva, y que no se cierra por ahí. Toman un candado de fila del perfil, que choca con
+    el de `note_session` y el de `claim_account` y entre sí, y se niegan a correr fuera de
+    read committed: sin el candado, dos «cerrar las demás» a la vez desde dos sesiones de
+    la misma cuenta se borraban una a la otra y la cuenta quedaba sin ninguna. Con él van
+    una tras otra, y la segunda no cierra nada. Es `for no key update`, el que no estorba
+    a quien inserta en una tabla que apunta al perfil; las dos funciones de antes usan
+    `for update`, y conviene pasarlas a este cuando una tabla de mucha escritura apunte a
+    `profiles`. «Las demás» se borran por cuenta y no por lo anotado: así se
     van también las abiertas directo en Auth. La guarda mira lo anotado en cada entrada,
     así que una sesión cerrada deja de pasar en el acto, sin esperar a que venza su token.
   - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo

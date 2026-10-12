@@ -26,35 +26,10 @@ const TITLE_ID = "cuenta-sesiones-titulo";
 
 const RESULTS = { one: text.closedOne, others: text.closedOthers, gone: text.alreadyClosed } as const;
 
-/**
- * Lo que contestó el último envío. Toma el foco al llegar: el botón que se pulsó suele ya
- * no existir, porque su fila se fue con la sesión, y sin esto el foco caería al documento.
- * El foco es también lo que se lo anuncia a quien usa lector de pantalla.
- *
- * No se lo quita a quien ya se fue a otra cosa: solo lo toma si el foco quedó sin dueño o
- * sigue en este bloque. Quien pulsó «Cerrar» y se puso a escribir su nombre sigue escribiendo.
- */
-function Result({ state }: { state: SessionsState }) {
-  const box = useRef<HTMLDivElement>(null);
-  const attempt = "attempt" in state ? state.attempt : 0;
-  useEffect(() => {
-    const notice = box.current;
-    if (attempt === 0 || notice === null) return;
-    const active = document.activeElement;
-    const free = active === null || active === document.body;
-    if (free || notice.closest("section")?.contains(active) === true) notice.focus();
-  }, [attempt]);
-
-  if (state.kind !== "closed" && state.kind !== "unavailable") return null;
-  return (
-    <div ref={box} tabIndex={-1}>
-      {state.kind === "closed" ? (
-        <InlineAlert tone="success">{RESULTS[state.what]}</InlineAlert>
-      ) : (
-        <InlineAlert tone="danger">{account.common.unavailable}</InlineAlert>
-      )}
-    </div>
-  );
+/** Lo que contestó el último envío, en palabras. Nulo si no hay nada que decir. */
+function resultOf(state: SessionsState): string | null {
+  if (state.kind === "closed") return RESULTS[state.what];
+  return state.kind === "unavailable" ? account.common.unavailable : null;
 }
 
 export interface SessionsBlockProps {
@@ -67,6 +42,33 @@ export interface SessionsBlockProps {
 
 export function SessionsBlock({ sessions, state, action, pending }: SessionsBlockProps) {
   const others = sessions.some((session) => !session.current);
+  const attempt = "attempt" in state ? state.attempt : 0;
+  const result = pending ? null : resultOf(state);
+  const notice = useRef<HTMLDivElement>(null);
+  const spoken = useRef<HTMLSpanElement>(null);
+
+  // Lo que contestó el último envío toma el foco al llegar: el botón que se pulsó suele ya
+  // no existir, porque su fila se fue con la sesión, y sin esto el foco caería al documento.
+  // El foco es también lo que se lo anuncia a quien usa lector de pantalla.
+  //
+  // Lo toma si nadie más lo tiene: si el foco está en algo que contiene al aviso (el
+  // documento, la pantalla, el bloque) o en el propio bloque. A quien ya se fue a otra cosa
+  // no se lo quita: quien pulsó «Cerrar» y se puso a escribir su nombre sigue escribiendo, y
+  // el resultado se le dice por la región viva de `spoken`, que existe desde antes.
+  useEffect(() => {
+    const box = notice.current;
+    const voice = spoken.current;
+    if (attempt === 0 || result === null || box === null || voice === null) return;
+    const active = document.activeElement;
+    if (active === null || active.contains(box) || box.closest("section")?.contains(active) === true) {
+      box.focus();
+      return;
+    }
+    voice.textContent = result;
+    return () => {
+      voice.textContent = "";
+    };
+  }, [attempt, result]);
 
   return (
     <section id={SESSIONS_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
@@ -75,11 +77,17 @@ export function SessionsBlock({ sessions, state, action, pending }: SessionsBloc
       </h2>
       <p className="text-body-s text-text-2">{text.sessionsIntro}</p>
       {/* Lo que dijo el último envío deja de decirse mientras hay otro en camino. */}
-      {!pending && <Result state={state} />}
-      {/* Existe desde antes de cargar: una región que nace con su texto no siempre se anuncia. */}
+      {result !== null && (
+        <div ref={notice} tabIndex={-1}>
+          <InlineAlert tone={state.kind === "closed" ? "success" : "danger"}>{result}</InlineAlert>
+        </div>
+      )}
+      {/* Existen desde antes de cargar: una región que nace con su texto no siempre se anuncia. */}
       <p role="status" className="text-body-s text-text-2">
         {pending ? text.closingSessions : null}
       </p>
+      {/* El resultado, para quien no tiene el foco en el aviso. Lo escribe el efecto de arriba. */}
+      <span ref={spoken} role="status" className="sr-only" />
       <form action={action} className="flex flex-col gap-4">
         <ul className="flex flex-col gap-3">
           {sessions.map((session) => (

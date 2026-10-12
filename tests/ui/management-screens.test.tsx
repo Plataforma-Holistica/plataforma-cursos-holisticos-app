@@ -485,10 +485,38 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
       finish({ kind: "closed", what: "one", attempt: 1 });
       await Promise.resolve();
     });
-    expect(await within(sessionsBlock()).findByText("Cerramos esa sesión.")).toBeVisible();
+    const [notice, voice] = await within(sessionsBlock()).findAllByText("Cerramos esa sesión.");
+    expect(notice).toBeVisible();
+    // El resultado se le dice por la región viva que ya existía, sin moverle el foco.
+    expect(voice).toHaveAttribute("role", "status");
     expect(nameField()).toHaveFocus();
     await user.type(nameField(), " Pérez");
     expect(nameField()).toHaveValue("Ana María Pérez");
+  });
+
+  it("si el foco está en la pantalla y en nada en particular, el aviso lo toma", async () => {
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    // Un clic en una zona que no es ningún control deja el foco en el contenedor de la pantalla.
+    screen.getByRole("main").focus();
+    expect(screen.getByRole("main")).toHaveFocus();
+
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 1 });
+      await Promise.resolve();
+    });
+    const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
+    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+  });
+
+  it("el botón de cada fila tiene el alto de los controles del alumno, no el de administración", () => {
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    expect(closeButtonOf(phone)).toHaveClass("h-control");
+    expect(closeButtonOf(phone)).not.toHaveClass("h-control-sm");
   });
 
   it("cerrar sesiones no toca el bloque del nombre: lo escrito ahí sigue", async () => {

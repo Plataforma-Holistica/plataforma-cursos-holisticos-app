@@ -280,6 +280,7 @@ const openSessionRow = z.object({
   opened_at: z.string(),
   last_active_at: z.string().nullable(),
   user_agent: z.string().nullable(),
+  current: z.boolean(),
 });
 
 /** Una sesión abierta, como la tiene la base. Las horas, en UTC y en formato ISO. */
@@ -293,19 +294,31 @@ export interface NotedSession {
    */
   lastActiveAt: string | null;
   userAgent: string | null;
+  /** Es la sesión con la que se pide la lista. Lo dice la base, que compara identificadores. */
+  current: boolean;
 }
 
-/** Las sesiones abiertas de quien actúa en esta transacción: anotadas y vivas en Auth. */
-export async function listSessions(tx: Tx): Promise<NotedSession[]> {
+/**
+ * Las sesiones abiertas de quien actúa en esta transacción: anotadas y vivas en Auth.
+ * `askingSessionId` es la sesión con la que se pide, para decir cuál de ellas es.
+ */
+export async function listSessions(tx: Tx, askingSessionId: string): Promise<NotedSession[]> {
   const rows = await tx.query(
     sql`select s.session_id::text as id,
                to_char(s.opened_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as opened_at,
                to_char(s.last_active_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as last_active_at,
-               s.user_agent
+               s.user_agent,
+               s.session_id = ${askingSessionId}::uuid as current
         from private.list_sessions() s`,
     openSessionRow,
   );
-  return rows.map((row) => ({ id: row.id, openedAt: row.opened_at, lastActiveAt: row.last_active_at, userAgent: row.user_agent }));
+  return rows.map((row) => ({
+    id: row.id,
+    openedAt: row.opened_at,
+    lastActiveAt: row.last_active_at,
+    userAgent: row.user_agent,
+    current: row.current,
+  }));
 }
 
 /**

@@ -43,7 +43,7 @@ export type NameChange =
 export interface OpenSession {
   id: string;
   openedAt: string;
-  /** La última vez que se usó, o nulo si no se sabe. */
+  /** La última vez que renovó su acceso, que es lo que se sabe de su actividad. Nulo si no se sabe. */
   lastActiveAt: string | null;
   /** De qué navegador y sistema dijo ser al abrirse. Lo que no se reconoce, en nulo. */
   device: Device;
@@ -145,13 +145,15 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
    */
   async function accountSessions(claims: VerifiedClaims): Promise<AccountSessions> {
     try {
-      const rows = await asServer({ claims, reason: "list_sessions" }, (tx) => listSessions(tx));
+      const asking = claims.sessionId;
+      if (!isSessionId(asking)) throw new Error("Las claims que dio la guarda no traen una sesión.");
+      const rows = await asServer({ claims, reason: "list_sessions" }, (tx) => listSessions(tx, asking));
       const sessions = rows.map((row) => ({
         id: row.id,
         openedAt: row.openedAt,
         lastActiveAt: row.lastActiveAt,
         device: describeUserAgent(row.userAgent),
-        current: row.id === claims.sessionId,
+        current: row.current,
       }));
       // La sesión con la que se pide se cerró desde otro lado entre la guarda y esta lectura.
       // No es una caída y no se reporta: no se pinta una lista sin ella, y lo siguiente que

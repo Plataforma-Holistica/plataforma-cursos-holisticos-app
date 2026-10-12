@@ -90,8 +90,9 @@ $$;
 --   · Quien pide dice con qué sesión lo pide, y esa sesión tiene que ser suya, estar
 --     anotada y seguir viva. La guarda de sesión ya lo miró, pero en otra transacción: aquí
 --     se vuelve a mirar, con el candado puesto.
---   · Toman el candado de fila del perfil, el mismo de private.note_session() y de
---     private.claim_account(). Sin él, dos «cerrar las demás» a la vez desde dos sesiones
+--   · Toman un candado de fila del perfil, que choca con el de private.note_session() y
+--     el de private.claim_account() y entre sí. Es el que no estorba a quien inserta en una
+--     tabla que apunta al perfil (un consentimiento): aquí no se va a tocar su clave. Sin él, dos «cerrar las demás» a la vez desde dos sesiones
 --     de la misma cuenta veían viva cada una la suya, borraban la de la otra, y la cuenta
 --     se quedaba sin ninguna (comprobado contra la base local). Con él van una tras otra, y
 --     la segunda encuentra su sesión ya cerrada y no cierra nada.
@@ -125,7 +126,7 @@ begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'private.close_session() needs read committed isolation' using errcode = '25000';
   end if;
-  perform 1 from public.profiles p where p.id = v_actor for update;
+  perform 1 from public.profiles p where p.id = v_actor for no key update;
   -- Después del candado: si otro cierre iba delante, la sesión de quien pide ya no está.
   -- Una cuenta sin perfil tampoco pasa de aquí: no tiene ninguna sesión reconocida.
   if private.session_recognized(p_asking) <> 'recognized' then
@@ -147,8 +148,9 @@ $$;
 
 -- Cerrar todas las sesiones de quien actúa menos la sesión con la que lo pide. Devuelve
 -- cuántas cerró en Auth, o nulo si no cerró nada porque no podía: sin actor, o la sesión
--- con la que se pide ya no se reconoce. Con cualquier otro valor esto cerraría
--- todas, también la de quien lo pide.
+-- con la que se pide ya no se reconoce. Por eso se exige que se reconozca: con el
+-- identificador de una sesión que no es de quien pide, esto las cerraría todas, también
+-- la suya.
 --
 -- Las demás se borran por cuenta, no por lo anotado: así se van también las sesiones
 -- abiertas directo en Auth, que la aplicación no reconoce pero que siguen vivas allá.
@@ -167,7 +169,7 @@ begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'private.close_other_sessions() needs read committed isolation' using errcode = '25000';
   end if;
-  perform 1 from public.profiles p where p.id = v_actor for update;
+  perform 1 from public.profiles p where p.id = v_actor for no key update;
   -- Después del candado: si otro cierre iba delante, la sesión de quien pide ya no está.
   -- Una cuenta sin perfil tampoco pasa de aquí: no tiene ninguna sesión reconocida.
   if private.session_recognized(p_keep) <> 'recognized' then

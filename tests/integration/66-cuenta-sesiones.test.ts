@@ -1,3 +1,4 @@
+import { Client } from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
@@ -8,6 +9,7 @@ import type { FailureCode } from "@/services/error-reporting/server";
 
 import { claimedUser, clearThrottle, freshOrigin, notedSessions, testServices } from "./helpers/account";
 import { memoryJar, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
+import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // Las sesiones a la vista (RF-109; FL-27, paso 4; TRD §9.2): lo que una persona ve de sus
@@ -87,8 +89,47 @@ afterEach(() => {
 });
 
 afterAll(async () => {
+  // Por si la prueba que le quita este permiso al servidor murió antes de devolverlo.
+  await ownerQuery("grant execute on function private.tag_session(uuid, text) to app_service");
   await deleteTestUsersByEmail(emails);
 });
+
+/**
+ * Corre esos cierres a la vez de verdad: otra sesión de la base tiene tomado el perfil, se
+ * lanzan todos, se espera a que cada uno esté detenido por ese candado, y entonces se suelta.
+ * Sin esto, que dos llamadas coincidan depende de la suerte.
+ */
+async function atOnce<Results extends unknown[]>(userId: string, work: { [Index in keyof Results]: () => Promise<Results[Index]> }): Promise<Results> {
+  const owner = new Client({ connectionString: localOwnerUrl() });
+  await owner.connect();
+  let running: Promise<Results> | undefined;
+  try {
+    await owner.query("begin");
+    const held = await owner.query<{ pid: number }>("select pg_backend_pid() as pid");
+    await owner.query("select 1 from public.profiles where id = $1 for update", [userId]);
+    running = Promise.all(work.map((start) => start())) as Promise<Results>;
+
+    // El primero que llega espera a quien tiene el perfil, y los demás hacen fila detrás de
+    // él: todos esperan un candado, y al menos uno, el de esta sesión de la base.
+    const deadline = Date.now() + 4_000;
+    for (;;) {
+      const rows = await ownerQuery<{ waiting: number; behind: boolean | null }>(
+        `select count(*)::int as waiting, bool_or($1::int = any(pg_blocking_pids(pid))) as behind
+         from pg_stat_activity where usename = 'app_service' and wait_event_type = 'Lock'`,
+        [held.rows[0]?.pid ?? -1],
+      );
+      if ((rows[0]?.waiting ?? 0) >= work.length && rows[0]?.behind === true) break;
+      if (Date.now() > deadline) throw new Error("Los cierres no llegaron a esperar el perfil a la vez.");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    await owner.query("commit");
+    return await running;
+  } finally {
+    await owner.query("rollback").catch(() => undefined);
+    await running?.catch(() => undefined);
+    await owner.end();
+  }
+}
 
 describe("al abrir una sesión queda dicho desde qué navegador", () => {
   it("el que mandó la petición, limpio", async () => {
@@ -194,6 +235,16 @@ describe("ver las sesiones abiertas", () => {
     expect(services.reported).toEqual(["account_unavailable"]);
   });
 
+  it("unas claims que no dicen de qué sesión son no listan nada: no se supo, y se reporta", async () => {
+    const who = await account();
+    const mine = await open(who);
+    const services = testServices();
+    // La guarda no deja pasar un token así. Si algún día llegara, no se pinta una lista sin saber cuál es la de ahora.
+    expect(await services.accountSessions({ ...mine.claims, sessionId: null })).toEqual({ kind: "unavailable" });
+    expect(await services.accountSessions({ ...mine.claims, sessionId: "no-es-un-identificador" })).toEqual({ kind: "unavailable" });
+    expect(services.reported).toEqual(["account_unavailable", "account_unavailable"]);
+  });
+
   it("si la sesión con la que se pide se cerró desde otro lado, no pinta una lista sin ella, y no es una caída", async () => {
     const who = await account();
     const mine = await open(who);
@@ -295,43 +346,55 @@ describe("dos cierres a la vez", () => {
   // Sin el candado de la base, cada «cerrar las demás» veía viva su sesión y borraba la de
   // la otra: la cuenta se quedaba sin ninguna, y las dos respuestas decían que salió bien.
   it("«cerrar las demás» desde dos sesiones: una gana y la otra se entera de que ya no tiene sesión", async () => {
-    for (let round = 0; round < 4; round += 1) {
-      const who = await account();
-      const first = await open(who);
-      const second = await open(who, SAFARI_IPHONE);
-      const services = testServices();
+    const who = await account();
+    const first = await open(who);
+    const second = await open(who, SAFARI_IPHONE);
+    const services = testServices();
 
-      const results = await Promise.all([services.closeOtherSessions(first.jar), services.closeOtherSessions(second.jar)]);
+    const results = await atOnce(who.id, [() => services.closeOtherSessions(first.jar), () => services.closeOtherSessions(second.jar)]);
 
-      expect(results.map((result) => result.kind).sort(), `ronda ${round}`).toEqual(["closed", "session"]);
-      expect(results.find((result) => result.kind === "closed"), `ronda ${round}`).toEqual({ kind: "closed", count: 1 });
-      expect(results.find((result) => result.kind === "session"), `ronda ${round}`).toEqual({ kind: "session", check: CLOSED });
-      // Queda exactamente una, y es la de quien ganó.
-      expect(await sessionCount(who.id), `ronda ${round}`).toBe(1);
-      expect(await notedSessions(who.id), `ronda ${round}`).toBe(1);
-      const winner = results[0]?.kind === "closed" ? first : second;
-      expect(await guard(winner.jar), `ronda ${round}`).toMatchObject({ kind: "pass" });
-      // Que una sesión pierda contra otra no es una caída.
-      expect(services.reported, `ronda ${round}`).toEqual([]);
-    }
+    expect(results.map((result) => result.kind).sort()).toEqual(["closed", "session"]);
+    expect(results.find((result) => result.kind === "closed")).toEqual({ kind: "closed", count: 1 });
+    expect(results.find((result) => result.kind === "session")).toEqual({ kind: "session", check: CLOSED });
+    // Queda exactamente una, y es la de quien ganó.
+    expect(await sessionCount(who.id)).toBe(1);
+    expect(await notedSessions(who.id)).toBe(1);
+    const winner = results[0].kind === "closed" ? first : second;
+    expect(await guard(winner.jar)).toMatchObject({ kind: "pass" });
+    // Que una sesión pierda contra otra no es una caída.
+    expect(services.reported).toEqual([]);
   });
 
   it("cerrar una mientras esa cierra las demás: nunca se quedan las dos, ni ninguna", async () => {
-    for (let round = 0; round < 4; round += 1) {
-      const who = await account();
-      const first = await open(who);
-      const second = await open(who, SAFARI_IPHONE);
-      const services = testServices();
+    const who = await account();
+    const first = await open(who);
+    const second = await open(who, SAFARI_IPHONE);
+    const services = testServices();
 
-      const [one, others] = await Promise.all([
-        services.closeSession(first.jar, { sessionId: idOf(second.claims) }),
-        services.closeOtherSessions(second.jar),
-      ]);
+    const [one, others] = await atOnce(who.id, [
+      () => services.closeSession(first.jar, { sessionId: idOf(second.claims) }),
+      () => services.closeOtherSessions(second.jar),
+    ]);
 
-      expect(await sessionCount(who.id), `ronda ${round}`).toBe(1);
-      expect([one.kind, others.kind].sort(), `ronda ${round}`).toEqual(["closed", "session"]);
-      expect(services.reported, `ronda ${round}`).toEqual([]);
-    }
+    expect(await sessionCount(who.id)).toBe(1);
+    expect([one.kind, others.kind].sort()).toEqual(["closed", "session"]);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("dos sesiones que se cierran una a la otra: queda una", async () => {
+    const who = await account();
+    const first = await open(who);
+    const second = await open(who, SAFARI_IPHONE);
+    const services = testServices();
+
+    const results = await atOnce(who.id, [
+      () => services.closeSession(first.jar, { sessionId: idOf(second.claims) }),
+      () => services.closeSession(second.jar, { sessionId: idOf(first.claims) }),
+    ]);
+
+    expect(results.map((result) => result.kind).sort()).toEqual(["closed", "session"]);
+    expect(await sessionCount(who.id)).toBe(1);
+    expect(services.reported).toEqual([]);
   });
 });
 
