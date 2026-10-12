@@ -49,6 +49,8 @@ describe("reportFailure", () => {
       "session_oversized",
       "session_not_noted",
       "session_not_tagged",
+      "password_change_unconfirmed",
+      "password_change_incomplete",
       "session_not_closed",
       "session_cookie_not_written",
       "sign_in_settle_failed",

@@ -4,10 +4,17 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { createAuth, signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { PendingAccount, SessionCheck } from "@/services/account/account";
-import { createManagement } from "@/services/account/management";
-import type { FailureCode } from "@/services/error-reporting/server";
 
-import { claimedUser, clearThrottle, freshOrigin, holdProfile, notedSessions, profileOf, testServices } from "./helpers/account";
+import {
+  claimedUser,
+  clearThrottle,
+  freshOrigin,
+  holdProfile,
+  managementWith,
+  notedSessions,
+  profileOf,
+  testServices,
+} from "./helpers/account";
 import { knownUser, memoryJar, type KnownUser, type MemoryJar } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
@@ -87,31 +94,6 @@ async function serverWaitsFor(blocker: Client): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("El servidor nunca llegó a esperar la fila del perfil.");
-}
-
-/**
- * El servicio con una guarda que contesta lo que se le diga, y lo que reportó. Con varias
- * respuestas las da en orden, y repite la última.
- */
-function managementWith(...checks: [SessionCheck, ...SessionCheck[]]) {
-  const answers: SessionCheck[] = [...checks];
-  const next = (): SessionCheck => {
-    const [first, ...later] = answers;
-    if (later.length > 0) answers.shift();
-    return first ?? checks[0];
-  };
-  const reported: FailureCode[] = [];
-  const management = createManagement(
-    {
-      isLocal: () => true,
-      report: (code) => {
-        reported.push(code);
-        return Promise.resolve();
-      },
-    },
-    { checkSession: () => Promise.resolve(next()) },
-  );
-  return { ...management, reported };
 }
 
 beforeEach(async () => {

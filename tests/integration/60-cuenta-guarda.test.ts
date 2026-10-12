@@ -380,6 +380,7 @@ describe("reclamar y anotar a la vez", () => {
     ["reclamar", "select private.claim_account()"],
     ["cerrar una sesión", "select private.close_session(gen_random_uuid(), gen_random_uuid())"],
     ["cerrar las demás", "select private.close_other_sessions(gen_random_uuid())"],
+    ["fechar un cambio de contraseña", "select private.note_password_change()"],
   ])("con un aislamiento que no es el de siempre, %s lanza", async (_name, call) => {
     const account = await user();
     const owner = new Client({ connectionString: localOwnerUrl() });

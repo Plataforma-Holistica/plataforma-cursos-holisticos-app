@@ -24,6 +24,8 @@ import { pressedElement, useSeenOnBlur } from "./hooks";
 export type NameProblem = "empty" | "too_long" | "invalid";
 export type EmailProblem = "required" | "invalid";
 export type PasswordProblem = "too_short" | "too_long" | "malformed";
+/** Además de la regla: es la que ya se tenía, o Auth no la aceptó. Eso solo lo dice el servidor. */
+export type NewPasswordProblem = PasswordProblem | "same" | "weak";
 
 export const NAME_ERRORS = {
   empty: account.fields.nameRequired,
@@ -34,9 +36,19 @@ export const NAME_ERRORS = {
 export const EMAIL_ERRORS = { required: account.fields.emailRequired, invalid: account.fields.emailInvalid } as const;
 
 /** El mensaje de una contraseña nueva que no cumple la regla. */
-export function passwordError(problem: PasswordProblem): string {
-  if (problem === "too_short") return t(account.fields.passwordTooShort, { min: PASSWORD_MIN_LENGTH });
-  return problem === "too_long" ? account.fields.passwordTooLong : account.fields.passwordInvalid;
+export function passwordError(problem: NewPasswordProblem): string {
+  switch (problem) {
+    case "too_short":
+      return t(account.fields.passwordTooShort, { min: PASSWORD_MIN_LENGTH });
+    case "too_long":
+      return account.fields.passwordTooLong;
+    case "malformed":
+      return account.fields.passwordInvalid;
+    case "same":
+      return account.fields.passwordSame;
+    case "weak":
+      return account.fields.passwordWeak;
+  }
 }
 
 interface CheckedField<Problem> {
@@ -116,8 +128,10 @@ export function EmailField({ id, defaultValue, problem, round = 0, hint }: Email
   );
 }
 
-export interface NewPasswordFieldProps extends CheckedField<PasswordProblem> {
+export interface NewPasswordFieldProps extends CheckedField<NewPasswordProblem> {
   label: string;
+  /** Mientras el envío va en camino: al llegar la respuesta el campo se arma de nuevo, vacío. */
+  readOnly?: boolean;
 }
 
 /**
@@ -125,9 +139,9 @@ export interface NewPasswordFieldProps extends CheckedField<PasswordProblem> {
  * cumplirse (diseño, PA-13 y PA-14). Sin JavaScript la regla se queda sin marcar: la revisa
  * el servidor al enviar. La contraseña nunca vuelve en una respuesta: el campo llega vacío.
  */
-export function NewPasswordField({ id, label, problem, round = 0 }: NewPasswordFieldProps) {
+export function NewPasswordField({ id, label, problem, round = 0, readOnly = false }: NewPasswordFieldProps) {
   const [met, setMet] = useState(false);
-  const [shown, see] = useSeenOnBlur(problem, round);
+  const [shown, see] = useSeenOnBlur<NewPasswordProblem>(problem, round);
 
   function track(event: FormEvent<HTMLDivElement>) {
     const field = event.target;
@@ -160,6 +174,7 @@ export function NewPasswordField({ id, label, problem, round = 0 }: NewPasswordF
         label={label}
         name="password"
         autoComplete="new-password"
+        readOnly={readOnly}
         rules={
           <p className={cx("flex items-center gap-2", met && "text-success")}>
             <Icon icon={met ? Check : Circle} size={16} />

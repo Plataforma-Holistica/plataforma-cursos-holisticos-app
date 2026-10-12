@@ -2,11 +2,20 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import { a11yViolations } from "./support/a11y";
 import { actionFields, hydrated, postAction } from "./support/actions";
-import { clearCounters, forgetNotedSessions, ownerQuery, person, SESSION_COOKIE, sessionCount, type Person } from "./support/stack";
+import {
+  clearCounters,
+  forgetNotedSessions,
+  lastMailTo,
+  ownerQuery,
+  person,
+  SESSION_COOKIE,
+  sessionCount,
+  type Person,
+} from "./support/stack";
 
 // La pantalla de la cuenta (diseño, PA-25; flujo de la app, FL-27): lo que la persona ve de
-// su cuenta, el cambio de nombre y las sesiones abiertas, con JavaScript y sin él, y lo que
-// cada acción hace con lo que su pantalla nunca mandaría.
+// su cuenta, el cambio de nombre, el de contraseña y las sesiones abiertas, con JavaScript y
+// sin él, y lo que cada acción hace con lo que su pantalla nunca mandaría.
 
 test.beforeEach(clearCounters);
 
@@ -61,9 +70,9 @@ test("del inicio se llega a la cuenta, que muestra el nombre y el correo, y se v
   await expect(nameField(page)).toHaveValue("Ana de Prueba");
   const email = page.getByRole("region", { name: "Correo" });
   await expect(email).toContainText(ana.email);
-  // El correo se ve, y no hay dónde escribir otro.
+  // El correo se ve, y no hay dónde escribir otro: ni en su bloque ni en ningún otro.
   await expect(email.getByRole("textbox")).toHaveCount(0);
-  await expect(page.getByRole("textbox")).toHaveCount(1);
+  await expect(page.locator('input[type="email"], input[name="email"]')).toHaveCount(0);
 
   await page.getByRole("link", { name: "Volver al inicio" }).click();
   await expect(page).toHaveURL("/inicio");
@@ -153,6 +162,10 @@ test("solo con el teclado: se llega al campo, se guarda con Intro y el foco no s
   await page.keyboard.type("Carla");
   await page.keyboard.press("Enter");
   await expect.poll(() => profileName(ana.id)).toBe("Carla");
+  // La base ya lo tiene antes de que la respuesta se pinte. Se espera el aviso, que escribir
+  // había quitado: con el envío todavía en camino el botón está inactivo, y un salto del
+  // teclado pasaría de largo.
+  await expect(page.getByText(SAVED)).toBeVisible();
   await expect(nameField(page)).toBeFocused();
 
   // Y quien guardó desde el botón sigue en el botón.
@@ -538,8 +551,8 @@ test("la acción de cerrar sesiones no hace nada para quien no trae sesión, ni 
   const phone = await anotherBrowser(browser, ana, { userAgent: IPHONE });
   try {
     await openAccount(page, ana);
-    // El formulario de las sesiones es el segundo de la pantalla que lleva una acción.
-    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+    // El formulario de las sesiones es el tercero de la pantalla que lleva una acción.
+    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 2);
     // El otro navegador entró primero: su sesión es la más antigua.
     const [theirs = ""] = await sessionIds(ana.id);
 
@@ -573,7 +586,7 @@ test("la acción de cerrar sesiones aguanta lo que su pantalla nunca mandaría, 
   const theirs = await anotherBrowser(browser, otra);
   try {
     await openAccount(page, ana);
-    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 2);
     // El otro navegador entró primero: su sesión es la más antigua, y la de esta página, la segunda.
     const [minePhone = "", mine = ""] = await sessionIds(ana.id);
     const [foreign = ""] = await sessionIds(otra.id);
@@ -609,4 +622,335 @@ test("la acción de cerrar sesiones aguanta lo que su pantalla nunca mandaría, 
   } finally {
     for (const other of [phone, theirs]) await other.context().close();
   }
+});
+
+// ---------------------------------------------------------------------------------------
+// El bloque de la contraseña (FL-27, paso 3).
+
+const CHANGED = "Tu contraseña cambió. Cerramos tus demás sesiones.";
+const CHANGED_MAIL = "Tu contraseña cambió";
+const NO_CURRENT = "Escribe tu contraseña actual.";
+const MISMATCH = "Esa no es tu contraseña actual.";
+const SAME = "Esa es la contraseña que ya tienes. Elige otra.";
+const TOO_SHORT = "Tu contraseña necesita 8 caracteres o más.";
+const WRONG = "una-que-no-es-la-suya";
+
+const passwordBlock = (page: Page) => page.getByRole("region", { name: "Contraseña" });
+const currentField = (page: Page) => page.getByLabel("Contraseña actual", { exact: true });
+const newField = (page: Page) => page.getByLabel("Contraseña nueva", { exact: true });
+const changeButton = (page: Page) => page.getByRole("button", { name: "Cambiar contraseña" });
+const chosen = () => `nueva-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+
+async function changePassword(page: Page, current: string, next: string): Promise<void> {
+  await currentField(page).fill(current);
+  await newField(page).fill(next);
+  await changeButton(page).click();
+}
+
+/** Si con esa contraseña se entra, desde un navegador sin nada. */
+async function entersWith(browser: Browser, who: Person, password: string): Promise<boolean> {
+  return inContext(browser, {}, async (fresh) => {
+    await signIn(fresh, { email: who.email, password });
+    // Una de dos: el inicio, con su enlace a la cuenta, o la pantalla de entrar diciendo que no.
+    const inside = fresh.getByRole("link", { name: "Cuenta", exact: true });
+    const refused = fresh.getByRole("main").getByText("El correo o la contraseña no coinciden.");
+    await expect(inside.or(refused)).toBeVisible();
+    return (await inside.count()) > 0;
+  });
+}
+
+test("cambiar la contraseña: lo dice ahí mismo, avisa por correo, saca a los demás navegadores y aquí se sigue dentro @telefono", async ({ page, browser }) => {
+  const ana = await person();
+  const phone = await anotherBrowser(browser, ana, { userAgent: IPHONE });
+  try {
+    await openAccount(page, ana);
+    await hydrated(page);
+    await expect(sessionRows(page)).toHaveCount(2);
+    const before = await sessionCookie(page);
+    const next = chosen();
+
+    await changePassword(page, ana.password, next);
+
+    await expect(passwordBlock(page).getByText(CHANGED)).toBeVisible();
+    await expect(page).toHaveURL("/cuenta");
+    // Una contraseña nunca vuelve: los dos campos quedan vacíos.
+    await expect(currentField(page)).toHaveValue("");
+    await expect(newField(page)).toHaveValue("");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+    expect(await a11yViolations(page)).toEqual([]);
+
+    // Queda una sola sesión, nueva, y es la de este navegador: la lista ya lo dice.
+    await expect(sessionRows(page)).toHaveCount(1);
+    expect(await sessionCount(ana.id)).toBe(1);
+    const after = await sessionCookie(page);
+    expect(after?.value).toBeTruthy();
+    expect(after?.value).not.toBe(before?.value);
+    expect((await lastMailTo(ana.email)).subject).toBe(CHANGED_MAIL);
+
+    // En el otro navegador la sesión ya no vale: lo siguiente que pide lo manda a entrar.
+    await phone.goto("/inicio");
+    await expect(phone).toHaveURL("/entrar");
+    // Y en este se sigue dentro, también al recargar.
+    await page.reload();
+    await expect(nameField(page)).toHaveValue("Ana de Prueba");
+    await expect(page.getByText(CHANGED)).toHaveCount(0);
+
+    expect(await entersWith(browser, ana, ana.password)).toBe(false);
+    expect(await entersWith(browser, ana, next)).toBe(true);
+  } finally {
+    await phone.context().close();
+  }
+});
+
+test("lo que se puede revisar de la contraseña se dice antes de enviar, y nada sale hacia el servidor", async ({ page }) => {
+  const ana = await person();
+  await openAccount(page, ana);
+  await hydrated(page);
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST") posts.push(request.url());
+  });
+
+  await newField(page).fill(chosen());
+  await changeButton(page).click();
+  const summary = page.getByRole("alert").filter({ hasText: NO_CURRENT });
+  await expect(summary).toBeFocused();
+  await expect(summary.getByRole("link", { name: NO_CURRENT })).toHaveAttribute("href", "#cuenta-contrasena-actual");
+  await expect(currentField(page)).toHaveAttribute("aria-invalid", "true");
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // La nueva igual a la actual, y la nueva corta: lo escrito se queda.
+  await changePassword(page, ana.password, ana.password);
+  await expect(page.getByRole("link", { name: SAME })).toHaveAttribute("href", "#cuenta-contrasena-nueva");
+  await changePassword(page, ana.password, "corta-7");
+  await expect(page.getByRole("link", { name: TOO_SHORT })).toBeVisible();
+  await expect(currentField(page)).toHaveValue(ana.password);
+  await expect(newField(page)).toHaveValue("corta-7");
+
+  expect(posts).toEqual([]);
+  expect(await sessionCount(ana.id)).toBe(1);
+});
+
+test("con la contraseña actual equivocada no cambia nada ni se cierra ninguna sesión, y con la correcta sí", async ({ page, browser }) => {
+  const ana = await person();
+  const phone = await anotherBrowser(browser, ana, { userAgent: IPHONE });
+  try {
+    await openAccount(page, ana);
+    await hydrated(page);
+    const next = chosen();
+
+    await changePassword(page, WRONG, next);
+    const summary = page.getByRole("alert").filter({ hasText: MISMATCH });
+    await expect(summary).toBeFocused();
+    await expect(summary.getByRole("link", { name: MISMATCH })).toHaveAttribute("href", "#cuenta-contrasena-actual");
+    await expect(currentField(page)).toHaveValue("");
+    await expect(newField(page)).toHaveValue("");
+    expect(await a11yViolations(page)).toEqual([]);
+    expect(await sessionCount(ana.id)).toBe(2);
+    await phone.goto("/inicio");
+    await expect(phone).toHaveURL("/inicio");
+
+    await changePassword(page, ana.password, next);
+    await expect(passwordBlock(page).getByText(CHANGED)).toBeVisible();
+    await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+    expect(await sessionCount(ana.id)).toBe(1);
+  } finally {
+    await phone.context().close();
+  }
+});
+
+test("cambiar la contraseña solo con el teclado: se llega a los dos campos, se envía con Intro y el foco no se pierde", async ({ page }) => {
+  const ana = await person();
+  await openAccount(page, ana);
+  await hydrated(page);
+
+  await currentField(page).focus();
+  await page.keyboard.type(ana.password);
+  // «Mostrar» es parte del campo: un salto llega a él y el siguiente, al campo que sigue.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(newField(page)).toBeFocused();
+  await page.keyboard.type(chosen());
+  await page.keyboard.press("Enter");
+
+  await expect(passwordBlock(page).getByText(CHANGED)).toBeVisible();
+  // El campo se armó de nuevo, vacío, y el foco volvió a él.
+  await expect(newField(page)).toBeFocused();
+  await expect(newField(page)).toHaveValue("");
+});
+
+test("sin JavaScript se cambia igual, y la respuesta deja a la persona en el bloque de la contraseña @telefono", async ({ browser }, testInfo) => {
+  const ana = await person();
+  const viewport = { width: testInfo.project.use.viewport?.width ?? 390, height: 260 };
+  await inContext(browser, { javaScriptEnabled: false, viewport }, async (page) => {
+    await openAccount(page, ana);
+    const next = chosen();
+
+    // Lo que no se puede guardar vuelve con su resumen, dentro de la vista, y sin cambiar nada.
+    await changePassword(page, "", next);
+    await expect(page).toHaveURL("/cuenta#bloque-contrasena");
+    await expect(page.getByRole("link", { name: NO_CURRENT })).toBeInViewport();
+    await changePassword(page, WRONG, next);
+    await expect(page.getByRole("link", { name: MISMATCH })).toBeInViewport();
+    await expect(currentField(page)).toHaveValue("");
+
+    await changePassword(page, ana.password, next);
+    await expect(page).toHaveURL("/cuenta#bloque-contrasena");
+    await expect(page.getByText(CHANGED)).toBeInViewport();
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+    // La cookie nueva llegó con esa misma respuesta: se sigue dentro.
+    await page.goto("/cuenta");
+    await expect(nameField(page)).toHaveValue("Ana de Prueba");
+    expect(await sessionCount(ana.id)).toBe(1);
+    expect(await entersWith(browser, ana, next)).toBe(true);
+  });
+});
+
+for (const javaScript of [true, false]) {
+  test(`fallar la contraseña actual varias veces frena también la pantalla de entrar (${javaScript ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const ana = await person();
+    await inContext(browser, { javaScriptEnabled: javaScript }, async (page) => {
+      await openAccount(page, ana);
+      if (javaScript) await hydrated(page);
+      const throttled = page.getByRole("main").getByText(/Demasiados intentos\. Podrás probar de nuevo a las/);
+
+      let attempts = 0;
+      while ((await throttled.count()) === 0) {
+        attempts += 1;
+        expect(attempts, "el freno nunca llegó").toBeLessThan(12);
+        // Sin JavaScript la respuesta es otra página: se espera a que cargue antes de mirarla.
+        const loaded = javaScript ? null : page.waitForEvent("load");
+        await changePassword(page, WRONG, chosen());
+        await loaded;
+        await expect(page.getByRole("link", { name: MISMATCH }).or(throttled)).toBeVisible();
+      }
+      // Hicieron falta varios fallos: uno solo no frena a nadie.
+      expect(attempts).toBeGreaterThan(2);
+      // Sin JavaScript no se sabe en qué zona está la persona: la hora dice cuál es.
+      if (javaScript) await expect(throttled).not.toContainText("hora del centro de México");
+      else await expect(throttled).toContainText("hora del centro de México");
+      await expect(changeButton(page)).toBeDisabled();
+      // Las reglas de accesibilidad corren dentro de la página: sin JavaScript no hay con qué.
+      if (javaScript) expect(await a11yViolations(page)).toEqual([]);
+
+      // Es el mismo freno: desde otro navegador, entrar a esa cuenta con su contraseña también espera.
+      await inContext(browser, {}, async (other) => {
+        await signIn(other, ana);
+        await expect(other.getByRole("main").getByText(/Demasiados intentos/)).toBeVisible();
+        await expect(other).toHaveURL("/entrar");
+      });
+      // Y la contraseña sigue siendo la de antes.
+      await clearCounters();
+      expect(await entersWith(browser, ana, ana.password)).toBe(true);
+    });
+  });
+}
+
+for (const javaScript of [true, false]) {
+  test(`si la sesión deja de valer mientras se escribe, cambiar la contraseña la cierra, manda a entrar y no cambia nada (${javaScript ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const ana = await person();
+    await inContext(browser, { javaScriptEnabled: javaScript }, async (page) => {
+      await openAccount(page, ana);
+      if (javaScript) await hydrated(page);
+      expect(await forgetNotedSessions(ana.id)).toBe(1);
+
+      await changePassword(page, ana.password, chosen());
+
+      await expect(page).toHaveURL(javaScript ? "/entrar" : "/entrar#bloque-contrasena");
+      await expect(page.getByRole("heading", { level: 1, name: "Inicia sesión" })).toBeVisible();
+      await expect(page.locator("#bloque-contrasena")).toHaveCount(0);
+      expect(await sessionCookie(page)).toBeUndefined();
+      expect(await sessionCount(ana.id)).toBe(0);
+    });
+    expect(await entersWith(browser, ana, ana.password)).toBe(true);
+  });
+}
+
+test("la acción de cambiar la contraseña no hace nada para quien no trae sesión, ni desde otro sitio", async ({ page, browser, request }) => {
+  const ana = await person();
+  await openAccount(page, ana);
+  // El formulario de la contraseña es el segundo de la pantalla que lleva una acción.
+  const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+  const next = chosen();
+
+  // Sin ninguna cookie, aunque traiga la contraseña correcta.
+  const anonymous = await postAction(request, "/cuenta", { ...hidden, current: ana.password, password: next });
+  expect(anonymous.status()).toBe(303);
+  expect(anonymous.headers().location).toBe("/entrar?volver=%2Fcuenta");
+  // Con la cookie, desde otro sitio.
+  for (const origin of ["https://otro.example", "http://localhost:3001", "null"]) {
+    const rejected = await postAction(page.request, "/cuenta", { ...hidden, current: ana.password, password: next }, origin);
+    expect(rejected.status(), origin).toBeGreaterThanOrEqual(400);
+  }
+  expect(await entersWith(browser, ana, ana.password)).toBe(true);
+  expect(await entersWith(browser, ana, next)).toBe(false);
+});
+
+test("la acción de cambiar la contraseña aguanta lo que su pantalla nunca mandaría, y solo cambia la de la cuenta de la sesión", async ({ page, browser }) => {
+  const ana = await person();
+  const otra = await person();
+  await openAccount(page, ana);
+  const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+  const file = { name: "x.txt", mimeType: "text/plain", buffer: Buffer.from(ana.password) };
+  const next = chosen();
+
+  // Ni cambia ni truena: contesta su pantalla, con lo que hay que corregir, y no cuenta un intento.
+  const odd = [
+    { ...hidden },
+    { ...hidden, password: next },
+    { ...hidden, current: file, password: next },
+    { ...hidden, current: "x".repeat(1_025), password: next },
+    { ...hidden, current: "x".repeat(50_000), password: next },
+  ];
+  const attempts = async () =>
+    (await ownerQuery<{ failed: number }>("select coalesce(sum(failed_count), 0)::int as failed from private.login_throttles"))[0]?.failed;
+  const counted = await attempts();
+  for (const fields of odd) {
+    const response = await postAction(page.request, "/cuenta", fields);
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain(NO_CURRENT);
+  }
+  expect(await attempts()).toBe(counted);
+  // Con la contraseña de otra cuenta, y diciendo que la cuenta es la otra: no es la suya.
+  // Esto sí cuenta: es un intento con una contraseña que no es la de la cuenta.
+  const foreign = await postAction(page.request, "/cuenta", {
+    ...hidden,
+    current: otra.password,
+    password: next,
+    email: otra.email,
+    userId: otra.id,
+    profile_id: otra.id,
+  });
+  expect(foreign.status()).toBe(200);
+  const refused = await foreign.text();
+  expect(refused).toContain(MISMATCH);
+  // Una contraseña nunca vuelve en la respuesta.
+  expect(refused).not.toContain(otra.password);
+  expect(refused).not.toContain(next);
+  expect(await attempts()).toBe((counted ?? 0) + 1);
+
+  // Lo que el formulario diga sobre de quién es la cuenta no se lee: cambia la de la sesión.
+  const pointed = await postAction(page.request, "/cuenta", {
+    ...hidden,
+    current: ana.password,
+    password: next,
+    email: otra.email,
+    userId: otra.id,
+    profile_id: otra.id,
+    volver: "//otro.example",
+  });
+  expect(pointed.status()).toBe(200);
+  const accepted = await pointed.text();
+  expect(accepted).toContain(CHANGED);
+  expect(accepted).not.toContain(ana.password);
+  expect(accepted).not.toContain(next);
+
+  expect(await entersWith(browser, ana, next)).toBe(true);
+  expect(await entersWith(browser, ana, ana.password)).toBe(false);
+  expect(await entersWith(browser, otra, otra.password)).toBe(true);
+  expect(await entersWith(browser, otra, next)).toBe(false);
+  // La sesión de este navegador se cambió por la nueva con esa misma respuesta.
+  await page.goto("/cuenta");
+  await expect(nameField(page)).toHaveValue("Ana de Prueba");
 });

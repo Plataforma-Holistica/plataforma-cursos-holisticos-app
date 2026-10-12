@@ -2,19 +2,22 @@
 
 import { refresh } from "next/cache";
 
-import { cookieJar } from "@/app/_lib/request-context";
-import { changeName, closeOtherSessions, closeSession } from "@/services/account/account";
+import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
+import { changeName, changePassword, closeOtherSessions, closeSession } from "@/services/account/account";
 
 import { leaveFor } from "../_lib/exit";
 import { nextAttempt } from "../_lib/form-state";
 
 import {
   changeNameOutcome,
+  changePasswordOutcome,
   closeOthersOutcome,
   closeSessionOutcome,
   readNameForm,
+  readPasswordForm,
   readSessionsForm,
   type NameState,
+  type PasswordState,
   type SessionsState,
 } from "./outcomes";
 
@@ -80,5 +83,43 @@ export async function closeSessionsAction(previous: SessionsState, form: FormDat
       return { kind: "suspended" };
     case "unavailable":
       return { kind: "unavailable", attempt };
+  }
+}
+
+/**
+ * Lo que envía el bloque de la contraseña (diseño, PA-25). Del formulario solo se leen la
+ * contraseña actual y la nueva. El servicio vuelve a correr la guarda, comprueba la actual
+ * por el mismo freno de intentos que la pantalla de entrar, y cambia la de la cuenta de esa
+ * sesión: por eso recibe de dónde viene la petición.
+ *
+ * Del estado anterior solo se lee el número de intento. Una contraseña nunca vuelve en la
+ * respuesta.
+ */
+export async function changePasswordAction(previous: PasswordState, form: FormData): Promise<PasswordState> {
+  const input = readPasswordForm(form);
+  const attempt = nextAttempt(previous);
+
+  const jar = await cookieJar();
+  const outcome = changePasswordOutcome(await changePassword(jar, input, await requestOrigin()));
+
+  // Si la guarda dijo que esta sesión ya no vale, se cierra antes de irse. Si fue el cambio
+  // el que dejó a este navegador sin sesión, ya no hay nada que cerrar: solo irse a entrar.
+  if (outcome.kind === "redirect") return leaveFor(jar, outcome);
+
+  switch (outcome.kind) {
+    case "changed":
+      // La página se vuelve a pedir: la sesión de este navegador ya es otra, y las demás se cerraron.
+      refresh();
+      return { kind: "changed", attempt };
+    case "invalid":
+      return { kind: "invalid", fields: outcome.fields, attempt };
+    case "throttled":
+      return { kind: "throttled", retryAt: outcome.retryAt, attempt };
+    case "capped":
+      return { kind: "failed", reason: "capped", attempt };
+    case "suspended":
+      return { kind: "suspended" };
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable", attempt };
   }
 }

@@ -18,8 +18,11 @@ export const metadata: Metadata = { title: text.signIn.pageTitle };
 // el texto se pone aquí. Una clave que esta pantalla no espera no dice nada.
 const NOTICES: Partial<Record<Notice, string>> = {
   password_changed: text.signIn.noticePasswordChanged,
+  password_unconfirmed: text.signIn.noticePasswordUnconfirmed,
   account_ready: text.signIn.noticeAccountReady,
 };
+// Los que no dicen que algo salió bien.
+const WARNINGS: ReadonlySet<Notice> = new Set<Notice>(["password_unconfirmed"]);
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -33,6 +36,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
       // Tal como llegó: la acción lo valida al entrar. Repetido en la dirección no es un destino.
       returnTo={typeof returnTo === "string" ? returnTo : ""}
       notice={notice === null ? null : (NOTICES[notice] ?? null)}
+      noticeTone={notice !== null && WARNINGS.has(notice) ? "warning" : "success"}
     />
   );
 }

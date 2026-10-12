@@ -2,9 +2,7 @@
 
 import { type FocusEvent, useActionState, useState } from "react";
 
-import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { account } from "@/messages/es/account";
-import { t } from "@/messages/format";
 import { parseEmail } from "@/services/account/field-rules";
 import { RETURN_PARAM, ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
@@ -15,8 +13,9 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
-import { afterInteraction, useHydrated, useWaitIsOver } from "../_lib/hooks";
+import { afterInteraction, useWaitIsOver } from "../_lib/hooks";
 import { SuspendedScreen } from "../_lib/states";
+import { ThrottledAlert } from "../_lib/throttled-alert";
 
 import { signInAction } from "./actions";
 import type { SignInFields, SignInState } from "./outcomes";
@@ -31,20 +30,6 @@ const PASSWORD_ID = "entrar-contrasena";
 const IDLE: SignInState = { kind: "idle" };
 
 const EMAIL_ERRORS = { required: account.fields.emailRequired, invalid: account.fields.emailInvalid } as const;
-
-export function ThrottledAlert({ retryAt }: { retryAt: string }) {
-  const hydrated = useHydrated();
-  // El servidor no sabe en qué zona está la persona: escribe la hora del centro de México
-  // y lo dice. El navegador la vuelve a escribir en la suya.
-  const message = hydrated
-    ? t(text.throttled, { time: clockTime(retryAt) })
-    : t(text.throttledCentral, { time: clockTime(retryAt, PRODUCT_TIME_ZONE) });
-  return (
-    <InlineAlert tone="danger" live>
-      {message}
-    </InlineAlert>
-  );
-}
 
 function Fields({ email, fields }: { email: string; fields: SignInFields }) {
   const [emailError, setEmailError] = useState(fields.email);
@@ -86,9 +71,11 @@ export interface SignInScreenProps {
   returnTo: string;
   /** El aviso que dejó la pantalla anterior, ya como texto. */
   notice: string | null;
+  /** Casi todos dicen que algo salió bien. El que no, lo dice con su tono. */
+  noticeTone?: "success" | "warning";
 }
 
-export function SignInScreen({ returnTo, notice }: SignInScreenProps) {
+export function SignInScreen({ returnTo, notice, noticeTone = "success" }: SignInScreenProps) {
   const [state, action, pending] = useActionState(signInAction, IDLE);
   const waitIsOver = useWaitIsOver(state.kind === "throttled" ? state.retryAt : null);
 
@@ -115,7 +102,7 @@ export function SignInScreen({ returnTo, notice }: SignInScreenProps) {
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.title}</h1>
       <form action={action} noValidate className="flex flex-col gap-6">
-        {notice !== null && state.kind === "idle" && <InlineAlert tone="success">{notice}</InlineAlert>}
+        {notice !== null && state.kind === "idle" && <InlineAlert tone={noticeTone}>{notice}</InlineAlert>}
         <FormErrorSummary errors={errors} attempt={attempt} />
         {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
             intento con los campos del siguiente, y el aviso viejo se queda en pantalla. */}

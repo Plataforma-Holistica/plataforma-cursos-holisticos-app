@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   changeNameAction: vi.fn(),
   closeSessionsAction: vi.fn(),
+  changePasswordAction: vi.fn(),
   accountSessions: vi.fn(),
   signOutAction: vi.fn(),
   requireSession: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/app/(cuenta)/cuenta/actions", () => ({
   changeNameAction: mocks.changeNameAction,
   closeSessionsAction: mocks.closeSessionsAction,
+  changePasswordAction: mocks.changePasswordAction,
 }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: mocks.signOutAction }));
 vi.mock("@/app/_lib/guard", () => ({ requireSession: mocks.requireSession }));
@@ -30,7 +32,7 @@ vi.mock("@/services/account/account", () => ({
   sessionEmail: mocks.sessionEmail,
 }));
 
-import type { NameState, SessionsState } from "@/app/(cuenta)/cuenta/outcomes";
+import type { NameState, PasswordState, SessionsState } from "@/app/(cuenta)/cuenta/outcomes";
 import AccountPage from "@/app/(cuenta)/cuenta/page";
 import type { SessionRow } from "@/app/(cuenta)/cuenta/rows";
 import { AccountScreen } from "@/app/(cuenta)/cuenta/screen";
@@ -99,6 +101,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
       "Nombre",
       "Correo",
+      "Contraseña",
       "Sesiones abiertas",
     ]);
     expect(nameField()).toHaveValue("Ana de Prueba");
@@ -676,5 +679,311 @@ describe("la página de la cuenta", () => {
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
     expect(mocks.accountSessions).not.toHaveBeenCalled();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("el bloque de la contraseña (PA-25)", () => {
+  const OLD = "la-de-antes-123";
+  const NEW = "la-de-ahora-456";
+  const CHANGED = "Tu contraseña cambió. Cerramos tus demás sesiones.";
+
+  const currentField = () => screen.getByLabelText("Contraseña actual");
+  const newField = () => screen.getByLabelText("Contraseña nueva");
+  const changeButton = () => screen.getByRole("button", { name: "Cambiar contraseña" });
+  const block = () => screen.getByRole("region", { name: "Contraseña" });
+  const changedNotice = () => screen.queryByText(CHANGED);
+
+  /** Pinta la pantalla, escribe esas dos contraseñas y envía, con la acción contestando `state`. */
+  async function change(state: PasswordState, typed: { current?: string; next?: string } = {}) {
+    mocks.changePasswordAction.mockResolvedValue(state);
+    const user = userEvent.setup();
+    const view = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
+    const current = typed.current ?? OLD;
+    const next = typed.next ?? NEW;
+    if (current !== "") await user.type(currentField(), current);
+    if (next !== "") await user.type(newField(), next);
+    await user.click(changeButton());
+    return { user, ...view };
+  }
+
+  it("en reposo: dos campos vacíos, la regla de la nueva a la vista y un enlace para quien no recuerda la actual", async () => {
+    const { container } = render(<AccountScreen name="Ana" email="ana@prueba.test" sessions={ALONE} />);
+    expect(block()).toHaveAttribute("id", "bloque-contrasena");
+    expect(currentField()).toHaveValue("");
+    expect(currentField()).toHaveAttribute("type", "password");
+    expect(currentField()).toHaveAttribute("name", "current");
+    expect(currentField()).toHaveAttribute("autocomplete", "current-password");
+    expect(newField()).toHaveValue("");
+    expect(newField()).toHaveAttribute("name", "password");
+    expect(newField()).toHaveAttribute("autocomplete", "new-password");
+    expect(within(block()).getByText("8 caracteres o más")).toBeVisible();
+    expect(within(block()).getByRole("link", { name: "No recuerdo mi contraseña actual" })).toHaveAttribute("href", "/recuperar");
+    expect(within(block()).queryByRole("alert")).not.toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin JavaScript se pinta entero: un formulario con sus dos campos, sin ninguna contraseña escrita", () => {
+    const html = renderToString(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    const page = new DOMParser().parseFromString(html, "text/html");
+    const fields = [...page.querySelectorAll<HTMLInputElement>("#bloque-contrasena form input")];
+    expect(fields.map((field) => [field.name, field.type, field.getAttribute("value")])).toEqual([
+      ["current", "password", null],
+      ["password", "password", null],
+    ]);
+  });
+
+  it("manda a la acción las dos contraseñas y nada más", async () => {
+    await change({ kind: "changed", attempt: 1 });
+    expect(mocks.changePasswordAction).toHaveBeenCalledOnce();
+    const form = mocks.changePasswordAction.mock.calls[0]?.[1] as FormData;
+    expect(Object.fromEntries(form)).toEqual({ current: OLD, password: NEW });
+    expect(mocks.changeNameAction).not.toHaveBeenCalled();
+  });
+
+  it("cambió: lo anuncia en su bloque, y los dos campos quedan vacíos", async () => {
+    const { container } = await change({ kind: "changed", attempt: 1 });
+    const notice = await screen.findByText(CHANGED);
+    // Un aviso, no una alerta: espera su turno, no interrumpe.
+    expect(notice.closest('[role="status"]')).toHaveTextContent(`Listo: ${CHANGED}`);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(currentField()).toHaveValue("");
+    expect(newField()).toHaveValue("");
+    expect(changeButton()).toBeEnabled();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it.each([
+    [{ current: "mismatch" }, "Esa no es tu contraseña actual.", "#cuenta-contrasena-actual"],
+    [{ current: "required" }, "Escribe tu contraseña actual.", "#cuenta-contrasena-actual"],
+    [{ next: "same" }, "Esa es la contraseña que ya tienes. Elige otra.", "#cuenta-contrasena-nueva"],
+    [{ next: "weak" }, "Esa contraseña es fácil de adivinar. Elige otra.", "#cuenta-contrasena-nueva"],
+    [{ next: "too_long" }, "Esa contraseña es demasiado larga. Elige una más corta.", "#cuenta-contrasena-nueva"],
+  ] as const)("el servicio no lo aceptó (%j): el campo marcado, los dos vacíos y un resumen que enlaza al campo", async (fields, message, href) => {
+    await change({ kind: "invalid", fields, attempt: 1 });
+    const summary = await screen.findByRole("alert");
+    expect(within(summary).getByRole("link", { name: message })).toHaveAttribute("href", href);
+    const marked = "current" in fields ? currentField() : newField();
+    const other = "current" in fields ? newField() : currentField();
+    expect(marked).toBeInvalid();
+    expect(marked).toHaveAccessibleDescription(expect.stringContaining(message));
+    expect(other).not.toBeInvalid();
+    // Una contraseña nunca vuelve en la respuesta: los campos se arman de nuevo, vacíos.
+    expect(currentField()).toHaveValue("");
+    expect(newField()).toHaveValue("");
+    expect(changedNotice()).not.toBeInTheDocument();
+  });
+
+  it("los dos campos mal: el resumen los trae en el orden de la pantalla", async () => {
+    await change({ kind: "invalid", fields: { current: "mismatch", next: "weak" }, attempt: 1 });
+    const summary = await screen.findByRole("alert");
+    expect(within(summary).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "#cuenta-contrasena-actual",
+      "#cuenta-contrasena-nueva",
+    ]);
+  });
+
+  it.each([
+    ["sin la actual", { current: "", next: NEW }, "Escribe tu contraseña actual."],
+    ["con la nueva corta", { current: OLD, next: "corta-7" }, "Tu contraseña necesita 8 caracteres o más."],
+    ["con la nueva igual a la actual", { current: OLD, next: OLD }, "Esa es la contraseña que ya tienes. Elige otra."],
+  ])("%s no se envía: se marca antes, lo escrito se queda, y el servicio ni se entera", async (_case, typed, message) => {
+    await change({ kind: "changed", attempt: 1 }, typed);
+    expect(mocks.changePasswordAction).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(currentField()).toHaveValue(typed.current);
+    expect(newField()).toHaveValue(typed.next);
+  });
+
+  it("frenado: dice hasta qué hora, y el botón no acepta otro intento mientras tanto", async () => {
+    const later = new Date(Date.now() + 5 * 60_000).toISOString();
+    await change({ kind: "throttled", retryAt: later, attempt: 1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Error: Demasiados intentos\. Podrás probar de nuevo a las \d/);
+    const button = changeButton();
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription("Podrás intentarlo de nuevo cuando pase la espera.");
+  });
+
+  it("cumplida la espera, el botón vuelve a servir sin recargar", async () => {
+    // La espera es de diez minutos y se mira con uno de margen a cada lado: lo que tarde
+    // de verdad en escribir y enviar no cambia el resultado.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await change({ kind: "throttled", retryAt: new Date(Date.now() + 600_000).toISOString(), attempt: 1 });
+      await screen.findByRole("alert");
+      expect(changeButton()).toBeDisabled();
+      await act(() => vi.advanceTimersByTimeAsync(540_000));
+      expect(changeButton()).toBeDisabled();
+      await act(() => vi.advanceTimersByTimeAsync(120_000));
+      expect(changeButton()).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pasada la espera, un intento nuevo en camino deja de decir que hay que esperar", async () => {
+    const { user } = await change({ kind: "throttled", retryAt: new Date(Date.now() - 1_000).toISOString(), attempt: 1 });
+    await screen.findByRole("alert");
+    await vi.waitFor(() => expect(changeButton()).toBeEnabled());
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    await user.type(currentField(), OLD);
+    await user.type(newField(), NEW);
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+  });
+
+  it.each([
+    ["capped", "Demasiados intentos. Vuelve a probar más tarde."],
+    ["unavailable", "No pudimos hacerlo. Intenta de nuevo en un momento."],
+  ] as const)("no se pudo (%s): lo dice en una alerta, sin marcar ningún campo", async (reason, message) => {
+    await change({ kind: "failed", reason, attempt: 1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(currentField()).not.toBeInvalid();
+    expect(newField()).not.toBeInvalid();
+    expect(changeButton()).toBeEnabled();
+  });
+
+  it("cuenta suspendida: la pantalla entera pasa a PA-35", async () => {
+    await change({ kind: "suspended" });
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
+  });
+
+  it("mientras el cambio va en camino: lo dice, los campos no se escriben y lo de antes deja de decirse", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    await user.type(currentField(), NEW);
+    await user.type(newField(), "otra-mas-789");
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(changedNotice()).not.toBeInTheDocument();
+    // Lo tecleado ahora se perdería al llegar la respuesta.
+    expect(currentField()).toHaveAttribute("readonly");
+    expect(newField()).toHaveAttribute("readonly");
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    expect(currentField()).not.toHaveAttribute("readonly");
+    expect(newField()).not.toHaveAttribute("readonly");
+  });
+
+  it("lo que dijo el último envío deja de decirse en cuanto se vuelve a escribir", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    await user.type(currentField(), "x");
+    expect(changedNotice()).not.toBeInTheDocument();
+  });
+
+  // Los campos pueden llenarse sin que esta pantalla se entere: los llena el navegador, o
+  // un gestor de contraseñas. Entonces lo que quita el aviso viejo no es haber escrito.
+  it("con algo por corregir no se dice «cambió», aunque nadie haya escrito", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    // Los dos campos quedaron vacíos: enviar así lo detiene la revisión.
+    await user.click(changeButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Escribe tu contraseña actual.");
+    expect(changedNotice()).not.toBeInTheDocument();
+    expect(mocks.changePasswordAction).toHaveBeenCalledOnce();
+  });
+
+  it("con otro envío en camino no se dice «cambió», aunque los campos se hayan llenado sin avisar", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    (currentField() as HTMLInputElement).value = NEW;
+    (newField() as HTMLInputElement).value = "otra-mas-789";
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(changedNotice()).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+  });
+
+  it("un envío nuevo tapa lo que el servicio había rechazado, aunque su respuesta no haya llegado", async () => {
+    const { user } = await change({ kind: "invalid", fields: { current: "mismatch" }, attempt: 1 });
+    await screen.findByRole("alert");
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    await user.type(currentField(), OLD);
+    await user.type(newField(), NEW);
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(currentField()).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+  });
+
+  it("enviar con Intro desde la contraseña nueva deja el foco en ese campo, que se armó de nuevo", async () => {
+    mocks.changePasswordAction.mockResolvedValue({ kind: "changed", attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    await user.type(currentField(), OLD);
+    const before = newField();
+    await user.type(before, `${NEW}{Enter}`);
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    expect(newField()).not.toBe(before);
+    expect(newField()).toHaveFocus();
+  });
+
+  it("si el servicio no lo aceptó, el foco es del resumen de errores", async () => {
+    mocks.changePasswordAction.mockResolvedValue({ kind: "invalid", fields: { current: "mismatch" }, attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    await user.type(currentField(), OLD);
+    await user.type(newField(), `${NEW}{Enter}`);
+    expect(await screen.findByRole("alert")).toHaveFocus();
+  });
+
+  it("al salir de la contraseña nueva, una que no cumple la regla se marca; la actual no se revisa al salir", async () => {
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    await user.type(currentField(), "x");
+    await user.type(newField(), "corta-7");
+    // Dos saltos: el primero cae en «Mostrar», que es parte del campo, y eso no es salir.
+    await user.tab();
+    expect(newField()).not.toBeInvalid();
+    await user.tab();
+    await vi.waitFor(() => expect(newField()).toBeInvalid());
+    expect(newField()).toHaveAccessibleDescription(expect.stringContaining("Tu contraseña necesita 8 caracteres o más."));
+    expect(currentField()).not.toBeInvalid();
+  });
+
+  it("cambiar la contraseña no toca el bloque del nombre: lo escrito ahí sigue", async () => {
+    mocks.changePasswordAction.mockResolvedValue({ kind: "changed", attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    await user.type(nameField(), " de Prueba");
+    await user.type(currentField(), OLD);
+    await user.type(newField(), NEW);
+    await user.click(changeButton());
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    expect(nameField()).toHaveValue("Ana de Prueba");
+    expect(savedNotice()).not.toBeInTheDocument();
   });
 });

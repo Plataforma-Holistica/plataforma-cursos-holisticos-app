@@ -8,4 +8,4 @@
 
 export { parseDisplayName, DISPLAY_NAME_MAX_LENGTH } from "@/domain/access/display-name";
 export { parseEmail, EMAIL_MAX_LENGTH } from "@/domain/access/email";
-export { checkPassword, PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";
+export { checkPassword, checkPasswordChange, PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH } from "@/domain/access/password-policy";

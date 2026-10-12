@@ -12,6 +12,8 @@ import {
   failureFromResponse,
   failureFromSdk,
   passwordSetFailure,
+  provenPasswordFailure,
+  provenPasswordLimited,
   recoveryNeedsAdministration,
   recoveryRequestFailure,
   redeemFailure,
@@ -153,6 +155,42 @@ describe("fijar una contraseña", () => {
   it.each(strangers)("lo que no reconoce no es un éxito ni un rechazo: %j", (failure) => {
     expect(passwordSetFailure(failure)).toBe("unknown");
   });
+});
+
+describe("cambiar la contraseña con sesión, desde la cuenta", () => {
+  it.each([
+    ["same_password", "same_password"],
+    ["weak_password", "weak_password"],
+    ["session_not_found", "rejected"],
+    ["reauthentication_needed", "rejected"],
+  ])("%s es %s, como al fijarla desde un enlace", (code, expected) => {
+    expect(provenPasswordFailure(rejected(code, 422))).toBe(expected);
+  });
+
+  // Aquí «no se supo» cierra todas las sesiones de la cuenta. El límite de peticiones se
+  // contesta antes de tocar nada: se sabe que no se guardó.
+  it("un límite de peticiones es un rechazo: no cambió nada", () => {
+    expect(provenPasswordFailure(rejected("over_request_rate_limit", 429))).toBe("rejected");
+    // Desde un enlace sigue siendo «no se supo»: ahí el enlace ya se gastó, y decide su tabla.
+    expect(passwordSetFailure(rejected("over_request_rate_limit", 429))).toBe("unknown");
+  });
+
+  // Como rechazo conocido ya no deja el aviso de un código que ninguna lista conoce.
+  it("ese límite deja su propio aviso en el registro, sin datos de nadie; lo demás, ninguno", () => {
+    expect(provenPasswordLimited(rejected("over_request_rate_limit", 429))).toBe(
+      "Auth rechazó set_password por su límite de peticiones: ningún cambio de contraseña desde la cuenta pasa mientras dure.",
+    );
+    for (const failure of [unreachable, rejected(null, 429), rejected("session_not_found", 403), rejected("same_password", 422)]) {
+      expect(provenPasswordLimited(failure)).toBeNull();
+    }
+  });
+
+  it.each(strangers.filter((failure) => !("code" in failure) || failure.code !== "over_request_rate_limit"))(
+    "lo demás que no reconoce no es un éxito ni un rechazo: %j",
+    (failure) => {
+      expect(provenPasswordFailure(failure)).toBe("unknown");
+    },
+  );
 });
 
 describe("recuperar: cuándo se pasa al camino de administración", () => {

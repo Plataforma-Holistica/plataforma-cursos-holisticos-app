@@ -71,6 +71,15 @@ export type SignInResult =
   /** No se supo. No es un «no»: se puede volver a intentar. */
   | { kind: "unavailable" };
 
+/** Un intento de entrada ya contado en el freno, antes de preguntarle a Auth. */
+export interface OpenedAttempt {
+  decision: SignInDecision;
+  /** La hora de la base en que empezó el intento, antes de preguntarle a Auth. */
+  startedText: string;
+  /** La ventana en la que se sumó, para descontar en la misma. */
+  window: Date;
+}
+
 export interface Admission {
   result: SignInResult;
   /** Cómo se cierra el intento en el freno (`settleSignIn`). */

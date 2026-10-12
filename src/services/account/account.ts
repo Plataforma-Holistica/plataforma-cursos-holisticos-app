@@ -8,7 +8,6 @@ import { parseEmail } from "@/domain/access/email";
 import {
   decideSignInAttempt,
   settleSignIn,
-  type SignInDecision,
   type SignInOutcome,
 } from "@/domain/access/login-throttle";
 import { PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
@@ -24,6 +23,7 @@ import {
   type Admission,
   type GateView,
   type NoteState,
+  type OpenedAttempt,
   type SessionCheck,
   type SignInResult,
 } from "./admission";
@@ -61,7 +61,16 @@ import { atLeast, SIGN_IN_FLOOR_MS } from "./timing";
 export type { PendingAccount, SessionCheck, SignInResult } from "./admission";
 export type { AccountDependencies, AuthPort } from "./deps";
 export type { AccountForm, FieldErrors, RegistrationForm } from "./forms";
-export type { AccountProfile, AccountSessions, NameChange, OpenSession, OthersClosing, SessionClosing } from "./management";
+export type {
+  AccountProfile,
+  AccountSessions,
+  NameChange,
+  OpenSession,
+  OthersClosing,
+  PasswordChange,
+  PasswordChangeErrors,
+  SessionClosing,
+} from "./management";
 export type {
   AccountCompletion,
   AccountFormFacts,
@@ -77,14 +86,6 @@ export type { VerifiedClaims } from "@/adapters/supabase/claims";
 export type { Browser, Device, System } from "@/domain/access/user-agent";
 // La forma de un enlace de correo: una página la revisa antes de pintar su formulario.
 export { isLinkToken } from "@/adapters/supabase/tokens";
-
-interface OpenedAttempt {
-  decision: SignInDecision;
-  /** La hora de la base en que empezó el intento, antes de preguntarle a Auth. */
-  startedText: string;
-  /** La ventana en la que se sumó, para descontar en la misma. */
-  window: Date;
-}
 
 const utf8 = new TextEncoder();
 
@@ -355,7 +356,14 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     signIn,
     signOut,
     ...createOnboarding(deps, { checkSession, admit }),
-    ...createManagement(deps, { checkSession }),
+    ...createManagement(deps, {
+      checkSession,
+      admit,
+      // Comprobar la contraseña actual es un intento de entrada como cualquier otro: pasa
+      // por el mismo freno, con el mismo par, y se cuenta antes de preguntarle a Auth.
+      openAttempt: (keys) => asSystem({ reason: "password_change_attempt" }, (tx) => openAttempt(tx, keys)),
+      settleAttempt,
+    }),
   };
 }
 
@@ -380,4 +388,5 @@ export const {
   accountSessions,
   closeSession,
   closeOtherSessions,
+  changePassword,
 } = services;

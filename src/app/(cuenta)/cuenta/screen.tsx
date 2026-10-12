@@ -14,18 +14,26 @@ import { NAME_ERRORS, NameField } from "../_lib/fields";
 import { useFocusKept, useLocalChecks } from "../_lib/hooks";
 import { SuspendedScreen } from "../_lib/states";
 
-import { changeNameAction, closeSessionsAction } from "./actions";
-import { checkNameForm, readNameForm, type NameProblem, type NameState, type SessionsState } from "./outcomes";
+import { changeNameAction, changePasswordAction, closeSessionsAction } from "./actions";
+import {
+  checkNameForm,
+  readNameForm,
+  type NameProblem,
+  type NameState,
+  type PasswordState,
+  type SessionsState,
+} from "./outcomes";
+import { PASSWORD_BLOCK_ID, PasswordBlock } from "./password-block";
 import type { SessionRow } from "./rows";
 import { SESSIONS_BLOCK_ID, SessionsBlock } from "./sessions-block";
 
 // PA-25 · Cuenta. Cada bloque tiene su propio formulario y su propio botón de guardar, y su
 // resultado se dice junto a ese botón. Funciona sin JavaScript.
 //
-// Por ahora, el nombre, el correo a la vista y las sesiones abiertas. Dos diferencias con la
-// ficha del diseño, decididas el 2026-10-11: el resultado de guardar va en un aviso en línea
-// y no en uno flotante, y el correo no se cambia desde aquí hasta que haya correo propio
-// (T-310).
+// El nombre, el correo a la vista, la contraseña y las sesiones abiertas. Dos diferencias con
+// la ficha del diseño, decididas el 2026-10-11: el resultado de guardar va en un aviso en
+// línea y no en uno flotante, y el correo no se cambia desde aquí hasta que haya correo
+// propio (T-310).
 //
 // Los estados de todos los bloques viven aquí arriba, y no en cada bloque: cualquiera de
 // ellos puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
@@ -44,6 +52,8 @@ const IDLE: NameState = { kind: "idle" };
 const NAME_PERMALINK = `${ROUTES.account}#${NAME_BLOCK_ID}`;
 const SESSIONS_PERMALINK = `${ROUTES.account}#${SESSIONS_BLOCK_ID}`;
 const SESSIONS_IDLE: SessionsState = { kind: "idle" };
+const PASSWORD_PERMALINK = `${ROUTES.account}#${PASSWORD_BLOCK_ID}`;
+const PASSWORD_IDLE: PasswordState = { kind: "idle" };
 
 export interface AccountScreenProps {
   /** El nombre guardado, como lo leyó la página. */
@@ -57,6 +67,7 @@ export interface AccountScreenProps {
 export function AccountScreen({ name, email, sessions }: AccountScreenProps) {
   const [state, action, pending] = useActionState(changeNameAction, IDLE, NAME_PERMALINK);
   const [closing, closeAction, closingPending] = useActionState(closeSessionsAction, SESSIONS_IDLE, SESSIONS_PERMALINK);
+  const [password, passwordAction, passwordPending] = useActionState(changePasswordAction, PASSWORD_IDLE, PASSWORD_PERMALINK);
   const sent = "attempt" in state ? state.attempt : 0;
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
   const [local, checked] = useLocalChecks<NameProblem>(sent);
@@ -65,7 +76,9 @@ export function AccountScreen({ name, email, sessions }: AccountScreenProps) {
   // Después de qué respuesta se volvió a escribir. Lo que esa respuesta dijo era de otro texto.
   const [editedAfter, setEditedAfter] = useState<number | null>(null);
 
-  if (state.kind === "suspended" || closing.kind === "suspended") return <SuspendedScreen withSession />;
+  if (state.kind === "suspended" || closing.kind === "suspended" || password.kind === "suspended") {
+    return <SuspendedScreen withSession />;
+  }
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const found = checkNameForm(readNameForm(new FormData(event.currentTarget)));
@@ -135,6 +148,7 @@ export function AccountScreen({ name, email, sessions }: AccountScreenProps) {
         {email !== null && <p>{email}</p>}
         <p className="text-body-s text-text-2">{text.emailNote}</p>
       </section>
+      <PasswordBlock state={password} action={passwordAction} pending={passwordPending} />
       <SessionsBlock sessions={sessions} state={closing} action={closeAction} pending={closingPending} />
       <p className="text-body-s">
         <TextLink href={ROUTES.home}>{text.backHome}</TextLink>

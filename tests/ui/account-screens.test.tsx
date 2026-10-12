@@ -138,7 +138,7 @@ describe("la hora del freno, cuando la pinta el servidor", () => {
   it("va en la hora del centro de México, y lo dice", async () => {
     // Lo que el servidor manda cuando el formulario se envió sin JavaScript: no sabe en qué
     // zona está la persona. 18:30 UTC son las 12:30 en el centro de México.
-    const { ThrottledAlert } = await import("@/app/(cuenta)/entrar/screen");
+    const { ThrottledAlert } = await import("@/app/(cuenta)/_lib/throttled-alert");
     const html = renderToString(<ThrottledAlert retryAt="2026-10-11T18:30:00.000Z" />);
     expect(html).toContain("Podrás probar de nuevo a las 12:30");
     expect(html).toContain("hora del centro de México");
