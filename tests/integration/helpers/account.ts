@@ -2,7 +2,9 @@ import { randomInt } from "node:crypto";
 
 import { Client } from "pg";
 
-import { createAccountServices, type AccountDependencies } from "@/services/account/account";
+import { createAuth } from "@/adapters/supabase/auth";
+import { createAccountServices, type AccountDependencies, type SessionCheck } from "@/services/account/account";
+import { createManagement } from "@/services/account/management";
 import { buckets, fingerprint, type Fingerprint } from "@/services/account/fingerprint";
 import { resolveOrigin, type RequestOrigin } from "@/services/account/origin";
 import type { FailureCode } from "@/services/error-reporting/server";
@@ -46,6 +48,36 @@ export function testServices(overrides: Partial<AccountDependencies> = {}): Test
     ...overrides,
   });
   return { ...services, reported, slept };
+}
+
+/**
+ * Los servicios de administrar la cuenta con una guarda que contesta lo que se le diga, y lo
+ * que reportaron. Con varias respuestas las da en orden, y repite la última. Lo que viene
+ * después de la guarda en una entrada (el freno, anotar la sesión) no está: si un caso llega
+ * hasta ahí, falla y lo dice.
+ */
+export function managementWith(...checks: [SessionCheck, ...SessionCheck[]]) {
+  const answers: SessionCheck[] = [...checks];
+  const next = (): SessionCheck => {
+    const [first, ...later] = answers;
+    if (later.length > 0) answers.shift();
+    return first ?? checks[0];
+  };
+  const beyond = () => Promise.reject(new Error("La guarda simulada no deja llegar hasta aquí."));
+  const reported: FailureCode[] = [];
+  const management = createManagement(
+    {
+      auth: createAuth(),
+      proxyTrusted: () => true,
+      isLocal: () => true,
+      report: (code) => {
+        reported.push(code);
+        return Promise.resolve();
+      },
+    },
+    { checkSession: () => Promise.resolve(next()), admit: beyond, openAttempt: beyond, settleAttempt: beyond },
+  );
+  return { ...management, reported };
 }
 
 /** Una dirección nueva en cada llamada, de un rango reservado para pruebas (198.18.0.0/15). */

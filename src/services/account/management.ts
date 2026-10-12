@@ -2,23 +2,35 @@ import "server-only";
 
 import { z } from "zod";
 
-import type { CookieReader } from "@/adapters/supabase/auth-cookies";
+import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
+import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asUser } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 import { parseDisplayName, type DisplayNameResult } from "@/domain/access/display-name";
+import { parseEmail } from "@/domain/access/email";
+import type { SignInOutcome } from "@/domain/access/login-throttle";
+import { checkPassword, PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
 import { describeUserAgent, type Device } from "@/domain/access/user-agent";
 
-import { isSessionId, type SessionCheck } from "./admission";
-import type { AccountDependencies } from "./deps";
+import { authRefusal, isSessionId, refusalOf, type Admission, type OpenedAttempt, type SessionCheck } from "./admission";
+import { stagingJar, type AccountDependencies } from "./deps";
+import { fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
+import { resolveOrigin, type RequestOrigin } from "./origin";
 import { saveName } from "./records";
-import { closeOtherSessions as closeOthersInBase, closeSession as closeInBase, listSessions } from "./store";
+import {
+  closeOtherSessions as closeOthersInBase,
+  closeSession as closeInBase,
+  dbClock,
+  listSessions,
+  notePasswordChange,
+  type PairKeys,
+} from "./store";
 
 // Administrar la cuenta (RF-109; flujo de la app FL-27; diseño PA-25): lo que una persona
-// con sesión cambia de su propia cuenta. Por ahora, el nombre y las sesiones abiertas. La
-// contraseña llega en su propia solicitud, y el cambio de correo espera a que haya correo
-// propio (T-310).
+// con sesión cambia de su propia cuenta: el nombre, las sesiones abiertas y la contraseña.
+// El cambio de correo espera a que haya correo propio (T-310).
 //
 // Una regla para todo el archivo: cada escritura vuelve a correr la guarda de sesión, y la
 // cuenta sobre la que se escribe es la de esa sesión. Nada de lo que llega dice de quién es.
@@ -71,14 +83,55 @@ export type OthersClosing =
   | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
   | { kind: "unavailable" };
 
+/** Lo que no dejó cambiar la contraseña, campo por campo. */
+export interface PasswordChangeErrors {
+  /** `mismatch`: no es la contraseña de esta cuenta. Cuenta como un intento fallido de entrada. */
+  current?: "required" | "mismatch";
+  /** `same`: es la que ya tenía. `weak`: Auth la rechazó aunque cumpla la regla de aquí. */
+  next?: "too_short" | "too_long" | "malformed" | "same" | "weak";
+}
+
+export type PasswordChange =
+  /** Cambió, las demás sesiones se cerraron, y este navegador quedó con una sesión nueva. */
+  | { kind: "changed" }
+  | { kind: "invalid"; fields: PasswordChangeErrors }
+  /** Frenado, como al entrar: son los mismos intentos. */
+  | { kind: "throttled"; retryAt: Date }
+  | { kind: "capped" }
+  /**
+   * Este navegador quedó sin sesión, y la cuenta sin ninguna: hay que entrar. `password`
+   * dice si la contraseña ya es la nueva, o si no se supo.
+   */
+  | { kind: "signed_out"; password: "changed" | "unknown" }
+  | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
+  | { kind: "unavailable" };
+
 /** Lo que estos servicios usan de los de entrada. */
 export interface ManagementCore {
   checkSession: (reader: CookieReader) => Promise<SessionCheck>;
+  /** Corre la guarda sobre una entrada que Auth aceptó y, si deja entrar, anota la sesión. */
+  admit: (entered: AuthSignIn & { ok: true }, startedText: string, userAgent: string | null) => Promise<Admission>;
+  /** Cuenta un intento de entrada en el freno, antes de preguntarle a Auth. */
+  openAttempt: (keys: PairKeys) => Promise<OpenedAttempt>;
+  /** Cierra ese intento con lo que pasó. */
+  settleAttempt: (keys: PairKeys, opened: OpenedAttempt, outcome: SignInOutcome, knownOrigin: boolean) => Promise<void>;
 }
+
+const utf8 = new TextEncoder();
 
 const nameRow = z.object({ display_name: z.string().nullable() });
 
-export function createManagement(deps: Pick<AccountDependencies, "report" | "isLocal">, core: ManagementCore) {
+export function createManagement(
+  deps: Pick<AccountDependencies, "auth" | "proxyTrusted" | "report" | "isLocal">,
+  core: ManagementCore,
+) {
+  const { auth } = deps;
+
+  /** Una sesión que ya no debía seguir. Si no se pudo cerrar, alguien tiene que saberlo. */
+  async function expectClosed(closing: Promise<"closed" | "unknown">): Promise<void> {
+    if ((await closing) !== "closed") await deps.report("session_not_closed");
+  }
+
   /**
    * Lo que la pantalla de la cuenta pinta de la persona. Recibe las claims con las que la
    * guarda dejó pasar a su página, y lee como esa persona: la base filtra por ella.
@@ -234,5 +287,164 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
     return refusedClosing(reader);
   }
 
-  return { accountProfile, changeName, accountSessions, closeSession, closeOtherSessions };
+  /**
+   * Fecha el cambio de contraseña en la base y borra lo anotado de la cuenta. Devuelve la
+   * hora de la base de después, que es desde cuándo puede empezar la entrada con la
+   * contraseña nueva; o nulo si no se pudo.
+   */
+  async function datePasswordChange(claims: VerifiedClaims): Promise<string | null> {
+    try {
+      return await asServer({ claims, reason: "change_password" }, async (tx) => {
+        if ((await notePasswordChange(tx)) !== "noted") throw new Error("El cambio de contraseña no se pudo fechar.");
+        return (await dbClock(tx)).text;
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /** Borra la cookie de una sesión que ya no existe. Nunca lanza: de aquí solo queda irse. */
+  async function dropCookie(jar: CookieJar): Promise<void> {
+    try {
+      await auth.signOut(jar);
+    } catch {
+      // El tarro no deja escribir: quien llamó no puede borrar cookies, y ya se reportó.
+    }
+  }
+
+  /**
+   * Cambiar la contraseña (FL-27, paso 3). El orden es la regla, y no se cambia sin leer el
+   * TRD §9.2, fila «Cambio de contraseña desde la cuenta»:
+   *
+   * 1. La guarda, y lo que se puede revisar sin preguntarle a nadie.
+   * 2. El freno de intentos, con el par de la cuenta y la dirección: comprobar la contraseña
+   *    actual es un intento de entrada. Sin él, esta pantalla serviría para adivinarla.
+   * 3. La contraseña actual se comprueba entrando con ella. Auth no la pide para fijar otra:
+   *    con la sesión del navegador, a quien se llevara una cookie le bastaría eso.
+   * 4. Esa entrada pasa por la guarda y se anota, como cualquier otra: si empezó antes del
+   *    último cambio de contraseña (una recuperación reciente), no sigue.
+   * 5. Auth guarda la nueva con la sesión de esa entrada: cierra las demás y manda CO-26.
+   * 6. La base fecha el cambio y borra lo anotado: una entrada en vuelo con la contraseña
+   *    de antes ya no se anota.
+   * 7. Se cierra la sesión de la comprobación y se entra con la contraseña nueva: es la
+   *    sesión que se queda en este navegador.
+   *
+   * Después del paso 5 ya no hay vuelta: si algo falla, la cuenta se queda sin sesiones y
+   * la persona entra de nuevo. Nunca queda una sesión abierta con la contraseña de antes.
+   */
+  async function changePassword(
+    jar: CookieJar,
+    input: { current: string; next: string },
+    origin: RequestOrigin,
+  ): Promise<PasswordChange> {
+    const check = await core.checkSession(jar);
+    if (check.kind !== "pass") return { kind: "session", check };
+
+    const fields: PasswordChangeErrors = {};
+    if (input.current === "") fields.current = "required";
+    const policy = checkPassword(input.next);
+    if (!policy.ok) fields.next = policy.reason;
+    else if (input.next === input.current) fields.next = "same";
+    if (fields.current !== undefined || fields.next !== undefined) return { kind: "invalid", fields };
+    // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie, y no hace
+    // falta mandársela a Auth para saberlo.
+    if (utf8.encode(input.current).length > PASSWORD_MAX_BYTES) return { kind: "invalid", fields: { current: "mismatch" } };
+
+    // El correo con el que se entra es el de la sesión que pasó la guarda. No llega de fuera.
+    const read = await auth.readSession(jar);
+    const email = read.kind === "session" ? parseEmail(read.email ?? "") : null;
+    if (email === null || !email.ok) {
+      await deps.report("account_unavailable");
+      return { kind: "unavailable" };
+    }
+
+    const from = resolveOrigin(origin, deps.proxyTrusted());
+    if (!from.known && !deps.isLocal()) await deps.report("client_ip_unknown");
+    const keys: PairKeys = { account: fingerprint("account", email.email), ip: from.ip };
+    let opened: OpenedAttempt;
+    try {
+      opened = await core.openAttempt(keys);
+    } catch {
+      await deps.report("throttle_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (!opened.decision.proceed) {
+      const refusal = refusalOf(opened.decision);
+      if (refusal.report) await deps.report(refusal.report);
+      if (refusal.result.kind === "throttled") return { kind: "throttled", retryAt: refusal.result.retryAt };
+      return refusal.result.kind === "capped" ? { kind: "capped" } : { kind: "unavailable" };
+    }
+
+    const proof = await auth.provePassword(email.email, input.current);
+    let admission: Admission;
+    if (!proof.ok) admission = authRefusal(proof.reason);
+    // La entrada tiene que ser de la cuenta de la sesión que pide: con otra, no acertó.
+    else if (proof.claims.userId !== check.claims.userId) admission = authRefusal("invalid_credentials");
+    else admission = await core.admit(proof, opened.startedText, from.userAgent);
+    if (admission.report) await deps.report(admission.report);
+    try {
+      await core.settleAttempt(keys, opened, admission.outcome, from.known);
+    } catch {
+      await deps.report("sign_in_settle_failed");
+    }
+
+    // Entrar con algo pendiente no alcanza: la guarda pidió una cuenta a la que no le falta nada.
+    const whole = admission.result.kind === "entered" && admission.result.pending === null;
+    if (!proof.ok || !admission.admit || !whole) {
+      if (proof.ok) await expectClosed(auth.discardProof(proof.proven));
+      if (admission.result.kind === "invalid_credentials") return { kind: "invalid", fields: { current: "mismatch" } };
+      if (admission.result.kind === "unavailable") return { kind: "unavailable" };
+      // La contraseña era la suya, pero la cuenta dejó de pasar a media operación (se
+      // suspendió, se le prendió la marca, cambió un texto): se contesta lo que la guarda
+      // dice ahora.
+      const now = await core.checkSession(jar);
+      if (now.kind !== "pass" && now.kind !== "unavailable") return { kind: "session", check: now };
+      await deps.report("account_unavailable");
+      return { kind: "unavailable" };
+    }
+
+    const saved = await auth.changeProvenPassword(proof.proven, input.next);
+    if (saved === "same_password" || saved === "weak_password") {
+      await expectClosed(auth.discardProof(proof.proven));
+      return { kind: "invalid", fields: { next: saved === "same_password" ? "same" : "weak" } };
+    }
+    if (saved === "rejected") {
+      // Auth dijo que no, y no cambió nada: la sesión de este navegador sigue valiendo.
+      await expectClosed(auth.discardProof(proof.proven));
+      await deps.report("account_unavailable");
+      return { kind: "unavailable" };
+    }
+
+    // Desde aquí la contraseña cambió, o no se sabe. En los dos casos el cambio se fecha: si
+    // sí cambió, es lo que impide que una entrada vieja quede reconocida.
+    const startedText = await datePasswordChange(proof.claims);
+    if (saved !== "ok" || startedText === null) {
+      await deps.report(saved === "ok" ? "password_change_incomplete" : "password_change_unconfirmed");
+      await expectClosed(auth.closeAllWithProof(proof.proven));
+      await dropCookie(jar);
+      return { kind: "signed_out", password: saved === "ok" ? "changed" : "unknown" };
+    }
+    await expectClosed(auth.discardProof(proof.proven));
+
+    // La entrada con la contraseña nueva. Su cookie no llega al navegador hasta que la
+    // guarda dejó entrar y la sesión quedó anotada.
+    const staging = stagingJar();
+    const entered = await auth.signIn(staging, email.email, input.next);
+    const admitted = entered.ok ? await core.admit(entered, startedText, from.userAgent) : null;
+    let failure = admitted?.report ?? null;
+    if (admitted?.admit === true && failure === null) {
+      try {
+        for (const write of staging.writes) jar.set(write.name, write.value, write.options);
+        return { kind: "changed" };
+      } catch {
+        failure = "session_cookie_not_written";
+      }
+    }
+    if (failure !== null) await deps.report(failure);
+    if (entered.ok) await expectClosed(auth.signOut(staging));
+    await dropCookie(jar);
+    return { kind: "signed_out", password: "changed" };
+  }
+
+  return { accountProfile, changeName, accountSessions, closeSession, closeOtherSessions, changePassword };
 }

@@ -264,6 +264,16 @@ export async function sessionRecognition(tx: Tx, sessionId: string): Promise<str
 }
 
 /**
+ * Fecha el cambio de contraseña de quien actúa en esta transacción y borra lo que tenía
+ * anotado: desde aquí, una entrada que empezó antes ya no se anota. Devuelve lo que
+ * contestó la base.
+ */
+export async function notePasswordChange(tx: Tx): Promise<string> {
+  const [row] = await tx.query(sql`select private.note_password_change() as state`, stateRow);
+  return row?.state ?? "";
+}
+
+/**
  * Etiqueta una sesión recién anotada con el navegador desde el que se abrió, para que su
  * dueña la reconozca en la lista de su cuenta. Devuelve lo que contestó la base.
  */
