@@ -156,8 +156,11 @@ describe("describeUserAgent", () => {
     );
   });
 
+  // Con semilla fija. Safari pide una combinación rara de piezas, y al azar alguna corrida
+  // no la producía: la prueba fallaba sin que nada hubiera cambiado (pasó el 2026-10-12).
+  // Lo que se comprueba es que los generadores pueden dar cada valor, no la suerte del día.
   it("los generadores sí producen cada navegador y cada sistema", () => {
-    const devices = fc.sample(candidate, 3_000).map((input) => describeUserAgent(input));
+    const devices = fc.sample(candidate, { numRuns: 3_000, seed: 20261012 }).map((input) => describeUserAgent(input));
     expect(new Set(devices.map((device) => device.browser))).toEqual(new Set([...BROWSERS, null]));
     expect(new Set(devices.map((device) => device.system))).toEqual(new Set([...SYSTEMS, null]));
   });
