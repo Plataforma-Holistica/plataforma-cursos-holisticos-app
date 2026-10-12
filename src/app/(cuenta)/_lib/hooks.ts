@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 // Lo poco que las pantallas de la cuenta saben del navegador en el que corren. Sin
 // JavaScript nada de esto cambia: la pantalla se queda como la pintó el servidor.
@@ -140,6 +140,38 @@ export function useSeenOnBlur<Problem extends string>(
   const see = (seen: Problem | null | undefined) =>
     afterInteraction(() => setLast(seen === undefined ? null : { round, seen }));
   return [shown, see];
+}
+
+/**
+ * Para un formulario cuya respuesta se pinta en la misma pantalla: devuelve el foco a donde
+ * estaba al enviar, si la respuesta lo dejó sin dueño.
+ *
+ * Con cada respuesta los campos se arman de nuevo y el botón pasa por deshabilitado: el
+ * elemento que tenía el foco desaparece o lo suelta, y el foco cae al documento. Quien guarda
+ * con Intro desde un campo tendría que volver a buscarlo desde el principio de la página.
+ * Donde el envío lleva a otra pantalla esto no hace falta.
+ *
+ * Solo actúa si el foco quedó sin dueño: si lo tomó el resumen de errores, o la persona ya
+ * se movió a otra cosa, ahí se queda.
+ *
+ * @param answers Cuántas respuestas del servidor ha recibido el formulario.
+ * @returns Con qué anotar, al enviar, dónde está el foco dentro de ese formulario.
+ */
+export function useFocusKept(answers: number): (form: HTMLFormElement) => void {
+  const sentFrom = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const from = sentFrom.current;
+    sentFrom.current = null;
+    if (from === null) return;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    // Un campo que se armó de nuevo ya es otro elemento: se le encuentra por su `id`.
+    const target = from.isConnected ? from : from.id === "" ? null : document.getElementById(from.id);
+    target?.focus();
+  }, [answers]);
+  return (form) => {
+    const active = document.activeElement;
+    sentFrom.current = active instanceof HTMLElement && form.contains(active) ? active : null;
+  };
 }
 
 /** Lo que lleva de las revisiones que el navegador hace de un formulario antes de enviarlo. */

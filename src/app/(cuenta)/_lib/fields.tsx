@@ -50,10 +50,15 @@ interface CheckedField<Problem> {
 export interface NameFieldProps extends CheckedField<NameProblem> {
   /** Lo escrito en el envío anterior: React vacía el formulario después de su acción. */
   defaultValue: string;
+  /**
+   * Para una pantalla que se queda en sí misma al guardar: mientras el envío va en camino el
+   * campo no se escribe, porque al llegar la respuesta se arma de nuevo y lo tecleado se perdería.
+   */
+  readOnly?: boolean;
 }
 
 /** El nombre de la persona (RF-109). */
-export function NameField({ id, defaultValue, problem, round = 0 }: NameFieldProps) {
+export function NameField({ id, defaultValue, problem, round = 0, readOnly = false }: NameFieldProps) {
   const [shown, see] = useSeenOnBlur(problem, round);
 
   function validate(event: FocusEvent<HTMLDivElement>) {
@@ -71,6 +76,7 @@ export function NameField({ id, defaultValue, problem, round = 0 }: NameFieldPro
         name="name"
         autoComplete="name"
         defaultValue={defaultValue}
+        readOnly={readOnly}
         error={shown ? NAME_ERRORS[shown] : undefined}
       />
     </div>

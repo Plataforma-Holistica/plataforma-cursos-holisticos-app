@@ -20,6 +20,9 @@ describe("qué rutas piden sesión", () => {
     ["/inicio/algo", true],
     ["/consentimientos", true],
     ["/consentimientos/x", true],
+    ["/cuenta", true],
+    ["/cuenta/datos", true],
+    ["/cuentas", false],
     ["/iniciox", false],
     ["/inicio.html", false],
     ["/", false],
@@ -56,6 +59,8 @@ describe("a dónde se va después de entrar", () => {
     ["/inicio?pestana=2", "/inicio?pestana=2"],
     ["/inicio/algo", "/inicio/algo"],
     ["/inicio#seccion", "/inicio"],
+    ["/cuenta", "/cuenta"],
+    ["/cuenta?bloque=nombre", "/cuenta?bloque=nombre"],
   ])("un destino permitido se respeta: %s", (input, expected) => {
     expect(resolveDestination(input)).toBe(expected);
   });
@@ -72,6 +77,8 @@ describe("a dónde se va después de entrar", () => {
     "inicio",
     " /inicio",
     "/iniciox",
+    "/cuentas",
+    "/cuenta/../entrar",
     // Rutas propias que no son destino: volver a ellas daría vueltas o no llevaría a nada.
     "/entrar",
     "/registro",
@@ -88,6 +95,8 @@ describe("mandar a entrar o a completar la cuenta, con el destino guardado", () 
   it("guarda el destino codificado", () => {
     expect(signInPath("/inicio")).toBe("/entrar?volver=%2Finicio");
     expect(consentsPath("/inicio")).toBe("/consentimientos?volver=%2Finicio");
+    expect(signInPath("/cuenta")).toBe("/entrar?volver=%2Fcuenta");
+    expect(consentsPath("/cuenta")).toBe("/consentimientos?volver=%2Fcuenta");
   });
 
   it("la consulta del destino viaja dentro del destino, no al lado", () => {
@@ -108,8 +117,8 @@ describe("mandar a entrar o a completar la cuenta, con el destino guardado", () 
     const segment = fc.stringMatching(/^[A-Za-z0-9_~-]{1,8}$/);
     const query = fc.stringMatching(/^[A-Za-z0-9_.~=&+-]{0,12}$/);
     fc.assert(
-      fc.property(fc.array(segment, { maxLength: 3 }), query, (segments, search) => {
-        const target = ["/inicio", ...segments].join("/") + (search === "" ? "" : `?${search}`);
+      fc.property(fc.constantFrom("/inicio", "/cuenta"), fc.array(segment, { maxLength: 3 }), query, (root, segments, search) => {
+        const target = [root, ...segments].join("/") + (search === "" ? "" : `?${search}`);
         expect(resolveDestination(returnOf(signInPath(target)))).toBe(target);
         expect(resolveDestination(returnOf(consentsPath(target)))).toBe(target);
       }),
@@ -120,7 +129,8 @@ describe("mandar a entrar o a completar la cuenta, con el destino guardado", () 
     fc.assert(
       fc.property(fc.string(), (input) => {
         const destination = resolveDestination(input);
-        expect(destination.startsWith("/inicio")).toBe(true);
+        // Solo las dos pantallas a las que se puede volver, o lo que cuelga de ellas.
+        expect(destination).toMatch(/^\/(inicio|cuenta)(?:[/?]|$)/);
         expect(new URL(destination, "https://plataforma.example").origin).toBe("https://plataforma.example");
         expect(new URL(signInPath(input), "https://plataforma.example").pathname).toBe("/entrar");
       }),

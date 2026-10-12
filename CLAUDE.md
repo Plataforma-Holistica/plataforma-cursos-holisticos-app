@@ -278,6 +278,26 @@ falla. Doce precisiones que la tabla no dice:
     cada intento: con la misma, React confunde uno con otro y el aviso de un intento se
     queda en pantalla con el siguiente. La preparación de las pruebas de componente
     (`tests/setup/dom.ts`) hace fallar toda prueba en la que React avise de eso.
+  - Una pantalla cuya respuesta se pinta en ella misma (la de la cuenta, PA-25) va por
+    bloques: cada bloque es una sección con su propio formulario, su `useActionState` y su
+    resumen de errores. Tres cosas que las pantallas que navegan al terminar no necesitan:
+    - El tercer argumento de `useActionState` es la dirección de la pantalla con el ancla
+      del bloque (`"/cuenta#bloque-nombre"`). Sin JavaScript el navegador vuelve ahí, y no
+      al principio de la página. El `id` del bloque no lo usa ninguna otra pantalla: si la
+      acción redirige, el navegador se lleva el ancla al destino, y allá no debe apuntar a
+      nada.
+    - El foco vuelve a donde estaba al enviar (`useFocusKept`, en `_lib/hooks.ts`): con
+      cada respuesta los campos se arman de nuevo y el foco caería al documento. Solo
+      actúa si el foco quedó sin dueño; el resumen de errores sigue mandando.
+    - El resultado se dice en el bloque, con un `InlineAlert` vivo, no con un aviso en
+      cookie: ese es para ir de una pantalla a otra. Deja de decirse mientras hay otro
+      envío en camino, con algo por corregir y en cuanto la persona vuelve a escribir:
+      «Guardado» junto a un texto que no se ha guardado miente. En una prueba se busca por su texto y no por su
+      papel, porque un botón con texto de carga siempre lleva su propia región viva.
+    - Mientras el envío va en camino el campo queda de solo lectura: al llegar la
+      respuesta se arma de nuevo, y lo tecleado entre tanto se perdería sin aviso.
+
+    Una prueba exige que el ancla de un bloque no se escriba en ningún otro archivo.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -310,7 +330,25 @@ falla. Doce precisiones que la tabla no dice:
   llega a la base; `session.ts`, que es lo que importa el paso previo, no lo importa.
   Registrarse, recuperar la contraseña y completar una cuenta viven en `onboarding.ts`,
   con sus revisiones puras en `forms.ts` y lo que leen y escriben de la persona en
-  `records.ts`; `account.ts` los arma.
+  `records.ts`; `account.ts` los arma. Administrar la cuenta (RF-109) vive en
+  `management.ts`: por ahora, lo que la pantalla de la cuenta pinta y el cambio de nombre.
+  - En `management.ts` cada escritura vuelve a correr la guarda y escribe sobre la cuenta
+    de esa sesión: nada de lo que llega dice de quién es. `accountProfile(claims)` lee como
+    la persona (`asUser`), con las claims que la guarda le dio a la página. `changeName`
+    exige una sesión que pase: a una cuenta a la que le falta algo se lo pide primero su
+    pantalla. La guarda de sesión corre en su propia transacción, así que la de la
+    escritura vuelve a evaluar la cuenta (`evaluateGate`), ya con el dato puesto, y lanza
+    si dejó de pasar: una cuenta que se suspendió entre una y otra no cambia. El orden
+    importa y una prueba lo fija: se guarda primero, que es lo que toma la fila, y se
+    evalúa después. Si guardar falla, antes de darlo por caída se le vuelve a preguntar a
+    la guarda de sesión: una cuenta que cambió a media operación no es una falla, y se
+    contesta lo que la guarda dice ahora. Si insiste en que pasa, o tampoco supo, es «no
+    se supo» y se reporta ahí mismo, sin contar con que la guarda reporte lo suyo. Una
+    escritura que no tocó una fila tampoco es «guardado». Una prueba
+    exige que la lectura vaya por `asUser` y la escritura por `asServer`.
+  - El correo que la pantalla de la cuenta muestra es el de `sessionEmail`. No se le
+    pregunta a Auth porque hoy ningún camino cambia un correo; cuando exista el cambio de
+    correo (T-310), esa pantalla lo lee de Auth.
   - `checkSession(reader)` es la guarda de sesión: toda página y toda acción con sesión la
     llama, y obedece lo que contesta. Además de lo que decide el dominio, comprueba en la
     base que la sesión sea de las que abrió la aplicación y que siga viva en Auth. Una

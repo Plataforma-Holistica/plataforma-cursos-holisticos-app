@@ -18,6 +18,12 @@ interface AxeResults {
 export async function a11yViolations(page: Page): Promise<string[]> {
   await page.addScriptTag({ path: axePath });
   const results = await page.evaluate(async () => {
+    // A media transición un color no es el de ningún estado: un botón que vuelve de
+    // «cargando» pasa un instante por un contraste que no existe ni antes ni después. Se
+    // mide cuando las transiciones en curso terminaron. Las animaciones no se esperan: un
+    // indicador de carga no termina nunca.
+    const transitions = document.getAnimations().filter((animation) => animation instanceof CSSTransition);
+    await Promise.all(transitions.map((transition) => transition.finished.catch(() => undefined)));
     const engine = (window as unknown as { axe: { run: (context: Document) => Promise<AxeResults> } }).axe;
     return engine.run(document);
   });

@@ -89,6 +89,10 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
     completeAccountAction: /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
   },
+  "src/app/(cuenta)/cuenta/actions.ts": {
+    // Cambiar el nombre: el servicio vuelve a correr la guarda, y del formulario solo llega el nombre.
+    changeNameAction: /changeNameOutcome\(await changeName\(jar, \{ name: input\.name \}\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
   "src/app/(cuenta)/registro/actions.ts": {
     // Pedir el registro: el servicio cuenta el intento y aplica los topes antes de invitar a nadie.
     requestRegistrationAction:
@@ -155,6 +159,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
     expect(routeOf("src/app/page.tsx")).toBe("/");
     expect(routeOf("src/app/inicio/page.tsx")).toBe("/inicio");
     expect(routeOf("src/app/(cuenta)/consentimientos/page.tsx")).toBe("/consentimientos");
+    expect(routeOf("src/app/(cuenta)/cuenta/page.tsx")).toBe("/cuenta");
     expect(routeOf("src/app/(cuenta)/verificar/[token]/page.tsx")).toBe("/verificar/[token]");
   });
 
@@ -175,7 +180,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
   it("toda ruta que pide sesión tiene su página revisada: ninguna se sirve sin pasar por aquí", () => {
     const sessionPages = guarded.filter((file) => requiresSession(routeOf(file))).map(routeOf);
-    expect(sessionPages.sort()).toEqual(["/consentimientos", "/inicio"]);
+    expect(sessionPages.sort()).toEqual(["/consentimientos", "/cuenta", "/inicio"]);
   });
 
   it("una página pública no finge pasar por la guarda", () => {
@@ -317,6 +322,7 @@ describe("lo que viaja al navegador", () => {
     expect(names).toContain("src/app/error.tsx");
     expect(names).toContain("src/app/(cuenta)/entrar/screen.tsx");
     expect(names).toContain("src/app/(cuenta)/consentimientos/screen.tsx");
+    expect(names).toContain("src/app/(cuenta)/cuenta/screen.tsx");
   });
 
   it.each(clients.map((source) => [source.file, source.path]))("%s no arrastra código del servidor", (_file, path) => {
@@ -343,6 +349,23 @@ describe("lo que viaja al navegador", () => {
       "src/services/account/field-rules.ts",
     ]);
     expect([...reached.packages]).toEqual([]);
+  });
+});
+
+describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
+  // Una pantalla por bloques le da a cada formulario la dirección a la que vuelve sin
+  // JavaScript, con el ancla de su bloque. Si la acción redirige, el navegador se lleva el
+  // ancla a la pantalla de destino: allá no debe existir, o la página se desplazaría sola.
+  const anchors = sources.flatMap((source) =>
+    [...source.code.matchAll(/"(bloque-[a-z0-9-]+)"/g)].map((match) => ({ file: source.file, anchor: match[1] ?? "" })),
+  );
+
+  it("hay anclas que revisar", () => {
+    expect(anchors.map(({ anchor }) => anchor)).toContain("bloque-nombre");
+  });
+
+  it.each(anchors)("$anchor solo se escribe en $file", ({ file, anchor }) => {
+    expect(everything.filter((source) => source.code.includes(anchor)).map((source) => source.file)).toEqual([file]);
   });
 });
 

@@ -15,6 +15,7 @@ export const ROUTES = {
   verify: "/verificar",
   consents: "/consentimientos",
   home: "/inicio",
+  account: "/cuenta",
   closeSession: "/sesion/cerrar",
 } as const;
 
@@ -25,14 +26,14 @@ export const RETURN_PARAM = "volver";
  * Las rutas que piden sesión: vale la ruta exacta y lo que cuelga de ella. Una pantalla
  * nueva con sesión se agrega aquí, y una prueba de arquitectura exige que llame a la guarda.
  */
-export const SESSION_ROUTES: readonly string[] = [ROUTES.home, ROUTES.consents];
+export const SESSION_ROUTES: readonly string[] = [ROUTES.home, ROUTES.consents, ROUTES.account];
 
 /**
  * A dónde se puede volver después de entrar. Va por lo que se permite: una ruta nueva no
- * es destino hasta que alguien la agrega. Las pantallas de la cuenta no están: volver a
- * ellas daría vueltas.
+ * es destino hasta que alguien la agrega. Las pantallas por las que se entra (entrar,
+ * registrarse, recuperar, completar la cuenta) no están: volver a ellas daría vueltas.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account];
 
 export function requiresSession(pathname: string): boolean {
   return SESSION_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));

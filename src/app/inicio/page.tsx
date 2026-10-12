@@ -9,9 +9,11 @@ import { sessionEmail } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
+import { TextLink } from "@/ui/text-link";
 
 // El inicio de quien entró, provisional: el del alumno (PA-20) llega con el catálogo
-// (T-210). Existe para que haya a dónde llegar después de entrar, y dónde salir.
+// (T-210). Existe para que haya a dónde llegar después de entrar, y dónde salir. Mientras
+// no haya menú de la cuenta, de aquí sale también el enlace a PA-25.
 //
 // Dice con qué correo se entró. No es un adorno: es lo que le avisa a alguien que completó
 // una cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla.
@@ -34,6 +36,9 @@ export default async function HomePage() {
         {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
         <p>{text.home.status}</p>
       </div>
+      <p>
+        <TextLink href={ROUTES.account}>{text.home.account}</TextLink>
+      </p>
       <form action={signOutAction}>
         <Button type="submit" variant="secondary">
           {text.common.signOut}
