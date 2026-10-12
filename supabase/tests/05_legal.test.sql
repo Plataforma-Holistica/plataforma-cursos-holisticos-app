@@ -193,7 +193,8 @@ select set_config('app.legal_drafts', 'on', true);
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('recurring_charge_consent', 0, 'Borrador', 'B', timestamptz '2020-01-01')$$,
-  '42501', null, 'el dueño a nombre de una persona, con el ajuste, tampoco');
+  '42501', 'public.legal_documents: version 0 is a local draft and is loaded only by the drafts script',
+  'el dueño a nombre de una persona, con el ajuste, tampoco');
 select pruebas.como_dueno();
 select set_config('app.actor_kind', 'system', true);
 select set_config('app.legal_drafts', 'on', true);

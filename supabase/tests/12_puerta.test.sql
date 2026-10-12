@@ -7,7 +7,7 @@
 -- rompe cada una de esas condiciones, de una en una, por los dos caminos.
 begin;
 \ir _ayuda.psql
-select plan(77);
+select plan(79);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -285,14 +285,14 @@ select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
   'una de hace más ya no: hay que dar el código otra vez');
 select ok(not pruebas.pasa_servicio('c0000000-0000-0000-0000-000000000001'), 'por ningún camino');
 -- La hora la pone el reloj de Auth, que puede ir un poco adelantado. Mucho, no.
-update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '1 minute'
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '4 minutes'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select ok(pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
-  'una verificación fechada un minuto adelante pasa: es desfase de relojes');
-update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '1 hour'
+  'una verificación fechada cuatro minutos adelante pasa: es desfase de relojes');
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '6 minutes'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
-  'una fechada una hora adelante no: no puede ser de ahora');
+  'una fechada seis minutos adelante no: no puede ser de ahora');
 update auth.mfa_amr_claims set updated_at = clock_timestamp(), authentication_method = 'password'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select ok(not pruebas.pasa('c0000000-0000-0000-0000-000000000001'),
@@ -328,7 +328,7 @@ select ok(not pruebas.pasa_servicio('c0000000-0000-0000-0000-000000000001'), 'po
 select ok(pruebas.pasa('c0000000-0000-0000-0000-000000000002'), 'y la de la otra persona sigue pasando');
 
 -- ---------------------------------------------------------------------------------------
--- El parámetro. Va al final porque cambia, dentro de esta transacción, de dónde salen los
+-- El parámetro. Va casi al final porque cambia, dentro de esta transacción, de dónde salen los
 -- parámetros. Sin él, o con uno que no vale, nadie pasa: la puerta falla cerrada.
 
 create table pruebas.parametro_falso (key text primary key, value jsonb);
@@ -372,7 +372,8 @@ select ok(pruebas.pasa_con_vigencia('2'), 'y con dos, sí: la ventana sale del p
 -- ---------------------------------------------------------------------------------------
 -- Primero la capacidad. Estas preguntas viven en políticas de tablas que lee cualquier
 -- cuenta: quien no tiene la capacidad no debe llegar a la puerta, ni a nada de Auth. Aquí la
--- puerta se cambia por una que lanza, para verlo.
+-- puerta se cambia por una que lanza, para verlo. Va al final de verdad: lo que se pruebe
+-- después de esto hereda una puerta que lanza.
 
 create or replace function private.team_session(p_user uuid, p_session uuid) returns boolean
 language plpgsql stable security definer set search_path = ''
@@ -387,6 +388,12 @@ select throws_ok(
   $$select pruebas.pasa('c0000000-0000-0000-0000-000000000002')$$,
   'P0001', 'la puerta no debía consultarse',
   'y quien sí la tiene, llega');
+select ok(not pruebas.pasa_servicio('a0000000-0000-0000-0000-000000000001'),
+  'por la pregunta de los disparadores, igual: sin capacidad no se consulta la puerta');
+select throws_ok(
+  $$select pruebas.pasa_servicio('c0000000-0000-0000-0000-000000000002')$$,
+  'P0001', 'la puerta no debía consultarse',
+  'y con ella, sí');
 
 select pruebas.limpiar();
 select * from finish();

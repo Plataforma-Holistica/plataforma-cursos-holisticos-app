@@ -155,9 +155,12 @@ describe("la puerta del equipo, contra una sesión de verdad", () => {
     const { person, client } = await entered();
     const factor = await verifiedFactor(client, "el suyo");
     const before = await tokenOf(client);
+    // Recién verificada, pasa: sin esto, los dos «no pasa» de abajo no dirían por qué.
+    expect(await asks(person, before, { bound: factor })).toEqual(PASSES);
 
     // La verificación se hace vieja de verdad, con la fila ya escrita por Auth. La cuenta
-    // se borra al terminar, y sus filas de Auth con ella.
+    // se borra al terminar, y sus filas de Auth con ella. Trece horas es más que las doce
+    // del parámetro: si el parámetro sube, este caso falla y lo dice.
     await ownerQuery("update auth.mfa_amr_claims set updated_at = now() - interval '13 hours' where session_id = $1", [
       before.sessionId,
     ]);
