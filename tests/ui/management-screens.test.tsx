@@ -189,6 +189,41 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("guardar con Intro desde el campo deja el foco en el campo, que se armó de nuevo", async () => {
+    mocks.changeNameAction.mockResolvedValue({ kind: "saved", name: "Beatriz", attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} />);
+    const before = nameField();
+    await user.clear(before);
+    await user.type(before, "Beatriz{Enter}");
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+    expect(nameField()).not.toBe(before);
+    expect(nameField()).toHaveFocus();
+  });
+
+  it("guardar desde el botón deja el foco en el botón", async () => {
+    await saveName("Beatriz", { kind: "saved", name: "Beatriz", attempt: 1 });
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+    expect(saveButton()).toHaveFocus();
+  });
+
+  it("si el servicio no lo aceptó, el foco es del resumen de errores y nadie se lo quita", async () => {
+    mocks.changeNameAction.mockResolvedValue({ kind: "invalid", name: "Beatriz", problem: "invalid", attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} />);
+    await user.clear(nameField());
+    await user.type(nameField(), "Beatriz{Enter}");
+    expect(await screen.findByRole("alert")).toHaveFocus();
+  });
+
+  // A dónde vuelve el formulario sin JavaScript (a esta pantalla, en su bloque) no se ve
+  // aquí: React solo lo escribe para una acción de servidor de verdad. Lo prueba el extremo
+  // a extremo. Aquí, que el bloque tenga el ancla a la que vuelve.
+  it("el bloque del nombre lleva su ancla", () => {
+    render(<AccountScreen name="Ana" email={null} />);
+    expect(screen.getByRole("region", { name: "Nombre" })).toHaveAttribute("id", "bloque-nombre");
+  });
+
   it("al salir del campo, un nombre que no se puede guardar se marca; uno vacío, no", async () => {
     const user = userEvent.setup();
     render(<AccountScreen name="Ana" email={null} />);

@@ -11,7 +11,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
 import { NAME_ERRORS, NameField } from "../_lib/fields";
-import { useLocalChecks } from "../_lib/hooks";
+import { useFocusKept, useLocalChecks } from "../_lib/hooks";
 import { SuspendedScreen } from "../_lib/states";
 
 import { changeNameAction } from "./actions";
@@ -25,10 +25,17 @@ import { checkNameForm, readNameForm, type NameProblem, type NameState } from ".
 // flotante, y el correo no se cambia desde aquí hasta que haya correo propio (T-310).
 
 const text = account.manage;
+// Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
+// se lleva el ancla a la pantalla de destino, y allá no debe apuntar a nada.
+const NAME_BLOCK_ID = "bloque-nombre";
 const NAME_ID = "cuenta-nombre";
 const NAME_TITLE_ID = "cuenta-nombre-titulo";
 const EMAIL_TITLE_ID = "cuenta-correo-titulo";
 const IDLE: NameState = { kind: "idle" };
+// A dónde vuelve el navegador cuando el formulario se envía sin JavaScript: a esta misma
+// pantalla, parado en el bloque que envió. Sin el ancla volvería al principio de la página,
+// y lo que contestó un bloque de más abajo quedaría fuera de la vista.
+const NAME_PERMALINK = `${ROUTES.account}#${NAME_BLOCK_ID}`;
 
 export interface AccountScreenProps {
   /** El nombre guardado, como lo leyó la página. */
@@ -38,10 +45,12 @@ export interface AccountScreenProps {
 }
 
 export function AccountScreen({ name, email }: AccountScreenProps) {
-  const [state, action, pending] = useActionState(changeNameAction, IDLE);
+  const [state, action, pending] = useActionState(changeNameAction, IDLE, NAME_PERMALINK);
   const sent = "attempt" in state ? state.attempt : 0;
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
   const [local, checked] = useLocalChecks<NameProblem>(sent);
+  // La respuesta se pinta aquí mismo: el foco vuelve a donde estaba al enviar.
+  const sendingFrom = useFocusKept(sent);
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
@@ -50,6 +59,7 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
     checked(found);
     // Con algo que corregir no se envía, y lo escrito se queda como está.
     if (found !== null) event.preventDefault();
+    else sendingFrom(event.currentTarget);
   }
 
   // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
@@ -63,7 +73,7 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-10 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.title}</h1>
-      <section aria-labelledby={NAME_TITLE_ID} className="flex flex-col gap-4">
+      <section id={NAME_BLOCK_ID} aria-labelledby={NAME_TITLE_ID} className="flex flex-col gap-4">
         <h2 id={NAME_TITLE_ID} className="text-h3">
           {text.nameTitle}
         </h2>
