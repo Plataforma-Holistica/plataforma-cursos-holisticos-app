@@ -290,9 +290,14 @@ falla. Doce precisiones que la tabla no dice:
       cada respuesta los campos se arman de nuevo y el foco caería al documento. Solo
       actúa si el foco quedó sin dueño; el resumen de errores sigue mandando.
     - El resultado se dice en el bloque, con un `InlineAlert` vivo, no con un aviso en
-      cookie: ese es para ir de una pantalla a otra. En una prueba se busca por su texto y
-      no por su papel, porque un botón con texto de carga siempre lleva su propia región
-      viva.
+      cookie: ese es para ir de una pantalla a otra. Deja de decirse mientras hay otro
+      envío en camino y en cuanto la persona vuelve a escribir: «Guardado» junto a un
+      texto que no se ha guardado miente. En una prueba se busca por su texto y no por su
+      papel, porque un botón con texto de carga siempre lleva su propia región viva.
+    - Mientras el envío va en camino el campo queda de solo lectura: al llegar la
+      respuesta se arma de nuevo, y lo tecleado entre tanto se perdería sin aviso.
+
+    Una prueba exige que el ancla de un bloque no se escriba en ningún otro archivo.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -331,8 +336,11 @@ falla. Doce precisiones que la tabla no dice:
     de esa sesión: nada de lo que llega dice de quién es. `accountProfile(claims)` lee como
     la persona (`asUser`), con las claims que la guarda le dio a la página. `changeName`
     exige una sesión que pase: a una cuenta a la que le falta algo se lo pide primero su
-    pantalla. Una escritura que no tocó una fila no es «guardado»: es «no se supo», y se
-    reporta.
+    pantalla. La guarda de sesión corre en su propia transacción, así que la de la
+    escritura vuelve a evaluar la cuenta (`evaluateGate`), ya con el dato puesto, y lanza
+    si dejó de pasar: una cuenta que se suspendió entre una y otra no cambia. Una
+    escritura que no tocó una fila no es «guardado»: es «no se supo», y se reporta. Una
+    prueba exige que la lectura vaya por `asUser` y la escritura por `asServer`.
   - El correo que la pantalla de la cuenta muestra es el de `sessionEmail`. No se le
     pregunta a Auth porque hoy ningún camino cambia un correo; cuando exista el cambio de
     correo (T-310), esa pantalla lo lee de Auth.

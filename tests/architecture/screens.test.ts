@@ -352,6 +352,23 @@ describe("lo que viaja al navegador", () => {
   });
 });
 
+describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
+  // Una pantalla por bloques le da a cada formulario la dirección a la que vuelve sin
+  // JavaScript, con el ancla de su bloque. Si la acción redirige, el navegador se lleva el
+  // ancla a la pantalla de destino: allá no debe existir, o la página se desplazaría sola.
+  const anchors = sources.flatMap((source) =>
+    [...source.code.matchAll(/"(bloque-[a-z0-9-]+)"/g)].map((match) => ({ file: source.file, anchor: match[1] ?? "" })),
+  );
+
+  it("hay anclas que revisar", () => {
+    expect(anchors.map(({ anchor }) => anchor)).toContain("bloque-nombre");
+  });
+
+  it.each(anchors)("$anchor solo se escribe en $file", ({ file, anchor }) => {
+    expect(everything.filter((source) => source.code.includes(anchor)).map((source) => source.file)).toEqual([file]);
+  });
+});
+
 describe("la petición se lee en un solo archivo", () => {
   const READER = "src/app/_lib/request-context.ts";
   const others = sources.filter((source) => source.file !== READER);

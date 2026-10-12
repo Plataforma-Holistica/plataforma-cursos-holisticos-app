@@ -129,3 +129,26 @@ describe("la llave secreta de Supabase", () => {
     expect(building).toEqual(["src/adapters/supabase/auth-client.ts"]);
   });
 });
+
+describe("lo que una persona lee de sí misma, lo lee como ella", () => {
+  // `accountProfile` filtra por la cuenta de las claims, y además lee con `asUser`: la base
+  // filtra por fila aunque la consulta se equivoque. Las pruebas de integración no
+  // distinguen un camino del otro mientras la consulta filtre bien: se cuida aquí.
+  const management = readFileSync(join(src, "services/account/management.ts"), "utf8");
+  /** El cuerpo de una función del servicio: desde su encabezado hasta la llave que la cierra. */
+  const bodyOf = (name: string) => {
+    const start = management.indexOf(`async function ${name}(`);
+    const end = management.indexOf("\n  }\n", start);
+    return start === -1 || end === -1 ? "" : management.slice(start, end);
+  };
+
+  it("la lectura del perfil va por `asUser`, y nunca como servidor ni como sistema", () => {
+    expect(bodyOf("accountProfile")).toMatch(/\basUser\(claims, /);
+    expect(bodyOf("accountProfile")).not.toMatch(/\bas(?:Server|System)\(/);
+  });
+
+  it("el nombre se escribe como servidor, a nombre de las claims que dio la guarda", () => {
+    expect(bodyOf("changeName")).toMatch(/\basServer\(\{ claims: check\.claims, reason: "change_name" \}, /);
+    expect(bodyOf("changeName")).not.toMatch(/\bas(?:User|System)\(/);
+  });
+});

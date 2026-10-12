@@ -160,6 +160,8 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     await user.click(saveButton());
     expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
     expect(savedNotice()).not.toBeInTheDocument();
+    // Y el campo no se puede escribir: lo tecleado ahora se perdería al llegar la respuesta.
+    expect(nameField()).toHaveAttribute("readonly");
 
     // Y cuando contesta, se vuelve a decir. (Además, React no suelta las demás acciones
     // mientras una siga en camino: hay que terminarla.)
@@ -169,6 +171,46 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     });
     expect(await screen.findByText("Guardado.")).toBeVisible();
     expect(saveButton()).toBeEnabled();
+    expect(nameField()).not.toHaveAttribute("readonly");
+  });
+
+  it("un envío nuevo tapa lo que el servicio había rechazado, aunque su respuesta no haya llegado", async () => {
+    const { user } = await saveName("Beatriz", { kind: "invalid", name: "Beatriz", problem: "invalid", attempt: 1 });
+    await screen.findByRole("alert");
+    expect(nameField()).toBeInvalid();
+
+    let finish: (state: NameState) => void = () => undefined;
+    mocks.changeNameAction.mockReturnValue(new Promise<NameState>((resolve) => (finish = resolve)));
+    await user.click(saveButton());
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    // Manda lo último que pasó: el navegador revisó y envió, y el rechazo viejo ya no se pinta.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(nameField()).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "saved", name: "Beatriz", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+  });
+
+  it("lo que dijo el último envío deja de decirse en cuanto lo escrito ya es otra cosa", async () => {
+    const { user } = await saveName("Beatriz", { kind: "saved", name: "Beatriz", attempt: 1 });
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+    await user.type(nameField(), " de Prueba");
+    expect(savedNotice()).not.toBeInTheDocument();
+
+    // Al guardar de nuevo se vuelve a decir.
+    mocks.changeNameAction.mockResolvedValue({ kind: "saved", name: "Beatriz de Prueba", attempt: 2 });
+    await user.click(saveButton());
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+
+    // Lo mismo con «no se supo».
+    mocks.changeNameAction.mockResolvedValue({ kind: "unavailable", name: "Beatriz de Prueba", attempt: 3 });
+    await user.click(saveButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos hacerlo.");
+    await user.type(nameField(), "x");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("dos fallos seguidos dejan un solo aviso", async () => {

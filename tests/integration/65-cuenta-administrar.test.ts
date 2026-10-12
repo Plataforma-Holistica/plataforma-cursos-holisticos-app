@@ -72,6 +72,7 @@ function managementWith(check: SessionCheck) {
   const reported: FailureCode[] = [];
   const management = createManagement(
     {
+      isLocal: () => true,
       report: (code) => {
         reported.push(code);
         return Promise.resolve();
@@ -302,6 +303,23 @@ describe("sin una sesión que pase la guarda no se cambia nada", () => {
       expect(management.reported).toEqual([]);
     }
     expect(await profileOf(account.id)).toMatchObject({ display_name: "Ana" });
+  });
+
+  // La guarda corre en una transacción y la escritura en otra. Entre las dos la cuenta puede
+  // dejar de pasar: se suspende, se le prende la marca de contraseña, retira un texto. Aquí
+  // la guarda dice «pasa» sobre una cuenta que en la base no pasa, con claims que la base acepta.
+  it("si la cuenta dejó de pasar la guarda entre la guarda y la escritura, no guarda", async () => {
+    const account = await claimedUser();
+    emails.push(account.email);
+    const jar = memoryJar();
+    await testServices().signIn(jar, account, freshOrigin());
+    const check = await testServices().checkSession(jar);
+    if (check.kind !== "incomplete") throw new Error(`La cuenta de prueba no quedó sin completar: ${check.kind}`);
+
+    const management = managementWith({ kind: "pass", claims: check.claims });
+    expect(await management.changeName(jar, { name: "Beatriz" })).toEqual({ kind: "unavailable" });
+    expect(management.reported).toEqual(["account_unavailable"]);
+    expect(await profileOf(account.id)).toMatchObject({ display_name: null });
   });
 
   it("si la cuenta desapareció entre la guarda y la escritura, no dice «guardado»", async () => {

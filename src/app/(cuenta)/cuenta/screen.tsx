@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useActionState } from "react";
+import { type FormEvent, useActionState, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { ROUTES } from "@/services/account/navigation";
@@ -51,6 +51,8 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
   const [local, checked] = useLocalChecks<NameProblem>(sent);
   // La respuesta se pinta aquí mismo: el foco vuelve a donde estaba al enviar.
   const sendingFrom = useFocusKept(sent);
+  // Después de qué respuesta se volvió a escribir. Lo que esa respuesta dijo era de otro texto.
+  const [editedAfter, setEditedAfter] = useState<number | null>(null);
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
@@ -65,8 +67,11 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
   // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
   // servidor, y entonces lo que esa respuesta dijo ya no se pinta.
   const problem = local.latest ? (local.found ?? undefined) : state.kind === "invalid" ? state.problem : undefined;
-  // Lo que dijo el último envío deja de decirse mientras hay otro en camino.
-  const answered = local.found === null && !pending;
+  // Lo que dijo el último envío deja de decirse mientras hay otro en camino, y en cuanto
+  // lo escrito ya es otra cosa: «Guardado» junto a un nombre que no se ha guardado miente.
+  // Con eso basta también para lo que el navegador detiene antes de enviar: para que haya
+  // algo que corregir, la persona tuvo que escribir después de la respuesta.
+  const answered = !pending && editedAfter !== sent;
   const errors: FormError[] = problem ? [{ fieldId: NAME_ID, message: NAME_ERRORS[problem] }] : [];
   const round = sent + local.checks;
 
@@ -77,7 +82,13 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
         <h2 id={NAME_TITLE_ID} className="text-h3">
           {text.nameTitle}
         </h2>
-        <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
+        <form
+          action={action}
+          onSubmit={checkBeforeSending}
+          onInput={() => setEditedAfter(sent)}
+          noValidate
+          className="flex flex-col gap-6"
+        >
           <FormErrorSummary errors={errors} attempt={round} />
           {/* Cuando llega la respuesta de un envío, el campo se arma de nuevo con lo que quedó. */}
           <NameField
@@ -86,6 +97,7 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
             defaultValue={state.kind === "idle" ? name : state.name}
             problem={problem}
             round={round}
+            readOnly={pending}
           />
           {/* Cada hermano lleva su propia `key`: con la misma, el aviso de un intento se
               quedaría en pantalla con el siguiente. */}
