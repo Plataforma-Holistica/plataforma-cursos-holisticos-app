@@ -1,10 +1,9 @@
 "use client";
 
-import { type FocusEvent, type FormEvent, useActionState, useState } from "react";
+import { type FormEvent, useActionState } from "react";
 
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
-import { parseDisplayName } from "@/services/account/field-rules";
 import { RETURN_PARAM } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
@@ -12,9 +11,10 @@ import { SPACE } from "@/ui/cx";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
-import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
+import { NAME_ERRORS, NameField } from "../_lib/fields";
+import { useLocalChecks } from "../_lib/hooks";
 import { signOutAction } from "../_lib/session-actions";
 import { SuspendedScreen } from "../_lib/states";
 
@@ -42,12 +42,6 @@ const NAME_ID = "cuenta-nombre";
 const ADULT_ID = "cuenta-edad";
 const itemId = (docType: string) => `cuenta-texto-${docType}`;
 const IDLE: ConsentsState = { kind: "idle" };
-
-const NAME_ERRORS = {
-  empty: account.fields.nameRequired,
-  too_long: account.fields.nameTooLong,
-  invalid: account.fields.nameInvalid,
-} as const;
 
 function TextConsent({ item, invalid }: { item: ConsentItem; invalid: boolean }) {
   const details = t(text.textDetails, { version: item.version, date: item.effectiveDate });
@@ -105,31 +99,18 @@ function TextConsent({ item, invalid }: { item: ConsentItem; invalid: boolean })
   );
 }
 
-function Fields({ view, name, fields }: { view: ConsentsView; name: string; fields: ConsentsFields }) {
-  // Lo que se vio al salir del campo manda sobre lo que dijo el último envío.
-  const [nameOnBlur, setNameOnBlur] = useState<ConsentsFields["name"] | null | undefined>(undefined);
-  const nameError = nameOnBlur === undefined ? fields.name : (nameOnBlur ?? undefined);
+interface FieldsProps {
+  view: ConsentsView;
+  name: string;
+  fields: ConsentsFields;
+  /** Cuenta las revisiones del formulario, las del navegador y las del servidor. */
+  round: number;
+}
 
-  function validateOnBlur(event: FocusEvent<HTMLDivElement>) {
-    const field = event.target;
-    if (!(field instanceof HTMLInputElement) || field.name !== "name") return;
-    if (field.value.trim() === "") return;
-    const parsed = parseDisplayName(field.value);
-    setNameOnBlur(parsed.ok ? null : parsed.reason);
-  }
-
+function Fields({ view, name, fields, round }: FieldsProps) {
   return (
-    <div className="flex flex-col gap-6" onBlur={validateOnBlur}>
-      {view.askName && (
-        <TextField
-          id={NAME_ID}
-          label={account.fields.name}
-          name="name"
-          autoComplete="name"
-          defaultValue={name}
-          error={nameError ? NAME_ERRORS[nameError] : undefined}
-        />
-      )}
+    <div className="flex flex-col gap-6">
+      {view.askName && <NameField id={NAME_ID} defaultValue={name} problem={fields.name} round={round} />}
       {view.askAdult && (
         <ConsentCheckbox id={ADULT_ID} name="adult" label={t(text.adult, { age: view.minimumAge })} invalid={fields.adult ?? false} />
       )}
@@ -161,24 +142,25 @@ export interface ConsentsScreenProps {
 export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
   const [state, action, pending] = useActionState(completeAccountAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, setLocal] = useState<{ fields: ConsentsFields; attempt: number } | null>(null);
+  const [local, checked] = useLocalChecks<ConsentsFields>("attempt" in state ? state.attempt : 0);
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
     const input = readConsentsForm(new FormData(event.currentTarget));
     const fields = checkConsentsForm(view, input);
-    if (fields === null) {
-      setLocal(null);
-      return;
-    }
-    // No se envía, así que el formulario no se vacía: lo marcado se queda marcado.
-    event.preventDefault();
-    setLocal((current) => ({ fields, attempt: (current?.attempt ?? 0) + 1 }));
+    checked(fields);
+    // Con algo que corregir no se envía, así que el formulario no se vacía: lo marcado se
+    // queda marcado.
+    if (fields !== null) event.preventDefault();
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const fields = local?.fields ?? (state.kind === "invalid" ? state.fields : {});
+  // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
+  // servidor, y entonces lo que esa respuesta dijo ya no se pinta.
+  const fields = local.latest ? (local.found ?? {}) : state.kind === "invalid" ? state.fields : {};
+  // Lo que dijo el último envío deja de decirse mientras hay otro en camino.
+  const answered = local.found === null && !pending;
   const name = state.kind === "idle" ? "" : state.name;
   const updated = view.variant === "updated_texts";
 
@@ -189,14 +171,14 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
         <p className="text-body-l text-text-2">{updated ? text.introUpdated : text.introComplete}</p>
       </div>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + (local?.attempt ?? 0)} />
-        {local === null && state.kind === "repainted" && state.reason === "texts_changed" && (
-          <InlineAlert key={sent} tone="warning" live>
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.checks} />
+        {answered && state.kind === "repainted" && state.reason === "texts_changed" && (
+          <InlineAlert key={`cambio-${sent}`} tone="warning" live>
             {text.textsChanged}
           </InlineAlert>
         )}
-        {local === null && state.kind === "unavailable" && (
-          <InlineAlert key={sent} tone="danger" live>
+        {answered && state.kind === "unavailable" && (
+          <InlineAlert key={`fallo-${sent}`} tone="danger" live>
             {account.common.unavailable}
           </InlineAlert>
         )}
@@ -205,7 +187,7 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
           <input key={item.documentId} type="hidden" name="shown" value={shownValue(item)} />
         ))}
         {/* Cuando cambian los textos, o llega la respuesta de un envío, los campos se arman de nuevo. */}
-        <Fields key={`${view.signature}:${sent}`} view={view} name={name} fields={fields} />
+        <Fields key={`campos-${view.signature}:${sent}`} view={view} name={name} fields={fields} round={sent + local.checks} />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
           {text.submit}
         </Button>

@@ -322,3 +322,103 @@ describe("los estados que sustituyen a una pantalla de la cuenta", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 });
+
+describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
+  const all = async (user: ReturnType<typeof userEvent.setup>) => {
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+  };
+
+  it("con errores del servidor a la vista, un envío que el navegador da por bueno no le quita el foco al campo", async () => {
+    answers<ConsentsState>(actions.completeAccountAction, { kind: "invalid", name: "Ana", fields: { name: "invalid" }, attempt: 1 });
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    await user.type(screen.getByLabelText("Nombre"), "Ana");
+    await all(user);
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+
+    // El segundo envío tarda. Mientras, lo que dijo la respuesta anterior deja de decirse: la
+    // última palabra es la revisión del navegador, que no encontró nada.
+    let finish: (state: ConsentsState) => void = () => undefined;
+    actions.completeAccountAction.mockReturnValue(new Promise<ConsentsState>((resolve) => (finish = resolve)));
+    await all(user);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(name);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(name).toHaveFocus();
+    expect(name).not.toBeInvalid();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "unavailable", name: "Ana", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+
+  it("un nombre marcado al salir del campo, después de una revisión, no vuelve a marcarse cuando el envío corregido va en camino", async () => {
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    await user.type(name, "---");
+    await user.click(screen.getByRole("heading", { level: 1 }));
+    expect(name).toBeInvalid();
+
+    let finish: (state: ConsentsState) => void = () => undefined;
+    actions.completeAccountAction.mockReturnValue(new Promise<ConsentsState>((resolve) => (finish = resolve)));
+    await all(user);
+    await user.clear(name);
+    await user.type(name, "Ana{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(name).not.toBeInvalid();
+
+    await act(async () => {
+      finish({ kind: "unavailable", name: "Ana", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+});
+
+describe("PA-15: el resumen vuelve a tomar el foco cuando la misma revisión falla otra vez", () => {
+  it("dos revisiones del navegador seguidas, con los mismos errores", async () => {
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+    await user.click(screen.getByLabelText("Nombre"));
+    expect(screen.getByRole("alert")).not.toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveFocus();
+    expect(actions.completeAccountAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("PA-11: dos fallos seguidos, sin recargar", () => {
+  it("dejan un solo aviso: el del intento anterior no se queda en pantalla", async () => {
+    const message = "El correo o la contraseña no coinciden.";
+    const { user } = await submitSignIn({ kind: "failed", email: "ana@prueba.test", reason: "invalid_credentials", attempt: 1 });
+    expect(await screen.findAllByText(message)).toHaveLength(1);
+
+    for (const attempt of [2, 3]) {
+      answers<SignInState>(actions.signInAction, { kind: "failed", email: "ana@prueba.test", reason: "invalid_credentials", attempt });
+      await user.type(screen.getByLabelText("Contraseña"), "otra-equivocada");
+      await user.click(screen.getByRole("button", { name: "Entrar" }));
+      await screen.findByDisplayValue("ana@prueba.test");
+      expect(actions.signInAction).toHaveBeenCalledTimes(attempt);
+      expect(screen.getAllByText(message)).toHaveLength(1);
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    }
+
+    // Y al cambiar de respuesta, el aviso de antes se va.
+    answers<SignInState>(actions.signInAction, { kind: "failed", email: "ana@prueba.test", reason: "capped", attempt: 4 });
+    await user.type(screen.getByLabelText("Contraseña"), "otra-equivocada");
+    await user.click(screen.getByRole("button", { name: "Entrar" }));
+    expect(await screen.findByText("Demasiados intentos. Vuelve a probar más tarde.")).toBeVisible();
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+});

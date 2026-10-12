@@ -5,6 +5,7 @@ import { nextAttempt } from "../_lib/form-state";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
 import { signIn } from "@/services/account/account";
 import { clearNotice } from "@/services/account/notice";
+import { forgetRegistration } from "@/services/account/pending-registration";
 
 import { checkSignInForm, readSignInForm, signInOutcome, type SignInState } from "./outcomes";
 
@@ -27,7 +28,12 @@ export async function signInAction(previous: SignInState, form: FormData): Promi
   clearNotice(jar);
   const outcome = signInOutcome(await signIn(jar, { email, password }, await requestOrigin()), returnTo);
 
-  if (outcome.kind === "redirect") return leaveFor(jar, outcome);
+  if (outcome.kind === "redirect") {
+    // Quien entra ya no tiene un correo por revisar en este navegador: sin esto, «Revisa tu
+    // correo» seguiría enseñando el de un registro anterior a quien lo use después.
+    forgetRegistration(jar);
+    return leaveFor(jar, outcome);
+  }
   if (outcome.kind === "suspended") return { kind: "suspended" };
   return { ...outcome, email, attempt };
 }

@@ -1,7 +1,8 @@
 import { defineMessages } from "../format";
 
-// Los textos de las pantallas de la cuenta (diseño, PA-11, PA-15, PA-35 y PA-07): entrar,
-// completar la cuenta, la cuenta suspendida y los textos legales.
+// Los textos de las pantallas de la cuenta (diseño, PA-10 a PA-15, PA-35 y PA-07):
+// registrarse, verificar el correo, entrar, recuperar la contraseña, completar la cuenta,
+// la cuenta suspendida y los textos legales.
 //
 // Tono (diseño, sección 8): de tú, frases cortas, con punto final, sin admiraciones. Un
 // mensaje de error dice qué pasó y cómo se arregla, y nunca revela si un correo tiene
@@ -28,6 +29,75 @@ export const account = defineMessages({
     nameRequired: "Escribe tu nombre.",
     nameTooLong: "Ese nombre es demasiado largo. Escribe uno más corto.",
     nameInvalid: "Ese nombre tiene caracteres que no podemos guardar. Escríbelo de nuevo.",
+    newPassword: "Contraseña nueva",
+    // La regla de una contraseña nueva, a la vista desde antes de escribir.
+    passwordRule: "{min} caracteres o más",
+    // Para quien no ve la marca: se lee antes de la regla cuando ya se cumple.
+    passwordRuleMet: "Cumplida:",
+    passwordTooShort: "Tu contraseña necesita {min} caracteres o más.",
+    passwordTooLong: "Esa contraseña es demasiado larga. Elige una más corta.",
+    passwordInvalid: "Esa contraseña tiene caracteres que no podemos guardar. Elige otra.",
+  },
+  // Cuánto dura algo, dicho como se dice: «1 hora», «60 segundos».
+  durations: {
+    seconds: { one: "{count} segundo", other: "{count} segundos" },
+    minutes: { one: "{count} minuto", other: "{count} minutos" },
+    hours: { one: "{count} hora", other: "{count} horas" },
+  },
+  // PA-10.
+  signUp: {
+    pageTitle: "Crear cuenta",
+    title: "Crea tu cuenta",
+    hint: "Te mandamos un enlace para confirmar tu correo. Al abrirlo eliges tu contraseña.",
+    submit: "Crear mi cuenta",
+    submitting: "Enviando…",
+    // «Antes de terminar vas a leer y aceptar los Términos y el Aviso de privacidad.»
+    legalBefore: "Antes de terminar vas a leer y aceptar los",
+    terms: "Términos",
+    legalJoin: "y el",
+    privacy: "Aviso de privacidad",
+    legalEnd: ".",
+    haveAccount: "Ya tengo cuenta",
+    // El único tope que se dice: no delata nada de ningún correo.
+    wait: "Espera un momento antes de intentarlo de nuevo.",
+  },
+  // PA-14, variante «Revisa tu correo».
+  checkMail: {
+    title: "Revisa tu correo",
+    sentTo: "Te mandamos un enlace a {email}. Ábrelo para completar tu cuenta.",
+    sentGeneric: "Te mandamos un enlace al correo que escribiste. Ábrelo para completar tu cuenta.",
+    lasts: "Dura {duration}.",
+    resend: "Reenviar",
+    resending: "Reenviando…",
+    resent: "Listo, lo mandamos otra vez.",
+    resendWait: "Podrás reenviarlo en {duration}.",
+    notMyEmail: "Ese no es mi correo",
+    writeAgain: "Escribir mi correo otra vez",
+    // «¿Ya tenías cuenta? Entra o recupera tu contraseña.»
+    alreadyBefore: "¿Ya tenías cuenta?",
+    alreadySignIn: "Entra",
+    alreadyJoin: "o",
+    alreadyRecover: "recupera tu contraseña",
+    alreadyEnd: ".",
+  },
+  // PA-14, variante «Completa tu cuenta».
+  complete: {
+    title: "Completa tu cuenta",
+    submit: "Confirmar mi correo",
+    submitting: "Confirmando…",
+    // «Acepto los Términos y el Aviso de privacidad.»
+    acceptBefore: "Acepto los",
+    acceptJoin: "y el",
+    acceptEnd: ".",
+    legalMissing: "Falta aceptar los Términos y el Aviso de privacidad.",
+    historyMissing: "Falta tu permiso para guardar tu historial de cursos.",
+    linkDeadTitle: "Ese enlace ya no sirve",
+    linkDeadBody: "Puede que haya caducado o que ya se haya usado. Si ya completaste tu cuenta, entra con tu contraseña.",
+    askAnother: "Pedir otro enlace",
+    recoverPassword: "Recuperar mi contraseña",
+    signIn: "Entrar",
+    unfinishedTitle: "No pudimos terminar tu registro",
+    unfinishedBody: "Tu correo ya quedó confirmado, pero tu cuenta no quedó lista y ese enlace ya se gastó. Elige tu contraseña desde «Recuperar mi contraseña»: al entrar te pedimos lo que falte.",
   },
   // PA-11.
   signIn: {
@@ -47,9 +117,27 @@ export const account = defineMessages({
     noticePasswordChanged: "Tu contraseña se cambió y cerramos todas tus sesiones. Entra con la nueva.",
     noticeAccountReady: "Tu cuenta está lista. Entra con tu contraseña.",
   },
-  // PA-13, lo que la entrada necesita decir al mandar ahí.
+  // PA-13.
   recover: {
+    pageTitle: "Recuperar contraseña",
+    title: "Recupera tu contraseña",
+    intro: "Escribe tu correo y te mandamos un enlace para elegir una contraseña nueva.",
+    submit: "Mandarme el enlace",
+    submitting: "Enviando…",
+    // El mismo mensaje exista o no la cuenta, y se haya mandado algo o no.
+    sent: "Si ese correo tiene cuenta, te mandamos un enlace.",
+    sentLasts: "Si ese correo tiene cuenta, te mandamos un enlace. Dura {duration}.",
     noticeChoosePassword: "Para entrar a esta cuenta hay que elegir su contraseña desde tu correo.",
+    backToSignIn: "Volver a entrar",
+    changePageTitle: "Contraseña nueva",
+    changeTitle: "Elige tu contraseña nueva",
+    save: "Guardar contraseña",
+    saving: "Guardando…",
+    linkDeadTitle: "Ese enlace ya no sirve",
+    linkDeadBody: "Puede que haya caducado o que ya se haya usado.",
+    unfinishedTitle: "No pudimos terminar el cambio",
+    unfinishedBody: "Ese enlace ya se gastó. Pide otro y vuelve a intentarlo.",
+    askAnother: "Pedir otro",
   },
   // El inicio provisional, mientras no existe PA-20.
   home: {

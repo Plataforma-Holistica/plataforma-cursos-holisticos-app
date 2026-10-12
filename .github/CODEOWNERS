@@ -60,6 +60,7 @@
 /tests/architecture/       @SerchFGA @plataformaholisticadev
 /tests/integration/        @SerchFGA @plataformaholisticadev
 /tests/proxy/              @SerchFGA @plataformaholisticadev
+/tests/actions/            @SerchFGA @plataformaholisticadev
 # El extremo a extremo: entra a la base local como dueño y usa la llave secreta de Auth
 /tests/e2e/                @SerchFGA @plataformaholisticadev
 /playwright.config.ts      @SerchFGA @plataformaholisticadev

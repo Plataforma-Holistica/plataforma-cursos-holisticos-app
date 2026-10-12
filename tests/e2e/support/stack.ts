@@ -19,6 +19,47 @@ export type { KnownUser };
 /** El nombre de la cookie de sesión en local, que va por http y sin prefijo. */
 export const SESSION_COOKIE = "plataforma-sesion";
 
+/** El nombre de la cookie del registro a medias en local. */
+export const PENDING_COOKIE = "plataforma-registro";
+
+/**
+ * Atrasa la hora del último correo anotado, a cualquier destino: así pasa `ESPERA_REENVIO`
+ * sin esperar. Los cubos llevan la huella del destino, que una prueba no sabe calcular; por
+ * eso van todos los de esa clase, que entre dos casos están vacíos.
+ */
+export async function ageLastMails(seconds: number): Promise<number> {
+  const rows = await ownerQuery<{ bucket: string }>(
+    `update private.rate_limit_counters set window_start = window_start - make_interval(secs => $1)
+     where bucket like 'mail:signup:last:%' or bucket like 'mail:recover:last:%' returning bucket`,
+    [seconds],
+  );
+  return rows.length;
+}
+
+/**
+ * Atrasa la hora en que Auth dice haber mandado el último correo de recuperación de una
+ * cuenta. Auth lleva su propia espera entre dos correos (`max_frequency`), además de la de
+ * la aplicación: sin esto la segunda petición no manda nada, y el servicio lo reporta.
+ */
+export async function ageAuthRecoveryMail(email: string, seconds: number): Promise<void> {
+  await ownerQuery("update auth.users set recovery_sent_at = recovery_sent_at - make_interval(secs => $2) where email = $1", [
+    email,
+    seconds,
+  ]);
+}
+
+/**
+ * Deja en `hits` los contadores por dirección de una puerta (`signup` o `recover`): así se
+ * llega al tope sin pedir veinte correos. Devuelve cuántos cubos tocó.
+ */
+export async function fillAddressCounters(door: "signup" | "recover", hits: number): Promise<number> {
+  const rows = await ownerQuery<{ bucket: string }>(
+    "update private.rate_limit_counters set hits = $2 where bucket like $1 returning bucket",
+    [`${door}:ip:%`, hits],
+  );
+  return rows.length;
+}
+
 /** Vacía el freno y los contadores: cada caso empieza de cero. */
 export async function clearCounters(): Promise<void> {
   await ownerQuery("delete from private.login_throttles");

@@ -48,6 +48,13 @@ const PUBLIC_PAGES = [
   "src/app/page.tsx",
   // Los textos legales, que cualquiera lee sin sesión.
   "src/app/legal/[documento]/page.tsx",
+  // «Revisa tu correo» y «Completa tu cuenta» (PA-14): una cuenta sin verificar no tiene
+  // sesión, y el enlace del correo se abre en cualquier navegador.
+  "src/app/(cuenta)/verificar/page.tsx",
+  "src/app/(cuenta)/verificar/[token]/page.tsx",
+  // Recuperar la contraseña (PA-13): quien la olvidó puede tener o no una sesión abierta.
+  "src/app/(cuenta)/recuperar/page.tsx",
+  "src/app/(cuenta)/recuperar/[token]/page.tsx",
   // La muestra de componentes, que solo existe con `pnpm dev`.
   "src/app/muestra/page.dev.tsx",
   "src/app/muestra/error/page.dev.tsx",
@@ -64,17 +71,63 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
 };
 
 /**
- * Los archivos de acciones de servidor, y el servicio por el que cada uno pasa. Todo lo
- * que exportan se puede llamar directo: la autorización es del servicio, no de la pantalla.
+ * Las acciones de servidor, archivo por archivo y una por una, con lo que el cuerpo de cada
+ * una tiene que llamar. Todo lo que exportan se puede llamar directo: la autorización es del
+ * servicio, no de la pantalla.
+ *
+ * Cada expresión se busca dentro de su función y de ninguna otra, y un archivo no puede
+ * exportar una acción que no esté aquí. Atrapan el olvido y el renombre: que una acción deje
+ * de pasar por su servicio, o que aparezca una puerta nueva sin que nadie la mire. Lo que
+ * cada acción hace con cada respuesta lo prueban `tests/actions/` y sus tablas.
  */
-const SERVER_ACTIONS: Record<string, RegExp> = {
-  // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
-  "src/app/(cuenta)/entrar/actions.ts": /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
-  // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
-  "src/app/(cuenta)/consentimientos/actions.ts": /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
-  // Salir: solo usa la cookie de quien pide.
-  "src/app/(cuenta)/_lib/session-actions.ts": /await signOut\(await cookieJar\(\)\)/,
+const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
+  "src/app/(cuenta)/entrar/actions.ts": {
+    // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
+    signInAction: /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/(cuenta)/consentimientos/actions.ts": {
+    // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
+    completeAccountAction: /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/(cuenta)/registro/actions.ts": {
+    // Pedir el registro: el servicio cuenta el intento y aplica los topes antes de invitar a nadie.
+    requestRegistrationAction:
+      /mailRequestOutcome\(await requestRegistration\(\{ email \}, await requestOrigin\(\)\)\)[\s\S]*return leaveFor\(jar, \{ to: ROUTES\.verify, notice: null \}\);/,
+  },
+  "src/app/(cuenta)/verificar/actions.ts": {
+    // Reenviar: el mismo servicio, con el correo que este navegador tiene anotado.
+    resendAction:
+      /const pending = readRegistration\(jar\);\s*if \(pending === null\) return leaveFor\([\s\S]*mailRequestOutcome\(await requestRegistration\(\{ email: pending\.email \}, await requestOrigin\(\)\)\)/,
+    // «Ese no es mi correo»: no le pide nada a ningún servicio. Olvida la cookie y se va.
+    notMyEmailAction: /^[^\n]*\{\s*const jar = await cookieJar\(\);\s*forgetRegistration\(jar\);\s*return leaveFor\(jar, \{ to: ROUTES\.signUp, notice: null \}\);\s*\}\s*$/,
+  },
+  "src/app/(cuenta)/verificar/[token]/actions.ts": {
+    // Completar la cuenta desde el enlace: lo que no tiene forma de enlace no llega al servicio.
+    completeRegistrationAction:
+      /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRegistration\(\s*jar,[\s\S]*forgetRegistration\(jar\);\s*return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/(cuenta)/recuperar/actions.ts": {
+    // Pedir la recuperación: el servicio contesta lo mismo exista o no la cuenta.
+    requestRecoveryAction: /mailRequestOutcome\(await requestRecovery\(\{ email \}, await requestOrigin\(\)\)\)/,
+  },
+  "src/app/(cuenta)/recuperar/[token]/actions.ts": {
+    // Cambiar la contraseña desde el enlace: lo que no tiene forma de enlace no llega al servicio.
+    completeRecoveryAction:
+      /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRecovery\(\{ tokenHash: input\.token, password: input\.password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(await cookieJar\(\), outcome\);/,
+  },
+  "src/app/(cuenta)/_lib/session-actions.ts": {
+    // Salir: solo usa la cookie de quien pide.
+    signOutAction: /await signOut\(await cookieJar\(\)\)/,
+  },
 };
+
+/** El texto de una función exportada de un archivo de acciones: de su `export` a la llave que la cierra. */
+function actionBody(code: string, name: string): string {
+  const start = code.indexOf(`export async function ${name}(`);
+  if (start < 0) return "";
+  const end = code.indexOf("\n}\n", start);
+  return end < 0 ? code.slice(start) : code.slice(start, end + 2);
+}
 
 const GUARD_IMPORT = /import \{[^}]*\} from "@\/app\/_lib\/guard";/;
 const SESSION_GUARD = /= await (requireSession|requireIncompleteSession)\(/;
@@ -172,14 +225,79 @@ describe("todo archivo de acciones de servidor está en la lista, con el servici
     expect(inline.map((source) => source.file)).toEqual([]);
   });
 
-  it.each(Object.entries(SERVER_ACTIONS))("%s", (file, service) => {
-    expect(codeOf(file)).toMatch(service);
+  const listed = Object.entries(SERVER_ACTIONS).flatMap(([file, actions]) =>
+    Object.entries(actions).map(([name, service]) => [file, name, service] as const),
+  );
+
+  it.each(listed)("%s · %s llama a lo suyo, dentro de su propia función", (file, name, service) => {
+    const body = actionBody(codeOf(file), name);
+    expect(body).not.toBe("");
+    expect(body).toMatch(service);
   });
 
-  it.each(Object.keys(SERVER_ACTIONS))("%s solo exporta acciones", (file) => {
+  it("el cuerpo de una acción es solo el suyo: no alcanza a la función de al lado", () => {
+    const code = codeOf("src/app/(cuenta)/verificar/actions.ts");
+    expect(actionBody(code, "notMyEmailAction")).not.toContain("requestRegistration");
+    expect(actionBody(code, "resendAction")).not.toContain("notMyEmailAction");
+    expect(actionBody(code, "noExisteAction")).toBe("");
+  });
+
+  it.each(Object.entries(SERVER_ACTIONS))("%s exporta esas acciones y ninguna otra cosa", (file, actions) => {
     const exported = [...codeOf(file).matchAll(/^export (.*)$/gm)].map((match) => match[1] ?? "");
-    expect(exported.length).toBeGreaterThan(0);
     for (const line of exported) expect(line).toMatch(/^async function \w+Action\(/);
+    const names = exported.map((line) => /^async function (\w+)\(/.exec(line)?.[1] ?? line);
+    // Una acción nueva en un archivo ya revisado es otra puerta: entra a la lista, con lo suyo.
+    expect(names.sort()).toEqual(Object.keys(actions).sort());
+    // Y no hay otra forma de exportar: ni lista, ni reexportación, ni por omisión.
+    expect(codeOf(file)).not.toMatch(/^export\s*(\{|\*|default\b)/m);
+  });
+});
+
+describe("pedir un correo corre detrás de la respuesta", () => {
+  // `requestRegistration` y `requestRecovery` no salen armados del servicio: quien los arma
+  // dice cómo se manda la llamada a Auth detrás de la respuesta, y armados sin eso correrían
+  // en línea, con lo que el tiempo delataría si un correo tiene cuenta. En `src/app` los arma
+  // un solo archivo, con `after()`.
+  const MAIL_REQUESTS = "src/app/_lib/mail-requests.ts";
+  const outside = sources.filter((source) => source.file !== MAIL_REQUESTS && !/\.test\.tsx?$/.test(source.file));
+
+  it("un solo archivo de la aplicación arma servicios de cuenta, y lo hace con `after()`", () => {
+    expect(outside.filter((source) => /\bcreateAccountServices\b/.test(source.code)).map((source) => source.file)).toEqual([]);
+    const code = codeOf(MAIL_REQUESTS);
+    expect(code).toMatch(/import \{ after \} from "next\/server";/);
+    expect(code).toMatch(/createAccountServices\(\{ defer: deferAfterResponse \}\)/);
+    expect(code).toMatch(/try \{\s*after\(work\);\s*\} catch \{/);
+  });
+
+  it("el servicio no entrega esas dos ya armadas: quien las quiere tiene que decir cómo corren detrás", () => {
+    const service = everything.find((source) => source.file === "src/services/account/account.ts")?.code ?? "";
+    const armed = /export const \{([^}]*)\} = services;/.exec(service)?.[1] ?? "";
+    // La lista de lo que sí sale armado existe y se leyó bien.
+    expect(armed).toMatch(/\bsignIn\b/);
+    expect(armed).not.toMatch(/\brequest(Registration|Recovery)\b/);
+    // El objeto con todos los servicios armados no sale de ese archivo por ningún otro
+    // lado: se crea, se desestructura en esa lista, y nada más lo nombra.
+    expect(service.match(/(?<![\w/])services\b(?!\/)/g)).toHaveLength(2);
+    expect(service).toMatch(/^const services = createAccountServices\(\);$/m);
+    expect(service).not.toMatch(/^export default\b/m);
+    // Ni en esa lista ni exportadas de ninguna otra forma, en ese archivo.
+    expect(service).not.toMatch(/^export\b[^\n;]*\brequest(Registration|Recovery)\b/m);
+    expect(service).not.toMatch(/^export \{[^}]*\brequest(Registration|Recovery)\b[^}]*\}/m);
+  });
+
+  it("quien pide un correo usa los de ese archivo, y de ningún otro lado", () => {
+    const users = outside.filter((source) => /\b(requestRegistration|requestRecovery)\(/.test(source.code));
+    expect(users.map((source) => source.file).sort()).toEqual([
+      "src/app/(cuenta)/recuperar/actions.ts",
+      "src/app/(cuenta)/registro/actions.ts",
+      "src/app/(cuenta)/verificar/actions.ts",
+    ]);
+    for (const source of users) {
+      expect(source.code, source.file).toMatch(/import \{ request(Registration|Recovery) \} from "@\/app\/_lib\/mail-requests";/);
+      // Ni armados aquí mismo, ni traídos con otro nombre.
+      expect(source.code, source.file).not.toMatch(/\b(?:const|let|var|function)\s+request(Registration|Recovery)\b/);
+      expect(source.code, source.file).not.toMatch(/\bas request(Registration|Recovery)\b/);
+    }
   });
 });
 

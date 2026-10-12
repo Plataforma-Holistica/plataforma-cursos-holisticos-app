@@ -1,3 +1,6 @@
+import { account } from "@/messages/es/account";
+import { plural, t } from "@/messages/format";
+
 // Cómo se escribe una fecha y una hora en pantalla (diseño, sección 6.0): la fecha
 // completa, «12 de noviembre de 2026».
 //
@@ -5,6 +8,7 @@
 // centro de México, que es la del producto; una hora, que sí cambia de sentido con la
 // zona, la vuelve a escribir el navegador en la suya cuando puede (ver la pantalla de
 // entrar).
+
 
 export const PRODUCT_TIME_ZONE = "America/Mexico_City";
 
@@ -21,4 +25,16 @@ export function clockTime(iso: string, timeZone?: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("es-MX", { hour: "numeric", minute: "2-digit", timeZone }).format(date);
+}
+
+/**
+ * Una duración, dicha como se dice: «1 hora», «15 minutos», «60 segundos». En la unidad más
+ * grande que la deje entera. Vacío si no es un número de segundos que se pueda decir.
+ */
+export function durationText(seconds: number): string {
+  if (!Number.isInteger(seconds) || seconds <= 0) return "";
+  const { hours, minutes, seconds: secondsForms } = account.durations;
+  if (seconds % 3_600 === 0) return t(plural(seconds / 3_600, hours), { count: seconds / 3_600 });
+  if (seconds % 60 === 0) return t(plural(seconds / 60, minutes), { count: seconds / 60 });
+  return t(plural(seconds, secondsForms), { count: seconds });
 }

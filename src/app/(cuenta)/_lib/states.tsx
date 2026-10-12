@@ -1,4 +1,4 @@
-import { Ban, FileX, ServerCrash } from "lucide";
+import { Ban, FileX, ServerCrash, TriangleAlert, Unlink } from "lucide";
 
 import { account } from "@/messages/es/account";
 import { states } from "@/messages/es/states";
@@ -77,6 +77,89 @@ export function NoCurrentTextScreen({ withSession }: { withSession: boolean }) {
         primaryAction={withSession ? <CloseSession /> : <Button href={ROUTES.landing}>{account.common.goHome}</Button>}
       >
         <p>{account.consents.noCurrentText}</p>
+      </FullScreenState>
+    </main>
+  );
+}
+
+/**
+ * El enlace de registro caducó o ya se usó (diseño, PA-14). Se descubre al enviar, no al
+ * abrir, salvo cuando la dirección ni siquiera tiene forma de enlace. «Entrar» es para quien
+ * envió dos veces y ya tiene su cuenta.
+ */
+export function RegistrationLinkDeadScreen() {
+  return (
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
+      <FullScreenState
+        icon={Unlink}
+        title={account.complete.linkDeadTitle}
+        primaryAction={<Button href={ROUTES.signUp}>{account.complete.askAnother}</Button>}
+        secondaryActions={
+          <>
+            <Button href={ROUTES.recover} variant="secondary">
+              {account.complete.recoverPassword}
+            </Button>
+            <Button href={ROUTES.signIn} variant="text">
+              {account.complete.signIn}
+            </Button>
+          </>
+        }
+      >
+        <p>{account.complete.linkDeadBody}</p>
+      </FullScreenState>
+    </main>
+  );
+}
+
+/**
+ * El enlace de registro se gastó y la cuenta no quedó lista (diseño, PA-14): el correo ya
+ * está confirmado, así que la salida es elegir la contraseña desde PA-13. Al entrar, PA-15
+ * pide lo que falte.
+ */
+export function RegistrationUnfinishedScreen() {
+  return (
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
+      <FullScreenState
+        icon={TriangleAlert}
+        title={account.complete.unfinishedTitle}
+        primaryAction={<Button href={ROUTES.recover}>{account.complete.recoverPassword}</Button>}
+      >
+        <p>{account.complete.unfinishedBody}</p>
+      </FullScreenState>
+    </main>
+  );
+}
+
+/** El enlace de recuperación caducó o ya se usó (diseño, PA-13). */
+export function RecoveryLinkDeadScreen() {
+  return (
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
+      <FullScreenState
+        icon={Unlink}
+        title={account.recover.linkDeadTitle}
+        primaryAction={<Button href={ROUTES.recover}>{account.recover.askAnother}</Button>}
+        secondaryActions={
+          <Button href={ROUTES.signIn} variant="text">
+            {account.recover.backToSignIn}
+          </Button>
+        }
+      >
+        <p>{account.recover.linkDeadBody}</p>
+      </FullScreenState>
+    </main>
+  );
+}
+
+/** El enlace de recuperación se gastó y el cambio no terminó (diseño, PA-13): hay que pedir otro. */
+export function RecoveryUnfinishedScreen() {
+  return (
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
+      <FullScreenState
+        icon={TriangleAlert}
+        title={account.recover.unfinishedTitle}
+        primaryAction={<Button href={ROUTES.recover}>{account.recover.askAnother}</Button>}
+      >
+        <p>{account.recover.unfinishedBody}</p>
       </FullScreenState>
     </main>
   );

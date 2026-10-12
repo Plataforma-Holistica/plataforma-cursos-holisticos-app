@@ -1,6 +1,6 @@
 "use client";
 
-import { type FocusEvent, useActionState, useEffect, useState, useSyncExternalStore } from "react";
+import { type FocusEvent, useActionState, useState } from "react";
 
 import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { account } from "@/messages/es/account";
@@ -15,6 +15,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
+import { afterInteraction, useHydrated, useWaitIsOver } from "../_lib/hooks";
 import { SuspendedScreen } from "../_lib/states";
 
 import { signInAction } from "./actions";
@@ -30,23 +31,6 @@ const PASSWORD_ID = "entrar-contrasena";
 const IDLE: SignInState = { kind: "idle" };
 
 const EMAIL_ERRORS = { required: account.fields.emailRequired, invalid: account.fields.emailInvalid } as const;
-
-const subscribeToNothing = () => () => undefined;
-/** Falso en el servidor y en el primer dibujado; verdadero cuando ya corre en el navegador. */
-const useHydrated = () => useSyncExternalStore(subscribeToNothing, () => true, () => false);
-
-/** Verdadero cuando ya pasó la hora de `retryAt`. Sin JavaScript no cambia: se recarga la pantalla. */
-function useWaitIsOver(retryAt: string | null): boolean {
-  const [passed, setPassed] = useState<string | null>(null);
-  useEffect(() => {
-    if (retryAt === null) return;
-    const wait = Math.max(0, new Date(retryAt).getTime() - Date.now());
-    // Un temporizador no acepta más de unos 24 días.
-    const timer = setTimeout(() => setPassed(retryAt), Math.min(wait, 2_000_000_000));
-    return () => clearTimeout(timer);
-  }, [retryAt]);
-  return retryAt !== null && passed === retryAt;
-}
 
 export function ThrottledAlert({ retryAt }: { retryAt: string }) {
   const hydrated = useHydrated();
@@ -70,7 +54,8 @@ function Fields({ email, fields }: { email: string; fields: SignInFields }) {
     const field = event.target;
     if (!(field instanceof HTMLInputElement) || field.name !== "email") return;
     if (field.value.trim() === "") return;
-    setEmailError(parseEmail(field.value).ok ? undefined : "invalid");
+    const seen = parseEmail(field.value).ok ? undefined : "invalid";
+    afterInteraction(() => setEmailError(seen));
   }
 
   return (
@@ -132,14 +117,16 @@ export function SignInScreen({ returnTo, notice }: SignInScreenProps) {
       <form action={action} noValidate className="flex flex-col gap-6">
         {notice !== null && state.kind === "idle" && <InlineAlert tone="success">{notice}</InlineAlert>}
         <FormErrorSummary errors={errors} attempt={attempt} />
+        {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
+            intento con los campos del siguiente, y el aviso viejo se queda en pantalla. */}
         {failure !== null && (
-          <InlineAlert key={attempt} tone="danger" live>
+          <InlineAlert key={`fallo-${attempt}`} tone="danger" live>
             {failure}
           </InlineAlert>
         )}
-        {state.kind === "throttled" && <ThrottledAlert key={attempt} retryAt={state.retryAt} />}
+        {state.kind === "throttled" && <ThrottledAlert key={`freno-${attempt}`} retryAt={state.retryAt} />}
         <input type="hidden" name={RETURN_PARAM} value={returnTo} />
-        <Fields key={attempt} email={state.kind === "idle" ? "" : state.email} fields={fields} />
+        <Fields key={`campos-${attempt}`} email={state.kind === "idle" ? "" : state.email} fields={fields} />
         <Button
           type="submit"
           loading={pending}

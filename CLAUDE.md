@@ -146,6 +146,7 @@ La que fija el TRD §4.2.
 | `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
+| `tests/actions/` | Pruebas de las acciones de servidor con sus servicios simulados: qué le pasa cada una a su servicio, en qué orden, y qué hace con cada respuesta | Las acciones de `src/app/` | Dar por probado lo que hace el servicio: eso lo prueban `tests/integration/` y el extremo a extremo |
 | `tests/e2e/` | Pruebas de extremo a extremo con Playwright (`*.spec.ts`): un navegador de verdad contra la aplicación compilada, la pila local y su buzón, con JavaScript y sin él. Las corre `pnpm test:e2e` | Los ayudantes de `tests/integration/helpers/` que no cargan código de la aplicación | Correr contra algo que no sea la pila local, y dejar residuo |
 | `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
 | `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
@@ -193,9 +194,12 @@ falla. Doce precisiones que la tabla no dice:
   - La guarda en las páginas le pregunta a `checkSession` y obedece. Qué hace cada tipo de
     pantalla con cada respuesta es una tabla pura, `guard-steps.ts`. `unavailable` nunca
     se trata como «sin sesión».
-  - Toda ruta y todo archivo de acciones de servidor entra a su lista en esa misma prueba,
-    con el servicio por el que pasa. Las rutas solo atienden lecturas. La marca
-    `"use server"` va al inicio del archivo, nunca dentro de una función.
+  - Toda ruta y toda acción de servidor entra a su lista en esa misma prueba. Las acciones
+    van una por una, con lo que el cuerpo de cada una tiene que llamar, y un archivo de
+    acciones no exporta ninguna que no esté ahí. Eso atrapa el olvido; lo que cada acción
+    hace con cada respuesta lo prueban `tests/actions/` y su tabla. Las rutas solo
+    atienden lecturas. La marca `"use server"` va al inicio del archivo, nunca dentro de
+    una función.
   - No hay armazones ni plantillas además del de la raíz: pintarían antes que la guarda de
     su página.
   - La decisión de cada pantalla vive en una tabla pura, `outcomes.ts`, junto a ella y con
@@ -232,6 +236,48 @@ falla. Doce precisiones que la tabla no dice:
   - Una acción de la cuenta sale hacia otra pantalla por `leaveFor`
     (`src/app/(cuenta)/_lib/exit.ts`), con lo que dijo su tabla: cierra la sesión que ya
     no vale, deja el aviso y redirige, en ese orden.
+  - Pedir un correo (registro, reenvío, recuperación) pasa por
+    `src/app/_lib/mail-requests.ts`, que le da al servicio el `after()` de Next: la llamada
+    a Auth corre detrás de la respuesta. Lo que la pantalla dice después (cuánto dura el
+    enlace, cuánto se espera) se lee cuando el servicio ya contestó, nunca antes
+    (`link-facts.ts`). Por eso una prueba de extremo a extremo que afirme «no llegó
+    ningún correo» espera antes un correo de control, y todo caso espera sus correos
+    antes de terminar: la limpieza no debe ganarle a un alta que viene en camino. Ese
+    archivo es el único de `src/app/` que arma servicios de cuenta, y una prueba lo
+    exige: armados sin `defer` correrían en línea. Si `after()` no puede encolar el
+    trabajo, corre en el acto y se reporta (`mail_not_deferred`).
+  - Lo que una página pública de la cuenta lee de la base pasa por `formFacts`
+    (`link-facts.ts`), que lo recuerda cinco segundos, también cuando no se supo: esas
+    páginas usan la misma reserva de conexiones con la que la gente entra. Una acción a la
+    que el servicio le dice que un texto cambió llama a `forgetFormFacts` antes de volver
+    a pintar.
+  - Una espera que el navegador solo cuenta (el botón «Reenviar») le llega como tiempo que
+    falta, no como hora (`useDelayIsOver`): su reloj no la acorta. Una hora que además se
+    le dice a la persona (el freno de entrar) sí viaja como hora.
+  - La página de un enlace del correo no llama a Auth ni gasta el enlace: pinta el
+    formulario, y el servicio lo canjea al enviar, con todo ya revisado. Lo que no tiene
+    forma de enlace (`isLinkToken`) no se le pregunta a nadie, ni en la página ni en la
+    acción. Esas rutas llevan `Referrer-Policy: same-origin` desde `next.config.ts`.
+  - El correo de un registro a medias viaja a «Revisa tu correo» en una cookie corta
+    (`pending-registration.ts`), sin firma: nada se decide con ella, y lo que no sea
+    exactamente lo que este código escribió cuenta como ausente.
+  - Lo que se pinta al salir de un campo pasa por `useSeenOnBlur`
+    (`src/app/(cuenta)/_lib/hooks.ts`). Se pinta cuando termina el clic o la tecla que
+    sacó el foco (`afterInteraction`): un mensaje que aparece al bajar el botón del ratón
+    recorre lo de abajo y el clic se pierde. Y vale hasta la siguiente revisión del
+    formulario: manda lo último que pasó. Los campos que se repiten (el nombre, el correo
+    al que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`; un campo
+    nuevo con validación al salir se hace igual, no con su propio estado. Una pantalla que
+    revisa antes de enviar lleva sus revisiones con `useLocalChecks`, y sigue la misma
+    regla que cada campo: una revisión del navegador más nueva que la última respuesta del
+    servidor tapa lo que esa respuesta dijo, aunque la siguiente todavía no llegue. Su
+    cuenta de revisiones no retrocede, también cuentan las que salen bien: contra ella se
+    mide qué manda en un campo, y con ella el resumen de errores sabe que hay algo nuevo
+    que anunciar.
+  - Dos hermanos nunca comparten `key`, tampoco un aviso y los campos que se rearman con
+    cada intento: con la misma, React confunde uno con otro y el aviso de un intento se
+    queda en pantalla con el siguiente. La preparación de las pruebas de componente
+    (`tests/setup/dom.ts`) hace fallar toda prueba en la que React avise de eso.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -506,7 +552,8 @@ están ahí `src/services/account/`, `src/proxy.ts`, la configuración de Auth
 entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
 `src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
 `src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
-`playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio.
+`playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio. Con
+las de registro y recuperación se sumó `tests/actions/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

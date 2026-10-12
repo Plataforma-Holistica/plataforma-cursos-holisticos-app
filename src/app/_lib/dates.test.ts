@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clockTime, longDate, PRODUCT_TIME_ZONE } from "./dates";
+import { clockTime, durationText, longDate, PRODUCT_TIME_ZONE } from "./dates";
 
 describe("la fecha completa", () => {
   it("se escribe en la zona del centro de México, no en la del servidor", () => {
@@ -22,5 +22,26 @@ describe("la hora", () => {
     expect(clockTime("2026-10-11T18:30:00.000Z", PRODUCT_TIME_ZONE)).toMatch(/^12:30/);
     expect(clockTime("2026-10-11T18:30:00.000Z", "Asia/Tokyo")).toMatch(/^3:30/);
     expect(clockTime("2026-10-11T18:05:00.000Z", "UTC")).toMatch(/^6:05/);
+  });
+});
+
+describe("una duración, dicha como se dice", () => {
+  it.each([
+    [1, "1 segundo"],
+    [45, "45 segundos"],
+    [60, "1 minuto"],
+    [90, "90 segundos"],
+    [120, "2 minutos"],
+    [900, "15 minutos"],
+    [3_600, "1 hora"],
+    [5_400, "90 minutos"],
+    [7_200, "2 horas"],
+    [86_400, "24 horas"],
+  ])("%i segundos: %s", (seconds, expected) => {
+    expect(durationText(seconds)).toBe(expected);
+  });
+
+  it.each([0, -60, 1.5, Number.NaN, Infinity])("lo que no es una duración no pinta nada: %s", (seconds) => {
+    expect(durationText(seconds)).toBe("");
   });
 });
