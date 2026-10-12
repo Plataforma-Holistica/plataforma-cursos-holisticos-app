@@ -7,7 +7,7 @@
 -- factor verificado, que es lo que decide cómo cambia su contraseña.
 begin;
 \ir _ayuda.psql
-select plan(32);
+select plan(34);
 
 select pruebas.alta('e0000000-0000-0000-0000-000000000001', 'con-factor@prueba.test');
 select pruebas.alta('e0000000-0000-0000-0000-000000000002', 'sin-factor@prueba.test');
@@ -108,13 +108,13 @@ select results_eq(
   $$select fallos, espera from pruebas.freno('fac70000-0000-0000-0000-000000000001')$$,
   $$values (6, interval '2 minutes')$$,
   'y la espera se duplica');
-update private.second_factor_attempts set failed_count = 30, locked_until = clock_timestamp() - interval '1 second'
+update private.second_factor_attempts set failed_count = 5000, locked_until = clock_timestamp() - interval '1 second'
   where factor_id = 'fac70000-0000-0000-0000-000000000001';
 select is(pruebas.intento('fac70000-0000-0000-0000-000000000001', false), 'reject',
   'con muchos fallos acumulados sigue frenando, sin desbordarse');
 select results_eq(
   $$select fallos, espera from pruebas.freno('fac70000-0000-0000-0000-000000000001')$$,
-  $$values (31, interval '15 minutes')$$,
+  $$values (5001, interval '15 minutes')$$,
   'y la espera no pasa de FRENO_ESPERA_TOPE');
 
 -- El código correcto, ya sin espera, borra la cuenta.
@@ -141,6 +141,19 @@ select is(pruebas.intento('fac70000-0000-0000-0000-000000000001', false), 'conti
 select is(
   (select fallos from pruebas.freno('fac70000-0000-0000-0000-000000000001')),
   1, 'desde uno');
+
+-- La espera manda también sobre el olvido: una que sigue viva frena aunque el último fallo
+-- sea viejo. Con los parámetros de hoy no puede pasar (la espera más larga dura menos que
+-- el olvido), pero son parámetros, y cambian.
+update private.second_factor_attempts
+  set failed_count = 9, last_failed_at = clock_timestamp() - interval '61 minutes',
+      locked_until = clock_timestamp() + interval '5 minutes'
+  where factor_id = 'fac70000-0000-0000-0000-000000000001';
+select is(pruebas.intento('fac70000-0000-0000-0000-000000000001', true), 'reject',
+  'una espera viva frena aunque los fallos ya sean viejos');
+select is(
+  (select fallos from pruebas.freno('fac70000-0000-0000-0000-000000000001')),
+  9, 'y no borra nada');
 
 -- Lo que no se entiende no pasa: el gancho falla cerrado.
 select is(

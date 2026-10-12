@@ -113,6 +113,13 @@ Después de tocar cualquiera de los dos: `pnpm db:stop` y `pnpm db:start`, para 
 lo tome. Nada de eso llega al proyecto remoto: subirlo (`supabase config push`) es
 reconfigurar un proveedor, y se pregunta.
 
+Desde T-105 el Auth local tiene prendido el segundo factor por aplicación de códigos
+(TOTP) y un gancho, `[auth.hook.mfa_verification_attempt]`, que apunta a una función de
+la base (`private.second_factor_attempt()`). Auth la llama en cada intento de verificar
+un código, y si la función falta o lanza, rechaza toda verificación: una migración que la
+renombre o le quite el permiso a `supabase_auth_admin` deja al equipo sin entrar. TOTP
+queda prendido para toda cuenta, no solo para el equipo.
+
 Versiones que no se suben sin revisar:
 
 - **Next.js 16.3**: Payload 3 exige 16.3.3 o superior. Esta versión cambió respecto a las
@@ -145,7 +152,7 @@ La que fija el TRD §4.2.
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
 | `supabase/templates/` | Las plantillas de los correos que manda Supabase Auth, mientras no los manda el proveedor de correo propio | | La dirección o el código que arma Auth: los enlaces llevan la huella y abren una página propia |
 | `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
-| `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
+| `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local. Un segundo factor de verdad sale de `helpers/auth.ts` (`secondFactorFor`) y sus códigos de `helpers/totp.ts`, sin dependencia nueva | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
 | `tests/actions/` | Pruebas de las acciones de servidor con sus servicios simulados: qué le pasa cada una a su servicio, en qué orden, y qué hace con cada respuesta | Las acciones de `src/app/` | Dar por probado lo que hace el servicio: eso lo prueban `tests/integration/` y el extremo a extremo |
 | `tests/e2e/` | Pruebas de extremo a extremo con Playwright (`*.spec.ts`): un navegador de verdad contra la aplicación compilada, la pila local y su buzón, con JavaScript y sin él. Las corre `pnpm test:e2e` | Los ayudantes de `tests/integration/helpers/` que no cargan código de la aplicación | Correr contra algo que no sea la pila local, y dejar residuo |
@@ -316,6 +323,9 @@ falla. Doce precisiones que la tabla no dice:
       puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
     - Lo que un bloque pinta de la base llega ya en palabras desde la página (`rows.ts`):
       el navegador no necesita saber leer fechas, y se ve lo mismo con JavaScript y sin él.
+    - En una cuenta con segundo factor, el bloque de la contraseña no pinta formulario:
+      dice que se recupera desde el correo y enlaza ahí. Lo sabe la página al pintar; si la
+      cuenta ganó su factor con la pantalla abierta, lo descubre el envío y el bloque cambia.
     - Un bloque con contraseñas (el de la contraseña) no devuelve ninguna: después de
       cada respuesta sus campos se arman de nuevo, vacíos, y lo que el navegador detiene
       antes de enviar deja lo escrito como está. Su resultado va arriba de los campos, no
@@ -369,7 +379,13 @@ falla. Doce precisiones que la tabla no dice:
   `management.ts`: lo que la pantalla de la cuenta pinta, el cambio de nombre, las sesiones
   abiertas y el cambio de contraseña. El cambio de correo espera a T-310.
   - `changePassword(jar, { current, next }, origin)` cambia la contraseña de la cuenta de
-    la sesión que pide. El orden es la regla, y no se cambia sin leer el TRD §9.2, fila
+    la sesión que pide. **Una cuenta con segundo factor verificado no pasa de la guarda:**
+    contesta `second_factor` antes de mirar lo escrito, sin contar un intento, y el bloque
+    le dice que la recupere desde su correo. Auth exige una sesión de segundo nivel para
+    cambiar la contraseña de esas cuentas, y la de la comprobación es de primer nivel
+    (decisión del 2026-10-12). `accountSecondFactor(claims)` es lo que la página le
+    pregunta antes de pintar el bloque; si no se supo, no se ofrece el formulario a
+    ciegas. Para las demás, el orden es la regla, y no se cambia sin leer el TRD §9.2, fila
     «Cambio de contraseña desde la cuenta»:
     1. La guarda, y lo que se revisa sin preguntarle a nadie (`checkPasswordChange`, del
        dominio, la misma regla que usa el navegador). Lo que se detiene ahí no cuenta
@@ -534,8 +550,19 @@ falla. Doce precisiones que la tabla no dice:
   - `completeRecovery` cierra todas las sesiones siempre, falle lo que falle antes, y no
     abre sesión. `setRecoveredPassword` guarda con la sesión del canje y, si esa sesión ya
     no existe o la contraseña es la que ya tenía, por la API de administración: por ese
-    camino el aviso CO-26 no sale, y se reporta. Los demás pares de la cuenta pierden la
-    confianza y conservan sus fallos.
+    camino el aviso CO-26 no sale, y se reporta. Hay un tercer caso que va por ahí y no se
+    reporta, porque no es una falla: la cuenta tiene segundo factor, y Auth no deja
+    cambiar la contraseña con la sesión de un enlace. Con el buzón se recupera la
+    contraseña, también la de esas cuentas; el segundo factor no se toca, y sin él no se
+    entra a administración, no se cambia la contraseña otra vez ni se tocan los factores.
+    Los demás pares de la cuenta pierden la confianza y conservan sus fallos.
+  - El freno de los códigos del segundo factor no vive en la aplicación: vive en el gancho
+    de Auth (`private.second_factor_attempt()`). Quien tiene la contraseña de una cuenta
+    puede probar códigos llamando directo a Auth, y un código equivocado no gasta el reto:
+    un freno en un servicio no lo vería. Usa la regla y los parámetros del freno de entrar,
+    por factor. Mientras dura la espera no pasa ni el código correcto, y cuando el gancho
+    rechaza, Auth además cierra esa sesión: a quien se equivocó de más hay que decirle que
+    vuelva a entrar.
   - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer })` existe
     para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
     propia dirección (`tests/integration/helpers/account.ts`).

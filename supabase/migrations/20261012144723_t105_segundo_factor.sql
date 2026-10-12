@@ -79,15 +79,15 @@ begin
   select a.failed_count, a.locked_until, a.last_failed_at into v_count, v_locked, v_last
   from private.second_factor_attempts a where a.factor_id = v_factor;
 
-  -- Fallos viejos: se olvidan.
+  -- La espera manda sobre todo lo demás, también sobre el olvido: mientras dure, no pasa nada.
+  if v_locked is not null and v_locked > v_now then
+    return v_reject;
+  end if;
+
+  -- Fallos viejos: se olvidan, y la cuenta empieza de nuevo.
   if found and v_last < v_now - v_forget then
     delete from private.second_factor_attempts a where a.factor_id = v_factor;
     v_count := null;
-    v_locked := null;
-  end if;
-
-  if v_locked is not null and v_locked > v_now then
-    return v_reject;
   end if;
 
   if v_valid then

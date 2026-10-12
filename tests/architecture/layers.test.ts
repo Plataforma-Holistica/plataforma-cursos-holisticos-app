@@ -19,10 +19,14 @@ const DOM_PROPS = "react/forbid-dom-props";
 
 let eslint: ESLint;
 
-beforeAll(() => {
+beforeAll(async () => {
   // `ignore: false` porque el lint normal se salta la carpeta de muestras.
   eslint = new ESLint({ cwd: root, ignore: false });
-});
+  // La primera llamada carga la configuración y los plugins, y tarda varios segundos. Se
+  // paga aquí, con su propio límite, y no dentro del primer caso: con la máquina ocupada
+  // ese caso se pasaba de su tiempo sin que ninguna regla hubiera fallado.
+  await eslint.lintText("export {};\n", { filePath: `${root}/${fixtures}/domain/access/probe.ts` });
+}, 60_000);
 
 async function rulesBroken(file: string, code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath: `${root}/${file}` });
