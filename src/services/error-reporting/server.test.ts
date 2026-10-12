@@ -48,6 +48,7 @@ describe("reportFailure", () => {
       "throttle_unavailable",
       "session_oversized",
       "session_not_noted",
+      "session_not_tagged",
       "session_not_closed",
       "session_cookie_not_written",
       "sign_in_settle_failed",

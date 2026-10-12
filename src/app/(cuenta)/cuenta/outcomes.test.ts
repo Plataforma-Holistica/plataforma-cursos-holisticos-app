@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { PendingAccount } from "@/services/account/account";
 
-import { changeNameOutcome, checkNameForm, readNameForm } from "./outcomes";
+import {
+  changeNameOutcome,
+  checkNameForm,
+  CLOSE_OTHERS,
+  closeOthersOutcome,
+  closeSessionOutcome,
+  readNameForm,
+  readSessionsForm,
+} from "./outcomes";
 
 // Qué hace la pantalla de la cuenta con cada respuesta (diseño, PA-25; FL-27, paso 1).
 
@@ -120,5 +128,73 @@ describe("qué se hace con lo que contesta el servicio al cambiar el nombre", ()
       notice: null,
       closeSession: true,
     });
+  });
+});
+
+describe("lo que llega del formulario de las sesiones", () => {
+  const ID = "5e560000-0000-0000-0000-000000000001";
+
+  it("el botón de una sesión dice cuál", () => {
+    expect(readSessionsForm(form([["close", ID]]))).toEqual({ target: "one", sessionId: ID });
+  });
+
+  it("el de «Cerrar todas las demás» no dice ninguna: cuál se queda lo sabe el servidor", () => {
+    expect(CLOSE_OTHERS).toBe("others");
+    expect(readSessionsForm(form([["close", "others"]]))).toEqual({ target: "others" });
+  });
+
+  it.each([
+    ["sin el campo", form([])],
+    ["con el campo vacío", form([["close", ""]])],
+    ["con un archivo en lugar de un texto", form([["close", new Blob([ID])]])],
+    ["con un texto más largo que un identificador", form([["close", `${ID}x`]])],
+    ["algo que no es un formulario", `close=${ID}`],
+    ["nada", null],
+  ])("%s no se entiende qué cerrar, y no se cierra nada", (_case, input) => {
+    expect(readSessionsForm(input)).toEqual({ target: "none" });
+  });
+
+  it("lo que no tiene forma de identificador llega como está: lo descarta el servicio", () => {
+    expect(readSessionsForm(form([["close", "otras"]]))).toEqual({ target: "one", sessionId: "otras" });
+  });
+
+  it("del campo repetido vale el primero, y no lee ningún otro", () => {
+    expect(readSessionsForm(form([["close", ID], ["close", "others"], ["keep", "x"], ["profile", "otra"]]))).toEqual({
+      target: "one",
+      sessionId: ID,
+    });
+  });
+});
+
+describe("qué se hace con lo que contesta el servicio al cerrar sesiones", () => {
+  it("cerrada: se queda en la pantalla, y dice cuál", () => {
+    expect(closeSessionOutcome({ kind: "closed" })).toEqual({ kind: "closed", what: "one" });
+    expect(closeOthersOutcome({ kind: "closed", count: 3 })).toEqual({ kind: "closed", what: "others" });
+    expect(closeOthersOutcome({ kind: "closed", count: 0 })).toEqual({ kind: "closed", what: "others" });
+  });
+
+  it("una que no se encontró se dice como ya cerrada: de otra cuenta o no, aquí no está abierta", () => {
+    expect(closeSessionOutcome({ kind: "not_found" })).toEqual({ kind: "closed", what: "gone" });
+  });
+
+  it("la sesión propia, mandada por aquí: se cierra por el camino que borra la cookie, y a la portada", () => {
+    expect(closeSessionOutcome({ kind: "current" })).toEqual({ kind: "redirect", to: "/", notice: null, closeSession: true });
+  });
+
+  it("no se supo: lo dice, y no se va a ningún lado", () => {
+    expect(closeSessionOutcome({ kind: "unavailable" })).toEqual({ kind: "unavailable" });
+    expect(closeOthersOutcome({ kind: "unavailable" })).toEqual({ kind: "unavailable" });
+  });
+
+  it.each([
+    ["cerrar una", (check: never) => closeSessionOutcome({ kind: "session", check })],
+    ["cerrar las demás", (check: never) => closeOthersOutcome({ kind: "session", check })],
+  ] as const)("%s, sin una sesión que pase: lo mismo que cualquier otro bloque de la pantalla", (_case, outcome) => {
+    expect(outcome({ kind: "anonymous" } as never)).toEqual({ kind: "redirect", to: "/entrar?volver=%2Fcuenta", notice: null, closeSession: false });
+    expect(outcome({ kind: "incomplete" } as never)).toEqual({ kind: "redirect", to: "/consentimientos?volver=%2Fcuenta", notice: null, closeSession: false });
+    expect(outcome({ kind: "suspended" } as never)).toEqual({ kind: "suspended" });
+    expect(outcome({ kind: "unavailable" } as never)).toEqual({ kind: "unavailable" });
+    expect(outcome({ kind: "must_sign_out", then: "recover" } as never)).toEqual({ kind: "redirect", to: "/recuperar", notice: "choose_password", closeSession: true });
+    expect(outcome({ kind: "must_sign_out", then: "sign_in" } as never)).toEqual({ kind: "redirect", to: "/entrar", notice: null, closeSession: true });
   });
 });

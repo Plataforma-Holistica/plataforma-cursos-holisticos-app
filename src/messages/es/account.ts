@@ -147,8 +147,8 @@ export const account = defineMessages({
     status: "En construcción.",
     account: "Cuenta",
   },
-  // PA-25. Por ahora, el nombre y el correo a la vista: las sesiones y la contraseña llegan
-  // en sus propias solicitudes, y cambiar de correo espera al correo propio (T-310).
+  // PA-25. Por ahora, el nombre, el correo a la vista y las sesiones abiertas: la contraseña
+  // llega en su propia solicitud, y cambiar de correo espera al correo propio (T-310).
   manage: {
     pageTitle: "Cuenta",
     title: "Cuenta",
@@ -159,6 +159,39 @@ export const account = defineMessages({
     emailTitle: "Correo",
     emailNote: "Por ahora no se puede cambiar desde aquí.",
     backHome: "Volver al inicio",
+    sessionsTitle: "Sesiones abiertas",
+    sessionsIntro: "Los navegadores en los que tu cuenta tiene una sesión abierta.",
+    // De qué navegador y sistema dijo ser cada sesión al abrirse: «Chrome en Windows».
+    deviceOn: "{browser} en {system}",
+    unknownBrowser: "Navegador desconocido",
+    browsers: {
+      chrome: "Chrome",
+      edge: "Edge",
+      firefox: "Firefox",
+      safari: "Safari",
+      opera: "Opera",
+      samsung: "Samsung Internet",
+    },
+    systems: {
+      windows: "Windows",
+      macos: "macOS",
+      linux: "Linux",
+      android: "Android",
+      ios: "iPhone o iPad",
+      chromeos: "ChromeOS",
+    },
+    openedOn: "Se abrió el {date}.",
+    lastActiveOn: "Última actividad: {date}.",
+    thisSession: "Esta sesión",
+    closeOne: "Cerrar",
+    // Lo que sigue a «Cerrar» para quien no ve la fila: cada botón dice cuál sesión cierra.
+    closeOneDetail: "la sesión de {device}, abierta el {date}",
+    closeOthers: "Cerrar todas las demás",
+    closingSessions: "Cerrando…",
+    closedOne: "Cerramos esa sesión.",
+    closedOthers: "Cerramos tus demás sesiones.",
+    alreadyClosed: "Esa sesión ya estaba cerrada.",
+    onlyThisSession: "No tienes otras sesiones abiertas.",
   },
   // PA-15.
   consents: {

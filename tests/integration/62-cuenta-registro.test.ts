@@ -428,6 +428,10 @@ describe("completar el registro desde el enlace", () => {
     // Una sola sesión, la que la aplicación abrió y anotó: la del canje ya no existe.
     expect(await sessionCount(id)).toBe(1);
     expect(await notedSessions(id)).toBe(1);
+    // Y queda dicho desde qué navegador se abrió, como al entrar: es la que verá en su lista.
+    expect(await ownerQuery("select user_agent from private.app_sessions where profile_id = $1", [id])).toEqual([
+      { user_agent: "Pruebas de integración" },
+    ]);
     expect(services.reported).toEqual([]);
 
     // La contraseña elegida entra, y a quien apenas se registra no le llega «tu contraseña cambió».
