@@ -44,23 +44,42 @@ export function SessionsBlock({ sessions, state, action, pending }: SessionsBloc
   const others = sessions.some((session) => !session.current);
   const attempt = "attempt" in state ? state.attempt : 0;
   const result = pending ? null : resultOf(state);
+  const block = useRef<HTMLElement>(null);
   const notice = useRef<HTMLDivElement>(null);
   const spoken = useRef<HTMLSpanElement>(null);
+  // Si, con el cierre en camino, la persona se llevó el foco a otra cosa.
+  const away = useRef(false);
+
+  // Manda lo que la persona hizo, no dónde está el foco cuando llega la respuesta: ese
+  // instante engaña, porque el botón pulsado queda inactivo o desaparece, y un campo de otro
+  // bloque puede estarse armando de nuevo, y en los dos casos el foco está en el documento.
+  // Así que se anota mientras se espera: irse es poner el foco en otra cosa. Dentro del
+  // bloque no hay dónde ponerlo mientras se espera, porque sus botones quedan inactivos. Y
+  // un clic en una zona vacía lo deja en la pantalla, que contiene al bloque: eso no es irse.
+  useEffect(() => {
+    if (!pending) return;
+    away.current = false;
+    const note = (event: FocusEvent) => {
+      const here = block.current;
+      const to = event.target;
+      away.current = here !== null && to instanceof Node && !to.contains(here);
+    };
+    document.addEventListener("focusin", note);
+    return () => document.removeEventListener("focusin", note);
+  }, [pending]);
 
   // Lo que contestó el último envío toma el foco al llegar: el botón que se pulsó suele ya
   // no existir, porque su fila se fue con la sesión, y sin esto el foco caería al documento.
   // El foco es también lo que se lo anuncia a quien usa lector de pantalla.
   //
-  // Lo toma si nadie más lo tiene: si el foco está en algo que contiene al aviso (el
-  // documento, la pantalla, el bloque) o en el propio bloque. A quien ya se fue a otra cosa
-  // no se lo quita: quien pulsó «Cerrar» y se puso a escribir su nombre sigue escribiendo, y
-  // el resultado se le dice por la región viva de `spoken`, que existe desde antes.
+  // A quien se fue a otra cosa no se le quita: quien pulsó «Cerrar» y se puso a escribir su
+  // nombre sigue escribiendo, y el resultado se le dice por la región viva de `spoken`, que
+  // existe desde antes.
   useEffect(() => {
     const box = notice.current;
     const voice = spoken.current;
     if (attempt === 0 || result === null || box === null || voice === null) return;
-    const active = document.activeElement;
-    if (active === null || active.contains(box) || box.closest("section")?.contains(active) === true) {
+    if (!away.current) {
       box.focus();
       return;
     }
@@ -71,7 +90,7 @@ export function SessionsBlock({ sessions, state, action, pending }: SessionsBloc
   }, [attempt, result]);
 
   return (
-    <section id={SESSIONS_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
+    <section ref={block} id={SESSIONS_BLOCK_ID} aria-labelledby={TITLE_ID} className="flex flex-col gap-4">
       <h2 id={TITLE_ID} className="text-h3">
         {text.sessionsTitle}
       </h2>

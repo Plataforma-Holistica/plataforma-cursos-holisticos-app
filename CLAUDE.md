@@ -301,11 +301,16 @@ falla. Doce precisiones que la tabla no dice:
       bloque lleva un solo estado. Lo que el formulario manda es qué botón se pulsó, y
       nada sobre de quién es la cuenta. Cuando el botón pulsado desaparece con la
       respuesta (su fila se fue), no hay a dónde devolver el foco: lo toma el aviso del
-      resultado, que entonces no es además una región viva. Lo toma si nadie más lo tiene:
-      si el foco está en algo que contiene al aviso (el documento, la pantalla, el bloque)
-      o en el propio bloque. A quien ya se fue a escribir a otro lado no se lo quita, y
-      entonces el resultado se le dice por una región viva aparte, que existe desde antes
-      de cargar, igual que la que dice «Cerrando…»: sin eso no se enteraría.
+      resultado, que entonces no es además una región viva. A quien se fue a otra cosa
+      mientras la respuesta venía en camino no se lo quita, y el resultado se le dice por
+      una región viva aparte, que existe desde antes de cargar, igual que la que dice
+      «Cerrando…»: sin eso no se enteraría. **Si se fue o no, no se deduce de dónde está
+      el foco cuando llega la respuesta:** ese instante engaña, porque el botón pulsado
+      queda inactivo o desaparece, y un campo de otro bloque puede estarse armando de
+      nuevo, y en los dos casos el foco está en el documento. Se anota mientras se espera,
+      con cada movimiento del foco: irse es ponerlo en algo que no contiene al bloque.
+      Tres rondas de arreglos sobre esto, cada una rompiendo un caso vecino, se acabaron al
+      escribir esa regla.
     - Los estados de todos los bloques viven en la pantalla, no en cada bloque: cualquiera
       puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
     - Lo que un bloque pinta de la base llega ya en palabras desde la página (`rows.ts`):

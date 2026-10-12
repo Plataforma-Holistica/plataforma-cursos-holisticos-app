@@ -98,6 +98,10 @@ afterAll(async () => {
  * Corre esos cierres a la vez de verdad: otra sesión de la base tiene tomado el perfil, se
  * lanzan todos, se espera a que cada uno esté detenido por ese candado, y entonces se suelta.
  * Sin esto, que dos llamadas coincidan depende de la suerte.
+ *
+ * El perfil se retiene con el candado más débil que detiene a un cierre (`for share`): si
+ * las funciones bajaran el suyo a uno que no se excluye consigo mismo, ya no harían fila
+ * aquí y esto fallaría, en vez de soltarlas juntas y volver a depender de la suerte.
  */
 async function atOnce<Results extends unknown[]>(userId: string, work: { [Index in keyof Results]: () => Promise<Results[Index]> }): Promise<Results> {
   const owner = new Client({ connectionString: localOwnerUrl() });
@@ -106,16 +110,22 @@ async function atOnce<Results extends unknown[]>(userId: string, work: { [Index 
   try {
     await owner.query("begin");
     const held = await owner.query<{ pid: number }>("select pg_backend_pid() as pid");
-    await owner.query("select 1 from public.profiles where id = $1 for update", [userId]);
+    await owner.query("select 1 from public.profiles where id = $1 for share", [userId]);
     running = Promise.all(work.map((start) => start())) as Promise<Results>;
 
     // El primero que llega espera a quien tiene el perfil, y los demás hacen fila detrás de
-    // él: todos esperan un candado, y al menos uno, el de esta sesión de la base.
+    // él. Se cuentan los que esperan a esta sesión de la base o a otro que ya espera en la
+    // misma fila, y a nadie más.
     const deadline = Date.now() + 4_000;
     for (;;) {
       const rows = await ownerQuery<{ waiting: number; behind: boolean | null }>(
-        `select count(*)::int as waiting, bool_or($1::int = any(pg_blocking_pids(pid))) as behind
-         from pg_stat_activity where usename = 'app_service' and wait_event_type = 'Lock'`,
+        `with waiters as (
+           select pid, pg_blocking_pids(pid) as blockers from pg_stat_activity
+           where usename = 'app_service' and wait_event_type = 'Lock')
+         select count(*) filter (
+                  where $1::int = any(blockers) or blockers && (select array_agg(pid) from waiters))::int as waiting,
+                bool_or($1::int = any(blockers)) as behind
+         from waiters`,
         [held.rows[0]?.pid ?? -1],
       );
       if ((rows[0]?.waiting ?? 0) >= work.length && rows[0]?.behind === true) break;

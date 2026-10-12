@@ -494,6 +494,75 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     expect(nameField()).toHaveValue("Ana María Pérez");
   });
 
+  // Las dos respuestas llegan juntas. El campo del nombre se arma de nuevo y el foco cae al
+  // documento justo cuando el aviso de las sesiones decide: si mirara dónde está el foco,
+  // se lo llevaría. Lo que cuenta es que la persona se había ido a escribir su nombre.
+  it("quien guardó su nombre mientras el cierre venía en camino se queda en su campo", async () => {
+    let closed: (state: SessionsState) => void = () => undefined;
+    let saved: (state: NameState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (closed = resolve)));
+    mocks.changeNameAction.mockReturnValue(new Promise<NameState>((resolve) => (saved = resolve)));
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    await user.click(nameField());
+    await user.type(nameField(), " María{Enter}");
+    await vi.waitFor(() => expect(mocks.changeNameAction).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      closed({ kind: "closed", what: "one", attempt: 1 });
+      saved({ kind: "saved", name: "Ana María", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+    expect(nameField()).toHaveValue("Ana María");
+    expect(nameField()).toHaveFocus();
+    // Y el cierre se le dice sin moverle el foco.
+    const [, voice] = await within(sessionsBlock()).findAllByText("Cerramos esa sesión.");
+    expect(voice).toHaveAttribute("role", "status");
+  });
+
+  it("haberse ido en un cierre no cuenta para el siguiente: cada espera empieza de cero", async () => {
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone, other]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    await user.click(nameField());
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(nameField()).toHaveFocus();
+
+    // El segundo cierre, sin irse a ningún lado: ahora el aviso sí toma el foco.
+    mocks.closeSessionsAction.mockResolvedValue({ kind: "closed", what: "one", attempt: 2 });
+    await user.click(closeButtonOf(other));
+    await vi.waitFor(() => expect(mocks.closeSessionsAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(within(sessionsBlock()).getByText("Cerramos esa sesión.").closest('[tabindex="-1"]')).toHaveFocus());
+  });
+
+  it("volver a la pantalla antes de que llegue la respuesta ya no es haberse ido", async () => {
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    await user.click(nameField());
+    // Y después un clic en una zona vacía de la pantalla: lo último que hizo ya no fue irse.
+    screen.getByRole("main").focus();
+
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 1 });
+      await Promise.resolve();
+    });
+    const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
+    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+  });
+
   it("si el foco está en la pantalla y en nada en particular, el aviso lo toma", async () => {
     let finish: (state: SessionsState) => void = () => undefined;
     mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));

@@ -441,6 +441,39 @@ test("cerrar una sesión solo con el teclado: el aviso toma el foco, y de ahí s
   }
 });
 
+test("quien se va a guardar su nombre mientras un cierre viene en camino no pierde el foco ni lo que escribe", async ({ page, browser }) => {
+  const ana = await person();
+  const phone = await anotherBrowser(browser, ana, { userAgent: IPHONE });
+  try {
+    await openAccount(page, ana);
+    await hydrated(page);
+    // Las respuestas de las acciones tardan: da tiempo de irse al otro bloque.
+    await page.route("**/cuenta", async (route) => {
+      if (route.request().method() === "POST") await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await route.continue();
+    });
+
+    await closeButton(page, "Safari en iPhone o iPad").click();
+    await expect(sessionsBlock(page).getByText("Cerrando…")).toBeVisible();
+    await nameField(page).click();
+    await nameField(page).fill("Ana María");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByText(SAVED)).toBeVisible();
+    await expect(sessionsBlock(page).getByText(CLOSED_ONE).first()).toBeVisible();
+    // Sigue en su campo: el aviso del otro bloque no se lo llevó.
+    await expect(nameField(page)).toBeFocused();
+    await page.keyboard.type(" Pérez");
+    await expect(nameField(page)).toHaveValue("Ana María Pérez");
+    // Y el cierre se le dijo por la región viva, sin moverle el foco.
+    await expect(sessionsBlock(page).getByRole("status").filter({ hasText: CLOSED_ONE })).toHaveCount(1);
+    expect(await profileName(ana.id)).toBe("Ana María");
+    expect(await sessionCount(ana.id)).toBe(1);
+  } finally {
+    await phone.context().close();
+  }
+});
+
 test("sin JavaScript se cierran igual, y la respuesta deja a la persona en el bloque de las sesiones @telefono", async ({ browser }, testInfo) => {
   const ana = await person();
   const phone = await anotherBrowser(browser, ana, { userAgent: IPHONE });
