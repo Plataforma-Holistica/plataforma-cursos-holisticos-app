@@ -69,9 +69,10 @@ export function AccountScreen({ name, email }: AccountScreenProps) {
   const problem = local.latest ? (local.found ?? undefined) : state.kind === "invalid" ? state.problem : undefined;
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino, y en cuanto
   // lo escrito ya es otra cosa: «Guardado» junto a un nombre que no se ha guardado miente.
-  // Con eso basta también para lo que el navegador detiene antes de enviar: para que haya
-  // algo que corregir, la persona tuvo que escribir después de la respuesta.
-  const answered = !pending && editedAfter !== sent;
+  // Tampoco con algo por corregir: lo escrito puede haber cambiado sin avisar (antes de
+  // que React tomara el formulario, o porque lo llenó el navegador), y entonces lo que se
+  // entera es la revisión antes de enviar.
+  const answered = !pending && local.found === null && editedAfter !== sent;
   const errors: FormError[] = problem ? [{ fieldId: NAME_ID, message: NAME_ERRORS[problem] }] : [];
   const round = sent + local.checks;
 

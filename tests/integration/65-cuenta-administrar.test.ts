@@ -1,3 +1,4 @@
+import { Client } from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAuth, signIn as authSignIn, readSession } from "@/adapters/supabase/auth";
@@ -8,6 +9,7 @@ import type { FailureCode } from "@/services/error-reporting/server";
 
 import { claimedUser, clearThrottle, freshOrigin, holdProfile, notedSessions, profileOf, testServices } from "./helpers/account";
 import { knownUser, memoryJar, type KnownUser, type MemoryJar } from "./helpers/auth";
+import { localOwnerUrl } from "./helpers/local";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // Administrar la cuenta (RF-109; FL-27; TRD §9.2): lo que la pantalla de la cuenta lee de
@@ -65,6 +67,19 @@ async function restOf(userId: string) {
 async function auditRows(): Promise<number> {
   const rows = await ownerQuery<{ n: number }>("select count(*)::int as n from public.audit_log");
   return rows[0]?.n ?? -1;
+}
+
+/** Espera a que el servidor quede detenido por un candado: su escritura ya llegó a la fila. */
+async function serverWaitsForLock(): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const rows = await ownerQuery<{ n: number }>(
+      "select count(*)::int as n from pg_stat_activity where usename = 'app_service' and wait_event_type = 'Lock'",
+    );
+    if ((rows[0]?.n ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("El servidor nunca llegó a esperar la fila del perfil.");
 }
 
 /** El servicio con una guarda que contesta lo que se le diga, y lo que reportó. */
@@ -303,6 +318,38 @@ describe("sin una sesión que pase la guarda no se cambia nada", () => {
       expect(management.reported).toEqual([]);
     }
     expect(await profileOf(account.id)).toMatchObject({ display_name: "Ana" });
+  });
+
+  // La carrera de verdad, con la guarda de verdad. Otra sesión de la base deja sin confirmar
+  // un cambio con el que la cuenta deja de pasar. La guarda de sesión todavía no lo ve y
+  // dice «pasa»; la escritura espera esa fila, y cuando el cambio se confirma tiene que
+  // volver a mirar. Lo que fija el orden: se guarda primero, que es lo que toma la fila, y
+  // se evalúa después. Al revés, la evaluación vería la cuenta de antes y el nombre se guardaría.
+  it("la cuenta deja de pasar justo mientras se guarda: la escritura espera, vuelve a mirar y obedece a la guarda", async () => {
+    const { account, jar } = await entered("Ana");
+    const services = testServices();
+    const owner = new Client({ connectionString: localOwnerUrl() });
+    await owner.connect();
+    try {
+      await owner.query("begin");
+      await owner.query("select set_config('app.actor_id', $1, true)", [account.id]);
+      await owner.query("update public.profiles set adult_declared_at = null where id = $1", [account.id]);
+
+      const changing = services.changeName(jar, { name: "Beatriz" });
+      await serverWaitsForLock();
+      await owner.query("commit");
+
+      // No es una caída: se contesta lo que la guarda dice ahora, y no se reporta nada.
+      expect(await changing).toMatchObject({
+        kind: "session",
+        check: { kind: "incomplete", missing: { name: false, adultDeclaration: true, documents: [] } },
+      });
+    } finally {
+      await owner.query("rollback").catch(() => undefined);
+      await owner.end();
+    }
+    expect(services.reported).toEqual([]);
+    expect(await profileOf(account.id)).toMatchObject({ display_name: "Ana", adult: false });
   });
 
   // La guarda corre en una transacción y la escritura en otra. Entre las dos la cuenta puede

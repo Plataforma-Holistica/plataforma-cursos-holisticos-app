@@ -194,6 +194,19 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(await screen.findByText("Guardado.")).toBeVisible();
   });
 
+  // Lo escrito puede cambiar sin que esta pantalla se entere: antes de que React tome el
+  // formulario, o porque lo llenó el navegador. Entonces lo que detiene el envío es la
+  // revisión, y con algo por corregir «Guardado» tampoco se dice.
+  it("con algo por corregir no se dice «Guardado», aunque el cambio no haya avisado", async () => {
+    const { user } = await saveName("Beatriz", { kind: "saved", name: "Beatriz", attempt: 1 });
+    expect(await screen.findByText("Guardado.")).toBeVisible();
+    (nameField() as HTMLInputElement).value = "";
+    await user.click(saveButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Escribe tu nombre.");
+    expect(savedNotice()).not.toBeInTheDocument();
+    expect(mocks.changeNameAction).toHaveBeenCalledOnce();
+  });
+
   it("lo que dijo el último envío deja de decirse en cuanto lo escrito ya es otra cosa", async () => {
     const { user } = await saveName("Beatriz", { kind: "saved", name: "Beatriz", attempt: 1 });
     expect(await screen.findByText("Guardado.")).toBeVisible();

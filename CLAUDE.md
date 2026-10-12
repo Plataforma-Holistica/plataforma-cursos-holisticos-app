@@ -291,8 +291,8 @@ falla. Doce precisiones que la tabla no dice:
       actúa si el foco quedó sin dueño; el resumen de errores sigue mandando.
     - El resultado se dice en el bloque, con un `InlineAlert` vivo, no con un aviso en
       cookie: ese es para ir de una pantalla a otra. Deja de decirse mientras hay otro
-      envío en camino y en cuanto la persona vuelve a escribir: «Guardado» junto a un
-      texto que no se ha guardado miente. En una prueba se busca por su texto y no por su
+      envío en camino, con algo por corregir y en cuanto la persona vuelve a escribir:
+      «Guardado» junto a un texto que no se ha guardado miente. En una prueba se busca por su texto y no por su
       papel, porque un botón con texto de carga siempre lleva su propia región viva.
     - Mientras el envío va en camino el campo queda de solo lectura: al llegar la
       respuesta se arma de nuevo, y lo tecleado entre tanto se perdería sin aviso.
@@ -338,9 +338,13 @@ falla. Doce precisiones que la tabla no dice:
     exige una sesión que pase: a una cuenta a la que le falta algo se lo pide primero su
     pantalla. La guarda de sesión corre en su propia transacción, así que la de la
     escritura vuelve a evaluar la cuenta (`evaluateGate`), ya con el dato puesto, y lanza
-    si dejó de pasar: una cuenta que se suspendió entre una y otra no cambia. Una
-    escritura que no tocó una fila no es «guardado»: es «no se supo», y se reporta. Una
-    prueba exige que la lectura vaya por `asUser` y la escritura por `asServer`.
+    si dejó de pasar: una cuenta que se suspendió entre una y otra no cambia. El orden
+    importa y una prueba lo fija: se guarda primero, que es lo que toma la fila, y se
+    evalúa después. Si guardar falla, antes de darlo por caída se le vuelve a preguntar a
+    la guarda de sesión: una cuenta que cambió a media operación no es una falla, y se
+    contesta lo que la guarda dice ahora. Solo si insiste en que pasa es «no se supo», y
+    se reporta. Una escritura que no tocó una fila tampoco es «guardado». Una prueba
+    exige que la lectura vaya por `asUser` y la escritura por `asServer`.
   - El correo que la pantalla de la cuenta muestra es el de `sessionEmail`. No se le
     pregunta a Auth porque hoy ningún camino cambia un correo; cuando exista el cambio de
     correo (T-310), esa pantalla lo lee de Auth.

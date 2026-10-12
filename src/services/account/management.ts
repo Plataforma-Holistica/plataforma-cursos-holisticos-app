@@ -68,7 +68,9 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
    * válido» es el mismo de la guarda, así que lo guardado nunca deja a la cuenta sin nombre.
    *
    * La guarda de sesión corre en su propia transacción. En la de la escritura se vuelve a
-   * mirar la cuenta, ya con el nombre puesto: si dejó de pasar entre una y otra, nada se guarda.
+   * mirar la cuenta, ya con el nombre puesto: si dejó de pasar entre una y otra, nada se
+   * guarda. El orden importa: guardar toma la fila, así que la evaluación de después ve lo
+   * que otra transacción confirmó mientras esta esperaba.
    */
   async function changeName(reader: CookieReader, input: { name: string }): Promise<NameChange> {
     const check = await core.checkSession(reader);
@@ -88,6 +90,11 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
         if (view.kind !== "pass") throw new Error("La cuenta dejó de pasar la guarda mientras se guardaba su nombre.");
       });
     } catch {
+      // Antes de darlo por caída se le vuelve a preguntar a la guarda de sesión: una cuenta
+      // que cambió a media operación no es una falla, y se contesta lo que la guarda dice
+      // ahora. Si insiste en que pasa, lo que falló fue guardar, y eso sí se reporta.
+      const now = await core.checkSession(reader);
+      if (now.kind !== "pass") return { kind: "session", check: now };
       await deps.report("account_unavailable");
       return { kind: "unavailable" };
     }
