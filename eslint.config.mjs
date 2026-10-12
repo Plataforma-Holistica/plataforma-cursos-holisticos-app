@@ -203,7 +203,7 @@ const NON_TEXT_ATTRIBUTES =
     "value",
     // Un manejador no es un texto, aunque adentro compare o navegue con cadenas.
     "on[A-Z][A-Za-z]*",
-    "role|lang|dir|key|ref|slot|is|as|variant|size|tone",
+    "role|lang|dir|key|ref|slot|is|as|variant|size|tone|noticeTone",
     "autoComplete|autoCapitalize|autoCorrect|inputMode|enterKeyHint|spellCheck|pattern|accept",
     "loading|decoding|fetchPriority|crossOrigin|referrerPolicy|integrity|nonce|sandbox|allow",
     "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",

@@ -1,5 +1,5 @@
-import type { NameChange, OthersClosing, SessionClosing } from "@/services/account/account";
-import { parseDisplayName } from "@/services/account/field-rules";
+import type { NameChange, OthersClosing, PasswordChange, PasswordChangeErrors, SessionClosing } from "@/services/account/account";
+import { checkPasswordChange, parseDisplayName } from "@/services/account/field-rules";
 import { consentsPath, ROUTES, signInPath } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 
@@ -144,6 +144,79 @@ export function closeOthersOutcome(result: OthersClosing): SessionsOutcome {
   switch (result.kind) {
     case "closed":
       return { kind: "closed", what: "others" };
+    case "unavailable":
+      return { kind: "unavailable" };
+    case "session":
+      return refusalOutcome(result.check);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// El bloque de la contraseña (FL-27, paso 3).
+
+/** Lo que hay que corregir, campo por campo. */
+export type PasswordFields = PasswordChangeErrors;
+
+/** Lo que el bloque de la contraseña pinta después de un envío. Nunca trae una contraseña. */
+export type PasswordState =
+  | { kind: "idle" }
+  | { kind: "invalid"; fields: PasswordFields; attempt: number }
+  | { kind: "changed"; attempt: number }
+  /** `retryAt`: cuándo se puede volver a intentar, en formato ISO. */
+  | { kind: "throttled"; retryAt: string; attempt: number }
+  | { kind: "failed"; reason: "capped" | "unavailable"; attempt: number }
+  | { kind: "suspended" };
+
+const MAX_PASSWORD = 1_024;
+
+const textOf = (value: FormDataEntryValue | null, max: number): string =>
+  typeof value === "string" && value.length <= max ? value : "";
+
+/**
+ * Lo que llega del formulario de la contraseña: la actual y la nueva, tal como se
+ * escribieron. Lo que no sea un texto de tamaño razonable cuenta como vacío. De quién es la
+ * cuenta no se lee de aquí: lo dice la sesión.
+ */
+export function readPasswordForm(form: unknown): { current: string; next: string } {
+  if (!(form instanceof FormData)) return { current: "", next: "" };
+  return { current: textOf(form.get("current"), MAX_PASSWORD), next: textOf(form.get("password"), MAX_PASSWORD) };
+}
+
+/**
+ * Lo que se puede revisar sin preguntarle a nadie. Lo usa el navegador antes de enviar: un
+ * envío que se detiene aquí no cuenta como un intento. La revisión que manda es la del
+ * servicio, con la misma regla. Nulo si no hay nada que corregir.
+ */
+export function checkPasswordForm(input: { current: string; next: string }): PasswordFields | null {
+  return checkPasswordChange(input.current, input.next);
+}
+
+export type PasswordOutcome =
+  | RefusalOutcome
+  | { kind: "changed" }
+  | { kind: "invalid"; fields: PasswordFields }
+  | { kind: "throttled"; retryAt: string }
+  | { kind: "capped" };
+
+export function changePasswordOutcome(result: PasswordChange): PasswordOutcome {
+  switch (result.kind) {
+    case "changed":
+      return { kind: "changed" };
+    case "invalid":
+      return { kind: "invalid", fields: result.fields };
+    case "throttled":
+      return { kind: "throttled", retryAt: result.retryAt.toISOString() };
+    case "capped":
+      return { kind: "capped" };
+    case "signed_out":
+      // La cuenta quedó sin sesiones y este navegador sin cookie: eso ya lo hizo el servicio.
+      // Aquí solo queda ir a entrar, sabiendo con cuál contraseña, y volver a la cuenta.
+      return {
+        kind: "redirect",
+        to: signInPath(ROUTES.account),
+        notice: result.password === "changed" ? "password_changed" : "password_unconfirmed",
+        closeSession: false,
+      };
     case "unavailable":
       return { kind: "unavailable" };
     case "session":

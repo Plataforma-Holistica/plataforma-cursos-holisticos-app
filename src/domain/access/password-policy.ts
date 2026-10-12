@@ -48,3 +48,25 @@ export function checkPassword(password: string): PasswordCheck {
   if (bytes > PASSWORD_MAX_BYTES) return { ok: false, reason: "too_long" };
   return { ok: true };
 }
+
+/** Lo que no deja cambiar una contraseña por otra, campo por campo. */
+export interface PasswordChangeProblems {
+  current?: "required";
+  /** `same`: es la que se dio como actual. */
+  next?: Extract<PasswordCheck, { ok: false }>["reason"] | "same";
+}
+
+/**
+ * Lo que se puede revisar de un cambio de contraseña sin preguntarle a nadie (RF-109): que
+ * venga la actual, que la nueva cumpla la regla y que no sea la misma. Nulo si no hay nada
+ * que corregir. A la actual no se le aplica la regla: es la que la cuenta ya tiene. Si de
+ * verdad es la suya lo dice Auth, no esto.
+ */
+export function checkPasswordChange(current: string, next: string): PasswordChangeProblems | null {
+  const problems: PasswordChangeProblems = {};
+  if (current === "") problems.current = "required";
+  const checked = checkPassword(next);
+  if (!checked.ok) problems.next = checked.reason;
+  else if (next === current) problems.next = "same";
+  return problems.current === undefined && problems.next === undefined ? null : problems;
+}

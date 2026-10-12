@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH, checkPassword } from "./password-policy";
+import { PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH, checkPassword, checkPasswordChange } from "./password-policy";
 
 // La regla de la contraseña (TRD §9.2, fila «Registro»): mínimo de caracteres y máximo de
 // bytes, sin reglas de composición. No se recorta ni se normaliza nada: lo que la persona
@@ -137,6 +137,37 @@ describe("checkPassword", () => {
           expect(checkPassword(dirty)).toEqual({ ok: false, reason: "malformed" });
         },
       ),
+    );
+  });
+});
+
+// Cambiar la contraseña por otra, desde la cuenta (RF-109): lo que se puede revisar sin
+// preguntarle a nadie. Si la actual es la de la cuenta lo dice Auth, no esto.
+describe("checkPasswordChange", () => {
+  it.each([
+    ["dos contraseñas distintas, la nueva dentro de la regla", "la-de-antes", "la-de-ahora", null],
+    ["una actual que no cumpliría la regla de hoy: no se le exige", "corta", "la-de-ahora", null],
+    ["sin la actual", "", "la-de-ahora", { current: "required" }],
+    ["la nueva más corta que el mínimo", "la-de-antes", "corta-7", { next: "too_short" }],
+    ["la nueva de más de 72 bytes", "la-de-antes", "a".repeat(73), { next: "too_long" }],
+    ["la nueva con un carácter de control", "la-de-antes", "abcdefgh\u0000", { next: "malformed" }],
+    ["la nueva igual a la actual", "la-de-antes", "la-de-antes", { next: "same" }],
+    ["sin ninguna de las dos", "", "", { current: "required", next: "too_short" }],
+    ["las dos iguales y fuera de la regla: manda la regla", "corta-7", "corta-7", { next: "too_short" }],
+    ["distintas solo por un espacio al final: son distintas, nada se recorta", "la-de-antes", "la-de-antes ", null],
+    ["distintas solo por mayúsculas", "la-de-antes", "La-de-antes", null],
+  ])("%s", (_case, current, next, expected) => {
+    expect(checkPasswordChange(current, next)).toEqual(expected);
+  });
+
+  it("no hay nada que corregir justo cuando viene la actual, la nueva cumple la regla y son distintas", () => {
+    const some = fc.oneof(fc.constant(""), fc.constant("la-de-antes"), fc.string({ maxLength: 80 }));
+    fc.assert(
+      fc.property(some, some, (current, next) => {
+        const fine = current !== "" && checkPassword(next).ok && next !== current;
+        expect(checkPasswordChange(current, next) === null).toBe(fine);
+      }),
+      { numRuns: 500 },
     );
   });
 });

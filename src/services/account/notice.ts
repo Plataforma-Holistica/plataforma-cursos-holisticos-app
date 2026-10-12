@@ -11,7 +11,7 @@ import { getEnv } from "@/config/env";
 // La cookie lleva una clave de una lista cerrada, nunca un texto. El texto lo pone la
 // pantalla, del catálogo. Lo que no sea una clave de la lista no dice nada.
 
-export const NOTICES = ["password_changed", "account_ready", "choose_password"] as const;
+export const NOTICES = ["password_changed", "password_unconfirmed", "account_ready", "choose_password"] as const;
 export type Notice = (typeof NOTICES)[number];
 
 /** Lo que dura: lo justo para llegar a la pantalla siguiente y leerla. */

@@ -10,7 +10,7 @@ import { sql } from "@/adapters/supabase/sql";
 import { parseDisplayName, type DisplayNameResult } from "@/domain/access/display-name";
 import { parseEmail } from "@/domain/access/email";
 import type { SignInOutcome } from "@/domain/access/login-throttle";
-import { checkPassword, PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
+import { checkPasswordChange, PASSWORD_MAX_BYTES } from "@/domain/access/password-policy";
 import { describeUserAgent, type Device } from "@/domain/access/user-agent";
 
 import { authRefusal, isSessionId, refusalOf, type Admission, type OpenedAttempt, type SessionCheck } from "./admission";
@@ -340,12 +340,8 @@ export function createManagement(
     const check = await core.checkSession(jar);
     if (check.kind !== "pass") return { kind: "session", check };
 
-    const fields: PasswordChangeErrors = {};
-    if (input.current === "") fields.current = "required";
-    const policy = checkPassword(input.next);
-    if (!policy.ok) fields.next = policy.reason;
-    else if (input.next === input.current) fields.next = "same";
-    if (fields.current !== undefined || fields.next !== undefined) return { kind: "invalid", fields };
+    const problems = checkPasswordChange(input.current, input.next);
+    if (problems !== null) return { kind: "invalid", fields: problems };
     // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie, y no hace
     // falta mandársela a Auth para saberlo.
     if (utf8.encode(input.current).length > PASSWORD_MAX_BYTES) return { kind: "invalid", fields: { current: "mismatch" } };

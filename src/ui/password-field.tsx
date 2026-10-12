@@ -25,9 +25,11 @@ export interface PasswordFieldProps {
   /** Las reglas de una contraseña nueva, cada una marcada al cumplirse. */
   rules?: ReactNode;
   error?: ReactNode;
+  /** Para un formulario que se queda en su pantalla: mientras su envío va en camino no se escribe. */
+  readOnly?: boolean;
 }
 
-export function PasswordField({ label, name, autoComplete, id, hint, rules, error }: PasswordFieldProps) {
+export function PasswordField({ label, name, autoComplete, id, hint, rules, error, readOnly = false }: PasswordFieldProps) {
   const generated = useId();
   const fieldId = id ?? generated;
   const hintId = `${fieldId}-hint`;
@@ -63,6 +65,7 @@ export function PasswordField({ label, name, autoComplete, id, hint, rules, erro
           autoComplete={autoComplete}
           autoCapitalize="none"
           spellCheck={false}
+          readOnly={readOnly}
           aria-required
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy(hint ? hintId : undefined, rules ? rulesId : undefined, error ? errorId : undefined)}

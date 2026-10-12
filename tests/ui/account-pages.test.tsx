@@ -176,20 +176,27 @@ describe("la pantalla que pide lo que le falta a la cuenta", () => {
 
 describe("la página de entrar", () => {
   it.each([
-    ["password_changed", "Tu contraseña se cambió y cerramos todas tus sesiones. Entra con la nueva."],
-    ["account_ready", "Tu cuenta está lista. Entra con tu contraseña."],
-  ])("el aviso %s se pinta con su texto", async (notice, message) => {
+    ["password_changed", "Tu contraseña se cambió y cerramos todas tus sesiones. Entra con la nueva.", "Listo:"],
+    ["account_ready", "Tu cuenta está lista. Entra con tu contraseña.", "Listo:"],
+    // El cambio desde la cuenta se quedó sin respuesta: eso no se dice como algo que salió bien.
+    [
+      "password_unconfirmed",
+      "No pudimos confirmar si tu contraseña cambió, y cerramos todas tus sesiones. Entra con la nueva; si no funciona, usa la de antes.",
+      "Aviso:",
+    ],
+  ])("el aviso %s se pinta con su texto y con su tono", async (notice, message, tone) => {
     mocks.readNotice.mockReturnValue(notice);
     render(await SignInPage(query({})));
     expect(mocks.visitorOnly).toHaveBeenCalledOnce();
     expect(mocks.readNotice).toHaveBeenCalledExactlyOnceWith(reader);
     expect(screen.getByText(message)).toBeVisible();
+    expect(screen.getByText(message).parentElement).toHaveTextContent(`${tone} ${message}`);
   });
 
   it.each([null, "choose_password"])("un aviso que no es de esta pantalla (%j) no pinta nada", async (notice) => {
     mocks.readNotice.mockReturnValue(notice);
     render(await SignInPage(query({})));
-    expect(screen.queryByText(/Tu contraseña se cambió|Tu cuenta está lista|elegir su contraseña/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tu contraseña se cambió|Tu cuenta está lista|elegir su contraseña|No pudimos confirmar/)).not.toBeInTheDocument();
   });
 
   it("el destino viaja tal como llegó, y repetido en la dirección no es un destino", async () => {

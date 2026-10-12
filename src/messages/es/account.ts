@@ -37,6 +37,9 @@ export const account = defineMessages({
     passwordTooShort: "Tu contraseña necesita {min} caracteres o más.",
     passwordTooLong: "Esa contraseña es demasiado larga. Elige una más corta.",
     passwordInvalid: "Esa contraseña tiene caracteres que no podemos guardar. Elige otra.",
+    // Al cambiarla desde la cuenta: la nueva es la que ya se tenía, o Auth no la aceptó.
+    passwordSame: "Esa es la contraseña que ya tienes. Elige otra.",
+    passwordWeak: "Esa contraseña es fácil de adivinar. Elige otra.",
   },
   // Cuánto dura algo, dicho como se dice: «1 hora», «60 segundos».
   durations: {
@@ -116,6 +119,9 @@ export const account = defineMessages({
     lockedReason: "Podrás intentarlo de nuevo cuando pase la espera.",
     noticePasswordChanged: "Tu contraseña se cambió y cerramos todas tus sesiones. Entra con la nueva.",
     noticeAccountReady: "Tu cuenta está lista. Entra con tu contraseña.",
+    // El cambio desde la cuenta se quedó sin respuesta: no se sabe cuál de las dos vale.
+    noticePasswordUnconfirmed:
+      "No pudimos confirmar si tu contraseña cambió, y cerramos todas tus sesiones. Entra con la nueva; si no funciona, usa la de antes.",
   },
   // PA-13.
   recover: {
@@ -158,6 +164,14 @@ export const account = defineMessages({
     saved: "Guardado.",
     emailTitle: "Correo",
     emailNote: "Por ahora no se puede cambiar desde aquí.",
+    passwordTitle: "Contraseña",
+    currentPassword: "Contraseña actual",
+    currentPasswordRequired: "Escribe tu contraseña actual.",
+    currentPasswordMismatch: "Esa no es tu contraseña actual.",
+    changePassword: "Cambiar contraseña",
+    changingPassword: "Cambiando…",
+    passwordChanged: "Tu contraseña cambió. Cerramos tus demás sesiones.",
+    forgotCurrent: "No recuerdo mi contraseña actual",
     backHome: "Volver al inicio",
     sessionsTitle: "Sesiones abiertas",
     sessionsIntro: "Los navegadores en los que tu cuenta tiene una sesión abierta.",

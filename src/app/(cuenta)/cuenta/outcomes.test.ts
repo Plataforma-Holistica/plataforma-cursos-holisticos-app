@@ -4,11 +4,14 @@ import type { PendingAccount } from "@/services/account/account";
 
 import {
   changeNameOutcome,
+  changePasswordOutcome,
   checkNameForm,
+  checkPasswordForm,
   CLOSE_OTHERS,
   closeOthersOutcome,
   closeSessionOutcome,
   readNameForm,
+  readPasswordForm,
   readSessionsForm,
 } from "./outcomes";
 
@@ -192,6 +195,99 @@ describe("qué se hace con lo que contesta el servicio al cerrar sesiones", () =
   ] as const)("%s, sin una sesión que pase: lo mismo que cualquier otro bloque de la pantalla", (_case, outcome) => {
     expect(outcome({ kind: "anonymous" } as never)).toEqual({ kind: "redirect", to: "/entrar?volver=%2Fcuenta", notice: null, closeSession: false });
     expect(outcome({ kind: "incomplete" } as never)).toEqual({ kind: "redirect", to: "/consentimientos?volver=%2Fcuenta", notice: null, closeSession: false });
+    expect(outcome({ kind: "suspended" } as never)).toEqual({ kind: "suspended" });
+    expect(outcome({ kind: "unavailable" } as never)).toEqual({ kind: "unavailable" });
+    expect(outcome({ kind: "must_sign_out", then: "recover" } as never)).toEqual({ kind: "redirect", to: "/recuperar", notice: "choose_password", closeSession: true });
+    expect(outcome({ kind: "must_sign_out", then: "sign_in" } as never)).toEqual({ kind: "redirect", to: "/entrar", notice: null, closeSession: true });
+  });
+});
+
+describe("lo que llega del formulario de la contraseña", () => {
+  it("las dos contraseñas, tal como se escribieron: nada se recorta", () => {
+    expect(readPasswordForm(form([["current", " la de antes "], ["password", " la de ahora "]]))).toEqual({
+      current: " la de antes ",
+      next: " la de ahora ",
+    });
+  });
+
+  it.each([
+    ["sin los campos", form([])],
+    ["con archivos en lugar de textos", form([["current", new Blob(["x"])], ["password", new Blob(["y"])]])],
+    ["con textos desmedidos", form([["current", "a".repeat(1025)], ["password", "b".repeat(1025)]])],
+    ["algo que no es un formulario", "current=x&password=y"],
+    ["nada", null],
+  ])("%s cuentan como vacías", (_case, input) => {
+    expect(readPasswordForm(input)).toEqual({ current: "", next: "" });
+  });
+
+  it("el texto más largo que se lee, completo: la medida la pone después el servicio", () => {
+    const longest = "a".repeat(1024);
+    expect(readPasswordForm(form([["current", longest], ["password", longest]]))).toEqual({ current: longest, next: longest });
+  });
+
+  it("no lee ningún otro campo: de quién es la cuenta lo dice la sesión", () => {
+    const sent = form([["current", "la-de-antes"], ["password", "la-de-ahora"], ["email", "otra@prueba.test"], ["next", "x"]]);
+    expect(readPasswordForm(sent)).toEqual({ current: "la-de-antes", next: "la-de-ahora" });
+  });
+});
+
+describe("lo que el navegador revisa de la contraseña antes de enviar", () => {
+  it.each([
+    [{ current: "la-de-antes", next: "la-de-ahora" }, null],
+    [{ current: "", next: "la-de-ahora" }, { current: "required" }],
+    [{ current: "la-de-antes", next: "corta-7" }, { next: "too_short" }],
+    [{ current: "la-de-antes", next: "la-de-antes" }, { next: "same" }],
+    [{ current: "", next: "" }, { current: "required", next: "too_short" }],
+  ])("%j", (input, expected) => {
+    expect(checkPasswordForm(input)).toEqual(expected);
+  });
+});
+
+describe("qué hace el bloque de la contraseña con lo que contesta el servicio", () => {
+  it("cambió: lo dice ahí mismo", () => {
+    expect(changePasswordOutcome({ kind: "changed" })).toEqual({ kind: "changed" });
+  });
+
+  it("lo que hay que corregir pasa tal cual, campo por campo", () => {
+    expect(changePasswordOutcome({ kind: "invalid", fields: { current: "mismatch" } })).toEqual({
+      kind: "invalid",
+      fields: { current: "mismatch" },
+    });
+    expect(changePasswordOutcome({ kind: "invalid", fields: { current: "required", next: "weak" } })).toEqual({
+      kind: "invalid",
+      fields: { current: "required", next: "weak" },
+    });
+  });
+
+  it("frenado: la hora viaja como texto, para que el navegador la escriba en su zona", () => {
+    expect(changePasswordOutcome({ kind: "throttled", retryAt: new Date("2026-10-12T18:30:00.000Z") })).toEqual({
+      kind: "throttled",
+      retryAt: "2026-10-12T18:30:00.000Z",
+    });
+  });
+
+  it("con el tope por hora, y cuando no se supo", () => {
+    expect(changePasswordOutcome({ kind: "capped" })).toEqual({ kind: "capped" });
+    expect(changePasswordOutcome({ kind: "unavailable" })).toEqual({ kind: "unavailable" });
+  });
+
+  // El servicio ya cerró todas las sesiones y borró la cookie: aquí no queda nada que cerrar.
+  it.each([
+    ["changed", "password_changed"],
+    ["unknown", "password_unconfirmed"],
+  ] as const)("si este navegador quedó sin sesión (%s): a entrar, con su aviso, para volver a la cuenta", (password, notice) => {
+    expect(changePasswordOutcome({ kind: "signed_out", password })).toEqual({
+      kind: "redirect",
+      to: "/entrar?volver=%2Fcuenta",
+      notice,
+      closeSession: false,
+    });
+  });
+
+  it("sin una sesión que pase: lo mismo que cualquier otro bloque de la pantalla", () => {
+    const outcome = (check: never) => changePasswordOutcome({ kind: "session", check });
+    expect(outcome({ kind: "anonymous" } as never)).toEqual({ kind: "redirect", to: "/entrar?volver=%2Fcuenta", notice: null, closeSession: false });
+    expect(outcome({ kind: "incomplete", claims } as never)).toEqual({ kind: "redirect", to: "/consentimientos?volver=%2Fcuenta", notice: null, closeSession: false });
     expect(outcome({ kind: "suspended" } as never)).toEqual({ kind: "suspended" });
     expect(outcome({ kind: "unavailable" } as never)).toEqual({ kind: "unavailable" });
     expect(outcome({ kind: "must_sign_out", then: "recover" } as never)).toEqual({ kind: "redirect", to: "/recuperar", notice: "choose_password", closeSession: true });

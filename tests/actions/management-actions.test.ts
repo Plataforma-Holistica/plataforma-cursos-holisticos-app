@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     changeName: logged("changeName", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     closeSession: logged("closeSession", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     closeOtherSessions: logged("closeOtherSessions", () => Promise.resolve<unknown>({ kind: "unavailable" })),
+    changePassword: logged("changePassword", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     signOut: logged("signOut", () => Promise.resolve("closed")),
     leaveNotice: logged("leaveNotice", () => undefined),
     refresh: logged("refresh", () => undefined),
@@ -25,22 +26,25 @@ const mocks = vi.hoisted(() => {
       throw new Error(`redirige a ${to}`);
     }),
     cookieJar: vi.fn(),
+    requestOrigin: vi.fn(),
   };
 });
-vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
+vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar, requestOrigin: mocks.requestOrigin }));
 vi.mock("@/services/account/account", () => ({
   changeName: mocks.changeName,
   closeSession: mocks.closeSession,
   closeOtherSessions: mocks.closeOtherSessions,
+  changePassword: mocks.changePassword,
   signOut: mocks.signOut,
 }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { changeNameAction, closeSessionsAction } from "@/app/(cuenta)/cuenta/actions";
+import { changeNameAction, changePasswordAction, closeSessionsAction } from "@/app/(cuenta)/cuenta/actions";
 
 const jar = { get: () => undefined, set: () => undefined };
+const origin = { realIp: "198.18.0.1", userAgent: "Pruebas" };
 const IDLE = { kind: "idle" } as const;
 
 function nameForm(name: string, extra: [string, string][] = []): FormData {
@@ -60,6 +64,7 @@ beforeEach(() => {
   calls.order = [];
   calls.next.clear();
   mocks.cookieJar.mockResolvedValue(jar);
+  mocks.requestOrigin.mockResolvedValue(origin);
 });
 
 describe("cambiar el nombre (PA-25)", () => {
@@ -213,5 +218,115 @@ describe("cerrar sesiones (PA-25)", () => {
     await expect(closeSessionsAction(IDLE, closeForm("others"))).rejects.toThrow("redirige a /recuperar");
     expect(calls.order).toEqual(["closeOtherSessions", "signOut", "leaveNotice", "redirect"]);
     expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "choose_password");
+  });
+});
+
+describe("cambiar la contraseña (PA-25)", () => {
+  const OLD = "la-de-antes-123";
+  const NEW = "la-de-ahora-456";
+
+  function passwordForm(current: string | null, next: string | null, extra: [string, string][] = []): FormData {
+    const data = new FormData();
+    if (current !== null) data.append("current", current);
+    if (next !== null) data.append("password", next);
+    for (const [field, value] of extra) data.append(field, value);
+    return data;
+  }
+
+  it("le pasa al servicio el tarro, las dos contraseñas tal como llegaron y de dónde viene la petición, y nada más del formulario", async () => {
+    once("changePassword", { kind: "changed" });
+    await changePasswordAction(IDLE, passwordForm(` ${OLD} `, ` ${NEW} `, [["email", "otra@prueba.test"], ["volver", "//otro.example"]]));
+    expect(mocks.changePassword).toHaveBeenCalledExactlyOnceWith(jar, { current: ` ${OLD} `, next: ` ${NEW} ` }, origin);
+  });
+
+  it("cambió: pide la página de nuevo, porque la sesión de este navegador ya es otra", async () => {
+    once("changePassword", { kind: "changed" });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "changed", attempt: 1 });
+    expect(calls.order).toEqual(["changePassword", "refresh"]);
+  });
+
+  it.each([
+    [{ current: "mismatch" }],
+    [{ current: "required", next: "too_short" }],
+    [{ next: "same" }],
+    [{ next: "weak" }],
+  ] as const)("algo por corregir (%j): lo marca, y no pide la página de nuevo", async (fields) => {
+    once("changePassword", { kind: "invalid", fields });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "invalid", fields, attempt: 1 });
+    expect(calls.order).toEqual(["changePassword"]);
+  });
+
+  it("frenado, con el tope lleno y cuando no se supo: lo dice, sin irse a ningún lado", async () => {
+    once("changePassword", { kind: "throttled", retryAt: new Date("2026-10-12T18:30:00.000Z") });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({
+      kind: "throttled",
+      retryAt: "2026-10-12T18:30:00.000Z",
+      attempt: 1,
+    });
+    once("changePassword", { kind: "capped" });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "failed", reason: "capped", attempt: 1 });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "failed", reason: "unavailable", attempt: 1 });
+    expect(calls.order).toEqual(["changePassword", "changePassword", "changePassword"]);
+  });
+
+  it("una contraseña nunca vuelve en la respuesta, pase lo que pase", async () => {
+    const answers = [
+      { kind: "changed" },
+      { kind: "invalid", fields: { current: "mismatch", next: "same" } },
+      { kind: "throttled", retryAt: new Date("2026-10-12T18:30:00.000Z") },
+      { kind: "capped" },
+      { kind: "unavailable" },
+      { kind: "session", check: { kind: "suspended" } },
+    ];
+    for (const answer of answers) {
+      once("changePassword", answer);
+      const state = JSON.stringify(await changePasswordAction(IDLE, passwordForm(OLD, NEW)));
+      expect(state).not.toContain(OLD);
+      expect(state).not.toContain(NEW);
+    }
+  });
+
+  it("lo que no es un formulario llega al servicio como dos contraseñas vacías: decide él", async () => {
+    once("changePassword", { kind: "invalid", fields: { current: "required", next: "too_short" } });
+    expect(await changePasswordAction(IDLE, "current=x" as unknown as FormData)).toMatchObject({ kind: "invalid" });
+    expect(mocks.changePassword).toHaveBeenCalledExactlyOnceWith(jar, { current: "", next: "" }, origin);
+  });
+
+  it("del estado anterior solo lee el número de intento", async () => {
+    once("changePassword", { kind: "changed" });
+    const previous = { kind: "invalid", fields: { current: "mismatch" }, attempt: 4, current: OLD } as never;
+    expect(await changePasswordAction(previous, passwordForm(OLD, NEW))).toEqual({ kind: "changed", attempt: 5 });
+    once("changePassword", { kind: "changed" });
+    expect(await changePasswordAction({ attempt: "x" } as never, passwordForm(OLD, NEW))).toMatchObject({ attempt: 1 });
+  });
+
+  it("cuenta suspendida: la pantalla pasa a PA-35, sin irse a ningún lado", async () => {
+    once("changePassword", { kind: "session", check: { kind: "suspended" } });
+    expect(await changePasswordAction(IDLE, passwordForm(OLD, NEW))).toEqual({ kind: "suspended" });
+    expect(calls.order).toEqual(["changePassword"]);
+  });
+
+  it("sin sesión: a entrar, para volver a la cuenta, sin cerrar nada", async () => {
+    once("changePassword", { kind: "session", check: { kind: "anonymous" } });
+    await expect(changePasswordAction(IDLE, passwordForm(OLD, NEW))).rejects.toThrow("redirige a /entrar?volver=%2Fcuenta");
+    expect(calls.order).toEqual(["changePassword", "redirect"]);
+  });
+
+  it("una sesión que la guarda rechaza se cierra, deja su aviso y solo entonces se va", async () => {
+    once("changePassword", { kind: "session", check: { kind: "must_sign_out", then: "recover" } });
+    await expect(changePasswordAction(IDLE, passwordForm(OLD, NEW))).rejects.toThrow("redirige a /recuperar");
+    expect(calls.order).toEqual(["changePassword", "signOut", "leaveNotice", "redirect"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "choose_password");
+  });
+
+  // El servicio ya cerró todo y borró la cookie: la acción solo deja el aviso y se va.
+  it.each([
+    ["changed", "password_changed"],
+    ["unknown", "password_unconfirmed"],
+  ] as const)("si este navegador quedó sin sesión (%s): deja su aviso y se va a entrar, sin cerrar nada más", async (password, notice) => {
+    once("changePassword", { kind: "signed_out", password });
+    await expect(changePasswordAction(IDLE, passwordForm(OLD, NEW))).rejects.toThrow("redirige a /entrar?volver=%2Fcuenta");
+    expect(calls.order).toEqual(["changePassword", "leaveNotice", "redirect"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, notice);
   });
 });
