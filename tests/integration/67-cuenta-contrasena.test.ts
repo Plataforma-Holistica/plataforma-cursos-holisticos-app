@@ -348,6 +348,8 @@ describe("el freno de intentos es el de entrar", () => {
     const down = testServices({ auth: createAuth({ fetch: failingFetch(/\/token/, networkDown).fetch }) });
 
     expect(await down.changePassword(jar, { current: who.password, next: fresh() }, origin)).toEqual({ kind: "unavailable" });
+    // Un corte de Auth no es una falla de esta cuenta: no se reporta como tal.
+    expect(down.reported).toEqual([]);
 
     const keys = keysOf(who.email, origin);
     // Quien pudiera hacer que Auth no conteste no puede así probar contraseñas sin acumular.
@@ -595,6 +597,34 @@ describe("la cuenta deja de pasar la guarda a media operación", () => {
   });
 });
 
+describe("cuando la entrada de la comprobación no se puede admitir", () => {
+  // La contraseña era la suya, pero la base no dejó anotar esa entrada: no se supo.
+  it("no cambia nada, cierra esa sesión, y se reporta", async () => {
+    const who = await account();
+    const here = await open(who);
+    let release: (() => Promise<void>) | undefined;
+    const { auth, calls } = authWith((real) => ({
+      provePassword: async (email, password) => {
+        const proof = await real.provePassword(email, password);
+        release = await holdProfile(who.id);
+        return proof;
+      },
+    }));
+    const services = testServices({ auth });
+    try {
+      expect(await services.changePassword(here.jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({
+        kind: "unavailable",
+      });
+    } finally {
+      await release?.();
+    }
+    expect(services.reported).toEqual(["gate_unavailable"]);
+    expect(asked(calls, USER)).toBe(0);
+    expect(await sessionCount(who.id)).toBe(1);
+    expect(await guard(here.jar)).toMatchObject({ kind: "pass", claims: { sessionId: here.claims.sessionId } });
+  });
+});
+
 describe("cuando Auth no acepta la contraseña nueva", () => {
   it.each([
     ["dice que es la que ya tenía", "same_password", { kind: "invalid", fields: { next: "same" } }, []],
@@ -664,6 +694,21 @@ describe("cuando no se sabe si la contraseña cambió", () => {
 });
 
 describe("cuando la contraseña cambió y lo que sigue falla", () => {
+  // La sesión de la comprobación ya cumplió. Si Auth no la cierra, nadie tiene sus tokens y
+  // la aplicación no la reconoce, pero alguien tiene que saberlo.
+  it("si la sesión de la comprobación no se pudo cerrar: el cambio sigue, y se reporta", async () => {
+    const who = await account();
+    const here = await open(who);
+    const services = testServices({ auth: createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch }) });
+
+    expect(await services.changePassword(here.jar, { current: who.password, next: fresh() }, freshOrigin())).toEqual({ kind: "changed" });
+    expect(services.reported).toEqual(["session_not_closed"]);
+    // Sigue viva en Auth, pero la aplicación solo tiene anotada la de este navegador.
+    expect(await sessionCount(who.id)).toBe(2);
+    expect(await notedSessions(who.id)).toBe(1);
+    expect(await guard(here.jar)).toMatchObject({ kind: "pass" });
+  });
+
   // Como si el código hubiera llegado antes que su migración: el servidor no puede fechar.
   it("si el cambio no se pudo fechar: la cuenta queda sin sesiones, y se reporta", async () => {
     const who = await account();
@@ -686,6 +731,31 @@ describe("cuando la contraseña cambió y lo que sigue falla", () => {
     expect(await guard(there.jar)).toEqual(CLOSED);
     expect(await accepts(who, who.password)).toBe(false);
     expect((await testServices().signIn(memoryJar(), { email: who.email, password: chosen }, freshOrigin())).kind).toBe("entered");
+  });
+
+  // La base contesta que no fechó nada (la cuenta se quedó sin fecha de reclamo a media
+  // operación). Solo «fechado» cuenta como fechado: lo demás es un cambio a medias.
+  it("si la base contesta que no fechó: la cuenta queda sin sesiones, y se reporta", async () => {
+    const who = await account();
+    const here = await open(who);
+    const chosen = fresh();
+    const { auth } = authWith((real) => ({
+      changeProvenPassword: async (proven, password) => {
+        const saved = await real.changeProvenPassword(proven, password);
+        await ownerQuery("delete from private.account_security where profile_id = $1", [who.id]);
+        return saved;
+      },
+    }));
+    const services = testServices({ auth });
+
+    expect(await services.changePassword(here.jar, { current: who.password, next: chosen }, freshOrigin())).toEqual({
+      kind: "signed_out",
+      password: "changed",
+    });
+    expect(services.reported).toEqual(["password_change_incomplete"]);
+    expect(await sessionCount(who.id)).toBe(0);
+    expect(here.jar.get(COOKIE)).toBeUndefined();
+    expect(await accepts(who, chosen)).toBe(true);
   });
 
   it("si la entrada con la nueva no se logra: este navegador queda sin sesión, y hay que entrar", async () => {
@@ -783,6 +853,41 @@ describe("lo que estaba en vuelo mientras cambiaba la contraseña", () => {
     expect(await notedSessions(who.id)).toBe(1);
     expect(await sessionCount(who.id)).toBe(1);
     expect(await guard(here.jar)).toMatchObject({ kind: "pass" });
+  });
+
+  // Fechar el cambio toma un candado de fila del perfil, el mismo que toma anotar una sesión:
+  // así una entrada se anota antes, y el cambio la borra, o después, y ve la fecha nueva.
+  // Con el perfil retenido por otra sesión de la base, fechar espera en lugar de adelantarse.
+  it("fechar el cambio espera a quien tiene tomado el perfil", async () => {
+    const who = await account();
+    const before = await changedAt(who.id);
+    const holder = new Client({ connectionString: localOwnerUrl() });
+    const asker = new Client({ connectionString: localOwnerUrl() });
+    await holder.connect();
+    await asker.connect();
+    try {
+      await holder.query("begin");
+      // El más débil que detiene a quien fecha: si la función bajara el suyo, esto ya no la detendría.
+      await holder.query("select 1 from public.profiles where id = $1 for share", [who.id]);
+      await asker.query("begin");
+      await asker.query("set local lock_timeout = '400ms'");
+      await asker.query("select set_config('app.actor_id', $1, true)", [who.id]);
+      await expect(asker.query(`select ${NOTE}`)).rejects.toMatchObject({ code: "55P03" });
+      await asker.query("rollback");
+      await holder.query("rollback");
+
+      // Con el perfil libre sí fecha.
+      await asker.query("begin");
+      await asker.query("select set_config('app.actor_id', $1, true)", [who.id]);
+      expect((await asker.query<{ state: string }>(`select ${NOTE} as state`)).rows[0]?.state).toBe("noted");
+      await asker.query("commit");
+    } finally {
+      await asker.query("rollback").catch(() => undefined);
+      await holder.query("rollback").catch(() => undefined);
+      await asker.end();
+      await holder.end();
+    }
+    expect(await changedAt(who.id)).toBeGreaterThan(before);
   });
 
   // Dos navegadores de la misma cuenta la cambian a la vez. Gane quien gane, no queda una

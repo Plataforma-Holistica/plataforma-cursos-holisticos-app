@@ -354,8 +354,9 @@ export function createManagement(
       return { kind: "unavailable" };
     }
 
+    // Que la dirección no se conozca fuera de local ya lo reporta cada entrada (`signIn`): aquí
+    // no se repite. Desconocida, va al cubo compartido y el par no queda de confianza.
     const from = resolveOrigin(origin, deps.proxyTrusted());
-    if (!from.known && !deps.isLocal()) await deps.report("client_ip_unknown");
     const keys: PairKeys = { account: fingerprint("account", email.email), ip: from.ip };
     let opened: OpenedAttempt;
     try {
@@ -428,7 +429,7 @@ export function createManagement(
     const entered = await auth.signIn(staging, email.email, input.next);
     const admitted = entered.ok ? await core.admit(entered, startedText, from.userAgent) : null;
     let failure = admitted?.report ?? null;
-    if (admitted?.admit === true && failure === null) {
+    if (admitted?.admit === true) {
       try {
         for (const write of staging.writes) jar.set(write.name, write.value, write.options);
         return { kind: "changed" };

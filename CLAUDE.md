@@ -84,7 +84,8 @@ comprueba que todo lo que va a tocar es la pila local, y le apaga el registro de
 Corre con un solo trabajador y en dos proyectos: escritorio, y teléfono para los casos
 marcados `@telefono`. Los archivos son `*.spec.ts`, para que Vitest no los tome por suyos.
 Las reglas de accesibilidad corren con el `axe-core` que ya estaba, inyectado en la
-página. No corre contra una vista previa: ahí no hay buzón que leer.
+página: en un caso sin JavaScript no hay con qué correrlas. No corre contra una vista
+previa: ahí no hay buzón que leer.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -315,6 +316,15 @@ falla. Doce precisiones que la tabla no dice:
       puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
     - Lo que un bloque pinta de la base llega ya en palabras desde la página (`rows.ts`):
       el navegador no necesita saber leer fechas, y se ve lo mismo con JavaScript y sin él.
+    - Un bloque con contraseñas (el de la contraseña) no devuelve ninguna: después de
+      cada respuesta sus campos se arman de nuevo, vacíos, y lo que el navegador detiene
+      antes de enviar deja lo escrito como está. Su resultado va arriba de los campos, no
+      junto al botón: sin JavaScript el navegador vuelve al principio del bloque, y más
+      abajo quedaría fuera de una ventana baja. El freno de intentos lo dice con el mismo
+      aviso que la pantalla de entrar (`_lib/throttled-alert.tsx`), porque es el mismo
+      freno. Si el cambio dejó a la cuenta sin sesiones, la acción no cierra nada: el
+      servicio ya lo hizo, y solo queda ir a entrar con el aviso que toca. El de «no se
+      supo si cambió» no se pinta como algo que salió bien.
 
     Una prueba exige que el ancla de un bloque no se escriba en ningún otro archivo.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
@@ -337,6 +347,12 @@ falla. Doce precisiones que la tabla no dice:
     actúan sobre la cuenta de un enlace recién canjeado, `setFirstPassword`, `slimDown` y
     el segundo camino de `setRecoveredPassword`. Una prueba lo exige. `auth-client.ts` no
     se importa fuera del adaptador: lo rechaza el lint.
+  - Cambiar la contraseña de una cuenta con sesión pide una prueba (`ProvenPassword`): la
+    da `provePassword`, que entra con la contraseña actual y deja una sesión que no llega
+    a ningún navegador. `changeProvenPassword` la gasta, y sirve para un solo intento;
+    `discardProof` cierra esa sesión y `closeAllWithProof`, todas las de la cuenta. Un
+    objeto con la forma de una prueba, armado en otro lado, no sirve: las de verdad viven
+    en una tabla que solo el adaptador conoce. No hay camino por la API de administración.
   - Cuando Auth rechaza con un código que no está en la lista de la operación, la
     respuesta sigue siendo «no se supo» y el adaptador deja en el registro del servidor la
     operación, el estado y el código. Nunca el mensaje, que puede traer un correo.
@@ -350,8 +366,48 @@ falla. Doce precisiones que la tabla no dice:
   Registrarse, recuperar la contraseña y completar una cuenta viven en `onboarding.ts`,
   con sus revisiones puras en `forms.ts` y lo que leen y escriben de la persona en
   `records.ts`; `account.ts` los arma. Administrar la cuenta (RF-109) vive en
-  `management.ts`: por ahora, lo que la pantalla de la cuenta pinta, el cambio de nombre y
-  las sesiones abiertas.
+  `management.ts`: lo que la pantalla de la cuenta pinta, el cambio de nombre, las sesiones
+  abiertas y el cambio de contraseña. El cambio de correo espera a T-310.
+  - `changePassword(jar, { current, next }, origin)` cambia la contraseña de la cuenta de
+    la sesión que pide. El orden es la regla, y no se cambia sin leer el TRD §9.2, fila
+    «Cambio de contraseña desde la cuenta»:
+    1. La guarda, y lo que se revisa sin preguntarle a nadie (`checkPasswordChange`, del
+       dominio, la misma regla que usa el navegador). Lo que se detiene ahí no cuenta
+       como un intento.
+    2. El freno de intentos, con el par de la cuenta y la dirección: comprobar la
+       contraseña actual es un intento de entrada, y se cuenta en el mismo freno que la
+       pantalla de entrar. Sin eso, esta pantalla serviría para adivinarla con una sesión
+       robada.
+    3. La contraseña actual se comprueba entrando con ella (`provePassword`). Auth no la
+       pide para fijar otra: con la sesión del navegador, a quien se llevara una cookie le
+       bastaría eso. El correo con el que se entra sale de la sesión que pasó la guarda,
+       y la entrada tiene que ser de esa misma cuenta.
+    4. Esa entrada pasa por la guarda y se anota, como cualquier otra (`admit`): si empezó
+       antes del último cambio de contraseña, o a la cuenta le falta algo, no sigue.
+    5. Auth guarda la nueva con la sesión de esa entrada (`changeProvenPassword`): cierra
+       las demás y manda el aviso CO-26. No hay segundo camino por la API de
+       administración: si Auth la rechaza, no cambia nada.
+    6. La base fecha el cambio y borra lo anotado (`private.note_password_change()`): una
+       entrada en vuelo con la contraseña de antes ya no se anota.
+    7. Se cierra la sesión de la comprobación y se entra con la contraseña nueva, que es
+       la sesión que se queda en ese navegador. Su cookie se escribe en un tarro temporal
+       y solo llega al navegador cuando la guarda la admitió.
+
+    Hasta el paso 4, lo que falla deja todo como estaba y la sesión de la comprobación se
+    cierra. Después del paso 5 ya no hay vuelta: si algo falla, la cuenta queda sin
+    sesiones, la cookie se borra y la persona entra de nuevo (`signed_out`). Nunca queda
+    una sesión abierta con la contraseña de antes. Si Auth no contestó al guardar, no se
+    sabe cuál contraseña vale: el cambio se fecha de todos modos, se cierra todo y se
+    reporta (`password_change_unconfirmed`). Si lo que falla es fechar, se reporta
+    `password_change_incomplete`. Cuando la entrada de la comprobación se niega por algo
+    que no es la contraseña, antes de darlo por caída se le vuelve a preguntar a la
+    guarda, como al cambiar el nombre.
+  - `private.note_password_change()` no es `private.claim_account()`: fecha y borra lo
+    anotado, pero nunca apaga la marca de contraseña ni le crea fecha a una cuenta que no
+    la tiene. La marca dice que la contraseña la fijó quien controla el buzón, y quien la
+    cambia desde la cuenta solo demostró que sabía la de antes. Toma el mismo candado de
+    fila del perfil que anotar y cerrar sesiones, y se niega a correr fuera de read
+    committed.
   - `accountSessions(claims)` da las sesiones abiertas de la cuenta, que son las anotadas y
     vivas, y dice cuál es la de quien pide: lo decide la base, que compara identificadores
     y no textos, igual que al cerrar. Si la de quien pide no viene (se cerró desde

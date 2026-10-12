@@ -820,6 +820,26 @@ describe("el bloque de la contraseña (PA-25)", () => {
     }
   });
 
+  it("pasada la espera, un intento nuevo en camino deja de decir que hay que esperar", async () => {
+    const { user } = await change({ kind: "throttled", retryAt: new Date(Date.now() - 1_000).toISOString(), attempt: 1 });
+    await screen.findByRole("alert");
+    await vi.waitFor(() => expect(changeButton()).toBeEnabled());
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    await user.type(currentField(), OLD);
+    await user.type(newField(), NEW);
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+  });
+
   it.each([
     ["capped", "Demasiados intentos. Vuelve a probar más tarde."],
     ["unavailable", "No pudimos hacerlo. Intenta de nuevo en un momento."],
@@ -866,6 +886,37 @@ describe("el bloque de la contraseña (PA-25)", () => {
     expect(await screen.findByText(CHANGED)).toBeVisible();
     await user.type(currentField(), "x");
     expect(changedNotice()).not.toBeInTheDocument();
+  });
+
+  // Los campos pueden llenarse sin que esta pantalla se entere: los llena el navegador, o
+  // un gestor de contraseñas. Entonces lo que quita el aviso viejo no es haber escrito.
+  it("con algo por corregir no se dice «cambió», aunque nadie haya escrito", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+    // Los dos campos quedaron vacíos: enviar así lo detiene la revisión.
+    await user.click(changeButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Escribe tu contraseña actual.");
+    expect(changedNotice()).not.toBeInTheDocument();
+    expect(mocks.changePasswordAction).toHaveBeenCalledOnce();
+  });
+
+  it("con otro envío en camino no se dice «cambió», aunque los campos se hayan llenado sin avisar", async () => {
+    const { user } = await change({ kind: "changed", attempt: 1 });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
+
+    let finish: (state: PasswordState) => void = () => undefined;
+    mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
+    (currentField() as HTMLInputElement).value = NEW;
+    (newField() as HTMLInputElement).value = "otra-mas-789";
+    await user.click(changeButton());
+    expect(await screen.findByRole("button", { name: "Cambiando…" })).toBeDisabled();
+    expect(changedNotice()).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "changed", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(CHANGED)).toBeVisible();
   });
 
   it("un envío nuevo tapa lo que el servicio había rechazado, aunque su respuesta no haya llegado", async () => {

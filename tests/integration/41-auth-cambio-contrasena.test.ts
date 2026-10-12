@@ -202,4 +202,16 @@ describe("cerrar la sesión de la prueba", () => {
     expect(await down.discardProof(proof.proven)).toBe("unknown");
     expect(await sessionCount(account.id)).toBe(1);
   });
+
+  // La sesión de la prueba sigue viva en Auth, que con ella sí dejaría cambiar la
+  // contraseña. Quien la descartó ya decidió que no: cerrada o no, la prueba se gastó.
+  it("una prueba que se descartó ya no cambia nada, aunque su sesión no se haya podido cerrar", async () => {
+    const account = await user();
+    const down = createAuth({ fetch: failingFetch(/\/logout/, networkDown).fetch });
+    const proof = await down.provePassword(account.email, account.password);
+    if (!proof.ok) throw new Error("La contraseña de prueba no se comprobó.");
+    expect(await down.discardProof(proof.proven)).toBe("unknown");
+    expect(await down.changeProvenPassword(proof.proven, password())).toBe("rejected");
+    expect(await entersWith(account, account.password)).toBe(true);
+  });
 });
