@@ -98,6 +98,8 @@ from (values
   ('ESPERA_REENVIO',            '60',                   'proposed'),
   ('VIGENCIA_INVITACION_DIAS',  '7',                    'proposed'),
   ('VIGENCIA_SEGUNDO_FACTOR_HORAS', '12',               'proposed'),
+  ('VIGENCIA_CODIGO_RECIENTE_MINUTOS', '15',            'proposed'),
+  ('VIGENCIA_PRUEBA_BUZON_MINUTOS', '60',               'proposed'),
   ('TOLERANCIA_CONCILIACION_PCT', '500',                'proposed'),
   ('RECURSO_TAMANO_MAX',        '52428800',             'proposed')
 ) as v (key, value, status)

@@ -105,8 +105,8 @@ select is(
 
 select pruebas.como_dueno();
 select throws_ok(
-  $$insert into private.admin_factors (profile_id, factor_id)
-    values ('c0000000-0000-0000-0000-000000000001', pruebas.factor('c0000000-0000-0000-0000-000000000001'))$$,
+  $$insert into private.admin_factors (profile_id, factor_id, bound_email)
+    values ('c0000000-0000-0000-0000-000000000001', pruebas.factor('c0000000-0000-0000-0000-000000000001'), 'config1@prueba.test')$$,
   '42501', null, 'atar un factor sin autor declarado se rechaza');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000002');
@@ -116,12 +116,12 @@ select is(
   2, 'cada atadura deja su renglón de auditoría');
 select set_config('app.actor_kind', 'system', true);
 select throws_ok(
-  $$insert into private.admin_factors (profile_id, factor_id)
-    values ('c0000000-0000-0000-0000-000000000001', gen_random_uuid())$$,
+  $$insert into private.admin_factors (profile_id, factor_id, bound_email)
+    values ('c0000000-0000-0000-0000-000000000001', gen_random_uuid(), 'config1@prueba.test')$$,
   '23505', null, 'una persona tiene un solo factor atado');
 select throws_ok(
-  $$insert into private.admin_factors (profile_id, factor_id)
-    values ('a0000000-0000-0000-0000-000000000001', pruebas.factor('c0000000-0000-0000-0000-000000000001'))$$,
+  $$insert into private.admin_factors (profile_id, factor_id, bound_email)
+    values ('a0000000-0000-0000-0000-000000000001', pruebas.factor('c0000000-0000-0000-0000-000000000001'), 'ana@prueba.test')$$,
   '23505', null, 'y un factor es de una sola persona');
 select pruebas.limpiar();
 
@@ -319,7 +319,8 @@ select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select ok(pruebas.pasa('c0000000-0000-0000-0000-000000000001'), '(de vuelta en su lugar, pasa)');
 
 -- La capacidad revocada corta en el acto, con la sesión y el token intactos.
-select pruebas.como_sistema();
+select pruebas.como_dueno();
+select set_config('app.actor_kind', 'system', true);
 update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000002'
   where profile_id = 'c0000000-0000-0000-0000-000000000001' and capability = 'config';
 select pruebas.limpiar();

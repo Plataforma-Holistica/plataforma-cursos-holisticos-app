@@ -2,7 +2,7 @@
 -- Qué lee, qué escribe y qué se le niega a cada quien (esquema de backend §6.3).
 begin;
 \ir _ayuda.psql
-select plan(32);
+select plan(34);
 
 -- Personas de la prueba.
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana@prueba.test');      -- alumna
@@ -119,24 +119,37 @@ select is(
 
 -- ---------------------------------------------------------------------------------------
 -- Revocar: surte efecto de inmediato, es de una sola escritura y deja dos con configuración.
+-- Desde T-105 el servidor no escribe esta tabla: dar y quitar pasan por funciones que
+-- comprueban quién actúa (13_invitaciones). Aquí se prueban los guardianes de la tabla,
+-- escribiéndola como su dueño.
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$insert into public.admin_capabilities (profile_id, capability, granted_by)
+    values ('a0000000-0000-0000-0000-000000000001', 'support', 'c0000000-0000-0000-0000-000000000001')$$,
+  '42501', null, 'el servidor no da una capacidad escribiendo la tabla');
+select throws_ok(
+  $$update public.admin_capabilities
+    set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
+    where profile_id = '50000000-0000-0000-0000-000000000001' and capability = 'support'$$,
+  '42501', null, 'ni la revoca');
+
+select pruebas.como_dueno();
+select set_config('app.actor_kind', 'system', true);
 select lives_ok(
   $$update public.admin_capabilities
     set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
     where profile_id = '50000000-0000-0000-0000-000000000001' and capability = 'support'$$,
-  'el servidor revoca una capacidad');
+  'una capacidad se revoca');
 
 select pruebas.como_usuario('50000000-0000-0000-0000-000000000001', 'aal2');
 select ok(not private.has_capability('support'), 'la capacidad revocada deja de contar de inmediato');
 
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
+select pruebas.como_dueno();
+select set_config('app.actor_kind', 'system', true);
 select throws_ok(
   $$update public.admin_capabilities set revoked_at = now() + interval '1 day'
     where profile_id = '50000000-0000-0000-0000-000000000001'$$,
   '42501', null, 'una revocación no se reescribe');
-
-select pruebas.como_dueno();
-select set_config('app.actor_kind', 'system', true);
 select throws_ok(
   $$update public.admin_capabilities set capability = 'finance'
     where profile_id = 'c0000000-0000-0000-0000-000000000003'$$,
@@ -145,7 +158,6 @@ select throws_ok(
   $$delete from public.admin_capabilities where profile_id = 'c0000000-0000-0000-0000-000000000003'$$,
   '42501', null, 'ni la borra');
 
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select lives_ok(
   $$update public.admin_capabilities
     set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
