@@ -92,6 +92,9 @@ select throws_ok(
 
 -- ---------------------------------------------------------------------------------------
 -- Capacidades: solo cuentan con segundo factor (RF-105, RF-106).
+-- Primero queda equipada del todo y después su sesión baja a primer nivel: así lo único
+-- que le falta es el código, que es lo que se prueba.
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select pruebas.como_usuario('c0000000-0000-0000-0000-000000000001', 'aal1');
 select ok(not private.has_capability('config'), 'sin segundo factor la capacidad no cuenta');
 select is(

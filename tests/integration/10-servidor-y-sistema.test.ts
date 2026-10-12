@@ -62,7 +62,7 @@ const context = z.object({
   session_user: z.string(),
   claims: z.string().nullable(),
   actor_id: z.string().nullable(),
-  actor_aal: z.string().nullable(),
+  actor_session: z.string().nullable(),
   actor_kind: z.string().nullable(),
   reason: z.string().nullable(),
   request_id: z.string().nullable(),
@@ -74,7 +74,7 @@ const readContext = sql`
   select current_user::text, session_user::text,
     current_setting('request.jwt.claims', true) as claims,
     current_setting('app.actor_id', true) as actor_id,
-    current_setting('app.actor_aal', true) as actor_aal,
+    current_setting('app.actor_session', true) as actor_session,
     current_setting('app.actor_kind', true) as actor_kind,
     current_setting('app.reason', true) as reason,
     current_setting('app.request_id', true) as request_id,
@@ -112,7 +112,7 @@ describe("asSystem", () => {
       session_user: "app_service",
       claims: "",
       actor_id: "",
-      actor_aal: "",
+      actor_session: "",
       actor_kind: "system",
       reason: "cierre",
       request_id: "req-1",
@@ -163,8 +163,9 @@ describe("asServer", () => {
       session_user: "app_service",
       claims: "",
       actor_id: carla.id,
-      // El nivel sale del token, no de quien llama.
-      actor_aal: "aal1",
+      // La sesión sale del token, no de quien llama. El nivel ya no se declara: la base
+      // lo lee de esa sesión (T-105).
+      actor_session: carlaClaims.sessionId,
       actor_kind: "",
       reason: "sanción",
       request_id: "req-3",
@@ -200,7 +201,7 @@ describe("asServer", () => {
     await expect(attempt).rejects.toMatchObject({ code: "42501" });
   });
 
-  // Es el camino que salta la seguridad por fila: quién actúa y con qué nivel no puede
+  // Es el camino que salta la seguridad por fila: quién actúa y con qué sesión no puede
   // salir de un objeto que arma quien llama.
   it("no acepta un autor armado a mano: ni un identificador suelto ni una copia de las claims", async () => {
     const forgeries = [
@@ -372,7 +373,7 @@ describe("la transacción", () => {
     expect(second.probe?.probe ?? "").toBe("");
     expect(second.context).toMatchObject({
       actor_id: "",
-      actor_aal: "",
+      actor_session: "",
       actor_kind: "system",
       claims: "",
     });

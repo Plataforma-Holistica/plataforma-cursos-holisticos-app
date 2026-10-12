@@ -2,7 +2,7 @@
 -- Ninguna tabla sin seguridad por fila, ninguna función de más, ningún permiso de más.
 begin;
 \ir _ayuda.psql
-select plan(33);
+select plan(34);
 
 select is_empty(
   'select * from private.schema_violations()',
@@ -14,7 +14,7 @@ from unnest(array['profiles', 'admin_capabilities', 'audit_log',
                   'legal_documents', 'consents']) as t;
 select has_table('private', t, 'existe private.' || t)
 from unnest(array['rate_limit_counters', 'login_throttles', 'app_sessions', 'account_security',
-                  'second_factor_attempts']) as t;
+                  'second_factor_attempts', 'admin_factors']) as t;
 
 -- El visitante no lee ninguna tabla propia, salvo los textos legales (y de esos, sus
 -- columnas públicas: lo prueba 05_legal).
