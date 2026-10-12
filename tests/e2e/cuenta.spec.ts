@@ -162,6 +162,10 @@ test("solo con el teclado: se llega al campo, se guarda con Intro y el foco no s
   await page.keyboard.type("Carla");
   await page.keyboard.press("Enter");
   await expect.poll(() => profileName(ana.id)).toBe("Carla");
+  // La base ya lo tiene antes de que la respuesta se pinte. Se espera el aviso, que escribir
+  // había quitado: con el envío todavía en camino el botón está inactivo, y un salto del
+  // teclado pasaría de largo.
+  await expect(page.getByText(SAVED)).toBeVisible();
   await expect(nameField(page)).toBeFocused();
 
   // Y quien guardó desde el botón sigue en el botón.
