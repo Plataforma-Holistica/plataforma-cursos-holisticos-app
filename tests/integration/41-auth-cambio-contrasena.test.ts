@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   changeProvenPassword,
@@ -55,6 +55,10 @@ async function proved(account: KnownUser): Promise<ProvenPassword> {
 }
 
 const entersWith = async (account: KnownUser, secret: string) => (await signIn(memoryJar(), account.email, secret)).ok;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 afterAll(async () => {
   await deleteTestUsersByEmail(emails);
@@ -171,13 +175,25 @@ describe("cambiar la contraseña con esa prueba", () => {
   });
 
   // Un límite de peticiones Auth lo contesta antes de tocar nada: se sabe que no cambió.
-  it("con el límite de peticiones de Auth, se rechaza: no es «no se supo»", async () => {
+  it("con el límite de peticiones de Auth, se rechaza: no es «no se supo», y queda dicho en el registro", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const account = await user();
     const limited = createAuth({ fetch: failingFetch(/\/auth\/v1\/user$/, tooManyRequests).fetch });
     const proof = await limited.provePassword(account.email, account.password);
     if (!proof.ok) throw new Error("La contraseña de prueba no se comprobó.");
     expect(await limited.changeProvenPassword(proof.proven, password())).toBe("rejected");
+    // Ese límite es del servidor entero, no de una persona: sin el aviso no se sabría por qué.
+    expect(warn.mock.calls).toEqual([
+      ["Auth rechazó set_password por su límite de peticiones: ningún cambio de contraseña desde la cuenta pasa mientras dure."],
+    ]);
     expect(await entersWith(account, account.password)).toBe(true);
+  });
+
+  it("un rechazo que no es el límite no deja ese aviso", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const account = await user();
+    expect(await changeProvenPassword(await proved(account), account.password)).toBe("same_password");
+    expect(warn).not.toHaveBeenCalled();
   });
 
   // Auth pide volver a identificarse a una sesión de más de un día. Una prueba siempre es
