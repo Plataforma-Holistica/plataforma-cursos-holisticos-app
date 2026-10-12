@@ -274,6 +274,10 @@ falla. Doce precisiones que la tabla no dice:
     cuenta de revisiones no retrocede, también cuentan las que salen bien: contra ella se
     mide qué manda en un campo, y con ella el resumen de errores sabe que hay algo nuevo
     que anunciar.
+  - Dos hermanos nunca comparten `key`, tampoco un aviso y los campos que se rearman con
+    cada intento: con la misma, React confunde uno con otro y el aviso de un intento se
+    queda en pantalla con el siguiente. La preparación de las pruebas de componente
+    (`tests/setup/dom.ts`) hace fallar toda prueba en la que React avise de eso.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
