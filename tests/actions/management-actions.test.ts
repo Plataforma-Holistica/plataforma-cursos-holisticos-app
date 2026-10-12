@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => {
     });
   return {
     changeName: logged("changeName", () => Promise.resolve<unknown>({ kind: "unavailable" })),
+    closeSession: logged("closeSession", () => Promise.resolve<unknown>({ kind: "unavailable" })),
+    closeOtherSessions: logged("closeOtherSessions", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     signOut: logged("signOut", () => Promise.resolve("closed")),
     leaveNotice: logged("leaveNotice", () => undefined),
     refresh: logged("refresh", () => undefined),
@@ -26,12 +28,17 @@ const mocks = vi.hoisted(() => {
   };
 });
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
-vi.mock("@/services/account/account", () => ({ changeName: mocks.changeName, signOut: mocks.signOut }));
+vi.mock("@/services/account/account", () => ({
+  changeName: mocks.changeName,
+  closeSession: mocks.closeSession,
+  closeOtherSessions: mocks.closeOtherSessions,
+  signOut: mocks.signOut,
+}));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { changeNameAction } from "@/app/(cuenta)/cuenta/actions";
+import { changeNameAction, closeSessionsAction } from "@/app/(cuenta)/cuenta/actions";
 
 const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;
@@ -121,5 +128,90 @@ describe("cambiar el nombre (PA-25)", () => {
     once("changeName", { kind: "session", check: { kind: "must_sign_out", then: "sign_in" } });
     await expect(changeNameAction(IDLE, nameForm("Ana"))).rejects.toThrow("redirige a /entrar");
     expect(calls.order).toEqual(["changeName", "signOut", "redirect"]);
+  });
+});
+
+describe("cerrar sesiones (PA-25)", () => {
+  const ID = "5e560000-0000-0000-0000-000000000001";
+
+  function closeForm(target: string | null, extra: [string, string][] = []): FormData {
+    const data = new FormData();
+    if (target !== null) data.append("close", target);
+    for (const [field, value] of extra) data.append(field, value);
+    return data;
+  }
+
+  it("cerrar una: le pasa al servicio el tarro de esta petición y el identificador, y nada más del formulario", async () => {
+    once("closeSession", { kind: "closed" });
+    await closeSessionsAction(IDLE, closeForm(ID, [["keep", "otra"], ["profile", "otra-cuenta"], ["volver", "//otro.example"]]));
+    expect(mocks.closeSession).toHaveBeenCalledExactlyOnceWith(jar, { sessionId: ID });
+    expect(mocks.closeOtherSessions).not.toHaveBeenCalled();
+  });
+
+  it("cerrar las demás: al servicio solo le llega el tarro. Cuál se queda lo sabe él", async () => {
+    once("closeOtherSessions", { kind: "closed", count: 2 });
+    await closeSessionsAction(IDLE, closeForm("others", [["keep", ID], ["session", ID]]));
+    expect(mocks.closeOtherSessions).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(mocks.closeSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["una", ID, "closeSession", { kind: "closed" }, "one"],
+    ["una que ya no estaba", ID, "closeSession", { kind: "not_found" }, "gone"],
+    ["las demás", "others", "closeOtherSessions", { kind: "closed", count: 2 }, "others"],
+  ] as const)("cerrada (%s): pide la página de nuevo y dice qué se cerró", async (_case, target, service, answer, what) => {
+    once(service, answer);
+    expect(await closeSessionsAction(IDLE, closeForm(target))).toEqual({ kind: "closed", what, attempt: 1 });
+    expect(calls.order).toEqual([service, "refresh"]);
+  });
+
+  it.each([
+    ["sin decir qué", closeForm(null)],
+    ["con el campo vacío", closeForm("")],
+    ["con algo más largo que un identificador", closeForm(`${ID}x`)],
+    ["lo que no es un formulario", `close=${ID}` as unknown as FormData],
+  ])("%s no se le pregunta nada a nadie", async (_case, input) => {
+    expect(await closeSessionsAction(IDLE, input)).toEqual({ kind: "idle" });
+    expect(calls.order).toEqual([]);
+    expect(mocks.cookieJar).not.toHaveBeenCalled();
+  });
+
+  it("no se supo: lo dice y no pide la página de nuevo", async () => {
+    expect(await closeSessionsAction(IDLE, closeForm(ID))).toEqual({ kind: "unavailable", attempt: 1 });
+    expect(await closeSessionsAction(IDLE, closeForm("others"))).toEqual({ kind: "unavailable", attempt: 1 });
+    expect(calls.order).toEqual(["closeSession", "closeOtherSessions"]);
+  });
+
+  it("del estado anterior solo lee el número de intento", async () => {
+    once("closeSession", { kind: "closed" });
+    const previous = { kind: "closed", what: "others", attempt: 4, keep: ID } as never;
+    expect(await closeSessionsAction(previous, closeForm(ID))).toEqual({ kind: "closed", what: "one", attempt: 5 });
+  });
+
+  it("la sesión propia, mandada por aquí: se cierra con su cookie y se va a la portada", async () => {
+    once("closeSession", { kind: "current" });
+    await expect(closeSessionsAction(IDLE, closeForm(ID))).rejects.toThrow("redirige a /");
+    expect(calls.order).toEqual(["closeSession", "signOut", "redirect"]);
+    expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith("/");
+  });
+
+  it("cuenta suspendida: la pantalla pasa a PA-35, sin irse a ningún lado", async () => {
+    once("closeOtherSessions", { kind: "session", check: { kind: "suspended" } });
+    expect(await closeSessionsAction(IDLE, closeForm("others"))).toEqual({ kind: "suspended" });
+    expect(calls.order).toEqual(["closeOtherSessions"]);
+  });
+
+  it("sin sesión: a entrar, para volver a la cuenta, sin cerrar nada", async () => {
+    once("closeSession", { kind: "session", check: { kind: "anonymous" } });
+    await expect(closeSessionsAction(IDLE, closeForm(ID))).rejects.toThrow("redirige a /entrar?volver=%2Fcuenta");
+    expect(calls.order).toEqual(["closeSession", "redirect"]);
+  });
+
+  it("una sesión que la guarda rechaza se cierra, deja su aviso y solo entonces se va", async () => {
+    once("closeOtherSessions", { kind: "session", check: { kind: "must_sign_out", then: "recover" } });
+    await expect(closeSessionsAction(IDLE, closeForm("others"))).rejects.toThrow("redirige a /recuperar");
+    expect(calls.order).toEqual(["closeOtherSessions", "signOut", "leaveNotice", "redirect"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "choose_password");
   });
 });

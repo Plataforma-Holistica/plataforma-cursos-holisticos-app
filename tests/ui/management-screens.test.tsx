@@ -9,26 +9,66 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   changeNameAction: vi.fn(),
+  closeSessionsAction: vi.fn(),
+  accountSessions: vi.fn(),
   signOutAction: vi.fn(),
   requireSession: vi.fn(),
   cookieReader: vi.fn(),
   accountProfile: vi.fn(),
   sessionEmail: vi.fn(),
 }));
-vi.mock("@/app/(cuenta)/cuenta/actions", () => ({ changeNameAction: mocks.changeNameAction }));
+vi.mock("@/app/(cuenta)/cuenta/actions", () => ({
+  changeNameAction: mocks.changeNameAction,
+  closeSessionsAction: mocks.closeSessionsAction,
+}));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: mocks.signOutAction }));
 vi.mock("@/app/_lib/guard", () => ({ requireSession: mocks.requireSession }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader }));
-vi.mock("@/services/account/account", () => ({ accountProfile: mocks.accountProfile, sessionEmail: mocks.sessionEmail }));
+vi.mock("@/services/account/account", () => ({
+  accountProfile: mocks.accountProfile,
+  accountSessions: mocks.accountSessions,
+  sessionEmail: mocks.sessionEmail,
+}));
 
-import type { NameState } from "@/app/(cuenta)/cuenta/outcomes";
+import type { NameState, SessionsState } from "@/app/(cuenta)/cuenta/outcomes";
 import AccountPage from "@/app/(cuenta)/cuenta/page";
+import type { SessionRow } from "@/app/(cuenta)/cuenta/rows";
 import { AccountScreen } from "@/app/(cuenta)/cuenta/screen";
 
 import { a11yViolations } from "../setup/a11y";
 
 const reader = { get: () => undefined };
 const claims = { userId: "u", aal: "aal1", sessionId: null, issuedAt: 0 };
+
+const HERE = "5e560000-0000-0000-0000-000000000001";
+const PHONE = "5e560000-0000-0000-0000-000000000002";
+const OTHER = "5e560000-0000-0000-0000-000000000003";
+const here: SessionRow = {
+  id: HERE,
+  device: "Chrome en Windows",
+  opened: "Se abrió el 10 de octubre de 2026.",
+  lastActive: "Última actividad: 12 de octubre de 2026.",
+  current: true,
+  closeDetail: "la sesión de Chrome en Windows, abierta el 10 de octubre de 2026",
+};
+const phone: SessionRow = {
+  id: PHONE,
+  device: "Safari en iPhone o iPad",
+  opened: "Se abrió el 11 de octubre de 2026.",
+  lastActive: "Última actividad: 11 de octubre de 2026.",
+  current: false,
+  closeDetail: "la sesión de Safari en iPhone o iPad, abierta el 11 de octubre de 2026",
+};
+const other: SessionRow = {
+  id: OTHER,
+  device: "Navegador desconocido",
+  opened: null,
+  lastActive: null,
+  current: false,
+  closeDetail: "Navegador desconocido",
+};
+/** Solo la sesión con la que se mira la pantalla: lo que ve casi todo el mundo. */
+const ALONE = [here];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -45,7 +85,7 @@ const savedNotice = () => screen.queryByText("Guardado.");
 async function saveName(typed: string, state: NameState) {
   mocks.changeNameAction.mockResolvedValue(state);
   const user = userEvent.setup();
-  const view = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" />);
+  const view = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
   await user.clear(nameField());
   if (typed !== "") await user.type(nameField(), typed);
   await user.click(saveButton());
@@ -54,9 +94,13 @@ async function saveName(typed: string, state: NameState) {
 
 describe("la pantalla de la cuenta (PA-25)", () => {
   it("en reposo: el nombre guardado en su campo, el correo a la vista y sin nada que anunciar", async () => {
-    const { container } = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" />);
+    const { container } = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Cuenta");
-    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Nombre", "Correo"]);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "Nombre",
+      "Correo",
+      "Sesiones abiertas",
+    ]);
     expect(nameField()).toHaveValue("Ana de Prueba");
     expect(nameField()).toHaveAttribute("autocomplete", "name");
     // Cada bloque es una región con el nombre de su título.
@@ -69,18 +113,18 @@ describe("la pantalla de la cuenta (PA-25)", () => {
   });
 
   it("el correo no se puede escribir: no hay campo para él", () => {
-    render(<AccountScreen name="Ana" email="ana@prueba.test" />);
+    render(<AccountScreen name="Ana" email="ana@prueba.test" sessions={ALONE} />);
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
   });
 
   it("sin correo en el token no inventa uno, y la nota sigue", () => {
-    render(<AccountScreen name="Ana" email={null} />);
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     expect(screen.queryByText(/@/)).not.toBeInTheDocument();
     expect(screen.getByText("Por ahora no se puede cambiar desde aquí.")).toBeVisible();
   });
 
   it("sin JavaScript se pinta entera: el formulario es un formulario, con su campo lleno", () => {
-    const html = renderToString(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" />);
+    const html = renderToString(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
     expect(html).toContain('name="name"');
     expect(html).toContain('value="Ana de Prueba"');
     expect(html).toContain("ana@prueba.test");
@@ -247,7 +291,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
   it("guardar con Intro desde el campo deja el foco en el campo, que se armó de nuevo", async () => {
     mocks.changeNameAction.mockResolvedValue({ kind: "saved", name: "Beatriz", attempt: 1 });
     const user = userEvent.setup();
-    render(<AccountScreen name="Ana" email={null} />);
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     const before = nameField();
     await user.clear(before);
     await user.type(before, "Beatriz{Enter}");
@@ -265,7 +309,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
   it("si el servicio no lo aceptó, el foco es del resumen de errores y nadie se lo quita", async () => {
     mocks.changeNameAction.mockResolvedValue({ kind: "invalid", name: "Beatriz", problem: "invalid", attempt: 1 });
     const user = userEvent.setup();
-    render(<AccountScreen name="Ana" email={null} />);
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     await user.clear(nameField());
     await user.type(nameField(), "Beatriz{Enter}");
     expect(await screen.findByRole("alert")).toHaveFocus();
@@ -275,13 +319,13 @@ describe("la pantalla de la cuenta (PA-25)", () => {
   // aquí: React solo lo escribe para una acción de servidor de verdad. Lo prueba el extremo
   // a extremo. Aquí, que el bloque tenga el ancla a la que vuelve.
   it("el bloque del nombre lleva su ancla", () => {
-    render(<AccountScreen name="Ana" email={null} />);
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     expect(screen.getByRole("region", { name: "Nombre" })).toHaveAttribute("id", "bloque-nombre");
   });
 
   it("al salir del campo, un nombre que no se puede guardar se marca; uno vacío, no", async () => {
     const user = userEvent.setup();
-    render(<AccountScreen name="Ana" email={null} />);
+    render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     await user.clear(nameField());
     await user.tab();
     expect(nameField()).not.toBeInvalid();
@@ -292,17 +336,179 @@ describe("la pantalla de la cuenta (PA-25)", () => {
   });
 });
 
+const sessionsBlock = () => screen.getByRole("region", { name: "Sesiones abiertas" });
+const closeOthers = () => within(sessionsBlock()).getByRole("button", { name: "Cerrar todas las demás" });
+const closeButtonOf = (row: SessionRow) => within(sessionsBlock()).getByRole("button", { name: `Cerrar${row.closeDetail}` });
+
+/** Pinta la pantalla con esas sesiones, pulsa ese botón y espera, con la acción contestando `state`. */
+async function closeWith(sessions: SessionRow[], press: () => HTMLElement, state: SessionsState) {
+  mocks.closeSessionsAction.mockResolvedValue(state);
+  const user = userEvent.setup();
+  const view = render(<AccountScreen name="Ana" email={null} sessions={sessions} />);
+  await user.click(press());
+  return { user, ...view };
+}
+
+describe("el bloque de sesiones abiertas (PA-25)", () => {
+  it("con solo esta sesión: la dice, sin botón para cerrarla, y dice que no hay otras", async () => {
+    const { container } = render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    const rows = within(sessionsBlock()).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("Chrome en Windows");
+    expect(rows[0]).toHaveTextContent("Esta sesión");
+    expect(within(sessionsBlock()).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(sessionsBlock()).getByText("No tienes otras sesiones abiertas.")).toBeVisible();
+    expect(sessionsBlock()).toHaveAttribute("id", "bloque-sesiones");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con varias: cada una con lo suyo, un botón por cada una que no es esta, y «Cerrar todas las demás»", async () => {
+    const { container } = render(<AccountScreen name="Ana" email={null} sessions={[here, phone, other]} />);
+    const rows = within(sessionsBlock()).getAllByRole("listitem");
+    expect(rows.map((row) => within(row).queryAllByRole("button").length)).toEqual([0, 1, 1]);
+    expect(rows[1]).toHaveTextContent("Safari en iPhone o iPad");
+    expect(rows[1]).toHaveTextContent("Se abrió el 11 de octubre de 2026.");
+    // Cada botón dice cuál sesión cierra, también a quien no ve la fila.
+    expect(closeButtonOf(phone)).toHaveAttribute("value", PHONE);
+    expect(closeButtonOf(other)).toHaveAttribute("value", OTHER);
+    expect(closeOthers()).toHaveAttribute("value", "others");
+    expect(within(sessionsBlock()).queryByText("No tienes otras sesiones abiertas.")).not.toBeInTheDocument();
+    // De una sesión de la que no se sabe la fecha no se inventa ninguna.
+    expect(rows[2]).not.toHaveTextContent("Se abrió");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin JavaScript se pinta entero: un solo formulario, y cada botón lleva lo que cierra", () => {
+    const html = renderToString(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    const painted = new DOMParser().parseFromString(html, "text/html");
+    const buttons = [...painted.querySelectorAll<HTMLButtonElement>('button[type="submit"][name="close"]')];
+    expect(buttons.map((button) => button.value)).toEqual([PHONE, "others"]);
+    // Todos en el mismo formulario, que es el del bloque.
+    expect(new Set(buttons.map((button) => button.form)).size).toBe(1);
+    expect(buttons[0]?.form?.closest("section")?.id).toBe("bloque-sesiones");
+    expect(html).not.toContain(`value="${HERE}"`);
+  });
+
+  it("cerrar una: manda a la acción el identificador de esa sesión y nada más", async () => {
+    await closeWith([here, phone, other], () => closeButtonOf(phone), { kind: "closed", what: "one", attempt: 1 });
+    expect(mocks.closeSessionsAction).toHaveBeenCalledOnce();
+    const form = mocks.closeSessionsAction.mock.calls[0]?.[1] as FormData;
+    expect(Object.fromEntries(form)).toEqual({ close: PHONE });
+  });
+
+  it("cerrar las demás: manda eso, y ningún identificador", async () => {
+    await closeWith([here, phone, other], closeOthers, { kind: "closed", what: "others", attempt: 1 });
+    const form = mocks.closeSessionsAction.mock.calls[0]?.[1] as FormData;
+    expect(Object.fromEntries(form)).toEqual({ close: "others" });
+  });
+
+  it.each([
+    ["one", "Cerramos esa sesión."],
+    ["others", "Cerramos tus demás sesiones."],
+    ["gone", "Esa sesión ya estaba cerrada."],
+  ] as const)("cerrada (%s): lo dice en el bloque, y el aviso toma el foco", async (what, message) => {
+    await closeWith([here, phone], () => closeButtonOf(phone), { kind: "closed", what, attempt: 1 });
+    const notice = await within(sessionsBlock()).findByText(message);
+    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // El bloque del nombre no dice nada de esto.
+    expect(savedNotice()).not.toBeInTheDocument();
+  });
+
+  it("no se supo: lo dice en el bloque, con el foco, y la lista sigue como estaba", async () => {
+    await closeWith([here, phone], () => closeButtonOf(phone), { kind: "unavailable", attempt: 1 });
+    const notice = await within(sessionsBlock()).findByText("No pudimos hacerlo. Intenta de nuevo en un momento.");
+    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    expect(within(sessionsBlock()).getAllByRole("listitem")).toHaveLength(2);
+    expect(closeButtonOf(phone)).toBeEnabled();
+  });
+
+  it("cuenta suspendida: la pantalla entera pasa a PA-35", async () => {
+    await closeWith([here, phone], closeOthers, { kind: "suspended" });
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("mientras un cierre va en camino: lo dice, los botones no aceptan otro clic, y lo de antes deja de decirse", async () => {
+    const { user } = await closeWith([here, phone, other], () => closeButtonOf(phone), { kind: "closed", what: "one", attempt: 1 });
+    expect(await within(sessionsBlock()).findByText("Cerramos esa sesión.")).toBeVisible();
+
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    await user.click(closeButtonOf(other));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    expect(within(sessionsBlock()).getByText("Cerrando…")).toHaveAttribute("role", "status");
+    expect(within(sessionsBlock()).queryByText("Cerramos esa sesión.")).not.toBeInTheDocument();
+    for (const button of within(sessionsBlock()).getAllByRole("button")) expect(button).toBeDisabled();
+
+    // Una acción sin terminar dejaría colgadas las de las pruebas siguientes.
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 2 });
+      await Promise.resolve();
+    });
+    expect(await within(sessionsBlock()).findByText("Cerramos esa sesión.")).toBeVisible();
+    expect(within(sessionsBlock()).queryByText("Cerrando…")).not.toBeInTheDocument();
+    expect(closeOthers()).toBeEnabled();
+  });
+
+  it("cerrar sesiones no toca el bloque del nombre: lo escrito ahí sigue", async () => {
+    mocks.closeSessionsAction.mockResolvedValue({ kind: "closed", what: "one", attempt: 1 });
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.type(nameField(), " María");
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerramos esa sesión.")).toBeVisible();
+    expect(nameField()).toHaveValue("Ana María");
+    expect(mocks.changeNameAction).not.toHaveBeenCalled();
+  });
+});
+
 describe("la página de la cuenta", () => {
-  it("le pide a la guarda una sesión para su propia ruta, y lee el perfil con las claims que ella dio", async () => {
+  const openSessions = {
+    kind: "ready",
+    sessions: [
+      {
+        id: HERE,
+        openedAt: "2026-10-10T18:00:00.000Z",
+        lastActiveAt: "2026-10-12T06:30:00.000Z",
+        device: { browser: "chrome", system: "windows" },
+        current: true,
+      },
+      { id: PHONE, openedAt: "2026-10-11T18:00:00.000Z", lastActiveAt: null, device: { browser: null, system: "ios" }, current: false },
+    ],
+  };
+
+  it("le pide a la guarda una sesión para su propia ruta, y lee el perfil y las sesiones con las claims que ella dio", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana de Prueba" });
+    mocks.accountSessions.mockResolvedValue(openSessions);
     mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
     render(await AccountPage());
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/cuenta");
     expect(mocks.accountProfile).toHaveBeenCalledExactlyOnceWith(claims);
+    expect(mocks.accountSessions).toHaveBeenCalledExactlyOnceWith(claims);
     expect(mocks.sessionEmail).toHaveBeenCalledExactlyOnceWith(reader);
     expect(nameField()).toHaveValue("Ana de Prueba");
     expect(screen.getByText("ana@prueba.test")).toBeVisible();
+    // Las sesiones, ya en palabras: el navegador, y las fechas en la zona del producto.
+    const rows = within(sessionsBlock()).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Chrome en Windows");
+    expect(rows[0]).toHaveTextContent("Se abrió el 10 de octubre de 2026.");
+    expect(rows[0]).toHaveTextContent("Última actividad: 12 de octubre de 2026.");
+    expect(rows[0]).toHaveTextContent("Esta sesión");
+    expect(rows[1]).toHaveTextContent("Navegador desconocido en iPhone o iPad");
+    expect(rows[1]).not.toHaveTextContent("Última actividad");
+  });
+
+  it("si las sesiones no se pudieron leer, no pinta la cuenta a medias: ofrece reintentar", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana de Prueba" });
+    mocks.accountSessions.mockResolvedValue({ kind: "unavailable" });
+    render(await AccountPage());
+    expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/cuenta");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(mocks.sessionEmail).not.toHaveBeenCalled();
   });
 
   it("a una cuenta suspendida no le pinta nada suyo: ve PA-35, y ni se lee el perfil", async () => {
@@ -312,6 +518,7 @@ describe("la página de la cuenta", () => {
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(mocks.accountProfile).not.toHaveBeenCalled();
+    expect(mocks.accountSessions).not.toHaveBeenCalled();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
   });
 
@@ -330,6 +537,7 @@ describe("la página de la cuenta", () => {
     expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/cuenta");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
+    expect(mocks.accountSessions).not.toHaveBeenCalled();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
   });
 });

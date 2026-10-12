@@ -92,6 +92,10 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   "src/app/(cuenta)/cuenta/actions.ts": {
     // Cambiar el nombre: el servicio vuelve a correr la guarda, y del formulario solo llega el nombre.
     changeNameAction: /changeNameOutcome\(await changeName\(jar, \{ name: input\.name \}\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Cerrar sesiones: del formulario solo llega qué botón se pulsó. De quién es la cuenta y
+    // cuál sesión se queda lo dice la sesión de quien envía, y lo decide el servicio.
+    closeSessionsAction:
+      /closeOthersOutcome\(await closeOtherSessions\(jar\)\)\s*: closeSessionOutcome\(await closeSession\(jar, \{ sessionId: request\.sessionId \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
   },
   "src/app/(cuenta)/registro/actions.ts": {
     // Pedir el registro: el servicio cuenta el intento y aplica los topes antes de invitar a nadie.
@@ -361,7 +365,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
   );
 
   it("hay anclas que revisar", () => {
-    expect(anchors.map(({ anchor }) => anchor)).toContain("bloque-nombre");
+    expect(anchors.map(({ anchor }) => anchor).sort()).toEqual(["bloque-nombre", "bloque-sesiones"]);
   });
 
   it.each(anchors)("$anchor solo se escribe en $file", ({ file, anchor }) => {
