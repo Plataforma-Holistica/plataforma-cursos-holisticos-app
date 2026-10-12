@@ -59,16 +59,28 @@ export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordB
   const [editedAfter, setEditedAfter] = useState<number | null>(null);
   const waitIsOver = useWaitIsOver(state.kind === "throttled" ? state.retryAt : null);
   const note = useRef<HTMLParagraphElement>(null);
+  const spoken = useRef<HTMLSpanElement>(null);
   const discovered = state.kind === "recover_only";
 
   // Cuando un envío descubre el segundo factor, el botón que se pulsó desaparece con el
   // formulario y el foco cae al documento: lo toma la nota, que es además lo que se lo dice
   // a quien usa lector de pantalla. Solo si quedó sin dueño: a quien ya se fue a otra cosa
-  // no se le quita. Pintada con la página no toma nada.
+  // no se le quita, y se le dice por la región viva de `spoken`, que existe desde antes.
+  // Pintada con la página, sin envío de por medio, la nota no toma nada. Si el envío fue
+  // antes de que la página cobrara vida, la respuesta llega ya pintada y la nota toma el
+  // foco al montar: es la respuesta de ese envío.
   useEffect(() => {
     if (!discovered) return;
-    if (document.activeElement !== null && document.activeElement !== document.body) return;
-    note.current?.focus();
+    if (document.activeElement === null || document.activeElement === document.body) {
+      note.current?.focus();
+      return;
+    }
+    const voice = spoken.current;
+    if (voice === null) return;
+    voice.textContent = text.passwordWithSecondFactor;
+    return () => {
+      voice.textContent = "";
+    };
   }, [discovered]);
 
   function checkBeforeSending(event: FormEvent<HTMLFormElement>) {
@@ -99,6 +111,7 @@ export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordB
         <h2 id={TITLE_ID} className="text-h3">
           {text.passwordTitle}
         </h2>
+        <span ref={spoken} role="status" className="sr-only" />
         <p ref={note} tabIndex={-1}>
           {text.passwordWithSecondFactor}
         </p>
@@ -114,6 +127,9 @@ export function PasswordBlock({ recoverOnly, state, action, pending }: PasswordB
       <h2 id={TITLE_ID} className="text-h3">
         {text.passwordTitle}
       </h2>
+      {/* La misma región viva que pinta la otra rama, en el mismo lugar: así ya existe cuando
+          un envío descubre el segundo factor, y una que nace con su texto no siempre se anuncia. */}
+      <span ref={spoken} role="status" className="sr-only" />
       <form
         action={action}
         onSubmit={checkBeforeSending}

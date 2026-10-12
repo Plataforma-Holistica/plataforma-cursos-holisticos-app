@@ -17,7 +17,7 @@
 -- La tabla del freno. Privada y sin permisos para nadie: solo la toca el gancho.
 --
 -- No apunta a auth.mfa_factors: es del esquema de Supabase. Una fila de un factor que ya no
--- existe no estorba; quedan ahí hasta que una tarea de limpieza las quite.
+-- existe no estorba, y hoy nada la quita: limpiarlas queda para una tarea de mantenimiento.
 
 create table private.second_factor_attempts (
   factor_id uuid primary key,                 -- el mismo valor que auth.mfa_factors.id
@@ -30,22 +30,35 @@ comment on table private.second_factor_attempts is 'Fallos seguidos de cada fact
 alter table private.second_factor_attempts enable row level security;
 
 -- ---------------------------------------------------------------------------------------
--- Un parámetro del freno, en minutos o en intentos: un entero entre 1 y su máximo, o nulo
--- si falta o no lo es. Nunca lanza, tampoco con un número que no cabe en un entero: de eso
+-- Un parámetro del freno, en minutos o en intentos: un entero de 1 en adelante, o nulo si
+-- falta o no lo es. Nunca lanza, tampoco con un número que no cabe en un entero: de eso
 -- depende que el gancho pueda rechazar en vez de tumbarse. La forma se mira antes de
--- convertir, cada cosa en su `case`, que es lo único que garantiza el orden.
+-- convertir, un paso por sentencia.
+--
+-- No tiene máximo propio: acepta todo entero positivo, que es lo que el guardián de los
+-- parámetros deja guardar. Con cualquiera de ellos el cálculo de la espera cabe.
 
-create function private.second_factor_limit(p_key text, p_max integer) returns integer
-language sql stable set search_path = ''
+create function private.second_factor_limit(p_key text) returns integer
+language plpgsql stable set search_path = ''
 as $$
-  select case when n.value between 1 and p_max then n.value end
-  from (
-    select case
-      when pg_catalog.jsonb_typeof(v.value) = 'number' and (v.value #>> '{}') ~ '^[0-9]{1,7}$'
-        then (v.value #>> '{}')::integer
-    end as value
-    from (select private.parameter_value(p_key) as value) as v
-  ) as n
+declare
+  v_value jsonb := private.parameter_value(p_key);
+  v_digits text;
+begin
+  -- Uno que falta tampoco es un número.
+  if pg_catalog.jsonb_typeof(v_value) is distinct from 'number' then
+    return null;
+  end if;
+  v_digits := v_value #>> '{}';
+  -- Diez cifras caben siempre en un bigint: ahí se compara, y solo después se convierte.
+  if v_digits !~ '^[0-9]{1,10}$' then
+    return null;
+  end if;
+  if v_digits::bigint < 1 or v_digits::bigint > 2147483647 then
+    return null;
+  end if;
+  return v_digits::integer;
+end
 $$;
 
 -- ---------------------------------------------------------------------------------------
@@ -63,8 +76,9 @@ $$;
 --     de la cuenta también: entra de nuevo, o recupera su contraseña desde su correo.
 --   · Si esta función lanza, Auth rechaza toda verificación (medido). Por eso no lanza con
 --     nada que pueda llegarle: lo que no entiende lo rechaza. Y falla cerrado también con
---     sus parámetros: si falta uno, o no es un entero dentro de sus límites, rechaza todo
---     hasta que se corrija, en vez de quedarse sin freno.
+--     sus parámetros: si falta uno, o no es un entero de 1 en adelante, rechaza todo hasta
+--     que se corrija, en vez de quedarse sin freno. Ese rechazo no es el del freno: lleva
+--     otro mensaje y deja un aviso en el registro de la base, para que quien opera lo vea.
 --   · Los intentos de un mismo factor van uno tras otro, con un candado consultivo: dos a la
 --     vez no se pisan la cuenta.
 
@@ -75,15 +89,17 @@ declare
   v_continue constant jsonb := pg_catalog.jsonb_build_object('decision', 'continue');
   v_reject constant jsonb := pg_catalog.jsonb_build_object(
     'decision', 'reject', 'message', 'Too many second factor attempts.');
+  v_unavailable constant jsonb := pg_catalog.jsonb_build_object(
+    'decision', 'reject', 'message', 'Second factor verification is not available.');
   v_text text := second_factor_attempt.event ->> 'factor_id';
   -- Solo el booleano de JSON es un acierto: un texto que diga «true» no lo es.
   v_valid boolean := coalesce((second_factor_attempt.event -> 'valid') = 'true'::jsonb, false);
   v_factor uuid;
   v_now timestamptz;
-  v_threshold integer := private.second_factor_limit('INTENTOS_ANTES_DE_FRENO', 1000);
-  v_base integer := private.second_factor_limit('FRENO_ESPERA_BASE', 1440);
-  v_top integer := private.second_factor_limit('FRENO_ESPERA_TOPE', 10080);
-  v_forget integer := private.second_factor_limit('FRENO_OLVIDO', 525600);
+  v_threshold integer := private.second_factor_limit('INTENTOS_ANTES_DE_FRENO');
+  v_base integer := private.second_factor_limit('FRENO_ESPERA_BASE');
+  v_top integer := private.second_factor_limit('FRENO_ESPERA_TOPE');
+  v_forget integer := private.second_factor_limit('FRENO_OLVIDO');
   v_count integer;
   v_locked timestamptz;
   v_last timestamptz;
@@ -94,9 +110,10 @@ begin
      or v_text !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
     return v_reject;
   end if;
-  -- Sin sus cuatro parámetros no hay regla que aplicar: no pasa nadie.
+  -- Sin sus cuatro parámetros no hay regla que aplicar: no pasa nadie, y queda dicho.
   if v_threshold is null or v_base is null or v_top is null or v_forget is null then
-    return v_reject;
+    raise warning 'private.second_factor_attempt: falta un parámetro del freno, o no es un entero de 1 en adelante. Se rechaza toda verificación del segundo factor.';
+    return v_unavailable;
   end if;
   v_factor := v_text::uuid;
 

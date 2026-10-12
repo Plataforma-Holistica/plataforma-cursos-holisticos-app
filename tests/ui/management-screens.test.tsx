@@ -1007,6 +1007,8 @@ describe("el bloque de la contraseña (PA-25)", () => {
       // El botón que se pulsó ya no existe: el foco lo toma la nota, que es además lo que se
       // lo dice a quien usa lector de pantalla. Sin eso caería al documento.
       expect(note).toHaveFocus();
+      // Con el foco en la nota, no hace falta decirlo además por la región viva.
+      expect(within(block()).getByRole("status")).toBeEmptyDOMElement();
       expect(await a11yViolations(container)).toEqual([]);
     });
 
@@ -1017,6 +1019,8 @@ describe("el bloque de la contraseña (PA-25)", () => {
       render(<AccountScreen name="Ana" email="ana@prueba.test" sessions={ALONE} />);
       await user.type(currentField(), OLD);
       await user.type(newField(), NEW);
+      const voice = block().querySelector(':scope > [role="status"]');
+      expect(voice).toBeEmptyDOMElement();
       await user.click(changeButton());
       // Mientras la respuesta va en camino, la persona se pone a escribir su nombre.
       await user.click(nameField());
@@ -1026,9 +1030,13 @@ describe("el bloque de la contraseña (PA-25)", () => {
         finish({ kind: "recover_only" });
         await Promise.resolve();
       });
-      expect(await within(block()).findByText(NOTE)).toBeVisible();
+      expect(await within(block()).findByText(NOTE, { selector: "p" })).toBeVisible();
       expect(nameField()).toHaveFocus();
       expect(nameField()).toHaveValue("Ana María");
+      // Pero se entera: se lo dice una región viva que existía desde antes de la respuesta.
+      // Es el mismo elemento: una región que nace con su texto no siempre se anuncia.
+      expect(within(block()).getByRole("status")).toHaveTextContent(NOTE);
+      expect(within(block()).getByRole("status")).toBe(voice);
     });
   });
 

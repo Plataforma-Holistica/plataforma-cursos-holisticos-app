@@ -117,12 +117,13 @@ Desde T-105 el Auth local tiene prendido el segundo factor por aplicación de c�
 (TOTP) y un gancho, `[auth.hook.mfa_verification_attempt]`, que apunta a una función de
 la base (`private.second_factor_attempt()`). Auth la llama en cada intento de verificar
 un código, y si la función falta o lanza, rechaza toda verificación: una migración que la
-renombre o le quite el permiso a `supabase_auth_admin` deja al equipo sin entrar. Lo mismo
-pasa si le falta uno de sus cuatro parámetros o no es un entero dentro de sus límites: la
-función rechaza todo en vez de quedarse sin freno. TOTP queda prendido para toda cuenta, no
-solo para el equipo. En el proyecto alojado, Supabase da ese gancho solo en los planes
-Teams y Enterprise: prenderlo, o aceptar por escrito el riesgo de no tenerlo, es una
-decisión de la lista de salida.
+renombre o le quite el permiso a `supabase_auth_admin` deja al equipo sin entrar. Tampoco
+entra nadie si a la función le falta uno de sus cuatro parámetros, o no es un entero de 1
+en adelante: rechaza todo en vez de quedarse sin freno, con un mensaje propio («not
+available», no «too many attempts») y un aviso en el registro de la base. TOTP queda
+prendido para toda cuenta, no solo para el equipo. En el proyecto alojado ese gancho pide
+los planes Teams o Enterprise de Supabase: ver la lista de salida
+(`../planeacion/06-plan-implementacion.md` §8).
 
 Versiones que no se suben sin revisar:
 
@@ -331,7 +332,8 @@ falla. Doce precisiones que la tabla no dice:
       dice que se recupera desde el correo y enlaza ahí. Lo sabe la página al pintar; si la
       cuenta ganó su factor con la pantalla abierta, lo descubre el envío y el bloque cambia:
       el botón pulsado desaparece con el formulario, y la nota toma el foco si quedó sin
-      dueño.
+      dueño. A quien ya se fue a otro campo se le dice por una región viva que existe desde
+      antes, en el mismo lugar en las dos formas del bloque.
     - Un bloque con contraseñas (el de la contraseña) no devuelve ninguna: después de
       cada respuesta sus campos se arman de nuevo, vacíos, y lo que el navegador detiene
       antes de enviar deja lo escrito como está. Su resultado va arriba de los campos, no
@@ -558,9 +560,8 @@ falla. Doce precisiones que la tabla no dice:
     no existe o la contraseña es la que ya tenía, por la API de administración: por ese
     camino el aviso CO-26 no sale, y se reporta. Hay un tercer caso que va por ahí y no es
     una falla: la cuenta tiene segundo factor, y Auth no deja cambiar la contraseña con la
-    sesión de un enlace. Lleva su propio reporte (`recovery_with_second_factor`), porque a
-    esa cuenta tampoco le sale el aviso y nadie más le dice a su dueña que alguien con su
-    buzón le cambió la contraseña. Con el buzón se recupera la
+    sesión de un enlace. Lleva su propio reporte (`recovery_with_second_factor`), para que
+    una persona lo sepa. Con el buzón se recupera la
     contraseña, también la de esas cuentas; el segundo factor no se toca, y sin él no se
     entra a administración, no se cambia la contraseña otra vez ni se tocan los factores.
     Los demás pares de la cuenta pierden la confianza y conservan sus fallos.
@@ -571,8 +572,7 @@ falla. Doce precisiones que la tabla no dice:
     por factor. Mientras dura la espera no pasa ni el código correcto, y cuando el gancho
     rechaza, Auth además cierra todas las sesiones de esa cuenta, no solo la del intento
     (medido): a quien se equivocó de más hay que decirle que vuelva a entrar, o que
-    recupere su contraseña desde su correo. Nadie recibe aviso de un factor frenado: queda
-    pendiente.
+    recupere su contraseña desde su correo.
   - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer })` existe
     para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
     propia dirección (`tests/integration/helpers/account.ts`).

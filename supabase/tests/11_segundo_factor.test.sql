@@ -7,7 +7,7 @@
 -- factor verificado, que es lo que decide cómo cambia su contraseña.
 begin;
 \ir _ayuda.psql
-select plan(52);
+select plan(59);
 
 select pruebas.alta('e0000000-0000-0000-0000-000000000001', 'con-factor@prueba.test');
 select pruebas.alta('e0000000-0000-0000-0000-000000000002', 'sin-factor@prueba.test');
@@ -240,6 +240,10 @@ begin
 end
 $$;
 
+-- Cada rechazo por configuración deja un aviso en el registro de la base. Aquí serían una
+-- docena de renglones de ruido en la salida de las pruebas: se callan hasta el final.
+set local client_min_messages to error;
+
 select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', null), 'reject',
   'sin INTENTOS_ANTES_DE_FRENO no pasa nadie, ni con el código correcto');
 select is(pruebas.con_parametro('FRENO_ESPERA_BASE', null), 'reject', 'sin FRENO_ESPERA_BASE, tampoco');
@@ -249,14 +253,45 @@ select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '0'), 'reject', 'un paráme
 select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '-1'), 'reject', 'ni uno negativo');
 select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '1.5'), 'reject', 'ni uno con decimales');
 select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '"1"'), 'reject', 'ni un texto, aunque diga un número');
-select is(pruebas.con_parametro('FRENO_OLVIDO', '99999999999'), 'reject',
-  'ni uno que no cabe en un entero: se rechaza, no se lanza');
-select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1001'), 'reject', 'ni uno por encima de su máximo');
-select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1000'), 'continue', 'en su máximo, sí');
-select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1'), 'continue', 'y en uno, también');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', 'null'), 'reject', 'ni el nulo de JSON');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', 'true'), 'reject', 'ni un booleano');
+select is(pruebas.con_parametro('FRENO_ESPERA_BASE', '[5]'), 'reject', 'ni una lista');
+select is(pruebas.con_parametro('FRENO_OLVIDO', '9999999999999999999999'), 'reject',
+  'ni uno que no cabe en ningún entero: se rechaza, no se lanza');
+select is(pruebas.con_parametro('FRENO_OLVIDO', '2147483648'), 'reject', 'tampoco por uno');
+-- De uno en adelante vale cualquier entero, que es lo que acepta quien guarda los
+-- parámetros: un máximo propio de esta función dejaría al equipo sin entrar con un valor
+-- que la pantalla de parámetros habría aceptado.
+select is(pruebas.con_parametro('FRENO_OLVIDO', '2147483647'), 'continue', 'el entero más grande, sí');
+select is(pruebas.con_parametro('INTENTOS_ANTES_DE_FRENO', '1'), 'continue', 'y uno, también');
 select is_empty(
   $$select 1 from private.second_factor_attempts where factor_id = 'fac70000-0000-0000-0000-000000000002'$$,
   'y nada de eso deja una fila');
+
+-- Rechazar por configuración no se confunde con el freno: lleva su propio mensaje.
+insert into pruebas.parametro_falso values ('FRENO_OLVIDO', null);
+select is(
+  private.second_factor_attempt(jsonb_build_object(
+    'factor_id', 'fac70000-0000-0000-0000-000000000002', 'valid', true)) ->> 'message',
+  'Second factor verification is not available.',
+  'cuando rechaza por sus parámetros lo dice con otro mensaje que cuando frena');
+delete from pruebas.parametro_falso;
+
+-- Con las tres esperas en el entero más grande nada se desborda: ni la espera, ni
+-- duplicarla, ni mirar si los fallos ya son viejos.
+insert into pruebas.parametro_falso values
+  ('INTENTOS_ANTES_DE_FRENO', '1'), ('FRENO_ESPERA_BASE', '2147483647'),
+  ('FRENO_ESPERA_TOPE', '2147483647'), ('FRENO_OLVIDO', '2147483647');
+select is(pruebas.intento('fac70000-0000-0000-0000-000000000002', false), 'reject',
+  'con las esperas en el entero más grande, el primer fallo frena');
+update private.second_factor_attempts set locked_until = clock_timestamp() - interval '1 second'
+  where factor_id = 'fac70000-0000-0000-0000-000000000002';
+select is(pruebas.intento('fac70000-0000-0000-0000-000000000002', false), 'reject',
+  'y el siguiente también, sin desbordarse');
+select results_eq(
+  $$select fallos, espera from pruebas.freno('fac70000-0000-0000-0000-000000000002')$$,
+  $$values (2, make_interval(mins => 2147483647))$$,
+  'con la espera en su tope');
 
 select pruebas.limpiar();
 select * from finish();
