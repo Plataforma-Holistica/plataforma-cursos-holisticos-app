@@ -939,8 +939,9 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
     const summary = await screen.findByRole("alert");
     expect(summary).toHaveFocus();
 
-    // El segundo envío tarda. Mientras, el resumen sigue diciendo lo del anterior, pero no
-    // vuelve a tomar el foco: no hay un error nuevo que anunciar.
+    // El segundo envío tarda. Mientras, lo que dijo la respuesta anterior deja de decirse:
+    // la última palabra es la revisión del navegador, que no encontró nada. El foco se queda
+    // donde estaba.
     let finish: (state: ChangePasswordState) => void = () => undefined;
     actions.completeRecoveryAction.mockReturnValue(new Promise<ChangePasswordState>((resolve) => (finish = resolve)));
     const again = screen.getByLabelText("Contraseña nueva");
@@ -948,7 +949,8 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
     await user.keyboard("otra clave larga{Enter}");
     expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
     expect(again).toHaveFocus();
-    expect(screen.getByRole("alert")).not.toHaveFocus();
+    expect(again).not.toBeInvalid();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {
       finish({ kind: "unavailable", attempt: 2 });
@@ -981,7 +983,7 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
       finish({ kind: "link_dead" });
       await Promise.resolve();
     });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+    expect(await screen.findByRole("heading", { level: 1, name: "Ese enlace ya no sirve" })).toBeVisible();
   });
 
   it("en «Completa tu cuenta», un nombre marcado al salir del campo no vuelve a marcarse cuando el envío corregido va en camino", async () => {
@@ -1051,5 +1053,115 @@ describe("«Completa tu cuenta»: el foco con errores del servidor a la vista", 
       await Promise.resolve();
     });
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+  });
+});
+
+describe("manda la última revisión, sea del navegador o del servidor", () => {
+  it("lo que el servidor rechazó y ya se corrigió no vuelve a marcarse mientras el envío bueno va en camino", async () => {
+    answers<ChangePasswordState>(actions.completeRecoveryAction, { kind: "invalid", problem: "malformed", attempt: 1 });
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    await user.type(screen.getByLabelText("Contraseña nueva"), "una clave larga{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esa contraseña tiene caracteres que no podemos guardar. Elige otra.");
+    const password = screen.getByLabelText("Contraseña nueva");
+    expect(password).toBeInvalid();
+
+    // La corrige y sale del campo: se desmarca.
+    await user.type(password, "otra clave larga");
+    await user.click(screen.getByRole("heading", { level: 1 }));
+    expect(password).not.toBeInvalid();
+
+    // Envía con Intro. Mientras la respuesta no llega, el campo no vuelve al error de antes.
+    let finish: (state: ChangePasswordState) => void = () => undefined;
+    actions.completeRecoveryAction.mockReturnValue(new Promise<ChangePasswordState>((resolve) => (finish = resolve)));
+    await user.click(password);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    expect(password).not.toBeInvalid();
+    expect(screen.queryByText("Esa contraseña tiene caracteres que no podemos guardar. Elige otra.")).not.toBeInTheDocument();
+
+    // Si el servidor la vuelve a rechazar, entonces sí: es su respuesta la que manda.
+    await act(async () => {
+      finish({ kind: "invalid", problem: "too_long", attempt: 2 });
+      await Promise.resolve();
+    });
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent("Esa contraseña es demasiado larga. Elige una más corta.");
+    expect(summary).toHaveFocus();
+    expect(screen.getByLabelText("Contraseña nueva")).toBeInvalid();
+  });
+
+  it("en «Completa tu cuenta», tras un rechazo del servidor y otro del navegador, el envío bueno no le devuelve el foco a los errores viejos", async () => {
+    answers<CompleteState>(actions.completeRegistrationAction, { kind: "invalid", name: "Ana Prueba", fields: { name: "invalid" }, attempt: 1 });
+    const user = userEvent.setup();
+    render(complete);
+    await fillComplete(user);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByText(/Hay 1 dato por corregir/)).toBeVisible();
+
+    // La respuesta vació la contraseña y las casillas: enviar así lo detiene el navegador,
+    // con otros errores, y el resumen toma el foco.
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    const summary = await screen.findByText(/Hay 4 datos por corregir/);
+    expect(summary.closest('[role="alert"]')).toHaveFocus();
+    // Los del servidor ya no se dicen: la última revisión es la del navegador.
+    expect(screen.queryByText(/Ese nombre tiene caracteres/)).not.toBeInTheDocument();
+
+    // Corrige y envía con Intro desde el nombre. La respuesta todavía no llega.
+    let finish: (state: CompleteState) => void = () => undefined;
+    actions.completeRegistrationAction.mockReturnValue(new Promise<CompleteState>((resolve) => (finish = resolve)));
+    await user.type(screen.getByLabelText("Contraseña"), "una clave larga");
+    for (const box of screen.getAllByRole("checkbox")) await user.click(box);
+    const name = screen.getByLabelText("Nombre");
+    await user.click(name);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
+    // El foco se queda en el campo, y no reaparece ni el error del servidor ni el resumen.
+    expect(name).toHaveFocus();
+    expect(name).not.toBeInvalid();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finish({ kind: "link_dead" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Ese enlace ya no sirve" })).toBeVisible();
+  });
+
+  it("pulsar la etiqueta de la contraseña no es salir del campo: el foco vuelve a él", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    const password = screen.getByLabelText("Contraseña nueva");
+    await user.type(password, "corta");
+    await user.click(screen.getByText("Contraseña nueva"));
+    expect(password).toHaveFocus();
+    expect(password).not.toBeInvalid();
+  });
+});
+
+describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra vez", () => {
+  it("al cambiar la contraseña", async () => {
+    const user = userEvent.setup();
+    render(<ChangePasswordScreen token={TOKEN} />);
+    await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+    // Vuelve al campo y envía igual: los mismos errores, pero es otra revisión.
+    await user.click(screen.getByLabelText("Contraseña nueva"));
+    expect(screen.getByRole("alert")).not.toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveFocus();
+    expect(actions.completeRecoveryAction).not.toHaveBeenCalled();
+  });
+
+  it("al completar la cuenta", async () => {
+    const user = userEvent.setup();
+    render(complete);
+    await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+    await user.click(screen.getByLabelText("Nombre"));
+    expect(screen.getByRole("alert")).not.toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveFocus();
+    expect(actions.completeRegistrationAction).not.toHaveBeenCalled();
   });
 });

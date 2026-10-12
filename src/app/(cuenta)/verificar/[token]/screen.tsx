@@ -179,7 +179,7 @@ export interface CompleteScreenProps {
 export function CompleteScreen({ token, view }: CompleteScreenProps) {
   const [state, action, pending] = useActionState(completeRegistrationAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, checked] = useLocalChecks<CompleteFields>();
+  const [local, checked] = useLocalChecks<CompleteFields>("attempt" in state ? state.attempt : 0);
 
   if (state.kind === "link_dead") return <RegistrationLinkDeadScreen />;
   if (state.kind === "recover_instead") return <RegistrationUnfinishedScreen />;
@@ -194,7 +194,9 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const fields = local.found ?? (state.kind === "invalid" ? state.fields : {});
+  // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
+  // servidor, y entonces lo que esa respuesta dijo ya no se pinta.
+  const fields = local.latest ? (local.found ?? {}) : state.kind === "invalid" ? state.fields : {};
   const name = state.kind === "idle" ? "" : state.name;
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino: si no, al
   // corregir un error del navegador volvería a anunciarse el aviso de antes.
@@ -204,7 +206,7 @@ export function CompleteScreen({ token, view }: CompleteScreenProps) {
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.title}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.failed} />
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.checks} />
         {answered && state.kind === "repainted" && (
           <InlineAlert key={sent} tone="warning" live>
             {consents.textsChanged}

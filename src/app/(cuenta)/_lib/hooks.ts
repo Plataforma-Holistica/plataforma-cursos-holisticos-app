@@ -144,30 +144,44 @@ export function useSeenOnBlur<Problem extends string>(
 
 /** Lo que lleva de las revisiones que el navegador hace de un formulario antes de enviarlo. */
 export interface LocalChecks<Found> {
+  /**
+   * Si la última palabra sobre el formulario es de una revisión del navegador, y no de una
+   * respuesta del servidor. Cuando lo es, lo que hay que corregir es `found` y nada más: lo
+   * que dijo la respuesta anterior ya no se pinta, aunque la siguiente todavía no llegue.
+   */
+  latest: boolean;
   /** Lo que encontró la última, o nulo si no encontró nada y el formulario se envió. */
   found: Found | null;
   /**
-   * Cuántas encontraron algo. Es lo que mueve el foco al resumen de errores: un envío sin
-   * nada que corregir no lo mueve, aunque todavía se vean los errores del envío anterior.
-   */
-  failed: number;
-  /**
-   * Cuántas hubo, encontraran algo o no. No retrocede: es contra lo que se mide si lo visto
-   * al salir de un campo sigue mandando (`useSeenOnBlur`).
+   * Cuántas hubo, encontraran algo o no. No retrocede ni se queda quieta: es contra lo que
+   * se mide si lo visto al salir de un campo sigue mandando (`useSeenOnBlur`), y lo que le
+   * dice al resumen de errores que hay una revisión nueva.
    */
   checks: number;
 }
 
 /**
- * Las revisiones del navegador antes de enviar. Son dos cuentas y no una a propósito: con
- * una sola que retrocedía al enviar bien, un error visto antes al salir del campo volvía a
- * pintarse; y con una sola que crecía siempre, el resumen tomaba el foco en un envío bueno.
+ * Las revisiones del navegador antes de enviar, y si son lo último que se sabe del formulario.
  *
+ * La regla de la pantalla es la misma que la de cada campo: manda lo último que pasó. Una
+ * respuesta del servidor manda hasta la siguiente revisión del navegador, y esa revisión
+ * manda hasta la siguiente respuesta. Sin eso, al enviar bien lo que el servidor había
+ * rechazado, el campo ya corregido volvía a marcarse con el error viejo mientras la
+ * respuesta nueva venía en camino, y el resumen de errores le quitaba el foco para
+ * repetirlo. Con la regla, un envío sin nada que corregir deja el resumen vacío, y un
+ * resumen vacío no toma el foco.
+ *
+ * @param answers Cuántas respuestas del servidor ha recibido el formulario.
  * @returns Lo que llevan, y con qué anotar una revisión: lo que encontró, o nulo.
  */
-export function useLocalChecks<Found>(): readonly [LocalChecks<Found>, (found: Found | null) => void] {
-  const [local, setLocal] = useState<LocalChecks<Found>>({ found: null, failed: 0, checks: 0 });
-  const record = (found: Found | null) =>
-    setLocal((current) => ({ found, failed: current.failed + (found === null ? 0 : 1), checks: current.checks + 1 }));
-  return [local, record];
+export function useLocalChecks<Found>(answers: number): readonly [LocalChecks<Found>, (found: Found | null) => void] {
+  // `after`: cuántas respuestas había cuando se hizo la última revisión.
+  const [local, setLocal] = useState<{ found: Found | null; checks: number; after: number | null }>({
+    found: null,
+    checks: 0,
+    after: null,
+  });
+  const record = (found: Found | null) => setLocal((current) => ({ found, checks: current.checks + 1, after: answers }));
+  const latest = local.after === answers;
+  return [{ latest, found: latest ? local.found : null, checks: local.checks }, record];
 }

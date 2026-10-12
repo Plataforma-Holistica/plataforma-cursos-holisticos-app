@@ -275,6 +275,11 @@ describe("pedir un correo corre detrás de la respuesta", () => {
     // La lista de lo que sí sale armado existe y se leyó bien.
     expect(armed).toMatch(/\bsignIn\b/);
     expect(armed).not.toMatch(/\brequest(Registration|Recovery)\b/);
+    // El objeto con todos los servicios armados no sale de ese archivo por ningún otro
+    // lado: se crea, se desestructura en esa lista, y nada más lo nombra.
+    expect(service.match(/(?<![\w/])services\b(?!\/)/g)).toHaveLength(2);
+    expect(service).toMatch(/^const services = createAccountServices\(\);$/m);
+    expect(service).not.toMatch(/^export default\b/m);
     // Ni en esa lista ni exportadas de ninguna otra forma, en ese archivo.
     expect(service).not.toMatch(/^export\b[^\n;]*\brequest(Registration|Recovery)\b/m);
     expect(service).not.toMatch(/^export \{[^}]*\brequest(Registration|Recovery)\b[^}]*\}/m);

@@ -307,23 +307,23 @@ describe("lo que encontraron las revisiones de los arreglos", () => {
 });
 
 describe("las revisiones del navegador antes de enviar", () => {
-  const checks = () => renderHook(() => useLocalChecks<string>());
+  const checks = (answers = 0) => renderHook((props: { answers: number }) => useLocalChecks<string>(props.answers), { initialProps: { answers } });
 
-  it("de entrada no hay ninguna", () => {
-    expect(checks().result.current[0]).toEqual({ found: null, failed: 0, checks: 0 });
+  it("de entrada no hay ninguna, y la última palabra no es del navegador", () => {
+    expect(checks().result.current[0]).toEqual({ latest: false, found: null, checks: 0 });
   });
 
-  it("una que encuentra algo cuenta en las dos cuentas, y dice qué encontró", () => {
+  it("una que encuentra algo cuenta, dice qué encontró y pasa a ser lo último", () => {
     const { result } = checks();
     act(() => result.current[1]("falta el nombre"));
-    expect(result.current[0]).toEqual({ found: "falta el nombre", failed: 1, checks: 1 });
+    expect(result.current[0]).toEqual({ latest: true, found: "falta el nombre", checks: 1 });
   });
 
-  it("una que no encuentra nada no mueve la cuenta de las fallidas: el resumen de errores no toma el foco en un envío bueno", () => {
+  it("una que no encuentra nada también cuenta y también es lo último: ya no hay nada que corregir", () => {
     const { result } = checks();
     act(() => result.current[1]("falta el nombre"));
     act(() => result.current[1](null));
-    expect(result.current[0]).toEqual({ found: null, failed: 1, checks: 2 });
+    expect(result.current[0]).toEqual({ latest: true, found: null, checks: 2 });
   });
 
   it("la cuenta de todas nunca retrocede ni se queda quieta: lo visto antes al salir de un campo no vuelve a mandar", () => {
@@ -334,6 +334,30 @@ describe("las revisiones del navegador antes de enviar", () => {
       seen.push(result.current[0].checks);
     }
     expect(seen).toEqual([1, 2, 3, 4, 5]);
-    expect(result.current[0].failed).toBe(2);
+  });
+
+  it("al llegar una respuesta del servidor, la última palabra es suya: lo que el navegador encontró ya no se dice", () => {
+    const { result, rerender } = checks(0);
+    act(() => result.current[1]("falta el nombre"));
+    rerender({ answers: 1 });
+    // La cuenta se queda; lo encontrado, no.
+    expect(result.current[0]).toEqual({ latest: false, found: null, checks: 1 });
+  });
+
+  it("y la siguiente revisión del navegador vuelve a mandar sobre esa respuesta", () => {
+    const { result, rerender } = checks(0);
+    act(() => result.current[1](null));
+    rerender({ answers: 1 });
+    expect(result.current[0].latest).toBe(false);
+    act(() => result.current[1](null));
+    expect(result.current[0]).toEqual({ latest: true, found: null, checks: 2 });
+    rerender({ answers: 2 });
+    expect(result.current[0].latest).toBe(false);
+    act(() => result.current[1]("otra cosa"));
+    expect(result.current[0]).toEqual({ latest: true, found: "otra cosa", checks: 3 });
+  });
+
+  it("una pantalla que ya trae respuestas al montarse no da por suya la última palabra", () => {
+    expect(checks(3).result.current[0].latest).toBe(false);
   });
 });

@@ -137,9 +137,10 @@ export function NewPasswordField({ id, label, problem, round = 0 }: NewPasswordF
     // escribir no se marca por querer verla. Se sabe por a dónde fue el foco o, donde un
     // botón no lo recibe al pulsarlo, por dónde bajó el botón del ratón.
     if (event.relatedTarget instanceof Node && wrapper.contains(event.relatedTarget)) return;
-    // Solo el botón: pulsar sobre la etiqueta o sobre la regla sí es salir del campo.
-    const button = pressedElement()?.closest("button") ?? null;
-    if (button !== null && wrapper.contains(button)) return;
+    // El botón y la etiqueta, que devuelve el foco al campo. Pulsar sobre la regla o sobre
+    // el mensaje sí es salir.
+    const part = pressedElement()?.closest("button, label") ?? null;
+    if (part !== null && wrapper.contains(part)) return;
     const field = wrapper.querySelector<HTMLInputElement>('input[name="password"]');
     if (field === null) return;
     const checked = checkPassword(field.value);

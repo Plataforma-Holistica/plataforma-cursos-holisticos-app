@@ -142,7 +142,7 @@ export interface ConsentsScreenProps {
 export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
   const [state, action, pending] = useActionState(completeAccountAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, checked] = useLocalChecks<ConsentsFields>();
+  const [local, checked] = useLocalChecks<ConsentsFields>("attempt" in state ? state.attempt : 0);
 
   if (state.kind === "suspended") return <SuspendedScreen withSession />;
 
@@ -156,7 +156,9 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const fields = local.found ?? (state.kind === "invalid" ? state.fields : {});
+  // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
+  // servidor, y entonces lo que esa respuesta dijo ya no se pinta.
+  const fields = local.latest ? (local.found ?? {}) : state.kind === "invalid" ? state.fields : {};
   // Lo que dijo el último envío deja de decirse mientras hay otro en camino.
   const answered = local.found === null && !pending;
   const name = state.kind === "idle" ? "" : state.name;
@@ -169,7 +171,7 @@ export function ConsentsScreen({ view, returnTo }: ConsentsScreenProps) {
         <p className="text-body-l text-text-2">{updated ? text.introUpdated : text.introComplete}</p>
       </div>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.failed} />
+        <FormErrorSummary errors={summaryOf(view, fields)} attempt={sent + local.checks} />
         {answered && state.kind === "repainted" && state.reason === "texts_changed" && (
           <InlineAlert key={sent} tone="warning" live>
             {text.textsChanged}

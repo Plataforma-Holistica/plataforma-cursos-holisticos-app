@@ -337,7 +337,8 @@ describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
     await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
     expect(await screen.findByRole("alert")).toHaveFocus();
 
-    // El segundo envío tarda: el resumen sigue diciendo lo del anterior, sin volver a tomar el foco.
+    // El segundo envío tarda. Mientras, lo que dijo la respuesta anterior deja de decirse: la
+    // última palabra es la revisión del navegador, que no encontró nada.
     let finish: (state: ConsentsState) => void = () => undefined;
     actions.completeAccountAction.mockReturnValue(new Promise<ConsentsState>((resolve) => (finish = resolve)));
     await all(user);
@@ -346,6 +347,8 @@ describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
     expect(name).toHaveFocus();
+    expect(name).not.toBeInvalid();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {
       finish({ kind: "unavailable", name: "Ana", attempt: 2 });
@@ -377,5 +380,19 @@ describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
       await Promise.resolve();
     });
     expect(await screen.findByText("No pudimos hacerlo. Intenta de nuevo en un momento.")).toBeVisible();
+  });
+});
+
+describe("PA-15: el resumen vuelve a tomar el foco cuando la misma revisión falla otra vez", () => {
+  it("dos revisiones del navegador seguidas, con los mismos errores", async () => {
+    const user = userEvent.setup();
+    render(<ConsentsScreen view={complete} returnTo="/inicio" />);
+    await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
+    expect(await screen.findByRole("alert")).toHaveFocus();
+    await user.click(screen.getByLabelText("Nombre"));
+    expect(screen.getByRole("alert")).not.toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveFocus();
+    expect(actions.completeAccountAction).not.toHaveBeenCalled();
   });
 });

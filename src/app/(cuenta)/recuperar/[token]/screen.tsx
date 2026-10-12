@@ -30,7 +30,7 @@ export interface ChangePasswordScreenProps {
 export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
   const [state, action, pending] = useActionState(completeRecoveryAction, IDLE);
   // Lo que el navegador encontró antes de enviar. Mientras exista, nada se manda.
-  const [local, checked] = useLocalChecks<PasswordProblem>();
+  const [local, checked] = useLocalChecks<PasswordProblem>("attempt" in state ? state.attempt : 0);
 
   if (state.kind === "link_dead") return <RecoveryLinkDeadScreen />;
   if (state.kind === "request_new_link") return <RecoveryUnfinishedScreen />;
@@ -43,14 +43,16 @@ export function ChangePasswordScreen({ token }: ChangePasswordScreenProps) {
   }
 
   const sent = state.kind === "idle" ? 0 : state.attempt;
-  const problem = local.found ?? (state.kind === "invalid" ? state.problem : undefined);
+  // Manda la última revisión: la del navegador, si es más nueva que la respuesta del
+  // servidor, y entonces lo que esa respuesta dijo ya no se pinta.
+  const problem = local.latest ? (local.found ?? undefined) : state.kind === "invalid" ? state.problem : undefined;
   const errors: FormError[] = problem ? [{ fieldId: PASSWORD_ID, message: passwordError(problem) }] : [];
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
       <h1 className="text-h1">{text.changeTitle}</h1>
       <form action={action} onSubmit={checkBeforeSending} noValidate className="flex flex-col gap-6">
-        <FormErrorSummary errors={errors} attempt={sent + local.failed} />
+        <FormErrorSummary errors={errors} attempt={sent + local.checks} />
         {local.found === null && !pending && state.kind === "unavailable" && (
           <InlineAlert key={sent} tone="danger" live>
             {account.common.unavailable}

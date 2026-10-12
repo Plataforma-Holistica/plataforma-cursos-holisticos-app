@@ -268,10 +268,12 @@ falla. Doce precisiones que la tabla no dice:
     formulario: manda lo último que pasó. Los campos que se repiten (el nombre, el correo
     al que se manda un enlace y la contraseña nueva) viven en `_lib/fields.tsx`; un campo
     nuevo con validación al salir se hace igual, no con su propio estado. Una pantalla que
-    revisa antes de enviar lleva sus revisiones con `useLocalChecks`, que son dos cuentas
-    a propósito: las que encontraron algo, que mueven el foco al resumen de errores, y
-    todas, contra las que se mide qué manda en un campo. Con una sola, o un error viejo
-    volvía a pintarse o el resumen tomaba el foco en un envío bueno.
+    revisa antes de enviar lleva sus revisiones con `useLocalChecks`, y sigue la misma
+    regla que cada campo: una revisión del navegador más nueva que la última respuesta del
+    servidor tapa lo que esa respuesta dijo, aunque la siguiente todavía no llegue. Su
+    cuenta de revisiones no retrocede, también cuentan las que salen bien: contra ella se
+    mide qué manda en un campo, y con ella el resumen de errores sabe que hay algo nuevo
+    que anunciar.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
