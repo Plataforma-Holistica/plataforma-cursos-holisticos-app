@@ -286,7 +286,11 @@ const openSessionRow = z.object({
 export interface NotedSession {
   id: string;
   openedAt: string;
-  /** La última vez que Auth la renovó o la usó, o nulo si no lo dice. */
+  /**
+   * La última vez que Auth renovó su token, o nulo si no lo dice. Es lo más cercano a una
+   * «última actividad»: Auth no mueve esa fecha con cada uso, solo al renovar, así que va
+   * hasta lo que dura un token de acceso por detrás.
+   */
   lastActiveAt: string | null;
   userAgent: string | null;
 }
@@ -304,9 +308,16 @@ export async function listSessions(tx: Tx): Promise<NotedSession[]> {
   return rows.map((row) => ({ id: row.id, openedAt: row.opened_at, lastActiveAt: row.last_active_at, userAgent: row.user_agent }));
 }
 
-/** Cierra esa sesión de quien actúa, en Auth y en lo anotado. Devuelve lo que contestó la base. */
-export async function closeSession(tx: Tx, sessionId: string): Promise<string> {
-  const [row] = await tx.query(sql`select private.close_session(${sessionId}::uuid) as state`, stateRow);
+/**
+ * Cierra esa sesión de quien actúa, en Auth y en lo anotado. `askingSessionId` es la sesión
+ * con la que se pide: la base exige que siga reconocida, y no la cierra por aquí. Devuelve
+ * lo que contestó la base.
+ */
+export async function closeSession(tx: Tx, sessionId: string, askingSessionId: string): Promise<string> {
+  const [row] = await tx.query(
+    sql`select private.close_session(${sessionId}::uuid, ${askingSessionId}::uuid) as state`,
+    stateRow,
+  );
   return row?.state ?? "";
 }
 

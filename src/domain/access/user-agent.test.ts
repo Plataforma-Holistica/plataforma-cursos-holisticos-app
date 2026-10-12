@@ -64,7 +64,76 @@ describe("describeUserAgent", () => {
     expect(describeUserAgent("NoChrome/1.0 MiEdg/2.0 xFirefox/3 UnLinuxito")).toEqual({ browser: null, system: null });
   });
 
-  it("solo mira el principio de un texto desmedido", () => {
+  // Un caso por condición de cada regla: quitarle a cualquiera su principio de palabra, su
+  // fin de palabra, su número o una de sus formas tiene que hacer fallar alguno de estos.
+  it.each([
+    ["Edg", "Edg/126"], ["Edge", "Edge/18"], ["EdgA", "EdgA/126"], ["EdgiOS", "EdgiOS/126"],
+  ])("Edge se dice de cuatro maneras: %s", (_form, mark) => {
+    expect(describeUserAgent(mark).browser).toBe("edge");
+  });
+
+  it.each([
+    ["OPR", "OPR/111"], ["OPiOS", "OPiOS/16"], ["Opera", "Opera/9.80 (Windows NT 6.1) Presto/2.12.388 Version/12.16"],
+  ])("Opera, de tres: %s", (_form, mark) => {
+    expect(describeUserAgent(mark).browser).toBe("opera");
+  });
+
+  it.each([
+    ["Firefox", "Firefox/127", "firefox"], ["FxiOS", "FxiOS/127", "firefox"],
+    ["Chrome", "Chrome/126", "chrome"], ["CriOS", "CriOS/126", "chrome"],
+    ["SamsungBrowser", "SamsungBrowser/25", "samsung"],
+    ["Version y Safari", "Version/17 Safari/605", "safari"],
+  ] as const)("%s solo, sin nada más alrededor", (_form, mark, browser) => {
+    expect(describeUserAgent(mark).browser).toBe(browser);
+  });
+
+  it.each([
+    "xEdg/126", "xEdge/18", "xEdgA/1", "xEdgiOS/1", "xOPR/111", "xOPiOS/16", "xOpera/9", "xSamsungBrowser/25",
+    "xFirefox/127", "xFxiOS/127", "xChrome/126", "xCriOS/126", "xVersion/17 Safari/605", "Version/17 xSafari/605",
+    "a-Chrome/126", "a_Firefox/127",
+  ])("pegado a otra palabra no es ese navegador: %s", (text) => {
+    expect(describeUserAgent(text).browser).toBeNull();
+  });
+
+  it.each([
+    "Edg/x", "Edge/", "OPR/x", "Opera/x", "SamsungBrowser/x", "Firefox/x", "FxiOS/", "Chrome/x", "CriOS/x",
+    "Version/x Safari/605", "Version/17 Safari/x", "Chrome", "Firefox",
+  ])("sin su número de versión no es ese navegador: %s", (text) => {
+    expect(describeUserAgent(text).browser).toBeNull();
+  });
+
+  it("el orden entre Chrome y Safari: lo que trae las dos marcas es Chrome", () => {
+    // La vista web de Android dice «Version/4.0» y «Chrome/…» a la vez.
+    const webView = `${ANDROID.replace(")", "; wv)")} ${KIT} Version/4.0 Chrome/126.0.0.0 Mobile Safari/537.36`;
+    expect(describeUserAgent(webView)).toEqual({ browser: "chrome", system: "android" });
+  });
+
+  it.each([
+    ["iPhone", "ios"], ["iPad", "ios"], ["iPod", "ios"], ["Android", "android"], ["CrOS", "chromeos"],
+    ["Windows", "windows"], ["Macintosh", "macos"], ["Mac OS X", "macos"], ["Linux", "linux"],
+  ] as const)("el sistema, con su palabra sola: %s", (word, system) => {
+    expect(describeUserAgent(`(${word})`).system).toBe(system);
+    // Pegada a otra por delante, o seguida de más letras, ya no es esa palabra.
+    expect(describeUserAgent(`(x${word})`).system).toBeNull();
+    expect(describeUserAgent(`(a-${word})`).system).toBeNull();
+    expect(describeUserAgent(`(${word}x)`).system).toBeNull();
+  });
+
+  it.each([
+    ["un iPhone no es un Mac, aunque diga «like Mac OS X»", IPHONE, "ios"],
+    ["Android no es Linux, aunque lo nombre", ANDROID, "android"],
+    ["ChromeOS tampoco", "Mozilla/5.0 (X11; Linux; CrOS x86_64 14541.0.0)", "chromeos"],
+  ] as const)("el orden entre sistemas: %s", (_case, text, system) => {
+    expect(describeUserAgent(text).system).toBe(system);
+  });
+
+  it("solo mira los primeros 512 caracteres, ni uno más ni uno menos", () => {
+    // La marca termina justo en el carácter 512: se ve.
+    expect(describeUserAgent(`${"x".repeat(506)} Linux`).system).toBe("linux");
+    expect(describeUserAgent(`${"x".repeat(503)} Chrome/1`).browser).toBe("chrome");
+    // Un carácter más allá, queda cortada y ya no es esa palabra.
+    expect(describeUserAgent(`${"x".repeat(507)} Linux`).system).toBeNull();
+    expect(describeUserAgent(`${"x".repeat(504)} Chrome/1`).browser).toBeNull();
     const padding = "x".repeat(600);
     expect(describeUserAgent(`${padding} ${WIN} ${KIT} Chrome/126.0.0.0 Safari/537.36`)).toEqual({ browser: null, system: null });
   });

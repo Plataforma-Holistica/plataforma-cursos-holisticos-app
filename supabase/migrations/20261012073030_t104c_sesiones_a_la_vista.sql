@@ -85,16 +85,32 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------------------
--- Cerrar una sesión de quien actúa: la borra en Auth y quita lo anotado, en una transacción.
+-- Cerrar sesiones. Dos funciones, y lo que tienen en común:
+--
+--   · Quien pide dice con qué sesión lo pide, y esa sesión tiene que ser suya, estar
+--     anotada y seguir viva. La guarda de sesión ya lo miró, pero en otra transacción: aquí
+--     se vuelve a mirar, con el candado puesto.
+--   · Toman el candado de fila del perfil, el mismo de private.note_session() y de
+--     private.claim_account(). Sin él, dos «cerrar las demás» a la vez desde dos sesiones
+--     de la misma cuenta veían viva cada una la suya, borraban la de la otra, y la cuenta
+--     se quedaba sin ninguna (comprobado contra la base local). Con él van una tras otra, y
+--     la segunda encuentra su sesión ya cerrada y no cierra nada.
+--   · Eso supone que cada sentencia ve lo ya confirmado (read committed, que es como abre
+--     sus transacciones el adaptador). Con otro aislamiento se niegan a correr.
+
+-- Cerrar una sesión de quien actúa que no es la sesión con la que lo pide: la borra en
+-- Auth y quita lo anotado, en una transacción.
 --
 --   closed      había algo que cerrar, en Auth o entre lo anotado, y ya no está
 --   not_found   esa sesión no es de quien actúa, o no existe
---   ineligible  sin actor o sin identificador de sesión
+--   current     es la sesión con la que se pide: esa no se cierra por aquí
+--   ineligible  sin actor, sin alguno de los dos identificadores, o la sesión con la que
+--               se pide ya no se reconoce
 --
 -- Cada borrado filtra por su propia columna de dueño: una fila mal anotada, a nombre de una
 -- cuenta con la sesión de otra en Auth, se quita de lo anotado sin tocar la sesión ajena.
 
-create function private.close_session(p_session uuid) returns text
+create function private.close_session(p_session uuid, p_asking uuid) returns text
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -102,8 +118,21 @@ declare
   v_in_auth integer;
   v_noted integer;
 begin
+  -- Sin la sesión con la que se pide no hace falta mirar aquí: abajo no se reconoce.
   if v_actor is null or p_session is null then
     return 'ineligible';
+  end if;
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.close_session() needs read committed isolation' using errcode = '25000';
+  end if;
+  perform 1 from public.profiles p where p.id = v_actor for update;
+  -- Después del candado: si otro cierre iba delante, la sesión de quien pide ya no está.
+  -- Una cuenta sin perfil tampoco pasa de aquí: no tiene ninguna sesión reconocida.
+  if private.session_recognized(p_asking) <> 'recognized' then
+    return 'ineligible';
+  end if;
+  if p_session = p_asking then
+    return 'current';
   end if;
   delete from auth.sessions a where a.id = p_session and a.user_id = v_actor;
   get diagnostics v_in_auth = row_count;
@@ -116,12 +145,10 @@ begin
 end
 $$;
 
--- ---------------------------------------------------------------------------------------
--- Cerrar todas las sesiones de quien actúa menos una. Devuelve cuántas cerró en Auth, o
--- nulo si no cerró nada porque no podía.
---
--- La que se queda tiene que ser de quien actúa, estar anotada y seguir viva: con cualquier
--- otro valor esto cerraría todas, también la de quien lo pide.
+-- Cerrar todas las sesiones de quien actúa menos la sesión con la que lo pide. Devuelve
+-- cuántas cerró en Auth, o nulo si no cerró nada porque no podía: sin actor, o la sesión
+-- con la que se pide ya no se reconoce. Con cualquier otro valor esto cerraría
+-- todas, también la de quien lo pide.
 --
 -- Las demás se borran por cuenta, no por lo anotado: así se van también las sesiones
 -- abiertas directo en Auth, que la aplicación no reconoce pero que siguen vivas allá.
@@ -133,9 +160,16 @@ declare
   v_actor uuid := private.actor_id();
   v_closed integer;
 begin
-  if v_actor is null or p_keep is null then
+  -- Sin la sesión con la que se pide no hace falta mirar aquí: abajo no se reconoce.
+  if v_actor is null then
     return null;
   end if;
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.close_other_sessions() needs read committed isolation' using errcode = '25000';
+  end if;
+  perform 1 from public.profiles p where p.id = v_actor for update;
+  -- Después del candado: si otro cierre iba delante, la sesión de quien pide ya no está.
+  -- Una cuenta sin perfil tampoco pasa de aquí: no tiene ninguna sesión reconocida.
   if private.session_recognized(p_keep) <> 'recognized' then
     return null;
   end if;
@@ -149,6 +183,6 @@ $$;
 grant execute on function
   private.tag_session(uuid, text),
   private.list_sessions(),
-  private.close_session(uuid),
+  private.close_session(uuid, uuid),
   private.close_other_sessions(uuid)
   to app_service;

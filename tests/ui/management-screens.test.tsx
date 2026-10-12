@@ -451,6 +451,46 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     expect(closeOthers()).toBeEnabled();
   });
 
+  it("cuando la fila del botón pulsado ya no está, el foco no cae al documento: lo toma el aviso", async () => {
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    const { rerender } = render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    // La página se volvió a pedir y la lista ya no trae esa sesión: su botón, que tenía el foco, se fue.
+    rerender(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
+    expect(document.body).toHaveFocus();
+
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 1 });
+      await Promise.resolve();
+    });
+    const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
+    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+  });
+
+  it("el aviso no le quita el foco a quien ya se fue a escribir a otro bloque", async () => {
+    let finish: (state: SessionsState) => void = () => undefined;
+    mocks.closeSessionsAction.mockReturnValue(new Promise<SessionsState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<AccountScreen name="Ana" email={null} sessions={[here, phone]} />);
+    await user.click(closeButtonOf(phone));
+    expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
+    // Mientras el cierre va en camino, la persona se pone a escribir su nombre.
+    await user.click(nameField());
+    await user.type(nameField(), " María");
+
+    await act(async () => {
+      finish({ kind: "closed", what: "one", attempt: 1 });
+      await Promise.resolve();
+    });
+    expect(await within(sessionsBlock()).findByText("Cerramos esa sesión.")).toBeVisible();
+    expect(nameField()).toHaveFocus();
+    await user.type(nameField(), " Pérez");
+    expect(nameField()).toHaveValue("Ana María Pérez");
+  });
+
   it("cerrar sesiones no toca el bloque del nombre: lo escrito ahí sigue", async () => {
     mocks.closeSessionsAction.mockResolvedValue({ kind: "closed", what: "one", attempt: 1 });
     const user = userEvent.setup();

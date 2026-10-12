@@ -27,15 +27,22 @@ const TITLE_ID = "cuenta-sesiones-titulo";
 const RESULTS = { one: text.closedOne, others: text.closedOthers, gone: text.alreadyClosed } as const;
 
 /**
- * Lo que contestó el último envío. Toma el foco al llegar: el botón que se pulsó ya no
- * existe, porque su fila se fue con la sesión, y sin esto el foco caería al documento. El
- * foco es también lo que se lo anuncia a quien usa lector de pantalla.
+ * Lo que contestó el último envío. Toma el foco al llegar: el botón que se pulsó suele ya
+ * no existir, porque su fila se fue con la sesión, y sin esto el foco caería al documento.
+ * El foco es también lo que se lo anuncia a quien usa lector de pantalla.
+ *
+ * No se lo quita a quien ya se fue a otra cosa: solo lo toma si el foco quedó sin dueño o
+ * sigue en este bloque. Quien pulsó «Cerrar» y se puso a escribir su nombre sigue escribiendo.
  */
 function Result({ state }: { state: SessionsState }) {
   const box = useRef<HTMLDivElement>(null);
   const attempt = "attempt" in state ? state.attempt : 0;
   useEffect(() => {
-    if (attempt > 0) box.current?.focus();
+    const notice = box.current;
+    if (attempt === 0 || notice === null) return;
+    const active = document.activeElement;
+    const free = active === null || active === document.body;
+    if (free || notice.closest("section")?.contains(active) === true) notice.focus();
   }, [attempt]);
 
   if (state.kind !== "closed" && state.kind !== "unavailable") return null;
@@ -88,7 +95,7 @@ export function SessionsBlock({ sessions, state, action, pending }: SessionsBloc
               {session.current ? (
                 <p className="text-body-s font-semibold">{text.thisSession}</p>
               ) : (
-                <Button type="submit" name="close" value={session.id} variant="secondary" size="md" disabled={pending}>
+                <Button type="submit" name="close" value={session.id} variant="secondary" disabled={pending}>
                   {text.closeOne}
                   {/* Sin el espacio, el nombre del botón se leería «Cerrarla sesión de…». */}
                   {SPACE}

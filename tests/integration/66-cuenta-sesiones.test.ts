@@ -53,8 +53,17 @@ const labelOf = async (sessionId: string) =>
 const guard = (jar: MemoryJar) => testServices().checkSession(jar);
 const CLOSED = { kind: "must_sign_out", then: "sign_in" };
 
-/** El servicio con una guarda que contesta lo que se le diga, y lo que reportó. */
-function managementWith(check: SessionCheck) {
+/**
+ * El servicio con una guarda que contesta lo que se le diga, y lo que reportó. Con varias
+ * respuestas las da en orden, y repite la última.
+ */
+function managementWith(...checks: [SessionCheck, ...SessionCheck[]]) {
+  const answers: SessionCheck[] = [...checks];
+  const next = (): SessionCheck => {
+    const [first, ...later] = answers;
+    if (later.length > 0) answers.shift();
+    return first ?? checks[0];
+  };
   const reported: FailureCode[] = [];
   const management = createManagement(
     {
@@ -64,7 +73,7 @@ function managementWith(check: SessionCheck) {
         return Promise.resolve();
       },
     },
-    { checkSession: () => Promise.resolve(check) },
+    { checkSession: () => Promise.resolve(next()) },
   );
   return { ...management, reported };
 }
@@ -98,6 +107,30 @@ describe("al abrir una sesión queda dicho desde qué navegador", () => {
     const who = await account();
     const { claims } = await open(who, "x".repeat(2_000));
     expect(await labelOf(idOf(claims))).toBe("x".repeat(512));
+  });
+});
+
+describe("la etiqueta no decide nada, y que falle no impide entrar", () => {
+  it("si no se puede etiquetar, la sesión se abre igual, se lista como de un navegador desconocido y se reporta", async () => {
+    const who = await account();
+    // Como si el código hubiera llegado antes que su migración: el servidor no puede etiquetar.
+    await ownerQuery("revoke execute on function private.tag_session(uuid, text) from app_service");
+    const services = testServices();
+    const jar = memoryJar();
+    try {
+      expect(await services.signIn(jar, who, { ...freshOrigin(), userAgent: CHROME_WINDOWS })).toEqual({ kind: "entered", pending: null });
+    } finally {
+      await ownerQuery("grant execute on function private.tag_session(uuid, text) to app_service");
+    }
+    expect(services.reported).toEqual(["session_not_tagged"]);
+
+    const check = await guard(jar);
+    if (check.kind !== "pass") throw new Error(`La sesión no pasó la guarda: ${check.kind}`);
+    expect(await labelOf(idOf(check.claims))).toBeNull();
+    expect(await testServices().accountSessions(check.claims)).toMatchObject({
+      kind: "ready",
+      sessions: [{ id: idOf(check.claims), device: { browser: null, system: null }, current: true }],
+    });
   });
 });
 
@@ -161,14 +194,15 @@ describe("ver las sesiones abiertas", () => {
     expect(services.reported).toEqual(["account_unavailable"]);
   });
 
-  it("si la sesión con la que se pide no está entre las abiertas, no pinta una lista sin ella", async () => {
+  it("si la sesión con la que se pide se cerró desde otro lado, no pinta una lista sin ella, y no es una caída", async () => {
     const who = await account();
     const mine = await open(who);
-    // No debería pasar: la guarda no deja llegar a una sesión que la aplicación no anotó.
-    await ownerQuery("delete from private.app_sessions where session_id = $1", [idOf(mine.claims)]);
+    const other = await open(who);
+    // Entre la guarda de la página y esta lectura, la otra sesión cerró esta.
+    expect(await testServices().closeSession(other.jar, { sessionId: idOf(mine.claims) })).toEqual({ kind: "closed" });
     const services = testServices();
     expect(await services.accountSessions(mine.claims)).toEqual({ kind: "unavailable" });
-    expect(services.reported).toEqual(["account_unavailable"]);
+    expect(services.reported).toEqual([]);
   });
 });
 
@@ -254,6 +288,93 @@ describe("cerrar una sesión", () => {
     vi.restoreAllMocks();
     expect(management.reported).toEqual(["account_unavailable"]);
     expect(await guard(there.jar)).toMatchObject({ kind: "pass" });
+  });
+});
+
+describe("dos cierres a la vez", () => {
+  // Sin el candado de la base, cada «cerrar las demás» veía viva su sesión y borraba la de
+  // la otra: la cuenta se quedaba sin ninguna, y las dos respuestas decían que salió bien.
+  it("«cerrar las demás» desde dos sesiones: una gana y la otra se entera de que ya no tiene sesión", async () => {
+    for (let round = 0; round < 4; round += 1) {
+      const who = await account();
+      const first = await open(who);
+      const second = await open(who, SAFARI_IPHONE);
+      const services = testServices();
+
+      const results = await Promise.all([services.closeOtherSessions(first.jar), services.closeOtherSessions(second.jar)]);
+
+      expect(results.map((result) => result.kind).sort(), `ronda ${round}`).toEqual(["closed", "session"]);
+      expect(results.find((result) => result.kind === "closed"), `ronda ${round}`).toEqual({ kind: "closed", count: 1 });
+      expect(results.find((result) => result.kind === "session"), `ronda ${round}`).toEqual({ kind: "session", check: CLOSED });
+      // Queda exactamente una, y es la de quien ganó.
+      expect(await sessionCount(who.id), `ronda ${round}`).toBe(1);
+      expect(await notedSessions(who.id), `ronda ${round}`).toBe(1);
+      const winner = results[0]?.kind === "closed" ? first : second;
+      expect(await guard(winner.jar), `ronda ${round}`).toMatchObject({ kind: "pass" });
+      // Que una sesión pierda contra otra no es una caída.
+      expect(services.reported, `ronda ${round}`).toEqual([]);
+    }
+  });
+
+  it("cerrar una mientras esa cierra las demás: nunca se quedan las dos, ni ninguna", async () => {
+    for (let round = 0; round < 4; round += 1) {
+      const who = await account();
+      const first = await open(who);
+      const second = await open(who, SAFARI_IPHONE);
+      const services = testServices();
+
+      const [one, others] = await Promise.all([
+        services.closeSession(first.jar, { sessionId: idOf(second.claims) }),
+        services.closeOtherSessions(second.jar),
+      ]);
+
+      expect(await sessionCount(who.id), `ronda ${round}`).toBe(1);
+      expect([one.kind, others.kind].sort(), `ronda ${round}`).toEqual(["closed", "session"]);
+      expect(services.reported, `ronda ${round}`).toEqual([]);
+    }
+  });
+});
+
+describe("un cierre que la base no hizo", () => {
+  // La base se niega cuando la sesión con la que se pide no se reconoce. Aquí la guarda dice
+  // «pasa» sobre una sesión abierta directo en Auth, que la base no reconoce.
+  async function unrecognized(who: KnownUser) {
+    const direct = memoryJar();
+    expect((await authSignIn(direct, who.email, who.password)).ok).toBe(true);
+    const read = await readSession(direct);
+    if (read.kind !== "session") throw new Error("La sesión directa no se leyó.");
+    return { jar: direct, claims: read.claims };
+  }
+
+  it("si la guarda, al volver a preguntarle, dice que esa sesión ya no vale, se contesta eso y no se reporta", async () => {
+    const who = await account();
+    const there = await open(who);
+    const asking = await unrecognized(who);
+    const management = managementWith({ kind: "pass", claims: asking.claims }, { kind: "must_sign_out", then: "sign_in" });
+    expect(await management.closeSession(asking.jar, { sessionId: idOf(there.claims) })).toEqual({ kind: "session", check: CLOSED });
+    expect(management.reported).toEqual([]);
+    expect(await guard(there.jar)).toMatchObject({ kind: "pass" });
+  });
+
+  it.each([
+    ["insiste en que pasa", { kind: "pass" }],
+    ["tampoco supo", { kind: "unavailable" }],
+  ] as const)("si la guarda %s, lo que falló fue cerrar: no se supo, y se reporta", async (_case, second) => {
+    const who = await account();
+    const there = await open(who);
+    const asking = await unrecognized(who);
+    const again: SessionCheck = second.kind === "pass" ? { kind: "pass", claims: asking.claims } : second;
+
+    const one = managementWith({ kind: "pass", claims: asking.claims }, again);
+    expect(await one.closeSession(asking.jar, { sessionId: idOf(there.claims) })).toEqual({ kind: "unavailable" });
+    expect(one.reported).toEqual(["account_unavailable"]);
+
+    const others = managementWith({ kind: "pass", claims: asking.claims }, again);
+    expect(await others.closeOtherSessions(asking.jar)).toEqual({ kind: "unavailable" });
+    expect(others.reported).toEqual(["account_unavailable"]);
+
+    expect(await guard(there.jar)).toMatchObject({ kind: "pass" });
+    expect(await sessionCount(who.id)).toBe(2);
   });
 });
 

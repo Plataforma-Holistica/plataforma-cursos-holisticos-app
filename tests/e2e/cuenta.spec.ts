@@ -551,12 +551,14 @@ test("la acción de cerrar sesiones aguanta lo que su pantalla nunca mandaría, 
       const response = await postAction(page.request, "/cuenta", fields);
       expect(response.status()).toBe(200);
     }
+    expect(await sessionIds(ana.id)).toEqual([minePhone, mine]);
     // La sesión de otra cuenta, o algo que no es un identificador: aquí no está abierta.
     for (const close of [foreign, "' or true --", "todas"]) {
       const response = await postAction(page.request, "/cuenta", { ...hidden, close });
       expect(response.status(), close).toBe(200);
       expect(await response.text(), close).toContain("Esa sesión ya estaba cerrada.");
     }
+    expect(await sessionIds(ana.id)).toEqual([minePhone, mine]);
     // Lo que el formulario diga sobre cuál se queda, o de quién es la cuenta, no se lee.
     const pointed = await postAction(page.request, "/cuenta", { ...hidden, close: "others", keep: foreign, userId: otra.id, profile_id: otra.id });
     expect(pointed.status()).toBe(200);

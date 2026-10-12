@@ -198,13 +198,27 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
         const view = await evaluateGate(tx, verified.userId, deps.isLocal());
         if (view.kind !== "pass" && view.kind !== "incomplete") return { view, noted: null };
         if (!isSessionId(verified.sessionId)) return { view, noted: null };
-        const noted = (await noteSession(tx, verified.sessionId, startedText)) as NoteState;
-        if (noted === "noted") await tagSession(tx, verified.sessionId, userAgent);
-        return { view, noted };
+        return { view, noted: (await noteSession(tx, verified.sessionId, startedText)) as NoteState };
       });
+      if (seen.noted === "noted") await labelSession(verified, userAgent);
       return decideAdmission(seen.view, seen.noted);
     } catch {
       return { result: { kind: "unavailable" }, outcome: "unknown", admit: false, report: "gate_unavailable" };
+    }
+  }
+
+  /**
+   * Deja dicho desde qué navegador se abrió una sesión recién anotada. Va en su propia
+   * transacción y nunca lanza: la etiqueta no decide nada, y que falle no puede impedir que
+   * alguien entre. Si falla, la sesión se lista como de un navegador desconocido, y se reporta.
+   */
+  async function labelSession(verified: (adapter.SignInResult & { ok: true })["claims"], userAgent: string | null): Promise<void> {
+    const sessionId = verified.sessionId;
+    if (!isSessionId(sessionId)) return;
+    try {
+      await asServer({ claims: verified, reason: "tag_session" }, (tx) => tagSession(tx, sessionId, userAgent));
+    } catch {
+      await deps.report("session_not_tagged");
     }
   }
 

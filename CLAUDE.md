@@ -301,8 +301,9 @@ falla. Doce precisiones que la tabla no dice:
       bloque lleva un solo estado. Lo que el formulario manda es qué botón se pulsó, y
       nada sobre de quién es la cuenta. Cuando el botón pulsado desaparece con la
       respuesta (su fila se fue), no hay a dónde devolver el foco: lo toma el aviso del
-      resultado, que entonces no es además una región viva. Lo que dice «Cerrando…» sí
-      lo es, y existe desde antes de cargar.
+      resultado, que entonces no es además una región viva. Solo lo toma si el foco quedó
+      sin dueño o sigue en el bloque: a quien ya se fue a escribir a otro lado no se lo
+      quita. Lo que dice «Cerrando…» sí es una región viva, y existe desde antes de cargar.
     - Los estados de todos los bloques viven en la pantalla, no en cada bloque: cualquiera
       puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
     - Lo que un bloque pinta de la base llega ya en palabras desde la página (`rows.ts`):
@@ -345,13 +346,20 @@ falla. Doce precisiones que la tabla no dice:
   `management.ts`: por ahora, lo que la pantalla de la cuenta pinta, el cambio de nombre y
   las sesiones abiertas.
   - `accountSessions(claims)` da las sesiones abiertas de la cuenta, que son las anotadas y
-    vivas, y dice cuál es la de quien pide. `closeSession` y `closeOtherSessions` vuelven a
-    correr la guarda. De una sesión que se quiere cerrar llega su identificador, y lo que
-    no tiene forma de serlo no llega a la base; la sesión propia no se cierra por ahí
-    (su cookie quedaría apuntando a nada): contesta `current`, y la pantalla la saca por
-    el camino de «Salir». Cuál se queda al cerrar las demás no llega de fuera: es la de la
-    sesión que pasó la guarda. Aquí no se vuelve a evaluar la cuenta dentro de la
-    transacción, como al cambiar el nombre: cerrar solo quita acceso.
+    vivas, y dice cuál es la de quien pide. Si la de quien pide no viene (se cerró desde
+    otro lado entre la guarda y la lectura) contesta «no se supo» sin reportar nada: no es
+    una caída, y lo siguiente que la persona pida pasa otra vez por la guarda. «Última
+    actividad» es la última vez que Auth renovó el token de esa sesión: no se mueve con
+    cada uso. `closeSession` y `closeOtherSessions` vuelven a correr la guarda. De una
+    sesión que se quiere cerrar llega su identificador, y lo que no tiene forma de serlo
+    no llega a la base; la sesión propia no se cierra por ahí (su cookie quedaría
+    apuntando a nada): la base contesta `current`, se escriba como se escriba, y la
+    pantalla la saca por el camino de «Salir». Cuál se queda al cerrar las demás no llega
+    de fuera: es la de la sesión que pasó la guarda. Aquí no se vuelve a evaluar la cuenta
+    dentro de la transacción, como al cambiar el nombre: cerrar solo quita acceso. Lo que
+    la base sí vuelve a mirar es que la sesión con la que se pide siga reconocida; si se
+    niega, antes de darlo por caída se le vuelve a preguntar a la guarda, como al cambiar
+    el nombre.
   - De qué navegador y sistema dice ser una sesión lo saca una regla pura del dominio
     (`user-agent.ts`), sin paquetes. Lo que no reconoce queda en nulo y la pantalla dice
     «desconocido».
@@ -380,20 +388,26 @@ falla. Doce precisiones que la tabla no dice:
   - Una sesión solo se anota con `private.note_session()`, y solo la llaman `signIn` y la
     entrada con la que termina `completeRegistration`. Exige
     que el intento haya empezado después del último cambio de contraseña: Auth abre la
-    sesión sin volver a mirar la cuenta, y una entrada en vuelo sobrevive al cambio. En la
-    misma transacción queda etiquetada con el navegador desde el que se abrió
+    sesión sin volver a mirar la cuenta, y una entrada en vuelo sobrevive al cambio. Ya
+    anotada, queda etiquetada con el navegador desde el que se abrió
     (`private.tag_session()`, una vez): la cabecera `User-Agent`, limpia y recortada. Es
-    para que su dueña la reconozca en su lista; no decide nada. Las columnas `user_agent`
-    e `ip` de `auth.sessions` no sirven para eso: Auth las reescribe en cada renovación con
-    los datos del servidor.
+    para que su dueña la reconozca en su lista; no decide nada, y por eso va en su propia
+    transacción y nunca impide entrar: si falla, la sesión se lista como de un navegador
+    desconocido y se reporta (`session_not_tagged`). Las columnas `user_agent` e `ip` de
+    `auth.sessions` no sirven para eso: Auth las reescribe en cada renovación con los
+    datos del servidor.
   - Una sesión se cierra desde la cuenta con `private.close_session()` y
     `private.close_other_sessions()`, que borran en `auth.sessions` y en lo anotado en una
     transacción. Son la única manera en que el servidor borra una sesión de Auth: no tiene
-    permisos sobre esa tabla. Ninguna recibe de quién es la cuenta, y la que se queda al
-    cerrar las demás tiene que ser de quien actúa, estar anotada y seguir viva. «Las
-    demás» se borran por cuenta y no por lo anotado: así se van también las abiertas
-    directo en Auth. La guarda mira lo anotado en cada entrada, así que una sesión cerrada
-    deja de pasar en el acto, sin esperar a que venza su token.
+    permisos sobre esa tabla. Ninguna recibe de quién es la cuenta. Las dos reciben la
+    sesión con la que se pide, que tiene que ser de quien actúa, estar anotada y seguir
+    viva, y que no se cierra por ahí. Toman el candado de fila del perfil, el mismo de
+    `note_session` y de `claim_account`, y se niegan a correr fuera de read committed: sin
+    el candado, dos «cerrar las demás» a la vez desde dos sesiones de la misma cuenta se
+    borraban una a la otra y la cuenta quedaba sin ninguna. Con él van una tras otra, y la
+    segunda no cierra nada. «Las demás» se borran por cuenta y no por lo anotado: así se
+    van también las abiertas directo en Auth. La guarda mira lo anotado en cada entrada,
+    así que una sesión cerrada deja de pasar en el acto, sin esperar a que venza su token.
   - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo
     cierra después en otra transacción. La cookie se escribe en un tarro temporal: no
     llega al navegador hasta que la guarda dejó entrar y la sesión quedó anotada.

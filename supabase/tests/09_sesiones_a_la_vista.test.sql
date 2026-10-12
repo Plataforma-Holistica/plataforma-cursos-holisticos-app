@@ -4,7 +4,7 @@
 -- actúa. Y la única manera de borrar una sesión de Auth desde el servidor son estas dos.
 begin;
 \ir _ayuda.psql
-select plan(70);
+select plan(78);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'alumna-a-la-vista@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'otra-a-la-vista@prueba.test');
@@ -52,7 +52,7 @@ select ok(
 from unnest(array[
   'private.tag_session(uuid, text)',
   'private.list_sessions()',
-  'private.close_session(uuid)',
+  'private.close_session(uuid, uuid)',
   'private.close_other_sessions(uuid)']) as f;
 select ok(
   not has_table_privilege('app_service', 'auth.sessions', 'select, insert, update, delete, truncate'),
@@ -159,21 +159,41 @@ select is(
 
 select pruebas.como_servicio();
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000002'),
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000001'),
   'ineligible', 'sin actor declarado no se cierra nada');
 select pruebas.como_servicio('b0000000-0000-0000-0000-000000000001');
 select is(
-  private.close_session(null),
+  private.close_session(null, '5e560000-0000-0000-0000-000000000001'),
   'ineligible', 'ni sin decir cuál');
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000011'),
+  private.close_session('5e560000-0000-0000-0000-000000000002', null),
+  'ineligible', 'ni sin decir con qué sesión se pide');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000011'),
+  'ineligible', 'ni pidiéndolo con la sesión de otra persona');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000006'),
+  'ineligible', 'ni con una propia que la aplicación no anotó');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000004'),
+  'ineligible', 'ni con una anotada que ya venció');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000001', '5e560000-0000-0000-0000-000000000001'),
+  'current', 'la sesión con la que se pide no se cierra por aquí');
+select pruebas.como_dueno();
+select is(
+  (select count(*)::int from auth.sessions where user_id = 'b0000000-0000-0000-0000-000000000001'),
+  5, 'ninguna de esas negativas cerró nada');
+select pruebas.como_servicio('b0000000-0000-0000-0000-000000000001');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000011', '5e560000-0000-0000-0000-000000000001'),
   'not_found', 'la sesión de otra persona no se encuentra');
 select is(
-  private.close_session('5e560000-0000-0000-0000-0000000000ff'),
+  private.close_session('5e560000-0000-0000-0000-0000000000ff', '5e560000-0000-0000-0000-000000000001'),
   'not_found', 'ni una que no existe');
 -- La fila que no debería existir: se va lo anotado a nombre de quien actúa, y nada más.
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000012'),
+  private.close_session('5e560000-0000-0000-0000-000000000012', '5e560000-0000-0000-0000-000000000001'),
   'closed', 'lo anotado a nombre propio se puede quitar');
 select pruebas.como_dueno();
 select is(
@@ -186,19 +206,19 @@ select is(
 
 select pruebas.como_servicio('b0000000-0000-0000-0000-000000000001');
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000002'),
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000001'),
   'closed', 'la sesión propia se cierra');
 select is(
   private.session_recognized('5e560000-0000-0000-0000-000000000002'),
   'not_noted', 'y la guarda deja de reconocerla en el acto');
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000002'),
+  private.close_session('5e560000-0000-0000-0000-000000000002', '5e560000-0000-0000-0000-000000000001'),
   'not_found', 'cerrarla otra vez ya no encuentra nada');
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000005'),
+  private.close_session('5e560000-0000-0000-0000-000000000005', '5e560000-0000-0000-0000-000000000001'),
   'closed', 'una anotada que Auth ya no tiene se limpia');
 select is(
-  private.close_session('5e560000-0000-0000-0000-000000000006'),
+  private.close_session('5e560000-0000-0000-0000-000000000006', '5e560000-0000-0000-0000-000000000001'),
   'closed', 'y una propia abierta directo en Auth también se puede cerrar');
 select pruebas.como_dueno();
 select is(
@@ -268,6 +288,15 @@ select is(
   private.close_other_sessions('5e560000-0000-0000-0000-000000000001'),
   0, 'sin otras que cerrar, cierra cero');
 
+-- Sin perfil no hay candado que tomar, y no se cierra nada.
+select pruebas.como_servicio('c0000000-0000-0000-0000-00000000dead');
+select is(
+  private.close_session('5e560000-0000-0000-0000-000000000011', '5e560000-0000-0000-0000-000000000001'),
+  'ineligible', 'una cuenta sin perfil no cierra ninguna');
+select is(
+  private.close_other_sessions('5e560000-0000-0000-0000-000000000001'),
+  null, 'ni las demás');
+
 -- ---------------------------------------------------------------------------------------
 -- Nadie más llama a las funciones ni toca las tablas.
 
@@ -279,7 +308,7 @@ select throws_ok(
   $$select * from private.list_sessions()$$,
   '42501', null, 'ni las lista por su cuenta');
 select throws_ok(
-  $$select private.close_session('5e560000-0000-0000-0000-000000000001')$$,
+  $$select private.close_session('5e560000-0000-0000-0000-000000000003', '5e560000-0000-0000-0000-000000000001')$$,
   '42501', null, 'ni cierra una');
 select throws_ok(
   $$select private.close_other_sessions('5e560000-0000-0000-0000-000000000001')$$,

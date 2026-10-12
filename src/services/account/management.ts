@@ -153,10 +153,10 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
         device: describeUserAgent(row.userAgent),
         current: row.id === claims.sessionId,
       }));
-      // La guarda ya reconoció la sesión con la que se pide: si no viene en la lista, algo no cuadra.
-      if (!sessions.some((session) => session.current)) {
-        throw new Error("La sesión que pasó la guarda no está entre las abiertas.");
-      }
+      // La sesión con la que se pide se cerró desde otro lado entre la guarda y esta lectura.
+      // No es una caída y no se reporta: no se pinta una lista sin ella, y lo siguiente que
+      // la persona pida pasa otra vez por la guarda, que la manda a entrar.
+      if (!sessions.some((session) => session.current)) return { kind: "unavailable" };
       return { kind: "ready", sessions };
     } catch {
       await deps.report("account_unavailable");
@@ -165,12 +165,28 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
   }
 
   /**
+   * Un cierre que la base no hizo. Antes de darlo por caída se le vuelve a preguntar a la
+   * guarda de sesión: si la sesión con la que se pide se cerró a media operación (otro
+   * cierre iba delante), no es una falla, y se contesta lo que la guarda dice ahora. Si
+   * insiste en que pasa, o tampoco supo, lo que falló fue cerrar, y se reporta.
+   */
+  async function refusedClosing(reader: CookieReader): Promise<Extract<SessionClosing, { kind: "session" | "unavailable" }>> {
+    const now = await core.checkSession(reader);
+    if (now.kind !== "pass" && now.kind !== "unavailable") return { kind: "session", check: now };
+    await deps.report("account_unavailable");
+    return { kind: "unavailable" };
+  }
+
+  /**
    * Cerrar una sesión de la cuenta que no es esta (FL-27, paso 4). La sesión con la que se
    * pide no se cierra por aquí: su cookie quedaría en el navegador apuntando a nada. Para
-   * esa está «Salir».
+   * esa está «Salir». Cuál es la propia lo decide la base, que compara identificadores y no
+   * textos: se escriba como se escriba, contesta `current`.
    *
    * No se vuelve a evaluar la cuenta en la transacción, como al cambiar el nombre: cerrar
-   * solo quita acceso, y la base busca la sesión entre las de quien actúa.
+   * solo quita acceso, y la base busca la sesión entre las de quien actúa. Lo que la base sí
+   * vuelve a mirar, con su candado puesto, es que la sesión con la que se pide siga
+   * reconocida: dos cierres a la vez van uno tras otro, y el segundo no cierra nada.
    */
   async function closeSession(reader: CookieReader, input: { sessionId: string }): Promise<SessionClosing> {
     const check = await core.checkSession(reader);
@@ -178,18 +194,19 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
 
     // Lo que no tiene forma de identificador no es una sesión de nadie, y no llega a la base.
     if (!isSessionId(input.sessionId)) return { kind: "not_found" };
-    const sessionId = input.sessionId.toLowerCase();
-    if (sessionId === check.claims.sessionId?.toLowerCase()) return { kind: "current" };
+    const sessionId = input.sessionId;
+    const asking = check.claims.sessionId;
 
-    let state: string;
-    try {
-      state = await asServer({ claims: check.claims, reason: "close_session" }, (tx) => closeInBase(tx, sessionId));
-    } catch {
-      state = "failed";
+    let state = "failed";
+    if (isSessionId(asking)) {
+      try {
+        state = await asServer({ claims: check.claims, reason: "close_session" }, (tx) => closeInBase(tx, sessionId, asking));
+      } catch {
+        state = "failed";
+      }
     }
-    if (state === "closed" || state === "not_found") return { kind: state };
-    await deps.report("account_unavailable");
-    return { kind: "unavailable" };
+    if (state === "closed" || state === "not_found" || state === "current") return { kind: state };
+    return refusedClosing(reader);
   }
 
   /**
@@ -212,8 +229,7 @@ export function createManagement(deps: Pick<AccountDependencies, "report" | "isL
       }
     }
     if (count !== null) return { kind: "closed", count };
-    await deps.report("account_unavailable");
-    return { kind: "unavailable" };
+    return refusedClosing(reader);
   }
 
   return { accountProfile, changeName, accountSessions, closeSession, closeOtherSessions };
