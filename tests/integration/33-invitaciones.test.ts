@@ -81,6 +81,8 @@ async function reverted<T>(fn: (owner: Client) => Promise<T>, server = true): Pr
   await owner.connect();
   try {
     await owner.query("begin");
+    // Si algo se queda esperando un candado que nadie suelta, falla aquí y no cuelga lo demás.
+    await owner.query("set local lock_timeout = '20s'");
     if (server) await owner.query("grant app_service to postgres with set true, inherit false");
     return await fn(owner);
   } finally {
@@ -237,7 +239,8 @@ describe("una invitación, de punta a punta, contra el Auth de verdad", () => {
 
 /** Espera a que esa conexión quede detenida en un candado. Falso si no llegó a estarlo. */
 async function waitsOnALock(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  // Hasta diez segundos: con la máquina cargada, la espera tarda en verse.
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     const [row] = await ownerQuery<{ waiting: boolean }>(
       "select coalesce(wait_event_type = 'Lock', false) as waiting from pg_stat_activity where pid = $1",
       [pid],
@@ -447,7 +450,7 @@ describe("los cambios al equipo van uno tras otro", () => {
     });
   });
 
-  it("y con una foto fija de la base se niegan a correr", async () => {
+  it("y con una foto fija de la base el candado del equipo se niega, y con él todas las que lo toman", async () => {
     const owner = new Client({ connectionString: localOwnerUrl() });
     await owner.connect();
     try {

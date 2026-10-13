@@ -502,9 +502,9 @@ falla. Doce precisiones que la tabla no dice:
     read committed: sin el candado, dos «cerrar las demás» a la vez desde dos sesiones de
     la misma cuenta se borraban una a la otra y la cuenta quedaba sin ninguna. Con él van
     una tras otra, y la segunda no cierra nada. Es `for no key update`, el que no estorba
-    a quien inserta en una tabla que apunta al perfil; las dos funciones de antes usan
-    `for update`, y conviene pasarlas a este cuando una tabla de mucha escritura apunte a
-    `profiles`. «Las demás» se borran por cuenta y no por lo anotado: así se
+    a quien inserta en una tabla que apunta al perfil; `note_session` todavía usa
+    `for update` (`claim_account` ya no, desde T-105), y conviene pasarla a este cuando
+    una tabla de mucha escritura apunte a `profiles`. «Las demás» se borran por cuenta y no por lo anotado: así se
     van también las abiertas directo en Auth. La guarda mira lo anotado en cada entrada,
     así que una sesión cerrada deja de pasar en el acto, sin esperar a que venza su token.
   - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo
@@ -740,12 +740,19 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     atado de hace menos de `VIGENCIA_CODIGO_RECIENTE_MINUTOS`. Contestan `forbidden` a
     quien no tiene configuración y `needs_fresh_code` a quien la tiene y debe dar su
     código otra vez. Todas toman primero un candado fijo (`private.team_lock()`) y
-    después, como mucho, el candado de fila de un perfil: van una tras otra.
+    después, como mucho, el candado de fila de un perfil: van una tras otra. Cambiar un
+    parámetro (`business_parameters`) pide ese mismo código reciente, por un disparador:
+    los plazos son parámetros, y sin eso quien tiene la sesión de alguien con
+    configuración se alargaría la ventana.
   - Aceptar (`accept_admin_invitation`) no mira la contraseña. Pide el resguardo del
     buzón (abajo), que la sesión esté verificada hace poco con el factor que el servidor
     dio de alta en ese navegador, y, si es un restablecimiento, el código que dicta quien
     restableció. Ata ese factor, da las capacidades de la invitación con quien invitó
     como autor, borra los demás factores de la cuenta y cierra sus demás sesiones.
+    Tres de sus rechazos escriben antes de contestar (`needs_handoff` cuenta el fallo;
+    `inviter_lost_config` y un `no_invitation` revocan la invitación): el servicio que la
+    llame tiene que confirmar la transacción también en esos casos, o el límite de
+    códigos dictados no contaría nada.
   - **El resguardo del buzón.** `private.claim_account(p_ticket)` guarda la huella
     (SHA-256 en hexadecimal) de un secreto que el servidor deja en el navegador que abrió
     el enlace del correo. Quien sabía la contraseña, quien la cambia por fuera o quien

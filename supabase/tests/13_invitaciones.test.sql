@@ -8,7 +8,7 @@
 -- un código reciente de quien lo cambia.
 begin;
 \ir _ayuda.psql
-select plan(258);
+select plan(267);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -258,11 +258,37 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_
   'needs_fresh_code', 'ni se quita');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('x'))$$),
   'needs_fresh_code', 'ni se restablece a nadie');
+-- Ni se cambia un parámetro: los plazos lo son, y quien tuviera esa sesión se los alargaría.
+select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000001');
+select set_config('app.reason', 'Prueba', true);
+select throws_ok(
+  $$insert into public.business_parameters (key, value, status, effective_from)
+    values ('VIGENCIA_CODIGO_RECIENTE_MINUTOS', '100000', 'proposed', now() + interval '1 day')$$,
+  '42501', 'public.business_parameters: a recent second factor code is required',
+  'ni se programa un cambio de parámetro');
+select throws_ok(
+  $$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000001'
+    where key = 'VIGENCIA_CODIGO_RECIENTE_MINUTOS'$$,
+  '42501', 'public.business_parameters: a recent second factor code is required',
+  'ni se cancela el vigente');
+select pruebas.como_sistema();
+select lives_ok(
+  $$insert into public.business_parameters (key, value, status, effective_from)
+    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '2 days')$$,
+  'el sistema sí: no da códigos');
+select pruebas.limpiar();
 select ok(pruebas.tiene('c0000000-0000-0000-0000-000000000001', 'config'), '(y eso que la puerta de 12 horas sí la pasa)');
 update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '14 minutes'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('', '{support}')$$),
   'invalid', 'con uno de hace 14 minutos sí pasa la puerta de cambio');
+select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000001');
+select set_config('app.reason', 'Prueba', true);
+select lives_ok(
+  $$insert into public.business_parameters (key, value, status, effective_from)
+    values ('GRACIA_COBRO_DIAS', '10', 'proposed', now() + interval '1 day')$$,
+  'y se puede programar un cambio de parámetro');
+select pruebas.limpiar();
 update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '6 minutes'
   where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('', '{support}')$$),
@@ -324,6 +350,8 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_
   'invalid', 'ni con la lista vacía');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('x@prueba.test', array[null]::public.capability[])$$),
   'invalid', 'ni con un nulo dentro');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('x@prueba.test', '{{support}}')$$),
+  'invalid', 'ni con una lista de listas: no lanza');
 select is((select count(*)::int from private.admin_invitations), 0, 'nada de lo anterior dejó una invitación');
 
 -- Un correo sin cuenta.
@@ -365,6 +393,9 @@ insert into auth.users (id, email, is_sso_user) values ('a0000000-0000-0000-0000
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('federada@prueba.test', '{support}')$$),
   'invited_new', 'una cuenta de acceso federado no cuenta como la cuenta de ese correo');
 select is((pruebas.invitacion_viva('federada@prueba.test')).profile_id, null, 'la invitación no apunta a ella');
+insert into auth.users (id, email) values ('a0000000-0000-0000-0000-000000000006', 'Mayus@Prueba.Test');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('mayus@prueba.test', '{support}')$$),
+  'invited_existing', 'una cuenta cuyo correo quedó guardado con mayúsculas se encuentra igual');
 
 -- Una cuenta invitada que cambia de correo sigue teniendo su invitación: una viva por cuenta.
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('beto@prueba.test', '{support}')$$),
@@ -744,8 +775,7 @@ select pruebas.limpiar();
 
 -- Un reclamo de alguien del equipo: conserva su factor atado y queda en la auditoría.
 select is(pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-3')), 'already_claimed', 'alguien del equipo recupera su contraseña');
-select ok(pruebas.tiene('a0000000-0000-0000-0000-000000000001', 'support') is not null
-    and exists (select 1 from auth.mfa_factors m where m.id = pruebas.factor('a0000000-0000-0000-0000-000000000001'))
+select ok(exists (select 1 from auth.mfa_factors m where m.id = pruebas.factor('a0000000-0000-0000-0000-000000000001'))
     and exists (select 1 from private.admin_factors f where f.profile_id = 'a0000000-0000-0000-0000-000000000001'),
   'con el buzón solo no se le quita el factor atado');
 select results_eq(
@@ -835,11 +865,13 @@ select throws_ok(
   '23514', null, 'tampoco escribiendo la tabla como dueño: el disparador cuenta igual');
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000003';
 select pruebas.limpiar();
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000003', 'config')$$),
-  'revoked', 'con las tres activas, se le quita a una');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', $$private.revoke_capability('c0000000-0000-0000-0000-000000000003', 'config')$$),
+  'revoked', 'con las tres activas, una se la quita a sí misma');
+select ok(not exists (select 1 from auth.sessions s where s.user_id = 'c0000000-0000-0000-0000-000000000003'),
+  'y se queda sin sesiones, también la que usó para quitársela');
 select results_eq(
   $$select i.revoked_at is not null, i.revoked_by from private.admin_invitations i where i.email = 'deltres@prueba.test'$$,
-  $$values (true, 'c0000000-0000-0000-0000-000000000001'::uuid)$$,
+  $$values (true, 'c0000000-0000-0000-0000-000000000003'::uuid)$$,
   'y las invitaciones que ella había hecho quedan revocadas');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000002', 'config')$$),
   'min_config', 'pero no se baja de dos');
@@ -1084,6 +1116,10 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_s
 update pruebas.parametro_falso set value = '2147483647';
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('param@prueba.test', '{support}')$$),
   'unavailable', 'y con un plazo que se sale del calendario, tampoco: no lanza');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000003', pruebas.huella('p'))$$),
+  'unavailable', 'ni al restablecer');
+select ok(exists (select 1 from private.admin_factors f where f.profile_id = 'c0000000-0000-0000-0000-000000000003'),
+  'y no le quitó nada a esa persona');
 delete from pruebas.parametro_falso;
 
 insert into pruebas.parametro_falso values ('VIGENCIA_CODIGO_RECIENTE_MINUTOS', null);

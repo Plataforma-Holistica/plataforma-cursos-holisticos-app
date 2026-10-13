@@ -20,7 +20,9 @@
 --     por otro canal.
 --
 -- Cambiar el equipo (invitar, dar, quitar, restablecer) pide configuración y ese mismo
--- código reciente: con la sesión robada de alguien con configuración no alcanza.
+-- código reciente: con la sesión robada de alguien con configuración no alcanza, salvo
+-- dentro de esa ventana. Cambiar un parámetro pide lo mismo: si no, quien tiene esa sesión
+-- se alargaría la ventana.
 --
 -- Lo que esta migración no trae: que el servidor emita el resguardo, deje su cookie y la
 -- lea al aceptar. Llega con el servicio que acepta. Hasta entonces los servicios reclaman
@@ -48,7 +50,8 @@ on conflict (key) do nothing;
 -- Tablas.
 
 -- El resguardo del buzón vive junto a la fecha de la contraseña. La huella, la hora y el
--- correo que tenía la cuenta al probarlo: solo los escribe private.claim_account().
+-- correo que tenía la cuenta al probarlo los escribe private.claim_account(); aceptar y
+-- restablecer solo anulan la huella.
 alter table private.account_security
   add column mailbox_proven_at timestamptz,
   add column mailbox_proven_email text,
@@ -112,8 +115,9 @@ $$;
 -- El candado de los cambios al equipo. Con él por delante, las funciones que cambian el
 -- equipo van una tras otra; después toman, como mucho, el candado de fila de un perfil, y
 -- solo entonces tocan filas de Auth. Las de sesión (anotar, reclamar, cerrar) toman un
--- solo candado de perfil y nunca este: no hay ciclo. Con una foto fija de la base, lo
--- confirmado mientras se esperaba el candado no se vería.
+-- solo candado de perfil y nunca este: no hay ciclo. (Insertar una fila que apunta a otro
+-- perfil toma además el candado compartido de su clave, que no choca con estos.) Con una
+-- foto fija de la base, lo confirmado mientras se esperaba el candado no se vería.
 create function private.team_lock() returns void
 language plpgsql security definer set search_path = ''
 as $$
@@ -128,7 +132,9 @@ $$;
 -- Borra de una cuenta todo factor de Supabase Auth que no sea el atado, y deja sus sesiones
 -- como las deja Auth al quitar un factor: sin la verificación y en primer nivel. También
 -- las que apuntan a un factor que ya no existe. El factor atado de alguien del equipo no se
--- toca. Primero bloquea los factores, que es por donde entra Auth al verificar.
+-- toca. Bloquea primero los factores y toca las sesiones antes que sus verificaciones, que
+-- es el orden de Auth al verificar. Si aun así se cruza con una verificación en curso, la
+-- base corta a uno de los dos (40P01) y quien llama reintenta.
 create function private.drop_unbound_factors(p_user uuid) returns integer
 language plpgsql security definer set search_path = ''
 as $$
@@ -139,13 +145,13 @@ begin
   select f.factor_id into v_bound from private.admin_factors f where f.profile_id = p_user;
   perform 1 from auth.mfa_factors m
   where m.user_id = p_user and m.id is distinct from v_bound for update;
-  delete from auth.mfa_amr_claims c using auth.sessions s
-  where c.session_id = s.id and s.user_id = p_user and c.authentication_method = 'totp'
-    and (v_bound is null or s.factor_id is distinct from v_bound);
   update auth.sessions s set aal = 'aal1', factor_id = null
   where s.user_id = p_user
     and (v_bound is null or s.factor_id is distinct from v_bound)
     and (s.factor_id is not null or s.aal is distinct from 'aal1');
+  delete from auth.mfa_amr_claims c using auth.sessions s
+  where c.session_id = s.id and s.user_id = p_user and c.authentication_method = 'totp'
+    and (v_bound is null or s.factor_id is distinct from v_bound);
   delete from private.second_factor_attempts a
   where a.factor_id in (
     select m.id from auth.mfa_factors m where m.user_id = p_user and m.id is distinct from v_bound);
@@ -358,8 +364,14 @@ declare
   v_user uuid;
   v_status public.profile_status;
 begin
-  if v_email is null or p_capabilities is null or pg_catalog.cardinality(p_capabilities) = 0
-     or pg_catalog.array_position(p_capabilities, null) is not null then
+  if v_email is null or p_capabilities is null or pg_catalog.cardinality(p_capabilities) = 0 then
+    return 'invalid';
+  end if;
+  -- Una lista de listas tampoco, y va antes: buscarle nulos lanzaría.
+  if pg_catalog.array_ndims(p_capabilities) <> 1 then
+    return 'invalid';
+  end if;
+  if pg_catalog.array_position(p_capabilities, null) is not null then
     return 'invalid';
   end if;
   -- Sin repetidos, en el orden en que llegaron.
@@ -375,7 +387,8 @@ begin
   end if;
 
   v_created := pg_catalog.clock_timestamp();
-  select u.id into v_user from auth.users u where u.email = v_email and not u.is_sso_user;
+  -- Auth guarda los correos en minúsculas; se compara igual que al aceptar, por si acaso.
+  select u.id into v_user from auth.users u where pg_catalog.lower(u.email) = v_email and not u.is_sso_user;
   if v_user is not null then
     select p.status into v_status from public.profiles p where p.id = v_user for no key update;
     if not found or v_status <> 'active' then
@@ -417,7 +430,9 @@ $$;
 -- Quitarle a alguien del equipo su atadura para que vuelva con un factor nuevo. La comparten
 -- restablecer y la emergencia. p_by es quién restablece, o nulo si es el dueño. p_email es
 -- a qué correo va la invitación: nulo quiere decir «al de la cuenta, si es el mismo con el
--- que aceptó»; el dueño puede escribir otro.
+-- que aceptó»; el dueño puede escribir otro. La emergencia nunca pasa nulo: sin correo
+-- escrito pasa el de la cuenta, sin compararlo, y lo que frena a quien lo hubiera cambiado
+-- es el código dictado.
 --
 -- No toca las capacidades de la persona: sin atadura no le sirven, y volver no se las da.
 -- La invitación que deja no lleva ninguna, así que aceptarla nunca devuelve una que se
@@ -860,8 +875,8 @@ begin
 end
 $$;
 
--- Cuando nadie del equipo puede restablecer a alguien: se restableció a sí mismo el último
--- con configuración, o a la persona le cambiaron el correo. p_email es a qué correo va la
+-- Cuando nadie del equipo puede restablecer a alguien: quien podía perdió también su
+-- factor, o a la persona le cambiaron el correo. p_email es a qué correo va la
 -- invitación; nulo, al de la cuenta. Aceptarla pide que la cuenta tenga ese correo.
 create function private.system_reset_second_factor(p_profile uuid, p_handoff text, p_email text) returns text
 language plpgsql set search_path = ''
@@ -904,6 +919,29 @@ begin
   return null;
 end
 $$;
+
+-- ---------------------------------------------------------------------------------------
+-- Cambiar un parámetro pide también el código reciente. Los plazos de arriba son
+-- parámetros: con la puerta de 12 horas sola, quien tiene la sesión de alguien con
+-- configuración se alargaría la ventana del código reciente y con ella invitaría. Vale
+-- para todo parámetro y no para una lista: uno nuevo queda cubierto sin acordarse de él.
+-- El sistema (la semilla, un trabajo) no da códigos. Corre después de
+-- business_parameters_actor, que sigue diciendo lo suyo a quien no tiene configuración.
+
+create function private.guard_parameter_fresh_code() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if not private.actor_is_system() and private.team_change_gate() is not null then
+    raise exception '%.%: a recent second factor code is required', tg_table_schema, tg_table_name
+      using errcode = '42501';
+  end if;
+  return new;
+end
+$$;
+
+create trigger business_parameters_fresh_code before insert or update on public.business_parameters
+  for each row execute function private.guard_parameter_fresh_code();
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante aprende dos cosas: nadie de la aplicación escribe las capacidades, y nadie
