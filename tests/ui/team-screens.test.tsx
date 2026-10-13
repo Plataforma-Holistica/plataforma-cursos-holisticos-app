@@ -271,6 +271,22 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
     expect(screen.getByRole("link", { name: "Empezar de nuevo" })).toHaveAttribute("href", "/entrar/segundo-factor/configurar");
   });
 
+  it.each([
+    ["vacío", ""],
+    ["sin forma de código", "12a4"],
+  ])("un envío %s no esconde la clave: no llegó a ser un intento, y la persona todavía no la usa", async (_what, typed) => {
+    actions.confirmSecondFactorAction.mockResolvedValue({ kind: "invalid", fields: { code: typed === "" ? "required" : "invalid" }, attempt: 1 });
+    const { user } = await begin();
+    await screen.findByText(SECRET);
+    if (typed !== "") await user.type(screen.getByLabelText("Código"), typed);
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+    await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.getByLabelText("Código")).toBeInvalid();
+    expect(screen.getByText(SECRET)).toBeVisible();
+    expect(screen.getByRole("img", { name: "Código QR con la clave de tu segundo factor" })).toBeVisible();
+  });
+
   it("al salir de la página la clave deja de pintarse: volver con «atrás» no la enseña", async () => {
     const { container } = await begin();
     await screen.findByText(SECRET);
@@ -419,19 +435,28 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
       await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
       await user.click(await screen.findByRole("button", { name: "Empezar de nuevo" }));
       expect(await screen.findByText(SECRET)).toBeVisible();
+      // Y sin el error del intento anterior: ese código era de otra clave.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Código")).not.toBeInvalid();
     });
 
-    it("si esa clave ya no es la vigente, deja de pedir el código y «Empezar de nuevo» da una nueva", async () => {
+    it("si esa clave ya no es la vigente, deja de pedir el código, y «Empezar de nuevo» pinta la nueva y vuelve a pedirlo", async () => {
       actions.confirmSecondFactorAction.mockResolvedValue({ kind: "start_again", attempt: 1 });
       actions.startSecondFactorAction.mockResolvedValue(STARTED);
       const user = userEvent.setup();
-      render(<FactorSetupScreen view={RESUME} />);
+      const { container } = render(<FactorSetupScreen view={RESUME} />);
       await user.type(screen.getByLabelText("Código"), "123456");
       await user.click(screen.getByRole("button", { name: "Continuar" }));
       expect(await screen.findByText("Esa clave ya no es la vigente. Empieza de nuevo para ver una nueva.")).toBeVisible();
       expect(screen.queryByLabelText("Código")).not.toBeInTheDocument();
+
       await user.click(screen.getByRole("button", { name: "Empezar de nuevo" }));
-      await vi.waitFor(() => expect(actions.startSecondFactorAction).toHaveBeenCalledOnce());
+      // La respuesta de confirmar era de la clave anterior: con una nueva ya no manda.
+      expect(await screen.findByText(SECRET)).toBeVisible();
+      expect(screen.queryByText("Esa clave ya no es la vigente. Empieza de nuevo para ver una nueva.")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Código")).toHaveValue("");
+      expect(container.querySelector('input[type="hidden"][name="painted"]')).toHaveValue(FACTOR);
+      expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
     });
   });
 });

@@ -62,6 +62,7 @@ pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
 pnpm test:e2e    # extremo a extremo de tests/e2e/ (Playwright): un navegador contra la aplicación compilada y la pila local
+pnpm test:e2e:equipo   # el camino del equipo, de extremo a extremo: deja residuo, y rehace la base local al terminar
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
@@ -86,6 +87,16 @@ marcados `@telefono`. Los archivos son `*.spec.ts`, para que Vitest no los tome 
 Las reglas de accesibilidad corren con el `axe-core` que ya estaba, inyectado en la
 página: en un caso sin JavaScript no hay con qué correrlas. No corre contra una vista
 previa: ahí no hay buzón que leer.
+
+`pnpm test:e2e:equipo` corre aparte el camino de quien es del equipo
+(`tests/e2e/equipo/*.equipo.ts`): invitada, prueba su buzón, configura su segundo factor,
+entra de nuevo, da su código y llega a administración, con JavaScript y sin él. No corre
+con `pnpm test:e2e`, y es a propósito: invitar, atar un factor y dar capacidades escriben
+en la auditoría, que no admite borrado, y las pruebas de base cuentan esos renglones. El
+guion (`scripts/e2e-equipo.mjs`) rehace la base local al terminar, pasen o fallen; si se
+corta a la mitad, `pnpm db:reset` antes de `pnpm test:db`. Qué corre lo decide
+`playwright.config.ts` con la variable `E2E_EQUIPO`, y en la integración continua es el
+último paso. Corre también si se tocó una pantalla del equipo, su guarda o `team.ts`.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -147,6 +158,7 @@ La que fija el TRD §4.2.
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/app/_lib/` | Lo que comparten todas las pantallas: `request-context.ts`, el único archivo que lee la petición; `guard.ts`, la guarda en las páginas; y `guard-steps.ts`, la tabla pura de qué hace cada tipo de pantalla con cada respuesta de la guarda | Servicios | Decidir quién pasa: eso lo contesta `checkSession` |
 | `src/app/(cuenta)/` | Las pantallas de la cuenta, cada una en su carpeta: `page.tsx` (llama a la guarda), `screen.tsx` (el formulario, que corre en el navegador), `actions.ts` (la acción de servidor) y `outcomes.ts` (la tabla pura de la pantalla). Lo que comparten, en su `_lib/` | Servicios, componentes base y textos | Un armazón o una plantilla propios: pintarían antes que la guarda de su página |
+| `src/app/admin/` | Administración. Toda página llama a `requireAdmin`, y el comodín `[...resto]` atiende con esa misma guarda lo que no tiene página. Sus estados propios (PA-88), en su `_lib/` | Servicios, componentes base y textos | Una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían o se asomarían antes que la guarda |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
 | `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
@@ -161,12 +173,13 @@ La que fija el TRD §4.2.
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
 | `tests/actions/` | Pruebas de las acciones de servidor con sus servicios simulados: qué le pasa cada una a su servicio, en qué orden, y qué hace con cada respuesta | Las acciones de `src/app/` | Dar por probado lo que hace el servicio: eso lo prueban `tests/integration/` y el extremo a extremo |
 | `tests/e2e/` | Pruebas de extremo a extremo con Playwright (`*.spec.ts`): un navegador de verdad contra la aplicación compilada, la pila local y su buzón, con JavaScript y sin él. Las corre `pnpm test:e2e` | Los ayudantes de `tests/integration/helpers/` que no cargan código de la aplicación | Correr contra algo que no sea la pila local, y dejar residuo |
+| `tests/e2e/equipo/` | El camino del equipo de extremo a extremo (`*.equipo.ts`). Lo corre `pnpm test:e2e:equipo`, nunca la corrida normal | Lo mismo que `tests/e2e/` | Correr sin rehacer la base después: deja renglones en la auditoría, que no admite borrado |
 | `tests/design/` | Lo que promete la hoja de tokens: la tabla de contraste del diseño, recalculada | | |
 | `scripts/` | Guiones de desarrollo y de la integración continua | | Correr contra una base que no sea la local |
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Doce precisiones que la tabla no dice:
+falla. Trece precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -352,6 +365,52 @@ falla. Doce precisiones que la tabla no dice:
       supo si cambió» no se pinta como algo que salió bien.
 
     Una prueba exige que el ancla de un bloque no se escriba en ningún otro archivo.
+- **Las pantallas del equipo tienen su propia guarda** (T-105; flujo de la app §6.2 y
+  §6.3). Quién es del equipo lo dice la base: la guarda de sesión a secas dejaría entrar a
+  cualquier cuenta.
+  - Son tres, en `src/app/_lib/guard.ts`. Le preguntan a `teamStanding` y obedecen cada
+    una su tabla pura de `guard-steps.ts`: `requireAdmin(ruta, capacidad?)` para todo lo
+    que cuelgue de `/admin`, `requireSecondFactor(volver)` para `/entrar/segundo-factor` y
+    `requireFactorSetup()` para `/entrar/segundo-factor/configurar`. Una prueba de
+    arquitectura exige que cada página del equipo use la suya y ninguna otra, y que las
+    demás pantallas con sesión no usen ninguna de las tres: el segundo factor solo se pide
+    en administración.
+  - A quien no es del equipo ni tiene invitación le contestan `notFound()`: lo mismo que
+    una ruta que no existe (PA-19). `unavailable` nunca se trata como «no es del equipo»:
+    pinta PA-18, con «Reintentar».
+  - Bajo `src/app/admin/` toda página llama a `requireAdmin`, y el comodín
+    `[...resto]/page.tsx` corre esa guarda antes de decir que una ruta no existe. Sin él,
+    una ruta de administración que existe y una que no existe se distinguirían con una
+    cookie inventada, que provoca «no se supo» a voluntad. Una página nueva de
+    administración toma su ruta antes que el comodín, y llama a la misma guarda.
+  - Ninguna página del equipo exporta `metadata`. Medido: cuando «no existe» lo contesta
+    una página, el navegador se queda con el título por omisión del sitio, así que el de
+    la página se asomaría justo ahí. Por eso la pestaña y el estado de una petición parcial
+    no son los de una dirección cualquiera que no existe; entre rutas de administración,
+    existan o no, sí son iguales, y eso es lo que se exige.
+  - A dónde va quien acaba de quedar dentro lo decide `entryDestination(estado, volver)`
+    (`navigation.ts`), con el estado que el servicio leyó al dejarla entrar
+    (`standingAtEntry`, con las claims que Auth acaba de dar; no vuelve a leer la cookie,
+    y del servicio solo sale el nombre del estado). Lo usan las tablas de entrar, de
+    completar el registro y de completar la cuenta. Quien pidió una pantalla que no es de
+    administración va a esa pantalla. Ese estado no autoriza nada: la pantalla a la que
+    llegue vuelve a preguntar, y «no se supo» sigue como cualquier cuenta.
+  - Configurar el segundo factor son dos formularios, cada uno con su `useActionState`, y
+    no se juntan. La respuesta de «Empezar» trae la clave, y sin JavaScript React manda el
+    estado de una acción dentro de todo formulario ligado a ella: mientras ese estado trae
+    la clave no se pinta ningún formulario de «Empezar», y «Empezar de nuevo» es un enlace
+    que vuelve a pedir la página. La clave no va en un campo oculto, no vuelve en otra
+    respuesta, y deja de pintarse al enviar el código y al salir de la página. El código
+    QR se pinta con `<img>` y una dirección de datos, nunca como marcado, y la clave en
+    texto va siempre junto a él.
+  - La página de configurar no da de alta nada: una lectura no escribe cookies, y dar de
+    alta borra los factores a medias, así que recargar rompería la otra pestaña. Por eso
+    existe el paso «Empezar», que es una acción.
+  - Todo estado de las dos pantallas del segundo factor lleva «Ir a mi inicio» y «Cerrar
+    sesión» (`SecondFactorExits`): nadie se queda encerrado ahí.
+  - PA-88 es `ForbiddenScreen` (`src/app/admin/_lib/states.tsx`). Se le pinta a quien es
+    del equipo y no tiene la capacidad que la pantalla pide, nunca a quien no lo es. Hoy
+    ninguna página pide una capacidad.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -608,7 +667,7 @@ falla. Doce precisiones que la tabla no dice:
     lo contestan tal cual:
     - `teamStanding(reader)` da el estado de quien trae esa sesión
       (`private.team_standing()`), con la huella del resguardo que traiga su navegador.
-      Es lo que leerá la guarda de `/admin`. Dice además qué factor dio de alta el
+      Es lo que leen las guardas de las pantallas del equipo. Dice además qué factor dio de alta el
       servidor en ese navegador y en esa sesión (`inProgress`), para que la pantalla sepa
       que ya se empezó; no dice que ese factor siga existiendo. Si un estado tiene una
       capacidad lo contesta `holds(standing, capability)`: solo `member`, nunca lo que
@@ -875,13 +934,13 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     recuperación terminan igual, y queda dicho (`mailbox_proof_unavailable`,
     `mailbox_ticket_not_kept`). Una prueba de arquitectura exige que reclamar y emitir un resguardo
     solo ocurran en esos dos flujos. La cookie la leen los servicios del equipo
-    (`team.ts`), y aceptar la borra. Mientras no existan las pantallas que los llaman,
-    ninguna invitación se puede aceptar desde un navegador.
+    (`team.ts`), y aceptar la borra. Las pantallas que los llaman son las dos
+    del segundo factor (PA-12).
   - **En qué estado está alguien respecto al equipo** lo dice
     `private.team_standing(huella del resguardo)`, sobre quien actúa y sin escribir:
     `member`, `needs_code`, `invited`, `invited_unproven`, `unbound` o `none`. Lo lee
-    `teamStanding` (`src/services/account/team.ts`), y es lo que leerá la guarda de
-    `/admin`, porque el servidor no puede leer las invitaciones ni las ataduras. Tiene que decir lo mismo que haría aceptar: una invitación que aceptar
+    `teamStanding` (`src/services/account/team.ts`), y es lo que leen las guardas de las
+    pantallas del equipo, porque el servidor no puede leer las invitaciones ni las ataduras. Tiene que decir lo mismo que haría aceptar: una invitación que aceptar
     revocaría no cuenta. Si se cambia una condición de `accept_admin_invitation`, se
     cambia aquí también.
   - Hay dos tipos de invitación. `grant` da capacidades a quien no tiene ninguna.
@@ -945,7 +1004,7 @@ entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
 `src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
 `src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
 `playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio. Con
-las de registro y recuperación se sumó `tests/actions/`.
+las de registro y recuperación se sumó `tests/actions/`. Con las del equipo, `src/app/admin/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

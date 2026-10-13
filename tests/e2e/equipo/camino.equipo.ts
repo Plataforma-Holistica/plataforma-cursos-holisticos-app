@@ -7,6 +7,7 @@ import {
   clearCounters,
   lastMailTo,
   ownerQuery,
+  parameter,
   person,
   SESSION_COOKIE,
   sessionCount,
@@ -74,7 +75,9 @@ async function register(page: Page, email: string): Promise<void> {
   await page.goto("/registro");
   await page.getByLabel("Correo").fill(email);
   await page.getByRole("button", { name: "Crear mi cuenta" }).click();
-  await expect(page).toHaveURL("/verificar");
+  // Con margen: es lo primero que se le pide a una aplicación recién levantada, que todavía
+  // no abre su primera conexión a la base ni le ha hablado a Auth.
+  await expect(page).toHaveURL("/verificar", { timeout: 20_000 });
   await page.goto(`/verificar/${tokenHashIn(await lastMailTo(email), "verificar")}`);
   await page.getByLabel("Nombre").fill("Ana de Prueba");
   await page.getByLabel("Contraseña", { exact: true }).fill(PASSWORD);
@@ -186,9 +189,32 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   // Sin el código no entra a administración: la guarda la devuelve aquí, guardando a dónde iba.
   await page.goto("/admin/equipo");
   await expect(page).toHaveURL("/entrar/segundo-factor?volver=%2Fadmin%2Fequipo");
+  // Tampoco pidiendo la página por partes, como la pide el navegador ya dentro de la aplicación.
+  const partial = await page.request.get("/admin", { headers: { RSC: "1" } });
+  expect(await partial.text()).not.toMatch(/Tus capacidades|No tienes pendientes/);
   // Y el segundo factor solo se pide en administración: su inicio y su cuenta siguen abiertos.
   await page.goto("/inicio");
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
+
+  // La acción de dar el código, llamada directo con la sesión de una alumna: no verifica
+  // nada, y la manda a la misma pantalla, donde la guarda le contesta que no existe.
+  const codeFields = actionFields(await (await page.request.get("/entrar/segundo-factor")).text());
+  const alumna = await person();
+  await inContext(browser, {}, async (other, otherContext) => {
+    await signIn(other, alumna);
+    await expect(other).toHaveURL("/inicio");
+    const given = await postAction(otherContext.request, "/entrar/segundo-factor", { ...codeFields, code: totpCode(secret), volver: "/admin" });
+    expect(given.status()).toBe(303);
+    expect(given.headers().location).toBe("/entrar/segundo-factor?volver=%2Fadmin");
+    expect((await otherContext.request.get("/admin")).status()).toBe(404);
+    expect(await teamOf(alumna.id)).toEqual({ bound: [], capabilities: [] });
+  });
+  // Y sin ninguna sesión, a entrar.
+  await inContext(browser, {}, async (_other, otherContext) => {
+    const given = await postAction(otherContext.request, "/entrar/segundo-factor", { ...codeFields, code: totpCode(secret), volver: "/admin" });
+    expect(given.status()).toBe(303);
+    expect(given.headers().location).toBe("/entrar?volver=%2Fadmin");
+  });
 
   await page.goto("/entrar/segundo-factor");
   await page.getByLabel("Código").fill(wrongCode(secret));
@@ -334,6 +360,14 @@ test("las acciones de configurar, llamadas directo por quien no es del equipo, n
   await register(page, email);
   await expect(page).toHaveURL(SETUP);
   const startFields = actionFields(await (await page.request.get(SETUP)).text());
+  // Ya empezado, la página trae el formulario de confirmar: es el primero.
+  await page.getByRole("button", { name: "Empezar" }).click();
+  await expect(page.locator("main code")).toBeVisible();
+  const invitedId = await userIdOf(email);
+  const [started] = await factorsOf(invitedId);
+  if (!started) throw new Error("La invitada no tiene un factor empezado.");
+  const confirmFields = actionFields(await (await page.request.get(SETUP)).text());
+  expect(Object.keys(confirmFields)).toContain("painted");
 
   const alumna = await person();
   await inContext(browser, {}, async (other, otherContext) => {
@@ -342,13 +376,24 @@ test("las acciones de configurar, llamadas directo por quien no es del equipo, n
 
     // «Empezar», con la sesión de una alumna: no da de alta nada, y la manda a la misma
     // ruta, donde la guarda le contesta que no existe.
-    const started = await postAction(otherContext.request, SETUP, startFields);
-    expect(started.status()).toBe(303);
-    expect(started.headers().location).toBe(SETUP);
+    const begun = await postAction(otherContext.request, SETUP, startFields);
+    expect(begun.status()).toBe(303);
+    expect(begun.headers().location).toBe(SETUP);
     expect(await factorsOf(alumna.id)).toEqual([]);
     expect((await otherContext.cookies()).map((cookie) => cookie.name)).not.toContain("plataforma-factor");
     expect((await otherContext.request.get(SETUP)).status()).toBe(404);
     expect(await teamOf(alumna.id)).toEqual({ bound: [], capabilities: [] });
+
+    // Confirmar, con el factor de la invitada como «lo pintado»: tampoco. Lo pintado solo se
+    // compara, y la alumna no tiene invitación: no se verifica nada ni se ata nada.
+    const confirmed = await postAction(otherContext.request, SETUP, { ...confirmFields, code: "123456", painted: started.id });
+    expect(confirmed.status()).toBe(303);
+    expect(confirmed.headers().location).toBe(SETUP);
+    expect(await factorsOf(alumna.id)).toEqual([]);
+    expect(await teamOf(alumna.id)).toEqual({ bound: [], capabilities: [] });
+    // El factor de la invitada sigue como estaba, sin verificar y sin atar.
+    expect(await factorsOf(invitedId)).toEqual([started]);
+    expect(await teamOf(invitedId)).toEqual({ bound: [], capabilities: [] });
     // Y sigue con su sesión.
     await other.goto("/inicio");
     await expect(other.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
@@ -356,8 +401,50 @@ test("las acciones de configurar, llamadas directo por quien no es del equipo, n
 
   // Sin ninguna sesión: a entrar, y tampoco pasa nada.
   await inContext(browser, {}, async (_other, otherContext) => {
-    const started = await postAction(otherContext.request, SETUP, startFields);
-    expect(started.status()).toBe(303);
-    expect(started.headers().location).toBe("/entrar");
+    for (const fields of [startFields, { ...confirmFields, code: "123456", painted: started.id }]) {
+      const answered = await postAction(otherContext.request, SETUP, fields);
+      expect(answered.status()).toBe(303);
+      expect(answered.headers().location).toBe("/entrar");
+    }
+    expect(await factorsOf(invitedId)).toEqual([started]);
+  });
+});
+
+test("demasiados códigos equivocados: se cierran todas sus sesiones, y la pantalla de entrar lo dice", async ({ browser }) => {
+  const email = testEmail();
+  expect(await invite(email, "{finance}")).toMatch(/^invited/);
+  const used: string[] = [];
+  const limit = await parameter("INTENTOS_ANTES_DE_FRENO");
+
+  // Sin JavaScript: cada envío es una carga completa, y se sabe cuándo terminó.
+  await inContext(browser, { javaScriptEnabled: false }, async (page, context) => {
+    await register(page, email);
+    await expect(page).toHaveURL(SETUP);
+    const id = await userIdOf(email);
+    await page.getByRole("button", { name: "Empezar" }).click();
+    const secret = (await page.locator("main code").innerText()).trim();
+    await page.getByLabel("Código").fill(await nextCode(secret, used));
+    await page.getByRole("button", { name: "Continuar" }).click();
+    await expect(page).toHaveURL("/entrar");
+
+    await signIn(page, { email, password: PASSWORD });
+    await expect(page).toHaveURL("/entrar/segundo-factor");
+
+    // Códigos equivocados, uno tras otro, hasta que el freno rechaza.
+    let tries = 0;
+    while (new URL(page.url()).pathname === "/entrar/segundo-factor" && tries < limit + 4) {
+      await page.getByLabel("Código").fill(wrongCode(secret));
+      await Promise.all([page.waitForEvent("load"), page.getByRole("button", { name: "Continuar" }).click()]);
+      tries += 1;
+    }
+    // Los primeros solo dicen que no coincide; pasado el límite, el freno rechaza.
+    expect(tries).toBeGreaterThanOrEqual(limit);
+    await expect(page).toHaveURL("/entrar");
+    await expect(page.getByText(/Hubo demasiados códigos equivocados y cerramos tus sesiones\./)).toBeVisible();
+    expect(await sessionCookie(context)).toBeUndefined();
+    expect(await sessionCount(id)).toBe(0);
+    // Sigue siendo del equipo: nada de eso le quitó su atadura ni sus capacidades.
+    expect((await teamOf(id)).capabilities).toEqual(["finance"]);
+    expect((await teamOf(id)).bound).toHaveLength(1);
   });
 });

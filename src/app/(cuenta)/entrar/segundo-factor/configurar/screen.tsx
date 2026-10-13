@@ -1,7 +1,8 @@
 "use client";
 
 import { MailOpen } from "lucide";
-import { useActionState, useEffect, useState } from "react";
+import { type FormEvent, useActionState, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 
 import type { FactorSetupView } from "@/app/_lib/guard-steps";
 import { account } from "@/messages/es/account";
@@ -16,6 +17,7 @@ import { TextField } from "@/ui/text-field";
 import { CODE_ERRORS, CodeField } from "../../../_lib/fields";
 import { signOutAction } from "../../../_lib/session-actions";
 import { SuspendedScreen } from "../../../_lib/states";
+import { checkCode } from "../outcomes";
 import { SecondFactorExits } from "../screen";
 
 import { confirmSecondFactorAction, startSecondFactorAction } from "./actions";
@@ -91,17 +93,33 @@ export interface FactorSetupScreenProps {
 
 export function FactorSetupScreen({ view }: FactorSetupScreenProps) {
   const [startState, startAction, starting] = useActionState(startSecondFactorAction, START_IDLE);
-  const [confirmState, confirmAction, confirming] = useActionState(confirmSecondFactorAction, CONFIRM_IDLE);
+  const [answer, confirmAction, confirming] = useActionState(confirmSecondFactorAction, CONFIRM_IDLE);
   // De cuál «Empezar» es la clave que ya no se pinta: la de ese intento, y no la de uno posterior.
   const [hiddenAttempt, setHiddenAttempt] = useState<number | null>(null);
+  // Con cuál «Empezar» a la vista se envió el último código.
+  const [confirmedWith, setConfirmedWith] = useState<number | null>(null);
   const startedAttempt = startState.kind === "started" ? startState.attempt : null;
 
+  // Los dos estados no saben uno del otro: la respuesta de confirmar se queda como está
+  // aunque después llegue una clave nueva. Lo que se contestó con otra clave a la vista ya no
+  // dice nada de esta: ni «esa clave ya no es la vigente», ni «ese código no coincide».
+  const confirmState: ConfirmState = confirmedWith === startedAttempt ? answer : CONFIRM_IDLE;
+
   // Al salir de la página la clave deja de pintarse: volver con «atrás» no la enseña otra vez.
+  // Se pinta en el acto: el navegador puede congelar la página justo después.
   useEffect(() => {
-    const hide = () => setHiddenAttempt(startedAttempt);
+    const hide = () => flushSync(() => setHiddenAttempt(startedAttempt));
     window.addEventListener("pagehide", hide);
     return () => window.removeEventListener("pagehide", hide);
   }, [startedAttempt]);
+
+  function sent(event: FormEvent<HTMLFormElement>) {
+    setConfirmedWith(startedAttempt);
+    // Enviado un código, la clave ya cumplió y deja de pintarse. Un envío vacío o sin forma
+    // no llega a ser un intento: la persona todavía no la usa, y se queda.
+    const code = new FormData(event.currentTarget).get("code");
+    if (typeof code === "string" && checkCode(code) === null) setHiddenAttempt(startedAttempt);
+  }
 
   // PA-35: la cuenta se suspendió con la pantalla abierta.
   if (startState.kind === "suspended" || confirmState.kind === "suspended") return <SuspendedScreen withSession />;
@@ -184,13 +202,7 @@ export function FactorSetupScreen({ view }: FactorSetupScreenProps) {
             <p className="text-text-2">{text.resumeBody}</p>
           )}
 
-          <form
-            action={confirmAction}
-            noValidate
-            className="flex flex-col gap-6"
-            // Enviado el código, la clave ya cumplió: deja de pintarse.
-            onSubmit={() => setHiddenAttempt(startedAttempt)}
-          >
+          <form action={confirmAction} noValidate className="flex flex-col gap-6" onSubmit={sent}>
             <FormErrorSummary errors={errors} attempt={attempt} />
             {confirmState.kind === "unavailable" && (
               <InlineAlert key={`fallo-${attempt}`} tone="danger" live>

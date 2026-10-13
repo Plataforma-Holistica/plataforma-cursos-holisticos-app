@@ -249,8 +249,16 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       const code = codeOf(file);
       const called = [...code.matchAll(/\bawait (require\w+|visitorOnly)\(/g)].map((match) => match[1]);
       expect(called).toEqual([teamGuardOf(routeOf(file))]);
-      // Antes de pintar nada: la guarda es lo primero que la página espera, salvo leer su consulta.
+      // No le pregunta al servicio por su cuenta: eso es de la guarda.
       expect(code).not.toMatch(/\bcheckSession\b|\bteamStanding\b/);
+      // Y la guarda es lo primero que la página espera, salvo leer su dirección: ningún otro
+      // servicio corre antes de saber quién pide.
+      const body = code.slice(code.indexOf("export default async function"));
+      const awaited = [...body.matchAll(/\bawait \(?([\w.]+)/g)].map((match) => match[1]);
+      expect(awaited.filter((name) => name !== "searchParams" && name !== "params")[0]).toBe(teamGuardOf(routeOf(file)));
+      // Sin límites de espera: lo de abajo se pintaría antes de que la guarda conteste, y un
+      // «no existe» dicho después ya no llegaría con su estado.
+      expect(code).not.toMatch(/\bSuspense\b/);
     });
 
     it.each(teamPages)("%s no exporta su título: no debe poder asomarse en la respuesta de «no existe»", (file) => {

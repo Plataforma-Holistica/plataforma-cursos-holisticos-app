@@ -78,9 +78,11 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
   expect(missing.title).toContain(NOT_FOUND);
   for (const path of TEAM_PATHS) expect(await outside(path), path).toEqual(missing);
 
-  // Bajo administración, además, el documento entero tiene la misma forma exista o no la
-  // ruta: las dos contestan desde la misma guarda. (Que el prefijo es de administración se
-  // sabe: a quien no trae sesión ya lo manda a entrar.)
+  // Bajo administración, además, lo que aquí se mira del documento (estado, título,
+  // encabezado y cabeceras) es igual exista o no la ruta: las dos contestan desde la misma
+  // guarda. Hoy bajo `/admin` solo hay una página y el comodín; con la primera página de
+  // verdad hay que volver a medir el documento entero. (Que el prefijo es de administración
+  // se sabe: a quien no trae sesión ya lo manda a entrar.)
   const existing = await seen(await page.request.get("/admin"));
   for (const path of ["/admin/equipo", "/admin/no-existe/tampoco"]) {
     expect(await seen(await page.request.get(path)), path).toEqual(existing);
@@ -162,16 +164,34 @@ test("con una cookie inventada, una ruta de administración que existe y una que
   };
 
   const context = await browser.newContext();
+  const forge = () => context.addCookies([{ name: SESSION_COOKIE, value: forged, url: "http://localhost:3000" }]);
   try {
-    await context.addCookies([{ name: SESSION_COOKIE, value: forged, url: "http://localhost:3000" }]);
+    // Primero, unas peticiones que no se miden. Con una clave que no conoce, el servidor
+    // vuelve a pedir las claves si hace más de un minuto que las pidió, y entonces sí sabe
+    // que el token es inventado: borra la cookie y manda a entrar. Dentro de ese minuto no
+    // pregunta otra vez: «no se supo». El paso previo y las páginas llevan cada uno su
+    // memoria de claves, así que hace falta una petición por cada uno para dejarlas recién
+    // pedidas. Lo que sigue mide siempre ese estado, corra este caso solo o con los demás.
+    let response = await context.request.get("/admin", { maxRedirects: 0 });
+    for (let warming = 0; warming < 4 && response.status() !== 200; warming += 1) {
+      await forge();
+      response = await context.request.get("/admin", { maxRedirects: 0 });
+    }
+    // «No se supo» no es «sin sesión» ni «no es del equipo»: ni manda a entrar, ni dice «no
+    // existe». Pinta su aviso, con 200, y no pinta administración.
+    expect(response.status()).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("Algo falló de nuestro lado");
+    expect(body).not.toContain("Tus capacidades");
+
+    await forge();
     const existing = await seenAt(context, "/admin");
-    // Ninguna pinta administración.
-    expect(existing.heading).not.toBe("Administración");
-    expect(existing.status).not.toBe(404);
     for (const path of ["/admin/no-existe", "/admin/no-existe/tampoco", "/admin/equipo"]) {
-      // La cookie se vuelve a poner: la respuesta anterior pudo borrarla.
-      await context.addCookies([{ name: SESSION_COOKIE, value: forged, url: "http://localhost:3000" }]);
+      // La cookie se vuelve a poner: si una respuesta la borrara, la siguiente no mediría lo mismo.
+      await forge();
       expect(await seenAt(context, path), path).toEqual(existing);
+      await forge();
+      expect(await (await context.request.get(path, { maxRedirects: 0 })).text(), path).toContain("Algo falló de nuestro lado");
     }
   } finally {
     await context.close();
