@@ -4,11 +4,13 @@ import type * as adapter from "@/adapters/supabase/auth";
 import type { CookieJar, CookieOptions } from "@/adapters/supabase/auth-cookies";
 import type { FailureCode } from "@/services/error-reporting/server";
 
+import type { TeamStore } from "./team";
 import type { Timing } from "./timing";
 
 // Lo que los servicios de cuenta reciben de fuera, para poder probarlos: el adaptador de
 // Auth, de dónde se cree la dirección, el reloj del piso de tiempo, a quién se le reporta,
-// cómo se manda trabajo detrás de la respuesta y cuánto dura el resguardo del buzón.
+// cómo se manda trabajo detrás de la respuesta, cuánto dura el resguardo del buzón y lo que
+// los servicios del equipo le preguntan a la base.
 
 /** Lo que estos servicios usan del adaptador de Auth. */
 export type AuthPort = Pick<
@@ -28,6 +30,9 @@ export type AuthPort = Pick<
   | "changeProvenPassword"
   | "discardProof"
   | "closeAllWithProof"
+  | "enrollFactor"
+  | "verifyFactor"
+  | "removeFactor"
 >;
 
 export interface AccountDependencies {
@@ -55,6 +60,13 @@ export interface AccountDependencies {
    * ya terminaron. Solo las pruebas la sustituyen, y una de arquitectura lo exige.
    */
   ticketLifetime: () => Promise<number | null>;
+  /**
+   * Las dos preguntas que los servicios del equipo le hacen a la base: en qué estado está
+   * quien actúa, y aceptar su invitación. Solo las pruebas lo sustituyen, para correr contra
+   * la base de verdad dentro de una transacción que se revierte, y una de arquitectura lo
+   * exige: quien lo sustituyera en la aplicación decidiría quién es del equipo.
+   */
+  teamStore: TeamStore;
 }
 
 export interface StagingJar extends CookieJar {

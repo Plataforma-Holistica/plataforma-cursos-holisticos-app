@@ -223,3 +223,107 @@ describe("el resguardo del buzón solo nace al terminar un enlace del correo", (
     expect(calls(bodyOf("completeRecovery"), /= jar \? issueTicket\(\) : null;/g)).toBe(1);
   });
 });
+
+describe("quién es del equipo lo decide la base, y el factor que se ata lo da de alta el servidor", () => {
+  // Aceptar una invitación ata un factor y da capacidades (TRD §9.2, fila «Invitaciones»).
+  // Lo sostienen dos cosas que una prueba de comportamiento no distingue mientras todo
+  // salga bien: que a la base solo se le pregunte por un camino, y que el factor que se le
+  // pasa al aceptar sea el que el servidor anotó al darlo de alta. Aquí se mira el código.
+  const sources = sourceFiles(src)
+    .filter((path) => !/\.test\.tsx?$/.test(path))
+    .map((path) => ({ file: posix(path), text: readFileSync(path, "utf8") }));
+  const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const namingInCode = (pattern: RegExp) =>
+    sources.filter((source) => pattern.test(withoutComments(source.text))).map((source) => source.file).sort();
+  const codeOf = (file: string) => withoutComments(sources.find((source) => source.file === file)?.text ?? "");
+  const count = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0;
+  const team = codeOf("src/services/account/team.ts");
+  /** El cuerpo de una función del servicio: desde su encabezado hasta la llave que la cierra. */
+  const bodyOf = (name: string) => {
+    const start = team.indexOf(`  async function ${name}(`);
+    const end = team.indexOf("\n  }\n", start);
+    return start === -1 || end === -1 ? "" : team.slice(start, end);
+  };
+
+  it("las dos funciones de la base se nombran en un solo archivo, una vez cada una", () => {
+    // Con su esquema: el almacén usa el mismo nombre como razón para la auditoría.
+    expect(namingInCode(/private\.team_standing\b/)).toEqual(["src/services/account/team-records.ts"]);
+    expect(namingInCode(/\baccept_admin_invitation\b/)).toEqual(["src/services/account/team-records.ts"]);
+    expect(count(codeOf("src/services/account/team-records.ts"), /private\.team_standing\(/g)).toBe(1);
+    expect(count(codeOf("src/services/account/team-records.ts"), /private\.accept_admin_invitation\(/g)).toBe(1);
+  });
+
+  it("y sus consultas solo las corre el almacén del equipo", () => {
+    const users = ["src/services/account/team-records.ts", "src/services/account/team-store.ts"];
+    expect(namingInCode(/\breadTeamStanding\b/)).toEqual(users);
+    expect(namingInCode(/\bacceptInvitation\b/)).toEqual(users);
+    // Una importación y una llamada de cada una, las dos como servidor.
+    const store = codeOf("src/services/account/team-store.ts");
+    expect(count(store, /\breadTeamStanding\b/g)).toBe(2);
+    expect(count(store, /\bacceptInvitation\b/g)).toBe(2);
+    expect(store).toMatch(/run\(\{ claims, reason: "team_standing" \}, \(tx\) => readTeamStanding\(tx, ticketPrint\)\)/);
+    expect(store).toMatch(/run\(\{ claims, reason: "accept_invitation" \}, \(tx\) => acceptInvitation\(tx, ticketPrint, factorId, handoffPrint\)\)/);
+    expect(store).not.toMatch(/\bas(?:User|System)\b/);
+  });
+
+  it("en la aplicación nadie sustituye ese almacén", () => {
+    expect(namingInCode(/\bteamStore\b/)).toEqual(["src/services/account/account.ts", "src/services/account/deps.ts"]);
+    expect(namingInCode(/\bcreateTeamStore\b/)).toEqual(["src/services/account/team-store.ts"]);
+    expect(namingInCode(/\bdatabaseTeamStore\b/)).toEqual(["src/services/account/account.ts", "src/services/account/team-store.ts"]);
+    // En `account.ts`: el valor de fábrica, y pasárselo a los servicios del equipo.
+    const account = codeOf("src/services/account/account.ts");
+    expect(count(account, /\bteamStore\b/g)).toBe(2);
+    expect(account).toMatch(/teamStore: databaseTeamStore,/);
+    expect(account).toMatch(/createTeam\(deps, \{ checkSession, store: deps\.teamStore \}\)/);
+  });
+
+  it("los servicios del equipo no abren transacciones: le preguntan al almacén", () => {
+    expect(team).not.toMatch(/adapters\/supabase\/db/);
+    expect(team).not.toMatch(/\bas(?:User|Server|System)\(/);
+  });
+
+  it("el factor se anota en un solo lugar: al darlo de alta, con lo que Auth devolvió", () => {
+    expect(namingInCode(/\bcreateEnrolledFactors\b/)).toEqual(["src/services/account/enrolled-factor.ts"]);
+    expect(namingInCode(/\bkeepEnrolledFactor\b/)).toEqual(["src/services/account/enrolled-factor.ts", "src/services/account/team.ts"]);
+    expect(count(team, /\bkeepEnrolledFactor\(/g)).toBe(1);
+    expect(bodyOf("startSecondFactor")).toMatch(/keepEnrolledFactor\(jar, sessionId, enrolled\.factorId\)/);
+    // Dar de alta un factor solo lo pide ese servicio.
+    expect(namingInCode(/\benrollFactor\b/)).toEqual([
+      "src/adapters/supabase/auth.ts",
+      "src/services/account/deps.ts",
+      "src/services/account/team.ts",
+    ]);
+    expect(count(team, /\.enrollFactor\(/g)).toBe(1);
+    expect(bodyOf("startSecondFactor")).toMatch(/await auth\.enrollFactor\(jar\)/);
+  });
+
+  it("el que se le pasa a la base al aceptar es el que se leyó de esa anotación, y es el que se verificó", () => {
+    const confirm = bodyOf("confirmSecondFactor");
+    expect(confirm).toMatch(/const factorId = readEnrolledFactor\(jar, team\.claims\.sessionId \?\? ""\);/);
+    expect(count(confirm, /\bfactorId = /g)).toBe(1);
+    expect(confirm).toMatch(/await auth\.verifyFactor\(jar, factorId, input\.code\)/);
+    // Con las claims de la sesión ya subida, no con las de antes de verificar.
+    expect(confirm).toMatch(/const \{ claims \} = verification;/);
+    expect(confirm).toMatch(/await store\.accept\(claims, ticket, factorId, handoff\)/);
+    expect(count(team, /store\.accept\(/g)).toBe(1);
+    // Nada de lo que llega del formulario dice qué factor es.
+    expect(confirm).not.toMatch(/input\.factor/);
+  });
+
+  it("al entrar, el código se da contra el factor que dice la base", () => {
+    const give = bodyOf("giveSecondFactorCode");
+    expect(give).toMatch(/await auth\.verifyFactor\(jar, standing\.factor, code\)/);
+    expect(count(team, /\.verifyFactor\(/g)).toBe(2);
+    expect(give).not.toMatch(/readEnrolledFactor|store\.accept/);
+  });
+
+  it("quitar un factor solo ocurre después de un no de la base, y es el recién verificado", () => {
+    expect(namingInCode(/\bremoveFactor\b/)).toEqual([
+      "src/adapters/supabase/auth.ts",
+      "src/services/account/deps.ts",
+      "src/services/account/team.ts",
+    ]);
+    expect(count(team, /\.removeFactor\(/g)).toBe(1);
+    expect(bodyOf("confirmSecondFactor")).toMatch(/await auth\.removeFactor\(jar, factorId\)/);
+  });
+});

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { claimedUser } from "./helpers/account";
 import { authVisitor, type KnownUser } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
+import { answer, asOwner, asServer, asSystem, print, reverted } from "./helpers/team";
 import { totpCode } from "./helpers/totp";
 import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -66,52 +67,6 @@ async function tokenOf(client: SupabaseClient): Promise<Token> {
   if (!data.session) throw new Error("El cliente de prueba no tiene sesión.");
   const json = Buffer.from(data.session.access_token.split(".")[1] ?? "", "base64url").toString("utf8");
   return { json, sessionId: (JSON.parse(json) as { session_id: string }).session_id };
-}
-
-/** La huella de un secreto, como la calcula el servidor. */
-const print = (secret: string) => createHash("sha256").update(secret).digest("hex");
-
-/**
- * Una transacción del dueño de la base local, que se revierte siempre. Con `server`, el
- * dueño puede tomar el rol del servidor dentro de ella. Dos transacciones abiertas a la
- * vez no pueden pedirlo las dos: la segunda esperaría a la primera, que es lo que cambia.
- */
-async function reverted<T>(fn: (owner: Client) => Promise<T>, server = true): Promise<T> {
-  const owner = new Client({ connectionString: localOwnerUrl() });
-  await owner.connect();
-  try {
-    await owner.query("begin");
-    // Si algo se queda esperando un candado que nadie suelta, falla aquí y no cuelga lo demás.
-    await owner.query("set local lock_timeout = '20s'");
-    if (server) await owner.query("grant app_service to postgres with set true, inherit false");
-    return await fn(owner);
-  } finally {
-    await owner.query("rollback").catch(() => undefined);
-    await owner.end();
-  }
-}
-
-const RESET =
-  "select set_config('role', 'none', true), set_config('request.jwt.claims', '', true), set_config('app.actor_id', '', true), " +
-  "set_config('app.actor_session', '', true), set_config('app.actor_kind', $1, true)";
-
-/** El dueño, sin autor declarado. */
-const asOwner = (owner: Client) => owner.query(RESET, [""]);
-/** El dueño declarado sistema: el arranque, la emergencia y lo que la prueba deja puesto. */
-const asSystem = (owner: Client) => owner.query(RESET, ["system"]);
-/** El servidor, a nombre de una persona y con su sesión. */
-async function asServer(owner: Client, personId: string, sessionId: string): Promise<void> {
-  await owner.query(RESET, [""]);
-  await owner.query(
-    "select set_config('app.actor_id', $1, true), set_config('app.actor_session', $2, true), set_config('role', 'app_service', true)",
-    [personId, sessionId],
-  );
-}
-
-/** Lo que contesta una función de la base. */
-async function answer(owner: Client, call: string, params: unknown[] = []): Promise<string | null> {
-  const result = await owner.query<{ state: string | null }>(`select ${call} as state`, params);
-  return result.rows[0]?.state ?? null;
 }
 
 async function passes(owner: Client, call: string): Promise<boolean> {

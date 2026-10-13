@@ -3,8 +3,19 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createAuth, enrollFactor, readSession, removeFactor, signIn, verifyFactor } from "@/adapters/supabase/auth";
+import { IdentityUnavailableError } from "@/adapters/supabase/errors";
 
-import { knownUser, memoryJar, recordingFetch, secondFactorFor, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
+import {
+  authAdmin,
+  authVisitor,
+  knownUser,
+  memoryJar,
+  recordingFetch,
+  secondFactorFor,
+  sessionCount,
+  type KnownUser,
+  type MemoryJar,
+} from "./helpers/auth";
 import { parameter } from "./helpers/account";
 import { totpCode, wrongCode } from "./helpers/totp";
 import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
@@ -45,6 +56,31 @@ const sessionsOf = (userId: string) =>
     [userId],
   );
 
+/** Cuántos retos se le han pedido a un factor, según la base de Auth. */
+async function challengesOf(factorId: string): Promise<number> {
+  const rows = await ownerQuery<{ n: number }>("select count(*)::int as n from auth.mfa_challenges where factor_id = $1", [factorId]);
+  return rows[0]?.n ?? -1;
+}
+
+/**
+ * El Auth de verdad, salvo en las rutas que coinciden con `match`, donde contesta `respond`
+ * las primeras `times` veces. Anota las rutas que se pidieron.
+ */
+function faking(match: RegExp, respond: () => Response, times = Number.POSITIVE_INFINITY): { fetch: typeof fetch; calls: string[] } {
+  const calls: string[] = [];
+  let left = times;
+  return {
+    calls,
+    fetch: (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      calls.push(path);
+      if (!match.test(path) || left <= 0) return fetch(input, init);
+      left -= 1;
+      return Promise.resolve(respond());
+    },
+  };
+}
+
 /** Da de alta un factor con esa sesión, y falla la prueba si no se pudo. */
 async function enrolled(jar: MemoryJar): Promise<{ factorId: string; secret: string; uri: string }> {
   const result = await enrollFactor(jar);
@@ -72,6 +108,40 @@ describe("dar de alta un factor", () => {
     // Dar de alta no sube el nivel ni toca la cookie.
     expect(jar.get(COOKIE)).toBe(before);
     expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal1", factor: null }]);
+    // Y nace con su primer reto ya pedido: cuando alguien da de alta un factor, Auth borra
+    // los que llevan minutos sin verificar y nunca tuvieron uno.
+    expect(await challengesOf(factor.factorId)).toBe(1);
+  });
+
+  it("con la sesión ya en segundo nivel, dar de alta otro no quita el verificado", async () => {
+    const { person, jar } = await entered();
+    const first = await enrolled(jar);
+    expect(await verifyFactor(jar, first.factorId, totpCode(first.secret))).toMatchObject({ kind: "verified" });
+
+    const second = await enrolled(jar);
+
+    expect(await factorsOf(person.id)).toEqual([
+      { id: first.factorId, status: "verified", type: "totp" },
+      { id: second.factorId, status: "unverified", type: "totp" },
+    ]);
+    expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal2", factor: first.factorId }]);
+  });
+
+  it("si Auth contesta un alta sin su clave, no se supo: no hay nada que pintar", async () => {
+    const { jar } = await entered();
+    const odd = faking(/\/factors$/, () => Response.json({ id: randomUUID(), type: "totp", totp: { qr_code: "x" } }));
+    expect(await createAuth({ fetch: odd.fetch }).enrollFactor(jar)).toEqual({ ok: false, reason: "unknown" });
+    // Ni se pidió un reto para un factor que no se entendió.
+    expect(odd.calls.filter((path) => path.endsWith("/challenge"))).toEqual([]);
+  });
+
+  it("si no se pudo verificar el token de la cookie, no se supo: no es lo mismo que no tener sesión", async () => {
+    const { jar } = await entered();
+    const factor = await enrolled(jar);
+    const blind = createAuth({ inspectToken: () => Promise.reject(new IdentityUnavailableError()) });
+    expect(await blind.enrollFactor(jar)).toEqual({ ok: false, reason: "unknown" });
+    expect(await blind.verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
+    expect(await blind.removeFactor(jar, factor.factorId)).toBe("unknown");
   });
 
   it("empezar de nuevo quita el que quedó a medias: nunca se acumulan", async () => {
@@ -219,6 +289,100 @@ describe("verificar un código", () => {
     expect(await down.verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
     expect(jar.get(COOKIE)).toBe(before);
   });
+
+  /** Lo que Auth contesta cuando el reto ya venció. */
+  const expired = () => Response.json({ code: "mfa_challenge_expired", message: "x" }, { status: 422 });
+  const count = (calls: string[], ending: string) => calls.filter((path) => path.endsWith(ending)).length;
+
+  it("si el reto venció, pide otro y verifica con ese", async () => {
+    const { person, jar } = await entered();
+    const factor = await enrolled(jar);
+    // Solo la primera verificación: la segunda llega al Auth de verdad.
+    const once = faking(/\/verify$/, expired, 1);
+
+    const result = await createAuth({ fetch: once.fetch }).verifyFactor(jar, factor.factorId, totpCode(factor.secret));
+
+    expect(result).toMatchObject({ kind: "verified", claims: { userId: person.id, aal: "aal2" } });
+    expect(count(once.calls, "/challenge")).toBe(2);
+    expect(count(once.calls, "/verify")).toBe(2);
+  });
+
+  it("y solo uno más: si vuelve a vencer, no se supo, y la cookie sigue como estaba", async () => {
+    const { person, jar } = await entered();
+    const factor = await enrolled(jar);
+    const before = jar.get(COOKIE);
+    const always = faking(/\/verify$/, expired);
+
+    expect(await createAuth({ fetch: always.fetch }).verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
+
+    expect(count(always.calls, "/challenge")).toBe(2);
+    expect(count(always.calls, "/verify")).toBe(2);
+    expect(jar.get(COOKIE)).toBe(before);
+    expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal1", factor: null }]);
+  });
+
+  it("un «verificado» sin sus dos tokens no se entiende: no se supo, y la cookie sigue como estaba", async () => {
+    const { jar } = await entered();
+    const factor = await enrolled(jar);
+    const before = jar.get(COOKIE);
+    for (const body of [{}, { access_token: "a" }, { refresh_token: "r" }]) {
+      const odd = faking(/\/verify$/, () => Response.json(body));
+      expect(await createAuth({ fetch: odd.fetch }).verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
+      expect(jar.get(COOKIE)).toBe(before);
+    }
+  });
+
+  it("verificar no puede traer la sesión de otra cuenta, ni otra sesión de la misma: la cookie no se escribe", async () => {
+    const { person, jar } = await entered();
+    const factor = await enrolled(jar);
+    const before = jar.get(COOKIE);
+    const other = await knownUser();
+    emails.push(other.email);
+
+    for (const who of [other, person]) {
+      // Tokens de verdad, firmados por este Auth, pero de otra sesión.
+      const elsewhere = await authVisitor().auth.signInWithPassword({ email: who.email, password: who.password });
+      if (elsewhere.error || !elsewhere.data.session) throw new Error("La otra sesión de prueba no se abrió.");
+      const { access_token, refresh_token } = elsewhere.data.session;
+      const swapped = faking(/\/verify$/, () => Response.json({ access_token, refresh_token, token_type: "bearer" }));
+
+      expect(await createAuth({ fetch: swapped.fetch }).verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
+      expect(jar.get(COOKIE)).toBe(before);
+    }
+  });
+
+  it("tampoco un token que dijera la misma sesión y otra cuenta", async () => {
+    // Auth no firma uno así: se arma con el lector de tokens de las pruebas, para ver que la
+    // cuenta se compara aparte y no se da por buena con el identificador de la sesión.
+    const { jar } = await entered();
+    const factor = await enrolled(jar);
+    const before = jar.get(COOKIE);
+    const read = await readSession(jar);
+    if (read.kind !== "session") throw new Error("La sesión de prueba no se leyó.");
+    const mine = read.claims;
+    const expiresAt = Date.now() + 600_000;
+    const swapped = faking(/\/verify$/, () => Response.json({ access_token: "de-otra-cuenta", refresh_token: "r" }));
+    const auth = createAuth({
+      fetch: swapped.fetch,
+      inspectToken: (token) =>
+        Promise.resolve({ state: "valid", claims: token === "de-otra-cuenta" ? { ...mine, userId: randomUUID() } : mine, expiresAt }),
+    });
+
+    expect(await auth.verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "unknown" });
+    expect(jar.get(COOKIE)).toBe(before);
+  });
+
+  it("si la sesión ya verificada no cabe en su cookie, no se queda abierta: se cierra, y la cookie se borra", async () => {
+    const { person, jar } = await entered();
+    const factor = await enrolled(jar);
+    // Lo que hace crecer el token que Auth entrega al verificar.
+    await authAdmin().auth.admin.updateUserById(person.id, { user_metadata: { relleno: "x".repeat(3_000) } });
+
+    expect(await verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "oversized_session" });
+
+    expect(jar.get(COOKIE)).toBeUndefined();
+    expect(await sessionCount(person.id)).toBe(0);
+  });
 });
 
 describe("quitar un factor", () => {
@@ -238,5 +402,12 @@ describe("quitar un factor", () => {
     const factor = await enrolled(jar);
     const down = createAuth({ fetch: () => Promise.reject(new Error("sin red")) });
     expect(await down.removeFactor(jar, factor.factorId)).toBe("unknown");
+  });
+
+  it("lo que no tiene forma de factor no llega a Auth", async () => {
+    const { jar } = await entered();
+    const watched = recordingFetch();
+    expect(await createAuth({ fetch: watched.fetch }).removeFactor(jar, "../user")).toBe("unknown");
+    expect(watched.calls).toEqual([]);
   });
 });

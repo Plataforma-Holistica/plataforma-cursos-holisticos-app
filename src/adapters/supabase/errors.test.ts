@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { DatabaseError, RowValidationError, toDatabaseError } from "./errors";
+import { DatabaseError, isLockConflict, RowValidationError, toDatabaseError } from "./errors";
 
 // Lo que trae un error de `pg`, con datos de una persona en el mensaje y en el detalle.
 const pgError = Object.assign(new Error('invalid input syntax for type uuid: "ana@correo.test"'), {
@@ -48,5 +48,27 @@ describe("errores de la base", () => {
     expect(error.paths).toEqual(["id", "n"]);
     expect(error.message).toContain("id");
     expect(error.message).not.toContain("secreto");
+  });
+});
+
+describe("un choque de candados", () => {
+  const withCode = (code: string) => toDatabaseError({ code, severity: "ERROR" });
+
+  it.each(["40P01", "55P03"])("%s lo es: la transacción se revirtió y se puede intentar de nuevo", (code) => {
+    expect(isLockConflict(withCode(code))).toBe(true);
+  });
+
+  // Vecinos que no lo son: un fallo de serialización, una sentencia cancelada por tiempo, un
+  // duplicado y una conexión que se cayó. Reintentarlos a ciegas repetiría una escritura
+  // que quizá sí ocurrió, o taparía una caída.
+  it.each(["40001", "57014", "23505", "08006", "40P02", "55P04", ""])("%s no lo es", (code) => {
+    expect(isLockConflict(withCode(code))).toBe(false);
+  });
+
+  it("solo cuenta un error que vino de la base, no algo que traiga su código", () => {
+    expect(isLockConflict({ code: "40P01", severity: "ERROR" })).toBe(false);
+    expect(isLockConflict(Object.assign(new Error("x"), { code: "40P01" }))).toBe(false);
+    expect(isLockConflict(null)).toBe(false);
+    expect(isLockConflict("40P01")).toBe(false);
   });
 });
