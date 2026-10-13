@@ -129,6 +129,76 @@ export const account = defineMessages({
       "Hubo demasiados códigos equivocados y cerramos tus sesiones. Espera unos minutos y entra de nuevo. Si no fuiste tú, recupera tu contraseña desde tu correo.",
     noticeSessionEnded: "Tu sesión se cerró. Entra de nuevo para continuar.",
   },
+  // PA-12, pedir: el código del segundo factor de quien es del equipo y entra.
+  secondFactor: {
+    title: "Escribe tu código",
+    body: "Ábrelo en tu aplicación de códigos.",
+    code: "Código",
+    codeHint: "Los seis dígitos que muestra tu aplicación.",
+    codeRequired: "Escribe tu código.",
+    codeInvalid: "El código son seis dígitos. Revísalo.",
+    wrongCode: "Ese código no coincide. Revisa que sea el más reciente.",
+    submit: "Continuar",
+    submitting: "Comprobando…",
+    goHome: "Ir a mi inicio",
+    // Conserva sus capacidades, perdió su atadura y no tiene una invitación viva.
+    unboundTitle: "Tu segundo factor ya no está",
+    unboundBody:
+      "Se restableció y no tienes una invitación vigente para configurarlo de nuevo. Pide a alguien del equipo con configuración que te mande otra.",
+  },
+  // PA-12, configurar: ahí se acepta una invitación de administración.
+  factorSetup: {
+    title: "Configura tu segundo factor",
+    intro: "Para entrar a administración necesitas una aplicación de códigos en tu teléfono. Al configurarla aceptas tu invitación.",
+    start: "Empezar",
+    starting: "Preparando…",
+    // Recargar sin JavaScript reenvía «Empezar» y cambia la clave: se dice antes.
+    startNote: "Al empezar te mostramos una clave, una sola vez. Si recargas la página o empiezas de nuevo, la clave cambia y la anterior deja de servir.",
+    stepScan: "Escanea el código con tu aplicación, o copia la clave.",
+    stepCode: "Escribe el código que te da la aplicación.",
+    qrAlt: "Código QR con la clave de tu segundo factor",
+    secretLabel: "Clave en texto",
+    openInApp: "Abrir en mi aplicación de códigos",
+    handoff: "Código que te dictaron",
+    handoffHint: "Te lo dicta quien restableció tu segundo factor.",
+    handoffRequired: "Escribe el código que te dictaron.",
+    handoffWrong: "Ese código no coincide con el que te dictaron. Pídelo de nuevo.",
+    submit: "Continuar",
+    submitting: "Comprobando…",
+    startAgain: "Empezar de nuevo",
+    // La clave que la persona tiene delante ya no es la vigente: otra pestaña empezó de
+    // nuevo, pasó demasiado tiempo, o el factor ya no existe.
+    startAgainNotice: "Esa clave ya no es la vigente. Empieza de nuevo para ver una nueva.",
+    // Ya hay un factor a medias en ese navegador, y la clave no se vuelve a mostrar.
+    resumeBody: "Ya empezaste a configurarlo en este navegador. Escribe el código de tu aplicación. Si ya no tienes la clave a la vista, empieza de nuevo.",
+    proveTitle: "Primero abre el enlace de tu correo",
+    proveBody:
+      "Para configurar tu segundo factor necesitamos confirmar que el buzón es tuyo. Recupera tu contraseña y abre el enlace en este mismo navegador. Si cierras sesión aquí, tendrás que repetirlo.",
+    proveAction: "Recuperar mi contraseña",
+    // La cuenta ya tiene un factor verificado que nadie ató: Auth no deja dar de alta otro.
+    secondLevel: "Tu cuenta ya tiene un segundo factor que no quedó ligado a tu invitación. Recupera tu contraseña desde tu correo, en este navegador, y vuelve a empezar.",
+  },
+  // PA-60, en su versión mínima: todavía no existe ninguna de sus tareas.
+  admin: {
+    title: "Administración",
+    noPending: "No tienes pendientes.",
+    capabilitiesTitle: "Tus capacidades",
+    account: "Cuenta",
+    capabilities: {
+      content: "Contenido",
+      finance: "Finanzas",
+      moderation: "Moderación",
+      support: "Soporte",
+      config: "Configuración",
+    },
+  },
+  // PA-88. Sin los nombres de quién puede asignarla: solo quien tiene configuración lee las
+  // capacidades de otras personas.
+  forbidden: {
+    title: "Esta sección pide la capacidad de {capability}",
+    body: "La asigna quien tiene configuración.",
+    action: "Ir al inicio de administración",
+  },
   // PA-13.
   recover: {
     pageTitle: "Recuperar contraseña",

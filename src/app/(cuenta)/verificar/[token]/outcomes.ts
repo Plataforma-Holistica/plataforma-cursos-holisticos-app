@@ -1,6 +1,6 @@
 import type { FieldErrors, LegalText, RegistrationCompletion } from "@/services/account/account";
 import { checkPassword, parseDisplayName } from "@/services/account/field-rules";
-import { consentsPath, homeOf, ROUTES } from "@/services/account/navigation";
+import { consentsPath, entryDestination, ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import { legalBlocks } from "@/services/legal/blocks";
 
@@ -198,7 +198,9 @@ export function completeRegistrationOutcome(result: RegistrationCompletion, unch
   switch (result.kind) {
     case "entered":
       // Quedó dentro. Si a la cuenta todavía le falta algo, se le pide antes que nada.
-      return { kind: "redirect", to: result.pending ? consentsPath(null) : homeOf(), notice: null };
+      // Si no, su estado en el equipo dice a dónde va: quien abrió el enlace con una
+      // invitación de administración sigue a configurar su segundo factor.
+      return { kind: "redirect", to: result.pending ? consentsPath(null) : entryDestination(result.team, null), notice: null };
     case "ready_sign_in":
       // La cuenta quedó lista y solo falló abrir la sesión: entra con su contraseña.
       return { kind: "redirect", to: ROUTES.signIn, notice: "account_ready" };

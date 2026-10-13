@@ -50,7 +50,7 @@ describe("decideAdmission: una entrada que Auth aceptó", () => {
 
   it("pasa y queda anotada: entra, y el intento se cierra como bueno", () => {
     expect(decideAdmission({ kind: "pass" }, "noted")).toEqual({
-      result: { kind: "entered", pending: null },
+      result: { kind: "entered", pending: null, team: null },
       outcome: "success",
       admit: true,
       report: null,
@@ -59,7 +59,7 @@ describe("decideAdmission: una entrada que Auth aceptó", () => {
 
   it("le falta algo y queda anotada: entra, y se le dice qué le falta", () => {
     expect(decideAdmission(incomplete, "noted")).toEqual({
-      result: { kind: "entered", pending: { variant: "complete_account", missing } },
+      result: { kind: "entered", pending: { variant: "complete_account", missing }, team: null },
       outcome: "success",
       admit: true,
       report: null,

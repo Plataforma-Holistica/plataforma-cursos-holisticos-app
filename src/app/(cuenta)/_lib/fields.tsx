@@ -5,16 +5,17 @@ import { Check, Circle } from "lucide";
 
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
-import { checkPassword, parseDisplayName, parseEmail, PASSWORD_MIN_LENGTH } from "@/services/account/field-rules";
+import { checkPassword, parseDisplayName, parseEmail, parseSecondFactorCode, PASSWORD_MIN_LENGTH } from "@/services/account/field-rules";
 import { cx, SPACE } from "@/ui/cx";
 import { Icon } from "@/ui/icon";
+import { OTPField } from "@/ui/otp-field";
 import { PasswordField } from "@/ui/password-field";
 import { TextField } from "@/ui/text-field";
 
 import { pressedElement, useSeenOnBlur } from "./hooks";
 
 // Los campos que se repiten entre las pantallas de la cuenta: el nombre, el correo al que
-// se manda un enlace y la contraseña nueva. Los tres validan al salir del campo, y solo si
+// se manda un enlace, la contraseña nueva y el código del segundo factor. Todos validan al salir del campo, y solo si
 // ya traen algo (diseño, sección 5.5): un campo vacío se marca al enviar. Las reglas son las
 // mismas del dominio que usa el servidor, que es el que manda.
 //
@@ -123,6 +124,48 @@ export function EmailField({ id, defaultValue, problem, round = 0, hint }: Email
         defaultValue={defaultValue}
         hint={hint}
         error={shown ? EMAIL_ERRORS[shown] : undefined}
+      />
+    </div>
+  );
+}
+
+/** `wrong`: tiene forma de código y no es el vigente. Eso solo lo dice el servidor. */
+export type CodeProblem = "required" | "invalid" | "wrong";
+
+export const CODE_ERRORS = {
+  required: account.secondFactor.codeRequired,
+  invalid: account.secondFactor.codeInvalid,
+  wrong: account.secondFactor.wrongCode,
+} as const;
+
+export interface CodeFieldProps extends CheckedField<CodeProblem> {
+  /** Mientras el envío va en camino: al llegar la respuesta el campo se arma de nuevo, vacío. */
+  readOnly?: boolean;
+}
+
+/**
+ * El código del segundo factor (diseño, PA-12). Al salir del campo solo se mira su forma,
+ * con la regla del dominio que usa el servidor: si es el vigente lo dice Auth, al enviar.
+ * Un código nunca vuelve en una respuesta: el campo llega vacío.
+ */
+export function CodeField({ id, problem, round = 0, readOnly = false }: CodeFieldProps) {
+  const [shown, see] = useSeenOnBlur<CodeProblem>(problem, round);
+
+  function validate(event: FocusEvent<HTMLDivElement>) {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || field.name !== "code") return;
+    see(field.value.trim() === "" ? undefined : parseSecondFactorCode(field.value).ok ? null : "invalid");
+  }
+
+  return (
+    <div onBlur={validate}>
+      <OTPField
+        id={id}
+        label={account.secondFactor.code}
+        name="code"
+        hint={account.secondFactor.codeHint}
+        readOnly={readOnly}
+        error={shown ? CODE_ERRORS[shown] : undefined}
       />
     </div>
   );

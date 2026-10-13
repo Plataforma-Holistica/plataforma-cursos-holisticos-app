@@ -14,10 +14,11 @@ const retryAt = new Date("2026-10-11T18:30:00.000Z");
 
 describe("lo que contesta el servicio de entrada", () => {
   it.each<[string, SignInResult, ReturnType<typeof signInOutcome>]>([
-    ["entró, sin pendientes", { kind: "entered", pending: null }, { kind: "redirect", to: "/inicio?x=1", notice: null }],
+    ["entró, sin pendientes", { kind: "entered", pending: null, team: "none" }, { kind: "redirect", to: "/inicio?x=1", notice: null }],
+    ["entró, y no se supo su estado en el equipo", { kind: "entered", pending: null, team: null }, { kind: "redirect", to: "/inicio?x=1", notice: null }],
     [
       "entró, y le falta completar su cuenta",
-      { kind: "entered", pending },
+      { kind: "entered", pending, team: null },
       { kind: "redirect", to: "/consentimientos?volver=%2Finicio%3Fx%3D1", notice: null },
     ],
     [
@@ -51,15 +52,39 @@ describe("lo que contesta el servicio de entrada", () => {
     expect(destinations).toEqual([null, null, null, null, null, "/recuperar"]);
   });
 
+  // El estado en el equipo de quien entró dice a qué pantalla va (flujo de la app §6.2). La
+  // tabla completa está en navigation.test.ts; aquí, que esta pantalla la obedece.
+  it.each([
+    ["invited", "", "/entrar/segundo-factor/configurar"],
+    ["invited_unproven", "/admin", "/entrar/segundo-factor/configurar"],
+    ["unbound", "", "/entrar/segundo-factor"],
+    ["needs_code", "", "/entrar/segundo-factor"],
+    ["needs_code", "/admin/equipo", "/entrar/segundo-factor?volver=%2Fadmin%2Fequipo"],
+    // Quien pidió otra pantalla va a esa pantalla: el código solo se pide en administración.
+    ["needs_code", "/cuenta", "/cuenta"],
+    ["member", "", "/admin"],
+    ["none", "/admin", "/admin"],
+  ] as const)("entró y su estado en el equipo es %s, con destino «%s»: va a %s", (team, returnTo, to) => {
+    expect(signInOutcome({ kind: "entered", pending: null, team }, returnTo)).toEqual({ kind: "redirect", to, notice: null });
+  });
+
+  it("a quien le falta algo de su cuenta se le pide eso antes que el segundo factor", () => {
+    expect(signInOutcome({ kind: "entered", pending, team: "needs_code" }, "/admin")).toEqual({
+      kind: "redirect",
+      to: "/consentimientos?volver=%2Fadmin",
+      notice: null,
+    });
+  });
+
   it.each(["", "//otro.example", "https://otro.example", "/entrar", "/consentimientos", "/sesion/cerrar"])(
     "un destino que no vale lleva al inicio: %s",
     (returnTo) => {
-      expect(signInOutcome({ kind: "entered", pending: null }, returnTo)).toEqual({
+      expect(signInOutcome({ kind: "entered", pending: null, team: "none" }, returnTo)).toEqual({
         kind: "redirect",
         to: "/inicio",
         notice: null,
       });
-      expect(signInOutcome({ kind: "entered", pending }, returnTo)).toEqual({
+      expect(signInOutcome({ kind: "entered", pending, team: null }, returnTo)).toEqual({
         kind: "redirect",
         to: "/consentimientos",
         notice: null,

@@ -85,6 +85,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
     signInAction: /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
   },
+  "src/app/(cuenta)/entrar/segundo-factor/actions.ts": {
+    // Dar el código: lo que no tiene forma de código no llega al servicio, que corre la
+    // guarda y verifica contra el factor que dice la base. Del formulario no llega ningún factor.
+    giveCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*giveCodeOutcome\(await giveSecondFactorCode\(jar, code\), returnTo\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
   "src/app/(cuenta)/consentimientos/actions.ts": {
     // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
     completeAccountAction: /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
@@ -143,8 +149,19 @@ function actionBody(code: string, name: string): string {
 }
 
 const GUARD_IMPORT = /import \{[^}]*\} from "@\/app\/_lib\/guard";/;
-const SESSION_GUARD = /= await (requireSession|requireIncompleteSession)\(/;
+const SESSION_GUARD = /= await (requireSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup)\(/;
 const VISITOR_GUARD = /^\s*await visitorOnly\(\);$/m;
+
+/**
+ * Las pantallas del equipo, cada una con la guarda que le toca. Las tres le preguntan a la
+ * base quién es del equipo; la guarda de sesión a secas dejaría entrar a cualquier cuenta.
+ * Una página que cuelgue de administración y no esté aquí usa la de administración.
+ */
+const TEAM_GUARDS: Record<string, string> = {
+  "/entrar/segundo-factor": "requireSecondFactor",
+};
+const teamGuardOf = (route: string): string | null =>
+  TEAM_GUARDS[route] ?? (route === "/admin" || route.startsWith("/admin/") ? "requireAdmin" : null);
 
 describe("toda página pasa por la guarda o está en la lista de públicas", () => {
   // Next sirve como página todo `page` con las extensiones de `pageExtensions`.
@@ -189,7 +206,45 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
   it("toda ruta que pide sesión tiene su página revisada: ninguna se sirve sin pasar por aquí", () => {
     const sessionPages = guarded.filter((file) => requiresSession(routeOf(file))).map(routeOf);
-    expect(sessionPages.sort()).toEqual(["/consentimientos", "/cuenta", "/inicio"]);
+    expect(sessionPages.sort()).toEqual(["/consentimientos", "/cuenta", "/entrar/segundo-factor", "/inicio"]);
+  });
+
+  describe("las pantallas del equipo usan su propia guarda", () => {
+    const teamPages = guarded.filter((file) => teamGuardOf(routeOf(file)) !== null);
+
+    it("hay pantallas del equipo que revisar, y la lista no nombra rutas que no existen", () => {
+      expect(teamPages.map(routeOf)).toEqual(expect.arrayContaining(Object.keys(TEAM_GUARDS)));
+      for (const route of Object.keys(TEAM_GUARDS)) expect(requiresSession(route), route).toBe(true);
+    });
+
+    it("sabe qué guarda le toca a cada ruta", () => {
+      expect(teamGuardOf("/entrar/segundo-factor")).toBe("requireSecondFactor");
+      expect(teamGuardOf("/admin")).toBe("requireAdmin");
+      expect(teamGuardOf("/admin/equipo")).toBe("requireAdmin");
+      expect(teamGuardOf("/admin/[...resto]")).toBe("requireAdmin");
+      expect(teamGuardOf("/administrar")).toBeNull();
+      expect(teamGuardOf("/inicio")).toBeNull();
+      expect(teamGuardOf("/entrar")).toBeNull();
+    });
+
+    it.each(teamPages)("%s llama a la guarda del equipo que le toca, y a ninguna otra", (file) => {
+      const code = codeOf(file);
+      const called = [...code.matchAll(/\bawait (require\w+|visitorOnly)\(/g)].map((match) => match[1]);
+      expect(called).toEqual([teamGuardOf(routeOf(file))]);
+      // Antes de pintar nada: la guarda es lo primero que la página espera, salvo leer su consulta.
+      expect(code).not.toMatch(/\bcheckSession\b|\bteamStanding\b/);
+    });
+
+    it.each(teamPages)("%s no exporta su título: no debe poder asomarse en la respuesta de «no existe»", (file) => {
+      expect(codeOf(file)).not.toMatch(/export (const metadata|(async )?function generateMetadata)\b/);
+    });
+
+    it("las demás pantallas con sesión no usan una guarda del equipo: el segundo factor solo se pide en administración", () => {
+      const others = guarded.filter((file) => teamGuardOf(routeOf(file)) === null);
+      for (const file of others) {
+        expect(codeOf(file), file).not.toMatch(/\b(requireAdmin|requireSecondFactor|requireFactorSetup)\(/);
+      }
+    });
   });
 
   it("una página pública no finge pasar por la guarda", () => {

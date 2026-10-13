@@ -7,6 +7,8 @@ import type { GateResult, MissingDocument } from "@/domain/access/session-gate";
 
 import type { FailureCode } from "@/services/error-reporting/server";
 
+import type { TeamState } from "./team";
+
 // Qué hace la aplicación con lo que decidieron la guarda y la base (TRD §9.2, filas «Freno
 // progresivo» y «Lo que entra sin pasar por el formulario»; flujo de la app §6.2).
 //
@@ -56,8 +58,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isSessionId = (value: string | null): value is string => value !== null && UUID.test(value);
 
 export type SignInResult =
-  /** Entró. `pending` dice si antes de seguir hay que completar la cuenta (PA-15). */
-  | { kind: "entered"; pending: PendingAccount | null }
+  /**
+   * Entró. `pending` dice si antes de seguir hay que completar la cuenta (PA-15). `team` es su
+   * estado respecto al equipo, para saber a qué pantalla llevarla: lo pone el servicio que la
+   * dejó dentro, y es nulo si le falta completar su cuenta o si no se supo. No autoriza nada.
+   */
+  | { kind: "entered"; pending: PendingAccount | null; team: TeamState | null }
   /** Un solo mensaje, exista o no la cuenta y sea cual sea el dato que falló. */
   | { kind: "invalid_credentials" }
   /** Frenado: la pantalla dice a qué hora se puede volver a intentar. */
@@ -166,6 +172,8 @@ export function decideAdmission(view: GateView, noted: NoteState | null): Admiss
         result: {
           kind: "entered",
           pending: view.kind === "incomplete" ? { variant: view.variant, missing: view.missing } : null,
+          // Aquí no se sabe: lo lee quien la deja dentro, ya con su cookie en el tarro.
+          team: null,
         },
         outcome: "success",
         admit: true,

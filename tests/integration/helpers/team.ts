@@ -4,7 +4,7 @@ import { Client } from "pg";
 
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
-import type { TeamStore } from "@/services/account/team";
+import type { TeamStanding, TeamStore } from "@/services/account/team";
 import { acceptAnswerOf, acceptInvitation, readTeamStanding } from "@/services/account/team-records";
 
 import { localOwnerUrl } from "./local";
@@ -89,4 +89,32 @@ export function teamStoreOn(owner: Client): TeamStore {
     accept: (claims, ticketPrint, factorId, handoffPrint) =>
       acting(claims, async () => acceptAnswerOf(await acceptInvitation(tx, ticketPrint, factorId, handoffPrint))),
   };
+}
+
+/** Con qué se le preguntó a la base por el estado de alguien. */
+export interface StandingQuestion {
+  userId: string;
+  sessionId: string | null;
+  aal: string;
+  /** La huella del resguardo que traía ese navegador, o nulo. */
+  ticket: string | null;
+}
+
+/**
+ * Un almacén del equipo que contesta el estado que se le diga y anota con qué se le preguntó.
+ * Es para probar qué estado sale cuando alguien acaba de quedar dentro. Ahí no sirve una
+ * invitación dentro de una transacción que se revierte: entrar anota la sesión tomando el
+ * candado de fila del perfil, y la invitación sin confirmar lo tendría tomado. Lo que la
+ * base contesta de verdad con una invitación viva se prueba en `34-equipo-servicios`.
+ */
+export function answeringStore(standing: TeamStanding | "throws"): { teamStore: TeamStore; asked: StandingQuestion[] } {
+  const asked: StandingQuestion[] = [];
+  const teamStore: TeamStore = {
+    standing: (claims, ticketPrint) => {
+      asked.push({ userId: claims.userId, sessionId: claims.sessionId, aal: claims.aal, ticket: ticketPrint });
+      return standing === "throws" ? Promise.reject(new Error("La base no contestó.")) : Promise.resolve(standing);
+    },
+    accept: () => Promise.reject(new Error("Aquí no se acepta nada.")),
+  };
+  return { teamStore, asked };
 }

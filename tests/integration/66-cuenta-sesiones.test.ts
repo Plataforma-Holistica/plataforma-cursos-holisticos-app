@@ -142,7 +142,7 @@ describe("la etiqueta no decide nada, y que falle no impide entrar", () => {
     const services = testServices();
     const jar = memoryJar();
     try {
-      expect(await services.signIn(jar, who, { ...freshOrigin(), userAgent: CHROME_WINDOWS })).toEqual({ kind: "entered", pending: null });
+      expect(await services.signIn(jar, who, { ...freshOrigin(), userAgent: CHROME_WINDOWS })).toEqual({ kind: "entered", pending: null, team: "none" });
     } finally {
       await ownerQuery("grant execute on function private.tag_session(uuid, text) to app_service");
     }

@@ -194,6 +194,55 @@ describe("en qué estado está quien pide", () => {
   });
 });
 
+describe("el estado de quien acaba de quedar dentro", () => {
+  const STANDINGS: TeamStanding[] = [
+    { state: "none" },
+    MEMBER,
+    { state: "needs_code", factor: BOUND },
+    { state: "unbound" },
+    INVITED,
+    REBIND,
+    { state: "invited_unproven", kind: "grant" },
+  ];
+
+  it.each(STANDINGS)("de %j sale solo el nombre del estado: ni el factor, ni las capacidades, ni el tipo de invitación", async (standing) => {
+    const team = teamWith({ standing });
+    expect(await team.standingAtEntry(raised, browser())).toBe(standing.state);
+  });
+
+  it("pregunta con las claims que se le pasan y la huella del resguardo del navegador, sin correr la guarda otra vez", async () => {
+    // La guarda diría que no hay sesión: no se le pregunta, porque quien llama acaba de dejarla entrar.
+    const team = teamWith({ check: { kind: "anonymous" }, standing: { state: "needs_code", factor: BOUND } });
+    expect(await team.standingAtEntry(raised, browser(false))).toBe("needs_code");
+    expect(team.calls).toEqual(["standing aal2 resguardo"]);
+    expect(team.store.standing).toHaveBeenCalledExactlyOnceWith(raised, sha256(TICKET));
+  });
+
+  it("sin resguardo en el navegador pregunta sin él", async () => {
+    const team = teamWith({ standing: { state: "invited_unproven", kind: "grant" } });
+    expect(await team.standingAtEntry(claims, jarOf())).toBe("invited_unproven");
+    expect(team.calls).toEqual(["standing aal1 sin"]);
+  });
+
+  it("no toca a Auth ni escribe nada en el navegador", async () => {
+    const team = teamWith({ standing: INVITED });
+    const jar = browser();
+    const before = new Map(jar.values);
+    await team.standingAtEntry(claims, jar);
+    expect(jar.values).toEqual(before);
+    expect(team.auth.enrollFactor).not.toHaveBeenCalled();
+    expect(team.auth.verifyFactor).not.toHaveBeenCalled();
+    expect(team.auth.signOut).not.toHaveBeenCalled();
+    expect(team.store.accept).not.toHaveBeenCalled();
+  });
+
+  it("si la base no contesta, no se supo: nulo, que no da nada, y queda dicho", async () => {
+    const team = teamWith({ standing: "throws" });
+    expect(await team.standingAtEntry(claims, browser())).toBeNull();
+    expect(team.reported).toEqual(["team_unavailable"]);
+  });
+});
+
 describe("empezar a configurar el segundo factor", () => {
   it.each(REFUSALS)("sin sesión que pase (%j) no empieza nada", async (check) => {
     const team = teamWith({ check });

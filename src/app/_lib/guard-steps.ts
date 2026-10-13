@@ -1,9 +1,8 @@
-import type { PendingAccount, SessionCheck, TeamCheck, TeamStanding, VerifiedClaims } from "@/services/account/account";
+import type { PendingAccount, SessionCheck, TeamCheck, VerifiedClaims } from "@/services/account/account";
 import {
   consentsPath,
   homeOf,
   resolveDestination,
-  returnsOutsideAdmin,
   ROUTES,
   secondFactorPath,
   signInPath,
@@ -214,33 +213,6 @@ export function factorSetupPageStep(check: TeamCheck): ({ kind: "render" } & Fac
       return redirect(ROUTES.secondFactor);
     case "member":
       return redirect(ROUTES.admin);
-  }
-}
-
-/**
- * A dónde va quien acaba de quedar dentro y sin pendientes (entrar, completar el registro,
- * completar la cuenta), según su estado en el equipo.
- *
- * Quien pidió una pantalla que no es de administración va a esa pantalla: el segundo factor
- * solo se pide en administración. A los demás del equipo se les lleva a la pantalla que les
- * toca, y nunca directo a administración sin haber dado su código.
- *
- * @param state El estado que el servicio leyó al dejarla entrar, o nulo si no se supo: «no
- *   se supo» no da nada, y se sigue como cualquier cuenta.
- * @param returnTo El destino guardado (`volver`), tal como llegó.
- */
-export function entryStep(state: TeamStanding["state"] | null, returnTo: string | null | undefined): string {
-  if (state === null || state === "none" || returnsOutsideAdmin(returnTo)) return resolveDestination(returnTo);
-  switch (state) {
-    case "invited_unproven":
-    case "invited":
-      return ROUTES.factorSetup;
-    case "unbound":
-      return ROUTES.secondFactor;
-    case "needs_code":
-      return secondFactorPath(returnTo);
-    case "member":
-      return teamDestination(returnTo);
   }
 }
 

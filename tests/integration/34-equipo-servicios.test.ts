@@ -12,7 +12,7 @@ import { databaseTeamStore } from "@/services/account/team-store";
 
 import { claimedUser, freshOrigin, parameter, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
-import { answer, asOwner, asServer, asSystem, print, reverted, teamStoreOn } from "./helpers/team";
+import { answer, answeringStore, asOwner, asServer, asSystem, print, reverted, teamStoreOn } from "./helpers/team";
 import { totpCode, wrongCode } from "./helpers/totp";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -610,6 +610,97 @@ describe("dar el código al entrar", () => {
       expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
       expect(services.reported).toEqual([]);
     });
+  });
+});
+
+// A qué pantalla va quien acaba de entrar lo dice su estado en el equipo (flujo de la app
+// §6.2). El servicio lo lee al dejarla dentro, con las claims que Auth acaba de dar y sin
+// volver a leer la cookie. El estado lo contesta la prueba, salvo «ninguno», que sale de la
+// base: una invitación sin confirmar tendría tomado el candado con el que entrar anota la
+// sesión. Lo que la base contesta con una invitación viva está probado arriba.
+describe("el estado del equipo de quien acaba de entrar", () => {
+  it("con el almacén de verdad, quien no es del equipo entra como «ninguno», sin tocar la auditoría", async () => {
+    const person = await completed();
+    const audited = await auditRows();
+    const services = testServices();
+
+    expect(await services.signIn(memoryJar(), person, freshOrigin())).toEqual({ kind: "entered", pending: null, team: "none" });
+
+    expect(await auditRows()).toBe(audited);
+    expect(services.reported).toEqual([]);
+  });
+
+  it.each<[TeamStanding]>([
+    [{ state: "invited_unproven", kind: "grant" }],
+    [{ state: "invited", kind: "rebind", capabilities: [] }],
+    [{ state: "unbound" }],
+    [{ state: "needs_code", factor: randomUUID() }],
+    [{ state: "member", factor: randomUUID(), capabilities: ["config"] }],
+  ])("de %j sale solo el nombre del estado, preguntado con la sesión recién abierta y el resguardo de ese navegador", async (standing) => {
+    const person = await completed();
+    const jar = memoryJar();
+    const secret = withTicket(jar);
+    const { teamStore, asked } = answeringStore(standing);
+    const services = testServices({ teamStore });
+
+    expect(await services.signIn(jar, person, freshOrigin())).toEqual({ kind: "entered", pending: null, team: standing.state });
+
+    // Se preguntó una vez, a nombre de la sesión que quedó en el navegador, en primer nivel.
+    const check = await services.checkSession(jar);
+    if (check.kind !== "pass") throw new Error(`La sesión no pasó la guarda: ${check.kind}`);
+    expect(asked).toEqual([{ userId: person.id, sessionId: check.claims.sessionId, aal: "aal1", ticket: print(secret) }]);
+    // Leer el estado no toca nada: ni el resguardo, ni un factor a medias, ni la sesión.
+    expect(jar.get(TICKET)).toBe(secret);
+    expect(jar.get(FACTOR)).toBeUndefined();
+    expect(await sessionCount(person.id)).toBe(1);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("sin resguardo en el navegador pregunta sin él", async () => {
+    const person = await completed();
+    const { teamStore, asked } = answeringStore({ state: "invited_unproven", kind: "grant" });
+
+    expect(await testServices({ teamStore }).signIn(memoryJar(), person, freshOrigin())).toMatchObject({ team: "invited_unproven" });
+
+    expect(asked).toMatchObject([{ userId: person.id, ticket: null }]);
+  });
+
+  it("si la base no dice el estado, la persona entra igual: «no se supo» no da nada, y queda dicho", async () => {
+    const person = await completed();
+    const jar = memoryJar();
+    const { teamStore } = answeringStore("throws");
+    const services = testServices({ teamStore });
+
+    expect(await services.signIn(jar, person, freshOrigin())).toEqual({ kind: "entered", pending: null, team: null });
+
+    expect(await services.checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: person.id } });
+    expect(services.reported).toEqual(["team_unavailable"]);
+  });
+
+  it("a quien le falta algo de su cuenta no se le pregunta por el equipo: eso se le pide primero", async () => {
+    const person = await claimedUser();
+    emails.push(person.email);
+    const { teamStore, asked } = answeringStore({ state: "needs_code", factor: randomUUID() });
+
+    expect(await testServices({ teamStore }).signIn(memoryJar(), person, freshOrigin())).toMatchObject({
+      kind: "entered",
+      pending: { variant: "complete_account" },
+      team: null,
+    });
+
+    expect(asked).toEqual([]);
+  });
+
+  it("quien no entra no llega a preguntar", async () => {
+    const person = await completed();
+    const { teamStore, asked } = answeringStore({ state: "member", factor: randomUUID(), capabilities: ["config"] });
+    const services = testServices({ teamStore });
+
+    expect(await services.signIn(memoryJar(), { email: person.email, password: "no es esta" }, freshOrigin())).toEqual({
+      kind: "invalid_credentials",
+    });
+
+    expect(asked).toEqual([]);
   });
 });
 

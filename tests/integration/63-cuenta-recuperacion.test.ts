@@ -46,6 +46,7 @@ import {
 } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
 import { lastMailTo, mailsTo, tokenHashIn, waitForMails } from "./helpers/mailbox";
+import { answeringStore } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery, testEmail } from "./helpers/users";
 
 // Pedir y completar la recuperación de la contraseña, y completar una cuenta ya abierta
@@ -326,6 +327,7 @@ describe("completar la recuperación", () => {
     expect(await services.signIn(memoryJar(), { email: account.email, password: chosen }, origin)).toEqual({
       kind: "entered",
       pending: null,
+      team: "none",
     });
   });
 
@@ -599,7 +601,7 @@ describe("completar una cuenta ya abierta", () => {
 
     expect(
       await services.completeAccount(jar, { name: " Ana ", adultDeclared: true, accepted: Object.values(texts) }, origin),
-    ).toEqual({ kind: "complete" });
+    ).toEqual({ kind: "complete", team: "none" });
 
     expect(await services.checkSession(jar)).toMatchObject({ kind: "pass" });
     expect(await profileOf(account.id)).toMatchObject({ display_name: "Ana", adult: true });
@@ -636,11 +638,11 @@ describe("completar una cuenta ya abierta", () => {
     const account = await claimed({ complete: true });
     const services = testServices();
     const jar = memoryJar();
-    expect(await services.signIn(jar, account, freshOrigin())).toEqual({ kind: "entered", pending: null });
+    expect(await services.signIn(jar, account, freshOrigin())).toEqual({ kind: "entered", pending: null, team: "none" });
 
     expect(
       await services.completeAccount(jar, { name: "Otro nombre", adultDeclared: true, accepted: Object.values(texts) }, freshOrigin()),
-    ).toEqual({ kind: "complete" });
+    ).toEqual({ kind: "complete", team: "none" });
 
     expect(await profileOf(account.id)).toMatchObject({ display_name: "Persona de prueba" });
     expect(await consentsOf(account.id)).toHaveLength(3);
@@ -652,7 +654,7 @@ describe("completar una cuenta ya abierta", () => {
     await completeAccountAsOwner(account.id, "Ya tenía nombre");
     const services = testServices();
     const jar = memoryJar();
-    expect(await services.signIn(jar, account, freshOrigin())).toEqual({ kind: "entered", pending: null });
+    expect(await services.signIn(jar, account, freshOrigin())).toEqual({ kind: "entered", pending: null, team: "none" });
     // Retira uno: ahora le falta ese.
     await withdraw(account.id, texts.course_history_consent);
     expect(await services.checkSession(jar)).toMatchObject({
@@ -667,6 +669,7 @@ describe("completar una cuenta ya abierta", () => {
     // Marca los tres: los dos que ya tenía dados no se anotan otra vez.
     expect(await services.completeAccount(jar, { accepted: Object.values(texts) }, freshOrigin())).toEqual({
       kind: "complete",
+      team: "none",
     });
     expect(await consentsOf(account.id)).toHaveLength(5);
     const history = (await consentsOf(account.id)).filter((consent) => consent.doc_type === "course_history_consent");
@@ -676,6 +679,49 @@ describe("completar una cuenta ya abierta", () => {
       ["granted", "login_prompt"],
     ]);
     expect(await profileOf(account.id)).toMatchObject({ display_name: "Ya tenía nombre" });
+  });
+
+  // A dónde va quien acaba de completar su cuenta lo dice su estado en el equipo, como al
+  // entrar (flujo de la app §6.2). El estado lo contesta la prueba.
+  it("al quedar completa dice su estado en el equipo, preguntado con la sesión que la guarda dejó pasar", async () => {
+    const { account, jar } = await pendingSession();
+    const { teamStore, asked } = answeringStore({ state: "needs_code", factor: randomUUID() });
+    const services = testServices({ teamStore });
+    const form = { name: "Ana", adultDeclared: true, accepted: Object.values(texts) };
+
+    expect(await services.completeAccount(jar, form, freshOrigin())).toEqual({ kind: "complete", team: "needs_code" });
+
+    const check = await services.checkSession(jar);
+    if (check.kind !== "pass") throw new Error(`La sesión no pasó la guarda: ${check.kind}`);
+    expect(asked).toEqual([{ userId: account.id, sessionId: check.claims.sessionId, aal: "aal1", ticket: null }]);
+
+    // Y si la pantalla se envía otra vez con la cuenta ya completa, contesta lo mismo.
+    expect(await services.completeAccount(jar, form, freshOrigin())).toEqual({ kind: "complete", team: "needs_code" });
+    expect(asked).toHaveLength(2);
+    expect(services.reported).toEqual([]);
+  });
+
+  it("si la base no dice el estado, la cuenta queda completa igual, y queda dicho", async () => {
+    const { jar } = await pendingSession();
+    const services = testServices({ teamStore: answeringStore("throws").teamStore });
+
+    expect(
+      await services.completeAccount(jar, { name: "Ana", adultDeclared: true, accepted: Object.values(texts) }, freshOrigin()),
+    ).toEqual({ kind: "complete", team: null });
+
+    expect(await services.checkSession(jar)).toMatchObject({ kind: "pass" });
+    expect(services.reported).toEqual(["team_unavailable"]);
+  });
+
+  it("mientras a la cuenta le falte algo no se pregunta por el equipo", async () => {
+    const { jar } = await pendingSession();
+    const { teamStore, asked } = answeringStore({ state: "member", factor: randomUUID(), capabilities: ["config"] });
+
+    expect(await testServices({ teamStore }).completeAccount(jar, { name: "", accepted: Object.values(texts) }, freshOrigin())).toMatchObject({
+      kind: "invalid",
+    });
+
+    expect(asked).toEqual([]);
   });
 
   it("sin sesión, o con una que no vale, no guarda nada y devuelve lo que dijo la guarda", async () => {

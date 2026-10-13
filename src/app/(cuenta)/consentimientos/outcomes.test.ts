@@ -253,8 +253,20 @@ describe("lo que contesta el servicio", () => {
   const outcome = (result: AccountCompletion, unchecked: string[] = []) => completeAccountOutcome(result, "/inicio?x=1", unchecked);
 
   it("completa: va a donde iba", () => {
-    expect(outcome({ kind: "complete" })).toEqual({ kind: "redirect", to: "/inicio?x=1", notice: null, closeSession: false });
-    expect(completeAccountOutcome({ kind: "complete" }, "//otro.example", [])).toMatchObject({ to: "/inicio" });
+    expect(outcome({ kind: "complete", team: "none" })).toEqual({ kind: "redirect", to: "/inicio?x=1", notice: null, closeSession: false });
+    expect(outcome({ kind: "complete", team: null })).toEqual({ kind: "redirect", to: "/inicio?x=1", notice: null, closeSession: false });
+    expect(completeAccountOutcome({ kind: "complete", team: "none" }, "//otro.example", [])).toMatchObject({ to: "/inicio" });
+  });
+
+  it.each([
+    ["invited", "", "/entrar/segundo-factor/configurar"],
+    ["invited_unproven", "", "/entrar/segundo-factor/configurar"],
+    ["unbound", "/admin", "/entrar/segundo-factor"],
+    ["needs_code", "/admin/equipo", "/entrar/segundo-factor?volver=%2Fadmin%2Fequipo"],
+    ["needs_code", "/cuenta", "/cuenta"],
+    ["member", "", "/admin"],
+  ] as const)("completa, y su estado en el equipo es %s con destino «%s»: va a %s", (team, returnTo, to) => {
+    expect(completeAccountOutcome({ kind: "complete", team }, returnTo, [])).toEqual({ kind: "redirect", to, notice: null, closeSession: false });
   });
 
   it("se guardó y todavía falta algo, o el texto cambió: la pantalla se vuelve a pintar", () => {
@@ -306,7 +318,7 @@ describe("lo que contesta el servicio", () => {
 
   it("solo se cierra la sesión cuando la guarda lo dijo", () => {
     const results: AccountCompletion[] = [
-      { kind: "complete" },
+      { kind: "complete", team: "needs_code" },
       { kind: "incomplete", ...pendingAll },
       { kind: "invalid", fields: {} },
       { kind: "texts_changed" },

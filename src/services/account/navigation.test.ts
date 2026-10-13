@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   consentsPath,
+  entryDestination,
   homeOf,
   requiresSession,
   resolveDestination,
@@ -219,5 +220,47 @@ describe("a dónde va quien es del equipo", () => {
     [undefined, false],
   ])("si el destino guardado vale y no es de administración: %s es %s", (input, expected) => {
     expect(returnsOutsideAdmin(input)).toBe(expected);
+  });
+});
+
+describe("a dónde va quien acaba de entrar, según su estado en el equipo", () => {
+  it.each([
+    // Quien no es del equipo, y también cuando no se supo: «no se supo» no da nada.
+    ["none", null, "/inicio"],
+    ["none", "/cuenta", "/cuenta"],
+    ["none", "/admin", "/admin"],
+    [null, null, "/inicio"],
+    [null, "/cuenta", "/cuenta"],
+    [null, "/admin/equipo", "/admin/equipo"],
+    ["invited_unproven", null, "/entrar/segundo-factor/configurar"],
+    ["invited_unproven", "/admin", "/entrar/segundo-factor/configurar"],
+    ["invited", null, "/entrar/segundo-factor/configurar"],
+    ["invited", "/admin/equipo", "/entrar/segundo-factor/configurar"],
+    ["unbound", null, "/entrar/segundo-factor"],
+    ["unbound", "/admin", "/entrar/segundo-factor"],
+    ["needs_code", null, "/entrar/segundo-factor"],
+    ["needs_code", "/admin/equipo?pagina=2", "/entrar/segundo-factor?volver=%2Fadmin%2Fequipo%3Fpagina%3D2"],
+    ["needs_code", "//otro.example", "/entrar/segundo-factor"],
+    ["member", null, "/admin"],
+    ["member", "/admin/equipo", "/admin/equipo"],
+    ["member", "/cuenta", "/cuenta"],
+  ] as const)("%s con destino %s: %s", (state, returnTo, expected) => {
+    expect(entryDestination(state, returnTo)).toBe(expected);
+  });
+
+  it.each(["invited_unproven", "invited", "unbound", "needs_code", "member"] as const)(
+    "%s que pidió otra pantalla va a esa pantalla: el segundo factor solo se pide en administración",
+    (state) => {
+      expect(entryDestination(state, "/cuenta")).toBe("/cuenta");
+      expect(entryDestination(state, "/inicio?pestana=2")).toBe("/inicio?pestana=2");
+    },
+  );
+
+  it("nunca manda directo a administración a quien no ha dado su código", () => {
+    for (const state of ["invited_unproven", "invited", "unbound", "needs_code"] as const) {
+      for (const returnTo of [null, "/admin", "/admin/equipo", "/administrar", "//otro.example"]) {
+        expect(entryDestination(state, returnTo), `${state} con ${returnTo}`).toMatch(/^\/entrar\/segundo-factor/);
+      }
+    }
   });
 });

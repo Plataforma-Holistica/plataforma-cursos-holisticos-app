@@ -103,3 +103,39 @@ export function returnsOutsideAdmin(input: string | null | undefined): boolean {
   const pathname = resolved.path.split("?")[0];
   return pathname !== ROUTES.admin && !pathname?.startsWith(`${ROUTES.admin}/`);
 }
+
+/**
+ * En qué estado está alguien respecto al equipo, solo por su nombre: los de `TeamStanding`,
+ * en `team.ts`. Se escriben aquí, y no se traen de allá, porque este archivo lo carga el paso
+ * previo y no importa nada de los servicios que llegan a la base. Si la base gana un estado,
+ * `team.ts` deja de compilar hasta que entre a esta lista y a la tabla de abajo.
+ */
+export type TeamState = "none" | "member" | "needs_code" | "unbound" | "invited" | "invited_unproven";
+
+/**
+ * A dónde va quien acaba de quedar dentro y sin pendientes (entrar, completar el registro,
+ * completar la cuenta), según su estado en el equipo.
+ *
+ * Quien pidió una pantalla que no es de administración va a esa pantalla: el segundo factor
+ * solo se pide en administración. A los demás del equipo se les lleva a la pantalla que les
+ * toca, y nunca directo a administración sin haber dado su código: a quien llegue ahí sin
+ * darlo lo detiene la guarda de esa página, que es el control.
+ *
+ * @param state El estado que el servicio leyó al dejarla entrar, o nulo si no se supo: «no
+ *   se supo» no da nada, y se sigue como cualquier cuenta.
+ * @param returnTo El destino guardado (`volver`), tal como llegó.
+ */
+export function entryDestination(state: TeamState | null, returnTo: string | null | undefined): string {
+  if (state === null || state === "none" || returnsOutsideAdmin(returnTo)) return resolveDestination(returnTo);
+  switch (state) {
+    case "invited_unproven":
+    case "invited":
+      return ROUTES.factorSetup;
+    case "unbound":
+      return ROUTES.secondFactor;
+    case "needs_code":
+      return secondFactorPath(returnTo);
+    case "member":
+      return teamDestination(returnTo);
+  }
+}
