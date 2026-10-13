@@ -611,7 +611,9 @@ falla. Doce precisiones que la tabla no dice:
       entrando de nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía
       antes de la atadura, y una copia de su cookie tendría un código reciente. La cierra
       la base, en la misma transacción que ata el factor; el servicio borra su cookie y le
-      pide a Auth cerrarla de todos modos, y que ya no exista cuenta como cerrada. Con un
+      pide a Auth cerrarla de todos modos, y que ya no exista cuenta como cerrada (medido).
+      Si Auth no contesta ahí, se reporta `session_not_closed`, que en ese camino ya no
+      quiere decir «quedó abierta»: en la base está cerrada, y lo que no se supo es Auth. Con un
       no terminal de la base (`no_invitation`,
       `already_bound`, `inviter_lost_config`, `ineligible`, `needs_mailbox_proof`) el
       factor recién verificado se quita. **Pero nunca sin releer antes el estado.** Solo

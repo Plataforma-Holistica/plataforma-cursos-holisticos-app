@@ -575,10 +575,25 @@ describe("el resguardo, cuando se cierra la sesión de ese navegador", () => {
     const secret = withTicket(jar);
     await ownerQuery("delete from auth.sessions where user_id = $1", [person.id]);
     await ownerQuery("delete from private.app_sessions where profile_id = $1", [person.id]);
-    const services = testServices();
+    // El Auth de verdad, anotando qué contesta al cierre.
+    const answered: string[] = [];
+    const auth = adapter.createAuth({
+      fetch: async (input, init) => {
+        const response = await fetch(input, init);
+        const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+        if (path.endsWith("/logout")) {
+          const body = (await response.clone().json()) as { code?: unknown };
+          answered.push(`${response.status} ${String(body.code)}`);
+        }
+        return response;
+      },
+    });
+    const services = testServices({ auth });
 
     expect(await services.signOut(jar)).toBe("closed");
 
+    // Lo mismo que se le contesta a mano en las pruebas de arriba.
+    expect(answered).toEqual(["403 session_not_found"]);
     expect(services.reported).toEqual([]);
     expect(jar.get(SESSION)).toBeUndefined();
     expect(jar.get(TICKET)).toBe(secret);

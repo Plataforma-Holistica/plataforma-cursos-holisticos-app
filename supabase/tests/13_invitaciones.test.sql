@@ -8,7 +8,7 @@
 -- un código reciente de quien lo cambia.
 begin;
 \ir _ayuda.psql
-select plan(278);
+select plan(284);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -507,6 +507,10 @@ update auth.users set email_confirmed_at = null where id = 'a0000000-0000-0000-0
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'ineligible', 'sin el correo confirmado no se acepta');
 update auth.users set email_confirmed_at = now(), is_sso_user = true where id = 'a0000000-0000-0000-0000-000000000001';
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'ineligible', 'ni una cuenta de acceso federado');
+select isnt_empty(
+  $$select 1 from auth.sessions s join private.app_sessions x on x.session_id = s.id
+    where s.id = pruebas.sesion('a0000000-0000-0000-0000-000000000001')$$,
+  'y quien no puede aceptar conserva su sesión');
 update auth.users set is_sso_user = false where id = 'a0000000-0000-0000-0000-000000000001';
 select pruebas.suspender('a0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'ineligible', 'ni una cuenta suspendida');
@@ -522,6 +526,10 @@ select pruebas.limpiar();
 update auth.users set email = 'ana2@prueba.test' where id = 'a0000000-0000-0000-0000-000000000001';
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'no_invitation',
   'si el correo de la cuenta ya no es el invitado, no hay invitación que aceptar');
+select isnt_empty(
+  $$select 1 from auth.sessions s join private.app_sessions x on x.session_id = s.id
+    where s.id = pruebas.sesion('a0000000-0000-0000-0000-000000000001')$$,
+  'y quien no tiene invitación que aceptar conserva su sesión');
 update auth.users set email = 'ana@prueba.test' where id = 'a0000000-0000-0000-0000-000000000001';
 select pruebas.como_dueno_sistema();
 update private.admin_invitations set profile_id = 'a0000000-0000-0000-0000-000000000004' where email = 'ana@prueba.test' and revoked_at is null;
@@ -544,6 +552,10 @@ delete from private.admin_factors where profile_id = 'c0000000-0000-0000-0000-00
 select pruebas.limpiar();
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'inviter_lost_config',
   'si quien invitó ya no tiene su factor atado, la invitación no se acepta');
+select isnt_empty(
+  $$select 1 from auth.sessions s join private.app_sessions x on x.session_id = s.id
+    where s.id = pruebas.sesion('a0000000-0000-0000-0000-000000000001')$$,
+  'y aunque la invitación se revoque, a quien la traía no se le cierra la sesión');
 select results_eq(
   $$select i.revoked_at is not null, i.revoked_by, i.accepted_at is null from private.admin_invitations i where i.email = 'ana@prueba.test'$$,
   $$values (true, null::uuid, true)$$,
@@ -624,6 +636,10 @@ select is_empty(
   'y con ellas, lo que Auth anotó de su verificación');
 select ok(not pruebas.tiene('a0000000-0000-0000-0000-000000000001', 'support'), 'con la sesión con la que aceptó no pasa la puerta');
 select ok(not private.team_session('a0000000-0000-0000-0000-000000000001', pruebas.sesion('a0000000-0000-0000-0000-000000000001')), 'ni preguntándole a la puerta por ella');
+select isnt_empty(
+  $$select 1 from auth.mfa_factors m join private.admin_factors f on f.factor_id = m.id and f.profile_id = m.user_id
+    where m.user_id = 'a0000000-0000-0000-0000-000000000001' and m.status = 'verified' and m.factor_type = 'totp'$$,
+  'el factor que quedó atado sigue en Auth, verificado: cerrar las sesiones no lo toca');
 -- Entra de nuevo y da su código: esa sesión es otra, y nace después de la atadura.
 select pruebas.verificar('a0000000-0000-0000-0000-000000000001', null, '5e000000-0000-0000-0000-0000000000b1');
 select ok(private.team_session('a0000000-0000-0000-0000-000000000001', '5e000000-0000-0000-0000-0000000000b1'),
@@ -870,6 +886,10 @@ select is_empty(
     union all select x.session_id from private.app_sessions x where x.profile_id = 'c0000000-0000-0000-0000-000000000002'$$,
   'un restablecimiento aceptado también cierra todas sus sesiones');
 select ok(not pruebas.tiene('c0000000-0000-0000-0000-000000000002', 'config'), 'y con la sesión con la que lo aceptó no pasa la puerta');
+select isnt_empty(
+  $$select 1 from auth.mfa_factors m join private.admin_factors f on f.factor_id = m.id and f.profile_id = m.user_id
+    where m.user_id = 'c0000000-0000-0000-0000-000000000002' and m.status = 'verified' and m.factor_type = 'totp'$$,
+  'su factor nuevo queda atado y verificado en Auth');
 select pruebas.verificar('c0000000-0000-0000-0000-000000000002');
 select ok(pruebas.tiene('c0000000-0000-0000-0000-000000000002', 'config'), 'entrando de nuevo y dando su código, su capacidad vuelve a servirle');
 select is(
@@ -963,6 +983,10 @@ select results_eq(
   $$values ('config', null::uuid)$$,
   'la capacidad queda sin quién la dio: fue el arranque');
 select ok(not pruebas.tiene('e0000000-0000-0000-0000-000000000001', 'config'), 'también en el arranque la sesión con la que aceptó se cierra');
+select isnt_empty(
+  $$select 1 from auth.mfa_factors m join private.admin_factors f on f.factor_id = m.id and f.profile_id = m.user_id
+    where m.user_id = 'e0000000-0000-0000-0000-000000000001' and m.status = 'verified' and m.factor_type = 'totp'$$,
+  'y su factor queda atado y verificado en Auth');
 select pruebas.verificar('e0000000-0000-0000-0000-000000000001');
 select ok(pruebas.tiene('e0000000-0000-0000-0000-000000000001', 'config'), 'y entrando de nuevo, pasa la puerta');
 
