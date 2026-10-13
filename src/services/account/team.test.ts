@@ -439,6 +439,21 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
           expect(team.reported).toEqual([]);
         });
 
+        it.each<TeamStanding>([{ state: "none" }, { state: "unbound" }, INVITED, { state: "invited_unproven", kind: "grant" }])(
+          "si sigue sin atadura (%j), el factor se quita, y se contesta lo que dijo la base",
+          async (now) => {
+            const team = teamWith({ accept, standing: [INVITED, now] });
+            const jar = browser();
+            expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({
+              kind: accept === "needs_mailbox_proof" ? "needs_mailbox_proof" : "not_invited",
+            });
+            expect(team.calls.slice(-1)).toEqual([`remove ${FACTOR}`]);
+            expect(team.auth.signOut).not.toHaveBeenCalled();
+            expect(jar.get("plataforma-factor")).toBeUndefined();
+            expect(team.reported).toEqual([]);
+          },
+        );
+
         it("si al volver a leer no se supo, no se quita nada y queda dicho", async () => {
           const team = teamWith({ accept });
           team.store.standing.mockResolvedValueOnce(INVITED).mockRejectedValueOnce(new Error("sin base"));
@@ -484,7 +499,7 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
       );
 
       it.each<TeamStanding>([{ state: "none" }, { state: "unbound" }, INVITED, { state: "invited_unproven", kind: "grant" }])(
-        "si sigue sin atadura (%j), no estaba invitada: el factor recién verificado se quita",
+        "si sigue sin atadura (%j), ya no hay invitación que aceptar: el factor recién verificado se quita",
         async (now) => {
           const team = teamWith({ accept, standing: [INVITED, now] });
           const jar = browser();
