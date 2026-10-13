@@ -9,7 +9,7 @@
 -- vueltas entre dos pantallas.
 begin;
 \ir _ayuda.psql
-select plan(61);
+select plan(62);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -189,8 +189,12 @@ select is(pruebas.estado('a0000000-0000-0000-0000-000000000002', pruebas.huella(
 select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'accepted', '(quien salía invitada, acepta)');
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001'),
+  'needs_code ' || pruebas.factor('a0000000-0000-0000-0000-000000000001') || ' - []',
+  'y queda a un código: aceptar cerró la sesión con la que aceptó, que existía antes de la atadura');
+select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001'),
   'member ' || pruebas.factor('a0000000-0000-0000-0000-000000000001') || ' - [content,support]',
-  'y pasa a ser del equipo');
+  'entrando de nuevo y dando su código, es del equipo');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'support')$$), 'revoked', '(se le quita una capacidad)');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'content')$$), 'revoked', '(y la otra)');
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001'), 'none - - []',

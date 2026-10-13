@@ -81,8 +81,8 @@ export type FactorStart =
 export type FactorConfirmation =
   | Refused
   /**
-   * Atada. La sesión con la que aceptó se manda cerrar: entra de nuevo y da su código. Si
-   * Auth no la pudo cerrar, queda dicho (`session_not_closed`).
+   * Atada, y sin sesión: la base cerró todas las de la cuenta en la misma transacción que
+   * ató, también aquella con la que aceptó. Entra de nuevo y da su código.
    */
   | { kind: "accepted" }
   | { kind: "wrong_code" }
@@ -179,9 +179,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
 
   /**
    * Verificar el código del factor recién dado de alta y, con la sesión ya en segundo
-   * nivel, aceptar la invitación. Aceptada, la sesión se manda cerrar: la del equipo nace
-   * después de atar, entrando de nuevo y dando el código. Cerrarla es un paso aparte, que
-   * depende de Auth: si falla, se aceptó igual y queda dicho.
+   * nivel, aceptar la invitación. Aceptada, la persona queda sin sesión: la del equipo nace
+   * después de atar, entrando de nuevo y dando el código. La sesión la cierra la base, en la
+   * misma transacción que ata el factor (`private.accept_admin_invitation()`); aquí solo se
+   * borra su cookie. A Auth se le pide cerrarla de todos modos, y que ya no exista cuenta
+   * como cerrada.
    */
   async function confirmSecondFactor(jar: CookieJar, input: { code: string; handoff?: unknown }): Promise<FactorConfirmation> {
     const team = await teamStanding(jar);
@@ -270,6 +272,9 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
       case "accepted":
         dropTicket(jar);
         dropEnrolledFactor(jar);
+        // La base ya cerró la sesión. Esto borra su cookie, y Auth contesta que no existe,
+        // que cuenta como cerrada. Si Auth no contesta, queda dicho: es la defensa por si
+        // esto corriera contra una base sin esa migración.
         if ((await auth.signOut(jar)) !== "closed") await deps.report("session_not_closed");
         return { kind: "accepted" };
       case "needs_handoff":
