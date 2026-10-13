@@ -389,6 +389,58 @@ describe("el segundo factor que el Auth local tiene configurado", () => {
     const other = await first.auth.mfa.enroll({ factorType: "totp", friendlyName: "otro" });
     expect(other.error?.code).toBe("insufficient_aal");
   });
+
+  /** Lo que Auth contesta a una petición hecha a mano, con el token de acceso de una sesión si se le da. */
+  async function ask(path: string, body: unknown, accessToken?: string): Promise<{ status: number; code: unknown; body: Record<string, unknown> }> {
+    const response = await fetch(`${env("NEXT_PUBLIC_SUPABASE_URL")}/auth/v1${path}`, {
+      method: "POST",
+      headers: {
+        apikey: env("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+        "content-type": "application/json",
+        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const answer = (await response.json()) as Record<string, unknown>;
+    return { status: response.status, code: answer.error_code, body: answer };
+  }
+
+  it("el nivel es de la sesión y no del token: una copia de la sesión de antes de verificar renueva ya en segundo nivel", async () => {
+    const { user, client } = await signedIn();
+    const before = (await client.auth.getSession()).data.session;
+    if (!before) throw new Error("El cliente de prueba no tiene sesión.");
+    const { factorId, secret } = await enrolled(client);
+    const verified = await client.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) });
+    if (verified.error) throw new Error(`El factor de prueba no se verificó: ${verified.error.code}`);
+    // Verificar cambia el token de renovación: el de antes queda revocado, con el nuevo como hijo.
+    expect(verified.data.refresh_token).not.toBe(before.refresh_token);
+
+    // Quien tuviera una copia de la cookie de antes la renueva, y lo que recibe es de
+    // segundo nivel y de la misma sesión. Por eso la puerta del equipo lee la sesión en la
+    // base y no el token, y por eso al aceptar una invitación la sesión se cierra.
+    const renewed = await ask("/token?grant_type=refresh_token", { refresh_token: before.refresh_token });
+    expect(renewed.status).toBe(200);
+    const claims = JSON.parse(Buffer.from(String(renewed.body.access_token).split(".")[1] ?? "", "base64url").toString("utf8")) as {
+      aal: string;
+      session_id: string;
+      sub: string;
+    };
+    expect(claims.aal).toBe("aal2");
+    expect(claims.sub).toBe(user.id);
+    expect(await sessionsOf(user.id)).toEqual([{ aal: "aal2", factor: factorId }]);
+  });
+
+  it("los códigos de recuperación de Auth están apagados: quien pierde su factor no tiene otra llave que el equipo no conozca", async () => {
+    const { client } = await signedIn();
+    const { factorId, secret } = await enrolled(client);
+    const verified = await client.auth.mfa.challengeAndVerify({ factorId, code: totpCode(secret) });
+    if (verified.error) throw new Error(`El factor de prueba no se verificó: ${verified.error.code}`);
+    const token = verified.data.access_token;
+
+    // Con la sesión ya en segundo nivel, que es la que podría pedirlos.
+    expect(await ask("/factors/recovery-codes", {}, token)).toMatchObject({ status: 422, code: "mfa_recovery_codes_enroll_not_enabled" });
+    expect(await ask("/factors/recovery-codes/verify", {}, token)).toMatchObject({ status: 422, code: "mfa_recovery_codes_verify_not_enabled" });
+  });
 });
 
 describe("los correos que manda el Auth local", () => {

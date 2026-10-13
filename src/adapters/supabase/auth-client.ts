@@ -103,7 +103,7 @@ function newAdminApi(base: Fetch): GoTrueAdminApi {
 export type AuthCall = { ok: true; body: unknown } | { ok: false; failure: AuthFailure };
 
 export interface AuthCallOptions {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   /** La ruta bajo `/auth/v1`, con su consulta. */
   path: string;
   /** El token de acceso de la persona, cuando la llamada es a su nombre. */

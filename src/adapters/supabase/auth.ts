@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { getEnv } from "@/config/env";
 import type { PasswordSetResult } from "@/domain/access/password-outcome";
 
@@ -15,6 +17,8 @@ import {
 } from "./auth-cookies";
 import {
   alreadyClosed,
+  enrollFailure,
+  factorAlreadyGone,
   failureFromSdk,
   passwordSetFailure,
   provenPasswordFailure,
@@ -28,6 +32,7 @@ import {
   signInFailure,
   signUpFailure,
   unlistedRejection,
+  verifyFailure,
   type AuthFailure,
   type AuthOperation,
   type RecoveryRequestFailure,
@@ -189,6 +194,38 @@ interface Proof {
 }
 
 const proofs = new WeakMap<object, Proof>();
+
+/**
+ * Dar de alta un factor de aplicación de códigos. `secret` y `uri` son para pintarlos una
+ * sola vez a quien lo está configurando: no se guardan ni se vuelven a pedir.
+ *
+ * `needs_second_level`: la cuenta ya tiene un factor verificado, y Auth no deja dar de
+ * alta otro con una sesión de primer nivel.
+ */
+export type FactorEnrollment =
+  | { ok: true; factorId: string; secret: string; uri: string }
+  | { ok: false; reason: "no_session" | "needs_second_level" | "unknown" };
+
+/**
+ * Verificar un código. `verified` trae las claims de los tokens nuevos: la misma sesión, ya
+ * en segundo nivel. Con `throttled`, Auth cerró todas las sesiones de la cuenta y la
+ * cookie se borró. `factor_gone`: hay que empezar de nuevo.
+ */
+export type FactorVerification =
+  | { kind: "verified"; claims: VerifiedClaims }
+  | { kind: "wrong_code" }
+  | { kind: "throttled" }
+  | { kind: "factor_gone" }
+  | { kind: "no_session" }
+  | { kind: "oversized_session" }
+  | { kind: "unknown" };
+
+export type FactorRemoval = "removed" | "unknown";
+
+/** Un identificador de factor, como los da Auth. Lo que no tiene esta forma no llega a una dirección. */
+const FACTOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Un código de aplicación: seis dígitos. */
+const FACTOR_CODE = /^[0-9]{6}$/;
 
 export interface AuthDependencies {
   /** Solo para pruebas: simular un servidor de identidad que no contesta o que limita. */
@@ -757,6 +794,143 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     return logout(accessToken, "local");
   }
 
+  /** El token de la sesión de la cookie, ya verificado: a nombre de quién se habla con Auth. */
+  async function sessionToken(
+    reader: CookieReader,
+  ): Promise<{ ok: true; accessToken: string; claims: VerifiedClaims } | { ok: false; reason: "no_session" | "unknown" }> {
+    const cookie = readSessionCookie(reader, secure());
+    if (cookie.kind !== "tokens") return { ok: false, reason: "no_session" };
+    const inspection = await inspect(cookie.tokens.accessToken);
+    if (inspection.state === "valid") return { ok: true, accessToken: cookie.tokens.accessToken, claims: inspection.claims };
+    return { ok: false, reason: inspection.state === "unavailable" ? "unknown" : "no_session" };
+  }
+
+  /**
+   * Da de alta un factor de aplicación de códigos a nombre de la sesión de la cookie. Antes
+   * quita los que esa cuenta dejó a medias: empezar de nuevo no los acumula. No sube el
+   * nivel ni toca la cookie: eso lo hace verificar.
+   */
+  async function enrollFactor(reader: CookieReader): Promise<FactorEnrollment> {
+    const session = await sessionToken(reader);
+    if (!session.ok) return { ok: false, reason: session.reason };
+    const { accessToken } = session;
+
+    const account = await callAuth({ method: "GET", path: "/user", accessToken, fetch: baseFetch });
+    if (!account.ok) return { ok: false, reason: classify("enroll_factor", account.failure, enrollFailure) };
+    const factors = isRecord(account.body) && Array.isArray(account.body.factors) ? account.body.factors : [];
+    for (const factor of factors as unknown[]) {
+      if (!isRecord(factor) || factor.status === "verified") continue;
+      const id = text(factor.id);
+      // Si no se pudo quitar, el alta de abajo dirá lo suyo.
+      if (id && FACTOR_ID.test(id)) await callAuth({ method: "DELETE", path: `/factors/${id}`, accessToken, fetch: baseFetch });
+    }
+
+    const call = await callAuth({
+      method: "POST",
+      path: "/factors",
+      accessToken,
+      // Auth no admite dos factores con el mismo nombre en una cuenta.
+      body: { factor_type: "totp", friendly_name: `equipo-${randomUUID()}` },
+      fetch: baseFetch,
+    });
+    if (!call.ok) return { ok: false, reason: classify("enroll_factor", call.failure, enrollFailure) };
+    const body = isRecord(call.body) ? call.body : {};
+    const totp = isRecord(body.totp) ? body.totp : {};
+    const factorId = text(body.id);
+    const secret = text(totp.secret);
+    const uri = text(totp.uri);
+    if (!factorId || !FACTOR_ID.test(factorId) || !secret || !uri) return { ok: false, reason: "unknown" };
+
+    // Un reto desde ya: cada vez que alguien da de alta un factor, Auth borra los que
+    // llevan minutos sin verificar y sin ningún reto, de cualquier cuenta. Si este falla,
+    // no cambia nada: verificar pide el suyo.
+    await callAuth({ method: "POST", path: `/factors/${factorId}/challenge`, accessToken, fetch: baseFetch });
+    return { ok: true, factorId, secret, uri };
+  }
+
+  /**
+   * Verifica un código de ese factor con la sesión de la cookie, y escribe la cookie con
+   * los tokens que Auth entrega: la misma sesión, en segundo nivel. Sirve para el factor
+   * recién dado de alta y para el de quien ya lo tiene y está entrando.
+   *
+   * Lo que no tiene forma de factor o de código no llega a Auth.
+   */
+  async function verifyFactor(jar: CookieJar, factorId: string, code: string): Promise<FactorVerification> {
+    if (!FACTOR_ID.test(factorId)) return { kind: "factor_gone" };
+    if (!FACTOR_CODE.test(code)) return { kind: "wrong_code" };
+    const isSecure = secure();
+    const session = await sessionToken(jar);
+    if (!session.ok) return { kind: session.reason };
+    const { accessToken } = session;
+
+    const failed = (failure: AuthFailure): FactorVerification | "retry" => {
+      const why = classify("verify_factor", failure, verifyFailure);
+      if (why === "retry") return "retry";
+      if (why === "throttled") {
+        // Auth ya cerró todas las sesiones de la cuenta: esta cookie no apunta a nada.
+        clearSessionCookie(jar, isSecure);
+        return { kind: "throttled" };
+      }
+      return { kind: why };
+    };
+
+    // Dos vueltas como mucho: la segunda, solo si el reto venció o era de otra dirección.
+    for (let round = 0; round < 2; round += 1) {
+      const challenge = await callAuth({ method: "POST", path: `/factors/${factorId}/challenge`, accessToken, fetch: baseFetch });
+      if (!challenge.ok) {
+        const answer = failed(challenge.failure);
+        if (answer === "retry") continue;
+        return answer;
+      }
+      const challengeId = isRecord(challenge.body) ? text(challenge.body.id) : null;
+      if (!challengeId) return { kind: "unknown" };
+
+      const call = await callAuth({
+        method: "POST",
+        path: `/factors/${factorId}/verify`,
+        accessToken,
+        body: { challenge_id: challengeId, code },
+        fetch: baseFetch,
+      });
+      if (!call.ok) {
+        const answer = failed(call.failure);
+        if (answer === "retry") continue;
+        return answer;
+      }
+      const body = isRecord(call.body) ? call.body : {};
+      const nextAccess = text(body.access_token);
+      const nextRefresh = text(body.refresh_token);
+      // Un 200 sin los dos tokens no se entiende: la sesión pudo subir de nivel, y no se sabe.
+      if (!nextAccess || !nextRefresh) return { kind: "unknown" };
+      const next = await inspect(nextAccess);
+      // Verificar no puede traer la sesión de otra cuenta ni otra sesión.
+      if (next.state !== "valid" || next.claims.userId !== session.claims.userId || next.claims.sessionId !== session.claims.sessionId) {
+        return { kind: "unknown" };
+      }
+      if (!writeSessionCookie(jar, { accessToken: nextAccess, refreshToken: nextRefresh }, isSecure)) {
+        // Como al entrar: una sesión que no cabe en su cookie no se queda abierta.
+        await logout(nextAccess, "local");
+        clearSessionCookie(jar, isSecure);
+        return { kind: "oversized_session" };
+      }
+      return { kind: "verified", claims: next.claims };
+    }
+    return { kind: "unknown" };
+  }
+
+  /**
+   * Quita un factor de la cuenta de la sesión de la cookie. Es para el que se acaba de
+   * verificar cuando lo que seguía no ocurrió: si se quedara, la cuenta tendría un factor
+   * que nadie ató. Auth pide segundo nivel para quitar uno verificado.
+   */
+  async function removeFactor(reader: CookieReader, factorId: string): Promise<FactorRemoval> {
+    if (!FACTOR_ID.test(factorId)) return "unknown";
+    const session = await sessionToken(reader);
+    if (!session.ok) return "unknown";
+    const call = await callAuth({ method: "DELETE", path: `/factors/${factorId}`, accessToken: session.accessToken, fetch: baseFetch });
+    return call.ok || factorAlreadyGone(call.failure) ? "removed" : "unknown";
+  }
+
   return {
     requestSignUp,
     requestPasswordRecovery,
@@ -775,6 +949,9 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     refreshSession,
     confirmSession,
     signOut,
+    enrollFactor,
+    verifyFactor,
+    removeFactor,
   };
 }
 
@@ -798,4 +975,7 @@ export const {
   refreshSession,
   confirmSession,
   signOut,
+  enrollFactor,
+  verifyFactor,
+  removeFactor,
 } = auth;

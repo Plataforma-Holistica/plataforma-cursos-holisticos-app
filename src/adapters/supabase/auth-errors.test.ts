@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   alreadyClosed,
+  enrollFailure,
+  factorAlreadyGone,
   failureFromResponse,
   failureFromSdk,
   passwordSetFailure,
@@ -23,6 +25,7 @@ import {
   signInFailure,
   signUpFailure,
   unlistedRejection,
+  verifyFailure,
   type AuthFailure,
 } from "./auth-errors";
 
@@ -247,6 +250,55 @@ describe("entrar", () => {
       expect(signInFailure(failure)).toBe("unknown");
     },
   );
+});
+
+describe("el segundo factor: dar de alta", () => {
+  it("a una cuenta que ya tiene un factor verificado se le pide segundo nivel, y eso se dice", () => {
+    expect(enrollFailure(rejected("insufficient_aal", 400))).toBe("needs_second_level");
+  });
+
+  it("con una sesión que se cerró en otro lado no hay sesión: no es una caída", () => {
+    expect(enrollFailure(rejected("session_not_found", 403))).toBe("no_session");
+  });
+
+  it.each([...strangers, rejected("too_many_enrolled_mfa_factors", 422), rejected("mfa_factor_name_conflict", 422), rejected("bad_jwt", 403)])(
+    "lo demás es «no se supo»: %j",
+    (failure) => {
+      expect(enrollFailure(failure)).toBe("unknown");
+    },
+  );
+});
+
+describe("el segundo factor: verificar un código", () => {
+  it.each([
+    ["mfa_verification_failed", "wrong_code"],
+    ["mfa_verification_rejected", "throttled"],
+    ["mfa_factor_not_found", "factor_gone"],
+    ["mfa_challenge_expired", "retry"],
+    ["mfa_ip_address_mismatch", "retry"],
+    // La sesión se cerró en otro lado: sin sesión, que no es una caída ni borra la cookie.
+    ["session_not_found", "no_session"],
+  ])("%s es %s", (code, expected) => {
+    expect(verifyFailure(rejected(code))).toBe(expected);
+  });
+
+  // Con `throttled` se borra la cookie de sesión: ningún otro código puede caer ahí.
+  it.each([...strangers, rejected("insufficient_aal"), rejected("user_banned", 403), rejected("bad_jwt", 403)])(
+    "lo que no reconoce es «no se supo», y no le cierra la sesión a nadie: %j",
+    (failure) => {
+      expect(verifyFailure(failure)).toBe("unknown");
+    },
+  );
+});
+
+describe("el segundo factor: quitar", () => {
+  it("quitar uno que ya no existe es haberlo quitado", () => {
+    expect(factorAlreadyGone(rejected("mfa_factor_not_found", 404))).toBe(true);
+  });
+
+  it.each([...strangers, rejected("insufficient_aal"), rejected("mfa_verification_failed")])("lo demás no: %j", (failure) => {
+    expect(factorAlreadyGone(failure)).toBe(false);
+  });
 });
 
 describe("renovar: cuándo la sesión se perdió de verdad", () => {

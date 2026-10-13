@@ -208,8 +208,64 @@ export function sessionRevoked(failure: AuthFailure): boolean {
   return SESSION_REVOKED.has(codeOf(failure) ?? "");
 }
 
+// El segundo factor (TRD §9.2, fila «Segundo factor»). Tres listas, una por operación.
+
+// Dar de alta. A una cuenta que ya tiene un factor verificado, Auth le pide segundo nivel
+// para dar de alta otro: no es una caída, y tiene su propia salida. Y con una sesión que se
+// cerró en otro lado contesta que no existe (medido): es «sin sesión», tampoco una caída.
+const ENROLL = new Map<string, "needs_second_level" | "no_session">([
+  ["insufficient_aal", "needs_second_level"],
+  ["session_not_found", "no_session"],
+]);
+
+export type EnrollFailure = "needs_second_level" | "no_session" | "unknown";
+
+export function enrollFailure(failure: AuthFailure): EnrollFailure {
+  return ENROLL.get(codeOf(failure) ?? "") ?? "unknown";
+}
+
+// Verificar un código, con su reto.
+//   wrong_code   el código no coincide. No gasta el reto ni cambia nada.
+//   throttled    el gancho de intentos rechazó: Auth ya cerró TODAS las sesiones de la
+//                cuenta antes de contestar. Es el único código de esta lista con el que se
+//                borra la cookie de sesión: agregar otro es decidir que con él se le
+//                cierra la sesión a alguien.
+//   factor_gone  ese factor ya no existe para esa cuenta: hay que empezar de nuevo, no
+//                reintentar. Auth borra solo los factores sin verificar que llevan minutos
+//                sin reto, y contesta lo mismo por el factor de otra cuenta.
+//   retry        el reto venció o se pidió desde otra dirección: se pide otro, una vez.
+//   no_session   la sesión de la cookie ya no existe en Auth: se cerró en otro lado
+//                (medido). La cookie no se borra aquí: la guarda la rechaza en la
+//                siguiente petición, y su página la cierra.
+const VERIFY = new Map<string, "wrong_code" | "throttled" | "factor_gone" | "retry" | "no_session">([
+  ["mfa_verification_failed", "wrong_code"],
+  ["mfa_verification_rejected", "throttled"],
+  ["mfa_factor_not_found", "factor_gone"],
+  ["mfa_challenge_expired", "retry"],
+  ["mfa_ip_address_mismatch", "retry"],
+  ["session_not_found", "no_session"],
+]);
+
+export type VerifyFailure = "wrong_code" | "throttled" | "factor_gone" | "retry" | "no_session" | "unknown";
+
+export function verifyFailure(failure: AuthFailure): VerifyFailure {
+  return VERIFY.get(codeOf(failure) ?? "") ?? "unknown";
+}
+
+// Quitar algo que ya no existe es haberlo quitado.
+export function factorAlreadyGone(failure: AuthFailure): boolean {
+  return codeOf(failure) === "mfa_factor_not_found";
+}
+
 /** Las operaciones cuyo rechazo se clasifica con una lista. */
-export type AuthOperation = "sign_up" | "recovery_request" | "redeem" | "set_password" | "sign_in";
+export type AuthOperation =
+  | "sign_up"
+  | "recovery_request"
+  | "redeem"
+  | "set_password"
+  | "sign_in"
+  | "enroll_factor"
+  | "verify_factor";
 
 // Un código de Auth es un identificador en minúsculas. Lo que no tiene esa forma no se
 // escribe: podría ser un mensaje, y un mensaje puede traer el correo de alguien.

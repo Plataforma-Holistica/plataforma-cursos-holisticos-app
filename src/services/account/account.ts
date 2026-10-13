@@ -35,6 +35,8 @@ import { createManagement } from "./management";
 import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
 import { mailboxProofSeconds } from "./records";
+import { createTeam } from "./team";
+import { databaseTeamStore } from "./team-store";
 import {
   countHit,
   dbClock,
@@ -83,6 +85,7 @@ export type {
   RegistrationCompletion,
 } from "./onboarding";
 export type { RequestOrigin } from "./origin";
+export type { CodeGiven, FactorConfirmation, FactorStart, TeamCheck, TeamStanding } from "./team";
 export type { CookieJar, CookieOptions, CookieReader };
 export type { VerifiedClaims } from "@/adapters/supabase/claims";
 // De qué navegador y sistema dice ser una sesión: la pantalla de la cuenta lo pone en palabras.
@@ -101,6 +104,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     report: reportFailure,
     defer: (work) => work(),
     ticketLifetime: () => asSystem({ reason: "mailbox_proof" }, (tx) => mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT)),
+    teamStore: databaseTeamStore,
     ...overrides,
   };
   const { auth } = deps;
@@ -368,6 +372,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       openAttempt: (keys) => asSystem({ reason: "password_change_attempt" }, (tx) => openAttempt(tx, keys)),
       settleAttempt,
     }),
+    ...createTeam(deps, { checkSession, store: deps.teamStore }),
   };
 }
 
@@ -394,4 +399,8 @@ export const {
   closeOtherSessions,
   accountSecondFactor,
   changePassword,
+  teamStanding,
+  startSecondFactor,
+  confirmSecondFactor,
+  giveSecondFactorCode,
 } = services;

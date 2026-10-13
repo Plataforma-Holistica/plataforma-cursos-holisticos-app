@@ -44,6 +44,19 @@ export function toDatabaseError(error: unknown): unknown {
   return isPgError(error) ? new DatabaseError(error) : error;
 }
 
+/** La base cortó a uno de dos que se cruzaron, o no le dio un candado a tiempo. */
+const LOCK_CONFLICTS: readonly string[] = ["40P01", "55P03"];
+
+/**
+ * Si un error es un choque de candados: un interbloqueo que la base resolvió cortando a
+ * uno (40P01), o un candado que no llegó dentro de su espera (55P03). La transacción se
+ * revirtió entera y nada quedó escrito: quien llama puede intentarla de nuevo. No es una
+ * caída de la base.
+ */
+export function isLockConflict(error: unknown): boolean {
+  return error instanceof DatabaseError && LOCK_CONFLICTS.includes(error.code);
+}
+
 /** Una fila no tiene la forma que su consulta declaró. Dice dónde, no qué valor traía. */
 export class RowValidationError extends Error {
   readonly paths: string[];

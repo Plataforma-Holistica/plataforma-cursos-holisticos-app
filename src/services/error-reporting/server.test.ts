@@ -65,6 +65,10 @@ describe("reportFailure", () => {
       "legal_text_unavailable",
       "mailbox_proof_unavailable",
       "mailbox_ticket_not_kept",
+      "team_unavailable",
+      "invitation_not_accepted",
+      "invitation_answer_lost",
+      "second_factor_not_removed",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);
     expect(new Set(messages).size).toBe(codes.length);

@@ -377,6 +377,22 @@ falla. Doce precisiones que la tabla no dice:
   - Un token firmado con una clave que no se conoce no es, sin más, un token inventado:
     puede ser de una clave recién rotada. Mientras no se haya vuelto a preguntar por las
     claves, la respuesta es «no se supo» y la cookie no se borra.
+  - El segundo factor son tres funciones, todas a nombre de la sesión de la cookie y
+    ninguna por la API de administración. `enrollFactor` da de alta un factor de
+    aplicación de códigos: antes quita los que la cuenta dejó a medias, y pide un reto en
+    el acto, porque Auth borra los factores sin verificar de más de cinco minutos que
+    nunca tuvieron uno. `verifyFactor` no abre otra sesión: sube de nivel la misma y
+    escribe la cookie con los tokens que Auth entrega, después de comprobar que son de la
+    misma cuenta y de la misma sesión. Distingue `wrong_code`, `throttled` (el gancho
+    rechazó: Auth ya cerró todas las sesiones de la cuenta, y la cookie se borra; es el
+    único código de esa lista con el que se le cierra la sesión a alguien), `factor_gone`
+    (ya no existe: toca empezar de nuevo, no reintentar) y `no_session` (la sesión se
+    cerró en otro lado; la cookie no se borra ahí: la guarda la rechaza en la siguiente
+    petición). `removeFactor` quita uno, y uno que ya no está cuenta como quitado. Tres
+    cosas medidas contra el Auth local: el nivel es de la sesión y no del token (una copia
+    de la cookie de antes de verificar renueva ya en segundo nivel, y con ella se puede
+    dar de alta otro factor); al verificar un factor, Auth borra los demás que la cuenta
+    tenía sin verificar; y con una sesión cerrada contesta `session_not_found`.
   - `createAuth({ fetch, now })` existe para las pruebas. El código de la aplicación usa
     las funciones ya armadas.
 - **Los servicios de cuenta viven en `src/services/account/`** (TRD §9.2). `account.ts`
@@ -573,8 +589,64 @@ falla. Doce precisiones que la tabla no dice:
     rechaza, Auth además cierra todas las sesiones de esa cuenta, no solo la del intento
     (medido): a quien se equivocó de más hay que decirle que vuelva a entrar, o que
     recupere su contraseña desde su correo.
-  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer, ticketLifetime })` existe
-    para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
+  - Los servicios del equipo viven en `team.ts` (T-105; TRD §9.2, fila «Invitaciones»).
+    Quién es del equipo lo decide la base; aquí solo se decide a quién se le pregunta qué
+    y en qué orden. Los cuatro corren primero la guarda de sesión, y lo que no sea «pasa»
+    lo contestan tal cual:
+    - `teamStanding(reader)` da el estado de quien trae esa sesión
+      (`private.team_standing()`), con la huella del resguardo que traiga su navegador.
+      Es lo que leerá la guarda de `/admin`.
+    - `startSecondFactor(jar)` da de alta el factor, solo a quien está `invited`, y anota
+      cuál fue en una cookie del servidor (`enrolled-factor.ts`: `plataforma-factor`, con
+      `__Host-` bajo https, quince minutos). El valor es `sesión.factor`, y con otra sesión
+      no se lee.
+    - `confirmSecondFactor(jar, { code, handoff })` verifica ese factor y, con la sesión
+      ya en segundo nivel, acepta la invitación. **El factor que se le pasa a la base es
+      el de esa cookie, nunca uno que llegue del formulario ni el que diga la sesión:**
+      quien tuviera la sesión de la persona y verificara por fuera un factor suyo no logra
+      que se ate. En un restablecimiento, sin un código dictado con forma no se verifica ni
+      se le pregunta a la base: un nulo le cuenta como intento fallido
+      (`handoffPrint`: sin espacios ni guiones, en mayúsculas, de 8 a 32 letras o dígitos).
+      Aceptada, **la sesión se manda cerrar**: la de equipo nace después de atar, entrando
+      de nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía antes de
+      la atadura, y una copia de su cookie tendría un código reciente. Cerrarla es un paso
+      aparte, que depende de Auth: si falla, se aceptó igual y queda dicho
+      (`session_not_closed`). Con un no terminal de la base (`no_invitation`,
+      `already_bound`, `inviter_lost_config`, `ineligible`, `needs_mailbox_proof`) el
+      factor recién verificado se quita. **Pero nunca sin releer antes el estado.** Solo
+      `accepted` y las dos que dicen que falta configuración (`needs_code`,
+      `unavailable`) se toman tal cual; con cualquier otra respuesta, y también si aceptar
+      no contestó (la transacción pudo confirmarse y perderse su respuesta), se vuelve a
+      leer. Si la persona ya tiene su atadura (`member` o `needs_code`), se aceptó en otro
+      envío o se perdió la respuesta: se contesta `accepted`, pase o no esa sesión la
+      puerta, porque el factor de ese navegador puede ser justo el que quedó atado y
+      quitarlo la dejaría sin con qué entrar (si la respuesta se perdió, queda dicho:
+      `invitation_answer_lost`). Con `needs_handoff`, si la invitación ya no existe (el
+      fallo que llega al límite la revoca, y la base contesta lo mismo), el factor se
+      quita y se contesta `not_invited`; si sigue viva, se queda para el siguiente
+      intento. Y si al volver a leer no se supo, nada se quita.
+    - `giveSecondFactorCode(jar, code)` es dar el código al entrar, o darlo otra vez para
+      un cambio al equipo que lo pide reciente. El factor es el que dice la base
+      (`standing.factor`). Después de verificar vuelve a leer el estado: si no quedó
+      `member`, es configuración (falta `VIGENCIA_SEGUNDO_FACTOR_HORAS`), y se reporta.
+
+    A la base le preguntan por un almacén de dos funciones (`TeamStore`), que arma
+    `team-store.ts` sobre las consultas de `team-records.ts`. Aceptar confirma su
+    transacción con cualquier respuesta, porque tres de sus rechazos escriben: por eso la
+    respuesta se valida ya confirmada, fuera de la transacción. Un choque de candados
+    (`isLockConflict`: 40P01 o 55P03) se intenta una vez más, y solo al aceptar. Leer el
+    estado no se reintenta. «No se supo» nunca es un sí y nunca borra nada. Una prueba de
+    arquitectura fija por dónde se le pregunta a la base y de dónde sale el factor.
+  - Cerrar la sesión de un navegador (`signOut`, `closeRejectedSession`) no se lleva el
+    resguardo del buzón: completar la recuperación lo deja y, en la misma respuesta,
+    cierra la sesión que ese navegador tuviera (`leaveFor`). Si cerrar se lo llevara,
+    nadie con una sesión abierta podría probar su buzón. Que «Salir» sí se lo lleve es un
+    paso propio de esa acción, y llega con las pantallas del equipo.
+  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer, ticketLifetime, teamStore })` existe
+    para las pruebas. En las de integración, lo que cambia el equipo corre con un almacén
+    sobre una transacción del dueño que se revierte (`teamStoreOn`, en
+    `tests/integration/helpers/team.ts`): la guarda y Auth corren de verdad, y la
+    invitación y su aceptación no dejan nada en la auditoría. Cada caso de integración empieza con los contadores vacíos y su
     propia dirección (`tests/integration/helpers/account.ts`).
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en
   `src/adapters/supabase/`** (ADR-31, TRD §8.10). La aplicación entra a la base como
@@ -767,13 +839,14 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     falta el parámetro, no se pudo leer o la cookie no se puede escribir, el registro y la
     recuperación terminan igual, y queda dicho (`mailbox_proof_unavailable`,
     `mailbox_ticket_not_kept`). Una prueba de arquitectura exige que reclamar y emitir un resguardo
-    solo ocurran en esos dos flujos. Leer la cookie y aceptar llega con el servicio que
-    acepta: hasta entonces ninguna invitación se puede aceptar.
+    solo ocurran en esos dos flujos. La cookie la leen los servicios del equipo
+    (`team.ts`), y aceptar la borra. Mientras no existan las pantallas que los llaman,
+    ninguna invitación se puede aceptar desde un navegador.
   - **En qué estado está alguien respecto al equipo** lo dice
     `private.team_standing(huella del resguardo)`, sobre quien actúa y sin escribir:
-    `member`, `needs_code`, `invited`, `invited_unproven`, `unbound` o `none`. Es lo que
-    leerá la guarda de `/admin`, porque el servidor no puede leer las invitaciones ni las
-    ataduras. Tiene que decir lo mismo que haría aceptar: una invitación que aceptar
+    `member`, `needs_code`, `invited`, `invited_unproven`, `unbound` o `none`. Lo lee
+    `teamStanding` (`src/services/account/team.ts`), y es lo que leerá la guarda de
+    `/admin`, porque el servidor no puede leer las invitaciones ni las ataduras. Tiene que decir lo mismo que haría aceptar: una invitación que aceptar
     revocaría no cuenta. Si se cambia una condición de `accept_admin_invitation`, se
     cambia aquí también.
   - Hay dos tipos de invitación. `grant` da capacidades a quien no tiene ninguna.
