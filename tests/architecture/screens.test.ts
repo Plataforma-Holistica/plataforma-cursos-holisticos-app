@@ -91,6 +91,15 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     giveCodeAction:
       /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*giveCodeOutcome\(await giveSecondFactorCode\(jar, code\), returnTo\)[\s\S]*return leaveFor\(jar, outcome\);/,
   },
+  "src/app/(cuenta)/entrar/segundo-factor/configurar/actions.ts": {
+    // Empezar: del formulario no se lee nada. El servicio corre la guarda y solo da de alta
+    // un factor a quien tiene una invitación que puede aceptar y el buzón probado.
+    startSecondFactorAction: /startOutcome\(await startSecondFactor\(jar\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Confirmar: lo que no tiene forma de código no llega al servicio. El factor que se ata
+    // es el que el servidor anotó: lo pintado solo viaja para compararse.
+    confirmSecondFactorAction:
+      /if \(fields\) return \{ kind: "invalid", fields, attempt \};[\s\S]*confirmOutcome\(await confirmSecondFactor\(jar, \{ code, handoff, painted \}\), handoff\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
   "src/app/(cuenta)/consentimientos/actions.ts": {
     // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
     completeAccountAction: /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
@@ -159,6 +168,7 @@ const VISITOR_GUARD = /^\s*await visitorOnly\(\);$/m;
  */
 const TEAM_GUARDS: Record<string, string> = {
   "/entrar/segundo-factor": "requireSecondFactor",
+  "/entrar/segundo-factor/configurar": "requireFactorSetup",
 };
 const teamGuardOf = (route: string): string | null =>
   TEAM_GUARDS[route] ?? (route === "/admin" || route.startsWith("/admin/") ? "requireAdmin" : null);
@@ -206,7 +216,13 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
   it("toda ruta que pide sesión tiene su página revisada: ninguna se sirve sin pasar por aquí", () => {
     const sessionPages = guarded.filter((file) => requiresSession(routeOf(file))).map(routeOf);
-    expect(sessionPages.sort()).toEqual(["/consentimientos", "/cuenta", "/entrar/segundo-factor", "/inicio"]);
+    expect(sessionPages.sort()).toEqual([
+      "/consentimientos",
+      "/cuenta",
+      "/entrar/segundo-factor",
+      "/entrar/segundo-factor/configurar",
+      "/inicio",
+    ]);
   });
 
   describe("las pantallas del equipo usan su propia guarda", () => {
