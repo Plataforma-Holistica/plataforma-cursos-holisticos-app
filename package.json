@@ -17,6 +17,7 @@
     "test:coverage": "vitest run --project unit --coverage",
     "test:int": "vitest run --project integration",
     "test:e2e": "playwright test",
+    "test:e2e:equipo": "node scripts/e2e-equipo.mjs",
     "secrets": "secretlint \"**/*\"",
     "db:start": "supabase start",
     "db:stop": "supabase stop",

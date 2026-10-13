@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
+import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem } from "@/adapters/supabase/db";
 import { parseEmail, type EmailResult } from "@/domain/access/email";
 import { pairAfterRecovery } from "@/domain/access/login-throttle";
@@ -50,6 +51,7 @@ import {
   unnoteSend,
   type PairKeys,
 } from "./store";
+import type { TeamState } from "./team";
 import { atLeast, MAIL_REQUEST_FLOOR_MS } from "./timing";
 
 // Registrarse, recuperar la contraseña y completar una cuenta (RF-101, RF-103, RF-108,
@@ -91,8 +93,11 @@ export type AccountFormFacts =
   | { kind: "unavailable" };
 
 export type RegistrationCompletion =
-  /** La cuenta quedó completa y la persona, dentro. */
-  | { kind: "entered"; pending: PendingAccount | null }
+  /**
+   * La cuenta quedó completa y la persona, dentro. `team` es su estado respecto al equipo,
+   * para saber a qué pantalla llevarla: nulo si le falta algo de su cuenta o si no se supo.
+   */
+  | { kind: "entered"; pending: PendingAccount | null; team: TeamState | null }
   /** La cuenta quedó lista, pero no se pudo abrir su sesión: que entre con su contraseña. */
   | { kind: "ready_sign_in" }
   | { kind: "invalid"; fields: FieldErrors }
@@ -118,8 +123,8 @@ export type RecoveryCompletion =
   | { kind: "unavailable" };
 
 export type AccountCompletion =
-  /** A la cuenta ya no le falta nada. */
-  | { kind: "complete" }
+  /** A la cuenta ya no le falta nada. `team`, como al entrar: a qué pantalla llevarla, o nulo si no se supo. */
+  | { kind: "complete"; team: TeamState | null }
   /** Se guardó lo que se mandó, y todavía falta algo (un texto cambió entre tanto). */
   | ({ kind: "incomplete" } & PendingAccount)
   | { kind: "invalid"; fields: FieldErrors }
@@ -136,6 +141,8 @@ export interface OnboardingCore {
    * el navegador desde el que se abrió.
    */
   admit: (entered: AuthSignIn & { ok: true }, startedText: string, userAgent: string | null) => Promise<Admission>;
+  /** El estado en el equipo de quien acaba de quedar dentro, o nulo si no se supo. */
+  standingAtEntry: (claims: VerifiedClaims, reader: CookieReader) => Promise<TeamState | null>;
 }
 
 interface MailFlow {
@@ -355,7 +362,9 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     // La sesión que el navegador traía, de otra cuenta, se cierra al final.
     const previous = { get: (name: string) => (before.has(name) ? before.get(name) : jar.get(name)), set: () => undefined };
     await expectClosed(auth.signOut(previous));
-    return result;
+    // Quedó dentro: si no le falta nada, su estado en el equipo dice a qué pantalla va. El
+    // resguardo que este registro acaba de dejar ya está en el tarro.
+    return { ...result, team: result.pending === null ? await core.standingAtEntry(entered.claims, jar) : null };
   }
 
   /**
@@ -539,7 +548,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
    */
   async function completeAccount(reader: CookieReader, form: AccountForm, origin: RequestOrigin): Promise<AccountCompletion> {
     const check = await core.checkSession(reader);
-    if (check.kind === "pass") return { kind: "complete" };
+    if (check.kind === "pass") return { kind: "complete", team: await core.standingAtEntry(check.claims, reader) };
     if (check.kind !== "incomplete") return { kind: "session", check };
 
     const checked = checkAccountForm(check.missing, form);
@@ -547,7 +556,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     const from = resolveOrigin(origin, deps.proxyTrusted());
     const profileId = check.claims.userId;
 
-    let result: AccountCompletion | { kind: "no_text" };
+    let result: Exclude<AccountCompletion, { kind: "complete" }> | { kind: "complete" } | { kind: "no_text" };
     try {
       result = await asServer({ claims: check.claims, reason: "complete_account" }, async (tx) => {
         const match = matchAccepted(await currentTexts(tx, deps.isLocal()), needed, form.accepted);
@@ -572,6 +581,9 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       await deps.report("gate_no_current_text");
       return { kind: "unavailable" };
     }
+    // Ya no le falta nada: como al entrar, su estado en el equipo dice a qué pantalla va.
+    // Las claims son las de la sesión que la guarda dejó pasar al empezar.
+    if (result.kind === "complete") return { kind: "complete", team: await core.standingAtEntry(check.claims, reader) };
     return result;
   }
 

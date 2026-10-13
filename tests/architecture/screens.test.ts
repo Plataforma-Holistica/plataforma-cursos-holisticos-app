@@ -85,6 +85,21 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
     signInAction: /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
   },
+  "src/app/(cuenta)/entrar/segundo-factor/actions.ts": {
+    // Dar el código: lo que no tiene forma de código no llega al servicio, que corre la
+    // guarda y verifica contra el factor que dice la base. Del formulario no llega ningún factor.
+    giveCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*giveCodeOutcome\(await giveSecondFactorCode\(jar, code\), returnTo\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/(cuenta)/entrar/segundo-factor/configurar/actions.ts": {
+    // Empezar: del formulario no se lee nada. El servicio corre la guarda y solo da de alta
+    // un factor a quien tiene una invitación que puede aceptar y el buzón probado.
+    startSecondFactorAction: /startOutcome\(await startSecondFactor\(jar\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Confirmar: lo que no tiene forma de código no llega al servicio. El factor que se ata
+    // es el que el servidor anotó: lo pintado solo viaja para compararse.
+    confirmSecondFactorAction:
+      /if \(fields\) return \{ kind: "invalid", fields, attempt \};[\s\S]*confirmOutcome\(await confirmSecondFactor\(jar, \{ code, handoff, painted \}\), handoff\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
   "src/app/(cuenta)/consentimientos/actions.ts": {
     // Completar la cuenta: el servicio vuelve a correr la guarda antes de escribir nada.
     completeAccountAction: /await completeAccount\(\s*jar,[\s\S]*return leaveFor\(jar, outcome\);/,
@@ -143,8 +158,20 @@ function actionBody(code: string, name: string): string {
 }
 
 const GUARD_IMPORT = /import \{[^}]*\} from "@\/app\/_lib\/guard";/;
-const SESSION_GUARD = /= await (requireSession|requireIncompleteSession)\(/;
+const SESSION_GUARD = /= await (requireSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup)\(/;
 const VISITOR_GUARD = /^\s*await visitorOnly\(\);$/m;
+
+/**
+ * Las pantallas del equipo, cada una con la guarda que le toca. Las tres le preguntan a la
+ * base quién es del equipo; la guarda de sesión a secas dejaría entrar a cualquier cuenta.
+ * Una página que cuelgue de administración y no esté aquí usa la de administración.
+ */
+const TEAM_GUARDS: Record<string, string> = {
+  "/entrar/segundo-factor": "requireSecondFactor",
+  "/entrar/segundo-factor/configurar": "requireFactorSetup",
+};
+const teamGuardOf = (route: string): string | null =>
+  TEAM_GUARDS[route] ?? (route === "/admin" || route.startsWith("/admin/") ? "requireAdmin" : null);
 
 describe("toda página pasa por la guarda o está en la lista de públicas", () => {
   // Next sirve como página todo `page` con las extensiones de `pageExtensions`.
@@ -189,7 +216,84 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
   it("toda ruta que pide sesión tiene su página revisada: ninguna se sirve sin pasar por aquí", () => {
     const sessionPages = guarded.filter((file) => requiresSession(routeOf(file))).map(routeOf);
-    expect(sessionPages.sort()).toEqual(["/consentimientos", "/cuenta", "/inicio"]);
+    expect(sessionPages.sort()).toEqual([
+      "/admin",
+      "/admin/[...resto]",
+      "/consentimientos",
+      "/cuenta",
+      "/entrar/segundo-factor",
+      "/entrar/segundo-factor/configurar",
+      "/inicio",
+    ]);
+  });
+
+  describe("las pantallas del equipo usan su propia guarda", () => {
+    const teamPages = guarded.filter((file) => teamGuardOf(routeOf(file)) !== null);
+
+    it("hay pantallas del equipo que revisar, y la lista no nombra rutas que no existen", () => {
+      expect(teamPages.map(routeOf)).toEqual(expect.arrayContaining(Object.keys(TEAM_GUARDS)));
+      for (const route of Object.keys(TEAM_GUARDS)) expect(requiresSession(route), route).toBe(true);
+    });
+
+    it("sabe qué guarda le toca a cada ruta", () => {
+      expect(teamGuardOf("/entrar/segundo-factor")).toBe("requireSecondFactor");
+      expect(teamGuardOf("/admin")).toBe("requireAdmin");
+      expect(teamGuardOf("/admin/equipo")).toBe("requireAdmin");
+      expect(teamGuardOf("/admin/[...resto]")).toBe("requireAdmin");
+      expect(teamGuardOf("/administrar")).toBeNull();
+      expect(teamGuardOf("/inicio")).toBeNull();
+      expect(teamGuardOf("/entrar")).toBeNull();
+    });
+
+    it.each(teamPages)("%s llama a la guarda del equipo que le toca, y a ninguna otra", (file) => {
+      const code = codeOf(file);
+      const called = [...code.matchAll(/\bawait (require\w+|visitorOnly)\(/g)].map((match) => match[1]);
+      expect(called).toEqual([teamGuardOf(routeOf(file))]);
+      // No le pregunta al servicio por su cuenta: eso es de la guarda.
+      expect(code).not.toMatch(/\bcheckSession\b|\bteamStanding\b/);
+      // Y la guarda es lo primero que la página espera, salvo leer su dirección: ningún otro
+      // servicio corre antes de saber quién pide.
+      const body = code.slice(code.indexOf("export default async function"));
+      const awaited = [...body.matchAll(/\bawait \(?([\w.]+)/g)].map((match) => match[1]);
+      expect(awaited.filter((name) => name !== "searchParams" && name !== "params")[0]).toBe(teamGuardOf(routeOf(file)));
+      // Sin límites de espera: lo de abajo se pintaría antes de que la guarda conteste, y un
+      // «no existe» dicho después ya no llegaría con su estado.
+      expect(code).not.toMatch(/\bSuspense\b/);
+    });
+
+    it.each(teamPages)("%s no exporta su título: no debe poder asomarse en la respuesta de «no existe»", (file) => {
+      expect(codeOf(file)).not.toMatch(/export (const metadata|(async )?function generateMetadata)\b/);
+    });
+
+    describe("bajo administración, toda ruta le contesta lo mismo a quien no es del equipo", () => {
+      const under = sources.filter((source) => source.file.startsWith("src/app/admin/"));
+
+      it("hay un comodín que atiende lo que no tiene página, y corre la guarda antes de decir que no existe", () => {
+        const wildcard = codeOf("src/app/admin/[...resto]/page.tsx");
+        expect(wildcard).toMatch(/const step = await requireAdmin\(path\);[\s\S]*\n\s*notFound\(\);\n\}/);
+        // La guarda va antes: si dijera «no existe» primero, la ruta que existe y la que no se distinguirían.
+        expect(wildcard.indexOf("requireAdmin(path)")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
+      });
+
+      it("no hay rutas, ni pantallas de carga, ni límites de espera: pintarían o contestarían antes que la guarda", () => {
+        expect(under.map((source) => source.file).filter((file) => /\/(route|loading|layout|template|default|error|not-found)\.tsx?$/.test(file))).toEqual([]);
+        expect(under.filter((source) => /\bSuspense\b/.test(source.code)).map((source) => source.file)).toEqual([]);
+      });
+
+      it("ninguna página de administración es pública", () => {
+        expect(PUBLIC_PAGES.filter((file) => file.startsWith("src/app/admin/"))).toEqual([]);
+        const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
+        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/page.tsx"]);
+        for (const file of pagesUnder) expect(teamPages).toContain(file);
+      });
+    });
+
+    it("las demás pantallas con sesión no usan una guarda del equipo: el segundo factor solo se pide en administración", () => {
+      const others = guarded.filter((file) => teamGuardOf(routeOf(file)) === null);
+      for (const file of others) {
+        expect(codeOf(file), file).not.toMatch(/\b(requireAdmin|requireSecondFactor|requireFactorSetup)\(/);
+      }
+    });
   });
 
   it("una página pública no finge pasar por la guarda", () => {

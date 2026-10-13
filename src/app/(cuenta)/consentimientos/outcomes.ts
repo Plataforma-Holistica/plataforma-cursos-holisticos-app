@@ -1,6 +1,6 @@
 import type { AccountCompletion, FieldErrors, LegalText, PendingAccount } from "@/services/account/account";
 import { parseDisplayName } from "@/services/account/field-rules";
-import { resolveDestination, ROUTES, signInPath } from "@/services/account/navigation";
+import { entryDestination, ROUTES, signInPath } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import { legalBlocks } from "@/services/legal/blocks";
 
@@ -202,7 +202,8 @@ export function completeAccountOutcome(
 ): ConsentsOutcome {
   switch (result.kind) {
     case "complete":
-      return { kind: "redirect", to: resolveDestination(returnTo), notice: null, closeSession: false };
+      // Como al entrar: su estado en el equipo dice a dónde va.
+      return { kind: "redirect", to: entryDestination(result.team, returnTo), notice: null, closeSession: false };
     case "incomplete":
       return { kind: "repaint", reason: "incomplete" };
     case "texts_changed":

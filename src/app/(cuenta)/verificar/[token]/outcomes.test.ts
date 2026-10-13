@@ -272,8 +272,14 @@ describe("lo que contesta el servicio", () => {
   };
 
   it.each<[RegistrationCompletion, CompleteOutcome]>([
-    [{ kind: "entered", pending: null }, { kind: "redirect", to: "/inicio", notice: null }],
-    [{ kind: "entered", pending }, { kind: "redirect", to: "/consentimientos", notice: null }],
+    [{ kind: "entered", pending: null, team: "none" }, { kind: "redirect", to: "/inicio", notice: null }],
+    [{ kind: "entered", pending: null, team: null }, { kind: "redirect", to: "/inicio", notice: null }],
+    // Abrió el enlace del correo con una invitación de administración: sigue a configurar su factor.
+    [{ kind: "entered", pending: null, team: "invited" }, { kind: "redirect", to: "/entrar/segundo-factor/configurar", notice: null }],
+    [{ kind: "entered", pending: null, team: "invited_unproven" }, { kind: "redirect", to: "/entrar/segundo-factor/configurar", notice: null }],
+    [{ kind: "entered", pending, team: null }, { kind: "redirect", to: "/consentimientos", notice: null }],
+    // Lo que le falta a su cuenta va antes que el segundo factor.
+    [{ kind: "entered", pending, team: "invited" }, { kind: "redirect", to: "/consentimientos", notice: null }],
     [{ kind: "ready_sign_in" }, { kind: "redirect", to: "/entrar", notice: "account_ready" }],
     [{ kind: "texts_changed" }, { kind: "repaint" }],
     [{ kind: "texts_unavailable" }, { kind: "texts_unavailable" }],

@@ -301,7 +301,7 @@ describe("completar la cuenta desde el enlace (PA-14)", () => {
   });
 
   it("quedó dentro: olvida el correo anotado y va al inicio", async () => {
-    once("completeRegistration", { kind: "entered", pending: null });
+    once("completeRegistration", { kind: "entered", pending: null, team: "none" });
     await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /inicio");
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
     expect(mocks.leaveNotice).not.toHaveBeenCalled();
@@ -312,7 +312,7 @@ describe("completar la cuenta desde el enlace (PA-14)", () => {
 
   it("quedó dentro y le falta algo: va a completarlo", async () => {
     const pending = { variant: "updated_texts", missing: { name: false, adultDeclaration: false, documents: [] } };
-    once("completeRegistration", { kind: "entered", pending });
+    once("completeRegistration", { kind: "entered", pending, team: null });
     await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /consentimientos");
   });
 
@@ -602,7 +602,7 @@ describe("entrar (PA-11), con un registro a medias anotado en el navegador", () 
   const signInForm = () => form([["email", "ana@prueba.test"], ["password", "una clave larga"]]);
 
   it("quien entra ya no tiene un correo por revisar: se olvida antes de irse", async () => {
-    once("signIn", { kind: "entered", pending: null });
+    once("signIn", { kind: "entered", pending: null, team: "none" });
     await expect(signInAction(IDLE, signInForm())).rejects.toThrow("redirige a /inicio");
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
     expect(calls.order).toEqual(["clearNotice", "signIn", "forgetRegistration", "redirect"]);

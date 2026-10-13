@@ -119,3 +119,14 @@ jobs:
       # prueba o un contador, aquí se nota.
       - name: Pruebas de base, después del extremo a extremo
         run: pnpm test:db
+
+      # El camino de quien es del equipo (invitar, configurar el segundo factor, entrar a
+      # administración). Va al final y aparte: invitar, atar y dar capacidades escriben en la
+      # auditoría, que no admite borrado, y las pruebas de base cuentan esos renglones. Después
+      # de este paso la base ya no sirve para ellas, y aquí no corre nada más.
+      # El comando va escrito aquí, por lo mismo que los de arriba. En local es
+      # `pnpm test:e2e:equipo`, que además rehace la base al terminar.
+      - name: Pruebas de extremo a extremo del equipo
+        run: pnpm exec playwright test
+        env:
+          E2E_EQUIPO: "1"

@@ -23,10 +23,18 @@ if (process.env.NEXT_PUBLIC_SITE_URL !== BASE_URL) {
   throw new Error(`NEXT_PUBLIC_SITE_URL debe ser ${BASE_URL}: es a donde apuntan los enlaces de los correos del Auth local.`);
 }
 
+// El camino completo de quien es del equipo (invitar, configurar el segundo factor, entrar a
+// administración) deja renglones en la auditoría, que no admite borrado, y las pruebas de
+// base cuentan esos renglones. Por eso va en su propio proyecto, que solo corre cuando se
+// pide con esta variable: nunca con la corrida normal. Después de él la base se rehace
+// (`pnpm test:e2e:equipo` lo encadena; en la integración continua es el último paso).
+const TEAM_RUN = process.env.E2E_EQUIPO === "1";
+
 export default defineConfig({
   testDir: "./tests/e2e",
-  // `.spec.ts`, para que Vitest, que recoge los `.test.ts`, no las tome por suyas.
-  testMatch: "**/*.spec.ts",
+  // `.spec.ts`, para que Vitest, que recoge los `.test.ts`, no las tome por suyas. Las del
+  // equipo llevan su propia terminación: así la corrida normal no las encuentra.
+  testMatch: TEAM_RUN ? "**/*.equipo.ts" : "**/*.spec.ts",
   globalSetup: "./tests/e2e/support/global-setup.ts",
   // Un caso a la vez: comparten la base y, en local, un solo cubo de dirección
   // desconocida para los topes. Cada caso empieza con los contadores vacíos.
@@ -42,11 +50,13 @@ export default defineConfig({
     timezoneId: "America/Mexico_City",
     trace: "retain-on-failure",
   },
-  projects: [
-    { name: "escritorio", use: { ...devices["Desktop Chrome"] } },
-    // En teléfono corren los casos marcados: el camino principal y la accesibilidad.
-    { name: "telefono", use: { ...devices["Pixel 7"] }, grep: /@telefono/ },
-  ],
+  projects: TEAM_RUN
+    ? [{ name: "equipo", use: { ...devices["Desktop Chrome"] } }]
+    : [
+        { name: "escritorio", use: { ...devices["Desktop Chrome"] } },
+        // En teléfono corren los casos marcados: el camino principal y la accesibilidad.
+        { name: "telefono", use: { ...devices["Pixel 7"] }, grep: /@telefono/ },
+      ],
   webServer: {
     // Se compila aquí mismo y se sirve eso: así nunca se prueba una compilación de antes.
     // Sin pasar por `package.json`: este archivo tiene dueño y aquel no.

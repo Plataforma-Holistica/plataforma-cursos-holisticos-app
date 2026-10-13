@@ -121,7 +121,7 @@ describe("entrar con la contraseña correcta", () => {
 
     const result = await services.signIn(jar, account, origin);
 
-    expect(result).toEqual({ kind: "entered", pending: null });
+    expect(result).toEqual({ kind: "entered", pending: null, team: "none" });
     expect(jar.writes).toHaveLength(1);
     expect(jar.writes[0]).toMatchObject({ name: COOKIE, options: { httpOnly: true, sameSite: "lax", path: "/" } });
     expect(await services.checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: account.id } });
@@ -156,6 +156,7 @@ describe("entrar con la contraseña correcta", () => {
     expect(await testServices().signIn(memoryJar(), { email: typed, password: account.password }, origin)).toEqual({
       kind: "entered",
       pending: null,
+      team: "none",
     });
     expect(await pairOf(keysOf(account.email, origin))).toMatchObject({ failed_count: 0 });
   });
@@ -248,7 +249,7 @@ describe("el freno progresivo", () => {
     const account = await claimed({ complete: true });
     await fail(account, freshOrigin(), params.threshold);
     // Fallar a propósito desde una red no deja fuera a la dueña en la suya.
-    expect(await testServices().signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "entered", pending: null });
+    expect(await testServices().signIn(memoryJar(), account, freshOrigin())).toEqual({ kind: "entered", pending: null, team: "none" });
   });
 
   it("tras el olvido sin fallos, la cuenta de fallos vuelve a empezar", async () => {
@@ -490,7 +491,7 @@ describe("cuando el freno no puede contar", () => {
       await unlock();
     }
 
-    expect(result).toEqual({ kind: "entered", pending: null });
+    expect(result).toEqual({ kind: "entered", pending: null, team: "none" });
     expect(services.reported).toEqual(["sign_in_settle_failed"]);
     expect(await testServices().checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: account.id } });
     expect(await pairOf(keys)).toMatchObject({ failed_count: 1, last_success_at: null });

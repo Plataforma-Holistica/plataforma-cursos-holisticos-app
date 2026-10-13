@@ -86,7 +86,7 @@ export type {
   RegistrationCompletion,
 } from "./onboarding";
 export type { RequestOrigin } from "./origin";
-export type { CodeGiven, FactorConfirmation, FactorStart, TeamCheck, TeamStanding } from "./team";
+export type { CodeGiven, FactorConfirmation, FactorStart, TeamCheck, TeamStanding, TeamState } from "./team";
 export type { CookieJar, CookieOptions, CookieReader };
 export type { VerifiedClaims } from "@/adapters/supabase/claims";
 // De qué navegador y sistema dice ser una sesión: la pantalla de la cuenta lo pone en palabras.
@@ -156,6 +156,10 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     if (report) await deps.report(report);
     return check;
   }
+
+  // `standingAtEntry` es de aquí dentro: lo usan los tres servicios que dejan a alguien
+  // dentro, con claims recién verificadas. No sale con los servicios armados.
+  const { standingAtEntry, ...team } = createTeam(deps, { checkSession, store: deps.teamStore });
 
   /** La primera transacción de una entrada: cuenta el intento antes de preguntarle a Auth. */
   async function openAttempt(tx: Tx, keys: PairKeys): Promise<OpenedAttempt> {
@@ -317,7 +321,13 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       const previous = { get: (name: string) => (before.has(name) ? before.get(name) : jar.get(name)), set: () => undefined };
       if ((await auth.signOut(previous)) !== "closed") await deps.report("session_not_closed");
     }
-    return admission.result;
+    // Quedó dentro y sin pendientes: se lee su estado en el equipo, para llevarla a la
+    // pantalla que le toca. A quien le falta algo de su cuenta se le pide eso primero.
+    const { result } = admission;
+    if (admission.admit && entered.ok && result.kind === "entered" && result.pending === null) {
+      return { ...result, team: await standingAtEntry(entered.claims, jar) };
+    }
+    return result;
   }
 
   /**
@@ -378,7 +388,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     sessionEmail,
     signIn,
     signOut,
-    ...createOnboarding(deps, { checkSession, admit }),
+    ...createOnboarding(deps, { checkSession, admit, standingAtEntry }),
     ...createManagement(deps, {
       checkSession,
       admit,
@@ -387,7 +397,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       openAttempt: (keys) => asSystem({ reason: "password_change_attempt" }, (tx) => openAttempt(tx, keys)),
       settleAttempt,
     }),
-    ...createTeam(deps, { checkSession, store: deps.teamStore }),
+    ...team,
   };
 }
 

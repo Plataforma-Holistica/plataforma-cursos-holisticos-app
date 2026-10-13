@@ -1,6 +1,6 @@
 import type { SignInResult } from "@/services/account/account";
 import { parseEmail } from "@/services/account/field-rules";
-import { consentsPath, resolveDestination, ROUTES } from "@/services/account/navigation";
+import { consentsPath, entryDestination, ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 
 // Qué hace la pantalla de entrar con lo que contesta el servicio (diseño, PA-11; FL-05).
@@ -71,8 +71,13 @@ export function checkSignInForm(input: { email: string; password: string }): Sig
 export function signInOutcome(result: SignInResult, returnTo: string): SignInOutcome {
   switch (result.kind) {
     case "entered":
-      // A quien le falta algo de su cuenta se le pide antes que cualquier otra pantalla.
-      return { kind: "redirect", to: result.pending ? consentsPath(returnTo) : resolveDestination(returnTo), notice: null };
+      // A quien le falta algo de su cuenta se le pide antes que cualquier otra pantalla. A
+      // quien no, su estado en el equipo dice a dónde va: quien no es del equipo, a su destino.
+      return {
+        kind: "redirect",
+        to: result.pending ? consentsPath(returnTo) : entryDestination(result.team, returnTo),
+        notice: null,
+      };
     case "must_recover":
       return { kind: "redirect", to: ROUTES.recover, notice: "choose_password" };
     case "suspended":

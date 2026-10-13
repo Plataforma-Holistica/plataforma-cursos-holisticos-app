@@ -10,6 +10,7 @@ import type { SessionCheck } from "./admission";
 import type { AccountDependencies } from "./deps";
 import * as enrolledFactors from "./enrolled-factor";
 import * as mailboxTickets from "./mailbox-ticket";
+import type { TeamState } from "./navigation";
 
 // Los servicios del equipo (RF-105, RF-106, RF-712; TRD §9.2, filas «Segundo factor» e
 // «Invitaciones»): en qué estado está alguien respecto al equipo, configurar el segundo
@@ -33,6 +34,10 @@ export type TeamStanding =
   | { state: "unbound" }
   | { state: "invited"; kind: "grant" | "rebind"; capabilities: string[] }
   | { state: "invited_unproven"; kind: "grant" | "rebind" };
+
+// Solo el nombre del estado: es lo que sale del servicio cuando alguien acaba de entrar. Vive
+// en la navegación, que no puede importar nada de aquí.
+export type { TeamState };
 
 /** Lo que contesta `private.accept_admin_invitation()`. */
 export const ACCEPT_ANSWERS = [
@@ -189,6 +194,23 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     } catch {
       await deps.report("team_unavailable");
       return { kind: "unavailable" };
+    }
+  }
+
+  /**
+   * El estado de quien acaba de quedar dentro, para saber a qué pantalla llevarla. No corre
+   * la guarda de sesión ni lee la cookie: lo llama el servicio que la dejó entrar, con las
+   * claims que el adaptador acaba de verificar y cuando la guarda ya la dejó pasar.
+   *
+   * Solo sale el nombre del estado, y no autoriza nada: la pantalla a la que llegue vuelve a
+   * preguntar. Nulo si no se supo, que no da nada: sigue como cualquier cuenta.
+   */
+  async function standingAtEntry(claims: VerifiedClaims, reader: CookieReader): Promise<TeamState | null> {
+    try {
+      return (await store.standing(claims, readTicketPrint(reader))).state;
+    } catch {
+      await deps.report("team_unavailable");
+      return null;
     }
   }
 
@@ -402,5 +424,5 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     return { kind: "unavailable" };
   }
 
-  return { teamStanding, startSecondFactor, confirmSecondFactor, giveSecondFactorCode };
+  return { teamStanding, standingAtEntry, startSecondFactor, confirmSecondFactor, giveSecondFactorCode };
 }

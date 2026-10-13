@@ -38,6 +38,7 @@ import {
   userIdOf,
 } from "./helpers/auth";
 import { lastMailTo, mailsTo, tokenHashIn, waitForMails } from "./helpers/mailbox";
+import { answeringStore } from "./helpers/team";
 import { claimAccount, deleteTestUsersByEmail, ownerQuery, testEmail } from "./helpers/users";
 
 // Pedir el registro y completarlo desde el enlace (RF-101, RF-108, RF-109; TRD §9.2, filas
@@ -410,6 +411,7 @@ describe("completar el registro desde el enlace", () => {
     expect(await services.completeRegistration(jar, form(hash, { password: chosen }), origin)).toEqual({
       kind: "entered",
       pending: null,
+      team: "none",
     });
 
     expect(jar.get(COOKIE)).toBeDefined();
@@ -599,6 +601,7 @@ describe("completar el registro desde el enlace", () => {
     expect(await testServices().signIn(memoryJar(), { email, password: chosen }, freshOrigin())).toEqual({
       kind: "entered",
       pending: null,
+      team: "none",
     });
   });
 
@@ -815,5 +818,51 @@ describe("el resguardo del buzón al completar el registro", () => {
     const jar = memoryJar();
     expect(await testServices().completeRegistration(jar, form(hash, { name: "" }), freshOrigin())).toMatchObject({ kind: "invalid" });
     expect(jar.get(TICKET_COOKIE)).toBeUndefined();
+  });
+});
+
+// A dónde va quien acaba de completar su registro lo dice su estado en el equipo (flujo de
+// la app §6.2): quien abrió el enlace con una invitación de administración sigue a configurar
+// su segundo factor. El estado lo contesta la prueba; lo que aquí se mide es con qué se
+// pregunta.
+describe("el estado del equipo de quien completa su registro", () => {
+  it("se pregunta con la sesión que quedó abierta y con el resguardo que ese mismo registro acaba de dejar", async () => {
+    const { hash, id } = await invited();
+    const jar = memoryJar();
+    const { teamStore, asked } = answeringStore({ state: "invited", kind: "grant", capabilities: ["support"] });
+    const services = testServices({ teamStore });
+
+    expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toEqual({ kind: "entered", pending: null, team: "invited" });
+
+    const check = await services.checkSession(jar);
+    if (check.kind !== "pass") throw new Error(`La sesión no pasó la guarda: ${check.kind}`);
+    const secret = jar.get(TICKET_COOKIE) ?? "";
+    expect(secret).not.toBe("");
+    // La huella con la que se preguntó es la que la base guardó al reclamar la cuenta.
+    expect(asked).toEqual([{ userId: id, sessionId: check.claims.sessionId, aal: "aal1", ticket: printOf(secret) }]);
+    expect((await proofOf(id))[0]?.print).toBe(printOf(secret));
+    expect(services.reported).toEqual([]);
+  });
+
+  it("si la base no dice el estado, el registro termina igual y la persona queda dentro", async () => {
+    const { hash, id } = await invited();
+    const jar = memoryJar();
+    const services = testServices({ teamStore: answeringStore("throws").teamStore });
+
+    expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toEqual({ kind: "entered", pending: null, team: null });
+
+    expect(await services.checkSession(jar)).toMatchObject({ kind: "pass", claims: { userId: id } });
+    expect(services.reported).toEqual(["team_unavailable"]);
+  });
+
+  it("un registro que no deja a nadie dentro no pregunta", async () => {
+    const { hash } = await invited();
+    const { teamStore, asked } = answeringStore({ state: "invited", kind: "grant", capabilities: [] });
+
+    expect(await testServices({ teamStore }).completeRegistration(memoryJar(), form(hash, { name: "" }), freshOrigin())).toMatchObject({
+      kind: "invalid",
+    });
+
+    expect(asked).toEqual([]);
   });
 });
