@@ -125,7 +125,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   "src/app/(cuenta)/recuperar/[token]/actions.ts": {
     // Cambiar la contraseña desde el enlace: lo que no tiene forma de enlace no llega al servicio.
     completeRecoveryAction:
-      /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRecovery\(\{ tokenHash: input\.token, password: input\.password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(await cookieJar\(\), outcome\);/,
+      /if \(!isLinkToken\(input\.token\)\) return \{ kind: "link_dead" \};[\s\S]*await completeRecovery\(\{ tokenHash: input\.token, password: input\.password \}, await requestOrigin\(\), jar\)[\s\S]*return leaveFor\(jar, outcome\);/,
   },
   "src/app/(cuenta)/_lib/session-actions.ts": {
     // Salir: solo usa la cookie de quien pide.

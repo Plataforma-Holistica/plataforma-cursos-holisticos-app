@@ -30,9 +30,11 @@ import {
 import { stagingJar, type AccountDependencies } from "./deps";
 import { buckets, fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
+import { MAILBOX_TICKET_MAX_AGE_LIMIT } from "./mailbox-ticket";
 import { createManagement } from "./management";
 import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
+import { mailboxProofSeconds } from "./records";
 import {
   countHit,
   dbClock,
@@ -98,6 +100,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     timing: undefined,
     report: reportFailure,
     defer: (work) => work(),
+    ticketLifetime: () => asSystem({ reason: "mailbox_proof" }, (tx) => mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT)),
     ...overrides,
   };
   const { auth } = deps;

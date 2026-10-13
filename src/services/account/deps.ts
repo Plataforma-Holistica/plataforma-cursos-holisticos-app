@@ -7,8 +7,8 @@ import type { FailureCode } from "@/services/error-reporting/server";
 import type { Timing } from "./timing";
 
 // Lo que los servicios de cuenta reciben de fuera, para poder probarlos: el adaptador de
-// Auth, de dónde se cree la dirección, el reloj del piso de tiempo, a quién se le reporta y
-// cómo se manda trabajo detrás de la respuesta.
+// Auth, de dónde se cree la dirección, el reloj del piso de tiempo, a quién se le reporta,
+// cómo se manda trabajo detrás de la respuesta y cuánto dura el resguardo del buzón.
 
 /** Lo que estos servicios usan del adaptador de Auth. */
 export type AuthPort = Pick<
@@ -48,6 +48,13 @@ export interface AccountDependencies {
    * corre en línea; quien tiene la petición le pasa lo que su plataforma dé para eso.
    */
   defer: (work: () => Promise<void>) => Promise<void>;
+  /**
+   * Cuántos segundos vive el resguardo del buzón, o nulo si no hay duración que valga. Es
+   * un parámetro, igual para todos: no depende de quién pregunta. Se pregunta después de
+   * reclamar la cuenta, nunca dentro del reclamo: si falla, el registro o la recuperación
+   * ya terminaron. Solo las pruebas la sustituyen, y una de arquitectura lo exige.
+   */
+  ticketLifetime: () => Promise<number | null>;
 }
 
 export interface StagingJar extends CookieJar {

@@ -174,4 +174,143 @@ begin
 end
 $$;
 
+-- ---------------------------------------------------------------------------------------
+-- El equipo (T-105): lo que comparten las pruebas de las invitaciones y del estado del
+-- equipo. Ninguno repara nada: lo que haya en la base es lo que se prueba.
+
+-- La huella de un secreto, como la calcula el servidor: SHA-256 en hexadecimal.
+create function pruebas.huella(p_secret text) returns text
+language sql immutable
+as $$ select encode(sha256(convert_to(p_secret, 'utf8')), 'hex') $$;
+
+-- Como el dueño de la base declarado sistema, que es como corren el arranque y la emergencia.
+create function pruebas.como_dueno_sistema() returns void
+language sql
+as $$ select pruebas.limpiar(); select set_config('app.actor_kind', 'system', true); $$;
+
+create function pruebas.suspender(p_id uuid) returns void
+language plpgsql
+as $$
+begin
+  perform pruebas.como_dueno_sistema();
+  update public.profiles set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = p_id;
+  perform pruebas.limpiar();
+end
+$$;
+
+-- El servidor a nombre de una persona, sin repararle nada: lo que haya en la base es lo que
+-- se prueba. (pruebas.como_servicio deja equipado a quien tiene una capacidad.)
+create function pruebas.a_nombre_de(p_id uuid, p_session uuid default null) returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', p_id::text, true),
+         set_config('app.actor_session', coalesce(p_session, pruebas.sesion(p_id))::text, true),
+         set_config('role', 'app_service', true);
+$$;
+
+-- Reclamar la cuenta, como al terminar un registro o una recuperación desde el correo.
+create function pruebas.reclamar(p_id uuid, p_ticket text default null) returns text
+language plpgsql
+as $$
+declare
+  v_state text;
+begin
+  perform pruebas.a_nombre_de(p_id);
+  v_state := private.claim_account(p_ticket);
+  perform pruebas.limpiar();
+  return v_state;
+end
+$$;
+
+-- Lo que deja Supabase Auth cuando la persona entra, da de alta un factor y lo verifica: una
+-- sesión anotada, en segundo nivel con ese factor, verificada ahora. Sin atarlo a nadie.
+create function pruebas.verificar(p_id uuid, p_factor uuid default null, p_session uuid default null) returns void
+language plpgsql
+as $$
+declare
+  v_factor uuid := coalesce(p_factor, pruebas.factor(p_id));
+  v_session uuid := coalesce(p_session, pruebas.sesion(p_id));
+begin
+  perform pruebas.limpiar();
+  insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret)
+  values (v_factor, p_id, 'f-' || v_factor::text, 'totp', 'verified', now(), now(), 'JBSWY3DPEHPK3PXP')
+  on conflict (id) do update set status = 'verified';
+  insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
+  values (v_session, p_id, 'aal2', v_factor, now(), now())
+  on conflict (id) do update set aal = 'aal2', factor_id = excluded.factor_id, not_after = null;
+  insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+  values (md5('verificacion:' || v_session::text)::uuid, v_session, 'totp', now(), now())
+  on conflict (session_id, authentication_method) do update set updated_at = now();
+  insert into private.app_sessions (session_id, profile_id) values (v_session, p_id)
+  on conflict (session_id) do nothing;
+end
+$$;
+
+create function pruebas.aceptar(
+  p_id uuid, p_ticket text, p_handoff text default null, p_factor uuid default null, p_session uuid default null)
+returns text
+language plpgsql
+as $$
+declare
+  v_state text;
+begin
+  perform pruebas.a_nombre_de(p_id, p_session);
+  v_state := private.accept_admin_invitation(p_ticket, coalesce(p_factor, pruebas.factor(p_id)), p_handoff);
+  perform pruebas.limpiar();
+  return v_state;
+end
+$$;
+
+-- Lo que contesta una función del equipo cuando la llama una persona con su sesión de pruebas.
+create function pruebas.pide(p_id uuid, p_call text) returns text
+language plpgsql
+as $$
+declare
+  v_state text;
+begin
+  perform pruebas.a_nombre_de(p_id);
+  execute 'select ' || p_call into v_state;
+  perform pruebas.limpiar();
+  return v_state;
+end
+$$;
+
+-- ¿Pasa la puerta con esta capacidad? Por el camino de servicio, sin reparar nada.
+create function pruebas.tiene(p_id uuid, p_capability text) returns boolean
+language plpgsql
+as $$
+declare
+  v_has boolean;
+begin
+  perform pruebas.a_nombre_de(p_id);
+  v_has := private.actor_has_capability(p_capability::public.capability);
+  perform pruebas.limpiar();
+  return v_has;
+end
+$$;
+
+-- ¿Deja resguardo este reclamo? Se mira justo después de reclamar.
+create function pruebas.reclamo_guarda(p_id uuid, p_ticket text) returns boolean
+language plpgsql
+as $$
+begin
+  perform pruebas.reclamar(p_id, p_ticket);
+  return (select s.mailbox_ticket is not null from private.account_security s where s.profile_id = p_id);
+end
+$$;
+
+-- Las dos de abajo leen como el dueño aunque las llame el servidor, que no puede leer la tabla.
+create function pruebas.invitacion_viva(p_email text) returns private.admin_invitations
+language sql security definer
+as $$ select i from private.admin_invitations i where i.email = p_email and i.accepted_at is null and i.revoked_at is null $$;
+
+create function pruebas.aceptadas(p_email text) returns setof private.admin_invitations
+language sql security definer
+as $$ select i from private.admin_invitations i where i.email = p_email and i.accepted_at is not null $$;
+
+create function pruebas.una_invitacion(p_email text) returns uuid
+language sql security definer
+as $$ select i.id from private.admin_invitations i where i.email = p_email limit 1 $$;
+
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;

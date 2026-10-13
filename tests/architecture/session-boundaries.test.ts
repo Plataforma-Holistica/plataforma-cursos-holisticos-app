@@ -152,3 +152,74 @@ describe("lo que una persona lee de sí misma, lo lee como ella", () => {
     expect(bodyOf("changeName")).not.toMatch(/\bas(?:User|System)\(/);
   });
 });
+
+describe("el resguardo del buzón solo nace al terminar un enlace del correo", () => {
+  // Aceptar una invitación de administración pide el resguardo que deja reclamar la cuenta
+  // (TRD §9.2, fila «Invitaciones»). Si otro camino pudiera reclamar, o emitir un resguardo,
+  // alguien probaría «su buzón» sin haber abierto ningún correo. Las pruebas no cuentan:
+  // aquí se mira el código de la aplicación.
+  const sources = sourceFiles(src)
+    .filter((path) => !/\.test\.tsx?$/.test(path))
+    .map((path) => ({ file: posix(path), text: readFileSync(path, "utf8") }));
+  const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(source.text)).map((source) => source.file).sort();
+  /** Lo mismo, sin los comentarios: varios nombran la función de la base para explicarla. */
+  const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const namingInCode = (pattern: RegExp) =>
+    sources.filter((source) => pattern.test(withoutComments(source.text))).map((source) => source.file).sort();
+  const onboarding = sources.find((source) => source.file === "src/services/account/onboarding.ts")?.text ?? "";
+  /** El cuerpo de una función del servicio: desde su encabezado hasta la llave que la cierra. */
+  const bodyOf = (name: string) => {
+    const start = onboarding.indexOf(`  async function ${name}(`);
+    const end = onboarding.indexOf("\n  }\n", start);
+    return start === -1 || end === -1 ? "" : onboarding.slice(start, end);
+  };
+
+  /** Cuántas veces aparece algo en el código de un archivo, sin sus comentarios. */
+  const countIn = (file: string, pattern: RegExp) =>
+    withoutComments(sources.find((source) => source.file === file)?.text ?? "").match(pattern)?.length ?? 0;
+
+  it("reclamar una cuenta solo se nombra donde se define y en el servicio de los enlaces", () => {
+    // Se cuenta el nombre, no la forma de la llamada: importarlo con otro nombre, guardarlo
+    // en una variable o llegar a él por el módulo entero también lo nombra. `claimAccount`
+    // es además un campo de la tabla del dominio que dice si toca reclamar: ahí solo puede
+    // aparecer como campo.
+    expect(namingInCode(/\bclaimAccount\b/)).toEqual([
+      "src/domain/access/password-outcome.ts",
+      "src/services/account/onboarding.ts",
+      "src/services/account/records.ts",
+    ]);
+    expect(countIn("src/domain/access/password-outcome.ts", /\bclaimAccount\b(?!\s*:)/g)).toBe(0);
+    // En el servicio: la importación, las dos llamadas y la lectura de ese campo. Una
+    // quinta aparición es otra manera de reclamar.
+    expect(countIn("src/services/account/onboarding.ts", /\bclaimAccount\b/g)).toBe(4);
+    // Y donde se define: una función, y una consulta que llama a la de la base.
+    expect(countIn("src/services/account/records.ts", /\bclaimAccount\b/g)).toBe(1);
+    expect(countIn("src/services/account/records.ts", /claim_account/g)).toBe(1);
+    expect(namingInCode(/claim_account/)).toEqual(["src/services/account/records.ts"]);
+  });
+
+  it("cuánto dura el resguardo lo dice la base: en la aplicación nadie sustituye esa lectura", () => {
+    expect(naming(/\bticketLifetime\b/)).toEqual([
+      "src/services/account/account.ts",
+      "src/services/account/deps.ts",
+      "src/services/account/onboarding.ts",
+    ]);
+  });
+
+  it("emitir un resguardo, también", () => {
+    expect(naming(/\bissueTicket\b/)).toEqual(["src/services/account/mailbox-ticket.ts", "src/services/account/onboarding.ts"]);
+    // Ni se arma otra fábrica de resguardos en otro lado.
+    expect(naming(/\bcreateMailboxTickets\b/)).toEqual(["src/services/account/mailbox-ticket.ts"]);
+  });
+
+  it("y solo dentro de completar el registro y de completar la recuperación", () => {
+    const calls = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0;
+    expect(calls(onboarding, /\bclaimAccount\(tx, /g)).toBe(2);
+    expect(calls(bodyOf("completeRegistration"), /\bclaimAccount\(tx, ticket\.print\)/g)).toBe(1);
+    expect(calls(bodyOf("completeRecovery"), /\bclaimAccount\(tx, ticket\?\.print \?\? null\)/g)).toBe(1);
+    // Una importación y dos emisiones: el secreto lo genera el servidor en cada una.
+    expect(calls(onboarding, /\bissueTicket\b/g)).toBe(3);
+    expect(calls(bodyOf("completeRegistration"), /= issueTicket\(\);/g)).toBe(1);
+    expect(calls(bodyOf("completeRecovery"), /= jar \? issueTicket\(\) : null;/g)).toBe(1);
+  });
+});

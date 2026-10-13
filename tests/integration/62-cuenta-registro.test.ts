@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -592,7 +592,8 @@ describe("completar el registro desde el enlace", () => {
       kind: "ready_sign_in",
     });
 
-    expect(jar.writes).toEqual([]);
+    // La cuenta quedó reclamada: el resguardo del buzón sí se queda. La sesión, no.
+    expect(jar.writes.map((write) => write.name)).toEqual(["plataforma-resguardo"]);
     expect(await sessionCount(id)).toBe(0);
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba", adult: true });
     expect(await testServices().signIn(memoryJar(), { email, password: chosen }, freshOrigin())).toEqual({
@@ -616,7 +617,8 @@ describe("completar el registro desde el enlace", () => {
       kind: "ready_sign_in",
     });
 
-    expect(services.reported).toEqual(["session_cookie_not_written"]);
+    // Ese tarro no deja escribir nada: tampoco el resguardo del buzón, y las dos cosas quedan dichas.
+    expect(services.reported).toEqual(["mailbox_ticket_not_kept", "session_cookie_not_written"]);
     expect(await sessionCount(id)).toBe(0);
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba" });
     expect(await testServices().signIn(memoryJar(), { email, password: chosen }, freshOrigin())).toMatchObject({
@@ -701,7 +703,8 @@ describe("completar el registro desde el enlace", () => {
     expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toEqual({ kind: "ready_sign_in" });
 
     expect(services.reported).toEqual(["gate_no_current_text"]);
-    expect(jar.writes).toEqual([]);
+    // La cuenta quedó reclamada: el resguardo del buzón sí se queda. La sesión, no.
+    expect(jar.writes.map((write) => write.name)).toEqual(["plataforma-resguardo"]);
     expect(await sessionCount(id)).toBe(0);
     expect(await notedSessions(id)).toBe(0);
     expect(await profileOf(id)).toMatchObject({ pending: false, display_name: "Ana de Prueba" });
@@ -737,5 +740,80 @@ describe("completar el registro desde el enlace", () => {
     expect(await sessionCount(id)).toBe(1);
     expect((await authVisitor().auth.signInWithPassword({ email, password: chosen })).error).toBeNull();
     expect(await profileOf(id)).toMatchObject({ display_name: null });
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// El resguardo del buzón (TRD §9.2, fila «Invitaciones»): abrir un enlace del correo y
+// fijar la contraseña deja un secreto en ese navegador y su huella en la base.
+
+const TICKET_COOKIE = "plataforma-resguardo";
+const printOf = (secret: string) => createHash("sha256").update(secret).digest("hex");
+
+/** Lo que la base guardó de la prueba del buzón de una cuenta. */
+const proofOf = (userId: string) =>
+  ownerQuery<{ print: string | null; email: string | null; dated: boolean | null }>(
+    `select mailbox_ticket as print, mailbox_proven_email as email, mailbox_proven_at = password_changed_at as dated
+     from private.account_security where profile_id = $1`,
+    [userId],
+  );
+
+/** Cuánto dice la base que dura, en segundos. */
+async function proofSeconds(): Promise<number> {
+  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds(86400) as seconds");
+  if (!row) throw new Error("La base no dijo cuánto dura la prueba del buzón.");
+  return row.seconds;
+}
+
+describe("el resguardo del buzón al completar el registro", () => {
+  it("se queda en el navegador que abrió el enlace, y a la base solo llega su huella", async () => {
+    const { email, hash, id } = await invited();
+    const jar = memoryJar();
+    expect(await testServices().completeRegistration(jar, form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+
+    const kept = jar.writes.filter((write) => write.name === TICKET_COOKIE);
+    expect(kept).toHaveLength(1);
+    const secret = kept[0]?.value ?? "";
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(kept[0]?.options).toEqual({ httpOnly: true, secure: false, sameSite: "lax", path: "/", maxAge: await proofSeconds() });
+    expect(await proofOf(id)).toEqual([{ print: printOf(secret), email, dated: true }]);
+    // El secreto no es la huella, ni viaja en la cookie de la sesión.
+    expect(secret).not.toBe(printOf(secret));
+    expect(jar.get(COOKIE)).not.toContain(secret);
+  });
+
+  it("cada registro lleva el suyo", async () => {
+    const first = await invited();
+    const second = await invited();
+    const jars = [memoryJar(), memoryJar()];
+    await testServices().completeRegistration(jars[0] as ReturnType<typeof memoryJar>, form(first.hash), freshOrigin());
+    await testServices().completeRegistration(jars[1] as ReturnType<typeof memoryJar>, form(second.hash), freshOrigin());
+    const secrets = jars.map((jar) => jar.get(TICKET_COOKIE));
+    expect(secrets[0]).toBeDefined();
+    expect(secrets[1]).toBeDefined();
+    expect(secrets[0]).not.toBe(secrets[1]);
+  });
+
+  it.each([
+    ["la base no dice cuánto dura", () => Promise.resolve<number | null>(null)],
+    ["no se pudo preguntar", () => Promise.reject<number | null>(new Error("sin base"))],
+    ["la duración no vale", () => Promise.resolve<number | null>(0)],
+  ])("si %s, el registro termina igual: sin resguardo, y queda dicho", async (_name, ticketLifetime) => {
+    const { hash, id } = await invited();
+    const jar = memoryJar();
+    const services = testServices({ ticketLifetime });
+    expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+    expect(jar.get(TICKET_COOKIE)).toBeUndefined();
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(services.reported).toEqual(["mailbox_proof_unavailable"]);
+    // La huella sí quedó en la base: solo falta el secreto, que nadie tiene.
+    expect((await proofOf(id))[0]?.print).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("un registro que se rechaza antes de canjear el enlace no deja resguardo", async () => {
+    const { hash } = await invited();
+    const jar = memoryJar();
+    expect(await testServices().completeRegistration(jar, form(hash, { name: "" }), freshOrigin())).toMatchObject({ kind: "invalid" });
+    expect(jar.get(TICKET_COOKIE)).toBeUndefined();
   });
 });

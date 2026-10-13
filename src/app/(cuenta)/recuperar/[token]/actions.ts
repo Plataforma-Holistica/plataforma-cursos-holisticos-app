@@ -23,11 +23,14 @@ export async function completeRecoveryAction(previous: ChangePasswordState, form
   // Lo que no tiene forma de enlace no se le pregunta a nadie.
   if (!isLinkToken(input.token)) return { kind: "link_dead" };
 
-  const result = await completeRecovery({ tokenHash: input.token, password: input.password }, await requestOrigin());
+  // El tarro va al servicio: abrir el enlace prueba el buzón, y el resguardo de esa prueba
+  // se queda en este navegador (TRD §9.2, fila «Invitaciones»).
+  const jar = await cookieJar();
+  const result = await completeRecovery({ tokenHash: input.token, password: input.password }, await requestOrigin(), jar);
   const outcome = completeRecoveryOutcome(result);
 
   // A entrar, sin sesión en este navegador y con el aviso de que la contraseña cambió.
-  if (outcome.kind === "redirect") return leaveFor(await cookieJar(), outcome);
+  if (outcome.kind === "redirect") return leaveFor(jar, outcome);
 
   switch (outcome.kind) {
     case "invalid":
