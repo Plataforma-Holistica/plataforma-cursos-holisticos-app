@@ -8,7 +8,7 @@
 -- un código reciente de quien lo cambia.
 begin;
 \ir _ayuda.psql
-select plan(267);
+select plan(268);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -266,6 +266,11 @@ select throws_ok(
     values ('VIGENCIA_CODIGO_RECIENTE_MINUTOS', '100000', 'proposed', now() + interval '1 day')$$,
   '42501', 'public.business_parameters: a recent second factor code is required',
   'ni se programa un cambio de parámetro');
+select throws_ok(
+  $$insert into public.business_parameters (key, value, status, effective_from)
+    values ('GRACIA_COBRO_DIAS', '12', 'proposed', now() + interval '3 days')$$,
+  '42501', 'public.business_parameters: a recent second factor code is required',
+  'de ninguno: no es una lista de parámetros delicados');
 select throws_ok(
   $$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000001'
     where key = 'VIGENCIA_CODIGO_RECIENTE_MINUTOS'$$,

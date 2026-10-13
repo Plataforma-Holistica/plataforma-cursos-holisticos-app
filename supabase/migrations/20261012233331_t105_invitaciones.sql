@@ -116,8 +116,9 @@ $$;
 -- equipo van una tras otra; después toman, como mucho, el candado de fila de un perfil, y
 -- solo entonces tocan filas de Auth. Las de sesión (anotar, reclamar, cerrar) toman un
 -- solo candado de perfil y nunca este: no hay ciclo. (Insertar una fila que apunta a otro
--- perfil toma además el candado compartido de su clave, que no choca con estos.) Con una
--- foto fija de la base, lo confirmado mientras se esperaba el candado no se vería.
+-- perfil toma además el candado compartido de su clave. No choca con los de aquí; a
+-- private.note_session(), que todavía pide el candado entero, la hace esperar, sin ciclo.)
+-- Con una foto fija de la base, lo confirmado mientras se esperaba el candado no se vería.
 create function private.team_lock() returns void
 language plpgsql security definer set search_path = ''
 as $$
@@ -132,9 +133,10 @@ $$;
 -- Borra de una cuenta todo factor de Supabase Auth que no sea el atado, y deja sus sesiones
 -- como las deja Auth al quitar un factor: sin la verificación y en primer nivel. También
 -- las que apuntan a un factor que ya no existe. El factor atado de alguien del equipo no se
--- toca. Bloquea primero los factores y toca las sesiones antes que sus verificaciones, que
--- es el orden de Auth al verificar. Si aun así se cruza con una verificación en curso, la
--- base corta a uno de los dos (40P01) y quien llama reintenta.
+-- toca. Bloquea primero los factores y toca las verificaciones antes que sus sesiones, que
+-- es el orden de Auth al verificar un código (leído en su código, v2.197.0): los dos piden
+-- lo mismo primero y no hay ciclo. Si otra versión de Auth lo cambiara, la base cortaría a
+-- uno de los dos (40P01) y quien llama reintenta.
 create function private.drop_unbound_factors(p_user uuid) returns integer
 language plpgsql security definer set search_path = ''
 as $$
@@ -145,13 +147,13 @@ begin
   select f.factor_id into v_bound from private.admin_factors f where f.profile_id = p_user;
   perform 1 from auth.mfa_factors m
   where m.user_id = p_user and m.id is distinct from v_bound for update;
+  delete from auth.mfa_amr_claims c using auth.sessions s
+  where c.session_id = s.id and s.user_id = p_user and c.authentication_method = 'totp'
+    and (v_bound is null or s.factor_id is distinct from v_bound);
   update auth.sessions s set aal = 'aal1', factor_id = null
   where s.user_id = p_user
     and (v_bound is null or s.factor_id is distinct from v_bound)
     and (s.factor_id is not null or s.aal is distinct from 'aal1');
-  delete from auth.mfa_amr_claims c using auth.sessions s
-  where c.session_id = s.id and s.user_id = p_user and c.authentication_method = 'totp'
-    and (v_bound is null or s.factor_id is distinct from v_bound);
   delete from private.second_factor_attempts a
   where a.factor_id in (
     select m.id from auth.mfa_factors m where m.user_id = p_user and m.id is distinct from v_bound);
