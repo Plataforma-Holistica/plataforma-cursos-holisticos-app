@@ -1,6 +1,16 @@
-import type { PendingAccount, SessionCheck, VerifiedClaims } from "@/services/account/account";
-import { consentsPath, homeOf, resolveDestination, ROUTES, signInPath } from "@/services/account/navigation";
+import type { PendingAccount, SessionCheck, TeamCheck, TeamStanding, VerifiedClaims } from "@/services/account/account";
+import {
+  consentsPath,
+  homeOf,
+  resolveDestination,
+  returnsOutsideAdmin,
+  ROUTES,
+  secondFactorPath,
+  signInPath,
+  teamDestination,
+} from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
+import { holds, type Capability } from "@/services/account/team";
 
 // Qué hace cada tipo de pantalla con lo que contesta la guarda de sesión (flujo de la app
 // §6.2 y §6.3). Es una tabla pura: la guarda (`checkSession`) decide quién pasa, y esto
@@ -86,6 +96,151 @@ export function visitorPageStep(check: SessionCheck): { kind: "render" } | Redir
       return redirect(homeOf());
     default:
       return { kind: "render" };
+  }
+}
+
+// Las pantallas del equipo (T-105; flujo de la app §6.2). Su entrada es lo que contesta
+// `teamStanding`: lo que la guarda de sesión niega, o el estado que dice la base. Quién es
+// del equipo no se decide aquí, y `unavailable` nunca se trata como «no es del equipo».
+
+/** PA-19: se contesta lo mismo que en una ruta que no existe. */
+export interface NotFound {
+  kind: "not_found";
+}
+
+type TeamDetour = Detour | NotFound;
+
+/** Lo que la guarda de sesión niega, igual para las tres: a dónde manda a entrar o a completar la cuenta cambia. */
+function refusedStep(
+  check: Exclude<TeamCheck, { kind: "team" }>,
+  toSignIn: string,
+  toConsents: string,
+): Detour {
+  switch (check.kind) {
+    case "anonymous":
+      return redirect(toSignIn);
+    case "incomplete":
+      return redirect(toConsents);
+    default:
+      return detour(check);
+  }
+}
+
+/**
+ * Una pantalla de administración. Solo se pinta para quien es del equipo con la sesión que
+ * pasa la puerta; a los demás estados los lleva a la pantalla que les toca.
+ * @param path La ruta que se pidió, con su consulta: es a donde se vuelve después.
+ * @param capability La capacidad que esa pantalla pide, si pide una. A quien es del equipo y
+ *   no la tiene se le dice (PA-88); a los demás no les cambia nada.
+ */
+export function adminPageStep(
+  check: TeamCheck,
+  path: string,
+  capability?: Capability,
+): { kind: "render"; claims: VerifiedClaims; capabilities: string[] } | { kind: "forbidden"; capability: Capability } | TeamDetour {
+  if (check.kind !== "team") return refusedStep(check, signInPath(path), consentsPath(path));
+  const { standing } = check;
+  switch (standing.state) {
+    case "none":
+      return { kind: "not_found" };
+    case "invited_unproven":
+    case "invited":
+      return redirect(ROUTES.factorSetup);
+    case "unbound":
+      return redirect(ROUTES.secondFactor);
+    case "needs_code":
+      return redirect(secondFactorPath(path));
+    case "member":
+      if (capability !== undefined && !holds(standing, capability)) return { kind: "forbidden", capability };
+      return { kind: "render", claims: check.claims, capabilities: standing.capabilities };
+  }
+}
+
+/**
+ * PA-12, dar el código (`/entrar/segundo-factor`). No usa la tabla de administración: con
+ * `needs_code` se redirigiría a sí misma.
+ * @param returnTo El destino guardado (`volver`), tal como llegó.
+ */
+export function secondFactorPageStep(
+  check: TeamCheck,
+  returnTo: string | null | undefined,
+): { kind: "render"; view: "code" | "unbound" } | TeamDetour {
+  if (check.kind !== "team") return refusedStep(check, signInPath(returnTo), consentsPath(returnTo));
+  switch (check.standing.state) {
+    case "none":
+      return { kind: "not_found" };
+    case "invited_unproven":
+    case "invited":
+      return redirect(ROUTES.factorSetup);
+    case "unbound":
+      // Conserva capacidades y perdió su atadura: no hay código que dar. Se le explica.
+      return { kind: "render", view: "unbound" };
+    case "needs_code":
+      return { kind: "render", view: "code" };
+    case "member":
+      return redirect(teamDestination(returnTo));
+  }
+}
+
+export type FactorSetupView =
+  /** Tiene invitación, pero no ha abierto un enlace de su correo en este navegador. */
+  | { view: "prove_mailbox" }
+  /** `handoff`: es un restablecimiento, y pide además el código que dicta quien restableció. */
+  | { view: "start"; handoff: boolean }
+  /**
+   * Ya hay un factor dado de alta en ese navegador y en esa sesión. La clave no se vuelve a
+   * pintar: el campo del código, y cómo empezar de nuevo. `painted` es ese factor, que la
+   * pantalla manda de vuelta como «lo que pinté».
+   */
+  | { view: "resume"; painted: string; handoff: boolean };
+
+/** PA-12, configurar (`/entrar/segundo-factor/configurar`): ahí se acepta una invitación. */
+export function factorSetupPageStep(check: TeamCheck): ({ kind: "render" } & FactorSetupView) | TeamDetour {
+  if (check.kind !== "team") return refusedStep(check, ROUTES.signIn, ROUTES.consents);
+  const { standing } = check;
+  switch (standing.state) {
+    case "none":
+      return { kind: "not_found" };
+    case "invited_unproven":
+      return { kind: "render", view: "prove_mailbox" };
+    case "invited": {
+      const handoff = standing.kind === "rebind";
+      return check.inProgress === null
+        ? { kind: "render", view: "start", handoff }
+        : { kind: "render", view: "resume", painted: check.inProgress, handoff };
+    }
+    case "unbound":
+    case "needs_code":
+      return redirect(ROUTES.secondFactor);
+    case "member":
+      return redirect(ROUTES.admin);
+  }
+}
+
+/**
+ * A dónde va quien acaba de quedar dentro y sin pendientes (entrar, completar el registro,
+ * completar la cuenta), según su estado en el equipo.
+ *
+ * Quien pidió una pantalla que no es de administración va a esa pantalla: el segundo factor
+ * solo se pide en administración. A los demás del equipo se les lleva a la pantalla que les
+ * toca, y nunca directo a administración sin haber dado su código.
+ *
+ * @param state El estado que el servicio leyó al dejarla entrar, o nulo si no se supo: «no
+ *   se supo» no da nada, y se sigue como cualquier cuenta.
+ * @param returnTo El destino guardado (`volver`), tal como llegó.
+ */
+export function entryStep(state: TeamStanding["state"] | null, returnTo: string | null | undefined): string {
+  if (state === null || state === "none" || returnsOutsideAdmin(returnTo)) return resolveDestination(returnTo);
+  switch (state) {
+    case "invited_unproven":
+    case "invited":
+      return ROUTES.factorSetup;
+    case "unbound":
+      return ROUTES.secondFactor;
+    case "needs_code":
+      return secondFactorPath(returnTo);
+    case "member":
+      return teamDestination(returnTo);
   }
 }
 

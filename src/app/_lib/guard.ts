@@ -1,18 +1,27 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
-import { checkSession } from "@/services/account/account";
+import { checkSession, teamStanding } from "@/services/account/account";
+import type { Capability } from "@/services/account/team";
 
-import { consentsPageStep, sessionPageStep, visitorPageStep } from "./guard-steps";
+import {
+  adminPageStep,
+  consentsPageStep,
+  factorSetupPageStep,
+  secondFactorPageStep,
+  sessionPageStep,
+  visitorPageStep,
+} from "./guard-steps";
 import { cookieReader } from "./request-context";
 
 // La guarda de sesión, para una página (flujo de la app §6.2; TRD §9.3). Toda página que
-// no sea pública llama a una de estas tres funciones antes de pintar nada, y una prueba de
+// no sea pública llama a una de estas funciones antes de pintar nada, y una prueba de
 // arquitectura lo exige: el paso previo solo mira si hay cookie.
 //
-// Aquí no se decide quién pasa: se le pregunta al servicio (`checkSession`) y se obedece.
-// Lo que no es redirigir se le devuelve a la página, que pinta la pantalla o el estado.
+// Aquí no se decide quién pasa: se le pregunta al servicio (`checkSession`, o `teamStanding`
+// para las pantallas del equipo) y se obedece. Lo que no es redirigir se le devuelve a la
+// página, que pinta la pantalla o el estado.
 
 /**
  * Para una pantalla con sesión. Redirige a entrar, a completar la cuenta o a cerrar una
@@ -36,4 +45,34 @@ export async function requireIncompleteSession(returnTo: string | null | undefin
 export async function visitorOnly(): Promise<void> {
   const step = visitorPageStep(await checkSession(await cookieReader()));
   if (step.kind === "redirect") redirect(step.to);
+}
+
+/**
+ * Para una pantalla de administración. Quién es del equipo lo dice la base, por
+ * `teamStanding`: el nivel que diga el token no cuenta. A quien no es del equipo le contesta
+ * lo mismo que una ruta que no existe (PA-19).
+ * @param path La ruta que se pidió: es a donde se vuelve después de entrar y de dar el código.
+ * @param capability La capacidad que esa pantalla pide, si pide una (PA-88).
+ */
+export async function requireAdmin(path: string, capability?: Capability) {
+  const step = adminPageStep(await teamStanding(await cookieReader()), path, capability);
+  if (step.kind === "redirect") redirect(step.to);
+  if (step.kind === "not_found") notFound();
+  return step;
+}
+
+/** Para la pantalla que pide el código del segundo factor (PA-12). */
+export async function requireSecondFactor(returnTo: string | null | undefined) {
+  const step = secondFactorPageStep(await teamStanding(await cookieReader()), returnTo);
+  if (step.kind === "redirect") redirect(step.to);
+  if (step.kind === "not_found") notFound();
+  return step;
+}
+
+/** Para la pantalla en la que se configura el segundo factor, que es aceptar una invitación (PA-12). */
+export async function requireFactorSetup() {
+  const step = factorSetupPageStep(await teamStanding(await cookieReader()));
+  if (step.kind === "redirect") redirect(step.to);
+  if (step.kind === "not_found") notFound();
+  return step;
 }
