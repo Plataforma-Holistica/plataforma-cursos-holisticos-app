@@ -112,6 +112,35 @@ async function outsideFactor(jar: MemoryJar | CookieJar): Promise<{ factorId: st
   return { factorId, secret };
 }
 
+/**
+ * El adaptador de Auth de verdad, salvo el cierre de sesión. Aceptar borra en la base la
+ * sesión con la que se acepta, y aquí eso ocurre dentro de una transacción que se revierte:
+ * el borrado queda sin confirmar y con su fila tomada, y el cierre de verdad se quedaría
+ * esperándola. Se le contesta lo que Auth contesta ya confirmado el borrado, que la sesión
+ * no existe, y se anota que el servicio lo pidió.
+ */
+function authAfterAccepting(): { auth: ReturnType<typeof adapter.createAuth>; logouts: string[] } {
+  const logouts: string[] = [];
+  const auth = adapter.createAuth({
+    fetch: (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      if (!path.endsWith("/logout")) return fetch(input, init);
+      logouts.push(path);
+      return Promise.resolve(Response.json({ code: "session_not_found", message: "x" }, { status: 403 }));
+    },
+  });
+  return { auth, logouts };
+}
+
+/** Las sesiones de esa cuenta, como las ve la transacción: en Auth y en lo anotado. */
+async function sessionsIn(owner: Client, userId: string): Promise<number> {
+  const rows = await owner.query(
+    "select 1 from auth.sessions where user_id = $1 union all select 1 from private.app_sessions where profile_id = $1",
+    [userId],
+  );
+  return rows.rows.length;
+}
+
 const factorsOf = (userId: string) =>
   ownerQuery<{ id: string; status: string }>(
     "select id::text as id, status::text as status from auth.mfa_factors where user_id = $1 order by created_at",
@@ -223,7 +252,8 @@ describe("aceptar una invitación configurando el segundo factor", () => {
     const secret = withTicket(jar);
 
     await reverted(async (owner) => {
-      const services = testServices({ teamStore: teamStoreOn(owner) });
+      const { auth, logouts } = authAfterAccepting();
+      const services = testServices({ teamStore: teamStoreOn(owner), auth });
       await asSystem(owner);
       expect(await answer(owner, "private.system_invite_admin($1, '{support}')", [person.email])).toBe("invited_existing");
       await asOwner(owner);
@@ -261,11 +291,19 @@ describe("aceptar una invitación configurando el segundo factor", () => {
         invitations: [{ kind: "grant", accepted: true, revoked: false, failures: 0 }],
         ticket: null,
       });
-      // Y sin nada en el navegador: la sesión se cerró, y el resguardo y el factor se gastaron.
+      // La sesión con la que aceptó la cerró la base, en la misma transacción que ató.
+      expect(await sessionsIn(owner, person.id)).toBe(0);
+      // Y sin nada en el navegador: su cookie se borró, y el resguardo y el factor se gastaron.
       expect(jar.get(SESSION)).toBeUndefined();
       expect(jar.get(TICKET)).toBeUndefined();
       expect(jar.get(FACTOR)).toBeUndefined();
-      expect(await sessionCount(person.id)).toBe(0);
+      // El servidor le pidió a Auth cerrarla igual; que ya no exista cuenta como cerrada.
+      expect(logouts).toHaveLength(1);
+      // Con su atadura y sin sesión que pase la puerta: está a un código de entrar.
+      await asServer(owner, person.id, who.sessionId);
+      const standing = await owner.query<{ state: string }>("select state from private.team_standing(null)");
+      await asOwner(owner);
+      expect(standing.rows).toEqual([{ state: "needs_code" }]);
       expect(await factorsOf(person.id)).toEqual([{ id: started.factorId, status: "verified" }]);
       expect(services.reported).toEqual([]);
     });
@@ -282,7 +320,8 @@ describe("aceptar una invitación configurando el segundo factor", () => {
     const dictated = "K7QM2X9P";
 
     await reverted(async (owner) => {
-      const services = testServices({ teamStore: teamStoreOn(owner) });
+      const { auth, logouts } = authAfterAccepting();
+      const services = testServices({ teamStore: teamStoreOn(owner), auth });
       // Conserva su capacidad y perdió su atadura: tiene una invitación de restablecimiento.
       await asSystem(owner);
       await owner.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'support')", [person.id]);
@@ -325,7 +364,8 @@ describe("aceptar una invitación configurando el segundo factor", () => {
         ticket: null,
       });
       expect(jar.get(SESSION)).toBeUndefined();
-      expect(await sessionCount(person.id)).toBe(0);
+      expect(await sessionsIn(owner, person.id)).toBe(0);
+      expect(logouts).toHaveLength(1);
       expect(services.reported).toEqual([]);
     });
   });
@@ -336,7 +376,8 @@ describe("aceptar una invitación configurando el segundo factor", () => {
     const secret = withTicket(jar);
 
     await reverted(async (owner) => {
-      const services = testServices({ teamStore: teamStoreOn(owner) });
+      const { auth } = authAfterAccepting();
+      const services = testServices({ teamStore: teamStoreOn(owner), auth });
       await asSystem(owner);
       expect(await answer(owner, "private.system_invite_admin($1, '{support}')", [person.email])).toBe("invited_existing");
       await asOwner(owner);
@@ -372,6 +413,8 @@ describe("aceptar una invitación configurando el segundo factor", () => {
       expect((await teamOf(owner, person.id)).factor).toBe(again.factorId);
       const left = await owner.query<{ id: string }>("select id::text as id from auth.mfa_factors where user_id = $1", [person.id]);
       expect(left.rows).toEqual([{ id: again.factorId }]);
+      // Y la sesión que el de fuera había subido de nivel se cerró con la aceptación.
+      expect(await sessionsIn(owner, person.id)).toBe(0);
       expect(services.reported).toEqual([]);
     });
   });
@@ -521,6 +564,24 @@ describe("el resguardo, cuando se cierra la sesión de ese navegador", () => {
     expect(jar.get(SESSION)).toBeUndefined();
     expect(jar.get(TICKET)).toBe(secret);
     expect(await sessionCount(person.id)).toBe(0);
+  });
+
+  // Aceptar una invitación borra en la base la sesión con la que se acepta, y después el
+  // servidor le pide a Auth cerrarla. En las pruebas de arriba esa respuesta de Auth se
+  // escribe a mano, porque el borrado queda sin confirmar. Aquí se mide de verdad, con el
+  // borrado confirmado: Auth contesta que no existe, y eso cuenta como cerrada.
+  it("cerrar en Auth una sesión que la base ya borró cuenta como cerrada, sin reporte", async () => {
+    const { person, jar } = await entered();
+    const secret = withTicket(jar);
+    await ownerQuery("delete from auth.sessions where user_id = $1", [person.id]);
+    await ownerQuery("delete from private.app_sessions where profile_id = $1", [person.id]);
+    const services = testServices();
+
+    expect(await services.signOut(jar)).toBe("closed");
+
+    expect(services.reported).toEqual([]);
+    expect(jar.get(SESSION)).toBeUndefined();
+    expect(jar.get(TICKET)).toBe(secret);
   });
 
   it("cerrar una sesión que la guarda rechazó, tampoco: es la que quedó de antes de probar el buzón", async () => {

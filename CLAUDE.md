@@ -607,11 +607,12 @@ falla. Doce precisiones que la tabla no dice:
       que se ate. En un restablecimiento, sin un código dictado con forma no se verifica ni
       se le pregunta a la base: un nulo le cuenta como intento fallido
       (`handoffPrint`: sin espacios ni guiones, en mayúsculas, de 8 a 32 letras o dígitos).
-      Aceptada, **la sesión se manda cerrar**: la de equipo nace después de atar, entrando
-      de nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía antes de
-      la atadura, y una copia de su cookie tendría un código reciente. Cerrarla es un paso
-      aparte, que depende de Auth: si falla, se aceptó igual y queda dicho
-      (`session_not_closed`). Con un no terminal de la base (`no_invitation`,
+      Aceptada, **la persona queda sin sesión**: la de equipo nace después de atar,
+      entrando de nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía
+      antes de la atadura, y una copia de su cookie tendría un código reciente. La cierra
+      la base, en la misma transacción que ata el factor; el servicio borra su cookie y le
+      pide a Auth cerrarla de todos modos, y que ya no exista cuenta como cerrada. Con un
+      no terminal de la base (`no_invitation`,
       `already_bound`, `inviter_lost_config`, `ineligible`, `needs_mailbox_proof`) el
       factor recién verificado se quita. **Pero nunca sin releer antes el estado.** Solo
       `accepted` y las dos que dicen que falta configuración (`needs_code`,
@@ -820,7 +821,10 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     buzón (abajo), que la sesión esté verificada hace poco con el factor que el servidor
     dio de alta en ese navegador, y, si es un restablecimiento, el código que dicta quien
     restableció. Ata ese factor, da las capacidades de la invitación con quien invitó
-    como autor, borra los demás factores de la cuenta y cierra sus demás sesiones.
+    como autor, borra los demás factores de la cuenta y cierra todas sus sesiones,
+    también aquella con la que se acepta (decisión del 2026-10-13): existía antes de la
+    atadura, y si sobreviviera pasaría la puerta sin haber dado un código después de
+    atar. Quien acepta entra de nuevo, y el estado que sigue a aceptar es `needs_code`.
     Tres de sus rechazos escriben antes de contestar (`needs_handoff` cuenta el fallo;
     `inviter_lost_config` y un `no_invitation` revocan la invitación): el servicio que la
     llame tiene que confirmar la transacción también en esos casos, o el límite de

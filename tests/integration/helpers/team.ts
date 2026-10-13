@@ -21,6 +21,12 @@ export const print = (secret: string) => createHash("sha256").update(secret).dig
  * Una transacción del dueño de la base local, que se revierte siempre. Con `server`, el
  * dueño puede tomar el rol del servidor dentro de ella. Dos transacciones abiertas a la
  * vez no pueden pedirlo las dos: la segunda esperaría a la primera, que es lo que cambia.
+ *
+ * Mientras siga abierta, lo que borró o cambió queda sin confirmar y con sus filas tomadas.
+ * Una llamada de verdad a Supabase Auth que toque una de esas filas (cerrar una sesión que
+ * aceptar ya borró aquí dentro, por ejemplo) se queda esperando, y el límite de espera de
+ * esta conexión no la protege: es de otra. Lo que Auth haría con esa fila se mira aquí
+ * dentro, o se le contesta a mano lo que contesta ya confirmado el cambio.
  */
 export async function reverted<T>(fn: (owner: Client) => Promise<T>, server = true): Promise<T> {
   const owner = new Client({ connectionString: localOwnerUrl() });

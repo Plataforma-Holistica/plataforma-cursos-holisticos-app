@@ -47,14 +47,17 @@ async function entered(): Promise<Entered> {
   return { person, client };
 }
 
-/** Da de alta un factor y lo verifica con esa misma sesión, que sube de nivel. */
-async function verifiedFactor(client: SupabaseClient, name: string): Promise<string> {
+/** Da de alta un factor y lo verifica con esa misma sesión, que sube de nivel. Con su clave. */
+async function verifiedFactorWithSecret(client: SupabaseClient, name: string): Promise<{ id: string; secret: string }> {
   const factor = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: name });
   if (factor.error) throw new Error(`El factor de prueba no se dio de alta: ${factor.error.code}`);
   const verified = await client.auth.mfa.challengeAndVerify({ factorId: factor.data.id, code: totpCode(factor.data.totp.secret) });
   if (verified.error) throw new Error(`El factor de prueba no se verificó: ${verified.error.code}`);
-  return factor.data.id;
+  return { id: factor.data.id, secret: factor.data.totp.secret };
 }
+
+/** Lo mismo, cuando la prueba solo necesita saber cuál factor es. */
+const verifiedFactor = async (client: SupabaseClient, name: string): Promise<string> => (await verifiedFactorWithSecret(client, name)).id;
 
 interface Token {
   /** Las claims del token, tal como las firmó Auth. */
@@ -94,7 +97,7 @@ const sessionsOf = (userId: string) =>
   );
 
 describe("una invitación, de punta a punta, contra el Auth de verdad", () => {
-  it("invitar pide un código reciente; aceptar, el resguardo y un factor recién verificado; y entonces pasa la puerta", async () => {
+  it("invitar pide un código reciente; aceptar, el resguardo y un factor recién verificado; y la puerta se pasa entrando de nuevo", async () => {
     const inviter = await entered();
     const inviterFactor = await verifiedFactor(inviter.client, "el de quien invita");
     const inviterToken = await tokenOf(inviter.client);
@@ -126,7 +129,7 @@ describe("una invitación, de punta a punta, contra el Auth de verdad", () => {
       expect(await answer(owner, "private.accept_admin_invitation($1, $2)", [ticket, randomUUID()])).toBe("needs_code");
 
       // Auth, de verdad y por su cuenta: da de alta un factor y lo verifica con su sesión.
-      const factor = await verifiedFactor(invited.client, "el nuevo");
+      const { id: factor, secret } = await verifiedFactorWithSecret(invited.client, "el nuevo");
       const token = await tokenOf(invited.client);
       expect(token.sessionId).toBe(before.sessionId);
       await asOwner(owner);
@@ -137,11 +140,42 @@ describe("una invitación, de punta a punta, contra el Auth de verdad", () => {
       expect(await answer(owner, "private.accept_admin_invitation($1, $2)", [print("otro"), factor])).toBe("needs_mailbox_proof");
       expect(await answer(owner, "private.accept_admin_invitation($1, $2)", [ticket, factor])).toBe("accepted");
 
-      // Y pasa la puerta, por los dos caminos, con lo que recibió y nada más.
+      // Aceptar cerró la sesión con la que aceptó, en la misma transacción: existía antes de
+      // la atadura. Con ella no se pasa la puerta por ningún camino, aunque su token siga
+      // diciendo segundo nivel.
+      expect(await passes(owner, "private.actor_has_capability('support')")).toBe(false);
+      await asOwner(owner);
+      const left = await owner.query("select 1 from auth.sessions where user_id = $1", [invited.person.id]);
+      expect(left.rows).toEqual([]);
+      const noted = await owner.query("select 1 from private.app_sessions where profile_id = $1", [invited.person.id]);
+      expect(noted.rows).toEqual([]);
+      // Ni sus tokens de renovación ni lo que Auth anotó de su verificación: una copia de su
+      // cookie ya no tiene con qué renovarse.
+      const leftovers = await owner.query(
+        "select 1 from auth.refresh_tokens where session_id = $1 union all select 1 from auth.mfa_amr_claims where session_id = $1",
+        [token.sessionId],
+      );
+      expect(leftovers.rows).toEqual([]);
+      await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [token.json]);
+      expect(await passes(owner, "private.has_capability('support')")).toBe(false);
+      await asOwner(owner);
+
+      // Entra de nuevo y da su código, con Auth de verdad: esa sesión nace después de atar.
+      const again = authVisitor();
+      const entering = await again.auth.signInWithPassword({ email: invited.person.email, password: invited.person.password });
+      if (entering.error) throw new Error(`La persona aceptada no entró de nuevo: ${entering.error.code}`);
+      const coded = await again.auth.mfa.challengeAndVerify({ factorId: factor, code: totpCode(secret) });
+      if (coded.error) throw new Error(`El código de la persona aceptada no pasó: ${coded.error.code}`);
+      const fresh = await tokenOf(again);
+      expect(fresh.sessionId).not.toBe(token.sessionId);
+      await owner.query("insert into private.app_sessions (session_id, profile_id) values ($1, $2)", [fresh.sessionId, invited.person.id]);
+
+      // Y ahora sí pasa la puerta, por los dos caminos, con lo que recibió y nada más.
+      await asServer(owner, invited.person.id, fresh.sessionId);
       expect(await passes(owner, "private.actor_has_capability('support')")).toBe(true);
       expect(await passes(owner, "private.actor_has_capability('config')")).toBe(false);
       await asOwner(owner);
-      await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [token.json]);
+      await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [fresh.json]);
       expect(await passes(owner, "private.has_capability('support')")).toBe(true);
       expect(await passes(owner, "private.has_capability('config')")).toBe(false);
     });
