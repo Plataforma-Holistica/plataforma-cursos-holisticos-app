@@ -502,9 +502,9 @@ falla. Doce precisiones que la tabla no dice:
     read committed: sin el candado, dos «cerrar las demás» a la vez desde dos sesiones de
     la misma cuenta se borraban una a la otra y la cuenta quedaba sin ninguna. Con él van
     una tras otra, y la segunda no cierra nada. Es `for no key update`, el que no estorba
-    a quien inserta en una tabla que apunta al perfil; las dos funciones de antes usan
-    `for update`, y conviene pasarlas a este cuando una tabla de mucha escritura apunte a
-    `profiles`. «Las demás» se borran por cuenta y no por lo anotado: así se
+    a quien inserta en una tabla que apunta al perfil; `note_session` todavía usa
+    `for update` (`claim_account` ya no, desde T-105), y conviene pasarla a este cuando
+    una tabla de mucha escritura apunte a `profiles`. «Las demás» se borran por cuenta y no por lo anotado: así se
     van también las abiertas directo en Auth. La guarda mira lo anotado en cada entrada,
     así que una sesión cerrada deja de pasar en el acto, sin esperar a que venza su token.
   - `signIn` cuenta el intento antes de preguntarle a Auth, como si fuera a fallar, y lo
@@ -702,7 +702,7 @@ en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.t
 un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
 revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
-En la base, siete reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
 - **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
   sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
@@ -728,17 +728,65 @@ En la base, siete reglas que salen de `../planeacion/05-esquema-backend.md` §16
   `private.is_aal2()`: no abren nada, porque van sumadas con «y» a una política que pasa
   por la puerta, pero en esas tablas un token de primer nivel no lee aunque su sesión ya
   esté verificada.
-  Quién ata un factor llega con las invitaciones; mientras, nadie pasa la puerta. En las
-  pruebas de base, «segundo nivel» es una sesión de equipo de verdad: la deja
+  En las pruebas de base, «segundo nivel» es una sesión de equipo de verdad: la deja
   `pruebas.equipar()`, que llaman `pruebas.como_usuario(…, 'aal2')` y, para quien tiene
   una capacidad, `pruebas.como_servicio()`.
+- **Una capacidad solo se recibe aceptando una invitación** (T-105), o de quien tiene
+  configuración si ya se es del equipo. El servidor no escribe `admin_capabilities`: todo
+  pasa por funciones de `private` que comprueban quién actúa, y el vigilante lo exige.
+  Lo que hay que saber antes de tocarlas:
+  - Cambiar el equipo (`invite_admin`, `revoke_admin_invitation`, `grant_capability`,
+    `revoke_capability`, `reset_second_factor`) pide configuración y un código del factor
+    atado de hace menos de `VIGENCIA_CODIGO_RECIENTE_MINUTOS`. Contestan `forbidden` a
+    quien no tiene configuración y `needs_fresh_code` a quien la tiene y debe dar su
+    código otra vez. Todas toman primero un candado fijo (`private.team_lock()`) y
+    después, como mucho, el candado de fila de un perfil: van una tras otra. Cambiar un
+    parámetro (`business_parameters`) pide ese mismo código reciente, por un disparador:
+    los plazos son parámetros, y sin eso quien tiene la sesión de alguien con
+    configuración se alargaría la ventana.
+  - Aceptar (`accept_admin_invitation`) no mira la contraseña. Pide el resguardo del
+    buzón (abajo), que la sesión esté verificada hace poco con el factor que el servidor
+    dio de alta en ese navegador, y, si es un restablecimiento, el código que dicta quien
+    restableció. Ata ese factor, da las capacidades de la invitación con quien invitó
+    como autor, borra los demás factores de la cuenta y cierra sus demás sesiones.
+    Tres de sus rechazos escriben antes de contestar (`needs_handoff` cuenta el fallo;
+    `inviter_lost_config` y un `no_invitation` revocan la invitación): el servicio que la
+    llame tiene que confirmar la transacción también en esos casos, o el límite de
+    códigos dictados no contaría nada.
+  - **El resguardo del buzón.** `private.claim_account(p_ticket)` guarda la huella
+    (SHA-256 en hexadecimal) de un secreto que el servidor deja en el navegador que abrió
+    el enlace del correo. Quien sabía la contraseña, quien la cambia por fuera o quien
+    tiene una entrada en vuelo no lo tiene. Hoy los servicios reclaman sin resguardo:
+    emitirlo, dejar la cookie y leerla al aceptar llega con el servicio que acepta, y
+    hasta entonces ninguna invitación se puede aceptar. El secreto lo genera siempre el
+    servidor, nunca se lee del cliente al reclamar, y solo en los dos flujos de enlace.
+  - Hay dos tipos de invitación. `grant` da capacidades a quien no tiene ninguna.
+    `rebind` no da nada: es para quien conserva capacidades y perdió su atadura
+    (restablecimiento), y por eso aceptarla nunca devuelve una capacidad que se quitó
+    entretanto. Invitar no le toca nada a una cuenta que ya existe; restablecer sí:
+    quita la atadura, borra los factores, cierra las sesiones y prende la marca de
+    contraseña.
+  - Al reclamar, a una cuenta con invitación viva se le borran los factores que tuviera.
+    A las demás no: recuperar la contraseña no quita un segundo factor, y a alguien del
+    equipo no se le quita el atado.
+  - El arranque y la emergencia (`system_invite_admin`, `system_reset_second_factor`)
+    solo los ejecuta el dueño de la base, declarado sistema. No son `security definer` y
+    no tienen permisos para nadie.
+  - Estas funciones borran y bajan sesiones y factores escribiendo en tablas de Supabase
+    Auth (`auth.sessions`, `auth.mfa_factors`, `auth.mfa_amr_claims`). Un 40P01 o un
+    55P03 de la base ahí es «no se supo, reintenta».
+  - En las pruebas de integración, lo que cambia el equipo corre en una transacción del
+    dueño que se revierte (`tests/integration/33-invitaciones.test.ts`): la auditoría no
+    admite borrado. Por eso no hay una prueba de dos revocaciones que confirmen a la vez;
+    se prueba lo que la impide, que cada función espera el candado de la anterior.
 - **La prueba primero**, en `supabase/tests/`, y se la ve fallar antes de escribir la
   migración. Las migraciones se aplican solo en la base local.
 - **En `profiles` el servidor escribe por columnas.** `app_service` no tiene `update` de la
   tabla entera: una columna nueva se le concede a mano en su migración, y si se olvida, el
   servidor recibe un error en vez de un acceso de más. La marca `password_reset_required`
-  no se concede nunca: solo la apaga `private.claim_account()`, y un guardián la cuida
-  aunque alguien devuelva el permiso (TRD §9.2).
+  no se concede nunca: solo la apaga `private.claim_account()` y solo la prende
+  restablecerle el segundo factor a alguien del equipo, y un guardián la cuida aunque
+  alguien devuelva el permiso (TRD §9.2).
 - **Un ajuste de sesión no es una barrera.** El servidor puede poner cualquier
   `set_config`, así que una regla que dependa solo de un ajuste se puede falsificar desde
   una consulta mal escrita. Las reglas duras miran además quién ejecuta (`current_user`

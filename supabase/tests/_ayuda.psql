@@ -64,7 +64,8 @@ begin
   on conflict (session_id) do nothing;
   -- Atar un factor queda en la auditoría, y aquí no hay persona que lo haga.
   perform set_config('app.actor_kind', 'system', true);
-  insert into private.admin_factors (profile_id, factor_id) values (p_id, pruebas.factor(p_id))
+  insert into private.admin_factors (profile_id, factor_id, bound_email)
+  values (p_id, pruebas.factor(p_id), (select lower(u.email) from auth.users u where u.id = p_id))
   on conflict (profile_id) do nothing;
   perform set_config('app.actor_kind', '', true);
 end
@@ -157,12 +158,15 @@ create function pruebas.confirmar(p_id uuid) returns void
 language sql
 as $$ update auth.users set email_confirmed_at = now() where id = p_id; $$;
 
--- Da una capacidad como lo haría el guion de arranque: declarado como sistema.
+-- Da una capacidad escribiendo la tabla, como dueño declarado sistema: el servidor ya no
+-- puede (T-105). Es un atajo de las pruebas: de verdad una capacidad solo se recibe
+-- aceptando una invitación o de quien tiene configuración (13_invitaciones).
 create function pruebas.dar_capacidad(p_profile uuid, p_capability text) returns void
 language plpgsql
 as $$
 begin
-  perform pruebas.como_sistema();
+  perform pruebas.limpiar();
+  perform set_config('app.actor_kind', 'system', true);
   execute format(
     'insert into public.admin_capabilities (profile_id, capability) values (%L, %L)',
     p_profile, p_capability);

@@ -91,7 +91,10 @@ async function asks(person: KnownUser, token: Token, setup: Setup): Promise<Aske
     await owner.query("grant app_service to postgres with set true, inherit false");
     await owner.query("select set_config('app.actor_kind', 'system', true)");
     await owner.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'config')", [person.id]);
-    await owner.query("insert into private.admin_factors (profile_id, factor_id) values ($1, $2)", [person.id, setup.bound]);
+    await owner.query(
+      "insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, (select lower(u.email) from auth.users u where u.id = $1))",
+      [person.id, setup.bound],
+    );
     await owner.query("select set_config('app.actor_kind', '', true)");
     if (setup.noted ?? true) {
       await owner.query("insert into private.app_sessions (session_id, profile_id) values ($1, $2)", [token.sessionId, person.id]);

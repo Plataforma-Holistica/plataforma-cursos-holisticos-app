@@ -131,9 +131,9 @@ select pruebas.como_dueno();
 -- private.claim_account(): la misma cuenta pasa por cada estado.
 
 select ok(
-  has_function_privilege('app_service', 'private.claim_account()', 'execute')
-    and not has_function_privilege('authenticated', 'private.claim_account()', 'execute')
-    and not has_function_privilege('anon', 'private.claim_account()', 'execute'),
+  has_function_privilege('app_service', 'private.claim_account(text)', 'execute')
+    and not has_function_privilege('authenticated', 'private.claim_account(text)', 'execute')
+    and not has_function_privilege('anon', 'private.claim_account(text)', 'execute'),
   'solo el servidor ejecuta claim_account');
 
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');

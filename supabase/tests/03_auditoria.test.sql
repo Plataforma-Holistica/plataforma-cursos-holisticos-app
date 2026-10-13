@@ -22,8 +22,8 @@ select pruebas.equipar('a0000000-0000-0000-0000-000000000001');
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select set_config('app.reason', 'Entra al equipo de soporte', true);
 select set_config('app.request_id', 'req-prueba-1', true);
-insert into public.admin_capabilities (profile_id, capability, granted_by)
-values ('a0000000-0000-0000-0000-000000000001', 'support', 'c0000000-0000-0000-0000-000000000001');
+-- El servidor ya no escribe la tabla (T-105): da la capacidad por su función.
+select private.grant_capability('a0000000-0000-0000-0000-000000000001', 'support');
 
 select is(
   private.actor_id(), 'c0000000-0000-0000-0000-000000000001'::uuid,
