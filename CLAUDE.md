@@ -400,9 +400,14 @@ falla. Trece precisiones que la tabla no dice:
     estado de una acción dentro de todo formulario ligado a ella: mientras ese estado trae
     la clave no se pinta ningún formulario de «Empezar», y «Empezar de nuevo» es un enlace
     que vuelve a pedir la página. La clave no va en un campo oculto, no vuelve en otra
-    respuesta, y deja de pintarse al enviar el código y al salir de la página. El código
-    QR se pinta con `<img>` y una dirección de datos, nunca como marcado, y la clave en
-    texto va siempre junto a él.
+    respuesta, y deja de pintarse al enviar un código con forma y al salir de la página
+    (un envío vacío o sin forma no es un intento, y no la esconde). El código QR se pinta
+    con `<img>` y una dirección de datos, nunca como marcado, y la clave en texto va
+    siempre junto a él.
+  - Esos dos estados no saben uno del otro: la respuesta de confirmar se queda como está
+    aunque después llegue una clave nueva. Por eso solo cuenta para la clave con la que se
+    envió (`confirmedWith`): sin eso, quien recibía «esa clave ya no es la vigente» y
+    empezaba de nuevo no veía la clave nueva. Lo encontró la revisión del diff.
   - La página de configurar no da de alta nada: una lectura no escribe cookies, y dar de
     alta borra los factores a medias, así que recargar rompería la otra pestaña. Por eso
     existe el paso «Empezar», que es una acción.
