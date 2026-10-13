@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ACCEPT_ANSWERS } from "./team";
-import { acceptAnswerOf, standingOf, type StandingRow } from "./team-records";
+import { GRANT_ANSWERS, INVITE_ANSWERS, RESET_ANSWERS, REVOKE_ANSWERS, REVOKE_INVITATION_ANSWERS } from "./team-admin";
+import { acceptAnswerOf, answerOf, rosterOf, standingOf, type StandingRow } from "./team-records";
 
 // Lo que la base contesta se entiende o no se entiende: aquí no se adivina. Las consultas
 // contra la base de verdad se prueban en `tests/integration/34-equipo-servicios.test.ts`.
@@ -88,5 +89,179 @@ describe("lo que contesta aceptar una invitación", () => {
 
   it.each(["", "Accepted", "accepted ", "ok", "forbidden", "needs_fresh_code"])("%j no lo es, y no se toma por ninguna", (answer) => {
     expect(() => acceptAnswerOf(answer)).toThrow("no contesta");
+  });
+});
+
+describe("lo que contesta cada cambio al equipo", () => {
+  it("cada lista es la que escribe su función de la base", () => {
+    expect([...INVITE_ANSWERS].sort()).toEqual([
+      "already_invited",
+      "already_member",
+      "forbidden",
+      "ineligible",
+      "invalid",
+      "invited_existing",
+      "invited_new",
+      "needs_fresh_code",
+      "unavailable",
+    ]);
+    expect([...REVOKE_INVITATION_ANSWERS].sort()).toEqual(["forbidden", "needs_fresh_code", "not_found", "revoked"]);
+    expect([...GRANT_ANSWERS].sort()).toEqual(["already_has", "forbidden", "granted", "ineligible", "invalid", "needs_fresh_code", "not_member"]);
+    expect([...REVOKE_ANSWERS].sort()).toEqual(["forbidden", "min_config", "needs_fresh_code", "not_found", "revoked"]);
+    expect([...RESET_ANSWERS].sort()).toEqual([
+      "forbidden",
+      "ineligible",
+      "invalid",
+      "needs_fresh_code",
+      "not_member",
+      "reset",
+      "self",
+      "unavailable",
+    ]);
+  });
+
+  it("una respuesta de su lista se entiende", () => {
+    expect(answerOf(REVOKE_ANSWERS, "min_config")).toBe("min_config");
+  });
+
+  it.each(["", "Revoked", "revoked ", "ok", "granted", "reset"])("%j no es de la lista de quitar, y no se toma por ninguna", (answer) => {
+    expect(() => answerOf(REVOKE_ANSWERS, answer)).toThrow("no contesta");
+  });
+});
+
+describe("la lista del equipo, como la contesta la base", () => {
+  const ME = "a0000000-0000-4000-8000-000000000001";
+  const OTHER = "b0000000-0000-4000-8000-000000000002";
+  const INVITATION = "d0000000-0000-4000-8000-000000000004";
+  const rawMember = (over: Record<string, unknown> = {}) => ({
+    profile_id: ME,
+    email: "yo@prueba.test",
+    display_name: null,
+    status: "active",
+    capabilities: ["config", "support"],
+    factor: "bound",
+    rebind: "none",
+    config_removable: true,
+    is_self: true,
+    ...over,
+  });
+  const rawInvitation = (over: Record<string, unknown> = {}) => ({
+    id: INVITATION,
+    kind: "grant",
+    email: "invitada@prueba.test",
+    profile_id: null,
+    capabilities: ["support", "content"],
+    invited_by: ME,
+    created_at: "2026-10-13T23:41:05.123456+00:00",
+    expires_at: "2026-10-20T23:41:05.123456+00:00",
+    expired: false,
+    acceptable: true,
+    ...over,
+  });
+  const raw = (over: Record<string, unknown> = {}) => ({ fresh_code: true, members: [rawMember()], invitations: [], ...over });
+
+  it("nulo es nulo: quien pregunta no pasa la puerta con configuración", () => {
+    expect(rosterOf(null)).toBeNull();
+  });
+
+  it("cada persona, con sus capacidades en el orden en que la aplicación las nombra", () => {
+    const other = rawMember({
+      profile_id: OTHER,
+      email: null,
+      display_name: "Otra",
+      status: "suspended",
+      capabilities: ["content"],
+      factor: "none",
+      rebind: "expired",
+      config_removable: false,
+      is_self: false,
+    });
+    expect(rosterOf(raw({ fresh_code: false, members: [rawMember(), other] }))).toEqual({
+      freshCode: false,
+      members: [
+        {
+          profileId: ME,
+          email: "yo@prueba.test",
+          displayName: null,
+          status: "active",
+          capabilities: ["support", "config"],
+          factor: "bound",
+          rebind: "none",
+          configRemovable: true,
+          isSelf: true,
+        },
+        {
+          profileId: OTHER,
+          email: null,
+          displayName: "Otra",
+          status: "suspended",
+          capabilities: ["content"],
+          factor: "none",
+          rebind: "expired",
+          configRemovable: false,
+          isSelf: false,
+        },
+      ],
+      invitations: [],
+    });
+  });
+
+  it("cada invitación, con sus horas y sus capacidades en el orden en que se pidieron", () => {
+    const rebind = rawInvitation({ kind: "rebind", profile_id: OTHER, capabilities: [], invited_by: null, expired: true, acceptable: false });
+    expect(rosterOf(raw({ invitations: [rawInvitation(), rebind] }))?.invitations).toEqual([
+      {
+        id: INVITATION,
+        kind: "grant",
+        email: "invitada@prueba.test",
+        profileId: null,
+        capabilities: ["support", "content"],
+        invitedBy: ME,
+        createdAt: new Date("2026-10-13T23:41:05.123Z"),
+        expiresAt: new Date("2026-10-20T23:41:05.123Z"),
+        expired: false,
+        acceptable: true,
+      },
+      {
+        id: INVITATION,
+        kind: "rebind",
+        email: "invitada@prueba.test",
+        profileId: OTHER,
+        capabilities: [],
+        invitedBy: null,
+        createdAt: new Date("2026-10-13T23:41:05.123Z"),
+        expiresAt: new Date("2026-10-20T23:41:05.123Z"),
+        expired: true,
+        acceptable: false,
+      },
+    ]);
+  });
+
+  it("un estado de cuenta que no es activa ni suspendida no se adivina: es «otro»", () => {
+    const other = rawMember({ profile_id: OTHER, status: "deleted", is_self: false });
+    expect(rosterOf(raw({ members: [rawMember(), other] }))?.members[1]?.status).toBe("other");
+  });
+
+  it.each<[string, unknown]>([
+    ["algo que no es un objeto", "lista"],
+    ["sin personas", raw({ members: [] })],
+    ["con las personas en nulo", raw({ members: null })],
+    ["sin decir si el código es reciente", raw({ fresh_code: null })],
+    ["sin invitaciones", raw({ invitations: null })],
+    ["con un campo que este código no conoce", raw({ secreto: "x" })],
+    ["una persona con un campo de más", raw({ members: [rawMember({ factor_id: "fa000000-0000-4000-8000-0000000000b0" })] })],
+    ["una persona sin capacidades", raw({ members: [rawMember({ capabilities: [] })] })],
+    ["una persona con una capacidad que no existe", raw({ members: [rawMember({ capabilities: ["owner"] })] })],
+    ["una persona con un identificador sin forma", raw({ members: [rawMember({ profile_id: "yo" })] })],
+    ["una persona con un estado de factor que no existe", raw({ members: [rawMember({ factor: "verified" })] })],
+    ["una persona con una invitación para volver que no existe", raw({ members: [rawMember({ rebind: "sent" })] })],
+    ["sin la fila de quien pregunta", raw({ members: [rawMember({ is_self: false })] })],
+    ["con dos filas de quien pregunta", raw({ members: [rawMember(), rawMember({ profile_id: OTHER })] })],
+    ["una invitación con la huella del código dictado", raw({ invitations: [rawInvitation({ handoff: "a".repeat(64) })] })],
+    ["una invitación de un tipo que no existe", raw({ invitations: [rawInvitation({ kind: "transfer" })] })],
+    ["una invitación con una hora que no lo es", raw({ invitations: [rawInvitation({ expires_at: "mañana" })] })],
+    ["una invitación con una capacidad que no existe", raw({ invitations: [rawInvitation({ capabilities: ["owner"] })] })],
+    ["una invitación con quien invitó sin forma", raw({ invitations: [rawInvitation({ invited_by: "ella" })] })],
+  ])("%s no se entiende, y lanza: quien llama lo trata como «no se supo»", (_what, value) => {
+    expect(() => rosterOf(value)).toThrow();
   });
 });

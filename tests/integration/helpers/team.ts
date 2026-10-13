@@ -5,7 +5,26 @@ import { Client } from "pg";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import type { TeamStanding, TeamStore } from "@/services/account/team";
-import { acceptAnswerOf, acceptInvitation, readTeamStanding } from "@/services/account/team-records";
+import {
+  GRANT_ANSWERS,
+  INVITE_ANSWERS,
+  RESET_ANSWERS,
+  REVOKE_ANSWERS,
+  REVOKE_INVITATION_ANSWERS,
+  type TeamAdminStore,
+} from "@/services/account/team-admin";
+import {
+  acceptAnswerOf,
+  acceptInvitation,
+  answerOf,
+  askGrant,
+  askInvite,
+  readTeamRoster,
+  readTeamStanding,
+  askReset,
+  askRevokeInvitation,
+  askRevoke,
+} from "@/services/account/team-records";
 
 import { localOwnerUrl } from "./local";
 
@@ -67,11 +86,11 @@ export async function answer(owner: Client, call: string, params: unknown[] = []
 }
 
 /**
- * El almacén del equipo sobre esa transacción: las mismas dos consultas que usa la
- * aplicación, como servidor y a nombre de las claims que se le pasen, pero sin confirmar.
- * Así los servicios del equipo corren contra la base de verdad y lo que aceptan se revierte.
+ * El almacén del equipo sobre esa transacción: las mismas consultas que usa la aplicación,
+ * como servidor y a nombre de las claims que se le pasen, pero sin confirmar. Así los
+ * servicios del equipo corren contra la base de verdad y lo que cambian se revierte.
  */
-export function teamStoreOn(owner: Client): TeamStore {
+export function teamStoreOn(owner: Client): TeamStore & TeamAdminStore {
   const tx: Tx = {
     query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
     execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
@@ -88,6 +107,17 @@ export function teamStoreOn(owner: Client): TeamStore {
     standing: (claims, ticketPrint) => acting(claims, () => readTeamStanding(tx, ticketPrint)),
     accept: (claims, ticketPrint, factorId, handoffPrint) =>
       acting(claims, async () => acceptAnswerOf(await acceptInvitation(tx, ticketPrint, factorId, handoffPrint))),
+    roster: (claims) => acting(claims, () => readTeamRoster(tx)),
+    invite: (claims, email, capabilities) =>
+      acting(claims, async () => answerOf(INVITE_ANSWERS, await askInvite(tx, email, capabilities))),
+    revokeInvitation: (claims, invitationId) =>
+      acting(claims, async () => answerOf(REVOKE_INVITATION_ANSWERS, await askRevokeInvitation(tx, invitationId))),
+    grant: (claims, profileId, capability) =>
+      acting(claims, async () => answerOf(GRANT_ANSWERS, await askGrant(tx, profileId, capability))),
+    revoke: (claims, profileId, capability) =>
+      acting(claims, async () => answerOf(REVOKE_ANSWERS, await askRevoke(tx, profileId, capability))),
+    resetFactor: (claims, profileId, handoff) =>
+      acting(claims, async () => answerOf(RESET_ANSWERS, await askReset(tx, profileId, handoff))),
   };
 }
 
@@ -107,14 +137,21 @@ export interface StandingQuestion {
  * candado de fila del perfil, y la invitación sin confirmar lo tendría tomado. Lo que la
  * base contesta de verdad con una invitación viva se prueba en `34-equipo-servicios`.
  */
-export function answeringStore(standing: TeamStanding | "throws"): { teamStore: TeamStore; asked: StandingQuestion[] } {
+export function answeringStore(standing: TeamStanding | "throws"): { teamStore: TeamStore & TeamAdminStore; asked: StandingQuestion[] } {
   const asked: StandingQuestion[] = [];
-  const teamStore: TeamStore = {
+  const never = () => Promise.reject(new Error("Aquí no se cambia ni se lee al equipo."));
+  const teamStore: TeamStore & TeamAdminStore = {
     standing: (claims, ticketPrint) => {
       asked.push({ userId: claims.userId, sessionId: claims.sessionId, aal: claims.aal, ticket: ticketPrint });
       return standing === "throws" ? Promise.reject(new Error("La base no contestó.")) : Promise.resolve(standing);
     },
     accept: () => Promise.reject(new Error("Aquí no se acepta nada.")),
+    roster: never,
+    invite: never,
+    revokeInvitation: never,
+    grant: never,
+    revoke: never,
+    resetFactor: never,
   };
   return { teamStore, asked };
 }

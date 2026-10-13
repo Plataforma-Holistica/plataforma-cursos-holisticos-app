@@ -36,6 +36,8 @@ const FAILURES = {
   invitation_not_accepted: "Una invitación de administración no se pudo aceptar después de verificar el segundo factor: esa persona tiene que intentarlo de nuevo. Si se repite, falta un parámetro del segundo factor o la base no contesta.",
   invitation_answer_lost: "Una invitación de administración quedó aceptada, pero la respuesta de la base se perdió o no se entendió: a la persona se le dijo que sí. Si se repite, la base está contestando algo que el servidor no conoce.",
   second_factor_not_removed: "Un segundo factor recién verificado se quedó en una cuenta que no pudo aceptar su invitación: no le da acceso a nada, pero esa cuenta ya no cambia su contraseña desde la pantalla de la cuenta.",
+  team_roster_unavailable: "No se pudo leer la lista del equipo de administración, o llegó sin la fila de quien la pidió: esa persona no pudo ver ni cambiar al equipo.",
+  team_change_unavailable: "Un cambio al equipo de administración se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista. También sale cuando alguien dio bien su código y aun así ningún cambio pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS, y solo lo arregla el dueño de la base.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",

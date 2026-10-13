@@ -69,6 +69,8 @@ describe("reportFailure", () => {
       "invitation_not_accepted",
       "invitation_answer_lost",
       "second_factor_not_removed",
+      "team_roster_unavailable",
+      "team_change_unavailable",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);
     expect(new Set(messages).size).toBe(codes.length);
