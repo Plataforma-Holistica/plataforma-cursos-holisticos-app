@@ -1,11 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { NextRequest } from "next/server";
 import type { Client } from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import * as adapter from "@/adapters/supabase/auth";
 import { readSessionCookie, type CookieJar } from "@/adapters/supabase/auth-cookies";
-import type { TeamStanding } from "@/services/account/account";
+import { proxy } from "@/proxy";
+import { forgetBrowserProofs, type TeamStanding } from "@/services/account/account";
 import { databaseTeamStore } from "@/services/account/team-store";
 
 import { claimedUser, freshOrigin, parameter, testServices } from "./helpers/account";
@@ -29,6 +31,10 @@ const TICKET = "plataforma-resguardo";
 const FACTOR = "plataforma-factor";
 const COOKIE = { httpOnly: true, secure: false, sameSite: "lax", path: "/", maxAge: 3600 } as const;
 const emails: string[] = [];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 afterAll(async () => {
   // El freno de los códigos guarda sus cuentas por factor; las de estas pruebas se van.
@@ -419,6 +425,63 @@ describe("aceptar una invitación configurando el segundo factor", () => {
     });
   });
 
+  it("dos pestañas y un doble envío: la clave de la primera ya no vale y no gasta intentos, y el segundo envío no rompe nada", async () => {
+    const who = await entered();
+    const { person, jar } = who;
+    const secret = withTicket(jar);
+
+    await reverted(async (owner) => {
+      const { auth, logouts } = authAfterAccepting();
+      const services = testServices({ teamStore: teamStoreOn(owner), auth });
+      await asSystem(owner);
+      expect(await answer(owner, "private.system_invite_admin($1, '{support}')", [person.email])).toBe("invited_existing");
+      await asOwner(owner);
+      await proveMailbox(owner, who, secret);
+
+      // La primera pestaña empieza y pinta su clave. La segunda empieza después: el
+      // navegador es el mismo, así que la anotación pasa a ser la del segundo factor.
+      const first = await services.startSecondFactor(jar);
+      const second = await services.startSecondFactor(jar);
+      if (first.kind !== "started" || second.kind !== "started") throw new Error("No empezó en las dos pestañas.");
+      expect(second.factorId).not.toBe(first.factorId);
+      expect(await services.teamStanding(jar)).toMatchObject({ kind: "team", inProgress: second.factorId });
+
+      // En la primera, la persona teclea el código de la clave que tiene delante.
+      expect(await services.confirmSecondFactor(jar, { code: totpCode(first.secret), painted: first.factorId })).toEqual({
+        kind: "start_again",
+      });
+      // No se le preguntó nada a Auth: el freno de ese factor no contó ningún fallo.
+      expect(await ownerQuery("select 1 from private.second_factor_attempts where factor_id = $1", [second.factorId])).toEqual([]);
+      expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal1", factor: null }]);
+      // Y la segunda pestaña sigue valiendo.
+      expect(jar.get(FACTOR)).toBe(`${who.sessionId}.${second.factorId}`);
+
+      // En la segunda, con su clave, acepta. El navegador manda el formulario dos veces: la
+      // copia es lo que el segundo envío traía antes de que el primero contestara.
+      const twin = jar.copy();
+      expect(await services.confirmSecondFactor(jar, { code: totpCode(second.secret), painted: second.factorId })).toEqual({ kind: "accepted" });
+      expect((await teamOf(owner, person.id)).factor).toBe(second.factorId);
+
+      // El segundo envío encuentra a la persona ya atada al factor de ese navegador: se le
+      // contesta lo mismo, sin verificar otra vez ni quitarle nada.
+      expect(await services.confirmSecondFactor(twin, { code: totpCode(second.secret), painted: second.factorId })).toEqual({ kind: "accepted" });
+      expect(twin.get(SESSION)).toBeUndefined();
+      expect(twin.get(TICKET)).toBeUndefined();
+      expect(twin.get(FACTOR)).toBeUndefined();
+      expect(logouts).toHaveLength(2);
+      expect(await teamOf(owner, person.id)).toMatchObject({
+        factor: second.factorId,
+        capabilities: [{ capability: "support", by: null }],
+        invitations: [{ kind: "grant", accepted: true, revoked: false, failures: 0 }],
+      });
+      const left = await owner.query<{ id: string; status: string }>("select id::text as id, status::text as status from auth.mfa_factors where user_id = $1", [
+        person.id,
+      ]);
+      expect(left.rows).toEqual([{ id: second.factorId, status: "verified" }]);
+      expect(services.reported).toEqual([]);
+    });
+  });
+
   it("si la sesión queda verificada con otro factor justo antes de aceptar, la base no ata ninguno", async () => {
     const who = await entered();
     const { person, jar } = who;
@@ -550,7 +613,73 @@ describe("dar el código al entrar", () => {
   });
 });
 
+describe("el paso previo renueva la sesión y, en esa misma petición, la acción da el código", () => {
+  it("la cookie que la acción recibe es la renovada, verificar la reescribe otra vez, y la sesión queda de equipo", async () => {
+    const person = await completed();
+    const factor = await secondFactorFor(person);
+    const who = await entered(person);
+    const before = who.jar.get(SESSION) ?? "";
+
+    await reverted(async (owner) => {
+      const services = testServices({ teamStore: teamStoreOn(owner) });
+      await asSystem(owner);
+      await owner.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'config')", [person.id]);
+      await owner.query("insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, $3)", [
+        person.id,
+        factor.factorId,
+        person.email.toLowerCase(),
+      ]);
+      await asOwner(owner);
+
+      // Catorce minutos después el token está por vencer: el paso previo lo renueva antes de
+      // que corra la acción, y le pasa a la petición la cookie nueva.
+      const real = Date.now.bind(Date);
+      vi.spyOn(Date, "now").mockImplementation(() => real() + 14 * 60_000);
+      const response = await proxy(
+        new NextRequest("http://localhost:3000/entrar/segundo-factor", { method: "POST", headers: { cookie: `${SESSION}=${before}` } }),
+      );
+      vi.restoreAllMocks();
+      const header = response.headers.getSetCookie().find((line) => line.startsWith(`${SESSION}=`)) ?? "";
+      const renewed = header.split("; ")[0]?.slice(SESSION.length + 1) ?? "";
+      expect(renewed).not.toBe("");
+      expect(renewed).not.toBe(before);
+      expect(response.headers.get("x-middleware-request-cookie")).toBe(`${SESSION}=${renewed}`);
+
+      // La acción trabaja sobre lo que el paso previo dejó en la petición.
+      const jar = memoryJar(new Map([[SESSION, renewed]]));
+      expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
+
+      // Tercera cookie en la misma petición: la de la sesión ya en segundo nivel. Es la
+      // última que se escribe, y es la que se queda en el navegador.
+      const verified = jar.get(SESSION) ?? "";
+      expect(verified).not.toBe(renewed);
+      expect(await adapter.readSession(jar)).toMatchObject({ kind: "session", claims: { sessionId: who.sessionId, aal: "aal2" } });
+      expect(await sessionsOf(person.id)).toEqual([{ id: who.sessionId, aal: "aal2", factor: factor.factorId }]);
+      expect(await services.teamStanding(jar)).toMatchObject({ kind: "team", standing: { state: "member", capabilities: ["config"] } });
+      expect(services.reported).toEqual([]);
+    });
+  });
+});
+
 describe("el resguardo, cuando se cierra la sesión de ese navegador", () => {
+  it("salir de ese navegador porque la persona lo pidió se lleva el resguardo y el factor a medias, y nada más", async () => {
+    const { jar, sessionId } = await entered();
+    withTicket(jar);
+    jar.set(FACTOR, `${sessionId}.fa000000-0000-4000-8000-000000000001`, COOKIE);
+    const session = jar.get(SESSION);
+
+    forgetBrowserProofs(jar);
+
+    expect(jar.get(TICKET)).toBeUndefined();
+    expect(jar.get(FACTOR)).toBeUndefined();
+    // Cerrar la sesión es otro paso, de quien la llama.
+    expect(jar.get(SESSION)).toBe(session);
+    // Sin nada que llevarse no escribe nada.
+    const empty = memoryJar();
+    forgetBrowserProofs(empty);
+    expect(empty.writes).toEqual([]);
+  });
+
   // Recuperar la contraseña deja el resguardo y, en la misma respuesta, cierra la sesión que
   // ese navegador tuviera. Si cerrar una sesión se lo llevara, nadie con sesión abierta
   // podría probar su buzón. Que «Salir» sí se lo lleve llega con las pantallas, como un

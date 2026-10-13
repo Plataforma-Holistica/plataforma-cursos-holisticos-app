@@ -20,9 +20,12 @@ const NOTICES: Partial<Record<Notice, string>> = {
   password_changed: text.signIn.noticePasswordChanged,
   password_unconfirmed: text.signIn.noticePasswordUnconfirmed,
   account_ready: text.signIn.noticeAccountReady,
+  second_factor_ready: text.signIn.noticeSecondFactorReady,
+  second_factor_throttled: text.signIn.noticeSecondFactorThrottled,
+  session_ended: text.signIn.noticeSessionEnded,
 };
 // Los que no dicen que algo salió bien.
-const WARNINGS: ReadonlySet<Notice> = new Set<Notice>(["password_unconfirmed"]);
+const WARNINGS: ReadonlySet<Notice> = new Set<Notice>(["password_unconfirmed", "second_factor_throttled", "session_ended"]);
 
 type Params = Record<string, string | string[] | undefined>;
 

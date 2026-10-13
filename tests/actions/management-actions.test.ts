@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     closeOtherSessions: logged("closeOtherSessions", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     changePassword: logged("changePassword", () => Promise.resolve<unknown>({ kind: "unavailable" })),
     signOut: logged("signOut", () => Promise.resolve("closed")),
+    forgetBrowserProofs: logged("forgetBrowserProofs", () => undefined),
     leaveNotice: logged("leaveNotice", () => undefined),
     refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
@@ -36,6 +37,7 @@ vi.mock("@/services/account/account", () => ({
   closeOtherSessions: mocks.closeOtherSessions,
   changePassword: mocks.changePassword,
   signOut: mocks.signOut,
+  forgetBrowserProofs: mocks.forgetBrowserProofs,
 }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -196,8 +198,10 @@ describe("cerrar sesiones (PA-25)", () => {
   it("la sesión propia, mandada por aquí: se cierra con su cookie y se va a la portada", async () => {
     once("closeSession", { kind: "current" });
     await expect(closeSessionsAction(IDLE, closeForm(ID))).rejects.toThrow("redirige a /");
-    expect(calls.order).toEqual(["closeSession", "signOut", "redirect"]);
+    // Es salir de ese navegador: se lleva también el resguardo del buzón y el factor a medias.
+    expect(calls.order).toEqual(["closeSession", "signOut", "forgetBrowserProofs", "redirect"]);
     expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(mocks.forgetBrowserProofs).toHaveBeenCalledExactlyOnceWith(jar);
     expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith("/");
   });
 
@@ -214,6 +218,7 @@ describe("cerrar sesiones (PA-25)", () => {
   });
 
   it("una sesión que la guarda rechaza se cierra, deja su aviso y solo entonces se va", async () => {
+    // Sin llevarse las pruebas del navegador: es la sesión que quedó de antes de probar el buzón.
     once("closeOtherSessions", { kind: "session", check: { kind: "must_sign_out", then: "recover" } });
     await expect(closeSessionsAction(IDLE, closeForm("others"))).rejects.toThrow("redirige a /recuperar");
     expect(calls.order).toEqual(["closeOtherSessions", "signOut", "leaveNotice", "redirect"]);

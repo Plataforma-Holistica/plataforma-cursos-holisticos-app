@@ -129,7 +129,8 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   },
   "src/app/(cuenta)/_lib/session-actions.ts": {
     // Salir: solo usa la cookie de quien pide.
-    signOutAction: /await signOut\(await cookieJar\(\)\)/,
+    // Cierra la sesión y, con el mismo tarro, se lleva las pruebas de ese navegador.
+    signOutAction: /const jar = await cookieJar\(\);\s+await signOut\(jar\);\s+forgetBrowserProofs\(jar\);/,
   },
 };
 
@@ -354,6 +355,7 @@ describe("lo que viaja al navegador", () => {
       "src/domain/access/display-name.ts",
       "src/domain/access/email.ts",
       "src/domain/access/password-policy.ts",
+      "src/domain/access/second-factor-code.ts",
       "src/services/account/field-rules.ts",
     ]);
     expect([...reached.packages]).toEqual([]);

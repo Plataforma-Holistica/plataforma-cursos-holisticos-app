@@ -461,3 +461,39 @@ for (const javaScriptEnabled of [true, false]) {
   });
 }
 
+
+for (const javaScriptEnabled of [true, false]) {
+  test(`«Salir» se lleva el resguardo del buzón de ese navegador (${javaScriptEnabled ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const ana = await person();
+    const context = await browser.newContext({ javaScriptEnabled });
+    try {
+      const page = await context.newPage();
+      const cookie = async (name: string) => (await context.cookies()).find((each) => each.name === name);
+      const token = await recoveryLink(page, ana.email);
+      await page.goto(`/recuperar/${token}`);
+      await savePassword(page, NEW_PASSWORD);
+      await expect(page).toHaveURL("/entrar");
+      await expect(page.getByText(CHANGED)).toBeVisible();
+      const ticket = await cookie("plataforma-resguardo");
+      expect(ticket?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+      // Entrar no se lo lleva: es con lo que después se acepta una invitación.
+      await page.getByLabel("Correo").fill(ana.email);
+      await page.getByLabel("Contraseña", { exact: true }).fill(NEW_PASSWORD);
+      await page.getByRole("button", { name: "Entrar" }).click();
+      await expect(page).toHaveURL("/inicio");
+      expect((await cookie("plataforma-resguardo"))?.value).toBe(ticket?.value);
+
+      // Salir, sí: quien sale ya no está en ese navegador.
+      await page.getByRole("button", { name: "Salir" }).click();
+      await expect(page).toHaveURL("/");
+      expect(await cookie("plataforma-resguardo")).toBeUndefined();
+      expect(await cookie(SESSION_COOKIE)).toBeUndefined();
+      expect(await sessionCount(ana.id)).toBe(0);
+      // El aviso «tu contraseña cambió» también llega: se espera antes de terminar.
+      await waitForMails(ana.email, 2);
+    } finally {
+      await context.close();
+    }
+  });
+}

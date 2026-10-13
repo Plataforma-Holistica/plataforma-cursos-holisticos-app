@@ -184,6 +184,15 @@ describe("la página de entrar", () => {
       "No pudimos confirmar si tu contraseña cambió, y cerramos todas tus sesiones. Entra con la nueva; si no funciona, usa la de antes.",
       "Aviso:",
     ],
+    // Aceptó su invitación: su sesión se cerró, y entra de nuevo dando su código.
+    ["second_factor_ready", "Tu segundo factor quedó configurado. Entra con tu contraseña y escribe el código de tu aplicación.", "Listo:"],
+    // Que el freno le cerró las sesiones, o que la sesión se cerró en otro lado, no son buenas noticias.
+    [
+      "second_factor_throttled",
+      "Hubo demasiados códigos equivocados y cerramos tus sesiones. Espera unos minutos y entra de nuevo. Si no fuiste tú, recupera tu contraseña desde tu correo.",
+      "Aviso:",
+    ],
+    ["session_ended", "Tu sesión se cerró. Entra de nuevo para continuar.", "Aviso:"],
   ])("el aviso %s se pinta con su texto y con su tono", async (notice, message, tone) => {
     mocks.readNotice.mockReturnValue(notice);
     render(await SignInPage(query({})));

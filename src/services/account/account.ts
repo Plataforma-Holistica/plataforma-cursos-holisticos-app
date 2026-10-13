@@ -28,9 +28,10 @@ import {
   type SignInResult,
 } from "./admission";
 import { stagingJar, type AccountDependencies } from "./deps";
+import { dropEnrolledFactor } from "./enrolled-factor";
 import { buckets, fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
-import { MAILBOX_TICKET_MAX_AGE_LIMIT } from "./mailbox-ticket";
+import { dropTicket, MAILBOX_TICKET_MAX_AGE_LIMIT } from "./mailbox-ticket";
 import { createManagement } from "./management";
 import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
@@ -94,6 +95,20 @@ export type { Browser, Device, System } from "@/domain/access/user-agent";
 export { isLinkToken } from "@/adapters/supabase/tokens";
 
 const utf8 = new TextEncoder();
+
+/**
+ * Se lleva de ese navegador el resguardo del buzón y el factor a medias. Lo llama quien
+ * saca a la persona de ese navegador porque ella lo pidió: «Salir», y cerrar la sesión
+ * propia desde la cuenta. El resguardo es lo que distingue a quien abrió el correo de quien
+ * solo sabe la contraseña: si se quedara, en un equipo compartido le serviría al siguiente.
+ *
+ * No va dentro de `signOut`: completar una recuperación deja el resguardo y, en la misma
+ * respuesta, cierra por ahí la sesión que ese navegador tuviera.
+ */
+export function forgetBrowserProofs(jar: CookieJar): void {
+  dropTicket(jar);
+  dropEnrolledFactor(jar);
+}
 
 export function createAccountServices(overrides: Partial<AccountDependencies> = {}) {
   const deps: AccountDependencies = {

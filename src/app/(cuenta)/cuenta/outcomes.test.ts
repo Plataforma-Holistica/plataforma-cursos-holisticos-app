@@ -181,7 +181,14 @@ describe("qué se hace con lo que contesta el servicio al cerrar sesiones", () =
   });
 
   it("la sesión propia, mandada por aquí: se cierra por el camino que borra la cookie, y a la portada", () => {
-    expect(closeSessionOutcome({ kind: "current" })).toEqual({ kind: "redirect", to: "/", notice: null, closeSession: true });
+    // Es salir de ese navegador: se lleva también el resguardo del buzón y el factor a medias.
+    expect(closeSessionOutcome({ kind: "current" })).toEqual({
+      kind: "redirect",
+      to: "/",
+      notice: null,
+      closeSession: true,
+      forgetProofs: true,
+    });
   });
 
   it("no se supo: lo dice, y no se va a ningún lado", () => {
