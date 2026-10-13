@@ -7,9 +7,12 @@ import {
   requiresSession,
   resolveDestination,
   RETURN_PARAM,
+  returnsOutsideAdmin,
   ROUTES,
+  secondFactorPath,
   SESSION_ROUTES,
   signInPath,
+  teamDestination,
 } from "./navigation";
 
 const returnOf = (path: string) => new URL(path, "https://plataforma.example").searchParams.get(RETURN_PARAM);
@@ -23,6 +26,17 @@ describe("qué rutas piden sesión", () => {
     ["/cuenta", true],
     ["/cuenta/datos", true],
     ["/cuentas", false],
+    // Administración, y lo que cuelgue de ella.
+    ["/admin", true],
+    ["/admin/equipo", true],
+    ["/admin/no-existe/tampoco", true],
+    ["/administrar", false],
+    ["/admin.html", false],
+    // Las dos pantallas del segundo factor piden sesión, aunque cuelguen de la de entrar.
+    ["/entrar/segundo-factor", true],
+    ["/entrar/segundo-factor/configurar", true],
+    ["/entrar/segundo-factores", false],
+    ["/entrar/otra", false],
     ["/iniciox", false],
     ["/inicio.html", false],
     ["/", false],
@@ -61,6 +75,9 @@ describe("a dónde se va después de entrar", () => {
     ["/inicio#seccion", "/inicio"],
     ["/cuenta", "/cuenta"],
     ["/cuenta?bloque=nombre", "/cuenta?bloque=nombre"],
+    ["/admin", "/admin"],
+    ["/admin/equipo", "/admin/equipo"],
+    ["/admin/equipo?pagina=2", "/admin/equipo?pagina=2"],
   ])("un destino permitido se respeta: %s", (input, expected) => {
     expect(resolveDestination(input)).toBe(expected);
   });
@@ -79,6 +96,12 @@ describe("a dónde se va después de entrar", () => {
     "/iniciox",
     "/cuentas",
     "/cuenta/../entrar",
+    "/administrar",
+    "/admin/../entrar",
+    "/admin//otro.example",
+    // Las pantallas del segundo factor son de paso: volver a ellas daría vueltas.
+    "/entrar/segundo-factor",
+    "/entrar/segundo-factor/configurar",
     // Rutas propias que no son destino: volver a ellas daría vueltas o no llevaría a nada.
     "/entrar",
     "/registro",
@@ -117,7 +140,7 @@ describe("mandar a entrar o a completar la cuenta, con el destino guardado", () 
     const segment = fc.stringMatching(/^[A-Za-z0-9_~-]{1,8}$/);
     const query = fc.stringMatching(/^[A-Za-z0-9_.~=&+-]{0,12}$/);
     fc.assert(
-      fc.property(fc.constantFrom("/inicio", "/cuenta"), fc.array(segment, { maxLength: 3 }), query, (root, segments, search) => {
+      fc.property(fc.constantFrom("/inicio", "/cuenta", "/admin"), fc.array(segment, { maxLength: 3 }), query, (root, segments, search) => {
         const target = [root, ...segments].join("/") + (search === "" ? "" : `?${search}`);
         expect(resolveDestination(returnOf(signInPath(target)))).toBe(target);
         expect(resolveDestination(returnOf(consentsPath(target)))).toBe(target);
@@ -129,11 +152,72 @@ describe("mandar a entrar o a completar la cuenta, con el destino guardado", () 
     fc.assert(
       fc.property(fc.string(), (input) => {
         const destination = resolveDestination(input);
-        // Solo las dos pantallas a las que se puede volver, o lo que cuelga de ellas.
-        expect(destination).toMatch(/^\/(inicio|cuenta)(?:[/?]|$)/);
+        // Solo las tres pantallas a las que se puede volver, o lo que cuelga de ellas.
+        expect(destination).toMatch(/^\/(inicio|cuenta|admin)(?:[/?]|$)/);
         expect(new URL(destination, "https://plataforma.example").origin).toBe("https://plataforma.example");
         expect(new URL(signInPath(input), "https://plataforma.example").pathname).toBe("/entrar");
       }),
     );
+  });
+});
+
+describe("a dónde va quien es del equipo", () => {
+  it("las pantallas del segundo factor y administración tienen su ruta", () => {
+    expect(ROUTES.secondFactor).toBe("/entrar/segundo-factor");
+    expect(ROUTES.factorSetup).toBe("/entrar/segundo-factor/configurar");
+    expect(ROUTES.admin).toBe("/admin");
+  });
+
+  it("a dar el código se va guardando a dónde se quería ir", () => {
+    expect(secondFactorPath("/admin")).toBe("/entrar/segundo-factor?volver=%2Fadmin");
+    expect(secondFactorPath("/admin/equipo?pagina=2")).toBe("/entrar/segundo-factor?volver=%2Fadmin%2Fequipo%3Fpagina%3D2");
+    expect(secondFactorPath("/cuenta")).toBe("/entrar/segundo-factor?volver=%2Fcuenta");
+  });
+
+  it.each(["//otro.example", "/entrar", "/entrar/segundo-factor", "/consentimientos", "", null, undefined])(
+    "un destino que no vale no se guarda al ir a dar el código: %s",
+    (target) => {
+      expect(secondFactorPath(target)).toBe("/entrar/segundo-factor");
+    },
+  );
+
+  it("con el código dado se va al destino guardado, y sin uno que valga, a administración", () => {
+    expect(teamDestination("/admin/equipo")).toBe("/admin/equipo");
+    expect(teamDestination("/admin")).toBe("/admin");
+    expect(teamDestination("/cuenta")).toBe("/cuenta");
+    expect(teamDestination("/inicio?pestana=2")).toBe("/inicio?pestana=2");
+    for (const input of [null, undefined, "", "//otro.example", "/entrar", "/entrar/segundo-factor", "/administrar"]) {
+      expect(teamDestination(input)).toBe("/admin");
+    }
+  });
+
+  it("nada de lo que llegue saca de la Plataforma a quien da su código", () => {
+    fc.assert(
+      fc.property(fc.string(), (input) => {
+        expect(teamDestination(input)).toMatch(/^\/(inicio|cuenta|admin)(?:[/?]|$)/);
+        expect(new URL(secondFactorPath(input), "https://plataforma.example").pathname).toBe("/entrar/segundo-factor");
+      }),
+    );
+  });
+
+  it.each([
+    ["/inicio", true],
+    ["/cuenta", true],
+    ["/cuenta?bloque=nombre", true],
+    ["/inicio/algo", true],
+    // Pedir administración no es pedir otra cosa.
+    ["/admin", false],
+    ["/admin/equipo", false],
+    ["/admin?x=1", false],
+    // Lo que no vale como destino tampoco: sin destino, quien es del equipo va a lo suyo.
+    ["/administrar", false],
+    ["/adminx", false],
+    ["//otro.example", false],
+    ["/entrar", false],
+    ["", false],
+    [null, false],
+    [undefined, false],
+  ])("si el destino guardado vale y no es de administración: %s es %s", (input, expected) => {
+    expect(returnsOutsideAdmin(input)).toBe(expected);
   });
 });
