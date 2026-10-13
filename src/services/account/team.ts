@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import { parseSecondFactorCode } from "@/domain/access/second-factor-code";
 
 import type { SessionCheck } from "./admission";
 import type { AccountDependencies } from "./deps";
@@ -70,8 +71,10 @@ export type TeamCheck =
       standing: TeamStanding;
       /**
        * El factor que el servidor dio de alta en ese navegador y en esa sesión, si hay uno a
-       * medias. Es para que la pantalla sepa que ya se empezó y lo mande de vuelta como «lo
-       * que pinté»: no dice que el factor siga existiendo, ni decide nada.
+       * medias. A la pantalla le sirve para saber que ya se empezó y mandarlo de vuelta como
+       * «lo que pinté»; no dice que el factor siga existiendo. Es además el que
+       * `confirmSecondFactor` verifica y le pasa a la base: sale de la cookie del servidor,
+       * nunca de la pantalla.
        */
       inProgress: string | null;
     };
@@ -257,7 +260,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     const handoff = standing.kind === "rebind" ? handoffPrint(input.handoff) : null;
     if (standing.kind === "rebind" && handoff === null) return { kind: "needs_handoff" };
 
-    const verification = await auth.verifyFactor(jar, factorId, input.code);
+    // Un código sin forma no es un intento: no llega a Auth, y no cuenta en su freno.
+    const typed = parseSecondFactorCode(input.code);
+    if (!typed.ok) return { kind: "wrong_code" };
+
+    const verification = await auth.verifyFactor(jar, factorId, typed.code);
     switch (verification.kind) {
       case "verified":
         break;
@@ -360,7 +367,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     const { standing } = team;
     if (standing.state !== "needs_code" && standing.state !== "member") return { kind: "not_member" };
 
-    const verification = await auth.verifyFactor(jar, standing.factor, code);
+    // Un código sin forma no es un intento: no llega a Auth, y no cuenta en su freno.
+    const typed = parseSecondFactorCode(code);
+    if (!typed.ok) return { kind: "wrong_code" };
+
+    const verification = await auth.verifyFactor(jar, standing.factor, typed.code);
     switch (verification.kind) {
       case "verified":
         break;

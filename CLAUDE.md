@@ -397,8 +397,11 @@ falla. Doce precisiones que la tabla no dice:
     cerró en otro lado; la cookie no se borra ahí: la guarda la rechaza en la siguiente
     petición). `removeFactor` quita uno, y uno que ya no está cuenta como quitado.
     `enrollFactor` entrega además el código QR que Auth ya manda hecho (un SVG de unos
-    360 KB, con la clave dentro), solo si es un dibujo y nada más (`qr.ts`); si no, nulo,
-    y el alta vale igual con la clave en texto. Tres
+    360 KB, con la clave dentro), solo si está hecho de lo esperado (`qr.ts`): una lista
+    de permitidos, un `<svg>` con rectángulos y sus atributos de posición, tamaño y
+    relleno. Cualquier otra cosa da nulo, y el alta vale igual con la clave en texto.
+    Si una versión nueva de Auth dibuja distinto, el QR deja de salir y la prueba que lo
+    mide falla: se amplía la lista a la vista. Tres
     cosas medidas contra el Auth local: el nivel es de la sesión y no del token (una copia
     de la cookie de antes de verificar renueva ya en segundo nivel, y con ella se puede
     dar de alta otro factor); al verificar un factor, Auth borra los demás que la cuenta
@@ -626,7 +629,11 @@ falla. Doce precisiones que la tabla no dice:
       de arquitectura exige que no se use para nada más. Y un segundo envío que encuentra
       a la persona ya atada justo al factor anotado en ese navegador se contesta
       `accepted`, con la misma limpieza; sin esa anotación, quien es del equipo recibe
-      `not_invited` y conserva su sesión. En un restablecimiento, sin un código dictado con forma no se verifica ni
+      `not_invited` y conserva su sesión. Esa rama solo corre en una carrera: lo normal
+      es que el segundo envío llegue con la sesión ya cerrada por la base, y la guarda
+      conteste `must_sign_out`. La pantalla lo trata como caso normal. El código pasa
+      por la regla del dominio aquí mismo (`parseSecondFactorCode`): sin forma se
+      contesta `wrong_code` sin preguntarle a Auth. En un restablecimiento, sin un código dictado con forma no se verifica ni
       se le pregunta a la base: un nulo le cuenta como intento fallido
       (`handoffPrint`: sin espacios ni guiones, en mayúsculas, de 8 a 32 letras o dígitos).
       Aceptada, **la persona queda sin sesión**: la de equipo nace después de atar,

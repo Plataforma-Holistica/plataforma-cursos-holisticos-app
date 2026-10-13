@@ -1,9 +1,10 @@
 // El código del segundo factor, como lo teclea o lo pega una persona (RF-106): seis dígitos
 // de su aplicación de códigos.
 //
-// Lo usan el formulario, al salir del campo, y el servidor, antes de preguntarle a Supabase
-// Auth. Un código sin forma no es un intento: no llega a Auth, y por eso no cuenta en el
-// freno de los códigos. Tiene que ser la misma regla en los dos lados.
+// Lo usan el formulario, al salir del campo, y los servicios del equipo, antes de
+// preguntarle a Supabase Auth. Un código sin forma no es un intento: no llega a Auth, y
+// por eso no cuenta en el freno de los códigos. Tiene que ser la misma regla en los dos
+// lados.
 
 export const SECOND_FACTOR_CODE_LENGTH = 6;
 

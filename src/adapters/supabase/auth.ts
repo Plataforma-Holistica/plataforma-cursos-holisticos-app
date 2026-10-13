@@ -203,8 +203,8 @@ const proofs = new WeakMap<object, Proof>();
  * `needs_second_level`: la cuenta ya tiene un factor verificado, y Auth no deja dar de
  * alta otro con una sesión de primer nivel.
  *
- * `qr` es la imagen que Auth entrega con esa misma clave dentro (un SVG), o nulo si no
- * mandó una que solo dibuje (`qr.ts`). Tampoco se guarda: lleva la clave.
+ * `qr` es la imagen que Auth entrega con esa misma clave dentro (un SVG), o nulo si lo
+ * que mandó no está hecho solo de lo esperado (`qr.ts`). Tampoco se guarda: lleva la clave.
  */
 export type FactorEnrollment =
   | { ok: true; factorId: string; secret: string; uri: string; qr: string | null }

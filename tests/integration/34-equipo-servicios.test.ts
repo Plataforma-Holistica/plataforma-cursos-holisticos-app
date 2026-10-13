@@ -613,8 +613,12 @@ describe("dar el código al entrar", () => {
   });
 });
 
-describe("el paso previo renueva la sesión y, en esa misma petición, la acción da el código", () => {
-  it("la cookie que la acción recibe es la renovada, verificar la reescribe otra vez, y la sesión queda de equipo", async () => {
+// Lo que una acción encuentra cuando el paso previo renovó la sesión justo antes: el
+// servicio trabaja sobre la cookie recién rotada. Aquí no hay Next en medio: que la acción
+// reciba esa cookie y que la suya sea la última que llega al navegador se mide en el
+// extremo a extremo de las pantallas.
+describe("dar el código con la sesión que el paso previo acaba de renovar", () => {
+  it("con la cookie renovada verificar funciona, la reescribe otra vez, y la sesión queda de equipo", async () => {
     const person = await completed();
     const factor = await secondFactorFor(person);
     const who = await entered(person);
@@ -649,8 +653,7 @@ describe("el paso previo renueva la sesión y, en esa misma petición, la acció
       const jar = memoryJar(new Map([[SESSION, renewed]]));
       expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
 
-      // Tercera cookie en la misma petición: la de la sesión ya en segundo nivel. Es la
-      // última que se escribe, y es la que se queda en el navegador.
+      // Verificar deja una tercera cookie: la de la sesión ya en segundo nivel.
       const verified = jar.get(SESSION) ?? "";
       expect(verified).not.toBe(renewed);
       expect(await adapter.readSession(jar)).toMatchObject({ kind: "session", claims: { sessionId: who.sessionId, aal: "aal2" } });

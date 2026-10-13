@@ -305,7 +305,7 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     expect(count(team, /\breadEnrolledFactor\(/g)).toBe(1);
     expect(confirm).toMatch(/const factorId = team\.inProgress;/);
     expect(count(confirm, /\bfactorId = /g)).toBe(1);
-    expect(confirm).toMatch(/await auth\.verifyFactor\(jar, factorId, input\.code\)/);
+    expect(confirm).toMatch(/await auth\.verifyFactor\(jar, factorId, typed\.code\)/);
     // Con las claims de la sesión ya subida, no con las de antes de verificar.
     expect(confirm).toMatch(/const \{ claims \} = verification;/);
     expect(confirm).toMatch(/await store\.accept\(claims, ticket, factorId, handoff\)/);
@@ -327,7 +327,7 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
 
   it("al entrar, el código se da contra el factor que dice la base", () => {
     const give = bodyOf("giveSecondFactorCode");
-    expect(give).toMatch(/await auth\.verifyFactor\(jar, standing\.factor, code\)/);
+    expect(give).toMatch(/await auth\.verifyFactor\(jar, standing\.factor, typed\.code\)/);
     expect(count(team, /\.verifyFactor\(/g)).toBe(2);
     expect(give).not.toMatch(/readEnrolledFactor|store\.accept/);
   });

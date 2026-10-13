@@ -281,6 +281,38 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     }
   });
 
+  // La regla del código es una sola, y el servicio la aplica él: no depende de que la
+  // acción se acuerde. Un código sin forma no es un intento, y no llega a Auth.
+  describe("el código, como lo teclea o lo pega una persona", () => {
+    it.each(["123 456", " 123456 ", "123\t456\n"])("%j llega a Auth sin espacios", async (code) => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(), { code })).toEqual({ kind: "accepted" });
+      expect(team.calls).toContain(`verify ${FACTOR} 123456`);
+    });
+
+    it.each(["", "   ", "12345", "1234567", "12a456", "123-456", "１２３４５６"])(
+      "%j no tiene forma de código: se dice que no coincide, sin preguntarle a Auth ni a la base",
+      async (code) => {
+        const team = teamWith();
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code })).toEqual({ kind: "wrong_code" });
+        expect(team.calls).toEqual(["standing aal1 resguardo"]);
+        expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+      },
+    );
+
+    it("lo que no es un texto, tampoco", async () => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(), { code: 123456 as unknown as string })).toEqual({ kind: "wrong_code" });
+      expect(team.auth.verifyFactor).not.toHaveBeenCalled();
+    });
+
+    it("en un restablecimiento, primero se mira el código dictado: sin él no importa cómo venga el otro", async () => {
+      const team = teamWith({ standing: REBIND });
+      expect(await team.confirmSecondFactor(browser(), { code: "12345" })).toEqual({ kind: "needs_handoff" });
+    });
+  });
+
   it("sin el resguardo en este navegador no se verifica ni se acepta, diga lo que diga el estado", async () => {
     // La base no diría «invitada» sin el resguardo: es una segunda barrera, por si lo dijera.
     const team = teamWith({ standing: INVITED });
@@ -661,6 +693,18 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
 });
 
 describe("dar el código al entrar", () => {
+  it.each(["123 456", " 123456 "])("el código %j llega a Auth sin espacios", async (code) => {
+    const team = teamWith({ standing: [{ state: "needs_code", factor: BOUND }, MEMBER] });
+    expect(await team.giveSecondFactorCode(browser(), code)).toEqual({ kind: "verified" });
+    expect(team.calls).toContain(`verify ${BOUND} 123456`);
+  });
+
+  it.each(["", "12345", "1234567", "12a456", "123-456"])("%j no tiene forma de código: no coincide, y no se le pregunta a Auth", async (code) => {
+    const team = teamWith({ standing: { state: "needs_code", factor: BOUND } });
+    expect(await team.giveSecondFactorCode(browser(), code)).toEqual({ kind: "wrong_code" });
+    expect(team.calls).toEqual(["standing aal1 resguardo"]);
+  });
+
   it.each(REFUSALS)("sin sesión que pase (%j) no verifica nada", async (check) => {
     const team = teamWith({ check });
     expect(await team.giveSecondFactorCode(browser(), "123456")).toEqual(check);
