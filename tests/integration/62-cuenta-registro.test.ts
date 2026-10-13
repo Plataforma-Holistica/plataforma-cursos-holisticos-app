@@ -760,7 +760,7 @@ const proofOf = (userId: string) =>
 
 /** Cuánto dice la base que dura, en segundos. */
 async function proofSeconds(): Promise<number> {
-  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds()::integer as seconds");
+  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds(86400) as seconds");
   if (!row) throw new Error("La base no dijo cuánto dura la prueba del buzón.");
   return row.seconds;
 }

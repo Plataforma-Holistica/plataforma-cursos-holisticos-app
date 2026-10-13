@@ -9,7 +9,7 @@
 -- vueltas entre dos pantallas.
 begin;
 \ir _ayuda.psql
-select plan(50);
+select plan(61);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -53,7 +53,7 @@ select ok(
            and not has_function_privilege('anon', f, 'execute')
            and not has_function_privilege('service_role', f, 'execute')),
   'las dos funciones de lectura las ejecuta solo el servidor')
-from unnest(array['private.team_standing(text)', 'private.mailbox_proof_seconds()']) as f;
+from unnest(array['private.team_standing(text)', 'private.mailbox_proof_seconds(integer)']) as f;
 select is_empty('select * from private.schema_violations()', 'private.schema_violations() sigue en cero');
 select pruebas.como_sistema();
 select results_eq(
@@ -95,6 +95,10 @@ update auth.mfa_factors set factor_type = 'totp', phone = null, user_id = 'a0000
 select is(pruebas.estado('c0000000-0000-0000-0000-000000000001'), 'unbound - - []', 'ni si en Auth es de otra cuenta');
 delete from auth.mfa_factors where id = pruebas.factor('c0000000-0000-0000-0000-000000000001');
 select is(pruebas.estado('c0000000-0000-0000-0000-000000000001'), 'unbound - - []', 'ni si ya no existe');
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret)
+values (gen_random_uuid(), 'c0000000-0000-0000-0000-000000000001', 'otro', 'totp', 'verified', now(), now(), 'JBSWY3DPEHPK3PXP');
+select is(pruebas.estado('c0000000-0000-0000-0000-000000000001'), 'unbound - - []', 'aunque la cuenta tenga otro factor verificado: el que cuenta es el atado');
+delete from auth.mfa_factors where user_id = 'c0000000-0000-0000-0000-000000000001';
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select is(left(pruebas.estado('c0000000-0000-0000-0000-000000000001'), 6), 'member', '(de vuelta en su lugar)');
 
@@ -111,6 +115,10 @@ select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella(
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', 'ana'), 'invited_unproven - grant []', 'con el secreto sin su huella, igual');
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'invited - grant [support,content]',
   'con su resguardo: invitada, y entonces sí sus capacidades, en el orden de la invitación');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'invited_unproven - grant []',
+  'si un reclamo posterior sin resguardo lo anuló, ya no vale');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana'));
 
 -- El resguardo vale lo mismo que al aceptar: posterior a la invitación, del mismo correo y reciente.
 select pruebas.como_dueno();
@@ -183,6 +191,22 @@ select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001'),
   'member ' || pruebas.factor('a0000000-0000-0000-0000-000000000001') || ' - [content,support]',
   'y pasa a ser del equipo');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'support')$$), 'revoked', '(se le quita una capacidad)');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'content')$$), 'revoked', '(y la otra)');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001'), 'none - - []',
+  'quien perdió todas sus capacidades vuelve a no ser nadie: su invitación ya aceptada no cuenta');
+-- Atada y sin capacidades: no pasa por las funciones, pero si pasara, aceptar diría que no.
+select pruebas.verificar('a0000000-0000-0000-0000-000000000002');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto')), 'accepted', '(la persona del arranque acepta)');
+select pruebas.como_dueno_sistema();
+update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
+  where profile_id = 'a0000000-0000-0000-0000-000000000002' and capability = 'config';
+insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at)
+values ('grant', 'beto@prueba.test', '{support}', clock_timestamp(), clock_timestamp() + interval '1 day');
+select pruebas.limpiar();
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto-2'));
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto-2')), 'none - - []',
+  'quien conserva una atadura sin capacidades no puede aceptar otra invitación: nada');
 
 -- ---------------------------------------------------------------------------------------
 -- Quien conserva capacidades y perdió su factor atado.
@@ -237,8 +261,18 @@ select is((select count(*)::int from private.admin_invitations i where i.email =
 -- porque cambia, dentro de esta transacción, de dónde salen los parámetros.
 
 select pruebas.como_servicio();
-select is(private.mailbox_proof_seconds(), 3600::bigint, 'la prueba del buzón dura lo que dice su parámetro: 60 minutos');
+select is(private.mailbox_proof_seconds(86400), 3600, 'la prueba del buzón dura lo que dice su parámetro: 60 minutos');
+select is(private.mailbox_proof_seconds(3600), 3600, 'con el tope justo, lo mismo');
+select is(private.mailbox_proof_seconds(600), 600, 'y nunca más que el tope de quien pregunta');
+select is(private.mailbox_proof_seconds(null), null, 'sin tope no hay duración');
+select is(private.mailbox_proof_seconds(0), null, 'ni con un tope que no vale');
 select pruebas.limpiar();
+select pruebas.alta('a0000000-0000-0000-0000-000000000003', 'carla@prueba.test');
+select pruebas.confirmar('a0000000-0000-0000-0000-000000000003');
+select pruebas.como_dueno_sistema();
+select private.system_invite_admin('carla@prueba.test', '{finance}');
+select pruebas.limpiar();
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000003', pruebas.huella('carla'));
 
 create table pruebas.parametro_falso (key text primary key, value jsonb);
 create or replace function private.parameter_value(p_key text, p_at timestamptz default now()) returns jsonb
@@ -254,19 +288,19 @@ as $$
 $$;
 insert into pruebas.parametro_falso values ('VIGENCIA_PRUEBA_BUZON_MINUTOS', null);
 select pruebas.como_servicio();
-select is(private.mailbox_proof_seconds(), null, 'sin el parámetro no hay duración: no lanza');
+select is(private.mailbox_proof_seconds(86400), null, 'sin el parámetro no hay duración: no lanza');
 select pruebas.limpiar();
-select is(pruebas.estado('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto')), 'invited_unproven - grant []',
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000003', pruebas.huella('carla')), 'invited_unproven - grant []',
   'y ningún resguardo vale');
 update pruebas.parametro_falso set value = '"sesenta"';
 select pruebas.como_servicio();
-select is(private.mailbox_proof_seconds(), null, 'con un texto en su lugar, tampoco');
+select is(private.mailbox_proof_seconds(86400), null, 'con un texto en su lugar, tampoco');
 select pruebas.limpiar();
 update pruebas.parametro_falso set value = '2147483647';
 select pruebas.como_servicio();
-select is(private.mailbox_proof_seconds(), 128849018820::bigint, 'y con el entero más grande no se desborda');
+select is(private.mailbox_proof_seconds(86400), 86400, 'y con el entero más grande no se desborda: queda en el tope');
 select pruebas.limpiar();
-select is(pruebas.estado('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto')), 'invited - grant [config]',
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000003', pruebas.huella('carla')), 'invited - grant [finance]',
   'ni al comparar la edad del resguardo');
 
 select pruebas.limpiar();

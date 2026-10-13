@@ -746,7 +746,7 @@ const proofOf = (userId: string) =>
 
 /** Cuánto dice la base que dura, en segundos. */
 async function proofSeconds(): Promise<number> {
-  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds()::integer as seconds");
+  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds(86400) as seconds");
   if (!row) throw new Error("La base no dijo cuánto dura la prueba del buzón.");
   return row.seconds;
 }
@@ -781,6 +781,33 @@ describe("el resguardo del buzón al recuperar la contraseña", () => {
       kind: "done",
     });
     expect(await proofOf(account.id)).toMatchObject([{ print: null, email: account.email }]);
+  });
+
+  it("si la base falla una vez al reclamar, el segundo intento deja el mismo resguardo que quedó en el navegador", async () => {
+    const account = await claimed({ complete: true });
+    const hash = await recoveryLink(account);
+    const jar = memoryJar();
+    const { released } = await holdProfileUntilFirstGivesUp(account.id);
+    try {
+      expect(await testServices().completeRecovery({ tokenHash: hash, password: password() }, freshOrigin(), jar)).toEqual({ kind: "done" });
+    } finally {
+      await released;
+    }
+    const secret = jar.get(TICKET_COOKIE) ?? "";
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(await proofOf(account.id)).toEqual([{ print: printOf(secret), email: account.email, dated: true }]);
+  }, 30_000);
+
+  it("si Auth no guarda la contraseña, no queda resguardo: ni en el navegador ni en la base", async () => {
+    const account = await claimed({ complete: true });
+    const hash = await recoveryLink(account);
+    const broken = testServices({ auth: createAuth({ fetch: failingFetch(/\/auth\/v1\/user$/, networkDown).fetch }) });
+    const jar = memoryJar();
+    expect(await broken.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin(), jar)).toEqual({
+      kind: "request_new_link",
+    });
+    expect(jar.writes).toEqual([]);
+    expect(await proofOf(account.id)).toMatchObject([{ print: null }]);
   });
 
   it("una recuperación que no termina no deja resguardo ni toca el que había", async () => {

@@ -208,12 +208,7 @@ const proofRow = z.object({ seconds: z.number().int().nullable() });
  * puede depender que alguien termine su registro o recupere su contraseña.
  */
 export async function mailboxProofSeconds(tx: Tx, limit: number): Promise<number | null> {
-  const [row] = await tx.query(
-    sql`select (select least(v.seconds, ${limit}::bigint)::integer
-                from (select private.mailbox_proof_seconds() as seconds) as v
-                where v.seconds is not null) as seconds`,
-    proofRow,
-  );
+  const [row] = await tx.query(sql`select private.mailbox_proof_seconds(${limit}::integer) as seconds`, proofRow);
   return row?.seconds ?? null;
 }
 

@@ -15,15 +15,24 @@
 -- la marca de contraseña: eso lo decide la guarda de sesión, que corre antes.
 
 -- ---------------------------------------------------------------------------------------
--- Cuánto vive el resguardo del buzón, en segundos, para la cookie que lo guarda. Nulo si
--- falta el parámetro o no vale: el servidor entonces no deja cookie, y el registro o la
--- recuperación terminan igual. El servidor no ejecuta private.second_factor_limit().
+-- Cuánto vive el resguardo del buzón, en segundos, para la cookie que lo guarda, con el
+-- tope que diga quien pregunta. Nulo si falta el parámetro o no vale, o si no se dice un
+-- tope: el servidor entonces no deja cookie, y el registro o la recuperación terminan
+-- igual. Nunca lanza: de esto no puede depender que alguien termine de registrarse. El
+-- tope va aquí y no en quien llama, porque sin él un parámetro enorme no cabría en el
+-- entero que se devuelve. El servidor no ejecuta private.second_factor_limit().
 
-create function private.mailbox_proof_seconds() returns bigint
+create function private.mailbox_proof_seconds(p_limit integer) returns integer
 language sql stable security definer set search_path = ''
-as $$ select private.second_factor_limit('VIGENCIA_PRUEBA_BUZON_MINUTOS')::bigint * 60 $$;
+as $$
+  select case
+    when v.minutes is null or p_limit is null or p_limit < 1 then null
+    else least(v.minutes::bigint * 60, p_limit::bigint)::integer
+  end
+  from (select private.second_factor_limit('VIGENCIA_PRUEBA_BUZON_MINUTOS') as minutes) as v
+$$;
 
-grant execute on function private.mailbox_proof_seconds() to app_service;
+grant execute on function private.mailbox_proof_seconds(integer) to app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- El estado. Siempre una fila.
