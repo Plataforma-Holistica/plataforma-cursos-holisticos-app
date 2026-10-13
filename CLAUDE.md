@@ -385,10 +385,14 @@ falla. Doce precisiones que la tabla no dice:
     escribe la cookie con los tokens que Auth entrega, después de comprobar que son de la
     misma cuenta y de la misma sesión. Distingue `wrong_code`, `throttled` (el gancho
     rechazó: Auth ya cerró todas las sesiones de la cuenta, y la cookie se borra; es el
-    único código de esa lista con el que se le cierra la sesión a alguien) y `factor_gone`
-    (ya no existe: toca empezar de nuevo, no reintentar). `removeFactor` quita uno, y uno
-    que ya no está cuenta como quitado. El nivel es de la sesión y no del token: una copia
-    de la cookie de antes de verificar renueva ya en segundo nivel (medido).
+    único código de esa lista con el que se le cierra la sesión a alguien), `factor_gone`
+    (ya no existe: toca empezar de nuevo, no reintentar) y `no_session` (la sesión se
+    cerró en otro lado; la cookie no se borra ahí: la guarda la rechaza en la siguiente
+    petición). `removeFactor` quita uno, y uno que ya no está cuenta como quitado. Tres
+    cosas medidas contra el Auth local: el nivel es de la sesión y no del token (una copia
+    de la cookie de antes de verificar renueva ya en segundo nivel, y con ella se puede
+    dar de alta otro factor); al verificar un factor, Auth borra los demás que la cuenta
+    tenía sin verificar; y con una sesión cerrada contesta `session_not_found`.
   - `createAuth({ fetch, now })` existe para las pruebas. El código de la aplicación usa
     las funciones ya armadas.
 - **Los servicios de cuenta viven en `src/services/account/`** (TRD §9.2). `account.ts`
@@ -603,16 +607,24 @@ falla. Doce precisiones que la tabla no dice:
       que se ate. En un restablecimiento, sin un código dictado con forma no se verifica ni
       se le pregunta a la base: un nulo le cuenta como intento fallido
       (`handoffPrint`: sin espacios ni guiones, en mayúsculas, de 8 a 32 letras o dígitos).
-      Aceptada, **la sesión se cierra**: la de equipo nace después de atar, entrando de
-      nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía antes de
-      la atadura, y una copia de su cookie tendría un código reciente. Con un no terminal
-      de la base (`no_invitation`, `already_bound`, `inviter_lost_config`, `ineligible`,
-      `needs_mailbox_proof`) el factor recién verificado se quita; con `needs_handoff` se
-      queda, para el siguiente intento. Ante `no_invitation` o `already_bound` se vuelve a
-      leer el estado antes de quitar nada: si ya tiene su atadura (`member` o
-      `needs_code`), fue un doble envío y se contesta `accepted`, pase o no esa sesión la
-      puerta. El factor de ese navegador puede ser justo el que quedó atado, y quitarlo
-      dejaría a la persona sin con qué entrar.
+      Aceptada, **la sesión se manda cerrar**: la de equipo nace después de atar, entrando
+      de nuevo y dando el código. Si no, la sesión que se vuelve de equipo existía antes de
+      la atadura, y una copia de su cookie tendría un código reciente. Cerrarla es un paso
+      aparte, que depende de Auth: si falla, se aceptó igual y queda dicho
+      (`session_not_closed`). Con un no terminal de la base (`no_invitation`,
+      `already_bound`, `inviter_lost_config`, `ineligible`, `needs_mailbox_proof`) el
+      factor recién verificado se quita. **Pero nunca sin releer antes el estado.** Solo
+      `accepted` y las dos que dicen que falta configuración (`needs_code`,
+      `unavailable`) se toman tal cual; con cualquier otra respuesta, y también si aceptar
+      no contestó (la transacción pudo confirmarse y perderse su respuesta), se vuelve a
+      leer. Si la persona ya tiene su atadura (`member` o `needs_code`), se aceptó en otro
+      envío o se perdió la respuesta: se contesta `accepted`, pase o no esa sesión la
+      puerta, porque el factor de ese navegador puede ser justo el que quedó atado y
+      quitarlo la dejaría sin con qué entrar (si la respuesta se perdió, queda dicho:
+      `invitation_answer_lost`). Con `needs_handoff`, si la invitación ya no existe (el
+      fallo que llega al límite la revoca, y la base contesta lo mismo), el factor se
+      quita y se contesta `not_invited`; si sigue viva, se queda para el siguiente
+      intento. Y si al volver a leer no se supo, nada se quita.
     - `giveSecondFactorCode(jar, code)` es dar el código al entrar, o darlo otra vez para
       un cambio al equipo que lo pide reciente. El factor es el que dice la base
       (`standing.factor`). Después de verificar vuelve a leer el estado: si no quedó

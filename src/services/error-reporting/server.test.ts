@@ -67,6 +67,7 @@ describe("reportFailure", () => {
       "mailbox_ticket_not_kept",
       "team_unavailable",
       "invitation_not_accepted",
+      "invitation_answer_lost",
       "second_factor_not_removed",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);

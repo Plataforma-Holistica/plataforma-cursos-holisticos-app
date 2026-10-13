@@ -286,7 +286,8 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     expect(namingInCode(/\bcreateEnrolledFactors\b/)).toEqual(["src/services/account/enrolled-factor.ts"]);
     expect(namingInCode(/\bkeepEnrolledFactor\b/)).toEqual(["src/services/account/enrolled-factor.ts", "src/services/account/team.ts"]);
     expect(count(team, /\bkeepEnrolledFactor\(/g)).toBe(1);
-    expect(bodyOf("startSecondFactor")).toMatch(/keepEnrolledFactor\(jar, sessionId, enrolled\.factorId\)/);
+    // Con la sesión que pasó la guarda y el factor que Auth acaba de devolver.
+    expect(bodyOf("startSecondFactor")).toMatch(/keepEnrolledFactor\(jar, team\.claims\.sessionId \?\? "", enrolled\.factorId\)/);
     // Dar de alta un factor solo lo pide ese servicio.
     expect(namingInCode(/\benrollFactor\b/)).toEqual([
       "src/adapters/supabase/auth.ts",

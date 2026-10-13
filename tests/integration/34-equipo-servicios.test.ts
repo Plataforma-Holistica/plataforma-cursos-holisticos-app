@@ -1,13 +1,14 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import type { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { enrollFactor, readSession, verifyFactor } from "@/adapters/supabase/auth";
+import * as adapter from "@/adapters/supabase/auth";
+import { readSessionCookie, type CookieJar } from "@/adapters/supabase/auth-cookies";
 import type { TeamStanding } from "@/services/account/account";
 import { databaseTeamStore } from "@/services/account/team-store";
 
-import { claimedUser, freshOrigin, testServices } from "./helpers/account";
+import { claimedUser, freshOrigin, parameter, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor, sessionCount, type KnownUser, type MemoryJar } from "./helpers/auth";
 import { answer, asOwner, asServer, asSystem, print, reverted, teamStoreOn } from "./helpers/team";
 import { totpCode, wrongCode } from "./helpers/totp";
@@ -77,6 +78,38 @@ async function proveMailbox(owner: Client, who: Entered, secret: string): Promis
   expect(await answer(owner, "private.claim_account($1)", [print(secret)])).toBe("already_claimed");
   await asOwner(owner);
   await owner.query("insert into private.app_sessions (session_id, profile_id) values ($1, $2)", [who.sessionId, who.person.id]);
+}
+
+/**
+ * Alguien con una copia de esa sesión le habla directo a Auth, sin pasar por la aplicación.
+ * Lo que Auth le devuelva no llega al navegador de la persona: su cookie sigue como estaba.
+ */
+async function outside(jar: MemoryJar, path: string, body: unknown): Promise<Record<string, unknown>> {
+  const cookie = readSessionCookie(jar, false);
+  if (cookie.kind !== "tokens") throw new Error("El tarro de prueba no trae una sesión.");
+  const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1${path}`, {
+    method: "POST",
+    headers: {
+      apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
+      authorization: `Bearer ${cookie.tokens.accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const answered = (await response.json()) as Record<string, unknown>;
+  if (!response.ok) throw new Error(`Auth rechazó ${path}: ${String(answered.code ?? response.status)}`);
+  return answered;
+}
+
+/** Da de alta y verifica un factor propio por fuera: la sesión queda en segundo nivel con él. */
+async function outsideFactor(jar: MemoryJar | CookieJar): Promise<{ factorId: string; secret: string }> {
+  const memory = jar as MemoryJar;
+  const factor = await outside(memory, "/factors", { factor_type: "totp", friendly_name: `fuera-${randomUUID()}` });
+  const factorId = String(factor.id);
+  const secret = String((factor.totp as { secret?: unknown } | undefined)?.secret);
+  const challenge = await outside(memory, `/factors/${factorId}/challenge`, {});
+  await outside(memory, `/factors/${factorId}/verify`, { challenge_id: challenge.id, code: totpCode(secret) });
+  return { factorId, secret };
 }
 
 const factorsOf = (userId: string) =>
@@ -297,7 +330,7 @@ describe("aceptar una invitación configurando el segundo factor", () => {
     });
   });
 
-  it("un factor verificado por fuera no es el que se ata: se ata el que el servidor dio de alta, o ninguno", async () => {
+  it("un factor verificado por fuera no es el que se ata, y el camino del servidor no lo toma", async () => {
     const who = await entered();
     const { person, jar } = who;
     const secret = withTicket(jar);
@@ -312,30 +345,121 @@ describe("aceptar una invitación configurando el segundo factor", () => {
       const started = await services.startSecondFactor(jar);
       if (started.kind !== "started") throw new Error(`No empezó: ${started.kind}`);
 
-      // Alguien con esa sesión habla directo con Auth: da de alta otro factor y lo verifica.
-      // Auth, al verificarlo, borra el que el servidor había dado de alta.
-      const outside = await enrollFactor(jar);
-      if (!outside.ok) throw new Error(`El factor de fuera no se dio de alta: ${outside.reason}`);
-      expect((await verifyFactor(jar, outside.factorId, totpCode(outside.secret))).kind).toBe("verified");
-      expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal2", factor: outside.factorId }]);
+      // Alguien con una copia de esa sesión habla directo con Auth, sin pasar por la
+      // aplicación: da de alta su propio factor y lo verifica. La sesión queda en segundo
+      // nivel con ese factor, y Auth borra el que estaba a medias (medido aquí).
+      const theirs = await outsideFactor(jar);
+      expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal2", factor: theirs.factorId }]);
+      expect(await factorsOf(person.id)).toEqual([{ id: theirs.factorId, status: "verified" }]);
 
-      // La sesión está en segundo nivel con un código reciente, pero de otro factor: el
-      // servidor verifica el suyo, que ya no existe, y no le pregunta nada a la base.
-      expect(await services.confirmSecondFactor(jar, { code: totpCode(outside.secret) })).toEqual({ kind: "start_again" });
+      // El servidor verifica el factor que él anotó, no el de la sesión: ya no existe, y a
+      // la base no se le pregunta nada. Tampoco con el código del factor de fuera.
+      expect(await services.confirmSecondFactor(jar, { code: totpCode(theirs.secret) })).toEqual({ kind: "start_again" });
       expect(jar.get(FACTOR)).toBeUndefined();
+
       expect(await teamOf(owner, person.id)).toMatchObject({
         factor: null,
         capabilities: [],
         invitations: [{ kind: "grant", accepted: false, revoked: false, failures: 0 }],
       });
 
-      // Empezando de nuevo, el que queda atado es el nuevo del servidor, y el de fuera se va.
+      // La persona empieza de nuevo en su navegador. Auth la deja dar de alta otro porque el
+      // nivel es de la sesión, que ya subió, y no del token de su cookie (medido aquí). El
+      // que queda atado es ese, el del servidor, y el de fuera se va al aceptar.
       const again = await services.startSecondFactor(jar);
       if (again.kind !== "started") throw new Error(`No empezó de nuevo: ${again.kind}`);
       expect(await services.confirmSecondFactor(jar, { code: totpCode(again.secret) })).toEqual({ kind: "accepted" });
       expect((await teamOf(owner, person.id)).factor).toBe(again.factorId);
       const left = await owner.query<{ id: string }>("select id::text as id from auth.mfa_factors where user_id = $1", [person.id]);
       expect(left.rows).toEqual([{ id: again.factorId }]);
+      expect(services.reported).toEqual([]);
+    });
+  });
+
+  it("si la sesión queda verificada con otro factor justo antes de aceptar, la base no ata ninguno", async () => {
+    const who = await entered();
+    const { person, jar } = who;
+    const secret = withTicket(jar);
+
+    await reverted(async (owner) => {
+      // Lo que haría alguien con una copia de la sesión, en el peor instante: entre que el
+      // servidor verifica su factor y le pide a la base que lo ate.
+      let theirs: { factorId: string; secret: string } | null = null;
+      const services = testServices({
+        teamStore: teamStoreOn(owner),
+        auth: {
+          ...adapter,
+          verifyFactor: async (cookies, factorId, code) => {
+            const verified = await adapter.verifyFactor(cookies, factorId, code);
+            if (verified.kind === "verified") theirs = await outsideFactor(cookies);
+            return verified;
+          },
+        },
+      });
+      await asSystem(owner);
+      expect(await answer(owner, "private.system_invite_admin($1, '{support}')", [person.email])).toBe("invited_existing");
+      await asOwner(owner);
+      await proveMailbox(owner, who, secret);
+      const started = await services.startSecondFactor(jar);
+      if (started.kind !== "started") throw new Error(`No empezó: ${started.kind}`);
+
+      // La base exige que la sesión esté verificada con el mismo factor que se le pide atar.
+      expect(await services.confirmSecondFactor(jar, { code: totpCode(started.secret) })).toEqual({ kind: "unavailable" });
+
+      expect(theirs).not.toBeNull();
+      expect(await sessionsOf(person.id)).toMatchObject([{ aal: "aal2", factor: (theirs as { factorId: string } | null)?.factorId }]);
+      expect(await teamOf(owner, person.id)).toMatchObject({
+        factor: null,
+        capabilities: [],
+        invitations: [{ kind: "grant", accepted: false, revoked: false, failures: 0 }],
+      });
+      // No se le quitó nada, la sesión sigue, y queda dicho.
+      expect(jar.get(SESSION)).toBeDefined();
+      expect(jar.get(FACTOR)).toBe(`${who.sessionId}.${started.factorId}`);
+      expect(services.reported).toEqual(["invitation_not_accepted"]);
+    });
+  });
+
+  it("al agotar los intentos del código dictado la invitación se revoca, y el factor verificado no se queda en la cuenta", async () => {
+    const limit = await parameter("INTENTOS_ANTES_DE_FRENO");
+    const who = await entered();
+    const { person, jar } = who;
+    const secret = withTicket(jar);
+
+    await reverted(async (owner) => {
+      const services = testServices({ teamStore: teamStoreOn(owner) });
+      await asSystem(owner);
+      await owner.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'support')", [person.id]);
+      await owner.query(
+        `insert into private.admin_invitations (kind, email, profile_id, capabilities, handoff, created_at, expires_at)
+         values ('rebind', $1, $2, '{}', $3, clock_timestamp(), clock_timestamp() + interval '1 day')`,
+        [person.email.toLowerCase(), person.id, print("K7QM2X9P")],
+      );
+      await asOwner(owner);
+      await proveMailbox(owner, who, secret);
+      const started = await services.startSecondFactor(jar);
+      if (started.kind !== "started") throw new Error(`No empezó: ${started.kind}`);
+      const wrong = () => services.confirmSecondFactor(jar, { code: totpCode(started.secret), handoff: "ZZZZ9999" });
+
+      for (let failure = 1; failure < limit; failure += 1) {
+        expect(await wrong(), `fallo ${failure}`).toEqual({ kind: "needs_handoff" });
+      }
+      expect(await factorsOf(person.id)).toEqual([{ id: started.factorId, status: "verified" }]);
+
+      // El que llega al límite: la base revoca, y ya no hay siguiente intento para ese factor.
+      expect(await wrong()).toEqual({ kind: "not_invited" });
+
+      expect(await teamOf(owner, person.id)).toMatchObject({
+        factor: null,
+        invitations: [{ kind: "rebind", accepted: false, revoked: true, failures: limit }],
+      });
+      expect(await factorsOf(person.id)).toEqual([]);
+      expect(jar.get(FACTOR)).toBeUndefined();
+      // Conserva sus capacidades y no tiene con qué volver: alguien la restablece de nuevo.
+      expect(await services.teamStanding(jar)).toMatchObject({ kind: "team", standing: { state: "unbound" } });
+      // Ni con el código dictado bueno: ya no hay invitación.
+      expect(await services.confirmSecondFactor(jar, { code: totpCode(started.secret), handoff: "K7QM2X9P" })).toEqual({ kind: "not_invited" });
+      expect(services.reported).toEqual([]);
     });
   });
 });
@@ -371,7 +495,7 @@ describe("dar el código al entrar", () => {
 
       // La misma sesión, subida de nivel, con su cookie nueva: ya pasa la puerta.
       expect(jar.get(SESSION)).not.toBe(before);
-      expect(await readSession(jar)).toMatchObject({ kind: "session", claims: { sessionId: who.sessionId, aal: "aal2" } });
+      expect(await adapter.readSession(jar)).toMatchObject({ kind: "session", claims: { sessionId: who.sessionId, aal: "aal2" } });
       expect(await services.teamStanding(jar)).toMatchObject({
         kind: "team",
         standing: { state: "member", factor: factor.factorId, capabilities: ["config"] },

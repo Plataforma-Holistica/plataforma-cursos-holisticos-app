@@ -281,6 +281,20 @@ describe("verificar un código", () => {
     expect(await sessionCount(person.id)).toBe(0);
   });
 
+  it("si la sesión se cerró en otro lado, no hay sesión: no es una caída, y la cookie no se toca aquí", async () => {
+    const { person, jar } = await entered();
+    const factor = await enrolled(jar);
+    const before = jar.get(COOKIE);
+    await ownerQuery("delete from auth.sessions where user_id = $1", [person.id]);
+
+    expect(await verifyFactor(jar, factor.factorId, totpCode(factor.secret))).toEqual({ kind: "no_session" });
+    expect(await enrollFactor(jar)).toEqual({ ok: false, reason: "no_session" });
+    // Quitar no distingue: sin sesión no se pudo quitar nada.
+    expect(await removeFactor(jar, factor.factorId)).toBe("unknown");
+    // La guarda la rechaza en la siguiente petición, y su página la cierra.
+    expect(jar.get(COOKIE)).toBe(before);
+  });
+
   it("si Auth no contesta, no se supo, y la cookie sigue como estaba", async () => {
     const { jar } = await entered();
     const factor = await enrolled(jar);

@@ -211,10 +211,14 @@ export function sessionRevoked(failure: AuthFailure): boolean {
 // El segundo factor (TRD §9.2, fila «Segundo factor»). Tres listas, una por operación.
 
 // Dar de alta. A una cuenta que ya tiene un factor verificado, Auth le pide segundo nivel
-// para dar de alta otro: no es una caída, y tiene su propia salida.
-const ENROLL = new Map<string, "needs_second_level">([["insufficient_aal", "needs_second_level"]]);
+// para dar de alta otro: no es una caída, y tiene su propia salida. Y con una sesión que se
+// cerró en otro lado contesta que no existe (medido): es «sin sesión», tampoco una caída.
+const ENROLL = new Map<string, "needs_second_level" | "no_session">([
+  ["insufficient_aal", "needs_second_level"],
+  ["session_not_found", "no_session"],
+]);
 
-export type EnrollFailure = "needs_second_level" | "unknown";
+export type EnrollFailure = "needs_second_level" | "no_session" | "unknown";
 
 export function enrollFailure(failure: AuthFailure): EnrollFailure {
   return ENROLL.get(codeOf(failure) ?? "") ?? "unknown";
@@ -230,15 +234,19 @@ export function enrollFailure(failure: AuthFailure): EnrollFailure {
 //                reintentar. Auth borra solo los factores sin verificar que llevan minutos
 //                sin reto, y contesta lo mismo por el factor de otra cuenta.
 //   retry        el reto venció o se pidió desde otra dirección: se pide otro, una vez.
-const VERIFY = new Map<string, "wrong_code" | "throttled" | "factor_gone" | "retry">([
+//   no_session   la sesión de la cookie ya no existe en Auth: se cerró en otro lado
+//                (medido). La cookie no se borra aquí: la guarda la rechaza en la
+//                siguiente petición, y su página la cierra.
+const VERIFY = new Map<string, "wrong_code" | "throttled" | "factor_gone" | "retry" | "no_session">([
   ["mfa_verification_failed", "wrong_code"],
   ["mfa_verification_rejected", "throttled"],
   ["mfa_factor_not_found", "factor_gone"],
   ["mfa_challenge_expired", "retry"],
   ["mfa_ip_address_mismatch", "retry"],
+  ["session_not_found", "no_session"],
 ]);
 
-export type VerifyFailure = "wrong_code" | "throttled" | "factor_gone" | "retry" | "unknown";
+export type VerifyFailure = "wrong_code" | "throttled" | "factor_gone" | "retry" | "no_session" | "unknown";
 
 export function verifyFailure(failure: AuthFailure): VerifyFailure {
   return VERIFY.get(codeOf(failure) ?? "") ?? "unknown";

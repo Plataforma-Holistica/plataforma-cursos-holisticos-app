@@ -72,15 +72,18 @@ export type FactorStart =
   /** Tiene invitación, pero no ha abierto un enlace de su correo en este navegador. */
   | { kind: "needs_mailbox_proof" }
   /**
-   * La cuenta ya tiene un factor verificado y esta sesión está en primer nivel. Con
-   * `resumable`, es el que se dio de alta aquí: se le da su código. Sin él, toca probar el
-   * buzón otra vez, que lo limpia.
+   * La cuenta ya tiene un factor verificado que nadie ató, y esta sesión está en primer
+   * nivel: Auth no deja dar de alta otro. La salida es probar el buzón otra vez, que con
+   * una invitación viva borra los factores sin atar.
    */
-  | { kind: "needs_second_level"; resumable: boolean };
+  | { kind: "needs_second_level" };
 
 export type FactorConfirmation =
   | Refused
-  /** Atada, y con la sesión cerrada: entra de nuevo y da su código. */
+  /**
+   * Atada. La sesión con la que aceptó se manda cerrar: entra de nuevo y da su código. Si
+   * Auth no la pudo cerrar, queda dicho (`session_not_closed`).
+   */
   | { kind: "accepted" }
   | { kind: "wrong_code" }
   /** El freno rechazó: Auth cerró todas sus sesiones. */
@@ -166,22 +169,19 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     if (team.kind !== "team") return team;
     if (team.standing.state === "invited_unproven") return { kind: "needs_mailbox_proof" };
     if (team.standing.state !== "invited") return { kind: "not_invited" };
-    const sessionId = team.claims.sessionId ?? "";
 
     const enrolled = await auth.enrollFactor(jar);
-    if (!enrolled.ok) {
-      if (enrolled.reason !== "needs_second_level") return { kind: "unavailable" };
-      return { kind: "needs_second_level", resumable: readEnrolledFactor(jar, sessionId) !== null };
-    }
+    if (!enrolled.ok) return { kind: enrolled.reason === "needs_second_level" ? "needs_second_level" : "unavailable" };
     // Sin dónde anotarlo no hay cómo verificarlo después: no se supo.
-    if (!keepEnrolledFactor(jar, sessionId, enrolled.factorId)) return { kind: "unavailable" };
+    if (!keepEnrolledFactor(jar, team.claims.sessionId ?? "", enrolled.factorId)) return { kind: "unavailable" };
     return { kind: "started", factorId: enrolled.factorId, secret: enrolled.secret, uri: enrolled.uri };
   }
 
   /**
    * Verificar el código del factor recién dado de alta y, con la sesión ya en segundo
-   * nivel, aceptar la invitación. Aceptada, la sesión se cierra: la del equipo nace después
-   * de atar, entrando de nuevo y dando el código.
+   * nivel, aceptar la invitación. Aceptada, la sesión se manda cerrar: la del equipo nace
+   * después de atar, entrando de nuevo y dando el código. Cerrarla es un paso aparte, que
+   * depende de Auth: si falla, se aceptó igual y queda dicho.
    */
   async function confirmSecondFactor(jar: CookieJar, input: { code: string; handoff?: unknown }): Promise<FactorConfirmation> {
     const team = await teamStanding(jar);
@@ -210,7 +210,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
         dropEnrolledFactor(jar);
         return { kind: "start_again" };
       case "no_session":
+        return { kind: "signed_out" };
       case "oversized_session":
+        // El adaptador ya la cerró. El factor quedó verificado y sin atar: lo borra volver a
+        // probar el buzón. Que alguien lo sepa, como cuando pasa al entrar.
+        await deps.report("session_oversized");
         return { kind: "signed_out" };
       case "unknown":
         return { kind: "unavailable" };
@@ -219,21 +223,41 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     // Desde aquí la sesión está en segundo nivel y el factor, verificado. Con las claims
     // nuevas: son las de esa misma sesión, ya subida.
     const { claims } = verification;
-    let answer: AcceptAnswer;
+    let answer: AcceptAnswer | "unknown";
     try {
       answer = await store.accept(claims, ticket, factorId, handoff);
-      // «No hay invitación» o «ya está atada», recién verificado, puede ser un doble envío:
-      // el primero ya aceptó, y con eso la invitación dejó de estar viva. Se pregunta de
-      // nuevo antes de quitarle nada. Si ya tiene su atadura, se aceptó, pase o no esta
-      // sesión la puerta: el factor de este navegador puede ser justo el que quedó atado, y
-      // quitarlo la dejaría sin con qué entrar.
-      if (answer === "no_invitation" || answer === "already_bound") {
-        const now = await store.standing(claims, ticket);
-        if (now.state === "member" || now.state === "needs_code") answer = "accepted";
-      }
     } catch {
-      await deps.report("invitation_not_accepted");
-      return { kind: "unavailable" };
+      // La transacción pudo confirmarse y perderse su respuesta: no se sabe si aceptó.
+      answer = "unknown";
+    }
+
+    // Solo «aceptada» y las dos que dicen que falta configuración se toman tal cual: con
+    // ellas nada se quita. Con cualquier otra se vuelve a leer el estado antes de decidir:
+    // nunca se le quita un factor a alguien sin haber visto que no quedó atada.
+    if (answer !== "accepted" && answer !== "needs_code" && answer !== "unavailable") {
+      const lost = answer === "unknown";
+      let now: TeamStanding | null;
+      try {
+        now = await store.standing(claims, ticket);
+      } catch {
+        now = null;
+      }
+      if (now === null) {
+        // No se supo: nada se quita. El código dictado equivocado se dice igual, que ya contó.
+        if (answer !== "needs_handoff") answer = "unknown";
+      } else if (now.state === "member" || now.state === "needs_code") {
+        // Ya tiene su atadura: se aceptó. Fue un doble envío y el otro ya aceptó (con eso la
+        // invitación dejó de estar viva), o se perdió la respuesta. Vale pase o no esta sesión
+        // la puerta: el factor de este navegador puede ser justo el que quedó atado, y
+        // quitarlo la dejaría sin con qué entrar.
+        answer = "accepted";
+        // Que la base aceptó y no se le entendió, alguien tiene que saberlo.
+        if (lost) await deps.report("invitation_answer_lost");
+      } else if (answer === "needs_handoff" && (now.state === "none" || now.state === "unbound")) {
+        // El fallo que llega al límite revoca la invitación, y la base contesta lo mismo que
+        // en los anteriores. Sin invitación ya no hay siguiente intento para ese factor.
+        answer = "no_invitation";
+      }
     }
 
     /** Lo que seguía no ocurrió: el factor verificado no puede quedarse sin que nadie lo ate. */
@@ -249,7 +273,8 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
         if ((await auth.signOut(jar)) !== "closed") await deps.report("session_not_closed");
         return { kind: "accepted" };
       case "needs_handoff":
-        // El factor se queda: el siguiente intento, con el código dictado bien, lo ata.
+        // La invitación sigue viva y sin aceptar, o no se supo: el factor se queda, y el
+        // siguiente intento, con el código dictado bien, lo ata.
         return { kind: "needs_handoff" };
       case "needs_mailbox_proof":
         await discard();
@@ -262,8 +287,9 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
         return { kind: "not_invited" };
       case "needs_code":
       case "unavailable":
-        // Recién verificado y la base dice que falta el código, o que le falta un
-        // parámetro: es configuración, no la persona. El factor se queda, para reintentar.
+      case "unknown":
+        // Recién verificado y la base dice que falta el código o que le falta un parámetro,
+        // o no contestó: no es la persona. El factor se queda, para reintentar.
         await deps.report("invitation_not_accepted");
         return { kind: "unavailable" };
     }
@@ -289,7 +315,10 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
       case "factor_gone":
         return { kind: "not_member" };
       case "no_session":
+        return { kind: "signed_out" };
       case "oversized_session":
+        // El adaptador ya la cerró. Que alguien lo sepa, como cuando pasa al entrar.
+        await deps.report("session_oversized");
         return { kind: "signed_out" };
       case "unknown":
         return { kind: "unavailable" };

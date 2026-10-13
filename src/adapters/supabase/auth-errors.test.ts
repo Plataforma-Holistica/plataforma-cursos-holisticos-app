@@ -257,7 +257,11 @@ describe("el segundo factor: dar de alta", () => {
     expect(enrollFailure(rejected("insufficient_aal", 400))).toBe("needs_second_level");
   });
 
-  it.each([...strangers, rejected("too_many_enrolled_mfa_factors", 422), rejected("mfa_factor_name_conflict", 422)])(
+  it("con una sesión que se cerró en otro lado no hay sesión: no es una caída", () => {
+    expect(enrollFailure(rejected("session_not_found", 403))).toBe("no_session");
+  });
+
+  it.each([...strangers, rejected("too_many_enrolled_mfa_factors", 422), rejected("mfa_factor_name_conflict", 422), rejected("bad_jwt", 403)])(
     "lo demás es «no se supo»: %j",
     (failure) => {
       expect(enrollFailure(failure)).toBe("unknown");
@@ -272,12 +276,14 @@ describe("el segundo factor: verificar un código", () => {
     ["mfa_factor_not_found", "factor_gone"],
     ["mfa_challenge_expired", "retry"],
     ["mfa_ip_address_mismatch", "retry"],
+    // La sesión se cerró en otro lado: sin sesión, que no es una caída ni borra la cookie.
+    ["session_not_found", "no_session"],
   ])("%s es %s", (code, expected) => {
     expect(verifyFailure(rejected(code))).toBe(expected);
   });
 
   // Con `throttled` se borra la cookie de sesión: ningún otro código puede caer ahí.
-  it.each([...strangers, rejected("insufficient_aal"), rejected("session_not_found", 403), rejected("bad_jwt", 403)])(
+  it.each([...strangers, rejected("insufficient_aal"), rejected("user_banned", 403), rejected("bad_jwt", 403)])(
     "lo que no reconoce es «no se supo», y no le cierra la sesión a nadie: %j",
     (failure) => {
       expect(verifyFailure(failure)).toBe("unknown");

@@ -34,6 +34,7 @@ const FAILURES = {
   mailbox_ticket_not_kept: "Una prueba del buzón no pudo dejar su cookie: si esa cuenta tiene una invitación de administración, tendrá que recuperar su contraseña otra vez para aceptarla.",
   team_unavailable: "No se pudo leer en qué estado está una cuenta respecto al equipo de administración, o su sesión no quedó de equipo después de dar bien su código: esa persona no pudo entrar a administración. Si le pasa a todo el equipo, falta el parámetro VIGENCIA_SEGUNDO_FACTOR_HORAS.",
   invitation_not_accepted: "Una invitación de administración no se pudo aceptar después de verificar el segundo factor: esa persona tiene que intentarlo de nuevo. Si se repite, falta un parámetro del segundo factor o la base no contesta.",
+  invitation_answer_lost: "Una invitación de administración quedó aceptada, pero la respuesta de la base se perdió o no se entendió: a la persona se le dijo que sí. Si se repite, la base está contestando algo que el servidor no conoce.",
   second_factor_not_removed: "Un segundo factor recién verificado se quedó en una cuenta que no pudo aceptar su invitación: no le da acceso a nada, pero esa cuenta ya no cambia su contraseña desde la pantalla de la cuenta.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",

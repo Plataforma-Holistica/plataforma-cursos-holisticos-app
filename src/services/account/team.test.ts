@@ -215,15 +215,15 @@ describe("empezar a configurar el segundo factor", () => {
     expect(team.calls).toEqual(["standing aal1 resguardo", "enroll"]);
   });
 
-  it("si la cuenta ya tiene un factor verificado, dice si en este navegador hay con qué seguir", async () => {
+  it("si la cuenta ya tiene un factor verificado y la sesión no ha subido de nivel, se dice: no es una caída", async () => {
     const enroll = { ok: false, reason: "needs_second_level" };
-    expect(await teamWith({ enroll }).startSecondFactor(browser(true))).toEqual({ kind: "needs_second_level", resumable: true });
-    expect(await teamWith({ enroll }).startSecondFactor(browser(false))).toEqual({ kind: "needs_second_level", resumable: false });
-    // El factor de otra sesión no es con qué seguir.
-    expect(await teamWith({ enroll }).startSecondFactor(browser(true, "5e000000-0000-4000-8000-0000000000ff"))).toEqual({
-      kind: "needs_second_level",
-      resumable: false,
-    });
+    // Haya o no un factor anotado en ese navegador: dar de alta ya quitó los que estaban a
+    // medias, así que no promete ninguno con el que seguir.
+    for (const jar of [browser(true), browser(false)]) {
+      const team = teamWith({ enroll });
+      expect(await team.startSecondFactor(jar)).toEqual({ kind: "needs_second_level" });
+      expect(team.reported).toEqual([]);
+    }
   });
 
   it.each(["no_session", "unknown"])("si Auth contesta %s, no se supo: no queda nada anotado", async (reason) => {
@@ -300,14 +300,15 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     expect(team.reported).toEqual(["session_not_closed"]);
   });
 
-  it.each<[unknown, string, boolean]>([
-    [{ kind: "wrong_code" }, "wrong_code", true],
-    [{ kind: "throttled" }, "throttled", true],
-    [{ kind: "factor_gone" }, "start_again", false],
-    [{ kind: "no_session" }, "signed_out", true],
-    [{ kind: "oversized_session" }, "signed_out", true],
-    [{ kind: "unknown" }, "unavailable", true],
-  ])("si verificar contesta %j, no se acepta nada", async (verify, kind, keepsFactor) => {
+  it.each<[unknown, string, boolean, string[]]>([
+    [{ kind: "wrong_code" }, "wrong_code", true, []],
+    [{ kind: "throttled" }, "throttled", true, []],
+    [{ kind: "factor_gone" }, "start_again", false, []],
+    [{ kind: "no_session" }, "signed_out", true, []],
+    // El adaptador ya cerró esa sesión: que alguien lo sepa, como cuando pasa al entrar.
+    [{ kind: "oversized_session" }, "signed_out", true, ["session_oversized"]],
+    [{ kind: "unknown" }, "unavailable", true, []],
+  ])("si verificar contesta %j, no se acepta nada", async (verify, kind, keepsFactor, reported) => {
     const team = teamWith({ verify });
     const jar = browser();
     expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind });
@@ -316,6 +317,7 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     // El resguardo no se toca: sirve para el siguiente intento.
     expect(jar.get("plataforma-resguardo")).toBe(TICKET);
     expect(jar.get("plataforma-factor") !== undefined).toBe(keepsFactor);
+    expect(team.reported).toEqual(reported);
   });
 
   describe("un restablecimiento pide además el código dictado", () => {
@@ -335,10 +337,58 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
       const team = teamWith({ standing: REBIND, accept: "needs_handoff" });
       const jar = browser();
       expect(await team.confirmSecondFactor(jar, { code: "123456", handoff: "ZZ99ZZ99" })).toEqual({ kind: "needs_handoff" });
+      // Se volvió a leer el estado, y la invitación sigue viva.
+      expect(team.calls.slice(-1)).toEqual(["standing aal2 resguardo"]);
       expect(team.auth.removeFactor).not.toHaveBeenCalled();
       expect(team.auth.signOut).not.toHaveBeenCalled();
       expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+      expect(team.reported).toEqual([]);
     });
+
+    // El fallo que llega al límite revoca la invitación, y la base contesta el mismo
+    // «el código dictado no es». Sin invitación no hay siguiente intento: el factor
+    // verificado se quedaría en la cuenta sin que nadie lo atara.
+    it.each<TeamStanding>([{ state: "unbound" }, { state: "none" }])(
+      "si con ese fallo la invitación dejó de existir (%j), el factor se quita y ya no se pide el código dictado",
+      async (now) => {
+        const team = teamWith({ standing: [REBIND, now], accept: "needs_handoff" });
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code: "123456", handoff: "ZZ99ZZ99" })).toEqual({ kind: "not_invited" });
+        expect(team.calls.slice(-2)).toEqual(["standing aal2 resguardo", `remove ${FACTOR}`]);
+        expect(jar.get("plataforma-factor")).toBeUndefined();
+        expect(team.auth.signOut).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each<TeamStanding | "throws">([{ state: "invited_unproven", kind: "rebind" }, "throws"])(
+      "si después del fallo el estado es %j, el factor se queda: la invitación sigue viva, o no se supo, y a ciegas no se quita nada",
+      async (now) => {
+        const team = teamWith({ accept: "needs_handoff" });
+        team.store.standing.mockResolvedValueOnce(REBIND);
+        if (now === "throws") team.store.standing.mockRejectedValueOnce(new Error("sin base"));
+        else team.store.standing.mockResolvedValueOnce(now);
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code: "123456", handoff: "ZZ99ZZ99" })).toEqual({ kind: "needs_handoff" });
+        expect(team.auth.removeFactor).not.toHaveBeenCalled();
+        expect(team.auth.signOut).not.toHaveBeenCalled();
+        expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+        expect(team.reported).toEqual([]);
+      },
+    );
+
+    // Dos envíos casi a la vez, uno con el código dictado mal y otro bien: al malo la base
+    // le cuenta el fallo, y cuando vuelve a mirar, el bueno ya ató.
+    it.each<TeamStanding>([MEMBER, { state: "needs_code", factor: FACTOR }])(
+      "si después del fallo ya tiene su atadura (%j), se aceptó en otro envío: no se le quita nada",
+      async (now) => {
+        const team = teamWith({ standing: [REBIND, now], accept: "needs_handoff" });
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code: "123456", handoff: "ZZ99ZZ99" })).toEqual({ kind: "accepted" });
+        expect(team.auth.removeFactor).not.toHaveBeenCalled();
+        expect(team.calls.slice(-1)).toEqual(["signOut"]);
+        expect(team.reported).toEqual([]);
+      },
+    );
 
     it("una invitación que da capacidades no manda código dictado aunque llegue uno", async () => {
       const team = teamWith({ standing: INVITED });
@@ -366,6 +416,52 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
       const team = teamWith({ accept: "ineligible", remove: "unknown" });
       expect(await team.confirmSecondFactor(browser(), { code: "123456" })).toEqual({ kind: "not_invited" });
       expect(team.reported).toEqual(["second_factor_not_removed"]);
+    });
+
+    // La regla es una sola: nunca se le quita un factor a alguien sin haber visto, después
+    // del no, que no quedó atada. Vale para todo no, también los que no deberían poder
+    // llegar con la persona atada: basta una carrera con otro envío para que lleguen.
+    describe.each<AcceptAnswer>(["inviter_lost_config", "ineligible", "needs_mailbox_proof", "no_invitation", "already_bound"])(
+      "antes de quitar el factor por %s se vuelve a leer el estado",
+      (accept) => {
+        it("se lee después de aceptar, con las claims de la sesión ya subida", async () => {
+          const team = teamWith({ accept });
+          await team.confirmSecondFactor(browser(), { code: "123456" });
+          expect(team.calls.slice(-3)).toEqual([expect.stringContaining("accept aal2"), "standing aal2 resguardo", `remove ${FACTOR}`]);
+        });
+
+        it.each<TeamStanding>([MEMBER, { state: "needs_code", factor: FACTOR }])("si ya tiene su atadura (%j), no se le quita: se aceptó", async (now) => {
+          const team = teamWith({ accept, standing: [INVITED, now] });
+          const jar = browser();
+          expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "accepted" });
+          expect(team.auth.removeFactor).not.toHaveBeenCalled();
+          expect(team.calls.slice(-1)).toEqual(["signOut"]);
+          expect(team.reported).toEqual([]);
+        });
+
+        it("si al volver a leer no se supo, no se quita nada y queda dicho", async () => {
+          const team = teamWith({ accept });
+          team.store.standing.mockResolvedValueOnce(INVITED).mockRejectedValueOnce(new Error("sin base"));
+          const jar = browser();
+          expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "unavailable" });
+          expect(team.auth.removeFactor).not.toHaveBeenCalled();
+          expect(team.auth.signOut).not.toHaveBeenCalled();
+          expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+          expect(team.reported).toEqual(["invitation_not_accepted"]);
+        });
+      },
+    );
+
+    it.each<AcceptAnswer>(["needs_code", "unavailable"])("con %s, que es falta de configuración, no hace falta volver a leer: nada se quita", async (accept) => {
+      const team = teamWith({ accept });
+      await team.confirmSecondFactor(browser(), { code: "123456" });
+      expect(team.calls.slice(-1)).toEqual([expect.stringContaining("accept aal2")]);
+    });
+
+    it("y aceptada, tampoco: no se pregunta de más", async () => {
+      const team = teamWith();
+      await team.confirmSecondFactor(browser(), { code: "123456" });
+      expect(team.store.standing).toHaveBeenCalledOnce();
     });
 
     // Un doble envío: el primero ya aceptó, y al segundo la base le dice que no hay
@@ -414,6 +510,44 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
       },
     );
 
+    // La transacción pudo confirmarse y perderse su respuesta. Si la persona ya tiene su
+    // atadura, se aceptó: decirle «inténtalo de nuevo» la mandaría a un «no estás invitada».
+    it.each<TeamStanding>([MEMBER, { state: "needs_code", factor: FACTOR }])(
+      "si aceptar no contesta y al volver a preguntar ya tiene su atadura (%j), se aceptó",
+      async (now) => {
+        const team = teamWith({ accept: "throws", standing: [INVITED, now] });
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "accepted" });
+        expect(team.calls.slice(-2)).toEqual(["standing aal2 resguardo", "signOut"]);
+        expect(team.auth.removeFactor).not.toHaveBeenCalled();
+        expect(jar.get("plataforma-resguardo")).toBeUndefined();
+        expect(jar.get("plataforma-factor")).toBeUndefined();
+        // A la persona se le dice que sí, y a quien opera, que la base no contestó bien.
+        expect(team.reported).toEqual(["invitation_answer_lost"]);
+      },
+    );
+
+    it.each<TeamStanding>([INVITED, { state: "invited_unproven", kind: "grant" }, { state: "none" }, { state: "unbound" }])(
+      "si aceptar no contesta y sigue sin atadura (%j), no se supo: nada se quita, y queda dicho",
+      async (now) => {
+        const team = teamWith({ accept: "throws", standing: [INVITED, now] });
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "unavailable" });
+        expect(team.auth.removeFactor).not.toHaveBeenCalled();
+        expect(team.auth.signOut).not.toHaveBeenCalled();
+        expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+        expect(team.reported).toEqual(["invitation_not_accepted"]);
+      },
+    );
+
+    it("si aceptar no contesta y la base tampoco al volver a preguntar, no se supo", async () => {
+      const team = teamWith({ accept: "throws" });
+      team.store.standing.mockResolvedValueOnce(INVITED).mockRejectedValueOnce(new Error("sin base"));
+      expect(await team.confirmSecondFactor(browser(), { code: "123456" })).toEqual({ kind: "unavailable" });
+      expect(team.auth.removeFactor).not.toHaveBeenCalled();
+      expect(team.reported).toEqual(["invitation_not_accepted"]);
+    });
+
     it("si al volver a preguntar el estado la base no contesta, no se supo", async () => {
       const team = teamWith({ accept: "no_invitation" });
       team.store.standing.mockResolvedValueOnce(INVITED).mockRejectedValueOnce(new Error("sin base"));
@@ -458,17 +592,19 @@ describe("dar el código al entrar", () => {
     expect(team.reported).toEqual(["team_unavailable"]);
   });
 
-  it.each<[unknown, string]>([
-    [{ kind: "wrong_code" }, "wrong_code"],
-    [{ kind: "throttled" }, "throttled"],
-    [{ kind: "factor_gone" }, "not_member"],
-    [{ kind: "no_session" }, "signed_out"],
-    [{ kind: "oversized_session" }, "signed_out"],
-    [{ kind: "unknown" }, "unavailable"],
-  ])("si verificar contesta %j, se dice eso", async (verify, kind) => {
+  it.each<[unknown, string, string[]]>([
+    [{ kind: "wrong_code" }, "wrong_code", []],
+    [{ kind: "throttled" }, "throttled", []],
+    [{ kind: "factor_gone" }, "not_member", []],
+    [{ kind: "no_session" }, "signed_out", []],
+    // El adaptador ya cerró esa sesión: que alguien lo sepa, como cuando pasa al entrar.
+    [{ kind: "oversized_session" }, "signed_out", ["session_oversized"]],
+    [{ kind: "unknown" }, "unavailable", []],
+  ])("si verificar contesta %j, se dice eso", async (verify, kind, reported) => {
     const team = teamWith({ standing: { state: "needs_code", factor: BOUND }, verify });
     expect(await team.giveSecondFactorCode(browser(), "123456")).toEqual({ kind });
     // No se vuelve a preguntar el estado: nada cambió.
     expect(team.store.standing).toHaveBeenCalledOnce();
+    expect(team.reported).toEqual(reported);
   });
 });
