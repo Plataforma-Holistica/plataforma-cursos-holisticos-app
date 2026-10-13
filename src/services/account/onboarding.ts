@@ -25,10 +25,12 @@ import {
   type RegistrationForm,
 } from "./forms";
 import { evaluateGate, REQUIRED_DOC_TYPES } from "./gate";
+import { issueTicket, keepTicket, MAILBOX_TICKET_MAX_AGE_LIMIT, type MailboxTicket } from "./mailbox-ticket";
 import { resolveOrigin, type RequestOrigin } from "./origin";
 import {
   claimAccount,
   currentTexts,
+  mailboxProofSeconds,
   grantConsents,
   loadFormParams,
   markRegistrationStarted,
@@ -300,6 +302,18 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
   }
 
   /** La entrada con la que termina un registro: la cookie al tarro, o la sesión cerrada. */
+  /**
+   * Deja el resguardo del buzón en el navegador. Nada depende de que lo logre: si la cookie
+   * no se pudo escribir, la persona prueba su buzón otra vez cuando haga falta, y queda dicho.
+   */
+  async function keepProof(jar: CookieJar, ticket: MailboxTicket, seconds: number | null): Promise<void> {
+    try {
+      keepTicket(jar, ticket, seconds);
+    } catch {
+      await deps.report("mailbox_ticket_not_kept");
+    }
+  }
+
   async function enter(
     jar: CookieJar,
     email: string,
@@ -401,36 +415,45 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
 
     // Las claims del canje siguen valiendo aunque su sesión ya se haya borrado. La hora se
     // lee después del reclamo: la entrada que sigue empezó después del cambio de contraseña.
+    // Abrir el enlace y fijar la contraseña prueba el buzón: el reclamo guarda la huella de
+    // un resguardo, y el secreto se queda en este navegador.
+    const ticket = issueTicket();
     const save = () =>
       asServer({ claims: redeemed.claims, reason: "complete_registration" }, async (tx) => {
         await saveIdentity(tx, profileId, { name: checked.name, adult: true });
         await grantConsents(tx, profileId, match.documentIds, "signup", from, deps.isLocal());
         // Si la cuenta no se puede reclamar, no se guarda nada.
-        if (!accountClaimed(await claimAccount(tx))) throw new Error("La cuenta no se pudo reclamar.");
-        return (await dbClock(tx)).text;
+        if (!accountClaimed(await claimAccount(tx, ticket.print))) throw new Error("La cuenta no se pudo reclamar.");
+        return { startedText: (await dbClock(tx)).text, ticketSeconds: await mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT) };
       });
-    let startedText: string;
+    let saved: { startedText: string; ticketSeconds: number | null };
     try {
-      startedText = await save();
+      saved = await save();
     } catch {
       try {
-        startedText = await save();
+        saved = await save();
       } catch {
         return failed();
       }
     }
 
-    return enter(jar, redeemed.email, checked.password, startedText, from.userAgent);
+    await keepProof(jar, ticket, saved.ticketSeconds);
+    return enter(jar, redeemed.email, checked.password, saved.startedText, from.userAgent);
   }
 
   /**
    * Completar la recuperación desde el enlace del correo (FL-06): guarda la contraseña,
    * reclama la cuenta, deja este dispositivo como de confianza y cierra todas las sesiones.
    * No abre sesión: la persona entra con su contraseña nueva.
+   *
+   * Con el tarro del navegador que abrió el enlace deja además el resguardo del buzón. Sin
+   * tarro no hay resguardo: la recuperación vale igual, pero no sirve para aceptar una
+   * invitación de administración.
    */
   async function completeRecovery(
     input: { tokenHash: string; password: string },
     origin: RequestOrigin,
+    jar?: CookieJar,
   ): Promise<RecoveryCompletion> {
     const checked = checkPassword(input.password);
     if (!checked.ok) return { kind: "invalid", reason: checked.reason };
@@ -455,6 +478,10 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       await deps.report(saved.secondFactor === true ? "recovery_with_second_factor" : "recovery_notice_not_sent");
     }
 
+    // El resguardo del buzón, solo si hay navegador donde dejarlo. Se genera aquí: nunca
+    // sale de lo que mandó quien pide.
+    const ticket = jar ? issueTicket() : null;
+    let ticketSeconds: number | null = null;
     if (done && outcome.claimAccount) {
       const account = parseEmail(redeemed.email);
       const keys: PairKeys = { account: fingerprint("account", account.ok ? account.email : redeemed.email), ip: from.ip };
@@ -463,17 +490,20 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
           // Los candados del freno van antes que el de la fila del perfil, que toma el reclamo.
           await lockAll(tx, [keys.ip, keys.account]);
           // Una cuenta que no se puede reclamar (suspendida) se queda con su contraseña
-          // nueva y sin dispositivo de confianza.
-          if (!accountClaimed(await claimAccount(tx)) || !outcome.clearThrottles) return;
+          // nueva, sin dispositivo de confianza y sin resguardo.
+          if (!accountClaimed(await claimAccount(tx, ticket?.print ?? null))) return null;
+          const seconds = ticket ? await mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT) : null;
+          if (!outcome.clearThrottles) return seconds;
           const trusted = pairAfterRecovery((await dbClock(tx)).date);
           // De una dirección que no se conoce no queda ningún par de confianza.
           await trustAfterRecovery(tx, keys, from.known && trusted.ok ? trusted.pair : null, buckets.signInAccount(keys.account));
+          return seconds;
         });
       try {
-        await settle();
+        ticketSeconds = await settle();
       } catch {
         try {
-          await settle();
+          ticketSeconds = await settle();
         } catch {
           done = false;
         }
@@ -488,6 +518,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       await deps.report("recovery_incomplete");
       return { kind: "request_new_link" };
     }
+    if (jar && ticket) await keepProof(jar, ticket, ticketSeconds);
     return { kind: "done" };
   }
 

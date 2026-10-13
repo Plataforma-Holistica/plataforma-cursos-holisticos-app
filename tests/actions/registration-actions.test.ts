@@ -458,7 +458,8 @@ describe("cambiar la contraseña desde el enlace (PA-13)", () => {
 
   it("le pasa al servicio la huella y la contraseña, tal como llegó", async () => {
     await completeRecoveryAction(IDLE, changeForm(TOKEN, "  con espacios  "));
-    expect(mocks.completeRecovery).toHaveBeenCalledExactlyOnceWith({ tokenHash: TOKEN, password: "  con espacios  " }, origin);
+    // Con el tarro del navegador: ahí se queda el resguardo del buzón.
+    expect(mocks.completeRecovery).toHaveBeenCalledExactlyOnceWith({ tokenHash: TOKEN, password: "  con espacios  " }, origin, jar);
   });
 
   it("hecho: cierra la sesión de este navegador, sea de quien sea, y va a entrar con el aviso", async () => {

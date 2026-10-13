@@ -155,6 +155,12 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
 
   // Un solo envío confirma el correo, fija la contraseña, guarda todo y deja dentro.
   await expect(page).toHaveURL("/inicio");
+  // Abrir el enlace y fijar la contraseña probó el buzón: el resguardo de esa prueba se queda
+  // en este navegador, donde el código de la página no lo alcanza (TRD §9.2, «Invitaciones»).
+  const ticket = await cookieOf(context, "plataforma-resguardo");
+  expect(ticket).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
+  expect(ticket?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(await page.evaluate(() => document.cookie)).not.toContain("plataforma-resguardo");
   await expect(page.getByText(`Entraste como ${email}.`)).toBeVisible();
   expect(await cookieOf(context, SESSION_COOKIE)).toMatchObject({ httpOnly: true });
   expect(await sessionCount(userId)).toBe(1);

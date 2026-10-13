@@ -426,3 +426,38 @@ test("pedir una recuperación desde otro sitio se rechaza y no deja rastro", asy
   await controlMail(browser);
   expect(await mailsTo(ana.email)).toHaveLength(0);
 });
+
+for (const javaScriptEnabled of [true, false]) {
+  test(`recuperar deja el resguardo del buzón en ese navegador, y solo ahí (${javaScriptEnabled ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const ana = await person();
+    const context = await browser.newContext({ javaScriptEnabled });
+    try {
+      const page = await context.newPage();
+      const token = await recoveryLink(page, ana.email);
+      const ticketOf = async () => (await context.cookies()).find((cookie) => cookie.name === "plataforma-resguardo");
+      // Pedir el enlace no prueba nada: abrirlo y fijar la contraseña, sí.
+      expect(await ticketOf()).toBeUndefined();
+      await page.goto(`/recuperar/${token}`);
+      expect(await ticketOf()).toBeUndefined();
+      await savePassword(page, NEW_PASSWORD);
+      await expect(page).toHaveURL("/entrar");
+      await expect(page.getByText(CHANGED)).toBeVisible();
+
+      const ticket = await ticketOf();
+      expect(ticket).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
+      expect(ticket?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      // Dura lo que dice su parámetro: ni es de sesión, ni vive más.
+      const life = (ticket?.expires ?? 0) - Date.now() / 1_000;
+      const lifetime = (await parameter("VIGENCIA_PRUEBA_BUZON_MINUTOS")) * 60;
+      expect(life).toBeGreaterThan(lifetime - 60);
+      expect(life).toBeLessThanOrEqual(lifetime + 5);
+      // Recuperar no abre sesión: el resguardo no es una.
+      expect((await context.cookies()).find((cookie) => cookie.name === "plataforma-sesion")).toBeUndefined();
+      // El aviso «tu contraseña cambió» también llega: se espera antes de terminar.
+      await waitForMails(ana.email, 2);
+    } finally {
+      await context.close();
+    }
+  });
+}
+

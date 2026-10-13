@@ -756,10 +756,24 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   - **El resguardo del buzón.** `private.claim_account(p_ticket)` guarda la huella
     (SHA-256 en hexadecimal) de un secreto que el servidor deja en el navegador que abrió
     el enlace del correo. Quien sabía la contraseña, quien la cambia por fuera o quien
-    tiene una entrada en vuelo no lo tiene. Hoy los servicios reclaman sin resguardo:
-    emitirlo, dejar la cookie y leerla al aceptar llega con el servicio que acepta, y
-    hasta entonces ninguna invitación se puede aceptar. El secreto lo genera siempre el
-    servidor, nunca se lee del cliente al reclamar, y solo en los dos flujos de enlace.
+    tiene una entrada en vuelo no lo tiene. Lo emiten `completeRegistration` y
+    `completeRecovery` (`src/services/account/mailbox-ticket.ts`): 32 bytes al azar que
+    genera el servidor, nunca algo que mande el navegador, en una cookie que la página no
+    lee (`plataforma-resguardo`, con `__Host-` bajo https) y que dura
+    `VIGENCIA_PRUEBA_BUZON_MINUTOS`. Se deja a toda cuenta que reclama, tenga o no una
+    invitación, para no decir nada de nadie. `completeRecovery` lo deja solo si recibe el
+    tarro del navegador; sin tarro reclama sin resguardo, y eso anula el que hubiera. Si
+    falta el parámetro o la cookie no se puede escribir, el registro y la recuperación
+    terminan igual. Una prueba de arquitectura exige que reclamar y emitir un resguardo
+    solo ocurran en esos dos flujos. Leer la cookie y aceptar llega con el servicio que
+    acepta: hasta entonces ninguna invitación se puede aceptar.
+  - **En qué estado está alguien respecto al equipo** lo dice
+    `private.team_standing(huella del resguardo)`, sobre quien actúa y sin escribir:
+    `member`, `needs_code`, `invited`, `invited_unproven`, `unbound` o `none`. Es lo que
+    leerá la guarda de `/admin`, porque el servidor no puede leer las invitaciones ni las
+    ataduras. Tiene que decir lo mismo que haría aceptar: una invitación que aceptar
+    revocaría no cuenta. Si se cambia una condición de `accept_admin_invitation`, se
+    cambia aquí también.
   - Hay dos tipos de invitación. `grant` da capacidades a quien no tiene ninguna.
     `rebind` no da nada: es para quien conserva capacidades y perdió su atadura
     (restablecimiento), y por eso aceptarla nunca devuelve una capacidad que se quitó

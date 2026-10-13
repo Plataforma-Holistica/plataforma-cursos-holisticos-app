@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -728,3 +728,78 @@ async function withdraw(userId: string, documentId: string): Promise<void> {
     await owner.end();
   }
 }
+
+// ---------------------------------------------------------------------------------------
+// El resguardo del buzón (TRD §9.2, fila «Invitaciones»): abrir un enlace del correo y
+// fijar la contraseña deja un secreto en ese navegador y su huella en la base.
+
+const TICKET_COOKIE = "plataforma-resguardo";
+const printOf = (secret: string) => createHash("sha256").update(secret).digest("hex");
+
+/** Lo que la base guardó de la prueba del buzón de una cuenta. */
+const proofOf = (userId: string) =>
+  ownerQuery<{ print: string | null; email: string | null; dated: boolean | null }>(
+    `select mailbox_ticket as print, mailbox_proven_email as email, mailbox_proven_at = password_changed_at as dated
+     from private.account_security where profile_id = $1`,
+    [userId],
+  );
+
+/** Cuánto dice la base que dura, en segundos. */
+async function proofSeconds(): Promise<number> {
+  const [row] = await ownerQuery<{ seconds: number }>("select private.mailbox_proof_seconds()::integer as seconds");
+  if (!row) throw new Error("La base no dijo cuánto dura la prueba del buzón.");
+  return row.seconds;
+}
+
+describe("el resguardo del buzón al recuperar la contraseña", () => {
+  it("con el navegador que abrió el enlace: el secreto se queda ahí, y a la base llega su huella", async () => {
+    const account = await claimed({ complete: true });
+    const jar = memoryJar();
+    expect(await testServices().completeRecovery({ tokenHash: await recoveryLink(account), password: password() }, freshOrigin(), jar)).toEqual({
+      kind: "done",
+    });
+
+    const kept = jar.writes.filter((write) => write.name === TICKET_COOKIE);
+    expect(kept).toHaveLength(1);
+    const secret = kept[0]?.value ?? "";
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(kept[0]?.options).toEqual({ httpOnly: true, secure: false, sameSite: "lax", path: "/", maxAge: await proofSeconds() });
+    expect(await proofOf(account.id)).toEqual([{ print: printOf(secret), email: account.email, dated: true }]);
+    // Recuperar no abre sesión: lo único que queda en ese navegador es el resguardo.
+    expect(jar.writes.map((write) => write.name)).toEqual([TICKET_COOKIE]);
+  });
+
+  it("sin navegador no hay resguardo, y el que la cuenta tuviera se anula", async () => {
+    const account = await claimed({ complete: true });
+    const jar = memoryJar();
+    await testServices().completeRecovery({ tokenHash: await recoveryLink(account), password: password() }, freshOrigin(), jar);
+    expect((await proofOf(account.id))[0]?.print).not.toBeNull();
+
+    // La espera entre dos correos no es lo que aquí se prueba.
+    await clearThrottle();
+    expect(await testServices().completeRecovery({ tokenHash: await recoveryLink(account, 3), password: password() }, freshOrigin())).toEqual({
+      kind: "done",
+    });
+    expect(await proofOf(account.id)).toMatchObject([{ print: null, email: account.email }]);
+  });
+
+  it("una recuperación que no termina no deja resguardo ni toca el que había", async () => {
+    const account = await claimed({ complete: true });
+    const first = memoryJar();
+    await testServices().completeRecovery({ tokenHash: await recoveryLink(account), password: password() }, freshOrigin(), first);
+    const before = await proofOf(account.id);
+
+    await clearThrottle();
+    const jar = memoryJar();
+    // Una contraseña que no pasa la revisión: el enlace ni se canjea.
+    expect(await testServices().completeRecovery({ tokenHash: await recoveryLink(account, 3), password: "corta" }, freshOrigin(), jar)).toMatchObject({
+      kind: "invalid",
+    });
+    // Un enlace que no existe.
+    expect(await testServices().completeRecovery({ tokenHash: "a".repeat(56), password: password() }, freshOrigin(), jar)).toEqual({
+      kind: "link_dead",
+    });
+    expect(jar.writes).toEqual([]);
+    expect(await proofOf(account.id)).toEqual(before);
+  });
+});

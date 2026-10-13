@@ -190,10 +190,31 @@ const claimRow = z.object({ state: z.string() });
  * Reclama la cuenta de quien actúa (`private.claim_account()`): apaga la marca de
  * contraseña, fecha el cambio y borra las sesiones anotadas. Va después de fijar la
  * contraseña, nunca antes. Devuelve lo que contestó la base.
+ *
+ * `ticketPrint` es la huella del resguardo del buzón que el servidor acaba de generar
+ * (`mailbox-ticket.ts`), o nulo: un reclamo sin resguardo anula el que la cuenta tuviera.
+ * Solo se reclama al terminar un enlace del correo, y una prueba de arquitectura lo exige.
  */
-export async function claimAccount(tx: Tx): Promise<string> {
-  const [row] = await tx.query(sql`select private.claim_account() as state`, claimRow);
+export async function claimAccount(tx: Tx, ticketPrint: string | null): Promise<string> {
+  const [row] = await tx.query(sql`select private.claim_account(${ticketPrint}) as state`, claimRow);
   return row?.state ?? "";
+}
+
+const proofRow = z.object({ seconds: z.number().int().nullable() });
+
+/**
+ * Cuántos segundos vive el resguardo del buzón (`VIGENCIA_PRUEBA_BUZON_MINUTOS`), con el
+ * tope que se le pase. Nulo si el parámetro falta o no vale: no lanza, porque de esto no
+ * puede depender que alguien termine su registro o recupere su contraseña.
+ */
+export async function mailboxProofSeconds(tx: Tx, limit: number): Promise<number | null> {
+  const [row] = await tx.query(
+    sql`select (select least(v.seconds, ${limit}::bigint)::integer
+                from (select private.mailbox_proof_seconds() as seconds) as v
+                where v.seconds is not null) as seconds`,
+    proofRow,
+  );
+  return row?.seconds ?? null;
 }
 
 const formParamsRow = z.object({

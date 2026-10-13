@@ -30,6 +30,7 @@ const FAILURES = {
   recovery_incomplete: "Una recuperación se quedó a medias después de gastar su enlace: esa persona tiene que pedir otro.",
   recovery_notice_not_sent: "Una contraseña se recuperó por el camino de administración: el aviso de cambio de contraseña no salió.",
   recovery_with_second_factor: "Una cuenta con segundo factor recuperó su contraseña desde su correo: a esa cuenta no le sale el aviso de cambio de contraseña, y conviene confirmar que fue su dueña.",
+  mailbox_ticket_not_kept: "Una prueba del buzón no pudo dejar su cookie: si esa cuenta tiene una invitación de administración, tendrá que recuperar su contraseña otra vez para aceptarla.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
