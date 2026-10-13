@@ -122,6 +122,12 @@ export const account = defineMessages({
     // El cambio desde la cuenta se quedó sin respuesta: no se sabe cuál de las dos vale.
     noticePasswordUnconfirmed:
       "No pudimos confirmar si tu contraseña cambió, y cerramos todas tus sesiones. Entra con la nueva; si no funciona, usa la de antes.",
+    // Aceptó su invitación configurando el segundo factor: su sesión se cerró al aceptar.
+    noticeSecondFactorReady: "Tu segundo factor quedó configurado. Entra con tu contraseña y escribe el código de tu aplicación.",
+    // El freno de los códigos rechazó: Auth cerró todas las sesiones de la cuenta.
+    noticeSecondFactorThrottled:
+      "Hubo demasiados códigos equivocados y cerramos tus sesiones. Espera unos minutos y entra de nuevo. Si no fuiste tú, recupera tu contraseña desde tu correo.",
+    noticeSessionEnded: "Tu sesión se cerró. Entra de nuevo para continuar.",
   },
   // PA-13.
   recover: {

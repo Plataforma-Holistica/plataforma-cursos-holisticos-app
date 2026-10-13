@@ -41,6 +41,7 @@ import {
 } from "./auth-errors";
 import { ensureIdentityKeys, inspectAccessToken, type TokenInspection, type VerifiedClaims } from "./claims";
 import { IdentityUnavailableError } from "./errors";
+import { qrImage } from "./qr";
 import { emailClaim, isLinkToken } from "./tokens";
 
 // Lo que los servicios le piden a Supabase Auth (TRD §8.10 y §9.2).
@@ -201,9 +202,12 @@ const proofs = new WeakMap<object, Proof>();
  *
  * `needs_second_level`: la cuenta ya tiene un factor verificado, y Auth no deja dar de
  * alta otro con una sesión de primer nivel.
+ *
+ * `qr` es la imagen que Auth entrega con esa misma clave dentro (un SVG), o nulo si lo
+ * que mandó no está hecho solo de lo esperado (`qr.ts`). Tampoco se guarda: lleva la clave.
  */
 export type FactorEnrollment =
-  | { ok: true; factorId: string; secret: string; uri: string }
+  | { ok: true; factorId: string; secret: string; uri: string; qr: string | null }
   | { ok: false; reason: "no_session" | "needs_second_level" | "unknown" };
 
 /**
@@ -845,7 +849,7 @@ export function createAuth(dependencies: AuthDependencies = {}) {
     // llevan minutos sin verificar y sin ningún reto, de cualquier cuenta. Si este falla,
     // no cambia nada: verificar pide el suyo.
     await callAuth({ method: "POST", path: `/factors/${factorId}/challenge`, accessToken, fetch: baseFetch });
-    return { ok: true, factorId, secret, uri };
+    return { ok: true, factorId, secret, uri, qr: qrImage(totp.qr_code) };
   }
 
   /**

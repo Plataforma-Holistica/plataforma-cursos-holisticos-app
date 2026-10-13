@@ -10,6 +10,7 @@ import { FormErrorSummary } from "@/ui/form-error-summary";
 import { FullScreenState } from "@/ui/full-screen-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
+import { OTPField } from "@/ui/otp-field";
 import { PasswordField } from "@/ui/password-field";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Spinner } from "@/ui/spinner";
@@ -120,6 +121,7 @@ export default function SamplePage() {
             error="Escribe un correo con arroba, como ana@correo.com."
           />
           <TextField label="País" name="country" autoComplete="country-name" optional />
+          <OTPField label="Código de tu aplicación" name="code" hint="Seis dígitos. Puedes pegarlo." />
           <PasswordField
             id="muestra-clave"
             label="Contraseña"

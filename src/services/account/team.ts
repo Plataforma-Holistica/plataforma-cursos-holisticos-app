@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import { parseSecondFactorCode } from "@/domain/access/second-factor-code";
 
 import type { SessionCheck } from "./admission";
 import type { AccountDependencies } from "./deps";
@@ -62,12 +63,41 @@ export interface TeamStore {
 /** Lo que la guarda de sesión contesta cuando no deja pasar. */
 type Refused = Exclude<SessionCheck, { kind: "pass" }>;
 
-export type TeamCheck = Refused | { kind: "team"; claims: VerifiedClaims; standing: TeamStanding };
+export type TeamCheck =
+  | Refused
+  | {
+      kind: "team";
+      claims: VerifiedClaims;
+      standing: TeamStanding;
+      /**
+       * El factor que el servidor dio de alta en ese navegador y en esa sesión, si hay uno a
+       * medias. A la pantalla le sirve para saber que ya se empezó y mandarlo de vuelta como
+       * «lo que pinté»; no dice que el factor siga existiendo. Es además el que
+       * `confirmSecondFactor` verifica y le pasa a la base: sale de la cookie del servidor,
+       * nunca de la pantalla.
+       */
+      inProgress: string | null;
+    };
+
+/** Las capacidades del equipo, como las nombra la base (`public.capability`). */
+export const CAPABILITIES = ["content", "finance", "moderation", "support", "config"] as const;
+export type Capability = (typeof CAPABILITIES)[number];
+
+/**
+ * Si ese estado tiene esa capacidad. Solo quien es del equipo con la sesión que pasa la
+ * puerta: lo que una invitación ofrece todavía no se tiene.
+ */
+export function holds(standing: TeamStanding, capability: Capability): boolean {
+  return standing.state === "member" && standing.capabilities.includes(capability);
+}
 
 export type FactorStart =
   | Refused
-  /** `secret` y `uri` se pintan una vez, a quien lo está configurando. */
-  | { kind: "started"; factorId: string; secret: string; uri: string }
+  /**
+   * `secret`, `uri` y `qr` se pintan una vez, a quien lo está configurando. `qr` es la imagen
+   * que Auth entrega con esa misma clave dentro, o nulo si no mandó una que se entienda.
+   */
+  | { kind: "started"; factorId: string; secret: string; uri: string; qr: string | null }
   | { kind: "not_invited" }
   /** Tiene invitación, pero no ha abierto un enlace de su correo en este navegador. */
   | { kind: "needs_mailbox_proof" }
@@ -105,6 +135,7 @@ export type CodeGiven =
   | { kind: "signed_out" };
 
 const HANDOFF = /^[A-Z0-9]{8,32}$/;
+const FACTOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * La huella del código que quien restablece le dictó a la persona, o nulo si lo tecleado no
@@ -153,7 +184,8 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     const check = await core.checkSession(reader);
     if (check.kind !== "pass") return check;
     try {
-      return { kind: "team", claims: check.claims, standing: await store.standing(check.claims, readTicketPrint(reader)) };
+      const standing = await store.standing(check.claims, readTicketPrint(reader));
+      return { kind: "team", claims: check.claims, standing, inProgress: readEnrolledFactor(reader, check.claims.sessionId ?? "") };
     } catch {
       await deps.report("team_unavailable");
       return { kind: "unavailable" };
@@ -174,7 +206,18 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     if (!enrolled.ok) return { kind: enrolled.reason === "needs_second_level" ? "needs_second_level" : "unavailable" };
     // Sin dónde anotarlo no hay cómo verificarlo después: no se supo.
     if (!keepEnrolledFactor(jar, team.claims.sessionId ?? "", enrolled.factorId)) return { kind: "unavailable" };
-    return { kind: "started", factorId: enrolled.factorId, secret: enrolled.secret, uri: enrolled.uri };
+    return { kind: "started", factorId: enrolled.factorId, secret: enrolled.secret, uri: enrolled.uri, qr: enrolled.qr };
+  }
+
+  /** Lo que sigue a una invitación aceptada: nada de ella queda en ese navegador. */
+  async function finishAccepted(jar: CookieJar): Promise<FactorConfirmation> {
+    dropTicket(jar);
+    dropEnrolledFactor(jar);
+    // La base ya cerró la sesión. Esto borra su cookie, y Auth contesta que no existe, que
+    // cuenta como cerrada. Si Auth no contesta, queda dicho: es la defensa por si esto
+    // corriera contra una base sin esa migración.
+    if ((await auth.signOut(jar)) !== "closed") await deps.report("session_not_closed");
+    return { kind: "accepted" };
   }
 
   /**
@@ -185,15 +228,31 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
    * borra su cookie. A Auth se le pide cerrarla de todos modos, y que ya no exista cuenta
    * como cerrada.
    */
-  async function confirmSecondFactor(jar: CookieJar, input: { code: string; handoff?: unknown }): Promise<FactorConfirmation> {
+  async function confirmSecondFactor(
+    jar: CookieJar,
+    input: { code: string; handoff?: unknown; painted?: unknown },
+  ): Promise<FactorConfirmation> {
     const team = await teamStanding(jar);
     if (team.kind !== "team") return team;
     const { standing } = team;
+    const factorId = team.inProgress;
+
+    // Un segundo envío que llega cuando el primero ya ató: la persona está atada justo al
+    // factor que este navegador dio de alta. Ya se aceptó, y se termina igual que entonces.
+    // Quien es del equipo y pasa por aquí sin esa anotación no pierde su sesión.
+    if ((standing.state === "member" || standing.state === "needs_code") && factorId !== null && standing.factor === factorId) {
+      return finishAccepted(jar);
+    }
     if (standing.state === "invited_unproven") return { kind: "needs_mailbox_proof" };
     if (standing.state !== "invited") return { kind: "not_invited" };
 
-    const factorId = readEnrolledFactor(jar, team.claims.sessionId ?? "");
     if (factorId === null) return { kind: "start_again" };
+    // Lo que la pantalla pintó no decide nada: solo sirve para no verificar contra un factor
+    // que no es el de la clave que la persona tiene delante (otra pestaña empezó de nuevo).
+    // Así ese código no cuenta en el freno. La anotación se queda: la otra pestaña vale.
+    if (typeof input.painted === "string" && FACTOR.test(input.painted) && input.painted !== factorId) {
+      return { kind: "start_again" };
+    }
     const ticket = readTicketPrint(jar);
     if (ticket === null) return { kind: "needs_mailbox_proof" };
     // En un restablecimiento, sin un código dictado con forma no se llama a nadie: a la
@@ -201,7 +260,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     const handoff = standing.kind === "rebind" ? handoffPrint(input.handoff) : null;
     if (standing.kind === "rebind" && handoff === null) return { kind: "needs_handoff" };
 
-    const verification = await auth.verifyFactor(jar, factorId, input.code);
+    // Un código sin forma no es un intento: no llega a Auth, y no cuenta en su freno.
+    const typed = parseSecondFactorCode(input.code);
+    if (!typed.ok) return { kind: "wrong_code" };
+
+    const verification = await auth.verifyFactor(jar, factorId, typed.code);
     switch (verification.kind) {
       case "verified":
         break;
@@ -270,13 +333,7 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
 
     switch (answer) {
       case "accepted":
-        dropTicket(jar);
-        dropEnrolledFactor(jar);
-        // La base ya cerró la sesión. Esto borra su cookie, y Auth contesta que no existe,
-        // que cuenta como cerrada. Si Auth no contesta, queda dicho: es la defensa por si
-        // esto corriera contra una base sin esa migración.
-        if ((await auth.signOut(jar)) !== "closed") await deps.report("session_not_closed");
-        return { kind: "accepted" };
+        return finishAccepted(jar);
       case "needs_handoff":
         // La invitación sigue viva y sin aceptar, o no se supo: el factor se queda, y el
         // siguiente intento, con el código dictado bien, lo ata.
@@ -310,7 +367,11 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
     const { standing } = team;
     if (standing.state !== "needs_code" && standing.state !== "member") return { kind: "not_member" };
 
-    const verification = await auth.verifyFactor(jar, standing.factor, code);
+    // Un código sin forma no es un intento: no llega a Auth, y no cuenta en su freno.
+    const typed = parseSecondFactorCode(code);
+    if (!typed.ok) return { kind: "wrong_code" };
+
+    const verification = await auth.verifyFactor(jar, standing.factor, typed.code);
     switch (verification.kind) {
       case "verified":
         break;

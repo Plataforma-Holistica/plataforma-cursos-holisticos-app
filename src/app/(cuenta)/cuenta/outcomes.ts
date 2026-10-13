@@ -45,7 +45,14 @@ export function checkNameForm(input: { name: string }): NameProblem | null {
 
 export type NameOutcome =
   /** `closeSession`: la guarda dijo que esta sesión ya no vale, y la acción la cierra antes de irse. */
-  | { kind: "redirect"; to: string; notice: Notice | null; closeSession: boolean }
+  | {
+      kind: "redirect";
+      to: string;
+      notice: Notice | null;
+      closeSession: boolean;
+      /** La persona pidió salir de ese navegador: se lleva también el resguardo del buzón y el factor a medias. */
+      forgetProofs?: boolean;
+    }
   | { kind: "saved"; name: string }
   | { kind: "invalid"; problem: NameProblem }
   | { kind: "suspended" }
@@ -132,7 +139,8 @@ export function closeSessionOutcome(result: SessionClosing): SessionsOutcome {
     case "current":
       // La pantalla no manda la sesión propia por aquí. A quien la manda se le hace lo que
       // pidió por el camino que sí borra la cookie: se cierra y se va a la portada.
-      return { kind: "redirect", to: ROUTES.landing, notice: null, closeSession: true };
+      // Es salir de ese navegador: se lleva también las pruebas que guardaba.
+      return { kind: "redirect", to: ROUTES.landing, notice: null, closeSession: true, forgetProofs: true };
     case "unavailable":
       return { kind: "unavailable" };
     case "session":

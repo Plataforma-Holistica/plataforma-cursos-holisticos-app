@@ -226,7 +226,11 @@ falla. Doce precisiones que la tabla no dice:
     Con JavaScript, después de una acción la página no se vuelve a pedir si la acción no
     lo pide: cuando hace falta, la acción llama a `refresh()`. La validación al salir del
     campo usa las mismas reglas del dominio, que reexporta
-    `src/services/account/field-rules.ts`, y solo si el campo ya trae algo.
+    `src/services/account/field-rules.ts`, y solo si el campo ya trae algo. Ahí está
+    también la del código del segundo factor (`parseSecondFactorCode`: seis dígitos, sin
+    contar espacios): un código sin forma no llega a Auth, y por eso no cuenta en su
+    freno. Su campo es `OTPField` (`src/ui/`), un solo campo sin tope de largo, para que
+    pegar «123 456» no se corte.
   - Los textos van al catálogo (`src/messages/es/account.ts` para la cuenta). Un
     componente de cliente importa solo su bloque y nada del servidor: la prueba lo revisa.
   - A dónde se va lo decide `navigation.ts`: `resolveDestination` es el único lector de
@@ -235,7 +239,10 @@ falla. Doce precisiones que la tabla no dice:
     dirección.
   - Una página no puede borrar una cookie: para cerrar una sesión que la guarda rechazó
     manda a `/sesion/cerrar`, que vuelve a correr la guarda y solo cierra si ella lo dice.
-    «Salir» es una acción de servidor.
+    «Salir» es una acción de servidor, y además de cerrar la sesión se lleva el resguardo
+    del buzón y el factor a medias de ese navegador (`forgetBrowserProofs`). Lo mismo
+    cerrar la sesión propia desde la cuenta, que sale por `leaveFor` con `forgetProofs`.
+    Una salida que cierra una sesión que la guarda rechazó no lo lleva.
   - El origen de una acción de servidor lo verifica Next. No se agrega una verificación
     propia, y «nulo» nunca entra a los orígenes permitidos. Por eso una página con
     formulario no lleva `Referrer-Policy: no-referrer`: rompe el envío sin JavaScript
@@ -388,7 +395,13 @@ falla. Doce precisiones que la tabla no dice:
     único código de esa lista con el que se le cierra la sesión a alguien), `factor_gone`
     (ya no existe: toca empezar de nuevo, no reintentar) y `no_session` (la sesión se
     cerró en otro lado; la cookie no se borra ahí: la guarda la rechaza en la siguiente
-    petición). `removeFactor` quita uno, y uno que ya no está cuenta como quitado. Tres
+    petición). `removeFactor` quita uno, y uno que ya no está cuenta como quitado.
+    `enrollFactor` entrega además el código QR que Auth ya manda hecho (un SVG de unos
+    360 KB, con la clave dentro), solo si está hecho de lo esperado (`qr.ts`): una lista
+    de permitidos, un `<svg>` con rectángulos y sus atributos de posición, tamaño y
+    relleno. Cualquier otra cosa da nulo, y el alta vale igual con la clave en texto.
+    Si una versión nueva de Auth dibuja distinto, el QR deja de salir y la prueba que lo
+    mide falla: se amplía la lista a la vista. Tres
     cosas medidas contra el Auth local: el nivel es de la sesión y no del token (una copia
     de la cookie de antes de verificar renueva ya en segundo nivel, y con ella se puede
     dar de alta otro factor); al verificar un factor, Auth borra los demás que la cuenta
@@ -595,16 +608,32 @@ falla. Doce precisiones que la tabla no dice:
     lo contestan tal cual:
     - `teamStanding(reader)` da el estado de quien trae esa sesión
       (`private.team_standing()`), con la huella del resguardo que traiga su navegador.
-      Es lo que leerá la guarda de `/admin`.
+      Es lo que leerá la guarda de `/admin`. Dice además qué factor dio de alta el
+      servidor en ese navegador y en esa sesión (`inProgress`), para que la pantalla sepa
+      que ya se empezó; no dice que ese factor siga existiendo. Si un estado tiene una
+      capacidad lo contesta `holds(standing, capability)`: solo `member`, nunca lo que
+      una invitación ofrece.
     - `startSecondFactor(jar)` da de alta el factor, solo a quien está `invited`, y anota
       cuál fue en una cookie del servidor (`enrolled-factor.ts`: `plataforma-factor`, con
       `__Host-` bajo https, quince minutos). El valor es `sesión.factor`, y con otra sesión
-      no se lee.
-    - `confirmSecondFactor(jar, { code, handoff })` verifica ese factor y, con la sesión
-      ya en segundo nivel, acepta la invitación. **El factor que se le pasa a la base es
-      el de esa cookie, nunca uno que llegue del formulario ni el que diga la sesión:**
-      quien tuviera la sesión de la persona y verificara por fuera un factor suyo no logra
-      que se ate. En un restablecimiento, sin un código dictado con forma no se verifica ni
+      no se lee. Devuelve la clave, su dirección `otpauth://` y el código QR: los tres
+      se pintan una vez y no se guardan ni viajan en un campo oculto.
+    - `confirmSecondFactor(jar, { code, handoff, painted })` verifica ese factor y, con la
+      sesión ya en segundo nivel, acepta la invitación. **El factor que se le pasa a la
+      base es el de esa cookie, nunca uno que llegue del formulario ni el que diga la
+      sesión:** quien tuviera la sesión de la persona y verificara por fuera un factor suyo
+      no logra que se ate. `painted` es el factor que la pantalla pintó, y solo se
+      compara: si tiene forma de factor y no es el anotado (otra pestaña empezó de
+      nuevo), se contesta `start_again` sin preguntarle a Auth, para que ese código no
+      cuente en el freno, y sin borrar la anotación, que es de la otra pestaña. Una prueba
+      de arquitectura exige que no se use para nada más. Y un segundo envío que encuentra
+      a la persona ya atada justo al factor anotado en ese navegador se contesta
+      `accepted`, con la misma limpieza; sin esa anotación, quien es del equipo recibe
+      `not_invited` y conserva su sesión. Esa rama solo corre en una carrera: lo normal
+      es que el segundo envío llegue con la sesión ya cerrada por la base, y la guarda
+      conteste `must_sign_out`. La pantalla lo trata como caso normal. El código pasa
+      por la regla del dominio aquí mismo (`parseSecondFactorCode`): sin forma se
+      contesta `wrong_code` sin preguntarle a Auth. En un restablecimiento, sin un código dictado con forma no se verifica ni
       se le pregunta a la base: un nulo le cuenta como intento fallido
       (`handoffPrint`: sin espacios ni guiones, en mayúsculas, de 8 a 32 letras o dígitos).
       Aceptada, **la persona queda sin sesión**: la de equipo nace después de atar,
@@ -644,7 +673,7 @@ falla. Doce precisiones que la tabla no dice:
     resguardo del buzón: completar la recuperación lo deja y, en la misma respuesta,
     cierra la sesión que ese navegador tuviera (`leaveFor`). Si cerrar se lo llevara,
     nadie con una sesión abierta podría probar su buzón. Que «Salir» sí se lo lleve es un
-    paso propio de esa acción, y llega con las pantallas del equipo.
+    paso propio de esa acción (`forgetBrowserProofs`, arriba), no del servicio.
   - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer, ticketLifetime, teamStore })` existe
     para las pruebas. En las de integración, lo que cambia el equipo corre con un almacén
     sobre una transacción del dueño que se revierte (`teamStoreOn`, en

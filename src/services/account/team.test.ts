@@ -7,7 +7,7 @@ import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { SessionCheck } from "./admission";
 import { createEnrolledFactors } from "./enrolled-factor";
 import { createMailboxTickets } from "./mailbox-ticket";
-import { createTeam, handoffPrint, withLockRetry, type AcceptAnswer, type TeamStanding } from "./team";
+import { CAPABILITIES, createTeam, handoffPrint, holds, withLockRetry, type AcceptAnswer, type TeamStanding } from "./team";
 
 // Los servicios del equipo, con todo lo de fuera simulado: aquí se prueba qué deciden con
 // cada respuesta de la guarda, de la base y de Auth, y en qué orden llaman. Contra el Auth y
@@ -23,6 +23,7 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 const tickets = createMailboxTickets({ secure: () => false });
 const factors = createEnrolledFactors({ secure: () => false });
 const TICKET = "t".repeat(43);
+const QR = "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>";
 
 function jarOf(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
@@ -61,7 +62,9 @@ function teamWith(setup: Setup = {}) {
   const auth = {
     enrollFactor: vi.fn(() => {
       calls.push("enroll");
-      return Promise.resolve(setup.enroll ?? { ok: true, factorId: FACTOR, secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP" });
+      return Promise.resolve(
+        setup.enroll ?? { ok: true, factorId: FACTOR, secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP", qr: QR },
+      );
     }),
     verifyFactor: vi.fn((_jar: unknown, factorId: string, code: string) => {
       calls.push(`verify ${factorId} ${code}`);
@@ -166,8 +169,16 @@ describe("en qué estado está quien pide", () => {
 
   it("con sesión que pasa, pregunta a la base con las claims de la guarda y la huella del resguardo del navegador", async () => {
     const team = teamWith({ standing: MEMBER });
-    expect(await team.teamStanding(browser())).toEqual({ kind: "team", claims, standing: MEMBER });
+    expect(await team.teamStanding(browser(false))).toEqual({ kind: "team", claims, standing: MEMBER, inProgress: null });
     expect(team.calls).toEqual(["standing aal1 resguardo"]);
+  });
+
+  it("dice además qué factor dio de alta el servidor en ese navegador y en esa sesión, si alguno", async () => {
+    const team = teamWith({ standing: INVITED });
+    expect(await team.teamStanding(browser())).toMatchObject({ kind: "team", inProgress: FACTOR });
+    // El de otra sesión no es de esta, y lo que no tiene forma no es ninguno.
+    expect(await team.teamStanding(browser(true, "5e000000-0000-4000-8000-0000000000ff"))).toMatchObject({ kind: "team", inProgress: null });
+    expect(await team.teamStanding(jarOf({ "plataforma-factor": "cualquier-cosa" }))).toMatchObject({ kind: "team", inProgress: null });
   });
 
   it("sin resguardo en el navegador pregunta sin él", async () => {
@@ -210,6 +221,7 @@ describe("empezar a configurar el segundo factor", () => {
       factorId: FACTOR,
       secret: "JBSWY3DPEHPK3PXP",
       uri: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP",
+      qr: QR,
     });
     expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
     expect(team.calls).toEqual(["standing aal1 resguardo", "enroll"]);
@@ -269,6 +281,38 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     }
   });
 
+  // La regla del código es una sola, y el servicio la aplica él: no depende de que la
+  // acción se acuerde. Un código sin forma no es un intento, y no llega a Auth.
+  describe("el código, como lo teclea o lo pega una persona", () => {
+    it.each(["123 456", " 123456 ", "123\t456\n"])("%j llega a Auth sin espacios", async (code) => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(), { code })).toEqual({ kind: "accepted" });
+      expect(team.calls).toContain(`verify ${FACTOR} 123456`);
+    });
+
+    it.each(["", "   ", "12345", "1234567", "12a456", "123-456", "１２３４５６"])(
+      "%j no tiene forma de código: se dice que no coincide, sin preguntarle a Auth ni pedirle a la base que acepte",
+      async (code) => {
+        const team = teamWith();
+        const jar = browser();
+        expect(await team.confirmSecondFactor(jar, { code })).toEqual({ kind: "wrong_code" });
+        expect(team.calls).toEqual(["standing aal1 resguardo"]);
+        expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+      },
+    );
+
+    it("lo que no es un texto, tampoco", async () => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(), { code: 123456 as unknown as string })).toEqual({ kind: "wrong_code" });
+      expect(team.auth.verifyFactor).not.toHaveBeenCalled();
+    });
+
+    it("en un restablecimiento, primero se mira el código dictado: sin él no importa cómo venga el otro", async () => {
+      const team = teamWith({ standing: REBIND });
+      expect(await team.confirmSecondFactor(browser(), { code: "12345" })).toEqual({ kind: "needs_handoff" });
+    });
+  });
+
   it("sin el resguardo en este navegador no se verifica ni se acepta, diga lo que diga el estado", async () => {
     // La base no diría «invitada» sin el resguardo: es una segunda barrera, por si lo dijera.
     const team = teamWith({ standing: INVITED });
@@ -276,6 +320,81 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "needs_mailbox_proof" });
     expect(team.calls).toEqual(["standing aal1 sin"]);
     expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+  });
+
+  // Dos pestañas: la segunda que empieza quita el factor de la primera. La pantalla manda
+  // el factor que pintó, y si no es el que este navegador tiene anotado, su clave ya no es
+  // la vigente: se dice sin gastar un intento en el freno. Nunca decide qué se ata.
+  describe("el factor que la pantalla pintó", () => {
+    const OTHER = "fa000000-0000-4000-8000-0000000000ee";
+
+    it("si es el anotado, sigue como siempre", async () => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(), { code: "123456", painted: FACTOR })).toEqual({ kind: "accepted" });
+      expect(team.calls).toContain(`verify ${FACTOR} 123456`);
+    });
+
+    it("si es otro, hay que empezar de nuevo: no se verifica, no se acepta, y nada se quita ni se borra", async () => {
+      const team = teamWith();
+      const jar = browser();
+      expect(await team.confirmSecondFactor(jar, { code: "123456", painted: OTHER })).toEqual({ kind: "start_again" });
+      expect(team.calls).toEqual(["standing aal1 resguardo"]);
+      expect(team.auth.removeFactor).not.toHaveBeenCalled();
+      // La otra pestaña es legítima: su anotación se queda.
+      expect(jar.get("plataforma-factor")).toBe(`${SESSION}.${FACTOR}`);
+      expect(jar.get("plataforma-resguardo")).toBe(TICKET);
+    });
+
+    it("el que se verifica y se ata es siempre el anotado, diga lo que diga el formulario", async () => {
+      const team = teamWith();
+      await team.confirmSecondFactor(browser(), { code: "123456", painted: FACTOR });
+      expect(team.calls.filter((call) => call.includes(OTHER))).toEqual([]);
+      expect(team.calls).toContain(`accept aal2 resguardo ${FACTOR} sin`);
+    });
+
+    it.each([undefined, null, "", "no-es-un-factor", 123456, [FACTOR], OTHER.toUpperCase()])(
+      "lo que no tiene forma de factor (%j) no dice nada: es una cortesía, no un control",
+      async (painted) => {
+        const team = teamWith();
+        expect(await team.confirmSecondFactor(browser(), { code: "123456", painted })).toEqual({ kind: "accepted" });
+      },
+    );
+
+    it("sin factor anotado, lo pintado no cambia nada: empezar de nuevo", async () => {
+      const team = teamWith();
+      expect(await team.confirmSecondFactor(browser(false), { code: "123456", painted: OTHER })).toEqual({ kind: "start_again" });
+      expect(team.calls).toEqual(["standing aal1 resguardo"]);
+    });
+  });
+
+  // El segundo envío de un doble clic puede llegar cuando el primero ya ató y la guarda
+  // todavía deja pasar. Atada con el factor que este navegador dio de alta: ya se aceptó.
+  describe("un segundo envío que llega con la persona ya atada", () => {
+    it.each<TeamStanding>([
+      { state: "member", factor: FACTOR, capabilities: ["support"] },
+      { state: "needs_code", factor: FACTOR },
+    ])("atada al factor anotado en este navegador (%j): se contesta que sí, con la misma limpieza, sin verificar ni aceptar", async (standing) => {
+      const team = teamWith({ standing });
+      const jar = browser();
+      expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "accepted" });
+      expect(team.calls).toEqual(["standing aal1 resguardo", "signOut"]);
+      expect(jar.get("plataforma-resguardo")).toBeUndefined();
+      expect(jar.get("plataforma-factor")).toBeUndefined();
+      expect(team.reported).toEqual([]);
+    });
+
+    it.each<[string, TeamStanding, boolean]>([
+      ["atada a otro factor", MEMBER, true],
+      ["a un código, con otro factor", { state: "needs_code", factor: BOUND }, true],
+      ["atada al mismo factor, sin anotación en este navegador", { state: "member", factor: FACTOR, capabilities: ["support"] }, false],
+      ["atada al mismo factor, anotado por otra sesión", { state: "needs_code", factor: FACTOR }, false],
+    ])("%s: no es un doble envío, y a quien es del equipo no se le cierra la sesión por pasar por aquí", async (_what, standing, withFactor) => {
+      const team = teamWith({ standing });
+      const jar = withFactor ? browser() : _what.includes("otra sesión") ? browser(true, "5e000000-0000-4000-8000-0000000000ff") : browser(false);
+      expect(await team.confirmSecondFactor(jar, { code: "123456" })).toEqual({ kind: "not_invited" });
+      expect(team.auth.signOut).not.toHaveBeenCalled();
+      expect(jar.get("plataforma-resguardo")).toBe(TICKET);
+    });
   });
 
   it("con todo en su lugar: verifica ese factor, acepta con las claims nuevas, limpia el navegador y cierra la sesión", async () => {
@@ -574,6 +693,18 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
 });
 
 describe("dar el código al entrar", () => {
+  it.each(["123 456", " 123456 "])("el código %j llega a Auth sin espacios", async (code) => {
+    const team = teamWith({ standing: [{ state: "needs_code", factor: BOUND }, MEMBER] });
+    expect(await team.giveSecondFactorCode(browser(), code)).toEqual({ kind: "verified" });
+    expect(team.calls).toContain(`verify ${BOUND} 123456`);
+  });
+
+  it.each(["", "12345", "1234567", "12a456", "123-456"])("%j no tiene forma de código: no coincide, y no se le pregunta a Auth", async (code) => {
+    const team = teamWith({ standing: { state: "needs_code", factor: BOUND } });
+    expect(await team.giveSecondFactorCode(browser(), code)).toEqual({ kind: "wrong_code" });
+    expect(team.calls).toEqual(["standing aal1 resguardo"]);
+  });
+
   it.each(REFUSALS)("sin sesión que pase (%j) no verifica nada", async (check) => {
     const team = teamWith({ check });
     expect(await team.giveSecondFactorCode(browser(), "123456")).toEqual(check);
@@ -621,5 +752,29 @@ describe("dar el código al entrar", () => {
     // No se vuelve a preguntar el estado: nada cambió.
     expect(team.store.standing).toHaveBeenCalledOnce();
     expect(team.reported).toEqual(reported);
+  });
+});
+
+describe("tener una capacidad", () => {
+  it("las capacidades son las cinco de la base", () => {
+    expect([...CAPABILITIES].sort()).toEqual(["config", "content", "finance", "moderation", "support"]);
+  });
+
+  it("solo quien es del equipo, con la sesión que pasa la puerta, y solo las que tiene", () => {
+    const member: TeamStanding = { state: "member", factor: BOUND, capabilities: ["support", "content"] };
+    expect(holds(member, "support")).toBe(true);
+    expect(holds(member, "content")).toBe(true);
+    expect(holds(member, "config")).toBe(false);
+    expect(holds({ state: "member", factor: BOUND, capabilities: [] }, "support")).toBe(false);
+  });
+
+  it.each<TeamStanding>([
+    { state: "none" },
+    { state: "unbound" },
+    { state: "needs_code", factor: BOUND },
+    { state: "invited", kind: "grant", capabilities: ["support"] },
+    { state: "invited_unproven", kind: "grant" },
+  ])("quien está en %j no tiene ninguna, tampoco las que le ofrece una invitación", (standing) => {
+    for (const capability of CAPABILITIES) expect(holds(standing, capability)).toBe(false);
   });
 });

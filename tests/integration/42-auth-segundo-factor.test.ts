@@ -82,7 +82,7 @@ function faking(match: RegExp, respond: () => Response, times = Number.POSITIVE_
 }
 
 /** Da de alta un factor con esa sesión, y falla la prueba si no se pudo. */
-async function enrolled(jar: MemoryJar): Promise<{ factorId: string; secret: string; uri: string }> {
+async function enrolled(jar: MemoryJar): Promise<{ factorId: string; secret: string; uri: string; qr: string | null }> {
   const result = await enrollFactor(jar);
   if (!result.ok) throw new Error(`El factor no se dio de alta: ${result.reason}`);
   return result;
@@ -104,6 +104,9 @@ describe("dar de alta un factor", () => {
     expect(factor.secret).toMatch(/^[A-Z2-7]{16,}$/);
     expect(factor.uri.startsWith("otpauth://totp/")).toBe(true);
     expect(factor.uri).toContain(`secret=${factor.secret}`);
+    // Y su código QR, que Auth ya manda hecho: un SVG que pasa el filtro de «solo dibuja».
+    expect(factor.qr).toMatch(/<svg[\s>]/);
+    expect(factor.qr?.length).toBeGreaterThan(1_000);
     expect(await factorsOf(person.id)).toEqual([{ id: factor.factorId, status: "unverified", type: "totp" }]);
     // Dar de alta no sube el nivel ni toca la cookie.
     expect(jar.get(COOKIE)).toBe(before);
@@ -133,6 +136,16 @@ describe("dar de alta un factor", () => {
     expect(await createAuth({ fetch: odd.fetch }).enrollFactor(jar)).toEqual({ ok: false, reason: "unknown" });
     // Ni se pidió un reto para un factor que no se entendió.
     expect(odd.calls.filter((path) => path.endsWith("/challenge"))).toEqual([]);
+  });
+
+  it("un código QR que no es solo un dibujo no se entrega: el alta vale igual, con la clave en texto", async () => {
+    const { jar } = await entered();
+    const id = randomUUID();
+    const totp = { secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP" };
+    for (const qr_code of ["<svg><script>alert(1)</script></svg>", "esto no es una imagen", undefined]) {
+      const odd = faking(/\/factors$/, () => Response.json({ id, type: "totp", totp: { ...totp, qr_code } }));
+      expect(await createAuth({ fetch: odd.fetch }).enrollFactor(jar)).toEqual({ ok: true, factorId: id, ...totp, qr: null });
+    }
   });
 
   it("si no se pudo verificar el token de la cookie, no se supo: no es lo mismo que no tener sesión", async () => {

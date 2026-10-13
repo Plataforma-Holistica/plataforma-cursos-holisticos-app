@@ -300,9 +300,12 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
 
   it("el que se le pasa a la base al aceptar es el que se leyó de esa anotación, y es el que se verificó", () => {
     const confirm = bodyOf("confirmSecondFactor");
-    expect(confirm).toMatch(/const factorId = readEnrolledFactor\(jar, team\.claims\.sessionId \?\? ""\);/);
+    // La anotación se lee una vez, junto con el estado, con la sesión que pasó la guarda.
+    expect(bodyOf("teamStanding")).toMatch(/inProgress: readEnrolledFactor\(reader, check\.claims\.sessionId \?\? ""\)/);
+    expect(count(team, /\breadEnrolledFactor\(/g)).toBe(1);
+    expect(confirm).toMatch(/const factorId = team\.inProgress;/);
     expect(count(confirm, /\bfactorId = /g)).toBe(1);
-    expect(confirm).toMatch(/await auth\.verifyFactor\(jar, factorId, input\.code\)/);
+    expect(confirm).toMatch(/await auth\.verifyFactor\(jar, factorId, typed\.code\)/);
     // Con las claims de la sesión ya subida, no con las de antes de verificar.
     expect(confirm).toMatch(/const \{ claims \} = verification;/);
     expect(confirm).toMatch(/await store\.accept\(claims, ticket, factorId, handoff\)/);
@@ -311,9 +314,20 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     expect(confirm).not.toMatch(/input\.factor/);
   });
 
+  it("lo que la pantalla dice que pintó solo se compara: nunca se verifica ni se ata", () => {
+    const confirm = bodyOf("confirmSecondFactor");
+    // Las tres apariciones son de una sola condición, que contesta «empieza de nuevo».
+    expect(count(confirm, /\binput\.painted\b/g)).toBe(3);
+    expect(confirm).toMatch(
+      /if \(typeof input\.painted === "string" && FACTOR\.test\(input\.painted\) && input\.painted !== factorId\) \{\s+return \{ kind: "start_again" \};/,
+    );
+    // No se guarda en una variable, ni llega a Auth ni a la base por ningún otro nombre.
+    expect(count(team, /\bpainted\b/g)).toBe(4);
+  });
+
   it("al entrar, el código se da contra el factor que dice la base", () => {
     const give = bodyOf("giveSecondFactorCode");
-    expect(give).toMatch(/await auth\.verifyFactor\(jar, standing\.factor, code\)/);
+    expect(give).toMatch(/await auth\.verifyFactor\(jar, standing\.factor, typed\.code\)/);
     expect(count(team, /\.verifyFactor\(/g)).toBe(2);
     expect(give).not.toMatch(/readEnrolledFactor|store\.accept/);
   });
