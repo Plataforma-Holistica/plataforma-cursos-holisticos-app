@@ -302,8 +302,7 @@ begin
 
   if exists (
       select 1 from private.admin_invitations i
-      where i.accepted_at is null and i.revoked_at is null
-        and (i.profile_id = v_actor or i.email = v_email)) then
+      where i.accepted_at is null and i.revoked_at is null and i.email = v_email) then
     perform private.drop_unbound_factors(v_actor);
   end if;
 
@@ -382,10 +381,11 @@ begin
     if not found or v_status <> 'active' then
       return 'ineligible';
     end if;
-    if exists (select 1 from private.admin_factors f where f.profile_id = v_user)
-       or exists (
-         select 1 from public.admin_capabilities c
-         where c.profile_id = v_user and c.revoked_at is null) then
+    -- Quien tiene una capacidad ya es del equipo, tenga o no su factor atado: si lo perdió,
+    -- se le restablece.
+    if exists (
+        select 1 from public.admin_capabilities c
+        where c.profile_id = v_user and c.revoked_at is null) then
       return 'already_member';
     end if;
     v_created := pg_catalog.clock_timestamp();
@@ -490,7 +490,7 @@ begin
   -- alguien usó su sesión, lo que esa sesión invitó no debe poder aceptarse.
   update private.admin_invitations i set revoked_at = v_created, revoked_by = p_by
   where i.accepted_at is null and i.revoked_at is null
-    and (i.profile_id = p_profile or i.email = v_email or i.email = v_current or i.invited_by = p_profile);
+    and (i.profile_id = p_profile or i.email = v_email or i.invited_by = p_profile);
   insert into private.admin_invitations (kind, email, profile_id, capabilities, invited_by, handoff, created_at, expires_at)
   values ('rebind', v_email, p_profile, '{}', p_by, p_handoff, v_created, v_expires);
   return 'reset';
@@ -760,7 +760,6 @@ declare
   v_actor uuid := private.actor_id();
   v_row uuid;
   v_now timestamptz;
-  v_email text;
 begin
   perform private.team_lock();
   v_gate := private.team_change_gate();
@@ -797,10 +796,8 @@ begin
       where c.profile_id = p_profile and c.revoked_at is null) then
     delete from private.admin_factors f where f.profile_id = p_profile;
     perform private.drop_unbound_factors(p_profile);
-    select pg_catalog.lower(u.email) into v_email from auth.users u where u.id = p_profile;
     update private.admin_invitations i set revoked_at = v_now, revoked_by = v_actor
-    where i.accepted_at is null and i.revoked_at is null
-      and (i.profile_id = p_profile or i.email = v_email);
+    where i.accepted_at is null and i.revoked_at is null and i.profile_id = p_profile;
   end if;
   return 'revoked';
 end

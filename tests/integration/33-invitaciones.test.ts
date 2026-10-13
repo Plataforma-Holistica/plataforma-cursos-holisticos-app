@@ -250,7 +250,8 @@ async function waitsOnALock(pid: number): Promise<boolean> {
 
 /**
  * Corre `held` en una transacción y, sin terminarla, `waiting` en otra. Dice si la segunda
- * se quedó esperando un candado, y qué contestó cuando la primera se revirtió.
+ * se quedó esperando un candado, y qué contestó cuando la primera se revirtió. Solo la
+ * segunda toma el rol del servidor.
  */
 async function secondWaits(
   held: (owner: Client) => Promise<unknown>,
@@ -268,7 +269,6 @@ async function secondWaits(
     const isHolding = new Promise<void>((resolve) => {
       holding = resolve;
     });
-    // La primera actúa como dueño: no necesita el rol del servidor.
     const first = reverted(async (owner) => {
       await held(owner);
       holding();
@@ -361,5 +361,104 @@ describe("los cambios al equipo van uno tras otro", () => {
       },
     );
     expect(claim).toEqual({ waited: true, answered: "already_claimed" });
+  });
+
+  it("al revés: una invitación que empezó antes de un reclamo y lo esperó queda fechada después de él", async () => {
+    const { person, client } = await entered();
+    const token = await tokenOf(client);
+    await reverted(async (claiming) => {
+      // El reclamo ya tiene el candado del perfil, pero todavía no toma su hora.
+      await asOwner(claiming);
+      await claiming.query("select 1 from public.profiles where id = $1 for no key update", [person.id]);
+
+      await reverted(async (inviting) => {
+        await asSystem(inviting);
+        const [me] = (await inviting.query<{ pid: number }>("select pg_backend_pid() as pid")).rows;
+        // La invitación empieza ahora: toma una primera hora, busca la cuenta y espera.
+        const running = answer(inviting, "private.system_invite_admin($1, '{support}')", [person.email]);
+        expect(await waitsOnALock(me?.pid ?? 0)).toBe(true);
+
+        await asServer(claiming, person.id, token.sessionId);
+        expect(await answer(claiming, "private.claim_account($1)", [print("t")])).toBe("already_claimed");
+        await asOwner(claiming);
+        const claimed = await claiming.query<{ at: string }>(
+          "select mailbox_proven_at::text as at from private.account_security where profile_id = $1",
+          [person.id],
+        );
+        await claiming.query("rollback");
+
+        expect(await running).toBe("invited_existing");
+        const dated = await inviting.query<{ later: boolean }>(
+          "select created_at > $2::timestamptz as later from private.admin_invitations where email = $1",
+          [person.email.toLowerCase(), claimed.rows[0]?.at],
+        );
+        // Con la hora de cuando empezó a esperar, ese reclamo contaría como prueba posterior.
+        expect(dated.rows).toEqual([{ later: true }]);
+      }, false);
+    });
+  });
+
+  describe("y las que tocan a una persona esperan además el candado de su perfil", () => {
+    const lockProfile = (id: string) => async (owner: Client) => {
+      await asOwner(owner);
+      await owner.query("select 1 from public.profiles where id = $1 for no key update", [id]);
+    };
+    const cases: [string, (id: string) => string, string][] = [
+      ["dar una capacidad", (id) => `private.grant_capability('${id}', 'support')`, "not_member"],
+      ["quitar una capacidad", (id) => `private.revoke_capability('${id}', 'support')`, "not_found"],
+      ["restablecer", (id) => `private.reset_second_factor('${id}', '${print("c")}')`, "not_member"],
+    ];
+
+    it.each(cases)("%s", async (_name, call, expected) => {
+      const admin = await entered();
+      const factor = await verifiedFactor(admin.client, "el de quien cambia el equipo");
+      const token = await tokenOf(admin.client);
+      const target = await claimedUser();
+      emails.push(target.email);
+      const result = await secondWaits(
+        lockProfile(target.id),
+        async (second) => {
+          await asServer(second, admin.person.id, token.sessionId);
+          return answer(second, call(target.id));
+        },
+        (second) => asTeamMember(second, admin.person, factor, token.sessionId),
+      );
+      expect(result).toEqual({ waited: true, answered: expected });
+    });
+
+    it("aceptar, el de quien acepta", async () => {
+      const { person, client } = await entered();
+      const token = await tokenOf(client);
+      const result = await secondWaits(
+        lockProfile(person.id),
+        async (second) => {
+          await asServer(second, person.id, token.sessionId);
+          return answer(second, "private.accept_admin_invitation($1, $2)", [print("r"), randomUUID()]);
+        },
+        async (second) => {
+          await asSystem(second);
+          await second.query(
+            "insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at) values ('grant', $1, '{support}', now(), now() + interval '1 day')",
+            [person.email.toLowerCase()],
+          );
+        },
+      );
+      expect(result).toEqual({ waited: true, answered: "needs_mailbox_proof" });
+    });
+  });
+
+  it("y con una foto fija de la base se niegan a correr", async () => {
+    const owner = new Client({ connectionString: localOwnerUrl() });
+    await owner.connect();
+    try {
+      await owner.query("begin isolation level repeatable read");
+      await asSystem(owner);
+      await expect(owner.query("select private.system_invite_admin('x@candado.test', '{support}')")).rejects.toMatchObject({
+        code: "25000",
+      });
+    } finally {
+      await owner.query("rollback").catch(() => undefined);
+      await owner.end();
+    }
   });
 });

@@ -8,7 +8,7 @@
 -- un código reciente de quien lo cambia.
 begin;
 \ir _ayuda.psql
-select plan(208);
+select plan(258);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -152,6 +152,10 @@ create function pruebas.invitacion_viva(p_email text) returns private.admin_invi
 language sql security definer
 as $$ select i from private.admin_invitations i where i.email = p_email and i.accepted_at is null and i.revoked_at is null $$;
 
+create function pruebas.aceptadas(p_email text) returns setof private.admin_invitations
+language sql security definer
+as $$ select i from private.admin_invitations i where i.email = p_email and i.accepted_at is not null $$;
+
 create function pruebas.una_invitacion(p_email text) returns uuid
 language sql security definer
 as $$ select i.id from private.admin_invitations i where i.email = p_email limit 1 $$;
@@ -269,8 +273,43 @@ select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select pruebas.verificar('c0000000-0000-0000-0000-000000000001', gen_random_uuid());
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('', '{support}')$$),
   'needs_fresh_code', 'un código reciente de otro factor no abre la puerta de cambio');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'preguntado directo: el código de otro factor no es reciente para nadie');
 delete from auth.mfa_factors where user_id = 'c0000000-0000-0000-0000-000000000001'
   and id <> pruebas.factor('c0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+select ok(private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'el del factor atado, recién dado, sí');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000002', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'pero no para otra persona');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000002')),
+  'ni con la sesión de otra');
+update auth.sessions set aal = 'aal1' where id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'ni si la sesión ya no está en segundo nivel');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+update auth.mfa_amr_claims set authentication_method = 'password'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'ni si lo reciente fue la contraseña y no el código');
+delete from auth.mfa_amr_claims where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '6 minutes'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'ni uno fechado seis minutos adelante');
+update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '16 minutes'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select ok(not private.fresh_code('c0000000-0000-0000-0000-000000000001', pruebas.sesion('c0000000-0000-0000-0000-000000000001')),
+  'ni uno de hace 16 minutos');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+
+-- Con el código reciente pero sin pasar la puerta del equipo, tampoco: aquí, una sesión que
+-- la aplicación no abrió.
+delete from private.app_sessions where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000001');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('', '{support}')$$),
+  'needs_fresh_code', 'el código reciente no basta si la sesión no pasa la puerta del equipo');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 
 -- ---------------------------------------------------------------------------------------
@@ -322,6 +361,29 @@ select ok(
 select pruebas.suspender('a0000000-0000-0000-0000-000000000003');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('suspendida@prueba.test', '{support}')$$),
   'ineligible', 'una cuenta suspendida no se invita');
+insert into auth.users (id, email, is_sso_user) values ('a0000000-0000-0000-0000-000000000005', 'federada@prueba.test', true);
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('federada@prueba.test', '{support}')$$),
+  'invited_new', 'una cuenta de acceso federado no cuenta como la cuenta de ese correo');
+select is((pruebas.invitacion_viva('federada@prueba.test')).profile_id, null, 'la invitación no apunta a ella');
+
+-- Una cuenta invitada que cambia de correo sigue teniendo su invitación: una viva por cuenta.
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('beto@prueba.test', '{support}')$$),
+  'invited_existing', '(se invita a otra cuenta que ya existe)');
+update auth.users set email = 'beto-nuevo@prueba.test' where id = 'a0000000-0000-0000-0000-000000000002';
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('beto-nuevo@prueba.test', '{support}')$$),
+  'already_invited', 'si la cuenta cambió de correo, sigue invitada: no se le invita otra vez');
+select pruebas.como_dueno_sistema();
+update private.admin_invitations set created_at = created_at - interval '8 days', expires_at = expires_at - interval '8 days'
+  where email = 'beto@prueba.test';
+select pruebas.limpiar();
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('beto-nuevo@prueba.test', '{support}')$$),
+  'invited_existing', 'y caducada la anterior, se le invita al correo nuevo');
+select is((select count(*)::int from private.admin_invitations i
+           where i.profile_id = 'a0000000-0000-0000-0000-000000000002' and i.revoked_at is null),
+  1, 'la anterior, que iba a su correo viejo, queda revocada');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
+    $$private.revoke_admin_invitation((pruebas.invitacion_viva('beto-nuevo@prueba.test')).id)$$), 'revoked', '(se revoca)');
+update auth.users set email = 'beto@prueba.test' where id = 'a0000000-0000-0000-0000-000000000002';
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('config2@prueba.test', '{support}')$$),
   'already_member', 'quien ya es del equipo no se invita: se le da la capacidad');
 
@@ -372,6 +434,9 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
   'revoked', 'quien tiene configuración revoca una invitación viva, la haya hecho quien la haya hecho');
 select is((select count(*)::int from private.admin_invitations i where i.email = 'nueva@prueba.test' and i.revoked_at is null),
   0, 'y deja de estar viva');
+select is((select count(*)::int from private.admin_invitations i
+           where i.email = 'nueva@prueba.test' and i.revoked_by = 'c0000000-0000-0000-0000-000000000001'),
+  1, 'con quién la revocó');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
     $$private.revoke_admin_invitation(pruebas.una_invitacion('nueva@prueba.test'))$$),
   'not_found', 'una ya revocada no se revoca dos veces');
@@ -407,7 +472,10 @@ select is((select s.mailbox_ticket from private.account_security s where s.profi
   null, 'ni se queda con resguardo');
 
 -- Cambiar la contraseña desde la cuenta no es una prueba del buzón.
+select pruebas.verificar('a0000000-0000-0000-0000-000000000002');
 select pruebas.reclamar('a0000000-0000-0000-0000-000000000002', pruebas.huella('beto-3'));
+select ok(exists (select 1 from auth.mfa_factors m where m.user_id = 'a0000000-0000-0000-0000-000000000002'),
+  'a una cuenta cuya invitación se revocó, reclamar no le quita su factor');
 select mailbox_proven_at as probado from private.account_security where profile_id = 'a0000000-0000-0000-0000-000000000002' \gset
 select pruebas.pide('a0000000-0000-0000-0000-000000000002', 'private.note_password_change()');
 select results_eq(
@@ -453,6 +521,11 @@ select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', 'ana-1'), 'needs_mailbox_proof', 'ni con el secreto sin su huella');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('beto-3')), 'needs_mailbox_proof',
   'ni con el resguardo de otra cuenta');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'needs_mailbox_proof',
+  'ni con el suyo, si un reclamo posterior sin resguardo lo anuló');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1'));
+select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
 
 -- El resguardo tiene que ser posterior a la invitación, del mismo correo y reciente.
 select pruebas.como_dueno();
@@ -508,6 +581,23 @@ select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1'),
     p_session => pruebas.sesion('c0000000-0000-0000-0000-000000000002')),
   'needs_code', 'la sesión de otra persona, aunque esté verificada, no sirve');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1'), p_session => gen_random_uuid()),
+  'needs_code', 'ni una sesión que no existe, aunque la cuenta tenga otra verificada');
+update private.app_sessions set profile_id = 'a0000000-0000-0000-0000-000000000004'
+  where session_id = pruebas.sesion('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'needs_code',
+  'ni una sesión anotada a nombre de otra cuenta');
+update private.app_sessions set profile_id = 'a0000000-0000-0000-0000-000000000001'
+  where session_id = pruebas.sesion('a0000000-0000-0000-0000-000000000001');
+update auth.sessions set user_id = 'a0000000-0000-0000-0000-000000000004' where id = pruebas.sesion('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'needs_code',
+  'ni una que en Auth es de otra cuenta');
+update auth.sessions set user_id = 'a0000000-0000-0000-0000-000000000001' where id = pruebas.sesion('a0000000-0000-0000-0000-000000000001');
+update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '6 minutes'
+  where session_id = pruebas.sesion('a0000000-0000-0000-0000-000000000001');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-1')), 'needs_code',
+  'ni un código fechado seis minutos adelante');
+select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
 
 -- La cuenta de quien acepta.
 update auth.users set email_confirmed_at = null where id = 'a0000000-0000-0000-0000-000000000001';
@@ -561,6 +651,36 @@ select ok(
   'ninguno de los rechazos de arriba dejó atadura ni capacidades');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 
+-- Las otras dos maneras de dejar de ser quien puede invitar. Cada vez: invitación nueva,
+-- prueba del buzón y factor verificado, para que lo único roto sea quien invitó.
+select pruebas.pide('c0000000-0000-0000-0000-000000000003', $$private.invite_admin('ana@prueba.test', '{support}')$$);
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-b'));
+select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
+select pruebas.suspender('c0000000-0000-0000-0000-000000000003');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-b')), 'inviter_lost_config',
+  'si quien invitó está suspendido, la invitación no se acepta');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000003';
+select pruebas.limpiar();
+select pruebas.pide('c0000000-0000-0000-0000-000000000003', $$private.invite_admin('ana@prueba.test', '{support}')$$);
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-c'));
+select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
+select pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.grant_capability('c0000000-0000-0000-0000-000000000003', 'support')$$);
+select pruebas.como_dueno_sistema();
+update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
+  where profile_id = 'c0000000-0000-0000-0000-000000000003' and capability = 'config';
+select pruebas.limpiar();
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-c')), 'inviter_lost_config',
+  'ni si le quitaron la configuración por fuera de la función, aunque conserve otra capacidad');
+select pruebas.como_dueno_sistema();
+update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
+  where profile_id = 'c0000000-0000-0000-0000-000000000003' and capability = 'support';
+select pruebas.limpiar();
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', $$private.invite_admin('x@prueba.test', '{support}')$$),
+  'forbidden', 'y quien tuvo configuración y ya no la tiene, no invita');
+select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000003', 'config');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000003');
+
 -- Ahora sí. Antes, lo que tiene que desaparecer al aceptar: otro factor y otra sesión.
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('ana@prueba.test', '{support,content}')$$),
   'invited_existing', '(se le invita de nuevo)');
@@ -592,6 +712,12 @@ select results_eq(
   $$select s.id from auth.sessions s where s.user_id = 'a0000000-0000-0000-0000-000000000001'$$,
   $$values (pruebas.sesion('a0000000-0000-0000-0000-000000000001'))$$,
   'y sus demás sesiones se cierran');
+select results_eq(
+  $$select x.session_id from private.app_sessions x where x.profile_id = 'a0000000-0000-0000-0000-000000000001'$$,
+  $$values (pruebas.sesion('a0000000-0000-0000-0000-000000000001'))$$,
+  'también en lo anotado');
+select is(pruebas.pide('a0000000-0000-0000-0000-000000000001', $$private.invite_admin('x@prueba.test', '{support}')$$),
+  'forbidden', 'ser del equipo sin configuración no deja invitar');
 select ok(pruebas.tiene('a0000000-0000-0000-0000-000000000001', 'support'), 'desde ese momento pasa la puerta con su capacidad');
 select ok(not pruebas.tiene('a0000000-0000-0000-0000-000000000001', 'config'), 'y solo con las que recibió');
 select results_eq(
@@ -603,6 +729,9 @@ select results_eq(
            ('admin_capabilities.insert', 'a0000000-0000-0000-0000-000000000001'::uuid)$$,
   'atar y recibir quedan en la auditoría, a nombre de quien aceptó');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-2')), 'no_invitation', 'una invitación se acepta una sola vez');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
+    $$private.revoke_admin_invitation((select i.id from pruebas.aceptadas('ana@prueba.test') i))$$),
+  'not_found', 'y una aceptada ya no se revoca');
 select pruebas.como_dueno_sistema();
 insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at)
 values ('grant', 'ana@prueba.test', '{finance}', clock_timestamp() - interval '1 hour', clock_timestamp() + interval '1 day');
@@ -669,6 +798,12 @@ select ok(
   'y a esa persona se le cierran todas las sesiones');
 select ok(exists (select 1 from private.admin_factors f where f.profile_id = 'a0000000-0000-0000-0000-000000000001'),
   'le quedan otras capacidades: conserva su factor atado');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'finance')$$),
+  'not_found', 'una ya quitada no se quita dos veces');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.grant_capability('a0000000-0000-0000-0000-000000000001', 'finance')$$),
+  'granted', 'y se le puede dar de nuevo');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'finance')$$),
+  'revoked', '(y quitársela otra vez)');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'content')$$),
   'revoked', '(se le quita otra)');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('a0000000-0000-0000-0000-000000000001', 'support')$$),
@@ -677,6 +812,15 @@ select ok(
   not exists (select 1 from private.admin_factors f where f.profile_id = 'a0000000-0000-0000-0000-000000000001')
     and not exists (select 1 from auth.mfa_factors m where m.user_id = 'a0000000-0000-0000-0000-000000000001'),
   'sin capacidades deja de ser del equipo: pierde la atadura y el factor');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('a0000000-0000-0000-0000-000000000001', pruebas.huella('k'))$$),
+  'not_member', 'y ya no hay nada que restablecerle: sus capacidades revocadas no cuentan');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-4'));
+select is((select count(*)::int from public.audit_log where action = 'account.claimed'), 1,
+  'ni deja renglón su siguiente recuperación de contraseña');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('ana@prueba.test', '{support}')$$),
+  'invited_existing', 'y se le puede invitar de nuevo: haber tenido capacidades no la deja fuera');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
+    $$private.revoke_admin_invitation((pruebas.invitacion_viva('ana@prueba.test')).id)$$), 'revoked', '(se revoca)');
 
 -- El mínimo de dos con configuración cuenta cuentas activas (RF-712).
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', $$private.invite_admin('deltres@prueba.test', '{support}')$$),
@@ -699,6 +843,16 @@ select results_eq(
   'y las invitaciones que ella había hecho quedan revocadas');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000002', 'config')$$),
   'min_config', 'pero no se baja de dos');
+-- El mínimo es de configuración: otra capacidad de esas dos personas sí se quita, y no se
+-- lleva las invitaciones que hicieron.
+select pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.grant_capability('c0000000-0000-0000-0000-000000000002', 'support')$$);
+select pruebas.pide('c0000000-0000-0000-0000-000000000002', $$private.invite_admin('sigue@prueba.test', '{support}')$$);
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000002', 'support')$$),
+  'revoked', 'con dos personas con configuración, a una de ellas se le quita otra capacidad');
+select ok((pruebas.invitacion_viva('sigue@prueba.test')).id is not null, 'y lo que invitó sigue en pie: conserva configuración');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000002');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001',
+    $$private.revoke_admin_invitation((pruebas.invitacion_viva('sigue@prueba.test')).id)$$), 'revoked', '(se revoca)');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000001', 'config')$$),
   'min_config', 'ni quitándosela una misma');
 
@@ -719,6 +873,12 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_s
   'ineligible', 'si el correo de la cuenta ya no es el de su atadura, no se manda la invitación al nuevo');
 update auth.users set email = 'config2@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
 
+select pruebas.suspender('c0000000-0000-0000-0000-000000000002');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('k'))$$),
+  'ineligible', 'ni se restablece a una cuenta suspendida');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000002';
+select pruebas.limpiar();
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', $$private.invite_admin('deldos@prueba.test', '{support}')$$),
   'invited_new', '(la persona que se va a restablecer había invitado a alguien)');
 select pruebas.reclamar('c0000000-0000-0000-0000-000000000002', pruebas.huella('viejo'));
@@ -748,6 +908,27 @@ select results_eq(
   'y con una invitación de restablecimiento: sin capacidades, con la huella del código dictado');
 select is((select i.revoked_at is not null from private.admin_invitations i where i.email = 'deldos@prueba.test'),
   true, 'las invitaciones que ella había hecho quedan revocadas');
+select pruebas.como_dueno_sistema();
+update private.admin_invitations set revoked_at = now() where email = 'config2@prueba.test' and revoked_at is null and accepted_at is null;
+select pruebas.limpiar();
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('config2@prueba.test', '{support}')$$),
+  'already_member', 'a quien conserva capacidades sin su factor atado no se le invita: se le restablece');
+-- Y una invitación que da capacidades, dirigida a quien ya las tiene, no le devuelve la
+-- atadura sin el código dictado: puede pasar si alguien cambia su correo al de una invitación.
+select pruebas.como_dueno_sistema();
+insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at)
+values ('grant', 'config2@prueba.test', '{finance}', clock_timestamp(), clock_timestamp() + interval '1 day');
+select pruebas.limpiar();
+select is(pruebas.reclamar('c0000000-0000-0000-0000-000000000002', pruebas.huella('atajo')), 'claimed', '(prueba su buzón)');
+select pruebas.verificar('c0000000-0000-0000-0000-000000000002');
+select is(pruebas.aceptar('c0000000-0000-0000-0000-000000000002', pruebas.huella('atajo')), 'no_invitation',
+  'una invitación que da capacidades no la acepta quien ya tiene alguna');
+select ok(
+  not exists (select 1 from private.admin_factors f where f.profile_id = 'c0000000-0000-0000-0000-000000000002')
+    and (select count(*)::int from private.admin_invitations i where i.email = 'config2@prueba.test' and i.revoked_at is null and i.accepted_at is null) = 0,
+  'no queda atada, y esa invitación queda revocada');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-1'))$$),
+  'reset', '(se le restablece de nuevo, con el mismo código)');
 
 -- Volver: buzón, factor nuevo y el código dictado.
 select is(pruebas.aceptar('c0000000-0000-0000-0000-000000000002', pruebas.huella('viejo'), pruebas.huella('clave-1')), 'ineligible',
@@ -766,7 +947,7 @@ select is(pruebas.aceptar('c0000000-0000-0000-0000-000000000002', pruebas.huella
 select ok(pruebas.tiene('c0000000-0000-0000-0000-000000000002', 'config'), 'y su capacidad vuelve a servirle');
 select is(
   (select count(*)::int from public.admin_capabilities c where c.profile_id = 'c0000000-0000-0000-0000-000000000002'),
-  1, 'sin recibir ninguna capacidad nueva');
+  2, 'sin recibir ninguna capacidad nueva: las dos filas que ya tenía, una de ellas revocada');
 
 -- Cinco códigos equivocados gastan la invitación.
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-2'))$$),
@@ -781,6 +962,11 @@ select is(pruebas.aceptar('c0000000-0000-0000-0000-000000000002', pruebas.huella
   'y el correcto ya no sirve: la invitación quedó revocada');
 
 -- Restablecer por segunda vez, ya sin atadura: el correo sale de su última invitación.
+select pruebas.como_dueno_sistema();
+insert into private.admin_invitations (kind, email, profile_id, capabilities, handoff, created_at, expires_at, revoked_at)
+values ('rebind', 'muy-viejo@prueba.test', 'c0000000-0000-0000-0000-000000000002', '{}', pruebas.huella('v'),
+        now() - interval '30 days', now() - interval '23 days', now() - interval '29 days');
+select pruebas.limpiar();
 update auth.users set email = 'config2-otro@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-3'))$$),
   'ineligible', 'sin atadura, el correo se compara con el de su última invitación');
@@ -795,6 +981,9 @@ select pruebas.equipar('c0000000-0000-0000-0000-000000000003');
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000003', 'config');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000002', 'config')$$),
   'revoked', 'a la persona restablecida se le quita su última capacidad');
+select is((select count(*)::int from private.admin_invitations i
+           where i.profile_id = 'c0000000-0000-0000-0000-000000000002' and i.revoked_at is null and i.accepted_at is null),
+  0, 'con ella se va su invitación de restablecimiento');
 select is(pruebas.aceptar('c0000000-0000-0000-0000-000000000002', pruebas.huella('nuevo-3'), pruebas.huella('clave-3')), 'no_invitation',
   'y ya no tiene invitación que aceptar');
 select ok(
@@ -822,9 +1011,11 @@ select throws_ok($$select private.system_invite_admin('arranque@prueba.test', '{
 select throws_ok($$select private.system_reset_second_factor('c0000000-0000-0000-0000-000000000001', pruebas.huella('e'), null)$$, '42501', null,
   'ni la emergencia');
 select pruebas.como_dueno();
-select throws_ok($$select private.system_invite_admin('arranque@prueba.test', '{config}')$$, '42501', null,
+select throws_ok($$select private.system_invite_admin('arranque@prueba.test', '{config}')$$,
+  '42501', 'private.system_invite_admin(): declare the system actor first',
   'el dueño, sin declararse sistema, tampoco: la auditoría tiene que decir quién fue');
-select throws_ok($$select private.system_reset_second_factor('c0000000-0000-0000-0000-000000000001', pruebas.huella('e'), null)$$, '42501', null,
+select throws_ok($$select private.system_reset_second_factor('c0000000-0000-0000-0000-000000000001', pruebas.huella('e'), null)$$,
+  '42501', 'private.system_reset_second_factor(): declare the system actor first',
   'en ninguna de las dos');
 select pruebas.como_dueno_sistema();
 select is(private.system_invite_admin('arranque@prueba.test', '{config}'), 'invited_new', 'el dueño, declarado sistema, deja una invitación de arranque');
@@ -836,6 +1027,8 @@ select pruebas.verificar('e0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('e0000000-0000-0000-0000-000000000001', pruebas.huella('arr')), 'needs_mailbox_proof',
   'la invitación de arranque pide la misma prueba del buzón que cualquiera');
 select pruebas.reclamar('e0000000-0000-0000-0000-000000000001', pruebas.huella('arr'));
+select ok(not exists (select 1 from auth.mfa_factors m where m.user_id = 'e0000000-0000-0000-0000-000000000001'),
+  'al probarlo pierde el factor que tenía, aunque la invitación sea anterior a su cuenta');
 select pruebas.verificar('e0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('e0000000-0000-0000-0000-000000000001', pruebas.huella('arr')), 'accepted', 'y con ella se acepta');
 select results_eq(
@@ -857,6 +1050,12 @@ select is(private.system_reset_second_factor('e0000000-0000-0000-0000-0000000000
 select is((select i.email from private.admin_invitations i
            where i.profile_id = 'e0000000-0000-0000-0000-000000000001' and i.revoked_at is null and i.accepted_at is null),
   'arranque@prueba.test', 'y revoca la anterior');
+select is(private.system_invite_admin('otro-mas@prueba.test', '{support}'), 'invited_new', '(una invitación viva a otro correo)');
+select is(private.system_reset_second_factor('e0000000-0000-0000-0000-000000000001', pruebas.huella('emergencia-3'), 'otro-mas@prueba.test'),
+  'reset', 'restablecer hacia un correo que ya tenía una invitación viva la sustituye');
+select results_eq(
+  $$select i.kind from private.admin_invitations i where i.email = 'otro-mas@prueba.test' and i.revoked_at is null and i.accepted_at is null$$,
+  $$values ('rebind')$$, 'queda una sola viva para ese correo');
 select pruebas.limpiar();
 
 -- ---------------------------------------------------------------------------------------
