@@ -798,6 +798,29 @@ describe("el resguardo del buzón al recuperar la contraseña", () => {
     expect(await proofOf(account.id)).toEqual([{ print: printOf(secret), email: account.email, dated: true }]);
   }, 30_000);
 
+  it("si la cuenta no se puede reclamar, la contraseña queda cambiada y no hay resguardo: ni cookie, ni huella", async () => {
+    const account = await claimed({ complete: true });
+    const hash = await recoveryLink(account);
+    // Suspender deja un renglón de auditoría que no se borra. Aquí el reclamo se niega por
+    // la otra razón que tiene: el correo deja de estar confirmado justo después de que Auth
+    // guarda la contraseña, antes de que el servicio reclame.
+    const auth = createAuth({
+      fetch: async (input, init) => {
+        const response = await fetch(input, init);
+        if (init?.method === "PUT" && /\/auth\/v1\/user$/.test(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)) {
+          await ownerQuery("update auth.users set email_confirmed_at = null where id = $1", [account.id]);
+        }
+        return response;
+      },
+    });
+    const services = testServices({ auth });
+    const jar = memoryJar();
+    expect(await services.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin(), jar)).toEqual({ kind: "done" });
+    expect(jar.writes).toEqual([]);
+    expect(services.reported).toEqual([]);
+    expect(await proofOf(account.id)).toMatchObject([{ print: null }]);
+  });
+
   it("si no se sabe cuánto dura, la recuperación termina igual: sin resguardo, y queda dicho", async () => {
     const account = await claimed({ complete: true });
     const hash = await recoveryLink(account);

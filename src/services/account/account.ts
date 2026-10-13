@@ -100,8 +100,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
     timing: undefined,
     report: reportFailure,
     defer: (work) => work(),
-    ticketLifetime: (claims) =>
-      asServer({ claims, reason: "mailbox_proof" }, (tx) => mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT)),
+    ticketLifetime: () => asSystem({ reason: "mailbox_proof" }, (tx) => mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT)),
     ...overrides,
   };
   const { auth } = deps;

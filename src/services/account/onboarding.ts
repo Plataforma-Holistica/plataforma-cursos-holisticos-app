@@ -2,7 +2,6 @@ import "server-only";
 
 import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
-import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem } from "@/adapters/supabase/db";
 import { parseEmail, type EmailResult } from "@/domain/access/email";
 import { pairAfterRecovery } from "@/domain/access/login-throttle";
@@ -307,22 +306,22 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
    * registro o una recuperación. Si no se supo cuánto dura, o la cookie no se pudo
    * escribir, la persona prueba su buzón otra vez cuando haga falta, y queda dicho.
    */
-  async function keepProof(jar: CookieJar, ticket: MailboxTicket, claims: VerifiedClaims): Promise<void> {
+  async function keepProof(jar: CookieJar, ticket: MailboxTicket): Promise<void> {
     let seconds: number | null;
     try {
-      seconds = await deps.ticketLifetime(claims);
+      seconds = await deps.ticketLifetime();
     } catch {
       seconds = null;
     }
-    if (seconds === null) {
-      await deps.report("mailbox_proof_unavailable");
-      return;
-    }
+    let kept: boolean;
     try {
-      keepTicket(jar, ticket, seconds);
+      // Sin una duración que valga, no deja nada.
+      kept = keepTicket(jar, ticket, seconds);
     } catch {
       await deps.report("mailbox_ticket_not_kept");
+      return;
     }
+    if (!kept) await deps.report("mailbox_proof_unavailable");
   }
 
   /** La entrada con la que termina un registro: la cookie al tarro, o la sesión cerrada. */
@@ -449,7 +448,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       }
     }
 
-    await keepProof(jar, ticket, redeemed.claims);
+    await keepProof(jar, ticket);
     return enter(jar, redeemed.email, checked.password, startedText, from.userAgent);
   }
 
@@ -530,7 +529,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       return { kind: "request_new_link" };
     }
     // Solo si el reclamo ocurrió: sin él la base no guardó ninguna huella.
-    if (jar && ticket && claimed) await keepProof(jar, ticket, redeemed.claims);
+    if (jar && ticket && claimed) await keepProof(jar, ticket);
     return { kind: "done" };
   }
 

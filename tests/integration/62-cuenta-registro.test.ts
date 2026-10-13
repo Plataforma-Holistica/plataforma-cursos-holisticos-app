@@ -795,8 +795,9 @@ describe("el resguardo del buzón al completar el registro", () => {
   });
 
   it.each([
-    ["la base no dice cuánto dura", () => Promise.resolve(null)],
-    ["no se pudo preguntar", () => Promise.reject(new Error("sin base"))],
+    ["la base no dice cuánto dura", () => Promise.resolve<number | null>(null)],
+    ["no se pudo preguntar", () => Promise.reject<number | null>(new Error("sin base"))],
+    ["la duración no vale", () => Promise.resolve<number | null>(0)],
   ])("si %s, el registro termina igual: sin resguardo, y queda dicho", async (_name, ticketLifetime) => {
     const { hash, id } = await invited();
     const jar = memoryJar();

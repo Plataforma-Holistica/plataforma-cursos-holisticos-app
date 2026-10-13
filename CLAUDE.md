@@ -573,7 +573,7 @@ falla. Doce precisiones que la tabla no dice:
     rechaza, Auth además cierra todas las sesiones de esa cuenta, no solo la del intento
     (medido): a quien se equivocó de más hay que decirle que vuelva a entrar, o que
     recupere su contraseña desde su correo.
-  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer })` existe
+  - `createAccountServices({ auth, proxyTrusted, isLocal, timing, report, defer, ticketLifetime })` existe
     para las pruebas. Cada caso de integración empieza con los contadores vacíos y su
     propia dirección (`tests/integration/helpers/account.ts`).
 - **El cliente de base (`pg`) y el SDK de Supabase solo se importan en

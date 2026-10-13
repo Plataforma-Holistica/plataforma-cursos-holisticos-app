@@ -174,14 +174,36 @@ describe("el resguardo del buzón solo nace al terminar un enlace del correo", (
     return start === -1 || end === -1 ? "" : onboarding.slice(start, end);
   };
 
+  /** Cuántas veces aparece algo en el código de un archivo, sin sus comentarios. */
+  const countIn = (file: string, pattern: RegExp) =>
+    withoutComments(sources.find((source) => source.file === file)?.text ?? "").match(pattern)?.length ?? 0;
+
   it("reclamar una cuenta solo se nombra donde se define y en el servicio de los enlaces", () => {
-    // El nombre, no solo la llamada: importarlo con otro nombre o guardarlo en una variable
-    // también cuenta. `claimAccount` a secas es además un campo de la tabla del dominio que
-    // dice si toca reclamar: por eso se excluye lo que va precedido de un punto o seguido de
-    // dos puntos.
-    expect(namingInCode(/(?<![.\w])claimAccount\b(?!\s*:)/)).toEqual(["src/services/account/onboarding.ts", "src/services/account/records.ts"]);
-    // Y la función de la base, escrita como sea, solo en la consulta que la llama.
+    // Se cuenta el nombre, no la forma de la llamada: importarlo con otro nombre, guardarlo
+    // en una variable o llegar a él por el módulo entero también lo nombra. `claimAccount`
+    // es además un campo de la tabla del dominio que dice si toca reclamar: ahí solo puede
+    // aparecer como campo.
+    expect(namingInCode(/\bclaimAccount\b/)).toEqual([
+      "src/domain/access/password-outcome.ts",
+      "src/services/account/onboarding.ts",
+      "src/services/account/records.ts",
+    ]);
+    expect(countIn("src/domain/access/password-outcome.ts", /\bclaimAccount\b(?!\s*:)/g)).toBe(0);
+    // En el servicio: la importación, las dos llamadas y la lectura de ese campo. Una
+    // quinta aparición es otra manera de reclamar.
+    expect(countIn("src/services/account/onboarding.ts", /\bclaimAccount\b/g)).toBe(4);
+    // Y donde se define: una función, y una consulta que llama a la de la base.
+    expect(countIn("src/services/account/records.ts", /\bclaimAccount\b/g)).toBe(1);
+    expect(countIn("src/services/account/records.ts", /claim_account/g)).toBe(1);
     expect(namingInCode(/claim_account/)).toEqual(["src/services/account/records.ts"]);
+  });
+
+  it("cuánto dura el resguardo lo dice la base: en la aplicación nadie sustituye esa lectura", () => {
+    expect(naming(/\bticketLifetime\b/)).toEqual([
+      "src/services/account/account.ts",
+      "src/services/account/deps.ts",
+      "src/services/account/onboarding.ts",
+    ]);
   });
 
   it("emitir un resguardo, también", () => {
