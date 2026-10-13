@@ -217,6 +217,8 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
   it("toda ruta que pide sesión tiene su página revisada: ninguna se sirve sin pasar por aquí", () => {
     const sessionPages = guarded.filter((file) => requiresSession(routeOf(file))).map(routeOf);
     expect(sessionPages.sort()).toEqual([
+      "/admin",
+      "/admin/[...resto]",
       "/consentimientos",
       "/cuenta",
       "/entrar/segundo-factor",
@@ -253,6 +255,29 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
     it.each(teamPages)("%s no exporta su título: no debe poder asomarse en la respuesta de «no existe»", (file) => {
       expect(codeOf(file)).not.toMatch(/export (const metadata|(async )?function generateMetadata)\b/);
+    });
+
+    describe("bajo administración, toda ruta le contesta lo mismo a quien no es del equipo", () => {
+      const under = sources.filter((source) => source.file.startsWith("src/app/admin/"));
+
+      it("hay un comodín que atiende lo que no tiene página, y corre la guarda antes de decir que no existe", () => {
+        const wildcard = codeOf("src/app/admin/[...resto]/page.tsx");
+        expect(wildcard).toMatch(/const step = await requireAdmin\(path\);[\s\S]*\n\s*notFound\(\);\n\}/);
+        // La guarda va antes: si dijera «no existe» primero, la ruta que existe y la que no se distinguirían.
+        expect(wildcard.indexOf("requireAdmin(path)")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
+      });
+
+      it("no hay rutas, ni pantallas de carga, ni límites de espera: pintarían o contestarían antes que la guarda", () => {
+        expect(under.map((source) => source.file).filter((file) => /\/(route|loading|layout|template|default|error|not-found)\.tsx?$/.test(file))).toEqual([]);
+        expect(under.filter((source) => /\bSuspense\b/.test(source.code)).map((source) => source.file)).toEqual([]);
+      });
+
+      it("ninguna página de administración es pública", () => {
+        expect(PUBLIC_PAGES.filter((file) => file.startsWith("src/app/admin/"))).toEqual([]);
+        const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
+        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/page.tsx"]);
+        for (const file of pagesUnder) expect(teamPages).toContain(file);
+      });
     });
 
     it("las demás pantallas con sesión no usan una guarda del equipo: el segundo factor solo se pide en administración", () => {
