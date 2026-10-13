@@ -798,6 +798,16 @@ describe("el resguardo del buzón al recuperar la contraseña", () => {
     expect(await proofOf(account.id)).toEqual([{ print: printOf(secret), email: account.email, dated: true }]);
   }, 30_000);
 
+  it("si no se sabe cuánto dura, la recuperación termina igual: sin resguardo, y queda dicho", async () => {
+    const account = await claimed({ complete: true });
+    const hash = await recoveryLink(account);
+    const jar = memoryJar();
+    const services = testServices({ ticketLifetime: () => Promise.resolve(null) });
+    expect(await services.completeRecovery({ tokenHash: hash, password: password() }, freshOrigin(), jar)).toEqual({ kind: "done" });
+    expect(jar.writes).toEqual([]);
+    expect(services.reported).toEqual(["mailbox_proof_unavailable"]);
+  });
+
   it("si Auth no guarda la contraseña, no queda resguardo: ni en el navegador ni en la base", async () => {
     const account = await claimed({ complete: true });
     const hash = await recoveryLink(account);

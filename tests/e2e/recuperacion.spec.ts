@@ -428,7 +428,7 @@ test("pedir una recuperación desde otro sitio se rechaza y no deja rastro", asy
 });
 
 for (const javaScriptEnabled of [true, false]) {
-  test(`recuperar deja el resguardo del buzón en ese navegador, y solo ahí (${javaScriptEnabled ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+  test(`recuperar deja el resguardo del buzón en ese navegador (${javaScriptEnabled ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
     const ana = await person();
     const context = await browser.newContext({ javaScriptEnabled });
     try {

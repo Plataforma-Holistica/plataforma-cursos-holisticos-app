@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
+import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem } from "@/adapters/supabase/db";
 import { parseEmail, type EmailResult } from "@/domain/access/email";
 import { pairAfterRecovery } from "@/domain/access/login-throttle";
@@ -25,12 +26,11 @@ import {
   type RegistrationForm,
 } from "./forms";
 import { evaluateGate, REQUIRED_DOC_TYPES } from "./gate";
-import { issueTicket, keepTicket, MAILBOX_TICKET_MAX_AGE_LIMIT, type MailboxTicket } from "./mailbox-ticket";
+import { issueTicket, keepTicket, type MailboxTicket } from "./mailbox-ticket";
 import { resolveOrigin, type RequestOrigin } from "./origin";
 import {
   claimAccount,
   currentTexts,
-  mailboxProofSeconds,
   grantConsents,
   loadFormParams,
   markRegistrationStarted,
@@ -301,12 +301,23 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     return { kind: "ready", texts, ...facts.params };
   }
 
-  /** La entrada con la que termina un registro: la cookie al tarro, o la sesión cerrada. */
   /**
-   * Deja el resguardo del buzón en el navegador. Nada depende de que lo logre: si la cookie
-   * no se pudo escribir, la persona prueba su buzón otra vez cuando haga falta, y queda dicho.
+   * Deja el resguardo del buzón en el navegador, ya con la cuenta reclamada. Cuánto dura se
+   * lee aparte, después de confirmado el reclamo: nada de lo que aquí falle deshace un
+   * registro o una recuperación. Si no se supo cuánto dura, o la cookie no se pudo
+   * escribir, la persona prueba su buzón otra vez cuando haga falta, y queda dicho.
    */
-  async function keepProof(jar: CookieJar, ticket: MailboxTicket, seconds: number | null): Promise<void> {
+  async function keepProof(jar: CookieJar, ticket: MailboxTicket, claims: VerifiedClaims): Promise<void> {
+    let seconds: number | null;
+    try {
+      seconds = await deps.ticketLifetime(claims);
+    } catch {
+      seconds = null;
+    }
+    if (seconds === null) {
+      await deps.report("mailbox_proof_unavailable");
+      return;
+    }
     try {
       keepTicket(jar, ticket, seconds);
     } catch {
@@ -314,6 +325,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     }
   }
 
+  /** La entrada con la que termina un registro: la cookie al tarro, o la sesión cerrada. */
   async function enter(
     jar: CookieJar,
     email: string,
@@ -424,21 +436,21 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
         await grantConsents(tx, profileId, match.documentIds, "signup", from, deps.isLocal());
         // Si la cuenta no se puede reclamar, no se guarda nada.
         if (!accountClaimed(await claimAccount(tx, ticket.print))) throw new Error("La cuenta no se pudo reclamar.");
-        return { startedText: (await dbClock(tx)).text, ticketSeconds: await mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT) };
+        return (await dbClock(tx)).text;
       });
-    let saved: { startedText: string; ticketSeconds: number | null };
+    let startedText: string;
     try {
-      saved = await save();
+      startedText = await save();
     } catch {
       try {
-        saved = await save();
+        startedText = await save();
       } catch {
         return failed();
       }
     }
 
-    await keepProof(jar, ticket, saved.ticketSeconds);
-    return enter(jar, redeemed.email, checked.password, saved.startedText, from.userAgent);
+    await keepProof(jar, ticket, redeemed.claims);
+    return enter(jar, redeemed.email, checked.password, startedText, from.userAgent);
   }
 
   /**
@@ -481,7 +493,7 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
     // El resguardo del buzón, solo si hay navegador donde dejarlo. Se genera aquí: nunca
     // sale de lo que mandó quien pide.
     const ticket = jar ? issueTicket() : null;
-    let ticketSeconds: number | null = null;
+    let claimed = false;
     if (done && outcome.claimAccount) {
       const account = parseEmail(redeemed.email);
       const keys: PairKeys = { account: fingerprint("account", account.ok ? account.email : redeemed.email), ip: from.ip };
@@ -491,19 +503,18 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
           await lockAll(tx, [keys.ip, keys.account]);
           // Una cuenta que no se puede reclamar (suspendida) se queda con su contraseña
           // nueva, sin dispositivo de confianza y sin resguardo.
-          if (!accountClaimed(await claimAccount(tx, ticket?.print ?? null))) return null;
-          const seconds = ticket ? await mailboxProofSeconds(tx, MAILBOX_TICKET_MAX_AGE_LIMIT) : null;
-          if (!outcome.clearThrottles) return seconds;
+          if (!accountClaimed(await claimAccount(tx, ticket?.print ?? null))) return false;
+          if (!outcome.clearThrottles) return true;
           const trusted = pairAfterRecovery((await dbClock(tx)).date);
           // De una dirección que no se conoce no queda ningún par de confianza.
           await trustAfterRecovery(tx, keys, from.known && trusted.ok ? trusted.pair : null, buckets.signInAccount(keys.account));
-          return seconds;
+          return true;
         });
       try {
-        ticketSeconds = await settle();
+        claimed = await settle();
       } catch {
         try {
-          ticketSeconds = await settle();
+          claimed = await settle();
         } catch {
           done = false;
         }
@@ -518,7 +529,8 @@ export function createOnboarding(deps: AccountDependencies, core: OnboardingCore
       await deps.report("recovery_incomplete");
       return { kind: "request_new_link" };
     }
-    if (jar && ticket) await keepProof(jar, ticket, ticketSeconds);
+    // Solo si el reclamo ocurrió: sin él la base no guardó ninguna huella.
+    if (jar && ticket && claimed) await keepProof(jar, ticket, redeemed.claims);
     return { kind: "done" };
   }
 

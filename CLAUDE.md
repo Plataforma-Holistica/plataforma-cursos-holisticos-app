@@ -760,11 +760,13 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     `completeRecovery` (`src/services/account/mailbox-ticket.ts`): 32 bytes al azar que
     genera el servidor, nunca algo que mande el navegador, en una cookie que la página no
     lee (`plataforma-resguardo`, con `__Host-` bajo https) y que dura
-    `VIGENCIA_PRUEBA_BUZON_MINUTOS`. Se deja a toda cuenta que reclama, tenga o no una
+    `VIGENCIA_PRUEBA_BUZON_MINUTOS`, con un tope de un día. Cuánto dura se lee después de
+    confirmado el reclamo, en su propia transacción. Se deja a toda cuenta que reclama, tenga o no una
     invitación, para no decir nada de nadie. `completeRecovery` lo deja solo si recibe el
     tarro del navegador; sin tarro reclama sin resguardo, y eso anula el que hubiera. Si
-    falta el parámetro o la cookie no se puede escribir, el registro y la recuperación
-    terminan igual. Una prueba de arquitectura exige que reclamar y emitir un resguardo
+    falta el parámetro, no se pudo leer o la cookie no se puede escribir, el registro y la
+    recuperación terminan igual, y queda dicho (`mailbox_proof_unavailable`,
+    `mailbox_ticket_not_kept`). Una prueba de arquitectura exige que reclamar y emitir un resguardo
     solo ocurran en esos dos flujos. Leer la cookie y aceptar llega con el servicio que
     acepta: hasta entonces ninguna invitación se puede aceptar.
   - **En qué estado está alguien respecto al equipo** lo dice

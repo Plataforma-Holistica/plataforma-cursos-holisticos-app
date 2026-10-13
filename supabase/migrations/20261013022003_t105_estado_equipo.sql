@@ -13,6 +13,11 @@
 --
 -- No escribe nada, no toma candados y no lanza. No comprueba que la cuenta esté activa ni
 -- la marca de contraseña: eso lo decide la guarda de sesión, que corre antes.
+--
+-- Con la configuración incompleta puede decir más de lo que aceptar haría: `invited` a una
+-- invitación de restablecimiento aunque falte INTENTOS_ANTES_DE_FRENO, y `needs_code`
+-- aunque falte VIGENCIA_SEGUNDO_FACTOR_HORAS. En los dos casos quien llama después (aceptar,
+-- la puerta) lo dice en el registro de la base, y nadie pasa.
 
 -- ---------------------------------------------------------------------------------------
 -- Cuánto vive el resguardo del buzón, en segundos, para la cookie que lo guarda, con el
@@ -115,6 +120,10 @@ begin
 
   -- El resguardo, con las mismas condiciones que al aceptar.
   v_minutes := private.second_factor_limit('VIGENCIA_PRUEBA_BUZON_MINUTOS');
+  if v_minutes is null then
+    -- Que quede dicho: sin esto, la persona invitada probaría su buzón una y otra vez.
+    raise warning 'private.team_standing: falta VIGENCIA_PRUEBA_BUZON_MINUTOS, o no es un entero de 1 en adelante. Ningún resguardo del buzón vale.';
+  end if;
   select s.mailbox_ticket, s.mailbox_proven_at, s.mailbox_proven_email
   into v_ticket, v_proven, v_proven_email
   from private.account_security s where s.profile_id = v_actor;

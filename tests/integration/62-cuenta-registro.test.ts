@@ -794,7 +794,22 @@ describe("el resguardo del buzón al completar el registro", () => {
     expect(secrets[0]).not.toBe(secrets[1]);
   });
 
-  it("un registro que no termina no deja resguardo", async () => {
+  it.each([
+    ["la base no dice cuánto dura", () => Promise.resolve(null)],
+    ["no se pudo preguntar", () => Promise.reject(new Error("sin base"))],
+  ])("si %s, el registro termina igual: sin resguardo, y queda dicho", async (_name, ticketLifetime) => {
+    const { hash, id } = await invited();
+    const jar = memoryJar();
+    const services = testServices({ ticketLifetime });
+    expect(await services.completeRegistration(jar, form(hash), freshOrigin())).toMatchObject({ kind: "entered" });
+    expect(jar.get(TICKET_COOKIE)).toBeUndefined();
+    expect(jar.get(COOKIE)).toBeDefined();
+    expect(services.reported).toEqual(["mailbox_proof_unavailable"]);
+    // La huella sí quedó en la base: solo falta el secreto, que nadie tiene.
+    expect((await proofOf(id))[0]?.print).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("un registro que se rechaza antes de canjear el enlace no deja resguardo", async () => {
     const { hash } = await invited();
     const jar = memoryJar();
     expect(await testServices().completeRegistration(jar, form(hash, { name: "" }), freshOrigin())).toMatchObject({ kind: "invalid" });

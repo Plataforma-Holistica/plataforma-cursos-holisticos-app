@@ -63,6 +63,8 @@ describe("reportFailure", () => {
       "recovery_notice_not_sent",
       "recovery_with_second_factor",
       "legal_text_unavailable",
+      "mailbox_proof_unavailable",
+      "mailbox_ticket_not_kept",
     ] as const;
     const messages = codes.map((code) => new OperationalFailure(code).message);
     expect(new Set(messages).size).toBe(codes.length);

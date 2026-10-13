@@ -162,6 +162,10 @@ describe("el resguardo del buzón solo nace al terminar un enlace del correo", (
     .filter((path) => !/\.test\.tsx?$/.test(path))
     .map((path) => ({ file: posix(path), text: readFileSync(path, "utf8") }));
   const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(source.text)).map((source) => source.file).sort();
+  /** Lo mismo, sin los comentarios: varios nombran la función de la base para explicarla. */
+  const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const namingInCode = (pattern: RegExp) =>
+    sources.filter((source) => pattern.test(withoutComments(source.text))).map((source) => source.file).sort();
   const onboarding = sources.find((source) => source.file === "src/services/account/onboarding.ts")?.text ?? "";
   /** El cuerpo de una función del servicio: desde su encabezado hasta la llave que la cierra. */
   const bodyOf = (name: string) => {
@@ -171,9 +175,13 @@ describe("el resguardo del buzón solo nace al terminar un enlace del correo", (
   };
 
   it("reclamar una cuenta solo se nombra donde se define y en el servicio de los enlaces", () => {
-    expect(naming(/\bclaimAccount\(/)).toEqual(["src/services/account/onboarding.ts", "src/services/account/records.ts"]);
-    // La consulta que llama a la función de la base (los comentarios la nombran sin argumento).
-    expect(naming(/claim_account\(\$\{/)).toEqual(["src/services/account/records.ts"]);
+    // El nombre, no solo la llamada: importarlo con otro nombre o guardarlo en una variable
+    // también cuenta. `claimAccount` a secas es además un campo de la tabla del dominio que
+    // dice si toca reclamar: por eso se excluye lo que va precedido de un punto o seguido de
+    // dos puntos.
+    expect(namingInCode(/(?<![.\w])claimAccount\b(?!\s*:)/)).toEqual(["src/services/account/onboarding.ts", "src/services/account/records.ts"]);
+    // Y la función de la base, escrita como sea, solo en la consulta que la llama.
+    expect(namingInCode(/claim_account/)).toEqual(["src/services/account/records.ts"]);
   });
 
   it("emitir un resguardo, también", () => {

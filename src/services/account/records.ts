@@ -204,8 +204,9 @@ const proofRow = z.object({ seconds: z.number().int().nullable() });
 
 /**
  * Cuántos segundos vive el resguardo del buzón (`VIGENCIA_PRUEBA_BUZON_MINUTOS`), con el
- * tope que se le pase. Nulo si el parámetro falta o no vale: no lanza, porque de esto no
- * puede depender que alguien termine su registro o recupere su contraseña.
+ * tope que se le pase. Nulo si el parámetro falta o no vale. Se pregunta en su propia
+ * transacción, después del reclamo y nunca dentro de él: de esto no puede depender que
+ * alguien termine su registro o recupere su contraseña.
  */
 export async function mailboxProofSeconds(tx: Tx, limit: number): Promise<number | null> {
   const [row] = await tx.query(sql`select private.mailbox_proof_seconds(${limit}::integer) as seconds`, proofRow);

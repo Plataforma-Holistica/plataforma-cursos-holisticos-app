@@ -287,6 +287,8 @@ as $$
   end
 $$;
 insert into pruebas.parametro_falso values ('VIGENCIA_PRUEBA_BUZON_MINUTOS', null);
+-- El aviso que deja en el registro cuando le falta su parámetro, aquí es ruido.
+set local client_min_messages to error;
 select pruebas.como_servicio();
 select is(private.mailbox_proof_seconds(86400), null, 'sin el parámetro no hay duración: no lanza');
 select pruebas.limpiar();

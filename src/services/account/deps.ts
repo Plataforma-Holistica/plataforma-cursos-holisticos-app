@@ -2,6 +2,7 @@ import "server-only";
 
 import type * as adapter from "@/adapters/supabase/auth";
 import type { CookieJar, CookieOptions } from "@/adapters/supabase/auth-cookies";
+import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { FailureCode } from "@/services/error-reporting/server";
 
 import type { Timing } from "./timing";
@@ -48,6 +49,12 @@ export interface AccountDependencies {
    * corre en línea; quien tiene la petición le pasa lo que su plataforma dé para eso.
    */
   defer: (work: () => Promise<void>) => Promise<void>;
+  /**
+   * Cuántos segundos vive el resguardo del buzón de la cuenta de esas claims, o nulo si no
+   * hay duración que valga. Se pregunta después de reclamar la cuenta, nunca dentro del
+   * reclamo: si falla, el registro o la recuperación ya terminaron.
+   */
+  ticketLifetime: (claims: VerifiedClaims) => Promise<number | null>;
 }
 
 export interface StagingJar extends CookieJar {
