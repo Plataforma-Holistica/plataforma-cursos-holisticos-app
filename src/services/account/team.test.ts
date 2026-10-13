@@ -291,7 +291,7 @@ describe("confirmar el segundo factor, que acepta la invitación", () => {
     });
 
     it.each(["", "   ", "12345", "1234567", "12a456", "123-456", "１２３４５６"])(
-      "%j no tiene forma de código: se dice que no coincide, sin preguntarle a Auth ni a la base",
+      "%j no tiene forma de código: se dice que no coincide, sin preguntarle a Auth ni pedirle a la base que acepte",
       async (code) => {
         const team = teamWith();
         const jar = browser();

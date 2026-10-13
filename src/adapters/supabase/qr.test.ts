@@ -17,8 +17,10 @@ describe("la imagen del código QR", () => {
     ["como lo manda Auth", FROM_AUTH],
     ["un SVG a secas", SVG],
     ["con espacios delante y detrás", `\n  ${SVG}\n\n`],
-    ["con un salto de línea antes de la declaración", `\n${FROM_AUTH}`],
+    ["con tabuladores y retornos por espacio", `<?xml version="1.0"\t?>\r\n<svg\twidth="1"\r\n>\r\n<rect\tx="1"\r\n/>\t</svg>\r\n`],
     ["con dos comentarios", `<!-- a --><!-- b -->${SVG}`],
+    ["con un comentario vacío", `<!---->${SVG}`],
+    ["con guiones sueltos en un comentario", `<!-- a-b - c -->${SVG}`],
     ["con la codificación declarada", `<?xml version="1.0" encoding="UTF-8"?>${SVG}`],
     ["sin ningún rectángulo", "<svg></svg>"],
     ["con colores en hexadecimal y rectángulos sin espacio antes del cierre", '<svg><rect x="0" y="0" width="1.5" height="1.5" fill="#000"/></svg>'],
@@ -46,7 +48,22 @@ describe("la imagen del código QR", () => {
     ["rectángulos sin su svg", `${RECT}</svg>`],
     ["dos declaraciones", `<?xml version="1.0"?><?xml version="1.0"?>${SVG}`],
     ["la declaración después de un comentario", `<!-- a --><?xml version="1.0"?>${SVG}`],
-    ["una declaración de tipo, con o sin entidades", `<!DOCTYPE svg [<!ENTITY x "y">]>${SVG}`],
+    ["una declaración de tipo a secas", `<!DOCTYPE svg>${SVG}`],
+    ["una declaración de tipo con entidades", `<!DOCTYPE svg [<!ENTITY x "y">]>${SVG}`],
+    // Lo que ya no es XML se pintaría como imagen rota: mejor nada, y la clave en texto.
+    ["un salto de línea antes de la declaración", `\n${FROM_AUTH}`],
+    ["un comentario con dos guiones seguidos", `<!-- a -- b -->${SVG}`],
+    ["un comentario que cierra con tres guiones", `<!-- a --->${SVG}`],
+    ["un comentario de puros guiones", `<!------->${SVG}`],
+    // El espacio es el de XML, no todo lo que JavaScript llama espacio.
+    ["un espacio duro delante", ` ${SVG}`],
+    ["una marca de orden de bytes delante", `﻿${FROM_AUTH}`],
+    ["un espacio duro en la declaración", `<?xml version="1.0" ?>${SVG}`],
+    ["un espacio duro entre el svg y su atributo", '<svg width="1"></svg>'],
+    ["un espacio duro antes de cerrar la etiqueta del svg", '<svg width="1" ></svg>'],
+    ["un espacio duro entre un rectángulo y su atributo", '<svg><rect x="1"/></svg>'],
+    ["un espacio duro antes de cerrar un rectángulo", '<svg><rect x="1" /></svg>'],
+    ["un salto de página entre rectángulos", `<svg>${RECT}\f${RECT}</svg>`],
   ])("%s no es una imagen: no se entrega nada", (_what, value) => {
     expect(qrImage(value)).toBeNull();
   });
@@ -64,6 +81,7 @@ describe("la imagen del código QR", () => {
     ["un manejador en el svg, con un valor inofensivo", SVG.replace("<svg", '<svg onload="x"')],
     ["un manejador en un rectángulo, con un valor inofensivo", SVG.replace("<rect", '<rect onclick="x"')],
     ["dos atributos pegados, sin espacio entre ellos", SVG.replace('x="12" y="15"', 'x="12"y="15"')],
+    ["dos atributos del svg pegados", SVG.replace('width="231" height="231"', 'width="231"height="231"')],
     ["un grupo con manejador y barra", SVG.replace("<rect", "<g/onload=alert(1)><rect")],
     ["una imagen dentro", SVG.replace("<rect", '<image href="https://otro.example/x.png"/><rect')],
     ["una referencia a otro documento", SVG.replace("<rect", '<use href="https://otro.example/x.svg#a"/><rect')],
@@ -107,8 +125,11 @@ describe("la imagen del código QR", () => {
   // Reconocer no puede costar más que leer: una respuesta hostil no puede dejar ocupado al
   // servidor. Estas son las formas que hacen estallar a una expresión regular descuidada.
   it.each([
-    ["una fila de comentarios sin dibujo después", `${"<!---->".repeat(5_000)}x`],
+    // Tan larga como cabe: con pocos, un tiempo que creciera con el cuadrado no se notaría.
+    ["una fila de comentarios sin dibujo después", `${"<!---->".repeat(140_000)}x`],
     ["un comentario enorme sin cerrar", `<!--${"-".repeat(900_000)}`],
+    ["un comentario de guiones sueltos sin cerrar", `<!--${"x-".repeat(450_000)}`],
+    ["un comentario de letras sin cerrar", `<!--${"x".repeat(900_000)}`],
     ["espacios y más espacios", `${" ".repeat(900_000)}x`],
     ["un svg con miles de atributos y sin cerrar", `<svg${' width="1"'.repeat(50_000)}`],
     ["miles de rectángulos y al final algo que no es", `${OPEN}${RECT.repeat(10_000)}<x/></svg>`],

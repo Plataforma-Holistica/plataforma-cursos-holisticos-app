@@ -22,11 +22,18 @@ const VALUE = '"[A-Za-z0-9 .,:;/#%-]*"';
 const SVG_ATTRIBUTES = "width|height|viewBox|version|xmlns|xmlns:xlink|preserveAspectRatio|shape-rendering";
 const RECT_ATTRIBUTES = "x|y|width|height|rx|ry|fill|stroke|stroke-width|style";
 
-const SPACE = /\s+/y;
-const DECLARATION = /<\?xml version="1\.[01]"(?: encoding="[A-Za-z0-9-]+")?\s*\?>/y;
-const COMMENT = /<!--[^<>]*-->/y;
-const OPENING = new RegExp(`<svg(?:\\s+(?:${SVG_ATTRIBUTES})=${VALUE})*\\s*>`, "y");
-const RECT = new RegExp(`<rect(?:\\s+(?:${RECT_ATTRIBUTES})=${VALUE})*\\s*/>`, "y");
+// El espacio de XML: espacio, tabulador, retorno y salto de línea. No el `\s` de
+// JavaScript, que admite más (U+00A0, U+FEFF, U+2028): el filtro tiene que partir el
+// texto igual que quien pinte la imagen.
+const S = "[ \\t\\r\\n]";
+
+const SPACE = new RegExp(`${S}+`, "y");
+const DECLARATION = new RegExp(`<\\?xml version="1\\.[01]"(?: encoding="[A-Za-z0-9-]+")?${S}*\\?>`, "y");
+// Sin signos de mayor o menor dentro, y sin dos guiones seguidos ni uno pegado al cierre,
+// que XML no admite: un comentario así daría una imagen rota.
+const COMMENT = /<!--[^<>-]*(?:-[^<>-]+)*-->/y;
+const OPENING = new RegExp(`<svg(?:${S}+(?:${SVG_ATTRIBUTES})=${VALUE})*${S}*>`, "y");
+const RECT = new RegExp(`<rect(?:${S}+(?:${RECT_ATTRIBUTES})=${VALUE})*${S}*/>`, "y");
 const CLOSING = /<\/svg>/y;
 
 /** Si esa pieza está justo en esa posición, dónde termina; si no, la misma posición. */
@@ -50,8 +57,9 @@ function skip(text: string, from: number, ...pieces: RegExp[]): number {
 export function qrImage(value: unknown): string | null {
   if (typeof value !== "string" || value.length > QR_MAX_LENGTH) return null;
 
-  // Antes del dibujo: la declaración, una sola vez y al principio, y comentarios.
-  let at = past(DECLARATION, value, past(SPACE, value, 0));
+  // Antes del dibujo: la declaración, una sola vez y en el primer carácter (con algo
+  // delante, ni un espacio, deja de ser XML), y comentarios.
+  let at = past(DECLARATION, value, 0);
   at = skip(value, at, COMMENT);
   const opened = past(OPENING, value, at);
   if (opened === at) return null;
