@@ -12,11 +12,11 @@ const actions = vi.hoisted(() => ({
   invitationsAction: vi.fn(),
   resetAction: vi.fn(),
 }));
-vi.mock("@/app/admin/equipo/actions", () => actions);
+vi.mock("@/app/admin/_equipo/actions", () => actions);
 
-import type { CodeState, InvitationsState, InviteState, ResetState, TeamState } from "@/app/admin/equipo/outcomes";
-import { teamView } from "@/app/admin/equipo/rows";
-import { TeamScreen } from "@/app/admin/equipo/screen";
+import type { CodeState, InvitationsState, InviteState, ResetState, TeamState } from "@/app/admin/_equipo/outcomes";
+import { teamView } from "@/app/admin/_equipo/rows";
+import { TeamScreen } from "@/app/admin/_equipo/screen";
 import type { TeamInvitation, TeamMember, TeamRoster } from "@/services/account/account";
 
 import { a11yViolations } from "../setup/a11y";

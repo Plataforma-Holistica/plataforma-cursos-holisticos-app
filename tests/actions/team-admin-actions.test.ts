@@ -51,8 +51,8 @@ vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }))
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { freshCodeAction, invitationsAction, inviteAction, resetAction, teamAction } from "@/app/admin/equipo/actions";
-import { invitationButton, resetButton, teamButton, type TeamIntent } from "@/app/admin/equipo/outcomes";
+import { freshCodeAction, invitationsAction, inviteAction, resetAction, teamAction } from "@/app/admin/_equipo/actions";
+import { invitationButton, resetButton, teamButton, type TeamIntent } from "@/app/admin/_equipo/outcomes";
 
 const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;

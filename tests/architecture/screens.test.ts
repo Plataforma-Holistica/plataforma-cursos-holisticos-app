@@ -147,7 +147,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Cierra la sesión y, con el mismo tarro, se lleva las pruebas de ese navegador.
     signOutAction: /const jar = await cookieJar\(\);\s+await signOut\(jar\);\s+forgetBrowserProofs\(jar\);/,
   },
-  "src/app/admin/equipo/actions.ts": {
+  "src/app/admin/_equipo/actions.ts": {
     // Dar el código otra vez: lo que no tiene forma de código no llega al servicio, que corre
     // la guarda y verifica contra el factor que dice la base.
     freshCodeAction:
@@ -238,7 +238,6 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
     expect(sessionPages.sort()).toEqual([
       "/admin",
       "/admin/[...resto]",
-      "/admin/equipo",
       "/consentimientos",
       "/cuenta",
       "/entrar/segundo-factor",
@@ -290,9 +289,10 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
       it("hay un comodín que atiende lo que no tiene página, y corre la guarda antes de decir que no existe", () => {
         const wildcard = codeOf("src/app/admin/[...resto]/page.tsx");
-        expect(wildcard).toMatch(/const step = await requireAdmin\(path\);[\s\S]*\n\s*notFound\(\);\n\}/);
+        expect(wildcard).toMatch(/const step = await requireAdmin\(path, section\?\.capability\);[\s\S]*\n\s*notFound\(\);\n\}/);
         // La guarda va antes: si dijera «no existe» primero, la ruta que existe y la que no se distinguirían.
-        expect(wildcard.indexOf("requireAdmin(path)")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
+        expect(wildcard.indexOf("requireAdmin(path, ")).toBeGreaterThan(-1);
+        expect(wildcard.indexOf("requireAdmin(path, ")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
       });
 
       it("no hay rutas, ni pantallas de carga, ni límites de espera: pintarían o contestarían antes que la guarda", () => {
@@ -303,8 +303,50 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("ninguna página de administración es pública", () => {
         expect(PUBLIC_PAGES.filter((file) => file.startsWith("src/app/admin/"))).toEqual([]);
         const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
-        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/equipo/page.tsx", "src/app/admin/page.tsx"]);
         for (const file of pagesUnder) expect(teamPages).toContain(file);
+      });
+
+      // Medido el 2026-10-13: con una página propia, el documento de «no existe» que recibe
+      // quien no es del equipo trae el árbol de rutas y los fragmentos de esa página, y se
+      // distingue del de una ruta que de verdad no existe. Por eso las secciones las sirve
+      // el comodín, y bajo administración no hay más páginas que el inicio y él.
+      it("no hay más páginas que el inicio y el comodín: una sección no tiene la suya", () => {
+        const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
+        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/page.tsx"]);
+      });
+
+      it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
+        // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
+        const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
+        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib"]);
+      });
+
+      it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
+        const wildcard = codeOf("src/app/admin/[...resto]/page.tsx");
+        expect(wildcard).toMatch(/const section = sectionAt\(resto\);\s+const step = await requireAdmin\(path, section\?\.capability\);/);
+        // La sección se pinta al final, ya obedecido todo lo demás que la guarda contesta.
+        const rendered = wildcard.indexOf("if (section !== null) return section.render(step.claims);");
+        expect(rendered).toBeGreaterThan(wildcard.indexOf('if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;'));
+        expect(rendered).toBeGreaterThan(wildcard.indexOf('step.kind === "unavailable"'));
+        expect(wildcard.lastIndexOf("notFound()")).toBeGreaterThan(rendered);
+        // Solo él pinta secciones.
+        expect(sources.filter((source) => /\bsectionAt\b/.test(source.code)).map((source) => source.file).sort()).toEqual([
+          "src/app/admin/[...resto]/page.tsx",
+          "src/app/admin/_lib/sections.tsx",
+        ]);
+      });
+
+      it("toda sección declara la capacidad que pide, y ninguna corre la guarda por su cuenta", () => {
+        const table = codeOf("src/app/admin/_lib/sections.tsx");
+        const entries = [...table.matchAll(/^ {2}(\w+): \{ capability: "(\w+)", render: \(claims\) => <\w+ claims=\{claims\} \/> \},$/gm)];
+        expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([["equipo", "config"]]);
+        // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
+        const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
+        expect(body.split("\n").filter((line) => line.trim() !== "" && !/^\s*\/\//.test(line))).toHaveLength(entries.length);
+        expect(table).toMatch(/capability: Capability;/);
+        const sections = under.filter((source) => /\/_[a-z]+\/section\.tsx$/.test(source.file));
+        expect(sections.map((source) => source.file)).toEqual(["src/app/admin/_equipo/section.tsx"]);
+        for (const section of sections) expect(section.code).not.toMatch(/\brequire\w+\(|\bcheckSession\b|\bteamStanding\b/);
       });
     });
 

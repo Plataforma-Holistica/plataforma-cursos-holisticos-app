@@ -121,7 +121,8 @@ describe("lo que cuelga de administración y no tiene página", () => {
   it("corre la guarda del equipo con la ruta que se pidió, y a quien sí es del equipo le dice que no existe", async () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["config"] });
     await expect(AdminRestPage(rest("equipo", "invitar"))).rejects.toThrow("no encontrado");
-    expect(mocks.requireAdmin).toHaveBeenCalledExactlyOnceWith("/admin/equipo/invitar");
+    // Ahí no hay ninguna sección: no se pide ninguna capacidad.
+    expect(mocks.requireAdmin).toHaveBeenCalledExactlyOnceWith("/admin/equipo/invitar", undefined);
     expect(mocks.notFound).toHaveBeenCalledOnce();
   });
 
