@@ -107,9 +107,9 @@ describe("agregar", () => {
     await user.click(blockOf("Prácticas").getByRole("button", { name: "Agregar práctica" }));
     expect(formOf(actions.practicesAction)).toEqual({ do: "add", name: "Meditación" });
     // A la vista, y en la región viva aparte: el aviso a la vista no es una región viva.
-    const said = await screen.findAllByText("Agregada: «Meditación».");
-    expect(said.map((each) => each.getAttribute("role"))).toEqual([null, "status"]);
-    expect(said[0]).toBeVisible();
+    // La región viva se escribe en un efecto, un instante después de pintar el aviso.
+    await waitFor(() => expect(screen.getAllByText("Agregada: «Meditación».").map((each) => each.getAttribute("role"))).toEqual([null, "status"]));
+    expect(screen.getAllByText("Agregada: «Meditación».")[0]).toBeVisible();
     // El foco llega después de pintar: se espera, como lo espera quien usa el teclado.
     await waitFor(() => {
       const again = blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva");

@@ -1231,7 +1231,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Agregar práctica" })).toHaveCount(0);
     expect(await practicesNow()).toContain("Respiración|respiracion|activa");
-    await page.getByLabel("Código").fill(await nextCode(ana.secret, ana.used));
+    // Exacto: la sección «Tu código» también se nombra con la palabra.
+    await page.getByLabel("Código", { exact: true }).fill(await nextCode(ana.secret, ana.used));
     await page.getByRole("button", { name: "Comprobar" }).click();
     await expect(page).toHaveURL(CATALOG);
     await expect(page.getByRole("button", { name: "Agregar práctica" })).toBeVisible();
