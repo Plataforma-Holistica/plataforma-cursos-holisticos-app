@@ -24,6 +24,8 @@ export const ROUTES = {
   admin: "/admin",
   /** PA-86, el equipo de administración: cuelga de administración y pide configuración. */
   team: "/admin/equipo",
+  /** PA-67, las prácticas y los niveles: cuelga de administración y pide Contenido. */
+  catalog: "/admin/practicas",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */

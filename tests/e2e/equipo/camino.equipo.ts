@@ -1140,4 +1140,224 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     );
     expect(counted?.n).toBe(0);
   });
+
+  // PA-67, las prácticas y los niveles (T-106). Van aquí porque escriben en la auditoría, y
+  // porque usan a las mismas dos personas: las dos tienen Contenido.
+  const CATALOG = "/admin/practicas";
+  const practicesNow = async () =>
+    (await ownerQuery<{ name: string; slug: string; active: boolean }>("select name, slug, is_active as active from public.practices order by position")).map(
+      (row) => `${row.name}|${row.slug}|${row.active ? "activa" : "desactivada"}`,
+    );
+  const practiceId = async (name: string) =>
+    (await ownerQuery<{ id: string; position: number }>("select id::text as id, position from public.practices where name = $1", [name]))[0];
+  /** Envejece el código de esa persona: los cambios lo piden otra vez. */
+  const ageCode = (userId: string) =>
+    ownerQuery(
+      `update auth.mfa_amr_claims c set updated_at = now() - interval '40 minutes'
+       from auth.sessions s where c.session_id = s.id and s.user_id = $1 and c.authentication_method = 'totp'`,
+      [userId],
+    );
+
+  test("prácticas y niveles con JavaScript: agrega, renombra con Enter, ordena, desactiva, reactiva y da su código cuando hace falta", async ({ page }) => {
+    test.setTimeout(300_000);
+    await enterAdmin(page, ana, "/admin");
+    await page.getByRole("link", { name: "Prácticas y niveles" }).click();
+    await expect(page).toHaveURL(CATALOG);
+    await expect(page.getByRole("heading", { level: 1, name: "Prácticas y niveles" })).toBeVisible();
+    const practices = page.locator("#bloque-catalogo-practicas");
+    await expect(practices.getByText("Todavía no hay prácticas.")).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    const audited = await auditRows();
+
+    // Agregar, con el botón y con Enter: el campo queda vacío y con el foco, para seguir.
+    const field = practices.getByLabel("Nombre de la práctica nueva");
+    await field.fill("Yoga");
+    await practices.getByRole("button", { name: "Agregar práctica" }).click();
+    await expect(practices.getByText("Agregada: «Yoga».").first()).toBeVisible();
+    await expect(field).toHaveValue("");
+    await expect(field).toBeFocused();
+    await field.fill("Meditación");
+    await field.press("Enter");
+    await expect(practices.getByText("Agregada: «Meditación».").first()).toBeVisible();
+    await field.fill("Respiración");
+    await field.press("Enter");
+    await expect(practices.getByText("Agregada: «Respiración».").first()).toBeVisible();
+    // El mismo nombre, escrito de otra forma: en su campo, con lo escrito.
+    await field.fill("YOGA");
+    await field.press("Enter");
+    await expect(practices.getByRole("link", { name: /Ya existe una práctica con ese nombre/ })).toBeVisible();
+    await expect(field).toHaveValue("YOGA");
+    expect(await practicesNow()).toEqual(["Yoga|yoga|activa", "Meditación|meditacion|activa", "Respiración|respiracion|activa"]);
+
+    // Subir: el foco se queda en el mismo botón de esa fila, para seguir con el teclado.
+    await practices.getByRole("button", { name: "Subir «Respiración»" }).click();
+    await expect(practices.getByText("«Respiración» quedó en el lugar 2 de 3.").first()).toBeVisible();
+    await expect(practices.getByRole("button", { name: "Subir «Respiración»" })).toBeFocused();
+    expect(await practicesNow()).toEqual(["Yoga|yoga|activa", "Respiración|respiracion|activa", "Meditación|meditacion|activa"]);
+
+    // Renombrar, y guardar con Enter: guarda esa fila, no mueve ninguna otra.
+    await practices.getByRole("button", { name: "Renombrar «Yoga»" }).click();
+    const renaming = practices.getByLabel("Nombre nuevo de «Yoga»");
+    await expect(renaming).toBeFocused();
+    await expect(practices.getByRole("button", { name: /^Bajar/ })).toHaveCount(0);
+    await renaming.fill("Yoga suave");
+    await renaming.press("Enter");
+    await expect(practices.getByText("Nombre guardado.")).toBeVisible();
+    // El slug no cambia: los enlaces guardados siguen sirviendo.
+    expect(await practicesNow()).toEqual(["Yoga suave|yoga|activa", "Respiración|respiracion|activa", "Meditación|meditacion|activa"]);
+
+    // Desactivar no pregunta. Agregar su nombre otra vez ofrece reactivarla, en su lugar.
+    await practices.getByRole("button", { name: "Desactivar «Meditación»" }).click();
+    // (El aviso antepone su tono para quien usa lector de pantalla: «Listo: …».)
+    await expect(practices.getByText(/Desactivada\. Ya no se ofrece/)).toBeVisible();
+    await field.fill("meditacion");
+    await field.press("Enter");
+    await expect(practices.getByText("«meditacion» ya existe, desactivada. Puedes reactivarla: vuelve a su lugar en la lista.")).toBeVisible();
+    await practices.getByRole("button", { name: "Reactivar «meditacion»" }).click();
+    await expect(practices.getByText("Reactivada, en el lugar que tenía.")).toBeVisible();
+    expect(await practicesNow()).toEqual(["Yoga suave|yoga|activa", "Respiración|respiracion|activa", "Meditación|meditacion|activa"]);
+
+    // Los niveles son otra lista.
+    const levels = page.locator("#bloque-catalogo-niveles");
+    await levels.getByLabel("Nombre del nivel nuevo").fill("Básico");
+    await levels.getByRole("button", { name: "Agregar nivel" }).click();
+    await expect(levels.getByText("Agregado: «Básico».").first()).toBeVisible();
+
+    // Se le vence el código con la pantalla abierta: el cambio no pasa, se le dice, y la
+    // página le pide el código arriba. Lo da, y vuelve a poder.
+    await ageCode(ana.id);
+    await practices.getByRole("button", { name: "Desactivar «Respiración»" }).click();
+    await expect(practices.getByText("Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Agregar práctica" })).toHaveCount(0);
+    expect(await practicesNow()).toContain("Respiración|respiracion|activa");
+    // Exacto: la sección «Tu código» también se nombra con la palabra.
+    await page.getByLabel("Código", { exact: true }).fill(await nextCode(ana.secret, ana.used));
+    await page.getByRole("button", { name: "Comprobar" }).click();
+    await expect(page).toHaveURL(CATALOG);
+    await expect(page.getByRole("button", { name: "Agregar práctica" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
+    // Y el aviso que pedía el código ya no se pinta: dejó de ser cierto.
+    await expect(page.getByText("Tu código ya no es reciente.", { exact: false })).toHaveCount(0);
+
+    expect(await auditRows()).toBeGreaterThan(audited);
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
+  test("prácticas y niveles sin JavaScript: agrega, renombra con Enter, y un formulario reenviado no sube dos lugares", async ({ browser }) => {
+    test.setTimeout(240_000);
+    await inContext(browser, { javaScriptEnabled: false }, async (page, context) => {
+      await enterAdmin(page, ana, CATALOG);
+      const practices = page.locator("#bloque-catalogo-practicas");
+      await practices.getByLabel("Nombre de la práctica nueva").fill("Tai chi");
+      await practices.getByRole("button", { name: "Agregar práctica" }).click();
+      await expect(practices.getByText("Agregada: «Tai chi».").first()).toBeVisible();
+      await expect(practices.getByRole("button", { name: "Subir «Tai chi»" })).toBeVisible();
+
+      // Renombrar con Enter, sin JavaScript: el primer botón del formulario es «Guardar».
+      await practices.getByRole("button", { name: "Renombrar «Tai chi»" }).click();
+      const renaming = practices.getByLabel("Nombre nuevo de «Tai chi»");
+      await renaming.fill("Tai chi chuan");
+      await renaming.press("Enter");
+      await expect(practices.getByText("Nombre guardado.")).toBeVisible();
+      const before = await practicesNow();
+      expect(before.at(-1)).toBe("Tai chi chuan|tai-chi|activa");
+
+      // El mismo «Subir», enviado dos veces (un doble clic, o recargar y reenviar): sube una.
+      const taichi = await practiceId("Tai chi chuan");
+      if (!taichi) throw new Error("Falta la práctica recién agregada.");
+      const fields = actionFields(await (await context.request.get(CATALOG)).text(), 0);
+      const up = { ...fields, do: `up:${taichi.id}:${taichi.position}` };
+      expect((await postAction(context.request, CATALOG, up)).status()).toBe(200);
+      const once = await practicesNow();
+      expect(once.at(-2)).toBe("Tai chi chuan|tai-chi|activa");
+      const again = await postAction(context.request, CATALOG, up);
+      expect(again.status()).toBe(200);
+      expect(await again.text()).toContain("La lista cambió mientras la veías.");
+      expect(await practicesNow()).toEqual(once);
+    });
+  });
+
+  test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
+    test.setTimeout(300_000);
+    // Los campos con que React nombra cada acción salen de la página de quien sí puede.
+    await enterAdmin(page, ana, CATALOG);
+    const html = await (await page.request.get(CATALOG)).text();
+    const practicesFields = actionFields(html, 0);
+    const levelsFields = actionFields(html, 2);
+    expect(practicesFields).not.toEqual(levelsFields);
+    const yoga = await practiceId("Yoga suave");
+    if (!yoga) throw new Error("Falta la práctica del caso de arriba.");
+    await ageCode(ana.id);
+    const stale = await (await page.request.get(CATALOG)).text();
+    const codeFields = actionFields(stale, 0);
+    expect(codeFields).not.toEqual(practicesFields);
+
+    const attempts: [string, Record<string, string>][] = [
+      ["agregar", { ...practicesFields, do: "add", name: "Intrusa" }],
+      ["agregar un nivel", { ...levelsFields, do: "add", name: "Intruso" }],
+      ["renombrar", { ...practicesFields, do: `save:${yoga.id}`, name: "Otra" }],
+      ["mover", { ...practicesFields, do: `down:${yoga.id}:${yoga.position}` }],
+      ["desactivar", { ...practicesFields, do: `deactivate:${yoga.id}` }],
+    ];
+    const snapshot = await practicesNow();
+    const audited = await auditRows();
+    const untouched = async () => {
+      expect(await practicesNow()).toEqual(snapshot);
+      expect(await ownerQuery("select 1 from public.levels where name = 'Intruso'")).toEqual([]);
+      expect(await auditRows()).toBe(audited);
+    };
+
+    // Con Contenido y el código vencido: la base pide el código, y nada cambia.
+    for (const [what, fields] of attempts) {
+      const answered = await postAction(page.context().request, CATALOG, fields);
+      expect(answered.status(), what).toBe(200);
+      expect(await answered.text(), what).toContain("Tu código ya no es reciente.");
+    }
+    await untouched();
+
+    // Con configuración y sin Contenido: PA-88 dice qué le falta, y nada cambia. Es la misma
+    // persona, sin Contenido (el caso de arriba le restableció el factor a la otra, que ya no
+    // entra). Quitárselo es preparación, no lo que se prueba: lo hace el dueño, declarado
+    // sistema.
+    await ownerQuery(
+      `with declared as materialized (select set_config('app.actor_kind', 'system', true) as kind)
+       update public.admin_capabilities c set revoked_at = now(), revoked_by = $1::uuid from declared
+       where c.profile_id = $2::uuid and c.capability = 'content' and c.revoked_at is null`,
+      [ana.id, ana.id],
+    );
+    const prepared = await auditRows();
+    await inContext(browser, {}, async (hers, herContext) => {
+      await enterAdmin(hers, ana, "/admin");
+      await expect(hers.getByRole("link", { name: "Prácticas y niveles" })).toHaveCount(0);
+      await hers.goto(CATALOG);
+      await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Contenido" })).toBeVisible();
+      await expect(hers.getByText("Yoga suave")).toHaveCount(0);
+      const given = await lastCodeOf(ana.id);
+      for (const [what, fields] of [...attempts, ["dar el código otra vez", { ...codeFields, code: "123456" }] as [string, Record<string, string>]]) {
+        const answered = await postAction(herContext.request, CATALOG, fields);
+        expect(answered.status(), what).toBe(303);
+        expect(answered.headers().location, what).toBe(CATALOG);
+      }
+      // Tampoco se le tomó el código que mandó.
+      expect(await lastCodeOf(ana.id)).toBe(given);
+    });
+    expect(await practicesNow()).toEqual(snapshot);
+    expect(await auditRows()).toBe(prepared);
+
+    // Una alumna: cada acción la manda a la sección, donde la guarda le contesta que no existe.
+    const alumna = await person();
+    await inContext(browser, {}, async (other, otherContext) => {
+      await signIn(other, alumna);
+      await expect(other).toHaveURL("/inicio");
+      for (const [what, fields] of attempts) {
+        const answered = await postAction(otherContext.request, CATALOG, fields);
+        expect(answered.status(), what).toBe(303);
+        expect(answered.headers().location, what).toBe(CATALOG);
+      }
+      expect((await otherContext.request.get(CATALOG)).status()).toBe(404);
+    });
+    expect(await practicesNow()).toEqual(snapshot);
+    expect(await auditRows()).toBe(prepared);
+  });
 });

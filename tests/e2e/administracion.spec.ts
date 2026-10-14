@@ -13,7 +13,9 @@ import { clearCounters, ownerQuery, person, SESSION_COOKIE, type Person } from "
 test.beforeEach(clearCounters);
 
 const NOT_FOUND = "No encontramos esa página";
-const TEAM_PATHS = ["/admin", "/admin/equipo", "/admin/no-existe/tampoco", "/entrar/segundo-factor", "/entrar/segundo-factor/configurar"];
+const TEAM_PATHS = ["/admin", "/admin/equipo", "/admin/practicas", "/admin/no-existe/tampoco", "/entrar/segundo-factor", "/entrar/segundo-factor/configurar"];
+/** Las secciones de administración: todas las de la tabla del comodín. */
+const SECTIONS = ["/admin/equipo", "/admin/practicas"];
 
 async function signIn(page: Page, who: Pick<Person, "email" | "password">, path = "/entrar"): Promise<void> {
   await page.goto(path);
@@ -83,7 +85,7 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
   // guarda. El documento entero se compara en el caso de abajo. (Que el prefijo es de
   // administración se sabe: a quien no trae sesión ya lo manda a entrar.)
   const existing = await seen(await page.request.get("/admin"));
-  for (const path of ["/admin/equipo", "/admin/no-existe/tampoco"]) {
+  for (const path of [...SECTIONS, "/admin/no-existe/tampoco"]) {
     expect(await seen(await page.request.get(path)), path).toEqual(existing);
   }
 
@@ -117,7 +119,7 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
       // Una ruta que tiene página contesta primero con una redirección a su forma canónica.
       first: first.status(),
       status: last.status(),
-      found: /Administración|Tus capacidades|Escribe tu código|Configura tu segundo factor|Empezar/.test(body),
+      found: /Administración|Tus capacidades|Escribe tu código|Configura tu segundo factor|Empezar|Prácticas y niveles|Agregar práctica/.test(body),
     };
   };
   expect(await partial("/no-existe")).toMatchObject({ status: 404, found: false });
@@ -147,7 +149,6 @@ test("para una alumna, una sección de administración y una ruta que no existe 
   await signIn(page, ana);
   await expect(page).toHaveURL("/inicio");
 
-  const SECTION = "/admin/equipo";
   const MISSING = "/admin/zzznoexiste";
   /** El cuerpo sin la ruta que se pidió: es lo único que puede cambiar de una a otra. */
   const bare = (body: string, path: string) => body.replaceAll(path, "[ruta]").replaceAll(path.split("/").at(-1) ?? "", "[parte]");
@@ -157,23 +158,25 @@ test("para una alumna, una sección de administración y una ruta que no existe 
   const fixed = (response: APIResponse) =>
     Object.fromEntries(Object.entries(response.headers()).filter(([name]) => !["date", "etag", "content-length"].includes(name)));
 
-  // El documento.
-  const section = await page.request.get(SECTION);
-  const missing = await page.request.get(MISSING);
-  expect(section.status()).toBe(404);
-  expect(fixed(section)).toEqual(fixed(missing));
-  const missingBody = await missing.text();
-  expect(bare(await section.text(), SECTION)).toBe(bare(missingBody, MISSING));
-  // Y el de la ruta que no existe no nombra a la sección que sí: ni en su árbol de rutas.
-  expect(missingBody).not.toContain("equipo");
-  expect(missingBody).toContain(NOT_FOUND);
+  for (const SECTION of SECTIONS) {
+    // El documento.
+    const section = await page.request.get(SECTION);
+    const missing = await page.request.get(MISSING);
+    expect(section.status(), SECTION).toBe(404);
+    expect(fixed(section), SECTION).toEqual(fixed(missing));
+    const missingBody = await missing.text();
+    expect(bare(await section.text(), SECTION), SECTION).toBe(bare(missingBody, MISSING));
+    // Y el de la ruta que no existe no nombra a ninguna sección que sí: ni en su árbol de rutas.
+    for (const name of SECTIONS.map((path) => path.split("/").at(-1) ?? "")) expect(missingBody).not.toContain(name);
+    expect(missingBody).toContain(NOT_FOUND);
 
-  // La página pedida por partes, como la pide el navegador ya dentro de la aplicación.
-  const sectionPart = await page.request.get(SECTION, { headers: { RSC: "1" } });
-  const missingPart = await page.request.get(MISSING, { headers: { RSC: "1" } });
-  expect(sectionPart.status()).toBe(missingPart.status());
-  expect(fixed(sectionPart)).toEqual(fixed(missingPart));
-  expect(steady(bare(await sectionPart.text(), SECTION))).toBe(steady(bare(await missingPart.text(), MISSING)));
+    // La página pedida por partes, como la pide el navegador ya dentro de la aplicación.
+    const sectionPart = await page.request.get(SECTION, { headers: { RSC: "1" } });
+    const missingPart = await page.request.get(MISSING, { headers: { RSC: "1" } });
+    expect(sectionPart.status(), SECTION).toBe(missingPart.status());
+    expect(fixed(sectionPart), SECTION).toEqual(fixed(missingPart));
+    expect(steady(bare(await sectionPart.text(), SECTION)), SECTION).toBe(steady(bare(await missingPart.text(), MISSING)));
+  }
 
   // Un envío con el nombre de una acción que no existe: con forma de nombre y sin ella.
   // La forma sale de una acción de verdad, la de entrar, que cualquiera puede ver.
@@ -188,11 +191,13 @@ test("para una alumna, una sección de administración y una ruta que no existe 
         data: "[]",
         maxRedirects: 0,
       });
-    const toSection = await send(SECTION);
-    const toMissing = await send(MISSING);
-    expect(toSection.status(), name).toBe(toMissing.status());
-    expect(fixed(toSection), name).toEqual(fixed(toMissing));
-    expect(bare(await toSection.text(), SECTION), name).toBe(bare(await toMissing.text(), MISSING));
+    for (const SECTION of SECTIONS) {
+      const toSection = await send(SECTION);
+      const toMissing = await send(MISSING);
+      expect(toSection.status(), name).toBe(toMissing.status());
+      expect(fixed(toSection), name).toEqual(fixed(toMissing));
+      expect(bare(await toSection.text(), SECTION), name).toBe(bare(await toMissing.text(), MISSING));
+    }
   }
 
   expect(await auditRows()).toBe(audited);
@@ -247,7 +252,7 @@ test("con una cookie inventada, una ruta de administración que existe y una que
 
     await forge();
     const existing = await seenAt(context, "/admin");
-    for (const path of ["/admin/no-existe", "/admin/no-existe/tampoco", "/admin/equipo"]) {
+    for (const path of ["/admin/no-existe", "/admin/no-existe/tampoco", ...SECTIONS]) {
       // La cookie se vuelve a poner: si una respuesta la borrara, la siguiente no mediría lo mismo.
       await forge();
       expect(await seenAt(context, path), path).toEqual(existing);

@@ -178,7 +178,7 @@ La que fija el TRD §4.2.
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/app/_lib/` | Lo que comparten todas las pantallas: `request-context.ts`, el único archivo que lee la petición; `guard.ts`, la guarda en las páginas; y `guard-steps.ts`, la tabla pura de qué hace cada tipo de pantalla con cada respuesta de la guarda | Servicios | Decidir quién pasa: eso lo contesta `checkSession` |
 | `src/app/(cuenta)/` | Las pantallas de la cuenta, cada una en su carpeta: `page.tsx` (llama a la guarda), `screen.tsx` (el formulario, que corre en el navegador), `actions.ts` (la acción de servidor) y `outcomes.ts` (la tabla pura de la pantalla). Lo que comparten, en su `_lib/` | Servicios, componentes base y textos | Un armazón o una plantilla propios: pintarían antes que la guarda de su página |
-| `src/app/admin/` | Administración. Solo dos páginas: el inicio y el comodín `[...resto]`, que corre `requireAdmin` y sirve las secciones de la tabla de `_lib/sections.tsx` o contesta que la ruta no existe. Cada sección, en su carpeta privada (`_equipo/`). Sus estados propios (PA-88), en `_lib/` | Servicios, componentes base y textos | Una página propia para una sección; una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían, se asomarían o se distinguirían antes que la guarda |
+| `src/app/admin/` | Administración. Solo dos páginas: el inicio y el comodín `[...resto]`, que corre `requireAdmin` y sirve las secciones de la tabla de `_lib/sections.tsx` o contesta que la ruta no existe. Cada sección, en su carpeta privada (`_equipo/`, `_practicas/`). Lo que comparten (sus estados, PA-88; «Tu código»; el foco al contestar), en `_lib/` | Servicios, componentes base y textos | Una página propia para una sección; una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían, se asomarían o se distinguirían antes que la guarda |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Nada: sin uso desde el 2026-10-13, cuando Sergio decidió hacer el contenido con pantallas propias, sin Payload (T-106). La capa sigue declarada en el lint, vacía; se quita aparte | | Cualquier archivo |
 | `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
@@ -199,7 +199,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Trece precisiones que la tabla no dice:
+falla. Quince precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -453,7 +453,7 @@ falla. Trece precisiones que la tabla no dice:
     sesión» (`SecondFactorExits`): nadie se queda encerrado ahí.
   - PA-88 es `ForbiddenScreen` (`src/app/admin/_lib/states.tsx`). Se le pinta a quien es
     del equipo y no tiene la capacidad que la sección pide, nunca a quien no lo es. Hoy la
-    pide el equipo (PA-86): configuración.
+    piden el equipo (PA-86), configuración, y las prácticas y los niveles (PA-67), Contenido.
 - **La pantalla del equipo (PA-86, `/admin/equipo`) va por bloques,** como la de la cuenta,
   y además cambia cosas que no se deshacen solas (RF-712). Vive en
   `src/app/admin/_equipo/`. Lo que no se ve leyendo un solo archivo:
@@ -509,8 +509,52 @@ falla. Trece precisiones que la tabla no dice:
       prenda. Quien lo prenda esconde antes el código al desmontar.
   - Los textos van en su propio bloque del catálogo (`src/messages/es/admin.ts`), para que
     no viajen con la pantalla de entrar. Ningún plazo ni tope se escribe con su número.
-  - A dónde va el foco cuando un bloque contesta es `useAnswerFocus` (`parts.tsx`): la
-    misma regla del bloque de sesiones de la cuenta, y por lo mismo.
+  - A dónde va el foco cuando un bloque contesta es `useAnswerFocus` (`_lib/answer.tsx`,
+    compartido con PA-67): la misma regla del bloque de sesiones de la cuenta, y por lo
+    mismo.
+  - **«Tu código» es el de `_lib/code-block.tsx`,** con su estado y su tabla
+    (`_lib/fresh-code.ts`), compartidos con PA-67. Cada sección le da sus `id` y su página:
+    dado el código, se vuelve a la propia página, nunca a la de otra sección. Y cada una
+    tiene su servicio para darlo, porque cada una comprueba lo reciente con su propia
+    lectura: el del equipo, con la lista del equipo, que es nula sin configuración.
+- **La pantalla de las prácticas y los niveles (PA-67, `/admin/practicas`)** se arma como
+  la del equipo (T-106; decisiones de Sergio del 2026-10-14: ordenar con «Subir» y «Bajar»,
+  desactivar sin confirmar, y las desactivadas en su lugar). Vive en
+  `src/app/admin/_practicas/`. Lo que no se ve leyendo un solo archivo:
+  - Cada lista es un bloque con dos formularios ligados a la misma acción y al mismo
+    estado: agregar y la lista. La acción es una por lista (`practicesAction`,
+    `levelsAction`) y es la que dice de qué lista se trata; el formulario solo dice qué
+    botón y qué fila.
+  - **Mientras una fila está abierta para renombrar, el formulario de la lista no pinta
+    ningún otro botón** que «Guardar» y «Cancelar» de esa fila. Con Enter en un campo, el
+    navegador envía el formulario con su primer botón, con JavaScript y sin él: si fuera
+    «Bajar» de otra fila, Enter movería esa fila y lo escrito se perdería. Lo encontró la
+    revisión del plan; la prueba de extremo a extremo pulsa Enter.
+  - **«Subir» y «Bajar» llevan la posición que se vio** (`up:<id>:<posición>`), y el
+    servicio relee la lista antes de mover: si ya no es esa, contesta `changed` y no mueve.
+    Así un formulario reenviado al recargar, o una pestaña vieja, no sube dos lugares. Es
+    una relectura, no un candado: dos envíos casi a la vez (un doble clic sin JavaScript)
+    pueden leer la misma posición. La base mueve dentro del candado de la lista, así que el
+    orden nunca queda roto.
+  - El nombre se revisa en la acción, antes de llamar al servicio, con la regla del
+    dominio (`src/domain/catalog/name.ts`, que la pantalla toma de
+    `src/services/catalog/field-rules.ts`): así un nombre sin forma se dice en su campo y
+    no se pierde. La base revisa lo mismo y manda.
+  - El foco tiene un dueño por respuesta: un error de un campo, el resumen de errores de
+    su formulario; lo agregado, el campo de agregar, ya vacío, para seguir; lo movido, el
+    mismo botón de la fila que se movió (o el del otro sentido), para seguir con el
+    teclado; lo demás, `useAnswerFocus`. Lo agregado y lo movido se dicen además por una
+    región viva propia del bloque.
+  - Toda respuesta del servicio que no sale de la página la vuelve a pedir (`refresh()`),
+    también «sin cambios» y «no se supo»: la lista pudo cambiar. Lo que no llama a nadie
+    («Renombrar», «Cancelar», un nombre sin forma) no la pide.
+  - El campo de agregar se arma de nuevo solo con una respuesta de agregar: el número de
+    intento es del bloque entero, y como llave borraría lo que se estaba escribiendo cuando
+    se pulsa otro botón del bloque.
+  - Un «tu código ya no es reciente» que contestó un bloque deja de pintarse en cuanto la
+    página lee un código reciente: después de darlo, ya no es cierto.
+  - Los tonos de portada son clases (`bg-cover-1` a `bg-cover-8`, en `@theme` de
+    `theme.css`), escritas enteras en un mapa: Tailwind no ve una clase armada con texto.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -1093,7 +1137,10 @@ En la base, nueve reglas que salen de `../planeacion/05-esquema-backend.md` §16
     primero (`holds(…, "content")`), la forma antes de la base, las listas cerradas de
     respuestas, y «no se supo» se reporta (`catalog_change_unavailable`). Lo que las
     pantallas importan sale de `catalog.ts`. Comprobar que una práctica está «en uso» antes
-    de desactivarla llega con los cursos (T-107 y T-402).
+    de desactivarla llega con los cursos (T-107 y T-402). `giveCatalogCode` da el código
+    otra vez y comprueba lo reciente con las listas del catálogo; pasa dos veces por la
+    guarda (antes, y después de verificar, porque verificar escribió la cookie), cada vez
+    en su función, y una prueba de arquitectura lo exige.
 - **Una capacidad solo se recibe aceptando una invitación** (T-105), o de quien tiene
   configuración si ya se es del equipo. El servidor no escribe `admin_capabilities`: todo
   pasa por funciones de `private` que comprueban quién actúa, y el vigilante lo exige.

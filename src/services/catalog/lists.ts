@@ -1,9 +1,10 @@
 import "server-only";
 
-import type { CookieReader } from "@/adapters/supabase/auth-cookies";
+import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import { CATALOG_NAME_MAX_LENGTH, parseCatalogName } from "@/domain/catalog/name";
 
-import { holds, type TeamCheck } from "@/services/account/team";
+import { holds, type CodeGiven, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
 
 // Las prácticas y los niveles del catálogo (RF-709; PA-67, FL-58; T-106). Las cambia solo
@@ -88,12 +89,26 @@ interface Malformed {
 export type ListsRead = { kind: "lists"; lists: CatalogLists } | Unavailable;
 export type ItemAdded = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: AddAnswer; id: string | null };
 export type ItemRenamed = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: RenameAnswer };
-export type ItemMoved = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: MoveAnswer };
+/**
+ * `changed`: la que se quería mover ya no estaba en la posición que se vio (un doble envío,
+ * un formulario reenviado al recargar, otra pestaña). No se movió nada.
+ */
+export type ItemMoved = Refused | Unavailable | Unknown | Malformed | { kind: "changed" } | { kind: "answered"; answer: MoveAnswer };
+/** Dar el código otra vez para que los cambios pasen su puerta (el bloque «Tu código»). */
+export type CatalogCode =
+  | Refused
+  | Unavailable
+  | { kind: "verified" }
+  | { kind: "wrong_code" }
+  /** El freno rechazó: Auth cerró todas sus sesiones. */
+  | { kind: "throttled" }
+  /** Su código fue el bueno, y aun así ningún cambio pasaría: es configuración. */
+  | { kind: "not_available" };
 export type ItemSetActive = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: SetActiveAnswer };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** El tope del nombre, el mismo que la tabla. */
-export const CATALOG_NAME_MAX = 40;
+export const CATALOG_NAME_MAX = CATALOG_NAME_MAX_LENGTH;
 
 /** Un identificador con forma, o nulo. Solo minúsculas: así dos iguales se escriben igual. */
 function idOf(value: unknown): string | null {
@@ -105,20 +120,24 @@ function listOf(value: unknown): CatalogList | null {
 }
 
 /**
- * Un nombre con la forma de la tabla, en NFC y ya sin espacios a los lados, o nulo: de 1 a 40
- * caracteres, sin caracteres de control ni de formato (el guion suave, los de ancho cero, los
- * que invierten la dirección del texto), que no se ven. La base revisa además que dé un slug.
+ * Un nombre con la forma de la tabla, en NFC y ya sin espacios a los lados, o nulo. La regla
+ * es la del dominio (`parseCatalogName`), la misma con que la pantalla lo revisa antes.
  */
 export function catalogNameOf(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const name = value.normalize("NFC").trim();
-  if (name.length < 1 || [...name].length > CATALOG_NAME_MAX) return null;
-  if (/[\p{Cc}\p{Cf}]/u.test(name)) return null;
-  return name;
+  const parsed = parseCatalogName(value);
+  return parsed.ok ? parsed.name : null;
+}
+
+/** Una posición que se vio en la lista: un entero de 1 en adelante, o nulo. */
+function positionOf(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : null;
 }
 
 export interface CatalogCore {
   teamStanding: (reader: CookieReader) => Promise<TeamCheck>;
+  /** Dar el código del segundo factor (`team.ts`): el factor es el que dice la base. */
+  giveSecondFactorCode: (jar: CookieJar, code: string) => Promise<CodeGiven>;
   store: CatalogStore;
 }
 
@@ -182,15 +201,39 @@ export function createCatalogLists(deps: { report: (code: FailureCode) => Promis
     return result.ok ? { kind: "answered", answer: result.answer } : result.result;
   }
 
-  async function moveItem(reader: CookieReader, input: { list: unknown; id: unknown; direction: unknown }): Promise<ItemMoved> {
+  /**
+   * Sube o baja una posición, si sigue en la que se vio (`position`). Mover no se repite sin
+   * daño: sin esto, un formulario reenviado al recargar subiría dos lugares, y una pestaña
+   * vieja intercambiaría con otra vecina. La comparación es una relectura, no un candado: dos
+   * envíos casi a la vez (un doble clic sin JavaScript) pueden leer los dos la misma posición
+   * y mover dos lugares. La base mueve dentro del candado de la lista, así que el orden nunca
+   * queda roto.
+   */
+  async function moveItem(
+    reader: CookieReader,
+    input: { list: unknown; id: unknown; direction: unknown; position: unknown },
+  ): Promise<ItemMoved> {
     const admitted = await admit(reader);
     if (!admitted.ok) return admitted.result;
     const list = listOf(input.list);
     const id = idOf(input.id);
     const direction = input.direction === "up" || input.direction === "down" ? input.direction : null;
-    if (list === null || id === null || direction === null) return { kind: "malformed" };
-    const result = await change(() => store.move(admitted.claims, list, id, direction));
-    return result.ok ? { kind: "answered", answer: result.answer } : result.result;
+    const seen = positionOf(input.position);
+    if (list === null || id === null || direction === null || seen === null) return { kind: "malformed" };
+    const result = await change(async () => {
+      const lists = await store.lists(admitted.claims);
+      // Dejó de pasar la puerta entre la guarda y esta lectura: que decida la página.
+      if (lists === null) return "refused" as const;
+      const item = lists[list].find((each) => each.id === id);
+      // Si ya no está, o ya no es esa su posición, no se mueve. Una que no existe la contesta
+      // la base (`not_found`), como siempre.
+      if (item !== undefined && item.position !== seen) return "changed" as const;
+      return store.move(admitted.claims, list, id, direction);
+    });
+    if (!result.ok) return result.result;
+    if (result.answer === "refused") return { kind: "refused" };
+    if (result.answer === "changed") return { kind: "changed" };
+    return { kind: "answered", answer: result.answer };
   }
 
   async function setItemActive(reader: CookieReader, input: { list: unknown; id: unknown; active: unknown }): Promise<ItemSetActive> {
@@ -204,5 +247,46 @@ export function createCatalogLists(deps: { report: (code: FailureCode) => Promis
     return result.ok ? { kind: "answered", answer: result.answer } : result.result;
   }
 
-  return { catalogLists, addItem, renameItem, moveItem, setItemActive };
+  /**
+   * Dar el código otra vez (PA-67, «Tu código»). El de la pantalla del equipo no sirve aquí:
+   * comprueba lo reciente leyendo la lista del equipo, que es nula sin configuración. Este
+   * lo comprueba con las listas del catálogo, que solo piden Contenido.
+   */
+  async function giveCatalogCode(jar: CookieJar, code: string): Promise<CatalogCode> {
+    const admitted = await admit(jar);
+    if (!admitted.ok) return admitted.result;
+    const given = await core.giveSecondFactorCode(jar, code);
+    switch (given.kind) {
+      case "verified":
+        break;
+      case "wrong_code":
+      case "throttled":
+      case "unavailable":
+        return { kind: given.kind };
+      default:
+        // Dejó de ser del equipo, o su sesión ya no vale: decide la página.
+        return { kind: "refused" };
+    }
+    return freshAfterCode(jar);
+  }
+
+  /** Después de verificar, con la sesión como quedó en ese tarro: verificar escribió su cookie. */
+  async function freshAfterCode(jar: CookieJar): Promise<CatalogCode> {
+    const admitted = await admit(jar);
+    if (!admitted.ok) return admitted.result;
+    let lists: CatalogLists | null;
+    try {
+      lists = await store.lists(admitted.claims);
+    } catch {
+      await deps.report("catalog_change_unavailable");
+      return { kind: "not_available" };
+    }
+    // Perdió Contenido entre una cosa y otra: decide la página, que le dirá cuál le falta.
+    if (lists === null) return { kind: "refused" };
+    if (lists.freshCode) return { kind: "verified" };
+    await deps.report("catalog_change_unavailable");
+    return { kind: "not_available" };
+  }
+
+  return { catalogLists, addItem, renameItem, moveItem, setItemActive, giveCatalogCode };
 }

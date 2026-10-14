@@ -31,6 +31,10 @@ vi.mock("@/app/admin/_equipo/actions", () => ({
   resetAction: vi.fn(),
 }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
+// El comodín conoce todas las secciones: las de las prácticas, simuladas (su página se
+// prueba en catalog-admin-page.test.tsx).
+vi.mock("@/services/catalog/catalog", () => ({ catalogLists: vi.fn() }));
+vi.mock("@/app/admin/_practicas/actions", () => ({ catalogCodeAction: vi.fn(), practicesAction: vi.fn(), levelsAction: vi.fn() }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
 import { TeamSection } from "@/app/admin/_equipo/section";
@@ -85,7 +89,11 @@ describe("qué sección atiende cada ruta de administración", () => {
     expect(sectionAt(["equipo"])?.capability).toBe("config");
   });
 
-  it.each<[string[]]>([[[]], [["otra"]], [["equipo", "invitar"]], [["Equipo"]], [["equipo", ""]], [["constructor"]], [["__proto__"]], [["toString"]]])(
+  it("las prácticas y los niveles piden Contenido", () => {
+    expect(sectionAt(["practicas"])?.capability).toBe("content");
+  });
+
+  it.each<[string[]]>([[[]], [["otra"]], [["equipo", "invitar"]], [["Equipo"]], [["equipo", ""]], [["practicas", "niveles"]], [["Practicas"]], [["constructor"]], [["__proto__"]], [["toString"]]])(
     "en %j no hay ninguna: solo vale la ruta exacta de una sección de la tabla",
     (rest) => {
       expect(sectionAt(rest)).toBeNull();

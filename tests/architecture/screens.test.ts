@@ -166,6 +166,16 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     resetAction:
       /if \(request\.step === "choose"\) return \{ kind: "confirm", profile, changed: false, attempt \};[\s\S]*resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed, version: request\.version \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
   },
+  "src/app/admin/_practicas/actions.ts": {
+    // Dar el código otra vez, con el servicio del catálogo: el del equipo comprueba lo
+    // reciente con la lista del equipo, nula sin configuración.
+    catalogCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*catalogCodeOutcome\(await giveCatalogCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Cada lista tiene su acción, que es la que dice de qué lista se trata.
+    // (Lo que hace `listAction` lo prueban tests/actions/catalog-actions.test.ts.)
+    practicesAction: /Promise<CatalogState> \{\n\s+return listAction\("practices", previous, form\);\n\}$/,
+    levelsAction: /Promise<CatalogState> \{\n\s+return listAction\("levels", previous, form\);\n\}$/,
+  },
 };
 
 /** El texto de una función exportada de un archivo de acciones: de su `export` a la llave que la cierra. */
@@ -318,7 +328,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib", "_practicas"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -343,13 +353,16 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("toda sección declara la capacidad que pide, y ninguna corre la guarda por su cuenta", () => {
         const table = codeOf("src/app/admin/_lib/sections.tsx");
         const entries = [...table.matchAll(/^ {2}(\w+): \{ capability: "(\w+)", render: \(claims\) => <\w+ claims=\{claims\} \/> \},$/gm)];
-        expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([["equipo", "config"]]);
+        expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([
+          ["equipo", "config"],
+          ["practicas", "content"],
+        ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
         const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
         expect(body.split("\n").filter((line) => line.trim() !== "" && !/^\s*\/\//.test(line))).toHaveLength(entries.length);
         expect(table).toMatch(/capability: Capability;/);
         const sections = under.filter((source) => /\/_[a-z]+\/section\.tsx$/.test(source.file));
-        expect(sections.map((source) => source.file)).toEqual(["src/app/admin/_equipo/section.tsx"]);
+        expect(sections.map((source) => source.file).sort()).toEqual(["src/app/admin/_equipo/section.tsx", "src/app/admin/_practicas/section.tsx"]);
         for (const section of sections) expect(section.code).not.toMatch(/\brequire\w+\(|\bcheckSession\b|\bteamStanding\b/);
       });
     });
@@ -553,6 +566,9 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
 
   it("hay anclas que revisar", () => {
     expect(anchors.map(({ anchor }) => anchor).sort()).toEqual([
+      "bloque-catalogo-codigo",
+      "bloque-catalogo-niveles",
+      "bloque-catalogo-practicas",
       "bloque-contrasena",
       "bloque-equipo-codigo",
       "bloque-equipo-invitaciones",

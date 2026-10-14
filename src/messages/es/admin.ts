@@ -9,6 +9,13 @@ import { defineMessages } from "../format";
 //
 // Ningún plazo ni tope se escribe con su número: son parámetros, y la pantalla no los lee.
 export const admin = defineMessages({
+  // El bloque «Tu código», el mismo en cada sección que cambia algo con un código reciente.
+  // Lo que dice su cuerpo es de cada sección.
+  code: {
+    title: "Tu código",
+    submit: "Comprobar",
+    submitting: "Comprobando…",
+  },
   team: {
     title: "Equipo de administración",
     intro: "Quién entra a administración y con qué capacidades. Cada cambio queda registrado con tu nombre.",
@@ -23,11 +30,8 @@ export const admin = defineMessages({
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
     changesLocked: "Escribe tu código, al inicio de esta página, para poder hacer cambios.",
 
-    // Dar el código otra vez, dentro de la pantalla.
-    codeTitle: "Tu código",
+    // Dar el código otra vez, dentro de la pantalla (el bloque es el compartido, `admin.code`).
     codeBody: "Para cambiar el equipo hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver la lista.",
-    codeSubmit: "Comprobar",
-    codeSubmitting: "Comprobando…",
     codeNotAvailable: "Tu código es correcto, pero por ahora no se puede cambiar el equipo. Avisa a quien opera la base de datos.",
 
     // Invitar. No se manda ningún correo: quien invita le avisa a la persona.
@@ -145,5 +149,79 @@ export const admin = defineMessages({
     resetNotMember: "Esa cuenta ya no es del equipo.",
     resetUnknown:
       "No supimos si se restableció. Revisa la lista: si la persona aparece sin segundo factor, restablece de nuevo, porque nadie conoce ese código.",
+  },
+
+  // PA-67, las prácticas y los niveles del catálogo. Las mismas frases para las dos listas,
+  // salvo lo que nombra a la lista.
+  catalog: {
+    title: "Prácticas y niveles",
+    intro: "Las listas con que se describe cada curso y se filtra el catálogo. Cada cambio queda registrado con tu nombre.",
+    backToAdmin: "Ir al inicio de administración",
+    working: "Guardando…",
+    codeBody: "Para cambiar las prácticas o los niveles hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver las listas.",
+    codeNotAvailable: "Tu código es correcto, pero por ahora no se pueden cambiar las listas. Avisa a quien opera la base de datos.",
+    changesLocked: "Escribe tu código, al inicio de esta página, para poder hacer cambios.",
+
+    practices: {
+      title: "Prácticas",
+      empty: "Todavía no hay prácticas.",
+      addLabel: "Nombre de la práctica nueva",
+      addSubmit: "Agregar práctica",
+      duplicate: "Ya existe una práctica con ese nombre. Puede estar desactivada: búscala en la lista.",
+      inactiveDuplicate: "«{name}» ya existe, desactivada. Puedes reactivarla: vuelve a su lugar en la lista.",
+      inactive: "Desactivada",
+      added: "Agregada: «{name}».",
+      deactivated: "Desactivada. Ya no se ofrece al describir un curso ni al filtrar; puedes reactivarla.",
+      reactivated: "Reactivada, en el lugar que tenía.",
+    },
+    levels: {
+      title: "Niveles",
+      empty: "Todavía no hay niveles.",
+      addLabel: "Nombre del nivel nuevo",
+      addSubmit: "Agregar nivel",
+      duplicate: "Ya existe un nivel con ese nombre. Puede estar desactivado: búscalo en la lista.",
+      inactiveDuplicate: "«{name}» ya existe, desactivado. Puedes reactivarlo: vuelve a su lugar en la lista.",
+      inactive: "Desactivado",
+      added: "Agregado: «{name}».",
+      deactivated: "Desactivado. Ya no se ofrece al describir un curso ni al filtrar; puedes reactivarlo.",
+      reactivated: "Reactivado, en el lugar que tenía.",
+    },
+
+    // Los botones de cada fila. El nombre va oculto a la vista, para quien no ve la fila.
+    up: "Subir",
+    down: "Bajar",
+    rename: "Renombrar",
+    deactivate: "Desactivar",
+    reactivate: "Reactivar",
+    save: "Guardar",
+    cancel: "Cancelar",
+    // Lo que va oculto después de cada botón.
+    of: "«{name}»",
+    renameLabel: "Nombre nuevo de «{name}»",
+    renameHint: "Su dirección en el catálogo no cambia: los enlaces guardados siguen sirviendo.",
+    toneOf: "Tono de portada: {tone}",
+    tones: {
+      1: "arcilla",
+      2: "ocre",
+      3: "musgo",
+      4: "pino",
+      5: "laguna",
+      6: "índigo",
+      7: "ciruela",
+      8: "vino",
+    },
+
+    // Lo que contestó el último envío.
+    renamed: "Nombre guardado.",
+    moved: "«{name}» quedó en el lugar {place} de {count}.",
+    unchanged: "No había nada que cambiar.",
+    listChanged: "La lista cambió mientras la veías. Esta es la de ahora: revisa y repite si hace falta.",
+    needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
+    unknown: "No supimos si el cambio se hizo. Revisa la lista antes de intentarlo otra vez.",
+
+    // Los errores del nombre.
+    nameRequired: "Escribe el nombre.",
+    nameTooLong: "Usa como mucho {max} caracteres.",
+    nameInvalid: "Usa al menos una letra o un número, sin caracteres especiales invisibles.",
   },
 });
