@@ -288,7 +288,7 @@ describe("los cambios al equipo van uno tras otro", () => {
     ["revocar una invitación", `private.revoke_admin_invitation('${randomUUID()}')`],
     ["dar una capacidad", `private.grant_capability('${randomUUID()}', 'support')`],
     ["quitar una capacidad", `private.revoke_capability('${randomUUID()}', 'support')`],
-    ["restablecer", `private.reset_second_factor('${randomUUID()}', '${print("c")}')`],
+    ["restablecer", `private.reset_second_factor('${randomUUID()}', '${print("c")}', '0.0')`],
   ];
 
   it.each(calls)("%s espera a que termine el cambio que va delante", async (_name, call) => {
@@ -398,7 +398,7 @@ describe("los cambios al equipo van uno tras otro", () => {
     const cases: [string, (id: string) => string, string][] = [
       ["dar una capacidad", (id) => `private.grant_capability('${id}', 'support')`, "not_member"],
       ["quitar una capacidad", (id) => `private.revoke_capability('${id}', 'support')`, "not_found"],
-      ["restablecer", (id) => `private.reset_second_factor('${id}', '${print("c")}')`, "not_member"],
+      ["restablecer", (id) => `private.reset_second_factor('${id}', '${print("c")}', '0.0')`, "not_member"],
     ];
 
     it.each(cases)("%s", async (_name, call, expected) => {

@@ -128,21 +128,21 @@ select is(
   jsonb_build_object(
     'profile_id', 'c0000000-0000-0000-0000-000000000001', 'email', 'config1@prueba.test', 'display_name', null,
     'status', 'active', 'capabilities', jsonb_build_array('config', 'support'), 'factor', 'bound',
-    'rebind', 'none', 'config_removable', true, 'is_self', true),
+    'rebind', 'none', 'config_removable', true, 'is_self', true, 'reset_version', '0.0'),
   'quien mira: su correo, sus capacidades activas en orden, su factor atado, y que es ella');
 select is(
   pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test'),
   jsonb_build_object(
     'profile_id', 'c0000000-0000-0000-0000-000000000002', 'email', 'config2@prueba.test', 'display_name', null,
     'status', 'active', 'capabilities', jsonb_build_array('config'), 'factor', 'bound',
-    'rebind', 'none', 'config_removable', true, 'is_self', false),
+    'rebind', 'none', 'config_removable', true, 'is_self', false, 'reset_version', '0.0'),
   'otra persona con configuración: no es quien mira');
 select is(
   pruebas.persona('c0000000-0000-0000-0000-000000000001', 'dora@prueba.test'),
   jsonb_build_object(
     'profile_id', 'd0000000-0000-0000-0000-000000000001', 'email', 'dora@prueba.test', 'display_name', null,
     'status', 'active', 'capabilities', jsonb_build_array('support'), 'factor', 'bound',
-    'rebind', 'none', 'config_removable', false, 'is_self', false),
+    'rebind', 'none', 'config_removable', false, 'is_self', false, 'reset_version', '0.0'),
   'alguien sin configuración: no hay configuración que quitarle');
 select is(
   (select array_agg(m ->> 'email' order by ord)
@@ -344,7 +344,7 @@ select pruebas.dar_capacidad('a0000000-0000-0000-0000-000000000001', 'moderation
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'una que da capacidades no le sirve a quien ya tiene alguna');
 select is(
-  pruebas.persona('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') - 'profile_id' - 'email' - 'display_name',
+  pruebas.persona('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') - 'profile_id' - 'email' - 'display_name' - 'reset_version',
   jsonb_build_object('status', 'active', 'capabilities', jsonb_build_array('moderation'), 'factor', 'none',
                      'rebind', 'none', 'config_removable', false, 'is_self', false),
   'y quien tiene una capacidad sin factor atado sale entre las personas: sin factor, y sin invitación para volver');
@@ -383,7 +383,7 @@ select is(
   pruebas.persona('c0000000-0000-0000-0000-000000000003', 'beto@prueba.test') - 'display_name',
   jsonb_build_object(
     'profile_id', 'a0000000-0000-0000-0000-000000000002', 'email', 'beto@prueba.test', 'status', 'active',
-    'capabilities', jsonb_build_array('config'), 'factor', 'bound', 'rebind', 'none', 'config_removable', true, 'is_self', false),
+    'capabilities', jsonb_build_array('config'), 'factor', 'bound', 'rebind', 'none', 'config_removable', true, 'is_self', false, 'reset_version', '1.1'),
   'y quien aceptó sale entre las personas, con lo que recibió y su factor atado');
 select is(
   pruebas.pide('c0000000-0000-0000-0000-000000000003',
@@ -410,12 +410,12 @@ select is(pruebas.estado('c0000000-0000-0000-0000-000000000002'), 'unbound', 'qu
 select pruebas.equipar('c0000000-0000-0000-0000-000000000002');
 select is(pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') ->> 'factor', 'bound', '(de vuelta en su lugar)');
 
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', '(se le restablece el segundo factor)');
 select is(
   pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') - 'display_name' - 'profile_id' - 'email',
   jsonb_build_object('status', 'active', 'capabilities', jsonb_build_array('config'), 'factor', 'none',
-                     'rebind', 'pending', 'config_removable', true, 'is_self', false),
+                     'rebind', 'pending', 'config_removable', true, 'is_self', false, 'reset_version', '1.0'),
   'restablecida: conserva sus capacidades, sin factor, y con una invitación para volver');
 select is(
   pruebas.pendiente('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') - 'created_at' - 'expires_at' - 'id',
@@ -440,7 +440,7 @@ select ok(
 select is(
   (select array_agg(distinct k order by k)
    from jsonb_array_elements(pruebas.lista('c0000000-0000-0000-0000-000000000001') -> 'members') as m, jsonb_object_keys(m) as k),
-  array['capabilities', 'config_removable', 'display_name', 'email', 'factor', 'is_self', 'profile_id', 'rebind', 'status'],
+  array['capabilities', 'config_removable', 'display_name', 'email', 'factor', 'is_self', 'profile_id', 'rebind', 'reset_version', 'status'],
   'de cada persona, estos campos y ninguno más');
 select is(
   (select array_agg(distinct k order by k)
@@ -480,7 +480,7 @@ select is(
   'revoked', '(se revoca su invitación para volver)');
 select is(
   pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') - 'display_name' - 'profile_id' - 'email' - 'capabilities' - 'status',
-  jsonb_build_object('factor', 'none', 'rebind', 'none', 'config_removable', true, 'is_self', false),
+  jsonb_build_object('factor', 'none', 'rebind', 'none', 'config_removable', true, 'is_self', false, 'reset_version', '1.0'),
   'sin atadura y sin invitación: no tiene con qué volver hasta que la restablezcan');
 
 -- No escribe nada: preguntar no deja renglón en la auditoría.

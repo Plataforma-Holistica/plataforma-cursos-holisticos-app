@@ -188,6 +188,7 @@ const ROSTER = {
       rebind: "none",
       config_removable: false,
       is_self: true,
+      reset_version: "0.0",
     },
   ],
   invitations: [],
@@ -238,8 +239,10 @@ describe("las consultas de administrar al equipo", () => {
 
   it("restablecer manda la persona y la huella del código dictado", async () => {
     const { tx, sent } = txWith([{ answer: "reset" }]);
-    expect(await askReset(tx, PERSON, HANDOFF)).toBe("reset");
-    expect(sent).toEqual([{ text: "select private.reset_second_factor($1::uuid, $2::text) as answer", values: [PERSON, HANDOFF] }]);
+    expect(await askReset(tx, PERSON, HANDOFF, "2.1")).toBe("reset");
+    expect(sent).toEqual([
+      { text: "select private.reset_second_factor($1::uuid, $2::text, $3::text) as answer", values: [PERSON, HANDOFF, "2.1"] },
+    ]);
   });
 
   it("dentro de la transacción no se juzga la respuesta, y sin fila devuelven vacío", async () => {
@@ -247,7 +250,7 @@ describe("las consultas de administrar al equipo", () => {
     expect(await askRevokeInvitation(txWith([]).tx, INVITATION)).toBe("");
     expect(await askGrant(txWith([]).tx, PERSON, "finance")).toBe("");
     expect(await askRevoke(txWith([]).tx, PERSON, "finance")).toBe("");
-    expect(await askReset(txWith([]).tx, PERSON, HANDOFF)).toBe("");
+    expect(await askReset(txWith([]).tx, PERSON, HANDOFF, "2.1")).toBe("");
     expect(await askInvite(txWith([]).tx, "ana@prueba.test", ["support"])).toBe("");
   });
 });
@@ -259,7 +262,7 @@ describe("el almacén, al administrar al equipo", () => {
     ["revocar una invitación", "revoke_admin_invitation", "revoked", (store) => store.revokeInvitation(claims, INVITATION), [INVITATION]],
     ["dar una capacidad", "grant_capability", "granted", (store) => store.grant(claims, PERSON, "finance"), [PERSON, "finance"]],
     ["quitar una capacidad", "revoke_capability", "min_config", (store) => store.revoke(claims, PERSON, "config"), [PERSON, "config"]],
-    ["restablecer", "reset_second_factor", "reset", (store) => store.resetFactor(claims, PERSON, HANDOFF), [PERSON, HANDOFF]],
+    ["restablecer", "reset_second_factor", "reset", (store) => store.resetFactor(claims, PERSON, HANDOFF, "2.1"), [PERSON, HANDOFF, "2.1"]],
   ];
 
   it("la lista se lee como servidor, a nombre de las claims que se le pasan", async () => {
@@ -315,7 +318,7 @@ describe("el almacén, al administrar al equipo", () => {
     const { run } = runnerWith([{ answer: "granted" }]);
     await expect(createTeamStore(run).revoke(claims, PERSON, "config")).rejects.toThrow("no contesta");
     const reset = runnerWith([{ answer: "revoked" }]);
-    await expect(createTeamStore(reset.run).resetFactor(claims, PERSON, HANDOFF)).rejects.toThrow("no contesta");
+    await expect(createTeamStore(reset.run).resetFactor(claims, PERSON, HANDOFF, "2.1")).rejects.toThrow("no contesta");
     const invite = runnerWith([{ answer: "reset" }]);
     await expect(createTeamStore(invite.run).invite(claims, "ana@prueba.test", ["support"])).rejects.toThrow("no contesta");
     const grant = runnerWith([{ answer: "min_config" }]);

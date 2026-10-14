@@ -5,7 +5,7 @@ import { admin } from "@/messages/es/admin";
 import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 
-import { resetButton, type ResetFailure, type ResetState } from "./outcomes";
+import type { ResetFailure, ResetState } from "./outcomes";
 import { BlockResult, ConfirmPanel, RowAction, useAnswerFocus } from "./parts";
 import type { ResetOption } from "./rows";
 
@@ -127,9 +127,10 @@ export function ResetBlock({ options, canChange, state, codeHidden, action, pend
       ) : (
         <form action={action} className="flex flex-col gap-4">
           {chosen !== null && asked !== null ? (
-            // El botón lleva además la marca de esta confirmación: la de otra no vale.
+            // El botón lleva la versión de la persona que la página leyó: un reenvío trae la
+            // de antes, y no restablece otra vez.
             <ConfirmPanel
-              confirmation={{ ...chosen.confirmation, value: resetButton.marked(chosen.confirmation.value, asked.token) }}
+              confirmation={chosen.confirmation}
               changed={asked.changed}
               pending={pending}
               pendingLabel={text.resetting}

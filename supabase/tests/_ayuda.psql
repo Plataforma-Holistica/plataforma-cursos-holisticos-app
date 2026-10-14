@@ -313,4 +313,10 @@ create function pruebas.una_invitacion(p_email text) returns uuid
 language sql security definer
 as $$ select i.id from private.admin_invitations i where i.email = p_email limit 1 $$;
 
+-- La versión con que se confirma restablecer a esa persona, como la lee el dueño: la función
+-- es interna y el servidor no la ejecuta.
+create function pruebas.version(p_profile uuid) returns text
+language sql security definer
+as $$ select private.reset_version(p_profile) $$;
+
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;

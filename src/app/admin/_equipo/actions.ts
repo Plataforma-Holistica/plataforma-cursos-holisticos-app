@@ -10,7 +10,6 @@ import {
   giveFreshCode,
   grantCapability,
   inviteAdmin,
-  prepareReset,
   reinviteAdmin,
   resetSecondFactor,
   revokeCapability,
@@ -22,7 +21,6 @@ import {
   freshCodeOutcome,
   grantOutcome,
   inviteOutcome,
-  prepareResetOutcome,
   readInvitationsForm,
   readInviteForm,
   readResetForm,
@@ -160,43 +158,37 @@ export async function invitationsAction(previous: InvitationsState, form: FormDa
 }
 
 /**
- * Restablecerle el segundo factor a alguien, en dos envíos. El primero (a quién) deja en
- * ese navegador el testigo con el que el segundo sabrá que no es un reenvío, y no toca nada
- * más. El segundo restablece, y su respuesta trae el código que hay que dictar: sale una
- * sola vez, y mientras sea el estado de esta acción la pantalla no pinta ningún formulario
- * suyo.
+ * Restablecerle el segundo factor a alguien, en dos envíos. El primero (a quién) no llama a
+ * nadie: contesta «confirma», y la pantalla pinta qué va a pasar con lo que su página leyó,
+ * como en los demás bloques. El segundo restablece, con la versión de la persona que la
+ * página puso en el botón: un formulario reenviado trae la de antes, y no restablece otra
+ * vez. Su respuesta trae el código que hay que dictar: sale una sola vez, y mientras sea el
+ * estado de esta acción la pantalla no pinta ningún formulario suyo.
  */
 export async function resetAction(previous: ResetState, form: FormData): Promise<ResetState> {
   const request = readResetForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
   const { profile } = request;
+  if (request.step === "choose") return { kind: "confirm", profile, changed: false, attempt };
 
   const jar = await cookieJar();
-  const outcome =
-    request.step === "choose"
-      ? prepareResetOutcome(await prepareReset(jar, { profile }))
-      : resetOutcome(await resetSecondFactor(jar, { profile, confirmed: request.confirmed, token: request.token }));
+  const outcome = resetOutcome(await resetSecondFactor(jar, { profile, confirmed: request.confirmed, version: request.version }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
 
+  // Con el código en la mano la página no se vuelve a pedir: si esa lectura fallara, o la
+  // guarda redirigiera, la pantalla se iría y el código, que ya es el único que vale, no
+  // llegaría a pintarse. Restablecer no escribe ninguna cookie, así que con JavaScript la
+  // página no se repinta, salvo que el paso previo haya renovado la sesión en ese mismo
+  // envío; sin JavaScript se pinta siempre. Son límites conocidos. La lista se pone al día
+  // con el enlace del bloque, que carga todo.
+  if (outcome.kind === "code") return { kind: "code", code: outcome.code, attempt };
+
   // La página se vuelve a pedir: lo que la confirmación dice sale de la lista de ahora.
-  //
-  // También cuando la respuesta trae el código, y no hay cómo evitarlo: gastar el testigo
-  // escribe una cookie, y con eso Next pinta la página en la misma respuesta, se llame a
-  // `refresh()` o no. Si esa lectura fallara justo entonces, la pantalla se iría y el código,
-  // que ya es el único que vale, no llegaría a pintarse: es un límite conocido, y se sale de
-  // él restableciendo otra vez.
   refresh();
   switch (outcome.kind) {
-    case "code":
-      return { kind: "code", code: outcome.code, attempt };
-    case "confirm":
-      return { kind: "confirm", profile, token: outcome.token, changed: false, attempt };
     case "confirm_again":
-      // Solo lo contesta confirmar. La misma confirmación, con lo de ahora: su testigo no
-      // se gastó, y su marca sigue.
-      if (request.step !== "confirm") return { kind: "idle" };
-      return { kind: "confirm", profile, token: request.token, changed: true, attempt };
+      return { kind: "confirm", profile, changed: true, attempt };
     case "idle":
       return { kind: "idle" };
     case "failed":

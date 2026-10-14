@@ -53,7 +53,7 @@ from unnest(array[
   'private.accept_admin_invitation(text, uuid, text)',
   'private.grant_capability(uuid, public.capability)',
   'private.revoke_capability(uuid, public.capability)',
-  'private.reset_second_factor(uuid, text)']) as f;
+  'private.reset_second_factor(uuid, text, text)']) as f;
 select ok(
   bool_and(not has_function_privilege('app_service', f, 'execute')
            and not has_function_privilege('authenticated', f, 'execute')
@@ -71,6 +71,7 @@ from unnest(array[
   'private.team_change_gate()',
   'private.place_invitation(text, public.capability[], uuid)',
   'private.reset_factor(uuid, text, uuid, text)',
+  'private.reset_version(uuid)',
   'private.system_invite_admin(text, public.capability[])',
   'private.system_reset_second_factor(uuid, text, text)']) as f;
 select is(
@@ -119,7 +120,7 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.grant_c
   'needs_fresh_code', 'ni se da una capacidad');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000003', 'config')$$),
   'needs_fresh_code', 'ni se quita');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('x'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('x'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'needs_fresh_code', 'ni se restablece a nadie');
 -- Ni se cambia un parámetro: los plazos lo son, y quien tuviera esa sesión se los alargaría.
 select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000001');
@@ -743,7 +744,7 @@ select ok(
   not exists (select 1 from private.admin_factors f where f.profile_id = 'a0000000-0000-0000-0000-000000000001')
     and not exists (select 1 from auth.mfa_factors m where m.user_id = 'a0000000-0000-0000-0000-000000000001'),
   'sin capacidades deja de ser del equipo: pierde la atadura y el factor');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('a0000000-0000-0000-0000-000000000001', pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('a0000000-0000-0000-0000-000000000001', pruebas.huella('k'), pruebas.version('a0000000-0000-0000-0000-000000000001'))$$),
   'not_member', 'y ya no hay nada que restablecerle: sus capacidades revocadas no cuentan');
 select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana-4'));
 select is((select count(*)::int from public.audit_log where action = 'account.claimed'), 1,
@@ -792,22 +793,22 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_
 -- ---------------------------------------------------------------------------------------
 -- Restablecer el segundo factor de otra persona.
 
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000001', pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000001', pruebas.huella('k'), pruebas.version('c0000000-0000-0000-0000-000000000001'))$$),
   'self', 'nadie se restablece a sí mismo');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', 'private.reset_second_factor(''c0000000-0000-0000-0000-000000000002'', ' || quote_nullable(h) || ')'),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', 'private.reset_second_factor(''c0000000-0000-0000-0000-000000000002'', ' || quote_nullable(h) || ', pruebas.version(''c0000000-0000-0000-0000-000000000002''))'),
   'invalid', 'sin la huella del código dictado no se restablece')
 from unnest(array[null, '', 'codigo', upper(pruebas.huella('k'))]) as h;
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('a0000000-0000-0000-0000-000000000002', pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('a0000000-0000-0000-0000-000000000002', pruebas.huella('k'), pruebas.version('a0000000-0000-0000-0000-000000000002'))$$),
   'not_member', 'a quien no tiene capacidades no hay nada que restablecerle');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor(gen_random_uuid(), pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor(gen_random_uuid(), pruebas.huella('k'), '0.0')$$),
   'ineligible', 'ni a una cuenta que no existe');
 update auth.users set email = 'config2-otro@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('k'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'ineligible', 'si el correo de la cuenta ya no es el de su atadura, no se manda la invitación al nuevo');
 update auth.users set email = 'config2@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
 
 select pruebas.suspender('c0000000-0000-0000-0000-000000000002');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('k'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('k'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'ineligible', 'ni se restablece a una cuenta suspendida');
 select pruebas.como_dueno_sistema();
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000002';
@@ -816,7 +817,7 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', $$private.invite_
   'invited_new', '(la persona que se va a restablecer había invitado a alguien)');
 select pruebas.reclamar('c0000000-0000-0000-0000-000000000002', pruebas.huella('viejo'));
 select pruebas.equipar('c0000000-0000-0000-0000-000000000002');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-1'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-1'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', 'quien tiene configuración restablece a otra persona');
 select ok(
   not exists (select 1 from private.admin_factors f where f.profile_id = 'c0000000-0000-0000-0000-000000000002')
@@ -860,7 +861,7 @@ select ok(
   not exists (select 1 from private.admin_factors f where f.profile_id = 'c0000000-0000-0000-0000-000000000002')
     and (select count(*)::int from private.admin_invitations i where i.email = 'config2@prueba.test' and i.revoked_at is null and i.accepted_at is null) = 0,
   'no queda atada, y esa invitación queda revocada');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-1'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-1'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', '(se le restablece de nuevo, con el mismo código)');
 
 -- Volver: buzón, factor nuevo y el código dictado.
@@ -897,7 +898,7 @@ select is(
   2, 'sin recibir ninguna capacidad nueva: las dos filas que ya tenía, una de ellas revocada');
 
 -- Cinco códigos equivocados gastan la invitación.
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-2'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-2'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', '(se le restablece otra vez)');
 select pruebas.reclamar('c0000000-0000-0000-0000-000000000002', pruebas.huella('nuevo-2'));
 select pruebas.verificar('c0000000-0000-0000-0000-000000000002');
@@ -915,10 +916,10 @@ values ('rebind', 'muy-viejo@prueba.test', 'c0000000-0000-0000-0000-000000000002
         now() - interval '30 days', now() - interval '23 days', now() - interval '29 days');
 select pruebas.limpiar();
 update auth.users set email = 'config2-otro@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-3'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-3'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'ineligible', 'sin atadura, el correo se compara con el de su última invitación');
 update auth.users set email = 'config2@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-3'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave-3'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', 'y con el mismo correo se restablece de nuevo');
 
 -- El ataque que tumbó el primer diseño: restablecer, quitar la última capacidad, y aceptar.
@@ -1032,12 +1033,12 @@ select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 insert into pruebas.parametro_falso values ('VIGENCIA_INVITACION_DIAS', null);
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('param@prueba.test', '{support}')$$),
   'unavailable', 'sin VIGENCIA_INVITACION_DIAS no se invita');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('e0000000-0000-0000-0000-000000000001', pruebas.huella('p'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('e0000000-0000-0000-0000-000000000001', pruebas.huella('p'), pruebas.version('e0000000-0000-0000-0000-000000000001'))$$),
   'unavailable', 'ni se restablece');
 update pruebas.parametro_falso set value = '2147483647';
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('param@prueba.test', '{support}')$$),
   'unavailable', 'y con un plazo que se sale del calendario, tampoco: no lanza');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000003', pruebas.huella('p'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000003', pruebas.huella('p'), pruebas.version('c0000000-0000-0000-0000-000000000003'))$$),
   'unavailable', 'ni al restablecer');
 select ok(exists (select 1 from private.admin_factors f where f.profile_id = 'c0000000-0000-0000-0000-000000000003'),
   'y no le quitó nada a esa persona');
@@ -1065,7 +1066,7 @@ select is(pruebas.aceptar('e0000000-0000-0000-0000-000000000002', pruebas.huella
   'y con el entero más grande no se desborda');
 delete from pruebas.parametro_falso;
 
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('e0000000-0000-0000-0000-000000000002', pruebas.huella('q'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('e0000000-0000-0000-0000-000000000002', pruebas.huella('q'), pruebas.version('e0000000-0000-0000-0000-000000000002'))$$),
   'reset', '(un restablecimiento para probar el límite de códigos)');
 select pruebas.reclamar('e0000000-0000-0000-0000-000000000002', pruebas.huella('param-2'));
 select pruebas.verificar('e0000000-0000-0000-0000-000000000002');
