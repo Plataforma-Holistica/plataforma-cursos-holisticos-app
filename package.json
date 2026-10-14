@@ -26,6 +26,7 @@
     "db:login": "node scripts/db-app-login.mjs",
     "db:drafts": "node scripts/db-legal-drafts.mjs",
     "db:admins": "node scripts/db-admins.mjs",
+    "db:courses": "node scripts/db-test-courses.mjs",
     "team:handoff": "node scripts/team-handoff.mjs",
     "db:migration": "supabase migration new",
     "test:db": "supabase test db",

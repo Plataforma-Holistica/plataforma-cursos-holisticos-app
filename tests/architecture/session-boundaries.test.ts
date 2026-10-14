@@ -381,6 +381,10 @@ describe("cambiar el equipo pasa por las funciones de la base, y el código dict
     expect(namingInCode(/system_invite_admin|system_reset_second_factor/)).toEqual([]);
   });
 
+  it("tampoco las de cargar cursos y crear prácticas como sistema (T-107): solo el guion local", () => {
+    expect(namingInCode(/system_load_course|system_add_teacher|system_catalog_add|catalog_place/)).toEqual([]);
+  });
+
   it.each(QUERIES)("la consulta %s solo la corre el almacén del equipo, una vez y como servidor", (query) => {
     expect(namingInCode(new RegExp(`\\b${query}\\b`))).toEqual(["src/services/account/team-records.ts", "src/services/account/team-store.ts"]);
     // Una importación y una llamada.

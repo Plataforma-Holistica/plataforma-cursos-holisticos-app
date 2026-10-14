@@ -59,6 +59,7 @@ pnpm db:reset    # borra la base local y la rehace: migraciones, semilla, db:log
 pnpm db:login    # le da a app_service entrada a la base local (ver .env.example)
 pnpm db:drafts   # carga en la base local los textos legales de borrador (versión 0)
 pnpm db:admins <correo> [<correo> ...]   # el arranque en local: invita a las primeras personas del equipo, con todas las capacidades
+pnpm db:courses  # carga en la base local los cursos de prueba (T-107): sus prácticas y niveles, dos maestros ficticios y dos cursos por aprobar
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
@@ -117,6 +118,17 @@ producción no hay guion: el arranque y la emergencia los hace a mano quien oper
 con las sentencias del manual de operación (`../planeacion/08-manual-operacion.md`,
 OP-15). Para la emergencia, `pnpm team:handoff` imprime un código para dictar y su
 huella, sin tocar ninguna base: a la sentencia va la huella, nunca el código.
+
+`pnpm db:courses` carga los cursos de prueba de `supabase/local/test-courses.json`
+(decisión de Sergio del 2026-10-14: no hay pilotos todavía, y los pilotos reales esperan a
+T-004 y al documento de PQ-25). Sus prácticas y niveles, dos maestros ficticios sin cuenta
+y dos cursos de dos lecciones, con videos del proveedor de prueba (`test`) que apuntan a
+los archivos de `../Videos-Test/` (fuera de git; se suben a Mux en T-108). Los cursos
+quedan por aprobar, sin listar: los aprueba alguien con Contenido. Escribe como dueño de la
+base declarado sistema, con el ajuste `app.local_courses`, que la base exige para un video
+de prueba. Solo contra la base local, con las mismas comprobaciones que `db:drafts`;
+correrlo dos veces no duplica nada. `db:reset` no lo corre, y deja renglones en la
+auditoría: después, `pnpm db:reset` antes de `pnpm test:db`.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -188,7 +200,7 @@ La que fija el TRD §4.2.
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
 | `supabase/templates/` | Las plantillas de los correos que manda Supabase Auth, mientras no los manda el proveedor de correo propio | | La dirección o el código que arma Auth: los enlaces llevan la huella y abren una página propia |
-| `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
+| `supabase/local/` | Lo que solo existe en una base local: los textos legales de borrador, un archivo por tipo, que carga `pnpm db:drafts`, y los cursos de prueba (`test-courses.json`), que carga `pnpm db:courses` | | Ser una semilla: todo `.sql` de `supabase/seeds/` viaja también a una base remota |
 | `tests/integration/` | Pruebas del código contra la base local real, con personas dadas de alta en el Auth local. Un segundo factor de verdad sale de `helpers/auth.ts` (`secondFactorFor`) y sus códigos de `helpers/totp.ts`, sin dependencia nueva | Adaptadores y servicios | Dejar residuo: lo que escribe en una tabla auditada se revierte |
 | `tests/ui/` | Pruebas de los componentes base, en un DOM simulado: teclado, nombres accesibles, estados y reglas automáticas de accesibilidad | Componentes y textos | Dar por probado lo que un DOM simulado no ve |
 | `tests/actions/` | Pruebas de las acciones de servidor con sus servicios simulados: qué le pasa cada una a su servicio, en qué orden, y qué hace con cada respuesta | Las acciones de `src/app/` | Dar por probado lo que hace el servicio: eso lo prueban `tests/integration/` y el extremo a extremo |
@@ -1078,7 +1090,7 @@ en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.t
 un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
 revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
-En la base, nueve reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
 - **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
   sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
@@ -1115,7 +1127,10 @@ En la base, nueve reglas que salen de `../planeacion/05-esquema-backend.md` §16
   lee, y el público lee las activas. Lo que no se ve leyendo una función:
   - Un guardián que **no** es `security definer` deja escribir solo al dueño de la tabla (es
     decir, a esas funciones) y a nombre de alguien que pasa la misma puerta, código reciente
-    incluido; no acepta «el sistema»: un ajuste de sesión no es una barrera. Nada cambia el
+    incluido, o del dueño declarado sistema (desde T-107: así crea el guion local las
+    prácticas de los cursos de prueba, con `private.system_catalog_add()`; agregar se partió
+    en la puerta y `private.catalog_place()`). Un ajuste de sesión no es una barrera: lo que
+    cuenta es que escriba el dueño de la tabla, que el servidor no es. Nada cambia el
     id ni el slug, y nada se borra ni se vacía (el `truncate` no pasa por los disparadores
     de cada fila: el mismo guardián lo cierra aparte).
   - El nombre pasa a NFC antes de revisarse, en el servicio y en la base, y no admite
@@ -1137,10 +1152,44 @@ En la base, nueve reglas que salen de `../planeacion/05-esquema-backend.md` §16
     primero (`holds(…, "content")`), la forma antes de la base, las listas cerradas de
     respuestas, y «no se supo» se reporta (`catalog_change_unavailable`). Lo que las
     pantallas importan sale de `catalog.ts`. Comprobar que una práctica está «en uso» antes
-    de desactivarla llega con los cursos (T-107 y T-402). `giveCatalogCode` da el código
+    de desactivarla llega con la segunda solicitud de T-107 (lo publicado) y con T-402 (los
+    borradores). `giveCatalogCode` da el código
     otra vez y comprueba lo reciente con las listas del catálogo; pasa dos veces por la
     guarda (antes, y después de verificar, porque verificar escribió la cookie), cada vez
     en su función, y una prueba de arquitectura lo exige.
+- **Lo publicado** (T-107, migración `t107_lo_publicado`; ADR-21; decisiones de Sergio del
+  2026-10-14): `teachers`, `published_teachers`, `course_registry`, `video_assets` y
+  `published_courses`, `published_modules` y `published_lessons`. Lo que no se ve leyendo
+  una función:
+  - **Nadie de la aplicación las escribe.** El servidor solo las lee, y el público lee lo
+    listado. Cargar un curso es `private.system_load_course()`, como el arranque del
+    equipo: no es `security definer`, no tiene permisos para nadie y exige al dueño
+    declarado sistema. Lo deja en revisión (`course_registry.state = 'in_review'`) y en lo
+    publicado **sin listar**. Aprobar es `private.approve_course()`, del servidor, con la
+    puerta de Contenido y un código reciente: lo lista y lo marca publicado. Un guardián en
+    cada tabla deja escribir solo al dueño, declarado sistema o a nombre de quien pasa esa
+    puerta, y nada se borra ni se vacía: lo publicado se oculta. El vigilante exige que
+    nadie de la aplicación las escriba ni ejecute las funciones del sistema, y las pruebas
+    de base, que cada tabla tenga su guardián.
+  - La ficha de un maestro nace sin listar, y aprobar su primer curso la lista: su nombre
+    no se ve antes. El orden de desempate no va ni a la auditoría.
+  - **Un video de prueba** (proveedor `test`) solo lo acepta el guardián del dueño declarado
+    sistema con el ajuste `app.local_courses`, que pone `pnpm db:courses`. No es un
+    `check`: un `check` que lee un ajuste se vuelve a evaluar en cada cambio de la fila. Los
+    de verdad son de Mux (T-108), y la función de medios rechazará cualquier otro.
+  - Claves compuestas: una lección no queda en un módulo de otro curso, ni con un video de
+    otro curso o de otro maestro. La duración de una lección es la de su video.
+  - Cargar y aprobar toman los candados de las dos listas del catálogo (prácticas y después
+    niveles) antes que el del curso (`private.course_lock()`), y se niegan fuera de read
+    committed: desactivar una práctica y aprobar un curso que la usa van uno tras otro.
+    Aprobar se niega si su práctica o su nivel se desactivó mientras esperaba.
+  - Sin Payload: el curso tiene su propio identificador y el video dice qué lección lo usa
+    (`lesson_id`). `published_courses` nace sin `course_review_id`, que llega con las
+    revisiones (T-405); cómo cumplen RN-16 los pilotos reales se decide con PQ-25.
+  - El orden de desempate de un maestro (`tiebreak_rank`) no lo lee nadie de la aplicación:
+    la lectura de `teachers` se concede columna por columna.
+  - La pantalla para ver y aprobar un curso llega con T-108, cuando los videos se
+    reproduzcan; hasta entonces los cursos de prueba se quedan por aprobar.
 - **Una capacidad solo se recibe aceptando una invitación** (T-105), o de quien tiene
   configuración si ya se es del equipo. El servidor no escribe `admin_capabilities`: todo
   pasa por funciones de `private` que comprueban quién actúa, y el vigilante lo exige.
