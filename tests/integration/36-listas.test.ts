@@ -8,7 +8,7 @@ import { memoryJar, secondFactorFor, type KnownUser, type MemoryJar } from "./he
 import { catalogStoreOn } from "./helpers/catalog";
 import { localOwnerUrl } from "./helpers/local";
 import { asOwner, asSystem, reverted, teamStoreOn } from "./helpers/team";
-import { totpCode } from "./helpers/totp";
+import { totpCode, wrongCode } from "./helpers/totp";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // Las prácticas y los niveles (RF-709, T-106), contra el Auth y la base locales: la guarda
@@ -37,7 +37,10 @@ async function auditRows(): Promise<number> {
 }
 
 /** Alguien del equipo con esas capacidades, con su factor atado y su código dado, dentro de la transacción. */
-async function asTeamMember<T>(capabilities: string[], fn: (stage: { owner: Client; jar: MemoryJar; person: KnownUser }) => Promise<T>) {
+async function asTeamMember<T>(
+  capabilities: string[],
+  fn: (stage: { owner: Client; jar: MemoryJar; person: KnownUser; secret: string }) => Promise<T>,
+) {
   const person = await claimedUser();
   emails.push(person.email);
   await completeAccountAsOwner(person.id);
@@ -57,7 +60,7 @@ async function asTeamMember<T>(capabilities: string[], fn: (stage: { owner: Clie
     ]);
     await asOwner(owner);
     expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
-    return fn({ owner, jar, person });
+    return fn({ owner, jar, person, secret: factor.secret });
   });
   expect(await auditRows()).toBe(audited);
   return result;
@@ -74,7 +77,7 @@ function catalogOn(owner: Client) {
         return Promise.resolve();
       },
     },
-    { teamStanding: services.teamStanding, store: catalogStoreOn(owner) },
+    { teamStanding: services.teamStanding, giveSecondFactorCode: services.giveSecondFactorCode, store: catalogStoreOn(owner) },
   );
   return { ...catalog, reported, services };
 }
@@ -94,7 +97,14 @@ describe("quien tiene Contenido y su código reciente cambia las listas", () => 
       expect(await catalog.addItem(jar, { list: "levels", name: "Principiante" })).toMatchObject({ kind: "answered", answer: "added" });
 
       expect(await catalog.renameItem(jar, { list: "practices", id: yoga.id, name: "Yoga suave" })).toEqual({ kind: "answered", answer: "renamed" });
-      expect(await catalog.moveItem(jar, { list: "practices", id: meditation.id, direction: "up" })).toEqual({ kind: "answered", answer: "moved" });
+      // Con una posición que ya no es la suya, no se mueve.
+      expect(await catalog.moveItem(jar, { list: "practices", id: meditation.id, direction: "up", position: 1 })).toEqual({ kind: "changed" });
+      expect(await catalog.moveItem(jar, { list: "practices", id: meditation.id, direction: "up", position: 2 })).toEqual({
+        kind: "answered",
+        answer: "moved",
+      });
+      // El mismo envío otra vez (un doble clic, un formulario reenviado): ya no sube.
+      expect(await catalog.moveItem(jar, { list: "practices", id: meditation.id, direction: "up", position: 2 })).toEqual({ kind: "changed" });
       expect(await catalog.setItemActive(jar, { list: "practices", id: yoga.id, active: false })).toEqual({
         kind: "answered",
         answer: "deactivated",
@@ -139,6 +149,43 @@ describe("quien tiene Contenido y su código reciente cambia las listas", () => 
   });
 });
 
+describe("el código otra vez, para quien solo tiene Contenido", () => {
+  // El de la pantalla del equipo comprueba lo reciente con la lista del equipo, que es nula
+  // sin configuración: con él, quien solo tiene Contenido no podría dar su código. Este lo
+  // comprueba con las listas del catálogo.
+  it("vencido, los cambios lo piden; un código equivocado no abre nada; el bueno los abre", async () => {
+    await asTeamMember(["content"], async ({ owner, jar, person, secret }) => {
+      const catalog = catalogOn(owner);
+      // Fuera de la transacción, como en la del equipo: dentro, la fila quedaría tomada y Auth
+      // esperaría por ella al verificar.
+      await ownerQuery(
+        `update auth.mfa_amr_claims c set updated_at = now() - interval '1 hour'
+         from auth.sessions s where c.session_id = s.id and s.user_id = $1`,
+        [person.id],
+      );
+      expect(await catalog.addItem(jar, { list: "practices", name: "Yoga" })).toEqual({ kind: "answered", answer: "needs_fresh_code", id: null });
+
+      expect(await catalog.giveCatalogCode(jar, wrongCode(secret))).toEqual({ kind: "wrong_code" });
+      expect(await catalog.addItem(jar, { list: "practices", name: "Yoga" })).toEqual({ kind: "answered", answer: "needs_fresh_code", id: null });
+
+      expect(await catalog.giveCatalogCode(jar, totpCode(secret))).toEqual({ kind: "verified" });
+      const check = await catalog.services.teamStanding(jar);
+      if (check.kind !== "team") throw new Error("La persona de prueba no quedó en el equipo.");
+      const read = await catalog.catalogLists(check.claims);
+      expect(read.kind === "lists" && read.lists.freshCode).toBe(true);
+      expect(await catalog.addItem(jar, { list: "practices", name: "Yoga" })).toMatchObject({ kind: "answered", answer: "added" });
+      expect(catalog.reported).toEqual([]);
+    });
+  });
+
+  it("a alguien con configuración y sin Contenido no le verifica nada", async () => {
+    await asTeamMember(["config"], async ({ owner, jar, secret }) => {
+      const catalog = catalogOn(owner);
+      expect(await catalog.giveCatalogCode(jar, totpCode(secret))).toEqual({ kind: "refused" });
+    });
+  });
+});
+
 describe("quien no tiene Contenido", () => {
   it("alguien del equipo con configuración: la guarda lo rechaza, y nada se le pregunta a la base", async () => {
     await asTeamMember(["config", "support"], async ({ owner, jar }) => {
@@ -157,7 +204,11 @@ describe("quien no tiene Contenido", () => {
     emails.push(person.email);
     await completeAccountAsOwner(person.id);
     const jar = await entered(person);
-    const catalog = createCatalogLists({ report: () => Promise.resolve() }, { teamStanding: testServices().teamStanding, store: catalogStoreOn(null as never) });
+    const services = testServices();
+    const catalog = createCatalogLists(
+      { report: () => Promise.resolve() },
+      { teamStanding: services.teamStanding, giveSecondFactorCode: services.giveSecondFactorCode, store: catalogStoreOn(null as never) },
+    );
     expect(await catalog.addItem(jar, { list: "practices", name: "Yoga" })).toEqual({ kind: "refused" });
     expect(await catalog.renameItem(jar, { list: "practices", id: person.id, name: "Yoga" })).toEqual({ kind: "refused" });
   });

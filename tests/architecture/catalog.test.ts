@@ -52,11 +52,18 @@ describe("las listas del catálogo pasan por las funciones de la base", () => {
     expect(lists).not.toMatch(/\bas(?:User|Server|System)\(/);
   });
 
-  it.each(["addItem", "renameItem", "moveItem", "setItemActive"])("%s corre la guarda antes que cualquier otra cosa", (name) => {
-    expect(bodyOf(name)).toMatch(
-      new RegExp(`^  async function ${name}\\([^)]*\\): Promise<\\w+> \\{\\s+const admitted = await admit\\(reader\\);\\s+if \\(!admitted\\.ok\\) return admitted\\.result;`),
-    );
-  });
+  // Dar el código pasa dos veces por la guarda: antes, y después de verificar, porque
+  // verificar escribió la cookie. Cada paso es su propia función.
+  it.each(["addItem", "renameItem", "moveItem", "setItemActive", "giveCatalogCode", "freshAfterCode"])(
+    "%s corre la guarda antes que cualquier otra cosa",
+    (name) => {
+      expect(bodyOf(name)).toMatch(
+        new RegExp(
+          `^  async function ${name}\\([^)]*\\): Promise<\\w+> \\{\\s+const admitted = await admit\\((?:reader|jar)\\);\\s+if \\(!admitted\\.ok\\) return admitted\\.result;`,
+        ),
+      );
+    },
+  );
 
   it("la guarda pide Contenido, no otra capacidad", () => {
     expect(bodyOf("admit")).toMatch(/!holds\(team\.standing, "content"\)/);
