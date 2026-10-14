@@ -466,8 +466,7 @@ falla. Trece precisiones que la tabla no dice:
   - **Quitar una capacidad, dar configuración, revocar y restablecer se confirman en dos
     pasos, dentro de la fila.** El primero (`ask`) no llama a ningún servicio: contesta
     «confirma», y la pantalla pinta qué va a pasar con lo que su página leyó (`rows.ts`).
-    El de restablecer es la excepción: se llama `choose` y sí llama a su servicio
-    (`prepareReset`), que deja el testigo y devuelve su marca; tampoco cambia nada.
+    En el bloque de restablecer ese primer paso se llama `choose`, y tampoco llama a nadie.
     Lo que se confirmó que pasaría viaja en el botón de confirmar
     (`effectsKey(removalEffects(…))`), y el servicio relee: si ya no es eso, contesta
     `changed` y se pregunta otra vez con la lista de ahora. Una confirmación dice todo lo
@@ -486,12 +485,15 @@ falla. Trece precisiones que la tabla no dice:
     botón de cada fila del equipo, el código habría viajado en cada «Dar» y cada «Quitar».
     Con JavaScript deja además de pintarse al salir de la página y con el siguiente envío
     de cualquier bloque. Tres cosas más, de la revisión del diff:
-    - Otro límite conocido: la página se vuelve a pintar en la misma respuesta que trae el
-      código, y no hay cómo evitarlo, porque gastar el testigo escribe una cookie (abajo,
-      «una acción que escribe una cookie»). Si esa lectura fallara justo entonces, o la
-      guarda redirigiera, la pantalla se iría y el código, que ya es el único que vale, no
-      llegaría a pintarse. Se sale restableciendo otra vez: la lista dice que esa persona
-      quedó sin segundo factor.
+    - Con el código en la mano la acción no llama a `refresh()`, y restablecer no escribe
+      ninguna cookie: con JavaScript la página no se vuelve a pintar en esa respuesta, y si
+      su lectura fallara, el código, que ya es el único que vale, se perdería. Dos límites
+      conocidos: si el paso previo renovó la sesión en ese mismo envío (al token le
+      quedaban menos de 90 segundos), esa cookie sí hace que Next la pinte (arriba, «una
+      acción que escribe una cookie»); y sin JavaScript Next pinta la página siempre. Se
+      sale restableciendo otra vez: la lista dice que esa persona quedó sin segundo factor.
+      El costo: con JavaScript la lista queda sin actualizar hasta el enlace del bloque o el
+      siguiente envío.
     - Un límite conocido, medido: en un envío sin JavaScript el documento de respuesta trae
       el estado de la acción una segunda vez, en los datos con que React se montaría. Es el
       mismo documento que ya pinta el código, no está en ningún campo y no viaja de vuelta;
@@ -859,17 +861,22 @@ falla. Trece precisiones que la tabla no dice:
       va solo su huella, calculada con el mismo `handoffPrint` con que se comprobará al
       aceptar. El código sale en la respuesta una sola vez, y solo si la base contestó
       `reset`. No se guarda, no se reporta y no va en ninguna cookie.
-    - **Restablecer son dos envíos, por un testigo de un solo uso** (`reset-token.ts`:
-      `plataforma-restablecer`, con `__Host-` bajo https, diez minutos, atado a la sesión, a
-      la persona y a una marca al azar). `prepareReset` lo deja y devuelve la marca, que
-      viaja en el botón de confirmar; `resetSecondFactor` exige el testigo con esa misma
-      marca y lo gasta antes de llamar a la base. Restablecer no tiene tope de repetición en
-      la base: sin esto, recargar sin JavaScript reenviaría el formulario y cambiaría el
-      código que ya se dictó. La marca es para que valga una confirmación y no cualquiera:
-      sin ella, pedir otra confirmación para la misma persona dejaba un testigo que el
-      formulario reenviado de la anterior también gastaba. Un `changed` no lo gasta, y la
-      confirmación que se pinta de nuevo conserva su marca. No es un control de acceso ni
-      un candado: dos envíos que salgan a la vez lo leen los dos.
+    - **Restablecer lleva la versión de la persona** (decisión del 2026-10-13, que
+      reemplazó un testigo en cookie). Restablecer no tiene tope de repetición en la base:
+      un formulario reenviado (un doble clic sin JavaScript, o recargar) lo haría otra vez y
+      mataría el código ya dictado. La versión (`private.reset_version()`, `n.a`: cuántas
+      invitaciones tuvo esa cuenta en cualquier estado y cuántas aceptó) la trae la lista,
+      la página la pone en el botón de confirmar, y `resetSecondFactor` la compara dos
+      veces: primero con la lista (si ya no es esa, `already_sent` cuando lo pendiente es
+      un restablecimiento de quien actúa, `changed` si no; así recargar después de
+      restablecer dice «ya se envió» y no «la lista cambió»), y después la base, **dentro
+      de su candado**: el segundo de dos envíos a la vez espera al primero, ve otra versión
+      y no hace nada. La regla de «ya se envió» es la misma en los dos lados, y si la base
+      contesta una de las dos, el servicio las traduce igual. La función de la base tiene
+      que seguir siendo volátil: es lo que hace que la comparación, posterior al candado,
+      vea lo que confirmó el envío que lo tenía (una prueba de base lo exige). Una
+      confirmación ya no caduca: vale mientras la versión no cambie. Restablecer no escribe
+      ninguna cookie. Nadie se restablece a sí misma: llega como `malformed`.
     - Al restablecer se avisa «quedarás como la única» (`alone`) solo si esa persona hoy
       puede cambiar el equipo: activa, con configuración y con su factor atado. A quien ya
       estaba restablecida no, porque hoy no cambia nada.
@@ -1113,7 +1120,9 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     su respuesta con un esquema estricto: un campo que no conoce no pasa. Tiene que decir
     lo mismo que harían las funciones que cambian el equipo: `acceptable`, con las
     condiciones de `team_standing()`, y `config_removable`, con la cuenta de
-    `revoke_capability()`. Si se cambia una, se cambia la otra.
+    `revoke_capability()`. Si se cambia una, se cambia la otra. De cada persona da además
+    su versión para restablecerla (`private.reset_version()`, interna), la misma que
+    `reset_second_factor()` compara dentro de su candado.
   - El arranque y la emergencia (`system_invite_admin`, `system_reset_second_factor`)
     solo los ejecuta el dueño de la base, declarado sistema. No son `security definer` y
     no tienen permisos para nadie. La aplicación no las nombra, y una prueba de

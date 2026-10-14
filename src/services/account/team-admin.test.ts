@@ -722,6 +722,12 @@ describe("restablecer el segundo factor de alguien", () => {
     expect(await admin.resetSecondFactor(jarOf(), confirm({ profile }))).toEqual({ kind: "malformed" });
     expect(admin.calls).toEqual(["guarda"]);
   });
+
+  it("nadie se restablece a sí misma: no llega ni a la lista", async () => {
+    const admin = adminWith({ answer: "reset" });
+    expect(await admin.resetSecondFactor(jarOf(), confirm({ profile: ME }))).toEqual({ kind: "malformed" });
+    expect(admin.calls).toEqual(["guarda"]);
+  });
 });
 
 describe("dar el código otra vez para cambiar el equipo", () => {

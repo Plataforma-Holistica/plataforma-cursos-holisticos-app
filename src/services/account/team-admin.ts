@@ -442,7 +442,8 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
     if (!admitted.ok) return admitted.result;
     const profile = idOf(input.profile);
     const version = versionOf(input.version);
-    if (profile === null || version === null) return { kind: "malformed" };
+    // Nadie se restablece a sí misma: la pantalla no lo ofrece, y la base lo diría.
+    if (profile === null || version === null || profile === admitted.claims.userId) return { kind: "malformed" };
     const read = await rosterFor(admitted.claims);
     if (!read.ok) return read.result;
     const member = read.roster.members.find((each) => each.profileId === profile);
