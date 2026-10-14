@@ -8,7 +8,7 @@
 -- solo las lee; el público lee las activas. Quitar es desactivar.
 begin;
 \ir _ayuda.psql
-select plan(126);
+select plan(127);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido1@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'contenido2@prueba.test');
@@ -313,8 +313,10 @@ select throws_ok($$insert into public.levels (slug, name, position) values ('dir
   '42501', 'public.levels: only the catalog functions write this list', 'en los niveles, igual');
 select pruebas.limpiar();
 select pruebas.como_dueno_sistema();
-select throws_ok($$insert into public.practices (slug, name, position, cover_tone) values ('directa', 'Directa', 99, 1)$$,
-  '42501', 'public.practices: only the catalog functions write this list', 'ni el dueño declarado sistema');
+-- El dueño declarado sistema sí: así crea el guion local las prácticas de los cursos de
+-- prueba (decisión de Sergio del 2026-10-14, T-107).
+select lives_ok($$insert into public.practices (slug, name, position, cover_tone) values ('directa', 'Directa', 99, 1)$$,
+  'el dueño declarado sistema sí escribe');
 select pruebas.limpiar();
 revoke insert, update, delete on public.practices, public.levels from app_service;
 select is_empty('select * from private.schema_violations()', '(sin el permiso de más, en cero otra vez)');
@@ -342,8 +344,10 @@ select pruebas.dueno_a_nombre_de('b0000000-0000-0000-0000-000000000001');
 -- (Las revisiones diferidas de las posiciones, hechas ya: con ellas pendientes, la base no
 -- deja ni intentar vaciar.)
 set constraints all immediate;
-select throws_ok($$truncate public.practices$$,
-  '42501', 'public.practices: rows are deactivated, not deleted', 'ni se vacía');
+-- Desde T-107 lo publicado apunta a las prácticas: vaciar a secas lo niega la clave foránea
+-- antes que el guardián. En cascada llega a los guardianes, y tampoco pasa.
+select throws_ok($$truncate public.practices$$, '0A000', null, 'ni se vacía');
+select throws_ok($$truncate public.practices cascade$$, '42501', null, 'ni en cascada');
 select throws_ok($$insert into public.levels (slug, name, position) values ('basico-nfd', U&'Ba\0301sico', 99)$$,
   '23514', null, 'un nombre descompuesto no lo guarda ni el dueño: la tabla lo exige en NFC');
 select throws_ok($$insert into public.levels (slug, name, position) values ('yoga-suave', U&'Yo\00ADga', 98)$$,

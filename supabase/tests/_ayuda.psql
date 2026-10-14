@@ -24,6 +24,7 @@ as $$
          set_config('app.reason', '', true),
          set_config('app.request_id', '', true),
          set_config('app.legal_drafts', '', true),
+         set_config('app.local_courses', '', true),
          set_config('app.claiming_account', '', true),
          set_config('role', 'none', true);
 $$;

@@ -2,7 +2,7 @@
 -- Ninguna tabla sin seguridad por fila, ninguna función de más, ningún permiso de más.
 begin;
 \ir _ayuda.psql
-select plan(39);
+select plan(53);
 
 select is_empty(
   'select * from private.schema_violations()',
@@ -11,7 +11,9 @@ select is_empty(
 select has_table('public', t, 'existe public.' || t)
 from unnest(array['profiles', 'admin_capabilities', 'audit_log',
                   'parameter_definitions', 'business_parameters',
-                  'legal_documents', 'consents', 'practices', 'levels']) as t;
+                  'legal_documents', 'consents', 'practices', 'levels',
+                  'teachers', 'published_teachers', 'course_registry', 'video_assets',
+                  'published_courses', 'published_modules', 'published_lessons']) as t;
 select has_table('private', t, 'existe private.' || t)
 from unnest(array['rate_limit_counters', 'login_throttles', 'app_sessions', 'account_security',
                   'second_factor_attempts', 'admin_factors', 'admin_invitations']) as t;
@@ -34,7 +36,9 @@ select ok(
   'service_role no tiene ningún permiso sobre ' || t)
 from unnest(array['profiles', 'admin_capabilities', 'audit_log',
                   'parameter_definitions', 'business_parameters',
-                  'legal_documents', 'consents', 'practices', 'levels']) as t;
+                  'legal_documents', 'consents', 'practices', 'levels',
+                  'teachers', 'published_teachers', 'course_registry', 'video_assets',
+                  'published_courses', 'published_modules', 'published_lessons']) as t;
 
 -- El permiso de entrada no se comprueba: la migración crea el rol sin él, y cada entorno
 -- se lo da fuera del repositorio (en local, `pnpm db:login`).
