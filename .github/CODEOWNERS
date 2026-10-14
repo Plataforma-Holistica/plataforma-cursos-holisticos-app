@@ -27,6 +27,8 @@
 /src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
 # Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta
 /src/messages/es/account.ts @SerchFGA @plataformaholisticadev
+# Los textos de administración: lo que una confirmación dice que va a pasar al cambiar el equipo
+/src/messages/es/admin.ts  @SerchFGA @plataformaholisticadev
 # Los textos legales que la gente lee antes de aceptar
 /src/app/legal/            @SerchFGA @plataformaholisticadev
 /src/services/legal/       @SerchFGA @plataformaholisticadev

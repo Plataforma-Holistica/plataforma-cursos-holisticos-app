@@ -147,6 +147,25 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Cierra la sesión y, con el mismo tarro, se lleva las pruebas de ese navegador.
     signOutAction: /const jar = await cookieJar\(\);\s+await signOut\(jar\);\s+forgetBrowserProofs\(jar\);/,
   },
+  "src/app/admin/equipo/actions.ts": {
+    // Dar el código otra vez: lo que no tiene forma de código no llega al servicio, que corre
+    // la guarda y verifica contra el factor que dice la base.
+    freshCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*freshCodeOutcome\(await giveFreshCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Invitar: del formulario llegan el correo y las capacidades. Quién invita lo dice la sesión.
+    inviteAction:
+      /if \(problems\) return \{ kind: "invalid", \.\.\.input, problems, attempt \};[\s\S]*inviteOutcome\(await inviteAdmin\(jar, input\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Dar y quitar: del formulario solo llega qué botón se pulsó. Preguntar no llama a nadie,
+    // y quitar lleva lo que se confirmó, para que el servicio lo compruebe.
+    teamAction:
+      /if \(request\.step === "ask"\) return \{ kind: "confirm", intent, changed: false, attempt \};[\s\S]*grantOutcome\(await grantCapability\(jar, \{ profile: intent\.profile, capability: intent\.capability \}\)\)\s*: revokeOutcome\(await revokeCapability\(jar, \{ profile: intent\.profile, capability: intent\.capability, confirmed: request\.confirmed \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Revocar e invitar de nuevo: del formulario solo llega cuál invitación.
+    invitationsAction:
+      /if \(request\.step === "ask"\) return \{ kind: "confirm", id: request\.id, attempt \};[\s\S]*revokeInvitationOutcome\(await revokeInvitation\(jar, \{ id: request\.id \}\)\)\s*: reinviteOutcome\(await reinviteAdmin\(jar, \{ id: request\.id \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Restablecer: el primer envío deja el testigo; el segundo lleva lo que se confirmó.
+    resetAction:
+      /prepareResetOutcome\(await prepareReset\(jar, \{ profile \}\)\)\s*: resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
 };
 
 /** El texto de una función exportada de un archivo de acciones: de su `export` a la llave que la cierra. */
@@ -219,6 +238,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
     expect(sessionPages.sort()).toEqual([
       "/admin",
       "/admin/[...resto]",
+      "/admin/equipo",
       "/consentimientos",
       "/cuenta",
       "/entrar/segundo-factor",
@@ -283,7 +303,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("ninguna página de administración es pública", () => {
         expect(PUBLIC_PAGES.filter((file) => file.startsWith("src/app/admin/"))).toEqual([]);
         const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
-        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/page.tsx"]);
+        expect(pagesUnder.sort()).toEqual(["src/app/admin/[...resto]/page.tsx", "src/app/admin/equipo/page.tsx", "src/app/admin/page.tsx"]);
         for (const file of pagesUnder) expect(teamPages).toContain(file);
       });
     });
@@ -475,7 +495,16 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
   );
 
   it("hay anclas que revisar", () => {
-    expect(anchors.map(({ anchor }) => anchor).sort()).toEqual(["bloque-contrasena", "bloque-nombre", "bloque-sesiones"]);
+    expect(anchors.map(({ anchor }) => anchor).sort()).toEqual([
+      "bloque-contrasena",
+      "bloque-equipo-codigo",
+      "bloque-equipo-invitaciones",
+      "bloque-equipo-invitar",
+      "bloque-equipo-personas",
+      "bloque-equipo-restablecer",
+      "bloque-nombre",
+      "bloque-sesiones",
+    ]);
   });
 
   it.each(anchors)("$anchor solo se escribe en $file", ({ file, anchor }) => {

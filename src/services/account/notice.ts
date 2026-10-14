@@ -22,6 +22,8 @@ export const NOTICES = [
   "second_factor_throttled",
   // La sesión se cerró en otro lado a media operación.
   "session_ended",
+  // Alguien del equipo se quitó una capacidad a sí misma: la base cerró todas sus sesiones.
+  "capability_removed",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

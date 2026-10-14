@@ -128,6 +128,8 @@ export const account = defineMessages({
     noticeSecondFactorThrottled:
       "Hubo demasiados códigos equivocados y cerramos tus sesiones. Espera unos minutos y entra de nuevo. Si no fuiste tú, recupera tu contraseña desde tu correo.",
     noticeSessionEnded: "Tu sesión se cerró. Entra de nuevo para continuar.",
+    // Alguien del equipo se quitó una capacidad a sí misma (PA-86).
+    noticeCapabilityRemoved: "Quitaste una de tus capacidades y cerramos todas tus sesiones. Entra de nuevo.",
   },
   // PA-12, pedir: el código del segundo factor de quien es del equipo y entra.
   secondFactor: {
@@ -183,6 +185,8 @@ export const account = defineMessages({
     title: "Administración",
     noPending: "No tienes pendientes.",
     capabilitiesTitle: "Tus capacidades",
+    // PA-86. Solo se le ofrece a quien tiene configuración.
+    team: "Equipo de administración",
     account: "Cuenta",
     capabilities: {
       content: "Contenido",
