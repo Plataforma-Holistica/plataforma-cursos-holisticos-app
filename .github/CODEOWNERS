@@ -11,6 +11,8 @@
 /src/domain/access/        @SerchFGA @plataformaholisticadev
 # Los servicios de cuenta: la guarda de sesión aplicada, entrar y salir
 /src/services/account/     @SerchFGA @plataformaholisticadev
+# Las prácticas y los niveles del catálogo: quién los cambia (Contenido, con código reciente)
+/src/services/catalog/     @SerchFGA @plataformaholisticadev
 # El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
 # No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
