@@ -12,7 +12,7 @@
 -- una aceptación: no dependen del reloj ni empatan.
 begin;
 \ir _ayuda.psql
-select plan(43);
+select plan(46);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -92,6 +92,17 @@ select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('
 select pruebas.verificar('a0000000-0000-0000-0000-000000000001');
 select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'accepted', '(acepta)');
 select is(pruebas.version('a0000000-0000-0000-0000-000000000001'), '2.1', 'aceptar sube el segundo');
+
+-- Una invitación a un correo que todavía no tenía cuenta no apunta a ninguna: aceptarla no
+-- le pone la cuenta, solo quién la aceptó. También cuenta.
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.invite_admin('nuevo@prueba.test', '{support}')$$),
+  'invited_new', '(se invita a un correo sin cuenta)');
+select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'nuevo@prueba.test');
+select pruebas.confirmar('a0000000-0000-0000-0000-000000000002');
+select pruebas.reclamar('a0000000-0000-0000-0000-000000000002', pruebas.huella('nuevo'));
+select pruebas.verificar('a0000000-0000-0000-0000-000000000002');
+select is(pruebas.aceptar('a0000000-0000-0000-0000-000000000002', pruebas.huella('nuevo')), 'accepted', '(la cuenta nueva acepta)');
+select is(pruebas.version('a0000000-0000-0000-0000-000000000002'), '1.1', 'la que aceptó sin que apuntara a su cuenta también cuenta');
 
 select pruebas.equipar('a0000000-0000-0000-0000-000000000001');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.grant_capability('a0000000-0000-0000-0000-000000000001', 'finance')$$),

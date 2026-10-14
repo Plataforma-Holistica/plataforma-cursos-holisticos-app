@@ -639,6 +639,10 @@ describe("restablecer el segundo factor de alguien", () => {
     ["lo pendiente lo puso el dueño de la base", [pending(null as unknown as string)]],
     ["no hay nada pendiente", []],
     ["lo que hay es una invitación que da capacidades", [invitation({ invitedBy: ME, profileId: OTHER })]],
+    [
+      "lo pendiente que restableció quien actúa es de otra persona",
+      [invitation({ kind: "rebind", email: "tercera@prueba.test", profileId: THIRD, capabilities: [], invitedBy: ME })],
+    ],
   ])("si la versión ya no es la de la lista y %s: cambió, sin llegar a la base", async (_what, invitations) => {
     const admin = adminWith({ roster: rosterOf([self(), member({ resetVersion: "2.1" })], invitations), answer: "reset" });
     expect(await admin.resetSecondFactor(jarOf(), confirm())).toEqual({ kind: "changed" });
