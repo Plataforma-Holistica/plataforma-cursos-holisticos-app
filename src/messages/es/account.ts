@@ -187,6 +187,8 @@ export const account = defineMessages({
     capabilitiesTitle: "Tus capacidades",
     // PA-86. Solo se le ofrece a quien tiene configuración.
     team: "Equipo de administración",
+    // PA-67. Solo se le ofrece a quien tiene Contenido.
+    catalog: "Prácticas y niveles",
     account: "Cuenta",
     capabilities: {
       content: "Contenido",

@@ -31,6 +31,9 @@ vi.mock("@/app/(cuenta)/entrar/segundo-factor/configurar/actions", () => ({
   confirmSecondFactorAction: vi.fn(),
 }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
+// El comodín conoce todas las secciones: las de las prácticas, simuladas.
+vi.mock("@/services/catalog/catalog", () => ({ catalogLists: vi.fn() }));
+vi.mock("@/app/admin/_practicas/actions", () => ({ catalogCodeAction: vi.fn(), practicesAction: vi.fn(), levelsAction: vi.fn() }));
 
 import FactorSetupPage from "@/app/(cuenta)/entrar/segundo-factor/configurar/page";
 import SecondFactorPage from "@/app/(cuenta)/entrar/segundo-factor/page";
@@ -81,6 +84,16 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "content", "finance", "moderation"] });
     render(await AdminHomePage());
     expect(screen.queryByRole("link", { name: "Equipo de administración" })).not.toBeInTheDocument();
+  });
+
+  it("a quien tiene Contenido le ofrece las prácticas y los niveles; a quien no, no", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "content"] });
+    const withContent = render(await AdminHomePage());
+    expect(screen.getByRole("link", { name: "Prácticas y niveles" })).toHaveAttribute("href", "/admin/practicas");
+    withContent.unmount();
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "config", "finance", "moderation"] });
+    render(await AdminHomePage());
+    expect(screen.queryByRole("link", { name: "Prácticas y niveles" })).not.toBeInTheDocument();
   });
 
   it("una capacidad que el catálogo no sabe nombrar no se pinta a medias", async () => {
