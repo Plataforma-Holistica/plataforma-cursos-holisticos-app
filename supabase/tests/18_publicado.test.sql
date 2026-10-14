@@ -4,7 +4,7 @@
 -- reciente; el proveedor de video de prueba solo lo pone el guion local.
 begin;
 \ir _ayuda.psql
-select plan(79);
+select plan(96);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido1@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'contenido2@prueba.test');
@@ -45,6 +45,12 @@ $$;
 create function pruebas.curso_por_slug(p_slug text) returns uuid
 language sql security definer as $$ select course_id from public.published_courses where slug = p_slug $$;
 create table pruebas.cargado (slug text primary key, course_id uuid);
+-- El dueño de la tabla, a nombre de alguien: es como escriben las funciones que aprueban.
+create function pruebas.dueno_a_nombre_de(p_id uuid) returns void
+language sql as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', p_id::text, true), set_config('app.actor_session', pruebas.sesion(p_id)::text, true);
+$$;
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
 
 -- ---------------------------------------------------------------------------------------
@@ -92,6 +98,16 @@ select ok(
   and not has_function_privilege('anon', 'private.approve_course(uuid)', 'execute'),
   'aprobar lo ejecuta solo el servidor');
 select is_empty('select * from private.schema_violations()', 'private.schema_violations() sigue en cero');
+select ok(
+  bool_and(exists (select 1 from pg_trigger g where g.tgrelid = t::regclass and g.tgname = 'publication_guard' and not g.tgisinternal)
+           and exists (select 1 from pg_trigger g where g.tgrelid = t::regclass and g.tgname = 'publication_no_truncate' and not g.tgisinternal)),
+  'cada tabla tiene su guardián, también contra vaciarla')
+from unnest(array['public.teachers', 'public.published_teachers', 'public.course_registry', 'public.video_assets',
+                  'public.published_courses', 'public.published_modules', 'public.published_lessons']) as t;
+select ok(
+  exists (select 1 from pg_trigger where tgrelid = 'public.teachers'::regclass and tgname = 'audit_changes')
+  and exists (select 1 from pg_trigger where tgrelid = 'public.course_registry'::regclass and tgname = 'audit_changes'),
+  'los maestros y el registro de cursos quedan en la auditoría');
 select policies_are('public', 'legal_documents',
   array['legal_documents_public_select', 'legal_documents_config_select', 'legal_documents_teacher_select'],
   'los textos de maestro los leen los maestros: la política llega con la tabla');
@@ -162,7 +178,7 @@ select pruebas.como_visitante();
 select is((select count(*)::int from public.published_courses), 0, 'un visitante no ve un curso por aprobar');
 select is((select count(*)::int from public.published_modules), 0, 'ni sus módulos');
 select is((select count(*)::int from public.published_lessons), 0, 'ni sus lecciones');
-select is((select count(*)::int from public.published_teachers), 1, 'la ficha del maestro sí es pública');
+select is((select count(*)::int from public.published_teachers), 0, 'ni la ficha de su maestro: su nombre no se ve antes de aprobar');
 select pruebas.limpiar();
 select pruebas.como_usuario('a0000000-0000-0000-0000-000000000001');
 select is((select count(*)::int from public.published_courses), 0, 'una cuenta común, lo mismo');
@@ -195,7 +211,10 @@ select pruebas.como_visitante();
 select is((select count(*)::int from public.published_courses), 1, 'un visitante ya ve el curso');
 select is((select count(*)::int from public.published_modules), 1, 'su módulo');
 select is((select count(*)::int from public.published_lessons), 2, 'y sus lecciones');
+select is((select count(*)::int from public.published_teachers), 1, 'y la ficha de su maestro');
 select pruebas.limpiar();
+select is((select count(*)::int from public.audit_log where entity_table = 'public.teachers' and (new_value ? 'tiebreak_rank' or old_value ? 'tiebreak_rank')), 0,
+  'el orden de desempate no quedó en la auditoría');
 
 -- Una práctica que se desactiva mientras el curso espera: aprobar se niega.
 select pruebas.como_guion();
@@ -207,6 +226,28 @@ select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices',
 select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_por_slug('oceano-uno')), 'practice_inactive',
   'aprobarlo: practice_inactive');
 select is((select is_listed from public.published_courses where slug = 'oceano-uno'), false, 'y sigue sin listar');
+select pruebas.como_guion();
+select is(private.system_load_course((select id from maestra), pruebas.curso('oceano-dos', 'oceano')) ->> 'answer', 'practice_inactive',
+  'cargar otro con esa práctica inactiva: practice_inactive');
+select is(private.system_catalog_add('levels', 'Avanzado') ->> 'answer', 'added', 'el sistema agrega otro nivel');
+select is(private.system_load_course((select id from maestra), pruebas.curso('avanzado-uno', 'naturaleza', 'avanzado')) ->> 'answer', 'loaded',
+  'carga un curso en ese nivel');
+select pruebas.limpiar();
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'levels', 'avanzado'), 'deactivated', 'el nivel se desactiva mientras espera');
+select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_por_slug('avanzado-uno')), 'level_inactive', 'aprobarlo: level_inactive');
+select pruebas.como_guion();
+select is(private.system_load_course((select id from maestra), pruebas.curso('avanzado-dos', 'naturaleza', 'avanzado')) ->> 'answer', 'level_inactive',
+  'cargar otro con ese nivel inactivo: level_inactive');
+-- Un video que deja de estar listo: aprobar se niega (RN-16).
+select is(private.system_load_course((select id from maestra), pruebas.curso('pendiente-uno')) ->> 'answer', 'loaded', 'carga otro');
+update public.video_assets set status = 'processing' where course_id = pruebas.curso_por_slug('pendiente-uno');
+-- Un curso en revisión sin su copia publicada (como lo dejará un camino que todavía no existe).
+insert into public.course_registry (teacher_id, state) values ((select id from maestra), 'in_review');
+select pruebas.limpiar();
+select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_por_slug('pendiente-uno')), 'videos_not_ready', 'con un video que no está listo: videos_not_ready');
+select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001',
+  (select r.course_id from public.course_registry r where not exists (select 1 from public.published_courses c where c.course_id = r.course_id))),
+  'incomplete', 'sin su copia publicada: incomplete');
 
 -- ---------------------------------------------------------------------------------------
 -- El guardián: aunque alguien le diera permiso al servidor, escribir directo no pasa.
@@ -226,6 +267,20 @@ select throws_ok($$update public.video_assets set provider_playback_id = 'otro'$
   'ni el servidor declarado sistema, con el ajuste del guion puesto');
 select pruebas.limpiar();
 revoke insert, update, delete on public.published_courses, public.video_assets from app_service;
+-- El dueño de la tabla, pero sin declararse sistema ni pasar la puerta, tampoco escribe.
+select pruebas.como_dueno();
+select throws_ok($$update public.published_teachers set is_listed = true$$,
+  '42501', 'public.published_teachers: only the publication functions write this table',
+  'el dueño sin declararse sistema no escribe');
+select pruebas.limpiar();
+select pruebas.dueno_a_nombre_de('b0000000-0000-0000-0000-000000000002');
+select throws_ok($$update public.course_registry set state = 'published', first_published_at = now() where state = 'in_review'$$,
+  '42501', 'public.course_registry: only the publication functions write this table',
+  'ni a nombre de alguien con Contenido y un código de hace una hora');
+select pruebas.limpiar();
+select pruebas.dueno_a_nombre_de('b0000000-0000-0000-0000-000000000001');
+select lives_ok($$update public.published_modules set title = title where false$$, '(a nombre de quien pasa la puerta, sí: es como aprueba)');
+select pruebas.limpiar();
 select is_empty('select * from private.schema_violations()', '(sin el permiso de más, en cero otra vez)');
 
 select pruebas.como_dueno_sistema();
@@ -233,13 +288,20 @@ select throws_ok($$delete from public.published_lessons$$, '42501', 'public.publ
   'ni el dueño borra lo publicado');
 select throws_ok($$truncate public.published_lessons$$, '42501', 'public.published_lessons: rows are hidden, not deleted',
   'ni lo vacía');
--- Una lección no puede quedar en un módulo de otro curso.
+-- Una lección no puede quedar en un módulo de otro curso: con su propio video, solo eso falla.
 select throws_ok(
   $$insert into public.published_lessons (id, course_id, module_id, teacher_id, video_asset_id, title, position, duration_seconds)
-    select gen_random_uuid(), pruebas.curso_por_slug('oceano-uno'), m.id, l.teacher_id, l.video_asset_id, 'Cruzada', 9, 10
-    from public.published_lessons l join public.published_modules m on m.course_id = l.course_id
-    where l.course_id = pruebas.curso_por_slug('naturaleza-uno') limit 1$$,
-  '23503', null, 'una lección no queda en un módulo ni con un video de otro curso');
+    select gen_random_uuid(), l.course_id, (select id from public.published_modules where course_id = pruebas.curso_por_slug('oceano-uno')),
+           l.teacher_id, l.video_asset_id, 'Cruzada', 9, 10
+    from public.published_lessons l where l.course_id = pruebas.curso_por_slug('naturaleza-uno') limit 1$$,
+  '23503', null, 'una lección no queda en un módulo de otro curso');
+-- Ni con un video de otro curso: con su propio módulo, solo eso falla.
+select throws_ok(
+  $$insert into public.published_lessons (id, course_id, module_id, teacher_id, video_asset_id, title, position, duration_seconds)
+    select gen_random_uuid(), l.course_id, l.module_id, l.teacher_id,
+           (select id from public.video_assets where course_id = pruebas.curso_por_slug('oceano-uno') limit 1), 'Cruzada', 9, 10
+    from public.published_lessons l where l.course_id = pruebas.curso_por_slug('naturaleza-uno') limit 1$$,
+  '23503', null, 'ni con un video de otro curso');
 select pruebas.limpiar();
 
 select * from finish();

@@ -58,7 +58,7 @@ create table public.published_teachers (
   display_name text not null,
   bio text,                                   -- semblanza (RF-611)
   portrait_path text,                         -- lo carga el equipo
-  is_listed boolean not null default true,
+  is_listed boolean not null default false,   -- nace sin listar: aprobar su primer curso la lista
   updated_at timestamptz not null default now(),
   constraint published_teachers_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
 );
@@ -316,7 +316,8 @@ begin
   -- En dos pasos: plpgsql resuelve `new.provider` aunque la tabla no sea la de videos.
   if tg_table_name = 'video_assets' then
     if new.provider = 'test'
-       and not (private.actor_is_system() and pg_catalog.current_setting('app.local_courses', true) = 'on') then
+       -- Un ajuste que nunca se definió es nulo, y un `if` nulo no lanza: por eso el coalesce.
+       and not (private.actor_is_system() and coalesce(pg_catalog.current_setting('app.local_courses', true), '') = 'on') then
       raise exception '%.%: test videos are only loaded by the local courses script', tg_table_schema, tg_table_name
         using errcode = '42501';
     end if;
@@ -343,8 +344,9 @@ begin
   end loop;
 end
 $$;
+-- El orden de desempate nunca sale de la base: tampoco a la auditoría.
 create trigger audit_changes after insert or update or delete on public.teachers
-  for each row execute function private.audit_row_change('access');
+  for each row execute function private.audit_row_change('access', 'tiebreak_rank');
 create trigger audit_changes after insert or update or delete on public.course_registry
   for each row execute function private.audit_row_change('content');
 
@@ -447,7 +449,8 @@ $$;
 -- cursos de prueba; mañana, los pilotos (con el documento de PQ-25) y el editor (T-402)
 -- llegan por su propio camino.
 
--- Un maestro sin cuenta (invitado), con su ficha. Si su slug ya existe, el que hay.
+-- Un maestro sin cuenta (invitado), con su ficha sin listar: su nombre no se ve hasta que se
+-- aprueba un curso suyo. Si su slug ya existe, el que hay.
 create function private.system_add_teacher(p_display_name text, p_slug text, p_bio text) returns uuid
 language plpgsql set search_path = ''
 as $$
@@ -474,7 +477,9 @@ $$;
 --   teacher_missing    el maestro no existe o no tiene ficha
 --   practice_missing / practice_inactive / level_missing / level_inactive
 --   invalid            la forma no es la de un curso: sin lecciones, un título vacío o largo,
---                      un video sin duración o sin identificadores
+--                      un video sin duración o sin identificadores del proveedor. Un proveedor
+--                      que no existe, o una duración que no cabe en un entero, lanza: no se
+--                      escribe nada
 -- Forma de p_course: {slug, title, summary, practice, level, modules: [{title, lessons:
 -- [{title, video: {provider, asset_id, playback_id, duration_seconds}}]}]}.
 create function private.system_load_course(p_teacher uuid, p_course jsonb) returns jsonb
@@ -594,6 +599,7 @@ $$;
 --   approved           listado y publicado
 --   not_found          no existe ese curso
 --   not_pending        no está en revisión (ya se aprobó, o es de otro estado)
+--   incomplete         no tiene su copia publicada, o le falta la práctica o el nivel
 --   practice_inactive / level_inactive   su práctica o su nivel se desactivó mientras tanto
 --   videos_not_ready   alguna lección tiene un video que no está listo (RN-16)
 --   forbidden / needs_fresh_code         la puerta de Contenido
@@ -623,10 +629,13 @@ begin
     return 'not_pending';
   end if;
   select practice_id, level_id into v_practice, v_level from public.published_courses where course_id = p_course;
-  if v_practice is not null and not exists (select 1 from public.practices where id = v_practice and is_active) then
+  if v_practice is null or v_level is null then
+    return 'incomplete';
+  end if;
+  if not exists (select 1 from public.practices where id = v_practice and is_active) then
     return 'practice_inactive';
   end if;
-  if v_level is not null and not exists (select 1 from public.levels where id = v_level and is_active) then
+  if not exists (select 1 from public.levels where id = v_level and is_active) then
     return 'level_inactive';
   end if;
   if exists (
@@ -638,6 +647,9 @@ begin
   update public.course_registry set state = 'published', first_published_at = coalesce(first_published_at, now())
   where course_id = p_course;
   update public.published_courses set is_listed = true, published_at = now() where course_id = p_course;
+  -- Y la ficha de su maestro, si todavía no estaba listada.
+  update public.published_teachers set is_listed = true
+  where teacher_id = (select teacher_id from public.course_registry where course_id = p_course) and not is_listed;
   return 'approved';
 end
 $$;

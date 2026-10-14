@@ -55,14 +55,16 @@ describe("los candados de lo publicado", () => {
   });
 
   it.each([
-    ["aprobar", "select private.approve_course(gen_random_uuid())"],
-    ["cargar", "select private.system_load_course(gen_random_uuid(), '{}'::jsonb)"],
-  ])("%s espera a quien tiene el candado de las prácticas, antes de mirar nada más", async (_what, statement) => {
+    ["aprobar", "practices", "select private.approve_course(gen_random_uuid())"],
+    ["cargar", "practices", "select private.system_load_course(gen_random_uuid(), '{}'::jsonb)"],
+    ["aprobar", "levels", "select private.approve_course(gen_random_uuid())"],
+    ["cargar", "levels", "select private.system_load_course(gen_random_uuid(), '{}'::jsonb)"],
+  ])("%s espera a quien tiene el candado de %s, antes de mirar nada más", async (_what, list, statement) => {
     const holder = await asSystem();
     const other = await asSystem();
     try {
-      // Quien agrega una práctica toma el candado de la lista y no termina todavía.
-      await holder.query("select private.system_catalog_add('practices', 'Práctica que espera')");
+      // Quien agrega a una lista toma su candado y no termina todavía.
+      await holder.query("select private.system_catalog_add($1::text::public.catalog_list, 'Elemento que espera')", [list]);
       const pid = await pidOf(other);
       const pending = other.query(statement).then(
         () => "contestó",
@@ -76,6 +78,28 @@ describe("los candados de lo publicado", () => {
     } finally {
       await close(holder);
       await close(other);
+    }
+  });
+
+  it("un video de prueba no entra en una sesión donde el ajuste del guion nunca se definió", async () => {
+    // Una conexión nueva: el ajuste no existe (es nulo), no está vacío. Declarada sistema,
+    // como lo haría quien opera la base.
+    const client = await asSystem();
+    try {
+      await client.query("select private.system_catalog_add('practices', 'Práctica sin ajuste'), private.system_catalog_add('levels', 'Nivel sin ajuste')");
+      const teacher = (await client.query<{ id: string }>("select private.system_add_teacher('Sin ajuste', 'sin-ajuste', null) as id")).rows[0]?.id;
+      const course = {
+        slug: "sin-ajuste",
+        title: "Sin ajuste",
+        practice: "practica-sin-ajuste",
+        level: "nivel-sin-ajuste",
+        modules: [{ title: "Uno", lessons: [{ title: "Una", video: { provider: "test", asset_id: "a", playback_id: "p", duration_seconds: 10 } }] }],
+      };
+      await expect(client.query("select private.system_load_course($1::uuid, $2::jsonb)", [teacher, JSON.stringify(course)])).rejects.toMatchObject({
+        code: "42501",
+      });
+    } finally {
+      await close(client);
     }
   });
 });

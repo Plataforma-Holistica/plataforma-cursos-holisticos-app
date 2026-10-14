@@ -1168,8 +1168,11 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     publicado **sin listar**. Aprobar es `private.approve_course()`, del servidor, con la
     puerta de Contenido y un código reciente: lo lista y lo marca publicado. Un guardián en
     cada tabla deja escribir solo al dueño, declarado sistema o a nombre de quien pasa esa
-    puerta, y nada se borra ni se vacía: lo publicado se oculta. El vigilante lo exige, y
-    también que nadie de la aplicación ejecute las funciones del sistema.
+    puerta, y nada se borra ni se vacía: lo publicado se oculta. El vigilante exige que
+    nadie de la aplicación las escriba ni ejecute las funciones del sistema, y las pruebas
+    de base, que cada tabla tenga su guardián.
+  - La ficha de un maestro nace sin listar, y aprobar su primer curso la lista: su nombre
+    no se ve antes. El orden de desempate no va ni a la auditoría.
   - **Un video de prueba** (proveedor `test`) solo lo acepta el guardián del dueño declarado
     sistema con el ajuste `app.local_courses`, que pone `pnpm db:courses`. No es un
     `check`: un `check` que lee un ajuste se vuelve a evaluar en cada cambio de la fila. Los

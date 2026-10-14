@@ -92,6 +92,8 @@ function readData() {
 
 /** El curso en la forma que espera `private.system_load_course()`: el video, del proveedor de prueba. */
 function courseOf(course) {
+  // Los videos se numeran en todo el curso: por módulo, dos módulos repetirían identificador.
+  let number = 0;
   return {
     slug: course.slug,
     title: course.title,
@@ -100,11 +102,11 @@ function courseOf(course) {
     level: course.level,
     modules: course.modules.map((part) => ({
       title: part.title,
-      lessons: part.lessons.map((lesson, index) => ({
+      lessons: part.lessons.map((lesson) => ({
         title: lesson.title,
         video: {
           provider: "test",
-          asset_id: `prueba-${course.slug}-${index + 1}`,
+          asset_id: `${course.slug}-video-${(number += 1)}`,
           playback_id: `prueba:${lesson.file}`,
           duration_seconds: lesson.duration_seconds,
         },
