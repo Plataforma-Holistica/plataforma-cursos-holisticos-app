@@ -6,7 +6,6 @@ import type {
   InvitationRevoked,
   InviteResult,
   ReinviteResult,
-  ResetPrepared,
 } from "@/services/account/account";
 import { parseEmail } from "@/services/account/field-rules";
 import { ROUTES } from "@/services/account/navigation";
@@ -456,8 +455,7 @@ export type ResetFailure =
 /** Lo que el bloque de restablecer pinta después de un envío. */
 export type ResetState =
   | { kind: "idle" }
-  /** `token`: la marca de esta confirmación, que su botón tiene que traer. No es un secreto. */
-  | { kind: "confirm"; profile: string; token: string; changed: boolean; attempt: number }
+  | { kind: "confirm"; profile: string; changed: boolean; attempt: number }
   /**
    * El código que hay que dictar. Mientras el estado sea este, la pantalla no pinta ningún
    * formulario de esta acción: viajaría dentro de él.
@@ -466,61 +464,50 @@ export type ResetState =
   | { kind: "failed"; reason: ResetFailure; attempt: number };
 
 export type ResetRequest =
-  /** El primer paso: a quién. Deja el testigo, y no toca nada más. */
+  /** El primer paso: a quién. No llama a nadie, como «preguntar» en los demás bloques. */
   | { step: "choose"; profile: string }
-  /** `token`: la marca de la confirmación que se está enviando. */
-  | { step: "confirm"; profile: string; confirmed: string; token: string }
+  /** `version`: la versión de la persona con que se pintó la confirmación. */
+  | { step: "confirm"; profile: string; confirmed: string; version: string }
   | { step: "cancel" }
   | { step: "none" };
 
 /** Los valores que llevan los botones del bloque de restablecer. */
 export const resetButton = {
   choose: (profile: string) => `choose:${profile}`,
-  /** A quién, y lo que se confirmó que pasaría. Lo arma la página; le falta la marca. */
-  confirm: (profile: string, confirmed: string) => `confirm:${profile}:${confirmed}`,
-  /** El valor completo del botón: lo de arriba, con la marca de esta confirmación. */
-  marked: (value: string, token: string) => `${value}:${token}`,
+  /**
+   * A quién, lo que se confirmó que pasaría y la versión de la persona que la página leyó.
+   * Con la versión, un formulario reenviado (un doble clic, o recargar) no restablece otra vez.
+   */
+  confirm: (profile: string, confirmed: string, version: string) => `confirm:${profile}:${confirmed}:${version}`,
   cancel: "cancel",
 } as const;
 
-// La marca de una confirmación, como la arma el servidor: 22 caracteres de base64 de URL.
-const MARK = /^[A-Za-z0-9_-]{22}$/;
+// La forma de la versión: `n.a`, dos contadores. La misma regla que `RESET_VERSION` del
+// servicio, que este archivo no puede importar porque viaja al navegador; una prueba las
+// compara.
+const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
 
 /** Lo que llega del formulario de restablecer: qué botón se pulsó. */
 export function readResetForm(form: unknown): ResetRequest {
   const parts = intentOf(form);
   if (parts === null) return { step: "none" };
-  const [step, profile = "", confirmed = "", token = ""] = parts;
+  const [step, profile = "", confirmed = "", version = ""] = parts;
   if (step === "cancel" && parts.length === 1) return { step: "cancel" };
   if (!ID.test(profile)) return { step: "none" };
   if (step === "choose" && parts.length === 2) return { step: "choose", profile };
-  if (step === "confirm" && parts.length === 4 && EFFECTS.test(confirmed) && MARK.test(token)) {
-    return { step: "confirm", profile, confirmed, token };
+  if (step === "confirm" && parts.length === 4 && EFFECTS.test(confirmed) && VERSION.test(version)) {
+    return { step: "confirm", profile, confirmed, version };
   }
   return { step: "none" };
 }
 
 export type ResetOutcome =
   | Leave
-  | { kind: "confirm"; token: string }
   | { kind: "confirm_again" }
   | { kind: "code"; code: string }
   /** Lo que llegó no tenía forma, o era quien actúa: la pantalla no lo ofrece, y no se dice nada. */
   | { kind: "idle" }
   | { kind: "failed"; reason: ResetFailure };
-
-export function prepareResetOutcome(result: ResetPrepared): ResetOutcome {
-  switch (result.kind) {
-    case "ready":
-      return { kind: "confirm", token: result.token };
-    case "malformed":
-      return { kind: "idle" };
-    case "refused":
-      return TO_PAGE;
-    case "unavailable":
-      return { kind: "failed", reason: "unavailable" };
-  }
-}
 
 /** Lo que contestó `private.reset_second_factor()` cuando no restableció. */
 function notResetOutcome(answer: Extract<FactorReset, { kind: "answered" }>["answer"]): ResetOutcome {
@@ -537,6 +524,11 @@ function notResetOutcome(answer: Extract<FactorReset, { kind: "answered" }>["ans
     case "unavailable":
       // Falta el plazo de las invitaciones: no lo arregla reintentar.
       return { kind: "failed", reason: "not_configured" };
+    // El servicio ya las traduce; están aquí para que la tabla recorra la lista entera.
+    case "already_sent":
+      return { kind: "failed", reason: "already_sent" };
+    case "changed":
+      return { kind: "confirm_again" };
   }
 }
 

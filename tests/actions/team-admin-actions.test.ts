@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => {
     revokeInvitation: logged("revokeInvitation", unavailable),
     grantCapability: logged("grantCapability", unavailable),
     revokeCapability: logged("revokeCapability", unavailable),
-    prepareReset: logged("prepareReset", unavailable),
     resetSecondFactor: logged("resetSecondFactor", unavailable),
     signOut: logged("signOut", () => Promise.resolve("closed")),
     forgetBrowserProofs: logged("forgetBrowserProofs", () => undefined),
@@ -42,7 +41,6 @@ vi.mock("@/services/account/account", () => ({
   revokeInvitation: mocks.revokeInvitation,
   grantCapability: mocks.grantCapability,
   revokeCapability: mocks.revokeCapability,
-  prepareReset: mocks.prepareReset,
   resetSecondFactor: mocks.resetSecondFactor,
   signOut: mocks.signOut,
   forgetBrowserProofs: mocks.forgetBrowserProofs,
@@ -59,9 +57,9 @@ const IDLE = { kind: "idle" } as const;
 const PERSON = "b0000000-0000-4000-8000-000000000002";
 const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const CODE = "ABCD-EFGH-JKMN-PQRS";
-/** La marca de una confirmación de restablecer, y el botón que la lleva. */
-const MARK = "m".repeat(22);
-const confirmReset = (profile: string, confirmed: string, mark = MARK) => resetButton.marked(resetButton.confirm(profile, confirmed), mark);
+/** La versión de la persona con que se pintó la confirmación, y el botón que la lleva. */
+const VERSION = "2.1";
+const confirmReset = (profile: string, confirmed: string, version = VERSION) => resetButton.confirm(profile, confirmed, version);
 
 function form(entries: [string, string][]): FormData {
   const data = new FormData();
@@ -354,39 +352,41 @@ describe("las invitaciones", () => {
 });
 
 describe("restablecer un segundo factor", () => {
-  it("elegir: el servicio deja el testigo y da su marca, y se pregunta. Todavía no se restablece nada", async () => {
-    once("prepareReset", { kind: "ready", token: MARK });
+  it("elegir no llama a nadie: se pregunta, con lo que la página leyó", async () => {
     expect(await resetAction(IDLE, pressed(resetButton.choose(PERSON)))).toEqual({
       kind: "confirm",
       profile: PERSON,
-      token: MARK,
       changed: false,
       attempt: 1,
     });
-    expect(mocks.prepareReset).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON });
-    expect(mocks.resetSecondFactor).not.toHaveBeenCalled();
-    expect(calls.order).toEqual(["prepareReset", "refresh"]);
+    expect(calls.order).toEqual([]);
   });
 
-  it("confirmar: le pasa al servicio a quién, lo que se confirmó y la marca, y devuelve el código una vez", async () => {
+  it("confirmar: le pasa al servicio a quién, lo que se confirmó y la versión, y devuelve el código una vez", async () => {
     once("resetSecondFactor", { kind: "reset", code: CODE });
     expect(await resetAction(IDLE, pressed(confirmReset(PERSON, "alone")))).toEqual({ kind: "code", code: CODE, attempt: 1 });
-    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "alone", token: MARK });
-    expect(mocks.prepareReset).not.toHaveBeenCalled();
-    expect(calls.order).toEqual(["resetSecondFactor", "refresh"]);
+    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "alone", version: VERSION });
   });
 
-  it("la marca sale del botón, nunca del estado anterior", async () => {
+  it("con el código en la mano no se vuelve a pedir la página, ni se escribe ninguna cookie: lo uno o lo otro la repintaría", async () => {
     once("resetSecondFactor", { kind: "reset", code: CODE });
-    const other = "n".repeat(22);
-    const before = { kind: "confirm", profile: PERSON, token: MARK, changed: false, attempt: 2 } as const;
-    await resetAction(before, pressed(confirmReset(PERSON, "", other)));
-    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "", token: other });
+    const set = vi.spyOn(jar, "set");
+    await resetAction(IDLE, pressed(confirmReset(PERSON, "")));
+    expect(calls.order).toEqual(["resetSecondFactor"]);
+    expect(set).not.toHaveBeenCalled();
+    set.mockRestore();
+  });
+
+  it("la versión sale del botón, nunca del estado anterior", async () => {
+    once("resetSecondFactor", { kind: "reset", code: CODE });
+    const before = { kind: "confirm", profile: PERSON, changed: false, attempt: 2 } as const;
+    await resetAction(before, pressed(confirmReset(PERSON, "", "7.3")));
+    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "", version: "7.3" });
   });
 
   it.each([
-    ["sin marca", resetButton.confirm(PERSON, "")],
-    ["con una marca sin forma", `confirm:${PERSON}::corta`],
+    ["sin versión", `confirm:${PERSON}:`],
+    ["con una versión sin forma", `confirm:${PERSON}::uno`],
   ])("confirmar %s no llama a nadie", async (_what, button) => {
     expect(await resetAction(IDLE, pressed(button))).toEqual({ kind: "idle" });
     expect(calls.order).toEqual([]);
@@ -394,9 +394,9 @@ describe("restablecer un segundo factor", () => {
 
   it("a quién se restablece sale del botón, nunca del estado anterior", async () => {
     once("resetSecondFactor", { kind: "reset", code: CODE });
-    const before = { kind: "confirm", profile: "c0000000-0000-4000-8000-000000000003", token: MARK, changed: false, attempt: 2 } as const;
+    const before = { kind: "confirm", profile: "c0000000-0000-4000-8000-000000000003", changed: false, attempt: 2 } as const;
     await resetAction(before, pressed(confirmReset(PERSON, "")));
-    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "", token: MARK });
+    expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "", version: VERSION });
   });
 
   it("el código de una respuesta anterior no vuelve en la siguiente", async () => {
@@ -406,12 +406,11 @@ describe("restablecer un segundo factor", () => {
     expect(JSON.stringify(state)).not.toContain("ABCD");
   });
 
-  it("si lo confirmado ya no es lo que pasaría, vuelve a preguntar, con la misma marca: su testigo no se gastó", async () => {
+  it("si lo confirmado ya no es lo que pasaría, vuelve a preguntar con la lista de ahora", async () => {
     once("resetSecondFactor", { kind: "changed" });
     expect(await resetAction(IDLE, pressed(confirmReset(PERSON, "")))).toEqual({
       kind: "confirm",
       profile: PERSON,
-      token: MARK,
       changed: true,
       attempt: 1,
     });
@@ -425,6 +424,7 @@ describe("restablecer un segundo factor", () => {
     [{ kind: "answered", answer: "invalid" }, "invalid"],
     [{ kind: "answered", answer: "unavailable" }, "not_configured"],
     [{ kind: "answered", answer: "needs_fresh_code" }, "needs_code"],
+    [{ kind: "already_sent" }, "already_sent"],
     [{ kind: "unknown" }, "unknown"],
     [{ kind: "unavailable" }, "unavailable"],
   ])("restablecer contesta %j: se pinta %s, sin código", async (result, reason) => {
@@ -439,22 +439,21 @@ describe("restablecer un segundo factor", () => {
     ["un envío que no se entiende", pressed("choose:ana")],
     ["más de una intención", form([["do", resetButton.choose(PERSON)], ["do", confirmReset(PERSON, "")]])],
   ])("%s no llama a nadie", async (_what, data) => {
-    expect(await resetAction({ kind: "confirm", profile: PERSON, token: MARK, changed: false, attempt: 3 }, data)).toEqual({ kind: "idle" });
+    expect(await resetAction({ kind: "confirm", profile: PERSON, changed: false, attempt: 3 }, data)).toEqual({ kind: "idle" });
     expect(calls.order).toEqual([]);
   });
 
-  it("a quien la pantalla no ofrece (una misma) no se le dice nada", async () => {
-    once("prepareReset", { kind: "malformed" });
-    expect(await resetAction(IDLE, pressed(resetButton.choose(PERSON)))).toEqual({ kind: "idle" });
+  it("lo que llega sin forma no se le dice a nadie", async () => {
+    once("resetSecondFactor", { kind: "malformed" });
+    expect(await resetAction(IDLE, pressed(confirmReset(PERSON, "")))).toEqual({ kind: "idle" });
   });
 
   it.each([
-    ["prepareReset", resetButton.choose(PERSON), { kind: "refused" }],
-    ["resetSecondFactor", confirmReset(PERSON, ""), { kind: "refused" }],
-    ["resetSecondFactor", confirmReset(PERSON, ""), { kind: "answered", answer: "forbidden" }],
-  ] as const)("sin permiso (%s): a la página, sin pintar nada", async (service, button, result) => {
-    once(service, result);
-    await expect(resetAction(IDLE, pressed(button))).rejects.toThrow("redirige a /admin/equipo");
-    expect(calls.order).toEqual([service, "redirect"]);
+    [{ kind: "refused" }],
+    [{ kind: "answered", answer: "forbidden" }],
+  ] as const)("sin permiso (%j): a la página, sin pintar nada", async (result) => {
+    once("resetSecondFactor", result);
+    await expect(resetAction(IDLE, pressed(confirmReset(PERSON, "")))).rejects.toThrow("redirige a /admin/equipo");
+    expect(calls.order).toEqual(["resetSecondFactor", "redirect"]);
   });
 });

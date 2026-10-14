@@ -109,6 +109,8 @@ describe("lo que contesta cada cambio al equipo", () => {
     expect([...GRANT_ANSWERS].sort()).toEqual(["already_has", "forbidden", "granted", "ineligible", "invalid", "needs_fresh_code", "not_member"]);
     expect([...REVOKE_ANSWERS].sort()).toEqual(["forbidden", "min_config", "needs_fresh_code", "not_found", "revoked"]);
     expect([...RESET_ANSWERS].sort()).toEqual([
+      "already_sent",
+      "changed",
       "forbidden",
       "ineligible",
       "invalid",
@@ -143,6 +145,7 @@ describe("la lista del equipo, como la contesta la base", () => {
     rebind: "none",
     config_removable: true,
     is_self: true,
+    reset_version: "0.0",
     ...over,
   });
   const rawInvitation = (over: Record<string, unknown> = {}) => ({
@@ -175,6 +178,7 @@ describe("la lista del equipo, como la contesta la base", () => {
       rebind: "expired",
       config_removable: false,
       is_self: false,
+      reset_version: "3.2",
     });
     expect(rosterOf(raw({ fresh_code: false, members: [rawMember(), other] }))).toEqual({
       freshCode: false,
@@ -189,6 +193,7 @@ describe("la lista del equipo, como la contesta la base", () => {
           rebind: "none",
           configRemovable: true,
           isSelf: true,
+          resetVersion: "0.0",
         },
         {
           profileId: OTHER,
@@ -200,6 +205,7 @@ describe("la lista del equipo, como la contesta la base", () => {
           rebind: "expired",
           configRemovable: false,
           isSelf: false,
+          resetVersion: "3.2",
         },
       ],
       invitations: [],
@@ -263,6 +269,10 @@ describe("la lista del equipo, como la contesta la base", () => {
     ["una persona con un identificador sin forma", raw({ members: [rawMember({ profile_id: "yo" })] })],
     ["una persona con un estado de factor que no existe", raw({ members: [rawMember({ factor: "verified" })] })],
     ["una persona con una invitación para volver que no existe", raw({ members: [rawMember({ rebind: "sent" })] })],
+    ["una persona sin versión", raw({ members: [rawMember({ reset_version: undefined })] })],
+    ["una persona con una versión sin forma", raw({ members: [rawMember({ reset_version: "1" })] })],
+    ["una persona con una versión con ceros de más", raw({ members: [rawMember({ reset_version: "01.0" })] })],
+    ["una persona con la versión como número", raw({ members: [rawMember({ reset_version: 1.0 })] })],
     ["sin la fila de quien pregunta", raw({ members: [rawMember({ is_self: false })] })],
     ["con dos filas de quien pregunta", raw({ members: [rawMember(), rawMember({ profile_id: OTHER })] })],
     ["una invitación con la huella del código dictado", raw({ invitations: [rawInvitation({ handoff: "a".repeat(64) })] })],

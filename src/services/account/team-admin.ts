@@ -7,7 +7,6 @@ import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { parseEmail } from "@/domain/access/email";
 
 import type { AccountDependencies } from "./deps";
-import * as resetTokens from "./reset-token";
 import { CAPABILITIES, handoffPrint, holds, type Capability, type CodeGiven, type TeamCheck } from "./team";
 
 // Administrar al equipo (RF-712, RF-105; TRD §9.2, fila «Invitaciones»): ver a quién se
@@ -44,6 +43,11 @@ export interface TeamMember {
   /** Tiene configuración y quedarían otras dos cuentas activas con ella. */
   configRemovable: boolean;
   isSelf: boolean;
+  /**
+   * La versión con que se confirma restablecerla (`n.a`: cuántas invitaciones tuvo su cuenta
+   * y cuántas aceptó). Cambia con cada restablecimiento y cuando vuelve.
+   */
+  resetVersion: string;
 }
 
 /** Una invitación viva (ni aceptada ni revocada), caducada o no. */
@@ -93,6 +97,8 @@ export const RESET_ANSWERS = [
   "unavailable",
   "ineligible",
   "not_member",
+  "already_sent",
+  "changed",
   "reset",
 ] as const;
 export type InviteAnswer = (typeof INVITE_ANSWERS)[number];
@@ -113,7 +119,7 @@ export interface TeamAdminStore {
   revokeInvitation(claims: VerifiedClaims, invitationId: string): Promise<RevokeInvitationAnswer>;
   grant(claims: VerifiedClaims, profileId: string, capability: Capability): Promise<GrantAnswer>;
   revoke(claims: VerifiedClaims, profileId: string, capability: Capability): Promise<RevokeAnswer>;
-  resetFactor(claims: VerifiedClaims, profileId: string, handoff: string): Promise<ResetAnswer>;
+  resetFactor(claims: VerifiedClaims, profileId: string, handoff: string, version: string): Promise<ResetAnswer>;
 }
 
 /** La guarda no dejó: lo decide la página, a donde la pantalla manda. */
@@ -156,15 +162,13 @@ export type CapabilityRevoked =
   /** Se la quitó a sí misma: la base cerró sus sesiones, y su cookie ya no está. */
   | { kind: "revoked_self" }
   | { kind: "answered"; answer: RevokeAnswer };
-/** `token`: la marca de esa confirmación. No es un secreto: distingue una confirmación de otra. */
-export type ResetPrepared = Refused | Unavailable | Malformed | { kind: "ready"; token: string };
 export type FactorReset =
   | Refused
   | Unavailable
   | Unknown
   | Malformed
   | Changed
-  /** Sin testigo: ese envío ya se hizo, o su confirmación caducó. No se tocó nada. */
+  /** Quien actúa ya la restableció con esa confirmación: es su envío repetido. No se tocó nada. */
   | { kind: "already_sent" }
   /** El código que hay que dictarle. Sale una sola vez: no se guarda en ningún lado. */
   | { kind: "reset"; code: string }
@@ -180,10 +184,17 @@ export type FreshCode =
   | { kind: "not_available" };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** La forma de la versión de una persona: `n.a`, dos contadores (`private.reset_version()`). */
+export const RESET_VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
 
 /** Un identificador con forma, o nulo. Solo minúsculas: así dos iguales se escriben igual. */
 function idOf(value: unknown): string | null {
   return typeof value === "string" && ID.test(value) ? value : null;
+}
+
+/** Una versión con forma, o nula. */
+function versionOf(value: unknown): string | null {
+  return typeof value === "string" && RESET_VERSION.test(value) ? value : null;
 }
 
 function capabilityOf(value: unknown): Capability | null {
@@ -271,15 +282,13 @@ export interface TeamAdminCore {
   teamStanding: (reader: CookieReader) => Promise<TeamCheck>;
   giveSecondFactorCode: (jar: CookieJar, code: string) => Promise<CodeGiven>;
   store: TeamAdminStore;
-  /** Solo para las pruebas: el código dictado, y la cookie del testigo con otro sitio. */
+  /** Solo para las pruebas: el código dictado. */
   dictate?: () => string;
-  tokens?: Pick<typeof resetTokens, "keepResetToken" | "holdsResetToken" | "spendResetToken">;
 }
 
 export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report">, core: TeamAdminCore) {
   const { store } = core;
   const dictate = core.dictate ?? dictatedCode;
-  const { keepResetToken, holdsResetToken, spendResetToken } = core.tokens ?? resetTokens;
 
   /** Quien pide, si es del equipo con configuración y su sesión pasa la puerta. */
   async function admit(reader: CookieReader): Promise<{ ok: true; claims: VerifiedClaims } | { ok: false; result: Refused | Unavailable }> {
@@ -413,50 +422,38 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
   }
 
   /**
-   * El primer paso de restablecer: deja el testigo con el que el segundo paso sabrá que no
-   * es un reenvío. No le pregunta nada más a la base ni toca nada: qué va a pasar lo pinta la
-   * pantalla con lo que su página leyó, y el segundo paso comprueba que siga siendo cierto.
-   */
-  async function prepareReset(jar: CookieJar, input: { profile: unknown }): Promise<ResetPrepared> {
-    const admitted = await admit(jar);
-    if (!admitted.ok) return admitted.result;
-    const profile = idOf(input.profile);
-    // Nadie se restablece a sí misma: la base lo diría en el segundo paso, y se dice antes.
-    if (profile === null || profile === admitted.claims.userId) return { kind: "malformed" };
-    const token = keepResetToken(jar, admitted.claims.sessionId ?? "", profile);
-    // Sin dónde dejarlo no hay segundo paso: no se supo.
-    if (token === null) return { kind: "unavailable" };
-    // La marca de esta confirmación: el botón de confirmar la trae, y la de otra no vale.
-    return { kind: "ready", token };
-  }
-
-  /**
    * Restablecerle el segundo factor a alguien del equipo. Genera aquí el código que quien
    * actúa le va a dictar por otro canal, y a la base le manda solo su huella, calculada con
    * la misma función con la que se comprobará al aceptar. El código sale en la respuesta una
    * sola vez, y solo si la base restableció: no se guarda ni se reporta.
    *
-   * El testigo del primer paso se gasta antes de llamar a la base: un reenvío del mismo
-   * formulario ya no lo encuentra, y no restablece otra vez. `token` es la marca de esa
-   * confirmación, la que el primer paso devolvió: el formulario de una confirmación anterior
-   * trae otra, y tampoco vale.
+   * Un formulario reenviado (un doble clic, o recargar) no restablece otra vez: `version` es
+   * la versión de la persona que la pantalla puso en el botón, y si ya no es esa no se hace
+   * nada. Se mira primero en la lista, para que recargar después de restablecer diga «ya se
+   * envió» y no «la lista cambió»; y la base la vuelve a comparar dentro de su candado, que
+   * es lo que de verdad impide dos restablecimientos a la vez. Con la misma regla en los dos
+   * lados: «ya se envió» solo si lo pendiente es un restablecimiento de quien actúa.
    */
   async function resetSecondFactor(
     jar: CookieJar,
-    input: { profile: unknown; confirmed: unknown; token: unknown },
+    input: { profile: unknown; confirmed: unknown; version: unknown },
   ): Promise<FactorReset> {
     const admitted = await admit(jar);
     if (!admitted.ok) return admitted.result;
     const profile = idOf(input.profile);
-    if (profile === null) return { kind: "malformed" };
-    const session = admitted.claims.sessionId ?? "";
-    if (!holdsResetToken(jar, session, profile, input.token)) return { kind: "already_sent" };
+    const version = versionOf(input.version);
+    if (profile === null || version === null) return { kind: "malformed" };
     const read = await rosterFor(admitted.claims);
     if (!read.ok) return read.result;
+    const member = read.roster.members.find((each) => each.profileId === profile);
+    if (member !== undefined && member.resetVersion !== version) {
+      const mine = read.roster.invitations.some(
+        (each) => each.kind === "rebind" && each.profileId === profile && each.invitedBy === admitted.claims.userId,
+      );
+      return mine ? { kind: "already_sent" } : { kind: "changed" };
+    }
     const effects = resetEffects(read.roster, profile);
-    // El testigo se queda: la confirmación se pinta otra vez, con lo de ahora.
     if (effects === null || effectsKey(effects) !== input.confirmed) return { kind: "changed" };
-    if (!spendResetToken(jar, session, profile, input.token)) return { kind: "already_sent" };
 
     const code = dictate();
     const print = handoffPrint(code);
@@ -465,9 +462,20 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
       await deps.report("team_change_unavailable");
       return { kind: "unknown" };
     }
-    const result = await change(() => store.resetFactor(admitted.claims, profile, print));
+    const result = await change(() => store.resetFactor(admitted.claims, profile, print, version));
     if (result.kind !== "answered") return result;
-    return result.answer === "reset" ? { kind: "reset", code } : { kind: "answered", answer: result.answer };
+    switch (result.answer) {
+      case "reset":
+        return { kind: "reset", code };
+      // Otro envío ganó el candado entre la lista y la base: lo mismo que si la lista lo
+      // hubiera dicho.
+      case "already_sent":
+        return { kind: "already_sent" };
+      case "changed":
+        return { kind: "changed" };
+      default:
+        return { kind: "answered", answer: result.answer };
+    }
   }
 
   /**
@@ -509,7 +517,6 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
     revokeInvitation,
     grantCapability,
     revokeCapability,
-    prepareReset,
     resetSecondFactor,
     giveFreshCode,
   };

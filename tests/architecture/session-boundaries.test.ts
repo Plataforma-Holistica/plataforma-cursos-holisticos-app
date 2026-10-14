@@ -370,7 +370,7 @@ describe("cambiar el equipo pasa por las funciones de la base, y el código dict
   };
   const DATABASE_FUNCTIONS = ["team_roster", "invite_admin", "revoke_admin_invitation", "grant_capability", "revoke_capability", "reset_second_factor"];
   const QUERIES = ["readTeamRoster", "askInvite", "askRevokeInvitation", "askGrant", "askRevoke", "askReset"];
-  const ENTRIES = ["inviteAdmin", "reinviteAdmin", "revokeInvitation", "grantCapability", "revokeCapability", "prepareReset", "resetSecondFactor", "giveFreshCode"];
+  const ENTRIES = ["inviteAdmin", "reinviteAdmin", "revokeInvitation", "grantCapability", "revokeCapability", "resetSecondFactor", "giveFreshCode"];
 
   it.each(DATABASE_FUNCTIONS)("private.%s() se nombra en un solo archivo, una vez", (name) => {
     expect(namingInCode(new RegExp(`private\\.${name}\\b`))).toEqual(["src/services/account/team-records.ts"]);
@@ -421,47 +421,32 @@ describe("cambiar el equipo pasa por las funciones de la base, y el código dict
     const reset = bodyOf("resetSecondFactor");
     expect(count(admin, /\bdictate\(\)/g)).toBe(1);
     expect(reset).toMatch(/const code = dictate\(\);\s+const print = handoffPrint\(code\);/);
-    // A la base va la huella, calculada con la misma función que usa aceptar.
-    expect(reset).toMatch(/store\.resetFactor\(admitted\.claims, profile, print\)/);
+    // A la base va la huella, calculada con la misma función que usa aceptar, y la versión.
+    expect(reset).toMatch(/store\.resetFactor\(admitted\.claims, profile, print, version\)/);
     expect(admin).toMatch(/import \{[^}]*\bhandoffPrint\b[^}]*\} from "\.\/team";/);
     // El código aparece tres veces: se genera, se le saca la huella y se devuelve con `reset`.
     expect(count(reset, /\bcode\b/g)).toBe(3);
-    expect(reset).toMatch(/return result\.answer === "reset" \? \{ kind: "reset", code \} : \{ kind: "answered", answer: result\.answer \};/);
+    expect(reset).toMatch(/case "reset":\s+return \{ kind: "reset", code \};/);
+    expect(count(reset, /kind: "reset"/g)).toBe(1);
     // No se reporta ni se deja en una cookie.
     expect(reset).not.toMatch(/report\([^)]*code|jar\.set|console\./);
   });
 
-  it("el testigo se exige y se gasta antes de llamar a la base", () => {
+  it("restablecer no deja nada en el navegador: la versión de la persona viaja en el botón", () => {
+    // Ningún testigo en cookie: escribir una haría que Next repintara la página con el código.
+    expect(namingInCode(/plataforma-restablecer|reset-token|ResetToken/)).toEqual([]);
+    expect(namingInCode(/\bprepareReset\b/)).toEqual([]);
     const reset = bodyOf("resetSecondFactor");
-    // Con la marca que llegó en el botón: la de otra confirmación no vale.
-    const held = reset.indexOf("holdsResetToken(jar, session, profile, input.token)");
-    const spent = reset.indexOf("spendResetToken(jar, session, profile, input.token)");
-    const called = reset.indexOf("store.resetFactor(");
-    expect(held).toBeGreaterThan(-1);
-    expect(spent).toBeGreaterThan(held);
-    expect(called).toBeGreaterThan(spent);
-    expect(count(admin, /\bholdsResetToken\(/g)).toBe(1);
-    expect(count(admin, /\bspendResetToken\(/g)).toBe(1);
-    // Lo deja el primer paso, y nadie más. Su marca es lo único que sale, y sale en la respuesta.
-    expect(namingInCode(/\bkeepResetToken\b/)).toEqual(["src/services/account/reset-token.ts", "src/services/account/team-admin.ts"]);
-    expect(count(admin, /\bkeepResetToken\(/g)).toBe(1);
-    const prepare = bodyOf("prepareReset");
-    expect(prepare).toMatch(/const token = keepResetToken\(jar, admitted\.claims\.sessionId \?\? "", profile\);/);
-    expect(prepare).toMatch(/if \(token === null\) return \{ kind: "unavailable" \};\s+return \{ kind: "ready", token \};/);
-    expect(namingInCode(/\bcreateResetTokens\b/)).toEqual(["src/services/account/reset-token.ts"]);
+    expect(reset).not.toMatch(/\bjar\.set\b/);
+    expect(reset).toMatch(/const version = versionOf\(input\.version\);/);
   });
 
-  it("el código que se dicta y la marca del testigo salen del azar criptográfico, no de `Math.random`", () => {
+  it("el código que se dicta sale del azar criptográfico, no de `Math.random`", () => {
     expect(admin).toMatch(/import \{[^}]*\brandomInt\b[^}]*\} from "node:crypto";/);
     expect(admin).toMatch(/export function dictatedCode\(pick: \(max: number\) => number = randomInt\): string \{/);
     // El servicio lo llama sin argumentos: no hay otro sorteo que el de fábrica.
     expect(admin).toMatch(/const dictate = core\.dictate \?\? dictatedCode;/);
-    const tokens = withoutComments(readFileSync(join(src, "services/account/reset-token.ts"), "utf8"));
-    expect(tokens).toMatch(/import \{[^}]*\brandomBytes\b[^}]*\} from "node:crypto";/);
-    expect(tokens).toMatch(/const mark = overrides\.mark \?\? \(\(\) => randomBytes\(16\)\.toString\("base64url"\)\);/);
-    // Los que usa la aplicación nacen sin marca propia: la de fábrica.
-    expect(tokens).toMatch(/export const \{ keepResetToken, holdsResetToken, spendResetToken \} = createResetTokens\(\);/);
-    for (const code of [admin, tokens]) expect(code).not.toMatch(/Math\.random/);
+    expect(admin).not.toMatch(/Math\.random/);
   });
 
   it("quitar y restablecer comprueban antes que lo confirmado siga siendo lo que pasaría", () => {
@@ -473,7 +458,10 @@ describe("cambiar el equipo pasa por las funciones de la base, y el código dict
     const resetChecked = reset.indexOf("effectsKey(effects) !== input.confirmed");
     expect(resetChecked).toBeGreaterThan(-1);
     expect(reset.indexOf("store.resetFactor(")).toBeGreaterThan(resetChecked);
-    // Y el testigo se gasta después de esa comparación: un «cambió» no lo consume.
-    expect(reset.indexOf("spendResetToken(")).toBeGreaterThan(resetChecked);
+    // Y la versión se compara antes que lo confirmado: recargar después de restablecer dice
+    // «ya se envió», no «la lista cambió».
+    const versionChecked = reset.indexOf("member.resetVersion !== version");
+    expect(versionChecked).toBeGreaterThan(-1);
+    expect(resetChecked).toBeGreaterThan(versionChecked);
   });
 });

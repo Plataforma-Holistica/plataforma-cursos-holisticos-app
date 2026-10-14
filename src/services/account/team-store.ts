@@ -74,8 +74,8 @@ export function createTeamStore(run: typeof asServer = asServer): TeamStore & Te
       change(claims, "grant_capability", GRANT_ANSWERS, (tx) => askGrant(tx, profileId, capability)),
     revoke: (claims, profileId, capability) =>
       change(claims, "revoke_capability", REVOKE_ANSWERS, (tx) => askRevoke(tx, profileId, capability)),
-    resetFactor: (claims, profileId, handoff) =>
-      change(claims, "reset_second_factor", RESET_ANSWERS, (tx) => askReset(tx, profileId, handoff)),
+    resetFactor: (claims, profileId, handoff, version) =>
+      change(claims, "reset_second_factor", RESET_ANSWERS, (tx) => askReset(tx, profileId, handoff, version)),
   };
 }
 

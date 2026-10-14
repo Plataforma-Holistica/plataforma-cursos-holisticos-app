@@ -30,8 +30,8 @@ const OTHER = "b0000000-0000-4000-8000-000000000002";
 const THIRD = "c0000000-0000-4000-8000-000000000003";
 const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const CODE = "ABCD-EFGH-JKMN-PQRS";
-/** La marca de una confirmación de restablecer: la pone el servicio, y viaja en el botón. */
-const MARK = "m".repeat(22);
+/** La versión de la persona, como la trae la lista: la página la pone en el botón de confirmar. */
+const VERSION = "2.1";
 
 const member = (over: Partial<TeamMember> = {}): TeamMember => ({
   profileId: OTHER,
@@ -43,6 +43,7 @@ const member = (over: Partial<TeamMember> = {}): TeamMember => ({
   rebind: "none",
   configRemovable: false,
   isSelf: false,
+  resetVersion: VERSION,
   ...over,
 });
 const self = (over: Partial<TeamMember> = {}) => member({ profileId: ME, email: "yo@prueba.test", capabilities: ["config"], isSelf: true, ...over });
@@ -446,7 +447,7 @@ describe("el bloque «Invitaciones pendientes»", () => {
 });
 
 describe("el bloque «Restablecer un segundo factor»", () => {
-  const asked: ResetState = { kind: "confirm", profile: OTHER, token: MARK, changed: false, attempt: 1 };
+  const asked: ResetState = { kind: "confirm", profile: OTHER, changed: false, attempt: 1 };
   const shown: ResetState = { kind: "code", code: CODE, attempt: 2 };
   const choose = (user: ReturnType<typeof userEvent.setup>) =>
     user.click(blockOf("Restablecer un segundo factor").getByRole("button", { name: "Restablecer el segundo factor de otra@prueba.test" }));
@@ -467,7 +468,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     expect(panel).toHaveFocus();
     expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
     // El botón lleva a quién, lo que se confirma y la marca de esta confirmación.
-    expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}::${MARK}`);
+    expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}::${VERSION}`);
     expect(await a11yViolations(container)).toEqual([]);
   });
 
@@ -476,7 +477,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     const { user, container } = show();
     await choose(user);
     await user.click(await screen.findByRole("button", { name: "Sí, restablecer" }));
-    expect(formOf(actions.resetAction, 1)).toEqual({ do: `confirm:${OTHER}::${MARK}` });
+    expect(formOf(actions.resetAction, 1)).toEqual({ do: `confirm:${OTHER}::${VERSION}` });
     expect(await screen.findByText(CODE)).toBeVisible();
     expect(screen.getAllByText(CODE)).toHaveLength(1);
     expect(screen.getByText("Díctaselo por teléfono o en persona, no por correo. Se muestra una sola vez: si se pierde, restablece de nuevo.")).toBeVisible();
@@ -568,7 +569,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
   });
 
   it("si esa persona ya no se puede restablecer, no hay nada que confirmar: se dice", async () => {
-    actions.resetAction.mockResolvedValue({ kind: "confirm", profile: THIRD, token: MARK, changed: true, attempt: 1 } satisfies ResetState);
+    actions.resetAction.mockResolvedValue({ kind: "confirm", profile: THIRD, changed: true, attempt: 1 } satisfies ResetState);
     const { user } = show();
     await choose(user);
     expect(await screen.findByText("La lista cambió mientras confirmabas. Revisa de nuevo lo que va a pasar.")).toBeVisible();
@@ -578,7 +579,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
   it.each<[ResetState & { kind: "failed" }, string]>([
     [
       { kind: "failed", reason: "already_sent", attempt: 1 },
-      "Ese restablecimiento ya se envió, o su confirmación caducó. Revisa la lista: si la persona aparece sin segundo factor y no tienes su código, restablece de nuevo.",
+      "Ya restableciste a esta persona: ese envío se repitió. Revisa la lista: si no tienes el código que te mostramos, restablécela de nuevo.",
     ],
     [{ kind: "failed", reason: "self", attempt: 1 }, "No puedes restablecer tu propio segundo factor. Pídeselo a otra persona con esa capacidad."],
     [

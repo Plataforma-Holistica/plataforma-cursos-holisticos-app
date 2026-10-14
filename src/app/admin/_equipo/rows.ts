@@ -238,7 +238,7 @@ function resetOption(roster: TeamRoster, member: TeamMember): ResetOption | null
     confirmation: {
       title: t(text.confirmResetTitle, { email }),
       effects: sentences,
-      value: resetButton.confirm(member.profileId, effectsKey(effects)),
+      value: resetButton.confirm(member.profileId, effectsKey(effects), member.resetVersion),
       button: text.confirmReset,
     },
   };
