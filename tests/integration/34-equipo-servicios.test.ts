@@ -209,6 +209,7 @@ describe("quien no es del equipo, con el almacén de verdad", () => {
     const asked: string[] = [];
     const services = testServices({
       teamStore: {
+        ...databaseTeamStore,
         standing: () => {
           asked.push("standing");
           return Promise.reject(new Error("no debía preguntarse"));
@@ -233,7 +234,7 @@ describe("quien no es del equipo, con el almacén de verdad", () => {
     const audited = await auditRows();
     // El estado lo contesta la prueba; aceptar va a la base, como servidor y confirmando.
     const invited: TeamStanding = { state: "invited", kind: "grant", capabilities: ["support"] };
-    const services = testServices({ teamStore: { standing: () => Promise.resolve(invited), accept: databaseTeamStore.accept } });
+    const services = testServices({ teamStore: { ...databaseTeamStore, standing: () => Promise.resolve(invited) } });
 
     const started = await services.startSecondFactor(jar);
     if (started.kind !== "started") throw new Error(`No empezó: ${started.kind}`);

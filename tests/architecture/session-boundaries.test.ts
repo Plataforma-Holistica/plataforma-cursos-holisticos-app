@@ -270,11 +270,15 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     expect(namingInCode(/\bteamStore\b/)).toEqual(["src/services/account/account.ts", "src/services/account/deps.ts"]);
     expect(namingInCode(/\bcreateTeamStore\b/)).toEqual(["src/services/account/team-store.ts"]);
     expect(namingInCode(/\bdatabaseTeamStore\b/)).toEqual(["src/services/account/account.ts", "src/services/account/team-store.ts"]);
-    // En `account.ts`: el valor de fábrica, y pasárselo a los servicios del equipo.
+    // En `account.ts`: el valor de fábrica, y pasárselo a los servicios del equipo y a los
+    // que lo administran.
     const account = codeOf("src/services/account/account.ts");
-    expect(count(account, /\bteamStore\b/g)).toBe(2);
+    expect(count(account, /\bteamStore\b/g)).toBe(3);
     expect(account).toMatch(/teamStore: databaseTeamStore,/);
     expect(account).toMatch(/createTeam\(deps, \{ checkSession, store: deps\.teamStore \}\)/);
+    expect(account).toMatch(
+      /createTeamAdmin\(deps, \{\s+teamStanding: team\.teamStanding,\s+giveSecondFactorCode: team\.giveSecondFactorCode,\s+store: deps\.teamStore,\s+\}\)/,
+    );
   });
 
   it("los servicios del equipo no abren transacciones: le preguntan al almacén", () => {
@@ -340,5 +344,136 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     ]);
     expect(count(team, /\.removeFactor\(/g)).toBe(1);
     expect(bodyOf("confirmSecondFactor")).toMatch(/await auth\.removeFactor\(jar, factorId\)/);
+  });
+});
+
+describe("cambiar el equipo pasa por las funciones de la base, y el código dictado no sale de donde se genera", () => {
+  // Administrar al equipo (RF-712; TRD §9.2, fila «Invitaciones»). Quién puede lo decide la
+  // base; lo que aquí se mira en el código es que no haya otro camino hacia ella, que la
+  // guarda corra antes que todo, y que el código que se dicta no se guarde ni viaje de más.
+  const sources = sourceFiles(src)
+    .filter((path) => !/\.test\.tsx?$/.test(path))
+    .map((path) => ({ file: posix(path), text: readFileSync(path, "utf8") }));
+  const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const namingInCode = (pattern: RegExp) =>
+    sources.filter((source) => pattern.test(withoutComments(source.text))).map((source) => source.file).sort();
+  const codeOf = (file: string) => withoutComments(sources.find((source) => source.file === file)?.text ?? "");
+  const count = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0;
+  const admin = codeOf("src/services/account/team-admin.ts");
+  const records = codeOf("src/services/account/team-records.ts");
+  const store = codeOf("src/services/account/team-store.ts");
+  /** El cuerpo de una función del servicio: desde su encabezado hasta la llave que la cierra. */
+  const bodyOf = (name: string) => {
+    const start = admin.indexOf(`  async function ${name}(`);
+    const end = admin.indexOf("\n  }\n", start);
+    return start === -1 || end === -1 ? "" : admin.slice(start, end);
+  };
+  const DATABASE_FUNCTIONS = ["team_roster", "invite_admin", "revoke_admin_invitation", "grant_capability", "revoke_capability", "reset_second_factor"];
+  const QUERIES = ["readTeamRoster", "askInvite", "askRevokeInvitation", "askGrant", "askRevoke", "askReset"];
+  const ENTRIES = ["inviteAdmin", "reinviteAdmin", "revokeInvitation", "grantCapability", "revokeCapability", "prepareReset", "resetSecondFactor", "giveFreshCode"];
+
+  it.each(DATABASE_FUNCTIONS)("private.%s() se nombra en un solo archivo, una vez", (name) => {
+    expect(namingInCode(new RegExp(`private\\.${name}\\b`))).toEqual(["src/services/account/team-records.ts"]);
+    expect(count(records, new RegExp(`private\\.${name}\\(`, "g"))).toBe(1);
+  });
+
+  it("las funciones del arranque y de la emergencia no se nombran en la aplicación: son del dueño de la base", () => {
+    expect(namingInCode(/system_invite_admin|system_reset_second_factor/)).toEqual([]);
+  });
+
+  it.each(QUERIES)("la consulta %s solo la corre el almacén del equipo, una vez y como servidor", (query) => {
+    expect(namingInCode(new RegExp(`\\b${query}\\b`))).toEqual(["src/services/account/team-records.ts", "src/services/account/team-store.ts"]);
+    // Una importación y una llamada.
+    expect(count(store, new RegExp(`\\b${query}\\b`, "g"))).toBe(2);
+    expect(count(store, new RegExp(`\\(tx\\) => ${query}\\(tx\\b`, "g"))).toBe(1);
+  });
+
+  it("los cinco cambios se reintentan igual y entienden su respuesta ya confirmada la transacción", () => {
+    expect(store).toMatch(/return answerOf\(known, await withLockRetry\(\(\) => run\(\{ claims, reason \}, work\), isLockConflict\)\);/);
+    expect(count(store, /\bchange\(claims, "/g)).toBe(5);
+    // Leer la lista no pasa por ahí: no toma candados.
+    expect(store).toMatch(/roster: \(claims\) => run\(\{ claims, reason: "team_roster" \}, \(tx\) => readTeamRoster\(tx\)\),/);
+  });
+
+  it("los servicios que administran al equipo no abren transacciones ni llaman a Auth por su cuenta", () => {
+    expect(admin).not.toMatch(/adapters\/supabase\/(?:db|auth["'])/);
+    expect(admin).not.toMatch(/\bas(?:User|Server|System)\(/);
+    // De Auth solo usan cerrar la sesión de quien se quitó una capacidad a sí misma.
+    expect(admin.match(/\bauth\.\w+/g)).toEqual(["auth.signOut"]);
+    // No mandan correo: invitar le dice a quien invita qué avisarle a la persona.
+    expect(admin).not.toMatch(/requestSignUp|requestPasswordRecovery/);
+  });
+
+  it.each(ENTRIES)("%s corre la guarda antes que cualquier otra cosa", (name) => {
+    expect(bodyOf(name)).toMatch(new RegExp(`^  async function ${name}\\([^)]*\\): Promise<\\w+> \\{\\s+const admitted = await admit\\(jar\\);\\s+if \\(!admitted\\.ok\\) return admitted\\.result;`));
+  });
+
+  it("quien actúa sale de la sesión que pasó la guarda, nunca de lo que llega", () => {
+    for (const call of admin.match(/store\.\w+\([^)]*\)/g) ?? []) {
+      expect(call).toMatch(/^store\.\w+\((?:admitted|now)?\.?claims\b/);
+    }
+    expect(count(admin, /store\.\w+\(/g)).toBe(9);
+    expect(admin).not.toMatch(/input\.(?:actor|claims|session|userId)/);
+  });
+
+  it("el código que se dicta se genera en un solo lugar y solo sale cuando la base restableció", () => {
+    expect(namingInCode(/\bdictatedCode\b/)).toEqual(["src/services/account/team-admin.ts"]);
+    const reset = bodyOf("resetSecondFactor");
+    expect(count(admin, /\bdictate\(\)/g)).toBe(1);
+    expect(reset).toMatch(/const code = dictate\(\);\s+const print = handoffPrint\(code\);/);
+    // A la base va la huella, calculada con la misma función que usa aceptar.
+    expect(reset).toMatch(/store\.resetFactor\(admitted\.claims, profile, print\)/);
+    expect(admin).toMatch(/import \{[^}]*\bhandoffPrint\b[^}]*\} from "\.\/team";/);
+    // El código aparece tres veces: se genera, se le saca la huella y se devuelve con `reset`.
+    expect(count(reset, /\bcode\b/g)).toBe(3);
+    expect(reset).toMatch(/return result\.answer === "reset" \? \{ kind: "reset", code \} : \{ kind: "answered", answer: result\.answer \};/);
+    // No se reporta ni se deja en una cookie.
+    expect(reset).not.toMatch(/report\([^)]*code|jar\.set|console\./);
+  });
+
+  it("el testigo se exige y se gasta antes de llamar a la base", () => {
+    const reset = bodyOf("resetSecondFactor");
+    // Con la marca que llegó en el botón: la de otra confirmación no vale.
+    const held = reset.indexOf("holdsResetToken(jar, session, profile, input.token)");
+    const spent = reset.indexOf("spendResetToken(jar, session, profile, input.token)");
+    const called = reset.indexOf("store.resetFactor(");
+    expect(held).toBeGreaterThan(-1);
+    expect(spent).toBeGreaterThan(held);
+    expect(called).toBeGreaterThan(spent);
+    expect(count(admin, /\bholdsResetToken\(/g)).toBe(1);
+    expect(count(admin, /\bspendResetToken\(/g)).toBe(1);
+    // Lo deja el primer paso, y nadie más. Su marca es lo único que sale, y sale en la respuesta.
+    expect(namingInCode(/\bkeepResetToken\b/)).toEqual(["src/services/account/reset-token.ts", "src/services/account/team-admin.ts"]);
+    expect(count(admin, /\bkeepResetToken\(/g)).toBe(1);
+    const prepare = bodyOf("prepareReset");
+    expect(prepare).toMatch(/const token = keepResetToken\(jar, admitted\.claims\.sessionId \?\? "", profile\);/);
+    expect(prepare).toMatch(/if \(token === null\) return \{ kind: "unavailable" \};\s+return \{ kind: "ready", token \};/);
+    expect(namingInCode(/\bcreateResetTokens\b/)).toEqual(["src/services/account/reset-token.ts"]);
+  });
+
+  it("el código que se dicta y la marca del testigo salen del azar criptográfico, no de `Math.random`", () => {
+    expect(admin).toMatch(/import \{[^}]*\brandomInt\b[^}]*\} from "node:crypto";/);
+    expect(admin).toMatch(/export function dictatedCode\(pick: \(max: number\) => number = randomInt\): string \{/);
+    // El servicio lo llama sin argumentos: no hay otro sorteo que el de fábrica.
+    expect(admin).toMatch(/const dictate = core\.dictate \?\? dictatedCode;/);
+    const tokens = withoutComments(readFileSync(join(src, "services/account/reset-token.ts"), "utf8"));
+    expect(tokens).toMatch(/import \{[^}]*\brandomBytes\b[^}]*\} from "node:crypto";/);
+    expect(tokens).toMatch(/const mark = overrides\.mark \?\? \(\(\) => randomBytes\(16\)\.toString\("base64url"\)\);/);
+    // Los que usa la aplicación nacen sin marca propia: la de fábrica.
+    expect(tokens).toMatch(/export const \{ keepResetToken, holdsResetToken, spendResetToken \} = createResetTokens\(\);/);
+    for (const code of [admin, tokens]) expect(code).not.toMatch(/Math\.random/);
+  });
+
+  it("quitar y restablecer comprueban antes que lo confirmado siga siendo lo que pasaría", () => {
+    const revoke = bodyOf("revokeCapability");
+    const revokeChecked = revoke.indexOf("effectsKey(effects) !== input.confirmed");
+    expect(revokeChecked).toBeGreaterThan(-1);
+    expect(revoke.indexOf("store.revoke(")).toBeGreaterThan(revokeChecked);
+    const reset = bodyOf("resetSecondFactor");
+    const resetChecked = reset.indexOf("effectsKey(effects) !== input.confirmed");
+    expect(resetChecked).toBeGreaterThan(-1);
+    expect(reset.indexOf("store.resetFactor(")).toBeGreaterThan(resetChecked);
+    // Y el testigo se gasta después de esa comparación: un «cambió» no lo consume.
+    expect(reset.indexOf("spendResetToken(")).toBeGreaterThan(resetChecked);
   });
 });

@@ -50,6 +50,12 @@ export default async function AdminHomePage() {
           ))}
         </ul>
       </section>
+      {/* El enlace es una comodidad: quién entra a esa pantalla lo decide su propia guarda. */}
+      {capabilities.includes("config") && (
+        <p>
+          <TextLink href={ROUTES.team}>{text.admin.team}</TextLink>
+        </p>
+      )}
       <p>
         <TextLink href={ROUTES.account}>{text.admin.account}</TextLink>
       </p>

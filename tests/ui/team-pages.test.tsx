@@ -73,6 +73,16 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("a quien tiene configuración le ofrece la pantalla del equipo; a quien no, no", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "config"] });
+    const withConfig = render(await AdminHomePage());
+    expect(screen.getByRole("link", { name: "Equipo de administración" })).toHaveAttribute("href", "/admin/equipo");
+    withConfig.unmount();
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "content", "finance", "moderation"] });
+    render(await AdminHomePage());
+    expect(screen.queryByRole("link", { name: "Equipo de administración" })).not.toBeInTheDocument();
+  });
+
   it("una capacidad que el catálogo no sabe nombrar no se pinta a medias", async () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "otra_cosa"] });
     render(await AdminHomePage());
@@ -111,7 +121,8 @@ describe("lo que cuelga de administración y no tiene página", () => {
   it("corre la guarda del equipo con la ruta que se pidió, y a quien sí es del equipo le dice que no existe", async () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["config"] });
     await expect(AdminRestPage(rest("equipo", "invitar"))).rejects.toThrow("no encontrado");
-    expect(mocks.requireAdmin).toHaveBeenCalledExactlyOnceWith("/admin/equipo/invitar");
+    // Ahí no hay ninguna sección: no se pide ninguna capacidad.
+    expect(mocks.requireAdmin).toHaveBeenCalledExactlyOnceWith("/admin/equipo/invitar", undefined);
     expect(mocks.notFound).toHaveBeenCalledOnce();
   });
 

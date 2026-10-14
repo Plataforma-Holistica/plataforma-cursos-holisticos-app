@@ -80,9 +80,8 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
 
   // Bajo administración, además, lo que aquí se mira del documento (estado, título,
   // encabezado y cabeceras) es igual exista o no la ruta: las dos contestan desde la misma
-  // guarda. Hoy bajo `/admin` solo hay una página y el comodín; con la primera página de
-  // verdad hay que volver a medir el documento entero. (Que el prefijo es de administración
-  // se sabe: a quien no trae sesión ya lo manda a entrar.)
+  // guarda. El documento entero se compara en el caso de abajo. (Que el prefijo es de
+  // administración se sabe: a quien no trae sesión ya lo manda a entrar.)
   const existing = await seen(await page.request.get("/admin"));
   for (const path of ["/admin/equipo", "/admin/no-existe/tampoco"]) {
     expect(await seen(await page.request.get(path)), path).toEqual(existing);
@@ -134,6 +133,68 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
   // La alumna sigue con su sesión, y nada quedó en la auditoría.
   await page.goto("/inicio");
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
+  expect(await auditRows()).toBe(audited);
+});
+
+// Medido el 2026-10-13, al construir la primera sección (el equipo, PA-86). Con una página
+// propia, a una alumna le llegaba el mismo «no existe» a la vista, pero el documento traía
+// el árbol de rutas y los fragmentos de esa página: se distinguía del de una ruta que de
+// verdad no existe, y hasta el comodín nombraba a su ruta hermana. Por eso las secciones las
+// sirve el comodín, y aquí se compara el documento entero, no solo lo que se ve.
+test("para una alumna, una sección de administración y una ruta que no existe son el mismo documento, de principio a fin", async ({ page }) => {
+  const ana = await person();
+  const audited = await auditRows();
+  await signIn(page, ana);
+  await expect(page).toHaveURL("/inicio");
+
+  const SECTION = "/admin/equipo";
+  const MISSING = "/admin/zzznoexiste";
+  /** El cuerpo sin la ruta que se pidió: es lo único que puede cambiar de una a otra. */
+  const bare = (body: string, path: string) => body.replaceAll(path, "[ruta]").replaceAll(path.split("/").at(-1) ?? "", "[parte]");
+  /** Next numera cada respuesta por partes con identificadores al azar: no dicen nada de la ruta. */
+  const steady = (body: string) => body.replaceAll(/"[A-Za-z0-9_-]{22}"/g, '"[id]"');
+  /** Las cabeceras que no cambian solas de una petición a otra. */
+  const fixed = (response: APIResponse) =>
+    Object.fromEntries(Object.entries(response.headers()).filter(([name]) => !["date", "etag", "content-length"].includes(name)));
+
+  // El documento.
+  const section = await page.request.get(SECTION);
+  const missing = await page.request.get(MISSING);
+  expect(section.status()).toBe(404);
+  expect(fixed(section)).toEqual(fixed(missing));
+  const missingBody = await missing.text();
+  expect(bare(await section.text(), SECTION)).toBe(bare(missingBody, MISSING));
+  // Y el de la ruta que no existe no nombra a la sección que sí: ni en su árbol de rutas.
+  expect(missingBody).not.toContain("equipo");
+  expect(missingBody).toContain(NOT_FOUND);
+
+  // La página pedida por partes, como la pide el navegador ya dentro de la aplicación.
+  const sectionPart = await page.request.get(SECTION, { headers: { RSC: "1" } });
+  const missingPart = await page.request.get(MISSING, { headers: { RSC: "1" } });
+  expect(sectionPart.status()).toBe(missingPart.status());
+  expect(fixed(sectionPart)).toEqual(fixed(missingPart));
+  expect(steady(bare(await sectionPart.text(), SECTION))).toBe(steady(bare(await missingPart.text(), MISSING)));
+
+  // Un envío con el nombre de una acción que no existe: con forma de nombre y sin ella.
+  // La forma sale de una acción de verdad, la de entrar, que cualquiera puede ver.
+  const real = /\$ACTION_ID_([0-9a-f]+)|&quot;id&quot;:&quot;([0-9a-f]+)&quot;/.exec(await (await page.request.get("/recuperar")).text());
+  const known = real?.[1] ?? real?.[2] ?? "";
+  expect(known.length).toBeGreaterThan(20);
+  const invented = known.replaceAll(/[0-9a-f]/g, (digit) => (digit === "0" ? "1" : "0"));
+  for (const name of [invented, "no-es-un-nombre"]) {
+    const send = (path: string) =>
+      page.request.post(path, {
+        headers: { "Next-Action": name, Origin: "http://localhost:3000", "Content-Type": "text/plain;charset=UTF-8" },
+        data: "[]",
+        maxRedirects: 0,
+      });
+    const toSection = await send(SECTION);
+    const toMissing = await send(MISSING);
+    expect(toSection.status(), name).toBe(toMissing.status());
+    expect(fixed(toSection), name).toEqual(fixed(toMissing));
+    expect(bare(await toSection.text(), SECTION), name).toBe(bare(await toMissing.text(), MISSING));
+  }
+
   expect(await auditRows()).toBe(audited);
 });
 

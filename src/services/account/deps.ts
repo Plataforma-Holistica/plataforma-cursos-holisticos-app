@@ -5,6 +5,7 @@ import type { CookieJar, CookieOptions } from "@/adapters/supabase/auth-cookies"
 import type { FailureCode } from "@/services/error-reporting/server";
 
 import type { TeamStore } from "./team";
+import type { TeamAdminStore } from "./team-admin";
 import type { Timing } from "./timing";
 
 // Lo que los servicios de cuenta reciben de fuera, para poder probarlos: el adaptador de
@@ -61,12 +62,13 @@ export interface AccountDependencies {
    */
   ticketLifetime: () => Promise<number | null>;
   /**
-   * Las dos preguntas que los servicios del equipo le hacen a la base: en qué estado está
-   * quien actúa, y aceptar su invitación. Solo las pruebas lo sustituyen, para correr contra
-   * la base de verdad dentro de una transacción que se revierte, y una de arquitectura lo
-   * exige: quien lo sustituyera en la aplicación decidiría quién es del equipo.
+   * Lo que los servicios del equipo le preguntan a la base: en qué estado está quien actúa,
+   * aceptar su invitación, la lista del equipo y los cambios al equipo. Solo las pruebas lo
+   * sustituyen, para correr contra la base de verdad dentro de una transacción que se
+   * revierte, y una de arquitectura lo exige: quien lo sustituyera en la aplicación
+   * decidiría quién es del equipo.
    */
-  teamStore: TeamStore;
+  teamStore: TeamStore & TeamAdminStore;
 }
 
 export interface StagingJar extends CookieJar {

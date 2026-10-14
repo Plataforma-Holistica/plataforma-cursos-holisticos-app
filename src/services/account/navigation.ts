@@ -22,6 +22,8 @@ export const ROUTES = {
   /** PA-12, configurar: quien tiene una invitación la acepta ahí. */
   factorSetup: "/entrar/segundo-factor/configurar",
   admin: "/admin",
+  /** PA-86, el equipo de administración: cuelga de administración y pide configuración. */
+  team: "/admin/equipo",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */

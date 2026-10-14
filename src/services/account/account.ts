@@ -37,6 +37,7 @@ import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
 import { mailboxProofSeconds } from "./records";
 import { createTeam } from "./team";
+import { createTeamAdmin } from "./team-admin";
 import { databaseTeamStore } from "./team-store";
 import {
   countHit,
@@ -87,6 +88,25 @@ export type {
 } from "./onboarding";
 export type { RequestOrigin } from "./origin";
 export type { CodeGiven, FactorConfirmation, FactorStart, TeamCheck, TeamStanding, TeamState } from "./team";
+export type {
+  CapabilityGranted,
+  CapabilityRevoked,
+  FactorReset,
+  FreshCode,
+  InvitationRevoked,
+  InviteResult,
+  ReinviteResult,
+  RemovalEffect,
+  ResetEffect,
+  ResetPrepared,
+  RosterRead,
+  TeamInvitation,
+  TeamMember,
+  TeamRoster,
+} from "./team-admin";
+// Qué más pasa al quitar una capacidad o al restablecer a alguien: la pantalla lo dice al
+// confirmar, y el servicio comprueba que siga siendo cierto.
+export { effectsKey, removalEffects, resetEffects } from "./team-admin";
 export type { CookieJar, CookieOptions, CookieReader };
 export type { VerifiedClaims } from "@/adapters/supabase/claims";
 // De qué navegador y sistema dice ser una sesión: la pantalla de la cuenta lo pone en palabras.
@@ -160,6 +180,11 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
   // `standingAtEntry` es de aquí dentro: lo usan los tres servicios que dejan a alguien
   // dentro, con claims recién verificadas. No sale con los servicios armados.
   const { standingAtEntry, ...team } = createTeam(deps, { checkSession, store: deps.teamStore });
+  const teamAdmin = createTeamAdmin(deps, {
+    teamStanding: team.teamStanding,
+    giveSecondFactorCode: team.giveSecondFactorCode,
+    store: deps.teamStore,
+  });
 
   /** La primera transacción de una entrada: cuenta el intento antes de preguntarle a Auth. */
   async function openAttempt(tx: Tx, keys: PairKeys): Promise<OpenedAttempt> {
@@ -398,6 +423,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
       settleAttempt,
     }),
     ...team,
+    ...teamAdmin,
   };
 }
 
@@ -428,4 +454,13 @@ export const {
   startSecondFactor,
   confirmSecondFactor,
   giveSecondFactorCode,
+  teamRoster,
+  inviteAdmin,
+  reinviteAdmin,
+  revokeInvitation,
+  grantCapability,
+  revokeCapability,
+  prepareReset,
+  resetSecondFactor,
+  giveFreshCode,
 } = services;

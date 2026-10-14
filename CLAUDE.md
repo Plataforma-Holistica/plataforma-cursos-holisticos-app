@@ -58,6 +58,8 @@ pnpm db:stop     # lo apaga; los datos se conservan
 pnpm db:reset    # borra la base local y la rehace: migraciones, semilla, db:login y db:drafts
 pnpm db:login    # le da a app_service entrada a la base local (ver .env.example)
 pnpm db:drafts   # carga en la base local los textos legales de borrador (versión 0)
+pnpm db:admins <correo> [<correo> ...]   # el arranque en local: invita a las primeras personas del equipo, con todas las capacidades
+pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
@@ -96,7 +98,21 @@ en la auditoría, que no admite borrado, y las pruebas de base cuentan esos reng
 guion (`scripts/e2e-equipo.mjs`) rehace la base local al terminar, pasen o fallen; si se
 corta a la mitad, `pnpm db:reset` antes de `pnpm test:db`. Qué corre lo decide
 `playwright.config.ts` con la variable `E2E_EQUIPO`, y en la integración continua es el
-último paso. Corre también si se tocó una pantalla del equipo, su guarda o `team.ts`.
+último paso. Corre también si se tocó una pantalla del equipo, su guarda, `team.ts` o
+`team-admin.ts`. Sus últimos casos (el equipo se administra a sí mismo, PA-86) comparten a
+dos personas con configuración que nacen con `pnpm db:admins`, y van en serie: el segundo
+y el tercero usan lo que dejó el primero. Tardan varios minutos, porque un código del
+segundo factor no se da dos veces y entre uno y otro hay que esperar al siguiente.
+
+`pnpm db:admins <correo> [<correo> ...]` es el arranque en una base local: invita a esas
+personas con todas las capacidades, como dueño de la base declarado sistema
+(`private.system_invite_admin()`). Cada quien acepta como cualquier invitada. Solo corre
+contra la base local, con las mismas comprobaciones que `db:login` y `db:drafts`. Deja
+renglones en la auditoría: después, `pnpm db:reset` antes de `pnpm test:db`. En
+producción no hay guion: el arranque y la emergencia los hace a mano quien opera la base,
+con las sentencias del manual de operación (`../planeacion/08-manual-operacion.md`,
+OP-15). Para la emergencia, `pnpm team:handoff` imprime un código para dictar y su
+huella, sin tocar ninguna base: a la sentencia va la huella, nunca el código.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -158,7 +174,7 @@ La que fija el TRD §4.2.
 | `src/app/` | Rutas, acciones de servidor, páginas | Servicios | Cliente de base, SDK de proveedores, dominio de reparto |
 | `src/app/_lib/` | Lo que comparten todas las pantallas: `request-context.ts`, el único archivo que lee la petición; `guard.ts`, la guarda en las páginas; y `guard-steps.ts`, la tabla pura de qué hace cada tipo de pantalla con cada respuesta de la guarda | Servicios | Decidir quién pasa: eso lo contesta `checkSession` |
 | `src/app/(cuenta)/` | Las pantallas de la cuenta, cada una en su carpeta: `page.tsx` (llama a la guarda), `screen.tsx` (el formulario, que corre en el navegador), `actions.ts` (la acción de servidor) y `outcomes.ts` (la tabla pura de la pantalla). Lo que comparten, en su `_lib/` | Servicios, componentes base y textos | Un armazón o una plantilla propios: pintarían antes que la guarda de su página |
-| `src/app/admin/` | Administración. Toda página llama a `requireAdmin`, y el comodín `[...resto]` atiende con esa misma guarda lo que no tiene página. Sus estados propios (PA-88), en su `_lib/` | Servicios, componentes base y textos | Una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían o se asomarían antes que la guarda |
+| `src/app/admin/` | Administración. Solo dos páginas: el inicio y el comodín `[...resto]`, que corre `requireAdmin` y sirve las secciones de la tabla de `_lib/sections.tsx` o contesta que la ruta no existe. Cada sección, en su carpeta privada (`_equipo/`). Sus estados propios (PA-88), en `_lib/` | Servicios, componentes base y textos | Una página propia para una sección; una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían, se asomarían o se distinguirían antes que la guarda |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
 | `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
 | `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
@@ -237,7 +253,10 @@ falla. Trece precisiones que la tabla no dice:
     servicio vuelve a correr la guarda. Una contraseña nunca vuelve en la respuesta.
   - Los formularios funcionan sin JavaScript: acción de servidor más `useActionState`.
     Con JavaScript, después de una acción la página no se vuelve a pedir si la acción no
-    lo pide: cuando hace falta, la acción llama a `refresh()`. La validación al salir del
+    lo pide: cuando hace falta, la acción llama a `refresh()`. Una acción que escribe una
+    cookie ya lo pidió sin decirlo: Next marca la ruta como cambiada con cada cookie que se
+    escribe y pinta la página en la misma respuesta (leído en el código de Next 16.3, en
+    `request-cookies.js` y `action-handler.js`). No se cuenta con que no se pinte. La validación al salir del
     campo usa las mismas reglas del dominio, que reexporta
     `src/services/account/field-rules.ts`, y solo si el campo ya trae algo. Ahí está
     también la del código del segundo factor (`parseSecondFactorCode`: seis dígitos, sin
@@ -381,8 +400,23 @@ falla. Trece precisiones que la tabla no dice:
   - Bajo `src/app/admin/` toda página llama a `requireAdmin`, y el comodín
     `[...resto]/page.tsx` corre esa guarda antes de decir que una ruta no existe. Sin él,
     una ruta de administración que existe y una que no existe se distinguirían con una
-    cookie inventada, que provoca «no se supo» a voluntad. Una página nueva de
-    administración toma su ruta antes que el comodín, y llama a la misma guarda.
+    cookie inventada, que provoca «no se supo» a voluntad.
+  - **Una sección de administración no tiene página propia: la sirve el comodín.** Medido
+    el 2026-10-13 con la primera (el equipo, PA-86): con su propia página, a quien no es
+    del equipo el «no existe» le llegaba igual a la vista, pero el documento traía el árbol
+    de rutas de Next y los fragmentos de esa página, y se distinguía del de una ruta que de
+    verdad no existe; hasta el comodín nombraba a su ruta hermana. Servidas todas desde el
+    mismo módulo, de una ruta a otra solo cambia la ruta pedida. Una sección nueva:
+    - entra a la tabla de `src/app/admin/_lib/sections.tsx`, con la capacidad que pide (toda
+      sección pide una);
+    - vive en una carpeta privada, `src/app/admin/_nombre/`, sin `page.tsx`, y su entrada es
+      un componente del servidor (`section.tsx`) que recibe las claims que la guarda dio.
+      No corre la guarda por su cuenta: ya corrió;
+    - y una prueba de arquitectura exige las dos cosas, y que bajo administración no haya
+      más páginas que el inicio y el comodín. Una prueba de extremo a extremo
+      (`tests/e2e/administracion.spec.ts`) compara, para una alumna, el documento entero de
+      una sección contra el de una ruta que no existe, la petición por partes y un envío con
+      el nombre de una acción inventada.
   - Ninguna página del equipo exporta `metadata`. Medido: cuando «no existe» lo contesta
     una página, el navegador se queda con el título por omisión del sitio, así que el de
     la página se asomaría justo ahí. Por eso la pestaña y el estado de una petición parcial
@@ -414,8 +448,63 @@ falla. Trece precisiones que la tabla no dice:
   - Todo estado de las dos pantallas del segundo factor lleva «Ir a mi inicio» y «Cerrar
     sesión» (`SecondFactorExits`): nadie se queda encerrado ahí.
   - PA-88 es `ForbiddenScreen` (`src/app/admin/_lib/states.tsx`). Se le pinta a quien es
-    del equipo y no tiene la capacidad que la pantalla pide, nunca a quien no lo es. Hoy
-    ninguna página pide una capacidad.
+    del equipo y no tiene la capacidad que la sección pide, nunca a quien no lo es. Hoy la
+    pide el equipo (PA-86): configuración.
+- **La pantalla del equipo (PA-86, `/admin/equipo`) va por bloques,** como la de la cuenta,
+  y además cambia cosas que no se deshacen solas (RF-712). Vive en
+  `src/app/admin/_equipo/`. Lo que no se ve leyendo un solo archivo:
+  - **Los cambios se ofrecen solo si la página leyó que el código de quien mira es
+    reciente** (`canChange`). Si no, arriba va el bloque «Tu código», y las listas se ven
+    sin botones. Eso lo decide el dato de la página, nunca lo que contestó otro bloque: con
+    JavaScript, la respuesta vieja de un bloque sobrevive a volver a pedir la página. Dado
+    el código, la acción redirige en vez de pintar: recargar no reenvía un código.
+  - **Cada bloque con varios botones es un formulario,** y todos sus botones se llaman
+    `do`. Su valor dice el paso y a quién (`ask:revoke:<persona>:<capacidad>`,
+    `confirm:…`, `cancel`): los arma `outcomes.ts`, que también los lee. Un envío sin `do`,
+    o con más de uno, cuenta como vacío. A quién se le hace algo sale de ese valor, nunca
+    del estado anterior.
+  - **Quitar una capacidad, dar configuración, revocar y restablecer se confirman en dos
+    pasos, dentro de la fila.** El primero (`ask`) no llama a ningún servicio: contesta
+    «confirma», y la pantalla pinta qué va a pasar con lo que su página leyó (`rows.ts`).
+    El de restablecer es la excepción: se llama `choose` y sí llama a su servicio
+    (`prepareReset`), que deja el testigo y devuelve su marca; tampoco cambia nada.
+    Lo que se confirmó que pasaría viaja en el botón de confirmar
+    (`effectsKey(removalEffects(…))`), y el servicio relee: si ya no es eso, contesta
+    `changed` y se pregunta otra vez con la lista de ahora. Una confirmación dice todo lo
+    que la base hace, no solo lo que se pidió.
+  - **A quien la guarda no dejó no se le dice «prohibido».** El servicio contesta
+    `refused`, y la acción lo manda a `/admin/equipo`, donde decide la guarda: puede ser
+    una alumna (PA-19), una invitada, o alguien a quien se le vencieron las doce horas con
+    la pantalla abierta. Lo mismo cuando es la base la que contesta `forbidden`.
+  - **Cada respuesta de la base tiene su caso en `outcomes.ts`,** y la prueba de la tabla
+    recorre la lista cerrada de cada función: una respuesta nueva no compila sin su caso.
+    «No se supo» nunca se pinta como hecho.
+  - **Restablecer es un bloque aparte, con su acción y su estado.** Su respuesta trae el
+    código que se dicta, y sin JavaScript React manda el estado de una acción dentro de
+    todo formulario ligado a ella: mientras ese estado trae el código, el bloque pinta solo
+    el código y un enlace de carga completa a la misma ruta, nunca un formulario. Como
+    botón de cada fila del equipo, el código habría viajado en cada «Dar» y cada «Quitar».
+    Con JavaScript deja además de pintarse al salir de la página y con el siguiente envío
+    de cualquier bloque. Tres cosas más, de la revisión del diff:
+    - Otro límite conocido: la página se vuelve a pintar en la misma respuesta que trae el
+      código, y no hay cómo evitarlo, porque gastar el testigo escribe una cookie (abajo,
+      «una acción que escribe una cookie»). Si esa lectura fallara justo entonces, o la
+      guarda redirigiera, la pantalla se iría y el código, que ya es el único que vale, no
+      llegaría a pintarse. Se sale restableciendo otra vez: la lista dice que esa persona
+      quedó sin segundo factor.
+    - Un límite conocido, medido: en un envío sin JavaScript el documento de respuesta trae
+      el estado de la acción una segunda vez, en los datos con que React se montaría. Es el
+      mismo documento que ya pinta el código, no está en ningún campo y no viaja de vuelta;
+      se va con la carga completa del enlace, y por eso el bloque no ofrece otra salida. La
+      prueba de extremo a extremo cuenta dónde aparece el código en el documento entero.
+    - Que el código deje de verse al navegar dentro de la aplicación depende de que la
+      pantalla se desmonte. Con `cacheComponents` Next conservaría su estado y volver la
+      repintaría con el código: una prueba de arquitectura exige que `next.config.ts` no lo
+      prenda. Quien lo prenda esconde antes el código al desmontar.
+  - Los textos van en su propio bloque del catálogo (`src/messages/es/admin.ts`), para que
+    no viajen con la pantalla de entrar. Ningún plazo ni tope se escribe con su número.
+  - A dónde va el foco cuando un bloque contesta es `useAnswerFocus` (`parts.tsx`): la
+    misma regla del bloque de sesiones de la cuenta, y por lo mismo.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,
   TRD §8.10), sin `@supabase/ssr`. Lo que importa al usarlo:
   - `readSession` lee y verifica, y no puede renovar. `refreshSession` renueva: la llaman
@@ -726,13 +815,71 @@ falla. Trece precisiones que la tabla no dice:
       (`standing.factor`). Después de verificar vuelve a leer el estado: si no quedó
       `member`, es configuración (falta `VIGENCIA_SEGUNDO_FACTOR_HORAS`), y se reporta.
 
-    A la base le preguntan por un almacén de dos funciones (`TeamStore`), que arma
-    `team-store.ts` sobre las consultas de `team-records.ts`. Aceptar confirma su
-    transacción con cualquier respuesta, porque tres de sus rechazos escriben: por eso la
-    respuesta se valida ya confirmada, fuera de la transacción. Un choque de candados
-    (`isLockConflict`: 40P01 o 55P03) se intenta una vez más, y solo al aceptar. Leer el
-    estado no se reintenta. «No se supo» nunca es un sí y nunca borra nada. Una prueba de
-    arquitectura fija por dónde se le pregunta a la base y de dónde sale el factor.
+    A la base le preguntan por un almacén (`TeamStore`, y `TeamAdminStore` para lo de
+    abajo), que arma `team-store.ts` sobre las consultas de `team-records.ts`. Aceptar
+    confirma su transacción con cualquier respuesta, porque tres de sus rechazos escriben:
+    por eso la respuesta se valida ya confirmada, fuera de la transacción. Un choque de
+    candados (`isLockConflict`: 40P01 o 55P03) se intenta una vez más: al aceptar y en los
+    cinco cambios al equipo, ninguno de los cuales escribe antes de rechazar. Leer el estado
+    o la lista no se reintenta. «No se supo» nunca es un sí y nunca borra nada. Una prueba
+    de arquitectura fija por dónde se le pregunta a la base y de dónde sale el factor.
+  - Administrar al equipo vive en `team-admin.ts` (T-105, quinta solicitud; RF-712): la
+    lista, invitar, invitar de nuevo, revocar una invitación, dar y quitar una capacidad,
+    restablecer un segundo factor y dar el código otra vez. Quién puede lo decide la base,
+    con su propia puerta (configuración y un código reciente); aquí se decide a quién se
+    le pregunta qué, y en qué orden:
+    - La guarda va primero (`admit`): `teamStanding`, y solo sigue quien es del equipo con
+      configuración. Los demás reciben `refused`, sin distinguir por qué, y sin que se le
+      pregunte nada más a la base. Si no se supo quién pide, `unavailable`: no se intentó
+      nada. Una prueba de arquitectura exige que cada servicio empiece así.
+    - Lo que llega se revisa antes de tocar la base: un identificador con forma (solo
+      minúsculas, para que dos iguales se escriban igual), una capacidad de la lista, un
+      correo que pase `parseEmail`. Lo que no tiene forma no llega (`malformed`).
+    - Nada de lo que llega dice quién actúa: sale de la sesión que pasó la guarda.
+    - Lo que la base contesta se entiende ya confirmada la transacción, contra la lista
+      cerrada de su función (`INVITE_ANSWERS` y las demás). Una respuesta que no está en la
+      lista, o una excepción, es `unknown`: se reporta (`team_change_unavailable`) y nunca
+      se pinta como hecho. `forbidden` y `needs_fresh_code` salen tal cual.
+    - `teamRoster(reader, claims)` lee la lista para la sección que ya pasó su guarda, con
+      las claims que esa guarda dio. Una lectura nula, o sin la fila de quien pregunta, no
+      vale: se le vuelve a preguntar a la guarda, y solo si insiste en que pasa se reporta
+      (`team_roster_unavailable`). **Leer no pide el código reciente,** y es una decisión
+      consciente: una sesión de equipo robada ve los correos del equipo, quién está sin
+      factor y las invitaciones, pero no cambia nada.
+    - `revokeCapability` y `resetSecondFactor` reciben lo que la persona confirmó que
+      pasaría (`confirmed`) y releen la lista: si ya no es eso, contestan `changed` y no
+      hacen nada. Quien se quita una capacidad a sí misma queda sin sesión (la base cierra
+      todas las de la persona a quien se le quita): el servicio borra su cookie y contesta
+      `revoked_self`.
+    - `reinviteAdmin` no recibe a quién ni con qué: lo lee de la invitación caducada, por
+      su identificador. Solo las que daban capacidades: una de restablecimiento caducada
+      se arregla restableciendo otra vez.
+    - **El código que se dicta al restablecer se genera aquí** (`dictatedCode`: dieciséis
+      caracteres al azar, sin los que se confunden al dictar, en cuatro grupos). A la base
+      va solo su huella, calculada con el mismo `handoffPrint` con que se comprobará al
+      aceptar. El código sale en la respuesta una sola vez, y solo si la base contestó
+      `reset`. No se guarda, no se reporta y no va en ninguna cookie.
+    - **Restablecer son dos envíos, por un testigo de un solo uso** (`reset-token.ts`:
+      `plataforma-restablecer`, con `__Host-` bajo https, diez minutos, atado a la sesión, a
+      la persona y a una marca al azar). `prepareReset` lo deja y devuelve la marca, que
+      viaja en el botón de confirmar; `resetSecondFactor` exige el testigo con esa misma
+      marca y lo gasta antes de llamar a la base. Restablecer no tiene tope de repetición en
+      la base: sin esto, recargar sin JavaScript reenviaría el formulario y cambiaría el
+      código que ya se dictó. La marca es para que valga una confirmación y no cualquiera:
+      sin ella, pedir otra confirmación para la misma persona dejaba un testigo que el
+      formulario reenviado de la anterior también gastaba. Un `changed` no lo gasta, y la
+      confirmación que se pinta de nuevo conserva su marca. No es un control de acceso ni
+      un candado: dos envíos que salgan a la vez lo leen los dos.
+    - Al restablecer se avisa «quedarás como la única» (`alone`) solo si esa persona hoy
+      puede cambiar el equipo: activa, con configuración y con su factor atado. A quien ya
+      estaba restablecida no, porque hoy no cambia nada.
+    - `giveFreshCode` da el código otra vez y después lee la lista: si sigue diciendo que
+      el código no es reciente, pedirlo de nuevo no arregla nada (falta
+      `VIGENCIA_CODIGO_RECIENTE_MINUTOS`), y contesta `not_available` y lo reporta. Que
+      verificar otra vez mueva la hora que la base mira se midió el 2026-10-13 y lo fija
+      `tests/integration/35-equipo-administrar.test.ts`.
+    - No mandan ningún correo: la pantalla le dice a quien invita qué avisarle a la
+      persona (decisión del 2026-10-13, hasta T-310). De Auth solo usan cerrar la sesión.
   - Cerrar la sesión de un navegador (`signOut`, `closeRejectedSession`) no se lleva el
     resguardo del buzón: completar la recuperación lo deja y, en la misma respuesta,
     cierra la sesión que ese navegador tuviera (`leaveFor`). Si cerrar se lo llevara,
@@ -957,9 +1104,20 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   - Al reclamar, a una cuenta con invitación viva se le borran los factores que tuviera.
     A las demás no: recuperar la contraseña no quita un segundo factor, y a alguien del
     equipo no se le quita el atado.
+  - **La lista del equipo** la da `private.team_roster()`, para la pantalla del equipo: en
+    un solo valor, las personas con alguna capacidad, las invitaciones vivas y si quien
+    mira dio su código hace poco. Es nulo para quien no pasa la puerta con configuración.
+    Una sola función y no dos: con dos sentencias, «no pasas» y «no hay nadie» se verían
+    igual. No pide el código reciente. Nunca devuelve la clave ni el identificador de un
+    factor, la huella de un código dictado ni el resguardo de un buzón, y el servicio lee
+    su respuesta con un esquema estricto: un campo que no conoce no pasa. Tiene que decir
+    lo mismo que harían las funciones que cambian el equipo: `acceptable`, con las
+    condiciones de `team_standing()`, y `config_removable`, con la cuenta de
+    `revoke_capability()`. Si se cambia una, se cambia la otra.
   - El arranque y la emergencia (`system_invite_admin`, `system_reset_second_factor`)
     solo los ejecuta el dueño de la base, declarado sistema. No son `security definer` y
-    no tienen permisos para nadie.
+    no tienen permisos para nadie. La aplicación no las nombra, y una prueba de
+    arquitectura lo exige: en local las llama `pnpm db:admins`.
   - Estas funciones borran y bajan sesiones y factores escribiendo en tablas de Supabase
     Auth (`auth.sessions`, `auth.mfa_factors`, `auth.mfa_amr_claims`). Un 40P01 o un
     55P03 de la base ahí es «no se supo, reintenta».
@@ -1009,7 +1167,9 @@ entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
 `src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
 `src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
 `playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio. Con
-las de registro y recuperación se sumó `tests/actions/`. Con las del equipo, `src/app/admin/`.
+las de registro y recuperación se sumó `tests/actions/`. Con las del equipo, `src/app/admin/`,
+y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que una
+confirmación dice que va a pasar.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

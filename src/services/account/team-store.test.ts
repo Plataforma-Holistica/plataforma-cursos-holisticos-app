@@ -6,7 +6,16 @@ import type { asServer, ServerActor, Tx } from "@/adapters/supabase/db";
 import { toDatabaseError } from "@/adapters/supabase/errors";
 import type { SqlQuery } from "@/adapters/supabase/sql";
 
-import { acceptInvitation, readTeamStanding } from "./team-records";
+import {
+  acceptInvitation,
+  askGrant,
+  askInvite,
+  readTeamRoster,
+  readTeamStanding,
+  askReset,
+  askRevokeInvitation,
+  askRevoke,
+} from "./team-records";
 import { createTeamStore } from "./team-store";
 
 // Lo que el almacén del equipo hace alrededor de sus dos consultas: a nombre de quién abre
@@ -161,5 +170,157 @@ describe("el almacén del equipo", () => {
     const { run, committed } = runnerWith([{ answer }]);
     expect(await createTeamStore(run).accept(claims, TICKET, FACTOR, null)).toBe(answer);
     expect(committed).toEqual(["accept_invitation"]);
+  });
+});
+
+const PERSON = "b0000000-0000-4000-8000-000000000002";
+const INVITATION = "d0000000-0000-4000-8000-000000000004";
+const ROSTER = {
+  fresh_code: true,
+  members: [
+    {
+      profile_id: claims.userId,
+      email: "yo@prueba.test",
+      display_name: null,
+      status: "active",
+      capabilities: ["config"],
+      factor: "bound",
+      rebind: "none",
+      config_removable: false,
+      is_self: true,
+    },
+  ],
+  invitations: [],
+};
+
+describe("las consultas de administrar al equipo", () => {
+  it("la lista se pide sin decir de quién es la cuenta", async () => {
+    const { tx, sent } = txWith([{ roster: ROSTER }]);
+    expect((await readTeamRoster(tx))?.members).toHaveLength(1);
+    expect(sent).toEqual([{ text: "select private.team_roster() as roster", values: [] }]);
+  });
+
+  it("una lista nula es nula, y sin fila lanza", async () => {
+    expect(await readTeamRoster(txWith([{ roster: null }]).tx)).toBeNull();
+    await expect(readTeamRoster(txWith([]).tx)).rejects.toThrow("no contestó");
+    await expect(readTeamRoster(txWith([{ roster: { ...ROSTER, members: [] } }]).tx)).rejects.toThrow();
+  });
+
+  it("invitar manda el correo y las capacidades como parámetros", async () => {
+    const { tx, sent } = txWith([{ answer: "invited_new" }]);
+    expect(await askInvite(tx, "ana@prueba.test", ["support", "config"])).toBe("invited_new");
+    expect(sent).toEqual([
+      {
+        text: "select private.invite_admin($1::text, $2::text[]::public.capability[]) as answer",
+        values: ["ana@prueba.test", ["support", "config"]],
+      },
+    ]);
+  });
+
+  it("revocar una invitación manda su identificador", async () => {
+    const { tx, sent } = txWith([{ answer: "revoked" }]);
+    expect(await askRevokeInvitation(tx, INVITATION)).toBe("revoked");
+    expect(sent).toEqual([{ text: "select private.revoke_admin_invitation($1::uuid) as answer", values: [INVITATION] }]);
+  });
+
+  it("dar y quitar mandan la persona y la capacidad, en ese orden", async () => {
+    const granted = txWith([{ answer: "granted" }]);
+    expect(await askGrant(granted.tx, PERSON, "finance")).toBe("granted");
+    expect(granted.sent).toEqual([
+      { text: "select private.grant_capability($1::uuid, $2::text::public.capability) as answer", values: [PERSON, "finance"] },
+    ]);
+    const revoked = txWith([{ answer: "revoked" }]);
+    expect(await askRevoke(revoked.tx, PERSON, "config")).toBe("revoked");
+    expect(revoked.sent).toEqual([
+      { text: "select private.revoke_capability($1::uuid, $2::text::public.capability) as answer", values: [PERSON, "config"] },
+    ]);
+  });
+
+  it("restablecer manda la persona y la huella del código dictado", async () => {
+    const { tx, sent } = txWith([{ answer: "reset" }]);
+    expect(await askReset(tx, PERSON, HANDOFF)).toBe("reset");
+    expect(sent).toEqual([{ text: "select private.reset_second_factor($1::uuid, $2::text) as answer", values: [PERSON, HANDOFF] }]);
+  });
+
+  it("dentro de la transacción no se juzga la respuesta, y sin fila devuelven vacío", async () => {
+    expect(await askInvite(txWith([{ answer: "otra_cosa" }]).tx, "ana@prueba.test", ["support"])).toBe("otra_cosa");
+    expect(await askRevokeInvitation(txWith([]).tx, INVITATION)).toBe("");
+    expect(await askGrant(txWith([]).tx, PERSON, "finance")).toBe("");
+    expect(await askRevoke(txWith([]).tx, PERSON, "finance")).toBe("");
+    expect(await askReset(txWith([]).tx, PERSON, HANDOFF)).toBe("");
+    expect(await askInvite(txWith([]).tx, "ana@prueba.test", ["support"])).toBe("");
+  });
+});
+
+describe("el almacén, al administrar al equipo", () => {
+  type Store = ReturnType<typeof createTeamStore>;
+  const CHANGES: [string, string, string, (store: Store) => Promise<string>, unknown[]][] = [
+    ["invitar", "invite_admin", "invited_new", (store) => store.invite(claims, "ana@prueba.test", ["support"]), ["ana@prueba.test", ["support"]]],
+    ["revocar una invitación", "revoke_admin_invitation", "revoked", (store) => store.revokeInvitation(claims, INVITATION), [INVITATION]],
+    ["dar una capacidad", "grant_capability", "granted", (store) => store.grant(claims, PERSON, "finance"), [PERSON, "finance"]],
+    ["quitar una capacidad", "revoke_capability", "min_config", (store) => store.revoke(claims, PERSON, "config"), [PERSON, "config"]],
+    ["restablecer", "reset_second_factor", "reset", (store) => store.resetFactor(claims, PERSON, HANDOFF), [PERSON, HANDOFF]],
+  ];
+
+  it("la lista se lee como servidor, a nombre de las claims que se le pasan", async () => {
+    const { run, opened } = runnerWith([{ roster: ROSTER }]);
+    expect((await createTeamStore(run).roster(claims))?.freshCode).toBe(true);
+    expect(opened).toEqual([{ claims, reason: "team_roster" }]);
+  });
+
+  it("leer la lista no se reintenta: no toma candados, y un fallo ahí es «no se supo»", async () => {
+    const { run, opened } = runnerWith([{ roster: ROSTER }], [lockConflict("40P01")]);
+    await expect(createTeamStore(run).roster(claims)).rejects.toMatchObject({ code: "40P01" });
+    expect(opened).toHaveLength(1);
+  });
+
+  describe.each(CHANGES)("%s", (_name, reason, answer, call, values) => {
+    it("va como servidor, con las claims que se le pasan y su razón para la auditoría", async () => {
+      const { run, opened, sent, committed } = runnerWith([{ answer }]);
+      expect(await call(createTeamStore(run))).toBe(answer);
+      expect(opened).toEqual([{ claims, reason }]);
+      expect(sent[0]?.values).toEqual(values);
+      expect(committed).toEqual([reason]);
+    });
+
+    it.each(["40P01", "55P03"])("un choque de candados (%s) se intenta una vez más", async (code) => {
+      const { run, opened } = runnerWith([{ answer }], [lockConflict(code)]);
+      expect(await call(createTeamStore(run))).toBe(answer);
+      expect(opened).toHaveLength(2);
+    });
+
+    it("y solo una: si insiste, es «no se supo»", async () => {
+      const { run, opened } = runnerWith([{ answer }], [lockConflict("40P01"), lockConflict("55P03")]);
+      await expect(call(createTeamStore(run))).rejects.toMatchObject({ code: "55P03" });
+      expect(opened).toHaveLength(2);
+    });
+
+    it("otro error de la base no se reintenta: quizá sí se escribió", async () => {
+      const failure = toDatabaseError({ code: "57014", severity: "ERROR" });
+      const { run, opened } = runnerWith([{ answer }], [failure]);
+      await expect(call(createTeamStore(run))).rejects.toBe(failure);
+      expect(opened).toHaveLength(1);
+    });
+
+    it.each(["accepted", "ok", ""])("una respuesta que no es de su lista (%j) se rechaza ya confirmada la transacción", async (other) => {
+      const { run, opened, committed } = runnerWith([{ answer: other }]);
+      await expect(call(createTeamStore(run))).rejects.toThrow("no contesta");
+      expect(committed).toEqual([reason]);
+      expect(opened).toHaveLength(1);
+    });
+  });
+
+  it("cada cambio entiende su respuesta con su propia lista, no con la de otro", async () => {
+    // `granted` es de dar; quitar no la contesta.
+    const { run } = runnerWith([{ answer: "granted" }]);
+    await expect(createTeamStore(run).revoke(claims, PERSON, "config")).rejects.toThrow("no contesta");
+    const reset = runnerWith([{ answer: "revoked" }]);
+    await expect(createTeamStore(reset.run).resetFactor(claims, PERSON, HANDOFF)).rejects.toThrow("no contesta");
+    const invite = runnerWith([{ answer: "reset" }]);
+    await expect(createTeamStore(invite.run).invite(claims, "ana@prueba.test", ["support"])).rejects.toThrow("no contesta");
+    const grant = runnerWith([{ answer: "min_config" }]);
+    await expect(createTeamStore(grant.run).grant(claims, PERSON, "config")).rejects.toThrow("no contesta");
+    const revokeInvitation = runnerWith([{ answer: "min_config" }]);
+    await expect(createTeamStore(revokeInvitation.run).revokeInvitation(claims, INVITATION)).rejects.toThrow("no contesta");
   });
 });

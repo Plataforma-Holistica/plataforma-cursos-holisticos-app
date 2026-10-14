@@ -23,6 +23,7 @@ const NOTICES: Partial<Record<Notice, string>> = {
   second_factor_ready: text.signIn.noticeSecondFactorReady,
   second_factor_throttled: text.signIn.noticeSecondFactorThrottled,
   session_ended: text.signIn.noticeSessionEnded,
+  capability_removed: text.signIn.noticeCapabilityRemoved,
 };
 // Los que no dicen que algo salió bien.
 const WARNINGS: ReadonlySet<Notice> = new Set<Notice>(["password_unconfirmed", "second_factor_throttled", "session_ended"]);
