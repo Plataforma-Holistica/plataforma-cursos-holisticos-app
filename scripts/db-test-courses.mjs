@@ -79,8 +79,8 @@ function readData() {
   }
   for (const course of data.courses) {
     if (!teachers.has(course.teacher)) fail(`${course.slug}: su maestro no está en la lista.`);
-    for (const module of course.modules ?? []) {
-      for (const lesson of module.lessons ?? []) {
+    for (const part of course.modules ?? []) {
+      for (const lesson of part.lessons ?? []) {
         if (!Number.isInteger(lesson.duration_seconds) || lesson.duration_seconds <= 0 || typeof lesson.file !== "string") {
           fail(`${course.slug}: «${lesson.title}» necesita su archivo y su duración en segundos enteros.`);
         }
@@ -98,9 +98,9 @@ function courseOf(course) {
     summary: course.summary,
     practice: course.practice,
     level: course.level,
-    modules: course.modules.map((module) => ({
-      title: module.title,
-      lessons: module.lessons.map((lesson, index) => ({
+    modules: course.modules.map((part) => ({
+      title: part.title,
+      lessons: part.lessons.map((lesson, index) => ({
         title: lesson.title,
         video: {
           provider: "test",
