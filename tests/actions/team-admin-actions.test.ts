@@ -360,6 +360,7 @@ describe("restablecer un segundo factor", () => {
       attempt: 1,
     });
     expect(calls.order).toEqual([]);
+    expect(mocks.cookieJar).not.toHaveBeenCalled();
   });
 
   it("confirmar: le pasa al servicio a quién, lo que se confirmó y la versión, y devuelve el código una vez", async () => {
@@ -368,13 +369,12 @@ describe("restablecer un segundo factor", () => {
     expect(mocks.resetSecondFactor).toHaveBeenCalledExactlyOnceWith(jar, { profile: PERSON, confirmed: "alone", version: VERSION });
   });
 
-  it("con el código en la mano no se vuelve a pedir la página, ni se escribe ninguna cookie: lo uno o lo otro la repintaría", async () => {
+  // Que el servicio no escriba cookies lo prueban el suyo y la integración; aquí, que la
+  // acción no agregue nada después: ni `refresh()`, ni un aviso, ni salir a otra página.
+  it("con el código en la mano la acción no vuelve a pedir la página ni hace nada más", async () => {
     once("resetSecondFactor", { kind: "reset", code: CODE });
-    const set = vi.spyOn(jar, "set");
     await resetAction(IDLE, pressed(confirmReset(PERSON, "")));
     expect(calls.order).toEqual(["resetSecondFactor"]);
-    expect(set).not.toHaveBeenCalled();
-    set.mockRestore();
   });
 
   it("la versión sale del botón, nunca del estado anterior", async () => {

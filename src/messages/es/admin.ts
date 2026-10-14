@@ -138,7 +138,7 @@ export const admin = defineMessages({
     codeHidden: "El código ya no se muestra. Si no alcanzaste a dictarlo, restablece de nuevo.",
     backToList: "Volver a la lista",
     resetAlreadySent:
-      "Ya restableciste a esta persona: ese envío se repitió. Revisa la lista: si no tienes el código que te mostramos, restablécela de nuevo.",
+      "Ya restableciste a esta persona después de abrir esta confirmación. Revisa la lista: si no tienes el código que te mostramos, restablécela de nuevo.",
     resetSelf: "No puedes restablecer tu propio segundo factor. Pídeselo a otra persona con esa capacidad.",
     resetIneligible:
       "No se pudo restablecer: la cuenta no está activa, o su correo ya no es el que tenía al entrar al equipo. Eso lo arregla quien opera la base de datos.",

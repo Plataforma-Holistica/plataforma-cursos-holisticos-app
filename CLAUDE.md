@@ -100,9 +100,13 @@ corta a la mitad, `pnpm db:reset` antes de `pnpm test:db`. Qué corre lo decide
 `playwright.config.ts` con la variable `E2E_EQUIPO`, y en la integración continua es el
 último paso. Corre también si se tocó una pantalla del equipo, su guarda, `team.ts` o
 `team-admin.ts`. Sus últimos casos (el equipo se administra a sí mismo, PA-86) comparten a
-dos personas con configuración que nacen con `pnpm db:admins`, y van en serie: el segundo
-y el tercero usan lo que dejó el primero. Tardan varios minutos, porque un código del
-segundo factor no se da dos veces y entre uno y otro hay que esperar al siguiente.
+dos personas con configuración que nacen con `pnpm db:admins`, y van en serie: cada uno usa
+lo que dejaron los anteriores, y el grupo empieza dejando al equipo en esas dos personas
+(lo que dejan los casos de arriba no es suyo). El último llama a la base directo, con dos
+conexiones del dueño que toman el rol del servidor: para eso concede `app_service` a
+`postgres` y lo quita al terminar, otro residuo que la base rehecha se lleva. Tardan varios
+minutos, porque un código del segundo factor no se da dos veces y entre uno y otro hay que
+esperar al siguiente.
 
 `pnpm db:admins <correo> [<correo> ...]` es el arranque en una base local: invita a esas
 personas con todas las capacidades, como dueño de la base declarado sistema
@@ -876,7 +880,13 @@ falla. Trece precisiones que la tabla no dice:
       que seguir siendo volátil: es lo que hace que la comparación, posterior al candado,
       vea lo que confirmó el envío que lo tenía (una prueba de base lo exige). Una
       confirmación ya no caduca: vale mientras la versión no cambie. Restablecer no escribe
-      ninguna cookie. Nadie se restablece a sí misma: llega como `malformed`.
+      ninguna cookie. Nadie se restablece a sí misma: llega como `malformed`. Dos cosas que
+      la versión no hace: con un doble clic sin JavaScript se restablece una sola vez, pero
+      el navegador pinta la respuesta del segundo envío, así que no se ve ningún código y
+      hay que restablecer otra vez (intercambio aceptado por Sergio); y lo confirmado
+      (`alone`, `inviter`) se compara contra la lista fuera del candado, como antes: si en
+      ese instante otra persona cambia el equipo, puede pasar sin su aviso. La ventana es de
+      milisegundos; cerrarla pide recalcular esos avisos dentro de la base.
     - Al restablecer se avisa «quedarás como la única» (`alone`) solo si esa persona hoy
       puede cambiar el equipo: activa, con configuración y con su factor atado. A quien ya
       estaba restablecida no, porque hoy no cambia nada.

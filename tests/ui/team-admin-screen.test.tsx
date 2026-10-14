@@ -467,7 +467,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     const panel = (await screen.findByText("¿Restablecer el segundo factor de otra@prueba.test?")).parentElement as HTMLElement;
     expect(panel).toHaveFocus();
     expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
-    // El botón lleva a quién, lo que se confirma y la marca de esta confirmación.
+    // El botón lleva a quién, lo que se confirma y la versión de la persona que la página leyó.
     expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}::${VERSION}`);
     expect(await a11yViolations(container)).toEqual([]);
   });
@@ -579,7 +579,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
   it.each<[ResetState & { kind: "failed" }, string]>([
     [
       { kind: "failed", reason: "already_sent", attempt: 1 },
-      "Ya restableciste a esta persona: ese envío se repitió. Revisa la lista: si no tienes el código que te mostramos, restablécela de nuevo.",
+      "Ya restableciste a esta persona después de abrir esta confirmación. Revisa la lista: si no tienes el código que te mostramos, restablécela de nuevo.",
     ],
     [{ kind: "failed", reason: "self", attempt: 1 }, "No puedes restablecer tu propio segundo factor. Pídeselo a otra persona con esa capacidad."],
     [

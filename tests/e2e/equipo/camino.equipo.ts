@@ -463,7 +463,7 @@ test("demasiados códigos equivocados: se cierran todas sus sesiones, y la panta
 
 const TEAM = "/admin/equipo";
 const CODE_SHAPE = /^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$/;
-const ALREADY_SENT = /Ya restableciste a esta persona: ese envío se repitió\./;
+const ALREADY_SENT = /Ya restableciste a esta persona después de abrir esta confirmación\./;
 
 interface Member {
   email: string;
