@@ -40,8 +40,8 @@ No leas todo: varios documentos pasan de 3 000 líneas. Lee el índice y la secc
 
 ## Comandos
 
-El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de Payload
-y de trabajos llegan con la tarea que los crea, y se escriben aquí ese mismo día.
+El gestor de paquetes es pnpm. Solo están aquí los comandos que ya existen; los de los
+trabajos llegan con la tarea que los crea, y se escriben aquí ese mismo día.
 
 ```bash
 pnpm install     # instala y activa el gancho de commit (.githooks/)
@@ -154,7 +154,7 @@ los planes Teams o Enterprise de Supabase: ver la lista de salida
 
 Versiones que no se suben sin revisar:
 
-- **Next.js 16.3**: Payload 3 exige 16.3.3 o superior. Esta versión cambió respecto a las
+- **Next.js 16.3**. Esta versión cambió respecto a las
   anteriores: su documentación exacta está en `node_modules/next/dist/docs/`, y se lee
   antes de usar una API de Next.
 - **TypeScript 6.0**: el lint de TypeScript todavía no admite la 7.
@@ -176,11 +176,11 @@ La que fija el TRD §4.2.
 | `src/app/(cuenta)/` | Las pantallas de la cuenta, cada una en su carpeta: `page.tsx` (llama a la guarda), `screen.tsx` (el formulario, que corre en el navegador), `actions.ts` (la acción de servidor) y `outcomes.ts` (la tabla pura de la pantalla). Lo que comparten, en su `_lib/` | Servicios, componentes base y textos | Un armazón o una plantilla propios: pintarían antes que la guarda de su página |
 | `src/app/admin/` | Administración. Solo dos páginas: el inicio y el comodín `[...resto]`, que corre `requireAdmin` y sirve las secciones de la tabla de `_lib/sections.tsx` o contesta que la ruta no existe. Cada sección, en su carpeta privada (`_equipo/`). Sus estados propios (PA-88), en `_lib/` | Servicios, componentes base y textos | Una página propia para una sección; una ruta (`route.ts`), una pantalla de carga, un límite de espera o `metadata`: contestarían, se asomarían o se distinguirían antes que la guarda |
 | `src/jobs/` | Trabajos programados y por evento | Servicios | Lo mismo que `src/app/` |
-| `src/payload/` | Configuración de Payload: solo el catálogo | Ganchos que llaman a servicios | Tablas de dinero, de consumo o de personas |
+| `src/payload/` | Nada: sin uso desde el 2026-10-13, cuando Sergio decidió hacer el contenido con pantallas propias, sin Payload (T-106). La capa sigue declarada en el lint, vacía; se quita aparte | | Cualquier archivo |
 | `src/ui/` | Los componentes base del diseño, compartidos por las cuatro superficies, y la hoja de tokens (`theme.css`) | Los textos, por bloque (`@/messages/es/ui`) | Servicios, dominio, adaptadores, configuración, y el catálogo entero |
 | `src/messages/` | Los textos visibles, en un solo lugar: un archivo por bloque en `es/`, el bloque de términos y `t()` | Nada | Todo lo demás |
 | `src/config/` | Las variables de entorno, leídas y validadas en un solo lugar | Nada de la aplicación | Todo lo demás |
-| `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema de Payload |
+| `supabase/migrations/` | El esquema propio, en SQL | | Objetos del esquema `payload`, que quedó sin uso |
 | `supabase/tests/` | Pruebas de base en pgTAP: qué lee, qué escribe y qué se le niega a cada rol | `_ayuda.psql`, con `\ir` | |
 | `supabase/seeds/` | Valores de arranque de los parámetros, transcritos de `00-fundamentos.md` §4 | | Cifras que no estén en ese documento |
 | `supabase/templates/` | Las plantillas de los correos que manda Supabase Auth, mientras no los manda el proveedor de correo propio | | La dirección o el código que arma Auth: los enlaces llevan la huella y abren una página propia |
@@ -1046,6 +1046,31 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   En las pruebas de base, «segundo nivel» es una sesión de equipo de verdad: la deja
   `pruebas.equipar()`, que llaman `pruebas.como_usuario(…, 'aal2')` y, para quien tiene
   una capacidad, `pruebas.como_servicio()`.
+- **Las prácticas y los niveles** (`public.practices` y `public.levels`, T-106; decisiones
+  de Sergio del 2026-10-13) los cambia solo alguien del equipo con Contenido y un código
+  reciente, y solo por las funciones `private.catalog_*` (agregar, renombrar, mover,
+  desactivar y reactivar), con su puerta (`private.content_change_gate()`, la del equipo
+  con Contenido en lugar de configuración) y el candado de cada lista. El servidor solo las
+  lee, y el público lee las activas. Lo que no se ve leyendo una función:
+  - Un guardián que **no** es `security definer` deja escribir solo al dueño de la tabla (es
+    decir, a esas funciones) y a nombre de alguien con Contenido; no acepta «el sistema»:
+    un ajuste de sesión no es una barrera. Nada cambia el id ni el slug, y nada se borra.
+    Su prueba concede dentro de la transacción el permiso que el servidor no tiene, porque
+    sin eso la escritura moriría por permiso antes de llegar al guardián.
+  - El slug se fija al crear y no cambia al renombrar: los filtros de explorar viven en
+    direcciones guardadas. El nombre se compara normalizado (sin acentos ni mayúsculas, con
+    `private.catalog_key()`), también contra las desactivadas. El tono de portada lo asigna
+    la base al crear, por rotación de ocho en orden de creación.
+  - Las posiciones son únicas con una restricción diferida: mover intercambia con la vecina
+    activa en dos `update`, sin un valor intermedio.
+  - La lista llega como el tipo enumerado `public.catalog_list`, y la tabla sale de él, nunca
+    del texto que manda alguien.
+  - El vigilante exige que ningún rol de la aplicación las escriba.
+  - El servicio vive en `src/services/catalog/` y se arma como el del equipo: la guarda
+    primero (`holds(…, "content")`), la forma antes de la base, las listas cerradas de
+    respuestas, y «no se supo» se reporta (`catalog_change_unavailable`). Lo que las
+    pantallas importan sale de `catalog.ts`. Comprobar que una práctica está «en uso» antes
+    de desactivarla llega con los cursos (T-107 y T-402).
 - **Una capacidad solo se recibe aceptando una invitación** (T-105), o de quien tiene
   configuración si ya se es del equipo. El servidor no escribe `admin_capabilities`: todo
   pasa por funciones de `private` que comprueban quién actúa, y el vigilante lo exige.
@@ -1167,7 +1192,8 @@ entrada se sumaron `src/app/_lib/`, `src/app/(cuenta)/`, `src/app/sesion/`,
 `src/app/inicio/`, `src/app/api/origin-drill/`, `src/app/legal/`, `src/services/legal/`,
 `src/messages/es/account.ts`, `next.config.ts`, `tests/proxy/`, `tests/e2e/` y
 `playwright.config.ts`: una pantalla nueva con sesión se agrega ahí en el mismo cambio. Con
-las de registro y recuperación se sumó `tests/actions/`. Con las del equipo, `src/app/admin/`,
+las de registro y recuperación se sumó `tests/actions/`. Con las prácticas y los niveles
+(T-106), `src/services/catalog/`. Con las del equipo, `src/app/admin/`,
 y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que una
 confirmación dice que va a pasar.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
@@ -1215,8 +1241,8 @@ el cambio está mal aunque todo lo demás pase.
   fuera de su bloque de términos.
 - Escribir un valor visual suelto o un estilo en línea, en vez de un token.
 - Crear una tabla expuesta sin su política por fila en la misma migración.
-- Escribir una migración destructiva, o una migración de Payload que toque el esquema
-  propio, o al revés.
+- Escribir una migración destructiva (borrar el esquema `payload` o el rol `payload_app`,
+  que quedaron sin uso, también lo es: se decide aparte).
 - Usar datos reales fuera de producción.
 - Agregar una dependencia sin decir para qué y sin revisar quién la mantiene.
 - Construir algo de la lista «No entra en el MVP» del PRD, aunque parezca fácil.
