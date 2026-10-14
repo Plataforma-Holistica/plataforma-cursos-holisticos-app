@@ -146,6 +146,17 @@ describe("lo que llega se revisa antes de tocar la base", () => {
     expect(catalogNameOf("Tai\tchi")).toBeNull();
     expect(CATALOG_NAME_MAX).toBe(40);
   });
+
+  it("el nombre llega en NFC, y sin caracteres de formato que no se ven", () => {
+    // «Básico» escrito descompuesto: la b, la a, el acento suelto.
+    expect(catalogNameOf("Ba\u0301sico")).toBe("Básico");
+    expect(catalogNameOf("Yo\u00adga")).toBeNull();
+    expect(catalogNameOf("Yo\u200bga")).toBeNull();
+    expect(catalogNameOf("\u202eagoY")).toBeNull();
+    expect(catalogNameOf("Yo\ufeffga")).toBeNull();
+    // El espacio duro no es de formato: dentro del nombre se queda, y la base lo compara como un espacio.
+    expect(catalogNameOf("Tai\u00a0chi")).toBe("Tai\u00a0chi");
+  });
 });
 
 describe("quien actúa sale de la sesión, y lo que la base contesta sale tal cual", () => {

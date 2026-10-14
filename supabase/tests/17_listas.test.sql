@@ -8,7 +8,7 @@
 -- solo las lee; el público lee las activas. Quitar es desactivar.
 begin;
 \ir _ayuda.psql
-select plan(102);
+select plan(126);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido1@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'contenido2@prueba.test');
@@ -120,6 +120,7 @@ select is(pruebas.agrega('b0000000-0000-0000-0000-000000000002', 'practices', 'Y
   'con Contenido y un código de hace una hora: que lo dé otra vez');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', null, 'Yoga') ->> 'answer', 'invalid', 'sin lista: invalid');
 select throws_ok($$select private.catalog_add('cursos', 'Yoga')$$, '22P02', null, 'una lista que no existe ni siquiera llega');
+select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'levels', gen_random_uuid(), 'up'), 'not_found', 'mover en una lista vacía: not_found');
 select is((select count(*)::int from public.practices) + (select count(*)::int from public.levels), 0,
   'nada de eso escribió: las listas arrancan vacías');
 
@@ -148,9 +149,27 @@ select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', 'y
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', 'Yógá') ->> 'answer', 'duplicate', 'con acentos: duplicate');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', 'Meditación   guiada') ->> 'answer', 'duplicate',
   'con espacios de más en medio: duplicate');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Respiracio\0301n') ->> 'answer', 'duplicate',
+  'escrito descompuesto (NFD), es el mismo: duplicate');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', 'RESPIRACIÓN') ->> 'answer', 'duplicate', 'en mayúsculas y con acento: duplicate');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Meditación\00A0guiada') ->> 'answer', 'duplicate',
+  'con un espacio duro en medio: duplicate');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', '') ->> 'answer', 'invalid', 'vacío: invalid');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', '    ') ->> 'answer', 'invalid', 'solo espacios: invalid');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', E'Tai\nchi') ->> 'answer', 'invalid', 'con un salto de línea: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Yo\00ADga') ->> 'answer', 'invalid', 'con un guion suave, que no se ve: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Yo\200Bga') ->> 'answer', 'invalid', 'con un carácter de ancho cero: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'\202EagoY') ->> 'answer', 'invalid',
+  'con uno que invierte la dirección del texto: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Yoga\2066') ->> 'answer', 'invalid',
+  'con uno que aísla la dirección del texto: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Yo\+0E0041ga') ->> 'answer', 'invalid',
+  'con una etiqueta, fuera del plano básico: invalid');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', U&'Meditación\2007guiada') ->> 'answer', 'duplicate',
+  'con un espacio de cifra en medio, que no es un espacio para toda configuración regional: duplicate');
+-- Con la configuración C, `\s` no ve los espacios duros: la clave los cuenta igual.
+select is(private.catalog_key(U&'Tai\00A0chi\2007de\202Fpie' collate "C"), 'tai chi de pie',
+  'los espacios duros cuentan como espacios en cualquier configuración regional');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', repeat('a', 41)) ->> 'answer', 'invalid', 'de 41 caracteres: invalid');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', '¡¡!!') ->> 'answer', 'invalid', 'solo signos, que dejan el slug vacío: invalid');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'practices', null) ->> 'answer', 'invalid', 'sin nombre: invalid');
@@ -163,9 +182,15 @@ select is((select count(*)::int from public.practices), 5, 'los rechazos no escr
 -- Los niveles son otra lista: posiciones propias y sin tono.
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'levels', 'Principiante') ->> 'answer', 'added', 'agrega un nivel');
 select is((select position from public.levels where name = 'Principiante'), 1, 'en la primera posición de su lista');
+select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'levels', (select id from public.levels where name = 'Principiante'), 'down'), 'edge',
+  'el único de su lista no baja: edge');
 select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'levels', 'Yoga') ->> 'answer', 'added',
   'un nombre que existe en la otra lista no choca');
 select is((select slug from public.levels where name = 'Yoga'), 'yoga', 'ni su slug');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'levels', U&'Ba\0301sico') ->> 'answer', 'added', 'agrega un nivel escrito descompuesto (NFD)');
+select ok(exists (select 1 from public.levels where name = 'Básico'), 'y lo guarda compuesto (NFC)');
+select is(pruebas.agrega('b0000000-0000-0000-0000-000000000001', 'levels', 'Bãsico') ->> 'answer', 'duplicate',
+  'con cualquier acento, también uno que nadie escribe aquí: duplicate');
 
 -- ---------------------------------------------------------------------------------------
 -- Renombrar: el slug no cambia.
@@ -184,6 +209,8 @@ select is(pruebas.renombra('b0000000-0000-0000-0000-000000000001', 'practices', 
   'not_found', 'una de la otra lista: not_found');
 select is(pruebas.renombra('d0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Yoga suave')).id, 'Otra'), 'forbidden',
   'sin Contenido: forbidden');
+select is(pruebas.renombra('b0000000-0000-0000-0000-000000000002', 'practices', (pruebas.practica('Yoga suave')).id, 'Otra'), 'needs_fresh_code',
+  'con un código de hace una hora: needs_fresh_code');
 
 -- ---------------------------------------------------------------------------------------
 -- Ordenar: se intercambia con la vecina activa.
@@ -199,6 +226,8 @@ select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', (pr
 select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Yoga!')).id, 'down'), 'edge', 'la última no baja: edge');
 select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Yoga!')).id, 'left'), 'invalid', 'una dirección que no existe: invalid');
 select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', gen_random_uuid(), 'up'), 'not_found', 'una que no existe: not_found');
+select is(pruebas.mueve('b0000000-0000-0000-0000-000000000002', 'practices', (pruebas.practica('Yoga!')).id, 'up'), 'needs_fresh_code',
+  'con un código de hace una hora: needs_fresh_code');
 
 -- ---------------------------------------------------------------------------------------
 -- Quitar es desactivar; se puede reactivar, en su lugar.
@@ -207,6 +236,8 @@ select is(pruebas.activa('b0000000-0000-0000-0000-000000000001', 'practices', (p
 select ok(not (pruebas.practica('Respiración')).is_active, 'queda inactiva');
 select is(pruebas.activa('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Respiración')).id, false), 'unchanged', 'otra vez: unchanged');
 select is(pruebas.activa('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Respiración')).id, null), 'invalid', 'sin decir cuál: invalid');
+select is(pruebas.activa('b0000000-0000-0000-0000-000000000002', 'practices', (pruebas.practica('Respiración')).id, true), 'needs_fresh_code',
+  'con un código de hace una hora: needs_fresh_code');
 select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica('Respiración')).id, 'up'), 'not_found', 'una inactiva no se mueve');
 -- bbbb… (4) sube: la vecina activa de arriba es Yoga suave (2), no Respiración (3), que está inactiva.
 select is(pruebas.mueve('b0000000-0000-0000-0000-000000000001', 'practices', (pruebas.practica(repeat('b', 40))).id, 'up'), 'moved', 'se salta a la inactiva');
@@ -270,7 +301,7 @@ select pruebas.limpiar();
 -- El guardián: aunque alguien le diera permiso al servidor, escribir directo no pasa.
 
 select pruebas.como_dueno();
-grant insert, update, delete on public.practices to app_service;
+grant insert, update, delete on public.practices, public.levels to app_service;
 select isnt_empty('select * from private.schema_violations()', 'con un permiso de más, el vigilante lo señala');
 select pruebas.a_nombre_de('b0000000-0000-0000-0000-000000000001');
 select throws_ok($$insert into public.practices (slug, name, position, cover_tone) values ('directa', 'Directa', 99, 1)$$,
@@ -278,13 +309,18 @@ select throws_ok($$insert into public.practices (slug, name, position, cover_ton
   'insertar directo, aun con Contenido: el guardián lo rechaza');
 select throws_ok($$update public.practices set name = 'Otra' where name = 'P6'$$,
   '42501', 'public.practices: only the catalog functions write this list', 'actualizar directo, tampoco');
+select throws_ok($$insert into public.levels (slug, name, position) values ('directo', 'Directo', 99)$$,
+  '42501', 'public.levels: only the catalog functions write this list', 'en los niveles, igual');
 select pruebas.limpiar();
 select pruebas.como_dueno_sistema();
 select throws_ok($$insert into public.practices (slug, name, position, cover_tone) values ('directa', 'Directa', 99, 1)$$,
   '42501', 'public.practices: only the catalog functions write this list', 'ni el dueño declarado sistema');
 select pruebas.limpiar();
-revoke insert, update, delete on public.practices from app_service;
+revoke insert, update, delete on public.practices, public.levels from app_service;
 select is_empty('select * from private.schema_violations()', '(sin el permiso de más, en cero otra vez)');
+grant trigger on public.levels to app_service;
+select isnt_empty('select * from private.schema_violations()', 'con permiso de ponerle disparadores, el vigilante también lo señala');
+revoke trigger on public.levels from app_service;
 
 -- Ni el dueño de la tabla con Contenido (como escriben las funciones) cambia el id o el
 -- slug, ni borra.
@@ -296,6 +332,22 @@ select throws_ok($$update public.levels set id = gen_random_uuid() where name = 
   '42501', 'public.levels: id and slug do not change', 'ni el id');
 select throws_ok($$delete from public.practices where name = 'P6 nueva'$$,
   '42501', 'public.practices: rows are deactivated, not deleted', 'y nada se borra');
+select pruebas.limpiar();
+select pruebas.dueno_a_nombre_de('b0000000-0000-0000-0000-000000000002');
+select throws_ok($$update public.practices set name = 'P7 nueva' where name = 'P7'$$,
+  '42501', 'public.practices: only the catalog functions write this list',
+  'ni el dueño a nombre de alguien con Contenido y un código de hace una hora');
+select pruebas.limpiar();
+select pruebas.dueno_a_nombre_de('b0000000-0000-0000-0000-000000000001');
+-- (Las revisiones diferidas de las posiciones, hechas ya: con ellas pendientes, la base no
+-- deja ni intentar vaciar.)
+set constraints all immediate;
+select throws_ok($$truncate public.practices$$,
+  '42501', 'public.practices: rows are deactivated, not deleted', 'ni se vacía');
+select throws_ok($$insert into public.levels (slug, name, position) values ('basico-nfd', U&'Ba\0301sico', 99)$$,
+  '23514', null, 'un nombre descompuesto no lo guarda ni el dueño: la tabla lo exige en NFC');
+select throws_ok($$insert into public.levels (slug, name, position) values ('yoga-suave', U&'Yo\00ADga', 98)$$,
+  '23514', null, 'ni uno con un carácter que no se ve');
 select pruebas.limpiar();
 
 select * from finish();

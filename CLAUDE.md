@@ -1017,7 +1017,7 @@ en `tests/ui/`, con teclado simulado y `a11yViolations()` de `tests/setup/a11y.t
 un DOM simulado no ve (foco visible, tamaños táctiles, 320 px, movimiento reducido) se
 revisa en `/muestra`, que solo existe con `pnpm dev`: se le agrega el componente.
 
-En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
+En la base, nueve reglas que salen de `../planeacion/05-esquema-backend.md` §16.1:
 
 - **Una tabla llega completa en su migración**: seguridad por fila, permisos, políticas,
   sus guardianes y su disparador de auditoría si es administrativa. Sin política, una
@@ -1053,8 +1053,14 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   con Contenido en lugar de configuración) y el candado de cada lista. El servidor solo las
   lee, y el público lee las activas. Lo que no se ve leyendo una función:
   - Un guardián que **no** es `security definer` deja escribir solo al dueño de la tabla (es
-    decir, a esas funciones) y a nombre de alguien con Contenido; no acepta «el sistema»:
-    un ajuste de sesión no es una barrera. Nada cambia el id ni el slug, y nada se borra.
+    decir, a esas funciones) y a nombre de alguien que pasa la misma puerta, código reciente
+    incluido; no acepta «el sistema»: un ajuste de sesión no es una barrera. Nada cambia el
+    id ni el slug, y nada se borra ni se vacía (el `truncate` no pasa por los disparadores
+    de cada fila: el mismo guardián lo cierra aparte).
+  - El nombre pasa a NFC antes de revisarse, en el servicio y en la base, y no admite
+    caracteres de control ni de formato (el guion suave, los de ancho cero, los que
+    invierten la dirección del texto): no se ven, y dos nombres iguales no lo parecerían.
+    La tabla exige lo mismo.
     Su prueba concede dentro de la transacción el permiso que el servidor no tiene, porque
     sin eso la escritura moriría por permiso antes de llegar al guardián.
   - El slug se fija al crear y no cambia al renombrar: los filtros de explorar viven en
@@ -1065,7 +1071,7 @@ En la base, ocho reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     activa en dos `update`, sin un valor intermedio.
   - La lista llega como el tipo enumerado `public.catalog_list`, y la tabla sale de él, nunca
     del texto que manda alguien.
-  - El vigilante exige que ningún rol de la aplicación las escriba.
+  - El vigilante exige que ningún rol de la aplicación las escriba ni les ponga disparadores.
   - El servicio vive en `src/services/catalog/` y se arma como el del equipo: la guarda
     primero (`holds(…, "content")`), la forma antes de la base, las listas cerradas de
     respuestas, y «no se supo» se reporta (`catalog_change_unavailable`). Lo que las

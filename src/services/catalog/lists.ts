@@ -105,15 +105,15 @@ function listOf(value: unknown): CatalogList | null {
 }
 
 /**
- * Un nombre con la forma de la tabla, ya sin espacios a los lados, o nulo: de 1 a 40
- * caracteres y sin caracteres de control. La base revisa además que dé un slug.
+ * Un nombre con la forma de la tabla, en NFC y ya sin espacios a los lados, o nulo: de 1 a 40
+ * caracteres, sin caracteres de control ni de formato (el guion suave, los de ancho cero, los
+ * que invierten la dirección del texto), que no se ven. La base revisa además que dé un slug.
  */
 export function catalogNameOf(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const name = value.trim();
+  const name = value.normalize("NFC").trim();
   if (name.length < 1 || [...name].length > CATALOG_NAME_MAX) return null;
-  // Los caracteres de control, que es justo lo que se rechaza.
-  if (/[\u0000-\u001f\u007f]/.test(name)) return null;
+  if (/[\p{Cc}\p{Cf}]/u.test(name)) return null;
   return name;
 }
 

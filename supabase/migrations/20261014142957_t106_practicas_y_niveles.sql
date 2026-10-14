@@ -13,15 +13,17 @@
 
 create type public.catalog_list as enum ('practices', 'levels');
 
--- La clave con que se comparan dos nombres: sin espacios de más, sin mayúsculas, sin
--- acentos. «Reiki» y «Réiki» son el mismo. Sin la extensión unaccent, que no está instalada.
+-- La clave con que se comparan dos nombres: sin mayúsculas, sin acentos (descompuestos y
+-- quitados, así cualquier letra acentuada y cualquier forma Unicode de escribirla da lo
+-- mismo) y sin espacios de más, contando los espacios duros, que según la configuración
+-- regional de la base `\s` vería o no. «Reiki», «Réiki» y «RÉIKI» son el mismo. Sin la
+-- extensión unaccent, que no está instalada.
 create function private.catalog_key(p_name text) returns text
 language sql immutable set search_path = ''
 as $$
-  select pg_catalog.translate(
-    pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.btrim(p_name), '\s+', ' ', 'g')),
-    'áéíóúüñàèìòùâêîôûäëïöç',
-    'aeiouunaeiouaeiouaeioc')
+  select pg_catalog.btrim(pg_catalog.regexp_replace(
+    pg_catalog.regexp_replace(normalize(pg_catalog.lower(p_name), NFD), '[\u0300-\u036f]', '', 'g'),
+    '[\s\u00a0\u2007\u202f]+', ' ', 'g'))
 $$;
 
 -- El slug de un nombre: la clave, con todo lo que no es letra o dígito como guion. Vacío si
@@ -49,7 +51,8 @@ create table public.practices (
   updated_at timestamptz not null default pg_catalog.clock_timestamp(),
   constraint practices_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and pg_catalog.char_length(slug) <= 60),
   constraint practices_name_format check (
-    name = pg_catalog.btrim(name) and pg_catalog.char_length(name) between 1 and 40 and name !~ '[[:cntrl:]]'),
+    name = pg_catalog.btrim(name) and pg_catalog.char_length(name) between 1 and 40 and name !~ '[[:cntrl:]]'
+    and name is nfc normalized and name !~ '[\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'),
   constraint practices_cover_tone check (cover_tone between 1 and 8),
   constraint practices_position_uq unique (position) deferrable initially deferred
 );
@@ -66,7 +69,8 @@ create table public.levels (
   updated_at timestamptz not null default pg_catalog.clock_timestamp(),
   constraint levels_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and pg_catalog.char_length(slug) <= 60),
   constraint levels_name_format check (
-    name = pg_catalog.btrim(name) and pg_catalog.char_length(name) between 1 and 40 and name !~ '[[:cntrl:]]'),
+    name = pg_catalog.btrim(name) and pg_catalog.char_length(name) between 1 and 40 and name !~ '[[:cntrl:]]'
+    and name is nfc normalized and name !~ '[\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'),
   constraint levels_position_uq unique (position) deferrable initially deferred
 );
 comment on table public.levels is 'Los niveles del catálogo (RF-709, PA-67). Solo los cambian las funciones private.catalog_*, con Contenido y el código reciente.';
@@ -82,7 +86,8 @@ grant select on public.practices, public.levels to anon, authenticated, app_serv
 
 -- ---------------------------------------------------------------------------------------
 -- El guardián. No es security definer: mira quién ejecuta. Solo el dueño de la tabla, es
--- decir, una de las funciones de abajo, y a nombre de alguien con Contenido. No acepta «el
+-- decir, una de las funciones de abajo, y a nombre de alguien que pasa la puerta de
+-- Contenido (la capacidad y el código reciente). No acepta «el
 -- sistema»: un ajuste de sesión no es una barrera, y mientras no haya semilla no hace falta.
 -- Así, aunque algún día alguien le diera al servidor un permiso de escribir, escribir directo
 -- no pasaría. Y nada cambia el id o el slug, ni se borra.
@@ -93,8 +98,14 @@ as $$
 declare
   v_owner name;
 begin
+  -- Vaciar no pasa por los disparadores de cada fila: este mismo guardián lo cierra, para
+  -- todos y antes que nada.
+  if tg_op = 'TRUNCATE' then
+    raise exception '%.%: rows are deactivated, not deleted', tg_table_schema, tg_table_name
+      using errcode = '42501';
+  end if;
   select pg_catalog.pg_get_userbyid(c.relowner) into v_owner from pg_catalog.pg_class c where c.oid = tg_relid;
-  if current_user::name <> v_owner or not private.actor_has_capability('content') then
+  if current_user::name <> v_owner or private.content_change_gate() is not null then
     raise exception '%.%: only the catalog functions write this list', tg_table_schema, tg_table_name
       using errcode = '42501';
   end if;
@@ -122,6 +133,10 @@ create trigger audit_changes after insert or update or delete on public.practice
   for each row execute function private.audit_row_change('content');
 create trigger audit_changes after insert or update or delete on public.levels
   for each row execute function private.audit_row_change('content');
+create trigger catalog_no_truncate before truncate on public.practices
+  for each statement execute function private.guard_catalog_list();
+create trigger catalog_no_truncate before truncate on public.levels
+  for each statement execute function private.guard_catalog_list();
 
 -- ---------------------------------------------------------------------------------------
 -- La puerta de Contenido. Nulo si pasa.
@@ -169,11 +184,16 @@ create function private.catalog_table(p_list public.catalog_list) returns text
 language sql immutable set search_path = ''
 as $$ select case p_list when 'practices' then 'practices' when 'levels' then 'levels' end $$;
 
--- Un nombre con la forma de la tabla, ya sin espacios a los lados, y que da un slug.
+-- Un nombre con la forma de la tabla, ya sin espacios a los lados y en NFC, y que da un
+-- slug: sin caracteres de control ni de formato (los de la categoría Cf de Unicode: el guion
+-- suave, los de ancho cero, los que invierten o aíslan la dirección del texto, las
+-- etiquetas), que no se ven y harían que dos nombres iguales no lo parecieran. Es la misma
+-- clase que rechaza el servicio (`\p{Cf}`), escrita a mano.
 create function private.catalog_name_ok(p_name text) returns boolean
 language sql immutable set search_path = ''
 as $$
   select p_name is not null and pg_catalog.char_length(p_name) between 1 and 40 and p_name !~ '[[:cntrl:]]'
+     and p_name !~ '[\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'
      and private.catalog_slug(p_name) <> ''
 $$;
 
@@ -190,7 +210,7 @@ as $$
 declare
   v_gate text;
   v_table text := private.catalog_table(p_list);
-  v_name text := pg_catalog.btrim(p_name);
+  v_name text := pg_catalog.btrim(normalize(p_name, NFC));
   v_slug text;
   v_try text;
   v_n integer := 1;
@@ -243,7 +263,7 @@ as $$
 declare
   v_gate text;
   v_table text := private.catalog_table(p_list);
-  v_name text := pg_catalog.btrim(p_name);
+  v_name text := pg_catalog.btrim(normalize(p_name, NFC));
   v_current text;
 begin
   perform private.catalog_lock(p_list);
@@ -254,7 +274,7 @@ begin
   if v_table is null or not private.catalog_name_ok(v_name) then
     return 'invalid';
   end if;
-  execute pg_catalog.format('select name from public.%I where id = $1 for update', v_table) into v_current using p_id;
+  execute pg_catalog.format('select name from public.%I where id = $1 for no key update', v_table) into v_current using p_id;
   if v_current is null then
     return 'not_found';
   end if;
@@ -293,18 +313,18 @@ begin
   if v_table is null or p_direction is null or p_direction not in ('up', 'down') then
     return 'invalid';
   end if;
-  execute pg_catalog.format('select position, is_active from public.%I where id = $1 for update', v_table)
+  execute pg_catalog.format('select position, is_active from public.%I where id = $1 for no key update', v_table)
     into v_position, v_active using p_id;
   if v_position is null or not v_active then
     return 'not_found';
   end if;
   if p_direction = 'up' then
     execute pg_catalog.format(
-      'select id, position from public.%I where is_active and position < $1 order by position desc limit 1 for update', v_table)
+      'select id, position from public.%I where is_active and position < $1 order by position desc limit 1 for no key update', v_table)
       into v_other, v_other_position using v_position;
   else
     execute pg_catalog.format(
-      'select id, position from public.%I where is_active and position > $1 order by position limit 1 for update', v_table)
+      'select id, position from public.%I where is_active and position > $1 order by position limit 1 for no key update', v_table)
       into v_other, v_other_position using v_position;
   end if;
   if v_other is null then
@@ -334,7 +354,7 @@ begin
   if v_table is null or p_active is null then
     return 'invalid';
   end if;
-  execute pg_catalog.format('select is_active from public.%I where id = $1 for update', v_table) into v_active using p_id;
+  execute pg_catalog.format('select is_active from public.%I where id = $1 for no key update', v_table) into v_active using p_id;
   if v_active is null then
     return 'not_found';
   end if;
@@ -497,5 +517,5 @@ as $$
   from app_roles r
   cross join (values ('public.practices'), ('public.levels')) as t (table_name)
   where pg_catalog.has_any_column_privilege(r.rolname::name, t.table_name::regclass, 'INSERT, UPDATE')
-     or pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'DELETE, TRUNCATE')
+     or pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'DELETE, TRUNCATE, TRIGGER')
 $$;

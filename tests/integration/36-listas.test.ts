@@ -1,4 +1,4 @@
-import type { Client } from "pg";
+import { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createCatalogLists } from "@/services/catalog/lists";
@@ -6,6 +6,7 @@ import { createCatalogLists } from "@/services/catalog/lists";
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor, type KnownUser, type MemoryJar } from "./helpers/auth";
 import { catalogStoreOn } from "./helpers/catalog";
+import { localOwnerUrl } from "./helpers/local";
 import { asOwner, asSystem, reverted, teamStoreOn } from "./helpers/team";
 import { totpCode } from "./helpers/totp";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
@@ -112,12 +113,13 @@ describe("quien tiene Contenido y su código reciente cambia las listas", () => 
         kind: "answered",
         answer: "reactivated",
       });
-      // Cada cambio quedó en la auditoría con su autor, dentro de la transacción.
+      // Cada cambio quedó en la auditoría con su autor, dentro de la transacción: tres altas, un
+      // renombre, el intercambio (dos filas), desactivar y reactivar. El duplicado no escribió.
       const audited = await owner.query<{ n: number }>(
         "select count(*)::int as n from public.audit_log where entity_table in ('public.practices', 'public.levels') and actor_id = $1",
         [check.claims.userId],
       );
-      expect(audited.rows[0]?.n).toBeGreaterThanOrEqual(7);
+      expect(audited.rows[0]?.n).toBe(8);
       expect(catalog.reported).toEqual([]);
     });
   });
@@ -158,5 +160,19 @@ describe("quien no tiene Contenido", () => {
     const catalog = createCatalogLists({ report: () => Promise.resolve() }, { teamStanding: testServices().teamStanding, store: catalogStoreOn(null as never) });
     expect(await catalog.addItem(jar, { list: "practices", name: "Yoga" })).toEqual({ kind: "refused" });
     expect(await catalog.renameItem(jar, { list: "practices", id: person.id, name: "Yoga" })).toEqual({ kind: "refused" });
+  });
+});
+
+describe("el candado de cada lista", () => {
+  it("con una foto fija de la base se niega, antes de mirar quién pide", async () => {
+    const owner = new Client({ connectionString: localOwnerUrl() });
+    await owner.connect();
+    try {
+      await owner.query("begin isolation level repeatable read");
+      await expect(owner.query("select private.catalog_add('practices', 'Yoga')")).rejects.toMatchObject({ code: "25000" });
+    } finally {
+      await owner.query("rollback").catch(() => undefined);
+      await owner.end();
+    }
   });
 });

@@ -98,7 +98,14 @@ export function answerOf<Answer extends string>(known: readonly Answer[], answer
   return found;
 }
 
-/** Lo que contestó agregar, con su id cuando la respuesta lo trae. */
+/**
+ * Lo que contestó agregar, con su id. Agregar, el duplicado y el duplicado inactivo siempre
+ * lo traen: sin él no se pintaría nada hecho, y lanza.
+ */
 export function addedOf(known: readonly Added["answer"][], raw: { answer: string; id: string | null }): Added {
-  return { answer: answerOf(known, raw.answer), id: raw.id };
+  const answer = answerOf(known, raw.answer);
+  if ((answer === "added" || answer === "duplicate" || answer === "inactive_duplicate") && raw.id === null) {
+    throw new Error("La base contestó sin el id que esa respuesta trae.");
+  }
+  return { answer, id: raw.id };
 }

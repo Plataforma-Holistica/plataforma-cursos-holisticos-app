@@ -40,7 +40,7 @@ const FAILURES = {
   team_change_unavailable: "Un cambio al equipo de administración se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista. También sale cuando alguien dio bien su código y aun así ningún cambio pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS, y solo lo arregla el dueño de la base.",
   catalog_lists_unavailable: "No se pudieron leer las prácticas y los niveles del catálogo: quien tiene Contenido no pudo verlas ni cambiarlas.",
   catalog_change_unavailable: "Un cambio a las prácticas o los niveles del catálogo se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista.",
-  legal_text_unavailable:"No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
+  legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
   password_change_incomplete: "Una contraseña se cambió desde la cuenta y la aplicación no pudo fechar el cambio: una entrada hecha antes con la contraseña vieja podría quedar reconocida.",

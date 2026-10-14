@@ -145,6 +145,10 @@ describe("el almacén", () => {
     await expect(createCatalogStore(runnerWith([{ added: { answer: "creado" } }]).run).add(claims, "practices", "x")).rejects.toThrow();
   });
 
+  it.each(["added", "duplicate", "inactive_duplicate"])("agregar que contesta %s sin el id lanza", async (answer) => {
+    await expect(createCatalogStore(runnerWith([{ added: { answer } }]).run).add(claims, "practices", "x")).rejects.toThrow();
+  });
+
   it("las listas cerradas son las que escribe cada función de la base", () => {
     expect([...ADD_ANSWERS].sort()).toEqual(["added", "duplicate", "forbidden", "inactive_duplicate", "invalid", "needs_fresh_code"]);
     expect([...RENAME_ANSWERS].sort()).toEqual(["duplicate", "forbidden", "invalid", "needs_fresh_code", "not_found", "renamed", "unchanged"]);
