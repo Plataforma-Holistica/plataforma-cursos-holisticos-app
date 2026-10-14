@@ -99,7 +99,8 @@ select ok(
            and not has_function_privilege('authenticated', f, 'execute')
            and not has_function_privilege('anon', f, 'execute')),
   'la puerta de Contenido y la clave de un nombre son internas')
-from unnest(array['private.content_change_gate()', 'private.catalog_key(text)']) as f;
+from unnest(array['private.content_change_gate()', 'private.catalog_key(text)',
+                  'private.catalog_in_use(public.catalog_list, uuid)']) as f;
 select is_empty('select * from private.schema_violations()', 'private.schema_violations() sigue en cero');
 
 -- ---------------------------------------------------------------------------------------

@@ -46,9 +46,8 @@ const TONE_CLASSES: Record<number, string> = {
   8: "bg-cover-8",
 };
 
-const FAILURES: Record<CatalogFailure, string> = {
+const FAILURES: Record<Exclude<CatalogFailure, "in_use">, string> = {
   list_changed: text.listChanged,
-  in_use: text.inUseRefused,
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,
@@ -132,7 +131,9 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
           ? // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
             state.reason === "needs_code" && canChange
             ? null
-            : FAILURES[state.reason]
+            : state.reason === "in_use"
+              ? words.inUseRefused
+              : FAILURES[state.reason]
           : state.kind === "inactive_duplicate" && canChange
             ? t(words.inactiveDuplicate, { name: state.name })
             : null;

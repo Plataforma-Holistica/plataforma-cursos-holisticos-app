@@ -170,6 +170,7 @@ export const admin = defineMessages({
       duplicate: "Ya existe una práctica con ese nombre. Puede estar desactivada: búscala en la lista.",
       inactiveDuplicate: "«{name}» ya existe, desactivada. Puedes reactivarla: vuelve a su lugar en la lista.",
       inactive: "Desactivada",
+      inUseRefused: "Ya la usa un curso, así que no se puede desactivar mientras tanto. La lista de ahora lo dice.",
       added: "Agregada: «{name}».",
       deactivated: "Desactivada. Ya no se ofrece al describir un curso ni al filtrar; puedes reactivarla.",
       reactivated: "Reactivada, en el lugar que tenía.",
@@ -182,6 +183,7 @@ export const admin = defineMessages({
       duplicate: "Ya existe un nivel con ese nombre. Puede estar desactivado: búscalo en la lista.",
       inactiveDuplicate: "«{name}» ya existe, desactivado. Puedes reactivarlo: vuelve a su lugar en la lista.",
       inactive: "Desactivado",
+      inUseRefused: "Ya lo usa un curso, así que no se puede desactivar mientras tanto. La lista de ahora lo dice.",
       added: "Agregado: «{name}».",
       deactivated: "Desactivado. Ya no se ofrece al describir un curso ni al filtrar; puedes reactivarlo.",
       reactivated: "Reactivado, en el lugar que tenía.",
@@ -218,7 +220,6 @@ export const admin = defineMessages({
     // «En uso» (FL-58 E1): lo que usa un curso no se desactiva. Todavía no hay con qué
     // reasignar un curso: no se promete.
     inUse: { one: "En uso en {count} curso.", other: "En uso en {count} cursos." },
-    inUseRefused: "Ya la usa un curso, así que no se puede desactivar mientras tanto. La lista de ahora lo dice.",
     listChanged: "La lista cambió mientras la veías. Esta es la de ahora: revisa y repite si hace falta.",
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
     unknown: "No supimos si el cambio se hizo. Revisa la lista antes de intentarlo otra vez.",

@@ -1185,7 +1185,8 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   - Cargar y aprobar toman los candados de las dos listas del catálogo (prácticas y después
     niveles) antes que el del curso (`private.course_lock()`), y se niegan fuera de read
     committed: desactivar una práctica y aprobar un curso que la usa van uno tras otro.
-    Aprobar se niega si su práctica o su nivel se desactivó mientras esperaba.
+    Aprobar se niega si su práctica o su nivel ya no está activo: desde «en uso» eso solo
+    pasa con una escritura por fuera de las funciones, y queda como defensa.
   - Sin Payload: el curso tiene su propio identificador y el video dice qué lección lo usa
     (`lesson_id`). `published_courses` nace sin `course_review_id`, que llega con las
     revisiones (T-405); cómo cumplen RN-16 los pilotos reales se decide con PQ-25.
