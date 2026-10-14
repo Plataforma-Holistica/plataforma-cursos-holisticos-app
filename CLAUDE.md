@@ -532,9 +532,10 @@ falla. Quince precisiones que la tabla no dice:
     revisión del plan; la prueba de extremo a extremo pulsa Enter.
   - **«Subir» y «Bajar» llevan la posición que se vio** (`up:<id>:<posición>`), y el
     servicio relee la lista antes de mover: si ya no es esa, contesta `changed` y no mueve.
-    Así un doble clic o un formulario reenviado al recargar no sube dos lugares. Es una
-    relectura, no un candado: dos envíos a la vez pueden leer la misma posición. La base
-    mueve dentro del candado de la lista, así que el orden nunca queda roto.
+    Así un formulario reenviado al recargar, o una pestaña vieja, no sube dos lugares. Es
+    una relectura, no un candado: dos envíos casi a la vez (un doble clic sin JavaScript)
+    pueden leer la misma posición. La base mueve dentro del candado de la lista, así que el
+    orden nunca queda roto.
   - El nombre se revisa en la acción, antes de llamar al servicio, con la regla del
     dominio (`src/domain/catalog/name.ts`, que la pantalla toma de
     `src/services/catalog/field-rules.ts`): así un nombre sin forma se dice en su campo y
@@ -544,8 +545,14 @@ falla. Quince precisiones que la tabla no dice:
     mismo botón de la fila que se movió (o el del otro sentido), para seguir con el
     teclado; lo demás, `useAnswerFocus`. Lo agregado y lo movido se dicen además por una
     región viva propia del bloque.
-  - Toda respuesta que no sale de la página la vuelve a pedir (`refresh()`), también
-    «sin cambios» y «no se supo»: la lista pudo cambiar.
+  - Toda respuesta del servicio que no sale de la página la vuelve a pedir (`refresh()`),
+    también «sin cambios» y «no se supo»: la lista pudo cambiar. Lo que no llama a nadie
+    («Renombrar», «Cancelar», un nombre sin forma) no la pide.
+  - El campo de agregar se arma de nuevo solo con una respuesta de agregar: el número de
+    intento es del bloque entero, y como llave borraría lo que se estaba escribiendo cuando
+    se pulsa otro botón del bloque.
+  - Un «tu código ya no es reciente» que contestó un bloque deja de pintarse en cuanto la
+    página lee un código reciente: después de darlo, ya no es cierto.
   - Los tonos de portada son clases (`bg-cover-1` a `bg-cover-8`, en `@theme` de
     `theme.css`), escritas enteras en un mapa: Tailwind no ve una clase armada con texto.
 - **La sesión es una cookie que lleva el adaptador** (`src/adapters/supabase/auth*.ts`,

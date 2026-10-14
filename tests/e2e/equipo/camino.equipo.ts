@@ -1208,7 +1208,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
 
     // Desactivar no pregunta. Agregar su nombre otra vez ofrece reactivarla, en su lugar.
     await practices.getByRole("button", { name: "Desactivar «Meditación»" }).click();
-    await expect(practices.getByText(/^Desactivada\. Ya no se ofrece/)).toBeVisible();
+    // (El aviso antepone su tono para quien usa lector de pantalla: «Listo: …».)
+    await expect(practices.getByText(/Desactivada\. Ya no se ofrece/)).toBeVisible();
     await field.fill("meditacion");
     await field.press("Enter");
     await expect(practices.getByText("«meditacion» ya existe, desactivada. Puedes reactivarla: vuelve a su lugar en la lista.")).toBeVisible();
@@ -1235,6 +1236,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page).toHaveURL(CATALOG);
     await expect(page.getByRole("button", { name: "Agregar práctica" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
+    // Y el aviso que pedía el código ya no se pinta: dejó de ser cierto.
+    await expect(page.getByText("Tu código ya no es reciente.", { exact: false })).toHaveCount(0);
 
     expect(await auditRows()).toBeGreaterThan(audited);
     expect(await a11yViolations(page)).toEqual([]);

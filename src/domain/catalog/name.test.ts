@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import { CATALOG_NAME_MAX_LENGTH, parseCatalogName } from "./name";
 
-// El nombre de una práctica o un nivel (RF-709). La base revisa lo mismo y manda: estas
-// pruebas fijan que el servicio y la pantalla no dejen pasar lo que ella rechazaría, ni
-// rechacen lo que ella aceptaría.
+// El nombre de una práctica o un nivel (RF-709). La base revisa lo mismo y manda; estas
+// pruebas fijan la regla de este lado, con los mismos casos que prueba la base en
+// `supabase/tests/17_listas.test.sql`. Lo que una deje pasar y la otra no, la persona lo ve
+// como «no tiene forma» en su campo.
 
 describe("parseCatalogName", () => {
   it.each([

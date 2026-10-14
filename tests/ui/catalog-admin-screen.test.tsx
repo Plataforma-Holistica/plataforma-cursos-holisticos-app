@@ -130,8 +130,19 @@ describe("agregar", () => {
     const { user } = show();
     await user.click(blockOf("Prácticas").getByRole("button", { name: "Agregar práctica" }));
     const message = "Ya existe una práctica con ese nombre. Puede estar desactivada: búscala en la lista.";
-    expect(await screen.findByRole("link", { name: message })).toBeVisible();
+    const link = await screen.findByRole("link", { name: message });
+    await waitFor(() => expect(link.closest("[tabindex]")).toHaveFocus());
     expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveValue("yoga");
+  });
+
+  it("lo que se estaba escribiendo sin enviar se queda cuando se pulsa otro botón del bloque", async () => {
+    actions.practicesAction.mockResolvedValue({ kind: "done", what: "deactivated", id: YOGA, name: null, direction: null, attempt: 1 } satisfies CatalogState);
+    const { user } = show();
+    await user.type(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva"), "Reiki");
+    await user.click(blockOf("Prácticas").getByRole("button", { name: "Desactivar «Yoga»" }));
+    expect(formOf(actions.practicesAction)).toEqual({ do: `deactivate:${YOGA}` });
+    expect(await screen.findByText(/^Desactivada\. Ya no se ofrece/)).toBeVisible();
+    expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveValue("Reiki");
   });
 
   it("el nombre de una desactivada: lo dice, y ofrece reactivarla con su id", async () => {
@@ -185,10 +196,41 @@ describe("renombrar", () => {
     expect(screen.getByRole("link", { name: "Ya existe una práctica con ese nombre. Puede estar desactivada: búscala en la lista." })).toBeVisible();
   });
 
-  it("sin el código reciente, una fila abierta no se pinta abierta", () => {
-    const { rerender } = show(listsOf({ freshCode: false }));
+  it("si la página deja de leer un código reciente, la fila abierta se cierra: lo decide el dato de la página", async () => {
+    actions.practicesAction.mockResolvedValue(opened);
+    const { user, rerender } = show();
+    await user.click(blockOf("Prácticas").getByRole("button", { name: "Renombrar «Tai chi»" }));
+    expect(await screen.findByLabelText("Nombre nuevo de «Tai chi»")).toBeVisible();
     rerender(<CatalogScreen view={catalogView(listsOf({ freshCode: false }))} />);
     expect(screen.queryByLabelText("Nombre nuevo de «Tai chi»")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+  });
+});
+
+describe("el código que dejó de ser reciente", () => {
+  const NEEDS_CODE = "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.";
+
+  it("se dice en el bloque mientras la página lee que hace falta, y deja de decirse cuando ya lo dio", async () => {
+    actions.levelsAction.mockResolvedValue({ kind: "failed", reason: "needs_code", name: null, attempt: 1 } satisfies CatalogState);
+    const { user, rerender } = show();
+    await user.click(blockOf("Niveles").getByRole("button", { name: "Desactivar «Básico»" }));
+    // La acción vuelve a pedir la página, que ahora lee que el código no es reciente.
+    rerender(<CatalogScreen view={catalogView(listsOf({ freshCode: false }))} />);
+    expect(await blockOf("Niveles").findByText(NEEDS_CODE)).toBeVisible();
+    // Dio su código: la página vuelve a leer uno reciente, y el aviso ya no es cierto.
+    rerender(<CatalogScreen view={catalogView(listsOf())} />);
+    expect(screen.queryByText(NEEDS_CODE)).not.toBeInTheDocument();
+  });
+  it("lo que se quiso agregar no se pierde: vuelve en el campo cuando ya lo dio", async () => {
+    actions.practicesAction.mockResolvedValue({ kind: "failed", reason: "needs_code", name: "Reiki", attempt: 1 } satisfies CatalogState);
+    const { user, rerender } = show();
+    await user.type(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva"), "Reiki");
+    await user.click(blockOf("Prácticas").getByRole("button", { name: "Agregar práctica" }));
+    rerender(<CatalogScreen view={catalogView(listsOf({ freshCode: false }))} />);
+    expect(await blockOf("Prácticas").findByText(NEEDS_CODE)).toBeVisible();
+    expect(screen.queryByLabelText("Nombre de la práctica nueva")).not.toBeInTheDocument();
+    rerender(<CatalogScreen view={catalogView(listsOf())} />);
+    expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveValue("Reiki");
   });
 });
 
@@ -222,7 +264,6 @@ describe("ordenar, desactivar y reactivar", () => {
 
   it.each([
     [{ kind: "failed", reason: "list_changed", name: null, attempt: 1 }, "La lista cambió mientras la veías. Esta es la de ahora: revisa y repite si hace falta."],
-    [{ kind: "failed", reason: "needs_code", name: null, attempt: 1 }, "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio."],
     [{ kind: "failed", reason: "unknown", name: null, attempt: 1 }, "No supimos si el cambio se hizo. Revisa la lista antes de intentarlo otra vez."],
     [{ kind: "unchanged", attempt: 1 }, "No había nada que cambiar."],
   ] satisfies [CatalogState, string][])("lo que contestó se dice en el bloque: %j", async (state, message) => {

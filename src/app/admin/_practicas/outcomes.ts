@@ -57,7 +57,7 @@ function textOf(form: FormData, name: string): string {
 }
 
 /**
- * Qué se pidió. Nulo si lo que llegó no es un formulario, no trae `do`, lo trae más de una
+ * Qué se pidió. `none` si lo que llegó no es un formulario, no trae `do`, lo trae más de una
  * vez, viene desmedido o no se entiende.
  */
 export function readCatalogForm(form: unknown): CatalogRequest {

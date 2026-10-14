@@ -203,10 +203,11 @@ export function createCatalogLists(deps: { report: (code: FailureCode) => Promis
 
   /**
    * Sube o baja una posición, si sigue en la que se vio (`position`). Mover no se repite sin
-   * daño: sin esto, un doble envío o un formulario reenviado al recargar subiría dos lugares,
-   * y una pestaña vieja intercambiaría con otra vecina. La comparación es una relectura, no un
-   * candado: dos envíos que salgan a la vez pueden leer los dos la misma posición. La base
-   * mueve dentro del candado de la lista, así que el orden nunca queda roto.
+   * daño: sin esto, un formulario reenviado al recargar subiría dos lugares, y una pestaña
+   * vieja intercambiaría con otra vecina. La comparación es una relectura, no un candado: dos
+   * envíos casi a la vez (un doble clic sin JavaScript) pueden leer los dos la misma posición
+   * y mover dos lugares. La base mueve dentro del candado de la lista, así que el orden nunca
+   * queda roto.
    */
   async function moveItem(
     reader: CookieReader,

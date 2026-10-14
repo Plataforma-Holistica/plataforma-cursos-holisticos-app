@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { admin } from "@/messages/es/admin";
@@ -99,6 +99,16 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
     state.kind === "add_invalid" || state.kind === "inactive_duplicate" || (state.kind === "failed" && state.name !== null)
       ? (state.name ?? "")
       : "";
+  // El campo de agregar se arma de nuevo solo con una respuesta de agregar. Con la de otro
+  // botón del bloque («Subir», «Renombrar»…), lo que se estaba escribiendo sin enviar se
+  // queda: el número de intento es del bloque entero, y como llave lo borraría.
+  const addAnswer = typed !== "" || (state.kind === "done" && state.what === "added") || state.kind === "add_invalid";
+  const [addRound, setAddRound] = useState(0);
+  const [seenAttempt, setSeenAttempt] = useState(0);
+  if (attempt !== seenAttempt) {
+    setSeenAttempt(attempt);
+    if (addAnswer) setAddRound(attempt);
+  }
 
   const moved = state.kind === "done" && state.what === "moved" ? view.rows.find((row) => row.id === state.id) : undefined;
   // Lo agregado y lo movido no toman el foco con su aviso: se dicen aparte.
@@ -118,7 +128,10 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
       : state.kind === "unchanged"
         ? text.unchanged
         : state.kind === "failed"
-          ? FAILURES[state.reason]
+          ? // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
+            state.reason === "needs_code" && canChange
+            ? null
+            : FAILURES[state.reason]
           : state.kind === "inactive_duplicate" && canChange
             ? t(words.inactiveDuplicate, { name: state.name })
             : null;
@@ -127,9 +140,13 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
   const { block, answer, spoken, away } = useAnswerFocus(pending, attempt, result);
   const { addField, renameField } = ids;
 
-  // El foco y la voz de lo que no pasa por el resultado.
+  // El foco y la voz de lo que no pasa por el resultado. Una vez por respuesta: si la lista
+  // cambia después por otro lado (otro bloque la volvió a pedir), no se le quita el foco a
+  // nadie.
+  const handled = useRef(0);
   useEffect(() => {
-    if (pending || attempt === 0) return;
+    if (pending || attempt === 0 || handled.current === attempt) return;
+    handled.current = attempt;
     let target: Element | null = null;
     if (state.kind === "done" && state.what === "added") target = document.getElementById(addField);
     else if (state.kind === "done" && state.what === "moved" && state.id !== null && state.direction !== null) {
@@ -145,7 +162,6 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
     return () => {
       voice.textContent = "";
     };
-    // Corre una vez por respuesta: todo lo que lee lo trae la misma respuesta.
   }, [attempt, pending, state, quiet, addField, renameField, away]);
 
   const addErrors: FormError[] = state.kind === "add_invalid" ? [{ fieldId: ids.addField, message: nameError(state.problem) }] : [];
@@ -161,9 +177,9 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
       {canChange && (
         <form action={action} noValidate className="flex flex-col gap-4">
           <FormErrorSummary errors={addErrors} attempt={attempt} />
-          {/* Con cada respuesta el campo se arma de nuevo, con lo que quedó. */}
+          {/* Con cada respuesta de agregar el campo se arma de nuevo, con lo que quedó. */}
           <TextField
-            key={`agregar-${attempt}`}
+            key={`agregar-${addRound}`}
             id={ids.addField}
             label={words.addLabel}
             name="name"
@@ -173,7 +189,8 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
             error={state.kind === "add_invalid" ? nameError(state.problem) : undefined}
           />
           <div>
-            <Button type="submit" name="do" value={catalogButton.add()} variant="secondary" size="md" loading={pending} loadingLabel={text.working}>
+            {/* Inactivo, y no «cargando», mientras va un envío: puede ser de otro botón del bloque. */}
+            <Button type="submit" name="do" value={catalogButton.add()} variant="secondary" size="md" disabled={pending}>
               {words.addSubmit}
             </Button>
           </div>
