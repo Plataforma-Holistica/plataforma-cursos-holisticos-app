@@ -6,7 +6,7 @@ import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
 import { ACCEPT_ANSWERS, CAPABILITIES, type AcceptAnswer, type Capability, type TeamStanding } from "./team";
-import type { TeamRoster } from "./team-admin";
+import { RESET_VERSION, type TeamRoster } from "./team-admin";
 
 // Lo que los servicios del equipo le preguntan a la base (esquema §6.2): en qué estado está
 // quien actúa, aceptar su invitación, la lista del equipo y los cinco cambios. Cada función
@@ -123,6 +123,7 @@ const rosterShape = z.strictObject({
         rebind: z.enum(["none", "pending", "expired", "unusable"]),
         config_removable: z.boolean(),
         is_self: z.boolean(),
+        reset_version: z.string().regex(RESET_VERSION),
       }),
     )
     .min(1),
@@ -176,6 +177,7 @@ export function rosterOf(raw: unknown): TeamRoster | null {
       rebind: member.rebind,
       configRemovable: member.config_removable,
       isSelf: member.is_self,
+      resetVersion: member.reset_version,
     })),
     invitations: roster.invitations.map((invitation) => ({
       id: invitation.id,
@@ -241,10 +243,14 @@ export async function askRevoke(tx: Tx, profileId: string, revoked: Capability):
 
 /**
  * Restablece el segundo factor de alguien del equipo (`private.reset_second_factor()`).
- * `handoff` es la huella del código que quien actúa va a dictarle, nunca el código.
+ * `handoff` es la huella del código que quien actúa va a dictarle, nunca el código; `version`,
+ * la versión de la persona que se confirmó, que la base compara dentro de su candado.
  */
-export async function askReset(tx: Tx, profileId: string, handoff: string): Promise<string> {
-  const [row] = await tx.query(sql`select private.reset_second_factor(${profileId}::uuid, ${handoff}::text) as answer`, answerRow);
+export async function askReset(tx: Tx, profileId: string, handoff: string, version: string): Promise<string> {
+  const [row] = await tx.query(
+    sql`select private.reset_second_factor(${profileId}::uuid, ${handoff}::text, ${version}::text) as answer`,
+    answerRow,
+  );
   return row?.answer ?? "";
 }
 

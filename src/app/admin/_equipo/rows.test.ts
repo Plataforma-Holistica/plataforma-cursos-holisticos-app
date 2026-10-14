@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TeamInvitation, TeamMember, TeamRoster } from "@/services/account/account";
 
-import { readInvitationsForm, readResetForm, readTeamForm, resetButton } from "./outcomes";
+import { readInvitationsForm, readResetForm, readTeamForm } from "./outcomes";
 import { teamView } from "./rows";
 
 // El equipo, puesto en palabras (PA-86): qué botón se ofrece en cada fila, y qué dice su
@@ -23,6 +23,7 @@ const member = (over: Partial<TeamMember> = {}): TeamMember => ({
   rebind: "none",
   configRemovable: false,
   isSelf: false,
+  resetVersion: "2.1",
   ...over,
 });
 const self = (over: Partial<TeamMember> = {}) => member({ profileId: ME, email: "yo@prueba.test", capabilities: ["config"], isSelf: true, ...over });
@@ -339,20 +340,17 @@ describe("a quién se le puede restablecer", () => {
           "Te mostraremos un código una sola vez. Su invitación para volver caduca en unos días, y se revoca si escribe mal el código varias veces.",
           "Queda registrado con tu nombre.",
         ],
-        value: `confirm:${OTHER}:`,
+        value: `confirm:${OTHER}::2.1`,
         button: "Sí, restablecer",
       },
     });
     expect(readResetForm(pressed(option?.choose.value ?? ""))).toEqual({ step: "choose", profile: OTHER });
-    // Al botón de confirmar le falta la marca de esa confirmación, que pone la pantalla: sin
-    // ella no se entiende, y con ella sí.
-    expect(readResetForm(pressed(option?.confirmation.value ?? ""))).toEqual({ step: "none" });
-    const mark = "m".repeat(22);
-    expect(readResetForm(pressed(resetButton.marked(option?.confirmation.value ?? "", mark)))).toEqual({
+    // El botón de confirmar lleva la versión de la persona que la página leyó.
+    expect(readResetForm(pressed(option?.confirmation.value ?? ""))).toEqual({
       step: "confirm",
       profile: OTHER,
       confirmed: "",
-      token: mark,
+      version: "2.1",
     });
   });
 
@@ -367,7 +365,7 @@ describe("a quién se le puede restablecer", () => {
       "Te mostraremos un código una sola vez. Su invitación para volver caduca en unos días, y se revoca si escribe mal el código varias veces.",
       "Queda registrado con tu nombre.",
     ]);
-    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:alone+inviter`);
+    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:alone+inviter:2.1`);
   });
 
   it("quien ya estaba restablecida hoy no puede cambiar nada: se dice que el código anterior deja de servir, y no que quedarás sola", () => {
@@ -381,6 +379,6 @@ describe("a quién se le puede restablecer", () => {
       "Te mostraremos un código una sola vez. Su invitación para volver caduca en unos días, y se revoca si escribe mal el código varias veces.",
       "Queda registrado con tu nombre.",
     ]);
-    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:inviter+again`);
+    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:inviter+again:2.1`);
   });
 });

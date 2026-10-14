@@ -116,8 +116,8 @@ export function teamStoreOn(owner: Client): TeamStore & TeamAdminStore {
       acting(claims, async () => answerOf(GRANT_ANSWERS, await askGrant(tx, profileId, capability))),
     revoke: (claims, profileId, capability) =>
       acting(claims, async () => answerOf(REVOKE_ANSWERS, await askRevoke(tx, profileId, capability))),
-    resetFactor: (claims, profileId, handoff) =>
-      acting(claims, async () => answerOf(RESET_ANSWERS, await askReset(tx, profileId, handoff))),
+    resetFactor: (claims, profileId, handoff, version) =>
+      acting(claims, async () => answerOf(RESET_ANSWERS, await askReset(tx, profileId, handoff, version))),
   };
 }
 

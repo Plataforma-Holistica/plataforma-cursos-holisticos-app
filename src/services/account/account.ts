@@ -98,7 +98,6 @@ export type {
   ReinviteResult,
   RemovalEffect,
   ResetEffect,
-  ResetPrepared,
   RosterRead,
   TeamInvitation,
   TeamMember,
@@ -460,7 +459,6 @@ export const {
   revokeInvitation,
   grantCapability,
   revokeCapability,
-  prepareReset,
   resetSecondFactor,
   giveFreshCode,
 } = services;

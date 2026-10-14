@@ -215,7 +215,7 @@ select is(pruebas.estado('a0000000-0000-0000-0000-000000000002', pruebas.huella(
 -- ---------------------------------------------------------------------------------------
 -- Quien conserva capacidades y perdió su factor atado.
 
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave'))$$),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.reset_second_factor('c0000000-0000-0000-0000-000000000002', pruebas.huella('clave'), pruebas.version('c0000000-0000-0000-0000-000000000002'))$$),
   'reset', '(se restablece a alguien del equipo)');
 select pruebas.reclamar('c0000000-0000-0000-0000-000000000002');
 select is(pruebas.estado('c0000000-0000-0000-0000-000000000002'), 'invited_unproven - rebind []',

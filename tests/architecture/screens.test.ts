@@ -162,9 +162,9 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Revocar e invitar de nuevo: del formulario solo llega cuál invitación.
     invitationsAction:
       /if \(request\.step === "ask"\) return \{ kind: "confirm", id: request\.id, attempt \};[\s\S]*revokeInvitationOutcome\(await revokeInvitation\(jar, \{ id: request\.id \}\)\)\s*: reinviteOutcome\(await reinviteAdmin\(jar, \{ id: request\.id \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
-    // Restablecer: el primer envío deja el testigo; el segundo lleva lo que se confirmó.
+    // Restablecer: elegir no llama a nadie; confirmar lleva lo que se confirmó y la versión.
     resetAction:
-      /prepareResetOutcome\(await prepareReset\(jar, \{ profile \}\)\)\s*: resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed, token: request\.token \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+      /if \(request\.step === "choose"\) return \{ kind: "confirm", profile, changed: false, attempt \};[\s\S]*resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed, version: request\.version \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
   },
 };
 

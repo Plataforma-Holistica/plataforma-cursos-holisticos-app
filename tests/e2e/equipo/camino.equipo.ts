@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { Client } from "pg";
 
+import { localOwnerUrl } from "../../integration/helpers/local";
 import { totpCode, wrongCode } from "../../integration/helpers/totp";
 import { a11yViolations } from "../support/a11y";
 import { actionFields, postAction } from "../support/actions";
@@ -461,7 +463,7 @@ test("demasiados códigos equivocados: se cierran todas sus sesiones, y la panta
 
 const TEAM = "/admin/equipo";
 const CODE_SHAPE = /^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$/;
-const ALREADY_SENT = /Ese restablecimiento ya se envió, o su confirmación caducó\./;
+const ALREADY_SENT = /Ya restableciste a esta persona después de abrir esta confirmación\./;
 
 interface Member {
   email: string;
@@ -817,15 +819,13 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     const audited = await auditRows();
     const victim = testEmail();
     // Con forma, para que cada envío llegue hasta su servicio: lo que lo detiene es la guarda.
-    const mark = "x".repeat(22);
     const attempts = (who: { id: string }): [string, Record<string, string>][] => [
       ["invitar", { ...inviteFields, email: victim, capability: "config" }],
       ["dar", { ...teamFields, do: `confirm:grant:${who.id}:config:` }],
       ["quitar", { ...teamFields, do: `confirm:revoke:${beto.id}:finance:` }],
       ["revocar una invitación", { ...invitationFields, do: `confirm:revoke:${baitId}` }],
       ["invitar de nuevo", { ...invitationFields, do: `confirm:reinvite:${baitId}` }],
-      ["preparar un restablecimiento", { ...resetFields, do: `choose:${beto.id}` }],
-      ["restablecer", { ...resetFields, do: `confirm:${beto.id}::${mark}` }],
+      ["restablecer", { ...resetFields, do: `confirm:${beto.id}::0.0` }],
       ["dar el código otra vez", { ...codeFields, code: "123456" }],
     ];
     const untouched = async () => {
@@ -1009,21 +1009,23 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await expect(resetting.getByText("Es la única otra persona que puede cambiar el equipo: mientras no vuelva, quedarás como la única.")).toBeVisible();
       expect((await teamOf(beto.id)).bound).toHaveLength(1);
 
-      // La confirmación de la otra pestaña ya no vale: cada una lleva su marca, y el testigo
-      // es de la última que se pidió. No restablece, y no gasta el de esta.
-      await theirReset.getByRole("button", { name: "Sí, restablecer" }).click();
-      await expect(theirReset.getByText(ALREADY_SENT)).toBeVisible();
-      await expect(theirReset.locator("code")).toHaveCount(0);
-      await earlier.close();
-      expect((await teamOf(beto.id)).bound).toHaveLength(1);
-      expect((await invitationsTo(beto.email)).filter((each) => each.kind === "rebind")).toEqual([]);
-
       await resetting.getByRole("button", { name: "Sí, restablecer" }).click();
       const dictated = (await resetting.locator("code").innerText()).trim();
       expect(dictated).toMatch(CODE_SHAPE);
       const first = (await invitationsTo(beto.email)).at(-1);
       expect(first).toEqual({ kind: "rebind", live: true, handoff: sha256(dictated.replaceAll("-", "")), by: ana.id });
       expect((await teamOf(beto.id)).bound).toEqual([]);
+
+      // La confirmación de la otra pestaña lleva la versión de antes: ya no restablece, y el
+      // código que se acaba de dictar sigue siendo el que vale.
+      await theirReset.getByRole("button", { name: "Sí, restablecer" }).click();
+      await expect(theirReset.getByText(ALREADY_SENT)).toBeVisible();
+      await expect(theirReset.locator("code")).toHaveCount(0);
+      await earlier.close();
+      expect((await invitationsTo(beto.email)).at(-1)).toEqual(first);
+      expect((await invitationsTo(beto.email)).filter((each) => each.kind === "rebind")).toHaveLength(1);
+      // Ni una ni otra pestaña dejaron nada en el navegador.
+      expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain("plataforma-restablecer");
 
       // Sin JavaScript, el estado de una acción viaja dentro de todo formulario ligado a ella.
       // La respuesta de restablecer trae el código: no debe estar en ningún campo del
@@ -1062,5 +1064,80 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await page.goto(TEAM);
       expect(await page.content()).not.toContain(dictated);
     });
+  });
+
+  // Lo que de verdad impide dos restablecimientos a la vez es el candado de la base: la
+  // versión se compara dentro de él. Aquí van dos llamadas directas a la base, como las
+  // haría el servidor a nombre de la misma persona, con la misma versión. Va en este proyecto
+  // y no en la integración porque la primera tiene que confirmar, y la auditoría no admite
+  // borrado: al terminar, la base se rehace.
+  test("dos restablecimientos a la vez con la misma versión: el segundo espera el candado y no hace nada", async () => {
+    test.setTimeout(60_000);
+    // La sesión de equipo de quien restablece, con su código reciente.
+    const [session] = await ownerQuery<{ id: string }>(
+      `select s.id::text as id from auth.sessions s join private.app_sessions a on a.session_id = s.id
+       where s.user_id = $1 and s.aal = 'aal2' order by s.created_at desc limit 1`,
+      [ana.id],
+    );
+    if (!session) throw new Error("Quien restablece no tiene una sesión de equipo.");
+    await ownerQuery(
+      "update auth.mfa_amr_claims set updated_at = now() where session_id = $1 and authentication_method = 'totp'",
+      [session.id],
+    );
+    const [current] = await ownerQuery<{ version: string }>("select private.reset_version($1) as version", [beto.id]);
+    const version = current?.version ?? "";
+    const audited = await auditRows();
+
+    // Las dos conexiones son del dueño y toman el rol del servidor. La integración lo concede
+    // dentro de su transacción, que se revierte; aquí son dos transacciones a la vez, y la
+    // segunda esperaría a la primera por la concesión misma. Se concede antes y se quita al
+    // final (y la base se rehace al terminar el proyecto).
+    await ownerQuery("grant app_service to postgres with set true, inherit false");
+    const first = new Client({ connectionString: localOwnerUrl() });
+    const second = new Client({ connectionString: localOwnerUrl() });
+    await first.connect();
+    await second.connect();
+    try {
+      const asAna = async (client: Client) => {
+        await client.query("begin");
+        await client.query(
+          "select set_config('app.actor_id', $1, true), set_config('app.actor_session', $2, true), set_config('role', 'app_service', true)",
+          [ana.id, session.id],
+        );
+      };
+      const reset = (client: Client, secret: string) =>
+        client.query<{ answer: string }>("select private.reset_second_factor($1, $2, $3) as answer", [beto.id, sha256(secret), version]);
+
+      await asAna(first);
+      expect((await reset(first, "PRIMERO")).rows[0]?.answer).toBe("reset");
+      await asAna(second);
+      const [{ pid } = { pid: 0 }] = (await second.query<{ pid: number }>("select pg_backend_pid() as pid")).rows;
+      const waiting = reset(second, "SEGUNDO");
+      // La segunda se queda esperando el candado del equipo mientras la primera no termina.
+      await expect
+        .poll(async () => (await ownerQuery<{ waiting: boolean }>(
+          "select coalesce(wait_event_type = 'Lock', false) as waiting from pg_stat_activity where pid = $1",
+          [pid],
+        ))[0]?.waiting, { timeout: 10_000 })
+        .toBe(true);
+      await first.query("commit");
+      // Cuando entra, la versión ya no es esa, y lo pendiente es de quien actúa: ya se envió.
+      expect((await waiting).rows[0]?.answer).toBe("already_sent");
+      await second.query("commit");
+    } finally {
+      await first.end();
+      await second.end();
+      await ownerQuery("revoke app_service from postgres");
+    }
+    // Una sola invitación para volver, con la huella del primero, y un solo restablecimiento
+    // en la auditoría.
+    const live = (await invitationsTo(beto.email)).filter((each) => each.live);
+    expect(live).toEqual([{ kind: "rebind", live: true, handoff: sha256("PRIMERO"), by: ana.id }]);
+    expect(await auditRows()).toBeGreaterThan(audited);
+    const [counted] = await ownerQuery<{ n: number }>(
+      "select count(*)::int as n from private.admin_invitations where profile_id = $1 and handoff = $2",
+      [beto.id, sha256("SEGUNDO")],
+    );
+    expect(counted?.n).toBe(0);
   });
 });

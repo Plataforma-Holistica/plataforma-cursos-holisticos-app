@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GRANT_ANSWERS, INVITE_ANSWERS, RESET_ANSWERS, REVOKE_ANSWERS, REVOKE_INVITATION_ANSWERS } from "@/services/account/team-admin";
+import { GRANT_ANSWERS, INVITE_ANSWERS, RESET_ANSWERS, RESET_VERSION, REVOKE_ANSWERS, REVOKE_INVITATION_ANSWERS } from "@/services/account/team-admin";
 
 import {
   checkInviteForm,
@@ -8,7 +8,6 @@ import {
   grantOutcome,
   invitationButton,
   inviteOutcome,
-  prepareResetOutcome,
   readInvitationsForm,
   readInviteForm,
   readResetForm,
@@ -29,9 +28,8 @@ import {
 const PERSON = "b0000000-0000-4000-8000-000000000002";
 const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const TO_PAGE = { kind: "leave", to: "/admin/equipo", notice: null };
-/** La marca de una confirmación de restablecer, y el botón que la lleva. */
-const MARK = "m".repeat(22);
-const confirmReset = (profile: string, confirmed: string, mark = MARK) => resetButton.marked(resetButton.confirm(profile, confirmed), mark);
+/** La versión de la persona con que se pinta una confirmación de restablecer. */
+const VERSION = "2.1";
 
 function form(entries: [string, string | Blob][]): FormData {
   const data = new FormData();
@@ -48,7 +46,6 @@ describe("a quien la guarda no dejó se le manda a su página, donde decide ella
     ["revocar una invitación", revokeInvitationOutcome({ kind: "refused" })],
     ["dar una capacidad", grantOutcome({ kind: "refused" })],
     ["quitar una capacidad", revokeOutcome({ kind: "refused" })],
-    ["preparar un restablecimiento", prepareResetOutcome({ kind: "refused" })],
     ["restablecer", resetOutcome({ kind: "refused" })],
   ])("%s", (_what, outcome) => {
     expect(outcome).toEqual(TO_PAGE);
@@ -74,7 +71,6 @@ describe("«no se supo» nunca se pinta como hecho", () => {
     ["no se supo quién pide, al revocar una invitación", revokeInvitationOutcome({ kind: "unavailable" }), "unavailable"],
     ["no se supo quién pide, al dar", grantOutcome({ kind: "unavailable" }), "unavailable"],
     ["no se supo quién pide, al quitar", revokeOutcome({ kind: "unavailable" }), "unavailable"],
-    ["no se supo quién pide, al preparar", prepareResetOutcome({ kind: "unavailable" }), "unavailable"],
     ["no se supo quién pide, al restablecer", resetOutcome({ kind: "unavailable" }), "unavailable"],
     ["no se supo si se invitó", inviteOutcome({ kind: "unknown" }), "unknown"],
     ["no se supo si se invitó de nuevo", reinviteOutcome({ kind: "unknown" }), "unknown"],
@@ -170,6 +166,9 @@ describe("toda respuesta de la base tiene su caso", () => {
       ["unavailable", { kind: "failed", reason: "not_configured" }],
       ["ineligible", { kind: "failed", reason: "ineligible" }],
       ["not_member", { kind: "failed", reason: "not_member" }],
+      // El servicio ya las traduce a sus propios casos; la tabla las entiende igual.
+      ["already_sent", { kind: "failed", reason: "already_sent" }],
+      ["changed", { kind: "confirm_again" }],
     ]);
   });
 });
@@ -331,48 +330,55 @@ describe("las invitaciones: qué botón se pulsó", () => {
 });
 
 describe("restablecer: qué botón se pulsó", () => {
-  it("elegir lleva a quién; confirmar, además lo que se confirmó y la marca de esa confirmación", () => {
+  it("elegir lleva a quién; confirmar, además lo que se confirmó y la versión de la persona", () => {
     expect(readResetForm(pressed(resetButton.choose(PERSON)))).toEqual({ step: "choose", profile: PERSON });
-    expect(readResetForm(pressed(confirmReset(PERSON, "alone+again")))).toEqual({
+    expect(readResetForm(pressed(resetButton.confirm(PERSON, "alone+again", VERSION)))).toEqual({
       step: "confirm",
       profile: PERSON,
       confirmed: "alone+again",
-      token: MARK,
+      version: VERSION,
     });
-    expect(readResetForm(pressed(confirmReset(PERSON, "")))).toEqual({ step: "confirm", profile: PERSON, confirmed: "", token: MARK });
+    expect(readResetForm(pressed(resetButton.confirm(PERSON, "", "0.0")))).toEqual({
+      step: "confirm",
+      profile: PERSON,
+      confirmed: "",
+      version: "0.0",
+    });
     expect(readResetForm(pressed(resetButton.cancel))).toEqual({ step: "cancel" });
   });
 
-  it("el botón de confirmar se arma en dos tiempos: la página pone a quién y qué, y la pantalla, la marca", () => {
-    expect(resetButton.marked(resetButton.confirm(PERSON, "alone"), MARK)).toBe(`confirm:${PERSON}:alone:${MARK}`);
+  it("el botón de confirmar lleva a quién, qué y la versión, en ese orden", () => {
+    expect(resetButton.confirm(PERSON, "alone", VERSION)).toBe(`confirm:${PERSON}:alone:${VERSION}`);
   });
+
+  // La tabla viaja al navegador y no puede importar la regla del servicio: tienen que decir lo mismo.
+  it.each(["0.0", "1.0", "12.3", "999999999.999999999", "", "1", "1.", ".0", "01.0", "1.00", "1.0.0", "a.b", "-1.0", "1234567890.0", " 1.0"])(
+    "la versión %j se entiende igual aquí que en el servicio",
+    (version) => {
+      const read = readResetForm(pressed(`confirm:${PERSON}::${version}`));
+      expect(read.step === "confirm").toBe(RESET_VERSION.test(version));
+    },
+  );
 
   it.each<[string, unknown]>([
     ["lo que no es un formulario", 7],
-    ["más de una intención", form([["do", resetButton.choose(PERSON)], ["do", confirmReset(PERSON, "")]])],
+    ["más de una intención", form([["do", resetButton.choose(PERSON)], ["do", resetButton.confirm(PERSON, "", VERSION)]])],
     ["elegir sin persona", pressed("choose")],
     ["elegir a una persona sin forma", pressed("choose:ana")],
     ["elegir con algo de más", pressed(`choose:${PERSON}:alone`)],
-    ["confirmar sin lo confirmado ni la marca", pressed(`confirm:${PERSON}`)],
-    ["confirmar sin la marca", pressed(resetButton.confirm(PERSON, "alone"))],
-    ["confirmar con la marca vacía", pressed(`confirm:${PERSON}:alone:`)],
-    ["confirmar con una marca corta", pressed(`confirm:${PERSON}:alone:${MARK.slice(1)}`)],
-    ["confirmar con una marca larga", pressed(`confirm:${PERSON}:alone:${MARK}m`)],
-    ["confirmar con una marca con otros signos", pressed(`confirm:${PERSON}:alone:${MARK.slice(1)}.`)],
-    ["confirmar con efectos sin forma", pressed(`confirm:${PERSON}:Alone:${MARK}`)],
-    ["confirmar con algo de más", pressed(`confirm:${PERSON}:alone:${MARK}:otro`)],
+    ["confirmar sin lo confirmado ni la versión", pressed(`confirm:${PERSON}`)],
+    ["confirmar sin la versión", pressed(`confirm:${PERSON}:alone`)],
+    ["confirmar con la versión vacía", pressed(`confirm:${PERSON}:alone:`)],
+    ["confirmar con una versión sin forma", pressed(`confirm:${PERSON}:alone:uno`)],
+    ["confirmar con efectos sin forma", pressed(`confirm:${PERSON}:Alone:${VERSION}`)],
+    ["confirmar con algo de más", pressed(`confirm:${PERSON}:alone:${VERSION}:otro`)],
     ["cancelar con algo de más", pressed("cancel:todo")],
     ["un paso que no existe", pressed(`reset:${PERSON}`)],
   ])("%s cuenta como vacío", (_what, value) => {
     expect(readResetForm(value)).toEqual({ step: "none" });
   });
 
-  it("el primer paso, listo: se pregunta", () => {
-    expect(prepareResetOutcome({ kind: "ready", token: MARK })).toEqual({ kind: "confirm", token: MARK });
-  });
-
-  it("a quien la pantalla no ofrece (una misma, o sin forma) no se le dice nada", () => {
-    expect(prepareResetOutcome({ kind: "malformed" })).toEqual({ kind: "idle" });
+  it("a quien la pantalla no ofrece (sin forma) no se le dice nada", () => {
     expect(resetOutcome({ kind: "malformed" })).toEqual({ kind: "idle" });
   });
 
@@ -380,7 +386,7 @@ describe("restablecer: qué botón se pulsó", () => {
     expect(resetOutcome({ kind: "reset", code: "ABCD-EFGH-JKMN-PQRS" })).toEqual({ kind: "code", code: "ABCD-EFGH-JKMN-PQRS" });
   });
 
-  it("un reenvío sin testigo no toca nada, y lo dice", () => {
+  it("un envío repetido no toca nada, y lo dice", () => {
     expect(resetOutcome({ kind: "already_sent" })).toEqual({ kind: "failed", reason: "already_sent" });
   });
 
