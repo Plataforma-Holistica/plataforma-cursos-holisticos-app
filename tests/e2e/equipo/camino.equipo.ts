@@ -1316,29 +1316,31 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     }
     await untouched();
 
-    // Con configuración y sin Contenido: PA-88 dice qué le falta, y nada cambia. Quitarle
-    // Contenido es preparación, no lo que se prueba: lo hace el dueño, declarado sistema.
+    // Con configuración y sin Contenido: PA-88 dice qué le falta, y nada cambia. Es la misma
+    // persona, sin Contenido (el caso de arriba le restableció el factor a la otra, que ya no
+    // entra). Quitárselo es preparación, no lo que se prueba: lo hace el dueño, declarado
+    // sistema.
     await ownerQuery(
       `with declared as materialized (select set_config('app.actor_kind', 'system', true) as kind)
        update public.admin_capabilities c set revoked_at = now(), revoked_by = $1::uuid from declared
        where c.profile_id = $2::uuid and c.capability = 'content' and c.revoked_at is null`,
-      [ana.id, beto.id],
+      [ana.id, ana.id],
     );
     const prepared = await auditRows();
     await inContext(browser, {}, async (hers, herContext) => {
-      await enterAdmin(hers, beto, "/admin");
+      await enterAdmin(hers, ana, "/admin");
       await expect(hers.getByRole("link", { name: "Prácticas y niveles" })).toHaveCount(0);
       await hers.goto(CATALOG);
       await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Contenido" })).toBeVisible();
       await expect(hers.getByText("Yoga suave")).toHaveCount(0);
-      const given = await lastCodeOf(beto.id);
+      const given = await lastCodeOf(ana.id);
       for (const [what, fields] of [...attempts, ["dar el código otra vez", { ...codeFields, code: "123456" }] as [string, Record<string, string>]]) {
         const answered = await postAction(herContext.request, CATALOG, fields);
         expect(answered.status(), what).toBe(303);
         expect(answered.headers().location, what).toBe(CATALOG);
       }
       // Tampoco se le tomó el código que mandó.
-      expect(await lastCodeOf(beto.id)).toBe(given);
+      expect(await lastCodeOf(ana.id)).toBe(given);
     });
     expect(await practicesNow()).toEqual(snapshot);
     expect(await auditRows()).toBe(prepared);
