@@ -9,6 +9,13 @@ import { defineMessages } from "../format";
 //
 // Ningún plazo ni tope se escribe con su número: son parámetros, y la pantalla no los lee.
 export const admin = defineMessages({
+  // El bloque «Tu código», el mismo en cada sección que cambia algo con un código reciente.
+  // Lo que dice su cuerpo es de cada sección.
+  code: {
+    title: "Tu código",
+    submit: "Comprobar",
+    submitting: "Comprobando…",
+  },
   team: {
     title: "Equipo de administración",
     intro: "Quién entra a administración y con qué capacidades. Cada cambio queda registrado con tu nombre.",
@@ -23,11 +30,8 @@ export const admin = defineMessages({
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
     changesLocked: "Escribe tu código, al inicio de esta página, para poder hacer cambios.",
 
-    // Dar el código otra vez, dentro de la pantalla.
-    codeTitle: "Tu código",
+    // Dar el código otra vez, dentro de la pantalla (el bloque es el compartido, `admin.code`).
     codeBody: "Para cambiar el equipo hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver la lista.",
-    codeSubmit: "Comprobar",
-    codeSubmitting: "Comprobando…",
     codeNotAvailable: "Tu código es correcto, pero por ahora no se puede cambiar el equipo. Avisa a quien opera la base de datos.",
 
     // Invitar. No se manda ningún correo: quien invita le avisa a la persona.

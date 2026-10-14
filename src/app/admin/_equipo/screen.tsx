@@ -8,8 +8,9 @@ import { ROUTES } from "@/services/account/navigation";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
+import { CodeBlock } from "../_lib/code-block";
+
 import { freshCodeAction, invitationsAction, inviteAction, resetAction, teamAction } from "./actions";
-import { CODE_BLOCK_ID, CodeBlock } from "./code-block";
 import { INVITATIONS_BLOCK_ID, InvitationsBlock } from "./invitations-block";
 import { INVITE_BLOCK_ID, InviteBlock } from "./invite-block";
 import { MEMBERS_BLOCK_ID, MembersBlock } from "./members-block";
@@ -34,6 +35,10 @@ const INVITE_IDLE: InviteState = { kind: "idle" };
 const TEAM_IDLE: TeamState = { kind: "idle" };
 const INVITATIONS_IDLE: InvitationsState = { kind: "idle" };
 const RESET_IDLE: ResetState = { kind: "idle" };
+// El bloque «Tu código», que es el compartido: sus `id` son de esta pantalla.
+const CODE_BLOCK_ID = "bloque-equipo-codigo";
+const CODE_TITLE_ID = "equipo-codigo-titulo";
+const CODE_FIELD_ID = "equipo-codigo";
 // A dónde vuelve el navegador cuando un formulario se envía sin JavaScript: a esta misma
 // pantalla, parado en el bloque que envió.
 const CODE_PERMALINK = `${ROUTES.team}#${CODE_BLOCK_ID}`;
@@ -77,7 +82,18 @@ export function TeamScreen({ view }: TeamScreenProps) {
         <h1 className="text-h1">{text.title}</h1>
         <p className="text-text-2">{text.intro}</p>
       </div>
-      {!view.canChange && <CodeBlock state={code} action={codeAction} pending={codePending} />}
+      {!view.canChange && (
+        <CodeBlock
+          blockId={CODE_BLOCK_ID}
+          titleId={CODE_TITLE_ID}
+          fieldId={CODE_FIELD_ID}
+          body={text.codeBody}
+          notAvailable={text.codeNotAvailable}
+          state={code}
+          action={codeAction}
+          pending={codePending}
+        />
+      )}
       <InviteBlock capabilities={view.capabilities} canChange={view.canChange} state={invite} action={sendInvite} pending={invitePending} />
       <MembersBlock members={view.members} canChange={view.canChange} state={team} action={sendTeam} pending={teamPending} />
       <InvitationsBlock

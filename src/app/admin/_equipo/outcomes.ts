@@ -9,7 +9,8 @@ import type {
 } from "@/services/account/account";
 import { parseEmail } from "@/services/account/field-rules";
 import { ROUTES } from "@/services/account/navigation";
-import type { Notice } from "@/services/account/notice";
+
+import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
 
 // Qué pinta y qué hace la pantalla del equipo (diseño, PA-86; FL-56). Todo aquí es puro: el
 // servicio corre la guarda y le pregunta a la base, y esto traduce su respuesta a un destino
@@ -28,12 +29,7 @@ import type { Notice } from "@/services/account/notice";
 //
 // Viaja al navegador: no importa nada del servidor.
 
-/** A dónde manda una acción cuando no pinta nada. */
-export interface Leave {
-  kind: "leave";
-  to: string;
-  notice: Notice | null;
-}
+export type { CodeState, Leave } from "../_lib/fresh-code";
 
 /** A esta misma página: decide su guarda. */
 const TO_PAGE: Leave = { kind: "leave", to: ROUTES.team, notice: null };
@@ -61,33 +57,9 @@ function intentOf(form: unknown): string[] | null {
 // ---------------------------------------------------------------------------------------
 // «Tu código»: dar el código otra vez, para que un cambio pase.
 
-/** Lo que el bloque del código pinta después de un envío. Nunca trae el código. */
-export type CodeState =
-  | { kind: "idle" }
-  | { kind: "invalid"; problem: "required" | "invalid"; attempt: number }
-  | { kind: "failed"; reason: "wrong_code" | "unavailable" | "not_available"; attempt: number };
-
-export type CodeOutcome = Leave | { kind: "failed"; reason: "wrong_code" | "unavailable" | "not_available" };
-
+/** Lo que contestó dar el código: la tabla compartida, con esta página. */
 export function freshCodeOutcome(result: FreshCode): CodeOutcome {
-  switch (result.kind) {
-    case "verified":
-      // Una redirección, y no volver a pintar: así recargar no reenvía un código de seis
-      // dígitos, que pasada su ventana contaría en el freno.
-      return TO_PAGE;
-    case "wrong_code":
-      return { kind: "failed", reason: "wrong_code" };
-    case "throttled":
-      // El freno rechazó: Auth ya cerró todas las sesiones de la cuenta y el adaptador borró
-      // la cookie. No queda nada que cerrar: solo decirle qué pasó.
-      return { kind: "leave", to: ROUTES.signIn, notice: "second_factor_throttled" };
-    case "not_available":
-      return { kind: "failed", reason: "not_available" };
-    case "unavailable":
-      return { kind: "failed", reason: "unavailable" };
-    case "refused":
-      return TO_PAGE;
-  }
+  return givenCodeOutcome(result, ROUTES.team);
 }
 
 // ---------------------------------------------------------------------------------------
