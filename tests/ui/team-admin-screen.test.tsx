@@ -1,5 +1,6 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // La pantalla del equipo (PA-86). Las acciones de servidor son la frontera con el servicio:
@@ -16,6 +17,7 @@ vi.mock("@/app/admin/_equipo/actions", () => actions);
 
 import type { CodeState, InvitationsState, InviteState, ResetState, TeamState } from "@/app/admin/_equipo/outcomes";
 import { teamView } from "@/app/admin/_equipo/rows";
+import { ResetBlock } from "@/app/admin/_equipo/reset-block";
 import { TeamScreen } from "@/app/admin/_equipo/screen";
 import type { TeamInvitation, TeamMember, TeamRoster } from "@/services/account/account";
 
@@ -28,6 +30,8 @@ const OTHER = "b0000000-0000-4000-8000-000000000002";
 const THIRD = "c0000000-0000-4000-8000-000000000003";
 const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const CODE = "ABCD-EFGH-JKMN-PQRS";
+/** La marca de una confirmación de restablecer: la pone el servicio, y viaja en el botón. */
+const MARK = "m".repeat(22);
 
 const member = (over: Partial<TeamMember> = {}): TeamMember => ({
   profileId: OTHER,
@@ -442,7 +446,7 @@ describe("el bloque «Invitaciones pendientes»", () => {
 });
 
 describe("el bloque «Restablecer un segundo factor»", () => {
-  const asked: ResetState = { kind: "confirm", profile: OTHER, changed: false, attempt: 1 };
+  const asked: ResetState = { kind: "confirm", profile: OTHER, token: MARK, changed: false, attempt: 1 };
   const shown: ResetState = { kind: "code", code: CODE, attempt: 2 };
   const choose = (user: ReturnType<typeof userEvent.setup>) =>
     user.click(blockOf("Restablecer un segundo factor").getByRole("button", { name: "Restablecer el segundo factor de otra@prueba.test" }));
@@ -462,7 +466,8 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     const panel = (await screen.findByText("¿Restablecer el segundo factor de otra@prueba.test?")).parentElement as HTMLElement;
     expect(panel).toHaveFocus();
     expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
-    expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}:`);
+    // El botón lleva a quién, lo que se confirma y la marca de esta confirmación.
+    expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}::${MARK}`);
     expect(await a11yViolations(container)).toEqual([]);
   });
 
@@ -471,7 +476,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     const { user, container } = show();
     await choose(user);
     await user.click(await screen.findByRole("button", { name: "Sí, restablecer" }));
-    expect(formOf(actions.resetAction, 1)).toEqual({ do: `confirm:${OTHER}:` });
+    expect(formOf(actions.resetAction, 1)).toEqual({ do: `confirm:${OTHER}::${MARK}` });
     expect(await screen.findByText(CODE)).toBeVisible();
     expect(screen.getAllByText(CODE)).toHaveLength(1);
     expect(screen.getByText("Díctaselo por teléfono o en persona, no por correo. Se muestra una sola vez: si se pierde, restablece de nuevo.")).toBeVisible();
@@ -494,6 +499,34 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     const done = within(block).getByRole("link", { name: "Ya lo dicté" });
     expect(done).toHaveAttribute("href", "/admin/equipo");
     expect(done.tagName).toBe("A");
+  });
+
+  // La regla no depende de que el navegador haya corrido algo: sin JavaScript lo que llega es
+  // lo que el servidor pintó, y React mete el estado de una acción en todo formulario ligado
+  // a ella. Se mira el marcado tal como sale del servidor.
+  it.each<[string, boolean]>([
+    ["a la vista", false],
+    ["ya escondido", true],
+  ])("pintado en el servidor con el código %s, el bloque no trae ningún formulario ni ningún campo", (_what, codeHidden) => {
+    const html = renderToString(
+      <ResetBlock options={teamView(rosterOf()).resettable} canChange state={shown} codeHidden={codeHidden} action={() => undefined} pending={false} />,
+    );
+    expect(html).not.toMatch(/<(form|input|button|textarea|select)\b/);
+    expect(html.split(CODE).length - 1).toBe(codeHidden ? 0 : 1);
+    expect(html).toContain('href="/admin/equipo"');
+  });
+
+  it.each<[string, ResetState]>([
+    ["sin nada pedido", { kind: "idle" }],
+    ["con una confirmación", asked],
+    ["con un fallo", { kind: "failed", reason: "unknown", attempt: 1 }],
+  ])("pintado en el servidor %s sí trae su formulario: la prueba de arriba mira algo que existe", (_what, state) => {
+    const html = renderToString(
+      <ResetBlock options={teamView(rosterOf()).resettable} canChange state={state} codeHidden={false} action={() => undefined} pending={false} />,
+    );
+    expect(html).toMatch(/<form\b/);
+    expect(html).toMatch(/<button\b/);
+    expect(html).not.toContain("ABCD");
   });
 
   it("al salir de la página el código deja de pintarse, y sigue sin haber formulario", async () => {
@@ -535,7 +568,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
   });
 
   it("si esa persona ya no se puede restablecer, no hay nada que confirmar: se dice", async () => {
-    actions.resetAction.mockResolvedValue({ kind: "confirm", profile: THIRD, changed: true, attempt: 1 } satisfies ResetState);
+    actions.resetAction.mockResolvedValue({ kind: "confirm", profile: THIRD, token: MARK, changed: true, attempt: 1 } satisfies ResetState);
     const { user } = show();
     await choose(user);
     expect(await screen.findByText("La lista cambió mientras confirmabas. Revisa de nuevo lo que va a pasar.")).toBeVisible();

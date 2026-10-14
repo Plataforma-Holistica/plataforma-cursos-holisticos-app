@@ -29,6 +29,9 @@ import {
 const PERSON = "b0000000-0000-4000-8000-000000000002";
 const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const TO_PAGE = { kind: "leave", to: "/admin/equipo", notice: null };
+/** La marca de una confirmación de restablecer, y el botón que la lleva. */
+const MARK = "m".repeat(22);
+const confirmReset = (profile: string, confirmed: string, mark = MARK) => resetButton.marked(resetButton.confirm(profile, confirmed), mark);
 
 function form(entries: [string, string | Blob][]): FormData {
   const data = new FormData();
@@ -328,22 +331,36 @@ describe("las invitaciones: qué botón se pulsó", () => {
 });
 
 describe("restablecer: qué botón se pulsó", () => {
-  it("elegir lleva a quién; confirmar, además lo que se confirmó", () => {
+  it("elegir lleva a quién; confirmar, además lo que se confirmó y la marca de esa confirmación", () => {
     expect(readResetForm(pressed(resetButton.choose(PERSON)))).toEqual({ step: "choose", profile: PERSON });
-    expect(readResetForm(pressed(resetButton.confirm(PERSON, "alone+again")))).toEqual({ step: "confirm", profile: PERSON, confirmed: "alone+again" });
-    expect(readResetForm(pressed(resetButton.confirm(PERSON, "")))).toEqual({ step: "confirm", profile: PERSON, confirmed: "" });
+    expect(readResetForm(pressed(confirmReset(PERSON, "alone+again")))).toEqual({
+      step: "confirm",
+      profile: PERSON,
+      confirmed: "alone+again",
+      token: MARK,
+    });
+    expect(readResetForm(pressed(confirmReset(PERSON, "")))).toEqual({ step: "confirm", profile: PERSON, confirmed: "", token: MARK });
     expect(readResetForm(pressed(resetButton.cancel))).toEqual({ step: "cancel" });
+  });
+
+  it("el botón de confirmar se arma en dos tiempos: la página pone a quién y qué, y la pantalla, la marca", () => {
+    expect(resetButton.marked(resetButton.confirm(PERSON, "alone"), MARK)).toBe(`confirm:${PERSON}:alone:${MARK}`);
   });
 
   it.each<[string, unknown]>([
     ["lo que no es un formulario", 7],
-    ["más de una intención", form([["do", resetButton.choose(PERSON)], ["do", resetButton.confirm(PERSON, "")]])],
+    ["más de una intención", form([["do", resetButton.choose(PERSON)], ["do", confirmReset(PERSON, "")]])],
     ["elegir sin persona", pressed("choose")],
     ["elegir a una persona sin forma", pressed("choose:ana")],
     ["elegir con algo de más", pressed(`choose:${PERSON}:alone`)],
-    ["confirmar sin el último campo", pressed(`confirm:${PERSON}`)],
-    ["confirmar con efectos sin forma", pressed(`confirm:${PERSON}:Alone`)],
-    ["confirmar con algo de más", pressed(`confirm:${PERSON}:alone:otro`)],
+    ["confirmar sin lo confirmado ni la marca", pressed(`confirm:${PERSON}`)],
+    ["confirmar sin la marca", pressed(resetButton.confirm(PERSON, "alone"))],
+    ["confirmar con la marca vacía", pressed(`confirm:${PERSON}:alone:`)],
+    ["confirmar con una marca corta", pressed(`confirm:${PERSON}:alone:${MARK.slice(1)}`)],
+    ["confirmar con una marca larga", pressed(`confirm:${PERSON}:alone:${MARK}m`)],
+    ["confirmar con una marca con otros signos", pressed(`confirm:${PERSON}:alone:${MARK.slice(1)}.`)],
+    ["confirmar con efectos sin forma", pressed(`confirm:${PERSON}:Alone:${MARK}`)],
+    ["confirmar con algo de más", pressed(`confirm:${PERSON}:alone:${MARK}:otro`)],
     ["cancelar con algo de más", pressed("cancel:todo")],
     ["un paso que no existe", pressed(`reset:${PERSON}`)],
   ])("%s cuenta como vacío", (_what, value) => {
@@ -351,7 +368,7 @@ describe("restablecer: qué botón se pulsó", () => {
   });
 
   it("el primer paso, listo: se pregunta", () => {
-    expect(prepareResetOutcome({ kind: "ready" })).toEqual({ kind: "confirm" });
+    expect(prepareResetOutcome({ kind: "ready", token: MARK })).toEqual({ kind: "confirm", token: MARK });
   });
 
   it("a quien la pantalla no ofrece (una misma, o sin forma) no se le dice nada", () => {

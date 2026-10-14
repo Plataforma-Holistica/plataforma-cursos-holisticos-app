@@ -456,7 +456,8 @@ export type ResetFailure =
 /** Lo que el bloque de restablecer pinta después de un envío. */
 export type ResetState =
   | { kind: "idle" }
-  | { kind: "confirm"; profile: string; changed: boolean; attempt: number }
+  /** `token`: la marca de esta confirmación, que su botón tiene que traer. No es un secreto. */
+  | { kind: "confirm"; profile: string; token: string; changed: boolean; attempt: number }
   /**
    * El código que hay que dictar. Mientras el estado sea este, la pantalla no pinta ningún
    * formulario de esta acción: viajaría dentro de él.
@@ -467,32 +468,41 @@ export type ResetState =
 export type ResetRequest =
   /** El primer paso: a quién. Deja el testigo, y no toca nada más. */
   | { step: "choose"; profile: string }
-  | { step: "confirm"; profile: string; confirmed: string }
+  /** `token`: la marca de la confirmación que se está enviando. */
+  | { step: "confirm"; profile: string; confirmed: string; token: string }
   | { step: "cancel" }
   | { step: "none" };
 
 /** Los valores que llevan los botones del bloque de restablecer. */
 export const resetButton = {
   choose: (profile: string) => `choose:${profile}`,
+  /** A quién, y lo que se confirmó que pasaría. Lo arma la página; le falta la marca. */
   confirm: (profile: string, confirmed: string) => `confirm:${profile}:${confirmed}`,
+  /** El valor completo del botón: lo de arriba, con la marca de esta confirmación. */
+  marked: (value: string, token: string) => `${value}:${token}`,
   cancel: "cancel",
 } as const;
+
+// La marca de una confirmación, como la arma el servidor: 22 caracteres de base64 de URL.
+const MARK = /^[A-Za-z0-9_-]{22}$/;
 
 /** Lo que llega del formulario de restablecer: qué botón se pulsó. */
 export function readResetForm(form: unknown): ResetRequest {
   const parts = intentOf(form);
   if (parts === null) return { step: "none" };
-  const [step, profile = "", confirmed = ""] = parts;
+  const [step, profile = "", confirmed = "", token = ""] = parts;
   if (step === "cancel" && parts.length === 1) return { step: "cancel" };
   if (!ID.test(profile)) return { step: "none" };
   if (step === "choose" && parts.length === 2) return { step: "choose", profile };
-  if (step === "confirm" && parts.length === 3 && EFFECTS.test(confirmed)) return { step: "confirm", profile, confirmed };
+  if (step === "confirm" && parts.length === 4 && EFFECTS.test(confirmed) && MARK.test(token)) {
+    return { step: "confirm", profile, confirmed, token };
+  }
   return { step: "none" };
 }
 
 export type ResetOutcome =
   | Leave
-  | { kind: "confirm" }
+  | { kind: "confirm"; token: string }
   | { kind: "confirm_again" }
   | { kind: "code"; code: string }
   /** Lo que llegó no tenía forma, o era quien actúa: la pantalla no lo ofrece, y no se dice nada. */
@@ -502,7 +512,7 @@ export type ResetOutcome =
 export function prepareResetOutcome(result: ResetPrepared): ResetOutcome {
   switch (result.kind) {
     case "ready":
-      return { kind: "confirm" };
+      return { kind: "confirm", token: result.token };
     case "malformed":
       return { kind: "idle" };
     case "refused":

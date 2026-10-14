@@ -134,8 +134,11 @@ const rosterShape = z.strictObject({
       profile_id: id.nullable(),
       capabilities: z.array(capability),
       invited_by: id.nullable(),
-      created_at: z.iso.datetime({ offset: true }),
-      expires_at: z.iso.datetime({ offset: true }),
+      // Como texto, y no como fecha con forma: un plazo desmedido da un año de cinco cifras,
+      // y rechazarlo tumbaría la pantalla entera por una sola invitación. Una fecha que no
+      // se entiende simplemente no se pinta.
+      created_at: z.string(),
+      expires_at: z.string(),
       expired: z.boolean(),
       acceptable: z.boolean(),
     }),

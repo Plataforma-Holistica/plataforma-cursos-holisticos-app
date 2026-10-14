@@ -69,7 +69,8 @@ export const admin = defineMessages({
     effectSessions: "Se cierran todas sus sesiones.",
     effectSelf: "Es tu propia cuenta: también se cierra tu sesión, y tendrás que entrar de nuevo.",
     effectLast: "Es su última capacidad: deja de ser del equipo. Se borran su segundo factor y las invitaciones dirigidas a esa cuenta.",
-    effectInviter: "Se revocan las invitaciones vigentes que hizo.",
+    effectInviter:
+      "Se revocan las invitaciones vigentes que hizo. Si con una de ellas alguien iba a configurar de nuevo su segundo factor, habrá que restablecerlo otra vez.",
     effectLogged: "Queda registrado con tu nombre.",
     confirmRemove: "Sí, quitar",
     confirmGiveTitle: "¿Dar {capability} a {email}?",
@@ -120,7 +121,8 @@ export const admin = defineMessages({
     effectResetAlways:
       "Se borran su segundo factor y todas sus sesiones. Antes de volver a entrar, a cualquier parte del sitio, tendrá que recuperar su contraseña desde su correo.",
     effectResetInvitations: "Se revocan las invitaciones vigentes dirigidas a esa cuenta.",
-    effectResetInviter: "Se revocan también las invitaciones vigentes que hizo.",
+    effectResetInviter:
+      "Se revocan también las invitaciones vigentes que hizo. Si con una de ellas alguien iba a configurar de nuevo su segundo factor, habrá que restablecerlo otra vez.",
     effectResetAlone: "Es la única otra persona que puede cambiar el equipo: mientras no vuelva, quedarás como la única.",
     effectResetAgain: "Ya estaba restablecida: el código que le hayas dictado antes deja de servir.",
     effectResetCode:

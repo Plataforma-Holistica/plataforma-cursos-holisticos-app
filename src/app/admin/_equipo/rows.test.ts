@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TeamInvitation, TeamMember, TeamRoster } from "@/services/account/account";
 
-import { readInvitationsForm, readResetForm, readTeamForm } from "./outcomes";
+import { readInvitationsForm, readResetForm, readTeamForm, resetButton } from "./outcomes";
 import { teamView } from "./rows";
 
 // El equipo, puesto en palabras (PA-86): qué botón se ofrece en cada fila, y qué dice su
@@ -162,7 +162,7 @@ describe("quitar una capacidad", () => {
     const row = capabilityOf(roster, OTHER, "config");
     expect(row.confirmation?.effects).toEqual([
       "Se cierran todas sus sesiones.",
-      "Se revocan las invitaciones vigentes que hizo.",
+      "Se revocan las invitaciones vigentes que hizo. Si con una de ellas alguien iba a configurar de nuevo su segundo factor, habrá que restablecerlo otra vez.",
       "Queda registrado con tu nombre.",
     ]);
     expect(row.confirmation?.value).toBe(`confirm:revoke:${OTHER}:config:inviter`);
@@ -344,21 +344,43 @@ describe("a quién se le puede restablecer", () => {
       },
     });
     expect(readResetForm(pressed(option?.choose.value ?? ""))).toEqual({ step: "choose", profile: OTHER });
-    expect(readResetForm(pressed(option?.confirmation.value ?? ""))).toEqual({ step: "confirm", profile: OTHER, confirmed: "" });
+    // Al botón de confirmar le falta la marca de esa confirmación, que pone la pantalla: sin
+    // ella no se entiende, y con ella sí.
+    expect(readResetForm(pressed(option?.confirmation.value ?? ""))).toEqual({ step: "none" });
+    const mark = "m".repeat(22);
+    expect(readResetForm(pressed(resetButton.marked(option?.confirmation.value ?? "", mark)))).toEqual({
+      step: "confirm",
+      profile: OTHER,
+      confirmed: "",
+      token: mark,
+    });
   });
 
-  it("la única otra persona con configuración, que invitó y ya estaba restablecida: se dice todo, en ese orden", () => {
+  it("la única otra persona que hoy puede cambiar el equipo, y que invitó: se dice todo, en ese orden", () => {
+    const roster = rosterOf([self(), member({ capabilities: ["config"] })], [invitation({ invitedBy: OTHER })]);
+    const [option] = optionsOf(roster);
+    expect(option?.confirmation.effects).toEqual([
+      "Se borran su segundo factor y todas sus sesiones. Antes de volver a entrar, a cualquier parte del sitio, tendrá que recuperar su contraseña desde su correo.",
+      "Se revocan las invitaciones vigentes dirigidas a esa cuenta.",
+      "Se revocan también las invitaciones vigentes que hizo. Si con una de ellas alguien iba a configurar de nuevo su segundo factor, habrá que restablecerlo otra vez.",
+      "Es la única otra persona que puede cambiar el equipo: mientras no vuelva, quedarás como la única.",
+      "Te mostraremos un código una sola vez. Su invitación para volver caduca en unos días, y se revoca si escribe mal el código varias veces.",
+      "Queda registrado con tu nombre.",
+    ]);
+    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:alone+inviter`);
+  });
+
+  it("quien ya estaba restablecida hoy no puede cambiar nada: se dice que el código anterior deja de servir, y no que quedarás sola", () => {
     const roster = rosterOf([self(), member({ capabilities: ["config"], factor: "none", rebind: "pending" })], [invitation({ invitedBy: OTHER })]);
     const [option] = optionsOf(roster);
     expect(option?.confirmation.effects).toEqual([
       "Se borran su segundo factor y todas sus sesiones. Antes de volver a entrar, a cualquier parte del sitio, tendrá que recuperar su contraseña desde su correo.",
       "Se revocan las invitaciones vigentes dirigidas a esa cuenta.",
-      "Se revocan también las invitaciones vigentes que hizo.",
-      "Es la única otra persona que puede cambiar el equipo: mientras no vuelva, quedarás como la única.",
+      "Se revocan también las invitaciones vigentes que hizo. Si con una de ellas alguien iba a configurar de nuevo su segundo factor, habrá que restablecerlo otra vez.",
       "Ya estaba restablecida: el código que le hayas dictado antes deja de servir.",
       "Te mostraremos un código una sola vez. Su invitación para volver caduca en unos días, y se revoca si escribe mal el código varias veces.",
       "Queda registrado con tu nombre.",
     ]);
-    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:alone+inviter+again`);
+    expect(option?.confirmation.value).toBe(`confirm:${OTHER}:inviter+again`);
   });
 });

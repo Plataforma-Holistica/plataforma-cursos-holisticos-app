@@ -153,6 +153,41 @@ async function sessionsIn(owner: Client, userId: string): Promise<number> {
   return rows.rows.length;
 }
 
+/**
+ * Una invitación vigente que hizo esa persona, dentro de la transacción. La pone el dueño:
+ * lo que se prueba es qué le pasa cuando a quien la hizo le cambian algo, no cómo se invita.
+ */
+async function invitationBy(owner: Client, inviter: KnownUser): Promise<string> {
+  await asSystem(owner);
+  const made = await owner.query<{ id: string }>(
+    `insert into private.admin_invitations (kind, email, capabilities, invited_by, created_at, expires_at)
+     values ('grant', $1, array['support']::public.capability[], $2, now(), now() + interval '1 day')
+     returning id::text as id`,
+    [testEmail().toLowerCase(), inviter.id],
+  );
+  await asOwner(owner);
+  const id = made.rows[0]?.id;
+  if (!id) throw new Error("La invitación de prueba no se creó.");
+  return id;
+}
+
+/** Si esa invitación sigue viva: ni aceptada ni revocada. */
+async function alive(owner: Client, id: string): Promise<boolean> {
+  const rows = await owner.query("select 1 from private.admin_invitations where id = $1 and accepted_at is null and revoked_at is null", [id]);
+  return rows.rows.length === 1;
+}
+
+/** Una marca con forma que ningún testigo lleva. */
+const NO_MARK = "x".repeat(22);
+
+/** El primer paso de restablecer: deja el testigo y devuelve su marca. */
+async function prepared(services: TestServices, jar: MemoryJar, profile: string): Promise<string> {
+  const ready = await services.prepareReset(jar, { profile });
+  if (ready.kind !== "ready") throw new Error(`El primer paso no dejó testigo: ${ready.kind}`);
+  expect(ready.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  return ready.token;
+}
+
 const memberOf = (roster: TeamRoster, person: KnownUser) => roster.members.find((member) => member.profileId === person.id);
 
 describe("quien no puede administrar al equipo", () => {
@@ -171,7 +206,7 @@ describe("quien no puede administrar al equipo", () => {
     expect(await services.grantCapability(jar, { profile: person.id, capability: "config" })).toEqual({ kind: "refused" });
     expect(await services.revokeCapability(jar, { profile: person.id, capability: "config", confirmed: "" })).toEqual({ kind: "refused" });
     expect(await services.prepareReset(jar, { profile: person.id })).toEqual({ kind: "refused" });
-    expect(await services.resetSecondFactor(jar, { profile: person.id, confirmed: "" })).toEqual({ kind: "refused" });
+    expect(await services.resetSecondFactor(jar, { profile: person.id, confirmed: "", token: NO_MARK })).toEqual({ kind: "refused" });
     expect(await services.giveFreshCode(jar, "123456")).toEqual({ kind: "refused" });
 
     // No se le pintó como caída: la sesión no pasa la puerta, y eso no se reporta.
@@ -385,20 +420,28 @@ describe("restablecer el segundo factor de alguien", () => {
       const other = await teammate(owner, ["config", "support"]);
 
       // Sin el primer paso no hay testigo: no se toca nada.
-      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone" })).toEqual({ kind: "already_sent" });
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone", token: NO_MARK })).toEqual({ kind: "already_sent" });
       expect(memberOf(await roster(), other)?.factor).toBe("bound");
       // Nadie se restablece a sí misma.
       expect(await services.prepareReset(jar, { profile: person.id })).toEqual({ kind: "malformed" });
 
-      expect(await services.prepareReset(jar, { profile: other.id })).toEqual({ kind: "ready" });
-      expect(jar.get(TOKEN)).toBe(`${sessionId}.${other.id}`);
+      const stale = await prepared(services, jar, other.id);
+      // Pedir la confirmación otra vez deja otro testigo: la marca de la anterior ya no vale.
+      const mark = await prepared(services, jar, other.id);
+      expect(mark).not.toBe(stale);
+      expect(jar.get(TOKEN)).toBe(`${sessionId}.${other.id}.${mark}`);
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone", token: stale })).toEqual({ kind: "already_sent" });
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone", token: NO_MARK })).toEqual({ kind: "already_sent" });
+      // Y un intento con otra marca no gasta el testigo de esta.
+      expect(jar.get(TOKEN)).toBe(`${sessionId}.${other.id}.${mark}`);
+      expect(memberOf(await roster(), other)?.factor).toBe("bound");
 
       // Es la única otra persona con configuración, y eso hay que haberlo confirmado.
-      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "" })).toEqual({ kind: "changed" });
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "", token: mark })).toEqual({ kind: "changed" });
       expect(jar.get(TOKEN)).toBeDefined();
       expect(memberOf(await roster(), other)?.factor).toBe("bound");
 
-      const result = await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone" });
+      const result = await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone", token: mark });
       if (result.kind !== "reset") throw new Error(`No restableció: ${result.kind}`);
       expect(result.code).toMatch(/^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$/);
       expect(jar.get(TOKEN)).toBeUndefined();
@@ -427,7 +470,7 @@ describe("restablecer el segundo factor de alguien", () => {
       expect(JSON.stringify(after)).not.toContain(invitation.rows[0]?.handoff);
 
       // Un reenvío del mismo formulario ya no trae testigo: no restablece otra vez.
-      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone+again" })).toEqual({ kind: "already_sent" });
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "again", token: mark })).toEqual({ kind: "already_sent" });
       const same = await owner.query<{ handoff: string }>(
         "select handoff from private.admin_invitations where profile_id = $1 and accepted_at is null and revoked_at is null",
         [other.id],
@@ -435,11 +478,65 @@ describe("restablecer el segundo factor de alguien", () => {
       expect(same.rows).toEqual([{ handoff: invitation.rows[0]?.handoff }]);
 
       // Restablecer otra vez se puede, con otro primer paso: el código anterior deja de servir.
-      expect(await services.prepareReset(jar, { profile: other.id })).toEqual({ kind: "ready" });
-      const second = await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone+again" });
+      // Ya no se avisa «quedarás como la única»: sin factor, esa persona hoy no cambia nada.
+      const again = await prepared(services, jar, other.id);
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone+again", token: again })).toEqual({ kind: "changed" });
+      const second = await services.resetSecondFactor(jar, { profile: other.id, confirmed: "again", token: again });
       if (second.kind !== "reset") throw new Error(`No restableció otra vez: ${second.kind}`);
       expect(second.code).not.toBe(result.code);
 
+      expect(services.reported).toEqual([]);
+    });
+  });
+
+  it("a quien invitó: hay que haber confirmado que sus invitaciones se revocan, y la base las revoca", async () => {
+    await asTeamMember(["config"], async ({ owner, services, jar, roster }) => {
+      const other = await teammate(owner, ["config"]);
+      const hers = await invitationBy(owner, other);
+      expect((await roster()).invitations).toMatchObject([{ id: hers, invitedBy: other.id }]);
+
+      const mark = await prepared(services, jar, other.id);
+      // Sin lo de sus invitaciones, lo confirmado no es lo que pasaría.
+      expect(await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone", token: mark })).toEqual({ kind: "changed" });
+      expect(await alive(owner, hers)).toBe(true);
+
+      const result = await services.resetSecondFactor(jar, { profile: other.id, confirmed: "alone+inviter", token: mark });
+      expect(result.kind).toBe("reset");
+      // Lo que la confirmación dijo es lo que la base hizo.
+      expect(await alive(owner, hers)).toBe(false);
+      const after = await roster();
+      expect(after.invitations).toHaveLength(1);
+      expect(after.invitations).toMatchObject([{ kind: "rebind", profileId: other.id }]);
+      expect(services.reported).toEqual([]);
+    });
+  });
+});
+
+describe("quitarle configuración a quien invitó", () => {
+  it("hay que haber confirmado que sus invitaciones se revocan, y la base las revoca", async () => {
+    await asTeamMember(["config"], async ({ owner, services, jar, roster }) => {
+      const other = await teammate(owner, ["config", "support"]);
+      await teammate(owner, ["config"]);
+      const hers = await invitationBy(owner, other);
+      expect(memberOf(await roster(), other)?.configRemovable).toBe(true);
+
+      // Quitarle otra capacidad no toca lo que invitó, y no hay nada de eso que confirmar.
+      expect(await services.revokeCapability(jar, { profile: other.id, capability: "support", confirmed: "inviter" })).toEqual({ kind: "changed" });
+      expect(await services.revokeCapability(jar, { profile: other.id, capability: "support", confirmed: "" })).toEqual({
+        kind: "answered",
+        answer: "revoked",
+      });
+      expect(await alive(owner, hers)).toBe(true);
+
+      // Configuración sí: es su última capacidad, e invitó.
+      expect(await services.revokeCapability(jar, { profile: other.id, capability: "config", confirmed: "last" })).toEqual({ kind: "changed" });
+      expect(await alive(owner, hers)).toBe(true);
+      expect(await services.revokeCapability(jar, { profile: other.id, capability: "config", confirmed: "last+inviter" })).toEqual({
+        kind: "answered",
+        answer: "revoked",
+      });
+      expect(await alive(owner, hers)).toBe(false);
+      expect((await roster()).invitations).toEqual([]);
       expect(services.reported).toEqual([]);
     });
   });

@@ -156,7 +156,8 @@ export type CapabilityRevoked =
   /** Se la quitó a sí misma: la base cerró sus sesiones, y su cookie ya no está. */
   | { kind: "revoked_self" }
   | { kind: "answered"; answer: RevokeAnswer };
-export type ResetPrepared = Refused | Unavailable | Malformed | { kind: "ready" };
+/** `token`: la marca de esa confirmación. No es un secreto: distingue una confirmación de otra. */
+export type ResetPrepared = Refused | Unavailable | Malformed | { kind: "ready"; token: string };
 export type FactorReset =
   | Refused
   | Unavailable
@@ -226,8 +227,9 @@ export type ResetEffect = "alone" | "inviter" | "again";
  * Qué más pasa al restablecer a esa persona. Nulo si no está en la lista, es quien actúa,
  * o su cuenta no está activa: a esas no se les restablece.
  *
- *   alone    tiene configuración y nadie más la tiene con su factor en regla: quien actúa
- *            queda como la única persona que puede cambiar el equipo
+ *   alone    hoy puede cambiar el equipo (configuración, y su factor en regla) y nadie más
+ *            puede: quien actúa queda como la única. Si ya no podía, restablecerla otra vez
+ *            no cambia eso, y no se dice
  *   inviter  tiene invitaciones vivas hechas por ella: se revocan
  *   again    ya estaba sin atadura: el código que se le hubiera dictado deja de servir
  */
@@ -237,7 +239,7 @@ export function resetEffects(roster: TeamRoster, profileId: string): ResetEffect
   const effects: ResetEffect[] = [];
   const others = roster.members.filter((each) => !each.isSelf && each.profileId !== profileId);
   const operative = (each: TeamMember) => each.status === "active" && each.factor === "bound" && each.capabilities.includes("config");
-  if (member.capabilities.includes("config") && !others.some(operative)) effects.push("alone");
+  if (operative(member) && !others.some(operative)) effects.push("alone");
   if (roster.invitations.some((invitation) => invitation.invitedBy === profileId)) effects.push("inviter");
   if (member.factor === "none") effects.push("again");
   return effects;
@@ -421,9 +423,11 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
     const profile = idOf(input.profile);
     // Nadie se restablece a sí misma: la base lo diría en el segundo paso, y se dice antes.
     if (profile === null || profile === admitted.claims.userId) return { kind: "malformed" };
+    const token = keepResetToken(jar, admitted.claims.sessionId ?? "", profile);
     // Sin dónde dejarlo no hay segundo paso: no se supo.
-    if (!keepResetToken(jar, admitted.claims.sessionId ?? "", profile)) return { kind: "unavailable" };
-    return { kind: "ready" };
+    if (token === null) return { kind: "unavailable" };
+    // La marca de esta confirmación: el botón de confirmar la trae, y la de otra no vale.
+    return { kind: "ready", token };
   }
 
   /**
@@ -433,21 +437,26 @@ export function createTeamAdmin(deps: Pick<AccountDependencies, "auth" | "report
    * sola vez, y solo si la base restableció: no se guarda ni se reporta.
    *
    * El testigo del primer paso se gasta antes de llamar a la base: un reenvío del mismo
-   * formulario ya no lo encuentra, y no restablece otra vez.
+   * formulario ya no lo encuentra, y no restablece otra vez. `token` es la marca de esa
+   * confirmación, la que el primer paso devolvió: el formulario de una confirmación anterior
+   * trae otra, y tampoco vale.
    */
-  async function resetSecondFactor(jar: CookieJar, input: { profile: unknown; confirmed: unknown }): Promise<FactorReset> {
+  async function resetSecondFactor(
+    jar: CookieJar,
+    input: { profile: unknown; confirmed: unknown; token: unknown },
+  ): Promise<FactorReset> {
     const admitted = await admit(jar);
     if (!admitted.ok) return admitted.result;
     const profile = idOf(input.profile);
     if (profile === null) return { kind: "malformed" };
     const session = admitted.claims.sessionId ?? "";
-    if (!holdsResetToken(jar, session, profile)) return { kind: "already_sent" };
+    if (!holdsResetToken(jar, session, profile, input.token)) return { kind: "already_sent" };
     const read = await rosterFor(admitted.claims);
     if (!read.ok) return read.result;
     const effects = resetEffects(read.roster, profile);
     // El testigo se queda: la confirmación se pinta otra vez, con lo de ahora.
     if (effects === null || effectsKey(effects) !== input.confirmed) return { kind: "changed" };
-    if (!spendResetToken(jar, session, profile)) return { kind: "already_sent" };
+    if (!spendResetToken(jar, session, profile, input.token)) return { kind: "already_sent" };
 
     const code = dictate();
     const print = handoffPrint(code);

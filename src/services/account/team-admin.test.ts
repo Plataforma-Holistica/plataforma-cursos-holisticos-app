@@ -30,7 +30,9 @@ const INVITATION = "d0000000-0000-4000-8000-000000000004";
 const BOUND = "fa000000-0000-4000-8000-0000000000b0";
 const claims = { userId: ME, aal: "aal2", sessionId: SESSION, issuedAt: 0 } as VerifiedClaims;
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
-const tokens = createResetTokens({ secure: () => false });
+const MARK = "m".repeat(22);
+const OTHER_MARK = "n".repeat(22);
+const tokens = createResetTokens({ secure: () => false, mark: () => MARK });
 const CODE = "ABCD-EFGH-JKMN-PQRS";
 
 function jarOf(initial: Record<string, string> = {}) {
@@ -46,7 +48,7 @@ function jarOf(initial: Record<string, string> = {}) {
 }
 
 /** Un navegador que ya pasó por el primer paso de restablecer a esa persona. */
-const armed = (profile = OTHER, session = SESSION) => jarOf({ "plataforma-restablecer": `${session}.${profile}` });
+const armed = (profile = OTHER, session = SESSION, mark = MARK) => jarOf({ "plataforma-restablecer": `${session}.${profile}.${mark}` });
 
 const member = (over: Partial<TeamMember> = {}): TeamMember => ({
   profileId: OTHER,
@@ -153,7 +155,7 @@ const ENTRIES: [string, (admin: ReturnType<typeof adminWith>, jar: ReturnType<ty
   ["dar una capacidad", (admin, jar) => admin.grantCapability(jar, { profile: OTHER, capability: "content" })],
   ["quitar una capacidad", (admin, jar) => admin.revokeCapability(jar, { profile: OTHER, capability: "support", confirmed: "last" })],
   ["preparar un restablecimiento", (admin, jar) => admin.prepareReset(jar, { profile: OTHER })],
-  ["restablecer", (admin, jar) => admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })],
+  ["restablecer", (admin, jar) => admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })],
   ["dar el código otra vez", (admin, jar) => admin.giveFreshCode(jar, "123456")],
 ];
 
@@ -179,7 +181,7 @@ describe("la guarda va primero en todo lo que llega de una acción", () => {
       expect(admin.calls).toEqual(["guarda"]);
       expect(admin.reported).toEqual([]);
       // El testigo sigue donde estaba: no se gastó ni se escribió otro.
-      expect([...jar.values]).toEqual([["plataforma-restablecer", `${SESSION}.${OTHER}`]]);
+      expect([...jar.values]).toEqual([["plataforma-restablecer", `${SESSION}.${OTHER}.${MARK}`]]);
     });
 
     it("si no se supo quién pide, no se intenta nada: la guarda ya lo reportó", async () => {
@@ -275,11 +277,16 @@ describe("qué más pasa al restablecer a alguien", () => {
     ["alguien que invitó", rosterOf([self(), member()], [invitation({ invitedBy: OTHER })]), OTHER, ["inviter"]],
     ["alguien que ya estaba restablecida", rosterOf([self(), member({ factor: "none", rebind: "pending" })]), OTHER, ["again"]],
     ["alguien cuyo factor Auth perdió", rosterOf([self(), member({ factor: "lost" })]), OTHER, []],
+    // Con configuración pero ya sin atadura: quien actúa ya era la única. Restablecerla otra
+    // vez no cambia eso, y no se dice.
+    ["la única otra con configuración, que ya estaba restablecida", rosterOf([self(), config({ factor: "none" })]), OTHER, ["again"]],
+    ["la única otra con configuración, cuyo factor Auth perdió", rosterOf([self(), config({ factor: "lost" })]), OTHER, []],
+    ["la única otra que puede, y además invitó", rosterOf([self(), config()], [invitation({ invitedBy: OTHER })]), OTHER, ["alone", "inviter"]],
     [
-      "todo junto",
+      "alguien que invitó y ya estaba restablecida",
       rosterOf([self(), config({ factor: "none" })], [invitation({ invitedBy: OTHER })]),
       OTHER,
-      ["alone", "inviter", "again"],
+      ["inviter", "again"],
     ],
     ["una misma", rosterOf(), ME, null],
     ["una cuenta suspendida", rosterOf([self(), member({ status: "suspended" })]), OTHER, null],
@@ -306,6 +313,7 @@ describe("la lista del equipo", () => {
     ["nula", null],
     ["sin la fila de quien pregunta", rosterOf([member()])],
     ["con otra marcada como quien pregunta", rosterOf([member({ isSelf: true })])],
+    ["con su fila sin marcar como suya", rosterOf([self({ isSelf: false }), member()])],
   ])("%s no vale: se le vuelve a preguntar a la guarda, y si ya no pasa no es una caída", async (_what, roster) => {
     const admin = adminWith({ roster, check: teamCheck({ state: "needs_code", factor: BOUND }) });
     expect(await admin.teamRoster(jarOf(), claims)).toEqual({ kind: "unavailable" });
@@ -592,8 +600,8 @@ describe("el primer paso de restablecer", () => {
   it("deja el testigo de esa sesión para esa persona, y no le pregunta nada más a la base", async () => {
     const admin = adminWith();
     const jar = jarOf();
-    expect(await admin.prepareReset(jar, { profile: OTHER })).toEqual({ kind: "ready" });
-    expect([...jar.values]).toEqual([["plataforma-restablecer", `${SESSION}.${OTHER}`]]);
+    expect(await admin.prepareReset(jar, { profile: OTHER })).toEqual({ kind: "ready", token: MARK });
+    expect([...jar.values]).toEqual([["plataforma-restablecer", `${SESSION}.${OTHER}.${MARK}`]]);
     expect(admin.calls).toEqual(["guarda"]);
   });
 
@@ -626,7 +634,7 @@ describe("restablecer el segundo factor de alguien", () => {
       admin.calls.push(`reset ${profile} ${handoff} ${jar.values.size === 0 ? "sin testigo" : "con testigo"}`);
       return Promise.resolve("reset" as never);
     });
-    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })).toEqual({ kind: "reset", code: CODE });
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "reset", code: CODE });
     expect(admin.calls).toEqual(["guarda", "roster yo", `reset ${OTHER} ${sha256("ABCDEFGHJKMNPQRS")} sin testigo`]);
     expect(admin.store.resetFactor.mock.calls[0]?.[0]).toBe(claims);
     expect(admin.reported).toEqual([]);
@@ -634,15 +642,15 @@ describe("restablecer el segundo factor de alguien", () => {
 
   it("la huella que se manda es la que aceptar calculará con lo que la persona teclee", async () => {
     const admin = adminWith({ answer: "reset" });
-    await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "" });
+    await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "", token: MARK });
     expect(admin.store.resetFactor.mock.calls[0]?.[2]).toBe(handoffPrint("abcd efgh jkmn pqrs"));
   });
 
   it("un reenvío ya no trae testigo: no toca nada, y lo dice", async () => {
     const admin = adminWith({ answer: "reset" });
     const jar = armed();
-    expect((await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })).kind).toBe("reset");
-    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })).toEqual({ kind: "already_sent" });
+    expect((await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).kind).toBe("reset");
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "already_sent" });
     expect(admin.store.resetFactor).toHaveBeenCalledOnce();
     expect(admin.calls.slice(-1)).toEqual(["guarda"]);
   });
@@ -651,10 +659,44 @@ describe("restablecer el segundo factor de alguien", () => {
     ["sin testigo", jarOf()],
     ["con el de otra persona", armed(THIRD)],
     ["con el de otra sesión", armed(OTHER, "5e000000-0000-4000-8000-000000000009")],
+    ["con el de otra confirmación", armed(OTHER, SESSION, OTHER_MARK)],
   ])("%s, saltarse el primer paso no restablece", async (_what, jar) => {
     const admin = adminWith({ answer: "reset" });
-    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })).toEqual({ kind: "already_sent" });
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "already_sent" });
     expect(admin.calls).toEqual(["guarda"]);
+  });
+
+  it.each([undefined, "", "corta", OTHER_MARK, [MARK], `${MARK} `])("sin la marca de esa confirmación (%j), el testigo no vale", async (token) => {
+    const admin = adminWith({ answer: "reset" });
+    const jar = armed();
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token })).toEqual({ kind: "already_sent" });
+    expect(admin.calls).toEqual(["guarda"]);
+    // Y no lo gasta: la confirmación de verdad sigue pudiendo enviarse.
+    expect(jar.values.size).toBe(1);
+  });
+
+  // Volver atrás hasta una confirmación anterior y reenviarla, después de haber pedido otra
+  // para la misma persona: su formulario trae la marca de antes, y el testigo es el nuevo.
+  it("el formulario de una confirmación anterior no vale para el testigo de la siguiente", async () => {
+    const marks = [MARK, OTHER_MARK];
+    const admin = createTeamAdmin(
+      { auth: { signOut: () => Promise.resolve("closed") } as never, report: () => Promise.resolve() },
+      {
+        teamStanding: () => Promise.resolve(teamCheck()),
+        giveSecondFactorCode: () => Promise.resolve({ kind: "verified" }),
+        store: {
+          roster: () => Promise.resolve(rosterOf()),
+          resetFactor: () => Promise.resolve("reset"),
+        } as never,
+        tokens: createResetTokens({ secure: () => false, mark: () => marks.shift() ?? "" }),
+        dictate: () => CODE,
+      },
+    );
+    const jar = jarOf();
+    expect(await admin.prepareReset(jar, { profile: OTHER })).toEqual({ kind: "ready", token: MARK });
+    expect(await admin.prepareReset(jar, { profile: OTHER })).toEqual({ kind: "ready", token: OTHER_MARK });
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "already_sent" });
+    expect((await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: OTHER_MARK })).kind).toBe("reset");
   });
 
   it.each<[string, TeamRoster, unknown]>([
@@ -666,22 +708,22 @@ describe("restablecer el segundo factor de alguien", () => {
   ])("si %s, no se restablece: se confirma otra vez, y el testigo se queda", async (_what, roster, confirmed) => {
     const admin = adminWith({ roster, answer: "reset" });
     const jar = armed();
-    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed })).toEqual({ kind: "changed" });
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed, token: MARK })).toEqual({ kind: "changed" });
     expect(admin.calls).toEqual(["guarda", "roster yo"]);
     expect(jar.values.size).toBe(1);
   });
 
   it("con todo lo que pasaría confirmado, restablece", async () => {
-    const roster = rosterOf([self(), member({ capabilities: ["config"], factor: "none" })], [invitation({ invitedBy: OTHER })]);
+    const roster = rosterOf([self(), member({ capabilities: ["config"] })], [invitation({ invitedBy: OTHER })]);
     const admin = adminWith({ roster, answer: "reset" });
-    expect((await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "alone+inviter+again" })).kind).toBe("reset");
+    expect((await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "alone+inviter", token: MARK })).kind).toBe("reset");
   });
 
   it.each(["forbidden", "needs_fresh_code", "self", "invalid", "unavailable", "ineligible", "not_member"])(
     "un no de la base (%s) sale tal cual, y sin código",
     async (answer) => {
       const admin = adminWith({ answer });
-      const result = await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "" });
+      const result = await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "", token: MARK });
       expect(result).toEqual({ kind: "answered", answer });
       expect(JSON.stringify(result)).not.toContain("ABCD");
     },
@@ -689,7 +731,7 @@ describe("restablecer el segundo factor de alguien", () => {
 
   it("si la base no contesta, no se supo: nadie conoce ese código, y no se devuelve", async () => {
     const admin = adminWith({ answer: "throws" });
-    const result = await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "" });
+    const result = await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "", token: MARK });
     expect(result).toEqual({ kind: "unknown" });
     expect(admin.reported).toEqual(["team_change_unavailable"]);
   });
@@ -697,7 +739,7 @@ describe("restablecer el segundo factor de alguien", () => {
   it("si la lista no se pudo leer, no se restablece y el testigo se queda", async () => {
     const admin = adminWith({ roster: "throws", answer: "reset" });
     const jar = armed();
-    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "" })).toEqual({ kind: "unavailable" });
+    expect(await admin.resetSecondFactor(jar, { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "unavailable" });
     expect(admin.store.resetFactor).not.toHaveBeenCalled();
     expect(jar.values.size).toBe(1);
   });
@@ -706,7 +748,7 @@ describe("restablecer el segundo factor de alguien", () => {
     "un código generado sin la forma que aceptar comprobará (%j) no se manda: no se supo",
     async (code) => {
       const admin = adminWith({ code, answer: "reset" });
-      expect(await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "" })).toEqual({ kind: "unknown" });
+      expect(await admin.resetSecondFactor(armed(), { profile: OTHER, confirmed: "", token: MARK })).toEqual({ kind: "unknown" });
       expect(admin.store.resetFactor).not.toHaveBeenCalled();
       expect(admin.reported).toEqual(["team_change_unavailable"]);
     },
@@ -714,7 +756,7 @@ describe("restablecer el segundo factor de alguien", () => {
 
   it.each([undefined, "", "ana", OTHER.toUpperCase()])("una persona sin forma (%j) no llega a la base", async (profile) => {
     const admin = adminWith({ answer: "reset" });
-    expect(await admin.resetSecondFactor(armed(), { profile, confirmed: "" })).toEqual({ kind: "malformed" });
+    expect(await admin.resetSecondFactor(armed(), { profile, confirmed: "", token: MARK })).toEqual({ kind: "malformed" });
     expect(admin.calls).toEqual(["guarda"]);
   });
 });

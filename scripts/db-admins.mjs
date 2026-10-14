@@ -90,6 +90,7 @@ const client = new pg.Client({
 });
 
 const answers = [];
+let failure = null;
 try {
   await client.connect();
   for (const email of emails) {
@@ -110,7 +111,8 @@ try {
     }
   }
 } catch (error) {
-  fail(`no se pudo invitar (${error.code ?? "sin código"}): ${error.message}`);
+  // No se sale todavía: lo que ya quedó invitado está confirmado, y se dice abajo.
+  failure = error;
 } finally {
   await client.end().catch(() => {});
 }
@@ -122,5 +124,11 @@ const invited = answers.filter(({ answer }) => INVITED.has(answer)).length;
 if (invited > 0) {
   console.log("db:admins: después de probar su buzón, al entrar se les pide configurar su segundo factor.");
   console.log("db:admins: esto dejó renglones en la auditoría. Antes de `pnpm test:db`, corre `pnpm db:reset`.");
+}
+if (failure !== null) {
+  const rest = emails.length - answers.length - 1;
+  fail(
+    `no se pudo invitar a ${emails[answers.length]}${rest > 0 ? `, y no se intentó con ${rest} más` : ""} (${failure.code ?? "sin código"}): ${failure.message}`,
+  );
 }
 if (invited !== answers.length) process.exit(1);

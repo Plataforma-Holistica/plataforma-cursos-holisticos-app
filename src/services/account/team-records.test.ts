@@ -236,6 +236,15 @@ describe("la lista del equipo, como la contesta la base", () => {
     ]);
   });
 
+  // Un plazo desmedido da una fecha así (medido en la base local), y una sola invitación
+  // con ella no debe tumbar la pantalla del equipo.
+  it.each(["10226-01-01T00:00:00+00:00", "mañana", ""])("una fecha que no se entiende (%j) no lanza: queda como fecha que no vale", (when) => {
+    const [invitation] = rosterOf(raw({ invitations: [rawInvitation({ expires_at: when })] }))?.invitations ?? [];
+    expect(invitation?.email).toBe("invitada@prueba.test");
+    expect(Number.isNaN(invitation?.expiresAt.getTime())).toBe(true);
+    expect(invitation?.createdAt).toEqual(new Date("2026-10-13T23:41:05.123Z"));
+  });
+
   it("un estado de cuenta que no es activa ni suspendida no se adivina: es «otro»", () => {
     const other = rawMember({ profile_id: OTHER, status: "deleted", is_self: false });
     expect(rosterOf(raw({ members: [rawMember(), other] }))?.members[1]?.status).toBe("other");
@@ -258,7 +267,7 @@ describe("la lista del equipo, como la contesta la base", () => {
     ["con dos filas de quien pregunta", raw({ members: [rawMember(), rawMember({ profile_id: OTHER })] })],
     ["una invitación con la huella del código dictado", raw({ invitations: [rawInvitation({ handoff: "a".repeat(64) })] })],
     ["una invitación de un tipo que no existe", raw({ invitations: [rawInvitation({ kind: "transfer" })] })],
-    ["una invitación con una hora que no lo es", raw({ invitations: [rawInvitation({ expires_at: "mañana" })] })],
+    ["una invitación con una hora que no es texto", raw({ invitations: [rawInvitation({ expires_at: 1790000000 })] })],
     ["una invitación con una capacidad que no existe", raw({ invitations: [rawInvitation({ capabilities: ["owner"] })] })],
     ["una invitación con quien invitó sin forma", raw({ invitations: [rawInvitation({ invited_by: "ella" })] })],
   ])("%s no se entiende, y lanza: quien llama lo trata como «no se supo»", (_what, value) => {

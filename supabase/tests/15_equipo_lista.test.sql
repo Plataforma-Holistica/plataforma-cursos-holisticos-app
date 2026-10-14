@@ -13,7 +13,7 @@
 -- private.revoke_capability().
 begin;
 \ir _ayuda.psql
-select plan(107);
+select plan(119);
 
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000002', 'config2@prueba.test');
@@ -111,6 +111,7 @@ select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select pruebas.suspender('c0000000-0000-0000-0000-000000000003');
 select is(pruebas.tiene('c0000000-0000-0000-0000-000000000003', 'config'), pruebas.lista('c0000000-0000-0000-0000-000000000003') is not null,
   'una cuenta suspendida ve la lista solo si la puerta la deja pasar: es la misma puerta');
+select is(pruebas.lista('c0000000-0000-0000-0000-000000000003'), null::jsonb, 'y no la deja: suspendida, nulo');
 select pruebas.como_dueno_sistema();
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000003';
 select pruebas.limpiar();
@@ -223,9 +224,12 @@ select is(pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config3@prueb
   'a la suspendida sí: sin ella quedan las otras dos');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000002', 'config')$$),
   'min_config', 'y quitar contesta lo mismo: a una de las dos activas, no');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', $$private.revoke_capability('c0000000-0000-0000-0000-000000000003', 'config')$$),
+  'revoked', 'y a la suspendida, sí');
 select pruebas.como_dueno_sistema();
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = 'c0000000-0000-0000-0000-000000000003';
 select pruebas.limpiar();
+select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000003', 'config');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000003');
 
 -- ---------------------------------------------------------------------------------------
@@ -288,6 +292,7 @@ delete from private.admin_factors where profile_id = 'c0000000-0000-0000-0000-00
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'si quien invitó ya no tiene su factor atado, tampoco');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
 select pruebas.como_dueno_sistema();
 update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000002'
@@ -295,6 +300,7 @@ update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'ni si ya no tiene configuración, aunque conserve otra capacidad');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000001', 'config');
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'true'::jsonb,
   '(con quien invitó de vuelta en su lugar, se puede)');
@@ -306,6 +312,7 @@ update private.admin_invitations set created_at = created_at - interval '3 hours
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'expired', 'true'::jsonb, 'una caducada sale, y lo dice');
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb, 'y no se puede aceptar');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 select pruebas.como_dueno_sistema();
 update private.admin_invitations set expires_at = clock_timestamp() + interval '1 day' where email = 'ana@prueba.test';
 select pruebas.limpiar();
@@ -316,6 +323,7 @@ update private.admin_invitations set profile_id = 'd0000000-0000-0000-0000-00000
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'si la invitación apunta a otra cuenta que la de ese correo, no');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 select pruebas.como_dueno_sistema();
 update private.admin_invitations set profile_id = 'a0000000-0000-0000-0000-000000000001' where email = 'ana@prueba.test';
 select pruebas.limpiar();
@@ -330,6 +338,7 @@ select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella(
 update auth.users set email = 'ana@prueba.test', is_sso_user = true where id = 'a0000000-0000-0000-0000-000000000001';
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'ni si pasó a ser de acceso federado');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 update auth.users set is_sso_user = false where id = 'a0000000-0000-0000-0000-000000000001';
 select pruebas.dar_capacidad('a0000000-0000-0000-0000-000000000001', 'moderation');
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
@@ -348,16 +357,20 @@ values ('a0000000-0000-0000-0000-000000000001', gen_random_uuid(), 'ana@prueba.t
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'false'::jsonb,
   'ni a quien conserva una atadura');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'none', 'y la invitada ve lo mismo');
 select pruebas.como_dueno_sistema();
 delete from private.admin_factors where profile_id = 'a0000000-0000-0000-0000-000000000001';
 select pruebas.limpiar();
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'ana@prueba.test') -> 'acceptable', 'true'::jsonb,
   '(con la invitada de vuelta en su lugar, se puede)');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('ana')), 'invited', 'y la invitada ve lo mismo');
 
 -- Un correo sin cuenta que después se registra.
 select pruebas.alta('a0000000-0000-0000-0000-000000000009', 'nueva@prueba.test');
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'nueva@prueba.test') -> 'acceptable', 'true'::jsonb,
   'cuando el correo invitado ya tiene cuenta, se sigue pudiendo');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000009'), 'invited_unproven',
+  'y esa cuenta lo ve: tiene una invitación, y le falta probar su buzón');
 select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000003', 'nueva@prueba.test') -> 'profile_id', 'null'::jsonb,
   'y la invitación sigue sin apuntar a una cuenta: eso lo decide aceptar');
 
@@ -452,6 +465,15 @@ select is(pruebas.persona('c0000000-0000-0000-0000-000000000001', 'otro2@prueba.
 select is(pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test'), null::jsonb, 'el correo que sale es el que la cuenta tiene hoy');
 update auth.users set email = 'config2@prueba.test' where id = 'c0000000-0000-0000-0000-000000000002';
 select is(pruebas.persona('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') ->> 'rebind', 'pending', '(de vuelta en su lugar)');
+-- Una invitación para volver no devuelve capacidades: a quien ya no tiene ninguna no le sirve.
+select pruebas.como_dueno_sistema();
+update public.admin_capabilities set revoked_at = now(), revoked_by = 'c0000000-0000-0000-0000-000000000001'
+  where profile_id = 'c0000000-0000-0000-0000-000000000002' and revoked_at is null;
+select pruebas.limpiar();
+select is(pruebas.pendiente('c0000000-0000-0000-0000-000000000001', 'config2@prueba.test') -> 'acceptable', 'false'::jsonb,
+  'una invitación para volver ya no se puede aceptar si la persona perdió sus capacidades');
+select is(pruebas.estado('c0000000-0000-0000-0000-000000000002'), 'none', 'y ella ve lo mismo: nada');
+select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000002', 'config');
 select is(
   pruebas.pide('c0000000-0000-0000-0000-000000000001',
     format('private.revoke_admin_invitation(%L)', (pruebas.invitacion_viva('config2@prueba.test')).id)),

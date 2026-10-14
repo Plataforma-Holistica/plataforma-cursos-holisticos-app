@@ -547,6 +547,38 @@ const invitationsTo = (email: string) =>
     [email],
   );
 
+/**
+ * Deja al equipo en esas personas y nada más. Los casos de arriba dejan gente con
+ * capacidades e invitaciones sin aceptar, y los de este grupo cuentan con saber cuántas
+ * personas tienen configuración. Lo hace el dueño de la base, declarado sistema: es
+ * preparación, no lo que se prueba. El mínimo de configuración se respeta: se quedan dos.
+ */
+async function onlyOnTeam(keep: Member[]): Promise<void> {
+  await ownerQuery(
+    `with declared as materialized (select set_config('app.actor_kind', 'system', true) as kind),
+          invitations as (
+            update private.admin_invitations i set revoked_at = now() from declared
+            where i.accepted_at is null and i.revoked_at is null returning 1),
+          capabilities as (
+            update public.admin_capabilities c set revoked_at = now(), revoked_by = $1::uuid from declared
+            where c.revoked_at is null and c.profile_id <> all($2::uuid[]) returning 1),
+          factors as (
+            delete from private.admin_factors f using declared where f.profile_id <> all($2::uuid[]) returning 1)
+     select (select count(*) from invitations) + (select count(*) from capabilities) + (select count(*) from factors) as touched`,
+    [keep[0]?.id, keep.map((each) => each.id)],
+  );
+}
+
+/** Cuándo dio su código por última vez esa persona, como lo guarda Auth. */
+const lastCodeOf = async (userId: string) =>
+  (
+    await ownerQuery<{ at: string | null }>(
+      `select max(c.updated_at)::text as at from auth.mfa_amr_claims c join auth.sessions s on s.id = c.session_id
+       where s.user_id = $1 and c.authentication_method = 'totp'`,
+      [userId],
+    )
+  )[0]?.at ?? null;
+
 const auditRows = async () => Number((await ownerQuery<{ n: string }>("select count(*)::text as n from public.audit_log"))[0]?.n);
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -576,6 +608,15 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     beto = await joinTeam(browser, second);
     expect((await teamOf(ana.id)).capabilities).toEqual(["config", "content", "finance", "moderation", "support"]);
     expect((await teamOf(beto.id)).capabilities).toEqual(["config", "content", "finance", "moderation", "support"]);
+    // El equipo, en ellas dos: lo que dejaron los casos de arriba no es de este grupo.
+    await onlyOnTeam([ana, beto]);
+    const left = await ownerQuery<{ people: string; invitations: string }>(
+      `select (select count(distinct profile_id) from public.admin_capabilities where revoked_at is null)::text as people,
+              (select count(*) from private.admin_invitations where accepted_at is null and revoked_at is null)::text as invitations`,
+    );
+    expect(left).toEqual([{ people: "2", invitations: "0" }]);
+    expect((await teamOf(ana.id)).bound).toHaveLength(1);
+    expect((await teamOf(beto.id)).bound).toHaveLength(1);
   });
 
   test("con JavaScript: ve al equipo, invita, da y quita una capacidad, se le vence el código y restablece un segundo factor", async ({ page, browser }) => {
@@ -738,23 +779,58 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
 
   test("quien no puede administrar al equipo: sin configuración ve qué le falta, y las acciones llamadas directo no hacen nada", async ({ page, browser }) => {
     test.setTimeout(300_000);
-    // Los campos con que React nombra cada acción salen de la página de quien sí puede.
+    // Los campos con que React nombra cada acción salen de la página de quien sí puede. Con
+    // una invitación pendiente, para que la página pinte también el formulario de ese bloque.
     await enterAdmin(page, ana);
+    const bait = testEmail();
+    const inviting = page.locator("#bloque-equipo-invitar");
+    await inviting.getByLabel("Correo de la persona").fill(bait);
+    await inviting.getByLabel("Soporte").check();
+    await inviting.getByRole("button", { name: "Invitar" }).click();
+    await expect(page.locator("#bloque-equipo-invitaciones").getByText(bait, { exact: true })).toBeVisible();
+    const baitId = (await ownerQuery<{ id: string }>("select id::text as id from private.admin_invitations where email = $1", [bait]))[0]?.id ?? "";
+    expect(baitId).not.toBe("");
     const html = await (await page.request.get(TEAM)).text();
     const inviteFields = actionFields(html, 0);
     const teamFields = actionFields(html, 1);
-    const resetFields = actionFields(html, 2);
+    const invitationFields = actionFields(html, 2);
+    const resetFields = actionFields(html, 3);
+    // A quien sí puede, un envío que no dice qué botón se pulsó no le hace nada.
+    const empty = await postAction(page.context().request, TEAM, { ...teamFields, profile: beto.id, capability: "finance" });
+    expect(empty.status()).toBe(200);
+    expect((await teamOf(beto.id)).capabilities).toContain("finance");
+    // «Tu código» solo se pinta cuando el código ya no es reciente: se envejece el de quien
+    // mira para leer de ahí su formulario, que entonces es el primero de la página.
+    await ownerQuery(
+      `update auth.mfa_amr_claims c set updated_at = now() - interval '40 minutes'
+       from auth.sessions s where c.session_id = s.id and s.user_id = $1 and c.authentication_method = 'totp'`,
+      [ana.id],
+    );
+    const stale = await (await page.request.get(TEAM)).text();
+    expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeGreaterThan(-1);
+    expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeLessThan(stale.indexOf("<form"));
+    const codeFields = actionFields(stale, 0);
+    // Es otra acción que las de arriba. Que cada envío de abajo llegue a su servicio lo dice
+    // su respuesta: uno que su acción no entiende no redirige.
+    for (const other of [inviteFields, teamFields, invitationFields, resetFields]) expect(codeFields).not.toEqual(other);
+
     const audited = await auditRows();
     const victim = testEmail();
+    // Con forma, para que cada envío llegue hasta su servicio: lo que lo detiene es la guarda.
+    const mark = "x".repeat(22);
     const attempts = (who: { id: string }): [string, Record<string, string>][] => [
       ["invitar", { ...inviteFields, email: victim, capability: "config" }],
       ["dar", { ...teamFields, do: `confirm:grant:${who.id}:config:` }],
       ["quitar", { ...teamFields, do: `confirm:revoke:${beto.id}:finance:` }],
+      ["revocar una invitación", { ...invitationFields, do: `confirm:revoke:${baitId}` }],
+      ["invitar de nuevo", { ...invitationFields, do: `confirm:reinvite:${baitId}` }],
       ["preparar un restablecimiento", { ...resetFields, do: `choose:${beto.id}` }],
-      ["restablecer", { ...resetFields, do: `confirm:${beto.id}:` }],
+      ["restablecer", { ...resetFields, do: `confirm:${beto.id}::${mark}` }],
+      ["dar el código otra vez", { ...codeFields, code: "123456" }],
     ];
     const untouched = async () => {
       expect(await invitationsTo(victim)).toEqual([]);
+      expect(await invitationsTo(bait)).toEqual([{ kind: "grant", live: true, handoff: null, by: ana.id }]);
       expect((await teamOf(beto.id)).capabilities).toContain("finance");
       expect((await teamOf(beto.id)).bound).toHaveLength(1);
       expect(await auditRows()).toBe(audited);
@@ -797,30 +873,60 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Configuración" })).toBeVisible();
       await expect(hers.getByText(ana.email)).toHaveCount(0);
       expect(await a11yViolations(hers)).toEqual([]);
+      const given = await lastCodeOf(carla.id);
+      expect(given).not.toBeNull();
       for (const [what, fields] of attempts(carla)) {
         const answered = await postAction(herContext.request, TEAM, fields);
         expect(answered.status(), what).toBe(303);
         expect(answered.headers().location, what).toBe(TEAM);
       }
       expect((await teamOf(carla.id)).capabilities).toEqual(["support"]);
+      // Tampoco se le tomó el código que mandó: su sesión de equipo sigue como estaba.
+      expect(await lastCodeOf(carla.id)).toBe(given);
       await untouched();
     });
-
-    // Y a quien sí puede, un envío que no dice qué botón se pulsó no le hace nada.
-    const empty = await postAction(page.context().request, TEAM, { ...teamFields, profile: beto.id, capability: "finance" });
-    expect(empty.status()).toBe(200);
-    await untouched();
   });
 
-  test("sin JavaScript: invita, revoca y restablece, y el código dictado no viaja en ningún formulario ni se repite al recargar", async ({ browser }) => {
-    test.setTimeout(300_000);
-    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+  test("sin JavaScript: da su código, invita, revoca, quita y restablece, y el código dictado no viaja en ningún formulario ni se repite al recargar", async ({ browser }) => {
+    test.setTimeout(420_000);
+    await inContext(browser, { javaScriptEnabled: false }, async (page, context) => {
       await enterAdmin(page, ana);
       await expect(page.getByRole("heading", { level: 1, name: "Equipo de administración" })).toBeVisible();
       const members = page.locator("#bloque-equipo-personas");
       const pending = page.locator("#bloque-equipo-invitaciones");
       const inviting = page.locator("#bloque-equipo-invitar");
       const resetting = page.locator("#bloque-equipo-restablecer");
+
+      // Su código deja de ser reciente: arriba se le pide, y ningún cambio se ofrece.
+      await ownerQuery(
+        `update auth.mfa_amr_claims c set updated_at = now() - interval '40 minutes'
+         from auth.sessions s where c.session_id = s.id and s.user_id = $1 and c.authentication_method = 'totp'`,
+        [ana.id],
+      );
+      await page.goto(TEAM);
+      const giving = page.locator("#bloque-equipo-codigo");
+      await expect(giving.getByRole("heading", { level: 2, name: "Tu código" })).toBeVisible();
+      await expect(members.getByRole("button")).toHaveCount(0);
+      await expect(resetting.getByRole("button")).toHaveCount(0);
+      // Sin forma de código: se dice en su bloque, y la página vuelve parada ahí.
+      await giving.getByLabel("Código", { exact: true }).fill("12");
+      await giving.getByRole("button", { name: "Comprobar" }).click();
+      await expect(page).toHaveURL(`${TEAM}#bloque-equipo-codigo`);
+      await expect(giving.getByRole("alert")).toBeVisible();
+      await expect(members.getByRole("button")).toHaveCount(0);
+      // Uno equivocado tampoco abre nada.
+      await giving.getByLabel("Código", { exact: true }).fill(wrongCode(ana.secret));
+      await giving.getByRole("button", { name: "Comprobar" }).click();
+      await expect(giving.getByRole("alert").getByRole("link", { name: WRONG })).toBeVisible();
+      await expect(members.getByRole("button")).toHaveCount(0);
+      // Con el bueno la acción redirige a la misma página, que ya llega con sus cambios. El
+      // navegador se lleva el ancla del bloque, que ahí ya no apunta a nada.
+      await giving.getByLabel("Código", { exact: true }).fill(await nextCode(ana.secret, ana.used));
+      await giving.getByRole("button", { name: "Comprobar" }).click();
+      await expect(page).toHaveURL(/\/admin\/equipo(?:#bloque-equipo-codigo)?$/);
+      await expect(page.locator("#bloque-equipo-codigo")).toHaveCount(0);
+      await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
+      await expect(inviting.getByRole("button", { name: "Invitar" })).toBeVisible();
 
       // Invitar. La página vuelve parada en su bloque, con qué avisarle a la persona.
       const fourth = testEmail();
@@ -860,11 +966,58 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await expect(members.getByText("Capacidad dada.")).toBeVisible();
       expect((await teamOf(carla.id)).capabilities).toEqual(["finance", "support"]);
 
+      // Quitar son dos pasos, y lo que se confirmó tiene que seguir siendo lo que pasaría.
+      // Se pregunta por Soporte cuando todavía le queda otra capacidad...
+      await hers.getByRole("button", { name: `Quitar Soporte a ${carla.email}` }).click();
+      await expect(page).toHaveURL(`${TEAM}#bloque-equipo-personas`);
+      await expect(hers.getByText(`¿Quitar Soporte a ${carla.email}?`)).toBeVisible();
+      await expect(hers.getByText("Se cierran todas sus sesiones.")).toBeVisible();
+      await expect(hers.getByText(/Es su última capacidad/)).toHaveCount(0);
+      expect((await teamOf(carla.id)).capabilities).toEqual(["finance", "support"]);
+      // ...y mientras tanto, en otra pestaña, se le quita la otra: también en dos pasos.
+      const other = await context.newPage();
+      await other.goto(TEAM);
+      const theirs = other.locator("#bloque-equipo-personas").getByRole("listitem").filter({ hasText: carla.email });
+      await theirs.getByRole("button", { name: `Quitar Finanzas a ${carla.email}` }).click();
+      await theirs.getByRole("button", { name: "Sí, quitar" }).click();
+      await expect(other.locator("#bloque-equipo-personas").getByText("Capacidad quitada. Se cerraron las sesiones de esa cuenta.")).toBeVisible();
+      await other.close();
+      expect((await teamOf(carla.id)).capabilities).toEqual(["support"]);
+      // La confirmación que quedó abierta ya no dice lo que pasaría: no quita nada, lo avisa
+      // y vuelve a preguntar con lo de ahora.
+      await hers.getByRole("button", { name: "Sí, quitar" }).click();
+      await expect(hers.getByText("La lista cambió mientras confirmabas. Revisa de nuevo lo que va a pasar.")).toBeVisible();
+      await expect(hers.getByText(/Es su última capacidad: deja de ser del equipo\./)).toBeVisible();
+      expect((await teamOf(carla.id)).capabilities).toEqual(["support"]);
+      expect((await teamOf(carla.id)).bound).toHaveLength(1);
+      // Confirmada con lo de ahora, sí: sale del equipo, y la base le quita su atadura.
+      await hers.getByRole("button", { name: "Sí, quitar" }).click();
+      await expect(members.getByText("Capacidad quitada. Se cerraron las sesiones de esa cuenta.")).toBeVisible();
+      await expect(members.getByText(carla.email)).toHaveCount(0);
+      expect(await teamOf(carla.id)).toEqual({ bound: [], capabilities: [] });
+
+      // En otra pestaña se pide antes la misma confirmación, y se deja abierta.
+      const earlier = await context.newPage();
+      await earlier.goto(TEAM);
+      const theirReset = earlier.locator("#bloque-equipo-restablecer");
+      await theirReset.getByRole("button", { name: `Restablecer el segundo factor de ${beto.email}` }).click();
+      await expect(theirReset.getByRole("button", { name: "Sí, restablecer" })).toBeVisible();
+
       // Restablecer a la única otra persona con configuración: se permite, avisando.
       await resetting.getByRole("button", { name: `Restablecer el segundo factor de ${beto.email}` }).click();
       await expect(page).toHaveURL(`${TEAM}#bloque-equipo-restablecer`);
       await expect(resetting.getByText("Es la única otra persona que puede cambiar el equipo: mientras no vuelva, quedarás como la única.")).toBeVisible();
       expect((await teamOf(beto.id)).bound).toHaveLength(1);
+
+      // La confirmación de la otra pestaña ya no vale: cada una lleva su marca, y el testigo
+      // es de la última que se pidió. No restablece, y no gasta el de esta.
+      await theirReset.getByRole("button", { name: "Sí, restablecer" }).click();
+      await expect(theirReset.getByText(ALREADY_SENT)).toBeVisible();
+      await expect(theirReset.locator("code")).toHaveCount(0);
+      await earlier.close();
+      expect((await teamOf(beto.id)).bound).toHaveLength(1);
+      expect((await invitationsTo(beto.email)).filter((each) => each.kind === "rebind")).toEqual([]);
+
       await resetting.getByRole("button", { name: "Sí, restablecer" }).click();
       const dictated = (await resetting.locator("code").innerText()).trim();
       expect(dictated).toMatch(CODE_SHAPE);
@@ -875,7 +1028,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       // Sin JavaScript, el estado de una acción viaja dentro de todo formulario ligado a ella.
       // La respuesta de restablecer trae el código: no debe estar en ningún campo del
       // documento, visible u oculto, ni haber un formulario en ese bloque.
-      const inputs = [...(await page.content()).matchAll(/<input\b[^>]*>/g)].map((match) => match[0]);
+      const document = await page.content();
+      const inputs = [...document.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]);
       expect(inputs.length).toBeGreaterThan(0);
       for (const input of inputs) {
         expect(input).not.toContain(dictated);
@@ -883,14 +1037,30 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       }
       await expect(resetting.locator("form")).toHaveCount(0);
       await expect(resetting.getByRole("link", { name: "Ya lo dicté" })).toHaveAttribute("href", TEAM);
+      // Dónde sí está, contado en el documento entero. En el marcado, una sola vez: donde se
+      // lee. Ninguna en un atributo, ni dentro de un formulario, un botón o un enlace.
+      const times = (text: string) => text.split(dictated).length - 1;
+      const scripts = [...document.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/g)].map((match) => match[0]).join("\n");
+      const markup = document.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+      expect(times(markup)).toBe(1);
+      expect(markup).toContain(`>${dictated}</code>`);
+      expect(document).not.toContain(dictated.replaceAll("-", ""));
+      // Un límite conocido, medido aquí para que un cambio de Next se note: en un envío sin
+      // JavaScript el documento trae además el estado de la acción en los datos con que React
+      // se montaría. Es el mismo documento que ya pinta el código, y no viaja de vuelta.
+      expect(times(scripts)).toBe(1);
 
       // Recargar reenvía ese mismo formulario. No restablece otra vez: el código que ya se
       // dictó sigue siendo el que vale, y la pantalla dice que ese envío ya se hizo.
       await page.reload();
       await expect(resetting.getByText(ALREADY_SENT)).toBeVisible();
       await expect(page.getByText(dictated)).toHaveCount(0);
+      expect(await page.content()).not.toContain(dictated);
       expect((await invitationsTo(beto.email)).at(-1)).toEqual(first);
       expect((await invitationsTo(beto.email)).filter((each) => each.kind === "rebind")).toHaveLength(1);
+      // Y una carga completa, que es lo que ofrece el bloque, no lo trae en ninguna parte.
+      await page.goto(TEAM);
+      expect(await page.content()).not.toContain(dictated);
     });
   });
 });

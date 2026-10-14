@@ -176,18 +176,27 @@ export async function resetAction(previous: ResetState, form: FormData): Promise
   const outcome =
     request.step === "choose"
       ? prepareResetOutcome(await prepareReset(jar, { profile }))
-      : resetOutcome(await resetSecondFactor(jar, { profile, confirmed: request.confirmed }));
+      : resetOutcome(await resetSecondFactor(jar, { profile, confirmed: request.confirmed, token: request.token }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
 
   // La página se vuelve a pedir: lo que la confirmación dice sale de la lista de ahora.
+  //
+  // También cuando la respuesta trae el código, y no hay cómo evitarlo: gastar el testigo
+  // escribe una cookie, y con eso Next pinta la página en la misma respuesta, se llame a
+  // `refresh()` o no. Si esa lectura fallara justo entonces, la pantalla se iría y el código,
+  // que ya es el único que vale, no llegaría a pintarse: es un límite conocido, y se sale de
+  // él restableciendo otra vez.
   refresh();
   switch (outcome.kind) {
-    case "confirm":
-      return { kind: "confirm", profile, changed: false, attempt };
-    case "confirm_again":
-      return { kind: "confirm", profile, changed: true, attempt };
     case "code":
       return { kind: "code", code: outcome.code, attempt };
+    case "confirm":
+      return { kind: "confirm", profile, token: outcome.token, changed: false, attempt };
+    case "confirm_again":
+      // Solo lo contesta confirmar. La misma confirmación, con lo de ahora: su testigo no
+      // se gastó, y su marca sigue.
+      if (request.step !== "confirm") return { kind: "idle" };
+      return { kind: "confirm", profile, token: request.token, changed: true, attempt };
     case "idle":
       return { kind: "idle" };
     case "failed":

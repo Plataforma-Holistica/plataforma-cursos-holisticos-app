@@ -5,7 +5,7 @@ import { admin } from "@/messages/es/admin";
 import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 
-import type { ResetFailure, ResetState } from "./outcomes";
+import { resetButton, type ResetFailure, type ResetState } from "./outcomes";
 import { BlockResult, ConfirmPanel, RowAction, useAnswerFocus } from "./parts";
 import type { ResetOption } from "./rows";
 
@@ -19,6 +19,13 @@ import type { ResetOption } from "./rows";
 // código y un enlace que vuelve a pedir la página, que es lo que suelta ese estado. El código
 // no va en un campo oculto, y deja de pintarse al salir de la página y con el siguiente envío
 // de cualquier bloque.
+//
+// Un límite, medido en Next 16.3: cuando el formulario se envía sin que React lo tenga
+// tomado (sin JavaScript, o antes de terminar de cargar), el documento de respuesta trae el
+// estado de la acción una segunda vez, dentro de los datos con que React se monta. Es el
+// mismo documento que ya pinta el código, no viaja de vuelta al servidor y no está en
+// ningún campo; pero esa copia no la quita «dejar de pintar». Se va con el enlace de abajo,
+// que carga la página entera: por eso el bloque no ofrece otra salida.
 
 const text = admin.team;
 // Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
@@ -119,8 +126,15 @@ export function ResetBlock({ options, canChange, state, codeHidden, action, pend
         <p className="text-body-s text-text-2">{text.changesLocked}</p>
       ) : (
         <form action={action} className="flex flex-col gap-4">
-          {chosen !== null ? (
-            <ConfirmPanel confirmation={chosen.confirmation} changed={asked?.changed} pending={pending} pendingLabel={text.resetting} box={answer} />
+          {chosen !== null && asked !== null ? (
+            // El botón lleva además la marca de esta confirmación: la de otra no vale.
+            <ConfirmPanel
+              confirmation={{ ...chosen.confirmation, value: resetButton.marked(chosen.confirmation.value, asked.token) }}
+              changed={asked.changed}
+              pending={pending}
+              pendingLabel={text.resetting}
+              box={answer}
+            />
           ) : (
             <ul className="flex flex-col gap-3">
               {options.map((option) => (

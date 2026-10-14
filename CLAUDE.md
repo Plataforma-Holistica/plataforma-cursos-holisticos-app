@@ -253,7 +253,10 @@ falla. Trece precisiones que la tabla no dice:
     servicio vuelve a correr la guarda. Una contraseña nunca vuelve en la respuesta.
   - Los formularios funcionan sin JavaScript: acción de servidor más `useActionState`.
     Con JavaScript, después de una acción la página no se vuelve a pedir si la acción no
-    lo pide: cuando hace falta, la acción llama a `refresh()`. La validación al salir del
+    lo pide: cuando hace falta, la acción llama a `refresh()`. Una acción que escribe una
+    cookie ya lo pidió sin decirlo: Next marca la ruta como cambiada con cada cookie que se
+    escribe y pinta la página en la misma respuesta (leído en el código de Next 16.3, en
+    `request-cookies.js` y `action-handler.js`). No se cuenta con que no se pinte. La validación al salir del
     campo usa las mismas reglas del dominio, que reexporta
     `src/services/account/field-rules.ts`, y solo si el campo ya trae algo. Ahí está
     también la del código del segundo factor (`parseSecondFactorCode`: seis dígitos, sin
@@ -463,6 +466,8 @@ falla. Trece precisiones que la tabla no dice:
   - **Quitar una capacidad, dar configuración, revocar y restablecer se confirman en dos
     pasos, dentro de la fila.** El primero (`ask`) no llama a ningún servicio: contesta
     «confirma», y la pantalla pinta qué va a pasar con lo que su página leyó (`rows.ts`).
+    El de restablecer es la excepción: se llama `choose` y sí llama a su servicio
+    (`prepareReset`), que deja el testigo y devuelve su marca; tampoco cambia nada.
     Lo que se confirmó que pasaría viaja en el botón de confirmar
     (`effectsKey(removalEffects(…))`), y el servicio relee: si ya no es eso, contesta
     `changed` y se pregunta otra vez con la lista de ahora. Una confirmación dice todo lo
@@ -480,7 +485,22 @@ falla. Trece precisiones que la tabla no dice:
     el código y un enlace de carga completa a la misma ruta, nunca un formulario. Como
     botón de cada fila del equipo, el código habría viajado en cada «Dar» y cada «Quitar».
     Con JavaScript deja además de pintarse al salir de la página y con el siguiente envío
-    de cualquier bloque.
+    de cualquier bloque. Tres cosas más, de la revisión del diff:
+    - Otro límite conocido: la página se vuelve a pintar en la misma respuesta que trae el
+      código, y no hay cómo evitarlo, porque gastar el testigo escribe una cookie (abajo,
+      «una acción que escribe una cookie»). Si esa lectura fallara justo entonces, o la
+      guarda redirigiera, la pantalla se iría y el código, que ya es el único que vale, no
+      llegaría a pintarse. Se sale restableciendo otra vez: la lista dice que esa persona
+      quedó sin segundo factor.
+    - Un límite conocido, medido: en un envío sin JavaScript el documento de respuesta trae
+      el estado de la acción una segunda vez, en los datos con que React se montaría. Es el
+      mismo documento que ya pinta el código, no está en ningún campo y no viaja de vuelta;
+      se va con la carga completa del enlace, y por eso el bloque no ofrece otra salida. La
+      prueba de extremo a extremo cuenta dónde aparece el código en el documento entero.
+    - Que el código deje de verse al navegar dentro de la aplicación depende de que la
+      pantalla se desmonte. Con `cacheComponents` Next conservaría su estado y volver la
+      repintaría con el código: una prueba de arquitectura exige que `next.config.ts` no lo
+      prenda. Quien lo prenda esconde antes el código al desmontar.
   - Los textos van en su propio bloque del catálogo (`src/messages/es/admin.ts`), para que
     no viajen con la pantalla de entrar. Ningún plazo ni tope se escribe con su número.
   - A dónde va el foco cuando un bloque contesta es `useAnswerFocus` (`parts.tsx`): la
@@ -840,12 +860,19 @@ falla. Trece precisiones que la tabla no dice:
       aceptar. El código sale en la respuesta una sola vez, y solo si la base contestó
       `reset`. No se guarda, no se reporta y no va en ninguna cookie.
     - **Restablecer son dos envíos, por un testigo de un solo uso** (`reset-token.ts`:
-      `plataforma-restablecer`, con `__Host-` bajo https, diez minutos, atado a la sesión y
-      a la persona). `prepareReset` lo deja; `resetSecondFactor` lo exige y lo gasta antes
-      de llamar a la base. Restablecer no tiene tope de repetición en la base: sin esto,
-      recargar sin JavaScript reenviaría el formulario y cambiaría el código que ya se
-      dictó. No es un control de acceso ni un candado: dos envíos que salgan a la vez lo
-      leen los dos.
+      `plataforma-restablecer`, con `__Host-` bajo https, diez minutos, atado a la sesión, a
+      la persona y a una marca al azar). `prepareReset` lo deja y devuelve la marca, que
+      viaja en el botón de confirmar; `resetSecondFactor` exige el testigo con esa misma
+      marca y lo gasta antes de llamar a la base. Restablecer no tiene tope de repetición en
+      la base: sin esto, recargar sin JavaScript reenviaría el formulario y cambiaría el
+      código que ya se dictó. La marca es para que valga una confirmación y no cualquiera:
+      sin ella, pedir otra confirmación para la misma persona dejaba un testigo que el
+      formulario reenviado de la anterior también gastaba. Un `changed` no lo gasta, y la
+      confirmación que se pinta de nuevo conserva su marca. No es un control de acceso ni
+      un candado: dos envíos que salgan a la vez lo leen los dos.
+    - Al restablecer se avisa «quedarás como la única» (`alone`) solo si esa persona hoy
+      puede cambiar el equipo: activa, con configuración y con su factor atado. A quien ya
+      estaba restablecida no, porque hoy no cambia nada.
     - `giveFreshCode` da el código otra vez y después lee la lista: si sigue diciendo que
       el código no es reciente, pedirlo de nuevo no arregla nada (falta
       `VIGENCIA_CODIGO_RECIENTE_MINUTOS`), y contesta `not_available` y lo reporta. Que

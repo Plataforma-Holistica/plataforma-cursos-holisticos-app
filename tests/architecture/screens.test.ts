@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { requiresSession } from "@/services/account/navigation";
 
-import { posix, reachableFrom, sourceFiles, src } from "./sources";
+import { posix, reachableFrom, root, sourceFiles, src } from "./sources";
 
 // Cuatro cosas de las pantallas que el lint no alcanza a ver (TRD §4.2 y §9.3; flujo de la
 // app §6.2):
@@ -164,7 +164,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
       /if \(request\.step === "ask"\) return \{ kind: "confirm", id: request\.id, attempt \};[\s\S]*revokeInvitationOutcome\(await revokeInvitation\(jar, \{ id: request\.id \}\)\)\s*: reinviteOutcome\(await reinviteAdmin\(jar, \{ id: request\.id \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
     // Restablecer: el primer envío deja el testigo; el segundo lleva lo que se confirmó.
     resetAction:
-      /prepareResetOutcome\(await prepareReset\(jar, \{ profile \}\)\)\s*: resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+      /prepareResetOutcome\(await prepareReset\(jar, \{ profile \}\)\)\s*: resetOutcome\(await resetSecondFactor\(jar, \{ profile, confirmed: request\.confirmed, token: request\.token \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
   },
 };
 
@@ -326,8 +326,12 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(wildcard).toMatch(/const section = sectionAt\(resto\);\s+const step = await requireAdmin\(path, section\?\.capability\);/);
         // La sección se pinta al final, ya obedecido todo lo demás que la guarda contesta.
         const rendered = wildcard.indexOf("if (section !== null) return section.render(step.claims);");
-        expect(rendered).toBeGreaterThan(wildcard.indexOf('if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;'));
-        expect(rendered).toBeGreaterThan(wildcard.indexOf('step.kind === "unavailable"'));
+        const forbidden = wildcard.indexOf('if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;');
+        const unavailable = wildcard.indexOf('step.kind === "unavailable"');
+        const suspended = wildcard.indexOf('step.kind === "suspended"');
+        // Cada una existe: comparar contra un -1 daría por bueno lo que no está.
+        for (const found of [forbidden, unavailable, suspended]) expect(found).toBeGreaterThan(-1);
+        for (const found of [forbidden, unavailable, suspended]) expect(rendered).toBeGreaterThan(found);
         expect(wildcard.lastIndexOf("notFound()")).toBeGreaterThan(rendered);
         // Solo él pinta secciones.
         expect(sources.filter((source) => /\bsectionAt\b/.test(source.code)).map((source) => source.file).sort()).toEqual([
@@ -525,6 +529,17 @@ describe("lo que viaja al navegador", () => {
       "src/services/account/field-rules.ts",
     ]);
     expect([...reached.packages]).toEqual([]);
+  });
+
+  // Dos pantallas pintan algo que se muestra una sola vez (la clave de un segundo factor al
+  // configurarlo, y el código que se dicta al restablecer uno) y cuentan con que navegar
+  // fuera de ellas las desmonta. Con `cacheComponents` Next conserva el estado de una
+  // pantalla al salir de ella, y volver la repintaría con el secreto. Quien lo prenda
+  // esconde antes esos dos al desmontar, y entonces cambia esta prueba.
+  it("la configuración de Next no conserva el estado de una pantalla al salir de ella", () => {
+    const config = readFileSync(join(root, "next.config.ts"), "utf8");
+    expect(config).toContain("poweredByHeader: false");
+    expect(config).not.toMatch(/cacheComponents|\bexperimental\b/);
   });
 });
 
