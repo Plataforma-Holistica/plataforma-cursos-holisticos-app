@@ -32,6 +32,8 @@ export interface CatalogItem {
   name: string;
   position: number;
   isActive: boolean;
+  /** Cuántos cursos sin retirar la usan: con alguno, no se desactiva (FL-58 E1). */
+  inUse: number;
 }
 export interface Practice extends CatalogItem {
   /** Del 1 al 8: el tono de su portada (03 §4.1). */
@@ -48,7 +50,7 @@ export interface CatalogLists {
 export const ADD_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "duplicate", "inactive_duplicate", "added"] as const;
 export const RENAME_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "not_found", "duplicate", "unchanged", "renamed"] as const;
 export const MOVE_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "not_found", "edge", "moved"] as const;
-export const SET_ACTIVE_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "not_found", "unchanged", "deactivated", "reactivated"] as const;
+export const SET_ACTIVE_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "not_found", "unchanged", "in_use", "deactivated", "reactivated"] as const;
 export type AddAnswer = (typeof ADD_ANSWERS)[number];
 export type RenameAnswer = (typeof RENAME_ANSWERS)[number];
 export type MoveAnswer = (typeof MOVE_ANSWERS)[number];

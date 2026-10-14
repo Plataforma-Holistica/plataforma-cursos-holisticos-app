@@ -21,6 +21,7 @@ const item = {
   name: z.string(),
   position: z.number().int(),
   is_active: z.boolean(),
+  in_use: z.number().int().min(0),
 };
 const listsSchema = z.strictObject({
   fresh_code: z.boolean(),
@@ -38,6 +39,7 @@ export function listsOf(raw: unknown): CatalogLists | null {
     name: row.name,
     position: row.position,
     isActive: row.is_active,
+    inUse: row.in_use,
   });
   return {
     freshCode: lists.fresh_code,

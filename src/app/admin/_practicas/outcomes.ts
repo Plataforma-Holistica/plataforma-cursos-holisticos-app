@@ -113,7 +113,7 @@ export const catalogButton = {
 // ---------------------------------------------------------------------------------------
 // Lo que se pinta.
 
-export type CatalogFailure = "list_changed" | "needs_code" | "unavailable" | "unknown";
+export type CatalogFailure = "list_changed" | "needs_code" | "in_use" | "unavailable" | "unknown";
 export type CatalogDone = "added" | "renamed" | "moved" | "deactivated" | "reactivated";
 
 /** Lo que la lista de un bloque pinta después de un envío. */
@@ -241,6 +241,9 @@ export function activeOutcome(result: ItemSetActive, id: string): CatalogOutcome
           return { kind: "done", what: result.answer, id, name: null, direction: null };
         case "unchanged":
           return { kind: "unchanged" };
+        // Una página vieja que todavía ofrecía «Desactivar»: un curso la empezó a usar.
+        case "in_use":
+          return failed("in_use");
         case "not_found":
         case "invalid":
           return failed("list_changed");

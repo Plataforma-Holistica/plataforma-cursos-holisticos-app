@@ -50,16 +50,16 @@ const lockConflict = (code: string) => toDatabaseError({ code, severity: "ERROR"
 
 const RAW = {
   fresh_code: false,
-  practices: [{ id: ITEM, slug: "yoga", name: "Yoga", position: 1, is_active: true, cover_tone: 3 }],
-  levels: [{ id: ITEM, slug: "principiante", name: "Principiante", position: 2, is_active: false }],
+  practices: [{ id: ITEM, slug: "yoga", name: "Yoga", position: 1, is_active: true, cover_tone: 3, in_use: 2 }],
+  levels: [{ id: ITEM, slug: "principiante", name: "Principiante", position: 2, is_active: false, in_use: 0 }],
 };
 
 describe("las listas, como las contesta la base", () => {
   it("se leen en nombres de la aplicación", () => {
     expect(listsOf(RAW)).toEqual({
       freshCode: false,
-      practices: [{ id: ITEM, slug: "yoga", name: "Yoga", position: 1, isActive: true, coverTone: 3 }],
-      levels: [{ id: ITEM, slug: "principiante", name: "Principiante", position: 2, isActive: false }],
+      practices: [{ id: ITEM, slug: "yoga", name: "Yoga", position: 1, isActive: true, coverTone: 3, inUse: 2 }],
+      levels: [{ id: ITEM, slug: "principiante", name: "Principiante", position: 2, isActive: false, inUse: 0 }],
     });
   });
 
@@ -69,6 +69,8 @@ describe("las listas, como las contesta la base", () => {
 
   it.each<[string, unknown]>([
     ["un campo que este código no conoce", { ...RAW, secreto: 1 }],
+    ["sin cuántos cursos la usan", { ...RAW, levels: [{ ...RAW.levels[0], in_use: undefined }] }],
+    ["un uso negativo", { ...RAW, levels: [{ ...RAW.levels[0], in_use: -1 }] }],
     ["una práctica sin tono", { ...RAW, practices: [{ ...RAW.practices[0], cover_tone: undefined }] }],
     ["un tono fuera de los ocho", { ...RAW, practices: [{ ...RAW.practices[0], cover_tone: 9 }] }],
     ["un nivel con tono", { ...RAW, levels: [{ ...RAW.levels[0], cover_tone: 1 }] }],
@@ -156,6 +158,7 @@ describe("el almacén", () => {
     expect([...SET_ACTIVE_ANSWERS].sort()).toEqual([
       "deactivated",
       "forbidden",
+      "in_use",
       "invalid",
       "needs_fresh_code",
       "not_found",

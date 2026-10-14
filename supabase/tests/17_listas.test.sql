@@ -280,11 +280,11 @@ select is(
 select is(
   (select array_agg(distinct k order by k) from jsonb_array_elements(pruebas.listas('b0000000-0000-0000-0000-000000000001') -> 'practices') as p,
      jsonb_object_keys(p) as k),
-  array['cover_tone', 'id', 'is_active', 'name', 'position', 'slug'], 'de cada práctica, estos campos');
+  array['cover_tone', 'id', 'in_use', 'is_active', 'name', 'position', 'slug'], 'de cada práctica, estos campos');
 select is(
   (select array_agg(distinct k order by k) from jsonb_array_elements(pruebas.listas('b0000000-0000-0000-0000-000000000001') -> 'levels') as p,
      jsonb_object_keys(p) as k),
-  array['id', 'is_active', 'name', 'position', 'slug'], 'de cada nivel, estos');
+  array['id', 'in_use', 'is_active', 'name', 'position', 'slug'], 'de cada nivel, estos');
 select is(pruebas.listas('b0000000-0000-0000-0000-000000000002') -> 'fresh_code', 'false'::jsonb,
   'con el código viejo ve las listas, y que no es reciente: leer no lo pide');
 

@@ -48,6 +48,7 @@ const TONE_CLASSES: Record<number, string> = {
 
 const FAILURES: Record<CatalogFailure, string> = {
   list_changed: text.listChanged,
+  in_use: text.inUseRefused,
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,
@@ -270,6 +271,7 @@ function Row({ row, inactiveLabel, offered, renaming, renameFieldId, renameError
         <p className="min-w-0 text-body font-semibold break-words">{row.name}</p>
         {!row.active && <span className="text-body-s text-text-2">{inactiveLabel}</span>}
       </div>
+      {row.inUse !== null && <p className="text-body-s text-text-2">{row.inUse}</p>}
       {row.tone !== null && <p className="text-body-s text-text-2">{t(text.toneOf, { tone: row.tone.name })}</p>}
       {renaming !== null && (
         <div className="flex flex-col gap-3">

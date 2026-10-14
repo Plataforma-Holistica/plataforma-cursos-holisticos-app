@@ -27,15 +27,16 @@ const REIKI = "b0000000-0000-4000-8000-000000000002";
 const TAICHI = "b0000000-0000-4000-8000-000000000003";
 const BASIC = "c0000000-0000-4000-8000-000000000001";
 
-const practice = (id: string, name: string, position: number, coverTone: number, isActive = true): Practice => ({
+const practice = (id: string, name: string, position: number, coverTone: number, isActive = true, inUse = 0): Practice => ({
   id,
   slug: name.toLowerCase(),
   name,
   position,
   isActive,
   coverTone,
+  inUse,
 });
-const level = (id: string, name: string, position: number): CatalogItem => ({ id, slug: name.toLowerCase(), name, position, isActive: true });
+const level = (id: string, name: string, position: number): CatalogItem => ({ id, slug: name.toLowerCase(), name, position, isActive: true, inUse: 0 });
 const listsOf = (over: Partial<CatalogLists> = {}): CatalogLists => ({
   freshCode: true,
   practices: [practice(YOGA, "Yoga", 1, 1), practice(REIKI, "Reiki", 2, 2, false), practice(TAICHI, "Tai chi", 3, 3)],
@@ -231,6 +232,25 @@ describe("el código que dejó de ser reciente", () => {
     expect(screen.queryByLabelText("Nombre de la práctica nueva")).not.toBeInTheDocument();
     rerender(<CatalogScreen view={catalogView(listsOf())} />);
     expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveValue("Reiki");
+  });
+});
+
+describe("«en uso» (FL-58 E1)", () => {
+  it("una práctica que usa un curso dice cuántos y no ofrece desactivar; lo demás sí", async () => {
+    const { container } = show(listsOf({ practices: [practice(YOGA, "Yoga", 1, 1, true, 2), practice(TAICHI, "Tai chi", 2, 3)] }));
+    const practices = blockOf("Prácticas");
+    expect(practices.getByText("En uso en 2 cursos.")).toBeVisible();
+    expect(practices.queryByRole("button", { name: "Desactivar «Yoga»" })).not.toBeInTheDocument();
+    expect(practices.getByRole("button", { name: "Renombrar «Yoga»" })).toBeVisible();
+    expect(practices.getByRole("button", { name: "Desactivar «Tai chi»" })).toBeVisible();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("si una página vieja la desactiva y ya está en uso, lo dice sin prometer nada más", async () => {
+    actions.practicesAction.mockResolvedValue({ kind: "failed", reason: "in_use", name: null, attempt: 1 } satisfies CatalogState);
+    const { user } = show();
+    await user.click(blockOf("Prácticas").getByRole("button", { name: "Desactivar «Yoga»" }));
+    expect(await blockOf("Prácticas").findByText("Ya la usa un curso, así que no se puede desactivar mientras tanto. La lista de ahora lo dice.")).toBeVisible();
   });
 });
 

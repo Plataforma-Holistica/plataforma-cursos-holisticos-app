@@ -1151,9 +1151,12 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   - El servicio vive en `src/services/catalog/` y se arma como el del equipo: la guarda
     primero (`holds(…, "content")`), la forma antes de la base, las listas cerradas de
     respuestas, y «no se supo» se reporta (`catalog_change_unavailable`). Lo que las
-    pantallas importan sale de `catalog.ts`. Comprobar que una práctica está «en uso» antes
-    de desactivarla llega con la segunda solicitud de T-107 (lo publicado) y con T-402 (los
-    borradores). `giveCatalogCode` da el código
+    pantallas importan sale de `catalog.ts`. Una práctica o un nivel que usa un curso sin
+    retirar no se desactiva: la base contesta `in_use` (T-107, `t107_en_uso`), y la lectura
+    trae por fila cuántos la usan (`inUse`); PA-67 no ofrece desactivar y lo dice. Los
+    borradores cuentan desde T-402. **Todo camino que liste un curso o le cambie la práctica
+    o el nivel toma los candados de las dos listas y comprueba que estén activas**: si no,
+    «en uso» tendría una carrera. `giveCatalogCode` da el código
     otra vez y comprueba lo reciente con las listas del catálogo; pasa dos veces por la
     guarda (antes, y después de verificar, porque verificar escribió la cookie), cada vez
     en su función, y una prueba de arquitectura lo exige.

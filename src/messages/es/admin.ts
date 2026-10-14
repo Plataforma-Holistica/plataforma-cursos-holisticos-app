@@ -215,6 +215,10 @@ export const admin = defineMessages({
     renamed: "Nombre guardado.",
     moved: "«{name}» quedó en el lugar {place} de {count}.",
     unchanged: "No había nada que cambiar.",
+    // «En uso» (FL-58 E1): lo que usa un curso no se desactiva. Todavía no hay con qué
+    // reasignar un curso: no se promete.
+    inUse: { one: "En uso en {count} curso.", other: "En uso en {count} cursos." },
+    inUseRefused: "Ya la usa un curso, así que no se puede desactivar mientras tanto. La lista de ahora lo dice.",
     listChanged: "La lista cambió mientras la veías. Esta es la de ahora: revisa y repite si hace falta.",
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
     unknown: "No supimos si el cambio se hizo. Revisa la lista antes de intentarlo otra vez.",

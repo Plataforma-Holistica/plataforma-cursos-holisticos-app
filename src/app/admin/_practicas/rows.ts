@@ -1,5 +1,5 @@
 import { admin } from "@/messages/es/admin";
-import { t } from "@/messages/format";
+import { plural, t } from "@/messages/format";
 import type { CatalogItem, CatalogLists, Practice } from "@/services/catalog/catalog";
 
 import { catalogButton } from "./outcomes";
@@ -25,6 +25,8 @@ export interface CatalogRow {
   active: boolean;
   /** Su lugar entre las activas, de 1 en adelante. Nulo si está desactivada. */
   place: number | null;
+  /** «En uso en N cursos», o nulo si ninguno la usa. Con alguno, no se ofrece desactivar. */
+  inUse: string | null;
   /** El tono de portada, solo en las prácticas: su número (1 a 8) y su nombre. */
   tone: { number: number; name: string } | null;
   /** Lo que va oculto después de cada botón, para quien no ve la fila. */
@@ -64,13 +66,15 @@ function listView(items: readonly (CatalogItem | Practice)[]): ListView {
       name: item.name,
       active: item.isActive,
       place,
+      inUse: item.inUse > 0 ? t(plural(item.inUse, text.inUse), { count: String(item.inUse) }) : null,
       tone: toneOf(item),
       detail: t(text.of, { name: item.name }),
       buttons: {
         up: place !== null && place > 1 ? catalogButton.up(item.id, item.position) : null,
         down: place !== null && place < active.length ? catalogButton.down(item.id, item.position) : null,
         rename: item.isActive ? catalogButton.rename(item.id) : null,
-        deactivate: item.isActive ? catalogButton.deactivate(item.id) : null,
+        // Lo que usa un curso no se desactiva (FL-58 E1): la base contestaría `in_use`.
+        deactivate: item.isActive && item.inUse === 0 ? catalogButton.deactivate(item.id) : null,
         reactivate: item.isActive ? null : catalogButton.reactivate(item.id),
       },
     };
