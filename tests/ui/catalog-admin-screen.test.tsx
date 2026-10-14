@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -110,8 +110,12 @@ describe("agregar", () => {
     const said = await screen.findAllByText("Agregada: «Meditación».");
     expect(said.map((each) => each.getAttribute("role"))).toEqual([null, "status"]);
     expect(said[0]).toBeVisible();
-    expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveValue("");
-    expect(blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva")).toHaveFocus();
+    // El foco llega después de pintar: se espera, como lo espera quien usa el teclado.
+    await waitFor(() => {
+      const again = blockOf("Prácticas").getByLabelText("Nombre de la práctica nueva");
+      expect(again).toHaveValue("");
+      expect(again).toHaveFocus();
+    });
   });
 
   it("con Enter en el campo también agrega", async () => {
@@ -149,7 +153,7 @@ describe("renombrar", () => {
     expect(formOf(actions.practicesAction)).toEqual({ do: `rename:${TAICHI}` });
     const field = await screen.findByLabelText("Nombre nuevo de «Tai chi»");
     expect(field).toHaveValue("Tai chi");
-    expect(field).toHaveFocus();
+    await waitFor(() => expect(field).toHaveFocus());
     const list = field.closest("form");
     if (list === null) throw new Error("El campo no está en un formulario.");
     expect(within(list).getAllByRole("button").map((button) => (button as HTMLButtonElement).value)).toEqual([`save:${TAICHI}`, "cancel"]);
@@ -196,14 +200,15 @@ describe("ordenar, desactivar y reactivar", () => {
     expect(formOf(actions.practicesAction)).toEqual({ do: `up:${TAICHI}:3` });
     // La vista no cambió en esta prueba: Tai chi sigue segunda de dos activas.
     expect((await screen.findAllByText("«Tai chi» quedó en el lugar 2 de 2."))[0]).toBeVisible();
-    expect(blockOf("Prácticas").getByRole("button", { name: "Subir «Tai chi»" })).toHaveFocus();
+    await waitFor(() => expect(blockOf("Prácticas").getByRole("button", { name: "Subir «Tai chi»" })).toHaveFocus());
   });
 
   it("si el botón del sentido pulsado ya no está, el foco va al del otro sentido", async () => {
     actions.practicesAction.mockResolvedValue({ kind: "done", what: "moved", id: YOGA, name: null, direction: "up", attempt: 1 } satisfies CatalogState);
     const { user } = show();
     await user.click(blockOf("Prácticas").getByRole("button", { name: "Bajar «Yoga»" }));
-    expect(await blockOf("Prácticas").findByRole("button", { name: "Bajar «Yoga»" })).toHaveFocus();
+    const down = await blockOf("Prácticas").findByRole("button", { name: "Bajar «Yoga»" });
+    await waitFor(() => expect(down).toHaveFocus());
   });
 
   it("desactivar no pregunta: el botón ya lo hace, y el resultado toma el foco", async () => {
@@ -212,7 +217,7 @@ describe("ordenar, desactivar y reactivar", () => {
     await user.click(blockOf("Prácticas").getByRole("button", { name: "Desactivar «Yoga»" }));
     expect(formOf(actions.practicesAction)).toEqual({ do: `deactivate:${YOGA}` });
     const message = await screen.findByText(/^Desactivada\. Ya no se ofrece/);
-    expect(message.closest("[tabindex]")).toHaveFocus();
+    await waitFor(() => expect(message.closest("[tabindex]")).toHaveFocus());
   });
 
   it.each([
