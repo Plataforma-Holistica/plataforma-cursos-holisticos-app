@@ -1,0 +1,45 @@
+{
+  "comment": "Cursos de prueba de la base local (T-107; decisión de Sergio del 2026-10-14). No son los pilotos: esos llegan con T-004 y el documento de PQ-25. Los maestros son ficticios. Cada video es uno de Videos-Test/ (carpeta del proyecto, fuera de git), con la duración que midió ffprobe redondeada al segundo; en T-108 se suben a Mux. Los carga `pnpm db:courses`, solo contra la base local.",
+  "practices": ["Naturaleza", "Océano"],
+  "levels": ["Principiante"],
+  "teachers": [
+    { "slug": "maestra-de-prueba-bosque", "name": "Maestra de prueba (bosque)", "bio": "Una maestra que no existe, para probar la Plataforma." },
+    { "slug": "maestro-de-prueba-mar", "name": "Maestro de prueba (mar)", "bio": "Un maestro que no existe, para probar la Plataforma." }
+  ],
+  "courses": [
+    {
+      "teacher": "maestra-de-prueba-bosque",
+      "slug": "prueba-naturaleza",
+      "title": "Naturaleza (curso de prueba)",
+      "summary": "Un curso de prueba con dos videos de naturaleza. No es contenido real de la Plataforma.",
+      "practice": "naturaleza",
+      "level": "principiante",
+      "modules": [
+        {
+          "title": "Bosque y río",
+          "lessons": [
+            { "title": "El bosque", "file": "Nature + Forest.mp4", "duration_seconds": 356 },
+            { "title": "El río", "file": "Nature + River.mp4", "duration_seconds": 409 }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestro-de-prueba-mar",
+      "slug": "prueba-oceano",
+      "title": "Océano (curso de prueba)",
+      "summary": "Un curso de prueba con dos videos del mar. No es contenido real de la Plataforma.",
+      "practice": "oceano",
+      "level": "principiante",
+      "modules": [
+        {
+          "title": "Ballenas y olas",
+          "lessons": [
+            { "title": "Las ballenas", "file": "Ocean + whales.mp4", "duration_seconds": 360 },
+            { "title": "Las olas", "file": "Ocean+Waves-4.mp4", "duration_seconds": 414 }
+          ]
+        }
+      ]
+    }
+  ]
+}
