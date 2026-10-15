@@ -4,7 +4,7 @@
 -- reciente; el proveedor de video de prueba solo lo pone el guion local.
 begin;
 \ir _ayuda.psql
-select plan(96);
+select plan(109);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido1@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'contenido2@prueba.test');
@@ -45,6 +45,8 @@ $$;
 create function pruebas.curso_por_slug(p_slug text) returns uuid
 language sql security definer as $$ select course_id from public.published_courses where slug = p_slug $$;
 create table pruebas.cargado (slug text primary key, course_id uuid);
+create function pruebas.listas_de(p_id uuid) returns jsonb
+language sql as $$ select pruebas.pide(p_id, 'private.catalog_lists()')::jsonb $$;
 -- El dueño de la tabla, a nombre de alguien: es como escriben las funciones que aprueban.
 create function pruebas.dueno_a_nombre_de(p_id uuid) returns void
 language sql as $$
@@ -221,8 +223,14 @@ select pruebas.como_guion();
 select is(private.system_load_course((select id from maestra), pruebas.curso('oceano-uno', 'oceano')) ->> 'answer', 'loaded',
   'carga otro curso, en otra práctica');
 select pruebas.limpiar();
-select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices', 'oceano'), 'deactivated',
-  'su práctica se desactiva mientras espera');
+-- Desde la segunda solicitud de T-107, desactivarla lo niega «en uso». Aprobar comprueba lo
+-- mismo como defensa: se desactiva por fuera de las funciones, como dueño declarado sistema.
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices', 'oceano'), 'in_use',
+  'desactivar la práctica de un curso que espera: in_use');
+select pruebas.como_dueno_sistema();
+update public.practices set is_active = false where slug = 'oceano';
+select pruebas.limpiar();
+select is((select is_active from public.practices where slug = 'oceano'), false, '(desactivada por fuera)');
 select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_por_slug('oceano-uno')), 'practice_inactive',
   'aprobarlo: practice_inactive');
 select is((select is_listed from public.published_courses where slug = 'oceano-uno'), false, 'y sigue sin listar');
@@ -233,7 +241,10 @@ select is(private.system_catalog_add('levels', 'Avanzado') ->> 'answer', 'added'
 select is(private.system_load_course((select id from maestra), pruebas.curso('avanzado-uno', 'naturaleza', 'avanzado')) ->> 'answer', 'loaded',
   'carga un curso en ese nivel');
 select pruebas.limpiar();
-select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'levels', 'avanzado'), 'deactivated', 'el nivel se desactiva mientras espera');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'levels', 'avanzado'), 'in_use', 'desactivar su nivel: in_use');
+select pruebas.como_dueno_sistema();
+update public.levels set is_active = false where slug = 'avanzado';
+select pruebas.limpiar();
 select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_por_slug('avanzado-uno')), 'level_inactive', 'aprobarlo: level_inactive');
 select pruebas.como_guion();
 select is(private.system_load_course((select id from maestra), pruebas.curso('avanzado-dos', 'naturaleza', 'avanzado')) ->> 'answer', 'level_inactive',
@@ -248,6 +259,39 @@ select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001', pruebas.curso_
 select is(pruebas.aprueba('b0000000-0000-0000-0000-000000000001',
   (select r.course_id from public.course_registry r where not exists (select 1 from public.published_courses c where c.course_id = r.course_id))),
   'incomplete', 'sin su copia publicada: incomplete');
+
+-- ---------------------------------------------------------------------------------------
+-- «En uso» (segunda solicitud de T-107; FL-58 E1): no se desactiva lo que usa un curso sin
+-- retirar, esté publicado o en revisión.
+
+select is((select provolatile::text from pg_proc where oid = 'private.catalog_set_active(public.catalog_list, uuid, boolean)'::regprocedure), 'v',
+  'desactivar es volátil: dentro del candado ve lo que confirmó quien lo tenía');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices', 'naturaleza'), 'in_use', 'una práctica que usa un curso publicado: in_use');
+select is((select is_active from public.practices where slug = 'naturaleza'), true, 'y sigue activa');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'levels', 'principiante'), 'in_use', 'un nivel también');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices', 'oceano'), 'unchanged',
+  'una que ya está inactiva sigue contestando unchanged, aunque la use un curso');
+select is(
+  (select (p ->> 'in_use')::int from jsonb_array_elements(pruebas.listas_de('b0000000-0000-0000-0000-000000000001') -> 'practices') p where p ->> 'slug' = 'naturaleza'),
+  (select count(*)::int from public.published_courses where practice_id = (select id from public.practices where slug = 'naturaleza')),
+  'la lista dice cuántos cursos la usan, también los que esperan aprobación');
+select ok(
+  (select (p ->> 'in_use')::int from jsonb_array_elements(pruebas.listas_de('b0000000-0000-0000-0000-000000000001') -> 'practices') p where p ->> 'slug' = 'naturaleza') >= 2,
+  '(y son varios: uno publicado y otros en revisión)');
+-- Un curso retirado ya no la usa.
+select pruebas.como_guion();
+select is(private.system_catalog_add('practices', 'Retirada') ->> 'answer', 'added', 'el sistema agrega una práctica');
+select is(private.system_load_course((select id from maestra), pruebas.curso('retirado-uno', 'retirada')) ->> 'answer', 'loaded',
+  'carga un curso con ella');
+update public.course_registry set state = 'withdrawn', first_published_at = now(), withdrawn_at = now(), withdrawal_reason = 'prueba'
+  where course_id = pruebas.curso_por_slug('retirado-uno');
+select pruebas.limpiar();
+select is(
+  (select (p ->> 'in_use')::int from jsonb_array_elements(pruebas.listas_de('b0000000-0000-0000-0000-000000000001') -> 'practices') p where p ->> 'slug' = 'retirada'),
+  0, 'un curso retirado no cuenta');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000001', 'practices', 'retirada'), 'deactivated', 'y la práctica se desactiva');
+select is(pruebas.desactiva('b0000000-0000-0000-0000-000000000002', 'practices', 'naturaleza'), 'needs_fresh_code',
+  'la puerta va antes que «en uso»');
 
 -- ---------------------------------------------------------------------------------------
 -- El guardián: aunque alguien le diera permiso al servidor, escribir directo no pasa.

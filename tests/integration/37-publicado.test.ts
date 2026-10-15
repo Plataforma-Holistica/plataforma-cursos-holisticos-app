@@ -59,6 +59,9 @@ describe("los candados de lo publicado", () => {
     ["cargar", "practices", "select private.system_load_course(gen_random_uuid(), '{}'::jsonb)"],
     ["aprobar", "levels", "select private.approve_course(gen_random_uuid())"],
     ["cargar", "levels", "select private.system_load_course(gen_random_uuid(), '{}'::jsonb)"],
+    // «En uso» (segunda solicitud): desactivar mira dentro del mismo candado.
+    ["desactivar", "practices", "select private.catalog_set_active('practices', gen_random_uuid(), false)"],
+    ["desactivar", "levels", "select private.catalog_set_active('levels', gen_random_uuid(), false)"],
   ])("%s espera a quien tiene el candado de %s, antes de mirar nada más", async (_what, list, statement) => {
     const holder = await asSystem();
     const other = await asSystem();

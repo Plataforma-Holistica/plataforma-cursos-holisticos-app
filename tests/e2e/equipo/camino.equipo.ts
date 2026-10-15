@@ -1278,6 +1278,45 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     });
   });
 
+  test("prácticas y niveles: lo que usa un curso no se desactiva, y la pantalla dice cuántos lo usan", async ({ page }) => {
+    test.setTimeout(240_000);
+    // Preparación, no lo que se prueba: un curso de prueba que usa «Respiración», cargado como
+    // el guion local (el dueño declarado sistema, con su ajuste). Queda en revisión, y en
+    // revisión ya cuenta.
+    const course = {
+      slug: "en-uso-e2e",
+      title: "Curso que usa una práctica",
+      practice: "respiracion",
+      level: "basico",
+      modules: [{ title: "Uno", lessons: [{ title: "Una", video: { provider: "test", asset_id: "en-uso-e2e-1", playback_id: "p", duration_seconds: 60 } }] }],
+    };
+    const [loaded] = await ownerQuery<{ answer: string }>(
+      `with declared as materialized (
+         select set_config('app.actor_kind', 'system', true), set_config('app.local_courses', 'on', true)),
+       teacher as materialized (
+         select private.system_add_teacher('Maestra de extremo a extremo', 'maestra-e2e', null) as id from declared)
+       select private.system_load_course((select id from teacher), $1::jsonb) ->> 'answer' as answer from teacher`,
+      [JSON.stringify(course)],
+    );
+    expect(loaded?.answer).toBe("loaded");
+
+    await enterAdmin(page, ana, CATALOG);
+    const practices = page.locator("#bloque-catalogo-practicas");
+    const row = practices.getByRole("listitem").filter({ hasText: "Respiración" });
+    await expect(row.getByText("En uso en 1 curso.")).toBeVisible();
+    await expect(row.getByRole("button", { name: "Desactivar «Respiración»" })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Renombrar «Respiración»" })).toBeVisible();
+
+    // Llamada directo, la base contesta «en uso» y no la desactiva.
+    const fields = actionFields(await (await page.request.get(CATALOG)).text(), 0);
+    const id = (await practiceId("Respiración"))?.id ?? "";
+    const answered = await postAction(page.context().request, CATALOG, { ...fields, do: `deactivate:${id}` });
+    expect(answered.status()).toBe(200);
+    expect(await answered.text()).toContain("Ya la usa un curso, así que no se puede desactivar mientras tanto.");
+    expect(await practicesNow()).toContain("Respiración|respiracion|activa");
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.

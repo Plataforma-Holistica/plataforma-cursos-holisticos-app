@@ -9,7 +9,14 @@ import { catalogView } from "./rows";
 // no baja, contando solo las activas.
 
 const id = (n: number) => `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const level = (n: number, position: number, isActive = true): CatalogItem => ({ id: id(n), slug: `n${n}`, name: `Nivel ${n}`, position, isActive });
+const level = (n: number, position: number, isActive = true, inUse = 0): CatalogItem => ({
+  id: id(n),
+  slug: `n${n}`,
+  name: `Nivel ${n}`,
+  position,
+  isActive,
+  inUse,
+});
 const practice = (n: number, position: number, coverTone: number, isActive = true): Practice => ({ ...level(n, position, isActive), coverTone });
 const lists = (practices: Practice[], levels: CatalogItem[] = [], freshCode = true): CatalogLists => ({ freshCode, practices, levels });
 
@@ -57,6 +64,23 @@ describe("los botones de cada fila", () => {
 
   it("en el orden de su posición, aunque lleguen en otro", () => {
     expect(catalogView(lists([], [level(2, 7), level(1, 3)])).levels.rows.map((row) => row.name)).toEqual(["Nivel 1", "Nivel 2"]);
+  });
+});
+
+describe("«en uso» (FL-58 E1)", () => {
+  it("lo que usa un curso no ofrece desactivar, y dice cuántos lo usan", () => {
+    const [one, many, none] = catalogView(lists([], [level(1, 1, true, 1), level(2, 2, true, 3), level(3, 3)])).levels.rows;
+    expect(one?.buttons.deactivate).toBeNull();
+    expect(one?.inUse).toBe("En uso en 1 curso.");
+    expect(many?.inUse).toBe("En uso en 3 cursos.");
+    expect(none?.inUse).toBeNull();
+    expect(none?.buttons.deactivate).toBe(`deactivate:${id(3)}`);
+  });
+
+  it("lo demás de la fila se sigue ofreciendo: renombrar y ordenar", () => {
+    const [first] = catalogView(lists([], [level(1, 1, true, 2), level(2, 2)])).levels.rows;
+    expect(first?.buttons.rename).toBe(`rename:${id(1)}`);
+    expect(first?.buttons.down).toBe(`down:${id(1)}:1`);
   });
 });
 

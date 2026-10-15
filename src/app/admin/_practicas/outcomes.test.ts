@@ -202,6 +202,7 @@ describe("cada respuesta de desactivar y reactivar tiene su caso", () => {
     ["deactivated", { kind: "done", what: "deactivated", id: ITEM, name: null, direction: null }],
     ["reactivated", { kind: "done", what: "reactivated", id: ITEM, name: null, direction: null }],
     ["unchanged", { kind: "unchanged" }],
+    ["in_use", { kind: "failed", reason: "in_use", name: null }],
     ["not_found", { kind: "failed", reason: "list_changed", name: null }],
     ["needs_fresh_code", { kind: "failed", reason: "needs_code", name: null }],
   ] as const)("%s", (answer, expected) => {

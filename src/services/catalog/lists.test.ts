@@ -15,7 +15,7 @@ const BOUND = "fa000000-0000-4000-8000-0000000000b0";
 const claims = { userId: ME, aal: "aal2", sessionId: "5e000000-0000-4000-8000-000000000001", issuedAt: 0 } as VerifiedClaims;
 const LISTS: CatalogLists = { freshCode: true, practices: [], levels: [] };
 /** Un nivel en la posición 3, para mover. */
-const LEVEL = { id: ITEM, slug: "medio", name: "Medio", position: 3, isActive: true };
+const LEVEL = { id: ITEM, slug: "medio", name: "Medio", position: 3, isActive: true, inUse: 0 };
 const WITH_LEVEL: CatalogLists = { ...LISTS, levels: [LEVEL] };
 
 const standingOf = (capabilities: Capability[]): TeamStanding => ({ state: "member", capabilities, factor: BOUND }) as TeamStanding;
