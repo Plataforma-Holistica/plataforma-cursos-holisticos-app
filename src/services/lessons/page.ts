@@ -48,12 +48,12 @@ export function lessonPageOf(rows: readonly LessonRowData[], lessonId: string): 
 
   const modules: LessonPage["modules"] = [];
   for (const [position, row] of ordered.entries()) {
-    let module = modules.at(-1);
-    if (module === undefined || module.id !== row.moduleId) {
-      module = { id: row.moduleId, title: row.moduleTitle, lessons: [] };
-      modules.push(module);
+    let group = modules.at(-1);
+    if (group === undefined || group.id !== row.moduleId) {
+      group = { id: row.moduleId, title: row.moduleTitle, lessons: [] };
+      modules.push(group);
     }
-    module.lessons.push({
+    group.lessons.push({
       id: row.lessonId,
       title: row.lessonTitle,
       number: position + 1,
