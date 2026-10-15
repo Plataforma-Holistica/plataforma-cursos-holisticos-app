@@ -37,7 +37,7 @@ export const ui = defineMessages({
     danger: "Error:",
   },
   // Una lección del temario: el nombre del enlace dice su número, su título, su duración y su
-  // estado.
+  // estado. A la vista va lo mismo, sin «Lección».
   lessonRow: {
     name: "Lección {number}, {title}, {duration}",
     namePlaying: "Lección {number}, {title}, {duration}, reproduciendo",

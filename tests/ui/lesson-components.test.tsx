@@ -77,7 +77,7 @@ describe("Tabs", () => {
 });
 
 describe("LessonRow", () => {
-  it("es un enlace cuyo nombre dice número, título y duración", () => {
+  it("es un enlace cuyo nombre dice número, título y duración, y contiene lo que se ve", () => {
     render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" />);
     const link = screen.getByRole("link", { name: "Lección 3, Cuatro tiempos, 6 min" });
     expect(link).toHaveAttribute("href", "/cursos/x/lecciones/1");
