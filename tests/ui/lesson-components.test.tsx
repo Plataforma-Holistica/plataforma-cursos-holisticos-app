@@ -1,0 +1,102 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import { a11yViolations } from "../setup/a11y";
+
+import { BackLink } from "@/ui/back-link";
+import { LessonRow } from "@/ui/lesson-row";
+import { Tabs } from "@/ui/tabs";
+
+// Los componentes base que llegan con la página de la lección (PA-22, T-203; diseño, sección
+// 5.2 y 5.3): regresar, pestañas y la fila de una lección.
+
+const ITEMS = [
+  { id: "temario", label: "Temario", panel: <p>Las lecciones.</p> },
+  { id: "sobre", label: "Sobre esta lección", panel: <p>De qué trata.</p> },
+  { id: "notas", label: "Notas", panel: <p>Lo que anotaste.</p> },
+];
+
+describe("Tabs", () => {
+  it("es una lista de pestañas con su nombre; la primera activa y su panel a la vista", async () => {
+    const { container } = render(<Tabs label="Partes de la lección" items={ITEMS} idPrefix="leccion" />);
+    expect(screen.getByRole("tablist", { name: "Partes de la lección" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Temario" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Sobre esta lección" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tabpanel", { name: "Temario" })).toHaveTextContent("Las lecciones.");
+    expect(screen.queryByText("De qué trata.")).not.toBeVisible();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("solo la activa recibe el foco con Tab, y Tab entra al panel", async () => {
+    const user = userEvent.setup();
+    render(<Tabs label="Partes" items={ITEMS} idPrefix="leccion" />);
+    await user.tab();
+    expect(screen.getByRole("tab", { name: "Temario" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("tabpanel", { name: "Temario" })).toHaveFocus();
+  });
+
+  it("las flechas cambian de pestaña y dan la vuelta; Inicio y Fin van a los extremos", async () => {
+    const user = userEvent.setup();
+    render(<Tabs label="Partes" items={ITEMS} idPrefix="leccion" />);
+    await user.tab();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Sobre esta lección" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Sobre esta lección" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("De qué trata.")).toBeVisible();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Temario" })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("tab", { name: "Notas" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("tab", { name: "Temario" })).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Notas" })).toHaveFocus();
+    // Otra tecla no mueve nada.
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("tab", { name: "Notas" })).toHaveFocus();
+  });
+
+  it("con el clic también", async () => {
+    const user = userEvent.setup();
+    render(<Tabs label="Partes" items={ITEMS} idPrefix="leccion" />);
+    await user.click(screen.getByRole("tab", { name: "Notas" }));
+    expect(screen.getByText("Lo que anotaste.")).toBeVisible();
+    expect(screen.queryByText("Las lecciones.")).not.toBeVisible();
+  });
+
+  it("sin JavaScript se pintan todos los paneles, cada uno con su título, y ninguna pestaña", () => {
+    const html = renderToString(<Tabs label="Partes" items={ITEMS} idPrefix="leccion" />);
+    expect(html).not.toContain('role="tablist"');
+    for (const item of ITEMS) expect(html).toContain(`<h2 id="leccion-${item.id}-title" class="text-h3">${item.label}</h2>`);
+    expect(html).toContain("Las lecciones.");
+    expect(html).toContain("Lo que anotaste.");
+  });
+});
+
+describe("LessonRow", () => {
+  it("es un enlace cuyo nombre dice número, título y duración", () => {
+    render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" />);
+    const link = screen.getByRole("link", { name: "Lección 3, Cuatro tiempos, 6 min" });
+    expect(link).toHaveAttribute("href", "/cursos/x/lecciones/1");
+    expect(link).not.toHaveAttribute("aria-current");
+  });
+
+  it("la que se está viendo lo dice en el nombre, a la vista y como página actual", async () => {
+    const { container } = render(<LessonRow href="/cursos/x/lecciones/1" number={5} title="Acostado" duration="7 min" current />);
+    const link = screen.getByRole("link", { name: "Lección 5, Acostado, 7 min, reproduciendo" });
+    expect(link).toHaveAttribute("aria-current", "page");
+    expect(link).toHaveTextContent("7 min · Reproduciendo");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("BackLink", () => {
+  it("es un enlace que dice a dónde regresa", async () => {
+    const { container } = render(<BackLink href="/inicio">Volver al inicio</BackLink>);
+    expect(screen.getByRole("link", { name: "Volver al inicio" })).toHaveAttribute("href", "/inicio");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
