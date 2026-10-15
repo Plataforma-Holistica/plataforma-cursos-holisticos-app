@@ -249,10 +249,9 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                         {text.player.play}
                       </Button>
                     ) : (
-                      // Solo sin JavaScript: con él, no se asoma mientras la página se monta.
-                      <noscript>
-                        <p className="text-text-2">{text.player.noScript}</p>
-                      </noscript>
+                      // Hasta que la página se monta. Dentro de `<noscript>` React no lo pinta
+                      // (medido sin JavaScript), así que con él se ve un instante al cargar.
+                      <p className="text-text-2">{text.player.noScript}</p>
                     ))}
                   {video.kind === "loading" && <p className="text-text-2">{text.player.loading}</p>}
                   {video.kind === "no_video" && <p className="text-text-2">{text.player.noVideo}</p>}

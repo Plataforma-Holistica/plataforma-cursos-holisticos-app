@@ -230,7 +230,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Diecinueve precisiones que la tabla no dice:
+falla. Veintiuna precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -263,11 +263,13 @@ falla. Diecinueve precisiones que la tabla no dice:
   a `db.ts`.
 - **Una pantalla se arma siempre igual** (TRD §4.2 y §9.3). Las reglas para quien escriba
   una:
-  - Toda página llama a la guarda que le toca (`requireSession`,
+  - Toda página llama a la guarda que le toca (`requireSession`, `requireLessonSession`,
     `requireIncompleteSession` o `visitorOnly`, de `src/app/_lib/guard.ts`) o entra a la
     lista de públicas de `tests/architecture/screens.test.ts`. Una pantalla con sesión se
     agrega además a `SESSION_ROUTES` (`src/services/account/navigation.ts`) y atiende sus
     dos estados: cuenta suspendida (PA-35) y «no se supo» (PA-18, con «Reintentar»).
+    `SESSION_ROUTES` va por prefijo; la lección (`/cursos/{slug}/lecciones/{id}`) va por
+    patrón (`isLessonPath`), porque de `/cursos` cuelga también la ficha pública del curso.
   - La guarda en las páginas le pregunta a `checkSession` y obedece. Qué hace cada tipo de
     pantalla con cada respuesta es una tabla pura, `guard-steps.ts`. `unavailable` nunca
     se trata como «sin sesión».
@@ -1154,6 +1156,44 @@ falla. Diecinueve precisiones que la tabla no dice:
   - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
     prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
     no sea a ella y anota a dónde iba.
+- **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
+  de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
+  pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
+  solo archivo:
+  - **Quien llega sin sesión no va siempre a entrar** (flujo §6.3): si el curso es el abierto,
+    a registrarse; si no, o si no se supo, a entrar (`lessonPageStep`). Por eso el paso previo
+    no redirige desde la lección (`proxySignsIn`): no lee la base. Lo decide su guarda,
+    `requireLessonSession`, que pregunta `courseIsOpen` solo cuando no hay sesión; lo lee como
+    sistema, del registro del curso, y solo si está listado. El registro todavía no lleva el
+    `volver` hasta el final; cuando exista `/planes` (T-30x), el curso normal irá ahí.
+  - **El temario se lee como la persona, filtrando a mano lo listado y lo vigente**
+    (`readCourseLessons`): las políticas dejan ver más al maestro dueño y a Contenido (lo suyo
+    sin listar, lo retirado). Un curso sin listar, una lección retirada, una de otro curso o
+    una que no existe: PA-19, igual. Lo del maestro sin listar lo verá en su vista previa
+    (PA-43).
+  - **PA-33 sale al cargar**: la página le pregunta a la función única de medios con
+    `lessonAccess`, sin firmar, antes de pintar (`04` §6.2, paso 7). Sin «Ver planes» hasta
+    que exista la pantalla de planes, y sin prometer avance guardado (T-206). Su fecha va en
+    palabras desde el servidor (`longDate`). Si la sesión dejó de pasar entre la guarda y esa
+    pregunta, la página vuelve a pedirse.
+  - **La dirección la pide el reproductor después** (`watchLessonAction`, como el alumno). La
+    tabla (`outcomes.ts`) no deja salir la base de acceso, si cuenta para el reparto ni hasta
+    cuándo: son de T-204 y T-205. Suspendida o sin sesión, la acción manda a la misma página,
+    donde decide la guarda.
+  - **El armado** (decisiones de Sergio): en escritorio, el reproductor, el título, el curso y
+    quien lo imparte, y «Sobre esta lección» como sección (es la única pestaña que queda: las
+    de Recursos y Comentarios no aparecen hasta T-404 y T-501), con el temario a la derecha.
+    En teléfono, el reproductor pegado arriba y las pestañas Temario y Sobre esta lección. El
+    temario va dos veces en la página (una oculta por tamaño), cada una con sus propios `id`.
+    El curso y el maestro van como texto, y «Regresar» va al inicio, hasta que existan sus
+    fichas (T-210).
+  - Al terminar, «Lección terminada», «Sigue: {lección}» y «Volver a ver», sin arranque
+    automático (D-07). Sin JavaScript, el lugar del reproductor lo dice.
+- **Tres componentes base de la lección** (`src/ui/`): `Tabs` (las flechas, Inicio y Fin
+  cambian; sin JavaScript pinta todos los paneles con su título), `LessonRow` (su nombre va
+  entero en un texto que solo se lee y lo visible queda fuera del árbol de accesibilidad:
+  armado con fragmentos, axe marcó que no contenía lo visible) y `BackLink`. Están en
+  `/muestra`.
 - **El reproductor de video es uno solo, `src/app/_video/player.tsx`** (T-108 y T-203; diseño,
   sección 5.4; RF-305, RF-312). Lo que no se ve leyendo un solo archivo:
   - **Mux Player solo se importa ahí**, y cada pantalla lo carga con `next/dynamic` sin
@@ -1515,7 +1555,8 @@ y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que un
 confirmación dice que va a pasar.
 Con el video (T-108), `src/services/media/`, `src/adapters/mux/` y el servicio de
 revisión, `src/services/review/`; con el reproductor compartido (T-203), `src/app/_video/`,
-donde viven la marca de agua y lo que se le apaga a Mux Player.
+donde viven la marca de agua y lo que se le apaga a Mux Player; y con la página de la
+lección, `src/app/cursos/` y `src/services/lessons/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.
