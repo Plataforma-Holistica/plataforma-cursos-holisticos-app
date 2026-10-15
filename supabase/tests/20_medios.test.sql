@@ -8,7 +8,7 @@
 -- TypeScript. Quien actúa sale de `private.actor_id()`: bajo el servidor no hay `auth.uid()`.
 begin;
 \ir _ayuda.psql
-select plan(56);
+select plan(67);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto@prueba.test');
@@ -83,6 +83,24 @@ select is(
 revoke insert on public.subscriptions from app_service;
 revoke update (revoked_at) on public.courtesy_grants from app_service;
 
+-- Una fecha `infinity` llegaría a la regla como fecha inválida («no se supo»): quien paga se
+-- quedaría sin video. Sin fin se escribe nulo.
+select throws_ok(format($$insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status,
+    currency, current_period_start, current_period_end, last_renewal_failed_at, ended_at)
+  values ('a0000000-0000-0000-0000-000000000001', 'manual', %L, 'monthly', 'expired', 'MXN', %s)$$, gen_random_uuid(), v.fechas),
+  '23514', null, 'una suscripción no acepta ' || v.caso)
+  from (values
+    ('un inicio de periodo -infinity', $$'-infinity', now(), null, null$$),
+    ('un fin de periodo infinity', $$now(), 'infinity', null, null$$),
+    ('una falla infinity', $$now(), now() + interval '1 day', 'infinity', null$$),
+    ('un fin infinity', $$now(), now() + interval '1 day', null, 'infinity'$$)) as v (caso, fechas);
+select throws_ok(format($$insert into public.courtesy_grants (profile_id, reason, starts_at, ends_at, granted_by)
+  values ('a0000000-0000-0000-0000-000000000001', 'prueba', %s, 'b0000000-0000-0000-0000-000000000001')$$, v.fechas),
+  '23514', null, 'una cortesía no acepta ' || v.caso)
+  from (values
+    ('un inicio -infinity', $$'-infinity', null$$),
+    ('un fin infinity', $$now(), 'infinity'$$)) as v (caso, fechas);
+
 select has_function('private', 'media_facts', array['uuid'], 'existe private.media_facts(uuid)');
 select has_function('private', 'lesson_playback', array['uuid'], 'existe private.lesson_playback(uuid)');
 select ok(
@@ -123,7 +141,7 @@ select pruebas.limpiar();
 -- Quién lee las tablas: cada quien lo suyo.
 
 select pruebas.suscripcion('a0000000-0000-0000-0000-000000000001', 'active', now() - interval '10 days', now() + interval '20 days');
-select pruebas.suscripcion('a0000000-0000-0000-0000-000000000002', 'active', now() - interval '10 days', now() + interval '20 days');
+select pruebas.suscripcion('a0000000-0000-0000-0000-000000000002', 'expired', now() - interval '40 days', now() - interval '10 days');
 insert into public.courtesy_grants (profile_id, reason, starts_at, ends_at, granted_by)
 values ('a0000000-0000-0000-0000-000000000002', 'prueba', now() - interval '1 day', null, 'b0000000-0000-0000-0000-000000000001');
 select pruebas.como_usuario('a0000000-0000-0000-0000-000000000001');
@@ -177,11 +195,18 @@ select pruebas.como_dueno_sistema();
 update public.teachers set status = 'active', left_at = null where id = (select id from maestra);
 select pruebas.limpiar();
 
--- Cuál suscripción: la más reciente, sin contar las que nunca se pagaron.
+-- Cuál suscripción: la viva (`active` o `in_grace`, solo puede haber una), y si no hay, la más
+-- reciente sin contar las que nunca se pagaron (decisión de Sergio del 2026-10-15).
 select pruebas.suscripcion('a0000000-0000-0000-0000-000000000001', 'pending', now() - interval '1 hour', null::timestamptz);
 select is((pruebas.hechos('a0000000-0000-0000-0000-000000000001', null) -> 'subscription' ->> 'paid_through')::timestamptz,
   (select current_period_end from public.subscriptions where profile_id = 'a0000000-0000-0000-0000-000000000001' and status = 'active'),
   'una pendiente más nueva no tapa a la que paga');
+select pruebas.suscripcion('a0000000-0000-0000-0000-000000000001', 'canceled', now() - interval '30 minutes',
+  now() - interval '1 minute', null, now() - interval '1 minute');
+select is((pruebas.hechos('a0000000-0000-0000-0000-000000000001', null) -> 'subscription') - 'grace_days',
+  (select jsonb_build_object('paid_through', current_period_end, 'failed_at', null, 'ended_at', null, 'refunded', false)
+     from public.subscriptions where profile_id = 'a0000000-0000-0000-0000-000000000001' and status = 'active'),
+  'una terminada más nueva tampoco: los hechos son todos de la viva');
 select pruebas.suscripcion('a0000000-0000-0000-0000-000000000002', 'refunded', now() - interval '1 hour', now() + interval '29 days',
   null, now() - interval '30 minutes');
 create temporary table h as select pruebas.hechos('a0000000-0000-0000-0000-000000000002', null) as f;
@@ -197,9 +222,9 @@ select pruebas.suscripcion('a0000000-0000-0000-0000-000000000004', 'in_grace', n
   now() - interval '1 day');
 select is(pruebas.hechos('a0000000-0000-0000-0000-000000000004', null) -> 'subscription' -> 'grace_days',
   private.parameter_value('GRACIA_COBRO_DIAS', now() - interval '1 day'), 'con falla, la gracia vigente a esa hora');
-select pruebas.suscripcion('a0000000-0000-0000-0000-000000000004', 'expired', now() - interval '10 hours',
+select pruebas.suscripcion('a0000000-0000-0000-0000-000000000003', 'expired', now() - interval '10 hours',
   timestamptz '2026-09-01 00:00:00+00', timestamptz '2026-09-01 00:00:00+00');
-select is(pruebas.hechos('a0000000-0000-0000-0000-000000000004', null) -> 'subscription' -> 'grace_days', 'null'::jsonb,
+select is(pruebas.hechos('a0000000-0000-0000-0000-000000000003', null) -> 'subscription' -> 'grace_days', 'null'::jsonb,
   'una falla de antes de que el parámetro existiera: nula, no la de hoy');
 
 -- Las cortesías: las vigentes y las futuras, sin las revocadas.
@@ -272,12 +297,38 @@ select is(pruebas.playback('b0000000-0000-0000-0000-000000000001', pruebas.lecci
   'a quien tiene Contenido: sí');
 select is(pruebas.playback('a0000000-0000-0000-0000-000000000001', pruebas.leccion('curso-listado', 2)), null,
   'un video de prueba: no');
+select is((select private.lesson_playback(pruebas.leccion('curso-listado'))), null,
+  'sin nadie que actúe, ni de un curso listado y publicado');
+
+-- Cada mitad de «publicado y listado» cuenta por sí sola, y una lección que ya no es la
+-- vigente no suelta su video. Cada caso se deshace.
+savepoint barrera;
+select pruebas.como_dueno_sistema();
+update public.published_courses set is_listed = false where slug = 'curso-listado';
+select pruebas.limpiar();
+select is(pruebas.playback('a0000000-0000-0000-0000-000000000002', pruebas.leccion('curso-listado')), null,
+  'de un curso publicado sin listar, a una cuenta común: no');
+rollback to savepoint barrera;
+select pruebas.como_dueno_sistema();
+update public.published_courses set is_listed = true where slug = 'curso-revision';
+select pruebas.limpiar();
+select is(pruebas.playback('a0000000-0000-0000-0000-000000000002', pruebas.leccion('curso-revision')), null,
+  'de un curso listado que no está publicado, a una cuenta común: no');
+rollback to savepoint barrera;
+select pruebas.como_dueno_sistema();
+update public.published_lessons set is_current = false, retired_at = now() where id = pruebas.leccion('curso-listado');
+select pruebas.limpiar();
+select is(pruebas.playback('a0000000-0000-0000-0000-000000000002', pruebas.leccion('curso-listado')), null,
+  'de una lección que ya no es la vigente: no');
+rollback to savepoint barrera;
+select is(pruebas.playback('a0000000-0000-0000-0000-000000000002', pruebas.leccion('curso-listado')), 'PlaybackMedioscursolistado',
+  'deshecho cada caso, el curso listado vuelve a soltar su video');
+
 select pruebas.como_dueno_sistema();
 update public.video_assets set status = 'processing' where provider_asset_id = 'AssetMedioscursolistado';
 select pruebas.limpiar();
 select is(pruebas.playback('a0000000-0000-0000-0000-000000000001', pruebas.leccion('curso-listado')), null,
   'un video sin terminar: no');
-select is((select private.lesson_playback(pruebas.leccion('curso-revision'))), null, 'sin nadie que actúe: no');
 select is(pruebas.playback('a0000000-0000-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000000'), null,
   'una lección que no existe: no');
 

@@ -43,11 +43,16 @@ create table public.subscriptions (
   constraint subscriptions_currency_format check (currency ~ '^[A-Z]{3}$'),
   constraint subscriptions_period_order check (current_period_end > current_period_start),
   constraint subscriptions_active_has_period check (status = 'pending' or current_period_end is not null),
-  constraint subscriptions_grace_has_failure check (status <> 'in_grace' or last_renewal_failed_at is not null)
+  constraint subscriptions_grace_has_failure check (status <> 'in_grace' or last_renewal_failed_at is not null),
+  -- Una fecha `infinity` llega a la regla como fecha inválida, que es «no se supo»: quien paga
+  -- se quedaría sin video. Sin fin se escribe nulo.
+  constraint subscriptions_finite_dates check (isfinite(current_period_start) and isfinite(current_period_end)
+                                               and isfinite(last_renewal_failed_at) and isfinite(ended_at))
 );
 -- Hechos de la cuenta para RN-01, en cada petición con acceso.
 create index subscriptions_profile_idx on public.subscriptions (profile_id, current_period_end desc);
--- La más reciente de una cuenta, que es de la que salen los hechos (`private.media_facts`).
+-- Las de una cuenta de las que pueden salir los hechos (`private.media_facts`: la viva, y si no
+-- hay, la más reciente).
 create index subscriptions_latest_idx on public.subscriptions (profile_id, created_at desc, id desc)
   where status <> 'pending';
 -- Una cuenta no tiene dos suscripciones cobrando a la vez.
@@ -71,7 +76,8 @@ create table public.courtesy_grants (
   revoked_at timestamptz,
   revoked_by uuid references public.profiles (id),
   constraint courtesy_grants_order check (ends_at is null or ends_at > starts_at),
-  constraint courtesy_grants_revocation_consistent check ((revoked_at is null) = (revoked_by is null))
+  constraint courtesy_grants_revocation_consistent check ((revoked_at is null) = (revoked_by is null)),
+  constraint courtesy_grants_finite_dates check (isfinite(starts_at) and isfinite(ends_at))   -- sin fin es nulo, no `infinity`
 );
 -- Hechos de la cuenta para RN-01: las ventanas de cortesía ("courtesy", T-201), de starts_at a ends_at; ends_at nulo es sin fin.
 create index courtesy_grants_profile_idx on public.courtesy_grants (profile_id) where revoked_at is null;
@@ -102,8 +108,10 @@ create policy courtesy_grants_support_select on public.courtesy_grants
 --    courtesy: [{from, until}],
 --    lesson: null | {is_current, provider, ready, duration_seconds, teacher_id, course_state, listed, is_open}}
 --
--- · La suscripción es la más reciente de quien actúa sin contar las `pending`, que nunca se
---   pagaron: una que se abre y no se termina de pagar no tapa a la que paga. Los cuatro
+-- · La suscripción es la viva de quien actúa (`active` o `in_grace`: solo puede haber una), y
+--   si no hay, la más reciente sin contar las `pending`, que nunca se pagaron. Así una que se
+--   abre y no se termina de pagar, o una más nueva que el cobro dio por terminada, no tapa a
+--   la que paga (decisión de Sergio del 2026-10-15, tras la revisión del diff). Los cuatro
 --   hechos salen de esa misma, para que el fin de una vieja no corte una nueva (T-201).
 -- · `grace_days` es el parámetro vigente a la hora de la falla, para que subirlo no reviva un
 --   acceso terminado. Sin falla va nulo: la gracia no se usa. Con falla y nulo (el parámetro
@@ -150,7 +158,7 @@ begin
     into v_subscription
   from public.subscriptions s
   where s.profile_id = v_actor and s.status <> 'pending'
-  order by s.created_at desc, s.id desc
+  order by s.status in ('active', 'in_grace') desc, s.created_at desc, s.id desc
   limit 1;
 
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('from', g.starts_at, 'until', g.ends_at)
