@@ -27,6 +27,7 @@
 # Administración: toda página bajo esta ruta corre la guarda del equipo, y el comodín hace
 # que una ruta que existe y una que no existe le contesten lo mismo a quien no es del equipo
 /src/app/admin/            @SerchFGA @plataformaholisticadev
+/src/app/_video/           @SerchFGA @plataformaholisticadev
 # La medición de la cabecera de la dirección, de la que dependen el freno y los topes
 /src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
 # Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta

@@ -106,11 +106,11 @@ const noProviderSdks = {
 };
 
 // El reproductor de video (Mux Player, y media-chrome, sobre el que está hecho) solo lo carga
-// el reproductor de la pantalla de revisión (`src/app/admin/_revision/player.tsx`, T-108), y
-// esa pantalla lo pide con `next/dynamic`: pesa, y no debe viajar con ninguna otra página.
+// el reproductor compartido (`src/app/_video/player.tsx`, T-108 y T-203), y las pantallas lo
+// piden con `next/dynamic`: pesa, y no debe viajar con ninguna otra página.
 const noVideoPlayer = {
   group: ["@mux/mux-player", "@mux/mux-player/*", "@mux/mux-player-react", "@mux/mux-player-react/*", "media-chrome", "media-chrome/*", "hls.js"],
-  message: "El reproductor de video solo se importa en src/app/admin/_revision/player.tsx, que se carga con next/dynamic (T-108).",
+  message: "El reproductor de video solo se importa en src/app/_video/player.tsx, que se carga con next/dynamic (T-108, T-203).",
 };
 
 // El SDK del registro de errores solo vive en su adaptador (RNF-16, TRD §10.5): ahí
@@ -211,7 +211,8 @@ const NON_TEXT_ATTRIBUTES =
     "value",
     // Un manejador no es un texto, aunque adentro compare o navegue con cadenas.
     "on[A-Z][A-Za-z]*",
-    "role|lang|dir|key|ref|slot|is|as|variant|size|tone|noticeTone",
+    // `translate` dice si un traductor del navegador puede tocar el texto: no es texto.
+    "role|lang|dir|translate|key|ref|slot|is|as|variant|size|tone|noticeTone",
     "autoComplete|autoCapitalize|autoCorrect|inputMode|enterKeyHint|spellCheck|pattern|accept",
     "loading|decoding|fetchPriority|crossOrigin|referrerPolicy|integrity|nonce|sandbox|allow",
     "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",
@@ -609,7 +610,7 @@ export default defineConfig([
   },
   {
     // El único que importa el reproductor.
-    files: ["**/src/app/admin/_revision/player.tsx"],
+    files: ["**/src/app/_video/player.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",

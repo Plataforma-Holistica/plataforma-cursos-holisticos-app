@@ -128,7 +128,7 @@ export function approveOutcome(result: CourseApproved): ApproveOutcome {
 
 /** Lo que el reproductor recibe. Los nombres de los tokens son los de Mux Player. */
 export type VideoAnswer =
-  | { kind: "granted"; playbackId: string; tokens: { playback: string; thumbnail: string; storyboard: string } }
+  | { kind: "granted"; playbackId: string; tokens: { playback: string; thumbnail: string; storyboard: string }; speeds: number[] }
   | { kind: "no_video" }
   | { kind: "unavailable" };
 
@@ -144,6 +144,7 @@ export function videoAnswerOf(grant: ReviewGrant): Leave | VideoAnswer {
         kind: "granted",
         playbackId: grant.playbackId,
         tokens: { playback: grant.tokens.video, thumbnail: grant.tokens.thumbnail, storyboard: grant.tokens.storyboard },
+        speeds: grant.speeds,
       };
     case "refused":
       return TO_PAGE;
@@ -154,5 +155,3 @@ export function videoAnswerOf(grant: ReviewGrant): Leave | VideoAnswer {
   }
 }
 
-/** El código con que Mux Player dice que la dirección firmada caducó (`NETWORK_TOKEN_EXPIRED`). */
-export const TOKEN_EXPIRED = 2403210;

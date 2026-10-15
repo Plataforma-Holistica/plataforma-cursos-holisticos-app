@@ -230,7 +230,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Dieciocho precisiones que la tabla no dice:
+falla. Diecinueve precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -1130,27 +1130,14 @@ falla. Dieciocho precisiones que la tabla no dice:
     y los tokens con los nombres de Mux Player (`playback`, no `video`: lo traduce la tabla
     de la pantalla). Una prueba de extremo a extremo revisa lo servido, no el DOM vivo:
     Mux Player escribe el playback id como atributo.
-  - **Mux Player solo se importa en `player.tsx`**, y la pantalla lo carga con
-    `next/dynamic` sin servidor: pesa (unos 330 KB comprimidos) y no debe viajar con otra
-    página. El lint (`noVideoPlayer`) rechaza el `import` en cualquier otro archivo, y una
-    prueba de arquitectura cualquier forma de cargarlo (`import()`, `require`) y su entrada
-    `/lazy`, que inyecta estilos en línea. Si la descarga falla, la pantalla lo dice como
-    cualquier otro error, con «Reintentar».
-  - **Lo que se le apaga:** Mux Data (`disableTracking`, `disableCookies`, sin `envKey`),
-    recordar volumen y silencio, y el envío a otra pantalla y la imagen dentro de imagen, que
-    no tienen prop (la de imagen dentro de imagen no la usa): se ponen en el `<video>`
-    interno con la referencia (`lockDown`), antes de que Mux Player reciba el playback id.
-    Sin eso, en Chrome pide un script de Google. El navegador de prueba no trae
-    `window.chrome`, así que el extremo a extremo se lo pone: sin él no habría nada que
-    probar. Sus textos van
-    en español registrando el de media-chrome, que es dependencia directa en la misma
-    versión que la de Mux Player: si se sube una, se sube la otra.
+  - **El reproductor es el compartido, `src/app/_video/player.tsx`** (T-203): lo usan esta
+    pantalla y, con marca de agua, la de la lección. Abajo, en su propia viñeta.
   - **Un error de Mux que no es fatal** (reconectando, sin red un momento) no se toca: lo
     resuelve Mux. El error viene en `event.detail`, con `fatal` y `muxCode`.
   - **Si la dirección caduca** (fatal, `muxCode` 2403210), se pide otra una sola vez, desde
     el mismo segundo; si vuelve a caducar sin haberse reproducido, se dice el error. Mientras
     se renueva, otro aviso de caducidad no pide otra, y un error manda sobre la dirección que
-    llegue tarde. Ningún error de Mux sale de `player.tsx`: algunos mensajes traen el
+    llegue tarde. Ningún error de Mux sale del reproductor: algunos mensajes traen el
     playback id. Y el filtro de Sentry (`scrub.ts`) deja de toda dirección de Mux solo el
     servidor (`https://stream.mux.com/[video]`): el rastro de un error llevaría el playback
     id en la ruta.
@@ -1167,6 +1154,60 @@ falla. Dieciocho precisiones que la tabla no dice:
   - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
     prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
     no sea a ella y anota a dónde iba.
+- **El reproductor de video es uno solo, `src/app/_video/player.tsx`** (T-108 y T-203; diseño,
+  sección 5.4; RF-305, RF-312). Lo que no se ve leyendo un solo archivo:
+  - **Mux Player solo se importa ahí**, y cada pantalla lo carga con `next/dynamic` sin
+    servidor: pesa (unos 330 KB comprimidos) y no debe viajar con otra página. El lint
+    (`noVideoPlayer`) rechaza el `import` en cualquier otro archivo, y una prueba de
+    arquitectura cualquier forma de cargarlo (`import()`, `require`), su entrada `/lazy`, que
+    inyecta estilos en línea, y que una pantalla lo importe en estático más allá de su tipo.
+    Si la descarga falla, la pantalla lo dice como cualquier otro error, con «Reintentar».
+  - **Lo que se le apaga:** Mux Data (`disableTracking`, `disableCookies`, sin `envKey`),
+    recordar volumen y silencio, y el envío a otra pantalla y la imagen dentro de imagen, que
+    no tienen prop: se ponen en el `<video>` interno con la referencia (`lockDown`, que llama
+    `attach`), antes de que Mux Player reciba el playback id. Sin eso, en Chrome pide un
+    script de Google. El navegador de prueba no trae `window.chrome`, así que el extremo a
+    extremo se lo pone. **El selector de calidad no se ofrece** (la calidad es automática,
+    RF-312) y sus botones de lo apagado tampoco: los esconde la clase `player-mux` de
+    `theme.css` con las variables de Mux (`--rendition-menu-button: none`…), nunca un
+    `style`. **Los subtítulos arrancan apagados** (`defaultHiddenCaptions`): Mux los enciende
+    por omisión.
+  - **Lo que se le configura:** el menú de velocidades que da la función única de medios
+    (`speeds`), saltos de diez segundos y los controles que se ocultan a los tres segundos
+    (`autohide` en su controlador; Mux trae dos).
+  - **Los nombres de los controles son los del diseño** («Regresar 10 segundos», «Activar
+    sonido», «Pantalla completa»…), del bloque `src/messages/es/player.ts`. `labels.ts` dice
+    qué clave de media-chrome lleva cada uno: las que dan el nombre accesible van en
+    minúsculas, las de la etiqueta con mayúscula, y se ponen las dos. Se registran como
+    `es-MX` sobre el español de media-chrome (`addTranslation` reemplaza el diccionario entero
+    de un idioma, no lo mezcla), y `setLanguage("es-MX")` cae a `es` en lo que el diseño no
+    nombra. media-chrome es dependencia directa en la misma versión que la de Mux Player: si
+    se sube una, se sube la otra. Su botón de subtítulos es un menú (`aria-expanded`), no un
+    botón con `aria-pressed` como pedía el diseño: se aceptó la diferencia.
+  - **Va dentro de un contenedor propio** (`data-player-frame`, clase `player-frame`), y ese
+    contenedor es el que entra a pantalla completa: se le asigna al controlador de Mux por
+    propiedad (`mediaController.fullscreenElement`), al montar y al cargar los datos del
+    video. Como atributo (`fullscreenElement` de React) no surte efecto: Mux lo busca por id
+    antes de que el nodo esté en la página. El extremo a extremo de revisión lo comprueba en
+    un navegador. En iPhone la pantalla completa de un contenedor no existe y Mux cae a la
+    del sistema, que no pinta la marca: eso lo resuelve la cuarta solicitud de T-203.
+  - **La marca de agua** (`watermark.tsx`, RF-305), solo si la pantalla la pasa (la lección;
+    revisión no, hasta T-405): el correo de quien ve, tal como lo dio la función única de
+    medios, en una de las ocho celdas del borde de una rejilla de 3 × 3 sobre el área segura
+    (`watermark-cells.ts`, nunca la central), que cambia cada 30 segundos con un desvanecido
+    y deriva despacio. Cada celda la ancla al borde del área segura según su columna y la
+    deriva va hacia dentro, con un ancho máximo: así no se corta ni se sale en un teléfono
+    (medido en Chromium de 320 a 1280 px; un correo de más de unos 50 caracteres en 320 px se
+    corta con puntos suspensivos antes que salirse). Lleva `translate="no"`. Con movimiento reducido, la regla general de `theme.css` le quita la
+    deriva. Su estilo son tokens (`--watermark`, `--watermark-size`, que mide el contenedor
+    con `cqw`) y utilidades (`watermark`, `watermark-cell-N`). No se lee, no se selecciona y
+    no recibe el toque. **Si desaparece, se oculta o le cambian el texto, el video se pausa**
+    (`watermarkIntact`, que vigila un observador del contenedor, cada cambio de celda y cada
+    vez que se le da reproducir). Mientras se desvanece y mientras vuelve, su opacidad no
+    cuenta, o daría pausas falsas; tampoco mientras corre una transición de opacidad suya, que
+    el navegador empieza un cuadro después de que React quita la clase y puede seguir cuando
+    el periodo protegido ya terminó (lo encontró la revisión del diff, medido en Chromium). Una
+    transición detenida a mano no la excusa, ni la deriva, que siempre corre. Es disuasión, no candado: ningún texto promete más.
 - **Quién tiene acceso hoy lo dice una sola regla** (T-201; RN-01, RF-203; TRD §5.1):
   `resolveAccountAccess`, en `src/domain/access/account-access.ts`. No se guarda un campo
   «tiene acceso». La usa la función única de medios desde T-202. Para quien la use: los
@@ -1473,7 +1514,8 @@ las de registro y recuperación se sumó `tests/actions/`. Con las prácticas y 
 y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que una
 confirmación dice que va a pasar.
 Con el video (T-108), `src/services/media/`, `src/adapters/mux/` y el servicio de
-revisión, `src/services/review/`.
+revisión, `src/services/review/`; con el reproductor compartido (T-203), `src/app/_video/`,
+donde viven la marca de agua y lo que se le apaga a Mux Player.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

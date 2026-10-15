@@ -1416,6 +1416,19 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
         }),
       )
       .toEqual([true, true]);
+    // La pantalla completa toma el contenedor propio, no el reproductor (T-203): ahí vivirá la
+    // marca de agua. Y los controles se ocultan a los tres segundos.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const controller = (document.querySelector("mux-player") as unknown as { mediaController?: HTMLElement & { fullscreenElement?: Element | null } } | null)
+            ?.mediaController;
+          return controller
+            ? [controller.fullscreenElement === document.querySelector("[data-player-frame]"), controller.getAttribute("autohide")]
+            : null;
+        }),
+      )
+      .toEqual([true, "3"]);
     // La pantalla, con el reproductor montado, pasa las reglas de accesibilidad.
     expect(await a11yViolations(page)).toEqual([]);
     await expect.poll(() => outside.some((href) => href.startsWith("https://stream.mux.com/Playbackrevisione2e.m3u8?") && href.includes("token=")), { timeout: 60_000 }).toBe(true);

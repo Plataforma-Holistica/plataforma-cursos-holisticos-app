@@ -15,7 +15,7 @@ const actions = vi.hoisted(() => ({
 vi.mock("@/app/admin/_revision/actions", () => actions);
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
-vi.mock("@/app/admin/_revision/player", () => ({
+vi.mock("@/app/_video/player", () => ({
   Player: (props: { playbackId: string; tokens: object; startTime: number; onExpired: (at: number) => void; onFailed: () => void; onPlaying: () => void }) => {
     player.last = props;
     return (
@@ -51,7 +51,7 @@ const COURSE = "c0000000-0000-4000-8000-000000000002";
 const MUX = "d0000000-0000-4000-8000-000000000001";
 const TEST = "d0000000-0000-4000-8000-000000000002";
 const MODULE = "e0000000-0000-4000-8000-000000000001";
-const GRANT = { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" } };
+const GRANT = { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" }, speeds: [0.75, 1, 2] };
 
 const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
   freshCode: true,
@@ -169,6 +169,9 @@ describe("reproducir", () => {
     expect(shown).toHaveAttribute("data-playback", "PlaybackDePrueba");
     expect(JSON.parse(shown.getAttribute("data-tokens") ?? "")).toEqual({ playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" });
     expect(shown).toHaveAttribute("data-start", "0");
+    // El menú de velocidades, el que dio la función única de medios; y sin marca de agua (T-405).
+    expect(player.last?.speeds).toEqual([0.75, 1, 2]);
+    expect(player.last?.watermark).toBeUndefined();
     expect(screen.getByRole("heading", { level: 2, name: "Viendo: El bosque" })).toHaveFocus();
     // De qué curso y de qué maestro: con muchos en la cola, no se adivina.
     expect(screen.getByText("Del curso «Naturaleza», de Ana Robles.")).toBeVisible();

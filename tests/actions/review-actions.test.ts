@@ -116,11 +116,12 @@ describe("reviewCodeAction", () => {
 
 describe("lessonVideoAction", () => {
   it("le pasa la lección a la función única de medios y devuelve los tokens con los nombres de Mux Player", async () => {
-    once("getMediaGrant", { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { video: "v", thumbnail: "t", storyboard: "s" }, expiresAt: 9 });
+    once("getMediaGrant", { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { video: "v", thumbnail: "t", storyboard: "s" }, expiresAt: 9, speeds: [1, 1.25] });
     expect(await lessonVideoAction(LESSON)).toEqual({
       kind: "granted",
       playbackId: "PlaybackDePrueba",
       tokens: { playback: "v", thumbnail: "t", storyboard: "s" },
+      speeds: [1, 1.25],
     });
     expect(mocks.getMediaGrant).toHaveBeenCalledWith(jar, LESSON, "review");
   });
