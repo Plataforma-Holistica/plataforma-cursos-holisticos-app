@@ -1047,16 +1047,44 @@ falla. Dieciocho precisiones que la tabla no dice:
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
 - **Solo la función única de medios firma una dirección de video** (T-108; RF-305;
-  TRD §5.5 y §9.4). Es `getMediaGrant` (`src/services/media/media.ts`): pregunta a la
-  guarda del equipo, lee la lección como la persona (`asUser`: la política de Contenido es
-  una segunda barrera), le pregunta a la regla del dominio
-  (`src/domain/access/media-access.ts`) y firma con el adaptador (`src/adapters/mux/`).
-  Lo que no se ve leyendo un solo archivo:
-  - Hoy una sola regla: alguien del equipo con Contenido, para revisar (sin puntos). T-202
-    suma las otras tres de RF-306. A quien no puede se le contesta `refused` antes de leer
-    la lección; lo que no tiene video que firmar (no existe, retirada, de prueba, sin
-    terminar, un id sin forma) contesta igual, `no_video`. El playback id sale de la base,
-    nunca de quien pide.
+  TRD §5.1, §5.5, §6.1 y §9.4). Es `getMediaGrant` (`src/services/media/media.ts`), y
+  quien llama dice desde dónde pide, como un literal: `review` o `watch`. Le pregunta a las
+  reglas del dominio (`src/domain/access/media-access.ts` y, para ver,
+  `account-access.ts`) y firma con el adaptador (`src/adapters/mux/`). Lo que no se ve
+  leyendo un solo archivo:
+  - **Revisar** (T-108; la pantalla de revisión pide así, y una prueba lo exige): la guarda
+    del equipo, y la lección leída como la persona (`asUser`: la política de Contenido es
+    una segunda barrera). A quien no tiene Contenido se le contesta `refused` antes de leer
+    la lección. Nunca cuenta para el reparto, aunque quien revisa además pague.
+  - **Ver** (T-202; la pantalla del alumno llega con T-203): la guarda de sesión, y después
+    los hechos leídos como servidor en una sola consulta, `private.media_facts()` y el
+    playback id de `private.lesson_playback()`: lo que se decide y lo que se firma salen de
+    la misma foto, con la hora de la base. Una cuenta no lee el video de nada, y bajo el
+    servidor no hay `auth.uid()`: quien actúa sale de `private.actor_id()`. La segunda
+    barrera es esa función, que solo suelta el video de una lección vigente y lista de Mux,
+    en un curso publicado y listado, del maestro dueño o para Contenido. Si la regla dio
+    acceso y la barrera no soltó el video, manda la barrera, y se reporta.
+  - **El orden de las reglas al ver decide dinero** (decisiones de Sergio del 2026-10-15):
+    cuenta suspendida, lo que no se puede ver (contesta igual que lo que no existe:
+    `no_video`), sin video, el maestro dueño (en cualquier estado del curso, sin puntos),
+    «no se supo» de la cuenta (`unavailable`, reportado: nunca PA-33), suscripción o gracia
+    (cuentan, también en el curso abierto y también si es alguien del equipo), cortesía, el
+    curso abierto con el correo verificado, y si no, `denied` con el rechazo de la cuenta
+    para PA-33. `granted` lleva `basis`, `countsForPayout` y `until`: si el acceso termina a
+    media lección, la dirección sigue viva hasta su caducidad pero desde `until` no cuenta
+    (T-205 lo revisa en cada latido).
+  - **Los hechos de la cuenta.** `subscriptions` y `courtesy_grants` existen desde T-202 sin
+    nadie de la aplicación que las escriba, y el vigilante lo exige: T-302, T-303 y T-307
+    abren la escritura. La suscripción de la que salen los hechos es la viva (`active` o
+    `in_grace`), y si no hay, la más reciente sin contar las `pending`: una más nueva que el
+    cobro dio por terminada no tapa a la que paga. Una fecha `infinity` no entra a ninguna
+    de las dos tablas (sin fin es nulo): la regla la leería como «no se supo». Sin falla de cobro, la gracia no se usa y va en 0; con falla y sin
+    el parámetro de esa hora, va `NaN` y la regla contesta «no se supo». Una cuenta que pasa
+    la guarda sin correo verificado se reporta (`media_email_unverified`).
+  - Lo que no tiene video que firmar (no existe, retirada, de prueba, sin terminar, un id
+    sin forma) contesta igual, `no_video`. El playback id sale de la base, nunca de quien
+    pide. T-202 no anota la reproducción ni cuenta las simultáneas (T-204), y los recursos
+    (RF-308) firmarán por esta misma función (T-404).
   - Firma tres direcciones (video, miniatura y vista de avance) con un JWT RS256 hecho con
     `node:crypto`, sin dependencia. La vida es la de ADR-27: la lección entera a
     `VELOCIDAD_MIN` más diez minutos, con tope de 55 (`grantLifetimeSeconds`).
@@ -1066,9 +1094,11 @@ falla. Dieciocho precisiones que la tabla no dice:
     2026-10-14). No va a ningún registro ni error.
   - Una prueba de arquitectura (`tests/architecture/media.test.ts`) exige que el
     adaptador y las dos variables de la llave vivan solo ahí, que ningún otro archivo de
-    `src/` firme (busca las maneras de Node y del navegador, y los paquetes de JWT), y que
-    la lección se lea con `asUser`. La llave de firma es RSA de 2048 bits o más; una que se
-    lee pero no firma contesta lo mismo que una que no sirve.
+    `src/` firme (busca las maneras de Node y del navegador, y los paquetes de JWT, y desde
+    T-202 las direcciones firmadas de archivos), que para revisar la lección se lea con
+    `asUser` y para ver los hechos con `asServer`, que el playback id salga solo de
+    `records.ts`, y que cada camino use su guarda. La llave de firma es RSA de 2048 bits o
+    más; una que se lee pero no firma contesta lo mismo que una que no sirve.
   - El adaptador va en `src/adapters/mux/`, no en `adapters/media/mux` como decía el TRD:
     aquí cada proveedor es su carpeta.
 - **La pantalla de revisión (PA-61 y PA-62 mínimas, `/admin/revision`)** se arma como
@@ -1120,8 +1150,9 @@ falla. Dieciocho precisiones que la tabla no dice:
     no sea a ella y anota a dónde iba.
 - **Quién tiene acceso hoy lo dice una sola regla** (T-201; RN-01, RF-203; TRD §5.1):
   `resolveAccountAccess`, en `src/domain/access/account-access.ts`. No se guarda un campo
-  «tiene acceso». Para quien la use (T-202): los hechos los reúne el servicio, y el
-  comentario del archivo dice de dónde sale cada uno (`paidThrough` no es el fin de periodo
+  «tiene acceso». La usa la función única de medios desde T-202. Para quien la use: los
+  hechos los reúne el servicio, y el comentario del archivo dice de dónde sale cada uno
+  (`paidThrough` no es el fin de periodo
   del proveedor de cobro); `invalid_input` es «no se supo» y nunca se trata como «sin
   acceso», que le pediría pagar a quien quizá ya pagó; y el orden de las bases decide
   dinero (solo suscripción y gracia generan puntos).
