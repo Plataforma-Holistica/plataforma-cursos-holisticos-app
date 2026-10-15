@@ -248,7 +248,6 @@ export const admin = defineMessages({
     unset: "sin definir",
     lessons: { one: "{count} lección, {duration} en total.", other: "{count} lecciones, {duration} en total." },
     loaded: "Cargado el {date}.",
-    lessonsTitle: "Lecciones",
 
     // De cada lección.
     watch: "Ver",

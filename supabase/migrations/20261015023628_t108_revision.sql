@@ -33,6 +33,7 @@ begin
                'lessons', coalesce((
                  select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
                           'lesson_id', pl.id,
+                          'module_id', m.id,
                           'module', m.title,
                           'title', pl.title,
                           'duration_seconds', pl.duration_seconds,
@@ -46,7 +47,7 @@ begin
                  from public.published_lessons pl
                  join public.published_modules m on m.id = pl.module_id
                  join public.video_assets v on v.id = pl.video_asset_id
-                 where pl.course_id = c.course_id and pl.is_current), '[]'::jsonb))
+                 where pl.course_id = c.course_id and pl.is_current and m.is_current), '[]'::jsonb))
              order by r.created_at, c.course_id)
       from public.course_registry r
       join public.published_courses c on c.course_id = r.course_id

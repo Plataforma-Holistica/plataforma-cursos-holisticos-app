@@ -16,7 +16,8 @@ import { TOKEN_EXPIRED } from "./outcomes";
 // Lo que se le apaga, a propósito:
 //   · Mux Data (`disableTracking`, `disableCookies`, sin `envKey`): ni analítica ni cookies.
 //   · Enviar a otra pantalla, AirPlay e imagen dentro de imagen (diseño, sección 5.4 y D-08).
-//     Sin eso, Mux Player pide un script de Google para enviar a un televisor.
+//     No tienen prop: se apagan en el `<video>` interno (`lockDown`). Sin eso, Mux Player pide
+//     un script de Google para enviar a un televisor.
 //   · Recordar el volumen y el silencio en el navegador.
 //
 // Sus errores no salen de aquí: algunos mensajes de Mux traen el playback id, y nada de eso
@@ -35,6 +36,12 @@ export interface PlayerProps {
   onFailed: () => void;
   /** Empezó a reproducirse: lo que se renovó ya sirvió. */
   onPlaying: () => void;
+}
+
+/** Lo que trae un error de Mux (su `MediaError`): si es fatal, y su código. Sus tipos no lo declaran. */
+interface MuxError {
+  fatal?: boolean;
+  muxCode?: number;
 }
 
 /** Lo que el elemento de Mux tiene dentro y no declara en sus tipos: el `<video>` de verdad. */
@@ -69,14 +76,15 @@ export function Player({ playbackId, tokens, startTime, onExpired, onFailed, onP
       startTime={startTime}
       disableTracking
       disableCookies
-      disablePictureInPicture
       noVolumePref
       noMutedPref
       onPlaying={onPlaying}
       onError={(event) => {
-        // El error de Mux trae `muxCode`; sus tipos no lo declaran en el elemento.
-        const player = event.target as (MuxPlayerRefAttributes & { error?: { muxCode?: number } | null }) | null;
-        if (player?.error?.muxCode === TOKEN_EXPIRED) onExpired(player.currentTime);
+        const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null }) | null;
+        const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;
+        // Lo que Mux no da por fatal (reconectando, sin red un momento) lo resuelve él solo.
+        if (error?.fatal === false) return;
+        if (error?.muxCode === TOKEN_EXPIRED) onExpired(player?.currentTime ?? 0);
         else onFailed();
       }}
     />

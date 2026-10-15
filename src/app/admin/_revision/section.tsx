@@ -1,6 +1,8 @@
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
+import { cookieReader } from "@/app/_lib/request-context";
 import type { VerifiedClaims } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
+import { readNotice } from "@/services/account/notice";
 import { reviewQueue } from "@/services/review/review";
 
 import { reviewView } from "./rows";
@@ -15,8 +17,10 @@ import { ReviewScreen } from "./screen";
 // pide después, con su propia acción.
 
 export async function ReviewSection({ claims }: { claims: VerifiedClaims }) {
-  const read = await reviewQueue(claims);
+  const reader = await cookieReader();
+  const read = await reviewQueue(reader, claims);
   if (read.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.review} withSession />;
 
-  return <ReviewScreen view={reviewView(read.queue)} />;
+  // Aprobar redirige aquí con un aviso: la cola de ahora ya no trae ese curso.
+  return <ReviewScreen view={reviewView(read.queue)} published={readNotice(reader) === "course_approved"} />;
 }

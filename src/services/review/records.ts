@@ -32,6 +32,7 @@ const queueSchema = z.strictObject({
       lessons: z.array(
         z.strictObject({
           lesson_id: id,
+          module_id: id,
           module: z.string(),
           title: z.string(),
           duration_seconds: z.number().int().min(0),
@@ -60,6 +61,7 @@ export function queueOf(raw: unknown): ReviewQueue | null {
       loadedAt: course.loaded_at,
       lessons: course.lessons.map((lesson) => ({
         lessonId: lesson.lesson_id,
+        moduleId: lesson.module_id,
         module: lesson.module,
         title: lesson.title,
         durationSeconds: lesson.duration_seconds,

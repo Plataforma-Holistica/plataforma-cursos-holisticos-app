@@ -25,6 +25,7 @@ export interface LessonRow {
 }
 
 export interface ModuleRows {
+  id: string;
   title: string;
   lessons: LessonRow[];
 }
@@ -67,7 +68,8 @@ const STATUS: Record<LessonVideo, string | null> = {
 function courseRow(course: ReviewCourse): CourseRow {
   const modules: ModuleRows[] = [];
   for (const lesson of course.lessons) {
-    // La base las da en orden; un módulo es la racha de lecciones con su mismo título.
+    // La base las da en orden; un módulo es la racha de lecciones con su mismo id (dos
+    // módulos pueden llamarse igual).
     const last = modules.at(-1);
     const row: LessonRow = {
       id: lesson.lessonId,
@@ -77,8 +79,8 @@ function courseRow(course: ReviewCourse): CourseRow {
       status: STATUS[lesson.video],
       detail: t(text.watchOf, { title: lesson.title }),
     };
-    if (last !== undefined && last.title === lesson.module) last.lessons.push(row);
-    else modules.push({ title: lesson.module, lessons: [row] });
+    if (last !== undefined && last.id === lesson.moduleId) last.lessons.push(row);
+    else modules.push({ id: lesson.moduleId, title: lesson.module, lessons: [row] });
   }
   return {
     id: course.courseId,

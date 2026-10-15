@@ -4,16 +4,19 @@
 -- no pasa la puerta de Contenido, y nunca con los identificadores del proveedor de video.
 begin;
 \ir _ayuda.psql
-select plan(23);
+select plan(24);
 
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido1@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'contenido2@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config@prueba.test');
+select pruebas.alta('b0000000-0000-0000-0000-000000000003', 'contenido3@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana@prueba.test');
 select pruebas.confirmar(id) from auth.users where email like '%@prueba.test';
 select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000001', 'content');
 select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000002', 'content');
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000001', 'config');
+-- La tercera tiene Contenido pero ningún factor atado: no tiene sesión de equipo.
+select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000003', 'content');
 select pruebas.equipar('b0000000-0000-0000-0000-000000000001');
 select pruebas.equipar('b0000000-0000-0000-0000-000000000002');
 select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
@@ -80,6 +83,8 @@ select is(
 select is(pruebas.cola_de('a0000000-0000-0000-0000-000000000001'), null, 'una cuenta común: nula');
 select is(pruebas.cola_de('c0000000-0000-0000-0000-000000000001'), null, 'del equipo sin Contenido: nula');
 select is((select private.review_queue()), null, 'sin nadie que actúe: nula');
+select is(pruebas.cola_de('b0000000-0000-0000-0000-000000000003'), null,
+  'con Contenido y sin sesión de equipo (sin factor atado): nula');
 select pruebas.sin_codigo('b0000000-0000-0000-0000-000000000001');
 select pruebas.limpiar();
 select ok((pruebas.cola_de('b0000000-0000-0000-0000-000000000002') ->> 'fresh_code')::boolean = false,
@@ -105,7 +110,7 @@ select is(
   'de cada curso, solo esto');
 select is(
   (select array_agg(k order by k) from cola, jsonb_object_keys(q -> 'courses' -> 0 -> 'lessons' -> 0) as k),
-  array['duration_seconds', 'lesson_id', 'module', 'title', 'video'],
+  array['duration_seconds', 'lesson_id', 'module', 'module_id', 'title', 'video'],
   'de cada lección, solo esto');
 select is((select q -> 'courses' -> 0 ->> 'teacher_name' from cola), 'Maestra de revisión', 'el maestro, por su nombre publicado');
 select is((select (q -> 'courses' -> 0 ->> 'teacher_listed')::boolean from cola), true,

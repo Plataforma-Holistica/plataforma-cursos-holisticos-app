@@ -1369,6 +1369,12 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     test.setTimeout(240_000);
     const course = await loadReviewCourse("revision-e2e");
     const outside = await cutOutside(page.context());
+    // Chrome de verdad trae `window.chrome`, y con él Mux Player ofrece enviar a un televisor y
+    // pide un script de Google. El navegador de prueba no lo trae: se le pone, para que la
+    // prueba vea lo que pasaría en Chrome.
+    await page.context().addInitScript(() => {
+      (window as unknown as { chrome?: object }).chrome ??= {};
+    });
     await enterAdmin(page, ana, "/admin");
     await page.getByRole("link", { name: "Cursos por revisar" }).click();
     await expect(page).toHaveURL(REVIEW);
@@ -1387,6 +1393,15 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await card.getByRole("button", { name: "Ver «Con Mux»" }).click();
     await expect(page.getByRole("heading", { level: 2, name: "Viendo: Con Mux" })).toBeFocused();
     await expect(page.getByText("Vista previa. No genera puntos.")).toBeVisible();
+    // En el video interno, el envío a otra pantalla y la imagen dentro de imagen, apagados.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const media = (document.querySelector("mux-player") as unknown as { media?: { nativeEl?: HTMLVideoElement } } | null)?.media?.nativeEl;
+          return media ? [media.disableRemotePlayback, media.disablePictureInPicture] : null;
+        }),
+      )
+      .toEqual([true, true]);
     await expect.poll(() => outside.some((href) => href.startsWith("https://stream.mux.com/Playbackrevisione2e.m3u8?") && href.includes("token=")), { timeout: 60_000 }).toBe(true);
     await expect(page.getByText("No se pudo cargar el video.")).toBeVisible({ timeout: 60_000 });
     const hosts = [...new Set(outside.map((href) => new URL(href).hostname))].sort();
@@ -1408,6 +1423,10 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     const again = await postAction(page.context().request, REVIEW, { ...fields, do: `confirm:${course}` });
     expect(again.status()).toBe(200);
     expect(await again.text()).toContain("Ese curso ya no está por revisar");
+
+    // Al final, otra vez: Mux Data manda lo suyo por tandas, y no debe haber salido nada.
+    const atTheEnd = [...new Set(outside.map((href) => new URL(href).hostname))].sort();
+    for (const host of atTheEnd) expect(["image.mux.com", "stream.mux.com"], host).toContain(host);
   });
 
   test("revisión sin JavaScript: la cola se ve, no hay «Ver» y dice por qué, y aprobar funciona", async ({ browser }) => {
@@ -1423,8 +1442,13 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await card.getByRole("button", { name: "Aprobar y publicar «Curso revision-e2e-sin-js»" }).click();
       const asked = page.getByRole("article").filter({ hasText: "Curso revision-e2e-sin-js" });
       await asked.getByRole("button", { name: "Sí, aprobar y publicar" }).click();
+      // Aprobado, redirige: la página que queda es una lectura, y recargarla no reenvía nada.
+      await expect(page).toHaveURL(REVIEW);
       await expect(page.getByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
       expect(await listedNow("revision-e2e-sin-js")).toBe(true);
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
       expect(outside).toEqual([]);
     });
   });

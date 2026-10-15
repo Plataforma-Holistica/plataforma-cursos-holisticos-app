@@ -43,7 +43,7 @@ describe("readReviewForm", () => {
 
 describe("approveOutcome", () => {
   const cases: Record<(typeof APPROVE_ANSWERS)[number], ReturnType<typeof approveOutcome>> = {
-    approved: { kind: "approved" },
+    approved: { kind: "leave", to: ROUTES.review, notice: "course_approved" },
     forbidden: TO_PAGE as never,
     needs_fresh_code: { kind: "failed", reason: "needs_code" },
     not_found: { kind: "failed", reason: "not_pending" },

@@ -28,6 +28,7 @@ export type LessonVideo = (typeof LESSON_VIDEOS)[number];
 
 export interface ReviewLesson {
   lessonId: string;
+  moduleId: string;
   module: string;
   title: string;
   durationSeconds: number;
@@ -96,17 +97,23 @@ export interface ReviewCore {
 export function createReviewQueue(deps: { report: (code: FailureCode) => Promise<void> }, core: ReviewCore) {
   /**
    * La cola, para la sección que ya pasó su guarda, con las claims que esa guarda dio. Leer no
-   * pide el código reciente. Una lectura nula (la sesión dejó de pasar entre la guarda y esta
-   * lectura) o que no se pudo hacer es «no se supo»; solo la segunda se reporta.
+   * pide el código reciente. Una lectura nula no vale: puede ser que la sesión dejó de pasar
+   * entre la guarda y esta lectura, o que la base y la guarda no coinciden. Se le vuelve a
+   * preguntar a la guarda, y solo si insiste en que pasa se reporta. Las dos son «no se supo»:
+   * «Reintentar» vuelve a correr la guarda, que decide.
    */
-  async function reviewQueue(claims: VerifiedClaims): Promise<QueueRead> {
+  async function reviewQueue(reader: CookieReader, claims: VerifiedClaims): Promise<QueueRead> {
+    let queue: ReviewQueue | null;
     try {
-      const queue = await core.store.queue(claims);
-      return queue === null ? { kind: "unavailable" } : { kind: "queue", queue };
+      queue = await core.store.queue(claims);
     } catch {
       await deps.report("review_queue_unavailable");
       return { kind: "unavailable" };
     }
+    if (queue !== null) return { kind: "queue", queue };
+    const team = await core.teamStanding(reader);
+    if (team.kind === "team" && holds(team.standing, "content")) await deps.report("review_queue_unavailable");
+    return { kind: "unavailable" };
   }
 
   async function approveCourse(reader: CookieReader, input: { course: unknown }): Promise<CourseApproved> {

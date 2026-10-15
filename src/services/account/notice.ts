@@ -24,6 +24,8 @@ export const NOTICES = [
   "session_ended",
   // Alguien del equipo se quitó una capacidad a sí misma: la base cerró todas sus sesiones.
   "capability_removed",
+  // Un curso quedó aprobado y publicado (T-108): la cola lo dice al volver a pintarse.
+  "course_approved",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

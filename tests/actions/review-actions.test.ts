@@ -74,14 +74,14 @@ describe("approveAction", () => {
     expect(calls.order).toEqual([]);
   });
 
-  it("confirmar: le pasa al servicio el curso del botón, y vuelve a pedir la página", async () => {
+  it("confirmar: le pasa al servicio el curso del botón y, aprobado, redirige con el aviso", async () => {
     once("approveCourse", { kind: "answered", answer: "approved" });
-    expect(await approveAction({ kind: "confirming", course: COURSE, attempt: 1 }, pressed(reviewButton.confirm(COURSE)))).toEqual({
-      kind: "approved",
-      attempt: 2,
-    });
+    await expect(approveAction({ kind: "confirming", course: COURSE, attempt: 1 }, pressed(reviewButton.confirm(COURSE)))).rejects.toThrow(
+      "redirige a /admin/revision",
+    );
     expect(mocks.approveCourse).toHaveBeenCalledWith(jar, { course: COURSE });
-    expect(calls.order).toEqual(["approveCourse", "refresh"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "course_approved");
+    expect(calls.order).toEqual(["approveCourse", "leaveNotice", "redirect"]);
   });
 
   it("lo que no se hizo se dice, y la página se vuelve a pedir: la cola pudo cambiar", async () => {

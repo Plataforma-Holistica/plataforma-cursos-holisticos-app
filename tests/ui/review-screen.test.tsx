@@ -42,13 +42,15 @@ import type { ReviewQueue } from "@/services/review/review";
 import { a11yViolations } from "../setup/a11y";
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // Sin respuestas pendientes de la prueba anterior.
+  vi.resetAllMocks();
   player.last = null;
 });
 
 const COURSE = "c0000000-0000-4000-8000-000000000002";
 const MUX = "d0000000-0000-4000-8000-000000000001";
 const TEST = "d0000000-0000-4000-8000-000000000002";
+const MODULE = "e0000000-0000-4000-8000-000000000001";
 const GRANT = { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" } };
 
 const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
@@ -65,8 +67,8 @@ const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
       totalDurationSeconds: 765,
       loadedAt: "2026-10-14T18:00:00Z",
       lessons: [
-        { lessonId: MUX, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" },
-        { lessonId: TEST, module: "Uno", title: "El río", durationSeconds: 409, video: "test" },
+        { lessonId: MUX, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" },
+        { lessonId: TEST, moduleId: MODULE, module: "Uno", title: "El río", durationSeconds: 409, video: "test" },
       ],
     },
   ],
@@ -171,6 +173,56 @@ describe("reproducir", () => {
     expect(screen.queryByText("No se pudo cargar el video.")).not.toBeInTheDocument();
   });
 
+  it("«Reintentar» lleva el foco al reproductor otra vez", async () => {
+    actions.lessonVideoAction.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce(GRANT);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    const heading = screen.getByRole("heading", { level: 2, name: "Viendo: El bosque" });
+    await user.click(await screen.findByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(await screen.findByTestId("reproductor")).toBeVisible();
+  });
+
+  it("dos avisos de caducidad seguidos piden una sola dirección nueva", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    actions.lessonVideoAction.mockResolvedValueOnce(GRANT).mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    const expire = await screen.findByRole("button", { name: "caduca" });
+    await user.click(expire);
+    await user.click(expire);
+    expect(actions.lessonVideoAction).toHaveBeenCalledTimes(2);
+    await act(async () => answer(GRANT));
+  });
+
+  it("un error mientras se renueva manda sobre la dirección que llega tarde", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    actions.lessonVideoAction.mockResolvedValueOnce(GRANT).mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await user.click(await screen.findByRole("button", { name: "caduca" }));
+    await user.click(screen.getByRole("button", { name: "falla" }));
+    await act(async () => answer(GRANT));
+    expect(screen.getByText("No se pudo cargar el video.")).toBeVisible();
+    expect(screen.queryByTestId("reproductor")).not.toBeInTheDocument();
+  });
+
+  it("si se pide otra lección antes de que conteste la primera, la primera ya no pinta nada", async () => {
+    let first: (value: unknown) => void = () => undefined;
+    const second = { ...GRANT, playbackId: "PlaybackSegunda" };
+    actions.lessonVideoAction.mockReturnValueOnce(new Promise((resolve) => (first = resolve))).mockResolvedValueOnce(second);
+    const two = queueOf();
+    const [course] = two.courses;
+    if (course) course.lessons = [course.lessons[0]!, { ...course.lessons[0]!, lessonId: TEST, title: "El río", video: "playable" }];
+    const { user } = show(two);
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await user.click(screen.getByRole("button", { name: "Ver «El río»" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-playback", "PlaybackSegunda");
+    await act(async () => first(GRANT));
+    expect(screen.getByTestId("reproductor")).toHaveAttribute("data-playback", "PlaybackSegunda");
+    expect(screen.getByRole("heading", { level: 2, name: "Viendo: El río" })).toBeVisible();
+  });
+
   it("cualquier otro error del reproductor: lo dice, sin pedir otra dirección", async () => {
     actions.lessonVideoAction.mockResolvedValue(GRANT);
     const { user } = show();
@@ -182,17 +234,34 @@ describe("reproducir", () => {
 });
 
 describe("aprobar", () => {
-  it("en dos pasos: preguntar dice qué va a pasar; confirmar manda ese curso", async () => {
+  it("en dos pasos: preguntar dice qué va a pasar y toma el foco; confirmar manda ese curso", async () => {
     const confirming: ReviewState = { kind: "confirming", course: COURSE, attempt: 1 };
-    actions.approveAction.mockResolvedValueOnce(confirming).mockResolvedValueOnce({ kind: "approved", attempt: 2 });
+    // Aprobado, la acción redirige: mientras tanto no contesta. Se suelta al final, porque una
+    // acción que nunca termina deja enredadas las transiciones de las pruebas siguientes.
+    let release: (value: unknown) => void = () => undefined;
+    actions.approveAction.mockResolvedValueOnce(confirming).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
     expect(formOf(0)).toEqual({ do: `ask:${COURSE}` });
-    expect(await screen.findByText("¿Aprobar y publicar este curso?")).toBeVisible();
+    const question = await screen.findByText("¿Aprobar y publicar este curso?");
+    expect(question).toBeVisible();
+    // El botón pulsado se fue con la pregunta: el foco lo toma ella.
+    await waitFor(() => expect(question.parentElement).toHaveFocus());
     expect(screen.getByText("Es el primer curso de Ana Robles: su ficha también aparece en el catálogo.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Sí, aprobar y publicar" }));
     expect(formOf(1)).toEqual({ do: `confirm:${COURSE}` });
-    expect(await screen.findByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
+    // Mientras va en camino, la pregunta sigue y el botón dice que trabaja.
+    expect((await screen.findAllByText("Aprobando…")).length).toBeGreaterThan(0);
+    expect(screen.getByText("¿Aprobar y publicar este curso?")).toBeVisible();
+    await act(async () => release({ kind: "idle" }));
+  });
+
+  it("de vuelta con el aviso de aprobado: lo dice, y toma el foco si quedó sin dueño", async () => {
+    const { container } = render(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} published />);
+    const notice = screen.getByText("Publicado. Ya aparece en el catálogo.");
+    expect(notice).toBeVisible();
+    await waitFor(() => expect(notice.closest("[tabindex]")).toHaveFocus());
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
   it("lo que no se pudo, se dice en la cola", async () => {

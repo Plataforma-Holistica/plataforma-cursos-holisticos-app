@@ -102,7 +102,7 @@ describe("la cola de revisión y aprobar, contra la base", () => {
       const review = reviewOn(owner);
       const check = await review.services.teamStanding(jar);
       if (check.kind !== "team") throw new Error("La persona de prueba no quedó en el equipo.");
-      const before = await review.reviewQueue(check.claims);
+      const before = await review.reviewQueue(jar, check.claims);
       if (before.kind !== "queue") throw new Error("No leyó la cola.");
       expect(before.queue.freshCode).toBe(true);
       const mine = before.queue.courses.find((each) => each.courseId === course);
@@ -112,7 +112,7 @@ describe("la cola de revisión y aprobar, contra la base", () => {
       expect(await review.approveCourse(jar, { course })).toEqual({ kind: "answered", answer: "approved" });
       // Una pestaña vieja, o un formulario reenviado: ya no está por revisar.
       expect(await review.approveCourse(jar, { course })).toEqual({ kind: "answered", answer: "not_pending" });
-      const after = await review.reviewQueue(check.claims);
+      const after = await review.reviewQueue(jar, check.claims);
       expect(after.kind === "queue" && after.queue.courses.some((each) => each.courseId === course)).toBe(false);
       const listed = await owner.query<{ course: boolean; teacher: boolean }>(
         `select c.is_listed as course, t.is_listed as teacher from public.published_courses c
@@ -134,7 +134,7 @@ describe("la cola de revisión y aprobar, contra la base", () => {
       );
       const check = await review.services.teamStanding(jar);
       if (check.kind !== "team") throw new Error("La persona de prueba no quedó en el equipo.");
-      const read = await review.reviewQueue(check.claims);
+      const read = await review.reviewQueue(jar, check.claims);
       expect(read.kind === "queue" && read.queue.freshCode).toBe(false);
       expect(await review.approveCourse(jar, { course })).toEqual({ kind: "answered", answer: "needs_fresh_code" });
       const state = await owner.query<{ state: string }>("select state::text from public.course_registry where course_id = $1", [course]);
@@ -160,7 +160,9 @@ describe("la cola de revisión y aprobar, contra la base", () => {
       const check = await review.services.teamStanding(jar);
       if (check.kind !== "team") throw new Error("La persona de prueba no quedó en el equipo.");
       expect(await reviewStoreOn(owner).queue(check.claims)).toBeNull();
-      expect(await review.reviewQueue(check.claims)).toEqual({ kind: "unavailable" });
+      expect(await review.reviewQueue(jar, check.claims)).toEqual({ kind: "unavailable" });
+      // La guarda tampoco la deja pasar: no se reporta.
+      expect(review.reported).toEqual([]);
     });
   });
 });

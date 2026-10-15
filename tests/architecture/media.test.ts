@@ -55,21 +55,27 @@ describe("solo la función única de medios firma", () => {
   });
 
   it("Mux Player se importa en un solo archivo, y la pantalla lo carga con next/dynamic", () => {
-    expect(naming(/from ["'](@mux\/mux-player|media-chrome|hls\.js)|import ["'](@mux\/mux-player|media-chrome|hls\.js)/)).toEqual([
-      "src/app/admin/_revision/player.tsx",
-    ]);
-    // Nadie lo importa en estático: solo la pantalla, y con `next/dynamic`, sin servidor.
+    // Cualquier manera de cargarlo: `import`, `import()` y `require`, con o sin `next/dynamic`.
+    const loads = /["'](@mux\/mux-player(-react)?|media-chrome|hls\.js)(\/[^"']*)?["']/;
+    expect(naming(loads)).toEqual(["src/app/admin/_revision/player.tsx"]);
+    // Su entrada `/lazy` inyecta estilos en línea: no se usa.
+    expect(naming(/mux-player-react\/lazy|mux-player-react\/dist\/lazy/)).toEqual([]);
+    // Solo la pantalla nombra al reproductor, y lo carga con `next/dynamic`, sin servidor. De él
+    // importa en estático solo un tipo, que no viaja.
     expect(naming(/["']\.\/player["']|_revision\/player["']/)).toEqual(["src/app/admin/_revision/screen.tsx"]);
     const screen = readFileSync(join(src, "app/admin/_revision/screen.tsx"), "utf8");
-    expect(screen).toMatch(/const Player = dynamic\(\(\) => import\("\.\/player"\)\.then\(\(module\) => module\.Player\), \{ ssr: false \}\);/);
-    expect(screen).not.toMatch(/^import [^;]*["']\.\/player["'];$/m);
+    expect(screen).toMatch(/const Player = dynamic\(\(\) => import\("\.\/player"\)\.then\(\(module\) => module\.Player, \(\) => PlayerMissing\), \{\n\s+ssr: false,/);
+    expect([...screen.matchAll(/^import ([^;]*)["']\.\/player["'];$/gm)].map((found) => found[1])).toEqual(["type { PlayerProps } from "]);
     // Sin analítica, sin cookies y sin imagen dentro de imagen.
     const player = withoutComments(readFileSync(join(src, "app/admin/_revision/player.tsx"), "utf8"));
     // Cada una como atributo propio del reproductor, en su línea: no basta que el nombre aparezca.
-    for (const prop of ["disableTracking", "disableCookies", "disablePictureInPicture", "noVolumePref", "noMutedPref", "ref={lockDown}"]) {
+    for (const prop of ["disableTracking", "disableCookies", "noVolumePref", "noMutedPref", "ref={lockDown}"]) {
       expect(player, prop).toMatch(new RegExp(`^ {6}${prop.replace(/[{}]/g, "\\$&")}$`, "m"));
     }
     expect(player).not.toMatch(/envKey|metadata|beaconCollectionDomain/);
+    // Lo que no tiene prop se apaga en el video interno.
+    expect(player).toMatch(/media\.nativeEl\.disableRemotePlayback = true;/);
+    expect(player).toMatch(/media\.nativeEl\.disablePictureInPicture = true;/);
   });
 
   it("la firma y la función única tienen dueño en CODEOWNERS", () => {

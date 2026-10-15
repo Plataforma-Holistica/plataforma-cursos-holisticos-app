@@ -160,9 +160,17 @@ type Shape = (value: unknown) => unknown;
 const asMessage: Shape = (value) => (typeof value === "string" ? mask(value, "message") : undefined);
 /** Un texto que anotó el SDK: se le quitan secretos y correos, no números ni fechas. */
 const asNote: Shape = (value) => (typeof value === "string" ? mask(value, "note") : undefined);
+/**
+ * Las direcciones del proveedor de video llevan el playback id en la ruta
+ * (`https://stream.mux.com/<id>.m3u8`): de ellas sale el servidor y nada más (T-108). El
+ * reproductor de la pantalla de revisión las pide, y quedan en el rastro de un error.
+ */
+const VIDEO_PROVIDER_PATH = /^(https?:\/\/(?:[a-z0-9-]+\.)*mux\.com)(?:[/:].*)?$/is;
 /** Una dirección, una ruta o el nombre de un archivo: sin parámetros ni ancla. */
 const asPath: Shape = (value) =>
-  typeof value === "string" ? mask(value.replace(/[?#].*$/s, ""), "path") : undefined;
+  typeof value === "string"
+    ? mask(value.replace(/[?#].*$/s, "").replace(VIDEO_PROVIDER_PATH, "$1/[video]"), "path")
+    : undefined;
 const asNumber: Shape = (value) =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 const asBoolean: Shape = (value) => (typeof value === "boolean" ? value : undefined);

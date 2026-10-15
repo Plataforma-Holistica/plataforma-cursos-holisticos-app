@@ -24,6 +24,11 @@ export type { CodeState } from "../_lib/fresh-code";
 
 /** A esta misma página: decide su guarda. */
 const TO_PAGE: Leave = { kind: "leave", to: ROUTES.review, notice: null };
+/**
+ * Aprobado: a esta misma página, con el aviso. Una redirección y no volver a pintar: así,
+ * sin JavaScript, recargar no reenvía el formulario.
+ */
+const APPROVED: Leave = { kind: "leave", to: ROUTES.review, notice: "course_approved" };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_INTENT = 120;
@@ -79,10 +84,9 @@ export type ReviewState =
   | { kind: "idle" }
   /** El primer paso: se pregunta en el bloque del curso, sin haber llamado a nadie. */
   | { kind: "confirming"; course: string; attempt: number }
-  | { kind: "approved"; attempt: number }
   | { kind: "failed"; reason: ReviewFailure; attempt: number };
 
-export type ApproveOutcome = Leave | { kind: "approved" } | { kind: "failed"; reason: ReviewFailure };
+export type ApproveOutcome = Leave | { kind: "failed"; reason: ReviewFailure };
 
 /** Lo que contestó aprobar. */
 export function approveOutcome(result: CourseApproved): ApproveOutcome {
@@ -99,7 +103,7 @@ export function approveOutcome(result: CourseApproved): ApproveOutcome {
     case "answered":
       switch (result.answer) {
         case "approved":
-          return { kind: "approved" };
+          return APPROVED;
         case "forbidden":
           return TO_PAGE;
         case "needs_fresh_code":

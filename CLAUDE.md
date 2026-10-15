@@ -1083,22 +1083,38 @@ falla. Diecisiete precisiones que la tabla no dice:
     Mux Player escribe el playback id como atributo.
   - **Mux Player solo se importa en `player.tsx`**, y la pantalla lo carga con
     `next/dynamic` sin servidor: pesa (unos 330 KB comprimidos) y no debe viajar con otra
-    página. Lo exigen el lint (`noVideoPlayer`) y una prueba de arquitectura. No se usa
-    su entrada `/lazy`, que inyecta estilos en línea.
+    página. El lint (`noVideoPlayer`) rechaza el `import` en cualquier otro archivo, y una
+    prueba de arquitectura cualquier forma de cargarlo (`import()`, `require`) y su entrada
+    `/lazy`, que inyecta estilos en línea. Si la descarga falla, la pantalla lo dice como
+    cualquier otro error, con «Reintentar».
   - **Lo que se le apaga:** Mux Data (`disableTracking`, `disableCookies`, sin `envKey`),
-    imagen dentro de imagen, recordar volumen y silencio, y el envío a otra pantalla, que
-    no tiene prop: se pone en el `<video>` interno con la referencia (`lockDown`), antes de
-    que Mux Player reciba el playback id. Sin eso pide un script de Google. Sus textos van
+    recordar volumen y silencio, y el envío a otra pantalla y la imagen dentro de imagen, que
+    no tienen prop (la de imagen dentro de imagen no la usa): se ponen en el `<video>`
+    interno con la referencia (`lockDown`), antes de que Mux Player reciba el playback id.
+    Sin eso, en Chrome pide un script de Google. El navegador de prueba no trae
+    `window.chrome`, así que el extremo a extremo se lo pone: sin él no habría nada que
+    probar. Sus textos van
     en español registrando el de media-chrome, que es dependencia directa en la misma
     versión que la de Mux Player: si se sube una, se sube la otra.
-  - **Si la dirección caduca** (`muxCode` 2403210), se pide otra una sola vez, desde el
-    mismo segundo; si vuelve a caducar sin haberse reproducido, se dice el error. Ningún
-    error de Mux sale de `player.tsx`: algunos mensajes traen el playback id.
-  - **Aprobar** va en dos pasos dentro del curso, con un solo estado para toda la cola: el
-    resultado se dice arriba, porque el curso aprobado sale de la lista. «Tu código» usa
-    el servicio del catálogo (`giveCatalogCode`): la misma puerta de Contenido. Sin
-    JavaScript, recargar después de aprobar reenvía el formulario y contesta «ya no está
-    por revisar»: es cierto y no publica dos veces.
+  - **Un error de Mux que no es fatal** (reconectando, sin red un momento) no se toca: lo
+    resuelve Mux. El error viene en `event.detail`, con `fatal` y `muxCode`.
+  - **Si la dirección caduca** (fatal, `muxCode` 2403210), se pide otra una sola vez, desde
+    el mismo segundo; si vuelve a caducar sin haberse reproducido, se dice el error. Mientras
+    se renueva, otro aviso de caducidad no pide otra, y un error manda sobre la dirección que
+    llegue tarde. Ningún error de Mux sale de `player.tsx`: algunos mensajes traen el
+    playback id. Y el filtro de Sentry (`scrub.ts`) deja de toda dirección de Mux solo el
+    servidor (`https://stream.mux.com/[video]`): el rastro de un error llevaría el playback
+    id en la ruta.
+  - **Aprobar** va en dos pasos dentro del curso, con un solo estado para toda la cola. La
+    pregunta toma el foco (el botón pulsado se va con ella) y sigue a la vista mientras el
+    envío va en camino. Aprobado, la acción redirige a la misma página con el aviso
+    `course_approved` (lista cerrada de `notice.ts`): así, sin JavaScript, recargar no
+    reenvía, y el aviso toma el foco si quedó sin dueño. Lo que no se pudo se dice arriba de
+    la cola. «Tu código» usa el servicio del catálogo (`giveCatalogCode`): la misma puerta
+    de Contenido.
+  - Las lecciones se agrupan por el id de su módulo, no por su título: dos módulos pueden
+    llamarse igual. Si la cola sale nula, el servicio le vuelve a preguntar a la guarda, y
+    solo si insiste en que pasa se reporta (`review_queue_unavailable`).
   - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
     prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
     no sea a ella y anota a dónde iba.

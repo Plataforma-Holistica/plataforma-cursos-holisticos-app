@@ -54,20 +54,28 @@ const reader = { get: () => undefined };
 describe("reviewQueue", () => {
   it("lee la cola con las claims que la guarda dio, sin volver a correrla", async () => {
     const service = queueWith();
-    expect(await service.reviewQueue(claims)).toEqual({ kind: "queue", queue: QUEUE });
+    expect(await service.reviewQueue(reader, claims)).toEqual({ kind: "queue", queue: QUEUE });
     expect(service.calls).toEqual(["cola"]);
     expect(service.store.queue).toHaveBeenCalledWith(claims);
   });
 
-  it("nula (dejó de pasar la puerta entre la guarda y la lectura): no se supo, sin reportar", async () => {
-    const service = queueWith({ queue: null });
-    expect(await service.reviewQueue(claims)).toEqual({ kind: "unavailable" });
+  it("nula, y la guarda ya no la deja pasar: no se supo, sin reportar", async () => {
+    const service = queueWith({ queue: null, check: teamCheck(standingOf(["config"])) });
+    expect(await service.reviewQueue(reader, claims)).toEqual({ kind: "unavailable" });
+    expect(service.calls).toEqual(["cola", "guarda"]);
     expect(service.reported).toEqual([]);
+  });
+
+  it("nula, y la guarda insiste en que pasa: la base y la guarda no coinciden, y se reporta", async () => {
+    const service = queueWith({ queue: null });
+    expect(await service.reviewQueue(reader, claims)).toEqual({ kind: "unavailable" });
+    expect(service.calls).toEqual(["cola", "guarda"]);
+    expect(service.reported).toEqual(["review_queue_unavailable"]);
   });
 
   it("si no se pudo leer: no se supo, y se reporta", async () => {
     const service = queueWith({ queue: "throws" });
-    expect(await service.reviewQueue(claims)).toEqual({ kind: "unavailable" });
+    expect(await service.reviewQueue(reader, claims)).toEqual({ kind: "unavailable" });
     expect(service.reported).toEqual(["review_queue_unavailable"]);
   });
 });

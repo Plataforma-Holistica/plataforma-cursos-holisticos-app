@@ -37,8 +37,9 @@ export async function reviewCodeAction(previous: CodeState, form: FormData): Pro
 
 /**
  * Aprobar un curso, en dos pasos. «Aprobar y publicar» y «Cancelar» no llaman a nadie: el
- * primero solo pregunta en el bloque del curso. Confirmar le pregunta al servicio y, salvo que
- * se salga de la página, la vuelve a pedir: la cola pudo cambiar, se haya aprobado o no.
+ * primero solo pregunta en el bloque del curso. Confirmar le pregunta al servicio. Aprobado,
+ * se redirige a esta misma página con el aviso (recargar no reenvía); si no, se vuelve a
+ * pedir la página: la cola pudo cambiar.
  */
 export async function approveAction(previous: ReviewState, form: FormData): Promise<ReviewState> {
   const request = readReviewForm(form);
@@ -50,7 +51,7 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
   const outcome = approveOutcome(await approveCourse(jar, { course: request.course }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
-  return outcome.kind === "approved" ? { kind: "approved", attempt } : { kind: "failed", reason: outcome.reason, attempt };
+  return { kind: "failed", reason: outcome.reason, attempt };
 }
 
 /**

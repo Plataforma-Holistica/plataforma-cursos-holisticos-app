@@ -9,6 +9,8 @@ import { playLength, reviewView } from "./rows";
 const COURSE = "c0000000-0000-4000-8000-000000000002";
 const lesson = (n: number, module: string, video: ReviewCourse["lessons"][number]["video"]) => ({
   lessonId: `d0000000-0000-4000-8000-00000000000${n}`,
+  // El id del módulo sale de su título: dos títulos iguales en módulos distintos se prueban aparte.
+  moduleId: module === "Uno" ? "e0000000-0000-4000-8000-000000000001" : "e0000000-0000-4000-8000-000000000002",
   module,
   title: `Lección ${n}`,
   durationSeconds: 356,
@@ -84,6 +86,15 @@ describe("reviewView", () => {
       ],
     ]);
     expect(course?.modules[0]?.lessons[0]).toMatchObject({ length: "5:56", detail: "«Lección 1»" });
+  });
+
+  it("dos módulos con el mismo título no se juntan: se agrupa por su id", () => {
+    const twin = { ...lesson(3, "Uno", "playable"), moduleId: "e0000000-0000-4000-8000-000000000009" };
+    const view2 = reviewView({ freshCode: true, courses: [{ ...COURSE_ROW, lessons: [lesson(1, "Uno", "playable"), twin] }] });
+    expect(view2.courses[0]?.modules.map((each) => [each.title, each.lessons.length])).toEqual([
+      ["Uno", 1],
+      ["Uno", 1],
+    ]);
   });
 
   it("una lección de un curso de una lección: «lección», en singular", () => {

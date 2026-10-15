@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useActionState, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type RefObject, useActionState, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { account } from "@/messages/es/account";
 import { admin } from "@/messages/es/admin";
@@ -9,6 +9,7 @@ import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
+import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
@@ -16,6 +17,7 @@ import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
 import { approveAction, lessonVideoAction, reviewCodeAction } from "./actions";
 import type { CodeState, ReviewFailure, ReviewState, VideoAnswer } from "./outcomes";
+import type { PlayerProps } from "./player";
 import type { CourseRow, LessonRow, ReviewView } from "./rows";
 
 // PA-61 y PA-62 mínimas · Los cursos por revisar, en una sola pantalla (decisión de Sergio del
@@ -53,8 +55,17 @@ const FAILURES: Record<ReviewFailure, string> = {
   unknown: text.unknown,
 };
 
+/** Si el reproductor no se pudo descargar: se dice como cualquier otro error, con «Reintentar». */
+function PlayerMissing({ onFailed }: PlayerProps) {
+  useEffect(() => onFailed(), [onFailed]);
+  return null;
+}
+
 // Mux Player pesa: se descarga solo cuando hay algo que reproducir, y nunca en el servidor.
-const Player = dynamic(() => import("./player").then((module) => module.Player), { ssr: false });
+const Player = dynamic(() => import("./player").then((module) => module.Player, () => PlayerMissing), {
+  ssr: false,
+  loading: () => <p className="text-body-s text-text-2">{text.loading}</p>,
+});
 
 /** Lo que se ve en el lugar del reproductor. */
 type VideoState =
@@ -67,6 +78,8 @@ type VideoState =
       startTime: number;
       /** Ya se renovó una vez sin llegar a reproducirse: otra caducidad es un error. */
       renewed: boolean;
+      /** Se está pidiendo la dirección nueva: otro aviso de caducidad no pide otra. */
+      renewing: boolean;
     }
   | { kind: "no_video"; lesson: LessonRow }
   | { kind: "failed"; lesson: LessonRow };
@@ -83,9 +96,11 @@ const useMounted = () =>
 export interface ReviewScreenProps {
   /** La cola, ya puesta en palabras por la página. */
   view: ReviewView;
+  /** La página llegó con el aviso de que se aprobó un curso. */
+  published?: boolean;
 }
 
-export function ReviewScreen({ view }: ReviewScreenProps) {
+export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
   const [code, codeAction, codePending] = useActionState(reviewCodeAction, CODE_IDLE, CODE_PERMALINK);
   const [queue, sendQueue, queuePending] = useActionState(approveAction, QUEUE_IDLE, QUEUE_PERMALINK);
   const mounted = useMounted();
@@ -94,17 +109,35 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
   // primero ya no pinta nada.
   const ticket = useRef(0);
   const playerHeading = useRef<HTMLHeadingElement>(null);
+  const publishedBox = useRef<HTMLDivElement>(null);
+  // Cada «Ver» y cada «Reintentar» llevan el foco al reproductor, aunque sea la misma lección:
+  // el botón pulsado queda inactivo o desaparece.
+  const [focusRequest, setFocusRequest] = useState(0);
   const watchedLesson = video.kind === "none" ? null : video.lesson.id;
 
   // El foco va al reproductor cuando se elige una lección: puede estar lejos, arriba de la cola.
   useEffect(() => {
-    if (watchedLesson !== null) playerHeading.current?.focus();
-  }, [watchedLesson]);
+    if (focusRequest > 0) playerHeading.current?.focus();
+  }, [focusRequest]);
+
+  // Si el reproductor tenía el foco y se fue con un error, el foco no se queda en el documento.
+  useEffect(() => {
+    if ((video.kind === "failed" || video.kind === "no_video") && focusIsLost()) playerHeading.current?.focus();
+  }, [video.kind]);
+
+  // Llegó con el aviso de aprobado: si el foco quedó sin dueño (el botón pulsado se fue con su
+  // curso), lo toma el aviso.
+  useEffect(() => {
+    if (published && focusIsLost()) publishedBox.current?.focus();
+  }, [published]);
 
   async function watch(lesson: LessonRow, startTime = 0, renewed = false) {
     ticket.current += 1;
     const mine = ticket.current;
-    if (!renewed) setVideo({ kind: "loading", lesson });
+    if (!renewed) {
+      setVideo({ kind: "loading", lesson });
+      setFocusRequest((count) => count + 1);
+    }
     let answer: VideoAnswer;
     try {
       answer = await lessonVideoAction(lesson.id);
@@ -112,29 +145,35 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
       answer = { kind: "unavailable" };
     }
     if (mine !== ticket.current) return;
-    if (answer.kind === "granted") setVideo({ kind: "playing", lesson, grant: answer, startTime, renewed });
+    if (answer.kind === "granted") setVideo({ kind: "playing", lesson, grant: answer, startTime, renewed, renewing: false });
     else if (answer.kind === "no_video") setVideo({ kind: "no_video", lesson });
     else setVideo({ kind: "failed", lesson });
   }
 
   function expired(at: number) {
-    if (video.kind !== "playing") return;
+    if (video.kind !== "playing" || video.renewing) return;
     if (video.renewed) setVideo({ kind: "failed", lesson: video.lesson });
-    else void watch(video.lesson, at, true);
+    else {
+      setVideo({ ...video, renewing: true });
+      void watch(video.lesson, at, true);
+    }
+  }
+
+  function failed(lesson: LessonRow) {
+    // Una renovación en camino ya no pinta nada: manda el error.
+    ticket.current += 1;
+    setVideo({ kind: "failed", lesson });
   }
 
   const attempt = queue.kind === "idle" ? 0 : queue.attempt;
-  const result: string | null = queuePending
-    ? null
-    : queue.kind === "approved"
-      ? text.approved
-      : queue.kind === "failed"
-        ? // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
-          queue.reason === "needs_code" && view.canChange
-          ? null
-          : FAILURES[queue.reason]
-        : null;
-  const tone = queue.kind === "approved" ? "success" : queue.kind === "failed" && (queue.reason === "unavailable" || queue.reason === "unknown") ? "danger" : "warning";
+  const result: string | null =
+    queuePending || queue.kind !== "failed"
+      ? null
+      : // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
+        queue.reason === "needs_code" && view.canChange
+        ? null
+        : FAILURES[queue.reason];
+  const tone = queue.kind === "failed" && (queue.reason === "unavailable" || queue.reason === "unknown") ? "danger" : "warning";
   const { block, answer, spoken } = useAnswerFocus(queuePending, attempt, result);
 
   const status =
@@ -172,7 +211,7 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
               tokens={video.grant.tokens}
               startTime={video.startTime}
               onExpired={expired}
-              onFailed={() => setVideo({ kind: "failed", lesson: video.lesson })}
+              onFailed={() => failed(video.lesson)}
               onPlaying={() => {
                 if (video.renewed) setVideo({ ...video, renewed: false });
               }}
@@ -200,6 +239,11 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
             `<noscript>`: hay navegadores que lo tratan como texto aunque no corran nada. */}
         {!mounted && <p className="text-body-s text-text-2">{text.noScript}</p>}
         {!view.canChange && <p className="text-body-s text-text-2">{text.approveLocked}</p>}
+        {published && (
+          <div ref={publishedBox} tabIndex={-1} className="outline-none">
+            <InlineAlert tone="success">{text.approved}</InlineAlert>
+          </div>
+        )}
         <BlockResult message={result} tone={tone} pending={queuePending} pendingText={text.working} answer={answer} spoken={spoken} />
         {view.courses.length === 0 ? (
           <p className="text-text-2">{text.empty}</p>
@@ -210,7 +254,8 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
                 key={course.id}
                 course={course}
                 canChange={view.canChange}
-                confirming={queue.kind === "confirming" && queue.course === course.id && !queuePending}
+                confirming={queue.kind === "confirming" && queue.course === course.id}
+                answer={answer}
                 action={sendQueue}
                 pending={queuePending}
                 mounted={mounted}
@@ -229,11 +274,18 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
   );
 }
 
+/** El foco no tiene dueño: quedó en el documento. */
+function focusIsLost(): boolean {
+  return document.activeElement === null || document.activeElement === document.body;
+}
+
 interface CourseProps {
   course: CourseRow;
   canChange: boolean;
   /** Se está preguntando si se aprueba este curso. */
   confirming: boolean;
+  /** Dónde va el foco cuando llega la pregunta: el botón pulsado desaparece con ella. */
+  answer: RefObject<HTMLDivElement | null>;
   action: (form: FormData) => void;
   pending: boolean;
   mounted: boolean;
@@ -242,7 +294,7 @@ interface CourseProps {
   onWatch: (lesson: LessonRow) => void;
 }
 
-function Course({ course, canChange, confirming, action, pending, mounted, watching, onWatch }: CourseProps) {
+function Course({ course, canChange, confirming, answer, action, pending, mounted, watching, onWatch }: CourseProps) {
   const headingId = `revision-curso-${course.id}`;
   return (
     <li>
@@ -257,8 +309,8 @@ function Course({ course, canChange, confirming, action, pending, mounted, watch
           <p className="text-body-s text-text-2">{course.loaded}</p>
         </div>
 
-        {course.modules.map((part, index) => (
-          <section key={`${index}-${part.title}`} className="flex flex-col gap-2">
+        {course.modules.map((part) => (
+          <section key={part.id} className="flex flex-col gap-2">
             <h4 className="text-body font-semibold break-words">{part.title}</h4>
             <ol className="flex flex-col gap-2">
               {part.lessons.map((lesson) => (
@@ -291,7 +343,7 @@ function Course({ course, canChange, confirming, action, pending, mounted, watch
         {canChange && (
           <form action={action} noValidate className="flex flex-col gap-3">
             {confirming ? (
-              <>
+              <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
                 <p className="font-semibold">{text.confirmTitle}</p>
                 <p className="text-text-2">{text.confirmBody}</p>
                 {course.firstOfTeacher !== null && <p className="text-text-2">{course.firstOfTeacher}</p>}
@@ -303,7 +355,7 @@ function Course({ course, canChange, confirming, action, pending, mounted, watch
                     {text.cancel}
                   </Button>
                 </div>
-              </>
+              </div>
             ) : (
               <div>
                 <Button type="submit" name="do" value={course.buttons.ask} size="md" disabled={pending}>

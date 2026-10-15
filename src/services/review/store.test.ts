@@ -39,7 +39,8 @@ function runnerWith(rows: unknown[], failures: unknown[] = []) {
 
 const lockConflict = (code: string) => toDatabaseError({ code, severity: "ERROR" });
 
-const LESSON_RAW = { lesson_id: LESSON, module: "Uno", title: "El bosque", duration_seconds: 356, video: "playable" };
+const MODULE = "e0000000-0000-4000-8000-000000000004";
+const LESSON_RAW = { lesson_id: LESSON, module_id: MODULE, module: "Uno", title: "El bosque", duration_seconds: 356, video: "playable" };
 const COURSE_RAW = {
   course_id: COURSE,
   title: "Naturaleza",
@@ -69,7 +70,7 @@ describe("la cola, como la contesta la base", () => {
           lessonCount: 1,
           totalDurationSeconds: 356,
           loadedAt: "2026-10-14T20:00:00+00:00",
-          lessons: [{ lessonId: LESSON, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" }],
+          lessons: [{ lessonId: LESSON, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" }],
         },
       ],
     });
