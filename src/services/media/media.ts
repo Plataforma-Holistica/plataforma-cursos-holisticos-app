@@ -3,21 +3,23 @@ import "server-only";
 import { signPlayback } from "@/adapters/mux/sign";
 import { getEnv } from "@/config/env";
 
-import { teamStanding } from "@/services/account/account";
+import { checkSession, teamStanding } from "@/services/account/account";
 import { reportFailure } from "@/services/error-reporting/server";
 
 import { createMediaGrant } from "./grant";
 import { databaseMediaStore } from "./store";
 
-// La función única de medios, ya armada con la guarda del equipo, la base, la llave de firma
-// de Mux y el registro de errores. Lo que importan las pantallas.
+// La función única de medios, ya armada con las guardas (del equipo para revisar, de sesión
+// para ver), la base, la llave de firma de Mux y el registro de errores. Lo que importan las
+// pantallas.
 
-export type { MediaGrant } from "./grant";
+export type { MediaGrant, ReviewGrant } from "./grant";
 
 export const { getMediaGrant } = createMediaGrant(
   { report: reportFailure },
   {
     teamStanding,
+    checkSession,
     store: databaseMediaStore,
     signingKey: () => {
       const env = getEnv();

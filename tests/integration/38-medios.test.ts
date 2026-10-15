@@ -92,6 +92,7 @@ function mediaOn(owner: Client) {
     { report: (code) => (reported.push(code), Promise.resolve()) },
     {
       teamStanding: testServices({ teamStore: teamStoreOn(owner) }).teamStanding,
+      checkSession: testServices().checkSession,
       store: mediaStoreOn(owner),
       signingKey: () => KEY,
       sign: signPlayback,
@@ -105,7 +106,7 @@ describe("la función única de medios, contra la base", () => {
   it("con Contenido: firma la lección de Mux, con su playback id y la vida que sale de VELOCIDAD_MIN", async () => {
     await staged(["content"], async ({ owner, jar, lessons }) => {
       const media = mediaOn(owner);
-      const grant = await media.getMediaGrant(jar, lessons.mux);
+      const grant = await media.getMediaGrant(jar, lessons.mux, "review");
       if (grant.kind !== "granted") throw new Error(`No firmó: ${grant.kind}`);
       expect(grant.playbackId).toBe("PlaybackMedios1");
       // 356 s a 0.75× son 475 s, más los diez minutos de ADR-27.
@@ -120,15 +121,15 @@ describe("la función única de medios, contra la base", () => {
   it("la lección de prueba, una que no existe y una sin forma: no_video", async () => {
     await staged(["content"], async ({ owner, jar, lessons }) => {
       const media = mediaOn(owner);
-      expect(await media.getMediaGrant(jar, lessons.test)).toEqual({ kind: "no_video" });
-      expect(await media.getMediaGrant(jar, "00000000-0000-4000-8000-000000000000")).toEqual({ kind: "no_video" });
-      expect(await media.getMediaGrant(jar, "no-es-un-id")).toEqual({ kind: "no_video" });
+      expect(await media.getMediaGrant(jar, lessons.test, "review")).toEqual({ kind: "no_video" });
+      expect(await media.getMediaGrant(jar, "00000000-0000-4000-8000-000000000000", "review")).toEqual({ kind: "no_video" });
+      expect(await media.getMediaGrant(jar, "no-es-un-id", "review")).toEqual({ kind: "no_video" });
     });
   });
 
   it("alguien del equipo sin Contenido: refused, también para la lección que sí existe", async () => {
     await staged(["config"], async ({ owner, jar, lessons }) => {
-      expect(await mediaOn(owner).getMediaGrant(jar, lessons.mux)).toEqual({ kind: "refused" });
+      expect(await mediaOn(owner).getMediaGrant(jar, lessons.mux, "review")).toEqual({ kind: "refused" });
     });
   });
 
@@ -155,12 +156,13 @@ describe("la función única de medios, contra la base", () => {
       { report: () => Promise.resolve() },
       {
         teamStanding: testServices().teamStanding,
+        checkSession: testServices().checkSession,
         store: mediaStoreOn(null as never),
         signingKey: () => KEY,
         sign: signPlayback,
         now: () => NOW,
       },
     );
-    expect(await media.getMediaGrant(jar, "00000000-0000-4000-8000-000000000000")).toEqual({ kind: "refused" });
+    expect(await media.getMediaGrant(jar, "00000000-0000-4000-8000-000000000000", "review")).toEqual({ kind: "refused" });
   });
 });

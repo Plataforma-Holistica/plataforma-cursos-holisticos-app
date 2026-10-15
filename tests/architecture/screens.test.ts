@@ -185,7 +185,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
       /if \(request\.step === "ask"\) return \{ kind: "confirming", course: request\.course, attempt \};[\s\S]*approveOutcome\(await approveCourse\(jar, \{ course: request\.course \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
     // El video: solo la función única de medios firma, y corre la guarda. Lo que llega es la
     // lección, nunca un playback id.
-    lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
+    lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId, "review"\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
   },
 };
 

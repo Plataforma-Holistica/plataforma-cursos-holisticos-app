@@ -61,7 +61,7 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
  */
 export async function lessonVideoAction(lessonId: unknown): Promise<VideoAnswer> {
   const jar = await cookieJar();
-  const answer = videoAnswerOf(await getMediaGrant(jar, lessonId));
+  const answer = videoAnswerOf(await getMediaGrant(jar, lessonId, "review"));
   if (answer.kind === "leave") return leaveFor(jar, answer);
   return answer;
 }
