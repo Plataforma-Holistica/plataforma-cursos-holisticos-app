@@ -13,6 +13,7 @@
 /src/services/account/     @SerchFGA @plataformaholisticadev
 # Las prácticas y los niveles del catálogo: quién los cambia (Contenido, con código reciente)
 /src/services/catalog/     @SerchFGA @plataformaholisticadev
+/src/services/media/       @SerchFGA @plataformaholisticadev
 # El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
 # No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
@@ -41,6 +42,7 @@
 /supabase/templates/       @SerchFGA @plataformaholisticadev
 # El único camino del código a la base: decide por quién se actúa (ADR-31)
 /src/adapters/supabase/    @SerchFGA @plataformaholisticadev
+/src/adapters/mux/         @SerchFGA @plataformaholisticadev
 
 # Medición y reparto
 /src/domain/consumption/   @SerchFGA @plataformaholisticadev

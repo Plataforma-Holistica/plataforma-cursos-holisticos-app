@@ -39,6 +39,7 @@ const FAILURES = {
   team_roster_unavailable: "No se pudo leer la lista del equipo de administración, o llegó sin la fila de quien la pidió: esa persona no pudo ver ni cambiar al equipo.",
   team_change_unavailable: "Un cambio al equipo de administración se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista. También sale cuando alguien dio bien su código y aun así ningún cambio pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS, y solo lo arregla el dueño de la base.",
   catalog_lists_unavailable: "No se pudieron leer las prácticas y los niveles del catálogo: quien tiene Contenido no pudo verlas ni cambiarlas.",
+  media_grant_unavailable: "No se pudo firmar la dirección de un video para alguien que podía verlo: falta la llave de firma de Mux, la llave no sirve, o falta un dato (la duración de la lección o VELOCIDAD_MIN). Quien lo pidió no pudo reproducirlo.",
   catalog_change_unavailable: "Un cambio a las prácticas o los niveles del catálogo se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",

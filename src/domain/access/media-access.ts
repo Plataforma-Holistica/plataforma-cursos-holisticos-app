@@ -26,9 +26,16 @@ export type MediaAccess =
   /** No hay video que firmar: no existe, se retiró, es de prueba o no está listo. */
   | { ok: false; reason: "no_video" };
 
+/**
+ * Si quien pide puede ver alguna lección. Se pregunta antes de leer la lección: a quien no
+ * puede no se le dice si existe.
+ */
+export function mayRequestMedia(viewer: MediaViewer): boolean {
+  return viewer.kind === "team" && viewer.content;
+}
+
 export function resolveMediaAccess(viewer: MediaViewer, lesson: MediaLesson | null): MediaAccess {
-  // Primero quién pide: a quien no puede no se le dice si la lección existe.
-  if (viewer.kind !== "team" || !viewer.content) return { ok: false, reason: "no_access" };
+  if (!mayRequestMedia(viewer)) return { ok: false, reason: "no_access" };
   if (lesson === null || !lesson.isCurrent || lesson.provider !== "mux" || !lesson.ready) {
     return { ok: false, reason: "no_video" };
   }

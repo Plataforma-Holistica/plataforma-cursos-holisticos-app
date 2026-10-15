@@ -1,7 +1,15 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { GRANT_MARGIN_SECONDS, GRANT_MAX_SECONDS, grantLifetimeSeconds, resolveMediaAccess, type MediaLesson, type MediaViewer } from "./media-access";
+import {
+  GRANT_MARGIN_SECONDS,
+  GRANT_MAX_SECONDS,
+  grantLifetimeSeconds,
+  mayRequestMedia,
+  resolveMediaAccess,
+  type MediaLesson,
+  type MediaViewer,
+} from "./media-access";
 
 // La regla de quién recibe una dirección firmada (RF-305, RF-306) y cuánto dura (ADR-27).
 
@@ -28,6 +36,16 @@ describe("resolveMediaAccess", () => {
     ["una con video sin terminar", { ...READY, ready: false }],
   ])("%s no tiene video que firmar", (_what, lesson) => {
     expect(resolveMediaAccess(CONTENT, lesson)).toEqual({ ok: false, reason: "no_video" });
+  });
+});
+
+describe("mayRequestMedia", () => {
+  it.each<[MediaViewer, boolean]>([
+    [{ kind: "team", content: true }, true],
+    [{ kind: "team", content: false }, false],
+    [{ kind: "other" }, false],
+  ])("%j: %s", (viewer, expected) => {
+    expect(mayRequestMedia(viewer)).toBe(expected);
   });
 });
 
