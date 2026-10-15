@@ -242,8 +242,7 @@ export const admin = defineMessages({
     empty: "No hay cursos por revisar.",
     queueTitle: "La cola, el más antiguo primero",
 
-    // De cada curso.
-    teacher: "De {teacher}.",
+    // De cada curso, bajo su maestro.
     practiceAndLevel: "Práctica: {practice}. Nivel: {level}.",
     unset: "sin definir",
     lessons: { one: "{count} lección, {duration} en total.", other: "{count} lecciones, {duration} en total." },
@@ -261,6 +260,9 @@ export const admin = defineMessages({
 
     // El reproductor, en su variante de revisión (diseño, sección 5).
     watching: "Viendo: {title}",
+    watchingContext: "Del curso «{course}», de {teacher}.",
+    // En la cola, junto a la lección que está en el reproductor.
+    watchingNow: "Viéndose ahora.",
     preview: "Vista previa. No genera puntos.",
     loading: "Preparando el video…",
     noVideo: "Esta lección no tiene video en Mux.",

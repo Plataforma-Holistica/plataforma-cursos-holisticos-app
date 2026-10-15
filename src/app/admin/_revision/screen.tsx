@@ -203,6 +203,7 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
           <h2 ref={playerHeading} id={PLAYER_HEADING_ID} tabIndex={-1} className="text-h3 outline-none">
             {t(text.watching, { title: video.lesson.title })}
           </h2>
+          <p className="text-text-2">{video.lesson.context}</p>
           <p className="text-body-s text-text-2">{text.preview}</p>
           {video.kind === "playing" && (
             <Player
@@ -245,25 +246,30 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
           </div>
         )}
         <BlockResult message={result} tone={tone} pending={queuePending} pendingText={text.working} answer={answer} spoken={spoken} />
-        {view.courses.length === 0 ? (
+        {view.teachers.length === 0 ? (
           <p className="text-text-2">{text.empty}</p>
         ) : (
-          <ol className="flex flex-col gap-6">
-            {view.courses.map((course) => (
-              <Course
-                key={course.id}
-                course={course}
-                canChange={view.canChange}
-                confirming={queue.kind === "confirming" && queue.course === course.id}
-                answer={answer}
-                action={sendQueue}
-                pending={queuePending}
-                mounted={mounted}
-                watching={watchedLesson}
-                onWatch={(lesson) => void watch(lesson)}
-              />
-            ))}
-          </ol>
+          view.teachers.map((teacher) => (
+            <section key={teacher.name} aria-label={teacher.name} className="flex flex-col gap-4">
+              <h3 className="text-h3 break-words">{teacher.name}</h3>
+              <ol className="flex flex-col gap-6">
+                {teacher.courses.map((course) => (
+                  <Course
+                    key={course.id}
+                    course={course}
+                    canChange={view.canChange}
+                    confirming={queue.kind === "confirming" && queue.course === course.id}
+                    answer={answer}
+                    action={sendQueue}
+                    pending={queuePending}
+                    mounted={mounted}
+                    watching={watchedLesson}
+                    onWatch={(lesson) => void watch(lesson)}
+                  />
+                ))}
+              </ol>
+            </section>
+          ))
         )}
       </section>
 
@@ -300,10 +306,9 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
     <li>
       <article aria-labelledby={headingId} className="flex flex-col gap-4 rounded-md border border-border p-4">
         <div className="flex flex-col gap-1">
-          <h3 id={headingId} className="text-h3 break-words">
+          <h4 id={headingId} className="text-h3 break-words">
             {course.title}
-          </h3>
-          <p className="text-text-2">{course.teacher}</p>
+          </h4>
           <p className="text-body-s text-text-2">{course.practiceAndLevel}</p>
           <p className="text-body-s text-text-2">{course.lessons}</p>
           <p className="text-body-s text-text-2">{course.loaded}</p>
@@ -311,12 +316,13 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
 
         {course.modules.map((part) => (
           <section key={part.id} className="flex flex-col gap-2">
-            <h4 className="text-body font-semibold break-words">{part.title}</h4>
+            <h5 className="text-body font-semibold break-words">{part.title}</h5>
             <ol className="flex flex-col gap-2">
               {part.lessons.map((lesson) => (
                 <li key={lesson.id} className="flex flex-wrap items-center gap-3">
                   <span className="min-w-0 break-words">{lesson.title}</span>
                   <span className="text-body-s text-text-2">{lesson.length}</span>
+                  {watching === lesson.id && <span className="text-body-s font-semibold">{text.watchingNow}</span>}
                   {lesson.playable ? (
                     mounted && (
                       <Button

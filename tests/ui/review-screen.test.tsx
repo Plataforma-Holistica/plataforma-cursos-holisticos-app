@@ -81,8 +81,9 @@ describe("la pantalla, en reposo", () => {
   it("la cola con sus lecciones: «Ver» solo en la de Mux, y aprobar con el código reciente", async () => {
     const { container } = show();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Cursos por revisar");
-    expect(screen.getByRole("heading", { level: 3, name: "Naturaleza" })).toBeVisible();
-    expect(screen.getByText("De Ana Robles.")).toBeVisible();
+    // Por maestro, y dentro, cada curso.
+    expect(screen.getByRole("heading", { level: 3, name: "Ana Robles" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 4, name: "Naturaleza" })).toBeVisible();
     expect(screen.getByText("2 lecciones, 12:45 en total.")).toBeVisible();
     expect(screen.getAllByRole("button", { name: /^Ver/ }).map((button) => button.textContent)).toEqual(["Ver «El bosque»"]);
     expect(screen.getByText("Sin video en Mux.")).toBeVisible();
@@ -129,7 +130,13 @@ describe("reproducir", () => {
     expect(JSON.parse(shown.getAttribute("data-tokens") ?? "")).toEqual({ playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" });
     expect(shown).toHaveAttribute("data-start", "0");
     expect(screen.getByRole("heading", { level: 2, name: "Viendo: El bosque" })).toHaveFocus();
+    // De qué curso y de qué maestro: con muchos en la cola, no se adivina.
+    expect(screen.getByText("Del curso «Naturaleza», de Ana Robles.")).toBeVisible();
     expect(screen.getByText("Vista previa. No genera puntos.")).toBeVisible();
+    // Y en la cola, la lección que se ve lo dice.
+    const row = screen.getByText("El bosque", { selector: "li span" }).closest("li");
+    expect(row).toHaveTextContent("Viéndose ahora.");
+    expect(screen.getByText("El río", { selector: "li span" }).closest("li")).not.toHaveTextContent("Viéndose ahora.");
     // La lección que se ve no se vuelve a pedir con el mismo botón.
     expect(screen.getByRole("button", { name: "Ver «El bosque»" })).toBeDisabled();
   });
