@@ -8,7 +8,7 @@
 -- TypeScript. Quien actúa sale de `private.actor_id()`: bajo el servidor no hay `auth.uid()`.
 begin;
 \ir _ayuda.psql
-select plan(67);
+select plan(69);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto@prueba.test');
@@ -158,7 +158,12 @@ create temporary table h as
 select is((select array_agg(k order by k) from h, jsonb_object_keys(f) as k),
   array['courtesy', 'lesson', 'now', 'subscription', 'viewer'], 'en un solo valor, con estas partes');
 select is((select f -> 'viewer' from h),
-  '{"suspended": false, "email_verified": true, "teacher_id": null}'::jsonb, 'de la persona: activa, verificada, sin ser maestra');
+  '{"suspended": false, "email_verified": true, "teacher_id": null, "email": "ana@prueba.test"}'::jsonb,
+  'de la persona: activa, verificada, sin ser maestra, y su correo para la marca de agua (T-203)');
+select is(pruebas.hechos('a0000000-0000-0000-0000-000000000002', null) -> 'viewer' ->> 'email', 'beto@prueba.test',
+  'el correo es el de quien actúa, nunca el de otro');
+select is(pruebas.hechos('b0000000-0000-0000-0000-000000000001', null) -> 'viewer' ->> 'email', 'contenido@prueba.test',
+  'también el de alguien del equipo');
 select ok((select abs(extract(epoch from (f ->> 'now')::timestamptz - now())) < 1 from h), 'con la hora de la base');
 select is((select f -> 'courtesy' from h), '[]'::jsonb, 'sin cortesías: una lista vacía');
 select is((select (f -> 'subscription' ->> 'paid_through')::timestamptz from h),
