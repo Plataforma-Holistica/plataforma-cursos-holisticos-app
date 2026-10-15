@@ -1353,22 +1353,36 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
   };
   const listedNow = async (slug: string) =>
     (await ownerQuery<{ listed: boolean }>("select is_listed as listed from public.published_courses where slug = $1", [slug]))[0]?.listed;
-  /** Corta toda petición que no sea a la aplicación, y anota a dónde iba. */
-  const cutOutside = async (context: BrowserContext) => {
+  /**
+   * Corta toda petición que no sea a la aplicación, y anota a dónde iba. Con `hold`, las de
+   * Mux se quedan sin contestar hasta `release()`: mientras tanto el reproductor sigue montado
+   * y se puede mirar por dentro.
+   */
+  const cutOutside = async (context: BrowserContext, hold = false) => {
     const outside: string[] = [];
+    const held: { abort: () => Promise<void> }[] = [];
+    let holding = hold;
     await context.route("**/*", (route) => {
       const url = new URL(route.request().url());
       if (url.hostname === "localhost") return route.continue();
       outside.push(url.href);
+      if (holding && url.hostname.endsWith(".mux.com")) {
+        held.push({ abort: () => route.abort() });
+        return;
+      }
       return route.abort();
     });
-    return outside;
+    const release = async () => {
+      holding = false;
+      for (const each of held.splice(0)) await each.abort();
+    };
+    return Object.assign(outside, { release });
   };
 
   test("revisión con JavaScript: ve la cola, reproduce sin que nada salga a Mux Data ni a Google, y aprueba en dos pasos", async ({ page }) => {
     test.setTimeout(240_000);
     const course = await loadReviewCourse("revision-e2e");
-    const outside = await cutOutside(page.context());
+    const outside = await cutOutside(page.context(), true);
     // Chrome de verdad trae `window.chrome`, y con él Mux Player ofrece enviar a un televisor y
     // pide un script de Google. El navegador de prueba no lo trae: se le pone, para que la
     // prueba vea lo que pasaría en Chrome.
@@ -1402,7 +1416,11 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
         }),
       )
       .toEqual([true, true]);
+    // La pantalla, con el reproductor montado, pasa las reglas de accesibilidad.
+    expect(await a11yViolations(page)).toEqual([]);
     await expect.poll(() => outside.some((href) => href.startsWith("https://stream.mux.com/Playbackrevisione2e.m3u8?") && href.includes("token=")), { timeout: 60_000 }).toBe(true);
+    // Con lo visto por dentro, se cortan las de Mux: el reproductor falla y la pantalla lo dice.
+    await outside.release();
     await expect(page.getByText("No se pudo cargar el video.")).toBeVisible({ timeout: 60_000 });
     const hosts = [...new Set(outside.map((href) => new URL(href).hostname))].sort();
     for (const host of hosts) expect(["image.mux.com", "stream.mux.com"], host).toContain(host);
@@ -1442,14 +1460,15 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await card.getByRole("button", { name: "Aprobar y publicar «Curso revision-e2e-sin-js»" }).click();
       const asked = page.getByRole("article").filter({ hasText: "Curso revision-e2e-sin-js" });
       await asked.getByRole("button", { name: "Sí, aprobar y publicar" }).click();
-      // Aprobado, redirige: la página que queda es una lectura, y recargarla no reenvía nada.
-      await expect(page).toHaveURL(REVIEW);
+      // Aprobado, redirige: la página que queda es una lectura, y recargarla no reenvía nada. El
+      // navegador conserva el ancla del bloque, que es de esta misma página: vuelve a la cola.
+      await expect(page).toHaveURL(`${REVIEW}#bloque-revision-cola`);
       await expect(page.getByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
       expect(await listedNow("revision-e2e-sin-js")).toBe(true);
       const audited = await auditRows();
       await page.reload();
       expect(await auditRows()).toBe(audited);
-      expect(outside).toEqual([]);
+      expect([...outside]).toEqual([]);
     });
   });
 
