@@ -34,7 +34,26 @@ const schema = z.object({
   // También de Vercel: el nombre del servidor de la vista previa de la rama, sin
   // protocolo. De ahí sale la dirección del sitio en una vista previa (abajo).
   VERCEL_BRANCH_URL: z.string().optional(),
+  // La llave con que se firman las direcciones de los videos de Mux (T-108; TRD §7.2 y
+  // §9.4). Secreta, solo en el servidor. Opcionales: sin ellas no hay video, y lo demás
+  // funciona igual. Van juntas. El token de la API de Mux no va aquí: solo lo usa el guion
+  // local que sube los videos de prueba.
+  MUX_SIGNING_KEY_ID: z.string().regex(/^[A-Za-z0-9]{8,64}$/).optional(),
+  MUX_SIGNING_PRIVATE_KEY: z.string().refine(looksLikePrivateKey).optional(),
 });
+
+// La llave privada de firma, en PEM o en base64, como la entrega Mux. Aquí solo se revisa su
+// forma (no se importa `node:crypto`: este archivo también se compila para Edge); que sea
+// una llave que firma lo dice el adaptador al usarla.
+function looksLikePrivateKey(value: string): boolean {
+  const privatePem = /-----BEGIN (RSA )?PRIVATE KEY-----/;
+  if (privatePem.test(value)) return true;
+  try {
+    return privatePem.test(atob(value.replace(/\s+/g, "")));
+  } catch {
+    return false;
+  }
+}
 
 // El nombre de un servidor y nada más: sin protocolo, sin ruta, sin usuario.
 const hostName = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
@@ -101,6 +120,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     }
     // Y cifrada. Sin cifrar solo en local, para probar contra un receptor en la máquina.
     if (present.SENTRY_DSN?.startsWith("http://")) failed.add("SENTRY_DSN");
+  }
+  // La llave de firma va completa o no va: con una sola de las dos no se firma nada, y eso
+  // se diría como «no hay video» cuando es configuración.
+  if ((present.MUX_SIGNING_KEY_ID === undefined) !== (present.MUX_SIGNING_PRIVATE_KEY === undefined)) {
+    failed.add(present.MUX_SIGNING_KEY_ID === undefined ? "MUX_SIGNING_KEY_ID" : "MUX_SIGNING_PRIVATE_KEY");
   }
   const unwelcome = forbidden.filter((name) => source[name] !== undefined && source[name] !== "");
   if (result.success && failed.size === 0 && unwelcome.length === 0) return result.data;

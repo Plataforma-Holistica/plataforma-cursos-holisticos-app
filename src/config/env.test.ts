@@ -82,6 +82,36 @@ describe("parseEnv", () => {
 
   // Con este secreto se calculan las huellas del correo y de la dirección para el freno y
   // los topes (TRD §9.9). Uno corto se adivina probando: se rechaza.
+  // La llave de firma de Mux (T-108): opcional, en pareja, y con la forma de una llave.
+  describe("MUX_SIGNING_KEY_ID y MUX_SIGNING_PRIVATE_KEY", () => {
+    // Una llave privada de prueba, armada por partes: escrita de corrido, el escaneo de
+    // secretos la tomaría por una real.
+    const pem = ["-----BEGIN", "RSA PRIVATE KEY-----\nAAAA\n-----END RSA", "PRIVATE KEY-----"].join(" ");
+    const mux = { MUX_SIGNING_KEY_ID: "LlaveDePrueba01", MUX_SIGNING_PRIVATE_KEY: btoa(pem) };
+
+    it("son opcionales: sin ellas no hay video", () => {
+      expect(parseEnv(valid)).not.toHaveProperty("MUX_SIGNING_KEY_ID");
+    });
+
+    it("se aceptan juntas, en base64 o en PEM", () => {
+      expect(parseEnv({ ...valid, ...mux }).MUX_SIGNING_KEY_ID).toBe("LlaveDePrueba01");
+      expect(parseEnv({ ...valid, ...mux, MUX_SIGNING_PRIVATE_KEY: pem }).MUX_SIGNING_PRIVATE_KEY).toBe(pem);
+    });
+
+    it("una sin la otra no arranca", () => {
+      expect(problemsOf({ ...valid, MUX_SIGNING_KEY_ID: mux.MUX_SIGNING_KEY_ID })).toEqual(["MUX_SIGNING_PRIVATE_KEY: falta"]);
+      expect(problemsOf({ ...valid, MUX_SIGNING_PRIVATE_KEY: mux.MUX_SIGNING_PRIVATE_KEY })).toEqual(["MUX_SIGNING_KEY_ID: falta"]);
+    });
+
+    it.each([
+      ["un texto que no es una llave", { ...mux, MUX_SIGNING_PRIVATE_KEY: "no-es-una-llave" }, "MUX_SIGNING_PRIVATE_KEY"],
+      ["una llave pública", { ...mux, MUX_SIGNING_PRIVATE_KEY: btoa(pem.replaceAll("RSA PRIVATE", "PUBLIC")) }, "MUX_SIGNING_PRIVATE_KEY"],
+      ["un identificador con signos", { ...mux, MUX_SIGNING_KEY_ID: "llave/../otra" }, "MUX_SIGNING_KEY_ID"],
+    ])("se rechaza %s, sin decir su valor", (_what, values, name) => {
+      expect(problemsOf({ ...valid, ...values })).toEqual([`${name}: tiene un valor inválido`]);
+    });
+  });
+
   describe("RATE_LIMIT_HMAC_SECRET", () => {
     it("pide 32 caracteres o más", () => {
       expect(problemsOf({ ...valid, RATE_LIMIT_HMAC_SECRET: "x".repeat(31) })).toEqual([
