@@ -240,10 +240,9 @@ export const admin = defineMessages({
     codeNotAvailable: "Tu código es correcto, pero por ahora no se puede aprobar. Avisa a quien opera la base de datos.",
     approveLocked: "Escribe tu código, al inicio de esta página, para poder aprobar.",
     empty: "No hay cursos por revisar.",
-    queueTitle: "La cola, el más antiguo primero",
+    queueTitle: "La cola, agrupada: primero quien espera desde hace más",
 
-    // De cada curso.
-    teacher: "De {teacher}.",
+    // De cada curso, bajo su maestro.
     practiceAndLevel: "Práctica: {practice}. Nivel: {level}.",
     unset: "sin definir",
     lessons: { one: "{count} lección, {duration} en total.", other: "{count} lecciones, {duration} en total." },
@@ -261,6 +260,10 @@ export const admin = defineMessages({
 
     // El reproductor, en su variante de revisión (diseño, sección 5).
     watching: "Viendo: {title}",
+    watchingContext: "Del curso «{course}», de {teacher}.",
+    // En la cola, junto a la lección que está en el reproductor (se esté viendo, cargando o
+    // haya fallado: lo cierto en todos los casos es dónde está).
+    watchingNow: "En el reproductor.",
     preview: "Vista previa. No genera puntos.",
     loading: "Preparando el video…",
     noVideo: "Esta lección no tiene video en Mux.",

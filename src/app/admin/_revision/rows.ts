@@ -22,6 +22,8 @@ export interface LessonRow {
   status: string | null;
   /** Lo que va oculto después de «Ver», para quien no ve la fila. */
   detail: string;
+  /** De qué curso y de qué maestro es: lo dice el reproductor, lejos de la cola. */
+  context: string;
 }
 
 export interface ModuleRows {
@@ -33,7 +35,6 @@ export interface ModuleRows {
 export interface CourseRow {
   id: string;
   title: string;
-  teacher: string;
   practiceAndLevel: string;
   lessons: string;
   loaded: string;
@@ -43,10 +44,22 @@ export interface CourseRow {
   buttons: { ask: string; confirm: string };
 }
 
+/** Los cursos de un maestro, del más antiguo al más nuevo. */
+export interface TeacherGroup {
+  name: string;
+  courses: CourseRow[];
+}
+
 export interface ReviewView {
   /** El código de quien mira es reciente: se ofrece aprobar. */
   canChange: boolean;
-  courses: CourseRow[];
+  /**
+   * La cola por maestro, cada uno en el orden de su curso más antiguo (lo pidió Sergio el
+   * 2026-10-15: con muchos cursos, no se sabe de quién es qué). Se agrupa por el nombre
+   * publicado: la base no le da el id del maestro a esta pantalla. Dos maestros que se
+   * llamaran igual quedarían bajo el mismo nombre, que es cierto para los dos.
+   */
+  teachers: TeacherGroup[];
 }
 
 /** «5:56», «1:02:03»: lo que dura, como lo dice un reproductor. */
@@ -78,6 +91,7 @@ function courseRow(course: ReviewCourse): CourseRow {
       playable: lesson.video === "playable",
       status: STATUS[lesson.video],
       detail: t(text.watchOf, { title: lesson.title }),
+      context: t(text.watchingContext, { course: course.title, teacher: course.teacherName }),
     };
     if (last !== undefined && last.id === lesson.moduleId) last.lessons.push(row);
     else modules.push({ id: lesson.moduleId, title: lesson.module, lessons: [row] });
@@ -85,7 +99,6 @@ function courseRow(course: ReviewCourse): CourseRow {
   return {
     id: course.courseId,
     title: course.title,
-    teacher: t(text.teacher, { teacher: course.teacherName }),
     practiceAndLevel: t(text.practiceAndLevel, { practice: course.practice ?? text.unset, level: course.level ?? text.unset }),
     lessons: t(plural(course.lessonCount, text.lessons), { count: String(course.lessonCount), duration: playLength(course.totalDurationSeconds) }),
     loaded: t(text.loaded, { date: longDate(course.loadedAt) }),
@@ -95,6 +108,19 @@ function courseRow(course: ReviewCourse): CourseRow {
   };
 }
 
+/** El nombre con que se agrupa: el mismo a la vista, aunque llegue escrito distinto en Unicode o con espacios de más. */
+const groupKey = (name: string) => name.normalize("NFC").trim().replace(/\s+/g, " ");
+
 export function reviewView(queue: ReviewQueue): ReviewView {
-  return { canChange: queue.freshCode, courses: queue.courses.map(courseRow) };
+  // Del más antiguo al más nuevo, aquí mismo: el orden no se le deja a la base. El primero de
+  // cada maestro fija su lugar.
+  const sorted = [...queue.courses].sort((a, b) => Date.parse(a.loadedAt) - Date.parse(b.loadedAt) || a.courseId.localeCompare(b.courseId));
+  const teachers: (TeacherGroup & { key: string })[] = [];
+  for (const course of sorted) {
+    const key = groupKey(course.teacherName);
+    const group = teachers.find((each) => each.key === key);
+    if (group === undefined) teachers.push({ key, name: key, courses: [courseRow(course)] });
+    else group.courses.push(courseRow(course));
+  }
+  return { canChange: queue.freshCode, teachers: teachers.map(({ name, courses }) => ({ name, courses })) };
 }
