@@ -151,10 +151,17 @@ describe("ver: una alumna y su cuenta (RN-01)", () => {
     await reverted(async (owner) => {
       const courses = await loadCourses(owner);
       const media = mediaOn(owner);
-      expect(await media.lessonAccess(jar, courses.listed)).toEqual({ kind: "denied", account: { allowed: false, reason: "never_subscribed" } });
-      expect(await media.lessonAccess(jar, courses.inReview)).toEqual({ kind: "no_video" });
+      // Lo que ver contestaría con los mismos hechos, sin la firma.
+      const both = async (lesson: string) => {
+        const watched = await media.getMediaGrant(jar, lesson, "watch");
+        const decided = await media.lessonAccess(jar, lesson);
+        expect(decided).toEqual(watched.kind === "granted" ? { kind: "allowed" } : watched);
+        return decided;
+      };
+      expect(await both(courses.listed)).toEqual({ kind: "denied", account: { allowed: false, reason: "never_subscribed" } });
+      expect(await both(courses.inReview)).toEqual({ kind: "no_video" });
       await subscribe(owner, who.id, { status: "active", end: new Date((await dbNow(owner)).getTime() + 20 * DAY_MS) });
-      expect(await media.lessonAccess(jar, courses.listed)).toEqual({ kind: "allowed" });
+      expect(await both(courses.listed)).toEqual({ kind: "allowed" });
       expect(media.reported).toEqual([]);
     });
   });

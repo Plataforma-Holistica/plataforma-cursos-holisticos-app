@@ -395,6 +395,10 @@ describe("playbackRates: el menú de velocidades (RF-312; 03 §5.4)", () => {
     expect(playbackRates(minimum, maximum)).toBeNull();
   });
 
+  it("el menú más largo que se acepta", () => {
+    expect(playbackRates(0.25, 0.25 * MAX_PLAYBACK_RATES)).toHaveLength(MAX_PLAYBACK_RATES);
+  });
+
   it("todo lo que da cae entre las dos, en pasos de 0.25, en orden y sin repetir", () => {
     fc.assert(
       fc.property(fc.double({ min: 0.05, max: 4, noNaN: true }), fc.double({ min: 0.05, max: 4, noNaN: true }), (a, b) => {
@@ -432,6 +436,11 @@ describe("watermarkText: el correo de la marca de agua (RF-305; 03 §5.4)", () =
     ["demasiado largo", `${"a".repeat(320)}@correo.com`],
     ["con un salto de línea", "ana@correo.com\nOtra cosa"],
     ["con un carácter de control", "ana@correo.com\u0000"],
+    ["con un carácter de control de C1", "ana@correo.com\u0085"],
+    ["con un separador de línea", "ana@correo.com\u2028"],
+    ["con uno que invierte la dirección del texto", "\u202emoc.oerroc@ana"],
+    ["con uno de ancho cero", "ana\u200b@correo.com"],
+    ["con una marca de orden de bytes", "\ufeffana@correo.com"],
   ])("%s: nulo", (_what, value) => {
     expect(watermarkText(value)).toBeNull();
   });

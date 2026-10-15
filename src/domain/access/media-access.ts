@@ -176,8 +176,10 @@ export function playbackRates(minimum: number, maximum: number): number[] | null
 
 /** El correo más largo que se pinta. Uno de verdad no pasa de 254. */
 const WATERMARK_MAX_LENGTH = 320;
-// Saltos de línea y los demás caracteres de control: la marca es una sola línea.
-const CONTROL = /[\u0000-\u001f\u007f]/;
+// La marca es una sola línea que se lee tal como es: fuera los caracteres de control (también
+// los de C1), los separadores de línea y de párrafo, los de ancho cero y los que invierten o
+// aíslan la dirección del texto, que harían que el correo se viera distinto de lo que es.
+const UNSEEN = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 
 /**
  * El texto de la marca de agua: el correo de la cuenta, tal cual (03 §5.4). No se le pide más
@@ -187,6 +189,6 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 export function watermarkText(email: unknown): string | null {
   // Sin arroba no hay correo: eso deja fuera también el vacío y los puros espacios.
   if (typeof email !== "string" || email.length > WATERMARK_MAX_LENGTH) return null;
-  if (CONTROL.test(email) || !email.includes("@")) return null;
+  if (UNSEEN.test(email) || !email.includes("@")) return null;
   return email;
 }

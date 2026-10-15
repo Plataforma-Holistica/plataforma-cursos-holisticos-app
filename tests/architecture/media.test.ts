@@ -85,9 +85,16 @@ describe("solo la función única de medios firma", () => {
     expect(grant.match(/\bsignFor\(/g)).toHaveLength(3);
     expect(grant.match(/\bcore\.sign\(/g)).toHaveLength(1);
     const body = (name: string) => grant.slice(grant.indexOf(`async function ${name}(`)).split(/\n {2}(?:async )?function /)[0] ?? "";
-    expect(body("lessonAccess")).not.toMatch(/signFor|core\.sign|playbackSpeeds|playbackId/);
+    // Ni directo ni a través de los caminos que firman.
+    expect(body("lessonAccess")).not.toMatch(/signFor|core\.sign|playbackSpeeds|playbackId|\bwatch\(|\breview\(|getMediaGrant\(/);
     expect(body("review")).toMatch(/return signFor\(/);
     expect(body("watch")).toMatch(/await signFor\(/);
+  });
+
+  it("la base de acceso y si cuenta para el reparto no llegan a ninguna pantalla: son de T-204 y T-205", () => {
+    // Una acción que devolviera la respuesta de ver tal cual le mandaría al navegador la base y
+    // el fin del acceso. Las pantallas solo toman de ella lo que pintan.
+    expect(naming(/\bcountsForPayout\b|\bbasis\b/).filter((file) => file.startsWith("src/app/"))).toEqual([]);
   });
 
   it("en las pantallas, solo la acción del reproductor pide un video: nada lo pinta en el HTML", () => {
