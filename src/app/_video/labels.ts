@@ -39,7 +39,6 @@ export function controlLabels(): Record<string, string> {
     "Disable captions": c.captionsOff,
     "Playback rate": c.rate,
     "Playback rate {playbackRate}": rateNamed,
-    "current playback rate": c.rateCurrent,
     "Enter fullscreen mode": c.fullscreen,
     "enter fullscreen mode": c.fullscreen,
     "Exit fullscreen mode": c.exitFullscreen,

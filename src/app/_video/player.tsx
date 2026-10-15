@@ -93,6 +93,9 @@ export function Player({ playbackId, tokens, startTime, speeds, watermark, onExp
   const mark = useRef<HTMLParagraphElement>(null);
   const fading = useRef(false);
 
+  // Una función nueva en cada render: React suelta y vuelve a poner la referencia, y `lockDown`
+  // corre otra vez, sin efecto. Con `useCallback` el compilador de React ya no deja tocar el
+  // controlador de Mux en `bindController`.
   function attach(element: MuxPlayerRefAttributes | null) {
     lockDown(element);
     mux.current = element;

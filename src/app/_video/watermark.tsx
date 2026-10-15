@@ -25,16 +25,28 @@ const CELL_CLASSES: Record<WatermarkCell, string> = {
   8: "watermark-cell-8",
 };
 
+/** Si la opacidad del elemento está a medio camino de una transición suya (el navegador la lleva). */
+function opacityInTransition(element: HTMLElement): boolean {
+  const running = element.getAnimations?.() ?? [];
+  return running.some(
+    (animation) =>
+      animation.playState === "running" && (animation as Animation & { transitionProperty?: string }).transitionProperty === "opacity",
+  );
+}
+
 /**
  * Si la marca sigue en su lugar: dentro del contenedor, visible, sin desvanecer a mano y con su
- * texto. Durante su propio desvanecido la opacidad no cuenta.
+ * texto. Durante su propio desvanecido la opacidad no cuenta, y tampoco mientras el navegador
+ * todavía la lleva de vuelta: la transición empieza un cuadro después de que React quita la
+ * clase, así que puede seguir corriendo cuando el periodo protegido ya terminó.
  */
 export function watermarkIntact(element: HTMLElement | null, frame: HTMLElement | null, text: string, fading: boolean): boolean {
   if (element === null || frame === null || !frame.contains(element)) return false;
   if (element.textContent !== text) return false;
   const style = getComputedStyle(element);
   if (style.display === "none" || style.visibility === "hidden" || element.hidden) return false;
-  return fading || style.opacity === "" || Number(style.opacity) >= 1;
+  if (fading || style.opacity === "" || Number(style.opacity) >= 1) return true;
+  return opacityInTransition(element);
 }
 
 export interface WatermarkProps {
@@ -79,7 +91,7 @@ export function Watermark({ text, elementRef, fadingRef, onMoved }: WatermarkPro
   }, [fadingRef]);
 
   return (
-    <p ref={elementRef} data-watermark aria-hidden="true" className={`watermark ${CELL_CLASSES[cell]}${fading ? " opacity-0" : ""}`}>
+    <p ref={elementRef} data-watermark aria-hidden="true" translate="no" className={`watermark ${CELL_CLASSES[cell]}${fading ? " opacity-0" : ""}`}>
       {text}
     </p>
   );

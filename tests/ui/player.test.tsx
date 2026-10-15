@@ -270,12 +270,36 @@ describe("la marca de agua (RF-305)", () => {
       await Promise.resolve();
     });
     expect(mux.element?.pause).not.toHaveBeenCalled();
-    // Ya de vuelta, la opacidad sí cuenta.
+    // Terminado el periodo protegido, el navegador todavía puede estarla trayendo de vuelta
+    // (la transición empieza un cuadro después): mientras corra, no pausa.
+    const element = mark()!;
+    const returning = [{ playState: "running", transitionProperty: "opacity" }];
+    Object.defineProperty(element, "getAnimations", { configurable: true, value: () => returning });
     await act(async () => {
       act(() => void vi.advanceTimersByTime(WATERMARK_FADE_MS));
       await Promise.resolve();
     });
+    expect(mux.element?.pause).not.toHaveBeenCalled();
+    // Una transición de opacidad detenida a mano tampoco la excusa.
+    returning.splice(0, 1, { playState: "paused", transitionProperty: "opacity" });
+    await act(async () => {
+      element.style.setProperty("opacity", "0.5");
+      await Promise.resolve();
+    });
     expect(mux.element?.pause).toHaveBeenCalled();
+    mux.element?.pause.mockClear();
+    // La deriva es otra animación, que siempre corre: no la excusa.
+    returning.splice(0, 1, { playState: "running", transitionProperty: "translate" });
+    await act(async () => {
+      element.style.setProperty("opacity", "0.8");
+      await Promise.resolve();
+    });
+    expect(mux.element?.pause).toHaveBeenCalled();
+  });
+
+  it("no la lee un traductor del navegador", () => {
+    const { mark } = show("ana@correo.com");
+    expect(mark()).toHaveAttribute("translate", "no");
   });
 
   it("y al darle reproducir otra vez sin marca, se vuelve a pausar", async () => {
