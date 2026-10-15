@@ -1195,13 +1195,19 @@ falla. Diecinueve precisiones que la tabla no dice:
     revisión no, hasta T-405): el correo de quien ve, tal como lo dio la función única de
     medios, en una de las ocho celdas del borde de una rejilla de 3 × 3 sobre el área segura
     (`watermark-cells.ts`, nunca la central), que cambia cada 30 segundos con un desvanecido
-    y deriva despacio. Con movimiento reducido, la regla general de `theme.css` le quita la
+    y deriva despacio. Cada celda la ancla al borde del área segura según su columna y la
+    deriva va hacia dentro, con un ancho máximo: así no se corta ni se sale en un teléfono
+    (medido en Chromium de 320 a 1280 px; un correo de más de unos 50 caracteres en 320 px se
+    corta con puntos suspensivos antes que salirse). Lleva `translate="no"`. Con movimiento reducido, la regla general de `theme.css` le quita la
     deriva. Su estilo son tokens (`--watermark`, `--watermark-size`, que mide el contenedor
     con `cqw`) y utilidades (`watermark`, `watermark-cell-N`). No se lee, no se selecciona y
     no recibe el toque. **Si desaparece, se oculta o le cambian el texto, el video se pausa**
     (`watermarkIntact`, que vigila un observador del contenedor, cada cambio de celda y cada
     vez que se le da reproducir). Mientras se desvanece y mientras vuelve, su opacidad no
-    cuenta, o daría pausas falsas. Es disuasión, no candado: ningún texto promete más.
+    cuenta, o daría pausas falsas; tampoco mientras corre una transición de opacidad suya, que
+    el navegador empieza un cuadro después de que React quita la clase y puede seguir cuando
+    el periodo protegido ya terminó (lo encontró la revisión del diff, medido en Chromium). Una
+    transición detenida a mano no la excusa, ni la deriva, que siempre corre. Es disuasión, no candado: ningún texto promete más.
 - **Quién tiene acceso hoy lo dice una sola regla** (T-201; RN-01, RF-203; TRD §5.1):
   `resolveAccountAccess`, en `src/domain/access/account-access.ts`. No se guarda un campo
   «tiene acceso». La usa la función única de medios desde T-202. Para quien la use: los
