@@ -27,3 +27,7 @@ Thumbs.db
 desktop.ini
 *.log
 *.stackdump
+
+# Los identificadores de los videos de prueba que subió `pnpm media:upload-test` a la cuenta
+# de Mux de quien desarrolla (T-108): de cada máquina, no del repositorio.
+supabase/local/test-videos.json

@@ -60,6 +60,7 @@ from (values
   ('UMBRAL_MEDIO_PCT',          '2500',                 'decided'),
   ('UMBRAL_COMPLETO_PCT',       '9000',                 'to_confirm'),
   ('VELOCIDAD_MAX',             '"2"',                  'decided'),
+  ('VELOCIDAD_MIN',             '"0.75"',               'decided'),
   ('SESIONES_SIMULTANEAS',      '2',                    'proposed'),
   ('RETENCION_LATIDOS',         '90',                   'decided'),
   ('ZONA_HORARIA_PERIODO',      '"America/Mexico_City"', 'proposed'),

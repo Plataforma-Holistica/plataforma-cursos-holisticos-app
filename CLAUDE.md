@@ -60,6 +60,8 @@ pnpm db:login    # le da a app_service entrada a la base local (ver .env.example
 pnpm db:drafts   # carga en la base local los textos legales de borrador (versión 0)
 pnpm db:admins <correo> [<correo> ...]   # el arranque en local: invita a las primeras personas del equipo, con todas las capacidades
 pnpm db:courses  # carga en la base local los cursos de prueba (T-107): sus prácticas y niveles, dos maestros ficticios y dos cursos por aprobar
+pnpm media:upload-test [<archivo> ...]   # sube a Mux videos de ../Videos-Test/ (por omisión, uno) y deja sus identificadores para db:courses
+pnpm media:check  # contra Mux: con una dirección firmada vigente sirve el video; caducada o sin firma, no
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
@@ -123,12 +125,29 @@ huella, sin tocar ninguna base: a la sentencia va la huella, nunca el código.
 (decisión de Sergio del 2026-10-14: no hay pilotos todavía, y los pilotos reales esperan a
 T-004 y al documento de PQ-25). Sus prácticas y niveles, dos maestros ficticios sin cuenta
 y dos cursos de dos lecciones, con videos del proveedor de prueba (`test`) que apuntan a
-los archivos de `../Videos-Test/` (fuera de git; se suben a Mux en T-108). Los cursos
+los archivos de `../Videos-Test/` (fuera de git), salvo las que ya tienen su video en Mux
+(abajo, `pnpm media:upload-test`). Los cursos
 quedan por aprobar, sin listar: los aprueba alguien con Contenido. Escribe como dueño de la
 base declarado sistema, con el ajuste `app.local_courses`, que la base exige para un video
 de prueba. Solo contra la base local, con las mismas comprobaciones que `db:drafts`;
 correrlo dos veces no duplica nada. `db:reset` no lo corre, y deja renglones en la
 auditoría: después, `pnpm db:reset` antes de `pnpm test:db`.
+
+`pnpm media:upload-test` sube a la cuenta de Mux de quien desarrolla los videos de
+`../Videos-Test/` que se le pidan (por omisión, «Nature + Forest.mp4»: decisión de Sergio
+del 2026-10-14, uno por ahora) y escribe sus identificadores y la duración que mide Mux en
+`supabase/local/test-videos.json`, que git ignora. Usa `MUX_TOKEN_ID` y `MUX_TOKEN_SECRET`
+de `.env.local`, que la aplicación no lee. Cada video viaja con su huella y se busca antes
+de subir: no se sube dos veces (salvo si se corta entre la subida y la creación del video
+en Mux, una ventana de segundos). Exige política firmada (si Mux le diera un playback id
+público, falla), no corre con `CI` ni en Vercel, y no imprime respuestas de la API. Con ese
+archivo, `pnpm db:courses` carga esas lecciones con video de Mux y las demás con el de
+prueba; si la base ya tenía los cursos con otros videos (otro proveedor, u otro video de
+Mux) se detiene: `pnpm db:reset` antes. `pnpm media:check` es el criterio de T-108 contra
+Mux: con una dirección vigente el manifiesto contesta 200, y caducada o sin firma, 403.
+Firma con la llave de `.env.local` fuera de la función única de medios, y por eso tampoco
+corre con `CI` ni en Vercel. Los dos
+guiones repiten lo que sabe el adaptador: uno de Node no importa TypeScript.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -211,7 +230,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Quince precisiones que la tabla no dice:
+falla. Dieciséis precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -1026,6 +1045,31 @@ falla. Quince precisiones que la tabla no dice:
   paleta de fábrica de Tailwind: `bg-red-500` no existe. Un solo tema, oscuro. Si falta un token,
   se agrega ahí y en el diseño (`../planeacion/03-diseno-ui-ux.md` §3), no se escribe el
   valor suelto. Si cambia un color, `tests/design/contrast.test.ts` dice qué pares revisar.
+- **Solo la función única de medios firma una dirección de video** (T-108; RF-305;
+  TRD §5.5 y §9.4). Es `getMediaGrant` (`src/services/media/media.ts`): pregunta a la
+  guarda del equipo, lee la lección como la persona (`asUser`: la política de Contenido es
+  una segunda barrera), le pregunta a la regla del dominio
+  (`src/domain/access/media-access.ts`) y firma con el adaptador (`src/adapters/mux/`).
+  Lo que no se ve leyendo un solo archivo:
+  - Hoy una sola regla: alguien del equipo con Contenido, para revisar (sin puntos). T-202
+    suma las otras tres de RF-306. A quien no puede se le contesta `refused` antes de leer
+    la lección; lo que no tiene video que firmar (no existe, retirada, de prueba, sin
+    terminar, un id sin forma) contesta igual, `no_video`. El playback id sale de la base,
+    nunca de quien pide.
+  - Firma tres direcciones (video, miniatura y vista de avance) con un JWT RS256 hecho con
+    `node:crypto`, sin dependencia. La vida es la de ADR-27: la lección entera a
+    `VELOCIDAD_MIN` más diez minutos, con tope de 55 (`grantLifetimeSeconds`).
+  - La llave de firma (`MUX_SIGNING_KEY_ID`, `MUX_SIGNING_PRIVATE_KEY`) es opcional y va en
+    pareja: sin ella no hay video y lo demás funciona; falta o no sirve, se reporta
+    (`media_grant_unavailable`). Fuera de local todavía no se carga (decisión del
+    2026-10-14). No va a ningún registro ni error.
+  - Una prueba de arquitectura (`tests/architecture/media.test.ts`) exige que el
+    adaptador y las dos variables de la llave vivan solo ahí, que ningún otro archivo de
+    `src/` firme (busca las maneras de Node y del navegador, y los paquetes de JWT), y que
+    la lección se lea con `asUser`. La llave de firma es RSA de 2048 bits o más; una que se
+    lee pero no firma contesta lo mismo que una que no sirve.
+  - El adaptador va en `src/adapters/mux/`, no en `adapters/media/mux` como decía el TRD:
+    aquí cada proveedor es su carpeta.
 - **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
   (`@sentry/*`) solo se importa en `src/adapters/sentry/`. El arranque y las pantallas de
   error piden al servicio `src/services/error-reporting/`: `server.ts` para el servidor y
@@ -1321,6 +1365,7 @@ las de registro y recuperación se sumó `tests/actions/`. Con las prácticas y 
 (T-106), `src/services/catalog/`. Con las del equipo, `src/app/admin/`,
 y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que una
 confirmación dice que va a pasar.
+Con el video (T-108), `src/services/media/` y `src/adapters/mux/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.
@@ -1350,7 +1395,9 @@ el cambio está mal aunque todo lo demás pase.
 - Actualizar o borrar una fila de un libro (latidos, cobros, repartos, ajustes,
   auditoría). Un error se corrige con una fila nueva.
 - Recalcular o modificar un periodo cerrado.
-- Firmar una dirección de video o de archivo fuera de la función única de medios.
+- Firmar una dirección de video o de archivo fuera de la función única de medios. La única
+  excepción es `pnpm media:check`, un guion de una máquina que no corre en la integración
+  continua ni en Vercel.
 - Consultar la tabla de suscripciones desde una página para decidir qué mostrar. Se le
   pregunta al servicio de acceso.
 - Dar por cierto lo que manda el navegador: un latido, el regreso de pagar, un rol, el
