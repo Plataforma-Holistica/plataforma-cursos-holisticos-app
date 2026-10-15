@@ -122,13 +122,13 @@ describe("lessonVideoAction", () => {
       playbackId: "PlaybackDePrueba",
       tokens: { playback: "v", thumbnail: "t", storyboard: "s" },
     });
-    expect(mocks.getMediaGrant).toHaveBeenCalledWith(jar, LESSON);
+    expect(mocks.getMediaGrant).toHaveBeenCalledWith(jar, LESSON, "review");
   });
 
   it("lo que llegue, sea lo que sea, va tal cual a la función: ella lo revisa", async () => {
     once("getMediaGrant", { kind: "no_video" });
     expect(await lessonVideoAction({ playbackId: "inventado" })).toEqual({ kind: "no_video" });
-    expect(mocks.getMediaGrant).toHaveBeenCalledWith(jar, { playbackId: "inventado" });
+    expect(mocks.getMediaGrant).toHaveBeenCalledWith(jar, { playbackId: "inventado" }, "review");
   });
 
   it("a quien no puede, a la página: decide su guarda", async () => {

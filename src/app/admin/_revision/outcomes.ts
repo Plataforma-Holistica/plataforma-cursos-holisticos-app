@@ -1,6 +1,6 @@
 import type { CatalogCode } from "@/services/catalog/catalog";
 import { ROUTES } from "@/services/account/navigation";
-import type { MediaGrant } from "@/services/media/media";
+import type { ReviewGrant } from "@/services/media/media";
 import type { CourseApproved } from "@/services/review/review";
 
 import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
@@ -136,7 +136,7 @@ export type VideoAnswer =
  * Lo que contestó la función única de medios, para el reproductor. La caducidad no viaja: el
  * reproductor pide otra dirección cuando Mux le dice que la suya caducó.
  */
-export function videoAnswerOf(grant: MediaGrant): Leave | VideoAnswer {
+export function videoAnswerOf(grant: ReviewGrant): Leave | VideoAnswer {
   switch (grant.kind) {
     case "granted":
       // `getMediaGrant` llama `video` al token del video; Mux Player lo llama `playback`.

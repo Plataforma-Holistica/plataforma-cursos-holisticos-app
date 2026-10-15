@@ -41,13 +41,38 @@ describe("solo la función única de medios firma", () => {
     expect(outside.map((source) => source.file)).toEqual([]);
   });
 
-  it("la lección se lee como la persona y la velocidad como servidor, nunca como sistema", () => {
+  it("para revisar, la lección se lee como la persona; para ver, los hechos como servidor; nunca como sistema", () => {
     const store = readFileSync(join(src, "services/media/store.ts"), "utf8");
-    // La política de Contenido de la base es la segunda barrera: con asServer no correría.
+    // La política de Contenido de la base es la segunda barrera al revisar: con asServer no correría.
     expect(store).toMatch(/lessonVideo: \(claims, lessonId\) => asUser\(claims, \(tx\) => readLessonVideo\(tx, lessonId\)\),/);
+    // Al ver, la segunda barrera es private.lesson_playback(), y quien actúa sale de las claims verificadas.
+    expect(store).toMatch(/watchFacts: \(claims, lessonId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readWatchFacts\(tx, lessonId\)\),/);
     expect(store).toMatch(/minimumSpeed: \(claims\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readMinimumSpeed\(tx\)\),/);
     expect(store).not.toMatch(/asSystem/);
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
+    expect(store.match(/\basServer\(/g)).toHaveLength(2);
+  });
+
+  it("el playback id sale de la base solo en las lecturas de la función única", () => {
+    // Al ver, la lectura de los hechos y del video va en la misma consulta: lo que se decide y
+    // lo que se firma salen de la misma foto.
+    expect(naming(/provider_playback_id|lesson_playback/)).toEqual(["src/services/media/records.ts"]);
+    expect(readFileSync(join(src, "services/media/records.ts"), "utf8")).toMatch(
+      /sql`select private\.media_facts\(\$\{id\}::uuid\) as facts, private\.lesson_playback\(\$\{id\}::uuid\) as playback_id`/,
+    );
+  });
+
+  it("nadie firma un archivo por fuera: los recursos (RF-308) pasarán por la misma función", () => {
+    expect(naming(/createSignedUrl|createSignedUploadUrl|getSignedUrl/)).toEqual([]);
+  });
+
+  it("ver pasa por la guarda de sesión; revisar, por la del equipo", () => {
+    const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
+    expect(grant).toMatch(/async function watch\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    expect(grant).toMatch(/async function review\([^)]*\)[^{]*\{\n\s+const team = await core\.teamStanding\(reader\);/);
+    // La pantalla de revisión pide siempre como revisión.
+    const actions = readFileSync(join(src, "app/admin/_revision/actions.ts"), "utf8");
+    expect(actions).toMatch(/getMediaGrant\(jar, lessonId, "review"\)/);
   });
 
   it("en las pantallas, solo la acción del reproductor pide un video: nada lo pinta en el HTML", () => {

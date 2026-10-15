@@ -21,8 +21,9 @@
 //
 // De dónde sale cada hecho lo decide quien los reúne (T-202), y aquí se dice para que no se
 // invente dos veces. `paidThrough`, `lastRenewalFailedAt`, `endedAt` y `refunded` salen los
-// cuatro de LA MISMA suscripción, la más reciente: el fin de una suscripción vieja no corta
-// una nueva.
+// cuatro de LA MISMA suscripción: la viva (`active` o `in_grace`), y si no hay, la más
+// reciente sin contar las `pending` (T-202). El fin de una suscripción vieja no corta una
+// nueva, y una más nueva que no está viva no tapa a la que paga.
 //   · `paidThrough` es el fin de su último periodo PAGADO, también si después se reembolsó
 //     (lo corta `endedAt`). No es el fin de periodo del proveedor de cobro, que avanza aunque
 //     el cobro falle: copiarlo haría que nunca se entrara en gracia (se confirma en T-303).
@@ -51,7 +52,7 @@ export interface CourtesyWindow {
 }
 
 /** Los hechos de una cuenta que decide la regla. Los reúne el servicio; aquí no hay base. */
-// Los cuatro de la suscripción salen de la misma, la más reciente (arriba).
+// Los cuatro de la suscripción salen de la misma (arriba dice cuál).
 export interface AccountFacts {
   suspended: boolean;
   paidThrough: Date | null;

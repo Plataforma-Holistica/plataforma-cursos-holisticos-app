@@ -3,15 +3,16 @@ import type { Client } from "pg";
 import { readVerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import type { MediaStore } from "@/services/media/grant";
-import { readLessonVideo, readMinimumSpeed } from "@/services/media/records";
+import { readLessonVideo, readMinimumSpeed, readWatchFacts } from "@/services/media/records";
 
 import { asOwner, asServer } from "./team";
 
 /**
  * El almacén de la función única de medios sobre una transacción del dueño: las mismas
- * consultas que usa la aplicación, la lección como la persona (rol `authenticated` con sus
- * claims) y la velocidad como servidor, pero sin confirmar. Así lo que la prueba cargó en
- * esa transacción se ve, y nada queda en la auditoría.
+ * consultas que usa la aplicación (para revisar, la lección como la persona, con el rol
+ * `authenticated` y sus claims; para ver, los hechos como servidor; y la velocidad como
+ * servidor), pero sin confirmar. Así lo que la prueba cargó en esa transacción se ve, y nada
+ * queda en la auditoría.
  */
 export function mediaStoreOn(owner: Client): MediaStore {
   const tx: Tx = {
@@ -26,6 +27,14 @@ export function mediaStoreOn(owner: Client): MediaStore {
       ]);
       try {
         return await readLessonVideo(tx, lessonId);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    watchFacts: async (claims, lessonId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await readWatchFacts(tx, lessonId);
       } finally {
         await asOwner(owner);
       }

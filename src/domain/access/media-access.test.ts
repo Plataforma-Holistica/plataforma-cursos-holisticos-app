@@ -1,51 +1,326 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import type { AccountAccess } from "./account-access";
 import {
+  COURSE_STATES,
   GRANT_MARGIN_SECONDS,
   GRANT_MAX_SECONDS,
   grantLifetimeSeconds,
-  mayRequestMedia,
+  MEDIA_PURPOSES,
+  mayReview,
   resolveMediaAccess,
+  type MediaAccess,
   type MediaLesson,
   type MediaViewer,
 } from "./media-access";
 
-// La regla de quién recibe una dirección firmada (RF-305, RF-306) y cuánto dura (ADR-27).
+// La puerta de los medios (RF-305, RF-306; TRD §5.1), con sus cuatro reglas: revisar,
+// el maestro dueño, el alumno con acceso (RN-01) y el curso abierto (RF-309). Y cuánto dura
+// una dirección (ADR-27).
 
-const READY: MediaLesson = { isCurrent: true, provider: "mux", ready: true };
-const CONTENT: MediaViewer = { kind: "team", content: true };
+const TEACHER = "11111111-1111-4111-8111-111111111111";
+const OTHER_TEACHER = "22222222-2222-4222-8222-222222222222";
+const LATER = new Date("2026-11-01T00:00:00.000Z");
+const BEFORE = new Date("2026-10-01T00:00:00.000Z");
 
-describe("resolveMediaAccess", () => {
-  it("alguien del equipo con Contenido ve una lección lista, para revisar", () => {
-    expect(resolveMediaAccess(CONTENT, READY)).toEqual({ ok: true, basis: "review" });
+const LISTED: MediaLesson = {
+  isCurrent: true,
+  provider: "mux",
+  ready: true,
+  teacherId: TEACHER,
+  courseState: "published",
+  listed: true,
+  isOpen: false,
+};
+const STUDENT: MediaViewer = { accountSuspended: false, content: false, teacherId: null, emailVerified: true };
+const CONTENT: MediaViewer = { ...STUDENT, content: true };
+const OWNER: MediaViewer = { ...STUDENT, teacherId: TEACHER };
+
+const PAID: AccountAccess = { allowed: true, basis: "subscription", until: LATER };
+const GRACE: AccountAccess = { allowed: true, basis: "grace", until: LATER };
+const COURTESY: AccountAccess = { allowed: true, basis: "courtesy", until: null };
+const NEVER: AccountAccess = { allowed: false, reason: "never_subscribed" };
+const EXPIRED: AccountAccess = { allowed: false, reason: "expired", endedAt: BEFORE };
+const INVALID: AccountAccess = { allowed: false, reason: "invalid_input" };
+const SUSPENDED: AccountAccess = { allowed: false, reason: "suspended" };
+
+const watch = (viewer: MediaViewer, account: AccountAccess | null, lesson: MediaLesson | null) =>
+  resolveMediaAccess("watch", viewer, account, lesson);
+
+describe("revisar (Contenido)", () => {
+  it("alguien del equipo con Contenido ve una lección lista de cualquier curso, y nunca cuenta", () => {
+    for (const courseState of COURSE_STATES) {
+      expect(resolveMediaAccess("review", CONTENT, null, { ...LISTED, courseState, listed: false })).toEqual({
+        ok: true,
+        basis: "review",
+        countsForPayout: false,
+        until: null,
+      });
+    }
+  });
+
+  it("aunque además pague: desde la revisión nunca cuenta (decisión de Sergio del 2026-10-15)", () => {
+    expect(resolveMediaAccess("review", CONTENT, PAID, LISTED)).toMatchObject({ ok: true, basis: "review", countsForPayout: false });
   });
 
   it.each<[string, MediaViewer]>([
-    ["alguien que no es del equipo", { kind: "other" }],
-    ["alguien del equipo sin Contenido", { kind: "team", content: false }],
-  ])("%s no la ve, exista o no la lección", (_who, viewer) => {
-    expect(resolveMediaAccess(viewer, READY)).toEqual({ ok: false, reason: "no_access" });
-    expect(resolveMediaAccess(viewer, null)).toEqual({ ok: false, reason: "no_access" });
+    ["una cuenta común", STUDENT],
+    ["el maestro dueño", OWNER],
+  ])("%s no revisa, exista o no la lección", (_who, viewer) => {
+    expect(resolveMediaAccess("review", viewer, PAID, LISTED)).toEqual({ ok: false, reason: "refused" });
+    expect(resolveMediaAccess("review", viewer, PAID, null)).toEqual({ ok: false, reason: "refused" });
   });
 
   it.each<[string, MediaLesson | null]>([
     ["una lección que no existe", null],
-    ["una retirada", { ...READY, isCurrent: false }],
-    ["una con video de prueba", { ...READY, provider: "test" }],
-    ["una con video sin terminar", { ...READY, ready: false }],
+    ["una retirada", { ...LISTED, isCurrent: false }],
+    ["una con video de prueba", { ...LISTED, provider: "test" }],
+    ["una con video sin terminar", { ...LISTED, ready: false }],
   ])("%s no tiene video que firmar", (_what, lesson) => {
-    expect(resolveMediaAccess(CONTENT, lesson)).toEqual({ ok: false, reason: "no_video" });
+    expect(resolveMediaAccess("review", CONTENT, null, lesson)).toEqual({ ok: false, reason: "no_video" });
+  });
+
+  it("mayReview: solo con Contenido", () => {
+    expect(mayReview(CONTENT)).toBe(true);
+    expect(mayReview(STUDENT)).toBe(false);
+    expect(mayReview(OWNER)).toBe(false);
   });
 });
 
-describe("mayRequestMedia", () => {
-  it.each<[MediaViewer, boolean]>([
-    [{ kind: "team", content: true }, true],
-    [{ kind: "team", content: false }, false],
-    [{ kind: "other" }, false],
-  ])("%j: %s", (viewer, expected) => {
-    expect(mayRequestMedia(viewer)).toBe(expected);
+describe("ver (el área del alumno)", () => {
+  describe("1. la cuenta suspendida, antes que todo", () => {
+    it.each<[string, MediaViewer, AccountAccess]>([
+      ["una alumna que paga", { ...STUDENT, accountSuspended: true }, PAID],
+      ["el maestro dueño", { ...OWNER, accountSuspended: true }, PAID],
+      ["alguien con Contenido", { ...CONTENT, accountSuspended: true }, PAID],
+    ])("%s, suspendida, no ve nada", (_who, viewer, account) => {
+      expect(watch(viewer, account, LISTED)).toEqual({ ok: false, reason: "suspended" });
+      expect(watch(viewer, account, { ...LISTED, isOpen: true })).toEqual({ ok: false, reason: "suspended" });
+    });
+
+    it("también si lo dice la regla de la cuenta y no quien mira", () => {
+      expect(watch(STUDENT, SUSPENDED, LISTED)).toEqual({ ok: false, reason: "suspended" });
+      expect(watch(STUDENT, SUSPENDED, { ...LISTED, isOpen: true })).toEqual({ ok: false, reason: "suspended" });
+    });
+  });
+
+  describe("2. un curso que no se puede ver contesta lo mismo que una lección que no existe", () => {
+    const hidden: Array<[string, MediaLesson]> = [
+      ["en revisión", { ...LISTED, courseState: "in_review", listed: false }],
+      ["en borrador", { ...LISTED, courseState: "draft", listed: false }],
+      ["retirado", { ...LISTED, courseState: "withdrawn", listed: false }],
+      ["publicado sin listar", { ...LISTED, listed: false }],
+      ["listado sin estar publicado", { ...LISTED, courseState: "in_review" }],
+    ];
+    it.each(hidden)("un curso %s, a quien paga: no_video", (_what, lesson) => {
+      const missing = watch(STUDENT, PAID, null);
+      expect(missing).toEqual({ ok: false, reason: "no_video" });
+      expect(watch(STUDENT, PAID, lesson)).toEqual(missing);
+      // Ni con la cuenta sin acceso, ni abierto, ni con Contenido (eso es revisar, no ver).
+      expect(watch(STUDENT, NEVER, { ...lesson, isOpen: true })).toEqual(missing);
+      expect(watch(CONTENT, PAID, lesson)).toEqual(missing);
+      expect(watch(STUDENT, INVALID, lesson)).toEqual(missing);
+    });
+
+    it("con cambios pendientes sigue publicado", () => {
+      expect(watch(STUDENT, PAID, { ...LISTED, courseState: "changes_pending" })).toMatchObject({ ok: true, basis: "subscription" });
+    });
+  });
+
+  describe("3. sin video que firmar, solo a quien puede ver el curso", () => {
+    it.each<[string, MediaLesson]>([
+      ["una lección retirada por una versión nueva", { ...LISTED, isCurrent: false }],
+      ["un video de prueba", { ...LISTED, provider: "test" }],
+      ["un video sin terminar", { ...LISTED, ready: false }],
+    ])("%s: no_video, también al dueño", (_what, lesson) => {
+      expect(watch(STUDENT, PAID, lesson)).toEqual({ ok: false, reason: "no_video" });
+      expect(watch(OWNER, NEVER, { ...lesson, courseState: "in_review", listed: false })).toEqual({ ok: false, reason: "no_video" });
+    });
+  });
+
+  describe("4. el maestro dueño", () => {
+    it.each(COURSE_STATES)("ve lo suyo con el curso %s, y nunca cuenta", (courseState) => {
+      expect(watch(OWNER, NEVER, { ...LISTED, courseState, listed: courseState === "published" })).toEqual({
+        ok: true,
+        basis: "owner_preview",
+        countsForPayout: false,
+        until: null,
+      });
+    });
+
+    it("aunque pague, o no se sepa su cuenta: lo suyo no da puntos y no depende de la cuenta", () => {
+      expect(watch(OWNER, PAID, LISTED)).toMatchObject({ basis: "owner_preview", countsForPayout: false });
+      expect(watch(OWNER, INVALID, LISTED)).toMatchObject({ basis: "owner_preview", countsForPayout: false });
+      expect(watch(OWNER, null, LISTED)).toMatchObject({ basis: "owner_preview", countsForPayout: false });
+    });
+
+    it("lo de otro maestro lo ve como cualquiera: pagando, cuenta", () => {
+      expect(watch({ ...STUDENT, teacherId: OTHER_TEACHER }, PAID, LISTED)).toMatchObject({ basis: "subscription", countsForPayout: true });
+      expect(watch({ ...STUDENT, teacherId: OTHER_TEACHER }, PAID, { ...LISTED, courseState: "in_review", listed: false })).toEqual({
+        ok: false,
+        reason: "no_video",
+      });
+    });
+  });
+
+  describe("5. «no se supo» de la cuenta", () => {
+    it("es unknown (PA-18, nunca PA-33), también en el curso abierto: quizá paga", () => {
+      expect(watch(STUDENT, INVALID, LISTED)).toEqual({ ok: false, reason: "unknown" });
+      expect(watch(STUDENT, INVALID, { ...LISTED, isOpen: true })).toEqual({ ok: false, reason: "unknown" });
+      expect(watch(STUDENT, null, LISTED)).toEqual({ ok: false, reason: "unknown" });
+    });
+  });
+
+  describe("6 y 7. la suscripción, la gracia y la cortesía", () => {
+    it.each<[string, AccountAccess, Partial<MediaAccess>]>([
+      ["suscripción: cuenta", PAID, { basis: "subscription", countsForPayout: true, until: LATER }],
+      ["gracia: cuenta", GRACE, { basis: "grace", countsForPayout: true, until: LATER }],
+      ["cortesía: no cuenta (RN-08)", COURTESY, { basis: "courtesy", countsForPayout: false, until: null }],
+    ])("%s", (_what, account, expected) => {
+      expect(watch(STUDENT, account, LISTED)).toEqual({ ok: true, ...expected });
+    });
+
+    it("en el curso abierto, quien paga cuenta (RN-08 solo excluye a quien no paga)", () => {
+      expect(watch(STUDENT, PAID, { ...LISTED, isOpen: true })).toMatchObject({ basis: "subscription", countsForPayout: true });
+      expect(watch(STUDENT, GRACE, { ...LISTED, isOpen: true })).toMatchObject({ basis: "grace", countsForPayout: true });
+    });
+
+    it("y la cortesía sigue siendo cortesía", () => {
+      expect(watch(STUDENT, COURTESY, { ...LISTED, isOpen: true })).toMatchObject({ basis: "courtesy", countsForPayout: false });
+    });
+
+    it("alguien del equipo que paga cuenta como cualquier alumno (decisión de Sergio del 2026-10-15)", () => {
+      expect(watch(CONTENT, PAID, LISTED)).toMatchObject({ basis: "subscription", countsForPayout: true });
+    });
+  });
+
+  describe("8. el curso abierto", () => {
+    it("lo ve una cuenta verificada sin suscripción, sin puntos", () => {
+      expect(watch(STUDENT, NEVER, { ...LISTED, isOpen: true })).toEqual({
+        ok: true,
+        basis: "open_course",
+        countsForPayout: false,
+        until: null,
+      });
+      expect(watch(STUDENT, EXPIRED, { ...LISTED, isOpen: true })).toMatchObject({ basis: "open_course" });
+    });
+
+    it("con el correo sin verificar no", () => {
+      expect(watch({ ...STUDENT, emailVerified: false }, NEVER, { ...LISTED, isOpen: true })).toEqual({
+        ok: false,
+        reason: "no_access",
+        account: NEVER,
+      });
+    });
+  });
+
+  describe("9. sin acceso: el motivo de la cuenta, para PA-33", () => {
+    it.each<AccountAccess>([
+      NEVER,
+      EXPIRED,
+      { allowed: false, reason: "grace_ended", endedAt: BEFORE },
+      { allowed: false, reason: "refunded", endedAt: BEFORE },
+    ])("%j", (account) => {
+      expect(watch(STUDENT, account, LISTED)).toEqual({ ok: false, reason: "no_access", account });
+    });
+  });
+});
+
+describe("propiedades", () => {
+  const instant = fc.date({ min: new Date("2026-01-01T00:00:00.000Z"), max: new Date("2027-12-31T00:00:00.000Z"), noInvalidDate: true });
+  const account: fc.Arbitrary<AccountAccess | null> = fc.oneof(
+    fc.constant(null),
+    fc.record({
+      allowed: fc.constant(true as const),
+      basis: fc.constantFrom("subscription" as const, "grace" as const, "courtesy" as const),
+      until: fc.option(instant, { nil: null }),
+    }),
+    fc.record({
+      allowed: fc.constant(false as const),
+      reason: fc.constantFrom("expired" as const, "grace_ended" as const, "refunded" as const),
+      endedAt: instant,
+    }),
+    fc.record({
+      allowed: fc.constant(false as const),
+      reason: fc.constantFrom("suspended" as const, "never_subscribed" as const, "invalid_input" as const),
+    }),
+  );
+  const teacher = fc.constantFrom(TEACHER, OTHER_TEACHER);
+  const viewer: fc.Arbitrary<MediaViewer> = fc.record({
+    accountSuspended: fc.boolean(),
+    content: fc.boolean(),
+    teacherId: fc.option(teacher, { nil: null }),
+    emailVerified: fc.boolean(),
+  });
+  const lesson: fc.Arbitrary<MediaLesson | null> = fc.option(
+    fc.record({
+      isCurrent: fc.boolean(),
+      provider: fc.constantFrom("mux", "test"),
+      ready: fc.boolean(),
+      teacherId: teacher,
+      courseState: fc.constantFrom(...COURSE_STATES),
+      listed: fc.boolean(),
+      isOpen: fc.boolean(),
+    }),
+    { nil: null },
+  );
+  const purpose = fc.constantFrom(...MEDIA_PURPOSES);
+
+  it("solo cuentan la suscripción y la gracia, y nunca el dueño", () => {
+    fc.assert(
+      fc.property(purpose, viewer, account, lesson, (p, v, a, l) => {
+        const result = resolveMediaAccess(p, v, a, l);
+        if (!result.ok || !result.countsForPayout) return;
+        expect(["subscription", "grace"]).toContain(result.basis);
+        expect(p).toBe("watch");
+        expect(l?.teacherId).not.toBe(v.teacherId);
+        expect(a?.allowed && a.basis).toBe(result.basis);
+      }),
+    );
+  });
+
+  it("con acceso, siempre hay un video que firmar y quien puede verlo", () => {
+    fc.assert(
+      fc.property(purpose, viewer, account, lesson, (p, v, a, l) => {
+        const result = resolveMediaAccess(p, v, a, l);
+        if (!result.ok) return;
+        expect(l).not.toBeNull();
+        expect(l?.isCurrent && l.provider === "mux" && l.ready).toBe(true);
+        if (p === "review") expect(v.content).toBe(true);
+        else {
+          expect(v.accountSuspended).toBe(false);
+          const visible = l?.teacherId === v.teacherId || (l?.listed && (l.courseState === "published" || l.courseState === "changes_pending"));
+          expect(visible).toBe(true);
+        }
+      }),
+    );
+  });
+
+  it("una cuenta suspendida nunca ve desde el área del alumno", () => {
+    fc.assert(
+      fc.property(viewer, account, lesson, (v, a, l) => {
+        expect(resolveMediaAccess("watch", { ...v, accountSuspended: true }, a, l).ok).toBe(false);
+      }),
+    );
+  });
+
+  it("lo que no se puede ver contesta igual que lo que no existe", () => {
+    fc.assert(
+      fc.property(viewer, account, lesson, (v, a, l) => {
+        if (l === null || l.teacherId === v.teacherId || v.accountSuspended) return;
+        if (l.listed && (l.courseState === "published" || l.courseState === "changes_pending")) return;
+        expect(resolveMediaAccess("watch", v, a, l)).toEqual(resolveMediaAccess("watch", v, a, null));
+      }),
+    );
+  });
+
+  it("nunca lanza", () => {
+    fc.assert(
+      fc.property(purpose, viewer, account, lesson, (p, v, a, l) => {
+        expect(() => resolveMediaAccess(p, v, a, l)).not.toThrow();
+      }),
+    );
   });
 });
 

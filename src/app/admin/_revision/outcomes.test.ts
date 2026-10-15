@@ -81,9 +81,17 @@ describe("reviewCodeOutcome", () => {
 });
 
 describe("videoAnswerOf", () => {
-  it("traduce los tokens a los nombres de Mux Player, y la caducidad no viaja", () => {
+  it("traduce los tokens a los nombres de Mux Player; la caducidad y la base no viajan", () => {
     expect(
-      videoAnswerOf({ kind: "granted", playbackId: "PlaybackDePrueba", tokens: { video: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" }, expiresAt: 99 }),
+      videoAnswerOf({
+        kind: "granted",
+        playbackId: "PlaybackDePrueba",
+        tokens: { video: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" },
+        expiresAt: 99,
+        basis: "review",
+        countsForPayout: false,
+        until: null,
+      }),
     ).toEqual({ kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" } });
   });
 
