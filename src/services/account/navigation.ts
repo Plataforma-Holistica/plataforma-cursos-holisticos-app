@@ -26,6 +26,8 @@ export const ROUTES = {
   team: "/admin/equipo",
   /** PA-67, las prácticas y los niveles: cuelga de administración y pide Contenido. */
   catalog: "/admin/practicas",
+  /** PA-61 y PA-62 mínimas, los cursos por revisar: cuelga de administración y pide Contenido. */
+  review: "/admin/revision",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */

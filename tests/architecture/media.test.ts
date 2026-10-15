@@ -50,6 +50,27 @@ describe("solo la función única de medios firma", () => {
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
   });
 
+  it("en las pantallas, solo la acción del reproductor pide un video: nada lo pinta en el HTML", () => {
+    expect(naming(/\bgetMediaGrant\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/admin/_revision/actions.ts"]);
+  });
+
+  it("Mux Player se importa en un solo archivo, y la pantalla lo carga con next/dynamic", () => {
+    expect(naming(/from ["'](@mux\/mux-player|media-chrome|hls\.js)|import ["'](@mux\/mux-player|media-chrome|hls\.js)/)).toEqual([
+      "src/app/admin/_revision/player.tsx",
+    ]);
+    // Nadie lo importa en estático: solo la pantalla, y con `next/dynamic`, sin servidor.
+    expect(naming(/["']\.\/player["']|_revision\/player["']/)).toEqual(["src/app/admin/_revision/screen.tsx"]);
+    const screen = readFileSync(join(src, "app/admin/_revision/screen.tsx"), "utf8");
+    expect(screen).toMatch(/const Player = dynamic\(\(\) => import\("\.\/player"\)\.then\(\(module\) => module\.Player\), \{ ssr: false \}\);/);
+    expect(screen).not.toMatch(/^import [^;]*["']\.\/player["'];$/m);
+    // Sin analítica, sin cookies y sin imagen dentro de imagen.
+    const player = withoutComments(readFileSync(join(src, "app/admin/_revision/player.tsx"), "utf8"));
+    for (const prop of ["disableTracking", "disableCookies", "disablePictureInPicture", "noVolumePref", "noMutedPref", "ref={lockDown}"]) {
+      expect(player).toContain(prop);
+    }
+    expect(player).not.toMatch(/envKey|metadata|beaconCollectionDomain/);
+  });
+
   it("la firma y la función única tienen dueño en CODEOWNERS", () => {
     const owners = readFileSync(join(src, "..", ".github", "CODEOWNERS"), "utf8");
     expect(owners).toMatch(/^\/src\/services\/media\/\s+@SerchFGA @plataformaholisticadev$/m);

@@ -51,9 +51,11 @@
     }
   },
   "dependencies": {
+    "@mux/mux-player-react": "3.14.0",
     "@sentry/nextjs": "11.5.0",
     "@supabase/supabase-js": "2.117.3",
     "lucide": "1.52.0",
+    "media-chrome": "4.19.3",
     "next": "16.3.8",
     "pg": "8.23.1",
     "react": "19.3.0",

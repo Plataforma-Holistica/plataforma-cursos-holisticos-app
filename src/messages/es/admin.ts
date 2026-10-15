@@ -229,4 +229,62 @@ export const admin = defineMessages({
     nameTooLong: "Usa como mucho {max} caracteres.",
     nameInvalid: "Usa al menos una letra o un número, sin caracteres especiales invisibles.",
   },
+  // PA-61 y PA-62 en su versión mínima (T-108; decisiones de Sergio del 2026-10-14): la cola,
+  // las lecciones de cada curso, el reproductor y aprobar, en una sola pantalla. Devolver al
+  // maestro, las notas y la lista del revisor llegan con T-405.
+  review: {
+    title: "Cursos por revisar",
+    intro: "Revisa cada lección y aprueba el curso cuando cumpla el estándar de producción. Aprobar lo publica: aparece en el catálogo.",
+    backToAdmin: "Ir al inicio de administración",
+    codeBody: "Para aprobar un curso hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver la cola y reproducir las lecciones.",
+    codeNotAvailable: "Tu código es correcto, pero por ahora no se puede aprobar. Avisa a quien opera la base de datos.",
+    approveLocked: "Escribe tu código, al inicio de esta página, para poder aprobar.",
+    empty: "No hay cursos por revisar.",
+    queueTitle: "La cola, el más antiguo primero",
+
+    // De cada curso.
+    teacher: "De {teacher}.",
+    practiceAndLevel: "Práctica: {practice}. Nivel: {level}.",
+    unset: "sin definir",
+    lessons: { one: "{count} lección, {duration} en total.", other: "{count} lecciones, {duration} en total." },
+    loaded: "Cargado el {date}.",
+    lessonsTitle: "Lecciones",
+
+    // De cada lección.
+    watch: "Ver",
+    watchOf: "«{title}»",
+    videos: {
+      test: "Sin video en Mux.",
+      processing: "El video se está procesando. Puede tardar unos minutos.",
+      errored: "El video no se pudo procesar.",
+    },
+    noScript: "Para reproducir una lección hace falta JavaScript. Aprobar funciona sin él.",
+
+    // El reproductor, en su variante de revisión (diseño, sección 5).
+    watching: "Viendo: {title}",
+    preview: "Vista previa. No genera puntos.",
+    loading: "Preparando el video…",
+    noVideo: "Esta lección no tiene video en Mux.",
+    failed: "No se pudo cargar el video.",
+    retry: "Reintentar",
+
+    // Aprobar, en dos pasos dentro del curso.
+    approve: "Aprobar y publicar",
+    confirmTitle: "¿Aprobar y publicar este curso?",
+    confirmBody: "Se publica y aparece en el catálogo.",
+    confirmFirst: "Es el primer curso de {teacher}: su ficha también aparece en el catálogo.",
+    confirm: "Sí, aprobar y publicar",
+    cancel: "Cancelar",
+    working: "Aprobando…",
+
+    // Lo que contestó el último envío.
+    approved: "Publicado. Ya aparece en el catálogo.",
+    notPending: "Ese curso ya no está por revisar: alguien lo aprobó, o cambió. Esta es la cola de ahora.",
+    incomplete: "A ese curso le falta su práctica o su nivel: no se puede publicar así.",
+    practiceInactive: "La práctica de ese curso está desactivada. Reactívala en Prácticas y niveles para poder publicarlo.",
+    levelInactive: "El nivel de ese curso está desactivado. Reactívalo en Prácticas y niveles para poder publicarlo.",
+    videosNotReady: "Alguna lección de ese curso tiene un video que no está listo: todavía no se puede publicar.",
+    needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite.",
+    unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
+  },
 });

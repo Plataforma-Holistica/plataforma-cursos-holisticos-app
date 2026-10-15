@@ -5,6 +5,7 @@ import type { Capability } from "@/services/account/team";
 
 import { TeamSection } from "../_equipo/section";
 import { CatalogSection } from "../_practicas/section";
+import { ReviewSection } from "../_revision/section";
 
 // Las secciones de administración que cuelgan de `/admin`. Ninguna tiene su propia página:
 // todas las sirve el comodín (`[...resto]/page.tsx`), después de correr la guarda.
@@ -31,6 +32,8 @@ const SECTIONS: Record<string, AdminSection> = {
   equipo: { capability: "config", render: (claims) => <TeamSection claims={claims} /> },
   // PA-67, las prácticas y los niveles del catálogo.
   practicas: { capability: "content", render: (claims) => <CatalogSection claims={claims} /> },
+  // PA-61 y PA-62 mínimas, los cursos por revisar: verlos, reproducirlos y aprobarlos.
+  revision: { capability: "content", render: (claims) => <ReviewSection claims={claims} /> },
 };
 
 /**

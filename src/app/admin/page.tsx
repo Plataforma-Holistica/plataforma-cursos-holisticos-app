@@ -61,6 +61,11 @@ export default async function AdminHomePage() {
           <TextLink href={ROUTES.catalog}>{text.admin.catalog}</TextLink>
         </p>
       )}
+      {capabilities.includes("content") && (
+        <p>
+          <TextLink href={ROUTES.review}>{text.admin.review}</TextLink>
+        </p>
+      )}
       <p>
         <TextLink href={ROUTES.account}>{text.admin.account}</TextLink>
       </p>
