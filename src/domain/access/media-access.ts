@@ -153,3 +153,40 @@ export function grantLifetimeSeconds(durationSeconds: number, minimumSpeed: numb
   if (!Number.isFinite(minimumSpeed) || minimumSpeed <= 0) return null;
   return Math.min(Math.ceil(durationSeconds / minimumSpeed) + GRANT_MARGIN_SECONDS, GRANT_MAX_SECONDS);
 }
+
+/** El paso del menú de velocidades (03 §5.4). Es del diseño, no del negocio. */
+export const PLAYBACK_RATE_STEP = 0.25;
+/** Un menú que ya no cabe en la pantalla: los parámetros no tienen sentido. */
+export const MAX_PLAYBACK_RATES = 16;
+
+/**
+ * El menú de velocidades del reproductor (RF-312): de `VELOCIDAD_MIN` a `VELOCIDAD_MAX`, en
+ * pasos de 0.25, empezando en el primer paso que no baja de la mínima. Nulo si los parámetros
+ * no tienen sentido o no dejan ni un paso: quien lo pide lo trata como «no se supo».
+ */
+export function playbackRates(minimum: number, maximum: number): number[] | null {
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum <= 0) return null;
+  // En cuartos enteros. Dividir entre 0.25 es exacto en binario: no hay error que arrastrar.
+  const first = Math.ceil(minimum / PLAYBACK_RATE_STEP);
+  const last = Math.floor(maximum / PLAYBACK_RATE_STEP);
+  const count = last - first + 1;
+  if (count < 1 || count > MAX_PLAYBACK_RATES) return null;
+  return Array.from({ length: count }, (_, index) => (first + index) * PLAYBACK_RATE_STEP);
+}
+
+/** El correo más largo que se pinta. Uno de verdad no pasa de 254. */
+const WATERMARK_MAX_LENGTH = 320;
+// Saltos de línea y los demás caracteres de control: la marca es una sola línea.
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * El texto de la marca de agua: el correo de la cuenta, tal cual (03 §5.4). No se le pide más
+ * forma que una arroba: un correo que Auth aceptó no deja sin video a quien pagó. Nulo si no
+ * hay qué pintar, y entonces no se da video.
+ */
+export function watermarkText(email: unknown): string | null {
+  // Sin arroba no hay correo: eso deja fuera también el vacío y los puros espacios.
+  if (typeof email !== "string" || email.length > WATERMARK_MAX_LENGTH) return null;
+  if (CONTROL.test(email) || !email.includes("@")) return null;
+  return email;
+}

@@ -47,7 +47,8 @@ describe("solo la función única de medios firma", () => {
     expect(store).toMatch(/lessonVideo: \(claims, lessonId\) => asUser\(claims, \(tx\) => readLessonVideo\(tx, lessonId\)\),/);
     // Al ver, la segunda barrera es private.lesson_playback(), y quien actúa sale de las claims verificadas.
     expect(store).toMatch(/watchFacts: \(claims, lessonId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readWatchFacts\(tx, lessonId\)\),/);
-    expect(store).toMatch(/minimumSpeed: \(claims\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readMinimumSpeed\(tx\)\),/);
+    // Las velocidades son parámetros, que una cuenta no lee.
+    expect(store).toMatch(/playbackSpeeds: \(claims\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readPlaybackSpeeds\(tx\)\),/);
     expect(store).not.toMatch(/asSystem/);
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
     expect(store.match(/\basServer\(/g)).toHaveLength(2);
@@ -68,11 +69,25 @@ describe("solo la función única de medios firma", () => {
 
   it("ver pasa por la guarda de sesión; revisar, por la del equipo", () => {
     const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
-    expect(grant).toMatch(/async function watch\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    // Ver y decidir al cargar comparten la decisión, que empieza por la guarda de sesión.
+    expect(grant).toMatch(/async function decideWatch\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    expect(grant).toMatch(/async function watch\([^)]*\)[^{]*\{\n\s+const decided = await decideWatch\(reader, lessonId\);/);
+    expect(grant).toMatch(/async function lessonAccess\([^)]*\)[^{]*\{\n\s+const decided = await decideWatch\(reader, lessonId\);/);
     expect(grant).toMatch(/async function review\([^)]*\)[^{]*\{\n\s+const team = await core\.teamStanding\(reader\);/);
     // La pantalla de revisión pide siempre como revisión.
     const actions = readFileSync(join(src, "app/admin/_revision/actions.ts"), "utf8");
     expect(actions).toMatch(/getMediaGrant\(jar, lessonId, "review"\)/);
+  });
+
+  it("decidir al cargar no firma: solo revisar y ver llegan a la firma", () => {
+    const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
+    // La definición y sus dos llamadas, una en cada camino que firma.
+    expect(grant.match(/\bsignFor\(/g)).toHaveLength(3);
+    expect(grant.match(/\bcore\.sign\(/g)).toHaveLength(1);
+    const body = (name: string) => grant.slice(grant.indexOf(`async function ${name}(`)).split(/\n {2}(?:async )?function /)[0] ?? "";
+    expect(body("lessonAccess")).not.toMatch(/signFor|core\.sign|playbackSpeeds|playbackId/);
+    expect(body("review")).toMatch(/return signFor\(/);
+    expect(body("watch")).toMatch(/await signFor\(/);
   });
 
   it("en las pantallas, solo la acción del reproductor pide un video: nada lo pinta en el HTML", () => {
