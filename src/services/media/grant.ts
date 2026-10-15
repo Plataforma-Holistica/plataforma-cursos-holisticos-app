@@ -66,8 +66,9 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       await deps.report("media_grant_unavailable");
       return { kind: "unavailable" };
     }
+    // Quien llega aquí ya pasó `mayRequestMedia`: lo único que puede faltar es el video.
     const access = resolveMediaAccess(viewer, lesson);
-    if (!access.ok) return { kind: access.reason === "no_access" ? "refused" : "no_video" };
+    if (!access.ok) return { kind: "no_video" };
     if (lesson === null || lesson.playbackId === null) return { kind: "no_video" };
 
     const key = core.signingKey();
