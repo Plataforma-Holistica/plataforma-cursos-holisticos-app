@@ -140,6 +140,7 @@
   --color-danger: var(--danger);
   --color-danger-bg: var(--danger-bg);
   --color-scrim: var(--scrim);
+  --color-player: var(--player-bg);
   /* Los tonos de portada, para la muestra de cada práctica en PA-67. */
   --color-cover-1: var(--cover-1);
   --color-cover-2: var(--cover-2);

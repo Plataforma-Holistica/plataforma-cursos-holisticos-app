@@ -156,6 +156,13 @@ describe("la redirección a entrar", () => {
     expect(response.headers.get("x-middleware-next")).toBeNull();
   });
 
+  it("una lección no la manda a entrar: la guarda de la página decide si a entrar o a registrarse", async () => {
+    refresh.mockResolvedValue({ kind: "none" });
+    const response = await proxy(request({}, "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002"));
+    expect(response.status).toBe(200);
+    expect(location(response)).toBeNull();
+  });
+
   it("guarda también la consulta, dentro del destino", async () => {
     refresh.mockResolvedValue({ kind: "none" });
     const response = await proxy(request({}, "/inicio/algo?pestana=2&volver=%2F%2Fotro.example"));

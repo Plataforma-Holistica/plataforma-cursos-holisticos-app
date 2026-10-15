@@ -2,6 +2,7 @@ import { Info, SearchX } from "lucide";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { Checkbox } from "@/ui/checkbox";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
@@ -10,10 +11,12 @@ import { FormErrorSummary } from "@/ui/form-error-summary";
 import { FullScreenState } from "@/ui/full-screen-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
+import { LessonRow } from "@/ui/lesson-row";
 import { OTPField } from "@/ui/otp-field";
 import { PasswordField } from "@/ui/password-field";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Spinner } from "@/ui/spinner";
+import { Tabs } from "@/ui/tabs";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
@@ -191,6 +194,28 @@ export default function SamplePage() {
         <p>
           Un <TextLink href="/">enlace dentro de un texto</TextLink> va subrayado.
         </p>
+      </Section>
+
+      <Section title="Lección: regresar, pestañas y temario">
+        <BackLink href="/inicio">Volver al inicio</BackLink>
+        <Tabs
+          label="Partes de la lección"
+          idPrefix="muestra"
+          items={[
+            {
+              id: "temario",
+              label: "Temario",
+              panel: (
+                <div className="flex flex-col">
+                  <LessonRow href="/muestra" number={1} title="Soltar los hombros" duration="5 min" />
+                  <LessonRow href="/muestra" number={2} title="Respirar acostado, con una pausa larga al final" duration="7 min" current />
+                  <LessonRow href="/muestra" number={3} title="Alargar la salida" duration="6 min" />
+                </div>
+              ),
+            },
+            { id: "sobre", label: "Sobre esta lección", panel: <p className="text-text-2">Un curso corto para volver a dormir.</p> },
+          ]}
+        />
       </Section>
 
       <Section title="Estado de pantalla completa">

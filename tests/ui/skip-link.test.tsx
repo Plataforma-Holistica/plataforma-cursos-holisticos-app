@@ -21,7 +21,7 @@ describe("SkipLink", () => {
     render(
       <>
         <SkipLink />
-        <a href="/cursos">Cursos</a>
+        <a href="#otra-parte">Otra parte</a>
         <main id={MAIN_CONTENT_ID} tabIndex={-1} />
       </>,
     );

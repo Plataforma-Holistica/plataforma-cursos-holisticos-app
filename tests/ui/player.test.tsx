@@ -99,8 +99,8 @@ afterEach(() => {
 describe("el reproductor", () => {
   it("recibe el video, sus tres tokens, el segundo y las velocidades; sin analítica, sin cookies y sin recordar volumen", () => {
     show();
-    const { ref: _ref, onError: _error, onPlaying: _playing, onPlay: _play, onLoadedMetadata: _loaded, ...rest } = mux.props ?? {};
-    void [_ref, _error, _playing, _play, _loaded];
+    const { ref: _ref, onError: _error, onPlaying: _playing, onPlay: _play, onLoadedMetadata: _loaded, onEnded: _ended, ...rest } = mux.props ?? {};
+    void [_ref, _error, _playing, _play, _loaded, _ended];
     expect(rest).toEqual({
       className: "player-mux block h-full w-full",
       playbackId: "PlaybackDePrueba",
@@ -166,6 +166,13 @@ describe("el reproductor", () => {
     const { onExpired, fail } = show();
     fail({ fatal: true, muxCode: TOKEN_EXPIRED }, true);
     expect(onExpired).toHaveBeenCalledExactlyOnceWith(42);
+  });
+
+  it("al llegar al final, lo dice", () => {
+    const onEnded = vi.fn();
+    render(<Player playbackId="P" tokens={TOKENS} startTime={0} speeds={SPEEDS} onExpired={vi.fn()} onFailed={vi.fn()} onPlaying={vi.fn()} onEnded={onEnded} />);
+    (mux.props?.onEnded as () => void)();
+    expect(onEnded).toHaveBeenCalledOnce();
   });
 
   it("cualquier otro error fatal, o uno sin forma: falla", () => {

@@ -54,6 +54,8 @@ export interface PlayerProps {
   onFailed: () => void;
   /** Empezó a reproducirse: lo que se renovó ya sirvió. */
   onPlaying: () => void;
+  /** Llegó al final (la lección: «Lección terminada» y la siguiente). */
+  onEnded?: () => void;
 }
 
 /** Lo que trae un error de Mux (su `MediaError`): si es fatal, y su código. Sus tipos no lo declaran. */
@@ -87,7 +89,7 @@ function lockDown(element: MuxPlayerRefAttributes | null) {
   }
 }
 
-export function Player({ playbackId, tokens, startTime, speeds, watermark, onExpired, onFailed, onPlaying }: PlayerProps) {
+export function Player({ playbackId, tokens, startTime, speeds, watermark, onExpired, onFailed, onPlaying, onEnded }: PlayerProps) {
   const frame = useRef<HTMLDivElement>(null);
   const mux = useRef<MuxPlayerRefAttributes | null>(null);
   const mark = useRef<HTMLParagraphElement>(null);
@@ -143,6 +145,7 @@ export function Player({ playbackId, tokens, startTime, speeds, watermark, onExp
         onLoadedMetadata={bindController}
         onPlay={guard}
         onPlaying={onPlaying}
+        onEnded={onEnded}
         onError={(event) => {
           const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null }) | null;
           const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;

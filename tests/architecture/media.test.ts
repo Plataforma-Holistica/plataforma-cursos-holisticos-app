@@ -98,7 +98,14 @@ describe("solo la función única de medios firma", () => {
   });
 
   it("en las pantallas, solo la acción del reproductor pide un video: nada lo pinta en el HTML", () => {
-    expect(naming(/\bgetMediaGrant\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/admin/_revision/actions.ts"]);
+    expect(naming(/\bgetMediaGrant\b/).filter((file) => file.startsWith("src/app/"))).toEqual([
+      "src/app/admin/_revision/actions.ts",
+      "src/app/cursos/[slug]/lecciones/[leccion]/actions.ts",
+    ]);
+    // La lección pide como el alumno; la página, antes de pintar, solo decide (no firma).
+    const lessonActions = readFileSync(join(src, "app/cursos/[slug]/lecciones/[leccion]/actions.ts"), "utf8");
+    expect(lessonActions).toMatch(/getMediaGrant\(jar, lessonId, "watch"\)/);
+    expect(naming(/\blessonAccess\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/cursos/[slug]/lecciones/[leccion]/page.tsx"]);
   });
 
   it("Mux Player se importa en un solo archivo, el reproductor compartido, y las pantallas lo cargan con next/dynamic", () => {
@@ -109,7 +116,7 @@ describe("solo la función única de medios firma", () => {
     expect(naming(/mux-player-react\/lazy|mux-player-react\/dist\/lazy/)).toEqual([]);
     // Solo las pantallas con video nombran al reproductor, y lo cargan con `next/dynamic`, sin
     // servidor. De él importan en estático solo un tipo, que no viaja.
-    const screens = ["src/app/admin/_revision/screen.tsx"];
+    const screens = ["src/app/admin/_revision/screen.tsx", "src/app/cursos/[slug]/lecciones/[leccion]/screen.tsx"];
     expect(naming(/["'][^"']*_video\/player["']|["']\.\/player["']/)).toEqual(screens);
     for (const file of screens) {
       const screen = readFileSync(join(src, "..", file), "utf8");

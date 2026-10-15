@@ -5,6 +5,9 @@ import {
   consentsPath,
   entryDestination,
   homeOf,
+  isLessonPath,
+  lessonPath,
+  proxySignsIn,
   requiresSession,
   resolveDestination,
   RETURN_PARAM,
@@ -13,6 +16,7 @@ import {
   secondFactorPath,
   SESSION_ROUTES,
   signInPath,
+  signUpPath,
   teamDestination,
 } from "./navigation";
 
@@ -50,8 +54,36 @@ describe("qué rutas piden sesión", () => {
     ["/sesion/cerrar", false],
     ["/legal/terminos", false],
     ["", false],
+    // La lección pide sesión (T-203); la ficha del curso, que cuelga de lo mismo, es pública
+    // (flujo §6.1). Por eso la lección va por patrón y no por prefijo.
+    ["/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002", true],
+    ["/cursos/[slug]/lecciones/[leccion]", true],
+    ["/cursos", false],
+    ["/cursos/respirar", false],
+    ["/cursos/respirar/lecciones", false],
+    ["/cursos/respirar/lecciones/una/otra", false],
+    ["/cursos//lecciones/x", false],
+    ["/cursosx/respirar/lecciones/x", false],
   ])("%s: %s", (pathname, expected) => {
     expect(requiresSession(pathname)).toBe(expected);
+  });
+
+  it("la lección es la única ruta por patrón, y el paso previo no manda a entrar desde ella", () => {
+    expect(isLessonPath("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002")).toBe(true);
+    expect(isLessonPath("/cursos/respirar")).toBe(false);
+    // A quien llega sin sesión lo manda la guarda de la página: al registro si el curso es el
+    // abierto, a entrar si no. El paso previo no lee la base y no sabe cuál.
+    expect(proxySignsIn("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002")).toBe(false);
+    for (const route of SESSION_ROUTES) expect(proxySignsIn(route), route).toBe(true);
+    expect(proxySignsIn("/admin/equipo")).toBe(true);
+    expect(proxySignsIn("/cursos/respirar")).toBe(false);
+  });
+
+  it("la dirección de una lección se arma con el slug y el id", () => {
+    expect(lessonPath("respirar", "b0000000-0000-4000-8000-000000000002")).toBe("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
+    // Lo que no tiene forma no se pega a una dirección.
+    expect(lessonPath("respirar/../x", "b0000000-0000-4000-8000-000000000002")).toBeNull();
+    expect(lessonPath("respirar", "no es un id")).toBeNull();
   });
 
   it("las pantallas de visitante no están en la lista: pedirles sesión encerraría a quien no la tiene", () => {
@@ -112,6 +144,19 @@ describe("a dónde se va después de entrar", () => {
     "/",
   ])("lo demás lleva al inicio: %s", (input) => {
     expect(resolveDestination(input)).toBe("/inicio");
+  });
+});
+
+describe("a una lección se vuelve después de entrar o de registrarse", () => {
+  it("vale como destino, con lo que cuelga de los cursos", () => {
+    expect(resolveDestination("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002")).toBe("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
+    expect(returnOf(signInPath("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002"))).toBe("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
+  });
+
+  it("el registro guarda el destino igual que entrar", () => {
+    expect(signUpPath("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002")).toBe(`/registro?volver=${encodeURIComponent("/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002")}`);
+    expect(signUpPath("//otro.example")).toBe("/registro");
+    expect(signUpPath(null)).toBe("/registro");
   });
 });
 

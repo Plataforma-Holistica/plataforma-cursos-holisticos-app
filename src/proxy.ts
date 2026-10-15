@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requiresSession, signInPath } from "@/services/account/navigation";
+import { proxySignsIn, signInPath } from "@/services/account/navigation";
 import { refreshSession, type CookieJar, type CookieOptions, type SessionRefresh } from "@/services/account/session";
 
 // El paso previo (TRD §4.2 y §9.2, fila «Token de acceso»). Next lo corre antes de cada
@@ -36,7 +36,7 @@ function signInRedirect(request: NextRequest, refresh: SessionRefresh): URL | nu
   if (refresh.kind !== "none" && refresh.kind !== "lost") return null;
   if (request.method !== "GET" && request.method !== "HEAD") return null;
   const { pathname } = request.nextUrl;
-  if (!requiresSession(pathname)) return null;
+  if (!proxySignsIn(pathname)) return null;
 
   const query = new URLSearchParams(request.nextUrl.search);
   query.delete(INTERNAL_PARAM);

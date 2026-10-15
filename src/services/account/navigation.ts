@@ -28,6 +28,11 @@ export const ROUTES = {
   catalog: "/admin/practicas",
   /** PA-61 y PA-62 mínimas, los cursos por revisar: cuelga de administración y pide Contenido. */
   review: "/admin/revision",
+  /**
+   * Los cursos. La ficha de un curso (`/cursos/[slug]`, T-210) es pública; la lección
+   * (`/cursos/[slug]/lecciones/[leccion]`, PA-22, T-203) pide sesión. Ver `isLessonPath`.
+   */
+  courses: "/cursos",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -46,6 +51,22 @@ export const SESSION_ROUTES: readonly string[] = [
   ROUTES.admin,
 ];
 
+// La lección: `/cursos/{slug}/lecciones/{id}`, exactamente esos cuatro segmentos. No va por
+// prefijo, porque de `/cursos` cuelga también la ficha del curso, que es pública.
+const LESSON_PATH = /^\/cursos\/[^/]+\/lecciones\/[^/]+$/;
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const LESSON_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Si la ruta es la de una lección (PA-22). Pide sesión, pero la guarda de su página decide a dónde va quien no la tiene. */
+export function isLessonPath(pathname: string): boolean {
+  return LESSON_PATH.test(pathname);
+}
+
+/** La dirección de una lección, o nulo si el slug o el id no tienen forma. */
+export function lessonPath(slug: string, lessonId: string): string | null {
+  return SLUG.test(slug) && LESSON_ID.test(lessonId) ? `${ROUTES.courses}/${slug}/lecciones/${lessonId}` : null;
+}
+
 /**
  * A dónde se puede volver después de entrar. Va por lo que se permite: una ruta nueva no
  * es destino hasta que alguien la agrega. Las pantallas por las que se entra (entrar,
@@ -55,10 +76,23 @@ export const SESSION_ROUTES: readonly string[] = [
  * Administración vale con todo lo que cuelgue de ella: por eso bajo `/admin` no puede haber
  * una lectura con efectos.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses];
+
+/** Las rutas de `SESSION_ROUTES`: la ruta exacta y lo que cuelga de ella. */
+function underSessionRoute(pathname: string): boolean {
+  return SESSION_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
 
 export function requiresSession(pathname: string): boolean {
-  return SESSION_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  return underSessionRoute(pathname) || isLessonPath(pathname);
+}
+
+/**
+ * Si el paso previo manda a entrar a quien llega sin sesión. La lección no: si su curso es el
+ * abierto va a registrarse, y eso lo sabe la base, que el paso previo no lee.
+ */
+export function proxySignsIn(pathname: string): boolean {
+  return underSessionRoute(pathname);
 }
 
 /** El inicio de quien entró. Los roles llegan con T-105: hoy todos son alumnos. */
@@ -83,6 +117,12 @@ function withReturn(route: string, target: string | null | undefined): string {
 
 /** A entrar, guardando a dónde se quería ir. */
 export const signInPath = (target: string | null | undefined): string => withReturn(ROUTES.signIn, target);
+
+/**
+ * A registrarse, guardando a dónde se quería ir (la lección de un curso abierto, flujo §6.3).
+ * El registro todavía no lleva ese destino hasta el final: queda escrito para cuando lo haga.
+ */
+export const signUpPath = (target: string | null | undefined): string => withReturn(ROUTES.signUp, target);
 
 /** A completar la cuenta (PA-15), guardando a dónde se quería ir. */
 export const consentsPath = (target: string | null | undefined): string => withReturn(ROUTES.consents, target);
