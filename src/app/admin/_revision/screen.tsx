@@ -13,11 +13,12 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
+import type { PlayerProps } from "@/app/_video/player";
+
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
 import { approveAction, lessonVideoAction, reviewCodeAction } from "./actions";
 import type { CodeState, ReviewFailure, ReviewState, VideoAnswer } from "./outcomes";
-import type { PlayerProps } from "./player";
 import type { CourseRow, LessonRow, ReviewView } from "./rows";
 
 // PA-61 y PA-62 mínimas · Los cursos por revisar, en una sola pantalla (decisión de Sergio del
@@ -63,7 +64,7 @@ function PlayerMissing({ onFailed }: PlayerProps) {
 }
 
 // Mux Player pesa: se descarga solo cuando hay algo que reproducir, y nunca en el servidor.
-const Player = dynamic(() => import("./player").then((module) => module.Player, () => PlayerMissing), {
+const Player = dynamic(() => import("@/app/_video/player").then((module) => module.Player, () => PlayerMissing), {
   ssr: false,
   loading: () => <p className="text-body-s text-text-2">{text.loading}</p>,
 });
@@ -215,6 +216,7 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
               playbackId={video.grant.playbackId}
               tokens={video.grant.tokens}
               startTime={video.startTime}
+              speeds={video.grant.speeds}
               onExpired={expired}
               onFailed={() => failed(video.lesson)}
               onPlaying={() => {

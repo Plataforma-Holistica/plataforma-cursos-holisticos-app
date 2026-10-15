@@ -101,33 +101,45 @@ describe("solo la función única de medios firma", () => {
     expect(naming(/\bgetMediaGrant\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/admin/_revision/actions.ts"]);
   });
 
-  it("Mux Player se importa en un solo archivo, y la pantalla lo carga con next/dynamic", () => {
+  it("Mux Player se importa en un solo archivo, el reproductor compartido, y las pantallas lo cargan con next/dynamic", () => {
     // Cualquier manera de cargarlo: `import`, `import()` y `require`, con o sin `next/dynamic`.
     const loads = /["'](@mux\/mux-player(-react)?|media-chrome|hls\.js)(\/[^"']*)?["']/;
-    expect(naming(loads)).toEqual(["src/app/admin/_revision/player.tsx"]);
+    expect(naming(loads)).toEqual(["src/app/_video/player.tsx"]);
     // Su entrada `/lazy` inyecta estilos en línea: no se usa.
     expect(naming(/mux-player-react\/lazy|mux-player-react\/dist\/lazy/)).toEqual([]);
-    // Solo la pantalla nombra al reproductor, y lo carga con `next/dynamic`, sin servidor. De él
-    // importa en estático solo un tipo, que no viaja.
-    expect(naming(/["']\.\/player["']|_revision\/player["']/)).toEqual(["src/app/admin/_revision/screen.tsx"]);
-    const screen = readFileSync(join(src, "app/admin/_revision/screen.tsx"), "utf8");
-    expect(screen).toMatch(/const Player = dynamic\(\(\) => import\("\.\/player"\)\.then\(\(module\) => module\.Player, \(\) => PlayerMissing\), \{\n\s+ssr: false,/);
-    expect([...screen.matchAll(/^import ([^;]*)["']\.\/player["'];$/gm)].map((found) => found[1])).toEqual(["type { PlayerProps } from "]);
+    // Solo las pantallas con video nombran al reproductor, y lo cargan con `next/dynamic`, sin
+    // servidor. De él importan en estático solo un tipo, que no viaja.
+    const screens = ["src/app/admin/_revision/screen.tsx"];
+    expect(naming(/["'][^"']*_video\/player["']|["']\.\/player["']/)).toEqual(screens);
+    for (const file of screens) {
+      const screen = readFileSync(join(src, "..", file), "utf8");
+      expect(screen, file).toMatch(
+        /const Player = dynamic\(\(\) => import\("@\/app\/_video\/player"\)\.then\(\(module\) => module\.Player, \(\) => PlayerMissing\), \{\n\s+ssr: false,/,
+      );
+      expect([...screen.matchAll(/^import ([^;]*)["']@\/app\/_video\/player["'];$/gm)].map((found) => found[1]), file).toEqual(["type { PlayerProps } from "]);
+    }
     // Sin analítica, sin cookies y sin imagen dentro de imagen.
-    const player = withoutComments(readFileSync(join(src, "app/admin/_revision/player.tsx"), "utf8"));
+    const player = withoutComments(readFileSync(join(src, "app/_video/player.tsx"), "utf8"));
     // Cada una como atributo propio del reproductor, en su línea: no basta que el nombre aparezca.
-    for (const prop of ["disableTracking", "disableCookies", "noVolumePref", "noMutedPref", "ref={lockDown}"]) {
-      expect(player, prop).toMatch(new RegExp(`^ {6}${prop.replace(/[{}]/g, "\\$&")}$`, "m"));
+    for (const prop of ["disableTracking", "disableCookies", "noVolumePref", "noMutedPref", "defaultHiddenCaptions", "ref={attach}"]) {
+      expect(player, prop).toMatch(new RegExp(`^ {8}${prop.replace(/[{}]/g, "\\$&")}$`, "m"));
     }
     expect(player).not.toMatch(/envKey|metadata|beaconCollectionDomain/);
-    // Lo que no tiene prop se apaga en el video interno.
+    // Lo que no tiene prop se apaga en el video interno, al conectarse el elemento.
+    expect(player).toMatch(/function attach\(element: MuxPlayerRefAttributes \| null\) \{\n\s+lockDown\(element\);/);
     expect(player).toMatch(/media\.nativeEl\.disableRemotePlayback = true;/);
     expect(player).toMatch(/media\.nativeEl\.disablePictureInPicture = true;/);
+    // El selector de calidad no se ofrece: la calidad es automática (RF-312).
+    expect(player).toMatch(/className="player-mux /);
+    const theme = readFileSync(join(src, "ui/theme.css"), "utf8");
+    expect(theme).toMatch(/@utility player-mux \{[^}]*--rendition-menu-button: none;/);
   });
 
   it("la firma y la función única tienen dueño en CODEOWNERS", () => {
     const owners = readFileSync(join(src, "..", ".github", "CODEOWNERS"), "utf8");
     expect(owners).toMatch(/^\/src\/services\/media\/\s+@SerchFGA @plataformaholisticadev$/m);
     expect(owners).toMatch(/^\/src\/adapters\/mux\/\s+@SerchFGA @plataformaholisticadev$/m);
+    // El reproductor: la marca de agua y lo que se le apaga.
+    expect(owners).toMatch(/^\/src\/app\/_video\/\s+@SerchFGA @plataformaholisticadev$/m);
   });
 });

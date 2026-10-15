@@ -90,7 +90,12 @@ describe("videoAnswerOf", () => {
         expiresAt: 99,
         speeds: [0.75, 1, 1.25, 1.5, 1.75, 2],
       }),
-    ).toEqual({ kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" } });
+    ).toEqual({
+      kind: "granted",
+      playbackId: "PlaybackDePrueba",
+      tokens: { playback: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" },
+      speeds: [0.75, 1, 1.25, 1.5, 1.75, 2],
+    });
   });
 
   it("refused: a esta página; lo demás, tal cual", () => {

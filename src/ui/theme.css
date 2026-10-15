@@ -49,6 +49,15 @@
   --scrim: rgb(0 0 0 / 0.72);
   --veil: linear-gradient(to bottom, rgb(0 0 0 / 0), rgb(0 0 0 / 0.80));
 
+  /* El reproductor (sección 5.4): fondo negro, y encima del video la marca de agua, blanca
+     al 30 % con una sombra negra de 2 px al 50 %, a 1.6 % del ancho y nunca menos de 11 px. */
+  --player-bg: #000;
+  --watermark: rgb(255 255 255 / 0.30);
+  --watermark-shadow: 0 0 2px rgb(0 0 0 / 0.50);
+  --watermark-size: max(11px, 1.6cqw);
+  --watermark-drift: 24px;
+  --watermark-interval: 30s;
+
   /* Paleta «papel», para correos y PDF (sección 3.4). No tiene utilidades: un correo no
      usa esta hoja, pero sus valores salen de aquí. */
   --paper: #FAF7F2;
@@ -246,6 +255,53 @@
 @utility halo-surface-3 {
   --focus-halo: var(--surface-3);
 }
+
+/* El reproductor (sección 5.4). El contenedor mide su ancho para la marca (`cqw`). */
+@utility player-frame {
+  container-type: inline-size;
+  background: var(--player-bg);
+}
+/* Lo que se le esconde a Mux Player: el selector de calidad (es automática, RF-312) y los
+   botones de lo que está apagado (imagen dentro de imagen, enviar a otra pantalla). */
+@utility player-mux {
+  --rendition-menu-button: none;
+  --pip-button: none;
+  --airplay-button: none;
+  --cast-button: none;
+}
+/* La marca de agua: tenue, sin recibir el toque ni seleccionarse, centrada en su celda, y que
+   deriva despacio. Con movimiento reducido, la regla de abajo le quita la deriva y el
+   desvanecido largo: cambia de celda casi de golpe. */
+@utility watermark {
+  position: absolute;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-text);
+  font-weight: 600;
+  font-size: var(--watermark-size);
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--watermark);
+  text-shadow: var(--watermark-shadow);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity var(--duration-slow) var(--ease-standard);
+  animation: watermark-drift var(--watermark-interval) ease-in-out infinite alternate;
+}
+@keyframes watermark-drift {
+  from { translate: 0 0; }
+  to { translate: var(--watermark-drift) 0; }
+}
+/* Las celdas: una rejilla de 3 × 3 sobre el área segura, del 10 % al 68 % del alto y del 4 %
+   al 96 % del ancho; cada clase es el centro de su celda. La central (4) no se usa. */
+@utility watermark-cell-0 { top: 19.667%; left: 19.333%; }
+@utility watermark-cell-1 { top: 19.667%; left: 50%; }
+@utility watermark-cell-2 { top: 19.667%; left: 80.667%; }
+@utility watermark-cell-3 { top: 39%; left: 19.333%; }
+@utility watermark-cell-5 { top: 39%; left: 80.667%; }
+@utility watermark-cell-6 { top: 58.333%; left: 19.333%; }
+@utility watermark-cell-7 { top: 58.333%; left: 50%; }
+@utility watermark-cell-8 { top: 58.333%; left: 80.667%; }
 
 /* 3. Base */
 @layer base {
