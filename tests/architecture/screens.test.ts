@@ -182,6 +182,9 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // página, donde decide su guarda.
     watchLessonAction:
       /const answer = watchAnswerOf\(await getMediaGrant\(jar, lessonId, "watch"\)\);\s*if \(answer\.kind === "reload"\) \{[\s\S]*redirect\(back \?\? ROUTES\.home\);/,
+    // Recordar los subtítulos: solo encendido o apagado, y el servicio corre la guarda y escribe
+    // en la cuenta de esa sesión.
+    rememberCaptionsAction: /if \(typeof on !== "boolean"\) return;\s*await rememberCaptions\(await cookieJar\(\), on\);/,
   },
   "src/app/admin/_revision/actions.ts": {
     // Dar el código otra vez: el del catálogo, que comprueba la misma puerta de Contenido.

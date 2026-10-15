@@ -5,6 +5,7 @@ import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireLessonSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
+import { captionsChoice } from "@/services/account/account";
 import { lessonPath } from "@/services/account/navigation";
 import { courseIsOpen, lessonPage, type LessonEntry } from "@/services/lessons/lessons";
 import { lessonAccess } from "@/services/media/media";
@@ -18,7 +19,8 @@ import { LessonScreen, type SyllabusEntry } from "./screen";
 // Antes de pintar le pregunta a la función única de medios si esta cuenta puede ver la
 // lección, sin firmar nada (`lessonAccess`): sin acceso, PA-33 ocupa el lugar del reproductor
 // desde el primer momento, también sin JavaScript. La dirección del video la pide el
-// reproductor después, con su acción (RF-305).
+// reproductor después, con su acción (RF-305). A la vez lee si la cuenta dejó los subtítulos
+// encendidos (RF-310); si no se supo, arrancan apagados.
 
 const text = messages.lesson;
 
@@ -39,7 +41,8 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={path} withSession />;
   const { page } = found;
 
-  const initial = initialOf(await lessonAccess(await cookieReader(), leccion));
+  const [access, captions] = await Promise.all([lessonAccess(await cookieReader(), leccion), captionsChoice(session.claims)]);
+  const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
   if (initial.kind === "reload") redirect(path);
 
@@ -63,6 +66,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
       modules={page.modules.map((group) => ({ id: group.id, title: group.title, lessons: group.lessons.map(entry) }))}
       next={page.next === null ? null : { title: page.next.title, href: lessonPath(page.course.slug, page.next.id) ?? path }}
       initial={initial}
+      captions={captions.kind === "ready" && captions.on}
     />
   );
 }

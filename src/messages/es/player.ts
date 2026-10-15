@@ -25,4 +25,9 @@ export const player = defineMessages({
     fullscreen: "Pantalla completa",
     exitFullscreen: "Salir de pantalla completa",
   },
+  // La pantalla completa dentro de la página, en iPhone: estos los pinta el reproductor, no Mux.
+  filled: {
+    turn: "Girar",
+    turnHint: "Gira tu teléfono para verlo más grande",
+  },
 });

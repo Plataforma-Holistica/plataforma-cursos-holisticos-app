@@ -257,10 +257,58 @@
   --focus-halo: var(--surface-3);
 }
 
-/* El reproductor (sección 5.4). El contenedor mide su ancho para la marca (`cqw`). */
+/* El reproductor (sección 5.4). El contenedor es lo que entra a pantalla completa; dentro, el
+   escenario guarda el 16:9 del video y lleva encima la marca, que se mide con su ancho (`cqw`).
+   A pantalla completa, de la del navegador o de la propia, el escenario se centra a lo más
+   grande que quepa: la marca queda sobre el video y no en las franjas negras. */
 @utility player-frame {
-  container-type: inline-size;
   background: var(--player-bg);
+  &:fullscreen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    container-type: size;
+  }
+}
+@utility player-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  container-type: inline-size;
+  :where(.player-frame:fullscreen, .player-frame-filled) > & {
+    width: min(100cqw, calc(100cqh * 16 / 9));
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+}
+/* La pantalla completa dentro de la página (iPhone, donde la del navegador no lleva la marca):
+   el contenedor fijo sobre toda la ventana visible, por encima de las barras, con los márgenes
+   seguros del aparato. Girado (`data-turned`), mide la ventana al revés y rota 90 grados desde
+   su esquina. Va sola, sin `relative` ni `w-full`: Tailwind escribe después las utilidades de
+   una sola propiedad, y le ganarían. */
+@utility player-frame-filled {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  width: 100vw;
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
+  &[data-turned] {
+    inset: 0 auto auto 100vw;
+    width: 100dvh;
+    height: 100vw;
+    transform-origin: top left;
+    transform: rotate(90deg);
+  }
+}
+/* Mientras el reproductor ocupa la ventana, la página de atrás no se desplaza. */
+@utility player-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 /* Lo que se le esconde a Mux Player: el selector de calidad (es automática, RF-312) y los
    botones de lo que está apagado (imagen dentro de imagen, enviar a otra pantalla). */
@@ -269,6 +317,11 @@
   --pip-button: none;
   --airplay-button: none;
   --cast-button: none;
+  /* En la pantalla completa propia, su botón de pantalla completa se va: sale con «Salir de
+     pantalla completa», que pinta el reproductor. */
+  :where(.player-frame-filled) & {
+    --fullscreen-button: none;
+  }
 }
 /* La marca de agua: tenue, sin recibir el toque ni seleccionarse, y que deriva despacio hacia
    dentro del área segura. Con movimiento reducido, la regla de abajo le quita la deriva y el

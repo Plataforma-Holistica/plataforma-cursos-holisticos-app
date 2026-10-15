@@ -18,7 +18,7 @@ import { stagingJar, type AccountDependencies } from "./deps";
 import { fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
 import { resolveOrigin, type RequestOrigin } from "./origin";
-import { saveName } from "./records";
+import { readCaptions, saveCaptions, saveName } from "./records";
 import {
   closeOtherSessions as closeOthersInBase,
   closeSession as closeInBase,
@@ -49,6 +49,15 @@ export type NameChange =
   | { kind: "saved"; name: string }
   | { kind: "invalid"; reason: Extract<DisplayNameResult, { ok: false }>["reason"] }
   /** La sesión no llega hasta aquí: se obedece lo que dijo la guarda. */
+  | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
+  | { kind: "unavailable" };
+
+/** Si la persona dejó los subtítulos encendidos (RF-310). */
+export type CaptionsChoice = { kind: "ready"; on: boolean } | { kind: "unavailable" };
+
+export type CaptionsChange =
+  | { kind: "saved"; on: boolean }
+  /** La sesión no llega hasta aquí: no se guardó nada. */
   | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
   | { kind: "unavailable" };
 
@@ -474,9 +483,49 @@ export function createManagement(
     return { kind: "signed_out", password: "changed" };
   }
 
+  /**
+   * Si la persona dejó los subtítulos encendidos (RF-310; diseño, sección 5.4): el reproductor
+   * de la lección arranca así. Recibe las claims con las que la guarda dejó pasar a la página,
+   * y lee como esa persona. Si no se supo, se reporta y la página los deja apagados: es una
+   * preferencia, y no vale una página caída.
+   */
+  async function captionsChoice(claims: VerifiedClaims): Promise<CaptionsChoice> {
+    try {
+      const on = await asUser(claims, (tx) => readCaptions(tx, claims.userId));
+      if (on === null) throw new Error("Una sesión que pasó la guarda no tiene perfil.");
+      return { kind: "ready", on };
+    } catch {
+      await deps.report("captions_choice_unavailable");
+      return { kind: "unavailable" };
+    }
+  }
+
+  /**
+   * Recordar si deja los subtítulos encendidos, porque los encendió o los apagó en el
+   * reproductor. Exige una sesión que pase la guarda, y escribe en la cuenta de esa sesión: lo
+   * único que llega de fuera es encendidos o apagados. No vuelve a evaluar la cuenta dentro de
+   * la transacción, como al cambiar el nombre: no da ni quita nada, y una cuenta que se
+   * suspendió en ese instante solo deja anotada su elección.
+   */
+  async function rememberCaptions(reader: CookieReader, on: boolean): Promise<CaptionsChange> {
+    const check = await core.checkSession(reader);
+    if (check.kind !== "pass") return { kind: "session", check };
+    try {
+      await asServer({ claims: check.claims, reason: "remember_captions" }, async (tx) => {
+        if (!(await saveCaptions(tx, check.claims.userId, on))) throw new Error("Una sesión que pasó la guarda no tiene perfil.");
+      });
+    } catch {
+      await deps.report("captions_choice_unavailable");
+      return { kind: "unavailable" };
+    }
+    return { kind: "saved", on };
+  }
+
   return {
     accountProfile,
     changeName,
+    captionsChoice,
+    rememberCaptions,
     accountSessions,
     closeSession,
     closeOtherSessions,

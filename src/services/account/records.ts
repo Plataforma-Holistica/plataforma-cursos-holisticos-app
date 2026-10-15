@@ -101,6 +101,20 @@ export async function saveName(tx: Tx, profileId: string, name: string): Promise
   return saved === 1;
 }
 
+const captionsRow = z.object({ captions_on: z.boolean() });
+
+/** Si la persona dejó los subtítulos encendidos (RF-310). Nulo si no hay perfil. */
+export async function readCaptions(tx: Tx, profileId: string): Promise<boolean | null> {
+  const [row] = await tx.query(sql`select p.captions_on from public.profiles p where p.id = ${profileId}::uuid`, captionsRow);
+  return row?.captions_on ?? null;
+}
+
+/** Guarda si deja los subtítulos encendidos. Dice si había un perfil donde guardarlo. */
+export async function saveCaptions(tx: Tx, profileId: string, on: boolean): Promise<boolean> {
+  const saved = await tx.execute(sql`update public.profiles set captions_on = ${on} where id = ${profileId}::uuid`);
+  return saved === 1;
+}
+
 /**
  * Guarda el nombre, si viene, y la declaración de edad, si se pide. La declaración lleva
  * la hora de la base y no se pisa: la primera es la que vale.

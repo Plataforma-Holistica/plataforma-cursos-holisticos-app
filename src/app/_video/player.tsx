@@ -6,7 +6,10 @@
 import { Es } from "media-chrome/dist/lang/es.js";
 import { addTranslation, setLanguage } from "media-chrome/dist/utils/i18n.js";
 import MuxPlayer, { type MuxPlayerRefAttributes } from "@mux/mux-player-react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
+import { player as text } from "@/messages/es/player";
+import { cx } from "@/ui/cx";
 
 import { TOKEN_EXPIRED } from "./errors";
 import { controlLabels, SEEK_SECONDS } from "./labels";
@@ -21,6 +24,16 @@ import { Watermark, watermarkIntact } from "./watermark";
 // (`fullscreenElement`, asignado por propiedad: como atributo, Mux lo busca por id antes de
 // que el nodo esté en la página y no surte efecto). Así la marca de agua entra con él.
 //
+// Donde el navegador no lleva a pantalla completa más que el video (iPhone), Mux caería a la
+// del sistema, que no pinta la marca. Ahí la pantalla completa es dentro de la página: el
+// contenedor se fija sobre toda la ventana, con «Salir de pantalla completa» y, en vertical, el
+// aviso de girar el teléfono y «Girar», que rota el contenedor. Se atrapan los pedidos de Mux
+// (su botón, la tecla F) antes de que lleguen a su controlador, y si iOS entra solo a la del
+// sistema (con un pellizco), se sale y se pasa a la propia (diseño, sección 5.4; D-08).
+//
+// Los subtítulos arrancan como la cuenta los dejó (RF-310), y cuando la persona los enciende o
+// los apaga, se avisa a la pantalla para que lo recuerde.
+//
 // Lo que se le apaga, a propósito:
 //   · Mux Data (`disableTracking`, `disableCookies`, sin `envKey`): ni analítica ni cookies.
 //   · Enviar a otra pantalla, AirPlay e imagen dentro de imagen (diseño, sección 5.4 y D-08).
@@ -28,7 +41,8 @@ import { Watermark, watermarkIntact } from "./watermark";
 //     un script de Google para enviar a un televisor.
 //   · Recordar el volumen y el silencio en el navegador.
 //   · El selector de calidad: es automática (RF-312). Lo esconde `player-mux`, de `theme.css`.
-//   · Los subtítulos encendidos de fábrica: arrancan apagados (diseño, sección 5.4).
+//   · Los subtítulos encendidos de fábrica: arrancan apagados, salvo que la cuenta los haya
+//     dejado encendidos (diseño, sección 5.4).
 //
 // Sus errores no salen de aquí: algunos mensajes de Mux traen el playback id, y nada de eso
 // va al registro de errores. La pantalla solo sabe si caducó la dirección o si falló.
@@ -39,6 +53,45 @@ setLanguage("es-MX");
 /** Los controles se ocultan a los tres segundos sin moverse (diseño, sección 5.4); Mux trae dos. */
 const AUTOHIDE_SECONDS = 3;
 
+/** Cuánto dura a la vista el aviso de girar el teléfono, al entrar a la pantalla completa propia. */
+export const TURN_HINT_MS = 4_000;
+
+/** Los pedidos de pantalla completa de los controles de Mux (media-chrome), y los de subtítulos. */
+const ENTER_FULLSCREEN = "mediaenterfullscreenrequest";
+const EXIT_FULLSCREEN = "mediaexitfullscreenrequest";
+const CAPTIONS_REQUESTS = ["mediashowsubtitlesrequest", "mediadisablesubtitlesrequest", "mediatogglesubtitlesrequest"];
+
+/**
+ * Si el navegador lleva a pantalla completa un elemento cualquiera, y no solo el video. En
+ * iPhone no: ahí va la pantalla completa propia.
+ */
+function elementFullscreenAvailable(): boolean {
+  const doc = document as Document & { webkitFullscreenEnabled?: boolean };
+  return doc.fullscreenEnabled === true || doc.webkitFullscreenEnabled === true;
+}
+
+/** Si el aparato está en vertical: ahí van el aviso y «Girar». */
+const PORTRAIT = "(orientation: portrait)";
+function subscribePortrait(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(PORTRAIT);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+const portraitNow = () => typeof window.matchMedia === "function" && window.matchMedia(PORTRAIT).matches;
+const portraitOnServer = () => false;
+
+/** Si hay subtítulos a la vista en el video. */
+function captionsShowing(video: HTMLVideoElement | undefined): boolean {
+  const tracks = video?.textTracks;
+  if (!tracks) return false;
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+    if (track && (track.kind === "subtitles" || track.kind === "captions") && track.mode === "showing") return true;
+  }
+  return false;
+}
+
 export interface PlayerProps {
   playbackId: string;
   tokens: { playback: string; thumbnail: string; storyboard: string };
@@ -48,6 +101,10 @@ export interface PlayerProps {
   speeds: number[];
   /** El correo para la marca de agua. Sin él no se pinta ninguna (revisión, hasta T-405). */
   watermark?: string | null;
+  /** Si arranca con los subtítulos encendidos: como los dejó la cuenta (RF-310). Por omisión, apagados. */
+  captions?: boolean;
+  /** La persona encendió o apagó los subtítulos. */
+  onCaptionsChange?: (on: boolean) => void;
   /** Mux dijo que la dirección caducó; `at` es el segundo en que iba. */
   onExpired: (at: number) => void;
   /** Cualquier otro error. */
@@ -66,7 +123,7 @@ interface MuxError {
 
 /** Lo que el elemento de Mux tiene dentro y no declara en sus tipos: el `<video>` de verdad y su controlador. */
 interface WithNativeVideo {
-  nativeEl?: HTMLVideoElement;
+  nativeEl?: HTMLVideoElement & { webkitExitFullscreen?: () => void };
   setAttribute?: (name: string, value: string) => void;
 }
 interface WithController {
@@ -89,11 +146,45 @@ function lockDown(element: MuxPlayerRefAttributes | null) {
   }
 }
 
-export function Player({ playbackId, tokens, startTime, speeds, watermark, onExpired, onFailed, onPlaying, onEnded }: PlayerProps) {
+/** El `<video>` de verdad, dentro de Mux Player. */
+function nativeVideo(element: MuxPlayerRefAttributes | null) {
+  return (element?.media as unknown as WithNativeVideo | null | undefined)?.nativeEl;
+}
+
+export function Player(props: PlayerProps) {
+  const { playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded } = props;
   const frame = useRef<HTMLDivElement>(null);
   const mux = useRef<MuxPlayerRefAttributes | null>(null);
   const mark = useRef<HTMLParagraphElement>(null);
   const fading = useRef(false);
+  const exitButton = useRef<HTMLButtonElement>(null);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const filledNow = useRef(false);
+  const captionsNow = useRef(captions);
+  const captionsChanged = useRef(onCaptionsChange);
+  useEffect(() => {
+    captionsChanged.current = onCaptionsChange;
+  });
+
+  // La pantalla completa propia: si está puesta, si se giró, y el aviso de girar.
+  const [filled, setFilled] = useState(false);
+  const [turned, setTurned] = useState(false);
+  const [hint, setHint] = useState(false);
+  const portrait = useSyncExternalStore(subscribePortrait, portraitNow, portraitOnServer);
+  const rotated = filled && turned && portrait;
+
+  /**
+   * Entra o sale de la pantalla completa propia. El aviso de girar se pinta solo dentro, y dura
+   * un momento contado desde la última vez que se entró.
+   */
+  const fill = useCallback((on: boolean) => {
+    filledNow.current = on;
+    setFilled(on);
+    setTurned(false);
+    setHint(true);
+    clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setHint(false), TURN_HINT_MS);
+  }, []);
 
   // Una función nueva en cada render: React suelta y vuelve a poner la referencia, y `lockDown`
   // corre otra vez, sin efecto. Con `useCallback` el compilador de React ya no deja tocar el
@@ -118,6 +209,75 @@ export function Player({ playbackId, tokens, startTime, speeds, watermark, onExp
 
   useEffect(bindController, [bindController]);
 
+  // Los pedidos de pantalla completa de Mux (su botón, la tecla F) se atrapan en la captura, antes
+  // de que lleguen a su controlador, solo donde la del navegador no llevaría el contenedor. Pedir
+  // entrar estando dentro (la tecla F) sale.
+  useEffect(() => {
+    const element = frame.current;
+    if (element === null) return;
+    const intercept = (event: Event) => {
+      if (elementFullscreenAvailable()) return;
+      event.stopPropagation();
+      fill(event.type === ENTER_FULLSCREEN && !filledNow.current);
+    };
+    element.addEventListener(ENTER_FULLSCREEN, intercept, true);
+    element.addEventListener(EXIT_FULLSCREEN, intercept, true);
+    return () => {
+      element.removeEventListener(ENTER_FULLSCREEN, intercept, true);
+      element.removeEventListener(EXIT_FULLSCREEN, intercept, true);
+    };
+  }, [fill]);
+
+  // Si iOS entra solo a la pantalla completa del sistema (un pellizco sobre el video), se sale de
+  // ella y se pasa a la propia: la del sistema no pinta la marca.
+  useEffect(() => {
+    const video = nativeVideo(mux.current);
+    if (typeof video?.addEventListener !== "function") return;
+    const takeBack = () => {
+      video.webkitExitFullscreen?.();
+      fill(true);
+    };
+    video.addEventListener("webkitbeginfullscreen", takeBack);
+    return () => video.removeEventListener("webkitbeginfullscreen", takeBack);
+  }, [fill]);
+
+  // Dentro de la propia: la página de atrás no se desplaza, Escape sale (con un teclado), y el
+  // foco va a «Salir de pantalla completa». Al salir, si el foco quedó sin dueño, vuelve al video.
+  useEffect(() => {
+    if (!filled) return;
+    const root = document.documentElement;
+    root.classList.add("player-locked");
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") fill(false);
+    };
+    document.addEventListener("keydown", onKey);
+    exitButton.current?.focus();
+    return () => {
+      root.classList.remove("player-locked");
+      document.removeEventListener("keydown", onKey);
+      if (document.activeElement === null || document.activeElement === document.body) (mux.current as unknown as HTMLElement | null)?.focus?.();
+    };
+  }, [filled, fill]);
+
+  useEffect(() => () => clearTimeout(hintTimer.current), []);
+
+  // Los subtítulos: cuando la persona los enciende o los apaga (el menú de Mux, la tecla C), su
+  // controlador ya cambió las pistas al llegar el pedido aquí, de subida. Se avisa solo si cambió.
+  useEffect(() => {
+    const element = frame.current;
+    if (element === null) return;
+    const noticed = () => {
+      const on = captionsShowing(nativeVideo(mux.current));
+      if (on === captionsNow.current) return;
+      captionsNow.current = on;
+      captionsChanged.current?.(on);
+    };
+    for (const request of CAPTIONS_REQUESTS) element.addEventListener(request, noticed);
+    return () => {
+      for (const request of CAPTIONS_REQUESTS) element.removeEventListener(request, noticed);
+    };
+  }, []);
+
   // Cualquier cambio dentro del contenedor (quitarla, ocultarla, cambiarle el texto) se revisa.
   useEffect(() => {
     if (!watermark || frame.current === null) return;
@@ -127,35 +287,70 @@ export function Player({ playbackId, tokens, startTime, speeds, watermark, onExp
   }, [watermark, guard]);
 
   return (
-    <div ref={frame} data-player-frame className="player-frame relative aspect-video w-full overflow-hidden">
-      <MuxPlayer
-        ref={attach}
-        className="player-mux block h-full w-full"
-        playbackId={playbackId}
-        tokens={tokens}
-        startTime={startTime}
-        playbackRates={speeds}
-        forwardSeekOffset={SEEK_SECONDS}
-        backwardSeekOffset={SEEK_SECONDS}
-        defaultHiddenCaptions
-        disableTracking
-        disableCookies
-        noVolumePref
-        noMutedPref
-        onLoadedMetadata={bindController}
-        onPlay={guard}
-        onPlaying={onPlaying}
-        onEnded={onEnded}
-        onError={(event) => {
-          const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null }) | null;
-          const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;
-          // Lo que Mux no da por fatal (reconectando, sin red un momento) lo resuelve él solo.
-          if (error?.fatal === false) return;
-          if (error?.muxCode === TOKEN_EXPIRED) onExpired(player?.currentTime ?? 0);
-          else onFailed();
-        }}
-      />
-      {watermark ? <Watermark text={watermark} elementRef={mark} fadingRef={fading} onMoved={guard} /> : null}
+    <div
+      ref={frame}
+      data-player-frame
+      data-filled={filled ? "" : undefined}
+      data-turned={rotated ? "" : undefined}
+      className={cx("player-frame overflow-hidden", filled ? "player-frame-filled" : "relative aspect-video w-full")}
+    >
+      <div className="player-stage">
+        <MuxPlayer
+          ref={attach}
+          className="player-mux block h-full w-full"
+          playbackId={playbackId}
+          tokens={tokens}
+          startTime={startTime}
+          playbackRates={speeds}
+          forwardSeekOffset={SEEK_SECONDS}
+          backwardSeekOffset={SEEK_SECONDS}
+          defaultHiddenCaptions={!captions}
+          disableTracking
+          disableCookies
+          noVolumePref
+          noMutedPref
+          onLoadedMetadata={bindController}
+          onPlay={guard}
+          onPlaying={onPlaying}
+          onEnded={onEnded}
+          onError={(event) => {
+            const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null }) | null;
+            const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;
+            // Lo que Mux no da por fatal (reconectando, sin red un momento) lo resuelve él solo.
+            if (error?.fatal === false) return;
+            if (error?.muxCode === TOKEN_EXPIRED) onExpired(player?.currentTime ?? 0);
+            else onFailed();
+          }}
+        />
+        {watermark ? <Watermark text={watermark} elementRef={mark} fadingRef={fading} onMoved={guard} /> : null}
+      </div>
+      {filled ? (
+        <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
+          <button
+            ref={exitButton}
+            type="button"
+            onClick={() => fill(false)}
+            className="min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
+          >
+            {text.controls.exitFullscreen}
+          </button>
+          {portrait ? (
+            <button
+              type="button"
+              aria-pressed={turned}
+              onClick={() => setTurned((current) => !current)}
+              className="min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
+            >
+              {text.filled.turn}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {filled ? (
+        <p role="status" className="pointer-events-none absolute inset-x-0 bottom-0 m-0 p-3 text-center text-body text-text">
+          {hint && portrait && !turned ? text.filled.turnHint : ""}
+        </p>
+      ) : null}
     </div>
   );
 }

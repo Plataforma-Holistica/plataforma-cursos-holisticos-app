@@ -128,8 +128,9 @@ describe("solo la función única de medios firma", () => {
     // Sin analítica, sin cookies y sin imagen dentro de imagen.
     const player = withoutComments(readFileSync(join(src, "app/_video/player.tsx"), "utf8"));
     // Cada una como atributo propio del reproductor, en su línea: no basta que el nombre aparezca.
-    for (const prop of ["disableTracking", "disableCookies", "noVolumePref", "noMutedPref", "defaultHiddenCaptions", "ref={attach}"]) {
-      expect(player, prop).toMatch(new RegExp(`^ {8}${prop.replace(/[{}]/g, "\\$&")}$`, "m"));
+    // Los subtítulos, apagados salvo que la cuenta los haya dejado encendidos (RF-310).
+    for (const prop of ["disableTracking", "disableCookies", "noVolumePref", "noMutedPref", "defaultHiddenCaptions={!captions}", "ref={attach}"]) {
+      expect(player, prop).toMatch(new RegExp(`^ {10}${prop.replace(/[{}!]/g, "\\$&")}$`, "m"));
     }
     expect(player).not.toMatch(/envKey|metadata|beaconCollectionDomain/);
     // Lo que no tiene prop se apaga en el video interno, al conectarse el elemento.
