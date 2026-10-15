@@ -7,6 +7,7 @@ import {
   closedSessionRoute,
   consentsPageStep,
   factorSetupPageStep,
+  lessonPageStep,
   secondFactorPageStep,
   sessionPageStep,
   visitorPageStep,
@@ -64,6 +65,32 @@ describe("una pantalla con sesión", () => {
       kind: "redirect",
       to: "/consentimientos?volver=%2Finicio%2Falgo%3Fx%3D1",
     });
+  });
+});
+
+describe("la pantalla de una lección (T-203; flujo §6.3)", () => {
+  const path = "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002";
+  const back = encodeURIComponent(path);
+
+  it.each([
+    ["pass", { kind: "render", claims }],
+    ["incomplete", { kind: "redirect", to: `/consentimientos?volver=${back}` }],
+    ["suspended", { kind: "suspended" }],
+    ["closeToRecover", { kind: "redirect", to: "/sesion/cerrar" }],
+    ["closeToSignIn", { kind: "redirect", to: "/sesion/cerrar" }],
+    ["unavailable", { kind: "unavailable" }],
+  ] as const)("%s: como cualquier pantalla con sesión", (name, expected) => {
+    expect(lessonPageStep(check(name), path, false)).toEqual(expected);
+    expect(lessonPageStep(check(name), path, true)).toEqual(expected);
+  });
+
+  it("sin sesión, la lección de un curso normal manda a entrar; la del abierto, a registrarse", () => {
+    expect(lessonPageStep(check("anonymous"), path, false)).toEqual({ kind: "redirect", to: `/entrar?volver=${back}` });
+    expect(lessonPageStep(check("anonymous"), path, true)).toEqual({ kind: "redirect", to: `/registro?volver=${back}` });
+  });
+
+  it("si no se supo si el curso es abierto, a entrar: es lo que sirve a quien ya tiene cuenta", () => {
+    expect(lessonPageStep(check("anonymous"), path, null)).toEqual({ kind: "redirect", to: `/entrar?volver=${back}` });
   });
 });
 
