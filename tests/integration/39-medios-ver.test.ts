@@ -133,6 +133,36 @@ describe("ver: una alumna y su cuenta (RN-01)", () => {
       if (grant.kind !== "granted") throw new Error(`No firmó: ${grant.kind}`);
       expect(grant).toMatchObject({ playbackId: "Playback-curso-ver-listado", basis: "subscription", countsForPayout: true });
       expect(grant.until?.getTime()).toBe(end.getTime());
+      // La marca es su correo, de la misma lectura (T-203), y el menú sale de VELOCIDAD_MIN y
+      // VELOCIDAD_MAX de la base.
+      expect(grant.watermark).toBe(who.email);
+      const speeds = (
+        await owner.query<{ minimum: unknown; maximum: unknown }>(
+          "select private.parameter_value('VELOCIDAD_MIN') as minimum, private.parameter_value('VELOCIDAD_MAX') as maximum",
+        )
+      ).rows[0];
+      expect(grant.speeds[0]).toBe(Number(speeds?.minimum));
+      expect(grant.speeds.at(-1)).toBe(Number(speeds?.maximum));
+    });
+  });
+
+  it("decidir al cargar contesta lo mismo que ver, sin firmar (T-203)", async () => {
+    const { who, jar } = await person();
+    await reverted(async (owner) => {
+      const courses = await loadCourses(owner);
+      const media = mediaOn(owner);
+      // Lo que ver contestaría con los mismos hechos, sin la firma.
+      const both = async (lesson: string) => {
+        const watched = await media.getMediaGrant(jar, lesson, "watch");
+        const decided = await media.lessonAccess(jar, lesson);
+        expect(decided).toEqual(watched.kind === "granted" ? { kind: "allowed" } : watched);
+        return decided;
+      };
+      expect(await both(courses.listed)).toEqual({ kind: "denied", account: { allowed: false, reason: "never_subscribed" } });
+      expect(await both(courses.inReview)).toEqual({ kind: "no_video" });
+      await subscribe(owner, who.id, { status: "active", end: new Date((await dbNow(owner)).getTime() + 20 * DAY_MS) });
+      expect(await both(courses.listed)).toEqual({ kind: "allowed" });
+      expect(media.reported).toEqual([]);
     });
   });
 

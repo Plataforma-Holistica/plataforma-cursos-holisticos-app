@@ -7,9 +7,12 @@ import {
   GRANT_MARGIN_SECONDS,
   GRANT_MAX_SECONDS,
   grantLifetimeSeconds,
+  MAX_PLAYBACK_RATES,
   MEDIA_PURPOSES,
   mayReview,
+  playbackRates,
   resolveMediaAccess,
+  watermarkText,
   type MediaAccess,
   type MediaLesson,
   type MediaViewer,
@@ -363,5 +366,82 @@ describe("grantLifetimeSeconds", () => {
         expect((life ?? 0) >= Math.min(duration / speed + GRANT_MARGIN_SECONDS, GRANT_MAX_SECONDS)).toBe(true);
       }),
     );
+  });
+});
+
+describe("playbackRates: el menú de velocidades (RF-312; 03 §5.4)", () => {
+  it("de VELOCIDAD_MIN a VELOCIDAD_MAX en pasos de 0.25", () => {
+    expect(playbackRates(0.75, 2)).toEqual([0.75, 1, 1.25, 1.5, 1.75, 2]);
+  });
+
+  it.each([
+    ["una mínima entre pasos empieza en el siguiente", 0.8, 1.5, [1, 1.25, 1.5]],
+    ["una máxima entre pasos termina en el anterior", 1, 1.6, [1, 1.25, 1.5]],
+    ["las dos iguales: una sola", 1, 1, [1]],
+  ])("%s", (_what, minimum, maximum, expected) => {
+    expect(playbackRates(minimum, maximum)).toEqual(expected);
+  });
+
+  it.each([
+    ["una mínima que no es un número", Number.NaN, 2],
+    ["una máxima que no es un número", 0.75, Number.NaN],
+    ["una mínima cero", 0, 2],
+    ["una mínima negativa", -1, 2],
+    ["una máxima infinita", 0.75, Number.POSITIVE_INFINITY],
+    ["la máxima menor que la mínima", 2, 0.75],
+    ["sin un paso entre las dos", 1.1, 1.2],
+    ["más pasos de los que caben en un menú", 0.25, 0.25 * (MAX_PLAYBACK_RATES + 1)],
+  ])("%s: nulo", (_what, minimum, maximum) => {
+    expect(playbackRates(minimum, maximum)).toBeNull();
+  });
+
+  it("el menú más largo que se acepta", () => {
+    expect(playbackRates(0.25, 0.25 * MAX_PLAYBACK_RATES)).toHaveLength(MAX_PLAYBACK_RATES);
+  });
+
+  it("todo lo que da cae entre las dos, en pasos de 0.25, en orden y sin repetir", () => {
+    fc.assert(
+      fc.property(fc.double({ min: 0.05, max: 4, noNaN: true }), fc.double({ min: 0.05, max: 4, noNaN: true }), (a, b) => {
+        const rates = playbackRates(a, b);
+        if (rates === null) return;
+        expect(rates.length).toBeGreaterThan(0);
+        expect(rates.length).toBeLessThanOrEqual(MAX_PLAYBACK_RATES);
+        for (const [index, rate] of rates.entries()) {
+          expect(rate).toBeGreaterThanOrEqual(a);
+          expect(rate).toBeLessThanOrEqual(b);
+          expect(Number.isInteger(rate * 4)).toBe(true);
+          if (index > 0) expect(rate - rates[index - 1]!).toBe(0.25);
+        }
+      }),
+    );
+  });
+});
+
+describe("watermarkText: el correo de la marca de agua (RF-305; 03 §5.4)", () => {
+  it("el correo, tal cual", () => {
+    expect(watermarkText("ana@correo.com")).toBe("ana@correo.com");
+    expect(watermarkText("Ana.Lopez+cursos@sub.correo.mx")).toBe("Ana.Lopez+cursos@sub.correo.mx");
+  });
+
+  it("no pide más forma que una arroba: un correo que Auth aceptó no deja a nadie sin video", () => {
+    expect(watermarkText("raro@local")).toBe("raro@local");
+  });
+
+  it.each([
+    ["nulo", null],
+    ["algo que no es texto", 7],
+    ["vacío", ""],
+    ["solo espacios", "   "],
+    ["sin arroba", "ana.correo.com"],
+    ["demasiado largo", `${"a".repeat(320)}@correo.com`],
+    ["con un salto de línea", "ana@correo.com\nOtra cosa"],
+    ["con un carácter de control", "ana@correo.com\u0000"],
+    ["con un carácter de control de C1", "ana@correo.com\u0085"],
+    ["con un separador de línea", "ana@correo.com\u2028"],
+    ["con uno que invierte la dirección del texto", "\u202emoc.oerroc@ana"],
+    ["con uno de ancho cero", "ana\u200b@correo.com"],
+    ["con una marca de orden de bytes", "\ufeffana@correo.com"],
+  ])("%s: nulo", (_what, value) => {
+    expect(watermarkText(value)).toBeNull();
   });
 });

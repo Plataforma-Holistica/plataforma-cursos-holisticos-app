@@ -28,6 +28,7 @@ const READY: LessonVideo = {
 const KEY = { id: "LlaveDePrueba01", privateKey: "llave" };
 const TOKENS = { video: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" };
 const NOW = 1_800_000_000;
+const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const DB_NOW = new Date("2026-10-15T12:00:00.000Z");
 const IN_A_MONTH = new Date("2026-11-15T12:00:00.000Z");
 
@@ -37,6 +38,7 @@ const PAYING: WatchFacts = {
   viewer: { accountSuspended: false, content: false, teacherId: null, emailVerified: true },
   account: { suspended: false, paidThrough: IN_A_MONTH, lastRenewalFailedAt: null, endedAt: null, refunded: false, courtesy: [] },
   graceDays: 0,
+  email: "ana@correo.com",
   lesson: { isCurrent: true, provider: "mux", ready: true, durationSeconds: 600, teacherId: TEACHER, courseState: "published", listed: true, isOpen: false },
   playbackId: "PlaybackDeLaBase",
 };
@@ -51,7 +53,7 @@ function grantWith(
     session?: SessionCheck;
     lesson?: LessonVideo | null | "throws";
     facts?: WatchFacts | null | "throws";
-    speed?: number | null | "throws";
+    speeds?: { minimum: number; maximum: number } | null | "throws";
     key?: typeof KEY | null;
     tokens?: typeof TOKENS | null;
   } = {},
@@ -78,10 +80,10 @@ function grantWith(
           if (setup.facts === "throws") return Promise.reject(new Error("sin base"));
           return Promise.resolve(setup.facts === undefined ? PAYING : setup.facts);
         }),
-        minimumSpeed: vi.fn(() => {
+        playbackSpeeds: vi.fn(() => {
           calls.push("velocidad");
-          if (setup.speed === "throws") return Promise.reject(new Error("sin base"));
-          return Promise.resolve(setup.speed === undefined ? 0.75 : setup.speed);
+          if (setup.speeds === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.speeds === undefined ? { minimum: 0.75, maximum: 2 } : setup.speeds);
         }),
       },
       signingKey: () => (setup.key === undefined ? KEY : setup.key),
@@ -95,16 +97,15 @@ function grantWith(
 const reader = { get: () => undefined };
 
 describe("revisar: quién recibe una dirección firmada", () => {
-  it("alguien del equipo con Contenido, para una lección lista: los tres tokens, con la vida de ADR-27, y nunca cuenta", async () => {
+  it("alguien del equipo con Contenido, para una lección lista: los tres tokens, con la vida de ADR-27, y el menú de velocidades", async () => {
     const service = grantWith();
+    // Revisar nunca cuenta, y no habla de la cuenta: sin base, sin marca ni hasta cuándo.
     expect(await service.getMediaGrant(reader, LESSON, "review")).toEqual({
       kind: "granted",
       playbackId: "PlaybackDeLaBase",
       tokens: TOKENS,
       expiresAt: NOW + 800 + 600,
-      basis: "review",
-      countsForPayout: false,
-      until: null,
+      speeds: RATES,
     });
     expect(service.calls).toEqual(["guarda del equipo", `lección ${LESSON}`, "velocidad", "firma"]);
     // El playback id es el de la base, y la llave, la de la configuración.
@@ -149,8 +150,10 @@ describe("revisar: quién recibe una dirección firmada", () => {
   it.each<[string, Parameters<typeof grantWith>[0]]>([
     ["la base no contestó la lección", { lesson: "throws" }],
     ["falta la llave de firma", { key: null }],
-    ["falta la velocidad mínima", { speed: null }],
-    ["la base no contestó la velocidad", { speed: "throws" }],
+    ["faltan las velocidades", { speeds: null }],
+    ["la base no contestó las velocidades", { speeds: "throws" }],
+    ["unas velocidades sin un paso entre ellas", { speeds: { minimum: 1.1, maximum: 1.2 } }],
+    ["una velocidad mínima que no sirve", { speeds: { minimum: 0, maximum: 2 } }],
     ["la llave no sirve", { tokens: null }],
     ["una lección sin duración", { lesson: { ...READY, durationSeconds: 0 } }],
   ])("%s: unavailable, y se reporta", async (_what, setup) => {
@@ -167,13 +170,15 @@ describe("revisar: quién recibe una dirección firmada", () => {
 });
 
 describe("ver: la guarda de sesión primero", () => {
-  it("una alumna que paga: firma, con la base, si cuenta y hasta cuándo", async () => {
+  it("una alumna que paga: firma, con su correo para la marca, las velocidades, la base, si cuenta y hasta cuándo", async () => {
     const service = grantWith();
     expect(await service.getMediaGrant(reader, LESSON, "watch")).toEqual({
       kind: "granted",
       playbackId: "PlaybackDeLaBase",
       tokens: TOKENS,
       expiresAt: NOW + 1400,
+      speeds: RATES,
+      watermark: "ana@correo.com",
       basis: "subscription",
       countsForPayout: true,
       until: IN_A_MONTH,
@@ -298,6 +303,78 @@ describe("ver: lo que no se supo se reporta, y nunca pide pagar", () => {
     const service = grantWith({ facts });
     expect(await service.getMediaGrant(reader, LESSON, "watch")).toMatchObject({ kind: "denied" });
     expect(service.reported).toEqual(["media_email_unverified"]);
+  });
+});
+
+describe("ver: la marca de agua (RF-305)", () => {
+  it.each<[string, unknown]>([
+    ["sin correo", null],
+    ["un correo vacío", ""],
+    ["un correo sin arroba", "ana.correo.com"],
+  ])("%s: unavailable, se reporta y no se firma: sin marca no hay video", async (_what, email) => {
+    const service = grantWith({ facts: { ...PAYING, email: email as string | null } });
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["media_watermark_unavailable"]);
+    expect(service.sign).not.toHaveBeenCalled();
+  });
+
+  it("un correo que no sirve no cambia lo que se le dice a quien no tiene acceso: PA-33, no PA-18", async () => {
+    const service = grantWith({ facts: { ...NEVER_PAID, email: null } });
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).toMatchObject({ kind: "denied" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("revisar no lleva marca (llega con T-405)", async () => {
+    expect(await grantWith().getMediaGrant(reader, LESSON, "review")).not.toHaveProperty("watermark");
+  });
+});
+
+describe("lessonAccess: decidir sin firmar (la página de la lección, al cargar)", () => {
+  it("una alumna que paga: allowed, sin leer la velocidad ni firmar, y sin playback id ni base", async () => {
+    const service = grantWith();
+    expect(await service.lessonAccess(reader, LESSON)).toEqual({ kind: "allowed" });
+    expect(service.calls).toEqual(["guarda de sesión", `hechos ${LESSON}`]);
+    expect(service.sign).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, Parameters<typeof grantWith>[0], unknown]>([
+    ["quien nunca pagó", { facts: NEVER_PAID }, { kind: "denied", account: { allowed: false, reason: "never_subscribed" } }],
+    ["una lección que no existe", { facts: { ...PAYING, lesson: null, playbackId: null } }, { kind: "no_video" }],
+    ["un curso que no se puede ver", { facts: { ...PAYING, lesson: { ...PAYING.lesson!, listed: false } } }, { kind: "no_video" }],
+    ["un id sin forma", {}, { kind: "no_video" }],
+    ["la cuenta suspendida", { session: { kind: "suspended" } }, { kind: "suspended" }],
+    ["sin sesión", { session: { kind: "anonymous" } }, { kind: "refused" }],
+    ["si no se supo", { facts: "throws" }, { kind: "unavailable" }],
+    ["la regla dio acceso y la base no soltó el video", { facts: { ...PAYING, playbackId: null } }, { kind: "unavailable" }],
+  ])("%s: lo mismo que contestaría ver, sin firmar", async (what, setup, expected) => {
+    const service = grantWith(setup);
+    const id = what === "un id sin forma" ? "no-es-un-id" : LESSON;
+    expect(await service.lessonAccess(reader, id)).toEqual(expected);
+    expect(service.sign).not.toHaveBeenCalled();
+    expect(service.calls).not.toContain("velocidad");
+  });
+
+  it("no mira la marca: eso es de firmar", async () => {
+    const service = grantWith({ facts: { ...PAYING, email: null } });
+    expect(await service.lessonAccess(reader, LESSON)).toEqual({ kind: "allowed" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("contesta igual que ver para cada combinación de hechos", async () => {
+    // La misma decisión, salvo firmar: lo que ver da, lessonAccess lo dice.
+    const cases: WatchFacts[] = [
+      PAYING,
+      NEVER_PAID,
+      { ...NEVER_PAID, lesson: { ...PAYING.lesson!, isOpen: true } },
+      { ...NEVER_PAID, viewer: { ...NEVER_PAID.viewer, teacherId: TEACHER }, lesson: { ...PAYING.lesson!, listed: false, courseState: "withdrawn" } },
+      { ...PAYING, viewer: { ...PAYING.viewer, accountSuspended: true }, account: { ...PAYING.account, suspended: true } },
+      { ...PAYING, lesson: { ...PAYING.lesson!, ready: false } },
+    ];
+    for (const facts of cases) {
+      const watched = await grantWith({ facts }).getMediaGrant(reader, LESSON, "watch");
+      const decided = await grantWith({ facts }).lessonAccess(reader, LESSON);
+      expect(decided).toEqual(watched.kind === "granted" ? { kind: "allowed" } : watched);
+    }
   });
 });
 

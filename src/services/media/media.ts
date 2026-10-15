@@ -13,9 +13,9 @@ import { databaseMediaStore } from "./store";
 // para ver), la base, la llave de firma de Mux y el registro de errores. Lo que importan las
 // pantallas.
 
-export type { MediaGrant, ReviewGrant } from "./grant";
+export type { LessonAccess, MediaGrant, ReviewGrant } from "./grant";
 
-export const { getMediaGrant } = createMediaGrant(
+export const { getMediaGrant, lessonAccess } = createMediaGrant(
   { report: reportFailure },
   {
     teamStanding,

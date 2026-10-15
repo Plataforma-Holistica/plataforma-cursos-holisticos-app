@@ -1081,6 +1081,24 @@ falla. Dieciocho precisiones que la tabla no dice:
     de las dos tablas (sin fin es nulo): la regla la leería como «no se supo». Sin falla de cobro, la gracia no se usa y va en 0; con falla y sin
     el parámetro de esa hora, va `NaN` y la regla contesta «no se supo». Una cuenta que pasa
     la guarda sin correo verificado se reporta (`media_email_unverified`).
+  - **Lo que lleva una dirección firmada** (T-203). Los dos caminos traen el menú de
+    velocidades (`speeds`, de `VELOCIDAD_MIN` a `VELOCIDAD_MAX` en pasos de 0.25, con
+    `playbackRates` del dominio; los dos parámetros se leen como servidor en una sola
+    consulta, porque una cuenta no lee parámetros). Ver trae además `watermark`, el correo
+    de quien ve para la marca de agua, de `private.media_facts()` (`viewer.email`, de
+    `auth.users`, en la misma foto): no del token, que tendría el correo de antes de un
+    cambio. Sin un correo que sirva (`watermarkText`: texto con arroba, sin caracteres de
+    control y de largo acotado; no `parseEmail`, que podría dejar sin video a quien pagó) no
+    hay video: `unavailable`, reportado (`media_watermark_unavailable`). Se mira solo con el
+    acceso ya dado: a quien no lo tiene se le dice PA-33, no «no se pudo». Revisar no lleva
+    marca (llega con T-405) y ya no habla de la base ni de la cuenta: `ReviewGrant` es su
+    propio tipo, no un recorte del de ver.
+  - **Decidir sin firmar** (T-203): `lessonAccess(reader, lessonId)` contesta `allowed`,
+    `denied`, `suspended`, `no_video`, `refused` o `unavailable`, lo mismo que contestaría
+    ver, porque comparte con él la decisión (`decideWatch`) hasta antes de firmar. Es lo que
+    la página de la lección pregunta al cargar, para pintar PA-33 sin pedir un video. No lee
+    las velocidades, no mira la marca, no firma y nunca devuelve el playback id ni la base
+    de acceso: la prueba de arquitectura lo exige.
   - Lo que no tiene video que firmar (no existe, retirada, de prueba, sin terminar, un id
     sin forma) contesta igual, `no_video`. El playback id sale de la base, nunca de quien
     pide. T-202 no anota la reproducción ni cuenta las simultáneas (T-204), y los recursos
@@ -1097,7 +1115,8 @@ falla. Dieciocho precisiones que la tabla no dice:
     `src/` firme (busca las maneras de Node y del navegador, y los paquetes de JWT, y desde
     T-202 las direcciones firmadas de archivos), que para revisar la lección se lea con
     `asUser` y para ver los hechos con `asServer`, que el playback id salga solo de
-    `records.ts`, y que cada camino use su guarda. La llave de firma es RSA de 2048 bits o
+    `records.ts`, que cada camino use su guarda, y que solo revisar y ver lleguen a la firma
+    (`lessonAccess` no). La llave de firma es RSA de 2048 bits o
     más; una que se lee pero no firma contesta lo mismo que una que no sirve.
   - El adaptador va en `src/adapters/mux/`, no en `adapters/media/mux` como decía el TRD:
     aquí cada proveedor es su carpeta.

@@ -81,16 +81,14 @@ describe("reviewCodeOutcome", () => {
 });
 
 describe("videoAnswerOf", () => {
-  it("traduce los tokens a los nombres de Mux Player; la caducidad y la base no viajan", () => {
+  it("traduce los tokens a los nombres de Mux Player; la caducidad no viaja", () => {
     expect(
       videoAnswerOf({
         kind: "granted",
         playbackId: "PlaybackDePrueba",
         tokens: { video: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" },
         expiresAt: 99,
-        basis: "review",
-        countsForPayout: false,
-        until: null,
+        speeds: [0.75, 1, 1.25, 1.5, 1.75, 2],
       }),
     ).toEqual({ kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" } });
   });

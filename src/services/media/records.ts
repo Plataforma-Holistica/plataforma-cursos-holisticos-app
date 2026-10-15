@@ -8,7 +8,7 @@ import type { AccountFacts } from "@/domain/access/account-access";
 import { COURSE_STATES, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
 
 // Lo que la función única de medios le pregunta a la base: la lección con su video para
-// revisar, los hechos para ver, y la velocidad mínima. Cada función recibe la transacción ya
+// revisar, los hechos para ver, y las velocidades. Cada función recibe la transacción ya
 // abierta.
 
 /** La lección y su video, como los necesita la regla. El playback id sale de aquí, nunca de quien pide. */
@@ -70,6 +70,8 @@ export interface WatchFacts {
   viewer: MediaViewer;
   account: AccountFacts;
   graceDays: number;
+  /** El correo de quien actúa, para la marca de agua (T-203): de la misma foto que el resto. */
+  email: string | null;
   lesson: (MediaLesson & { durationSeconds: number }) | null;
   playbackId: string | null;
 }
@@ -78,7 +80,9 @@ const instant = z.string().transform((value) => new Date(value));
 const factsRow = z
   .object({
     now: instant,
-    viewer: z.object({ suspended: z.boolean(), email_verified: z.boolean(), teacher_id: z.string().nullable() }).strict(),
+    viewer: z
+      .object({ suspended: z.boolean(), email_verified: z.boolean(), teacher_id: z.string().nullable(), email: z.string().nullable() })
+      .strict(),
     subscription: z
       .object({
         paid_through: instant.nullable(),
@@ -145,6 +149,7 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
       courtesy: facts.courtesy,
     },
     graceDays,
+    email: facts.viewer.email,
     lesson:
       lesson === null
         ? null
@@ -162,11 +167,25 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
   };
 }
 
-const speedRow = z.object({ value: z.unknown() });
+const speedsRow = z.object({ minimum: z.unknown(), maximum: z.unknown() });
 
-/** `VELOCIDAD_MIN`, o nulo si falta o no es un número positivo. */
-export async function readMinimumSpeed(tx: Tx): Promise<number | null> {
-  const [row] = await tx.query(sql`select private.parameter_value('VELOCIDAD_MIN') as value`, speedRow);
-  const value = typeof row?.value === "string" ? Number(row.value) : typeof row?.value === "number" ? row.value : Number.NaN;
-  return Number.isFinite(value) && value > 0 ? value : null;
+/** Un parámetro de velocidad guardado como número o como texto (`"0.75"`), o nulo si no es un número. */
+function speed(value: unknown): number | null {
+  const number = typeof value === "string" ? Number(value) : typeof value === "number" ? value : Number.NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
+/**
+ * `VELOCIDAD_MIN` y `VELOCIDAD_MAX`, en una sola lectura, o nulo si falta alguna o no es un
+ * número. La mínima fija la vida de la dirección (ADR-27); las dos, el menú. Que tengan
+ * sentido (positivas, en orden) lo deciden las reglas del dominio, que contestan nulo si no.
+ */
+export async function readPlaybackSpeeds(tx: Tx): Promise<{ minimum: number; maximum: number } | null> {
+  const [row] = await tx.query(
+    sql`select private.parameter_value('VELOCIDAD_MIN') as minimum, private.parameter_value('VELOCIDAD_MAX') as maximum`,
+    speedsRow,
+  );
+  const minimum = speed(row?.minimum);
+  const maximum = speed(row?.maximum);
+  return minimum === null || maximum === null ? null : { minimum, maximum };
 }
