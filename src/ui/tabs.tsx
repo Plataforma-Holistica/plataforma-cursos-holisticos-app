@@ -16,6 +16,12 @@ export interface TabItem {
   id: string;
   label: string;
   panel: ReactNode;
+  /**
+   * Si el panel tiene algo que recibe el foco (enlaces, botones). Entonces el panel mismo no es
+   * una parada de tabulación: Tab va a lo primero de adentro. Si no, el panel la es, para que
+   * se pueda llegar a leerlo.
+   */
+  hasFocusableContent?: boolean;
 }
 
 export interface TabsProps {
@@ -99,7 +105,7 @@ export function Tabs({ label, items, idPrefix }: TabsProps) {
           role="tabpanel"
           id={`${idPrefix}-${item.id}-panel`}
           aria-labelledby={`${idPrefix}-${item.id}-tab`}
-          tabIndex={0}
+          tabIndex={item.hasFocusableContent === true ? undefined : 0}
           hidden={item.id !== active}
         >
           {item.panel}

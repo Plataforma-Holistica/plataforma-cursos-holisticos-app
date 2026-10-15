@@ -26,7 +26,15 @@ export interface LessonStore {
   courseIsOpen(slug: string): Promise<boolean | null>;
 }
 
-export function createLessons(deps: { store: LessonStore; report: (code: FailureCode) => Promise<void> }) {
+/** Cuánto se recuerda si un curso es abierto: es un dato público, y la página la puede pedir cualquiera. */
+export const OPEN_MEMORY_MS = 30_000;
+/** Cuántos cursos se recuerdan a la vez: pasado eso, se olvida todo y se empieza de nuevo. */
+const OPEN_MEMORY_SIZE = 500;
+
+export function createLessons(deps: { store: LessonStore; report: (code: FailureCode) => Promise<void>; now?: () => number }) {
+  const now = deps.now ?? Date.now;
+  const remembered = new Map<string, { value: boolean | null; at: number }>();
+
   /**
    * La página de la lección `lessonId` del curso `slug`. `not_found` si el curso no está
    * listado, la lección no está vigente o es de otro curso, o algo no tiene forma: todo eso se
@@ -49,14 +57,24 @@ export function createLessons(deps: { store: LessonStore; report: (code: Failure
    * Si el curso `slug` es el abierto, para quien llega sin sesión: decide si va a registrarse
    * o a entrar. Nulo si no existe, no está listado o no se supo, y la guarda lo trata como «a
    * entrar». No se reporta: es una lectura de cortesía antes de una redirección.
+   *
+   * Se recuerda treinta segundos por curso, también el nulo y también si no se supo: sin eso,
+   * cada visita sin sesión abriría una transacción en la misma reserva de conexiones con la
+   * que la gente entra. Es un dato que ya es público (`published_courses.is_open`).
    */
   async function courseIsOpen(slug: string): Promise<boolean | null> {
     if (!SLUG.test(slug)) return null;
+    const known = remembered.get(slug);
+    if (known !== undefined && now() - known.at < OPEN_MEMORY_MS) return known.value;
+    let value: boolean | null;
     try {
-      return await deps.store.courseIsOpen(slug);
+      value = await deps.store.courseIsOpen(slug);
     } catch {
-      return null;
+      value = null;
     }
+    if (remembered.size >= OPEN_MEMORY_SIZE) remembered.clear();
+    remembered.set(slug, { value, at: now() });
+    return value;
   }
 
   return { lessonPage, courseIsOpen };

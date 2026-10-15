@@ -38,6 +38,16 @@ describe("Tabs", () => {
     expect(screen.getByRole("tabpanel", { name: "Temario" })).toHaveFocus();
   });
 
+  it("un panel con enlaces no es una parada de tabulación: Tab va al primer enlace", async () => {
+    const user = userEvent.setup();
+    const items = [{ id: "temario", label: "Temario", panel: <a href="#uno">Uno</a>, hasFocusableContent: true }, ...ITEMS.slice(1)];
+    render(<Tabs label="Partes" items={items} idPrefix="leccion" />);
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("link", { name: "Uno" })).toHaveFocus();
+    expect(screen.getByRole("tabpanel", { name: "Temario" })).not.toHaveAttribute("tabindex");
+  });
+
   it("las flechas cambian de pestaña y dan la vuelta; Inicio y Fin van a los extremos", async () => {
     const user = userEvent.setup();
     render(<Tabs label="Partes" items={ITEMS} idPrefix="leccion" />);

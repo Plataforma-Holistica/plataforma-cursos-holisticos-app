@@ -169,7 +169,33 @@ test("con acceso y sin JavaScript: la página se lee, y dice que para ver hace f
   await signIn(page, who, lessonUrl(SLUG, lesson));
   await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
   await expect(page.getByText("Para ver la lección hace falta JavaScript.")).toBeVisible();
-  // Sin pestañas, todo el temario y «Sobre esta lección» se leen.
+  // El temario y «Sobre esta lección» se leen, sin pestañas.
   await expect(page.getByRole("tablist")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, reproduciendo" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Sobre esta lección" })).toBeVisible();
+  await expect(page.getByText("Un curso para probar la lección.").first()).toBeVisible();
+  await context.close();
+});
+
+test("en un teléfono: el reproductor arriba, las pestañas Temario y Sobre esta lección, y las reglas de accesibilidad", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  await holdOutside(context);
+  await signIn(page, who, lessonUrl(SLUG, lesson));
+  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+  const tabs = page.getByRole("tablist", { name: "Partes de la lección" });
+  await expect(tabs).toBeVisible();
+  await expect(tabs.getByRole("tab")).toHaveText(["Temario", "Sobre esta lección"]);
+  // La columna de escritorio no se ve, y el temario de la pestaña sí.
+  await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, reproduciendo" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, reproduciendo" })).toBeVisible();
+  await page.getByRole("tab", { name: "Sobre esta lección" }).click();
+  await expect(page.getByRole("tabpanel", { name: "Sobre esta lección" })).toContainText("Un curso para probar la lección.");
+  expect(await a11yViolations(page)).toEqual([]);
+  await page.getByRole("button", { name: "Reproducir la lección" }).click();
+  await expect(page.locator("[data-player-frame] [data-watermark]")).toHaveText(who.email);
+  expect(await a11yViolations(page)).toEqual([]);
   await context.close();
 });

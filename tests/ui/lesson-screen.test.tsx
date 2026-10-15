@@ -116,8 +116,9 @@ describe("el lugar del reproductor", () => {
     expect(actions.watchLessonAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON);
     await screen.findByTestId("reproductor");
     expect(player.last).toMatchObject({ playbackId: "P", watermark: "ana@correo.com", speeds: [0.75, 1, 2], startTime: 0 });
-    // El botón se fue: el foco quedó en el lugar del reproductor.
     expect(within(area()).getByTestId("reproductor")).toBeVisible();
+    // El botón se fue: el foco quedó en el lugar del reproductor.
+    expect(area().querySelector("[tabindex='-1']")).toHaveFocus();
   });
 
   it("sin acceso desde que carga: PA-33, sin botón de reproducir", () => {
@@ -147,9 +148,10 @@ describe("el lugar del reproductor", () => {
   it.each([
     [{ kind: "no_video" } as const, "Esta lección no está disponible por ahora.", false],
     [{ kind: "unavailable" } as const, "Algo falló de nuestro lado. No es por algo que hayas hecho.", true],
-  ])("al cargar %j: lo dice", (initial, sentence, retry) => {
-    show({ initial });
-    expect(screen.getByText(sentence)).toBeVisible();
+  ])("al cargar %j: lo dice, también a quien no lo ve", (initial, sentence, retry) => {
+    const { area } = show({ initial });
+    expect(within(area()).getByText(sentence, { selector: "p:not([role=status])" })).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(sentence);
     expect(screen.queryByRole("button", { name: "Reintentar" }) !== null).toBe(retry);
   });
 
@@ -190,6 +192,30 @@ describe("el lugar del reproductor", () => {
     await user.click(await screen.findByRole("button", { name: "falla" }));
     expect(screen.getByRole("status")).toHaveTextContent("No pudimos cargar el video.");
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeVisible();
+  });
+
+  it("si el reproductor tenía el foco y se va con un error, el foco no cae al documento", async () => {
+    const { user, area } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    const fails = await screen.findByRole("button", { name: "falla" });
+    fails.focus();
+    await user.click(fails);
+    expect(area().querySelector("[tabindex='-1']")).toHaveFocus();
+  });
+
+  it("PA-33 que llega al reproducir se anuncia", async () => {
+    actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Esta lección pide una suscripción Con una suscripción ves todo el catálogo."));
+  });
+
+  it("la acción que manda a la página (la sesión ya no pasa) no se toma por un error", async () => {
+    actions.watchLessonAction.mockRejectedValueOnce(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await waitFor(() => expect(actions.watchLessonAction).toHaveBeenCalledOnce());
+    expect(screen.queryByText("Algo falló de nuestro lado. No es por algo que hayas hecho.")).toBeNull();
   });
 
   it("al terminar: «Lección terminada», la siguiente y volver a ver, sin arrancar sola (D-07)", async () => {

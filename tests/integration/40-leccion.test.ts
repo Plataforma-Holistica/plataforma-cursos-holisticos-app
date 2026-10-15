@@ -150,20 +150,21 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
     await reverted(async (owner) => {
       await loadCourse(owner, "leccion-abierto", true);
       await loadCourse(owner, "leccion-cerrado", false);
-      const service = lessons(owner);
-      expect(await service.courseIsOpen("leccion-abierto")).toBe(false);
+      // Cada pregunta con un servicio nuevo: el de verdad recuerda la respuesta treinta segundos.
+      const ask = (slug: string) => lessons(owner).courseIsOpen(slug);
+      expect(await ask("leccion-abierto")).toBe(false);
       await asSystem(owner);
       await owner.query("update public.published_courses set is_open = true where slug = 'leccion-abierto'");
       await asOwner(owner);
-      expect(await service.courseIsOpen("leccion-abierto")).toBe(false);
+      expect(await ask("leccion-abierto")).toBe(false);
       await asSystem(owner);
       await owner.query(
         "update public.course_registry set is_open = true, open_since = now() where course_id = (select course_id from public.published_courses where slug = 'leccion-abierto')",
       );
       await asOwner(owner);
-      expect(await service.courseIsOpen("leccion-abierto")).toBe(true);
-      expect(await service.courseIsOpen("leccion-cerrado")).toBeNull();
-      expect(await service.courseIsOpen("no-existe")).toBeNull();
+      expect(await ask("leccion-abierto")).toBe(true);
+      expect(await ask("leccion-cerrado")).toBeNull();
+      expect(await ask("no-existe")).toBeNull();
     });
   });
 });

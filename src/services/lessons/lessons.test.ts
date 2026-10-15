@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 
-import { createLessons } from "./lessons";
+import { createLessons, OPEN_MEMORY_MS } from "./lessons";
 import type { LessonRowData } from "./page";
 
 vi.mock("server-only", () => ({}));
@@ -75,6 +75,28 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
     const service = lessonsWith({ open });
     expect(await service.courseIsOpen("respirar")).toBe(expected);
     expect(service.reported).toEqual([]);
+  });
+
+  it("lo recuerda treinta segundos por curso, también si no se supo; pasado eso, pregunta otra vez", async () => {
+    let clock = 1_000;
+    const storeOpen = vi.fn(() => Promise.resolve(true));
+    const service = createLessons({ store: { courseLessons: vi.fn(), courseIsOpen: storeOpen }, report: () => Promise.resolve(), now: () => clock });
+    expect(await service.courseIsOpen("respirar")).toBe(true);
+    clock += OPEN_MEMORY_MS - 1;
+    expect(await service.courseIsOpen("respirar")).toBe(true);
+    expect(storeOpen).toHaveBeenCalledOnce();
+    // Otro curso es otra pregunta.
+    await service.courseIsOpen("dormir");
+    expect(storeOpen).toHaveBeenCalledTimes(2);
+    clock += 1;
+    await service.courseIsOpen("respirar");
+    expect(storeOpen).toHaveBeenCalledTimes(3);
+
+    const failing = vi.fn(() => Promise.reject(new Error("sin base")));
+    const unsure = createLessons({ store: { courseLessons: vi.fn(), courseIsOpen: failing }, report: () => Promise.resolve(), now: () => clock });
+    expect(await unsure.courseIsOpen("respirar")).toBeNull();
+    expect(await unsure.courseIsOpen("respirar")).toBeNull();
+    expect(failing).toHaveBeenCalledOnce();
   });
 
   it("un slug sin forma no llega a la base", async () => {
