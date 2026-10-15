@@ -176,6 +176,17 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     practicesAction: /Promise<CatalogState> \{\n\s+return listAction\("practices", previous, form\);\n\}$/,
     levelsAction: /Promise<CatalogState> \{\n\s+return listAction\("levels", previous, form\);\n\}$/,
   },
+  "src/app/admin/_revision/actions.ts": {
+    // Dar el código otra vez: el del catálogo, que comprueba la misma puerta de Contenido.
+    reviewCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*reviewCodeOutcome\(await giveCatalogCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Aprobar: del formulario solo llega qué botón y qué curso. Preguntar no llama a nadie.
+    approveAction:
+      /if \(request\.step === "ask"\) return \{ kind: "confirming", course: request\.course, attempt \};[\s\S]*approveOutcome\(await approveCourse\(jar, \{ course: request\.course \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+    // El video: solo la función única de medios firma, y corre la guarda. Lo que llega es la
+    // lección, nunca un playback id.
+    lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
+  },
 };
 
 /** El texto de una función exportada de un archivo de acciones: de su `export` a la llave que la cierra. */
@@ -328,7 +339,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib", "_practicas"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib", "_practicas", "_revision"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -356,13 +367,18 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([
           ["equipo", "config"],
           ["practicas", "content"],
+          ["revision", "content"],
         ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
         const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
         expect(body.split("\n").filter((line) => line.trim() !== "" && !/^\s*\/\//.test(line))).toHaveLength(entries.length);
         expect(table).toMatch(/capability: Capability;/);
         const sections = under.filter((source) => /\/_[a-z]+\/section\.tsx$/.test(source.file));
-        expect(sections.map((source) => source.file).sort()).toEqual(["src/app/admin/_equipo/section.tsx", "src/app/admin/_practicas/section.tsx"]);
+        expect(sections.map((source) => source.file).sort()).toEqual([
+          "src/app/admin/_equipo/section.tsx",
+          "src/app/admin/_practicas/section.tsx",
+          "src/app/admin/_revision/section.tsx",
+        ]);
         for (const section of sections) expect(section.code).not.toMatch(/\brequire\w+\(|\bcheckSession\b|\bteamStanding\b/);
       });
     });
@@ -576,6 +592,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-equipo-personas",
       "bloque-equipo-restablecer",
       "bloque-nombre",
+      "bloque-revision-codigo",
+      "bloque-revision-cola",
       "bloque-sesiones",
     ]);
   });

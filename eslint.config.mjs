@@ -105,6 +105,14 @@ const noProviderSdks = {
     "Esta capa no habla con proveedores ni con la base: pídeselo a un servicio (TRD §4.2).",
 };
 
+// El reproductor de video (Mux Player, y media-chrome, sobre el que está hecho) solo lo carga
+// el reproductor de la pantalla de revisión (`src/app/admin/_revision/player.tsx`, T-108), y
+// esa pantalla lo pide con `next/dynamic`: pesa, y no debe viajar con ninguna otra página.
+const noVideoPlayer = {
+  group: ["@mux/mux-player", "@mux/mux-player/*", "@mux/mux-player-react", "@mux/mux-player-react/*", "media-chrome", "media-chrome/*", "hls.js"],
+  message: "El reproductor de video solo se importa en src/app/admin/_revision/player.tsx, que se carga con next/dynamic (T-108).",
+};
+
 // El SDK del registro de errores solo vive en su adaptador (RNF-16, TRD §10.5): ahí
 // están apagada la recolección y puesto el filtro de datos personales. Desde cualquier
 // otro lado, `Sentry.setUser({ email })` o `Sentry.logger` se los saltarían.
@@ -595,6 +603,16 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": [
         "error",
+        { patterns: [noProviderSdks, noVideoPlayer, noDevFiles], paths: noOwnRequire },
+      ],
+    },
+  },
+  {
+    // El único que importa el reproductor.
+    files: ["**/src/app/admin/_revision/player.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
         { patterns: [noProviderSdks, noDevFiles], paths: noOwnRequire },
       ],
     },
@@ -604,7 +622,7 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": [
         "error",
-        { patterns: [noProviderSdks, noWholeCatalog, noDevFiles], paths: noOwnRequire },
+        { patterns: [noProviderSdks, noVideoPlayer, noWholeCatalog, noDevFiles], paths: noOwnRequire },
       ],
     },
   },

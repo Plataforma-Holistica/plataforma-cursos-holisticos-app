@@ -1317,6 +1317,161 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     expect(await a11yViolations(page)).toEqual([]);
   });
 
+  // PA-61 y PA-62 mínimas, los cursos por revisar (T-108). Van aquí porque aprobar escribe en
+  // la auditoría y porque usan a la misma persona con Contenido. La aplicación firma con una
+  // llave de prueba (`playwright.config.ts`), y el navegador corta toda petición que no sea a
+  // ella: nunca se sale a Mux, y así se ve qué se le habría pedido a quién.
+  const REVIEW = "/admin/revision";
+  /** Un curso por revisar, cargado como el guion local: una lección «de Mux» (inventada) y una de prueba. */
+  const loadReviewCourse = async (slug: string) => {
+    const course = {
+      slug,
+      title: `Curso ${slug}`,
+      practice: "revision-e2e",
+      level: "basico",
+      modules: [
+        {
+          title: "Uno",
+          lessons: [
+            { title: "Con Mux", video: { provider: "mux", asset_id: `Asset${slug.replaceAll("-", "")}`, playback_id: `Playback${slug.replaceAll("-", "")}`, duration_seconds: 356 } },
+            { title: "De prueba", video: { provider: "test", asset_id: `${slug}-2`, playback_id: "p", duration_seconds: 60 } },
+          ],
+        },
+      ],
+    };
+    const [loaded] = await ownerQuery<{ answer: string }>(
+      `with declared as materialized (
+         select set_config('app.actor_kind', 'system', true), set_config('app.local_courses', 'on', true)),
+       practice as materialized (select private.system_catalog_add('practices', 'Revisión e2e') from declared),
+       teacher as materialized (
+         select private.system_add_teacher('Maestra de revisión', 'maestra-revision-e2e', null) as id from practice)
+       select private.system_load_course((select id from teacher), $1::jsonb) ->> 'answer' as answer from teacher`,
+      [JSON.stringify(course)],
+    );
+    expect(loaded?.answer).toBe("loaded");
+    return (await ownerQuery<{ id: string }>("select course_id::text as id from public.published_courses where slug = $1", [slug]))[0]?.id ?? "";
+  };
+  const listedNow = async (slug: string) =>
+    (await ownerQuery<{ listed: boolean }>("select is_listed as listed from public.published_courses where slug = $1", [slug]))[0]?.listed;
+  /**
+   * Corta toda petición que no sea a la aplicación, y anota a dónde iba. Con `hold`, las de
+   * Mux se quedan sin contestar hasta `release()`: mientras tanto el reproductor sigue montado
+   * y se puede mirar por dentro.
+   */
+  const cutOutside = async (context: BrowserContext, hold = false) => {
+    const outside: string[] = [];
+    const held: { abort: () => Promise<void> }[] = [];
+    let holding = hold;
+    await context.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.hostname === "localhost") return route.continue();
+      outside.push(url.href);
+      if (holding && url.hostname.endsWith(".mux.com")) {
+        held.push({ abort: () => route.abort() });
+        return;
+      }
+      return route.abort();
+    });
+    const release = async () => {
+      holding = false;
+      for (const each of held.splice(0)) await each.abort();
+    };
+    return Object.assign(outside, { release });
+  };
+
+  test("revisión con JavaScript: ve la cola, reproduce sin que nada salga a Mux Data ni a Google, y aprueba en dos pasos", async ({ page }) => {
+    test.setTimeout(240_000);
+    const course = await loadReviewCourse("revision-e2e");
+    const outside = await cutOutside(page.context(), true);
+    // Chrome de verdad trae `window.chrome`, y con él Mux Player ofrece enviar a un televisor y
+    // pide un script de Google. El navegador de prueba no lo trae: se le pone, para que la
+    // prueba vea lo que pasaría en Chrome.
+    await page.context().addInitScript(() => {
+      (window as unknown as { chrome?: object }).chrome ??= {};
+    });
+    await enterAdmin(page, ana, "/admin");
+    await page.getByRole("link", { name: "Cursos por revisar" }).click();
+    await expect(page).toHaveURL(REVIEW);
+    await expect(page.getByRole("heading", { level: 1, name: "Cursos por revisar" })).toBeVisible();
+    const card = page.getByRole("article").filter({ hasText: "Curso revision-e2e" });
+    await expect(card.getByText("Sin video en Mux.")).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+
+    // Lo servido no trae nada del video: ni su playback id ni un token.
+    const served = await (await page.request.get(REVIEW)).text();
+    expect(served).not.toContain("Playbackrevisione2e");
+    expect(served).not.toMatch(/token=|eyJhbGciOiJSUzI1Ni/);
+
+    // «Ver»: el foco va al reproductor, y lo único que se le pide a alguien de fuera es el
+    // video a Mux, con su dirección firmada. Mux no la acepta (se cortó): la pantalla lo dice.
+    await card.getByRole("button", { name: "Ver «Con Mux»" }).click();
+    await expect(page.getByRole("heading", { level: 2, name: "Viendo: Con Mux" })).toBeFocused();
+    await expect(page.getByText("Vista previa. No genera puntos.")).toBeVisible();
+    // En el video interno, el envío a otra pantalla y la imagen dentro de imagen, apagados.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const media = (document.querySelector("mux-player") as unknown as { media?: { nativeEl?: HTMLVideoElement } } | null)?.media?.nativeEl;
+          return media ? [media.disableRemotePlayback, media.disablePictureInPicture] : null;
+        }),
+      )
+      .toEqual([true, true]);
+    // La pantalla, con el reproductor montado, pasa las reglas de accesibilidad.
+    expect(await a11yViolations(page)).toEqual([]);
+    await expect.poll(() => outside.some((href) => href.startsWith("https://stream.mux.com/Playbackrevisione2e.m3u8?") && href.includes("token=")), { timeout: 60_000 }).toBe(true);
+    // Con lo visto por dentro, se cortan las de Mux: el reproductor falla y la pantalla lo dice.
+    await outside.release();
+    await expect(page.getByText("No se pudo cargar el video.")).toBeVisible({ timeout: 60_000 });
+    const hosts = [...new Set(outside.map((href) => new URL(href).hostname))].sort();
+    for (const host of hosts) expect(["image.mux.com", "stream.mux.com"], host).toContain(host);
+
+    // Aprobar, en dos pasos: preguntar dice qué va a pasar; confirmar lo publica.
+    const audited = await auditRows();
+    await card.getByRole("button", { name: "Aprobar y publicar «Curso revision-e2e»" }).click();
+    await expect(card.getByText("Es el primer curso de Maestra de revisión: su ficha también aparece en el catálogo.")).toBeVisible();
+    expect(await listedNow("revision-e2e")).toBe(false);
+    await card.getByRole("button", { name: "Sí, aprobar y publicar" }).click();
+    await expect(page.getByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
+    await expect(page.getByRole("article").filter({ hasText: "Curso revision-e2e" })).toHaveCount(0);
+    expect(await listedNow("revision-e2e")).toBe(true);
+    expect(await auditRows()).toBeGreaterThan(audited);
+
+    // Una pestaña vieja que confirma otra vez: ya no está por revisar, y nada cambia.
+    const fields = actionFields(await (await page.request.get(REVIEW)).text(), 0);
+    const again = await postAction(page.context().request, REVIEW, { ...fields, do: `confirm:${course}` });
+    expect(again.status()).toBe(200);
+    expect(await again.text()).toContain("Ese curso ya no está por revisar");
+
+    // Al final, otra vez: Mux Data manda lo suyo por tandas, y no debe haber salido nada.
+    const atTheEnd = [...new Set(outside.map((href) => new URL(href).hostname))].sort();
+    for (const host of atTheEnd) expect(["image.mux.com", "stream.mux.com"], host).toContain(host);
+  });
+
+  test("revisión sin JavaScript: la cola se ve, no hay «Ver» y dice por qué, y aprobar funciona", async ({ browser }) => {
+    test.setTimeout(240_000);
+    await loadReviewCourse("revision-e2e-sin-js");
+    await inContext(browser, { javaScriptEnabled: false }, async (page, context) => {
+      const outside = await cutOutside(context);
+      await enterAdmin(page, ana, REVIEW);
+      const card = page.getByRole("article").filter({ hasText: "Curso revision-e2e-sin-js" });
+      await expect(card.getByText("Con Mux")).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Ver/ })).toHaveCount(0);
+      await expect(page.getByText("Para reproducir una lección hace falta JavaScript.")).toBeVisible();
+      await card.getByRole("button", { name: "Aprobar y publicar «Curso revision-e2e-sin-js»" }).click();
+      const asked = page.getByRole("article").filter({ hasText: "Curso revision-e2e-sin-js" });
+      await asked.getByRole("button", { name: "Sí, aprobar y publicar" }).click();
+      // Aprobado, redirige: la página que queda es una lectura, y recargarla no reenvía nada. El
+      // navegador conserva el ancla del bloque, que es de esta misma página: vuelve a la cola.
+      await expect(page).toHaveURL(`${REVIEW}#bloque-revision-cola`);
+      await expect(page.getByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
+      expect(await listedNow("revision-e2e-sin-js")).toBe(true);
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
+      expect([...outside]).toEqual([]);
+    });
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.
@@ -1372,6 +1527,9 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await hers.goto(CATALOG);
       await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Contenido" })).toBeVisible();
       await expect(hers.getByText("Yoga suave")).toHaveCount(0);
+      // Los cursos por revisar también piden Contenido.
+      await hers.goto(REVIEW);
+      await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Contenido" })).toBeVisible();
       const given = await lastCodeOf(ana.id);
       for (const [what, fields] of [...attempts, ["dar el código otra vez", { ...codeFields, code: "123456" }] as [string, Record<string, string>]]) {
         const answered = await postAction(herContext.request, CATALOG, fields);
@@ -1395,6 +1553,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
         expect(answered.headers().location, what).toBe(CATALOG);
       }
       expect((await otherContext.request.get(CATALOG)).status()).toBe(404);
+      expect((await otherContext.request.get(REVIEW)).status()).toBe(404);
     });
     expect(await practicesNow()).toEqual(snapshot);
     expect(await auditRows()).toBe(prepared);

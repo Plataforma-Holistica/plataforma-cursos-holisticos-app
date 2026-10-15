@@ -270,6 +270,30 @@ describe("scrubEvent: lo que deja pasar", () => {
     ]);
   });
 
+  it("de una dirección del proveedor de video sale solo el servidor: la ruta lleva el playback id", () => {
+    const clean = scrubEvent(
+      event({
+        breadcrumbs: [
+          { category: "xhr", data: { method: "GET", url: "https://stream.mux.com/PlaybackDePrueba123.m3u8?token=eyJ.x.y", status_code: 403 } },
+          { category: "fetch", data: { method: "GET", url: "https://image.mux.com/PlaybackDePrueba123/thumbnail.webp" } },
+          { category: "xhr", data: { method: "GET", url: "https://manifest-gcp-us-east1-vop1.cfcdn.mux.com/abc/rendition.m3u8" } },
+          { category: "fetch", data: { method: "GET", url: "https://stream.mux.com" } },
+          { category: "fetch", data: { method: "GET", url: "https://notmux.com/PlaybackDePrueba123" } },
+        ],
+      }),
+    );
+
+    expect(clean.breadcrumbs).toEqual([
+      { category: "xhr", data: { method: "GET", url: "https://stream.mux.com/[video]", status_code: 403 } },
+      { category: "fetch", data: { method: "GET", url: "https://image.mux.com/[video]" } },
+      { category: "xhr", data: { method: "GET", url: "https://manifest-gcp-us-east1-vop1.cfcdn.mux.com/[video]" } },
+      { category: "fetch", data: { method: "GET", url: "https://stream.mux.com/[video]" } },
+      // Otro dominio que termina igual no es el proveedor.
+      { category: "fetch", data: { method: "GET", url: "https://notmux.com/PlaybackDePrueba123" } },
+    ]);
+    expect(JSON.stringify(clean)).not.toContain("PlaybackDePrueba123.m3u8");
+  });
+
   it("del entorno, solo lo que el propio SDK anota: qué máquina, qué programa, qué ruta", () => {
     const sdk = {
       runtime: { name: "node", version: "v24.11.0" },
