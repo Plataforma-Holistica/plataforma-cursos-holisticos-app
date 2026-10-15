@@ -230,7 +230,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Diecisiete precisiones que la tabla no dice:
+falla. Dieciocho precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -1118,6 +1118,13 @@ falla. Diecisiete precisiones que la tabla no dice:
   - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
     prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
     no sea a ella y anota a dónde iba.
+- **Quién tiene acceso hoy lo dice una sola regla** (T-201; RN-01, RF-203; TRD §5.1):
+  `resolveAccountAccess`, en `src/domain/access/account-access.ts`. No se guarda un campo
+  «tiene acceso». Para quien la use (T-202): los hechos los reúne el servicio, y el
+  comentario del archivo dice de dónde sale cada uno (`paidThrough` no es el fin de periodo
+  del proveedor de cobro); `invalid_input` es «no se supo» y nunca se trata como «sin
+  acceso», que le pediría pagar a quien quizá ya pagó; y el orden de las bases decide
+  dinero (solo suscripción y gracia generan puntos).
 - **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
   (`@sentry/*`) solo se importa en `src/adapters/sentry/`. El arranque y las pantallas de
   error piden al servicio `src/services/error-reporting/`: `server.ts` para el servidor y
