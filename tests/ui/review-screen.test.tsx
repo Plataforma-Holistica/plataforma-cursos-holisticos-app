@@ -1,0 +1,212 @@
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// La pantalla de revisión (PA-61 y PA-62 mínimas; T-108). Las acciones de servidor son la
+// frontera con los servicios: aquí se cambian por lo que contestarían. Mux Player se cambia
+// por uno de mentira que dice qué recibió y deja provocar sus avisos: lo que hace el de verdad
+// lo prueba el extremo a extremo.
+const actions = vi.hoisted(() => ({
+  reviewCodeAction: vi.fn(),
+  approveAction: vi.fn(),
+  lessonVideoAction: vi.fn(),
+}));
+vi.mock("@/app/admin/_revision/actions", () => actions);
+
+const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+vi.mock("@/app/admin/_revision/player", () => ({
+  Player: (props: { playbackId: string; tokens: object; startTime: number; onExpired: (at: number) => void; onFailed: () => void; onPlaying: () => void }) => {
+    player.last = props;
+    return (
+      <div data-testid="reproductor" data-playback={props.playbackId} data-start={String(props.startTime)} data-tokens={JSON.stringify(props.tokens)}>
+        <button type="button" onClick={() => props.onExpired(42)}>
+          caduca
+        </button>
+        <button type="button" onClick={() => props.onFailed()}>
+          falla
+        </button>
+        <button type="button" onClick={() => props.onPlaying()}>
+          reproduce
+        </button>
+      </div>
+    );
+  },
+}));
+
+import type { ReviewState } from "@/app/admin/_revision/outcomes";
+import { reviewView } from "@/app/admin/_revision/rows";
+import { ReviewScreen } from "@/app/admin/_revision/screen";
+import type { ReviewQueue } from "@/services/review/review";
+
+import { a11yViolations } from "../setup/a11y";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  player.last = null;
+});
+
+const COURSE = "c0000000-0000-4000-8000-000000000002";
+const MUX = "d0000000-0000-4000-8000-000000000001";
+const TEST = "d0000000-0000-4000-8000-000000000002";
+const GRANT = { kind: "granted", playbackId: "PlaybackDePrueba", tokens: { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" } };
+
+const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
+  freshCode: true,
+  courses: [
+    {
+      courseId: COURSE,
+      title: "Naturaleza",
+      teacherName: "Ana Robles",
+      teacherListed: false,
+      practice: "Naturaleza",
+      level: "Principiante",
+      lessonCount: 2,
+      totalDurationSeconds: 765,
+      loadedAt: "2026-10-14T18:00:00Z",
+      lessons: [
+        { lessonId: MUX, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" },
+        { lessonId: TEST, module: "Uno", title: "El río", durationSeconds: 409, video: "test" },
+      ],
+    },
+  ],
+  ...over,
+});
+const show = (queue: ReviewQueue = queueOf()) => ({ user: userEvent.setup(), ...render(<ReviewScreen view={reviewView(queue)} />) });
+const formOf = (call = 0) => Object.fromEntries(actions.approveAction.mock.calls[call]?.[1] as FormData);
+
+describe("la pantalla, en reposo", () => {
+  it("la cola con sus lecciones: «Ver» solo en la de Mux, y aprobar con el código reciente", async () => {
+    const { container } = show();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Cursos por revisar");
+    expect(screen.getByRole("heading", { level: 3, name: "Naturaleza" })).toBeVisible();
+    expect(screen.getByText("De Ana Robles.")).toBeVisible();
+    expect(screen.getByText("2 lecciones, 12:45 en total.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /^Ver/ }).map((button) => button.textContent)).toEqual(["Ver «El bosque»"]);
+    expect(screen.getByText("Sin video en Mux.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" })).toBeVisible();
+    expect(screen.queryByLabelText("Código")).not.toBeInTheDocument();
+    // Nada del video al pintar: no se pidió ninguna dirección.
+    expect(actions.lessonVideoAction).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("reproductor")).not.toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin el código reciente: se pide arriba, no se ofrece aprobar, y se puede reproducir", async () => {
+    const { container } = show(queueOf({ freshCode: false }));
+    expect(screen.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Tu código");
+    expect(screen.queryByRole("button", { name: /Aprobar/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Escribe tu código, al inicio de esta página, para poder aprobar.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ver «El bosque»" })).toBeVisible();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("vacía: lo dice", () => {
+    show(queueOf({ courses: [] }));
+    expect(screen.getByText("No hay cursos por revisar.")).toBeVisible();
+  });
+
+  it("sin JavaScript no hay «Ver»: el HTML del servidor no lo trae, y dice por qué", () => {
+    const html = renderToString(<ReviewScreen view={reviewView(queueOf())} />);
+    expect(html).not.toContain(">Ver<");
+    expect(html).toContain("Para reproducir una lección hace falta JavaScript.");
+    expect(html).toContain("Aprobar y publicar");
+  });
+});
+
+describe("reproducir", () => {
+  it("«Ver» pide la dirección de esa lección, y el reproductor recibe los tres tokens; el foco va a él", async () => {
+    actions.lessonVideoAction.mockResolvedValue(GRANT);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    expect(actions.lessonVideoAction).toHaveBeenCalledWith(MUX);
+    const shown = await screen.findByTestId("reproductor");
+    expect(shown).toHaveAttribute("data-playback", "PlaybackDePrueba");
+    expect(JSON.parse(shown.getAttribute("data-tokens") ?? "")).toEqual({ playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" });
+    expect(shown).toHaveAttribute("data-start", "0");
+    expect(screen.getByRole("heading", { level: 2, name: "Viendo: El bosque" })).toHaveFocus();
+    expect(screen.getByText("Vista previa. No genera puntos.")).toBeVisible();
+    // La lección que se ve no se vuelve a pedir con el mismo botón.
+    expect(screen.getByRole("button", { name: "Ver «El bosque»" })).toBeDisabled();
+  });
+
+  it("sin video en Mux, o sin respuesta: lo dice, y «Reintentar» lo pide otra vez", async () => {
+    actions.lessonVideoAction.mockResolvedValueOnce({ kind: "no_video" });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    expect(await screen.findByText("Esta lección no tiene video en Mux.")).toBeVisible();
+
+    actions.lessonVideoAction.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce(GRANT);
+    const again = render(<ReviewScreen view={reviewView(queueOf())} />);
+    await user.click(within(again.container).getByRole("button", { name: "Ver «El bosque»" }));
+    expect(await within(again.container).findByText("No se pudo cargar el video.")).toBeVisible();
+    await user.click(within(again.container).getByRole("button", { name: "Reintentar" }));
+    expect(await within(again.container).findByTestId("reproductor")).toBeVisible();
+  });
+
+  it("si la dirección caduca, pide otra una sola vez y sigue desde el mismo segundo", async () => {
+    actions.lessonVideoAction.mockResolvedValue(GRANT);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await user.click(await screen.findByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "42"));
+    expect(actions.lessonVideoAction).toHaveBeenCalledTimes(2);
+    // Caduca otra vez sin haber vuelto a reproducirse: ya no se insiste.
+    await user.click(screen.getByRole("button", { name: "caduca" }));
+    expect(await screen.findByText("No se pudo cargar el video.")).toBeVisible();
+    expect(actions.lessonVideoAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("si volvió a reproducirse entre una caducidad y otra, la siguiente también se renueva", async () => {
+    actions.lessonVideoAction.mockResolvedValue(GRANT);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await user.click(await screen.findByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(actions.lessonVideoAction).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole("button", { name: "reproduce" }));
+    await user.click(screen.getByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(actions.lessonVideoAction).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText("No se pudo cargar el video.")).not.toBeInTheDocument();
+  });
+
+  it("cualquier otro error del reproductor: lo dice, sin pedir otra dirección", async () => {
+    actions.lessonVideoAction.mockResolvedValue(GRANT);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await user.click(await screen.findByRole("button", { name: "falla" }));
+    expect(await screen.findByText("No se pudo cargar el video.")).toBeVisible();
+    expect(actions.lessonVideoAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("aprobar", () => {
+  it("en dos pasos: preguntar dice qué va a pasar; confirmar manda ese curso", async () => {
+    const confirming: ReviewState = { kind: "confirming", course: COURSE, attempt: 1 };
+    actions.approveAction.mockResolvedValueOnce(confirming).mockResolvedValueOnce({ kind: "approved", attempt: 2 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    expect(formOf(0)).toEqual({ do: `ask:${COURSE}` });
+    expect(await screen.findByText("¿Aprobar y publicar este curso?")).toBeVisible();
+    expect(screen.getByText("Es el primer curso de Ana Robles: su ficha también aparece en el catálogo.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Sí, aprobar y publicar" }));
+    expect(formOf(1)).toEqual({ do: `confirm:${COURSE}` });
+    expect(await screen.findByText("Publicado. Ya aparece en el catálogo.")).toBeVisible();
+  });
+
+  it("lo que no se pudo, se dice en la cola", async () => {
+    actions.approveAction.mockResolvedValueOnce({ kind: "failed", reason: "practice_inactive", attempt: 1 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    expect(await screen.findByText(/La práctica de ese curso está desactivada/)).toBeVisible();
+  });
+
+  it("«tu código ya no es reciente» deja de decirse en cuanto la página lee uno reciente", async () => {
+    actions.approveAction.mockResolvedValueOnce({ kind: "failed", reason: "needs_code", attempt: 1 });
+    const { user, rerender } = show(queueOf({ freshCode: false }));
+    // Sin código reciente no hay botón: se provoca con la página que sí lo tenía.
+    rerender(<ReviewScreen view={reviewView(queueOf())} />);
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    await act(async () => undefined);
+    expect(screen.queryByText(/Tu código ya no es reciente/)).not.toBeInTheDocument();
+  });
+});
