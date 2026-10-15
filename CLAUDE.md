@@ -230,7 +230,7 @@ La que fija el TRD §4.2.
 
 Las reglas viven en `eslint.config.mjs` (con `eslint-plugin-boundaries`) y rompen el lint.
 `tests/architecture/layers.test.ts` comprueba cada una: si se afloja una regla, esa prueba
-falla. Dieciséis precisiones que la tabla no dice:
+falla. Diecisiete precisiones que la tabla no dice:
 
 - **`process.env` solo se lee en `src/config/`.** El resto llama a `getEnv()`. Adaptadores
   y servicios pueden importar la configuración; el dominio, `src/app/` y `src/jobs/`, no.
@@ -484,7 +484,8 @@ falla. Dieciséis precisiones que la tabla no dice:
     sesión» (`SecondFactorExits`): nadie se queda encerrado ahí.
   - PA-88 es `ForbiddenScreen` (`src/app/admin/_lib/states.tsx`). Se le pinta a quien es
     del equipo y no tiene la capacidad que la sección pide, nunca a quien no lo es. Hoy la
-    piden el equipo (PA-86), configuración, y las prácticas y los niveles (PA-67), Contenido.
+    piden el equipo (PA-86), configuración, y las prácticas y los niveles (PA-67) y los
+    cursos por revisar (PA-61 y PA-62 mínimas), Contenido.
 - **La pantalla del equipo (PA-86, `/admin/equipo`) va por bloques,** como la de la cuenta,
   y además cambia cosas que no se deshacen solas (RF-712). Vive en
   `src/app/admin/_equipo/`. Lo que no se ve leyendo un solo archivo:
@@ -1070,6 +1071,37 @@ falla. Dieciséis precisiones que la tabla no dice:
     lee pero no firma contesta lo mismo que una que no sirve.
   - El adaptador va en `src/adapters/mux/`, no en `adapters/media/mux` como decía el TRD:
     aquí cada proveedor es su carpeta.
+- **La pantalla de revisión (PA-61 y PA-62 mínimas, `/admin/revision`)** se arma como
+  PA-67 (T-108; decisiones de Sergio del 2026-10-14: una sola ruta, Mux Player sin
+  analítica, reproducir sin código reciente y aprobar con él). Vive en
+  `src/app/admin/_revision/`. Lo que no se ve leyendo un solo archivo:
+  - **Nada del video va en lo que se pinta.** La página trae la cola sin identificadores
+    de Mux. Al pulsar «Ver», el navegador llama a `lessonVideoAction`, que pasa la lección
+    tal cual a `getMediaGrant` (ella la revisa y corre la guarda) y devuelve el playback id
+    y los tokens con los nombres de Mux Player (`playback`, no `video`: lo traduce la tabla
+    de la pantalla). Una prueba de extremo a extremo revisa lo servido, no el DOM vivo:
+    Mux Player escribe el playback id como atributo.
+  - **Mux Player solo se importa en `player.tsx`**, y la pantalla lo carga con
+    `next/dynamic` sin servidor: pesa (unos 330 KB comprimidos) y no debe viajar con otra
+    página. Lo exigen el lint (`noVideoPlayer`) y una prueba de arquitectura. No se usa
+    su entrada `/lazy`, que inyecta estilos en línea.
+  - **Lo que se le apaga:** Mux Data (`disableTracking`, `disableCookies`, sin `envKey`),
+    imagen dentro de imagen, recordar volumen y silencio, y el envío a otra pantalla, que
+    no tiene prop: se pone en el `<video>` interno con la referencia (`lockDown`), antes de
+    que Mux Player reciba el playback id. Sin eso pide un script de Google. Sus textos van
+    en español registrando el de media-chrome, que es dependencia directa en la misma
+    versión que la de Mux Player: si se sube una, se sube la otra.
+  - **Si la dirección caduca** (`muxCode` 2403210), se pide otra una sola vez, desde el
+    mismo segundo; si vuelve a caducar sin haberse reproducido, se dice el error. Ningún
+    error de Mux sale de `player.tsx`: algunos mensajes traen el playback id.
+  - **Aprobar** va en dos pasos dentro del curso, con un solo estado para toda la cola: el
+    resultado se dice arriba, porque el curso aprobado sale de la lista. «Tu código» usa
+    el servicio del catálogo (`giveCatalogCode`): la misma puerta de Contenido. Sin
+    JavaScript, recargar después de aprobar reenvía el formulario y contesta «ya no está
+    por revisar»: es cierto y no publica dos veces.
+  - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
+    prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
+    no sea a ella y anota a dónde iba.
 - **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
   (`@sentry/*`) solo se importa en `src/adapters/sentry/`. El arranque y las pantallas de
   error piden al servicio `src/services/error-reporting/`: `server.ts` para el servidor y
@@ -1236,8 +1268,10 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     revisiones (T-405); cómo cumplen RN-16 los pilotos reales se decide con PQ-25.
   - El orden de desempate de un maestro (`tiebreak_rank`) no lo lee nadie de la aplicación:
     la lectura de `teachers` se concede columna por columna.
-  - La pantalla para ver y aprobar un curso llega con T-108, cuando los videos se
-    reproduzcan; hasta entonces los cursos de prueba se quedan por aprobar.
+  - Lo que la pantalla de revisión lee es `private.review_queue()` (T-108): una sola
+    función, nula para quien no pasa la puerta de Contenido, con `fresh_code` y los cursos
+    en revisión. Nunca trae el playback id ni el asset id: el video sale solo por la
+    función única de medios.
 - **Una capacidad solo se recibe aceptando una invitación** (T-105), o de quien tiene
   configuración si ya se es del equipo. El servidor no escribe `admin_capabilities`: todo
   pasa por funciones de `private` que comprueban quién actúa, y el vigilante lo exige.
@@ -1365,7 +1399,8 @@ las de registro y recuperación se sumó `tests/actions/`. Con las prácticas y 
 (T-106), `src/services/catalog/`. Con las del equipo, `src/app/admin/`,
 y con la pantalla del equipo, sus textos (`src/messages/es/admin.ts`): lo que una
 confirmación dice que va a pasar.
-Con el video (T-108), `src/services/media/` y `src/adapters/mux/`.
+Con el video (T-108), `src/services/media/`, `src/adapters/mux/` y el servicio de
+revisión, `src/services/review/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

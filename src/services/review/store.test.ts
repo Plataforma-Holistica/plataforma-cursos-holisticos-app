@@ -82,6 +82,7 @@ describe("la cola, como la contesta la base", () => {
   it.each([
     ["un playback id en la lección", { ...RAW, courses: [{ ...COURSE_RAW, lessons: [{ ...LESSON_RAW, playback_id: "x" }] }] }],
     ["un campo de más en el curso", { ...RAW, courses: [{ ...COURSE_RAW, teacher_id: COURSE }] }],
+    ["un campo de más en la cola", { ...RAW, playback_ids: [] }],
     ["un estado de video que no conoce", { ...RAW, courses: [{ ...COURSE_RAW, lessons: [{ ...LESSON_RAW, video: "ready" }] }] }],
     ["un curso sin forma de id", { ...RAW, courses: [{ ...COURSE_RAW, course_id: "x" }] }],
   ])("con %s, lanza: no llega a la pantalla", (_what, raw) => {

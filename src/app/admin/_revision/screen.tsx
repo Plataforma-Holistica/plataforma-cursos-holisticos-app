@@ -196,9 +196,9 @@ export function ReviewScreen({ view }: ReviewScreenProps) {
         <h2 id={QUEUE_HEADING_ID} className="text-h2">
           {text.queueTitle}
         </h2>
-        <noscript>
-          <p className="text-body-s text-text-2">{text.noScript}</p>
-        </noscript>
+        {/* Lo pinta el servidor y se va al montar: sin JavaScript se queda. No es un
+            `<noscript>`: hay navegadores que lo tratan como texto aunque no corran nada. */}
+        {!mounted && <p className="text-body-s text-text-2">{text.noScript}</p>}
         {!view.canChange && <p className="text-body-s text-text-2">{text.approveLocked}</p>}
         <BlockResult message={result} tone={tone} pending={queuePending} pendingText={text.working} answer={answer} spoken={spoken} />
         {view.courses.length === 0 ? (

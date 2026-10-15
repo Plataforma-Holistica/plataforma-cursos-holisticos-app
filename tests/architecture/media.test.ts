@@ -65,8 +65,9 @@ describe("solo la función única de medios firma", () => {
     expect(screen).not.toMatch(/^import [^;]*["']\.\/player["'];$/m);
     // Sin analítica, sin cookies y sin imagen dentro de imagen.
     const player = withoutComments(readFileSync(join(src, "app/admin/_revision/player.tsx"), "utf8"));
+    // Cada una como atributo propio del reproductor, en su línea: no basta que el nombre aparezca.
     for (const prop of ["disableTracking", "disableCookies", "disablePictureInPicture", "noVolumePref", "noMutedPref", "ref={lockDown}"]) {
-      expect(player).toContain(prop);
+      expect(player, prop).toMatch(new RegExp(`^ {6}${prop.replace(/[{}]/g, "\\$&")}$`, "m"));
     }
     expect(player).not.toMatch(/envKey|metadata|beaconCollectionDomain/);
   });

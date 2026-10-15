@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import { defineConfig, devices } from "@playwright/test";
@@ -29,6 +30,12 @@ if (process.env.NEXT_PUBLIC_SITE_URL !== BASE_URL) {
 // pide con esta variable: nunca con la corrida normal. Después de él la base se rehace
 // (`pnpm test:e2e:equipo` lo encadena; en la integración continua es el último paso).
 const TEAM_RUN = process.env.E2E_EQUIPO === "1";
+
+// La llave con que la aplicación firma las direcciones de video (T-108) es siempre una de
+// prueba, generada aquí: reemplaza a la de `.env.local`, y así ninguna prueba firma con la
+// llave de verdad de quien desarrolla. Mux nunca la acepta: las pruebas no salen a Mux (cortan
+// toda petición que no sea a la aplicación).
+const TEST_SIGNING_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -68,6 +75,10 @@ export default defineConfig({
     timeout: 240_000,
     // Estas pruebas provocan errores a propósito: no se le mandan al registro de errores.
     // Vacía cuenta como ausente, al compilar (el navegador) y al servir (el servidor).
-    env: { SENTRY_DSN: "" },
+    env: {
+      SENTRY_DSN: "",
+      MUX_SIGNING_KEY_ID: "LlaveDeExtremoAExtremo",
+      MUX_SIGNING_PRIVATE_KEY: Buffer.from(TEST_SIGNING_KEY).toString("base64"),
+    },
   },
 });

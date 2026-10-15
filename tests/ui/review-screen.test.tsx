@@ -86,6 +86,8 @@ describe("la pantalla, en reposo", () => {
     expect(screen.getByText("Sin video en Mux.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" })).toBeVisible();
     expect(screen.queryByLabelText("Código")).not.toBeInTheDocument();
+    // Con JavaScript no se dice que falta.
+    expect(screen.queryByText(/hace falta JavaScript/)).not.toBeInTheDocument();
     // Nada del video al pintar: no se pidió ninguna dirección.
     expect(actions.lessonVideoAction).not.toHaveBeenCalled();
     expect(screen.queryByTestId("reproductor")).not.toBeInTheDocument();
