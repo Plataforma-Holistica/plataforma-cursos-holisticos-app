@@ -45,6 +45,10 @@ describe("la suscripción: el periodo pagado, hasta su fin y sin incluirlo", () 
     expect(resolve(refund, at(40))).toEqual({ allowed: false, reason: "refunded", endedAt: at(10) });
   });
 
+  it("un reembolso que no cortó nada (cobro duplicado) no cambia el motivo", () => {
+    expect(resolve({ ...paid, refunded: true }, at(31))).toEqual({ allowed: false, reason: "expired", endedAt: at(30) });
+  });
+
   it("un `endedAt` posterior al periodo no lo alarga", () => {
     expect(resolve({ ...paid, endedAt: at(50) }, at(31))).toEqual({ allowed: false, reason: "expired", endedAt: at(30) });
   });
@@ -77,12 +81,21 @@ describe("la gracia: desde la falla, `GRACIA_COBRO_DIAS` días de 24 horas, sin 
     expect(resolve({ ...failed, endedAt: at(32), refunded: true }, at(32))).toEqual({ allowed: false, reason: "refunded", endedAt: at(32) });
   });
 
+  it("es de una renovación: sin un periodo pagado antes, una falla no da gracia", () => {
+    expect(resolve({ lastRenewalFailedAt: at(0) }, at(3))).toEqual({ allowed: false, reason: "never_subscribed" });
+  });
+
+  it("y desde la falla: una con fecha futura no da gracia, ni cuenta para el motivo", () => {
+    expect(resolve({ paidThrough: at(10), lastRenewalFailedAt: at(30) }, at(20))).toEqual({ allowed: false, reason: "expired", endedAt: at(10) });
+    expect(resolve({ paidThrough: at(10), lastRenewalFailedAt: at(30) }, at(30))).toEqual({ allowed: true, basis: "grace", until: at(37) });
+  });
+
   it("con cero días de gracia, la falla no da acceso", () => {
     expect(resolve(failed, at(30), 0)).toEqual({ allowed: false, reason: "grace_ended", endedAt: at(30) });
   });
 
-  it("una falla vieja ya recuperada no hace decir «no pudimos cobrar»: el motivo es el último fin", () => {
-    // Falló el día 30, se cobró, pagó hasta el 60, canceló, y ya es el 61.
+  it("si llega una falla vieja (los avisos llegan en desorden), no hace decir «no pudimos cobrar»", () => {
+    // Falló el día 30, se cobró, pagó hasta el 60, canceló, y ya es el 61; el motivo es el último fin.
     expect(resolve({ paidThrough: at(60), lastRenewalFailedAt: at(30) }, at(61))).toEqual({ allowed: false, reason: "expired", endedAt: at(60) });
   });
 
@@ -101,6 +114,15 @@ describe("la cortesía (RF-213): desde su inicio, hasta su fin o sin fin", () =>
     expect(resolve({ courtesy: [{ from: at(5), until: at(20) }] }, now)).toEqual(expected);
   });
 
+  it("una con fin antes de su inicio nunca da acceso", () => {
+    expect(resolve({ courtesy: [{ from: at(10), until: at(5) }] }, at(7))).toEqual({ allowed: false, reason: "never_subscribed" });
+  });
+
+  it("`endedAt` no la corta: es de la suscripción", () => {
+    const refundedWithCourtesy = { paidThrough: at(30), endedAt: at(10), refunded: true, courtesy: [{ from: at(0), until: null }] };
+    expect(resolve(refundedWithCourtesy, at(11))).toEqual({ allowed: true, basis: "courtesy", until: null });
+  });
+
   it("sin fecha de fin: sin fin", () => {
     expect(resolve({ courtesy: [{ from: at(0), until: null }] }, at(9999))).toEqual({ allowed: true, basis: "courtesy", until: null });
   });
@@ -112,6 +134,13 @@ describe("la cortesía (RF-213): desde su inicio, hasta su fin o sin fin", () =>
     ];
     expect(resolve({ courtesy: two }, at(6))).toEqual({ allowed: true, basis: "courtesy", until: at(15) });
     expect(resolve({ courtesy: [...two, { from: at(1), until: null }] }, at(6))).toEqual({ allowed: true, basis: "courtesy", until: null });
+    // En cualquier orden.
+    expect(resolve({ courtesy: [{ from: at(1), until: null }, ...two] }, at(6))).toEqual({ allowed: true, basis: "courtesy", until: null });
+  });
+
+  it("muchas a la vez no la tiran: se recorren, no se esparcen", () => {
+    const many = Array.from({ length: 200_000 }, (_, index) => ({ from: at(0), until: at(10, index) }));
+    expect(resolve({ courtesy: many }, at(1))).toEqual({ allowed: true, basis: "courtesy", until: at(10, 199_999) });
   });
 
   it("una que todavía no empieza no cuenta, ni para el fin de las vigentes", () => {
@@ -199,13 +228,13 @@ describe("el ciclo completo de una cuenta, día por día (TRD §12)", () => {
       ["renovación", { paidThrough: at(61) }, at(31), { allowed: true, basis: "subscription", until: at(61) }],
       ["la renovación falla", { paidThrough: at(61), lastRenewalFailedAt: at(61) }, at(62), { allowed: true, basis: "grace", until: at(68) }],
       ["se recupera dentro de la gracia", { paidThrough: at(91) }, at(64), { allowed: true, basis: "subscription", until: at(91) }],
-      // FL-21 E2: un reintento que vuelve a fallar no alarga la gracia: la falla es la misma.
-      ["vuelve a fallar, y un reintento también", { paidThrough: at(91), lastRenewalFailedAt: at(91) }, at(95), { allowed: true, basis: "grace", until: at(98) }],
+      // FL-21 E2: la fecha límite es la de la falla; que un reintento no la mueva le toca a quien reúne los hechos.
+      ["la renovación siguiente falla", { paidThrough: at(91), lastRenewalFailedAt: at(91) }, at(95), { allowed: true, basis: "grace", until: at(98) }],
       ["se recupera otra vez", { paidThrough: at(121) }, at(96), { allowed: true, basis: "subscription", until: at(121) }],
-      ["cancela con el periodo vigente", { paidThrough: at(121) }, at(100), { allowed: true, basis: "subscription", until: at(121) }],
       // FL-20 A1: reanudar antes del fin no cambia el acceso; renueva al llegar el fin.
       ["reanuda antes del fin, y renueva", { paidThrough: at(151) }, at(122), { allowed: true, basis: "subscription", until: at(151) }],
       ["falla y cancela durante la gracia", { paidThrough: at(151), lastRenewalFailedAt: at(151), endedAt: at(153) }, at(153), { allowed: false, reason: "grace_ended", endedAt: at(153) }],
+      // Una suscripción nueva: sus hechos son suyos, el fin de la anterior no la corta.
       ["se suscribe otra vez", { paidThrough: at(190) }, at(160), { allowed: true, basis: "subscription", until: at(190) }],
       ["pide un reembolso", { paidThrough: at(190), endedAt: at(162), refunded: true }, at(163), { allowed: false, reason: "refunded", endedAt: at(162) }],
       ["se suscribe, y la suspenden a mitad", { suspended: true, paidThrough: at(220) }, at(195), { allowed: false, reason: "suspended" }],
@@ -238,7 +267,8 @@ describe("la lista cerrada de motivos", () => {
 });
 
 describe("propiedades", () => {
-  const date = fc.integer({ min: -400, max: 400 }).map((days) => at(days));
+  // Días enteros, y también un milisegundo antes y después: así la hora cae en los bordes.
+  const date = fc.tuple(fc.integer({ min: -400, max: 400 }), fc.constantFrom(-1, 0, 0, 1)).map(([days, ms]) => at(days, ms));
   const maybe = fc.option(date, { nil: null });
   const accountFacts = fc.record({
     suspended: fc.boolean(),
@@ -271,15 +301,18 @@ describe("propiedades", () => {
     );
   });
 
-  it("con acceso, hasta `until` la base no cambia", () => {
+  it("entre dos bordes de los hechos, la respuesta no cambia: ni la base, ni las fechas, ni el motivo", () => {
     fc.assert(
-      fc.property(accountFacts, date, graceDays, fc.integer({ min: 0, max: 400 * DAY }), (account, now, days, step) => {
-        const first = resolveAccountAccess(account, now, { graceDays: days });
-        if (!first.allowed) return;
-        const later = new Date(now.getTime() + step);
-        if (first.until !== null && later.getTime() >= first.until.getTime()) return;
-        const second = resolveAccountAccess(account, later, { graceDays: days });
-        expect(second.allowed && second.basis).toBe(first.basis);
+      fc.property(accountFacts, date, date, graceDays, (account, one, other, days) => {
+        // Todos los instantes en que algo empieza o termina.
+        const borders = [account.paidThrough, account.endedAt, account.lastRenewalFailedAt, ...account.courtesy.flatMap((window) => [window.from, window.until])]
+          .filter((value): value is Date => value !== null)
+          .map((value) => value.getTime());
+        if (account.lastRenewalFailedAt !== null) borders.push(account.lastRenewalFailedAt.getTime() + days * DAY);
+        const [a, b] = [one.getTime(), other.getTime()].sort((x, y) => x - y);
+        // Solo si ningún borde cae en (a, b]: los dos instantes están en el mismo tramo.
+        if (borders.some((border) => border > (a ?? 0) && border <= (b ?? 0))) return;
+        expect(resolveAccountAccess(account, one, { graceDays: days })).toEqual(resolveAccountAccess(account, other, { graceDays: days }));
       }),
     );
   });
