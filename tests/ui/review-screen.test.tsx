@@ -119,6 +119,46 @@ describe("la pantalla, en reposo", () => {
   });
 });
 
+describe("por maestro", () => {
+  it("cada maestro con sus cursos, en encabezados que siguen su orden, y la cola pasa las reglas", async () => {
+    const course = (id: string, title: string, teacherName: string, day: string) => ({
+      ...queueOf().courses[0]!,
+      courseId: id,
+      title,
+      teacherName,
+      loadedAt: day,
+    });
+    const { container } = show({
+      freshCode: true,
+      courses: [
+        course("c0000000-0000-4000-8000-000000000011", "Bosque", "Beto Luna", "2026-10-01T10:00:00Z"),
+        course("c0000000-0000-4000-8000-000000000012", "Respirar", "Ana Robles", "2026-10-02T10:00:00Z"),
+        course("c0000000-0000-4000-8000-000000000013", "Río", "Beto Luna", "2026-10-03T10:00:00Z"),
+      ],
+    });
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Beto Luna", "Ana Robles"]);
+    expect(screen.getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent)).toEqual(["Bosque", "Río", "Respirar"]);
+    // Sin una región por maestro: el encabezado ya da la estructura.
+    expect(screen.queryAllByRole("region", { name: "Beto Luna" })).toEqual([]);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("en reposo nada dice «En el reproductor.», y al cambiar de lección la marca se mueve", async () => {
+    actions.lessonVideoAction.mockResolvedValue(GRANT);
+    const two = queueOf();
+    const [first] = two.courses;
+    if (first) first.lessons = [first.lessons[0]!, { ...first.lessons[0]!, lessonId: TEST, title: "El río", video: "playable" }];
+    const { user } = show(two);
+    expect(screen.queryByText("En el reproductor.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    await screen.findByTestId("reproductor");
+    await user.click(screen.getByRole("button", { name: "Ver «El río»" }));
+    await waitFor(() => expect(screen.getByText("El río", { selector: "li span" }).closest("li")).toHaveTextContent("En el reproductor."));
+    expect(screen.getByText("El bosque", { selector: "li span" }).closest("li")).not.toHaveTextContent("En el reproductor.");
+    expect(screen.getAllByText("En el reproductor.")).toHaveLength(1);
+  });
+});
+
 describe("reproducir", () => {
   it("«Ver» pide la dirección de esa lección, y el reproductor recibe los tres tokens; el foco va a él", async () => {
     actions.lessonVideoAction.mockResolvedValue(GRANT);
@@ -133,10 +173,12 @@ describe("reproducir", () => {
     // De qué curso y de qué maestro: con muchos en la cola, no se adivina.
     expect(screen.getByText("Del curso «Naturaleza», de Ana Robles.")).toBeVisible();
     expect(screen.getByText("Vista previa. No genera puntos.")).toBeVisible();
-    // Y en la cola, la lección que se ve lo dice.
+    // Al llegar el foco se anuncia también de qué curso es.
+    expect(screen.getByRole("heading", { level: 2, name: "Viendo: El bosque" })).toHaveAccessibleDescription("Del curso «Naturaleza», de Ana Robles.");
+    // Y en la cola, la lección que está en el reproductor lo dice.
     const row = screen.getByText("El bosque", { selector: "li span" }).closest("li");
-    expect(row).toHaveTextContent("Viéndose ahora.");
-    expect(screen.getByText("El río", { selector: "li span" }).closest("li")).not.toHaveTextContent("Viéndose ahora.");
+    expect(row).toHaveTextContent("En el reproductor.");
+    expect(screen.getByText("El río", { selector: "li span" }).closest("li")).not.toHaveTextContent("En el reproductor.");
     // La lección que se ve no se vuelve a pedir con el mismo botón.
     expect(screen.getByRole("button", { name: "Ver «El bosque»" })).toBeDisabled();
   });

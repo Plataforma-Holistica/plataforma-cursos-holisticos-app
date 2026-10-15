@@ -41,6 +41,7 @@ const CODE_FIELD_ID = "revision-codigo";
 const QUEUE_BLOCK_ID = "bloque-revision-cola";
 const QUEUE_HEADING_ID = "revision-cola-titulo";
 const PLAYER_HEADING_ID = "revision-video-titulo";
+const PLAYER_CONTEXT_ID = "revision-video-curso";
 const CODE_PERMALINK = `${ROUTES.review}#${CODE_BLOCK_ID}`;
 const QUEUE_PERMALINK = `${ROUTES.review}#${QUEUE_BLOCK_ID}`;
 
@@ -200,10 +201,13 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
 
       {video.kind !== "none" && (
         <section aria-labelledby={PLAYER_HEADING_ID} className="flex flex-col gap-3">
-          <h2 ref={playerHeading} id={PLAYER_HEADING_ID} tabIndex={-1} className="text-h3 outline-none">
+          {/* Al llegar el foco se anuncia también de qué curso es. */}
+          <h2 ref={playerHeading} id={PLAYER_HEADING_ID} tabIndex={-1} aria-describedby={PLAYER_CONTEXT_ID} className="text-h3 outline-none">
             {t(text.watching, { title: video.lesson.title })}
           </h2>
-          <p className="text-text-2">{video.lesson.context}</p>
+          <p id={PLAYER_CONTEXT_ID} className="text-text-2">
+            {video.lesson.context}
+          </p>
           <p className="text-body-s text-text-2">{text.preview}</p>
           {video.kind === "playing" && (
             <Player
@@ -250,7 +254,7 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
           <p className="text-text-2">{text.empty}</p>
         ) : (
           view.teachers.map((teacher) => (
-            <section key={teacher.name} aria-label={teacher.name} className="flex flex-col gap-4">
+            <div key={teacher.name} className="flex flex-col gap-4">
               <h3 className="text-h3 break-words">{teacher.name}</h3>
               <ol className="flex flex-col gap-6">
                 {teacher.courses.map((course) => (
@@ -268,7 +272,7 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
                   />
                 ))}
               </ol>
-            </section>
+            </div>
           ))
         )}
       </section>
@@ -306,7 +310,7 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
     <li>
       <article aria-labelledby={headingId} className="flex flex-col gap-4 rounded-md border border-border p-4">
         <div className="flex flex-col gap-1">
-          <h4 id={headingId} className="text-h3 break-words">
+          <h4 id={headingId} className="text-body-l font-semibold break-words">
             {course.title}
           </h4>
           <p className="text-body-s text-text-2">{course.practiceAndLevel}</p>

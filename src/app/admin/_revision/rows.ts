@@ -108,13 +108,19 @@ function courseRow(course: ReviewCourse): CourseRow {
   };
 }
 
+/** El nombre con que se agrupa: el mismo a la vista, aunque llegue escrito distinto en Unicode o con espacios de más. */
+const groupKey = (name: string) => name.normalize("NFC").trim().replace(/\s+/g, " ");
+
 export function reviewView(queue: ReviewQueue): ReviewView {
-  const teachers: TeacherGroup[] = [];
-  // La base da los cursos del más antiguo al más nuevo: el primero de cada maestro fija su lugar.
-  for (const course of queue.courses) {
-    const group = teachers.find((each) => each.name === course.teacherName);
-    if (group === undefined) teachers.push({ name: course.teacherName, courses: [courseRow(course)] });
+  // Del más antiguo al más nuevo, aquí mismo: el orden no se le deja a la base. El primero de
+  // cada maestro fija su lugar.
+  const sorted = [...queue.courses].sort((a, b) => Date.parse(a.loadedAt) - Date.parse(b.loadedAt) || a.courseId.localeCompare(b.courseId));
+  const teachers: (TeacherGroup & { key: string })[] = [];
+  for (const course of sorted) {
+    const key = groupKey(course.teacherName);
+    const group = teachers.find((each) => each.key === key);
+    if (group === undefined) teachers.push({ key, name: key, courses: [courseRow(course)] });
     else group.courses.push(courseRow(course));
   }
-  return { canChange: queue.freshCode, teachers };
+  return { canChange: queue.freshCode, teachers: teachers.map(({ name, courses }) => ({ name, courses })) };
 }

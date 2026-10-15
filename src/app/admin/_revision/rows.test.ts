@@ -92,22 +92,46 @@ describe("reviewView", () => {
     expect(course?.modules[0]?.lessons[0]?.context).toBe("Del curso «Naturaleza», de Ana Robles.");
   });
 
-  it("por maestro y, dentro, por curso: los maestros en el orden de su curso más antiguo", () => {
-    const of = (id: string, title: string, teacherName: string): ReviewCourse => ({ ...COURSE_ROW, courseId: id, title, teacherName });
-    // La base ya los da del más antiguo al más nuevo.
+  it("por maestro y, dentro, por curso: los maestros en el orden de su curso más antiguo, sin importar cómo lleguen", () => {
+    const of = (id: string, title: string, teacherName: string, day: number): ReviewCourse => ({
+      ...COURSE_ROW,
+      courseId: id,
+      title,
+      teacherName,
+      loadedAt: `2026-10-${String(day).padStart(2, "0")}T12:00:00Z`,
+    });
+    // Desordenados a propósito: el orden lo pone la pantalla.
     const grouped = reviewView({
       freshCode: true,
       courses: [
-        of("c0000000-0000-4000-8000-000000000011", "Bosque", "Beto"),
-        of("c0000000-0000-4000-8000-000000000012", "Respirar", "Ana"),
-        of("c0000000-0000-4000-8000-000000000013", "Río", "Beto"),
-        of("c0000000-0000-4000-8000-000000000014", "Dormir", "Ana"),
+        of("c0000000-0000-4000-8000-000000000014", "Dormir", "Ana", 9),
+        of("c0000000-0000-4000-8000-000000000013", "Río", "Beto", 6),
+        of("c0000000-0000-4000-8000-000000000012", "Respirar", "Ana", 3),
+        of("c0000000-0000-4000-8000-000000000011", "Bosque", "Beto", 1),
       ],
     });
     expect(grouped.teachers.map((teacher) => [teacher.name, teacher.courses.map((each) => each.title)])).toEqual([
       ["Beto", ["Bosque", "Río"]],
       ["Ana", ["Respirar", "Dormir"]],
     ]);
+  });
+
+  it("el mismo día, desempata el id del curso", () => {
+    const of = (id: string, title: string): ReviewCourse => ({ ...COURSE_ROW, courseId: id, title });
+    const tied = reviewView({ freshCode: true, courses: [of("c0000000-0000-4000-8000-000000000022", "Segundo"), of("c0000000-0000-4000-8000-000000000021", "Primero")] });
+    expect(tied.teachers[0]?.courses.map((each) => each.title)).toEqual(["Primero", "Segundo"]);
+  });
+
+  it("un nombre escrito distinto pero igual a la vista es el mismo maestro", () => {
+    const decomposed = "Ana Pe\u0301rez";
+    const grouped = reviewView({
+      freshCode: true,
+      courses: [
+        { ...COURSE_ROW, courseId: "c0000000-0000-4000-8000-000000000031", teacherName: "Ana Pérez" },
+        { ...COURSE_ROW, courseId: "c0000000-0000-4000-8000-000000000032", teacherName: ` ${decomposed}  ` },
+      ],
+    });
+    expect(grouped.teachers.map((teacher) => [teacher.name, teacher.courses.length])).toEqual([["Ana Pérez", 2]]);
   });
 
   it("sin cursos, sin maestros", () => {
