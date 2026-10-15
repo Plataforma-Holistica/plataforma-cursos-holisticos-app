@@ -23,15 +23,19 @@ export type PlaybackTokens = Record<PlaybackAudience, string>;
 
 const base64url = (value: Buffer | string) => Buffer.from(value).toString("base64url");
 
+/** Las llaves de firma de Mux son RSA de 2048 bits; una más corta no se acepta. */
+const MIN_MODULUS_BITS = 2048;
+
 /**
- * La llave privada lista para firmar, o nulo si lo que llegó no es una llave privada. Nunca
- * lanza con el texto de la llave adentro.
+ * La llave privada lista para firmar, o nulo si lo que llegó no es una llave privada RSA de
+ * al menos 2048 bits. Nunca lanza con el texto de la llave adentro.
  */
 export function privateKeyOf(raw: string): KeyObject | null {
   const pem = raw.includes("-----BEGIN") ? raw : Buffer.from(raw, "base64").toString("utf8");
   try {
     const key = createPrivateKey(pem);
-    return key.asymmetricKeyType === "rsa" ? key : null;
+    const bits = key.asymmetricKeyDetails?.modulusLength ?? 0;
+    return key.asymmetricKeyType === "rsa" && bits >= MIN_MODULUS_BITS ? key : null;
   } catch {
     return null;
   }
@@ -50,9 +54,15 @@ export function signPlayback(input: { playbackId: string; expiresAt: number; key
     const signature = sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), key);
     return `${header}.${payload}.${base64url(signature)}`;
   };
-  return {
-    video: tokenFor(PLAYBACK_AUDIENCES.video),
-    thumbnail: tokenFor(PLAYBACK_AUDIENCES.thumbnail),
-    storyboard: tokenFor(PLAYBACK_AUDIENCES.storyboard),
-  };
+  // Si firmar falla con una llave que se leyó bien, es «no sirve», no una excepción: quien
+  // pregunta lo reporta. El error no se relanza, porque podría nombrar la llave.
+  try {
+    return {
+      video: tokenFor(PLAYBACK_AUDIENCES.video),
+      thumbnail: tokenFor(PLAYBACK_AUDIENCES.thumbnail),
+      storyboard: tokenFor(PLAYBACK_AUDIENCES.storyboard),
+    };
+  } catch {
+    return null;
+  }
 }

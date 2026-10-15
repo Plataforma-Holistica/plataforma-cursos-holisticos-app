@@ -132,6 +132,20 @@ describe("la función única de medios, contra la base", () => {
     });
   });
 
+  it("la segunda barrera: la base no le da la lección a quien es del equipo sin Contenido, y a Contenido sí", async () => {
+    await staged(["config"], async ({ owner, jar, lessons }) => {
+      const team = await testServices({ teamStore: teamStoreOn(owner) }).teamStanding(jar);
+      if (team.kind !== "team") throw new Error(`No quedó del equipo: ${team.kind}`);
+      // Sin pasar por la guarda del servicio: la consulta misma, como esa persona.
+      expect(await mediaStoreOn(owner).lessonVideo(team.claims, lessons.mux)).toBeNull();
+    });
+    await staged(["content"], async ({ owner, jar, lessons }) => {
+      const team = await testServices({ teamStore: teamStoreOn(owner) }).teamStanding(jar);
+      if (team.kind !== "team") throw new Error(`No quedó del equipo: ${team.kind}`);
+      expect(await mediaStoreOn(owner).lessonVideo(team.claims, lessons.mux)).toMatchObject({ playbackId: "PlaybackMedios1" });
+    });
+  });
+
   it("una cuenta común: refused, sin preguntarle nada a la base", async () => {
     const person = await claimedUser();
     emails.push(person.email);

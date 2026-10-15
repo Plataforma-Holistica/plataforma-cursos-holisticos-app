@@ -41,7 +41,8 @@ const auth = `Basic ${Buffer.from(`${tokenId}:${tokenSecret}`).toString("base64"
 
 const files = process.argv.length > 2 ? process.argv.slice(2) : DEFAULT_FILES;
 for (const file of files) {
-  if (file.includes("/") || file.includes("\\") || !existsSync(join(VIDEOS_DIR, file))) fail(`no está ${file} en ${VIDEOS_DIR}.`);
+  // Solo un nombre de archivo de esa carpeta: sin rutas, sin «..» y sin ocultos.
+  if (!/^[^/\\]+$/.test(file) || file.startsWith(".") || !existsSync(join(VIDEOS_DIR, file))) fail(`no está ${file} en ${VIDEOS_DIR}.`);
 }
 
 /** Una llamada a la API. Sin el cuerpo de la respuesta en ningún mensaje. */
@@ -69,7 +70,8 @@ async function findAsset(passthrough) {
     if (found) return found;
     if (assets.length < 100) return null;
   }
-  return null;
+  // Sin haberla visto toda no se sabe si ya está: no se sube a ciegas.
+  fail("Mux tiene más de 2000 videos y no se revisaron todos: búscalo a mano en el panel.");
 }
 
 async function upload(file, passthrough) {

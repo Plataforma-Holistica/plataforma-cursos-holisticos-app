@@ -68,6 +68,8 @@ describe("grantLifetimeSeconds", () => {
     ["una duración cero", 0, 0.75],
     ["una duración negativa", -10, 0.75],
     ["una duración que no es un número", Number.NaN, 0.75],
+    ["una duración infinita", Number.POSITIVE_INFINITY, 0.75],
+    ["una velocidad que no es un número", 600, Number.NaN],
     ["una velocidad cero", 600, 0],
     ["una velocidad negativa", 600, -1],
     ["una velocidad infinita", 600, Number.POSITIVE_INFINITY],

@@ -42,6 +42,8 @@ describe("signPlayback", () => {
     ["un texto cualquiera", "no-es-una-llave"],
     ["una llave pública", publicKey.export({ type: "spki", format: "pem" }).toString()],
     ["vacía", ""],
+    ["una llave RSA de 1024 bits", generateKeyPairSync("rsa", { modulusLength: 1024 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString()],
+    ["una llave de curva elíptica", generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString()],
   ])("con %s no firma, y no lanza", (_what, raw) => {
     expect(privateKeyOf(raw)).toBeNull();
     expect(signPlayback({ playbackId: "x", expiresAt: 1, key: { id: "k", privateKey: raw } })).toBeNull();

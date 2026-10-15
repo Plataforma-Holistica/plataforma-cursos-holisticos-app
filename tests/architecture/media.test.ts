@@ -8,7 +8,9 @@ import { posix, sourceFiles, src } from "./sources";
 // La función única de medios (TRD §5.5 y §9.4; RF-305): solo ella firma una dirección de
 // video. Lo exige el código, no la buena voluntad: aquí se buscan las firmas.
 
-const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+// Solo los comentarios de línea entera: un `//` dentro de un texto («https://…») no esconde
+// lo que sigue en la misma línea.
+const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const sources = sourceFiles(src)
   .filter((path) => !/\.test\.tsx?$/.test(path))
   .map((path) => ({ file: posix(path), text: withoutComments(readFileSync(path, "utf8")) }));
@@ -27,12 +29,25 @@ describe("solo la función única de medios firma", () => {
 
   it("nadie más arma un JWT ni usa la llave de firma", () => {
     expect(naming(/MUX_SIGNING_PRIVATE_KEY/)).toEqual(["src/config/env.ts", "src/services/media/media.ts"]);
-    expect(naming(/["']RSA-SHA256["']|createPrivateKey/)).toEqual(["src/adapters/mux/sign.ts"]);
+    expect(naming(/MUX_SIGNING_KEY_ID/)).toEqual(["src/config/env.ts", "src/services/media/media.ts"]);
+    // Las maneras de firmar que hay a mano en Node y en el navegador, y los paquetes de JWT.
+    expect(naming(/RSA-SHA256|createPrivateKey|createSign|subtle\.sign|\bimportKey\b|jsonwebtoken|["']jose["']/i)).toEqual([
+      "src/adapters/mux/sign.ts",
+    ]);
   });
 
-  it("las pantallas piden la dirección a media.ts, nunca a grant.ts ni al adaptador", () => {
-    const fromApp = sources.filter((source) => source.file.startsWith("src/app/") && /services\/media\/(?!media\b)/.test(source.text));
-    expect(fromApp.map((source) => source.file)).toEqual([]);
+  it("las pantallas y los trabajos piden la dirección a media.ts, nunca a grant.ts ni al adaptador", () => {
+    const outside = sources.filter((source) => /^src\/(app|jobs)\//.test(source.file) && /services\/media\/(?!media\b)/.test(source.text));
+    expect(outside.map((source) => source.file)).toEqual([]);
+  });
+
+  it("la lección se lee como la persona y la velocidad como servidor, nunca como sistema", () => {
+    const store = readFileSync(join(src, "services/media/store.ts"), "utf8");
+    // La política de Contenido de la base es la segunda barrera: con asServer no correría.
+    expect(store).toMatch(/lessonVideo: \(claims, lessonId\) => asUser\(claims, \(tx\) => readLessonVideo\(tx, lessonId\)\),/);
+    expect(store).toMatch(/minimumSpeed: \(claims\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readMinimumSpeed\(tx\)\),/);
+    expect(store).not.toMatch(/asSystem/);
+    expect(store.match(/\basUser\(/g)).toHaveLength(1);
   });
 
   it("la firma y la función única tienen dueño en CODEOWNERS", () => {

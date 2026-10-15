@@ -125,7 +125,8 @@ huella, sin tocar ninguna base: a la sentencia va la huella, nunca el código.
 (decisión de Sergio del 2026-10-14: no hay pilotos todavía, y los pilotos reales esperan a
 T-004 y al documento de PQ-25). Sus prácticas y niveles, dos maestros ficticios sin cuenta
 y dos cursos de dos lecciones, con videos del proveedor de prueba (`test`) que apuntan a
-los archivos de `../Videos-Test/` (fuera de git; se suben a Mux en T-108). Los cursos
+los archivos de `../Videos-Test/` (fuera de git), salvo las que ya tienen su video en Mux
+(abajo, `pnpm media:upload-test`). Los cursos
 quedan por aprobar, sin listar: los aprueba alguien con Contenido. Escribe como dueño de la
 base declarado sistema, con el ajuste `app.local_courses`, que la base exige para un video
 de prueba. Solo contra la base local, con las mismas comprobaciones que `db:drafts`;
@@ -137,12 +138,15 @@ auditoría: después, `pnpm db:reset` antes de `pnpm test:db`.
 del 2026-10-14, uno por ahora) y escribe sus identificadores y la duración que mide Mux en
 `supabase/local/test-videos.json`, que git ignora. Usa `MUX_TOKEN_ID` y `MUX_TOKEN_SECRET`
 de `.env.local`, que la aplicación no lee. Cada video viaja con su huella y se busca antes
-de subir: no se sube dos veces. Exige política firmada (si Mux le diera un playback id
+de subir: no se sube dos veces (salvo si se corta entre la subida y la creación del video
+en Mux, una ventana de segundos). Exige política firmada (si Mux le diera un playback id
 público, falla), no corre con `CI` ni en Vercel, y no imprime respuestas de la API. Con ese
 archivo, `pnpm db:courses` carga esas lecciones con video de Mux y las demás con el de
-prueba; si la base ya tenía los cursos con otros videos se detiene: `pnpm db:reset` antes.
-`pnpm media:check` es el criterio de T-108 contra Mux, fuera de la integración continua: con
-una dirección vigente el manifiesto contesta 200, y caducada o sin firma, 403. Los dos
+prueba; si la base ya tenía los cursos con otros videos (otro proveedor, u otro video de
+Mux) se detiene: `pnpm db:reset` antes. `pnpm media:check` es el criterio de T-108 contra
+Mux: con una dirección vigente el manifiesto contesta 200, y caducada o sin firma, 403.
+Firma con la llave de `.env.local` fuera de la función única de medios, y por eso tampoco
+corre con `CI` ni en Vercel. Los dos
 guiones repiten lo que sabe el adaptador: uno de Node no importa TypeScript.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
@@ -1060,7 +1064,10 @@ falla. Dieciséis precisiones que la tabla no dice:
     (`media_grant_unavailable`). Fuera de local todavía no se carga (decisión del
     2026-10-14). No va a ningún registro ni error.
   - Una prueba de arquitectura (`tests/architecture/media.test.ts`) exige que el
-    adaptador, la llave y cualquier firma RSA vivan solo ahí.
+    adaptador y las dos variables de la llave vivan solo ahí, que ningún otro archivo de
+    `src/` firme (busca las maneras de Node y del navegador, y los paquetes de JWT), y que
+    la lección se lea con `asUser`. La llave de firma es RSA de 2048 bits o más; una que se
+    lee pero no firma contesta lo mismo que una que no sirve.
   - El adaptador va en `src/adapters/mux/`, no en `adapters/media/mux` como decía el TRD:
     aquí cada proveedor es su carpeta.
 - **A Sentry solo salen errores, y sin datos personales** (RNF-16, TRD §10.5). El SDK
@@ -1388,7 +1395,9 @@ el cambio está mal aunque todo lo demás pase.
 - Actualizar o borrar una fila de un libro (latidos, cobros, repartos, ajustes,
   auditoría). Un error se corrige con una fila nueva.
 - Recalcular o modificar un periodo cerrado.
-- Firmar una dirección de video o de archivo fuera de la función única de medios.
+- Firmar una dirección de video o de archivo fuera de la función única de medios. La única
+  excepción es `pnpm media:check`, un guion de una máquina que no corre en la integración
+  continua ni en Vercel.
 - Consultar la tabla de suscripciones desde una página para decidir qué mostrar. Se le
   pregunta al servicio de acceso.
 - Dar por cierto lo que manda el navegador: un latido, el regreso de pagar, un rol, el

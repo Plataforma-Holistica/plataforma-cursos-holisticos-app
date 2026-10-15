@@ -93,7 +93,6 @@ function readData() {
   return data;
 }
 
-/** El curso en la forma que espera `private.system_load_course()`: el video, del proveedor de prueba. */
 /** Los videos de Mux por archivo, revisados. Vacío si todavía no se subió ninguno. */
 function readVideos() {
   if (!existsSync(VIDEOS_FILE)) return new Map();
@@ -114,6 +113,7 @@ function readVideos() {
   return videos;
 }
 
+/** El curso en la forma que espera `private.system_load_course()`, con el video de cada lección. */
 function courseOf(course) {
   // Los videos se numeran en todo el curso: por módulo, dos módulos repetirían identificador.
   let number = 0;
@@ -186,18 +186,18 @@ try {
     ]);
     const answer = rows[0]?.answer;
     if (answer !== "loaded" && answer !== "already_loaded") fail(`${course.slug} contestó ${answer}.`);
-    // Lo publicado no se edita: si ya estaba con otros videos (de prueba, y ahora hay de
-    // Mux), no se cambia en silencio.
+    // Lo publicado no se edita: si ya estaba con otros videos (de prueba y ahora hay de Mux,
+    // o un video de Mux que se volvió a subir), no se cambia en silencio.
     if (answer === "already_loaded") {
-      const expected = courseOf(course).modules.flatMap((part) => part.lessons.map((lesson) => lesson.video.provider));
+      const expected = courseOf(course).modules.flatMap((part) => part.lessons.map((lesson) => `${lesson.video.provider}:${lesson.video.asset_id}`));
       const { rows: stored } = await client.query(
-        `select v.provider from public.published_lessons l
+        `select v.provider || ':' || v.provider_asset_id as video from public.published_lessons l
          join public.published_courses c on c.course_id = l.course_id
          join public.video_assets v on v.id = l.video_asset_id
          where c.slug = $1 order by l.position`,
         [course.slug],
       );
-      if (stored.map((row) => row.provider).join() !== expected.join()) {
+      if (stored.map((row) => row.video).join() !== expected.join()) {
         fail(`${course.slug} ya está cargado con otros videos. Para cargarlo con los de ${VIDEOS_FILE}: pnpm db:reset && pnpm db:courses.`);
       }
     }

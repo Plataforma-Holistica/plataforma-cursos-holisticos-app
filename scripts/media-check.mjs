@@ -17,6 +17,8 @@ function fail(message) {
   process.exit(1);
 }
 
+// Firma fuera de la función única de medios, y por eso solo en una máquina.
+if (process.env.CI || process.env.VERCEL || process.env.VERCEL_ENV) fail("no corre en la integración continua ni en Vercel: es una comprobación de una máquina.");
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 const keyId = process.env.MUX_SIGNING_KEY_ID;
 const raw = process.env.MUX_SIGNING_PRIVATE_KEY;
