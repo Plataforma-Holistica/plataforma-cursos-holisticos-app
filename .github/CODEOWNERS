@@ -14,6 +14,7 @@
 # Las prácticas y los niveles del catálogo: quién los cambia (Contenido, con código reciente)
 /src/services/catalog/     @SerchFGA @plataformaholisticadev
 /src/services/media/       @SerchFGA @plataformaholisticadev
+/src/services/review/      @SerchFGA @plataformaholisticadev
 # El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
 # No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
