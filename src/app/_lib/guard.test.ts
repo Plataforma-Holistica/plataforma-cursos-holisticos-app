@@ -20,7 +20,15 @@ vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.no
 
 import type { PendingAccount, SessionCheck, TeamCheck, TeamStanding, VerifiedClaims } from "@/services/account/account";
 
-import { requireAdmin, requireFactorSetup, requireIncompleteSession, requireSecondFactor, requireSession, visitorOnly } from "./guard";
+import {
+  requireAdmin,
+  requireFactorSetup,
+  requireIncompleteSession,
+  requireLessonSession,
+  requireSecondFactor,
+  requireSession,
+  visitorOnly,
+} from "./guard";
 
 const reader = { get: () => undefined };
 const claims = { userId: "u", aal: "aal1", sessionId: null, issuedAt: 0 } as VerifiedClaims;
@@ -54,6 +62,34 @@ describe("requireSession", () => {
     answers(check);
     expect(await requireSession("/inicio")).toEqual({ kind: check.kind });
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireLessonSession", () => {
+  const path = "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002";
+  const back = encodeURIComponent(path);
+
+  it("con sesión, pinta, y no pregunta si el curso es abierto", async () => {
+    answers({ kind: "pass", claims });
+    const isOpen = vi.fn(() => Promise.resolve(true));
+    expect(await requireLessonSession(path, isOpen)).toEqual({ kind: "render", claims });
+    expect(isOpen).not.toHaveBeenCalled();
+  });
+
+  it.each<[boolean | null, string]>([
+    [true, `/registro?volver=${back}`],
+    [false, `/entrar?volver=${back}`],
+    [null, `/entrar?volver=${back}`],
+  ])("sin sesión, con el curso abierto %s, redirige a %s", async (open, to) => {
+    answers({ kind: "anonymous" });
+    const isOpen = vi.fn(() => Promise.resolve(open));
+    await expect(requireLessonSession(path, isOpen)).rejects.toThrow(`redirige a ${to}`);
+    expect(isOpen).toHaveBeenCalledOnce();
+  });
+
+  it.each<[SessionCheck]>([[{ kind: "suspended" }], [{ kind: "unavailable" }]])("%j no redirige: la página pinta ese estado", async (check) => {
+    answers(check);
+    expect(await requireLessonSession(path, () => Promise.resolve(true))).toEqual({ kind: check.kind });
   });
 });
 

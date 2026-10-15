@@ -9,6 +9,7 @@ import {
   adminPageStep,
   consentsPageStep,
   factorSetupPageStep,
+  lessonPageStep,
   secondFactorPageStep,
   sessionPageStep,
   visitorPageStep,
@@ -30,6 +31,18 @@ import { cookieReader } from "./request-context";
  */
 export async function requireSession(path: string) {
   const step = sessionPageStep(await checkSession(await cookieReader()), path);
+  if (step.kind === "redirect") redirect(step.to);
+  return step;
+}
+
+/**
+ * Para la pantalla de una lección (PA-22, T-203): como `requireSession`, salvo a dónde va
+ * quien llega sin sesión. Si el curso es el abierto, a registrarse; si no, a entrar.
+ * @param courseIsOpen Se pregunta solo cuando no hay sesión: es una lectura de más.
+ */
+export async function requireLessonSession(path: string, courseIsOpen: () => Promise<boolean | null>) {
+  const check = await checkSession(await cookieReader());
+  const step = lessonPageStep(check, path, check.kind === "anonymous" ? await courseIsOpen() : null);
   if (step.kind === "redirect") redirect(step.to);
   return step;
 }

@@ -176,6 +176,13 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     practicesAction: /Promise<CatalogState> \{\n\s+return listAction\("practices", previous, form\);\n\}$/,
     levelsAction: /Promise<CatalogState> \{\n\s+return listAction\("levels", previous, form\);\n\}$/,
   },
+  "src/app/cursos/[slug]/lecciones/[leccion]/actions.ts": {
+    // El video de la lección: solo la función única de medios firma, como el alumno, y corre la
+    // guarda. Lo que llega es la lección, nunca un playback id; si la sesión ya no pasa, a la
+    // página, donde decide su guarda.
+    watchLessonAction:
+      /const answer = watchAnswerOf\(await getMediaGrant\(jar, lessonId, "watch"\)\);\s*if \(answer\.kind === "reload"\) \{[\s\S]*redirect\(back \?\? ROUTES\.home\);/,
+  },
   "src/app/admin/_revision/actions.ts": {
     // Dar el código otra vez: el del catálogo, que comprueba la misma puerta de Contenido.
     reviewCodeAction:
@@ -198,7 +205,7 @@ function actionBody(code: string, name: string): string {
 }
 
 const GUARD_IMPORT = /import \{[^}]*\} from "@\/app\/_lib\/guard";/;
-const SESSION_GUARD = /= await (requireSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup)\(/;
+const SESSION_GUARD = /= await (requireSession|requireLessonSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup)\(/;
 const VISITOR_GUARD = /^\s*await visitorOnly\(\);$/m;
 
 /**
@@ -261,6 +268,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/admin/[...resto]",
       "/consentimientos",
       "/cuenta",
+      "/cursos/[slug]/lecciones/[leccion]",
       "/entrar/segundo-factor",
       "/entrar/segundo-factor/configurar",
       "/inicio",
