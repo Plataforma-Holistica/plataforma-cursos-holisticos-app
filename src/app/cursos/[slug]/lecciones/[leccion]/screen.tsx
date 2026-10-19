@@ -3,20 +3,23 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
+import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
+import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps } from "@/app/_video/player";
 import { lesson as text } from "@/messages/es/lesson";
 import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
+import { SPACE } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
 import { LessonRow } from "@/ui/lesson-row";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Tabs } from "@/ui/tabs";
 import { TextLink } from "@/ui/text-link";
 
-import { rememberCaptionsAction, watchLessonAction } from "./actions";
-import type { Denial, InitialState, WatchAnswer } from "./outcomes";
+import { playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
+import type { BusyRow, Denial, InitialState, PresenceReply, WatchAnswer } from "./outcomes";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
 // el reproductor, el título y «Sobre esta lección» a la izquierda, y el temario a la derecha. En
@@ -30,6 +33,13 @@ import type { Denial, InitialState, WatchAnswer } from "./outcomes";
 // la cuenta (RF-310) y en la pantalla: una dirección renovada sigue con lo que eligió. Renovar
 // no vuelve a montar el reproductor (sin `key`): le pasa otra concesión, y así no se sale de la
 // pantalla completa.
+//
+// Una reproducción a la vez (T-204, RF-107): mientras el video avanza, la pantalla late su
+// reproducción cada `heartbeatSeconds`, y también al reanudar y al volver a la pestaña. Si otro
+// dispositivo la cerró, o se abrió en otra pestaña, el reproductor se va y queda «Reproducir
+// aquí»; si había vencido (una pausa larga) y otro tomó el lugar, PA-34. Las dos guardan el
+// segundo en que iba. Un latido que contesta tarde, de una reproducción que ya no es la actual
+// (una dirección renovada la reemplaza), no pinta nada.
 
 /** Una lección del temario, ya en palabras y con su dirección. */
 export interface SyllabusEntry {
@@ -86,7 +96,11 @@ type VideoState =
   | { kind: "failed" }
   | { kind: "denied"; denial: Denial }
   | { kind: "no_video" }
-  | { kind: "unavailable" };
+  | { kind: "unavailable" }
+  /** PA-34: el lugar de la cuenta está ocupado en otro navegador. */
+  | { kind: "busy"; live: BusyRow[]; startTime: number }
+  /** La reproducción se cerró desde otro dispositivo, o se abrió en otra pestaña. `by`: la que tomó su lugar. */
+  | { kind: "closed"; from: "device" | "tab"; by: string | null; startTime: number };
 
 const subscribeNothing = () => () => undefined;
 /** Verdadero solo ya montada en el navegador: sin JavaScript no hay con qué reproducir. */
@@ -133,9 +147,66 @@ function announcementOf(video: VideoState): string {
       return text.player.unavailable;
     case "denied":
       return paywallCopy(video.denial).join(" ");
+    case "busy":
+      return elsewhereCopy(video.live).join(" ");
+    case "closed":
+      return text.closed[video.from];
     default:
       return "";
   }
+}
+
+/** El título de PA-34 y su frase: en singular con una reproducción, en plural con más. */
+function elsewhereCopy(live: BusyRow[]): [string, string] {
+  const copy = text.elsewhere;
+  return live.length > 1 ? [t(copy.titleMany, { count: String(live.length) }), copy.textMany] : [copy.title, copy.text];
+}
+
+/**
+ * PA-34: dónde se está reproduciendo, con «Cerrar esa reproducción» en cada una, «Reintentar» y
+ * a dónde ir si no se reconoce alguna. En el lugar del reproductor, que crece lo necesario.
+ */
+function Elsewhere({ live, onClose, onRetry }: { live: BusyRow[]; onClose: (sessionId: string) => void; onRetry: () => void }) {
+  const copy = text.elsewhere;
+  const [title, sentence] = elsewhereCopy(live);
+  return (
+    <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-h3">{title}</h2>
+        <p className="text-text-2">{sentence}</p>
+      </div>
+      <ul aria-label={copy.listLabel} className="flex flex-col gap-3">
+        {live.map((row) => {
+          const device = deviceName({ browser: row.browser, system: row.system });
+          const place = row.lesson !== null && row.course !== null ? t(copy.place, { lesson: row.lesson, course: row.course }) : (row.lesson ?? row.course);
+          const time = clockTime(row.since, PRODUCT_TIME_ZONE);
+          const details = [place, time === "" ? null : t(copy.since, { time })].filter((part) => part !== null);
+          return (
+            <li key={row.sessionId} className="flex flex-col gap-3 rounded-md border border-border bg-surface-1 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-1">
+                <p className="font-semibold">{device}</p>
+                {details.length > 0 && <p className="text-body-s text-text-2">{details.join(" · ")}</p>}
+              </div>
+              <Button type="button" onClick={() => onClose(row.sessionId)}>
+                {copy.close}
+                {/* Sin el espacio, el nombre del botón se leería pegado: «…reproducción(la de…». */}
+                {SPACE}
+                <span className="sr-only">{t(copy.closeDetail, { device })}</span>
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button type="button" variant="secondary" onClick={onRetry}>
+          {copy.retry}
+        </Button>
+        <TextLink href={ROUTES.home}>{copy.back}</TextLink>
+      </div>
+      {/* El bloque de la contraseña de PA-25: cambiarla cierra las demás sesiones, y con ellas sus reproducciones. */}
+      <TextLink href={`${ROUTES.account}#bloque-contrasena`}>{copy.account}</TextLink>
+    </div>
+  );
 }
 
 /** PA-33: por qué no hay acceso, en el lugar del reproductor. Sin «Ver planes» hasta que exista la pantalla (T-30x). */
@@ -156,23 +227,29 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // Cuál pedido manda: uno que contesta tarde, después de un error o de otro pedido, ya no pinta.
   const ticket = useRef(0);
   const area = useRef<HTMLDivElement>(null);
+  // Si el video avanza (entonces late su reproducción), y el segundo en que va.
+  const [advancing, setAdvancing] = useState(false);
+  const at = useRef(0);
   // Cuando lo que tenía el foco se va (el reproductor al terminar o al fallar), el foco se queda
   // en el lugar del reproductor y no cae al documento.
   useEffect(() => {
     if (video.kind !== "playing" && video.kind !== "poster" && focusIsLost()) area.current?.focus();
   }, [video.kind]);
 
-  async function watch(startTime = 0, renewed = false) {
+  /** Pide el video. `closing`: la reproducción que se cierra en el mismo paso (PA-34, «Reproducir aquí»). */
+  async function watch(startTime = 0, renewed = false, closing?: string) {
     ticket.current += 1;
     const mine = ticket.current;
+    at.current = startTime;
     if (!renewed) {
+      setAdvancing(false);
       setVideo({ kind: "loading" });
       // El botón pulsado se va: el foco se queda en el lugar del reproductor.
       area.current?.focus();
     }
     let answer: WatchAnswer;
     try {
-      answer = await watchLessonAction(slug, lessonId);
+      answer = await watchLessonAction(slug, lessonId, closing);
     } catch (error) {
       // La acción manda a la página cuando la sesión ya no pasa: Next navega solo, y no es «algo falló».
       if (isRedirect(error)) return;
@@ -180,17 +257,51 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     }
     if (mine !== ticket.current) return;
     if (answer.kind === "granted") setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
-    // PA-34 (el lugar ocupado en otro navegador) llega con la segunda solicitud de T-204: hasta
-    // entonces se dice «no se pudo».
-    else setVideo(answer.kind === "busy" ? { kind: "unavailable" } : answer);
+    else if (answer.kind === "busy") setVideo({ kind: "busy", live: answer.live, startTime });
+    else setVideo(answer);
   }
 
-  function expired(at: number) {
+  // El latido de presencia: solo mientras el video avanza, y nunca mientras se renueva la
+  // dirección (la reproducción está por cambiar). Un latido de la reproducción anterior que
+  // contesta tarde ya no pinta: su efecto se limpió.
+  const beating = video.kind === "playing" && !video.renewing && advancing ? video.grant : null;
+  const beatingId = beating?.playbackSessionId ?? null;
+  const beatEvery = beating?.heartbeatSeconds ?? 0;
+  useEffect(() => {
+    if (beatingId === null) return;
+    let current = true;
+    const beat = async () => {
+      let reply: PresenceReply;
+      try {
+        reply = await playbackPresenceAction(slug, lessonId, beatingId);
+      } catch {
+        // Una redirección (la sesión ya no pasa): Next navega solo. Otro error: el video sigue, y
+        // el siguiente latido lo vuelve a intentar.
+        return;
+      }
+      if (!current) return;
+      if (reply.kind === "busy") setVideo({ kind: "busy", live: reply.live, startTime: at.current });
+      else if (reply.kind === "closed") setVideo({ kind: "closed", from: reply.from, by: reply.by, startTime: at.current });
+    };
+    void beat();
+    const timer = setInterval(() => void beat(), beatEvery * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void beat();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [beatingId, beatEvery, slug, lessonId]);
+
+  function expired(second: number) {
     if (video.kind !== "playing" || video.renewing) return;
     if (video.renewed) setVideo({ kind: "failed" });
     else {
       setVideo({ ...video, renewing: true });
-      void watch(at, true);
+      void watch(second, true);
     }
   }
 
@@ -240,7 +351,12 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       <div className="grid gap-8 lg:grid-cols-10">
         <div className="flex flex-col gap-4 lg:col-span-7">
           <section aria-label={text.player.label} className="sticky top-0 z-(--z-sticky) lg:static">
-            <div ref={area} tabIndex={-1} className="flex aspect-video w-full flex-col bg-player outline-none">
+            <div
+              ref={area}
+              tabIndex={-1}
+              // PA-34 crece lo necesario: en un teléfono, sus tarjetas no caben en el 16:9.
+              className={video.kind === "busy" ? "flex min-h-0 w-full flex-col bg-player outline-none" : "flex aspect-video w-full flex-col bg-player outline-none"}
+            >
               {video.kind === "playing" ? (
                 <Player
                   grant={video.grantNumber}
@@ -257,9 +373,19 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                     if (video.renewed) setVideo({ ...video, renewed: false });
                   }}
                   onEnded={() => setVideo({ kind: "ended" })}
+                  onAdvancing={setAdvancing}
+                  onProgress={(second) => {
+                    at.current = second;
+                  }}
                 />
               ) : video.kind === "denied" ? (
                 <Paywall denial={video.denial} />
+              ) : video.kind === "busy" ? (
+                <Elsewhere
+                  live={video.live}
+                  onClose={(sessionId) => void watch(video.startTime, false, sessionId)}
+                  onRetry={() => void watch(video.startTime)}
+                />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
                   {video.kind === "poster" &&
@@ -279,6 +405,14 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                       <p className="text-text-2">{video.kind === "failed" ? text.player.failed : text.player.unavailable}</p>
                       <Button type="button" variant="secondary" onClick={() => void watch()}>
                         {text.player.retry}
+                      </Button>
+                    </>
+                  )}
+                  {video.kind === "closed" && (
+                    <>
+                      <p className="text-text-2">{text.closed[video.from]}</p>
+                      <Button type="button" onClick={() => void watch(video.startTime, false, video.by ?? undefined)}>
+                        {text.closed.here}
                       </Button>
                     </>
                   )}

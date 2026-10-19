@@ -389,3 +389,98 @@ test("en un teléfono: el reproductor arriba, las pestañas Temario y Sobre esta
   expect(await a11yViolations(page)).toEqual([]);
   await context.close();
 });
+
+/**
+ * Lo que Mux Player avisa cuando el video empieza a avanzar: aquí nunca carga, así que se avisa a
+ * mano, sobre el propio elemento. Desde entonces la lección late su reproducción (T-204).
+ */
+async function advance(page: Page): Promise<void> {
+  await page.evaluate(() => document.querySelector("mux-player")?.dispatchEvent(new Event("playing")));
+}
+
+/** Un latido ahora, sin esperar `LATIDO_SEGUNDOS`: la pantalla late al volver a la pestaña. */
+async function beatNow(page: Page): Promise<void> {
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+}
+
+/** Entra con su propio navegador (otra sesión de Auth de la misma cuenta) y le da reproducir. */
+async function watchFrom(context: BrowserContext, who: Person): Promise<Page> {
+  const page = await context.newPage();
+  await holdOutside(context);
+  await signIn(page, who, lessonUrl(SLUG, lesson));
+  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+  await page.getByRole("button", { name: "Reproducir la lección" }).click();
+  return page;
+}
+
+test("una reproducción a la vez: otro dispositivo ve PA-34, cierra la otra, y la otra se detiene y puede tomar el lugar de vuelta (T-204)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const computer = await browser.newContext();
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const first = await watchFrom(computer, who);
+  await expect(first.locator("mux-player")).toHaveCount(1);
+  await advance(first);
+
+  // El teléfono encuentra el lugar ocupado: PA-34 en el lugar del reproductor, con la lista.
+  const second = await watchFrom(phone, who);
+  await expect(second.getByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en otro lugar" })).toBeVisible();
+  const rows = second.getByRole("list", { name: "Dónde se está reproduciendo" }).getByRole("listitem");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Con Mux · Curso leccion-e2e · Desde las");
+  await expect(second.locator("mux-player")).toHaveCount(0);
+  expect(await a11yViolations(second)).toEqual([]);
+
+  // Cerrar esa reproducción: aquí arranca, en el mismo pedido.
+  await rows.first().getByRole("button", { name: /^Cerrar esa reproducción/ }).click();
+  await expect(second.locator("mux-player")).toHaveCount(1);
+  await expect(second.locator("[data-player-frame] [data-watermark]")).toHaveText(who.email);
+
+  // En la computadora, su siguiente latido lo dice, y el video se va.
+  await beatNow(first);
+  await expect(first.getByText("Esta reproducción se cerró desde otro dispositivo.").first()).toBeVisible();
+  await expect(first.locator("mux-player")).toHaveCount(0);
+  expect(await a11yViolations(first)).toEqual([]);
+
+  // «Reproducir aquí» toma el lugar de vuelta, y ahora es el teléfono el que se detiene.
+  await advance(second);
+  await first.getByRole("button", { name: "Reproducir aquí" }).click();
+  await expect(first.locator("mux-player")).toHaveCount(1);
+  await beatNow(second);
+  await expect(second.getByText("Esta reproducción se cerró desde otro dispositivo.").first()).toBeVisible();
+
+  // En la base, una sola viva para la cuenta.
+  const [live] = await ownerQuery<{ n: number }>(
+    "select count(*)::int as n from public.playback_sessions where profile_id = $1 and revoked_at is null",
+    [who.id],
+  );
+  expect(live?.n).toBe(1);
+  await computer.close();
+  await phone.close();
+});
+
+test("la misma lección en otra pestaña del mismo navegador: la nueva reproduce y la vieja lo dice (T-204)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const first = await watchFrom(context, who);
+  await expect(first.locator("mux-player")).toHaveCount(1);
+  await advance(first);
+  // Otra pestaña, con la misma sesión: nunca dice ocupado.
+  const second = await context.newPage();
+  await second.goto(lessonUrl(SLUG, lesson));
+  await second.getByRole("button", { name: "Reproducir la lección" }).click();
+  await expect(second.locator("mux-player")).toHaveCount(1);
+  await beatNow(first);
+  await expect(first.getByText("Esta lección se abrió en otra pestaña o ventana.").first()).toBeVisible();
+  await expect(first.locator("mux-player")).toHaveCount(0);
+  // Y renovar la dirección en la nueva no la saca: sigue reproduciendo, y su latido sigue bien.
+  await advance(second);
+  await expire(second);
+  await expect.poll(() => second.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
+  await advance(second);
+  await beatNow(second);
+  await expect(second.locator("mux-player")).toHaveCount(1);
+  await expect(second.getByText("Esta lección se abrió en otra pestaña o ventana.")).toHaveCount(0);
+  await context.close();
+});

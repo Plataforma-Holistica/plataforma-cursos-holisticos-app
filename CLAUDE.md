@@ -1215,8 +1215,19 @@ falla. Veintiuna precisiones que la tabla no dice:
   `app.actor_session`) y `tests/integration/40-reproducciones.test.ts` (cada navegador es otra
   entrada; que abrir espera el candado se prueba con otra conexión que lo retiene: no se puede
   probar que latir también lo espera en la misma prueba, porque la transacción que abrió ya lo
-  tiene). PA-34 y el latido en el reproductor llegan con la segunda solicitud; mientras, la
-  pantalla dice «no se pudo» con el lugar ocupado.
+  tiene).
+  - **La pantalla** (segunda solicitud): el reproductor compartido avisa cuándo avanza el video
+    (`onAdvancing`: el aviso `playing` de Mux, y la pausa, el final o un error lo detienen) y en
+    qué segundo va (`onProgress`); la revisión no los usa. La lección late con
+    `playbackPresenceAction` al empezar a avanzar, cada `heartbeatSeconds` y al volver a la
+    pestaña (`visibilitychange`), y nunca mientras renueva la dirección. El latido vive en un
+    efecto que depende de la reproducción: si cambia (una dirección renovada la reemplaza), la
+    respuesta del viejo se descarta. Cerrada o vencida con el lugar tomado, el reproductor se va
+    (y con él la pantalla completa) y queda el aviso con «Reproducir aquí», o PA-34, con el
+    segundo en que iba; las dos piden con `closing` (la que tomó su lugar, o la que se elige
+    cerrar). El nombre del navegador sale de `src/app/_lib/devices.ts`, el mismo de PA-25. En el
+    extremo a extremo el video no avanza (Mux está cortado): `advance` manda el aviso `playing`
+    al elemento, y `beatNow` un `visibilitychange`, para no esperar 30 segundos.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

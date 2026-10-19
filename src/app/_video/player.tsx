@@ -134,6 +134,13 @@ export interface PlayerProps {
   onPlaying: () => void;
   /** Llegó al final (la lección: «Lección terminada» y la siguiente). */
   onEnded?: () => void;
+  /**
+   * El video empezó a avanzar (`true`) o se detuvo: una pausa, el final, un error. Mientras
+   * avanza, la lección late su reproducción (T-204, RF-107). Esperar a que cargue no lo detiene.
+   */
+  onAdvancing?: (advancing: boolean) => void;
+  /** El segundo en que va, cada vez que avanza: para volver a él si la reproducción se cierra (T-204). */
+  onProgress?: (at: number) => void;
 }
 
 /** Lo que trae un error de Mux (su `MediaError`): si es fatal, y su código. Sus tipos no lo declaran. */
@@ -196,7 +203,8 @@ function nativeVideo(element: MuxPlayerRefAttributes | null) {
 }
 
 export function Player(props: PlayerProps) {
-  const { grant, playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded } = props;
+  const { grant, playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded, onAdvancing, onProgress } =
+    props;
   const frame = useRef<HTMLDivElement>(null);
   const mux = useRef<MuxPlayerRefAttributes | null>(null);
   // El último Mux Player que se ligó: React suelta y vuelve a poner la referencia en cada render.
@@ -405,14 +413,20 @@ export function Player(props: PlayerProps) {
             wantsPlay.current = true;
             guard();
           }}
-          onPlaying={onPlaying}
+          onPlaying={() => {
+            onAdvancing?.(true);
+            onPlaying();
+          }}
+          onTimeUpdate={(event) => onProgress?.((event.target as { currentTime?: number } | null)?.currentTime ?? 0)}
           onPause={(event) => {
+            onAdvancing?.(false);
             // Una pausa que no viene de sus controles (la pantalla de bloqueo, unos audífonos que se
             // desconectan) también cuenta; la que acompaña a un error, no.
             if (!(event.target as { error?: unknown } | null)?.error) wantsPlay.current = false;
           }}
           onEnded={() => {
             wantsPlay.current = false;
+            onAdvancing?.(false);
             onEnded?.();
           }}
           onError={(event) => {
