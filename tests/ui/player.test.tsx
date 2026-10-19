@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { forwardRef, useImperativeHandle } from "react";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // El reproductor compartido (`src/app/_video/player.tsx`; diseño, sección 5.4), con Mux Player
@@ -21,13 +21,21 @@ interface FakeElement {
   media: { setAttribute: ReturnType<typeof vi.fn>; nativeEl: FakeVideo };
   mediaController: { fullscreenElement: HTMLElement | null; setAttribute: ReturnType<typeof vi.fn> };
   currentTime: number;
+  playbackRate: number;
+  volume: number;
+  muted: boolean;
   error: unknown;
   pause: ReturnType<typeof vi.fn>;
+  play: ReturnType<typeof vi.fn>;
+  focus: ReturnType<typeof vi.fn>;
 }
 
+// Cada montaje del Mux Player de mentira es un elemento nuevo, como el de verdad: `element` es el
+// último, y `elements`, todos los que se montaron.
 const mux = vi.hoisted(() => ({
   props: null as null | Record<string, unknown>,
   element: null as null | FakeElement,
+  elements: [] as FakeElement[],
 }));
 // Se llaman una vez, al cargar el módulo: se anotan aparte, porque las pruebas limpian las simulaciones.
 const i18n = vi.hoisted(() => {
@@ -46,24 +54,33 @@ vi.mock("media-chrome/dist/utils/i18n.js", () => i18n);
 vi.mock("@mux/mux-player-react", () => ({
   default: forwardRef<unknown, Record<string, unknown>>(function FakeMuxPlayer(props, ref) {
     mux.props = props;
-    const element: FakeElement = mux.element ?? {
-      media: {
-        setAttribute: vi.fn(),
-        nativeEl: Object.assign(new EventTarget(), {
-          disableRemotePlayback: false,
-          disablePictureInPicture: false,
-          textTracks: [] as { kind: string; mode: string }[],
-          webkitExitFullscreen: vi.fn(),
-        }),
-      },
-      mediaController: { fullscreenElement: null, setAttribute: vi.fn() },
-      currentTime: 42,
-      error: null,
-      pause: vi.fn(),
-    };
+    const [element] = useState<FakeElement>(() => {
+      const created: FakeElement = {
+        media: {
+          setAttribute: vi.fn(),
+          nativeEl: Object.assign(new EventTarget(), {
+            disableRemotePlayback: false,
+            disablePictureInPicture: false,
+            textTracks: [] as { kind: string; mode: string }[],
+            webkitExitFullscreen: vi.fn(),
+          }),
+        },
+        mediaController: { fullscreenElement: null, setAttribute: vi.fn() },
+        currentTime: 42,
+        playbackRate: 1,
+        volume: 1,
+        muted: false,
+        error: null,
+        pause: vi.fn(),
+        play: vi.fn(() => Promise.resolve()),
+        focus: vi.fn(),
+      };
+      mux.elements.push(created);
+      return created;
+    });
     mux.element = element;
     useImperativeHandle(ref, () => element);
-    return <div data-testid="mux" />;
+    return <div data-testid="mux" tabIndex={-1} />;
   }),
 }));
 
@@ -72,17 +89,19 @@ import { Player, TURN_HINT_MS } from "@/app/_video/player";
 import { WATERMARK_FADE_MS, WATERMARK_INTERVAL_MS } from "@/app/_video/watermark-cells";
 
 const TOKENS = { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" };
+const RENEWED = { playback: "p2.p2.p2", thumbnail: "t2.t2.t2", storyboard: "s2.s2.s2" };
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
 function show(watermark?: string, captions?: { on?: boolean; onChange?: (on: boolean) => void }) {
   const onExpired = vi.fn();
   const onFailed = vi.fn();
   const onPlaying = vi.fn();
-  const view = render(
+  const player = (grant: number, tokens: typeof TOKENS, startTime: number) => (
     <Player
+      grant={grant}
       playbackId="PlaybackDePrueba"
-      tokens={TOKENS}
-      startTime={7}
+      tokens={tokens}
+      startTime={startTime}
       speeds={SPEEDS}
       watermark={watermark}
       captions={captions?.on}
@@ -90,8 +109,11 @@ function show(watermark?: string, captions?: { on?: boolean; onChange?: (on: boo
       onExpired={onExpired}
       onFailed={onFailed}
       onPlaying={onPlaying}
-    />,
+    />
   );
+  const view = render(player(1, TOKENS, 7));
+  /** Lo que hace la pantalla con una dirección renovada: otra concesión, otros tokens, el segundo en que iba. */
+  const renew = (grant = 2, tokens = RENEWED, startTime = 42) => view.rerender(player(grant, tokens, startTime));
   /** Lo que haría Mux Player al fallar: el error en `detail`, o solo en el elemento. */
   const fail = (detail: unknown, onElement = false) => {
     if (onElement) {
@@ -103,12 +125,15 @@ function show(watermark?: string, captions?: { on?: boolean; onChange?: (on: boo
   };
   const frame = view.container.querySelector<HTMLElement>("[data-player-frame]");
   const mark = () => view.container.querySelector<HTMLElement>("[data-watermark]");
-  return { onExpired, onFailed, onPlaying, fail, frame, mark, view };
+  /** Lo que haría Mux Player al cargar los datos del video. */
+  const loaded = () => act(() => (mux.props?.onLoadedMetadata as (event: unknown) => void)({ target: mux.element }));
+  return { onExpired, onFailed, onPlaying, fail, frame, mark, view, renew, loaded };
 }
 
 beforeEach(() => {
   mux.props = null;
   mux.element = null;
+  mux.elements = [];
 });
 
 afterEach(() => {
@@ -190,7 +215,7 @@ describe("el reproductor", () => {
 
   it("al llegar al final, lo dice", () => {
     const onEnded = vi.fn();
-    render(<Player playbackId="P" tokens={TOKENS} startTime={0} speeds={SPEEDS} onExpired={vi.fn()} onFailed={vi.fn()} onPlaying={vi.fn()} onEnded={onEnded} />);
+    render(<Player grant={1} playbackId="P" tokens={TOKENS} startTime={0} speeds={SPEEDS} onExpired={vi.fn()} onFailed={vi.fn()} onPlaying={vi.fn()} onEnded={onEnded} />);
     (mux.props?.onEnded as () => void)();
     expect(onEnded).toHaveBeenCalledOnce();
   });
@@ -593,5 +618,191 @@ describe("los subtítulos (RF-310)", () => {
     mux.element?.media.nativeEl.textTracks.push({ kind: "subtitles", mode: "disabled" });
     request("mediadisablesubtitlesrequest");
     expect(onChange).toHaveBeenCalledExactlyOnceWith(false);
+  });
+});
+
+describe("renovar la dirección, sin salir de la pantalla completa", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, "fullscreenEnabled");
+    vi.unstubAllGlobals();
+    document.documentElement.classList.remove("player-locked");
+  });
+
+  it("otra concesión monta otro Mux Player dentro del mismo contenedor, con los tokens y el segundo nuevos, ligado al contenedor", () => {
+    const { frame, renew, view } = show("ana@correo.com");
+    const first = mux.element;
+    renew();
+    expect(mux.elements).toHaveLength(2);
+    expect(mux.element).not.toBe(first);
+    // El contenedor (lo que está a pantalla completa) y la marca son los mismos.
+    expect(view.container.querySelector("[data-player-frame]")).toBe(frame);
+    expect(frame?.querySelector("[data-watermark]")).not.toBeNull();
+    expect(mux.props).toMatchObject({ tokens: RENEWED, startTime: 42 });
+    expect(mux.element?.mediaController.fullscreenElement).toBe(frame);
+    expect(mux.element?.mediaController.setAttribute).toHaveBeenCalledWith("autohide", "3");
+    expect(mux.element?.media.nativeEl.disableRemotePlayback).toBe(true);
+  });
+
+  it("si la pantalla vuelve a pintar con la misma concesión, no monta otro", () => {
+    const { renew } = show();
+    renew(1, TOKENS, 7);
+    expect(mux.elements).toHaveLength(1);
+  });
+
+  it("en la pantalla completa propia (iPhone), renovar no la deshace: sigue girada y con la página quieta", () => {
+    elementFullscreen(false);
+    orientation(true);
+    const { frame, renew } = show("ana@correo.com");
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Girar" }));
+    renew();
+    expect(frame).toHaveAttribute("data-filled");
+    expect(frame).toHaveAttribute("data-turned");
+    expect(document.documentElement).toHaveClass("player-locked");
+    expect(screen.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("el pellizco se atrapa en el video del Mux Player nuevo, y ya no en el del viejo", () => {
+    elementFullscreen(false);
+    const { frame, renew } = show();
+    const old = mux.element?.media.nativeEl;
+    renew();
+    const now = mux.element?.media.nativeEl;
+    act(() => void old?.dispatchEvent(new Event("webkitbeginfullscreen")));
+    expect(old?.webkitExitFullscreen).not.toHaveBeenCalled();
+    expect(frame).not.toHaveAttribute("data-filled");
+    act(() => void now?.dispatchEvent(new Event("webkitbeginfullscreen")));
+    expect(now?.webkitExitFullscreen).toHaveBeenCalledOnce();
+    expect(frame).toHaveAttribute("data-filled");
+  });
+
+  it("al cargar se repone lo que la persona tenía: velocidad, volumen y silencio; y si le dio reproducir, sigue", () => {
+    const { fail, renew, loaded } = show();
+    const old = mux.element;
+    if (old === null) throw new Error("Sin reproductor");
+    Object.assign(old, { playbackRate: 1.5, volume: 0.4, muted: true });
+    // Volvió de una pausa larga y pulsó reproducir: Mux contesta que la dirección caducó.
+    request("mediaplayrequest");
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    const now = mux.element;
+    expect(now?.play).not.toHaveBeenCalled();
+    loaded();
+    expect(now).toMatchObject({ playbackRate: 1.5, volume: 0.4, muted: true });
+    expect(now?.play).toHaveBeenCalledOnce();
+    // Otro aviso de carga no repite nada.
+    loaded();
+    expect(now?.play).toHaveBeenCalledOnce();
+  });
+
+  it("también si se le dio reproducir sin los controles de Mux (el video avisó que empezó)", () => {
+    const { fail, renew, loaded } = show();
+    act(() => (mux.props?.onPlay as (event: unknown) => void)({ target: mux.element }));
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    loaded();
+    expect(mux.element?.play).toHaveBeenCalledOnce();
+  });
+
+  it("si estaba en pausa, sigue en pausa en el segundo en que iba, con lo demás repuesto", () => {
+    const { fail, renew, loaded } = show();
+    const old = mux.element;
+    if (old === null) throw new Error("Sin reproductor");
+    old.playbackRate = 2;
+    request("mediaplayrequest");
+    request("mediapauserequest");
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    loaded();
+    expect(mux.element?.play).not.toHaveBeenCalled();
+    expect(mux.element?.playbackRate).toBe(2);
+  });
+
+  it("si el navegador no deja reproducir sin un toque (Safari), queda en pausa, sin error", async () => {
+    const { fail, renew, loaded, onFailed } = show();
+    request("mediaplayrequest");
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    // La negativa se atrapa: sin eso sería un rechazo sin manejar. No sirve devolver una promesa
+    // rechazada, porque el espía de Vitest se engancha a ella para anotar su resultado y ya cuenta
+    // como atendida: se mira que se llame a su `catch`.
+    const refusal = Promise.reject(new Error("NotAllowedError"));
+    const caught = vi.fn((onRejected: (reason: unknown) => unknown) => refusal.catch(onRejected));
+    mux.element?.play.mockReturnValue({ catch: caught });
+    loaded();
+    await act(async () => await Promise.resolve());
+    expect(caught).toHaveBeenCalledOnce();
+    expect(onFailed).not.toHaveBeenCalled();
+  });
+
+  it("un aviso de carga del reproductor viejo, antes de la dirección nueva, no se queda con lo que hay que reponer", () => {
+    const { fail, renew, loaded } = show();
+    const old = mux.element;
+    request("mediaplayrequest");
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    loaded();
+    expect(old?.play).not.toHaveBeenCalled();
+    renew();
+    loaded();
+    expect(mux.element?.play).toHaveBeenCalledOnce();
+  });
+
+  it("si llegó al final, no sigue solo", () => {
+    const { fail, renew, loaded } = show();
+    request("mediaplayrequest");
+    act(() => (mux.props?.onEnded as () => void)());
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    loaded();
+    expect(mux.element?.play).not.toHaveBeenCalled();
+  });
+
+  it("sin una caducidad antes, cargar no toca nada", () => {
+    const { loaded } = show();
+    request("mediaplayrequest");
+    loaded();
+    expect(mux.element?.play).not.toHaveBeenCalled();
+    expect(mux.element?.playbackRate).toBe(1);
+  });
+
+  it("el foco que estaba en el reproductor viejo pasa al nuevo: sin eso, los atajos del teclado dejan de servir", () => {
+    const { fail, renew } = show();
+    screen.getByTestId("mux").focus();
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    expect(mux.element?.focus).toHaveBeenCalledOnce();
+  });
+
+  it("si la persona movió el foco a otra parte mientras se renovaba, se queda donde lo puso", () => {
+    const { fail, renew } = show();
+    screen.getByTestId("mux").focus();
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    renew();
+    expect(mux.element?.focus).not.toHaveBeenCalled();
+    expect(elsewhere).toHaveFocus();
+    elsewhere.remove();
+  });
+
+  it("si nadie tenía el foco, el reproductor nuevo no lo toma", () => {
+    const { fail, renew } = show();
+    (document.activeElement as HTMLElement | null)?.blur();
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    expect(mux.element?.focus).not.toHaveBeenCalled();
+  });
+
+  it("si el foco estaba en otra parte, se queda donde estaba", () => {
+    const { fail, renew } = show();
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    renew();
+    expect(mux.element?.focus).not.toHaveBeenCalled();
+    expect(elsewhere).toHaveFocus();
+    elsewhere.remove();
   });
 });

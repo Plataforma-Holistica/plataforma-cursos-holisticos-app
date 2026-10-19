@@ -213,6 +213,25 @@ describe("reproducir", () => {
     expect(actions.lessonVideoAction).toHaveBeenCalledTimes(2);
   });
 
+  it("renovar no vuelve a montar el reproductor (no se sale de la pantalla completa); otra lección, sí", async () => {
+    const renewed = { ...GRANT, tokens: { playback: "p2.p2.p2", thumbnail: "t2.t2.t2", storyboard: "s2.s2.s2" } };
+    actions.lessonVideoAction.mockResolvedValueOnce(GRANT).mockResolvedValueOnce(renewed).mockResolvedValueOnce({ ...GRANT, playbackId: "PlaybackSegunda" });
+    const two = queueOf();
+    const [course] = two.courses;
+    if (course) course.lessons = [course.lessons[0]!, { ...course.lessons[0]!, lessonId: TEST, title: "El río", video: "playable" }];
+    const { user } = show(two);
+    await user.click(screen.getByRole("button", { name: "Ver «El bosque»" }));
+    const mounted = await screen.findByTestId("reproductor");
+    const first = player.last?.grant;
+    await user.click(screen.getByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(player.last?.tokens).toEqual(renewed.tokens));
+    expect(screen.getByTestId("reproductor")).toBe(mounted);
+    expect(player.last?.grant).not.toBe(first);
+    await user.click(screen.getByRole("button", { name: "Ver «El río»" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-playback", "PlaybackSegunda");
+    expect(screen.getByTestId("reproductor")).not.toBe(mounted);
+  });
+
   it("si volvió a reproducirse entre una caducidad y otra, la siguiente también se renueva", async () => {
     actions.lessonVideoAction.mockResolvedValue(GRANT);
     const { user } = show();

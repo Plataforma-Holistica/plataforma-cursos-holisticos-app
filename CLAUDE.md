@@ -63,6 +63,7 @@ pnpm db:courses  # carga en la base local los cursos de prueba (T-107): sus prá
 pnpm media:upload-test [<archivo> ...]   # sube a Mux videos de ../Videos-Test/ (por omisión, uno) y deja sus identificadores para db:courses
 pnpm media:check  # contra Mux: con una dirección firmada vigente sirve el video; caducada o sin firma, no
 pnpm media:captions-test [<archivo>]   # le agrega a un video de prueba de Mux la pista de subtítulos escrita a mano
+pnpm db:student [<correo@prueba.test>]   # publica el curso de prueba y deja una alumna con suscripción, para ver la lección desde otro aparato de la red
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
@@ -160,6 +161,26 @@ con el de la máquina: si la rama no está subida o el archivo cambió, se detie
 viaja con la huella del archivo: si el video ya la tiene, no hace nada, y si tiene otra pista
 de prueba, se detiene (se quita a mano en el panel). Tampoco corre con `CI` ni en Vercel, ni
 imprime respuestas de la API.
+
+`pnpm db:student` deja la base local lista para ver «El bosque» como alumna con suscripción
+desde otro aparato de la misma red, como el iPhone de quien revisa (T-203; decisión de Sergio
+del 2026-10-19). Pide antes `db:drafts`, `media:upload-test` y `db:courses`, y no los corre él.
+Publica y lista `prueba-naturaleza` como dueño de la base declarado sistema: aprobar pide a
+alguien del equipo con su código, y el guardián de lo publicado acepta al dueño declarado
+sistema, así que repite las revisiones, los candados y las tres escrituras de
+`private.approve_course()`. Da de alta en el Auth local a `alumna@prueba.test` (u otro correo
+`@prueba.test` que se le pase, sin el `it-` que barren las pruebas), la reclama y la completa
+como los ayudantes de las pruebas, y le da una suscripción `manual`. Se niega con una cuenta
+del equipo, invitada o de un maestro. Cada corrida le pone otra contraseña, y reclamar cierra
+sus sesiones; los consentimientos son un libro, así que solo agrega los que faltan, y una
+suscripción viva ya vencida se extiende. Imprime la dirección con la IP de la red (sin los
+adaptadores de WSL ni de Docker), el correo y la contraseña. La aplicación se levanta con
+`pnpm build && pnpm start`: `next start` escucha en toda la red, y `next dev` le niega sus
+recursos de desarrollo a otra dirección sin `allowedDevOrigins`. Desde otra dirección nada se
+rompe en http: las cookies no llevan `Secure` con `NEXT_PUBLIC_SITE_URL` en http, y las
+acciones comparan `Origin` con `Host`. Las mismas comprobaciones de `db:admins` y
+`DATABASE_URL` local; de un error imprime solo el código. Deja auditoría y consentimientos:
+antes de cualquier prueba, se apaga el servidor y `pnpm db:reset`.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -1152,7 +1173,8 @@ falla. Veintiuna precisiones que la tabla no dice:
   - **Si la dirección caduca** (fatal, `muxCode` 2403210), se pide otra una sola vez, desde
     el mismo segundo; si vuelve a caducar sin haberse reproducido, se dice el error. Mientras
     se renueva, otro aviso de caducidad no pide otra, y un error manda sobre la dirección que
-    llegue tarde. Ningún error de Mux sale del reproductor: algunos mensajes traen el
+    llegue tarde. La dirección nueva llega con otro número de concesión y no se sale de la
+    pantalla completa (abajo, en el reproductor). Ningún error de Mux sale del reproductor: algunos mensajes traen el
     playback id. Y el filtro de Sentry (`scrub.ts`) deja de toda dirección de Mux solo el
     servidor (`https://stream.mux.com/[video]`): el rastro de un error llevaría el playback
     id en la ruta.
@@ -1275,11 +1297,24 @@ falla. Veintiuna precisiones que la tabla no dice:
     antes de entrar. El extremo a extremo lo prueba con un iPhone simulado (`likeAnIPhone`: sin
     pantalla completa de elementos y con la del video), y mide que ninguna de las ocho celdas de
     la marca quede bajo un botón, en vertical, girado y en horizontal. Chromium no simula los
-    márgenes seguros: eso y el iPhone de verdad, a mano. Un límite conocido: renovar la dirección
-    vuelve a montar el reproductor (la pantalla de la lección le pone el token como `key`), así
-    que quien estaba en la pantalla completa propia sale de ella, igual que en computadora sale
-    de la del navegador. Solo pasa si la dirección caducó, es decir, tras una pausa más larga que
-    su vida (ADR-27).
+    márgenes seguros: eso y el iPhone de verdad, a mano.
+  - **Renovar la dirección no saca de la pantalla completa** (decisiones de Sergio del
+    2026-10-19). Las pantallas no le ponen `key` al reproductor: le pasan un número de
+    concesión (`grant`, el del pedido que dio la dirección), y el reproductor lo usa como `key`
+    de `<MuxPlayer>`, dentro del contenedor. Con una dirección renovada solo se monta otro Mux
+    Player; el contenedor (lo que está a pantalla completa), la marca y el estado de la pantalla
+    completa propia se quedan. Tres cosas que no se ven: cambiar solo los tokens del mismo Mux
+    Player no vuelve a cargar el video (leído en `@mux/mux-player` 3.14: guarda los tokens sin
+    volver a pintar); el número no es el token, porque el token se firma con la hora en
+    segundos y sin azar, y dos pedidos seguidos dan el mismo; y el elemento nuevo se liga al
+    contenedor en su referencia (`attach`), y la escucha del pellizco se vuelve a poner con su
+    video. Al caducar se anota lo que se repone en el nuevo al cargar: la velocidad, el volumen
+    y el silencio, el foco (si estaba dentro y quedó sin dueño: los atajos escuchan en el
+    controlador de Mux), y si la persona le había dado reproducir (los pedidos de media-chrome
+    de reproducir y pausar, o el aviso de que empezó; un error no es una pausa), y entonces
+    sigue solo. Safari puede negarse sin un toque sobre ese `<video>`, que es nuevo: queda en
+    pausa en el segundo en que iba. El extremo a extremo provoca la caducidad a pantalla
+    completa, en computadora y en el iPhone simulado.
   - **La marca de agua** (`watermark.tsx`, RF-305), solo si la pantalla la pasa (la lección;
     revisión no, hasta T-405): el correo de quien ve, tal como lo dio la función única de
     medios, en una de las ocho celdas del borde de una rejilla de 3 × 3 sobre el área segura

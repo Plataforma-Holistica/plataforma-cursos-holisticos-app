@@ -34,6 +34,14 @@ import { Watermark, watermarkIntact } from "./watermark";
 // Los subtítulos arrancan como la cuenta los dejó (RF-310), y cuando la persona los enciende o
 // los apaga, se avisa a la pantalla para que lo recuerde.
 //
+// Cuando la dirección caduca, la pantalla pide otra y la pasa con otra concesión (`grant`): solo
+// el Mux Player se monta de nuevo, dentro del mismo contenedor, así que no se sale de la pantalla
+// completa (la del navegador ni la propia) y la marca sigue donde estaba. Cambiar solo los tokens
+// del mismo Mux Player no basta: no vuelve a cargar el video. El elemento nuevo se liga al
+// contenedor, recibe el foco si lo tenía el viejo, y al cargar repone la velocidad, el volumen y
+// el silencio, y sigue si la persona le había dado reproducir (Safari puede negarse sin un toque:
+// entonces queda en pausa en el segundo en que iba).
+//
 // Lo que se le apaga, a propósito:
 //   · Mux Data (`disableTracking`, `disableCookies`, sin `envKey`): ni analítica ni cookies.
 //   · Enviar a otra pantalla, AirPlay e imagen dentro de imagen (diseño, sección 5.4 y D-08).
@@ -60,6 +68,14 @@ export const TURN_HINT_MS = 4_000;
 const ENTER_FULLSCREEN = "mediaenterfullscreenrequest";
 const EXIT_FULLSCREEN = "mediaexitfullscreenrequest";
 const CAPTIONS_REQUESTS = ["mediashowsubtitlesrequest", "mediadisablesubtitlesrequest", "mediatogglesubtitlesrequest"];
+/** Los pedidos de reproducir y de pausar de los controles de Mux (su botón, un toque, la barra espaciadora). */
+const PLAY_REQUEST = "mediaplayrequest";
+const PAUSE_REQUEST = "mediapauserequest";
+
+/** Si el foco quedó sin dueño: el elemento que lo tenía se fue de la página. */
+function focusIsLost(): boolean {
+  return document.activeElement === null || document.activeElement === document.body;
+}
 
 /**
  * Si el navegador lleva a pantalla completa un elemento cualquiera, y no solo el video. En
@@ -93,6 +109,11 @@ function captionsShowing(video: HTMLVideoElement | undefined): boolean {
 }
 
 export interface PlayerProps {
+  /**
+   * Qué concesión de la pantalla es: con otra (una dirección renovada) se monta otro Mux Player.
+   * No es el token: firmado con la hora en segundos y sin azar, dos pedidos seguidos dan el mismo.
+   */
+  grant: number;
   playbackId: string;
   tokens: { playback: string; thumbnail: string; storyboard: string };
   /** Desde qué segundo: el mismo en que iba, si la dirección se renovó. */
@@ -130,6 +151,17 @@ interface WithController {
   mediaController?: { fullscreenElement?: HTMLElement | null; setAttribute?: (name: string, value: string) => void } | null;
 }
 
+/** Lo que se repone en el Mux Player nuevo cuando la dirección caducó. */
+interface Resume {
+  playbackRate: number;
+  volume: number;
+  muted: boolean;
+  /** La persona le había dado reproducir (y no pausó desde entonces). */
+  play: boolean;
+  /** El foco estaba dentro del reproductor. */
+  focused: boolean;
+}
+
 /**
  * Apaga enviar a otra pantalla e imagen dentro de imagen en el `<video>` interno. Corre al
  * conectarse el elemento, antes de que Mux Player reciba el playback id (eso lo hace en un
@@ -152,9 +184,15 @@ function nativeVideo(element: MuxPlayerRefAttributes | null) {
 }
 
 export function Player(props: PlayerProps) {
-  const { playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded } = props;
+  const { grant, playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded } = props;
   const frame = useRef<HTMLDivElement>(null);
   const mux = useRef<MuxPlayerRefAttributes | null>(null);
+  // El último Mux Player que se ligó: React suelta y vuelve a poner la referencia en cada render.
+  const bound = useRef<MuxPlayerRefAttributes | null>(null);
+  // Si la persona le dio reproducir y no pausó desde entonces; y lo que se repone si la dirección
+  // caducó, con el Mux Player al que caducó (a ese no se le repone nada).
+  const wantsPlay = useRef(false);
+  const resume = useRef<(Resume & { from: MuxPlayerRefAttributes | null }) | null>(null);
   const mark = useRef<HTMLParagraphElement>(null);
   const fading = useRef(false);
   const exitButton = useRef<HTMLButtonElement>(null);
@@ -186,14 +224,6 @@ export function Player(props: PlayerProps) {
     hintTimer.current = setTimeout(() => setHint(false), TURN_HINT_MS);
   }, []);
 
-  // Una función nueva en cada render: React suelta y vuelve a poner la referencia, y `lockDown`
-  // corre otra vez, sin efecto. Con `useCallback` el compilador de React ya no deja tocar el
-  // controlador de Mux en `bindController`.
-  function attach(element: MuxPlayerRefAttributes | null) {
-    lockDown(element);
-    mux.current = element;
-  }
-
   /** El contenedor entra a pantalla completa, y los controles se ocultan a su tiempo. */
   const bindController = useCallback(() => {
     const controller = (mux.current as unknown as WithController | null)?.mediaController;
@@ -201,6 +231,33 @@ export function Player(props: PlayerProps) {
     if (controller.fullscreenElement !== frame.current) controller.fullscreenElement = frame.current;
     controller.setAttribute?.("autohide", String(AUTOHIDE_SECONDS));
   }, []);
+
+  // Una función nueva en cada render: React suelta y vuelve a poner la referencia, y `lockDown`
+  // corre otra vez, sin efecto. Con `useCallback` el compilador de React ya no deja tocar el
+  // controlador de Mux en `bindController`. Un Mux Player nuevo (otra concesión) se liga al
+  // contenedor en el acto, antes de cargar, y si el foco estaba en el viejo, pasa a él: los
+  // atajos del teclado escuchan en su controlador, y en el documento no sirven.
+  function attach(element: MuxPlayerRefAttributes | null) {
+    lockDown(element);
+    mux.current = element;
+    if (element === null || element === bound.current) return;
+    bound.current = element;
+    bindController();
+    if (resume.current?.focused && focusIsLost()) (element as unknown as HTMLElement).focus?.();
+  }
+
+  /** Al cargar: el controlador, y en un Mux Player nuevo tras una caducidad, lo que la persona tenía. */
+  function loaded() {
+    bindController();
+    const element = mux.current as (MuxPlayerRefAttributes & Partial<Pick<HTMLMediaElement, "playbackRate" | "volume" | "muted" | "play">>) | null;
+    const kept = resume.current;
+    if (element === null || kept === null || kept.from === element) return;
+    resume.current = null;
+    element.playbackRate = kept.playbackRate;
+    element.volume = kept.volume;
+    element.muted = kept.muted;
+    if (kept.play) element.play?.()?.catch(() => undefined);
+  }
 
   /** Sin la marca en su lugar, el video no sigue (TRD §9.4). */
   const guard = useCallback(() => {
@@ -230,7 +287,8 @@ export function Player(props: PlayerProps) {
 
   // Si iOS entra solo a la pantalla completa del sistema (un pellizco sobre el video), se sale de
   // ella y se pasa a la propia: la del sistema no pinta la marca. Si ya estaba en la propia, se
-  // queda como estaba, girada o no.
+  // queda como estaba, girada o no. Se escucha en el video de cada Mux Player: con otra concesión
+  // el video es otro.
   useEffect(() => {
     const video = nativeVideo(mux.current);
     if (typeof video?.addEventListener !== "function") return;
@@ -240,7 +298,7 @@ export function Player(props: PlayerProps) {
     };
     video.addEventListener("webkitbeginfullscreen", takeBack);
     return () => video.removeEventListener("webkitbeginfullscreen", takeBack);
-  }, [fill]);
+  }, [fill, grant]);
 
   // Dentro de la propia: la página de atrás no se desplaza, Escape sale (con un teclado), y el
   // foco va a «Salir de pantalla completa». Al salir, si el foco quedó sin dueño, vuelve al video.
@@ -279,6 +337,21 @@ export function Player(props: PlayerProps) {
     };
   }, []);
 
+  // Si la persona le dio reproducir (los controles de Mux piden de subida, por el contenedor), para
+  // seguir si la dirección caduca justo entonces. Un error no es una pausa: solo la pide ella.
+  useEffect(() => {
+    const element = frame.current;
+    if (element === null) return;
+    const play = () => void (wantsPlay.current = true);
+    const pause = () => void (wantsPlay.current = false);
+    element.addEventListener(PLAY_REQUEST, play);
+    element.addEventListener(PAUSE_REQUEST, pause);
+    return () => {
+      element.removeEventListener(PLAY_REQUEST, play);
+      element.removeEventListener(PAUSE_REQUEST, pause);
+    };
+  }, []);
+
   // Cualquier cambio dentro del contenedor (quitarla, ocultarla, cambiarle el texto) se revisa.
   useEffect(() => {
     if (!watermark || frame.current === null) return;
@@ -297,6 +370,7 @@ export function Player(props: PlayerProps) {
     >
       <div className="player-stage">
         <MuxPlayer
+          key={grant}
           ref={attach}
           className="player-mux block h-full w-full"
           playbackId={playbackId}
@@ -310,17 +384,32 @@ export function Player(props: PlayerProps) {
           disableCookies
           noVolumePref
           noMutedPref
-          onLoadedMetadata={bindController}
-          onPlay={guard}
+          onLoadedMetadata={loaded}
+          onPlay={() => {
+            wantsPlay.current = true;
+            guard();
+          }}
           onPlaying={onPlaying}
-          onEnded={onEnded}
+          onEnded={() => {
+            wantsPlay.current = false;
+            onEnded?.();
+          }}
           onError={(event) => {
-            const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null }) | null;
+            const player = event.target as (MuxPlayerRefAttributes & { error?: MuxError | null } & Partial<HTMLMediaElement>) | null;
             const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;
             // Lo que Mux no da por fatal (reconectando, sin red un momento) lo resuelve él solo.
             if (error?.fatal === false) return;
-            if (error?.muxCode === TOKEN_EXPIRED) onExpired(player?.currentTime ?? 0);
-            else onFailed();
+            if (error?.muxCode === TOKEN_EXPIRED) {
+              resume.current = {
+                from: mux.current,
+                playbackRate: player?.playbackRate ?? 1,
+                volume: player?.volume ?? 1,
+                muted: player?.muted ?? false,
+                play: wantsPlay.current,
+                focused: frame.current?.contains(document.activeElement) ?? false,
+              };
+              onExpired(player?.currentTime ?? 0);
+            } else onFailed();
           }}
         />
         {watermark ? <Watermark text={watermark} elementRef={mark} fadingRef={fading} onMoved={guard} /> : null}

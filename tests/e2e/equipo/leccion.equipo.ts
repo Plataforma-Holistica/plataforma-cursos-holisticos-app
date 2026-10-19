@@ -18,6 +18,8 @@ test.describe.configure({ mode: "serial", timeout: 120_000 });
 const SLUG = "leccion-e2e";
 const OPEN_SLUG = "leccion-abierta-e2e";
 const lessonUrl = (slug: string, id: string) => `/cursos/${slug}/lecciones/${id}`;
+/** El código con que Mux Player dice que la dirección caducó (`NETWORK_TOKEN_EXPIRED`; el de `src/app/_video/errors.ts`). */
+const TOKEN_EXPIRED = 2403210;
 
 /** Un curso de una lección de Mux, cargado como el guion local y publicado y listado como sistema. Devuelve la lección. */
 async function loadListedCourse(slug: string, open = false): Promise<string> {
@@ -82,6 +84,19 @@ async function signIn(page: Page, who: Person, path: string): Promise<void> {
   await page.getByLabel("Correo").fill(who.email);
   await page.getByLabel("Contraseña", { exact: true }).fill(who.password);
   await page.getByRole("button", { name: "Entrar" }).click();
+}
+
+/**
+ * Lo que manda Mux Player cuando la dirección caducó: un error fatal con su código, en el propio
+ * elemento, que es donde lo escucha el reproductor. El elemento queda anotado, para ver que se
+ * montó otro.
+ */
+async function expire(page: Page): Promise<void> {
+  await page.evaluate((muxCode) => {
+    const element = document.querySelector("mux-player");
+    (window as unknown as { expired?: Element | null }).expired = element;
+    element?.dispatchEvent(new CustomEvent("error", { detail: { fatal: true, muxCode } }));
+  }, TOKEN_EXPIRED);
 }
 
 /** Corta toda petición que no sea a la aplicación, y anota a dónde iba; las de Mux se quedan sin contestar. */
@@ -164,6 +179,24 @@ test("con acceso: el reproductor con la marca de agua, que entra con él a panta
   await page.getByRole("heading", { level: 1 }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.querySelector("[data-player-frame]"))).toBe(true);
   await expect(page.locator("[data-player-frame]")).not.toHaveAttribute("data-filled");
+  // Si la dirección caduca a pantalla completa, se renueva sin salir de ella: otro Mux Player
+  // dentro del mismo contenedor, ligado a él, que vuelve a pedir el video.
+  const manifests = () => outside.filter((href) => href.startsWith(`https://stream.mux.com/Playback${SLUG.replaceAll("-", "")}.m3u8?`)).length;
+  await expect.poll(manifests, { timeout: 60_000 }).toBeGreaterThan(0);
+  const before = manifests();
+  await expire(page);
+  await expect.poll(() => page.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
+  expect(await page.evaluate(() => document.fullscreenElement === document.querySelector("[data-player-frame]"))).toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const controller = (document.querySelector("mux-player") as unknown as { mediaController?: Element & { fullscreenElement?: Element | null } }).mediaController;
+        return controller?.fullscreenElement === document.querySelector("[data-player-frame]") && controller.hasAttribute("mediaisfullscreen");
+      }),
+    )
+    .toBe(true);
+  await expect.poll(manifests, { timeout: 60_000 }).toBeGreaterThan(before);
+  await expect(mark).toHaveText(who.email);
   await page.evaluate(() => document.exitFullscreen());
   // Lo único que se le pide a alguien de fuera es el video a Mux, con su dirección firmada.
   await expect.poll(() => outside.some((href) => href.startsWith(`https://stream.mux.com/Playback${SLUG.replaceAll("-", "")}.m3u8?`) && href.includes("token=")), { timeout: 60_000 }).toBe(true);
@@ -274,6 +307,15 @@ test("en un iPhone: la pantalla completa es dentro de la página, con la marca s
   expect(mark.x).toBeGreaterThanOrEqual(stage.x);
   expect(mark.x + mark.width).toBeLessThanOrEqual(stage.x + stage.width);
   expect(await cellsUnderButtons(page, who.email)).toEqual([]);
+
+  // Si la dirección caduca aquí, se renueva sin salir de la pantalla completa propia: sigue girada.
+  await expire(page);
+  await expect.poll(() => page.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
+  await expect(frame).toHaveAttribute("data-filled", "");
+  await expect(frame).toHaveAttribute("data-turned", "");
+  await expect(page.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(true);
+  await expect(page.locator("[data-player-frame] [data-watermark]")).toHaveText(who.email);
 
   // En horizontal ya no gira, y el video llena el alto: «Salir» queda encima del video, sin tapar
   // ninguna celda de la marca, y un toque junto a él llega al video, no a la franja de los botones.

@@ -189,6 +189,20 @@ describe("el lugar del reproductor", () => {
     expect(actions.watchLessonAction).toHaveBeenCalledTimes(2);
   });
 
+  it("renovar no vuelve a montar el reproductor: le pasa la dirección nueva con otra concesión, y así no se sale de la pantalla completa", async () => {
+    const renewed = { ...GRANT, tokens: { playback: "p2.p2.p2", thumbnail: "t2.t2.t2", storyboard: "s2.s2.s2" } };
+    actions.watchLessonAction.mockResolvedValueOnce(GRANT).mockResolvedValueOnce(renewed);
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    const mounted = await screen.findByTestId("reproductor");
+    const first = player.last?.grant;
+    await user.click(screen.getByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(player.last?.tokens).toEqual(renewed.tokens));
+    expect(screen.getByTestId("reproductor")).toBe(mounted);
+    expect(player.last?.grant).not.toBe(first);
+    expect(mounted).toHaveAttribute("data-start", "42");
+  });
+
   it("si se reprodujo entre una caducidad y otra, la siguiente también se renueva", async () => {
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));

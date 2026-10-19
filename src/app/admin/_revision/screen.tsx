@@ -77,6 +77,8 @@ type VideoState =
       kind: "playing";
       lesson: LessonRow;
       grant: Extract<VideoAnswer, { kind: "granted" }>;
+      /** Qué pedido la dio: con una dirección renovada, el reproductor monta otro Mux Player sin salir de la pantalla completa. */
+      grantNumber: number;
       startTime: number;
       /** Ya se renovó una vez sin llegar a reproducirse: otra caducidad es un error. */
       renewed: boolean;
@@ -147,7 +149,7 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
       answer = { kind: "unavailable" };
     }
     if (mine !== ticket.current) return;
-    if (answer.kind === "granted") setVideo({ kind: "playing", lesson, grant: answer, startTime, renewed, renewing: false });
+    if (answer.kind === "granted") setVideo({ kind: "playing", lesson, grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
     else if (answer.kind === "no_video") setVideo({ kind: "no_video", lesson });
     else setVideo({ kind: "failed", lesson });
   }
@@ -212,7 +214,8 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
           <p className="text-body-s text-text-2">{text.preview}</p>
           {video.kind === "playing" && (
             <Player
-              key={`${video.lesson.id}-${video.grant.tokens.playback}`}
+              key={video.lesson.id}
+              grant={video.grantNumber}
               playbackId={video.grant.playbackId}
               tokens={video.grant.tokens}
               startTime={video.startTime}
