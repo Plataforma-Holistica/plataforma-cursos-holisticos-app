@@ -312,6 +312,8 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       return { kind: "unavailable" };
     }
     if (opened.kind === "busy") return { kind: "busy", live: describeLive(opened.live) };
+    // Se cerró la sesión mientras se abría: la pantalla vuelve a la página, donde decide la guarda.
+    if (opened.kind === "session_closed") return { kind: "refused" };
     return {
       ...signed,
       watermark,

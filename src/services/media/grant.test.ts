@@ -459,6 +459,12 @@ describe("ver abre una reproducción (T-204, RF-107)", () => {
     expect(service.reported).toEqual([]);
   });
 
+  it("la sesión se cerró mientras se abría: refused, sin reportar; la página decide", async () => {
+    const service = grantWith({ opened: { kind: "session_closed" } });
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).toEqual({ kind: "refused" });
+    expect(service.reported).toEqual([]);
+  });
+
   it.each<[string, OpenedPlayback | null | "throws"]>([
     ["la base no contestó", "throws"],
     ["la base no reconoce la sesión que pasó la guarda", null],

@@ -10,7 +10,7 @@ import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar, type KnownUser, type MemoryJar } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
 import { mediaStoreOn } from "./helpers/media";
-import { asOwner, asSystem, reverted } from "./helpers/team";
+import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users";
 
 // Una reproducción a la vez (T-204; RF-107, FL-25), contra el Auth y la base locales: la guarda
@@ -196,6 +196,55 @@ describe("una reproducción a la vez", () => {
       });
     } finally {
       await holder.end();
+    }
+  });
+
+  it("cerrar la sesión mientras se abre: la apertura espera, y con la sesión ya cerrada no abre nada", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    const session = await testServices().checkSession(computer);
+    if (session.kind !== "pass") throw new Error(`No pasó: ${session.kind}`);
+    const closer = new Client({ connectionString: localOwnerUrl() });
+    await closer.connect();
+    try {
+      await reverted(async (owner) => {
+        const lesson = await setUp(owner, who.id);
+        const media = mediaOn(owner);
+        // Otra conexión cierra la sesión (lo que hacen close_session y compañía con lo anotado), sin confirmar todavía.
+        await closer.query("begin");
+        await closer.query("delete from private.app_sessions where session_id = $1", [session.claims.sessionId]);
+        let settled = false;
+        const opening = media.getMediaGrant(computer, lesson, "watch").finally(() => {
+          settled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        expect(settled).toBe(false);
+        await closer.query("commit");
+        // La guarda ya había pasado; la base ve la sesión cerrada y no anota nada: a la página.
+        expect(await opening).toEqual({ kind: "refused" });
+        expect((await owner.query<{ n: number }>("select count(*)::int as n from public.playback_sessions where profile_id = $1", [who.id])).rows[0]?.n).toBe(0);
+        expect(media.reported).toEqual([]);
+      });
+    } finally {
+      await closer.end();
+    }
+  });
+
+  it("abrir y latir se niegan a correr con una foto fija: el candado no serviría", async () => {
+    const who = await person();
+    const client = new Client({ connectionString: localOwnerUrl() });
+    await client.connect();
+    try {
+      for (const call of ["private.open_playback(gen_random_uuid(), 'x', 'subscription', true, null)", "private.touch_playback(gen_random_uuid())"]) {
+        await client.query("begin isolation level repeatable read");
+        // Como el servidor, dentro de esta transacción, que se revierte (como en `reverted`).
+        await client.query("grant app_service to postgres with set true, inherit false");
+        await asServer(client, who.id, crypto.randomUUID());
+        await expect(client.query(`select ${call}`)).rejects.toMatchObject({ code: "25000" });
+        await client.query("rollback");
+      }
+    } finally {
+      await client.end();
     }
   });
 

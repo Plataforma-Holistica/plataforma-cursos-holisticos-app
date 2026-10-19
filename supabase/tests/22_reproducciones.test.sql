@@ -9,7 +9,7 @@
 -- reemplaza a la vieja. Lo que una cuenta puede ver o hacer ya lo decidió TypeScript.
 begin;
 \ir _ayuda.psql
-select plan(66);
+select plan(73);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-reproduce@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-reproduce@prueba.test');
@@ -211,18 +211,52 @@ insert into r select 'beto', pruebas.abre('a0000000-0000-0000-0000-000000000002'
 select is((select answer ->> 'outcome' from r where name = 'beto'), 'opened', 'otra cuenta tiene su propio lugar');
 select is((select f.revoked_at from pruebas.fila(pruebas.id('tel-2')) f), null, 'y no cierra la de Ana aunque la nombre');
 
--- Ocupado y con algo que cerrar: no cierra nada si de todos modos no habría lugar.
+-- Ocupado y con algo que cerrar: no cierra nada si de todos modos no habría lugar. Una tercera
+-- viva, de otra sesión (la tableta), anotada a mano.
+select pruebas.como_dueno();
+insert into public.playback_sessions (profile_id, auth_session_id, course_id, lesson_id, video_asset_id, teacher_id,
+                                      access_basis, counts_for_payout, lesson_duration_seconds)
+select 'a0000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000003', l.course_id, l.id,
+       l.video_asset_id, l.teacher_id, 'subscription', true, l.duration_seconds
+from public.published_lessons l where l.id = pruebas.leccion();
+insert into r select 'dos-vivas', pruebas.abre('a0000000-0000-0000-0000-000000000001', pruebas.computadora(),
+  pruebas.leccion(), 'PlaybackReproducecursoreproducir', 'subscription', true, pruebas.id('tel-2'));
+select is((select answer ->> 'outcome' from r where name = 'dos-vivas'), 'busy',
+  'con otra viva además de la que se pide cerrar, sigue ocupado');
+select is((select f.revoked_at from pruebas.fila(pruebas.id('tel-2')) f), null, 'y sin lugar, cerrar no se hace a medias');
+select pruebas.como_dueno();
+update public.playback_sessions set revoked_at = now(), revoke_reason = 'admin'
+  where auth_session_id = 'c1000000-0000-0000-0000-000000000003';
+
+-- El cupo sale del parámetro vigente, y un cupo de 0 no es un cupo: dejaría a todos sin video.
 select pruebas.como_dueno_sistema();
 insert into public.business_parameters (key, value, status, effective_from)
 values ('SESIONES_SIMULTANEAS', '0', 'decided', now() - interval '2 seconds');
-insert into r select 'cero', pruebas.abre('a0000000-0000-0000-0000-000000000001', pruebas.computadora(),
-  pruebas.leccion(), 'PlaybackReproducecursoreproducir', 'subscription', true, pruebas.id('tel-2'));
-select is((select answer ->> 'outcome' from r where name = 'cero'), 'busy', 'el cupo sale del parámetro vigente');
-select is((select f.revoked_at from pruebas.fila(pruebas.id('tel-2')) f), null, 'y sin lugar, cerrar no se hace a medias');
+select throws_ok(
+  format($$select pruebas.abre('a0000000-0000-0000-0000-000000000001', %L, %L, 'PlaybackReproducecursoreproducir')$$,
+         pruebas.computadora(), pruebas.leccion()),
+  'P0001', 'playback limits are not set', 'un cupo de 0 lanza: el servidor dice «no se pudo»');
+select throws_ok(
+  format($$select pruebas.late('a0000000-0000-0000-0000-000000000001', %L, %L)$$, pruebas.telefono(), pruebas.id('tel-2')),
+  'P0001', 'playback limits are not set', 'y latir también');
 -- Los parámetros no se borran: se vuelve a 1 con un valor más nuevo.
 select pruebas.como_dueno_sistema();
 insert into public.business_parameters (key, value, status, effective_from)
 values ('SESIONES_SIMULTANEAS', '1', 'decided', now() - interval '1 second');
+
+-- La revisión del equipo no abre reproducción, ni aunque se pida (desde el teléfono hay lugar).
+select throws_ok(
+  format($$select pruebas.abre('a0000000-0000-0000-0000-000000000001', %L, %L, 'PlaybackReproducecursoreproducir', 'review', false)$$,
+         pruebas.telefono(), pruebas.leccion()),
+  '23514', null, 'la base de revisar no se anota');
+
+-- Una sesión de Auth que ya no está anotada (se cerró después de pasar la guarda): no abre.
+select is(pruebas.abre('a0000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000009',
+  pruebas.leccion(), 'PlaybackReproducecursoreproducir'),
+  '{"outcome": "session_closed"}'::jsonb, 'si la sesión se cerró, no se abre');
+select is(
+  (select count(*)::int from public.playback_sessions where auth_session_id = 'c1000000-0000-0000-0000-000000000009'),
+  0, 'y no anota nada');
 
 -- ---------------------------------------------------------------------------------------
 -- Latir.
@@ -315,11 +349,27 @@ select ok(
    where oid in ('private.open_playback(uuid, text, public.access_basis, boolean, uuid)'::regprocedure,
                  'private.touch_playback(uuid)'::regprocedure)),
   'abrir y latir son security definer y volátiles');
+-- El candado sirve si va antes de contar, de mirar la sesión y de leer la fila: movido después,
+-- dos peticiones a la vez volverían a entrar las dos.
+create function pruebas.antes(p_function regprocedure, p_first text, p_then text) returns boolean
+language sql as $$
+  select position(p_first in d) > 0 and position(p_then in d) > position(p_first in d)
+  from pg_get_functiondef(p_function) d
+$$;
 select ok(
-  (select bool_and(pg_get_functiondef(oid) like '%pg_advisory_xact_lock%') from pg_proc
+  pruebas.antes('private.open_playback(uuid, text, public.access_basis, boolean, uuid)', 'pg_advisory_xact_lock', 'from private.app_sessions')
+  and pruebas.antes('private.open_playback(uuid, text, public.access_basis, boolean, uuid)', 'pg_advisory_xact_lock', 'private.live_playbacks(')
+  and pruebas.antes('private.open_playback(uuid, text, public.access_basis, boolean, uuid)', 'pg_advisory_xact_lock', 'insert into'),
+  'abrir toma el candado de la cuenta antes de mirar la sesión, contar e insertar');
+select ok(
+  pruebas.antes('private.touch_playback(uuid)', 'pg_advisory_xact_lock', 'for update')
+  and pruebas.antes('private.touch_playback(uuid)', 'pg_advisory_xact_lock', 'private.live_playbacks('),
+  'latir lo toma antes de leer la fila y de contar');
+select ok(
+  (select bool_and(pg_get_functiondef(oid) like '%transaction_isolation%') from pg_proc
    where oid in ('private.open_playback(uuid, text, public.access_basis, boolean, uuid)'::regprocedure,
                  'private.touch_playback(uuid)'::regprocedure)),
-  'las dos toman el candado de la cuenta');
+  'las dos exigen read committed: con una foto fija, contar después de esperar no vería lo nuevo');
 select is(
   (select count(*)::int from public.audit_log where entity_table like '%playback_sessions'),
   0, 'reproducir no se audita');

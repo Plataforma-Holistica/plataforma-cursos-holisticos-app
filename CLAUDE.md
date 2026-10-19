@@ -1204,7 +1204,10 @@ falla. Veintiuna precisiones que la tabla no dice:
   (`revoked_by`, para «Reproducir aquí»). Cerrar una sesión de Auth suelta sus reproducciones
   con un disparador sobre `private.app_sessions`. Nadie escribe la tabla fuera de esas
   funciones, y el código no la nombra (lo exigen el vigilante y una prueba de arquitectura).
-  La revisión del equipo no abre reproducción. La dirección de Mux no se revoca: el
+  Las dos funciones exigen read committed, y abrir mira bajo el candado que la sesión siga en
+  `private.app_sessions` (`for key share`): si se cerró después de la guarda contesta
+  `session_closed` y la pantalla recarga.
+  La revisión del equipo no abre reproducción (la base lo impide). La dirección de Mux no se revoca: el
   reproductor se detiene porque su latido lo dice. T-205 se monta encima: la presencia va
   antes de `record_heartbeats`, y lo atrasado de una reproducción reemplazada se acepta.
   Las pruebas: `supabase/tests/22_reproducciones.test.sql` (el cupo, el reemplazo, la ventana,

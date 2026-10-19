@@ -53,7 +53,9 @@ create table public.playback_sessions (
     check (revoke_reason in ('closed_by_user', 'replaced', 'session_closed', 'access_lost', 'admin')),
   constraint playback_sessions_revocation_consistent check ((revoked_at is null) = (revoke_reason is null)),
   constraint playback_sessions_revoked_by_reason
-    check (revoked_by is null or revoke_reason in ('closed_by_user', 'replaced'))
+    check (revoked_by is null or revoke_reason in ('closed_by_user', 'replaced')),
+  -- La revisión del equipo no abre reproducción (decisión de Sergio del 2026-10-19).
+  constraint playback_sessions_not_review check (access_basis <> 'review')
 );
 comment on table public.playback_sessions is 'Una fila por reproducción (RF-107, RF-401). La escriben solo private.open_playback() y private.touch_playback() (T-204) y, con T-205, private.record_heartbeats().';
 comment on column public.playback_sessions.auth_session_id is 'La sesión de Auth que abrió la reproducción: la misma sesión reemplaza, otra cuenta contra el cupo. No sale por la API de datos.';
@@ -106,8 +108,8 @@ as $$
     and s.last_heartbeat_at > pg_catalog.now() - p_window
 $$;
 
--- El cupo y la ventana, de los parámetros vigentes. Sin un número entero que tenga sentido no
--- se adivina: se lanza, y el servidor contesta «no se pudo».
+-- El cupo y la ventana, de los parámetros vigentes. Sin un entero positivo no se adivina (un
+-- cupo de 0 dejaría a todos sin video): se lanza, y el servidor contesta «no se pudo».
 create function private.playback_limits(out max_live integer, out heartbeat_seconds integer)
 language plpgsql stable security definer set search_path = ''
 as $$
@@ -116,7 +118,7 @@ declare
   v_beat jsonb := private.parameter_value('LATIDO_SEGUNDOS');
 begin
   if pg_catalog.jsonb_typeof(v_max) is distinct from 'number' or pg_catalog.jsonb_typeof(v_beat) is distinct from 'number'
-     or (v_max)::text !~ '^[0-9]+$' or (v_beat)::text !~ '^[1-9][0-9]*$' then
+     or (v_max)::text !~ '^[1-9][0-9]*$' or (v_beat)::text !~ '^[1-9][0-9]*$' then
     raise exception 'playback limits are not set' using errcode = 'P0001';
   end if;
   max_live := (v_max)::text::integer;
@@ -133,6 +135,10 @@ $$;
 --   {outcome: 'opened', session_id, heartbeat_seconds}
 --   {outcome: 'busy', live: [...]}       sin lugar: no cierra ni anota nada
 --   {outcome: 'not_found'}               la lección no existe o su video no es el firmado
+--   {outcome: 'session_closed'}          la sesión de Auth se cerró después de pasar la guarda
+--
+-- El candado solo sirve si contar toma una foto nueva después de esperarlo: eso pasa en read
+-- committed, y por eso se exige, como en private.claim_account().
 
 create function private.open_playback(
   p_lesson uuid, p_playback_id text, p_basis public.access_basis, p_counts boolean, p_closing uuid)
@@ -148,6 +154,9 @@ declare
   v_live jsonb;
   v_id uuid;
 begin
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.open_playback() needs read committed isolation' using errcode = '25000';
+  end if;
   if v_actor is null or v_session is null then
     return null;
   end if;
@@ -167,6 +176,14 @@ begin
   -- Una cuenta a la vez: dos peticiones no pasan las dos por el último lugar, y cerrar una para
   -- abrir otra no deja hueco.
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('playback:' || v_actor::text, 0));
+
+  -- La sesión sigue anotada, y no se puede quitar hasta que esta apertura termine: cerrar la
+  -- sesión espera, y su disparador ve la reproducción nueva y la suelta. Sin esto, una sesión
+  -- cerrada mientras se abría dejaría una reproducción viva.
+  perform 1 from private.app_sessions a where a.session_id = v_session and a.profile_id = v_actor for key share;
+  if not found then
+    return pg_catalog.jsonb_build_object('outcome', 'session_closed');
+  end if;
 
   -- La que se elige cerrar no cuenta; si de todos modos no hay lugar, no se cierra.
   select coalesce(pg_catalog.jsonb_agg(e), '[]'::jsonb) into v_live
@@ -220,6 +237,9 @@ declare
   v_window interval;
   v_live jsonb;
 begin
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'private.touch_playback() needs read committed isolation' using errcode = '25000';
+  end if;
   if v_actor is null or v_auth is null then
     return null;
   end if;

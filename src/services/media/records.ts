@@ -213,7 +213,9 @@ export type OpenedPlayback =
   | { kind: "opened"; sessionId: string; heartbeatSeconds: number }
   | { kind: "busy"; live: LivePlayback[] }
   /** La lección no existe, o su video ya no es el que se firmó. */
-  | { kind: "not_found" };
+  | { kind: "not_found" }
+  /** La sesión de Auth se cerró después de pasar la guarda. */
+  | { kind: "session_closed" };
 
 export type Presence =
   | { kind: "ok" }
@@ -261,6 +263,7 @@ const openedRow = z.object({
       z.object({ outcome: z.literal("opened"), session_id: uuid, heartbeat_seconds: z.number().int().positive() }).strict(),
       busy,
       notFound,
+      z.object({ outcome: z.literal("session_closed") }).strict(),
     ])
     .nullable(),
 });
@@ -295,6 +298,8 @@ export async function openPlayback(tx: Tx, opening: PlaybackOpening): Promise<Op
       return { kind: "busy", live: answer.live };
     case "not_found":
       return { kind: "not_found" };
+    case "session_closed":
+      return { kind: "session_closed" };
   }
 }
 
