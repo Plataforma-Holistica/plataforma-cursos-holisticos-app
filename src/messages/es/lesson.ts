@@ -40,4 +40,27 @@ export const lesson = defineMessages({
     refunded: "Tu suscripción fue reembolsada",
     refundedText: "Puedes volver cuando quieras.",
   },
+  // PA-34 (T-204, RF-107): la cuenta ya reproduce en otro lugar. Describe y resuelve: no acusa
+  // de compartir la cuenta. Con `SESIONES_SIMULTANEAS` en 1 hay una sola fila; si sube, el texto
+  // va en plural. «Volver al inicio» hasta que exista la ficha del curso (T-210).
+  elsewhere: {
+    title: "Tu cuenta ya está reproduciendo en otro lugar",
+    titleMany: "Tu cuenta ya está reproduciendo en {count} lugares",
+    text: "Puedes cerrar esa reproducción para ver esta lección aquí.",
+    textMany: "Puedes cerrar una de esas reproducciones para ver esta lección aquí.",
+    listLabel: "Dónde se está reproduciendo",
+    place: "{lesson} · {course}",
+    since: "desde las {time}",
+    close: "Cerrar esa reproducción",
+    closeDetail: "(la de {device})",
+    retry: "Reintentar",
+    back: "Volver al inicio",
+    account: "¿No reconoces alguno? Cambia tu contraseña y cierra todas las sesiones",
+  },
+  // La reproducción se cerró desde otro lado (T-204): «Reproducir aquí» toma el lugar de vuelta.
+  closed: {
+    device: "Esta reproducción se cerró desde otro dispositivo.",
+    tab: "Esta lección se abrió en otra pestaña o ventana.",
+    here: "Reproducir aquí",
+  },
 });

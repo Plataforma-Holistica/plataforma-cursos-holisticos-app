@@ -1,7 +1,8 @@
 import { longDate } from "@/app/_lib/dates";
+import { deviceName } from "@/app/_lib/devices";
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
-import type { Device, OpenSession } from "@/services/account/account";
+import type { OpenSession } from "@/services/account/account";
 
 // Las sesiones abiertas de la cuenta, puestas en palabras (diseño, PA-25). Lo arma la
 // página, en el servidor, y la pantalla solo lo pinta: así el navegador no necesita saber
@@ -24,11 +25,8 @@ export interface SessionRow {
   closeDetail: string;
 }
 
-/** De qué navegador y sistema dijo ser una sesión, como se le dice a una persona. */
-export function deviceName(device: Device): string {
-  const browser = device.browser === null ? text.unknownBrowser : text.browsers[device.browser];
-  return device.system === null ? browser : t(text.deviceOn, { browser, system: text.systems[device.system] });
-}
+/** De qué navegador y sistema dijo ser una sesión: el mismo nombre que en PA-34 (T-204). */
+export { deviceName };
 
 export function sessionRows(sessions: readonly OpenSession[]): SessionRow[] {
   return sessions.map((session) => {

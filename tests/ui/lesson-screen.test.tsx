@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -8,7 +8,7 @@ import { a11yViolations } from "../setup/a11y";
 // pinta en el lugar del reproductor en cada estado, el temario y lo de alrededor. El reproductor
 // de verdad lo prueba tests/ui/player.test.tsx, y la página entera, el extremo a extremo.
 
-const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn(), rememberCaptionsAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn(), rememberCaptionsAction: vi.fn(), playbackPresenceAction: vi.fn() }));
 vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/actions", () => actions);
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
@@ -21,6 +21,8 @@ vi.mock("@/app/_video/player", () => ({
     onPlaying: () => void;
     onEnded?: () => void;
     onCaptionsChange?: (on: boolean) => void;
+    onAdvancing?: (advancing: boolean) => void;
+    onProgress?: (at: number) => void;
   }) => {
     player.last = props;
     return (
@@ -40,6 +42,15 @@ vi.mock("@/app/_video/player", () => ({
         <button type="button" onClick={() => props.onCaptionsChange?.(true)}>
           enciende subtítulos
         </button>
+        <button type="button" onClick={() => props.onAdvancing?.(true)}>
+          avanza
+        </button>
+        <button type="button" onClick={() => props.onAdvancing?.(false)}>
+          se detiene
+        </button>
+        <button type="button" onClick={() => props.onProgress?.(61)}>
+          va en 61
+        </button>
       </div>
     );
   },
@@ -48,13 +59,19 @@ vi.mock("@/app/_video/player", () => ({
 import { LessonScreen, type LessonScreenProps } from "@/app/cursos/[slug]/lecciones/[leccion]/screen";
 
 const LESSON = "b0000000-0000-4000-8000-000000000002";
+const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
+const OTHER = "d0000000-0000-4000-8000-000000000005";
 const GRANT = {
   kind: "granted",
   playbackId: "P",
   tokens: { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" },
   speeds: [0.75, 1, 2],
   watermark: "ana@correo.com",
+  playbackSessionId: PLAYBACK,
+  heartbeatSeconds: 30,
 };
+/** Una reproducción viva en otra computadora: 01:40 UTC son las 19:40 en el centro de México. */
+const ROW = { sessionId: OTHER, browser: "chrome", system: "windows", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" };
 
 const PROPS: LessonScreenProps = {
   slug: "respirar",
@@ -90,6 +107,7 @@ beforeEach(() => {
   player.last = null;
   actions.watchLessonAction.mockResolvedValue(GRANT);
   actions.rememberCaptionsAction.mockResolvedValue(undefined);
+  actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
 });
 
 describe("lo de alrededor del reproductor", () => {
@@ -126,7 +144,7 @@ describe("el lugar del reproductor", () => {
   it("con acceso: «Reproducir» pide la dirección de esta lección y monta el reproductor con la marca y las velocidades", async () => {
     const { user, area } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
-    expect(actions.watchLessonAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON);
+    expect(actions.watchLessonAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON, undefined);
     await screen.findByTestId("reproductor");
     expect(player.last).toMatchObject({ playbackId: "P", watermark: "ana@correo.com", speeds: [0.75, 1, 2], startTime: 0 });
     expect(within(area()).getByTestId("reproductor")).toBeVisible();
@@ -289,5 +307,289 @@ describe("los subtítulos (RF-310)", () => {
     await user.click(await screen.findByRole("button", { name: "enciende subtítulos" }));
     expect(screen.getByTestId("reproductor")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+});
+
+describe("PA-34: la cuenta ya reproduce en otro lugar (T-204, RF-107)", () => {
+  it("dice dónde, con su navegador, la lección y desde cuándo, y lo anuncia", async () => {
+    actions.watchLessonAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    const { user, area, view } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    expect(await within(area()).findByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en otro lugar" })).toBeVisible();
+    expect(within(area()).getByText("Puedes cerrar esa reproducción para ver esta lección aquí.")).toBeVisible();
+    const row = within(screen.getByRole("list", { name: "Dónde se está reproduciendo" })).getByRole("listitem");
+    expect(row).toHaveTextContent("Chrome en Windows");
+    expect(row).toHaveTextContent("Respirar · Yoga suave · desde las 7:40 p.m.");
+    expect(within(row).getByRole("button", { name: "Cerrar esa reproducción (la de Chrome en Windows)" })).toBeVisible();
+    expect(within(area()).getByRole("link", { name: "Volver al inicio" })).toHaveAttribute("href", "/inicio");
+    expect(within(area()).getByRole("link", { name: "¿No reconoces alguno? Cambia tu contraseña y cierra todas las sesiones" })).toHaveAttribute(
+      "href",
+      "/cuenta#bloque-contrasena",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Tu cuenta ya está reproduciendo en otro lugar Puedes cerrar esa reproducción para ver esta lección aquí.");
+    expect(screen.queryByTestId("reproductor")).toBeNull();
+    // Crece lo necesario, y en el teléfono no se queda pegado arriba: taparía la página.
+    expect(screen.getByRole("region", { name: "Reproductor" })).not.toHaveClass("sticky");
+    expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("el reproductor sí va pegado arriba en el teléfono", async () => {
+    const { user } = show();
+    expect(screen.getByRole("region", { name: "Reproductor" })).toHaveClass("sticky");
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByTestId("reproductor");
+    expect(screen.getByRole("region", { name: "Reproductor" })).toHaveClass("sticky");
+  });
+
+  it("con más de una, en plural; y lo que no se sabe no se inventa", async () => {
+    actions.watchLessonAction.mockResolvedValue({
+      kind: "busy",
+      live: [ROW, { ...ROW, sessionId: "d0000000-0000-4000-8000-000000000006", browser: null, system: null, lesson: null, course: null, since: "no es una fecha" }],
+    });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en 2 lugares" })).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Reproductor" })).getByText("Puedes cerrar una de esas reproducciones para ver esta lección aquí.")).toBeVisible();
+    const second = screen.getAllByRole("listitem")[1];
+    expect(second).toHaveTextContent(/^Navegador desconocidoCerrar/);
+  });
+
+  it("de la lección o del curso, el que se sepa", async () => {
+    actions.watchLessonAction.mockResolvedValue({ kind: "busy", live: [{ ...ROW, course: null }] });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    expect(await screen.findByText("Respirar · desde las 7:40 p.m.")).toBeVisible();
+  });
+
+  it("«Cerrar esa reproducción» la cierra y abre esta en el mismo pedido; «Reintentar» solo vuelve a pedir", async () => {
+    actions.watchLessonAction.mockResolvedValueOnce({ kind: "busy", live: [ROW] });
+    actions.watchLessonAction.mockResolvedValueOnce({ kind: "busy", live: [ROW] });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "Reintentar" }));
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, undefined);
+    await user.click(await screen.findByRole("button", { name: /^Cerrar esa reproducción/ }));
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
+    expect(await screen.findByTestId("reproductor")).toBeVisible();
+  });
+});
+
+describe("el latido de presencia (T-204)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Reproduce, con relojes falsos: los clics van con fireEvent, que no espera tiempo. */
+  async function playing() {
+    vi.useFakeTimers();
+    show();
+    fireEvent.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId("reproductor")).toBeVisible();
+  }
+
+  const press = async (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  };
+  /** El lugar del reproductor, sin la región que anuncia (que repite el texto). */
+  const playerArea = () => screen.getByRole("region", { name: "Reproductor" }).querySelector<HTMLElement>("[tabindex='-1']") ?? document.body;
+  const wait = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  it("no late hasta que el video avanza; entonces late al momento y cada `heartbeatSeconds`, y deja de latir en pausa", async () => {
+    await playing();
+    await wait(60_000);
+    expect(actions.playbackPresenceAction).not.toHaveBeenCalled();
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON, PLAYBACK);
+    await wait(29_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await wait(1_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+    await press("se detiene");
+    await wait(120_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+    // Al reanudar, otra vez al momento.
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(3);
+  });
+
+  it("al volver a la pestaña late, si avanza", async () => {
+    await playing();
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("al irse de la pestaña no late", async () => {
+    await playing();
+    await press("avanza");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    visibility.mockRestore();
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("cerrada desde otro dispositivo: se va el video, lo dice, y «Reproducir aquí» toma el lugar desde el segundo en que iba", async () => {
+    await playing();
+    await press("va en 61");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "device", by: OTHER });
+    await press("avanza");
+    expect(screen.queryByTestId("reproductor")).toBeNull();
+    expect(within(playerArea()).getByText("Esta reproducción se cerró desde otro dispositivo.")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("Esta reproducción se cerró desde otro dispositivo.");
+    vi.useRealTimers();
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Reproducir aquí" }));
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "61");
+  });
+
+  it("abierta en otra pestaña: su propio texto; sin la que tomó su lugar, «Reproducir aquí» pide sin cerrar nada", async () => {
+    await playing();
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "tab", by: null });
+    await press("avanza");
+    expect(within(playerArea()).getByText("Esta lección se abrió en otra pestaña o ventana.")).toBeVisible();
+    await press("Reproducir aquí");
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, undefined);
+  });
+
+  it("vencida y con el lugar tomado: PA-34, y cerrar la otra vuelve al segundo en que iba", async () => {
+    await playing();
+    await press("va en 61");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    await press("avanza");
+    expect(screen.getByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en otro lugar" })).toBeVisible();
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    await press("Cerrar esa reproducción (la de Chrome en Windows)");
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
+    expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
+  });
+
+  it("«Reintentar» en PA-34 también vuelve al segundo en que iba", async () => {
+    await playing();
+    await press("va en 61");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    await press("avanza");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    await press("Reintentar");
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, undefined);
+    expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
+  });
+
+  it("si el latido no contesta o no se supo, el video sigue", async () => {
+    await playing();
+    actions.playbackPresenceAction.mockRejectedValueOnce(new Error("sin red"));
+    actions.playbackPresenceAction.mockResolvedValueOnce({ kind: "unavailable" });
+    await press("avanza");
+    await wait(30_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("reproductor")).toBeVisible();
+  });
+
+  it("mientras se renueva la dirección no late, y un latido de la reproducción anterior que llega tarde no pinta nada", async () => {
+    await playing();
+    let answer: (reply: unknown) => void = () => undefined;
+    actions.playbackPresenceAction.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    await press("avanza");
+    // La dirección caduca con el latido en camino; la nueva tarda en llegar.
+    let renewed: (grant: unknown) => void = () => undefined;
+    actions.watchLessonAction.mockImplementationOnce(() => new Promise((resolve) => (renewed = resolve)));
+    await press("caduca");
+    await wait(90_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    // Si el Mux Player viejo aún dijera que avanza, tampoco: su reproducción está por reemplazarse.
+    await press("avanza");
+    await wait(30_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    // El latido viejo contesta: la reproducción anterior fue reemplazada por la renovación.
+    await act(async () => {
+      answer({ kind: "closed", from: "tab", by: OTHER });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId("reproductor")).toBeVisible();
+    expect(screen.queryByText("Esta lección se abrió en otra pestaña o ventana.")).toBeNull();
+    // Llega la nueva, con otra reproducción: no late hasta que su video avanza (en un iPhone puede
+    // quedarse esperando un toque), y entonces late con ella.
+    await act(async () => {
+      renewed({ ...GRANT, playbackSessionId: OTHER });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await wait(60_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
+  });
+
+  it("pausar y reanudar seguido no manda un latido por pulsación", async () => {
+    await playing();
+    await press("avanza");
+    await press("se detiene");
+    await press("avanza");
+    await press("se detiene");
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await press("se detiene");
+    await wait(5_000);
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["cero", 0, 5_000],
+    ["más de lo que cabe en un temporizador", 10_000_000, 300_000],
+  ])("un `heartbeatSeconds` fuera de rango (%s) se acota", async (_what, seconds, every) => {
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, heartbeatSeconds: seconds });
+    await playing();
+    await press("avanza");
+    await wait(every - 1);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await wait(1);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("un latido que contesta después de que el video falló no lo pisa", async () => {
+    await playing();
+    let answer: (reply: unknown) => void = () => undefined;
+    actions.playbackPresenceAction.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    await press("avanza");
+    // El error y la respuesta, en la misma vuelta: React todavía no aplicó el error ni limpió el
+    // latido. El aviso llega del reproductor como lo manda Mux (no un clic, que se aplica al momento).
+    await act(async () => {
+      (player.last?.onFailed as () => void)();
+      answer({ kind: "closed", from: "device", by: OTHER });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(within(playerArea()).getByText("No pudimos cargar el video.")).toBeVisible();
+    expect(within(playerArea()).queryByText("Esta reproducción se cerró desde otro dispositivo.")).toBeNull();
+  });
+
+  it("si el latido no llega (una redirección de la acción, o la red), el video sigue: la redirección la hace Next", async () => {
+    await playing();
+    actions.playbackPresenceAction.mockRejectedValue(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+    await press("avanza");
+    expect(screen.getByTestId("reproductor")).toBeVisible();
+  });
+
+  it.each([["termina"], ["falla"]])("si %s, deja de latir", async (what) => {
+    await playing();
+    await press("avanza");
+    await press(what);
+    await wait(120_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
   });
 });

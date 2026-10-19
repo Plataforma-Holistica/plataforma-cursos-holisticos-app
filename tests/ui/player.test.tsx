@@ -143,8 +143,18 @@ afterEach(() => {
 describe("el reproductor", () => {
   it("recibe el video, sus tres tokens, el segundo y las velocidades; sin analítica, sin cookies y sin recordar volumen", () => {
     show();
-    const { ref: _ref, onError: _error, onPlaying: _playing, onPlay: _play, onPause: _pause, onLoadedMetadata: _loaded, onEnded: _ended, ...rest } = mux.props ?? {};
-    void [_ref, _error, _playing, _play, _pause, _loaded, _ended];
+    const {
+      ref: _ref,
+      onError: _error,
+      onPlaying: _playing,
+      onPlay: _play,
+      onPause: _pause,
+      onLoadedMetadata: _loaded,
+      onEnded: _ended,
+      onTimeUpdate: _time,
+      ...rest
+    } = mux.props ?? {};
+    void [_ref, _error, _playing, _play, _pause, _loaded, _ended, _time];
     expect(rest).toEqual({
       className: "player-mux block h-full w-full",
       playbackId: "PlaybackDePrueba",
@@ -218,6 +228,50 @@ describe("el reproductor", () => {
     render(<Player grant={1} playbackId="P" tokens={TOKENS} startTime={0} speeds={SPEEDS} onExpired={vi.fn()} onFailed={vi.fn()} onPlaying={vi.fn()} onEnded={onEnded} />);
     (mux.props?.onEnded as () => void)();
     expect(onEnded).toHaveBeenCalledOnce();
+  });
+
+  it("dice cuándo avanza y cuándo se detiene, y en qué segundo va (T-204)", () => {
+    const onAdvancing = vi.fn();
+    const onProgress = vi.fn();
+    const onPlaying = vi.fn();
+    render(
+      <Player
+        grant={1}
+        playbackId="P"
+        tokens={TOKENS}
+        startTime={0}
+        speeds={SPEEDS}
+        onExpired={vi.fn()}
+        onFailed={vi.fn()}
+        onPlaying={onPlaying}
+        onAdvancing={onAdvancing}
+        onProgress={onProgress}
+      />,
+    );
+    act(() => (mux.props?.onPlaying as () => void)());
+    expect(onAdvancing).toHaveBeenLastCalledWith(true);
+    expect(onPlaying).toHaveBeenCalledOnce();
+    act(() => (mux.props?.onTimeUpdate as (event: unknown) => void)({ target: { currentTime: 61.5 } }));
+    expect(onProgress).toHaveBeenLastCalledWith(61.5);
+    act(() => (mux.props?.onTimeUpdate as (event: unknown) => void)({ target: null }));
+    expect(onProgress).toHaveBeenLastCalledWith(0);
+    // Cualquier pausa lo detiene, también la que acompaña a un error.
+    act(() => (mux.props?.onPause as (event: unknown) => void)({ target: { error: { fatal: true } } }));
+    expect(onAdvancing).toHaveBeenLastCalledWith(false);
+    act(() => (mux.props?.onPlaying as () => void)());
+    act(() => (mux.props?.onEnded as () => void)());
+    expect(onAdvancing.mock.calls).toEqual([[true], [false], [true], [false]]);
+  });
+
+  it("sin quien escuche cuándo avanza (la revisión), nada cambia", () => {
+    const { onPlaying } = show();
+    act(() => {
+      (mux.props?.onPlaying as () => void)();
+      (mux.props?.onTimeUpdate as (event: unknown) => void)({ target: { currentTime: 3 } });
+      (mux.props?.onPause as (event: unknown) => void)({ target: { error: null } });
+      (mux.props?.onEnded as () => void)();
+    });
+    expect(onPlaying).toHaveBeenCalledOnce();
   });
 
   it("cualquier otro error fatal, o uno sin forma: falla", () => {
