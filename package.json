@@ -27,6 +27,7 @@
     "db:drafts": "node scripts/db-legal-drafts.mjs",
     "db:admins": "node scripts/db-admins.mjs",
     "db:courses": "node scripts/db-test-courses.mjs",
+    "db:student": "node scripts/db-student.mjs",
     "media:upload-test": "node scripts/media-upload-test.mjs",
     "media:check": "node scripts/media-check.mjs",
     "media:captions-test": "node scripts/media-captions-test.mjs",

@@ -27,7 +27,9 @@ import type { Denial, InitialState, WatchAnswer } from "./outcomes";
 // El reproductor pide su dirección con la acción después de pintar (RF-305), y se descarga
 // solo entonces. Lo que se ve en su lugar lo decide la tabla (`outcomes.ts`). Arranca con los
 // subtítulos como la cuenta los dejó, y si la persona los enciende o los apaga, se recuerda en
-// la cuenta (RF-310) y en la pantalla: una dirección renovada sigue con lo que eligió.
+// la cuenta (RF-310) y en la pantalla: una dirección renovada sigue con lo que eligió. Renovar
+// no vuelve a montar el reproductor (sin `key`): le pasa otra concesión, y así no se sale de la
+// pantalla completa.
 
 /** Una lección del temario, ya en palabras y con su dirección. */
 export interface SyllabusEntry {
@@ -72,6 +74,8 @@ type VideoState =
   | {
       kind: "playing";
       grant: Extract<WatchAnswer, { kind: "granted" }>;
+      /** Qué pedido la dio: con una dirección renovada, el reproductor monta otro Mux Player sin salir de la pantalla completa. */
+      grantNumber: number;
       startTime: number;
       /** Ya se renovó una vez sin llegar a reproducirse: otra caducidad es un error. */
       renewed: boolean;
@@ -175,7 +179,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       answer = { kind: "unavailable" };
     }
     if (mine !== ticket.current) return;
-    if (answer.kind === "granted") setVideo({ kind: "playing", grant: answer, startTime, renewed, renewing: false });
+    if (answer.kind === "granted") setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
     else setVideo(answer);
   }
 
@@ -237,7 +241,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
             <div ref={area} tabIndex={-1} className="flex aspect-video w-full flex-col bg-player outline-none">
               {video.kind === "playing" ? (
                 <Player
-                  key={video.grant.tokens.playback}
+                  grant={video.grantNumber}
                   playbackId={video.grant.playbackId}
                   tokens={video.grant.tokens}
                   startTime={video.startTime}
