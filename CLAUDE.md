@@ -1266,9 +1266,20 @@ falla. Veintiuna precisiones que la tabla no dice:
     pantalla completa» con el foco y, en vertical, el aviso de girar un momento y «Girar», que
     rota el contenedor 90 grados (`data-turned`). El botón de Mux se esconde mientras
     tanto. Si iOS entra solo a la del sistema (un pellizco, `webkitbeginfullscreen` en el video
-    interno), sale de ella y pasa a la propia. Donde el navegador sí lleva el contenedor, nada
-    se atrapa. El extremo a extremo lo prueba con un iPhone simulado (`likeAnIPhone`: sin
-    pantalla completa de elementos y con la del video); el iPhone de verdad, a mano.
+    interno), sale de ella y pasa a la propia, o se queda en la propia como estaba, girada o no.
+    Donde el navegador sí lleva el contenedor, nada se atrapa. Los márgenes seguros van en
+    variables (`--safe-top`…) que girado cambian de lado, porque cada lado del contenedor cae
+    sobre otro de la pantalla; los usan también los botones y el aviso, que van en posición
+    absoluta y no se mueven con el relleno del contenedor. La franja de los botones no recibe el
+    toque, solo los botones, y el aviso de girar se dice en una región viva que existe desde
+    antes de entrar. El extremo a extremo lo prueba con un iPhone simulado (`likeAnIPhone`: sin
+    pantalla completa de elementos y con la del video), y mide que ninguna de las ocho celdas de
+    la marca quede bajo un botón, en vertical, girado y en horizontal. Chromium no simula los
+    márgenes seguros: eso y el iPhone de verdad, a mano. Un límite conocido: renovar la dirección
+    vuelve a montar el reproductor (la pantalla de la lección le pone el token como `key`), así
+    que quien estaba en la pantalla completa propia sale de ella, igual que en computadora sale
+    de la del navegador. Solo pasa si la dirección caducó, es decir, tras una pausa más larga que
+    su vida (ADR-27).
   - **La marca de agua** (`watermark.tsx`, RF-305), solo si la pantalla la pasa (la lección;
     revisión no, hasta T-405): el correo de quien ve, tal como lo dio la función única de
     medios, en una de las ocho celdas del borde de una rejilla de 3 × 3 sobre el área segura

@@ -284,26 +284,49 @@
 /* La pantalla completa dentro de la página (iPhone, donde la del navegador no lleva la marca):
    el contenedor fijo sobre toda la ventana visible, por encima de las barras, con los márgenes
    seguros del aparato. Girado (`data-turned`), mide la ventana al revés y rota 90 grados desde
-   su esquina. Va sola, sin `relative` ni `w-full`: Tailwind escribe después las utilidades de
-   una sola propiedad, y le ganarían. */
+   su esquina, y cada lado suyo cae sobre otro de la pantalla: su arriba es la derecha, su
+   derecha es abajo, su abajo es la izquierda y su izquierda es arriba, donde está la cámara.
+   Por eso los márgenes van en variables, que girado cambian de lado, y los usan también los
+   botones y el aviso (`player-filled-bar`, `player-filled-hint`): van en posición absoluta, y
+   el relleno del contenedor no los mueve. Va sola, sin `relative` ni `w-full`: Tailwind
+   escribe después las utilidades de una sola propiedad, y le ganarían. */
 @utility player-frame-filled {
+  --safe-top: env(safe-area-inset-top);
+  --safe-right: env(safe-area-inset-right);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
   position: fixed;
   inset: 0;
   z-index: var(--z-overlay);
   width: 100vw;
   height: 100dvh;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   display: flex;
   align-items: center;
   justify-content: center;
   container-type: size;
   &[data-turned] {
+    --safe-top: env(safe-area-inset-right);
+    --safe-right: env(safe-area-inset-bottom);
+    --safe-bottom: env(safe-area-inset-left);
+    --safe-left: env(safe-area-inset-top);
     inset: 0 auto auto 100vw;
     width: 100dvh;
     height: 100vw;
     transform-origin: top left;
     transform: rotate(90deg);
   }
+}
+/* «Salir de pantalla completa» y «Girar», arriba, y el aviso de girar, abajo: a `p-3` del borde,
+   o más, si ahí empieza el margen seguro. Fuera de la pantalla completa propia las variables no
+   existen y queda `p-3`. */
+@utility player-filled-bar {
+  padding: max(calc(var(--spacing) * 3), var(--safe-top, 0px)) max(calc(var(--spacing) * 3), var(--safe-right, 0px)) 0
+    max(calc(var(--spacing) * 3), var(--safe-left, 0px));
+}
+@utility player-filled-hint {
+  padding: calc(var(--spacing) * 3) max(calc(var(--spacing) * 3), var(--safe-right, 0px)) max(calc(var(--spacing) * 3), var(--safe-bottom, 0px))
+    max(calc(var(--spacing) * 3), var(--safe-left, 0px));
 }
 /* Mientras el reproductor ocupa la ventana, la página de atrás no se desplaza. */
 @utility player-locked {

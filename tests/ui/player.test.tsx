@@ -449,6 +449,43 @@ describe("la pantalla completa dentro de la página (iPhone; diseño, sección 5
     expect(frame).toHaveAttribute("data-filled");
   });
 
+  it("si iOS entra a la del sistema estando ya dentro y girado, se sale de ella y sigue girado", () => {
+    orientation(true);
+    const { frame } = show("ana@correo.com");
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Girar" }));
+    const video = mux.element?.media.nativeEl;
+    act(() => void video?.dispatchEvent(new Event("webkitbeginfullscreen")));
+    expect(video?.webkitExitFullscreen).toHaveBeenCalledOnce();
+    expect(frame).toHaveAttribute("data-turned");
+    expect(screen.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("el aviso de girar se dice en una región viva que ya estaba antes de entrar: una que nace llena no se anuncia", () => {
+    orientation(true);
+    show();
+    const region = screen.getByRole("status");
+    expect(region).toHaveTextContent("");
+    request("mediaenterfullscreenrequest");
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("Gira tu teléfono para verlo más grande");
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("");
+  });
+
+  it("los botones y el aviso respetan los márgenes seguros, y la franja entre los botones no se queda con el toque", () => {
+    orientation(true);
+    show();
+    request("mediaenterfullscreenrequest");
+    const exit = screen.getByRole("button", { name: "Salir de pantalla completa" });
+    const bar = exit.parentElement;
+    expect(bar?.className).toMatch(/\bplayer-filled-bar\b/);
+    expect(bar?.className).toMatch(/\bpointer-events-none\b/);
+    for (const button of [exit, screen.getByRole("button", { name: "Girar" })]) expect(button.className).toMatch(/\bpointer-events-auto\b/);
+    expect(screen.getByRole("status").className).toMatch(/\bplayer-filled-hint\b/);
+  });
+
   it("en vertical: el aviso de girar un momento, y «Girar» rota el contenedor", () => {
     vi.useFakeTimers();
     orientation(true);

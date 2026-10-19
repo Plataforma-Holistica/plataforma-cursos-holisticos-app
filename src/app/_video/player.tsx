@@ -229,13 +229,14 @@ export function Player(props: PlayerProps) {
   }, [fill]);
 
   // Si iOS entra solo a la pantalla completa del sistema (un pellizco sobre el video), se sale de
-  // ella y se pasa a la propia: la del sistema no pinta la marca.
+  // ella y se pasa a la propia: la del sistema no pinta la marca. Si ya estaba en la propia, se
+  // queda como estaba, girada o no.
   useEffect(() => {
     const video = nativeVideo(mux.current);
     if (typeof video?.addEventListener !== "function") return;
     const takeBack = () => {
       video.webkitExitFullscreen?.();
-      fill(true);
+      if (!filledNow.current) fill(true);
     };
     video.addEventListener("webkitbeginfullscreen", takeBack);
     return () => video.removeEventListener("webkitbeginfullscreen", takeBack);
@@ -325,12 +326,12 @@ export function Player(props: PlayerProps) {
         {watermark ? <Watermark text={watermark} elementRef={mark} fadingRef={fading} onMoved={guard} /> : null}
       </div>
       {filled ? (
-        <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
+        <div className="player-filled-bar pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2">
           <button
             ref={exitButton}
             type="button"
             onClick={() => fill(false)}
-            className="min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
+            className="pointer-events-auto min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
           >
             {text.controls.exitFullscreen}
           </button>
@@ -339,18 +340,17 @@ export function Player(props: PlayerProps) {
               type="button"
               aria-pressed={turned}
               onClick={() => setTurned((current) => !current)}
-              className="min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
+              className="pointer-events-auto min-h-touch rounded-md bg-scrim px-4 text-body font-semibold text-text"
             >
               {text.filled.turn}
             </button>
           ) : null}
         </div>
       ) : null}
-      {filled ? (
-        <p role="status" className="pointer-events-none absolute inset-x-0 bottom-0 m-0 p-3 text-center text-body text-text">
-          {hint && portrait && !turned ? text.filled.turnHint : ""}
-        </p>
-      ) : null}
+      {/* Existe desde antes de entrar: una región viva que nace con su texto no se anuncia. */}
+      <p role="status" className="player-filled-hint pointer-events-none absolute inset-x-0 bottom-0 m-0 text-center text-body text-text">
+        {filled && hint && portrait && !turned ? text.filled.turnHint : ""}
+      </p>
     </div>
   );
 }
