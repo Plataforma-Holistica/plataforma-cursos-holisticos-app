@@ -19,7 +19,7 @@ type FakeVideo = EventTarget & {
 
 interface FakeElement {
   media: { setAttribute: ReturnType<typeof vi.fn>; nativeEl: FakeVideo };
-  mediaController: { fullscreenElement: HTMLElement | null; setAttribute: ReturnType<typeof vi.fn> };
+  mediaController: { fullscreenElement: HTMLElement | null; setAttribute: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> };
   currentTime: number;
   playbackRate: number;
   volume: number;
@@ -65,7 +65,7 @@ vi.mock("@mux/mux-player-react", () => ({
             webkitExitFullscreen: vi.fn(),
           }),
         },
-        mediaController: { fullscreenElement: null, setAttribute: vi.fn() },
+        mediaController: { fullscreenElement: null, setAttribute: vi.fn(), focus: vi.fn() },
         currentTime: 42,
         playbackRate: 1,
         volume: 1,
@@ -143,8 +143,8 @@ afterEach(() => {
 describe("el reproductor", () => {
   it("recibe el video, sus tres tokens, el segundo y las velocidades; sin analítica, sin cookies y sin recordar volumen", () => {
     show();
-    const { ref: _ref, onError: _error, onPlaying: _playing, onPlay: _play, onLoadedMetadata: _loaded, onEnded: _ended, ...rest } = mux.props ?? {};
-    void [_ref, _error, _playing, _play, _loaded, _ended];
+    const { ref: _ref, onError: _error, onPlaying: _playing, onPlay: _play, onPause: _pause, onLoadedMetadata: _loaded, onEnded: _ended, ...rest } = mux.props ?? {};
+    void [_ref, _error, _playing, _play, _pause, _loaded, _ended];
     expect(rest).toEqual({
       className: "player-mux block h-full w-full",
       playbackId: "PlaybackDePrueba",
@@ -576,6 +576,14 @@ describe("la pantalla completa dentro de la página (iPhone; diseño, sección 5
     expect(screen.getByRole("status")).toHaveTextContent("");
   });
 
+  it("al salir, si el foco quedó sin dueño, lo recibe el controlador de Mux (el elemento no lo recibe)", () => {
+    show();
+    request("mediaenterfullscreenrequest");
+    expect(screen.getByRole("button", { name: "Salir de pantalla completa" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(mux.element?.mediaController.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  });
+
   it("si el reproductor se va estando dentro (terminó la lección), la página vuelve a desplazarse", () => {
     const { view } = show();
     request("mediaenterfullscreenrequest");
@@ -704,6 +712,35 @@ describe("renovar la dirección, sin salir de la pantalla completa", () => {
     expect(mux.element?.play).toHaveBeenCalledOnce();
   });
 
+  it("si pausó mientras llegaba la dirección nueva, no sigue solo", () => {
+    const { fail, renew, loaded } = show();
+    request("mediaplayrequest");
+    fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    request("mediapauserequest");
+    renew();
+    loaded();
+    expect(mux.element?.play).not.toHaveBeenCalled();
+  });
+
+  it("una pausa que no viene de sus controles (la pantalla de bloqueo) también cuenta; la que acompaña al error, no", () => {
+    const first = show();
+    request("mediaplayrequest");
+    act(() => (mux.props?.onPause as (event: unknown) => void)({ target: { error: null } }));
+    first.fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    first.renew();
+    first.loaded();
+    expect(mux.element?.play).not.toHaveBeenCalled();
+    first.view.unmount();
+
+    const second = show();
+    request("mediaplayrequest");
+    act(() => (mux.props?.onPause as (event: unknown) => void)({ target: { error: { fatal: true } } }));
+    second.fail({ fatal: true, muxCode: TOKEN_EXPIRED });
+    second.renew();
+    second.loaded();
+    expect(mux.element?.play).toHaveBeenCalledOnce();
+  });
+
   it("si estaba en pausa, sigue en pausa en el segundo en que iba, con lo demás repuesto", () => {
     const { fail, renew, loaded } = show();
     const old = mux.element;
@@ -765,12 +802,14 @@ describe("renovar la dirección, sin salir de la pantalla completa", () => {
     expect(mux.element?.playbackRate).toBe(1);
   });
 
-  it("el foco que estaba en el reproductor viejo pasa al nuevo: sin eso, los atajos del teclado dejan de servir", () => {
+  it("el foco que estaba en el reproductor viejo pasa al controlador del nuevo: sin eso, los atajos del teclado dejan de servir", () => {
     const { fail, renew } = show();
     screen.getByTestId("mux").focus();
     fail({ fatal: true, muxCode: TOKEN_EXPIRED });
     renew();
-    expect(mux.element?.focus).toHaveBeenCalledOnce();
+    // El elemento de Mux no recibe el foco (su sombra no lo delega): lo recibe su controlador.
+    expect(mux.element?.mediaController.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(mux.element?.focus).not.toHaveBeenCalled();
   });
 
   it("si la persona movió el foco a otra parte mientras se renovaba, se queda donde lo puso", () => {
@@ -781,7 +820,7 @@ describe("renovar la dirección, sin salir de la pantalla completa", () => {
     document.body.append(elsewhere);
     elsewhere.focus();
     renew();
-    expect(mux.element?.focus).not.toHaveBeenCalled();
+    expect(mux.element?.mediaController.focus).not.toHaveBeenCalled();
     expect(elsewhere).toHaveFocus();
     elsewhere.remove();
   });
@@ -791,7 +830,7 @@ describe("renovar la dirección, sin salir de la pantalla completa", () => {
     (document.activeElement as HTMLElement | null)?.blur();
     fail({ fatal: true, muxCode: TOKEN_EXPIRED });
     renew();
-    expect(mux.element?.focus).not.toHaveBeenCalled();
+    expect(mux.element?.mediaController.focus).not.toHaveBeenCalled();
   });
 
   it("si el foco estaba en otra parte, se queda donde estaba", () => {
@@ -801,7 +840,7 @@ describe("renovar la dirección, sin salir de la pantalla completa", () => {
     elsewhere.focus();
     fail({ fatal: true, muxCode: TOKEN_EXPIRED });
     renew();
-    expect(mux.element?.focus).not.toHaveBeenCalled();
+    expect(mux.element?.mediaController.focus).not.toHaveBeenCalled();
     expect(elsewhere).toHaveFocus();
     elsewhere.remove();
   });

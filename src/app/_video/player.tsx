@@ -148,7 +148,21 @@ interface WithNativeVideo {
   setAttribute?: (name: string, value: string) => void;
 }
 interface WithController {
-  mediaController?: { fullscreenElement?: HTMLElement | null; setAttribute?: (name: string, value: string) => void } | null;
+  mediaController?: {
+    fullscreenElement?: HTMLElement | null;
+    setAttribute?: (name: string, value: string) => void;
+    focus?: (options?: FocusOptions) => void;
+  } | null;
+}
+
+/**
+ * Le da el foco al reproductor. Se lo lleva su controlador: el elemento de Mux no lo recibe (su
+ * sombra no lo delega y no tiene `tabindex`), y los atajos del teclado escuchan en el controlador.
+ */
+function focusPlayer(element: MuxPlayerRefAttributes | null) {
+  const controller = (element as unknown as WithController | null)?.mediaController;
+  if (controller?.focus) controller.focus({ preventScroll: true });
+  else (element as unknown as HTMLElement | null)?.focus?.({ preventScroll: true });
 }
 
 /** Lo que se repone en el Mux Player nuevo cuando la dirección caducó. */
@@ -156,8 +170,6 @@ interface Resume {
   playbackRate: number;
   volume: number;
   muted: boolean;
-  /** La persona le había dado reproducir (y no pausó desde entonces). */
-  play: boolean;
   /** El foco estaba dentro del reproductor. */
   focused: boolean;
 }
@@ -243,10 +255,13 @@ export function Player(props: PlayerProps) {
     if (element === null || element === bound.current) return;
     bound.current = element;
     bindController();
-    if (resume.current?.focused && focusIsLost()) (element as unknown as HTMLElement).focus?.();
+    if (resume.current?.focused && focusIsLost()) focusPlayer(element);
   }
 
-  /** Al cargar: el controlador, y en un Mux Player nuevo tras una caducidad, lo que la persona tenía. */
+  /**
+   * Al cargar: el controlador, y en un Mux Player nuevo tras una caducidad, lo que la persona
+   * tenía. Si sigue o no se decide ahora, no al caducar: pudo pausar mientras llegaba la dirección.
+   */
   function loaded() {
     bindController();
     const element = mux.current as (MuxPlayerRefAttributes & Partial<Pick<HTMLMediaElement, "playbackRate" | "volume" | "muted" | "play">>) | null;
@@ -256,7 +271,7 @@ export function Player(props: PlayerProps) {
     element.playbackRate = kept.playbackRate;
     element.volume = kept.volume;
     element.muted = kept.muted;
-    if (kept.play) element.play?.()?.catch(() => undefined);
+    if (wantsPlay.current) element.play?.()?.catch(() => undefined);
   }
 
   /** Sin la marca en su lugar, el video no sigue (TRD §9.4). */
@@ -314,7 +329,7 @@ export function Player(props: PlayerProps) {
     return () => {
       root.classList.remove("player-locked");
       document.removeEventListener("keydown", onKey);
-      if (document.activeElement === null || document.activeElement === document.body) (mux.current as unknown as HTMLElement | null)?.focus?.();
+      if (focusIsLost()) focusPlayer(mux.current);
     };
   }, [filled, fill]);
 
@@ -338,7 +353,8 @@ export function Player(props: PlayerProps) {
   }, []);
 
   // Si la persona le dio reproducir (los controles de Mux piden de subida, por el contenedor), para
-  // seguir si la dirección caduca justo entonces. Un error no es una pausa: solo la pide ella.
+  // seguir si la dirección caduca justo entonces. Las pausas que no pasan por sus controles las
+  // cuenta `onPause`.
   useEffect(() => {
     const element = frame.current;
     if (element === null) return;
@@ -390,6 +406,11 @@ export function Player(props: PlayerProps) {
             guard();
           }}
           onPlaying={onPlaying}
+          onPause={(event) => {
+            // Una pausa que no viene de sus controles (la pantalla de bloqueo, unos audífonos que se
+            // desconectan) también cuenta; la que acompaña a un error, no.
+            if (!(event.target as { error?: unknown } | null)?.error) wantsPlay.current = false;
+          }}
           onEnded={() => {
             wantsPlay.current = false;
             onEnded?.();
@@ -401,11 +422,10 @@ export function Player(props: PlayerProps) {
             if (error?.fatal === false) return;
             if (error?.muxCode === TOKEN_EXPIRED) {
               resume.current = {
-                from: mux.current,
+                from: player,
                 playbackRate: player?.playbackRate ?? 1,
                 volume: player?.volume ?? 1,
                 muted: player?.muted ?? false,
-                play: wantsPlay.current,
                 focused: frame.current?.contains(document.activeElement) ?? false,
               };
               onExpired(player?.currentTime ?? 0);

@@ -214,7 +214,6 @@ export function ReviewScreen({ view, published = false }: ReviewScreenProps) {
           <p className="text-body-s text-text-2">{text.preview}</p>
           {video.kind === "playing" && (
             <Player
-              key={video.lesson.id}
               grant={video.grantNumber}
               playbackId={video.grant.playbackId}
               tokens={video.grant.tokens}

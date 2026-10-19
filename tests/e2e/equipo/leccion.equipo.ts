@@ -184,6 +184,9 @@ test("con acceso: el reproductor con la marca de agua, que entra con él a panta
   const manifests = () => outside.filter((href) => href.startsWith(`https://stream.mux.com/Playback${SLUG.replaceAll("-", "")}.m3u8?`)).length;
   await expect.poll(manifests, { timeout: 60_000 }).toBeGreaterThan(0);
   const before = manifests();
+  // Con el foco en el reproductor (en su controlador, que es lo que lo recibe), como quien usa el teclado.
+  await page.evaluate(() => (document.querySelector("mux-player") as unknown as { mediaController: HTMLElement }).mediaController.focus());
+  expect(await page.evaluate(() => document.activeElement === document.querySelector("mux-player"))).toBe(true);
   await expire(page);
   await expect.poll(() => page.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
   expect(await page.evaluate(() => document.fullscreenElement === document.querySelector("[data-player-frame]"))).toBe(true);
@@ -197,6 +200,8 @@ test("con acceso: el reproductor con la marca de agua, que entra con él a panta
     .toBe(true);
   await expect.poll(manifests, { timeout: 60_000 }).toBeGreaterThan(before);
   await expect(mark).toHaveText(who.email);
+  // El foco pasó al reproductor nuevo: los atajos del teclado siguen sirviendo.
+  expect(await page.evaluate(() => document.activeElement === document.querySelector("mux-player"))).toBe(true);
   await page.evaluate(() => document.exitFullscreen());
   // Lo único que se le pide a alguien de fuera es el video a Mux, con su dirección firmada.
   await expect.poll(() => outside.some((href) => href.startsWith(`https://stream.mux.com/Playback${SLUG.replaceAll("-", "")}.m3u8?`) && href.includes("token=")), { timeout: 60_000 }).toBe(true);

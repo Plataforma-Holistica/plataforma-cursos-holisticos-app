@@ -249,7 +249,8 @@ try {
   });
   if (claimed !== "claimed" && claimed !== "already_claimed") fail(`no se pudo reclamar la cuenta (${claimed}).`);
 
-  // Completar: nombre, edad y los consentimientos vigentes que falten.
+  // Completar: nombre, edad y los consentimientos que falten sobre los textos vigentes. Falta el
+  // que nunca se dio y el que se retiró: cuenta el último, como en la guarda.
   await inTransaction([["app.actor_id", id]], async () => {
     await client.query(
       `update public.profiles set display_name = coalesce(display_name, 'Alumna de prueba'), adult_declared_at = coalesce(adult_declared_at, now())
@@ -259,8 +260,11 @@ try {
     await client.query(
       `insert into public.consents (profile_id, legal_document_id, origin)
        select $1, private.current_legal_document(d), 'signup' from unnest($2::public.legal_doc_type[]) as d
-        where not exists (
-          select 1 from public.consents c where c.profile_id = $1 and c.legal_document_id = private.current_legal_document(d))`,
+        where coalesce((
+          select c.action <> 'granted' from public.consents c
+           where c.profile_id = $1 and c.legal_document_id = private.current_legal_document(d)
+           order by c.occurred_at desc, (c.action = 'withdrawn') desc
+           limit 1), true)`,
       [id, LEGAL],
     );
   });

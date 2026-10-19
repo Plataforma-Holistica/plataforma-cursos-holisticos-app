@@ -172,7 +172,8 @@ sistema, así que repite las revisiones, los candados y las tres escrituras de
 `@prueba.test` que se le pase, sin el `it-` que barren las pruebas), la reclama y la completa
 como los ayudantes de las pruebas, y le da una suscripción `manual`. Se niega con una cuenta
 del equipo, invitada o de un maestro. Cada corrida le pone otra contraseña, y reclamar cierra
-sus sesiones; los consentimientos son un libro, así que solo agrega los que faltan, y una
+sus sesiones; los consentimientos son un libro, así que solo agrega los que faltan (el que nunca
+se dio y el que se retiró: cuenta el último, como en la guarda), y una
 suscripción viva ya vencida se extiende. Imprime la dirección con la IP de la red (sin los
 adaptadores de WSL ni de Docker), el correo y la contraseña. La aplicación se levanta con
 `pnpm build && pnpm start`: `next start` escucha en toda la red, y `next dev` le niega sus
@@ -1309,10 +1310,13 @@ falla. Veintiuna precisiones que la tabla no dice:
     segundos y sin azar, y dos pedidos seguidos dan el mismo; y el elemento nuevo se liga al
     contenedor en su referencia (`attach`), y la escucha del pellizco se vuelve a poner con su
     video. Al caducar se anota lo que se repone en el nuevo al cargar: la velocidad, el volumen
-    y el silencio, el foco (si estaba dentro y quedó sin dueño: los atajos escuchan en el
-    controlador de Mux), y si la persona le había dado reproducir (los pedidos de media-chrome
-    de reproducir y pausar, o el aviso de que empezó; un error no es una pausa), y entonces
-    sigue solo. Safari puede negarse sin un toque sobre ese `<video>`, que es nuevo: queda en
+    y el silencio, y el foco si estaba dentro y quedó sin dueño. El foco se le da al
+    controlador de Mux, no al elemento: el elemento no lo recibe (su sombra no lo delega), y los
+    atajos del teclado escuchan en el controlador; lo mismo al salir de la pantalla completa
+    propia. Si sigue solo se decide al cargar, no al caducar: sigue si la persona le había dado
+    reproducir y no pausó desde entonces (los pedidos de media-chrome de reproducir y pausar, el
+    aviso de que empezó, y cualquier pausa que no acompañe a un error, como la de la pantalla de
+    bloqueo). Safari puede negarse sin un toque sobre ese `<video>`, que es nuevo: queda en
     pausa en el segundo en que iba. El extremo a extremo provoca la caducidad a pantalla
     completa, en computadora y en el iPhone simulado.
   - **La marca de agua** (`watermark.tsx`, RF-305), solo si la pantalla la pasa (la lección;
