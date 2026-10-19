@@ -427,7 +427,7 @@ test("una reproducción a la vez: otro dispositivo ve PA-34, cierra la otra, y l
   await expect(second.getByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en otro lugar" })).toBeVisible();
   const rows = second.getByRole("list", { name: "Dónde se está reproduciendo" }).getByRole("listitem");
   await expect(rows).toHaveCount(1);
-  await expect(rows.first()).toContainText("Con Mux · Curso leccion-e2e · Desde las");
+  await expect(rows.first()).toContainText("Con Mux · Curso leccion-e2e · desde las");
   await expect(second.locator("mux-player")).toHaveCount(0);
   expect(await a11yViolations(second)).toEqual([]);
 
@@ -478,8 +478,21 @@ test("la misma lección en otra pestaña del mismo navegador: la nueva reproduce
   await advance(second);
   await expire(second);
   await expect.poll(() => second.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
+  // El latido de la nueva tiene que llegar a la base antes de afirmar que no pasó nada: si latiera
+  // con la reproducción reemplazada, el aviso de la pestaña llegaría después.
+  const [{ at } = { at: "" }] = await ownerQuery<{ at: string }>("select now()::text as at");
   await advance(second);
   await beatNow(second);
+  await expect
+    .poll(async () => {
+      const [row] = await ownerQuery<{ beat: boolean }>(
+        `select bool_or(last_heartbeat_at > $2::timestamptz) as beat from public.playback_sessions
+          where profile_id = $1 and revoked_at is null`,
+        [who.id, at],
+      );
+      return row?.beat ?? false;
+    })
+    .toBe(true);
   await expect(second.locator("mux-player")).toHaveCount(1);
   await expect(second.getByText("Esta lección se abrió en otra pestaña o ventana.")).toHaveCount(0);
   await context.close();

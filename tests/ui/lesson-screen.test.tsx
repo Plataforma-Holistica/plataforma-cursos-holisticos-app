@@ -319,7 +319,7 @@ describe("PA-34: la cuenta ya reproduce en otro lugar (T-204, RF-107)", () => {
     expect(within(area()).getByText("Puedes cerrar esa reproducción para ver esta lección aquí.")).toBeVisible();
     const row = within(screen.getByRole("list", { name: "Dónde se está reproduciendo" })).getByRole("listitem");
     expect(row).toHaveTextContent("Chrome en Windows");
-    expect(row).toHaveTextContent("Respirar · Yoga suave · Desde las 7:40 p.m.");
+    expect(row).toHaveTextContent("Respirar · Yoga suave · desde las 7:40 p.m.");
     expect(within(row).getByRole("button", { name: "Cerrar esa reproducción (la de Chrome en Windows)" })).toBeVisible();
     expect(within(area()).getByRole("link", { name: "Volver al inicio" })).toHaveAttribute("href", "/inicio");
     expect(within(area()).getByRole("link", { name: "¿No reconoces alguno? Cambia tu contraseña y cierra todas las sesiones" })).toHaveAttribute(
@@ -328,7 +328,17 @@ describe("PA-34: la cuenta ya reproduce en otro lugar (T-204, RF-107)", () => {
     );
     expect(screen.getByRole("status")).toHaveTextContent("Tu cuenta ya está reproduciendo en otro lugar Puedes cerrar esa reproducción para ver esta lección aquí.");
     expect(screen.queryByTestId("reproductor")).toBeNull();
+    // Crece lo necesario, y en el teléfono no se queda pegado arriba: taparía la página.
+    expect(screen.getByRole("region", { name: "Reproductor" })).not.toHaveClass("sticky");
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("el reproductor sí va pegado arriba en el teléfono", async () => {
+    const { user } = show();
+    expect(screen.getByRole("region", { name: "Reproductor" })).toHaveClass("sticky");
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByTestId("reproductor");
+    expect(screen.getByRole("region", { name: "Reproductor" })).toHaveClass("sticky");
   });
 
   it("con más de una, en plural; y lo que no se sabe no se inventa", async () => {
@@ -348,7 +358,7 @@ describe("PA-34: la cuenta ya reproduce en otro lugar (T-204, RF-107)", () => {
     actions.watchLessonAction.mockResolvedValue({ kind: "busy", live: [{ ...ROW, course: null }] });
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
-    expect(await screen.findByText("Respirar · Desde las 7:40 p.m.")).toBeVisible();
+    expect(await screen.findByText("Respirar · desde las 7:40 p.m.")).toBeVisible();
   });
 
   it("«Cerrar esa reproducción» la cierra y abre esta en el mismo pedido; «Reintentar» solo vuelve a pedir", async () => {
@@ -422,6 +432,18 @@ describe("el latido de presencia (T-204)", () => {
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
   });
 
+  it("al irse de la pestaña no late", async () => {
+    await playing();
+    await press("avanza");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    visibility.mockRestore();
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+  });
+
   it("cerrada desde otro dispositivo: se va el video, lo dice, y «Reproducir aquí» toma el lugar desde el segundo en que iba", async () => {
     await playing();
     await press("va en 61");
@@ -458,6 +480,17 @@ describe("el latido de presencia (T-204)", () => {
     expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
   });
 
+  it("«Reintentar» en PA-34 también vuelve al segundo en que iba", async () => {
+    await playing();
+    await press("va en 61");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    await press("avanza");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    await press("Reintentar");
+    expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, undefined);
+    expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
+  });
+
   it("si el latido no contesta o no se supo, el video sigue", async () => {
     await playing();
     actions.playbackPresenceAction.mockRejectedValueOnce(new Error("sin red"));
@@ -479,6 +512,10 @@ describe("el latido de presencia (T-204)", () => {
     await press("caduca");
     await wait(90_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    // Si el Mux Player viejo aún dijera que avanza, tampoco: su reproducción está por reemplazarse.
+    await press("avanza");
+    await wait(30_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
     // El latido viejo contesta: la reproducción anterior fue reemplazada por la renovación.
     await act(async () => {
       answer({ kind: "closed", from: "tab", by: OTHER });
@@ -486,25 +523,72 @@ describe("el latido de presencia (T-204)", () => {
     });
     expect(screen.getByTestId("reproductor")).toBeVisible();
     expect(screen.queryByText("Esta lección se abrió en otra pestaña o ventana.")).toBeNull();
-    // Llega la nueva, con otra reproducción: late con ella.
+    // Llega la nueva, con otra reproducción: no late hasta que su video avanza (en un iPhone puede
+    // quedarse esperando un toque), y entonces late con ella.
     await act(async () => {
       renewed({ ...GRANT, playbackSessionId: OTHER });
       await vi.advanceTimersByTimeAsync(0);
     });
+    await wait(60_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await press("avanza");
     expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
   });
 
-  it("si la acción manda a la página (la sesión ya no pasa, o la cuenta se suspendió), no se toma por un error", async () => {
+  it("pausar y reanudar seguido no manda un latido por pulsación", async () => {
+    await playing();
+    await press("avanza");
+    await press("se detiene");
+    await press("avanza");
+    await press("se detiene");
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await press("se detiene");
+    await wait(5_000);
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["cero", 0, 5_000],
+    ["más de lo que cabe en un temporizador", 10_000_000, 300_000],
+  ])("un `heartbeatSeconds` fuera de rango (%s) se acota", async (_what, seconds, every) => {
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, heartbeatSeconds: seconds });
+    await playing();
+    await press("avanza");
+    await wait(every - 1);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+    await wait(1);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("un latido que contesta después de que el video falló no lo pisa", async () => {
+    await playing();
+    let answer: (reply: unknown) => void = () => undefined;
+    actions.playbackPresenceAction.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    await press("avanza");
+    // El error y la respuesta, en la misma vuelta: React todavía no aplicó el error ni limpió el
+    // latido. El aviso llega del reproductor como lo manda Mux (no un clic, que se aplica al momento).
+    await act(async () => {
+      (player.last?.onFailed as () => void)();
+      answer({ kind: "closed", from: "device", by: OTHER });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(within(playerArea()).getByText("No pudimos cargar el video.")).toBeVisible();
+    expect(within(playerArea()).queryByText("Esta reproducción se cerró desde otro dispositivo.")).toBeNull();
+  });
+
+  it("si el latido no llega (una redirección de la acción, o la red), el video sigue: la redirección la hace Next", async () => {
     await playing();
     actions.playbackPresenceAction.mockRejectedValue(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
     await press("avanza");
     expect(screen.getByTestId("reproductor")).toBeVisible();
   });
 
-  it("al terminar o fallar deja de latir", async () => {
+  it.each([["termina"], ["falla"]])("si %s, deja de latir", async (what) => {
     await playing();
     await press("avanza");
-    await press("termina");
+    await press(what);
     await wait(120_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
   });

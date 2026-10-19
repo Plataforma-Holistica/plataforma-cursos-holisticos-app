@@ -1220,9 +1220,13 @@ falla. Veintiuna precisiones que la tabla no dice:
     (`onAdvancing`: el aviso `playing` de Mux, y la pausa, el final o un error lo detienen) y en
     qué segundo va (`onProgress`); la revisión no los usa. La lección late con
     `playbackPresenceAction` al empezar a avanzar, cada `heartbeatSeconds` y al volver a la
-    pestaña (`visibilitychange`), y nunca mientras renueva la dirección. El latido vive en un
-    efecto que depende de la reproducción: si cambia (una dirección renovada la reemplaza), la
-    respuesta del viejo se descarta. Cerrada o vencida con el lugar tomado, el reproductor se va
+    pestaña (`visibilitychange`), y nunca mientras renueva la dirección: con la dirección nueva,
+    espera a que avance el Mux Player nuevo. Reanudar seguido no late más de una vez cada 5 s, y
+    `heartbeatSeconds` se acota entre 5 y 300. El latido vive en un efecto que depende de la
+    reproducción: si cambia (una dirección renovada la reemplaza), la respuesta del viejo se
+    descarta; y la que llega antes de que React aplique otro cambio (un error, el final) no lo
+    pisa, porque se aplica solo si sigue esa reproducción en curso. PA-34 no va pegada arriba en
+    el teléfono, como el reproductor: crece, y taparía la página. Cerrada o vencida con el lugar tomado, el reproductor se va
     (y con él la pantalla completa) y queda el aviso con «Reproducir aquí», o PA-34, con el
     segundo en que iba; las dos piden con `closing` (la que tomó su lugar, o la que se elige
     cerrar). El nombre del navegador sale de `src/app/_lib/devices.ts`, el mismo de PA-25. En el

@@ -50,7 +50,7 @@ export const lesson = defineMessages({
     textMany: "Puedes cerrar una de esas reproducciones para ver esta lección aquí.",
     listLabel: "Dónde se está reproduciendo",
     place: "{lesson} · {course}",
-    since: "Desde las {time}",
+    since: "desde las {time}",
     close: "Cerrar esa reproducción",
     closeDetail: "(la de {device})",
     retry: "Reintentar",

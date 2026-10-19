@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
+import { PASSWORD_BLOCK_ID } from "@/app/(cuenta)/cuenta/password-block";
 import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps } from "@/app/_video/player";
@@ -101,6 +102,10 @@ type VideoState =
   | { kind: "busy"; live: BusyRow[]; startTime: number }
   /** La reproducción se cerró desde otro dispositivo, o se abrió en otra pestaña. `by`: la que tomó su lugar. */
   | { kind: "closed"; from: "device" | "tab"; by: string | null; startTime: number };
+
+/** Los límites del latido, en segundos: ni más seguido, ni tan espaciado que la reproducción venza. */
+const BEAT_MIN_SECONDS = 5;
+const BEAT_MAX_SECONDS = 300;
 
 const subscribeNothing = () => () => undefined;
 /** Verdadero solo ya montada en el navegador: sin JavaScript no hay con qué reproducir. */
@@ -204,7 +209,7 @@ function Elsewhere({ live, onClose, onRetry }: { live: BusyRow[]; onClose: (sess
         <TextLink href={ROUTES.home}>{copy.back}</TextLink>
       </div>
       {/* El bloque de la contraseña de PA-25: cambiarla cierra las demás sesiones, y con ellas sus reproducciones. */}
-      <TextLink href={`${ROUTES.account}#bloque-contrasena`}>{copy.account}</TextLink>
+      <TextLink href={`${ROUTES.account}#${PASSWORD_BLOCK_ID}`}>{copy.account}</TextLink>
     </div>
   );
 }
@@ -242,7 +247,6 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     const mine = ticket.current;
     at.current = startTime;
     if (!renewed) {
-      setAdvancing(false);
       setVideo({ kind: "loading" });
       // El botón pulsado se va: el foco se queda en el lugar del reproductor.
       area.current?.focus();
@@ -256,7 +260,12 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       answer = { kind: "unavailable" };
     }
     if (mine !== ticket.current) return;
-    if (answer.kind === "granted") setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
+    if (answer.kind === "granted") {
+      // Se late cuando avance este video. Lo que el Mux Player viejo haya dicho mientras llegaba
+      // la dirección no cuenta: en un iPhone, el nuevo puede quedarse en pausa esperando un toque.
+      setAdvancing(false);
+      setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
+    }
     else if (answer.kind === "busy") setVideo({ kind: "busy", live: answer.live, startTime });
     else setVideo(answer);
   }
@@ -266,11 +275,15 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // contesta tarde ya no pinta: su efecto se limpió.
   const beating = video.kind === "playing" && !video.renewing && advancing ? video.grant : null;
   const beatingId = beating?.playbackSessionId ?? null;
-  const beatEvery = beating?.heartbeatSeconds ?? 0;
+  // Acotado: un valor fuera de rango no deja latir en bucle ni dejar de latir.
+  const beatEvery = Math.min(Math.max(beating?.heartbeatSeconds ?? BEAT_MIN_SECONDS, BEAT_MIN_SECONDS), BEAT_MAX_SECONDS);
+  // Cuándo salió el último latido: pausar y reanudar seguido no manda uno por pulsación.
+  const lastBeat = useRef(Number.NEGATIVE_INFINITY);
   useEffect(() => {
     if (beatingId === null) return;
     let current = true;
     const beat = async () => {
+      lastBeat.current = Date.now();
       let reply: PresenceReply;
       try {
         reply = await playbackPresenceAction(slug, lessonId, beatingId);
@@ -279,11 +292,20 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
         // el siguiente latido lo vuelve a intentar.
         return;
       }
-      if (!current) return;
-      if (reply.kind === "busy") setVideo({ kind: "busy", live: reply.live, startTime: at.current });
-      else if (reply.kind === "closed") setVideo({ kind: "closed", from: reply.from, by: reply.by, startTime: at.current });
+      if (!current || (reply.kind !== "busy" && reply.kind !== "closed")) return;
+      // Solo si sigue siendo esta reproducción, y en curso: un cambio que React aún no aplicó (la
+      // dirección caducó, terminó, falló) no se pisa. Y un pedido en camino ya no pinta.
+      ticket.current += 1;
+      const second = at.current;
+      setVideo((now) =>
+        now.kind !== "playing" || now.renewing || now.grant.playbackSessionId !== beatingId
+          ? now
+          : reply.kind === "busy"
+            ? { kind: "busy", live: reply.live, startTime: second }
+            : { kind: "closed", from: reply.from, by: reply.by, startTime: second },
+      );
     };
-    void beat();
+    if (Date.now() - lastBeat.current >= BEAT_MIN_SECONDS * 1000) void beat();
     const timer = setInterval(() => void beat(), beatEvery * 1000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void beat();
@@ -350,7 +372,8 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       <BackLink href={ROUTES.home}>{text.back}</BackLink>
       <div className="grid gap-8 lg:grid-cols-10">
         <div className="flex flex-col gap-4 lg:col-span-7">
-          <section aria-label={text.player.label} className="sticky top-0 z-(--z-sticky) lg:static">
+          {/* Pegado arriba al desplazar, en teléfono; PA-34 no: crece, y taparía la página. */}
+          <section aria-label={text.player.label} className={video.kind === "busy" ? undefined : "sticky top-0 z-(--z-sticky) lg:static"}>
             <div
               ref={area}
               tabIndex={-1}
