@@ -152,6 +152,19 @@ test("con acceso: el reproductor con la marca de agua, que entra con él a panta
       }),
     )
     .toBe(true);
+  // En computadora el pedido de Mux no se atrapa: el navegador lleva a pantalla completa el
+  // contenedor entero, con la marca. Sin video cargado, los controles de Mux no se ven: el
+  // pedido sale de su controlador como lo mandaría su botón, dentro de un clic de verdad (el
+  // navegador solo deja entrar a pantalla completa con un gesto de quien ve).
+  await page.evaluate(() => {
+    const controller = (document.querySelector("mux-player") as unknown as { mediaController: Element }).mediaController;
+    const ask = () => controller.dispatchEvent(new CustomEvent("mediaenterfullscreenrequest", { bubbles: true, composed: true }));
+    document.querySelector("h1")?.addEventListener("click", ask, { once: true });
+  });
+  await page.getByRole("heading", { level: 1 }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.querySelector("[data-player-frame]"))).toBe(true);
+  await expect(page.locator("[data-player-frame]")).not.toHaveAttribute("data-filled");
+  await page.evaluate(() => document.exitFullscreen());
   // Lo único que se le pide a alguien de fuera es el video a Mux, con su dirección firmada.
   await expect.poll(() => outside.some((href) => href.startsWith(`https://stream.mux.com/Playback${SLUG.replaceAll("-", "")}.m3u8?`) && href.includes("token=")), { timeout: 60_000 }).toBe(true);
   for (const host of new Set(outside.map((href) => new URL(href).hostname))) expect(["image.mux.com", "stream.mux.com"], host).toContain(host);
@@ -159,6 +172,136 @@ test("con acceso: el reproductor con la marca de agua, que entra con él a panta
   // Si la quitan, el video se pausa: el reproductor queda en pausa.
   await page.evaluate(() => document.querySelector("[data-watermark]")?.remove());
   await expect.poll(() => page.evaluate(() => (document.querySelector("mux-player") as unknown as { paused?: boolean } | null)?.paused)).toBe(true);
+});
+
+/**
+ * Un iPhone, hasta donde Chromium lo deja simular: ningún elemento entra a pantalla completa
+ * (Safari de iPhone solo lleva ahí el video, con la del sistema, que no pinta la marca), y el
+ * video sí tiene la del sistema. Si alguien la pide, queda anotado.
+ */
+async function likeAnIPhone(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    for (const key of ["requestFullscreen", "webkitRequestFullscreen", "webkitRequestFullScreen"]) Reflect.deleteProperty(Element.prototype, key);
+    Object.defineProperty(Document.prototype, "fullscreenEnabled", { configurable: true, get: () => false });
+    Object.defineProperty(Document.prototype, "webkitFullscreenEnabled", { configurable: true, get: () => false });
+    Object.defineProperty(HTMLVideoElement.prototype, "webkitSupportsFullscreen", { configurable: true, get: () => true });
+    Object.defineProperty(HTMLVideoElement.prototype, "webkitEnterFullscreen", {
+      configurable: true,
+      value() {
+        (window as unknown as { systemFullscreen?: boolean }).systemFullscreen = true;
+      },
+    });
+  });
+}
+
+/** Lo que ocupan en la ventana el contenedor, el escenario del video y la marca. */
+async function boxes(page: Page) {
+  const box = async (selector: string) => {
+    const found = await page.locator(selector).boundingBox();
+    if (found === null) throw new Error(`No se ve ${selector}`);
+    return found;
+  };
+  return { frame: await box("[data-player-frame]"), stage: await box("[data-player-frame] .player-stage"), mark: await box("[data-player-frame] [data-watermark]") };
+}
+
+/**
+ * Las celdas de la marca que quedarían bajo un botón de la pantalla completa propia. La celda es
+ * al azar: se mide cada una con una muestra del mismo texto, puesta un momento en el escenario.
+ * Agregarla no toca la marca, así que no pausa nada.
+ */
+async function cellsUnderButtons(page: Page, email: string): Promise<number[]> {
+  return page.evaluate((text) => {
+    const stage = document.querySelector("[data-player-frame] .player-stage");
+    if (stage === null) throw new Error("No se ve el escenario");
+    const buttons = [...document.querySelectorAll("[data-player-frame] .player-filled-bar button")].map((button) => button.getBoundingClientRect());
+    if (buttons.length === 0) throw new Error("No se ven los botones");
+    const under: number[] = [];
+    for (const cell of [0, 1, 2, 3, 5, 6, 7, 8]) {
+      const probe = document.createElement("p");
+      probe.className = `watermark watermark-cell-${cell}`;
+      probe.textContent = text;
+      stage.append(probe);
+      const mark = probe.getBoundingClientRect();
+      probe.remove();
+      if (buttons.some((button) => mark.left < button.right && button.left < mark.right && mark.top < button.bottom && button.top < mark.bottom)) under.push(cell);
+    }
+    return under;
+  }, email);
+}
+
+test("en un iPhone: la pantalla completa es dentro de la página, con la marca sobre el video, y «Girar»", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await likeAnIPhone(context);
+  const page = await context.newPage();
+  await holdOutside(context);
+  await signIn(page, who, lessonUrl(SLUG, lesson));
+  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+  await page.getByRole("button", { name: "Reproducir la lección" }).click();
+  await expect(page.locator("[data-player-frame] [data-watermark]")).toHaveText(who.email);
+
+  // Lo que pide el botón de pantalla completa de Mux (o la tecla F), desde dentro de sus controles.
+  await page.evaluate(() =>
+    (document.querySelector("mux-player") as unknown as { mediaController: Element }).mediaController.dispatchEvent(
+      new CustomEvent("mediaenterfullscreenrequest", { bubbles: true, composed: true }),
+    ),
+  );
+  const frame = page.locator("[data-player-frame]");
+  await expect(frame).toHaveAttribute("data-filled", "");
+  expect(await page.evaluate(() => (window as unknown as { systemFullscreen?: boolean }).systemFullscreen)).toBeUndefined();
+  // Toda la ventana; el video al centro, a lo ancho, y la marca encima del video, no en lo negro.
+  let { frame: frameBox, stage, mark } = await boxes(page);
+  expect(frameBox).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+  expect(stage.width).toBeCloseTo(390, 0);
+  expect(stage.height).toBeCloseTo((390 * 9) / 16, 0);
+  expect(mark.y).toBeGreaterThanOrEqual(stage.y);
+  expect(mark.y + mark.height).toBeLessThanOrEqual(stage.y + stage.height);
+  // La página de atrás no se desplaza.
+  expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(true);
+  await expect(page.getByRole("button", { name: "Salir de pantalla completa" })).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "Gira tu teléfono para verlo más grande" })).toBeVisible();
+  expect(await cellsUnderButtons(page, who.email)).toEqual([]);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Girar: el contenedor rota y el video ocupa el largo de la pantalla.
+  await page.getByRole("button", { name: "Girar" }).click();
+  await expect(page.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "true");
+  ({ frame: frameBox, stage, mark } = await boxes(page));
+  expect(frameBox.width).toBeCloseTo(390, 0);
+  expect(frameBox.height).toBeCloseTo(844, 0);
+  expect(stage.height).toBeGreaterThan(stage.width);
+  expect(mark.x).toBeGreaterThanOrEqual(stage.x);
+  expect(mark.x + mark.width).toBeLessThanOrEqual(stage.x + stage.width);
+  expect(await cellsUnderButtons(page, who.email)).toEqual([]);
+
+  // En horizontal ya no gira, y el video llena el alto: «Salir» queda encima del video, sin tapar
+  // ninguna celda de la marca, y un toque junto a él llega al video, no a la franja de los botones.
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(frame).not.toHaveAttribute("data-turned");
+  await expect(page.getByRole("button", { name: "Girar" })).toHaveCount(0);
+  ({ frame: frameBox, stage } = await boxes(page));
+  expect(frameBox).toEqual({ x: 0, y: 0, width: 844, height: 390 });
+  expect(stage.height).toBeCloseTo(390, 0);
+  expect(await cellsUnderButtons(page, who.email)).toEqual([]);
+  const exit = await page.getByRole("button", { name: "Salir de pantalla completa" }).boundingBox();
+  if (exit === null) throw new Error("No se ve «Salir de pantalla completa»");
+  expect(exit.x + exit.width).toBeGreaterThan(stage.x);
+  const beside = { x: exit.x + exit.width + 40, y: exit.y + exit.height / 2 };
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("mux-player") !== null, beside)).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.getByRole("button", { name: "Salir de pantalla completa" }).click();
+  await expect(frame).not.toHaveAttribute("data-filled");
+  expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(false);
+
+  // Si iOS entra solo a la del sistema (un pellizco), se sale de ella y pasa a la propia.
+  await page.evaluate(() => {
+    const video = (document.querySelector("mux-player") as unknown as { media: { nativeEl: HTMLVideoElement } }).media.nativeEl;
+    video.dispatchEvent(new Event("webkitbeginfullscreen"));
+  });
+  await expect(frame).toHaveAttribute("data-filled", "");
+  await context.close();
 });
 
 test("con acceso y sin JavaScript: la página se lee, y dice que para ver hace falta JavaScript", async ({ browser }) => {

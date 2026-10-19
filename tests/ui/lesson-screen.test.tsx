@@ -8,12 +8,20 @@ import { a11yViolations } from "../setup/a11y";
 // pinta en el lugar del reproductor en cada estado, el temario y lo de alrededor. El reproductor
 // de verdad lo prueba tests/ui/player.test.tsx, y la página entera, el extremo a extremo.
 
-const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn(), rememberCaptionsAction: vi.fn() }));
 vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/actions", () => actions);
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
 vi.mock("@/app/_video/player", () => ({
-  Player: (props: { watermark?: string; startTime: number; onExpired: (at: number) => void; onFailed: () => void; onPlaying: () => void; onEnded?: () => void }) => {
+  Player: (props: {
+    watermark?: string;
+    startTime: number;
+    onExpired: (at: number) => void;
+    onFailed: () => void;
+    onPlaying: () => void;
+    onEnded?: () => void;
+    onCaptionsChange?: (on: boolean) => void;
+  }) => {
     player.last = props;
     return (
       <div data-testid="reproductor" data-start={String(props.startTime)}>
@@ -28,6 +36,9 @@ vi.mock("@/app/_video/player", () => ({
         </button>
         <button type="button" onClick={() => props.onEnded?.()}>
           termina
+        </button>
+        <button type="button" onClick={() => props.onCaptionsChange?.(true)}>
+          enciende subtítulos
         </button>
       </div>
     );
@@ -64,6 +75,7 @@ const PROPS: LessonScreenProps = {
   ],
   next: { title: "Alargar la salida", href: "/cursos/respirar/lecciones/l3" },
   initial: { kind: "ready" },
+  captions: false,
 };
 
 function show(props: Partial<LessonScreenProps> = {}) {
@@ -77,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   player.last = null;
   actions.watchLessonAction.mockResolvedValue(GRANT);
+  actions.rememberCaptionsAction.mockResolvedValue(undefined);
 });
 
 describe("lo de alrededor del reproductor", () => {
@@ -234,5 +247,33 @@ describe("el lugar del reproductor", () => {
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
     await user.click(await screen.findByRole("button", { name: "termina" }));
     expect(screen.queryByRole("link", { name: /^Sigue/ })).toBeNull();
+  });
+});
+
+describe("los subtítulos (RF-310)", () => {
+  it("el reproductor arranca con ellos como la cuenta los dejó", async () => {
+    const { user } = show({ captions: true });
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByTestId("reproductor");
+    expect(player.last).toMatchObject({ captions: true });
+  });
+
+  it("encenderlos se recuerda en la cuenta, y una dirección renovada sigue con ellos encendidos", async () => {
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "enciende subtítulos" }));
+    expect(actions.rememberCaptionsAction).toHaveBeenCalledExactlyOnceWith(true);
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, tokens: { ...GRANT.tokens, playback: "otro.p.p" } });
+    await user.click(screen.getByRole("button", { name: "caduca" }));
+    await waitFor(() => expect(player.last).toMatchObject({ tokens: { playback: "otro.p.p" }, captions: true }));
+  });
+
+  it("si no se pudo recordar, el video sigue igual y no se dice nada", async () => {
+    actions.rememberCaptionsAction.mockRejectedValue(new Error("sin red"));
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "enciende subtítulos" }));
+    expect(screen.getByTestId("reproductor")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 });

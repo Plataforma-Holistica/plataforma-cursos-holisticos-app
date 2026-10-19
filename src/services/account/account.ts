@@ -444,6 +444,8 @@ export const {
   completeAccount,
   accountProfile,
   changeName,
+  captionsChoice,
+  rememberCaptions,
   accountSessions,
   closeSession,
   closeOtherSessions,

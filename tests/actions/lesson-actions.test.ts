@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// La acción del reproductor de la lección (PA-22, T-203), con la función única de medios
-// simulada: qué le pide y qué hace con cada respuesta. Lo que la función hace de verdad lo
-// prueban sus pruebas de integración.
+// Las acciones del reproductor de la lección (PA-22, T-203), con sus servicios simulados: qué
+// le piden a la función única de medios y qué hacen con cada respuesta, y qué se guarda de los
+// subtítulos. Lo que los servicios hacen de verdad lo prueban sus pruebas de integración.
 
 const mocks = vi.hoisted(() => ({
   getMediaGrant: vi.fn(),
+  rememberCaptions: vi.fn(),
   cookieJar: vi.fn(),
   redirect: vi.fn((to: string): never => {
     throw new Error(`redirige a ${to}`);
@@ -13,9 +14,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
 vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant }));
+vi.mock("@/services/account/account", () => ({ rememberCaptions: mocks.rememberCaptions }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
-import { watchLessonAction } from "@/app/cursos/[slug]/lecciones/[leccion]/actions";
+import { rememberCaptionsAction, watchLessonAction } from "@/app/cursos/[slug]/lecciones/[leccion]/actions";
 
 const jar = { get: () => undefined, set: () => undefined };
 const LESSON = "b0000000-0000-4000-8000-000000000002";
@@ -61,5 +63,23 @@ describe("watchLessonAction", () => {
     mocks.getMediaGrant.mockResolvedValue({ kind: "refused" });
     await expect(watchLessonAction("../otro", LESSON)).rejects.toThrow("redirige a /inicio");
     await expect(watchLessonAction(7, LESSON)).rejects.toThrow("redirige a /inicio");
+  });
+});
+
+describe("rememberCaptionsAction", () => {
+  it.each([true, false])("guarda %s en la cuenta de la sesión que pide", async (on) => {
+    mocks.rememberCaptions.mockResolvedValue({ kind: "saved", on });
+    await rememberCaptionsAction(on);
+    expect(mocks.rememberCaptions).toHaveBeenCalledExactlyOnceWith(jar, on);
+  });
+
+  it.each([["sí"], [1], [null], [undefined], [{ on: true }]])("lo que no es encendido o apagado (%j) no se guarda", async (value) => {
+    await rememberCaptionsAction(value);
+    expect(mocks.rememberCaptions).not.toHaveBeenCalled();
+  });
+
+  it("no le dice nada al navegador, tampoco si no se guardó", async () => {
+    mocks.rememberCaptions.mockResolvedValue({ kind: "unavailable" });
+    expect(await rememberCaptionsAction(true)).toBeUndefined();
   });
 });

@@ -15,7 +15,7 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Tabs } from "@/ui/tabs";
 import { TextLink } from "@/ui/text-link";
 
-import { watchLessonAction } from "./actions";
+import { rememberCaptionsAction, watchLessonAction } from "./actions";
 import type { Denial, InitialState, WatchAnswer } from "./outcomes";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
@@ -25,7 +25,9 @@ import type { Denial, InitialState, WatchAnswer } from "./outcomes";
 // T-501; decisión de Sergio del 2026-10-15), y con una sola, en escritorio, va como sección.
 //
 // El reproductor pide su dirección con la acción después de pintar (RF-305), y se descarga
-// solo entonces. Lo que se ve en su lugar lo decide la tabla (`outcomes.ts`).
+// solo entonces. Lo que se ve en su lugar lo decide la tabla (`outcomes.ts`). Arranca con los
+// subtítulos como la cuenta los dejó, y si la persona los enciende o los apaga, se recuerda en
+// la cuenta (RF-310) y en la pantalla: una dirección renovada sigue con lo que eligió.
 
 /** Una lección del temario, ya en palabras y con su dirección. */
 export interface SyllabusEntry {
@@ -47,6 +49,8 @@ export interface LessonScreenProps {
   modules: { id: string; title: string; lessons: SyllabusEntry[] }[];
   next: { title: string; href: string } | null;
   initial: Exclude<InitialState, { kind: "suspended" | "reload" }>;
+  /** Si la cuenta dejó los subtítulos encendidos. */
+  captions: boolean;
 }
 
 /** Si el reproductor no se pudo descargar: se dice como cualquier otro error, con «Reintentar». */
@@ -141,9 +145,10 @@ function Paywall({ denial }: { denial: Denial }) {
   );
 }
 
-export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, initial }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, initial, captions }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
+  const [captionsOn, setCaptionsOn] = useState(captions);
   // Cuál pedido manda: uno que contesta tarde, después de un error o de otro pedido, ya no pinta.
   const ticket = useRef(0);
   const area = useRef<HTMLDivElement>(null);
@@ -181,6 +186,12 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       setVideo({ ...video, renewing: true });
       void watch(at, true);
     }
+  }
+
+  /** La persona encendió o apagó los subtítulos: se recuerda. Si no se guardó, el video sigue igual. */
+  function captionsChanged(on: boolean) {
+    setCaptionsOn(on);
+    rememberCaptionsAction(on).catch(() => undefined);
   }
 
   function failed() {
@@ -232,6 +243,8 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                   startTime={video.startTime}
                   speeds={video.grant.speeds}
                   watermark={video.grant.watermark}
+                  captions={captionsOn}
+                  onCaptionsChange={captionsChanged}
                   onExpired={expired}
                   onFailed={failed}
                   onPlaying={() => {

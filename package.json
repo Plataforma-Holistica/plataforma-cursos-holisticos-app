@@ -29,6 +29,7 @@
     "db:courses": "node scripts/db-test-courses.mjs",
     "media:upload-test": "node scripts/media-upload-test.mjs",
     "media:check": "node scripts/media-check.mjs",
+    "media:captions-test": "node scripts/media-captions-test.mjs",
     "team:handoff": "node scripts/team-handoff.mjs",
     "db:migration": "supabase migration new",
     "test:db": "supabase test db",

@@ -1,15 +1,24 @@
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // El reproductor compartido (`src/app/_video/player.tsx`; diseño, sección 5.4), con Mux Player
 // cambiado por uno de mentira: qué props recibe, qué apaga en el `<video>` interno, qué hace
-// con cada error, el contenedor propio que entra a pantalla completa y la marca de agua. Que
-// Mux Player de verdad no salga a terceros, y la pantalla completa en un navegador, lo prueba
-// el extremo a extremo.
+// con cada error, el contenedor propio que entra a pantalla completa, la pantalla completa
+// dentro de la página donde el navegador no lleva el contenedor (iPhone), la marca de agua y
+// los subtítulos. Que Mux Player de verdad no salga a terceros, y la pantalla completa en un
+// navegador, lo prueba el extremo a extremo.
+
+/** El `<video>` de verdad, de mentira: recibe eventos y tiene pistas de texto. */
+type FakeVideo = EventTarget & {
+  disableRemotePlayback: boolean;
+  disablePictureInPicture: boolean;
+  textTracks: { kind: string; mode: string }[];
+  webkitExitFullscreen: ReturnType<typeof vi.fn>;
+};
 
 interface FakeElement {
-  media: { setAttribute: ReturnType<typeof vi.fn>; nativeEl: { disableRemotePlayback: boolean; disablePictureInPicture: boolean } };
+  media: { setAttribute: ReturnType<typeof vi.fn>; nativeEl: FakeVideo };
   mediaController: { fullscreenElement: HTMLElement | null; setAttribute: ReturnType<typeof vi.fn> };
   currentTime: number;
   error: unknown;
@@ -38,7 +47,15 @@ vi.mock("@mux/mux-player-react", () => ({
   default: forwardRef<unknown, Record<string, unknown>>(function FakeMuxPlayer(props, ref) {
     mux.props = props;
     const element: FakeElement = mux.element ?? {
-      media: { setAttribute: vi.fn(), nativeEl: { disableRemotePlayback: false, disablePictureInPicture: false } },
+      media: {
+        setAttribute: vi.fn(),
+        nativeEl: Object.assign(new EventTarget(), {
+          disableRemotePlayback: false,
+          disablePictureInPicture: false,
+          textTracks: [] as { kind: string; mode: string }[],
+          webkitExitFullscreen: vi.fn(),
+        }),
+      },
       mediaController: { fullscreenElement: null, setAttribute: vi.fn() },
       currentTime: 42,
       error: null,
@@ -51,13 +68,13 @@ vi.mock("@mux/mux-player-react", () => ({
 }));
 
 import { TOKEN_EXPIRED } from "@/app/_video/errors";
-import { Player } from "@/app/_video/player";
+import { Player, TURN_HINT_MS } from "@/app/_video/player";
 import { WATERMARK_FADE_MS, WATERMARK_INTERVAL_MS } from "@/app/_video/watermark-cells";
 
 const TOKENS = { playback: "p.p.p", thumbnail: "t.t.t", storyboard: "s.s.s" };
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
-function show(watermark?: string) {
+function show(watermark?: string, captions?: { on?: boolean; onChange?: (on: boolean) => void }) {
   const onExpired = vi.fn();
   const onFailed = vi.fn();
   const onPlaying = vi.fn();
@@ -68,6 +85,8 @@ function show(watermark?: string) {
       startTime={7}
       speeds={SPEEDS}
       watermark={watermark}
+      captions={captions?.on}
+      onCaptionsChange={captions?.onChange}
       onExpired={onExpired}
       onFailed={onFailed}
       onPlaying={onPlaying}
@@ -122,7 +141,8 @@ describe("el reproductor", () => {
     show();
     expect(mux.element?.media.setAttribute).toHaveBeenCalledWith("disableremoteplayback", "");
     expect(mux.element?.media.setAttribute).toHaveBeenCalledWith("disablepictureinpicture", "");
-    expect(mux.element?.media.nativeEl).toEqual({ disableRemotePlayback: true, disablePictureInPicture: true });
+    expect(mux.element?.media.nativeEl.disableRemotePlayback).toBe(true);
+    expect(mux.element?.media.nativeEl.disablePictureInPicture).toBe(true);
   });
 
   it("la pantalla completa toma el contenedor propio, no el reproductor: la marca entra con ella", () => {
@@ -326,5 +346,252 @@ describe("la marca de agua (RF-305)", () => {
     (mux.props?.onPlay as (event: unknown) => void)({ target: mux.element });
     act(() => void vi.advanceTimersByTime(WATERMARK_INTERVAL_MS * 3));
     expect(mux.element?.pause).not.toHaveBeenCalled();
+  });
+});
+
+/** Lo que mandan los controles de Mux (media-chrome) al pedir algo: sube y sale de su sombra. */
+function request(type: string) {
+  const event = new CustomEvent(type, { bubbles: true, composed: true });
+  act(() => void screen.getByTestId("mux").dispatchEvent(event));
+}
+
+/** Si el navegador lleva a pantalla completa un elemento cualquiera (en computadora y Android, sí). */
+function elementFullscreen(enabled: boolean) {
+  Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: enabled });
+}
+
+/** El aparato, en vertical o en horizontal. Devuelve con qué girarlo después. */
+function orientation(portrait: boolean): (portrait: boolean) => void {
+  const listeners = new Set<() => void>();
+  const query = {
+    matches: portrait,
+    addEventListener: (_type: string, listener: () => void) => void listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => void listeners.delete(listener),
+  };
+  vi.stubGlobal("matchMedia", vi.fn(() => query));
+  return (next) => {
+    query.matches = next;
+    act(() => listeners.forEach((listener) => listener()));
+  };
+}
+
+describe("la pantalla completa dentro de la página (iPhone; diseño, sección 5.4)", () => {
+  beforeEach(() => {
+    elementFullscreen(false);
+    orientation(false);
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(document, "fullscreenEnabled");
+    vi.unstubAllGlobals();
+    document.documentElement.classList.remove("player-locked");
+  });
+
+  it("donde el navegador no lleva el contenedor, el pedido de Mux no llega a su controlador: el contenedor ocupa la ventana, con la marca", () => {
+    const { frame } = show("ana@correo.com");
+    const controller = vi.fn();
+    screen.getByTestId("mux").addEventListener("mediaenterfullscreenrequest", controller);
+    request("mediaenterfullscreenrequest");
+    expect(controller).not.toHaveBeenCalled();
+    expect(frame).toHaveAttribute("data-filled");
+    expect(frame?.className).toMatch(/\bplayer-frame-filled\b/);
+    expect(frame?.className).not.toMatch(/\baspect-video\b/);
+    expect(frame?.querySelector("[data-watermark]")).not.toBeNull();
+    // La página de atrás no se desplaza, y el foco va a salir.
+    expect(document.documentElement).toHaveClass("player-locked");
+    expect(screen.getByRole("button", { name: "Salir de pantalla completa" })).toHaveFocus();
+  });
+
+  it("«Salir de pantalla completa» la deja como estaba", () => {
+    const { frame } = show("ana@correo.com");
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(frame).not.toHaveAttribute("data-filled");
+    expect(frame?.className).toMatch(/\baspect-video\b/);
+    expect(document.documentElement).not.toHaveClass("player-locked");
+    expect(screen.queryByRole("button", { name: "Salir de pantalla completa" })).toBeNull();
+  });
+
+  it("con un teclado, Escape sale, y la tecla F (otro pedido de entrar) también", () => {
+    const { frame } = show();
+    request("mediaenterfullscreenrequest");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(frame).not.toHaveAttribute("data-filled");
+    request("mediaenterfullscreenrequest");
+    expect(frame).toHaveAttribute("data-filled");
+    request("mediaenterfullscreenrequest");
+    expect(frame).not.toHaveAttribute("data-filled");
+  });
+
+  it("un pedido de salir, de Mux, también sale; y fuera de ella no hace nada", () => {
+    const { frame } = show();
+    request("mediaexitfullscreenrequest");
+    expect(frame).not.toHaveAttribute("data-filled");
+    request("mediaenterfullscreenrequest");
+    request("mediaexitfullscreenrequest");
+    expect(frame).not.toHaveAttribute("data-filled");
+  });
+
+  it("donde el navegador sí lleva el contenedor (computadora, Android), el pedido sigue a Mux", () => {
+    elementFullscreen(true);
+    const { frame } = show("ana@correo.com");
+    const controller = vi.fn();
+    screen.getByTestId("mux").addEventListener("mediaenterfullscreenrequest", controller);
+    request("mediaenterfullscreenrequest");
+    expect(controller).toHaveBeenCalledOnce();
+    expect(frame).not.toHaveAttribute("data-filled");
+  });
+
+  it("si iOS entra solo a la del sistema (un pellizco), se sale de ella y pasa a la propia", () => {
+    const { frame } = show("ana@correo.com");
+    const video = mux.element?.media.nativeEl;
+    act(() => void video?.dispatchEvent(new Event("webkitbeginfullscreen")));
+    expect(video?.webkitExitFullscreen).toHaveBeenCalledOnce();
+    expect(frame).toHaveAttribute("data-filled");
+  });
+
+  it("si iOS entra a la del sistema estando ya dentro y girado, se sale de ella y sigue girado", () => {
+    orientation(true);
+    const { frame } = show("ana@correo.com");
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Girar" }));
+    const video = mux.element?.media.nativeEl;
+    act(() => void video?.dispatchEvent(new Event("webkitbeginfullscreen")));
+    expect(video?.webkitExitFullscreen).toHaveBeenCalledOnce();
+    expect(frame).toHaveAttribute("data-turned");
+    expect(screen.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("el aviso de girar se dice en una región viva que ya estaba antes de entrar: una que nace llena no se anuncia", () => {
+    orientation(true);
+    show();
+    const region = screen.getByRole("status");
+    expect(region).toHaveTextContent("");
+    request("mediaenterfullscreenrequest");
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("Gira tu teléfono para verlo más grande");
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("");
+  });
+
+  it("los botones y el aviso respetan los márgenes seguros, y la franja entre los botones no se queda con el toque", () => {
+    orientation(true);
+    show();
+    request("mediaenterfullscreenrequest");
+    const exit = screen.getByRole("button", { name: "Salir de pantalla completa" });
+    const bar = exit.parentElement;
+    expect(bar?.className).toMatch(/\bplayer-filled-bar\b/);
+    expect(bar?.className).toMatch(/\bpointer-events-none\b/);
+    for (const button of [exit, screen.getByRole("button", { name: "Girar" })]) expect(button.className).toMatch(/\bpointer-events-auto\b/);
+    expect(screen.getByRole("status").className).toMatch(/\bplayer-filled-hint\b/);
+  });
+
+  it("en vertical: el aviso de girar un momento, y «Girar» rota el contenedor", () => {
+    vi.useFakeTimers();
+    orientation(true);
+    const { frame } = show("ana@correo.com");
+    request("mediaenterfullscreenrequest");
+    expect(screen.getByRole("status")).toHaveTextContent("Gira tu teléfono para verlo más grande");
+    const turn = screen.getByRole("button", { name: "Girar" });
+    expect(turn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(turn);
+    expect(turn).toHaveAttribute("aria-pressed", "true");
+    expect(frame).toHaveAttribute("data-turned");
+    // Ya girado, el aviso sobra.
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    fireEvent.click(turn);
+    expect(frame).not.toHaveAttribute("data-turned");
+    expect(screen.getByRole("status")).toHaveTextContent("Gira tu teléfono para verlo más grande");
+    act(() => void vi.advanceTimersByTime(TURN_HINT_MS));
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("al salir y volver a entrar, ni girado ni sin aviso: empieza de nuevo", () => {
+    orientation(true);
+    const { frame } = show();
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Girar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    request("mediaenterfullscreenrequest");
+    expect(frame).not.toHaveAttribute("data-turned");
+    expect(screen.getByRole("button", { name: "Girar" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("status")).toHaveTextContent("Gira tu teléfono para verlo más grande");
+  });
+
+  it("girado, si el teléfono se pone en horizontal, deja de rotar: ya cabe sin girar", () => {
+    const turnPhone = orientation(true);
+    const { frame } = show();
+    request("mediaenterfullscreenrequest");
+    fireEvent.click(screen.getByRole("button", { name: "Girar" }));
+    expect(frame).toHaveAttribute("data-turned");
+    turnPhone(false);
+    expect(frame).not.toHaveAttribute("data-turned");
+    expect(screen.queryByRole("button", { name: "Girar" })).toBeNull();
+  });
+
+  it("el aviso dura su momento entero desde la última vez que se entró", () => {
+    vi.useFakeTimers();
+    orientation(true);
+    show();
+    request("mediaenterfullscreenrequest");
+    act(() => void vi.advanceTimersByTime(TURN_HINT_MS - 1_000));
+    fireEvent.click(screen.getByRole("button", { name: "Salir de pantalla completa" }));
+    request("mediaenterfullscreenrequest");
+    // Cuando se habría ido el de la primera vez, el de ahora sigue.
+    act(() => void vi.advanceTimersByTime(1_000));
+    expect(screen.getByRole("status")).toHaveTextContent("Gira tu teléfono para verlo más grande");
+    act(() => void vi.advanceTimersByTime(TURN_HINT_MS - 1_000));
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("en horizontal: sin aviso y sin «Girar»", () => {
+    show();
+    request("mediaenterfullscreenrequest");
+    expect(screen.queryByRole("button", { name: "Girar" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("si el reproductor se va estando dentro (terminó la lección), la página vuelve a desplazarse", () => {
+    const { view } = show();
+    request("mediaenterfullscreenrequest");
+    view.unmount();
+    expect(document.documentElement).not.toHaveClass("player-locked");
+  });
+});
+
+describe("los subtítulos (RF-310)", () => {
+  it("arrancan como la cuenta los dejó: encendidos, si así quedaron", () => {
+    show(undefined, { on: true });
+    expect(mux.props?.defaultHiddenCaptions).toBe(false);
+  });
+
+  it("cuando la persona los enciende o los apaga, se avisa una vez por cambio", () => {
+    const onChange = vi.fn();
+    show(undefined, { onChange });
+    const tracks = mux.element?.media.nativeEl.textTracks ?? [];
+    tracks.push({ kind: "metadata", mode: "showing" }, { kind: "subtitles", mode: "disabled" });
+    // Una pista que no es de subtítulos, a la vista, no cuenta.
+    request("mediatogglesubtitlesrequest");
+    expect(onChange).not.toHaveBeenCalled();
+    tracks[1]!.mode = "showing";
+    request("mediashowsubtitlesrequest");
+    expect(onChange).toHaveBeenLastCalledWith(true);
+    request("mediashowsubtitlesrequest");
+    expect(onChange).toHaveBeenCalledOnce();
+    tracks[1]!.mode = "disabled";
+    request("mediadisablesubtitlesrequest");
+    expect(onChange).toHaveBeenLastCalledWith(false);
+    tracks.push({ kind: "captions", mode: "showing" });
+    request("mediatogglesubtitlesrequest");
+    expect(onChange).toHaveBeenLastCalledWith(true);
+    expect(onChange).toHaveBeenCalledTimes(3);
+  });
+
+  it("si arrancaron encendidos, apagarlos se avisa", () => {
+    const onChange = vi.fn();
+    show(undefined, { on: true, onChange });
+    mux.element?.media.nativeEl.textTracks.push({ kind: "subtitles", mode: "disabled" });
+    request("mediadisablesubtitlesrequest");
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(false);
   });
 });

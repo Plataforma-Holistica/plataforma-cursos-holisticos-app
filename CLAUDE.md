@@ -62,6 +62,7 @@ pnpm db:admins <correo> [<correo> ...]   # el arranque en local: invita a las pr
 pnpm db:courses  # carga en la base local los cursos de prueba (T-107): sus prácticas y niveles, dos maestros ficticios y dos cursos por aprobar
 pnpm media:upload-test [<archivo> ...]   # sube a Mux videos de ../Videos-Test/ (por omisión, uno) y deja sus identificadores para db:courses
 pnpm media:check  # contra Mux: con una dirección firmada vigente sirve el video; caducada o sin firma, no
+pnpm media:captions-test [<archivo>]   # le agrega a un video de prueba de Mux la pista de subtítulos escrita a mano
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
@@ -148,6 +149,17 @@ Mux: con una dirección vigente el manifiesto contesta 200, y caducada o sin fir
 Firma con la llave de `.env.local` fuera de la función única de medios, y por eso tampoco
 corre con `CI` ni en Vercel. Los dos
 guiones repiten lo que sabe el adaptador: uno de Node no importa TypeScript.
+
+`pnpm media:captions-test` le agrega al video de prueba que se le diga (por omisión, «Nature +
+Forest.mp4», ya subido con `pnpm media:upload-test`) la pista de subtítulos escrita a mano,
+`supabase/local/test-captions.es.vtt` (decisión de Sergio del 2026-10-15: una sola pista, en
+español, en su cuenta de Mux; los automáticos se deciden con T-403). Mux no recibe el archivo:
+lo descarga de una dirección pública, la del archivo en GitHub en el commit de la rama (el
+repositorio es público). Por eso, antes de pedírselo, el guion lo descarga de ahí y lo compara
+con el de la máquina: si la rama no está subida o el archivo cambió, se detiene. La pista
+viaja con la huella del archivo: si el video ya la tiene, no hace nada, y si tiene otra pista
+de prueba, se detiene (se quita a mano en el panel). Tampoco corre con `CI` ni en Vercel, ni
+imprime respuestas de la API.
 
 Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -651,7 +663,8 @@ falla. Veintiuna precisiones que la tabla no dice:
   con sus revisiones puras en `forms.ts` y lo que leen y escriben de la persona en
   `records.ts`; `account.ts` los arma. Administrar la cuenta (RF-109) vive en
   `management.ts`: lo que la pantalla de la cuenta pinta, el cambio de nombre, las sesiones
-  abiertas y el cambio de contraseña. El cambio de correo espera a T-310.
+  abiertas, el cambio de contraseña y la elección de subtítulos (`captionsChoice`,
+  `rememberCaptions`, desde T-203). El cambio de correo espera a T-310.
   - `changePassword(jar, { current, next }, origin)` cambia la contraseña de la cuenta de
     la sesión que pide. **Una cuenta con segundo factor verificado no pasa de la guarda:**
     contesta `second_factor` antes de mirar lo escrito, sin contar un intento, y el bloque
@@ -1189,6 +1202,12 @@ falla. Veintiuna precisiones que la tabla no dice:
     fichas (T-210).
   - Al terminar, «Lección terminada», «Sigue: {lección}» y «Volver a ver», sin arranque
     automático (D-07). Sin JavaScript, el lugar del reproductor lo dice.
+  - **Los subtítulos se recuerdan en la cuenta** (RF-310; decisión de Sergio del 2026-10-15):
+    la página lee `captionsChoice` a la vez que `lessonAccess`, y si no se supo arrancan
+    apagados (se reporta `captions_choice_unavailable`, pero no vale una página caída). La
+    acción `rememberCaptionsAction` solo acepta encendido o apagado, y `rememberCaptions`
+    (`management.ts`) corre la guarda y escribe en la cuenta de esa sesión. No contesta nada:
+    si no se guardó, el video sigue igual.
 - **Tres componentes base de la lección** (`src/ui/`): `Tabs` (las flechas, Inicio y Fin
   cambian; sin JavaScript pinta todos los paneles con su título), `LessonRow` (su nombre va
   entero en un texto que solo se lee y lo visible queda fuera del árbol de accesibilidad:
@@ -1210,8 +1229,13 @@ falla. Veintiuna precisiones que la tabla no dice:
     extremo se lo pone. **El selector de calidad no se ofrece** (la calidad es automática,
     RF-312) y sus botones de lo apagado tampoco: los esconde la clase `player-mux` de
     `theme.css` con las variables de Mux (`--rendition-menu-button: none`…), nunca un
-    `style`. **Los subtítulos arrancan apagados** (`defaultHiddenCaptions`): Mux los enciende
-    por omisión.
+    `style`. **Los subtítulos arrancan como la cuenta los dejó** (`captions`, que la página lee
+    con `captionsChoice`): apagados salvo que la persona los haya encendido
+    (`defaultHiddenCaptions`, porque Mux los enciende por omisión). Cuando los enciende o los
+    apaga (el menú de Mux, la tecla C), el reproductor escucha los pedidos de subtítulos de
+    media-chrome al subir por el contenedor, ya atendidos, y avisa (`onCaptionsChange`) solo si
+    cambió lo que se ve. La pantalla de la lección lo guarda con `rememberCaptionsAction` y lo
+    conserva al renovar la dirección.
   - **Lo que se le configura:** el menú de velocidades que da la función única de medios
     (`speeds`), saltos de diez segundos y los controles que se ocultan a los tres segundos
     (`autohide` en su controlador; Mux trae dos).
@@ -1229,8 +1253,33 @@ falla. Veintiuna precisiones que la tabla no dice:
     propiedad (`mediaController.fullscreenElement`), al montar y al cargar los datos del
     video. Como atributo (`fullscreenElement` de React) no surte efecto: Mux lo busca por id
     antes de que el nodo esté en la página. El extremo a extremo de revisión lo comprueba en
-    un navegador. En iPhone la pantalla completa de un contenedor no existe y Mux cae a la
-    del sistema, que no pinta la marca: eso lo resuelve la cuarta solicitud de T-203.
+    un navegador. Dentro, un escenario (`player-stage`) guarda el 16:9 y lleva encima la marca:
+    a pantalla completa se centra a lo más grande que quepa (con unidades de contenedor), así
+    que la marca queda sobre el video y no en las franjas negras.
+  - **La pantalla completa dentro de la página** (iPhone; diseño, sección 5.4; D-08). Donde el
+    navegador no lleva un elemento a pantalla completa (`document.fullscreenEnabled` falso),
+    Mux caería a la del sistema, que no pinta la marca. Ahí el reproductor atrapa en la captura,
+    sobre su contenedor, los pedidos de media-chrome (`mediaenterfullscreenrequest` y el de
+    salir: su botón y la tecla F) antes de que lleguen a su controlador, y hace la suya: el
+    contenedor fijo sobre toda la ventana (`player-frame-filled`, con `100dvh` y los márgenes
+    seguros), la página de atrás sin desplazarse (`player-locked` en `html`), «Salir de
+    pantalla completa» con el foco y, en vertical, el aviso de girar un momento y «Girar», que
+    rota el contenedor 90 grados (`data-turned`). El botón de Mux se esconde mientras
+    tanto. Si iOS entra solo a la del sistema (un pellizco, `webkitbeginfullscreen` en el video
+    interno), sale de ella y pasa a la propia, o se queda en la propia como estaba, girada o no.
+    Donde el navegador sí lleva el contenedor, nada se atrapa. Los márgenes seguros van en
+    variables (`--safe-top`…) que girado cambian de lado, porque cada lado del contenedor cae
+    sobre otro de la pantalla; los usan también los botones y el aviso, que van en posición
+    absoluta y no se mueven con el relleno del contenedor. La franja de los botones no recibe el
+    toque, solo los botones, y el aviso de girar se dice en una región viva que existe desde
+    antes de entrar. El extremo a extremo lo prueba con un iPhone simulado (`likeAnIPhone`: sin
+    pantalla completa de elementos y con la del video), y mide que ninguna de las ocho celdas de
+    la marca quede bajo un botón, en vertical, girado y en horizontal. Chromium no simula los
+    márgenes seguros: eso y el iPhone de verdad, a mano. Un límite conocido: renovar la dirección
+    vuelve a montar el reproductor (la pantalla de la lección le pone el token como `key`), así
+    que quien estaba en la pantalla completa propia sale de ella, igual que en computadora sale
+    de la del navegador. Solo pasa si la dirección caducó, es decir, tras una pausa más larga que
+    su vida (ADR-27).
   - **La marca de agua** (`watermark.tsx`, RF-305), solo si la pantalla la pasa (la lección;
     revisión no, hasta T-405): el correo de quien ve, tal como lo dio la función única de
     medios, en una de las ocho celdas del borde de una rejilla de 3 × 3 sobre el área segura
@@ -1514,7 +1563,9 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   servidor recibe un error en vez de un acceso de más. La marca `password_reset_required`
   no se concede nunca: solo la apaga `private.claim_account()` y solo la prende
   restablecerle el segundo factor a alguien del equipo, y un guardián la cuida aunque
-  alguien devuelva el permiso (TRD §9.2).
+  alguien devuelva el permiso (TRD §9.2). Desde T-203 está `captions_on` (si la persona dejó
+  los subtítulos encendidos): la escribe el servidor por su columna, la persona solo la lee, y
+  no se audita.
 - **Un ajuste de sesión no es una barrera.** El servidor puede poner cualquier
   `set_config`, así que una regla que dependa solo de un ajuste se puede falsificar desde
   una consulta mal escrita. Las reglas duras miran además quién ejecuta (`current_user`
