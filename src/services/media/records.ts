@@ -5,11 +5,11 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 import type { AccountFacts } from "@/domain/access/account-access";
-import { COURSE_STATES, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
+import { COURSE_STATES, type MediaBasis, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
 
 // Lo que la función única de medios le pregunta a la base: la lección con su video para
-// revisar, los hechos para ver, y las velocidades. Cada función recibe la transacción ya
-// abierta.
+// revisar, los hechos para ver, y las velocidades; y desde T-204, abrir la reproducción y su
+// latido de presencia. Cada función recibe la transacción ya abierta.
 
 /** La lección y su video, como los necesita la regla. El playback id sale de aquí, nunca de quien pide. */
 export interface LessonVideo extends MediaLesson {
@@ -188,4 +188,134 @@ export async function readPlaybackSpeeds(tx: Tx): Promise<{ minimum: number; max
   const minimum = speed(row?.minimum);
   const maximum = speed(row?.maximum);
   return minimum === null || maximum === null ? null : { minimum, maximum };
+}
+
+// ---------------------------------------------------------------------------------------
+// Las reproducciones (T-204; RF-107): abrir una después de firmar, y el latido de presencia.
+// Las dos funciones de la base actúan a nombre de quien actúa y con la sesión de Auth que el
+// servidor declara: aquí no llega de quién es la reproducción.
+
+/** Por qué una reproducción dejó de estar viva sin que su dueño lo pidiera desde ahí. */
+export const REVOKE_REASONS = ["closed_by_user", "replaced", "session_closed", "access_lost", "admin"] as const;
+export type RevokeReason = (typeof REVOKE_REASONS)[number];
+
+/** Una reproducción viva de la misma cuenta en otro navegador: una fila de PA-34. */
+export interface LivePlayback {
+  sessionId: string;
+  /** La cabecera `User-Agent` con que se abrió su sesión, o nulo si no se anotó. Solo para describirla. */
+  userAgent: string | null;
+  lessonTitle: string | null;
+  courseTitle: string | null;
+  startedAt: Date;
+}
+
+export type OpenedPlayback =
+  | { kind: "opened"; sessionId: string; heartbeatSeconds: number }
+  | { kind: "busy"; live: LivePlayback[] }
+  /** La lección no existe, o su video ya no es el que se firmó. */
+  | { kind: "not_found" }
+  /** La sesión de Auth se cerró después de pasar la guarda. */
+  | { kind: "session_closed" };
+
+export type Presence =
+  | { kind: "ok" }
+  | { kind: "busy"; live: LivePlayback[] }
+  /** `by`: la reproducción que tomó su lugar, si la hubo. */
+  | { kind: "revoked"; reason: RevokeReason; by: string | null }
+  /** No existe, o es de otra cuenta o de otra sesión de Auth. */
+  | { kind: "not_found" };
+
+export interface PlaybackOpening {
+  lessonId: string;
+  /** El playback id que se firmó: se anota ese video y no otro. */
+  playbackId: string;
+  basis: MediaBasis;
+  countsForPayout: boolean;
+  /** La reproducción que la persona eligió cerrar, o la que tomó su lugar. */
+  closing: string | null;
+}
+
+const uuid = z.uuid();
+const liveRow = z
+  .object({
+    session_id: uuid,
+    user_agent: z.string().nullable(),
+    lesson_title: z.string().nullable(),
+    course_title: z.string().nullable(),
+    started_at: instant,
+  })
+  .strict()
+  .transform(
+    (row): LivePlayback => ({
+      sessionId: row.session_id,
+      userAgent: row.user_agent,
+      lessonTitle: row.lesson_title,
+      courseTitle: row.course_title,
+      startedAt: row.started_at,
+    }),
+  );
+const busy = z.object({ outcome: z.literal("busy"), live: z.array(liveRow).min(1) }).strict();
+const notFound = z.object({ outcome: z.literal("not_found") }).strict();
+
+const openedRow = z.object({
+  answer: z
+    .union([
+      z.object({ outcome: z.literal("opened"), session_id: uuid, heartbeat_seconds: z.number().int().positive() }).strict(),
+      busy,
+      notFound,
+      z.object({ outcome: z.literal("session_closed") }).strict(),
+    ])
+    .nullable(),
+});
+
+const presenceRow = z.object({
+  answer: z
+    .union([
+      z.object({ outcome: z.literal("ok") }).strict(),
+      busy,
+      z.object({ outcome: z.literal("revoked"), reason: z.enum(REVOKE_REASONS), by: uuid.nullable() }).strict(),
+      notFound,
+    ])
+    .nullable(),
+});
+
+/**
+ * Abrir una reproducción, o la lista de las vivas si no hay lugar. Nulo si la base no reconoce
+ * a quien actúa o no se declaró su sesión. Lo que no tenga la forma lanza: es «no se supo».
+ */
+export async function openPlayback(tx: Tx, opening: PlaybackOpening): Promise<OpenedPlayback | null> {
+  const [row] = await tx.query(
+    sql`select private.open_playback(${opening.lessonId}::uuid, ${opening.playbackId}, ${opening.basis}::public.access_basis,
+                                     ${opening.countsForPayout}, ${opening.closing}::uuid) as answer`,
+    openedRow,
+  );
+  const answer = row?.answer ?? null;
+  if (answer === null) return null;
+  switch (answer.outcome) {
+    case "opened":
+      return { kind: "opened", sessionId: answer.session_id, heartbeatSeconds: answer.heartbeat_seconds };
+    case "busy":
+      return { kind: "busy", live: answer.live };
+    case "not_found":
+      return { kind: "not_found" };
+    case "session_closed":
+      return { kind: "session_closed" };
+  }
+}
+
+/** El latido de presencia de una reproducción. Nulo y lanzar, como al abrir. */
+export async function touchPlayback(tx: Tx, sessionId: string): Promise<Presence | null> {
+  const [row] = await tx.query(sql`select private.touch_playback(${sessionId}::uuid) as answer`, presenceRow);
+  const answer = row?.answer ?? null;
+  if (answer === null) return null;
+  switch (answer.outcome) {
+    case "ok":
+      return { kind: "ok" };
+    case "busy":
+      return { kind: "busy", live: answer.live };
+    case "revoked":
+      return { kind: "revoked", reason: answer.reason, by: answer.by };
+    case "not_found":
+      return { kind: "not_found" };
+  }
 }

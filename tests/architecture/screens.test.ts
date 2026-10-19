@@ -179,9 +179,13 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   "src/app/cursos/[slug]/lecciones/[leccion]/actions.ts": {
     // El video de la lección: solo la función única de medios firma, como el alumno, y corre la
     // guarda. Lo que llega es la lección, nunca un playback id; si la sesión ya no pasa, a la
-    // página, donde decide su guarda.
+    // página, donde decide su guarda. La reproducción que se pide cerrar la revisa la función.
     watchLessonAction:
-      /const answer = watchAnswerOf\(await getMediaGrant\(jar, lessonId, "watch"\)\);\s*if \(answer\.kind === "reload"\) \{[\s\S]*redirect\(back \?\? ROUTES\.home\);/,
+      /const answer = watchAnswerOf\(await getMediaGrant\(jar, lessonId, "watch", \{ closing \}\)\);\s*if \(answer\.kind === "reload"\) backTo\(slug, lessonId\);/,
+    // El latido de presencia (T-204): la función corre la guarda de sesión y solo late una
+    // reproducción de esa sesión; si ya no pasa, a la página.
+    playbackPresenceAction:
+      /const answer = presenceReplyOf\(await playbackPresence\(await cookieJar\(\), sessionId\)\);\s*if \(answer\.kind === "reload"\) backTo\(slug, lessonId\);/,
     // Recordar los subtítulos: solo encendido o apagado, y el servicio corre la guarda y escribe
     // en la cuenta de esa sesión.
     rememberCaptionsAction: /if \(typeof on !== "boolean"\) return;\s*await rememberCaptions\(await cookieJar\(\), on\);/,

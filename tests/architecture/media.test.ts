@@ -49,9 +49,37 @@ describe("solo la función única de medios firma", () => {
     expect(store).toMatch(/watchFacts: \(claims, lessonId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readWatchFacts\(tx, lessonId\)\),/);
     // Las velocidades son parámetros, que una cuenta no lee.
     expect(store).toMatch(/playbackSpeeds: \(claims\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readPlaybackSpeeds\(tx\)\),/);
+    // Abrir y latir (T-204): a nombre de quien actúa y con la sesión de Auth de sus claims, que
+    // es lo que la base cuenta contra el cupo. Como sistema no habría ni una ni otra.
+    expect(store).toMatch(/openPlayback: \(claims, opening\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => openPlayback\(tx, opening\)\),/);
+    expect(store).toMatch(
+      /touchPlayback: \(claims, sessionId\) => asServer\(\{ claims, reason: "playback_presence" \}, \(tx\) => touchPlayback\(tx, sessionId\)\),/,
+    );
     expect(store).not.toMatch(/asSystem/);
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
-    expect(store.match(/\basServer\(/g)).toHaveLength(2);
+    expect(store.match(/\basServer\(/g)).toHaveLength(4);
+  });
+
+  it("solo la función única abre y late reproducciones, y la tabla no se toca de otro modo (T-204)", () => {
+    // Las dos funciones de la base se llaman en un solo archivo, y la tabla no se nombra en el
+    // código: nada la lee ni la escribe por fuera de ellas.
+    expect(naming(/\bopen_playback\b|\btouch_playback\b/)).toEqual(["src/services/media/records.ts"]);
+    expect(naming(/\bplayback_sessions\b/)).toEqual([]);
+    expect(naming(/\bopenPlayback\b|\btouchPlayback\b/)).toEqual([
+      "src/services/media/grant.ts",
+      "src/services/media/records.ts",
+      "src/services/media/store.ts",
+    ]);
+    const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
+    const body = (name: string) => grant.slice(grant.indexOf(`async function ${name}(`)).split(/\n {2}(?:async )?function /)[0] ?? "";
+    // Se abre al ver, después de firmar; nunca al revisar ni al decidir al cargar.
+    expect(grant.match(/core\.store\.openPlayback\(/g)).toHaveLength(1);
+    expect(body("watch").indexOf("core.store.openPlayback(")).toBeGreaterThan(body("watch").indexOf("await signFor("));
+    expect(body("review")).not.toMatch(/openPlayback/);
+    expect(body("lessonAccess")).not.toMatch(/openPlayback/);
+    // El latido pasa primero por la guarda de sesión.
+    expect(grant.match(/core\.store\.touchPlayback\(/g)).toHaveLength(1);
+    expect(grant).toMatch(/async function playbackPresence\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
   });
 
   it("el playback id sale de la base solo en las lecturas de la función única", () => {
@@ -104,7 +132,7 @@ describe("solo la función única de medios firma", () => {
     ]);
     // La lección pide como el alumno; la página, antes de pintar, solo decide (no firma).
     const lessonActions = readFileSync(join(src, "app/cursos/[slug]/lecciones/[leccion]/actions.ts"), "utf8");
-    expect(lessonActions).toMatch(/getMediaGrant\(jar, lessonId, "watch"\)/);
+    expect(lessonActions).toMatch(/getMediaGrant\(jar, lessonId, "watch", \{ closing \}\)/);
     expect(naming(/\blessonAccess\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/cursos/[slug]/lecciones/[leccion]/page.tsx"]);
   });
 
