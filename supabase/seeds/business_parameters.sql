@@ -1,6 +1,6 @@
 -- Valores de arranque de los parámetros de negocio (RF-707).
 --
--- Fuente única: ../planeacion/00-fundamentos.md §4, leída el 2026-10-06. Este archivo se
+-- Fuente única: ../planeacion/00-fundamentos.md §4, leída el 2026-10-06 (`SESIONES_SIMULTANEAS`, el 2026-10-19 con T-204). Este archivo se
 -- transcribe de ahí a mano: si cambia un valor allá, se cambia aquí en el mismo trabajo.
 -- En una base que ya corre, un parámetro no se cambia editando este archivo: se inserta un
 -- valor nuevo, que es lo que deja rastro.
@@ -61,7 +61,7 @@ from (values
   ('UMBRAL_COMPLETO_PCT',       '9000',                 'to_confirm'),
   ('VELOCIDAD_MAX',             '"2"',                  'decided'),
   ('VELOCIDAD_MIN',             '"0.75"',               'decided'),
-  ('SESIONES_SIMULTANEAS',      '2',                    'proposed'),
+  ('SESIONES_SIMULTANEAS',      '1',                    'decided'),
   ('RETENCION_LATIDOS',         '90',                   'decided'),
   ('ZONA_HORARIA_PERIODO',      '"America/Mexico_City"', 'proposed'),
   ('ALERTA_SALTO_MAESTRO_PCT',  '5000',                 'proposed'),

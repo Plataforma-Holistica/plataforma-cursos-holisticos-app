@@ -3,7 +3,7 @@ import type { Client } from "pg";
 import { readVerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import type { MediaStore } from "@/services/media/grant";
-import { readLessonVideo, readPlaybackSpeeds, readWatchFacts } from "@/services/media/records";
+import { openPlayback, readLessonVideo, readPlaybackSpeeds, readWatchFacts, touchPlayback } from "@/services/media/records";
 
 import { asOwner, asServer } from "./team";
 
@@ -11,7 +11,7 @@ import { asOwner, asServer } from "./team";
  * El almacén de la función única de medios sobre una transacción del dueño: las mismas
  * consultas que usa la aplicación (para revisar, la lección como la persona, con el rol
  * `authenticated` y sus claims; para ver, los hechos como servidor; y las velocidades como
- * servidor), pero sin confirmar. Así lo que la prueba cargó en esa transacción se ve, y nada
+ * servidor; y desde T-204, abrir y latir, como servidor), pero sin confirmar. Así lo que la prueba cargó en esa transacción se ve, y nada
  * queda en la auditoría.
  */
 export function mediaStoreOn(owner: Client): MediaStore {
@@ -43,6 +43,22 @@ export function mediaStoreOn(owner: Client): MediaStore {
       await asServer(owner, claims.userId, claims.sessionId ?? "");
       try {
         return await readPlaybackSpeeds(tx);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    openPlayback: async (claims, opening) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await openPlayback(tx, opening);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    touchPlayback: async (claims, sessionId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await touchPlayback(tx, sessionId);
       } finally {
         await asOwner(owner);
       }

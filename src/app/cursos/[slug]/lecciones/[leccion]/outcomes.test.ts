@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { denialOf, initialOf, watchAnswerOf } from "./outcomes";
+import { denialOf, initialOf, presenceReplyOf, watchAnswerOf } from "./outcomes";
 
 // La tabla de la página de una lección (PA-22, T-203): lo que contesta la función única de
 // medios, al cargar (`lessonAccess`) y al reproducir (`getMediaGrant`), traducido a lo que se
@@ -8,6 +8,20 @@ import { denialOf, initialOf, watchAnswerOf } from "./outcomes";
 
 const TOKENS = { video: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" };
 const ENDED = new Date("2026-10-01T18:00:00.000Z");
+const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
+const OTHER = "d0000000-0000-4000-8000-000000000005";
+const LIVE = [
+  {
+    sessionId: OTHER,
+    device: { browser: "safari", system: "ios" } as const,
+    lessonTitle: "Respirar",
+    courseTitle: "Yoga suave",
+    startedAt: new Date("2026-10-19T01:40:00.000Z"),
+  },
+];
+const ROWS = [
+  { sessionId: OTHER, browser: "safari", system: "ios", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" },
+];
 
 describe("el motivo de PA-33, con la fecha ya en palabras", () => {
   it.each([
@@ -44,7 +58,7 @@ describe("al cargar: lo que dijo lessonAccess", () => {
 });
 
 describe("al reproducir: lo que dijo getMediaGrant", () => {
-  it("con acceso: el video, sus tokens con los nombres de Mux Player, las velocidades y la marca; nada de la base de acceso", () => {
+  it("con acceso: el video, sus tokens con los nombres de Mux Player, las velocidades, la marca y su reproducción; nada de la base de acceso", () => {
     const answer = watchAnswerOf({
       kind: "granted",
       playbackId: "PlaybackDePrueba",
@@ -55,6 +69,8 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       basis: "subscription",
       countsForPayout: true,
       until: ENDED,
+      playbackSessionId: PLAYBACK,
+      heartbeatSeconds: 30,
     });
     expect(answer).toEqual({
       kind: "granted",
@@ -62,7 +78,13 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       tokens: { playback: "v.v.v", thumbnail: "t.t.t", storyboard: "s.s.s" },
       speeds: [1, 1.25],
       watermark: "ana@correo.com",
+      playbackSessionId: PLAYBACK,
+      heartbeatSeconds: 30,
     });
+  });
+
+  it("con el lugar ocupado en otro navegador: la lista de PA-34, con la hora en ISO", () => {
+    expect(watchAnswerOf({ kind: "busy", live: LIVE })).toEqual({ kind: "busy", live: ROWS });
   });
 
   it.each([
@@ -75,5 +97,26 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
     [{ kind: "denied", account: { allowed: false, reason: "suspended" } }, { kind: "reload" }],
   ] as const)("%j", (grant, expected) => {
     expect(watchAnswerOf(grant)).toEqual(expected);
+  });
+});
+
+describe("el latido de presencia (T-204): lo que dijo playbackPresence", () => {
+  it.each([
+    [{ kind: "ok" }, { kind: "ok" }],
+    // No se supo: el video sigue.
+    [{ kind: "unavailable" }, { kind: "unavailable" }],
+    [{ kind: "busy", live: LIVE }, { kind: "busy", live: ROWS }],
+    // Cerrada desde PA-34 de otro dispositivo, o abierta en otra pestaña: con la que tomó su lugar.
+    [{ kind: "revoked", reason: "closed_by_user", by: OTHER }, { kind: "closed", from: "device", by: OTHER }],
+    [{ kind: "revoked", reason: "replaced", by: OTHER }, { kind: "closed", from: "tab", by: OTHER }],
+    [{ kind: "revoked", reason: "replaced", by: null }, { kind: "closed", from: "tab", by: null }],
+    // La sesión se cerró, o un motivo del equipo: a la página, donde decide la guarda.
+    [{ kind: "revoked", reason: "session_closed", by: null }, { kind: "reload" }],
+    [{ kind: "revoked", reason: "access_lost", by: null }, { kind: "reload" }],
+    [{ kind: "revoked", reason: "admin", by: null }, { kind: "reload" }],
+    [{ kind: "suspended" }, { kind: "reload" }],
+    [{ kind: "refused" }, { kind: "reload" }],
+  ] as const)("%j", (answer, expected) => {
+    expect(presenceReplyOf(answer)).toEqual(expected);
   });
 });

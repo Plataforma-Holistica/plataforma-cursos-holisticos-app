@@ -17,11 +17,13 @@ import {
   type MediaViewer,
 } from "@/domain/access/media-access";
 
+import { describeUserAgent, type Device } from "@/domain/access/user-agent";
+
 import type { SessionCheck } from "@/services/account/admission";
 import { holds, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
 
-import type { LessonVideo, WatchFacts } from "./records";
+import type { LessonVideo, LivePlayback, OpenedPlayback, PlaybackOpening, Presence, RevokeReason, WatchFacts } from "./records";
 
 // La función única de medios (RF-305, RF-306; TRD §5.5, §6.1 y §9.4): la única que firma una
 // dirección de video. Pregunta quién pide, lee la lección y los hechos, le pregunta a las
@@ -39,8 +41,13 @@ import type { LessonVideo, WatchFacts } from "./records";
 // con `watch` todo hasta antes de firmar, así que contesta lo mismo.
 //
 // Nada de lo que llega dice qué video: llega una lección, y el playback id sale de la base.
-// Lo que todavía no se hace: anotar la reproducción (`playback_sessions`) y el límite de
-// reproducciones (T-204), y los recursos (RF-308), que firman con esta misma regla en T-404.
+//
+// Desde T-204, ver abre además una reproducción (RF-107), después de firmar: la firma es local
+// y sin efectos, y si falla no queda una reproducción ocupando lugar. Con el lugar ocupado por
+// otro navegador de la misma cuenta contesta `busy` con la lista (PA-34), y se le puede pedir
+// cerrar una en el mismo paso. `playbackPresence` es el latido de presencia, con la misma
+// guarda de sesión. Revisar no abre reproducción (decisión de Sergio del 2026-10-19). Lo que
+// todavía no se hace: los recursos (RF-308), que firman con esta misma regla en T-404.
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -66,6 +73,19 @@ type Refusal =
   /** No se supo, o falta configuración (la llave, las velocidades, la marca): se reporta. */
   | { kind: "unavailable" };
 
+/** Una reproducción viva de la misma cuenta en otro navegador, como la pinta PA-34. */
+export interface LiveElsewhere {
+  sessionId: string;
+  /** El navegador y el sistema de la sesión que la abrió; lo que no se reconoce, nulo. */
+  device: Device;
+  lessonTitle: string | null;
+  courseTitle: string | null;
+  startedAt: Date;
+}
+
+/** El lugar de la cuenta está ocupado en otro navegador (RF-107, PA-34). */
+type Busy = { kind: "busy"; live: LiveElsewhere[] };
+
 export type MediaGrant =
   | (Signed & {
       /** El correo de la cuenta, que el reproductor pinta encima del video (RF-305). */
@@ -78,8 +98,32 @@ export type MediaGrant =
        * no cuenta (decisión de Sergio del 2026-10-15). Nulo si no depende de la cuenta.
        */
       until: Date | null;
+      /** La reproducción abierta (T-204): con ella late el reproductor. */
+      playbackSessionId: string;
+      /** Cada cuánto latir (`LATIDO_SEGUNDOS`). */
+      heartbeatSeconds: number;
     })
+  | Busy
   | Refusal;
+
+/** Lo que contesta el latido de presencia. */
+export type PresenceAnswer =
+  | { kind: "ok" }
+  /** Había vencido (una pausa larga) y otro navegador tomó el lugar. */
+  | Busy
+  /** `by`: la reproducción que tomó su lugar, si la hubo. */
+  | { kind: "revoked"; reason: RevokeReason; by: string | null }
+  | { kind: "suspended" }
+  /** La sesión no pasa, o la reproducción no es de esta sesión: la pantalla vuelve a la página. */
+  | { kind: "refused" }
+  /** No se supo: el video sigue, y el siguiente latido lo vuelve a intentar. */
+  | { kind: "unavailable" };
+
+/** Lo que puede acompañar a ver. */
+export interface WatchOptions {
+  /** La reproducción que se pide cerrar en el mismo paso (PA-34, o «Reproducir aquí»). */
+  closing?: unknown;
+}
 
 /** Lo que contesta revisar: nunca habla de la cuenta, y nunca cuenta (sin base ni marca). */
 export type ReviewGrant = Signed | Extract<Refusal, { kind: "refused" | "no_video" | "unavailable" }>;
@@ -91,6 +135,8 @@ export interface MediaStore {
   lessonVideo(claims: VerifiedClaims, lessonId: string): Promise<LessonVideo | null>;
   watchFacts(claims: VerifiedClaims, lessonId: string): Promise<WatchFacts | null>;
   playbackSpeeds(claims: VerifiedClaims): Promise<{ minimum: number; maximum: number } | null>;
+  openPlayback(claims: VerifiedClaims, opening: PlaybackOpening): Promise<OpenedPlayback | null>;
+  touchPlayback(claims: VerifiedClaims, sessionId: string): Promise<Presence | null>;
 }
 
 export interface MediaCore {
@@ -108,12 +154,19 @@ export interface MediaCore {
 interface Decided {
   kind: "decided";
   claims: VerifiedClaims;
+  lessonId: string;
   email: string | null;
   video: { playbackId: string; durationSeconds: number };
   access: { basis: MediaBasis; countsForPayout: boolean; until: Date | null };
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const idOrNull = (value: unknown): string | null => (typeof value === "string" && ID.test(value) ? value : null);
+
+/** La lista de la base, con el navegador ya descrito: la cabecera no sale del servidor. */
+const describeLive = (live: LivePlayback[]): LiveElsewhere[] =>
+  live.map(({ userAgent, ...rest }) => ({ ...rest, device: describeUserAgent(userAgent) }));
 
 export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<void> }, core: MediaCore) {
   /** Firma lo que una regla ya dejó pasar. */
@@ -219,13 +272,14 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     return {
       kind: "decided",
       claims: session.claims,
+      lessonId,
       email: facts.email,
       video: { playbackId: facts.playbackId, durationSeconds: facts.lesson.durationSeconds },
       access,
     };
   }
 
-  async function watch(reader: CookieReader, lessonId: unknown): Promise<MediaGrant> {
+  async function watch(reader: CookieReader, lessonId: unknown, options: WatchOptions): Promise<MediaGrant> {
     const decided = await decideWatch(reader, lessonId);
     if (decided.kind !== "decided") return decided;
     // Sin marca no hay video. Se mira solo aquí, con el acceso ya dado: a quien no lo tiene se
@@ -238,7 +292,72 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     const signed = await signFor(decided.claims, decided.video);
     if (signed.kind !== "granted") return signed;
     const { basis, countsForPayout, until } = decided.access;
-    return { ...signed, watermark, basis, countsForPayout, until };
+    // `review` solo sale de revisar (`resolveMediaAccess`), que no abre reproducción.
+    let opened: OpenedPlayback | null;
+    try {
+      opened = await core.store.openPlayback(decided.claims, {
+        lessonId: decided.lessonId,
+        playbackId: signed.playbackId,
+        basis,
+        countsForPayout,
+        closing: idOrNull(options.closing),
+      });
+    } catch {
+      opened = null;
+    }
+    // No se supo, la base no reconoce la sesión que pasó la guarda, o la lección cambió de video
+    // entre decidir y abrir: no se da una dirección que no quedó anotada.
+    if (opened === null || opened.kind === "not_found") {
+      await deps.report("playback_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (opened.kind === "busy") return { kind: "busy", live: describeLive(opened.live) };
+    return {
+      ...signed,
+      watermark,
+      basis,
+      countsForPayout,
+      until,
+      playbackSessionId: opened.sessionId,
+      heartbeatSeconds: opened.heartbeatSeconds,
+    };
+  }
+
+  /**
+   * El latido de presencia de una reproducción (T-204), mientras el video avanza. Con la guarda
+   * de sesión: una cuenta suspendida se detiene (PA-35); a una que le falta algo se le deja
+   * acabar (decisión de Sergio del 2026-10-19); el fin del acceso no se mira aquí (sigue sin
+   * puntos, decisión de T-202).
+   */
+  async function playbackPresence(reader: CookieReader, sessionId: unknown): Promise<PresenceAnswer> {
+    const session = await core.checkSession(reader);
+    // La guarda ya reportó lo suyo.
+    if (session.kind === "unavailable") return { kind: "unavailable" };
+    if (session.kind === "suspended") return { kind: "suspended" };
+    if (session.kind !== "pass" && session.kind !== "incomplete") return { kind: "refused" };
+    const id = idOrNull(sessionId);
+    if (id === null) return { kind: "refused" };
+
+    let presence: Presence | null;
+    try {
+      presence = await core.store.touchPlayback(session.claims, id);
+    } catch {
+      presence = null;
+    }
+    if (presence === null) {
+      await deps.report("playback_unavailable");
+      return { kind: "unavailable" };
+    }
+    switch (presence.kind) {
+      case "ok":
+        return { kind: "ok" };
+      case "busy":
+        return { kind: "busy", live: describeLive(presence.live) };
+      case "revoked":
+        return presence;
+      case "not_found":
+        return { kind: "refused" };
+    }
   }
 
   /**
@@ -251,12 +370,17 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
   }
 
   function getMediaGrant(reader: CookieReader, lessonId: unknown, purpose: "review"): Promise<ReviewGrant>;
-  function getMediaGrant(reader: CookieReader, lessonId: unknown, purpose: "watch"): Promise<MediaGrant>;
-  async function getMediaGrant(reader: CookieReader, lessonId: unknown, purpose: MediaPurpose): Promise<MediaGrant | ReviewGrant> {
+  function getMediaGrant(reader: CookieReader, lessonId: unknown, purpose: "watch", options?: WatchOptions): Promise<MediaGrant>;
+  async function getMediaGrant(
+    reader: CookieReader,
+    lessonId: unknown,
+    purpose: MediaPurpose,
+    options: WatchOptions = {},
+  ): Promise<MediaGrant | ReviewGrant> {
     // Lo arma quien llama, como un literal; algo que no sea uno de los dos no pasa.
     if (!(MEDIA_PURPOSES as readonly unknown[]).includes(purpose)) return { kind: "refused" };
-    return purpose === "review" ? review(reader, lessonId) : watch(reader, lessonId);
+    return purpose === "review" ? review(reader, lessonId) : watch(reader, lessonId, options);
   }
 
-  return { getMediaGrant, lessonAccess };
+  return { getMediaGrant, lessonAccess, playbackPresence };
 }

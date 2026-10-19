@@ -1192,6 +1192,28 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Las pruebas nunca firman con la llave de verdad: `playwright.config.ts` genera una de
     prueba para la aplicación que levanta, y el extremo a extremo corta toda petición que
     no sea a ella y anota a dónde iba.
+- **Una reproducción a la vez** (T-204; RF-107; decisiones de Sergio del 2026-10-19; 05
+  §9.5). Ver, después de firmar, abre una reproducción con `private.open_playback()`; con el
+  lugar ocupado en otro navegador de la cuenta contesta `busy` con la lista (PA-34), y se
+  puede pedir cerrar una en el mismo paso (`closing`). Cada reproducción guarda la sesión de
+  Auth que la abrió: desde la misma (renovar la dirección, recargar, cambiar de lección, otra
+  pestaña) reemplaza a la anterior y nunca dice ocupado. «Viva» es un latido dentro de tres
+  `LATIDO_SEGUNDOS`; el cupo es `SESIONES_SIMULTANEAS`; las dos salen de los parámetros
+  dentro de la base. El latido de presencia es `playbackPresence` (`private.touch_playback()`):
+  una vencida vuelve a pasar por el cupo, una revocada dice por qué y cuál tomó su lugar
+  (`revoked_by`, para «Reproducir aquí»). Cerrar una sesión de Auth suelta sus reproducciones
+  con un disparador sobre `private.app_sessions`. Nadie escribe la tabla fuera de esas
+  funciones, y el código no la nombra (lo exigen el vigilante y una prueba de arquitectura).
+  La revisión del equipo no abre reproducción. La dirección de Mux no se revoca: el
+  reproductor se detiene porque su latido lo dice. T-205 se monta encima: la presencia va
+  antes de `record_heartbeats`, y lo atrasado de una reproducción reemplazada se acepta.
+  Las pruebas: `supabase/tests/22_reproducciones.test.sql` (el cupo, el reemplazo, la ventana,
+  la reentrada, el disparador; dos sesiones de Auth de la misma cuenta se simulan declarando
+  `app.actor_session`) y `tests/integration/40-reproducciones.test.ts` (cada navegador es otra
+  entrada; que abrir espera el candado se prueba con otra conexión que lo retiene: no se puede
+  probar que latir también lo espera en la misma prueba, porque la transacción que abrió ya lo
+  tiene). PA-34 y el latido en el reproductor llegan con la segunda solicitud; mientras, la
+  pantalla dice «no se pudo» con el lugar ocupado.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

@@ -180,7 +180,9 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     }
     if (mine !== ticket.current) return;
     if (answer.kind === "granted") setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
-    else setVideo(answer);
+    // PA-34 (el lugar ocupado en otro navegador) llega con la segunda solicitud de T-204: hasta
+    // entonces se dice «no se pudo».
+    else setVideo(answer.kind === "busy" ? { kind: "unavailable" } : answer);
   }
 
   function expired(at: number) {

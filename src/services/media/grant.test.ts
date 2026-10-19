@@ -5,7 +5,7 @@ import type { SessionCheck } from "@/services/account/admission";
 import type { Capability, TeamCheck, TeamStanding } from "@/services/account/team";
 
 import { createMediaGrant } from "./grant";
-import type { LessonVideo, WatchFacts } from "./records";
+import type { LessonVideo, OpenedPlayback, PlaybackOpening, Presence, WatchFacts } from "./records";
 
 // La función única de medios, con todo lo de fuera simulado: a quién se le pregunta qué, en
 // qué orden, y qué se contesta. Contra la base de verdad, en
@@ -43,6 +43,24 @@ const PAYING: WatchFacts = {
   playbackId: "PlaybackDeLaBase",
 };
 const NEVER_PAID: WatchFacts = { ...PAYING, account: { ...PAYING.account, paidThrough: null } };
+const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
+const OTHER_PLAYBACK = "d0000000-0000-4000-8000-000000000005";
+const OPENED: OpenedPlayback = { kind: "opened", sessionId: PLAYBACK, heartbeatSeconds: 30 };
+const STARTED = new Date("2026-10-15T11:40:00.000Z");
+const LIVE_ROW = {
+  sessionId: OTHER_PLAYBACK,
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+  lessonTitle: "Respirar",
+  courseTitle: "Yoga suave",
+  startedAt: STARTED,
+};
+const LIVE_SEEN = {
+  sessionId: OTHER_PLAYBACK,
+  device: { browser: "chrome", system: "windows" },
+  lessonTitle: "Respirar",
+  courseTitle: "Yoga suave",
+  startedAt: STARTED,
+};
 
 const standingOf = (capabilities: Capability[]): TeamStanding => ({ state: "member", capabilities, factor: "f" }) as TeamStanding;
 const teamCheck = (standing: TeamStanding = standingOf(["content"])): TeamCheck => ({ kind: "team", claims, standing, inProgress: null });
@@ -56,9 +74,12 @@ function grantWith(
     speeds?: { minimum: number; maximum: number } | null | "throws";
     key?: typeof KEY | null;
     tokens?: typeof TOKENS | null;
+    opened?: OpenedPlayback | null | "throws";
+    presence?: Presence | null | "throws";
   } = {},
 ) {
   const calls: string[] = [];
+  const openings: PlaybackOpening[] = [];
   const reported: string[] = [];
   const sign = vi.fn(() => {
     calls.push("firma");
@@ -85,13 +106,24 @@ function grantWith(
           if (setup.speeds === "throws") return Promise.reject(new Error("sin base"));
           return Promise.resolve(setup.speeds === undefined ? { minimum: 0.75, maximum: 2 } : setup.speeds);
         }),
+        openPlayback: vi.fn((_claims: VerifiedClaims, opening: PlaybackOpening) => {
+          calls.push("abre");
+          openings.push(opening);
+          if (setup.opened === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.opened === undefined ? OPENED : setup.opened);
+        }),
+        touchPlayback: vi.fn((_claims: VerifiedClaims, id: string) => {
+          calls.push(`late ${id}`);
+          if (setup.presence === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.presence === undefined ? { kind: "ok" as const } : setup.presence);
+        }),
       },
       signingKey: () => (setup.key === undefined ? KEY : setup.key),
       sign,
       now: () => NOW,
     },
   );
-  return { ...service, calls, reported, sign };
+  return { ...service, calls, reported, sign, openings };
 }
 
 const reader = { get: () => undefined };
@@ -182,8 +214,11 @@ describe("ver: la guarda de sesión primero", () => {
       basis: "subscription",
       countsForPayout: true,
       until: IN_A_MONTH,
+      playbackSessionId: PLAYBACK,
+      heartbeatSeconds: 30,
     });
-    expect(service.calls).toEqual(["guarda de sesión", `hechos ${LESSON}`, "velocidad", "firma"]);
+    // La reproducción se abre al final, después de firmar (T-204).
+    expect(service.calls).toEqual(["guarda de sesión", `hechos ${LESSON}`, "velocidad", "firma", "abre"]);
     // Nunca la guarda del equipo: ver no es revisar.
     expect(service.calls).not.toContain("guarda del equipo");
   });
@@ -383,5 +418,141 @@ describe("desde dónde se pide", () => {
     const service = grantWith();
     expect(await service.getMediaGrant(reader, LESSON, "otro" as "watch")).toEqual({ kind: "refused" });
     expect(service.calls).toEqual([]);
+  });
+});
+
+describe("ver abre una reproducción (T-204, RF-107)", () => {
+  it("con la lección, el video que se firmó, la base y si cuenta; sin nada que cerrar", async () => {
+    const service = grantWith();
+    await service.getMediaGrant(reader, LESSON, "watch");
+    expect(service.openings).toEqual([
+      { lessonId: LESSON, playbackId: "PlaybackDeLaBase", basis: "subscription", countsForPayout: true, closing: null },
+    ]);
+  });
+
+  it("la vista previa del dueño también ocupa lugar, sin contar para el reparto", async () => {
+    const facts: WatchFacts = { ...NEVER_PAID, viewer: { ...NEVER_PAID.viewer, teacherId: TEACHER } };
+    const service = grantWith({ facts });
+    await service.getMediaGrant(reader, LESSON, "watch");
+    expect(service.openings).toMatchObject([{ basis: "owner_preview", countsForPayout: false }]);
+  });
+
+  it("la que se pide cerrar viaja a la base; algo que no es un id, no", async () => {
+    const closing = grantWith();
+    await closing.getMediaGrant(reader, LESSON, "watch", { closing: OTHER_PLAYBACK });
+    expect(closing.openings[0]?.closing).toBe(OTHER_PLAYBACK);
+    for (const odd of ["no-es-un-id", 7, { id: OTHER_PLAYBACK }, null]) {
+      const service = grantWith();
+      expect(await service.getMediaGrant(reader, LESSON, "watch", { closing: odd })).toMatchObject({ kind: "granted" });
+      expect(service.openings[0]?.closing).toBeNull();
+    }
+  });
+
+  it("con el lugar ocupado: busy, con el navegador descrito y sin la cabecera; no reporta", async () => {
+    const service = grantWith({ opened: { kind: "busy", live: [LIVE_ROW, { ...LIVE_ROW, userAgent: null, lessonTitle: null }] } });
+    const grant = await service.getMediaGrant(reader, LESSON, "watch");
+    expect(grant).toEqual({
+      kind: "busy",
+      live: [LIVE_SEEN, { ...LIVE_SEEN, device: { browser: null, system: null }, lessonTitle: null }],
+    });
+    expect(JSON.stringify(grant)).not.toContain("Mozilla");
+    expect(service.reported).toEqual([]);
+  });
+
+  it.each<[string, OpenedPlayback | null | "throws"]>([
+    ["la base no contestó", "throws"],
+    ["la base no reconoce la sesión que pasó la guarda", null],
+    ["la lección cambió de video entre decidir y abrir", { kind: "not_found" }],
+  ])("%s: unavailable y se reporta; la dirección firmada no sale", async (_what, opened) => {
+    const service = grantWith({ opened });
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["playback_unavailable"]);
+  });
+
+  it.each<[string, Parameters<typeof grantWith>[0]]>([
+    ["sin acceso", { facts: NEVER_PAID }],
+    ["sin marca", { facts: { ...PAYING, email: null } }],
+    ["sin llave", { key: null }],
+    ["si la firma falla", { tokens: null }],
+    ["una cuenta suspendida", { session: { kind: "suspended" } }],
+  ])("%s: no abre nada, y no ocupa lugar", async (_what, setup) => {
+    const service = grantWith(setup);
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).not.toMatchObject({ kind: "granted" });
+    expect(service.calls).not.toContain("abre");
+  });
+
+  it("revisar y decidir al cargar no abren reproducción", async () => {
+    const service = grantWith();
+    await service.getMediaGrant(reader, LESSON, "review");
+    await service.lessonAccess(reader, LESSON);
+    expect(service.calls).not.toContain("abre");
+  });
+});
+
+describe("el latido de presencia (T-204)", () => {
+  it("con la sesión que pasa: late esa reproducción, y sigue", async () => {
+    const service = grantWith();
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+    expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`]);
+    expect(service.reported).toEqual([]);
+  });
+
+  it("a una cuenta a la que le falta algo se le deja acabar (decisión de Sergio del 2026-10-19)", async () => {
+    const service = grantWith({ session: { kind: "incomplete", claims } as SessionCheck });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+    expect(service.calls).toContain(`late ${PLAYBACK}`);
+  });
+
+  it.each<[string, SessionCheck, string]>([
+    ["sin sesión", { kind: "anonymous" }, "refused"],
+    ["una sesión que hay que cerrar", { kind: "must_sign_out", then: "sign_in" }, "refused"],
+    ["una cuenta suspendida", { kind: "suspended" }, "suspended"],
+    ["si no se supo (la guarda ya reportó)", { kind: "unavailable" }, "unavailable"],
+  ])("%s: %s, sin latir", async (_who, session, kind) => {
+    const service = grantWith({ session });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+    expect(service.reported).toEqual([]);
+  });
+
+  it.each<[string, unknown]>([
+    ["un id sin forma", "no-es-un-id"],
+    ["algo que no es texto", { id: PLAYBACK }],
+  ])("%s: refused, sin latir", async (_what, id) => {
+    const service = grantWith();
+    expect(await service.playbackPresence(reader, id)).toEqual({ kind: "refused" });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it("vencida y con el lugar tomado: busy, con el navegador descrito", async () => {
+    const service = grantWith({ presence: { kind: "busy", live: [LIVE_ROW] } });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "busy", live: [LIVE_SEEN] });
+  });
+
+  it("revocada: con su motivo y la que tomó su lugar", async () => {
+    const service = grantWith({ presence: { kind: "revoked", reason: "closed_by_user", by: OTHER_PLAYBACK } });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "revoked", reason: "closed_by_user", by: OTHER_PLAYBACK });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("una que no es de esta sesión: refused, sin reportar", async () => {
+    const service = grantWith({ presence: { kind: "not_found" } });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "refused" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it.each<[string, Presence | null | "throws"]>([
+    ["la base no contestó", "throws"],
+    ["la base no reconoce la sesión que pasó la guarda", null],
+  ])("%s: unavailable y se reporta; el video sigue", async (_what, presence) => {
+    const service = grantWith({ presence });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["playback_unavailable"]);
+  });
+
+  it("no lee los hechos ni mira el acceso: el fin del acceso no detiene el video (T-202)", async () => {
+    const service = grantWith({ facts: NEVER_PAID });
+    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+    expect(service.calls).not.toContain(`hechos ${LESSON}`);
   });
 });
