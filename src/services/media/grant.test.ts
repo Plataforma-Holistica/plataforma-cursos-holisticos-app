@@ -5,7 +5,7 @@ import type { SessionCheck } from "@/services/account/admission";
 import type { Capability, TeamCheck, TeamStanding } from "@/services/account/team";
 
 import { createMediaGrant } from "./grant";
-import type { LessonVideo, OpenedPlayback, PlaybackOpening, Presence, WatchFacts } from "./records";
+import type { BatchRecord, HeartbeatBeat, LessonVideo, OpenedPlayback, PlaybackOpening, Presence, WatchFacts } from "./records";
 
 // La función única de medios, con todo lo de fuera simulado: a quién se le pregunta qué, en
 // qué orden, y qué se contesta. Contra la base de verdad, en
@@ -47,6 +47,12 @@ const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
 const OTHER_PLAYBACK = "d0000000-0000-4000-8000-000000000005";
 const OPENED: OpenedPlayback = { kind: "opened", sessionId: PLAYBACK, heartbeatSeconds: 30 };
 const STARTED = new Date("2026-10-15T11:40:00.000Z");
+/** La hora del tope del reloj de la reproducción, que da la base: con ella se decide si el lote cuenta. */
+const AT = new Date("2026-10-15T11:59:30.000Z");
+const EVENTS = [
+  { seq: 0, from: 0, to: 30, rate: 1, visible: true },
+  { seq: 1, from: 30, to: 60, rate: 1, visible: true },
+];
 const LIVE_ROW = {
   sessionId: OTHER_PLAYBACK,
   userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
@@ -76,10 +82,16 @@ function grantWith(
     tokens?: typeof TOKENS | null;
     opened?: OpenedPlayback | null | "throws";
     presence?: Presence | null | "throws";
+    /** Los hechos con que la base le pregunta a la regla si el lote cuenta; nulo: no se pudieron leer. */
+    beatFacts?: WatchFacts | null;
+    /** Lo que la base contesta del lote, si la regla supo decidir; `throws`: el lote tumba la transacción. */
+    recorded?: BatchRecord | "throws";
   } = {},
 ) {
   const calls: string[] = [];
   const openings: PlaybackOpening[] = [];
+  const beats: HeartbeatBeat[] = [];
+  const decisions: string[] = [];
   const reported: string[] = [];
   const sign = vi.fn(() => {
     calls.push("firma");
@@ -112,10 +124,26 @@ function grantWith(
           if (setup.opened === "throws") return Promise.reject(new Error("sin base"));
           return Promise.resolve(setup.opened === undefined ? OPENED : setup.opened);
         }),
-        touchPlayback: vi.fn((_claims: VerifiedClaims, id: string) => {
-          calls.push(`late ${id}`);
+        // Como `recordHeartbeat`: la presencia si se pide, y el lote si trae algo, con la regla
+        // preguntada a la hora del tope del reloj (`AT`).
+        heartbeat: vi.fn((_claims: VerifiedClaims, beat: HeartbeatBeat) => {
+          beats.push(beat);
+          if (beat.presence) calls.push(`late ${beat.sessionId}`);
           if (setup.presence === "throws") return Promise.reject(new Error("sin base"));
-          return Promise.resolve(setup.presence === undefined ? { kind: "ok" as const } : setup.presence);
+          if (beat.presence && setup.presence === null) return Promise.resolve(null);
+          let batch: BatchRecord | null = null;
+          if (beat.events.length > 0) {
+            calls.push(`registra ${beat.sessionId}`);
+            if (setup.recorded === "throws") return Promise.reject(new Error("consulta cancelada"));
+            const facts = setup.beatFacts === undefined ? PAYING : setup.beatFacts;
+            const counts = facts === null ? "unknown" : beat.decide(facts, AT);
+            decisions.push(counts);
+            batch =
+              counts === "unknown"
+                ? { kind: "unknown" }
+                : (setup.recorded ?? { kind: "recorded", accepted: beat.events.map((each) => each.seq), duplicate: [], rejected: [] });
+          }
+          return Promise.resolve({ presence: beat.presence ? (setup.presence ?? { kind: "ok" as const }) : null, batch });
         }),
       },
       signingKey: () => (setup.key === undefined ? KEY : setup.key),
@@ -123,7 +151,7 @@ function grantWith(
       now: () => NOW,
     },
   );
-  return { ...service, calls, reported, sign, openings };
+  return { ...service, calls, reported, sign, openings, beats, decisions };
 }
 
 const reader = { get: () => undefined };
@@ -498,14 +526,15 @@ describe("ver abre una reproducción (T-204, RF-107)", () => {
 describe("el latido de presencia (T-204)", () => {
   it("con la sesión que pasa: late esa reproducción, y sigue", async () => {
     const service = grantWith();
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind: "ok" }, batch: null });
     expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`]);
+    expect(service.beats[0]).toMatchObject({ sessionId: PLAYBACK, presence: true, events: [] });
     expect(service.reported).toEqual([]);
   });
 
   it("a una cuenta a la que le falta algo se le deja acabar (decisión de Sergio del 2026-10-19)", async () => {
     const service = grantWith({ session: { kind: "incomplete", claims } as SessionCheck });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind: "ok" }, batch: null });
     expect(service.calls).toContain(`late ${PLAYBACK}`);
   });
 
@@ -514,51 +543,207 @@ describe("el latido de presencia (T-204)", () => {
     ["una sesión que hay que cerrar", { kind: "must_sign_out", then: "sign_in" }, "refused"],
     ["una cuenta suspendida", { kind: "suspended" }, "suspended"],
     ["si no se supo (la guarda ya reportó)", { kind: "unavailable" }, "unavailable"],
-  ])("%s: %s, sin latir", async (_who, session, kind) => {
+  ])("%s: %s, sin latir; los tramos se quedan en la cola", async (_who, session, kind) => {
     const service = grantWith({ session });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind });
-    expect(service.calls).toEqual(["guarda de sesión"]);
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind }, batch: null });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind }, batch: { kind: "retry" } });
+    expect(service.calls).toEqual(["guarda de sesión", "guarda de sesión"]);
     expect(service.reported).toEqual([]);
   });
 
   it.each<[string, unknown]>([
     ["un id sin forma", "no-es-un-id"],
     ["algo que no es texto", { id: PLAYBACK }],
-  ])("%s: refused, sin latir", async (_what, id) => {
+  ])("%s: refused, sin latir; sus tramos no son de ninguna", async (_what, id) => {
     const service = grantWith();
-    expect(await service.playbackPresence(reader, id)).toEqual({ kind: "refused" });
-    expect(service.calls).toEqual(["guarda de sesión"]);
+    expect(await service.playbackHeartbeat(reader, id)).toEqual({ presence: { kind: "refused" }, batch: null });
+    expect(await service.playbackHeartbeat(reader, id, EVENTS)).toEqual({ presence: { kind: "refused" }, batch: { kind: "discard" } });
+    expect(service.calls).toEqual(["guarda de sesión", "guarda de sesión"]);
   });
 
   it("vencida y con el lugar tomado: busy, con el navegador descrito", async () => {
     const service = grantWith({ presence: { kind: "busy", live: [LIVE_ROW] } });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "busy", live: [LIVE_SEEN] });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind: "busy", live: [LIVE_SEEN] }, batch: null });
   });
 
   it("revocada: con su motivo y la que tomó su lugar", async () => {
     const service = grantWith({ presence: { kind: "revoked", reason: "closed_by_user", by: OTHER_PLAYBACK } });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "revoked", reason: "closed_by_user", by: OTHER_PLAYBACK });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({
+      presence: { kind: "revoked", reason: "closed_by_user", by: OTHER_PLAYBACK },
+      batch: null,
+    });
     expect(service.reported).toEqual([]);
   });
 
   it("una que no es de esta sesión: refused, sin reportar", async () => {
     const service = grantWith({ presence: { kind: "not_found" } });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "refused" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind: "refused" }, batch: null });
     expect(service.reported).toEqual([]);
   });
 
   it.each<[string, Presence | null | "throws"]>([
     ["la base no contestó", "throws"],
     ["la base no reconoce la sesión que pasó la guarda", null],
-  ])("%s: unavailable y se reporta; el video sigue", async (_what, presence) => {
+  ])("%s: unavailable y se reporta; el video sigue y los tramos se quedan", async (_what, presence) => {
     const service = grantWith({ presence });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "unavailable" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "unavailable" }, batch: { kind: "retry" } });
     expect(service.reported).toEqual(["playback_unavailable"]);
   });
 
-  it("no lee los hechos ni mira el acceso: el fin del acceso no detiene el video (T-202)", async () => {
-    const service = grantWith({ facts: NEVER_PAID });
-    expect(await service.playbackPresence(reader, PLAYBACK)).toEqual({ kind: "ok" });
+  it("sin tramos no lee los hechos ni mira el acceso: el fin del acceso no detiene el video (T-202)", async () => {
+    const service = grantWith({ facts: NEVER_PAID, beatFacts: NEVER_PAID });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK)).toEqual({ presence: { kind: "ok" }, batch: null });
     expect(service.calls).not.toContain(`hechos ${LESSON}`);
+    expect(service.decisions).toEqual([]);
+  });
+});
+
+describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
+  it("van en el mismo latido que la presencia, y salen de la cola todos los que la base vio", async () => {
+    const service = grantWith({
+      recorded: { kind: "recorded", accepted: [2, 0], duplicate: [1], rejected: [{ seq: 3, reason: "faster_than_clock" }] },
+    });
+    const four = [...EVENTS, { seq: 2, from: 60, to: 90, rate: 1, visible: true }, { seq: 3, from: 90, to: 120, rate: 1, visible: true }];
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, four)).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1, 2, 3] } });
+    expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`, `registra ${PLAYBACK}`]);
+    expect(service.beats).toHaveLength(1);
+    expect(service.beats[0]).toMatchObject({ sessionId: PLAYBACK, presence: true, events: four });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("si la presencia dice que otro tomó el lugar, los tramos se registran igual: son de antes", async () => {
+    const service = grantWith({ presence: { kind: "revoked", reason: "replaced", by: OTHER_PLAYBACK } });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({
+      presence: { kind: "revoked", reason: "replaced", by: OTHER_PLAYBACK },
+      batch: { kind: "settled", seqs: [0, 1] },
+    });
+  });
+
+  it("un lote sin forma no se registra: lo enviado se tira, y la presencia late igual", async () => {
+    const service = grantWith();
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, [{ ...EVENTS[0], to: 0 }])).toEqual({
+      presence: { kind: "ok" },
+      batch: { kind: "discard" },
+    });
+    expect(service.beats[0]).toMatchObject({ presence: true, events: [] });
+    expect(service.calls).not.toContain(`registra ${PLAYBACK}`);
+  });
+
+  it("la reproducción no existe o no es de quien la manda: se tira, sin reportar", async () => {
+    const service = grantWith({ recorded: { kind: "not_found" } });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "ok" }, batch: { kind: "discard" } });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("si el lote tumba la transacción, la presencia se repite sola: la reproducción no vence", async () => {
+    const service = grantWith({ recorded: "throws" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
+    expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`, `registra ${PLAYBACK}`, `late ${PLAYBACK}`]);
+    expect(service.beats.map((each) => each.events.length)).toEqual([2, 0]);
+    expect(service.reported).toEqual(["heartbeat_unavailable"]);
+  });
+
+  it("si tampoco la presencia sola contesta, no se supo: se reporta como la presencia", async () => {
+    const service = grantWith({ presence: "throws" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "unavailable" }, batch: { kind: "retry" } });
+    expect(service.beats).toHaveLength(2);
+    expect(service.reported).toEqual(["playback_unavailable"]);
+  });
+
+  it("la base no pudo registrar: se queda en la cola y se reporta", async () => {
+    const service = grantWith({ recorded: { kind: "failed", code: "23514" } });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
+    expect(service.reported).toEqual(["heartbeat_unavailable"]);
+  });
+
+  // Si lo visto cuenta, con los hechos a la hora del tope del reloj, no a la de llegada.
+  const facts = (change: Partial<WatchFacts>): WatchFacts => ({ ...PAYING, ...change });
+  it.each<[string, WatchFacts | null, string]>([
+    ["con suscripción a esa hora: cuenta", PAYING, "counts"],
+    [
+      "el periodo pagado terminó antes del tope: se guarda sin puntos (decisión de T-202)",
+      facts({ account: { ...PAYING.account, paidThrough: new Date("2026-10-15T11:59:00.000Z") } }),
+      "no",
+    ],
+    [
+      "el periodo pagado termina después del tope, aunque ya pasó al llegar: cuenta",
+      facts({ now: IN_A_MONTH, account: { ...PAYING.account, paidThrough: new Date("2026-10-15T12:00:00.000Z") } }),
+      "counts",
+    ],
+    ["la lección se retiró: deja de contar (decisión de Sergio del 2026-10-19)", facts({ lesson: { ...PAYING.lesson!, isCurrent: false } }), "no"],
+    ["cortesía: no cuenta", facts({ account: { ...PAYING.account, paidThrough: null, courtesy: [{ from: STARTED, until: null }] } }), "no"],
+    ["la cuenta se suspendió: no cuenta", facts({ viewer: { ...PAYING.viewer, accountSuspended: true } }), "no"],
+    [
+      "con una falla de cobro y sin la gracia de esa hora: no se supo",
+      facts({ account: { ...PAYING.account, paidThrough: new Date("2026-10-01T00:00:00.000Z"), lastRenewalFailedAt: STARTED }, graceDays: Number.NaN }),
+      "unknown",
+    ],
+    ["los hechos no se pudieron leer: no se supo", null, "unknown"],
+  ])("%s", async (_what, beatFacts, decision) => {
+    const service = grantWith({ beatFacts });
+    const answer = await service.playbackHeartbeat(reader, PLAYBACK, EVENTS);
+    expect(service.decisions).toEqual([decision]);
+    // «No se supo» no es «no cuenta»: no se registra, se queda en la cola, y se reporta.
+    if (decision === "unknown") {
+      expect(answer).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
+      expect(service.reported).toEqual(["heartbeat_unavailable"]);
+    } else {
+      expect(answer).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1] } });
+      expect(service.reported).toEqual([]);
+    }
+  });
+});
+
+describe("mandar los tramos sin presencia (T-205)", () => {
+  it("no late: solo registra", async () => {
+    const service = grantWith();
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1] });
+    expect(service.calls).toEqual(["guarda de sesión", `registra ${PLAYBACK}`]);
+    expect(service.beats[0]).toMatchObject({ sessionId: PLAYBACK, presence: false, events: EVENTS });
+  });
+
+  it("un lote vacío no le pregunta nada a la base", async () => {
+    const service = grantWith();
+    expect(await service.flushHeartbeats(reader, PLAYBACK, [])).toEqual({ kind: "settled", seqs: [] });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+    expect(service.beats).toEqual([]);
+  });
+
+  it("a una cuenta a la que le falta algo también", async () => {
+    const service = grantWith({ session: { kind: "incomplete", claims } as SessionCheck });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1] });
+  });
+
+  it.each<[string, SessionCheck]>([
+    ["sin sesión", { kind: "anonymous" }],
+    ["una sesión que hay que cerrar", { kind: "must_sign_out", then: "sign_in" }],
+    ["una cuenta suspendida", { kind: "suspended" }],
+    ["si no se supo", { kind: "unavailable" }],
+  ])("%s: se queda en la cola, sin preguntarle a la base", async (_who, session) => {
+    const service = grantWith({ session });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "retry" });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it.each<[string, unknown, unknown]>([
+    ["un id sin forma", "no-es-un-id", EVENTS],
+    ["un lote sin forma", PLAYBACK, { 0: EVENTS[0] }],
+    ["sin lote", PLAYBACK, undefined],
+  ])("%s: lo enviado se tira", async (_what, id, events) => {
+    const service = grantWith();
+    expect(await service.flushHeartbeats(reader, id, events)).toEqual({ kind: "discard" });
+    expect(service.beats).toEqual([]);
+  });
+
+  it.each<[string, Parameters<typeof grantWith>[0], unknown, string[]]>([
+    ["la reproducción no es de quien la manda: se tira", { recorded: { kind: "not_found" } }, { kind: "discard" }, []],
+    ["la base no pudo: se queda y se reporta", { recorded: { kind: "failed", code: "23514" } }, { kind: "retry" }, ["heartbeat_unavailable"]],
+    ["no se supo si cuenta: se queda y se reporta", { beatFacts: null }, { kind: "retry" }, ["heartbeat_unavailable"]],
+    ["la base no contestó: se queda y se reporta", { presence: "throws" }, { kind: "retry" }, ["heartbeat_unavailable"]],
+    ["el lote tumbó la transacción: se queda y se reporta", { recorded: "throws" }, { kind: "retry" }, ["heartbeat_unavailable"]],
+  ])("%s", async (_what, setup, expected, reported) => {
+    const service = grantWith(setup);
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual(expected);
+    expect(service.reported).toEqual(reported);
   });
 });

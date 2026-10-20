@@ -136,8 +136,8 @@ describe("una reproducción a la vez", () => {
       const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
       const again = await granted(await media.getMediaGrant(computer, lesson, "watch"));
       expect(again.playbackSessionId).not.toBe(first.playbackSessionId);
-      expect(await media.playbackPresence(computer, first.playbackSessionId)).toEqual({ kind: "revoked", reason: "replaced", by: again.playbackSessionId });
-      expect(await media.playbackPresence(computer, again.playbackSessionId)).toEqual({ kind: "ok" });
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId)).presence).toEqual({ kind: "revoked", reason: "replaced", by: again.playbackSessionId });
+      expect((await media.playbackHeartbeat(computer, again.playbackSessionId)).presence).toEqual({ kind: "ok" });
     });
   });
 
@@ -150,13 +150,13 @@ describe("una reproducción a la vez", () => {
       const media = mediaOn(owner);
       const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
       const second = await granted(await media.getMediaGrant(phone, lesson, "watch", { closing: first.playbackSessionId }));
-      const closed = await media.playbackPresence(computer, first.playbackSessionId);
+      const closed = (await media.playbackHeartbeat(computer, first.playbackSessionId)).presence;
       expect(closed).toEqual({ kind: "revoked", reason: "closed_by_user", by: second.playbackSessionId });
       // «Reproducir aquí»: cierra la que tomó su lugar.
       const back = await granted(await media.getMediaGrant(computer, lesson, "watch", { closing: second.playbackSessionId }));
-      expect(await media.playbackPresence(phone, second.playbackSessionId)).toEqual({ kind: "revoked", reason: "closed_by_user", by: back.playbackSessionId });
+      expect((await media.playbackHeartbeat(phone, second.playbackSessionId)).presence).toEqual({ kind: "revoked", reason: "closed_by_user", by: back.playbackSessionId });
       // Un navegador no late la reproducción de otro, aunque sea de la misma cuenta.
-      expect(await media.playbackPresence(phone, back.playbackSessionId)).toEqual({ kind: "refused" });
+      expect((await media.playbackHeartbeat(phone, back.playbackSessionId)).presence).toEqual({ kind: "refused" });
     });
   });
 
@@ -168,7 +168,7 @@ describe("una reproducción a la vez", () => {
       const media = mediaOn(owner);
       const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
       await owner.query("update public.subscriptions set current_period_end = now() - interval '1 day', status = 'expired', ended_at = now() - interval '1 day' where profile_id = $1", [who.id]);
-      expect(await media.playbackPresence(computer, first.playbackSessionId)).toEqual({ kind: "ok" });
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId)).presence).toEqual({ kind: "ok" });
       // Pedir otra vez sí lo mira.
       expect(await media.getMediaGrant(computer, lesson, "watch")).toMatchObject({ kind: "denied" });
     });
@@ -230,12 +230,16 @@ describe("una reproducción a la vez", () => {
     }
   });
 
-  it("abrir y latir se niegan a correr con una foto fija: el candado no serviría", async () => {
+  it("abrir, latir y registrar se niegan a correr con una foto fija: el candado no serviría", async () => {
     const who = await person();
     const client = new Client({ connectionString: localOwnerUrl() });
     await client.connect();
     try {
-      for (const call of ["private.open_playback(gen_random_uuid(), 'x', 'subscription', true, null)", "private.touch_playback(gen_random_uuid())"]) {
+      for (const call of [
+        "private.open_playback(gen_random_uuid(), 'x', 'subscription', true, null)",
+        "private.touch_playback(gen_random_uuid())",
+        "private.record_heartbeats(gen_random_uuid(), '[]', true, now())",
+      ]) {
         await client.query("begin isolation level repeatable read");
         // Como el servidor, dentro de esta transacción, que se revierte (como en `reverted`).
         await client.query("grant app_service to postgres with set true, inherit false");
@@ -266,5 +270,196 @@ describe("una reproducción a la vez", () => {
       );
       expect(await media.getMediaGrant(phone, lesson, "watch")).toMatchObject({ kind: "granted" });
     });
+  });
+});
+
+
+// Los latidos que miden (T-205; RF-401 a RF-403): los tramos viajan con la presencia, en la misma
+// transacción, y la base los revisa contra la lección y el reloj de la reproducción. Como en todo
+// este archivo, `now()` no avanza dentro de la transacción que se revierte: el tiempo vivo se
+// pone a mano.
+
+const tramo = (seq: number, from: number, to: number) => ({ seq, from, to, rate: 1, visible: true });
+
+/** Como si la reproducción llevara tantos segundos viva. */
+async function alive(owner: Client, playback: string, seconds: number): Promise<void> {
+  await owner.query("update public.playback_sessions set live_seconds = $2 where id = $1", [playback, seconds]);
+}
+
+async function ledger(owner: Client, playback: string) {
+  return (
+    await owner.query<{ seq: number; to_second: number; counts_for_payout: boolean }>(
+      "select seq, to_second, counts_for_payout from public.watch_events where playback_session_id = $1 order by seq",
+      [playback],
+    )
+  ).rows;
+}
+
+describe("los latidos que miden (T-205)", () => {
+  it("los tramos viajan con la presencia y entran al libro; reenviados no entran otra vez", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      const events = [tramo(0, 0, 30), tramo(1, 30, 60)];
+      expect(await media.playbackHeartbeat(computer, first.playbackSessionId, events)).toEqual({
+        presence: { kind: "ok" },
+        batch: { kind: "settled", seqs: [0, 1] },
+      });
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([
+        { seq: 0, to_second: 30, counts_for_payout: true },
+        { seq: 1, to_second: 60, counts_for_payout: true },
+      ]);
+      // El navegador no supo la respuesta y los manda otra vez, ahora sin presencia.
+      expect(await media.flushHeartbeats(computer, first.playbackSessionId, events)).toEqual({ kind: "settled", seqs: [0, 1] });
+      expect(await ledger(owner, first.playbackSessionId)).toHaveLength(2);
+      expect(media.reported).toEqual([]);
+    });
+  });
+
+  it("lo que se ve después de que terminó el acceso se guarda sin puntos (decisión de T-202)", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      await owner.query(
+        "update public.subscriptions set current_period_end = now() - interval '1 day', status = 'expired', ended_at = now() - interval '1 day' where profile_id = $1",
+        [who.id],
+      );
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({ kind: "settled", seqs: [0] });
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([{ seq: 0, to_second: 30, counts_for_payout: false }]);
+    });
+  });
+
+  it("lo atrasado se decide con la hora de su tope, no con la de llegada", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      // Se cerró hace una hora, con la suscripción vigente; la suscripción terminó hace media hora.
+      await owner.query(
+        `update public.playback_sessions
+           set live_seconds = 120, last_heartbeat_at = now() - interval '1 hour 10 seconds',
+               revoked_at = now() - interval '1 hour', revoke_reason = 'closed_by_user'
+         where id = $1`,
+        [first.playbackSessionId],
+      );
+      await owner.query(
+        "update public.subscriptions set current_period_end = now() - interval '30 minutes', status = 'expired', ended_at = now() - interval '30 minutes' where profile_id = $1",
+        [who.id],
+      );
+      expect(await media.flushHeartbeats(computer, first.playbackSessionId, [tramo(0, 0, 30)])).toEqual({ kind: "settled", seqs: [0] });
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([{ seq: 0, to_second: 30, counts_for_payout: true }]);
+    });
+  });
+
+  it("si no se supo si el acceso cuenta, no se registra nada: se queda en la cola y se reporta", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      // Una falla de cobro de cuando aún no existía GRACIA_COBRO_DIAS: la regla no sabe la gracia.
+      await owner.query(
+        `update public.subscriptions
+           set current_period_start = '1999-12-01', current_period_end = '2000-01-01', last_renewal_failed_at = '2000-01-01', status = 'in_grace'
+         where profile_id = $1`,
+        [who.id],
+      );
+      expect(await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).toEqual({
+        presence: { kind: "ok" },
+        batch: { kind: "retry" },
+      });
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([]);
+      const row = (
+        await owner.query<{ seqs: string; fresh: boolean }>(
+          "select seqs_received::text as seqs, last_heartbeat_at = now() as fresh from public.playback_sessions where id = $1",
+          [first.playbackSessionId],
+        )
+      ).rows[0];
+      // La presencia sí quedó; del lote, ni el consecutivo.
+      expect(row).toEqual({ seqs: "{}", fresh: true });
+      expect(media.reported).toEqual(["heartbeat_unavailable"]);
+    });
+  });
+
+  it("más de lo que el reloj permite: se rechaza, sale de la cola y no entra al libro", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      // Recién abierta (en esta transacción `now()` no avanza): sin tiempo transcurrido no cabe nada,
+      // ni la tolerancia, que nunca pasa del tiempo transcurrido.
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 5), tramo(1, 5, 35)])).batch).toEqual({
+        kind: "settled",
+        seqs: [0, 1],
+      });
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([]);
+      // Con diez segundos vivos caben 10 × 2 + 5.
+      await alive(owner, first.playbackSessionId, 10);
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(2, 0, 25), tramo(3, 25, 26)])).batch).toEqual({
+        kind: "settled",
+        seqs: [2, 3],
+      });
+      expect((await ledger(owner, first.playbackSessionId)).map((row) => row.seq)).toEqual([2]);
+      expect(media.reported).toEqual([]);
+    });
+  });
+
+  it("lo atrasado de una reproducción cerrada desde otro dispositivo entra desde ese; de una viva, no", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    const phone = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      // PA-34 le muestra al teléfono el id de la viva: con él no escribe en ella.
+      expect(await media.flushHeartbeats(phone, first.playbackSessionId, [tramo(0, 0, 30)])).toEqual({ kind: "discard" });
+      // El teléfono la cierra. La computadora, ya cerrada, manda lo que tenía.
+      await granted(await media.getMediaGrant(phone, lesson, "watch", { closing: first.playbackSessionId }));
+      expect(await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).toMatchObject({
+        presence: { kind: "revoked", reason: "closed_by_user" },
+        batch: { kind: "settled", seqs: [0] },
+      });
+      expect(await ledger(owner, first.playbackSessionId)).toHaveLength(1);
+    });
+  });
+
+  it("crear una partición no espera a los latidos que están entrando", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    const maintenance = new Client({ connectionString: localOwnerUrl() });
+    await maintenance.connect();
+    try {
+      await reverted(async (owner) => {
+        const lesson = await setUp(owner, who.id);
+        const media = mediaOn(owner);
+        const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+        await alive(owner, first.playbackSessionId, 120);
+        // Un lote ya escrito y sin confirmar tiene el libro.
+        expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({ kind: "settled", seqs: [0] });
+        // El mantenimiento crea otra partición mientras tanto; si esperara, su `lock_timeout` lo cortaría.
+        await maintenance.query("begin");
+        const created = await maintenance.query<{ created: boolean }>("select private.create_watch_partition(209912) as created");
+        expect(created.rows[0]?.created).toBe(true);
+        await maintenance.query("rollback");
+      });
+    } finally {
+      await maintenance.end();
+    }
   });
 });

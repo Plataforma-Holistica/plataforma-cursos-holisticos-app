@@ -3,7 +3,7 @@ import type { Client } from "pg";
 import { readVerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import type { MediaStore } from "@/services/media/grant";
-import { openPlayback, readLessonVideo, readPlaybackSpeeds, readWatchFacts, touchPlayback } from "@/services/media/records";
+import { openPlayback, readLessonVideo, readPlaybackSpeeds, readWatchFacts, recordHeartbeat } from "@/services/media/records";
 
 import { asOwner, asServer } from "./team";
 
@@ -11,7 +11,7 @@ import { asOwner, asServer } from "./team";
  * El almacén de la función única de medios sobre una transacción del dueño: las mismas
  * consultas que usa la aplicación (para revisar, la lección como la persona, con el rol
  * `authenticated` y sus claims; para ver, los hechos como servidor; y las velocidades como
- * servidor; y desde T-204, abrir y latir, como servidor), pero sin confirmar. Así lo que la prueba cargó en esa transacción se ve, y nada
+ * servidor; desde T-204, abrir y latir, y desde T-205 los tramos vistos, como servidor), pero sin confirmar. Así lo que la prueba cargó en esa transacción se ve, y nada
  * queda en la auditoría.
  */
 export function mediaStoreOn(owner: Client): MediaStore {
@@ -55,10 +55,10 @@ export function mediaStoreOn(owner: Client): MediaStore {
         await asOwner(owner);
       }
     },
-    touchPlayback: async (claims, sessionId) => {
+    heartbeat: async (claims, beat) => {
       await asServer(owner, claims.userId, claims.sessionId ?? "");
       try {
-        return await touchPlayback(tx, sessionId);
+        return await recordHeartbeat(tx, beat);
       } finally {
         await asOwner(owner);
       }

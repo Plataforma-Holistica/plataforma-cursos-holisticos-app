@@ -1,5 +1,5 @@
 import { longDate } from "@/app/_lib/dates";
-import type { LessonAccess, LiveElsewhere, MediaGrant, PresenceAnswer } from "@/services/media/media";
+import type { BatchAnswer, HeartbeatAnswer, LessonAccess, LiveElsewhere, MediaGrant, PresenceAnswer } from "@/services/media/media";
 
 // La tabla de la página de una lección (PA-22, T-203): lo que contesta la función única de
 // medios, al cargar (`lessonAccess`) y al reproducir (`getMediaGrant`), traducido a lo que se
@@ -7,7 +7,8 @@ import type { LessonAccess, LiveElsewhere, MediaGrant, PresenceAnswer } from "@/
 //
 // La base de acceso (`basis`), si cuenta para el reparto y hasta cuándo (`until`) no salen de
 // aquí: son del servidor, no del navegador. Desde T-204 salen la reproducción abierta y cada
-// cuánto latir, el lugar ocupado en otro navegador (PA-34) y lo que contesta el latido.
+// cuánto latir, el lugar ocupado en otro navegador (PA-34) y lo que contesta el latido; desde
+// T-205, qué pasó con los tramos vistos que llevaba.
 
 type AccountRefusal = Extract<MediaGrant, { kind: "denied" }>["account"];
 
@@ -170,4 +171,17 @@ function closedOf(answer: Extract<PresenceAnswer, { kind: "revoked" }>): Presenc
     case "admin":
       return { kind: "reload" };
   }
+}
+
+/**
+ * Lo que el reproductor recibe de un latido (T-205): lo de la presencia y qué pasó con los
+ * tramos que llevaba, para su cola (nulo si no llevaba). Qué consecutivos salen de la cola lo
+ * dice el servidor; el navegador no decide nada con eso.
+ */
+export type HeartbeatReply = PresenceReply & { batch: BatchAnswer | null };
+
+/** Lo que contestó el latido; o volver a la página, como con la presencia sola. */
+export function heartbeatReplyOf(answer: HeartbeatAnswer): HeartbeatReply | { kind: "reload" } {
+  const presence = presenceReplyOf(answer.presence);
+  return presence.kind === "reload" ? presence : { ...presence, batch: answer.batch };
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { denialOf, initialOf, presenceReplyOf, watchAnswerOf } from "./outcomes";
+import type { BatchAnswer } from "@/services/media/media";
+
+import { denialOf, heartbeatReplyOf, initialOf, presenceReplyOf, watchAnswerOf } from "./outcomes";
 
 // La tabla de la página de una lección (PA-22, T-203): lo que contesta la función única de
 // medios, al cargar (`lessonAccess`) y al reproducir (`getMediaGrant`), traducido a lo que se
@@ -118,5 +120,24 @@ describe("el latido de presencia (T-204): lo que dijo playbackPresence", () => {
     [{ kind: "refused" }, { kind: "reload" }],
   ] as const)("%j", (answer, expected) => {
     expect(presenceReplyOf(answer)).toEqual(expected);
+  });
+});
+
+describe("el latido con los tramos vistos (T-205): lo que dijo playbackHeartbeat", () => {
+  it.each<[BatchAnswer | null]>([[null], [{ kind: "settled", seqs: [0, 1, 2] }], [{ kind: "discard" }], [{ kind: "retry" }]])(
+    "lo del lote va tal cual junto a lo de la presencia: %j",
+    (batch) => {
+    expect(heartbeatReplyOf({ presence: { kind: "ok" }, batch })).toEqual({ kind: "ok", batch });
+    expect(heartbeatReplyOf({ presence: { kind: "revoked", reason: "replaced", by: OTHER }, batch })).toEqual({
+      kind: "closed",
+      from: "tab",
+      by: OTHER,
+      batch,
+    });
+    },
+  );
+
+  it("si la presencia vuelve a la página, el lote no viaja: se queda en la cola", () => {
+    expect(heartbeatReplyOf({ presence: { kind: "suspended" }, batch: { kind: "retry" } })).toEqual({ kind: "reload" });
   });
 });

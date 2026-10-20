@@ -18,12 +18,23 @@ import {
 } from "@/domain/access/media-access";
 
 import { describeUserAgent, type Device } from "@/domain/access/user-agent";
+import { accessCounts, parseHeartbeatBatch, type AccessCount, type HeartbeatEvent } from "@/domain/consumption/heartbeat";
 
 import type { SessionCheck } from "@/services/account/admission";
 import { holds, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
 
-import type { LessonVideo, LivePlayback, OpenedPlayback, PlaybackOpening, Presence, RevokeReason, WatchFacts } from "./records";
+import type {
+  BatchRecord,
+  HeartbeatBeat,
+  HeartbeatOutcome,
+  LessonVideo,
+  LivePlayback,
+  OpenedPlayback,
+  PlaybackOpening,
+  RevokeReason,
+  WatchFacts,
+} from "./records";
 
 // La función única de medios (RF-305, RF-306; TRD §5.5, §6.1 y §9.4): la única que firma una
 // dirección de video. Pregunta quién pide, lee la lección y los hechos, le pregunta a las
@@ -45,9 +56,15 @@ import type { LessonVideo, LivePlayback, OpenedPlayback, PlaybackOpening, Presen
 // Desde T-204, ver abre además una reproducción (RF-107), después de firmar: la firma es local
 // y sin efectos, y si falla no queda una reproducción ocupando lugar. Con el lugar ocupado por
 // otro navegador de la misma cuenta contesta `busy` con la lista (PA-34), y se le puede pedir
-// cerrar una en el mismo paso. `playbackPresence` es el latido de presencia, con la misma
+// cerrar una en el mismo paso. `playbackHeartbeat` es el latido de presencia, con la misma
 // guarda de sesión. Revisar no abre reproducción (decisión de Sergio del 2026-10-19). Lo que
 // todavía no se hace: los recursos (RF-308), que firman con esta misma regla en T-404.
+//
+// Desde T-205 el latido lleva los tramos vistos (RF-401), y `flushHeartbeats` los manda sin
+// presencia (al pausar, al irse el reproductor, al volver a abrir una lección). Si lo visto
+// cuenta lo decide aquí la regla de los medios con los hechos a la hora del tope del reloj de
+// la reproducción, que la base da: lo atrasado se mide en su hora, no en la de llegada. La
+// base revisa cada tramo contra la lección y el reloj, y solo puede bajar lo que cuenta.
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -119,6 +136,21 @@ export type PresenceAnswer =
   /** No se supo: el video sigue, y el siguiente latido lo vuelve a intentar. */
   | { kind: "unavailable" };
 
+/** Qué pasó con un lote de tramos (T-205), para la cola del navegador. */
+export type BatchAnswer =
+  /** Los consecutivos que salen de la cola: aceptados, repetidos y rechazados. Ninguno se reenvía. */
+  | { kind: "settled"; seqs: number[] }
+  /** La reproducción no existe o no es de quien la manda, o el lote no tiene forma: lo enviado se tira. */
+  | { kind: "discard" }
+  /** No se supo: todo se queda en la cola y se manda otra vez. */
+  | { kind: "retry" };
+
+/** Lo que contesta un latido: la presencia y, si llevaba tramos, qué pasó con ellos. */
+export interface HeartbeatAnswer {
+  presence: PresenceAnswer;
+  batch: BatchAnswer | null;
+}
+
 /** Lo que puede acompañar a ver. */
 export interface WatchOptions {
   /** La reproducción que se pide cerrar en el mismo paso (PA-34, o «Reproducir aquí»). */
@@ -136,7 +168,7 @@ export interface MediaStore {
   watchFacts(claims: VerifiedClaims, lessonId: string): Promise<WatchFacts | null>;
   playbackSpeeds(claims: VerifiedClaims): Promise<{ minimum: number; maximum: number } | null>;
   openPlayback(claims: VerifiedClaims, opening: PlaybackOpening): Promise<OpenedPlayback | null>;
-  touchPlayback(claims: VerifiedClaims, sessionId: string): Promise<Presence | null>;
+  heartbeat(claims: VerifiedClaims, beat: HeartbeatBeat): Promise<HeartbeatOutcome | null>;
 }
 
 export interface MediaCore {
@@ -163,6 +195,21 @@ interface Decided {
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const idOrNull = (value: unknown): string | null => (typeof value === "string" && ID.test(value) ? value : null);
+
+/**
+ * Si lo visto cuenta, con los hechos de la cuenta a la hora del tope del reloj: la misma regla
+ * que decide al ver (RN-01, RF-306). El fin del acceso o una lección retirada lo guardan sin
+ * puntos (decisiones de Sergio del 2026-10-15 y del 2026-10-19).
+ */
+const decideBeat = (facts: WatchFacts, at: Date): AccessCount =>
+  accessCounts(resolveMediaAccess("watch", facts.viewer, resolveAccountAccess(facts.account, at, { graceDays: facts.graceDays }), facts.lesson));
+
+/** El lote como lo pide la base: lo que no tiene forma, nulo; sin lote, vacío. */
+const batchOf = (events: unknown): HeartbeatEvent[] | null => (events === undefined ? [] : parseHeartbeatBatch(events));
+
+/** Lo que se contesta del lote cuando no se llegó a mandar. */
+const unsent = (batch: HeartbeatEvent[] | null, reason: "retry" | "discard"): BatchAnswer | null =>
+  batch === null ? { kind: "discard" } : batch.length === 0 ? null : { kind: reason };
 
 /** La lista de la base, con el navegador ya descrito: la cabecera no sale del servidor. */
 const describeLive = (live: LivePlayback[]): LiveElsewhere[] =>
@@ -325,41 +372,106 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     };
   }
 
-  /**
-   * El latido de presencia de una reproducción (T-204), mientras el video avanza. Con la guarda
-   * de sesión: una cuenta suspendida se detiene (PA-35); a una que le falta algo se le deja
-   * acabar (decisión de Sergio del 2026-10-19); el fin del acceso no se mira aquí (sigue sin
-   * puntos, decisión de T-202).
-   */
-  async function playbackPresence(reader: CookieReader, sessionId: unknown): Promise<PresenceAnswer> {
-    const session = await core.checkSession(reader);
-    // La guarda ya reportó lo suyo.
-    if (session.kind === "unavailable") return { kind: "unavailable" };
-    if (session.kind === "suspended") return { kind: "suspended" };
-    if (session.kind !== "pass" && session.kind !== "incomplete") return { kind: "refused" };
-    const id = idOrNull(sessionId);
-    if (id === null) return { kind: "refused" };
+  /** Lo que la base contestó del lote, para la cola. «No se supo» se reporta. */
+  async function settle(batch: BatchRecord | null): Promise<BatchAnswer | null> {
+    if (batch === null) return null;
+    switch (batch.kind) {
+      case "recorded":
+        return {
+          kind: "settled",
+          seqs: [...new Set([...batch.accepted, ...batch.duplicate, ...batch.rejected.map((each) => each.seq)])].sort((a, b) => a - b),
+        };
+      case "not_found":
+        return { kind: "discard" };
+      case "unknown":
+      case "failed":
+        await deps.report("heartbeat_unavailable");
+        return { kind: "retry" };
+    }
+  }
 
-    let presence: Presence | null;
-    try {
-      presence = await core.store.touchPlayback(session.claims, id);
-    } catch {
-      presence = null;
-    }
-    if (presence === null) {
+  /**
+   * El latido de una reproducción (T-204), mientras el video avanza, con los tramos vistos que
+   * tenga pendientes (T-205). Con la guarda de sesión: una cuenta suspendida se detiene
+   * (PA-35); a una que le falta algo se le deja acabar (decisión de Sergio del 2026-10-19). El
+   * fin del acceso no detiene el video: lo que se ve desde ahí se guarda sin puntos (decisión de
+   * T-202). Si la presencia contesta que otro tomó el lugar, los tramos se registran igual: son
+   * de antes.
+   */
+  async function playbackHeartbeat(reader: CookieReader, sessionId: unknown, events?: unknown): Promise<HeartbeatAnswer> {
+    const session = await core.checkSession(reader);
+    const batch = batchOf(events);
+    // La guarda ya reportó lo suyo.
+    if (session.kind === "unavailable") return { presence: { kind: "unavailable" }, batch: unsent(batch, "retry") };
+    if (session.kind === "suspended") return { presence: { kind: "suspended" }, batch: unsent(batch, "retry") };
+    if (session.kind !== "pass" && session.kind !== "incomplete") return { presence: { kind: "refused" }, batch: unsent(batch, "retry") };
+    const id = idOrNull(sessionId);
+    if (id === null) return { presence: { kind: "refused" }, batch: unsent(batch, "discard") };
+
+    const beat = async (events: HeartbeatEvent[]): Promise<HeartbeatOutcome | null> => {
+      try {
+        return await core.store.heartbeat(session.claims, { sessionId: id, presence: true, events, decide: decideBeat });
+      } catch {
+        return null;
+      }
+    };
+    let outcome = await beat(batch ?? []);
+    // El lote tumbó la transacción con un error de la base que el registro no ataja (una consulta
+    // cancelada, los hechos que no se leyeron): la presencia, sola, en otra. Así nada del
+    // registro deja vencer la reproducción.
+    const alone = (outcome === null || outcome.presence === null) && batch !== null && batch.length > 0;
+    if (alone) outcome = await beat([]);
+    if (outcome === null || outcome.presence === null) {
       await deps.report("playback_unavailable");
-      return { kind: "unavailable" };
+      return { presence: { kind: "unavailable" }, batch: unsent(batch, "retry") };
     }
+    const presence = outcome.presence;
+    let answer: BatchAnswer | null;
+    if (batch === null) answer = { kind: "discard" };
+    else if (alone) {
+      await deps.report("heartbeat_unavailable");
+      answer = { kind: "retry" };
+    } else answer = await settle(outcome.batch);
     switch (presence.kind) {
       case "ok":
-        return { kind: "ok" };
+        return { presence: { kind: "ok" }, batch: answer };
       case "busy":
-        return { kind: "busy", live: describeLive(presence.live) };
+        return { presence: { kind: "busy", live: describeLive(presence.live) }, batch: answer };
       case "revoked":
-        return presence;
+        return { presence, batch: answer };
       case "not_found":
-        return { kind: "refused" };
+        return { presence: { kind: "refused" }, batch: answer };
     }
+  }
+
+  /**
+   * Los tramos pendientes de una reproducción, sin presencia: no toma ni refresca el lugar. Lo
+   * manda el navegador al pausar, al terminar, al ocultar la pestaña o al irse el reproductor, y
+   * lo que quedó guardado de otra visita al volver a abrir una lección. Con la misma guarda que
+   * el latido; lo atrasado de una reproducción de otra sesión de la cuenta entra si ya terminó.
+   */
+  async function flushHeartbeats(reader: CookieReader, sessionId: unknown, events: unknown): Promise<BatchAnswer> {
+    const session = await core.checkSession(reader);
+    const batch = parseHeartbeatBatch(events);
+    if (batch === null) return { kind: "discard" };
+    // La guarda ya reportó lo suyo. Sin una sesión que pase, se queda en la cola: al volver a
+    // entrar se manda desde la sesión nueva.
+    if (session.kind !== "pass" && session.kind !== "incomplete") return { kind: "retry" };
+    const id = idOrNull(sessionId);
+    if (id === null) return { kind: "discard" };
+    if (batch.length === 0) return { kind: "settled", seqs: [] };
+
+    let outcome: HeartbeatOutcome | null;
+    try {
+      outcome = await core.store.heartbeat(session.claims, { sessionId: id, presence: false, events: batch, decide: decideBeat });
+    } catch {
+      outcome = null;
+    }
+    if (outcome === null) {
+      await deps.report("heartbeat_unavailable");
+      return { kind: "retry" };
+    }
+    return (await settle(outcome.batch)) ?? { kind: "settled", seqs: [] };
   }
 
   /**
@@ -384,5 +496,5 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     return purpose === "review" ? review(reader, lessonId) : watch(reader, lessonId, options);
   }
 
-  return { getMediaGrant, lessonAccess, playbackPresence };
+  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats };
 }
