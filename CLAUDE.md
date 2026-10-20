@@ -49,7 +49,7 @@ pnpm dev         # aplicación en local, en http://localhost:3000. La muestra de
 pnpm typecheck   # tipos
 pnpm lint        # lint, incluida la regla de capas
 pnpm test        # dominio, textos, capas y contraste, y los componentes en un DOM simulado. Sin red ni base
-pnpm test:coverage   # las pruebas de `unit` con cobertura: src/domain/access/ debe dar 100 %, archivo por archivo
+pnpm test:coverage   # las pruebas de `unit` con cobertura: src/domain/access/ y src/domain/consumption/ deben dar 100 %, archivo por archivo
 pnpm secrets     # escaneo de secretos en todo el repositorio
 pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
@@ -183,7 +183,7 @@ acciones comparan `Origin` con `Host`. Las mismas comprobaciones de `db:admins` 
 `DATABASE_URL` local; de un error imprime solo el código. Deja auditoría y consentimientos:
 antes de cualquier prueba, se apaga el servidor y `pnpm db:reset`.
 
-Si se tocó `src/domain/access/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
+Si se tocó `src/domain/access/` o `src/domain/consumption/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
 `tests/architecture/` los prohíbe): una rama que no se puede cubrir sobra, y se quita. El
 porcentaje no ve lo que decide una expresión regular o una tabla, así que no basta: cada
@@ -1199,7 +1199,7 @@ falla. Veintiuna precisiones que la tabla no dice:
   Auth que la abrió: desde la misma (renovar la dirección, recargar, cambiar de lección, otra
   pestaña) reemplaza a la anterior y nunca dice ocupado. «Viva» es un latido dentro de tres
   `LATIDO_SEGUNDOS`; el cupo es `SESIONES_SIMULTANEAS`; las dos salen de los parámetros
-  dentro de la base. El latido de presencia es `playbackPresence` (`private.touch_playback()`):
+  dentro de la base. El latido de presencia es `playbackHeartbeat` (`private.touch_playback()`):
   una vencida vuelve a pasar por el cupo, una revocada dice por qué y cuál tomó su lugar
   (`revoked_by`, para «Reproducir aquí»). Cerrar una sesión de Auth suelta sus reproducciones
   con un disparador sobre `private.app_sessions`. Nadie escribe la tabla fuera de esas
@@ -1208,8 +1208,7 @@ falla. Veintiuna precisiones que la tabla no dice:
   `private.app_sessions` (`for key share`): si se cerró después de la guarda contesta
   `session_closed` y la pantalla recarga.
   La revisión del equipo no abre reproducción (la base lo impide). La dirección de Mux no se revoca: el
-  reproductor se detiene porque su latido lo dice. T-205 se monta encima: la presencia va
-  antes de `record_heartbeats`, y lo atrasado de una reproducción reemplazada se acepta.
+  reproductor se detiene porque su latido lo dice. T-205 se monta encima (la viñeta que sigue).
   Las pruebas: `supabase/tests/22_reproducciones.test.sql` (el cupo, el reemplazo, la ventana,
   la reentrada, el disparador; dos sesiones de Auth de la misma cuenta se simulan declarando
   `app.actor_session`) y `tests/integration/40-reproducciones.test.ts` (cada navegador es otra
@@ -1232,6 +1231,72 @@ falla. Veintiuna precisiones que la tabla no dice:
     cerrar). El nombre del navegador sale de `src/app/_lib/devices.ts`, el mismo de PA-25. En el
     extremo a extremo el video no avanza (Mux está cortado): `advance` manda el aviso `playing`
     al elemento, y `beatNow` un `visibilitychange`, para no esperar 30 segundos.
+- **Los latidos que miden** (T-205; RF-401 a RF-403; decisiones de Sergio del 2026-10-19; 05
+  §5.4, §9.2 y §13.2). El latido de presencia lleva los tramos vistos que el navegador tiene
+  pendientes (`playbackHeartbeat(reader, reproducción, tramos)`), y `flushHeartbeats` los manda
+  sin presencia: no toma ni refresca el lugar. Un tramo es `{seq, from, to, rate, visible}`, en
+  segundos enteros del video, sin la lección (sale de la reproducción) ni la hora. Lo que no se
+  ve leyendo un solo archivo:
+  - **El libro (`watch_events`) no lo toca nadie de la aplicación**, ni para leer: solo
+    `private.record_heartbeats()`, y el código no lo nombra (lo exigen el vigilante, que mira
+    también cada partición, y una prueba de arquitectura). Va por mes, sin partición por
+    omisión. Las particiones las crea la migración y después `pg_cron` cada día (el trabajo
+    `watch_partitions`, que llama `private.ensure_watch_partitions(2)`), con la tabla suelta y
+    unida después con `attach partition`: así no detiene los latidos que entran. Cada partición
+    lleva su seguridad por fila y su seguro contra vaciarla, que no pasa de la madre. El vigilante
+    exige además el seguro de editar encendido en cada una, que no haya partición por omisión, y
+    que exista la del mes que sigue: si `pg_cron` dejó de correr, se sabe antes de que fallen los
+    latidos.
+  - **La presencia y el lote van en una transacción**, la presencia primero (`recordHeartbeat`,
+    en `records.ts`, que el almacén abre con `asServer` y el motivo `playback_heartbeat`). Antes
+    de registrar se lee el blanco (`private.heartbeat_target()`: la lección y el tope del reloj)
+    y los hechos de la cuenta, y la regla decide **a la hora del tope** si lo visto cuenta
+    (`decideBeat`: `resolveAccountAccess` a esa hora, `resolveMediaAccess` y `accessCounts`).
+    Lo atrasado se mide en su hora, no en la de llegada. El tope vuelve a la base tal como lo
+    escribió (texto, no `Date`: perdería los microsegundos), y si ya es otro (otra transacción
+    latió o revocó entre las dos lecturas) contesta `failed` y el lote se reintenta. «No se supo»
+    no registra nada: el lote se queda en la cola y se reporta (`heartbeat_unavailable`).
+    Guardarlo como «no cuenta» sería para siempre, porque al reintentarlo sale repetido.
+  - **La base revisa cada tramo y nunca lanza por uno:** repetido (`seqs_received`, que cubre
+    también el reenvío que cruza de mes), forma imposible, más allá de la duración (hasta 2 s
+    se recorta) y el reloj. Lanzar abortaría la transacción con la presencia, y sin presencia el
+    límite de una a la vez se cae. Cualquier otra falla (falta la partición o un parámetro) la
+    ataja un bloque de excepción de plpgsql, que contesta `failed`, y la presencia de la misma
+    transacción se queda. No contradice la regla del adaptador: lo que se prohíbe es atrapar en
+    TypeScript; esto es una subtransacción de la base. Lo que el bloque no ataja (una consulta
+    cancelada) o un error al leer los hechos sí abortan la transacción entera: `recordHeartbeat`
+    no atrapa un `DatabaseError`, y `playbackHeartbeat` repite entonces la presencia sola, en
+    otra transacción, para que la reproducción no venza.
+  - **El reloj es el tiempo vivo** (`live_seconds`): cada presencia suma lo que pasó desde la
+    anterior, a lo más una ventana. El tope es ahora, la revocación o el último latido más una
+    ventana, lo que llegue primero; el presupuesto, el tiempo transcurrido (tiempo vivo + lo que
+    va del último latido al tope) × `VELOCIDAD_MAX`, más 5 s de tolerancia que nunca pasan del
+    tiempo transcurrido, contra lo ya aceptado. Así un dispositivo que dejó de latir mientras
+    otro veía no junta tiempo para vaciarlo después (05 §15 A1), y abrir reproducciones en serie
+    desde la misma sesión no junta tolerancias. La revisión contra el reloj solo vive en la base,
+    la única que ve lo acumulado, bajo el candado de la cuenta. La persona no lee su tiempo vivo:
+    le diría cuánto le sobra.
+  - **Lo que cuenta lo calcula la base:** `qualifies` es visible y a no más de `VELOCIDAD_MAX`, y
+    `counts_for_payout` pide además que la reproducción cuente y que TypeScript haya dicho que el
+    acceso cuenta. Lo que dice TypeScript solo lo baja.
+  - **Quién escribe:** la cuenta que abrió la reproducción y, si sigue viva, solo desde la misma
+    sesión de Auth (PA-34 le muestra a otro dispositivo el id de una viva). Lo atrasado de otra
+    sesión entra si la reproducción ya está revocada, con cualquier motivo, o su sesión ya no
+    existe: es lo que el navegador guardó y manda al volver a entrar. Y solo si su tope cae en el
+    periodo en curso o en el anterior: un periodo cerrado no cambia, y lo que sobró del
+    presupuesto de una reproducción vieja no se llena después (contesta `not_found`).
+  - Lo que se contesta del lote (`BatchAnswer`): `settled` con los consecutivos que salen de la
+    cola (aceptados, repetidos y rechazados), `discard` (la reproducción no es de quien la manda,
+    o el lote no tiene forma: lo enviado se tira) o `retry`. Las acciones son
+    `playbackPresenceAction(slug, lección, reproducción, tramos)` y `flushHeartbeatsAction`. Sin
+    el progreso (T-206), los días de práctica ni `rollup_dirty` (T-207). La cola del navegador,
+    con su dueña entre pestañas y sus reintentos, es la segunda solicitud.
+  - Las pruebas: `supabase/tests/23_latidos.test.sql` (en una transacción `now()` no avanza: el
+    tiempo vivo se simula moviendo el último latido hacia atrás) y
+    `tests/integration/40-reproducciones.test.ts`. Que mandar sin presencia espera el candado de
+    la cuenta no se puede probar ahí, por lo mismo que latir; tampoco el mismo lote desde dos
+    conexiones a la vez (lo de una transacción que se revierte no lo ve otra). Lo cubren el
+    candado de la cuenta, el `for update` de la fila y `seqs_received`.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import type { Tx } from "@/adapters/supabase/db";
+import { DatabaseError } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
 import type { AccountFacts } from "@/domain/access/account-access";
 import { COURSE_STATES, type MediaBasis, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
@@ -359,9 +360,11 @@ export interface HeartbeatOutcome {
   batch: BatchRecord | null;
 }
 
+// El tope viaja como lo escribió la base: vuelve tal cual a `record_heartbeats`, que lo compara
+// con el suyo (una fecha de JavaScript perdería los microsegundos).
 const targetRow = z.object({
   answer: z
-    .union([z.object({ outcome: z.literal("found"), lesson_id: uuid, at: instant }).strict(), notFound])
+    .union([z.object({ outcome: z.literal("found"), lesson_id: uuid, at: z.string() }).strict(), notFound])
     .nullable(),
 });
 
@@ -400,18 +403,21 @@ export async function recordHeartbeat(tx: Tx, beat: HeartbeatBeat): Promise<Hear
   if (found.outcome === "not_found") return { presence, batch: { kind: "not_found" } };
 
   // Una forma inesperada de los hechos no es una falla de la base: la transacción sigue sana, y
-  // la presencia que ya corrió se queda.
+  // la presencia que ya corrió se queda. Un error de la base sí la abortó: atraparlo y seguir
+  // no se puede (el adaptador lo prohíbe), así que sube, y el servicio repite la presencia sola.
   let facts: WatchFacts | null;
   try {
     facts = await readWatchFacts(tx, found.lesson_id);
-  } catch {
+  } catch (error) {
+    if (error instanceof DatabaseError) throw error;
     facts = null;
   }
-  const counts = facts === null ? "unknown" : beat.decide(facts, found.at);
+  const counts = facts === null ? "unknown" : beat.decide(facts, new Date(found.at));
   if (counts === "unknown") return { presence, batch: { kind: "unknown" } };
 
   const [row] = await tx.query(
-    sql`select private.record_heartbeats(${beat.sessionId}::uuid, ${JSON.stringify(beat.events)}::jsonb, ${counts === "counts"}) as answer`,
+    sql`select private.record_heartbeats(${beat.sessionId}::uuid, ${JSON.stringify(beat.events)}::jsonb, ${counts === "counts"},
+                                         ${found.at}::timestamptz) as answer`,
     recordedRow,
   );
   const answer = row?.answer ?? null;

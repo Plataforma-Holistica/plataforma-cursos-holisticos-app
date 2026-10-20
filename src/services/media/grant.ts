@@ -408,18 +408,30 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     const id = idOrNull(sessionId);
     if (id === null) return { presence: { kind: "refused" }, batch: unsent(batch, "discard") };
 
-    let outcome: HeartbeatOutcome | null;
-    try {
-      outcome = await core.store.heartbeat(session.claims, { sessionId: id, presence: true, events: batch ?? [], decide: decideBeat });
-    } catch {
-      outcome = null;
-    }
+    const beat = async (events: HeartbeatEvent[]): Promise<HeartbeatOutcome | null> => {
+      try {
+        return await core.store.heartbeat(session.claims, { sessionId: id, presence: true, events, decide: decideBeat });
+      } catch {
+        return null;
+      }
+    };
+    let outcome = await beat(batch ?? []);
+    // El lote tumbó la transacción con un error de la base que el registro no ataja (una consulta
+    // cancelada, los hechos que no se leyeron): la presencia, sola, en otra. Así nada del
+    // registro deja vencer la reproducción.
+    const alone = (outcome === null || outcome.presence === null) && batch !== null && batch.length > 0;
+    if (alone) outcome = await beat([]);
     if (outcome === null || outcome.presence === null) {
       await deps.report("playback_unavailable");
       return { presence: { kind: "unavailable" }, batch: unsent(batch, "retry") };
     }
     const presence = outcome.presence;
-    const answer: BatchAnswer | null = batch === null ? { kind: "discard" } : await settle(outcome.batch);
+    let answer: BatchAnswer | null;
+    if (batch === null) answer = { kind: "discard" };
+    else if (alone) {
+      await deps.report("heartbeat_unavailable");
+      answer = { kind: "retry" };
+    } else answer = await settle(outcome.batch);
     switch (presence.kind) {
       case "ok":
         return { presence: { kind: "ok" }, batch: answer };

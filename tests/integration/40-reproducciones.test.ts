@@ -238,7 +238,7 @@ describe("una reproducción a la vez", () => {
       for (const call of [
         "private.open_playback(gen_random_uuid(), 'x', 'subscription', true, null)",
         "private.touch_playback(gen_random_uuid())",
-        "private.record_heartbeats(gen_random_uuid(), '[]', true)",
+        "private.record_heartbeats(gen_random_uuid(), '[]', true, now())",
       ]) {
         await client.query("begin isolation level repeatable read");
         // Como el servidor, dentro de esta transacción, que se revierte (como en `reverted`).
@@ -400,12 +400,20 @@ describe("los latidos que miden (T-205)", () => {
       const lesson = await setUp(owner, who.id);
       const media = mediaOn(owner);
       const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
-      // Recién abierta: sin tiempo vivo, solo caben los 5 segundos de tolerancia.
+      // Recién abierta (en esta transacción `now()` no avanza): sin tiempo transcurrido no cabe nada,
+      // ni la tolerancia, que nunca pasa del tiempo transcurrido.
       expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 5), tramo(1, 5, 35)])).batch).toEqual({
         kind: "settled",
         seqs: [0, 1],
       });
-      expect((await ledger(owner, first.playbackSessionId)).map((row) => row.seq)).toEqual([0]);
+      expect(await ledger(owner, first.playbackSessionId)).toEqual([]);
+      // Con diez segundos vivos caben 10 × 2 + 5.
+      await alive(owner, first.playbackSessionId, 10);
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(2, 0, 25), tramo(3, 25, 26)])).batch).toEqual({
+        kind: "settled",
+        seqs: [2, 3],
+      });
+      expect((await ledger(owner, first.playbackSessionId)).map((row) => row.seq)).toEqual([2]);
       expect(media.reported).toEqual([]);
     });
   });

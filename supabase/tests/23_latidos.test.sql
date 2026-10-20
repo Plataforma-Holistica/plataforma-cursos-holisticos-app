@@ -14,7 +14,7 @@
 -- se simula moviendo hacia atrás el último latido de la reproducción.
 begin;
 \ir _ayuda.psql
-select plan(102);
+select plan(114);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-late@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-late@prueba.test');
@@ -61,13 +61,16 @@ begin
   return v;
 end
 $$;
-create function pruebas.registra(p_id uuid, p_session uuid, p_playback uuid, p_events jsonb, p_counts boolean default true) returns jsonb
+-- Como el servidor: con el tope que dio el blanco (o el que se le diga).
+create function pruebas.registra(p_id uuid, p_session uuid, p_playback uuid, p_events jsonb, p_counts boolean default true,
+                                 p_at timestamptz default null) returns jsonb
 language plpgsql as $$
 declare
   v jsonb;
 begin
   perform pruebas.como(p_id, p_session);
-  select private.record_heartbeats(p_playback, p_events, p_counts) into v;
+  select private.record_heartbeats(p_playback, p_events, p_counts,
+           coalesce(p_at, (private.heartbeat_target(p_playback) ->> 'at')::timestamptz, now())) into v;
   perform pruebas.limpiar();
   return v;
 end
@@ -80,7 +83,7 @@ declare
 begin
   perform pruebas.como(p_id, p_session);
   perform private.touch_playback(p_playback);
-  select private.record_heartbeats(p_playback, p_events, true) into v;
+  select private.record_heartbeats(p_playback, p_events, true, (private.heartbeat_target(p_playback) ->> 'at')::timestamptz) into v;
   perform pruebas.limpiar();
   return v;
 end
@@ -186,16 +189,20 @@ select ok(
   and not has_table_privilege(r, 'private.heartbeat_rejection_counts', 'delete, truncate, trigger'),
   r || ' no toca los rechazos')
 from unnest(array['anon', 'authenticated', 'service_role', 'app_service']) as r;
+select ok(
+  has_column_privilege('authenticated', 'public.playback_sessions', 'accepted_media_seconds', 'select')
+  and not has_column_privilege('authenticated', 'public.playback_sessions', 'live_seconds', 'select'),
+  'la persona no lee su tiempo vivo: le diría cuánto le sobra del presupuesto');
 select is((select count(*)::integer from pg_constraint where conrelid = 'private.heartbeat_rejection_counts'::regclass and contype = 'f'), 0,
   'los rechazos no apuntan a profiles: es una tabla muy escrita');
 
 select ok(
   has_function_privilege('app_service', 'private.heartbeat_target(uuid)', 'execute')
-  and has_function_privilege('app_service', 'private.record_heartbeats(uuid, jsonb, boolean)', 'execute'),
+  and has_function_privilege('app_service', 'private.record_heartbeats(uuid, jsonb, boolean, timestamptz)', 'execute'),
   'el servidor pide el blanco y registra');
 select ok(
   not has_function_privilege(r, 'private.heartbeat_target(uuid)', 'execute')
-  and not has_function_privilege(r, 'private.record_heartbeats(uuid, jsonb, boolean)', 'execute'),
+  and not has_function_privilege(r, 'private.record_heartbeats(uuid, jsonb, boolean, timestamptz)', 'execute'),
   r || ' no')
 from unnest(array['anon', 'authenticated', 'service_role']) as r;
 select ok(
@@ -218,6 +225,24 @@ select is(
   (select array_agg(problem) from private.schema_violations() where object_name = current_setting('pruebas.particion')),
   array['watch partition without truncate guard'], 'y si una partición se queda sin su seguro');
 do $$ begin execute format('alter table %s enable trigger ledger_no_truncate', current_setting('pruebas.particion')); end $$;
+do $$ begin execute format('alter table %s disable trigger ledger_no_update_delete', current_setting('pruebas.particion')); end $$;
+select is(
+  (select array_agg(problem) from private.schema_violations() where object_name = current_setting('pruebas.particion')),
+  array['watch partition without update guard'], 'o sin el de editar y borrar, que pasa de la madre pero se puede apagar');
+do $$ begin execute format('alter table %s enable trigger ledger_no_update_delete', current_setting('pruebas.particion')); end $$;
+create table public.watch_events_omision partition of public.watch_events default;
+alter table public.watch_events_omision enable row level security;
+select is(
+  (select array_agg(problem) from private.schema_violations() where object_name = 'public.watch_events_omision' and problem like 'watch default%'),
+  array['watch default partition'], 'y si alguien le pone una partición por omisión');
+drop table public.watch_events_omision;
+select set_config('pruebas.siguiente',
+  format('watch_events_%s', to_char(date_trunc('month', now() at time zone 'America/Mexico_City') + interval '1 month', 'YYYYMM')), true);
+do $$ begin execute format('alter table public.%I rename to falta', current_setting('pruebas.siguiente')); end $$;
+select is(
+  (select array_agg(problem) from private.schema_violations() where object_name = 'public.' || current_setting('pruebas.siguiente')),
+  array['watch partition missing for next month'], 'y si falta la partición del mes que sigue: pg_cron dejó de correr');
+do $$ begin execute format('alter table public.falta rename to %I', current_setting('pruebas.siguiente')); end $$;
 grant insert on public.watch_events to app_service;
 select ok(
   exists (select 1 from private.schema_violations() where problem = 'watch ledger reachable by app_service' and object_name = 'public.watch_events'),
@@ -238,9 +263,28 @@ select ok(
    from generate_series(date_trunc('month', now() at time zone 'UTC') - interval '1 month',
                         date_trunc('month', now() at time zone 'UTC') + interval '2 months', interval '1 month') m),
   'la migración dejó del mes anterior al siguiente del siguiente');
+select private.ensure_watch_partitions(2);
 select is(private.ensure_watch_partitions(2), 0, 'pedirlas otra vez no crea nada');
 select is(private.create_watch_partition(pruebas.periodo(now())), false, 'ni la del mes en curso');
-select is(private.ensure_watch_partitions(4), 2, 'cuatro meses adelante crea las dos que faltaban');
+-- Empieza por el mes anterior: lo atrasado del mes pasado tiene dónde caer. Sin la partición
+-- del mes pasado, asegurar cero meses adelante la crea (y nada más).
+select set_config('pruebas.anterior',
+  format('watch_events_%s', to_char(date_trunc('month', now() at time zone 'America/Mexico_City') - interval '1 month', 'YYYYMM')), true);
+do $$ begin
+  execute format('alter table public.watch_events detach partition public.%I', current_setting('pruebas.anterior'));
+  execute format('alter table public.%I rename to apartada', current_setting('pruebas.anterior'));
+end $$;
+select is(private.ensure_watch_partitions(0), 1, 'asegurar empieza por el mes anterior');
+do $$ begin
+  execute format('drop table public.%I', current_setting('pruebas.anterior'));
+  execute format('alter table public.apartada rename to %I', current_setting('pruebas.anterior'));
+  execute format('alter table public.watch_events attach partition public.%I for values in (%s)',
+                 current_setting('pruebas.anterior'), substr(current_setting('pruebas.anterior'), 14));
+end $$;
+-- Aunque alguien les conceda permisos por omisión a las tablas nuevas.
+alter default privileges for role postgres in schema public grant select, insert on tables to app_service;
+select ok(private.ensure_watch_partitions(4) > 0, 'cuatro meses adelante crea las que faltaban');
+alter default privileges for role postgres in schema public revoke select, insert on tables from app_service;
 select ok(
   (select c.relrowsecurity
           and exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'ledger_no_truncate')
@@ -362,6 +406,10 @@ select is(
   '{"outcome": "recorded", "accepted": [0, 2], "duplicate": [], "rejected": [{"seq": 1, "reason": "faster_than_clock"}]}'::jsonb,
   'con 20 segundos vivos caben 45: entra el primero, el segundo no cabe y el tercero sí');
 select is(pruebas.rechazos('faster_than_clock') - current_setting('pruebas.antes_rapido')::integer, 1, 'el rechazo se cuenta');
+select is(
+  pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'reloj'), jsonb_build_array(pruebas.tramo(3, 75, 76))),
+  '{"outcome": "recorded", "accepted": [], "duplicate": [], "rejected": [{"seq": 3, "reason": "faster_than_clock"}]}'::jsonb,
+  'el presupuesto se mide contra lo ya aceptado en lotes anteriores: lleno, ni un segundo más');
 
 -- A3: veinte minutos declarados en una reproducción de cinco segundos.
 insert into r values ('a3', pruebas.abre(pruebas.computadora()));
@@ -412,6 +460,27 @@ select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'revocada'),
     jsonb_build_array(pruebas.tramo(0, 0, 110), pruebas.tramo(1, 110, 116), pruebas.tramo(2, 110, 115))) -> 'accepted',
   '[0, 2]'::jsonb, 'revocada, lo de antes de la revocación entra, y nada después');
+select is(
+  pruebas.blanco(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'revocada')) ->> 'at',
+  to_jsonb((pruebas.fila((select id from r where name = 'revocada'))).revoked_at) #>> '{}', 'su blanco tiene el tope en la revocación');
+
+-- La tolerancia nunca pasa del tiempo transcurrido: una reproducción que vivió un segundo no
+-- trae 5 de regalo. Abrir en serie desde la misma sesión no junta tolerancias.
+insert into r values ('breve', pruebas.abre(pruebas.computadora()));
+select pruebas.ajusta((select id from r where name = 'breve'), 0, 1);
+update public.playback_sessions set revoked_at = now(), revoke_reason = 'replaced' where id = (select id from r where name = 'breve');
+select is(
+  pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'breve'),
+    jsonb_build_array(pruebas.tramo(0, 0, 3), pruebas.tramo(1, 3, 4))),
+  '{"outcome": "recorded", "accepted": [0], "duplicate": [], "rejected": [{"seq": 1, "reason": "faster_than_clock"}]}'::jsonb,
+  'un segundo vivo: 1 × 2 + 1 = 3 segundos, no 7');
+
+-- El tope con que se decidió el acceso tiene que ser el de ahora: si otra transacción latió o
+-- revocó entre las dos lecturas, no se registra.
+select is(
+  pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'revocada'),
+    jsonb_build_array(pruebas.tramo(9, 200, 210)), true, now() - interval '1 second'),
+  '{"outcome": "failed", "code": "clock_moved"}'::jsonb, 'con otro tope, nada: la decisión sería de otra hora');
 
 -- Lo atrasado cuenta en su mes: una reproducción revocada antes de que empezara este mes
 -- guarda en el mes anterior, y su consecutivo ya no entra en este.
@@ -430,6 +499,15 @@ select is(
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'mes'), jsonb_build_array(pruebas.tramo(0, 0, 30))) -> 'duplicate',
   '[0]'::jsonb, 'y reenviado no entra otra vez, aunque la clave del libro no lo atraparía en otro mes');
+insert into r values ('vieja', pruebas.abre(pruebas.computadora()));
+update public.playback_sessions
+set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interval '40 days',
+    revoked_at = date_trunc('month', now()) - interval '40 days', revoke_reason = 'replaced',
+    started_at = date_trunc('month', now()) - interval '41 days'
+where id = (select id from r where name = 'vieja');
+select is(
+  pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'vieja'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
+  '{"outcome": "not_found"}'::jsonb, 'lo de antes del mes pasado ya no entra: ese periodo no cambia');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que no cuenta (RF-403): la base lo calcula; lo que dice TypeScript solo lo baja.
@@ -482,6 +560,12 @@ update public.playback_sessions set revoked_at = now(), revoke_reason = 'closed_
 select is(
   pruebas.registra(pruebas.ana(), pruebas.telefono(), (select id from r where name = 'ajena'), jsonb_build_array(pruebas.tramo(0, 0, 30))) -> 'accepted',
   '[0]'::jsonb, 'revocada, la misma cuenta desde otra sesión manda lo atrasado');
+select is(
+  pruebas.registra(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'ajena'), jsonb_build_array(pruebas.tramo(1, 30, 60))),
+  '{"outcome": "not_found"}'::jsonb, 'otra cuenta tampoco en una revocada: lo atrasado es solo de su dueña');
+select is(
+  pruebas.blanco(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'ajena')),
+  '{"outcome": "not_found"}'::jsonb, 'ni pide su blanco');
 -- Sin revocar, pero su sesión de Auth ya no existe.
 insert into r values ('huerfana', pruebas.abre(pruebas.computadora()));
 update public.playback_sessions set auth_session_id = gen_random_uuid() where id = (select id from r where name = 'huerfana');

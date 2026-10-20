@@ -84,8 +84,8 @@ function grantWith(
     presence?: Presence | null | "throws";
     /** Los hechos con que la base le pregunta a la regla si el lote cuenta; nulo: no se pudieron leer. */
     beatFacts?: WatchFacts | null;
-    /** Lo que la base contesta del lote, si la regla supo decidir. */
-    recorded?: BatchRecord;
+    /** Lo que la base contesta del lote, si la regla supo decidir; `throws`: el lote tumba la transacción. */
+    recorded?: BatchRecord | "throws";
   } = {},
 ) {
   const calls: string[] = [];
@@ -134,6 +134,7 @@ function grantWith(
           let batch: BatchRecord | null = null;
           if (beat.events.length > 0) {
             calls.push(`registra ${beat.sessionId}`);
+            if (setup.recorded === "throws") return Promise.reject(new Error("consulta cancelada"));
             const facts = setup.beatFacts === undefined ? PAYING : setup.beatFacts;
             const counts = facts === null ? "unknown" : beat.decide(facts, AT);
             decisions.push(counts);
@@ -634,6 +635,21 @@ describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
     expect(service.reported).toEqual([]);
   });
 
+  it("si el lote tumba la transacción, la presencia se repite sola: la reproducción no vence", async () => {
+    const service = grantWith({ recorded: "throws" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
+    expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`, `registra ${PLAYBACK}`, `late ${PLAYBACK}`]);
+    expect(service.beats.map((each) => each.events.length)).toEqual([2, 0]);
+    expect(service.reported).toEqual(["heartbeat_unavailable"]);
+  });
+
+  it("si tampoco la presencia sola contesta, no se supo: se reporta como la presencia", async () => {
+    const service = grantWith({ presence: "throws" });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "unavailable" }, batch: { kind: "retry" } });
+    expect(service.beats).toHaveLength(2);
+    expect(service.reported).toEqual(["playback_unavailable"]);
+  });
+
   it("la base no pudo registrar: se queda en la cola y se reporta", async () => {
     const service = grantWith({ recorded: { kind: "failed", code: "23514" } });
     expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
@@ -690,6 +706,7 @@ describe("mandar los tramos sin presencia (T-205)", () => {
     const service = grantWith();
     expect(await service.flushHeartbeats(reader, PLAYBACK, [])).toEqual({ kind: "settled", seqs: [] });
     expect(service.calls).toEqual(["guarda de sesión"]);
+    expect(service.beats).toEqual([]);
   });
 
   it("a una cuenta a la que le falta algo también", async () => {
@@ -723,6 +740,7 @@ describe("mandar los tramos sin presencia (T-205)", () => {
     ["la base no pudo: se queda y se reporta", { recorded: { kind: "failed", code: "23514" } }, { kind: "retry" }, ["heartbeat_unavailable"]],
     ["no se supo si cuenta: se queda y se reporta", { beatFacts: null }, { kind: "retry" }, ["heartbeat_unavailable"]],
     ["la base no contestó: se queda y se reporta", { presence: "throws" }, { kind: "retry" }, ["heartbeat_unavailable"]],
+    ["el lote tumbó la transacción: se queda y se reporta", { recorded: "throws" }, { kind: "retry" }, ["heartbeat_unavailable"]],
   ])("%s", async (_what, setup, expected, reported) => {
     const service = grantWith(setup);
     expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual(expected);

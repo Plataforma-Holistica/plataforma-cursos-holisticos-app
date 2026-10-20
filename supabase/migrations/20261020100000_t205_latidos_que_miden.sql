@@ -28,7 +28,6 @@ alter table public.playback_sessions
   add constraint playback_sessions_live_positive check (live_seconds >= 0);
 comment on column public.playback_sessions.live_seconds is 'Segundos vivos (T-205): lo que sumó la presencia, a lo más una ventana por latido. Con VELOCIDAD_MAX, el tope de lo que la reproducción puede declarar visto.';
 comment on table public.playback_sessions is 'Una fila por reproducción (RF-107, RF-401). La escriben solo private.open_playback(), private.touch_playback() (T-204) y private.record_heartbeats() (T-205).';
-grant select (live_seconds) on public.playback_sessions to authenticated;
 
 -- La presencia de T-204, con el tiempo vivo. Lo demás no cambia.
 create or replace function private.touch_playback(p_session uuid)
@@ -131,7 +130,7 @@ create trigger ledger_no_truncate before truncate on public.watch_events
 -- tiene el libro, se rinde y la corrida de mañana lo vuelve a intentar.
 
 create function private.create_watch_partition(p_period public.period_id) returns boolean
-language plpgsql volatile security definer set search_path = ''
+language plpgsql volatile security definer set search_path = '' set lock_timeout = '5s'
 as $$
 declare
   v_name text := 'watch_events_' || p_period::text;
@@ -144,7 +143,6 @@ begin
     where i.inhparent = 'public.watch_events'::regclass and c.relname = v_name) then
     return false;
   end if;
-  perform pg_catalog.set_config('lock_timeout', '5s', true);
   execute pg_catalog.format(
     'create table public.%I (like public.watch_events including defaults including constraints)', v_name);
   execute pg_catalog.format('alter table public.%I enable row level security', v_name);
@@ -219,7 +217,9 @@ revoke all on private.heartbeat_rejection_counts from public, anon, authenticate
 -- dispositivo, no le sirve para escribir en ella.
 --
 -- El tope del reloj: ahora, o la revocación, o la última presencia más una ventana, lo que
--- llegue primero. Es la hora con la que se decide el acceso y el mes del tramo.
+-- llegue primero. Es la hora con la que se decide el acceso y el mes del tramo. Lo atrasado solo
+-- entra si su tope cae en el periodo en curso o en el anterior: un periodo cerrado no cambia, y
+-- lo que sobra del presupuesto de una reproducción vieja no se puede llenar después.
 
 -- Lo que el servidor necesita antes de registrar: la lección y el tope. Contesta (nula si no
 -- hay quien actúe o no declaró su sesión):
@@ -253,24 +253,34 @@ $$;
 
 -- Registrar un lote (05 §9.2). `p_events` es un arreglo de a lo más 50 tramos
 -- `{seq, from, to, rate, visible}`; `p_access_counts`, si el acceso de la cuenta a esa hora
--- cuenta para el reparto, como lo decidió TypeScript (nunca sube lo que la reproducción ya dice).
+-- cuenta para el reparto, como lo decidió TypeScript (nunca sube lo que la reproducción ya dice);
+-- `p_at`, el tope con que lo decidió (el de `heartbeat_target`). Si el tope ya es otro (otra
+-- transacción latió o revocó entre las dos lecturas), no registra: la decisión sería de otra
+-- hora, y quizá de otro mes.
 --
 -- Cada tramo, en orden de consecutivo (si se repite en el lote, manda el primero):
 --   · ya recibido: repetido;
 --   · forma imposible (consecutivo fuera de 0 a 10⁶, segundos que no son enteros o no avanzan,
 --     velocidad fuera de (0, 9.99], visibilidad que no es sí o no): `out_of_range`;
 --   · más allá de la duración: hasta 2 s se recorta (el redondeo de la duración); más, `out_of_range`;
---   · lo aceptado más el tramo no cabe en el presupuesto: `faster_than_clock`;
+--   · lo aceptado más el tramo no cabe en el presupuesto: `faster_than_clock`. El presupuesto es
+--     el tiempo transcurrido de la reproducción por VELOCIDAD_MAX, más 5 s de tolerancia que nunca
+--     pasan del tiempo transcurrido: abrir reproducciones en serie no junta tolerancias;
 --   · si no, se guarda en el mes del tope.
 -- Todo consecutivo visto, aceptado o no, queda recibido: un rechazo reenviado no se cuenta dos
 -- veces. No toca la presencia (`last_heartbeat_at`, `live_seconds`): ya corrió antes.
 --
 -- Contesta (nula si no hay quien actúe o no declaró su sesión):
 --   {outcome: 'recorded', accepted: [seq], duplicate: [seq], rejected: [{seq, reason}]}
---   {outcome: 'not_found'}             no existe, o no la puede escribir quien actúa
---   {outcome: 'failed', code}          nada se registró (falta la partición, un parámetro…)
+--   {outcome: 'not_found'}             no existe, no la puede escribir quien actúa, o su tope es
+--                                      de un periodo anterior al pasado
+--   {outcome: 'failed', code}          nada se registró (el tope cambió, falta la partición, un
+--                                      parámetro…)
+--
+-- Lo que no ataja el bloque de excepción: una consulta cancelada (`statement_timeout`) aborta la
+-- transacción entera. El servicio lo sabe y repite la presencia sola.
 
-create function private.record_heartbeats(p_session uuid, p_events jsonb, p_access_counts boolean)
+create function private.record_heartbeats(p_session uuid, p_events jsonb, p_access_counts boolean, p_at timestamptz)
 returns jsonb
 language plpgsql volatile security definer set search_path = ''
 as $$
@@ -283,6 +293,7 @@ declare
   v_max_rate numeric;
   v_zone text;
   v_period integer;
+  v_elapsed numeric;
   v_budget numeric;
   v_media integer := 0;
   v_seen int4multirange;
@@ -334,9 +345,16 @@ begin
     end if;
 
     v_top := least(pg_catalog.now(), v_row.revoked_at, v_row.last_heartbeat_at + v_window);
+    if v_top is distinct from p_at then
+      return pg_catalog.jsonb_build_object('outcome', 'failed', 'code', 'clock_moved');
+    end if;
     v_period := pg_catalog.to_char(pg_catalog.timezone(v_zone, v_top), 'YYYYMM')::integer;
-    v_budget := (v_row.live_seconds
-                 + greatest(extract(epoch from v_top - v_row.last_heartbeat_at), 0)) * v_max_rate + 5;
+    if v_period < pg_catalog.to_char(pg_catalog.date_trunc('month', pg_catalog.timezone(v_zone, pg_catalog.now())) - interval '1 month',
+                                      'YYYYMM')::integer then
+      return pg_catalog.jsonb_build_object('outcome', 'not_found');
+    end if;
+    v_elapsed := v_row.live_seconds + greatest(extract(epoch from v_top - v_row.last_heartbeat_at), 0);
+    v_budget := v_elapsed * v_max_rate + least(5, v_elapsed);
     v_seen := v_row.seqs_received;
 
     for v_item in
@@ -434,8 +452,8 @@ begin
 end
 $$;
 
-revoke all on function private.heartbeat_target(uuid), private.record_heartbeats(uuid, jsonb, boolean) from public;
-grant execute on function private.heartbeat_target(uuid), private.record_heartbeats(uuid, jsonb, boolean) to app_service;
+revoke all on function private.heartbeat_target(uuid), private.record_heartbeats(uuid, jsonb, boolean, timestamptz) from public;
+grant execute on function private.heartbeat_target(uuid), private.record_heartbeats(uuid, jsonb, boolean, timestamptz) to app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante aprende el libro de latidos: ningún rol de la aplicación lo toca, ni a ninguna
@@ -553,6 +571,31 @@ as $$
     and not exists (
       select 1 from pg_catalog.pg_trigger t
       where t.tgrelid = c.oid and t.tgname = 'ledger_no_truncate' and t.tgenabled <> 'D')
+  union all
+  -- El seguro de editar y borrar sí pasa de la madre, pero se puede apagar en una partición.
+  select 'watch partition without update guard', 'public.' || c.relname
+  from pg_catalog.pg_inherits i
+  join pg_catalog.pg_class c on c.oid = i.inhrelid
+  where i.inhparent = 'public.watch_events'::regclass
+    and not exists (
+      select 1 from pg_catalog.pg_trigger t
+      where t.tgrelid = c.oid and t.tgname = 'ledger_no_update_delete' and t.tgenabled <> 'D')
+  union all
+  -- Sin partición por omisión: un tramo sin su mes no entra.
+  select 'watch default partition', 'public.' || c.relname
+  from pg_catalog.pg_inherits i
+  join pg_catalog.pg_class c on c.oid = i.inhrelid
+  where i.inhparent = 'public.watch_events'::regclass and c.relpartbound is not null
+    and pg_catalog.pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'
+  union all
+  -- La partición del mes que sigue ya existe: si pg_cron dejó de correr, se sabe antes de que
+  -- los latidos empiecen a fallar.
+  select 'watch partition missing for next month', 'public.watch_events_' || m.period
+  from (select pg_catalog.to_char(
+                 pg_catalog.date_trunc('month', pg_catalog.timezone(
+                   coalesce(private.parameter_value('ZONA_HORARIA_PERIODO') #>> '{}', 'UTC'), pg_catalog.now()))
+                 + interval '1 month', 'YYYYMM') as period) m
+  where pg_catalog.to_regclass('public.watch_events_' || m.period) is null
   union all
   -- Los rechazos solo los escribe private.record_heartbeats() (T-205).
   select 'heartbeat rejections reachable by ' || r.rolname, 'private.heartbeat_rejection_counts'
