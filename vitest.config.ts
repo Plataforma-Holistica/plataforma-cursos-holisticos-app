@@ -25,11 +25,12 @@ export default defineConfig({
     // regular o una tabla: eso lo cuidan las tablas de casos y las propiedades.
     coverage: {
       provider: "v8",
-      include: ["src/domain/access/**/*.ts"],
+      include: ["src/domain/access/**/*.ts", "src/domain/consumption/**/*.ts"],
       exclude: ["**/*.test.ts"],
       reporter: ["text"],
       thresholds: {
         "src/domain/access/**": { 100: true, perFile: true },
+        "src/domain/consumption/**": { 100: true, perFile: true },
       },
     },
     projects: [

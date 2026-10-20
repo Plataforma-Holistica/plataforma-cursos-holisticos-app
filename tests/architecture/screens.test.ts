@@ -183,9 +183,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     watchLessonAction:
       /const answer = watchAnswerOf\(await getMediaGrant\(jar, lessonId, "watch", \{ closing \}\)\);\s*if \(answer\.kind === "reload"\) backTo\(slug, lessonId\);/,
     // El latido de presencia (T-204): la función corre la guarda de sesión y solo late una
-    // reproducción de esa sesión; si ya no pasa, a la página.
+    // reproducción de esa sesión; si ya no pasa, a la página. Desde T-205 lleva los tramos
+    // vistos tal como llegaron: la función los revisa.
     playbackPresenceAction:
-      /const answer = presenceReplyOf\(await playbackPresence\(await cookieJar\(\), sessionId\)\);\s*if \(answer\.kind === "reload"\) backTo\(slug, lessonId\);/,
+      /const answer = heartbeatReplyOf\(await playbackHeartbeat\(await cookieJar\(\), sessionId, events\)\);\s*if \(answer\.kind === "reload"\) backTo\(slug, lessonId\);/,
+    // Los tramos sin presencia (T-205): la misma guarda en la función, y nada más.
+    flushHeartbeatsAction: /return flushHeartbeats\(await cookieJar\(\), sessionId, events\);/,
     // Recordar los subtítulos: solo encendido o apagado, y el servicio corre la guarda y escribe
     // en la cuenta de esa sesión.
     rememberCaptionsAction: /if \(typeof on !== "boolean"\) return;\s*await rememberCaptions\(await cookieJar\(\), on\);/,

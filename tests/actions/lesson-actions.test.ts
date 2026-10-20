@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Las acciones del reproductor de la lección (PA-22, T-203), con sus servicios simulados: qué
 // le piden a la función única de medios y qué hacen con cada respuesta, y qué se guarda de los
-// subtítulos, y el latido de presencia (T-204). Lo que los servicios hacen de verdad lo prueban
-// sus pruebas de integración.
+// subtítulos, y el latido de presencia (T-204) con los tramos vistos (T-205). Lo que los
+// servicios hacen de verdad lo prueban sus pruebas de integración.
 
 const mocks = vi.hoisted(() => ({
   getMediaGrant: vi.fn(),
-  playbackPresence: vi.fn(),
+  playbackHeartbeat: vi.fn(),
+  flushHeartbeats: vi.fn(),
   rememberCaptions: vi.fn(),
   cookieJar: vi.fn(),
   redirect: vi.fn((to: string): never => {
@@ -15,11 +16,20 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
-vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant, playbackPresence: mocks.playbackPresence }));
+vi.mock("@/services/media/media", () => ({
+  getMediaGrant: mocks.getMediaGrant,
+  playbackHeartbeat: mocks.playbackHeartbeat,
+  flushHeartbeats: mocks.flushHeartbeats,
+}));
 vi.mock("@/services/account/account", () => ({ rememberCaptions: mocks.rememberCaptions }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
-import { playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "@/app/cursos/[slug]/lecciones/[leccion]/actions";
+import {
+  flushHeartbeatsAction,
+  playbackPresenceAction,
+  rememberCaptionsAction,
+  watchLessonAction,
+} from "@/app/cursos/[slug]/lecciones/[leccion]/actions";
 
 const jar = { get: () => undefined, set: () => undefined };
 const LESSON = "b0000000-0000-4000-8000-000000000002";
@@ -105,27 +115,54 @@ describe("rememberCaptionsAction", () => {
 });
 
 describe("playbackPresenceAction (T-204)", () => {
+  const EVENTS = [{ seq: 0, from: 0, to: 30, rate: 1, visible: true }];
+
   it("late la reproducción tal cual llegó, y dice si sigue", async () => {
-    mocks.playbackPresence.mockResolvedValue({ kind: "ok" });
-    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK)).toEqual({ kind: "ok" });
-    expect(mocks.playbackPresence).toHaveBeenCalledExactlyOnceWith(jar, PLAYBACK);
+    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "ok" }, batch: null });
+    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK)).toEqual({ kind: "ok", batch: null });
+    expect(mocks.playbackHeartbeat).toHaveBeenCalledExactlyOnceWith(jar, PLAYBACK, undefined);
+  });
+
+  it("con los tramos vistos (T-205): se los pasa tal cual, y dice cuáles salen de la cola", async () => {
+    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0] } });
+    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK, EVENTS)).toEqual({ kind: "ok", batch: { kind: "settled", seqs: [0] } });
+    expect(mocks.playbackHeartbeat).toHaveBeenCalledExactlyOnceWith(jar, PLAYBACK, EVENTS);
   });
 
   it("cerrada desde otro dispositivo: con la que tomó su lugar", async () => {
-    mocks.playbackPresence.mockResolvedValue({ kind: "revoked", reason: "closed_by_user", by: OTHER });
-    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK)).toEqual({ kind: "closed", from: "device", by: OTHER });
+    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "revoked", reason: "closed_by_user", by: OTHER }, batch: { kind: "retry" } });
+    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK, EVENTS)).toEqual({
+      kind: "closed",
+      from: "device",
+      by: OTHER,
+      batch: { kind: "retry" },
+    });
   });
 
   it.each([[{ kind: "suspended" }], [{ kind: "refused" }], [{ kind: "revoked", reason: "session_closed", by: null }]])(
     "%j: a la página de la lección, donde decide su guarda",
-    async (answer) => {
-      mocks.playbackPresence.mockResolvedValue(answer);
-      await expect(playbackPresenceAction("respirar", LESSON, PLAYBACK)).rejects.toThrow(`redirige a ${PATH}`);
+    async (presence) => {
+      mocks.playbackHeartbeat.mockResolvedValue({ presence, batch: { kind: "retry" } });
+      await expect(playbackPresenceAction("respirar", LESSON, PLAYBACK, EVENTS)).rejects.toThrow(`redirige a ${PATH}`);
     },
   );
 
   it("si lo que llegó no tiene forma de dirección, al inicio", async () => {
-    mocks.playbackPresence.mockResolvedValue({ kind: "refused" });
+    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "refused" }, batch: null });
     await expect(playbackPresenceAction(null, LESSON, PLAYBACK)).rejects.toThrow("redirige a /inicio");
   });
+});
+
+describe("flushHeartbeatsAction (T-205)", () => {
+  const EVENTS = [{ seq: 4, from: 120, to: 135, rate: 1.5, visible: false }];
+
+  it.each([[{ kind: "settled", seqs: [4] }], [{ kind: "discard" }], [{ kind: "retry" }]])(
+    "le pasa los tramos tal cual a la función, y le devuelve al navegador lo que dijo: %j",
+    async (answer) => {
+      mocks.flushHeartbeats.mockResolvedValue(answer);
+      expect(await flushHeartbeatsAction(PLAYBACK, EVENTS)).toEqual(answer);
+      expect(mocks.flushHeartbeats).toHaveBeenCalledExactlyOnceWith(jar, PLAYBACK, EVENTS);
+      expect(mocks.redirect).not.toHaveBeenCalled();
+    },
+  );
 });

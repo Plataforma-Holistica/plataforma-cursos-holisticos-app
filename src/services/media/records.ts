@@ -6,10 +6,12 @@ import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 import type { AccountFacts } from "@/domain/access/account-access";
 import { COURSE_STATES, type MediaBasis, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
+import type { AccessCount, HeartbeatEvent } from "@/domain/consumption/heartbeat";
 
 // Lo que la función única de medios le pregunta a la base: la lección con su video para
-// revisar, los hechos para ver, y las velocidades; y desde T-204, abrir la reproducción y su
-// latido de presencia. Cada función recibe la transacción ya abierta.
+// revisar, los hechos para ver, y las velocidades; desde T-204, abrir la reproducción y su
+// latido de presencia; y desde T-205, los tramos vistos. Cada función recibe la transacción
+// ya abierta.
 
 /** La lección y su video, como los necesita la regla. El playback id sale de aquí, nunca de quien pide. */
 export interface LessonVideo extends MediaLesson {
@@ -317,5 +319,109 @@ export async function touchPlayback(tx: Tx, sessionId: string): Promise<Presence
       return { kind: "revoked", reason: answer.reason, by: answer.by };
     case "not_found":
       return { kind: "not_found" };
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// Los latidos que miden (T-205; RF-401 a RF-403). La presencia y el lote van en la misma
+// transacción, la presencia primero (05 §9.2). Antes de registrar se lee el blanco de la
+// reproducción (su lección y el tope de su reloj) y los hechos de la cuenta, y la regla decide
+// a esa hora si lo visto cuenta. Si no se supo, el lote no se registra: un lote guardado en
+// falso ya no se corrige, porque al reintentarlo sale repetido.
+
+/** Por qué la base rechazó un tramo. */
+export const REJECT_REASONS = ["out_of_range", "faster_than_clock", "session_revoked"] as const;
+export type RejectReason = (typeof REJECT_REASONS)[number];
+
+export type BatchRecord =
+  /** Cada tramo con su veredicto: todos quedaron recibidos. */
+  | { kind: "recorded"; accepted: number[]; duplicate: number[]; rejected: { seq: number; reason: RejectReason }[] }
+  /** La reproducción no existe, o quien actúa no puede escribir en ella. */
+  | { kind: "not_found" }
+  /** No se supo si el acceso cuenta: no se registró nada. */
+  | { kind: "unknown" }
+  /** La base no pudo registrar (falta la partición, un parámetro): no se registró nada. */
+  | { kind: "failed"; code: string };
+
+export interface HeartbeatBeat {
+  sessionId: string;
+  /** Si además es el latido de presencia. Al pausar o al irse el reproductor solo se manda el lote. */
+  presence: boolean;
+  events: HeartbeatEvent[];
+  /** Si lo visto cuenta, con los hechos y a la hora del tope del reloj de la reproducción. */
+  decide: (facts: WatchFacts, at: Date) => AccessCount;
+}
+
+export interface HeartbeatOutcome {
+  /** Lo que contestó la presencia; nulo si no se pidió. */
+  presence: Presence | null;
+  /** Lo que pasó con el lote; nulo si venía vacío. */
+  batch: BatchRecord | null;
+}
+
+const targetRow = z.object({
+  answer: z
+    .union([z.object({ outcome: z.literal("found"), lesson_id: uuid, at: instant }).strict(), notFound])
+    .nullable(),
+});
+
+const recordedRow = z.object({
+  answer: z
+    .union([
+      z
+        .object({
+          outcome: z.literal("recorded"),
+          accepted: z.array(z.number().int()),
+          duplicate: z.array(z.number().int()),
+          rejected: z.array(z.object({ seq: z.number().int(), reason: z.enum(REJECT_REASONS) }).strict()),
+        })
+        .strict(),
+      notFound,
+      z.object({ outcome: z.literal("failed"), code: z.string() }).strict(),
+    ])
+    .nullable(),
+});
+
+/**
+ * Un latido: la presencia si se pide, y el lote si trae algo. Nulo si la base no reconoce a
+ * quien actúa o no se declaró su sesión. Lo que no tenga la forma lanza: es «no se supo».
+ */
+export async function recordHeartbeat(tx: Tx, beat: HeartbeatBeat): Promise<HeartbeatOutcome | null> {
+  let presence: Presence | null = null;
+  if (beat.presence) {
+    presence = await touchPlayback(tx, beat.sessionId);
+    if (presence === null) return null;
+  }
+  if (beat.events.length === 0) return { presence, batch: null };
+
+  const [target] = await tx.query(sql`select private.heartbeat_target(${beat.sessionId}::uuid) as answer`, targetRow);
+  const found = target?.answer ?? null;
+  if (found === null) return null;
+  if (found.outcome === "not_found") return { presence, batch: { kind: "not_found" } };
+
+  // Una forma inesperada de los hechos no es una falla de la base: la transacción sigue sana, y
+  // la presencia que ya corrió se queda.
+  let facts: WatchFacts | null;
+  try {
+    facts = await readWatchFacts(tx, found.lesson_id);
+  } catch {
+    facts = null;
+  }
+  const counts = facts === null ? "unknown" : beat.decide(facts, found.at);
+  if (counts === "unknown") return { presence, batch: { kind: "unknown" } };
+
+  const [row] = await tx.query(
+    sql`select private.record_heartbeats(${beat.sessionId}::uuid, ${JSON.stringify(beat.events)}::jsonb, ${counts === "counts"}) as answer`,
+    recordedRow,
+  );
+  const answer = row?.answer ?? null;
+  if (answer === null) return null;
+  switch (answer.outcome) {
+    case "recorded":
+      return { presence, batch: { kind: "recorded", accepted: answer.accepted, duplicate: answer.duplicate, rejected: answer.rejected } };
+    case "not_found":
+      return { presence, batch: { kind: "not_found" } };
+    case "failed":
+      return { presence, batch: { kind: "failed", code: answer.code } };
   }
 }

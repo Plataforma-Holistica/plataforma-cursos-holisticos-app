@@ -52,9 +52,9 @@ describe("solo la función única de medios firma", () => {
     // Abrir y latir (T-204): a nombre de quien actúa y con la sesión de Auth de sus claims, que
     // es lo que la base cuenta contra el cupo. Como sistema no habría ni una ni otra.
     expect(store).toMatch(/openPlayback: \(claims, opening\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => openPlayback\(tx, opening\)\),/);
-    expect(store).toMatch(
-      /touchPlayback: \(claims, sessionId\) => asServer\(\{ claims, reason: "playback_presence" \}, \(tx\) => touchPlayback\(tx, sessionId\)\),/,
-    );
+    // El latido (T-204) y los tramos vistos (T-205), en una sola transacción: la presencia, los
+    // hechos a la hora del tope y el registro.
+    expect(store).toMatch(/heartbeat: \(claims, beat\) => asServer\(\{ claims, reason: "playback_heartbeat" \}, \(tx\) => recordHeartbeat\(tx, beat\)\),/);
     expect(store).not.toMatch(/asSystem/);
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
     expect(store.match(/\basServer\(/g)).toHaveLength(4);
@@ -65,11 +65,9 @@ describe("solo la función única de medios firma", () => {
     // código: nada la lee ni la escribe por fuera de ellas.
     expect(naming(/\bopen_playback\b|\btouch_playback\b/)).toEqual(["src/services/media/records.ts"]);
     expect(naming(/\bplayback_sessions\b/)).toEqual([]);
-    expect(naming(/\bopenPlayback\b|\btouchPlayback\b/)).toEqual([
-      "src/services/media/grant.ts",
-      "src/services/media/records.ts",
-      "src/services/media/store.ts",
-    ]);
+    expect(naming(/\bopenPlayback\b/)).toEqual(["src/services/media/grant.ts", "src/services/media/records.ts", "src/services/media/store.ts"]);
+    // La presencia solo se late desde el latido de records.ts, en la transacción de los tramos.
+    expect(naming(/\btouchPlayback\b/)).toEqual(["src/services/media/records.ts"]);
     const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
     const body = (name: string) => grant.slice(grant.indexOf(`async function ${name}(`)).split(/\n {2}(?:async )?function /)[0] ?? "";
     // Se abre al ver, después de firmar; nunca al revisar ni al decidir al cargar.
@@ -77,9 +75,27 @@ describe("solo la función única de medios firma", () => {
     expect(body("watch").indexOf("core.store.openPlayback(")).toBeGreaterThan(body("watch").indexOf("await signFor("));
     expect(body("review")).not.toMatch(/openPlayback/);
     expect(body("lessonAccess")).not.toMatch(/openPlayback/);
-    // El latido pasa primero por la guarda de sesión.
-    expect(grant.match(/core\.store\.touchPlayback\(/g)).toHaveLength(1);
-    expect(grant).toMatch(/async function playbackPresence\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    // El latido y los tramos sin presencia pasan primero por la guarda de sesión.
+    expect(grant.match(/core\.store\.heartbeat\(/g)).toHaveLength(2);
+    expect(grant).toMatch(/async function playbackHeartbeat\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    expect(grant).toMatch(/async function flushHeartbeats\([^)]*\)[^{]*\{\n\s+const session = await core\.checkSession\(reader\);/);
+    expect(body("playbackHeartbeat")).toMatch(/core\.store\.heartbeat\(session\.claims, \{ sessionId: id, presence: true,/);
+    expect(body("flushHeartbeats")).toMatch(/core\.store\.heartbeat\(session\.claims, \{ sessionId: id, presence: false,/);
+  });
+
+  it("los tramos vistos solo entran por la función de la base, y el libro no se nombra en el código (T-205)", () => {
+    // Nada de la aplicación lee ni escribe el libro de latidos ni los rechazos: solo
+    // private.record_heartbeats(), que se llama en un solo archivo, como el blanco.
+    expect(naming(/\bwatch_events\b|\bheartbeat_rejection_counts\b/)).toEqual([]);
+    expect(naming(/\brecord_heartbeats\b|\bheartbeat_target\b/)).toEqual(["src/services/media/records.ts"]);
+    // Si lo visto cuenta lo decide la regla del dominio, con los hechos a la hora del tope.
+    const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
+    expect(grant).toMatch(
+      /const decideBeat = \(facts: WatchFacts, at: Date\): AccessCount =>\s*accessCounts\(resolveMediaAccess\("watch", facts\.viewer, resolveAccountAccess\(facts\.account, at, \{ graceDays: facts\.graceDays \}\), facts\.lesson\)\);/,
+    );
+    expect(grant.match(/decide: decideBeat/g)).toHaveLength(2);
+    // Las pantallas no nombran lo que cuenta: solo la acción pasa los tramos tal cual.
+    expect(naming(/\bparseHeartbeatBatch\b|\baccessCounts\b/).filter((file) => file.startsWith("src/app/"))).toEqual([]);
   });
 
   it("el playback id sale de la base solo en las lecturas de la función única", () => {
