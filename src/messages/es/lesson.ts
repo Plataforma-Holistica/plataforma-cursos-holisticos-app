@@ -29,6 +29,8 @@ export const lesson = defineMessages({
     ended: "Lección terminada",
     next: "Sigue: {title}",
     replay: "Volver a ver",
+    // PA-22: no sale por un latido perdido, sino a los dos envíos fallidos seguidos (T-205).
+    offline: "Sin conexión. Reintentando…",
   },
   // PA-33: por qué no hay acceso, sin dramatizar.
   denied: {

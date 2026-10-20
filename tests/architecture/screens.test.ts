@@ -578,6 +578,17 @@ describe("lo que viaja al navegador", () => {
     expect([...reached.packages]).toEqual([]);
   });
 
+  it("las reglas de los tramos vistos, que arma el navegador, son solo el dominio del consumo (T-205)", () => {
+    const reached = reachableFrom(join(src, "services/media/watch-rules.ts"), { runtimeOnly: true });
+    expect([...reached.files].map(posix).sort()).toEqual([
+      "src/domain/consumption/heartbeat.ts",
+      "src/domain/consumption/queue.ts",
+      "src/domain/consumption/segments.ts",
+      "src/services/media/watch-rules.ts",
+    ]);
+    expect([...reached.packages]).toEqual([]);
+  });
+
   // Dos pantallas pintan algo que se muestra una sola vez (la clave de un segundo factor al
   // configurarlo, y el código que se dicta al restablecer uno) y cuentan con que navegar
   // fuera de ellas las desmonta. Con `cacheComponents` Next conserva el estado de una

@@ -36,8 +36,11 @@ describe("solo la función única de medios firma", () => {
     ]);
   });
 
+  // La excepción es `watch-rules.ts`, las reglas puras de los tramos vistos que arma el navegador
+  // (T-205): no firma ni llega a la base, y una prueba de `screens.test.ts` exige que solo alcance
+  // el dominio del consumo.
   it("las pantallas y los trabajos piden la dirección a media.ts, nunca a grant.ts ni al adaptador", () => {
-    const outside = sources.filter((source) => /^src\/(app|jobs)\//.test(source.file) && /services\/media\/(?!media\b)/.test(source.text));
+    const outside = sources.filter((source) => /^src\/(app|jobs)\//.test(source.file) && /services\/media\/(?!media\b|watch-rules\b)/.test(source.text));
     expect(outside.map((source) => source.file)).toEqual([]);
   });
 
@@ -159,7 +162,7 @@ describe("solo la función única de medios firma", () => {
     // Su entrada `/lazy` inyecta estilos en línea: no se usa.
     expect(naming(/mux-player-react\/lazy|mux-player-react\/dist\/lazy/)).toEqual([]);
     // Solo las pantallas con video nombran al reproductor, y lo cargan con `next/dynamic`, sin
-    // servidor. De él importan en estático solo un tipo, que no viaja.
+    // servidor. De él importan en estático solo tipos, que no viajan.
     const screens = ["src/app/admin/_revision/screen.tsx", "src/app/cursos/[slug]/lecciones/[leccion]/screen.tsx"];
     expect(naming(/["'][^"']*_video\/player["']|["']\.\/player["']/)).toEqual(screens);
     for (const file of screens) {
@@ -167,7 +170,7 @@ describe("solo la función única de medios firma", () => {
       expect(screen, file).toMatch(
         /const Player = dynamic\(\(\) => import\("@\/app\/_video\/player"\)\.then\(\(module\) => module\.Player, \(\) => PlayerMissing\), \{\n\s+ssr: false,/,
       );
-      expect([...screen.matchAll(/^import ([^;]*)["']@\/app\/_video\/player["'];$/gm)].map((found) => found[1]), file).toEqual(["type { PlayerProps } from "]);
+      expect([...screen.matchAll(/^import ([^;]*)["']@\/app\/_video\/player["'];$/gm)].map((found) => found[1]), file).toEqual([expect.stringMatching(/^type \{[^}]*\} from $/)]);
     }
     // Sin analítica, sin cookies y sin imagen dentro de imagen.
     const player = withoutComments(readFileSync(join(src, "app/_video/player.tsx"), "utf8"));

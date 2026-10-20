@@ -244,6 +244,7 @@ describe("ver: la guarda de sesión primero", () => {
       until: IN_A_MONTH,
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
+      durationSeconds: 600,
     });
     // La reproducción se abre al final, después de firmar (T-204).
     expect(service.calls).toEqual(["guarda de sesión", `hechos ${LESSON}`, "velocidad", "firma", "abre"]);

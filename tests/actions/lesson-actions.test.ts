@@ -56,6 +56,7 @@ describe("watchLessonAction", () => {
       until: null,
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
+      durationSeconds: 356,
     });
     const answer = await watchLessonAction("respirar", LESSON);
     expect(mocks.getMediaGrant).toHaveBeenCalledExactlyOnceWith(jar, LESSON, "watch", { closing: undefined });
@@ -67,6 +68,7 @@ describe("watchLessonAction", () => {
       watermark: "ana@correo.com",
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
+      durationSeconds: 356,
     });
     // Nada de la base de acceso viaja al navegador.
     expect(JSON.stringify(answer)).not.toMatch(/basis|countsForPayout|until|expiresAt/);

@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type Route } from "@playwright/test";
 
 import { a11yViolations } from "../support/a11y";
 import { clearCounters, ownerQuery, person, type Person } from "../support/stack";
@@ -495,5 +495,178 @@ test("la misma lección en otra pestaña del mismo navegador: la nueva reproduce
     .toBe(true);
   await expect(second.locator("mux-player")).toHaveCount(1);
   await expect(second.getByText("Esta lección se abrió en otra pestaña o ventana.")).toHaveCount(0);
+  await context.close();
+});
+
+// Los tramos vistos (T-205). Aquí el video nunca carga: el elemento dice que avanza y en qué
+// segundo va, y manda `timeupdate` cada cuarto de segundo con el reloj de verdad, porque la base
+// revisa cada tramo contra el tiempo vivo de su reproducción.
+
+/** El video avanza de `from` a `to` a velocidad normal, en tiempo real. */
+async function playVideo(page: Page, from: number, to: number): Promise<void> {
+  await page.evaluate(
+    async ({ from, to }) => {
+      const element = document.querySelector("mux-player") as (Element & { fakeAt?: number }) | null;
+      if (element === null) throw new Error("sin reproductor");
+      if (Object.getOwnPropertyDescriptor(element, "paused") === undefined) {
+        Object.defineProperty(element, "paused", { configurable: true, get: () => false });
+        Object.defineProperty(element, "currentTime", { configurable: true, get: () => element.fakeAt ?? 0, set: () => undefined });
+        Object.defineProperty(element, "playbackRate", { configurable: true, get: () => 1, set: () => undefined });
+        Object.defineProperty(element, "duration", { configurable: true, get: () => 356 });
+      }
+      for (let at = from; at <= to; at += 0.25) {
+        element.fakeAt = at;
+        element.dispatchEvent(new Event("timeupdate"));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    },
+    { from, to },
+  );
+}
+
+/** La pausa, como la avisa Mux Player: el tramo se cierra y lo pendiente sale sin presencia. */
+async function pauseVideo(page: Page): Promise<void> {
+  await page.evaluate(() => document.querySelector("mux-player")?.dispatchEvent(new Event("pause")));
+}
+
+type Watched = {
+  session: string;
+  seq: number;
+  from: number;
+  to: number;
+  visible: boolean;
+};
+
+/** Lo que el libro tiene de esa cuenta. */
+async function watched(who: Person): Promise<Watched[]> {
+  return ownerQuery<Watched>(
+    `select playback_session_id::text as session, seq, from_second as "from", to_second as "to", was_visible as visible
+       from public.watch_events where profile_id = $1 order by received_at, seq`,
+    [who.id],
+  );
+}
+
+/** Cuántas colas guarda el navegador en esa página. */
+const queues = (page: Page) => page.evaluate(() => Object.keys(window.localStorage).filter((key) => key.startsWith("plataforma-latidos:")).length);
+
+/** Una acción de servidor: un envío con su cabecera. */
+const isAction = (route: Route) => route.request().method() === "POST" && route.request().headers()["next-action"] !== undefined;
+
+test("los tramos vistos llegan al libro una sola vez, aunque una respuesta se pierda (T-205)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  await playVideo(page, 0, 3);
+  // La respuesta del primer vaciado se pierde después de que el servidor lo atendió: el navegador
+  // lo reintenta, y la base lo contesta repetido.
+  let dropped = false;
+  await page.route("**/*", async (route) => {
+    if (!dropped && isAction(route)) {
+      dropped = true;
+      await route.fetch();
+      return route.abort();
+    }
+    return route.fallback();
+  });
+  await pauseVideo(page);
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
+  expect(dropped).toBe(true);
+  // El reintento sale a los 5 s; con su respuesta, la cola queda vacía. En el libro, uno solo.
+  await expect.poll(() => queues(page), { timeout: 15_000 }).toBe(0);
+  expect(await watched(who)).toHaveLength(1);
+  await context.close();
+});
+
+test("sin red: «Sin conexión. Reintentando…» a los dos envíos fallidos, y al volver, los tramos llegan (T-205)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  await playVideo(page, 0, 3);
+  await context.setOffline(true);
+  await pauseVideo(page);
+  // Un envío perdido no la muestra: el primero falla en el acto, y el reintento sale a los 5 s.
+  await page.waitForTimeout(2_000);
+  await expect(page.getByText("Sin conexión. Reintentando…")).toHaveCount(0);
+  const note = page.getByText("Sin conexión. Reintentando…");
+  await expect(note).toBeVisible({ timeout: 15_000 });
+  expect(await watched(who)).toEqual([]);
+  expect(await a11yViolations(page)).toEqual([]);
+  await context.setOffline(false);
+  await expect(page.getByText("Sin conexión. Reintentando…")).toHaveCount(0, { timeout: 20_000 });
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
+  await context.close();
+});
+
+test("con la pestaña oculta, lo visto llega como no visible (T-205, RF-403)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  // El navegador de prueba siempre está a la vista: se le dice que no, y se avisa.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await playVideo(page, 0, 3);
+  await pauseVideo(page);
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: false })]);
+  await context.close();
+});
+
+test("al irse la página con un tramo sin mandar, sale la próxima vez que se abre una lección (T-205)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  await playVideo(page, 0, 3);
+  // Nada sale de esta página: el tramo solo se guarda al irse.
+  await page.route("**/*", (route) => (isAction(route) ? route.abort() : route.fallback()));
+  await page.goto("about:blank");
+  expect(await watched(who)).toEqual([]);
+  const again = await context.newPage();
+  await again.goto(lessonUrl(SLUG, lesson));
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
+  await expect.poll(() => queues(again)).toBe(0);
+  await context.close();
+});
+
+test("al navegar dentro de la aplicación, el tramo abierto se cierra y sale (T-205)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  await playVideo(page, 0, 3);
+  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
+  await context.close();
+});
+
+test("al renovar la dirección, lo visto con la reproducción vieja llega a la vieja (T-205)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  await playVideo(page, 0, 3);
+  await expire(page);
+  await expect.poll(() => page.evaluate(() => document.querySelector("mux-player") !== (window as unknown as { expired?: Element }).expired)).toBe(true);
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3 })]);
+  const [{ session } = { session: "" }] = await watched(who);
+  const [old] = await ownerQuery<{ reason: string | null }>("select revoke_reason as reason from public.playback_sessions where id = $1", [session]);
+  expect(old?.reason).toBe("replaced");
   await context.close();
 });

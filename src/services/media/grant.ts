@@ -119,6 +119,8 @@ export type MediaGrant =
       playbackSessionId: string;
       /** Cada cuánto latir (`LATIDO_SEGUNDOS`). */
       heartbeatSeconds: number;
+      /** La duración de la lección, la que revisa la base en cada tramo: el navegador recorta a ella (T-205). */
+      durationSeconds: number;
     })
   | Busy
   | Refusal;
@@ -369,6 +371,7 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       until,
       playbackSessionId: opened.sessionId,
       heartbeatSeconds: opened.heartbeatSeconds,
+      durationSeconds: decided.video.durationSeconds,
     };
   }
 

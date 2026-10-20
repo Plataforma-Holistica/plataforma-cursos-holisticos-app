@@ -34,6 +34,10 @@ import { Watermark, watermarkIntact } from "./watermark";
 // Los subtítulos arrancan como la cuenta los dejó (RF-310), y cuando la persona los enciende o
 // los apaga, se avisa a la pantalla para que lo recuerde.
 //
+// Para los tramos vistos (T-205) avisa cada muestra mientras el video avanza, y cuándo se detiene
+// el tramo (`onWatch`). Lo decide con el elemento en el evento mismo (`paused`), no con lo que la
+// pantalla sabe de antes: una muestra que llega con el video ya en pausa detiene, no extiende.
+//
 // Cuando la dirección caduca, la pantalla pide otra y la pasa con otra concesión (`grant`): solo
 // el Mux Player se monta de nuevo, dentro del mismo contenedor, así que no se sale de la pantalla
 // completa (la del navegador ni la propia) y la marca sigue donde estaba. Cambiar solo los tokens
@@ -141,6 +145,10 @@ export interface PlayerProps {
   onAdvancing?: (advancing: boolean) => void;
   /** El segundo en que va, cada vez que avanza: para volver a él si la reproducción se cierra (T-204). */
   onProgress?: (at: number) => void;
+  /** Cada muestra mientras avanza, y cuándo se detiene el tramo (T-205). La revisión no lo usa. */
+  onWatch?: (signal: WatchSignal) => void;
+  /** Una nota de la pantalla (PA-22, «Sin conexión»), que se pinta dentro en la pantalla completa propia. */
+  notice?: string | null;
 }
 
 /** Lo que trae un error de Mux (su `MediaError`): si es fatal, y su código. Sus tipos no lo declaran. */
@@ -197,14 +205,44 @@ function lockDown(element: MuxPlayerRefAttributes | null) {
   }
 }
 
+/**
+ * Lo que el reproductor dice para los tramos vistos (T-205): una muestra mientras el video avanza,
+ * o que el tramo se detiene (pausa, final, búsqueda, un atasco, un error).
+ */
+export type WatchSignal = { kind: "tick"; at: number; rate: number; duration: number } | { kind: "stop" };
+
+/** Lo que un evento del elemento dice para los tramos: una muestra si avanza, o que se detiene. */
+function watchSignal(target: EventTarget | null): WatchSignal {
+  const media = target as Partial<Pick<HTMLMediaElement, "currentTime" | "playbackRate" | "duration" | "paused">> | null;
+  if (media?.paused !== false || typeof media.currentTime !== "number" || typeof media.playbackRate !== "number") return { kind: "stop" };
+  return { kind: "tick", at: media.currentTime, rate: media.playbackRate, duration: typeof media.duration === "number" ? media.duration : Number.NaN };
+}
+
 /** El `<video>` de verdad, dentro de Mux Player. */
 function nativeVideo(element: MuxPlayerRefAttributes | null) {
   return (element?.media as unknown as WithNativeVideo | null | undefined)?.nativeEl;
 }
 
 export function Player(props: PlayerProps) {
-  const { grant, playbackId, tokens, startTime, speeds, watermark, captions = false, onCaptionsChange, onExpired, onFailed, onPlaying, onEnded, onAdvancing, onProgress } =
-    props;
+  const {
+    grant,
+    playbackId,
+    tokens,
+    startTime,
+    speeds,
+    watermark,
+    captions = false,
+    onCaptionsChange,
+    onExpired,
+    onFailed,
+    onPlaying,
+    onEnded,
+    onAdvancing,
+    onProgress,
+    onWatch,
+    notice,
+  } = props;
+  const stopWatch = () => onWatch?.({ kind: "stop" });
   const frame = useRef<HTMLDivElement>(null);
   const mux = useRef<MuxPlayerRefAttributes | null>(null);
   // El último Mux Player que se ligó: React suelta y vuelve a poner la referencia en cada render.
@@ -417,14 +455,23 @@ export function Player(props: PlayerProps) {
             onAdvancing?.(true);
             onPlaying();
           }}
-          onTimeUpdate={(event) => onProgress?.((event.target as { currentTime?: number } | null)?.currentTime ?? 0)}
+          onTimeUpdate={(event) => {
+            onProgress?.((event.target as { currentTime?: number } | null)?.currentTime ?? 0);
+            onWatch?.(watchSignal(event.target));
+          }}
+          onRateChange={(event) => onWatch?.(watchSignal(event.target))}
+          onSeeking={stopWatch}
+          onWaiting={stopWatch}
+          onEmptied={stopWatch}
           onPause={(event) => {
+            stopWatch();
             onAdvancing?.(false);
             // Una pausa que no viene de sus controles (la pantalla de bloqueo, unos audífonos que se
             // desconectan) también cuenta; la que acompaña a un error, no.
             if (!(event.target as { error?: unknown } | null)?.error) wantsPlay.current = false;
           }}
           onEnded={() => {
+            stopWatch();
             wantsPlay.current = false;
             onAdvancing?.(false);
             onEnded?.();
@@ -434,6 +481,7 @@ export function Player(props: PlayerProps) {
             const error = (event as Event & { detail?: MuxError | null }).detail ?? player?.error ?? null;
             // Lo que Mux no da por fatal (reconectando, sin red un momento) lo resuelve él solo.
             if (error?.fatal === false) return;
+            stopWatch();
             if (error?.muxCode === TOKEN_EXPIRED) {
               resume.current = {
                 from: player,
@@ -470,9 +518,16 @@ export function Player(props: PlayerProps) {
           ) : null}
         </div>
       ) : null}
-      {/* Existe desde antes de entrar: una región viva que nace con su texto no se anuncia. */}
+      {/* Existe desde antes de entrar: una región viva que nace con su texto no se anuncia. La nota
+          de la pantalla va abajo, sin fondo, para no tapar la marca, y no se anuncia aquí: la
+          pantalla ya la dice en su propia región viva. */}
       <p role="status" className="player-filled-hint pointer-events-none absolute inset-x-0 bottom-0 m-0 text-center text-body text-text">
         {filled && hint && portrait && !turned ? text.filled.turnHint : ""}
+        {filled && notice ? (
+          <span aria-hidden="true" className="block text-body-s">
+            {notice}
+          </span>
+        ) : null}
       </p>
     </div>
   );

@@ -8,8 +8,16 @@ import { a11yViolations } from "../setup/a11y";
 // pinta en el lugar del reproductor en cada estado, el temario y lo de alrededor. El reproductor
 // de verdad lo prueba tests/ui/player.test.tsx, y la página entera, el extremo a extremo.
 
-const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn(), rememberCaptionsAction: vi.fn(), playbackPresenceAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ watchLessonAction: vi.fn(), rememberCaptionsAction: vi.fn(), playbackPresenceAction: vi.fn(), flushHeartbeatsAction: vi.fn() }));
 vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/actions", () => actions);
+
+// El cartero de los tramos vive en el módulo: cada prueba tiene el suyo, sobre el `localStorage`
+// del DOM simulado (que no trae Web Locks).
+const postman = vi.hoisted(() => ({ current: null as unknown }));
+vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/watch-queue", async (original) => {
+  const real = await original<Record<string, unknown>>();
+  return { ...real, courier: new Proxy({}, { get: (_, key) => (postman.current as Record<PropertyKey, unknown>)[key] }) };
+});
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
 vi.mock("@/app/_video/player", () => ({
@@ -23,6 +31,8 @@ vi.mock("@/app/_video/player", () => ({
     onCaptionsChange?: (on: boolean) => void;
     onAdvancing?: (advancing: boolean) => void;
     onProgress?: (at: number) => void;
+    onWatch?: (signal: unknown) => void;
+    notice?: string | null;
   }) => {
     player.last = props;
     return (
@@ -57,6 +67,7 @@ vi.mock("@/app/_video/player", () => ({
 }));
 
 import { LessonScreen, type LessonScreenProps } from "@/app/cursos/[slug]/lecciones/[leccion]/screen";
+import { createCourier } from "@/app/cursos/[slug]/lecciones/[leccion]/watch-queue";
 
 const LESSON = "b0000000-0000-4000-8000-000000000002";
 const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
@@ -69,6 +80,7 @@ const GRANT = {
   watermark: "ana@correo.com",
   playbackSessionId: PLAYBACK,
   heartbeatSeconds: 30,
+  durationSeconds: 356,
 };
 /** Una reproducción viva en otra computadora: 01:40 UTC son las 19:40 en el centro de México. */
 const ROW = { sessionId: OTHER, browser: "chrome", system: "windows", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" };
@@ -105,9 +117,18 @@ function show(props: Partial<LessonScreenProps> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   player.last = null;
+  window.localStorage.clear();
+  postman.current = createCourier({
+    storage: () => window.localStorage,
+    locks: () => null,
+    now: () => Date.now(),
+    setTimer: (run, ms) => setTimeout(run, ms),
+    clearTimer: (timer) => clearTimeout(timer),
+  });
+  actions.flushHeartbeatsAction.mockImplementation((_id: string, events: { seq: number }[]) => Promise.resolve({ kind: "settled", seqs: events.map((event) => event.seq) }));
   actions.watchLessonAction.mockResolvedValue(GRANT);
   actions.rememberCaptionsAction.mockResolvedValue(undefined);
-  actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+  actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
 });
 
 describe("lo de alrededor del reproductor", () => {
@@ -408,7 +429,7 @@ describe("el latido de presencia (T-204)", () => {
     await wait(60_000);
     expect(actions.playbackPresenceAction).not.toHaveBeenCalled();
     await press("avanza");
-    expect(actions.playbackPresenceAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON, PLAYBACK);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledExactlyOnceWith("respirar", LESSON, PLAYBACK, []);
     await wait(29_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
     await wait(1_000);
@@ -447,13 +468,13 @@ describe("el latido de presencia (T-204)", () => {
   it("cerrada desde otro dispositivo: se va el video, lo dice, y «Reproducir aquí» toma el lugar desde el segundo en que iba", async () => {
     await playing();
     await press("va en 61");
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "device", by: OTHER });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "device", by: OTHER, batch: null });
     await press("avanza");
     expect(screen.queryByTestId("reproductor")).toBeNull();
     expect(within(playerArea()).getByText("Esta reproducción se cerró desde otro dispositivo.")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("Esta reproducción se cerró desde otro dispositivo.");
     vi.useRealTimers();
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
     await userEvent.setup().click(screen.getByRole("button", { name: "Reproducir aquí" }));
     expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
     expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "61");
@@ -461,7 +482,7 @@ describe("el latido de presencia (T-204)", () => {
 
   it("abierta en otra pestaña: su propio texto; sin la que tomó su lugar, «Reproducir aquí» pide sin cerrar nada", async () => {
     await playing();
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "tab", by: null });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "closed", from: "tab", by: null, batch: null });
     await press("avanza");
     expect(within(playerArea()).getByText("Esta lección se abrió en otra pestaña o ventana.")).toBeVisible();
     await press("Reproducir aquí");
@@ -471,10 +492,10 @@ describe("el latido de presencia (T-204)", () => {
   it("vencida y con el lugar tomado: PA-34, y cerrar la otra vuelve al segundo en que iba", async () => {
     await playing();
     await press("va en 61");
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW], batch: null });
     await press("avanza");
     expect(screen.getByRole("heading", { level: 2, name: "Tu cuenta ya está reproduciendo en otro lugar" })).toBeVisible();
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
     await press("Cerrar esa reproducción (la de Chrome en Windows)");
     expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
     expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
@@ -483,9 +504,9 @@ describe("el latido de presencia (T-204)", () => {
   it("«Reintentar» en PA-34 también vuelve al segundo en que iba", async () => {
     await playing();
     await press("va en 61");
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW] });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "busy", live: [ROW], batch: null });
     await press("avanza");
-    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok" });
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
     await press("Reintentar");
     expect(actions.watchLessonAction).toHaveBeenLastCalledWith("respirar", LESSON, undefined);
     expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "61");
@@ -494,7 +515,7 @@ describe("el latido de presencia (T-204)", () => {
   it("si el latido no contesta o no se supo, el video sigue", async () => {
     await playing();
     actions.playbackPresenceAction.mockRejectedValueOnce(new Error("sin red"));
-    actions.playbackPresenceAction.mockResolvedValueOnce({ kind: "unavailable" });
+    actions.playbackPresenceAction.mockResolvedValueOnce({ kind: "unavailable", batch: null });
     await press("avanza");
     await wait(30_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
@@ -518,7 +539,7 @@ describe("el latido de presencia (T-204)", () => {
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
     // El latido viejo contesta: la reproducción anterior fue reemplazada por la renovación.
     await act(async () => {
-      answer({ kind: "closed", from: "tab", by: OTHER });
+      answer({ kind: "closed", from: "tab", by: OTHER, batch: null });
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByTestId("reproductor")).toBeVisible();
@@ -532,7 +553,7 @@ describe("el latido de presencia (T-204)", () => {
     await wait(60_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
     await press("avanza");
-    expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER);
+    expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, OTHER, []);
   });
 
   it("pausar y reanudar seguido no manda un latido por pulsación", async () => {
@@ -571,7 +592,7 @@ describe("el latido de presencia (T-204)", () => {
     // latido. El aviso llega del reproductor como lo manda Mux (no un clic, que se aplica al momento).
     await act(async () => {
       (player.last?.onFailed as () => void)();
-      answer({ kind: "closed", from: "device", by: OTHER });
+      answer({ kind: "closed", from: "device", by: OTHER, batch: null });
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(within(playerArea()).getByText("No pudimos cargar el video.")).toBeVisible();
@@ -591,5 +612,223 @@ describe("el latido de presencia (T-204)", () => {
     await press(what);
     await wait(120_000);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("los tramos vistos (T-205)", () => {
+  // El latido resuelve lo que lleva, como el servidor cuando todo sale bien.
+  beforeEach(() => {
+    actions.playbackPresenceAction.mockImplementation((_slug: string, _lesson: string, _id: string, events: { seq: number }[]) =>
+      Promise.resolve({ kind: "ok", batch: { kind: "settled", seqs: events.map((event) => event.seq) } }),
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function playing(props: Partial<LessonScreenProps> = {}) {
+    vi.useFakeTimers();
+    const view = show(props);
+    fireEvent.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    return view;
+  }
+  const press = async (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  };
+  const wait = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  const signal = (value: unknown) => act(() => (player.last?.onWatch as (signal: unknown) => void)(value));
+  /** El video avanza de `from` a `to` a velocidad normal: una muestra cada cuarto de segundo, con el reloj. */
+  async function watch(from: number, to: number) {
+    for (let at = from; at <= to; at += 0.25) {
+      await signal({ kind: "tick", at, rate: 1, duration: 356 });
+      if (at < to) await wait(250);
+    }
+  }
+  const sent = (call: unknown[] | undefined) => (call?.at(-1) as { seq: number; from: number; to: number; visible: boolean }[] | undefined) ?? [];
+  const stored = (id: string) => window.localStorage.getItem(`plataforma-latidos:${id}`);
+  /** Todo lo que salió, con latido o sin presencia, una vez cada consecutivo y en orden. */
+  const everything = () => {
+    const all = [...actions.playbackPresenceAction.mock.calls, ...actions.flushHeartbeatsAction.mock.calls].flatMap((call) => sent(call));
+    return [...new Map(all.map((event) => [event.seq, event])).values()].sort((a, b) => a.seq - b.seq);
+  };
+
+  it("el latido corta el tramo abierto y lleva lo visto; lo resuelto sale de la cola", async () => {
+    await playing();
+    await press("avanza");
+    expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, PLAYBACK, []);
+    // El latido sale a los 30 s del anterior, con la última muestra antes de él.
+    await watch(0, 30);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
+    expect(sent(actions.playbackPresenceAction.mock.calls[1])).toEqual([{ seq: 0, from: 0, to: 29, rate: 1, visible: true }]);
+    await wait(0);
+    expect(stored(PLAYBACK)).toBeNull();
+    // El siguiente sigue desde el borde, con el siguiente consecutivo.
+    await watch(30.25, 60);
+    await wait(250);
+    expect(sent(actions.playbackPresenceAction.mock.calls[2])).toEqual([{ seq: 1, from: 29, to: 60, rate: 1, visible: true }]);
+  });
+
+  it("un latido que no contesta deja lo suyo en la cola, guardado, y sale sin presencia a los 5 s", async () => {
+    await playing();
+    await press("avanza");
+    actions.playbackPresenceAction.mockRejectedValueOnce(new Error("sin red"));
+    await watch(0, 30);
+    expect(sent(actions.playbackPresenceAction.mock.calls[1])).toEqual([{ seq: 0, from: 0, to: 29, rate: 1, visible: true }]);
+    expect(JSON.parse(stored(PLAYBACK) ?? "{}").events).toHaveLength(1);
+    expect(actions.flushHeartbeatsAction).not.toHaveBeenCalled();
+    await wait(5_000);
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(PLAYBACK, [{ seq: 0, from: 0, to: 29, rate: 1, visible: true }]);
+    expect(stored(PLAYBACK)).toBeNull();
+  });
+
+  it("si un latido va en camino, no sale otro", async () => {
+    await playing();
+    actions.playbackPresenceAction.mockImplementationOnce(() => new Promise(() => undefined));
+    await press("avanza");
+    await wait(120_000);
+    expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("al pausar, lo visto sale sin presencia", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 10);
+    await signal({ kind: "stop" });
+    await press("se detiene");
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(PLAYBACK, [{ seq: 0, from: 0, to: 10, rate: 1, visible: true }]);
+    await wait(0);
+    expect(stored(PLAYBACK)).toBeNull();
+  });
+
+  it("una muestra que no avanza no se cuenta: buscar en pausa y volver mucho después no acredita lo saltado", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 5);
+    await signal({ kind: "stop" });
+    await wait(600_000);
+    await watch(300, 302);
+    await signal({ kind: "stop" });
+    await press("se detiene");
+    expect(everything()).toEqual([
+      { seq: 0, from: 0, to: 5, rate: 1, visible: true },
+      { seq: 1, from: 300, to: 302, rate: 1, visible: true },
+    ]);
+  });
+
+  it("con la pestaña oculta, lo visto sale como no visible; al ocultarla, se corta y se manda", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 5);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(sent(actions.flushHeartbeatsAction.mock.calls[0])).toEqual([{ seq: 0, from: 0, to: 5, rate: 1, visible: true }]);
+    await watch(5.25, 9);
+    visibility.mockRestore();
+    await signal({ kind: "stop" });
+    await press("se detiene");
+    // Ocultar detuvo la cadena: lo oculto empieza en otra, hacia arriba.
+    expect(sent(actions.flushHeartbeatsAction.mock.calls[1])).toEqual([{ seq: 1, from: 6, to: 9, rate: 1, visible: false }]);
+  });
+
+  it("ocultar y volver entre dos muestras detiene la cadena: lo de en medio no sale como visible", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 5);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    visibility.mockRestore();
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await watch(5.25, 9);
+    await signal({ kind: "stop" });
+    await press("se detiene");
+    expect(everything()).toEqual([
+      { seq: 0, from: 0, to: 5, rate: 1, visible: true },
+      { seq: 1, from: 6, to: 9, rate: 1, visible: true },
+    ]);
+  });
+
+  it("al renovar la dirección, lo de la reproducción vieja sale a la vieja, y el viejo no suma mientras llega la nueva", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 10);
+    let renewed: (grant: unknown) => void = () => undefined;
+    actions.watchLessonAction.mockImplementationOnce(() => new Promise((resolve) => (renewed = resolve)));
+    await signal({ kind: "stop" });
+    await press("caduca");
+    // El Mux Player viejo sigue con lo que tenía cargado: no suma.
+    await watch(10, 20);
+    await act(async () => {
+      renewed({ ...GRANT, playbackSessionId: OTHER });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(PLAYBACK, [{ seq: 0, from: 0, to: 10, rate: 1, visible: true }]);
+  });
+
+  it("al salir de la pantalla (navegar dentro de la aplicación), el tramo abierto se cierra y sale", async () => {
+    const { view } = await playing();
+    await press("avanza");
+    await watch(0, 12);
+    view.unmount();
+    await wait(0);
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(PLAYBACK, [{ seq: 0, from: 0, to: 12, rate: 1, visible: true }]);
+  });
+
+  it("al irse la página, el tramo abierto se guarda, sin mandarse", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 12);
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(actions.flushHeartbeatsAction).not.toHaveBeenCalled();
+    expect(JSON.parse(stored(PLAYBACK) ?? "{}").events).toEqual([{ seq: 0, from: 0, to: 12, rate: 1, visible: true }]);
+  });
+
+  it("al abrir una lección, lo que quedó guardado de otra visita sale", async () => {
+    vi.useFakeTimers();
+    const event = { seq: 3, from: 60, to: 90, rate: 1, visible: true };
+    window.localStorage.setItem(`plataforma-latidos:${OTHER}`, JSON.stringify({ v: 1, touched: Date.now() - 3_600_000, next: 4, events: [event] }));
+    show();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(OTHER, [event]);
+    expect(stored(OTHER)).toBeNull();
+  });
+
+  it("«Sin conexión. Reintentando…» a los dos envíos fallidos seguidos, y se va con el primero que contesta", async () => {
+    await playing();
+    actions.playbackPresenceAction.mockRejectedValue(new Error("sin red"));
+    await press("avanza");
+    expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);
+    await wait(30_000);
+    // Una sola vez, en su propia región viva; la del reproductor no la repite.
+    const note = screen.getByText("Sin conexión. Reintentando…");
+    expect(note).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status", { name: "" }).textContent).not.toContain("Sin conexión");
+    expect(player.last?.notice).toBe("Sin conexión. Reintentando…");
+    actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
+    await wait(30_000);
+    expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);
+    expect(player.last?.notice).toBeNull();
   });
 });

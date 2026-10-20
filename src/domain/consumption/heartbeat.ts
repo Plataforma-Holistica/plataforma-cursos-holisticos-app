@@ -21,7 +21,7 @@ export interface HeartbeatEvent {
   seq: number;
   /** Segundo del video donde empieza, entero. */
   from: number;
-  /** Segundo donde termina, sin incluirlo: siempre mayor que `from`. */
+  /** Segundo donde termina, sin incluirlo: siempre mayor que el inicio. */
   to: number;
   rate: number;
   visible: boolean;
@@ -39,15 +39,19 @@ export const HEARTBEAT_LIMITS = {
   rate: 9.99,
 } as const;
 
-const FIELDS = ["seq", "from", "to", "rate", "visible"] as const;
+// Los campos, atados a la interfaz. Van como claves y no como textos: las pruebas de
+// arquitectura leen como importación la palabra del inicio seguida de comillas.
+const SHAPE: Record<keyof HeartbeatEvent, true> = { seq: true, from: true, to: true, rate: true, visible: true };
+const FIELDS = Object.keys(SHAPE) as (keyof HeartbeatEvent)[];
 
 const whole = (value: unknown, max: number): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= max;
 
-function parseEvent(value: unknown): HeartbeatEvent | null {
+/** Un tramo, si tiene la forma; si no, nulo. La cola del navegador revisa así cada uno al leerla. */
+export function parseHeartbeatEvent(value: unknown): HeartbeatEvent | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const keys = Object.keys(value);
   if (keys.length !== FIELDS.length || !FIELDS.every((field) => keys.includes(field))) return null;
-  const { seq, from, to, rate, visible } = value as Record<(typeof FIELDS)[number], unknown>;
+  const { seq, from, to, rate, visible } = value as Record<keyof HeartbeatEvent, unknown>;
   if (!whole(seq, HEARTBEAT_LIMITS.seq) || !whole(from, HEARTBEAT_LIMITS.second) || !whole(to, HEARTBEAT_LIMITS.second)) return null;
   if (to <= from) return null;
   if (typeof rate !== "number" || !(rate >= HEARTBEAT_LIMITS.minRate) || rate > HEARTBEAT_LIMITS.rate) return null;
@@ -63,7 +67,7 @@ export function parseHeartbeatBatch(value: unknown): HeartbeatEvent[] | null {
   if (!Array.isArray(value) || value.length > HEARTBEAT_LIMITS.batch) return null;
   const events: HeartbeatEvent[] = [];
   for (const each of value) {
-    const event = parseEvent(each);
+    const event = parseHeartbeatEvent(each);
     if (event === null) return null;
     events.push(event);
   }

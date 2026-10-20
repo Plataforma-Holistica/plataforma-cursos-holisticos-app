@@ -73,6 +73,7 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       until: ENDED,
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
+      durationSeconds: 356,
     });
     expect(answer).toEqual({
       kind: "granted",
@@ -82,6 +83,7 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       watermark: "ana@correo.com",
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
+      durationSeconds: 356,
     });
   });
 
