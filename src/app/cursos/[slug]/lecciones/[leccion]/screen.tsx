@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PASSWORD_BLOCK_ID } from "@/app/(cuenta)/cuenta/password-block";
 import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { deviceName } from "@/app/_lib/devices";
-import type { PlayerProps } from "@/app/_video/player";
+import type { PlayerProps, WatchSignal } from "@/app/_video/player";
 import { lesson as text } from "@/messages/es/lesson";
 import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
@@ -19,8 +19,11 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Tabs } from "@/ui/tabs";
 import { TextLink } from "@/ui/text-link";
 
-import { playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
-import type { BusyRow, Denial, InitialState, PresenceReply, WatchAnswer } from "./outcomes";
+import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuilder } from "@/services/media/watch-rules";
+
+import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
+import type { BusyRow, Denial, HeartbeatReply, InitialState, WatchAnswer } from "./outcomes";
+import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
 // el reproductor, el título y «Sobre esta lección» a la izquierda, y el temario a la derecha. En
@@ -41,6 +44,16 @@ import type { BusyRow, Denial, InitialState, PresenceReply, WatchAnswer } from "
 // aquí»; si había vencido (una pausa larga) y otro tomó el lugar, PA-34. Las dos guardan el
 // segundo en que iba. Un latido que contesta tarde, de una reproducción que ya no es la actual
 // (una dirección renovada la reemplaza), no pinta nada.
+//
+// Los tramos vistos (T-205, RF-401): mientras el video avanza, el reproductor da cada muestra y
+// la pantalla arma los tramos de la reproducción en curso (`segments.ts`, del dominio). Cada
+// latido corta el tramo abierto y lleva la cola de esa reproducción; al pausar, al ocultar la
+// pestaña, al cambiar de reproducción, al irse el reproductor y al salir de la pantalla, se manda
+// sin presencia. Las colas no viven aquí sino en el cartero del documento (`watch-queue.ts`), que
+// las guarda en el navegador y sobrevive a navegar dentro de la aplicación. Al irse la página, el
+// tramo abierto se guarda y sale la próxima vez que se abra una lección en este navegador
+// (decisión de Sergio del 2026-10-19). «Sin conexión. Reintentando…» va arriba del reproductor, y
+// dentro de él en la pantalla completa propia.
 
 /** Una lección del temario, ya en palabras y con su dirección. */
 export interface SyllabusEntry {
@@ -106,6 +119,32 @@ type VideoState =
 /** Los límites del latido, en segundos: ni más seguido, ni tan espaciado que la reproducción venza. */
 const BEAT_MIN_SECONDS = 5;
 const BEAT_MAX_SECONDS = 300;
+
+/** Un reloj monótono en segundos, para armar los tramos: no es la hora. */
+const clockSeconds = () => performance.now() / 1000;
+const pageVisible = () => document.visibilityState === "visible";
+
+/** El cartero vacía sin presencia con su acción; con el latido de la reproducción, espera según él. */
+function configureCourier(heartbeatSeconds?: number) {
+  courier.configure({ send: (id, events) => flushHeartbeatsAction(id, events), heartbeatSeconds });
+}
+
+/** El armador de tramos de una reproducción. */
+interface HeldSegments {
+  id: string;
+  builder: SegmentBuilder;
+}
+
+/** Un paso del armador de esa reproducción; lo que cierra va a su cola. */
+function stepSegments(held: HeldSegments | null, step: (builder: SegmentBuilder) => ReturnType<typeof cutSegment>) {
+  if (held === null) return;
+  const next = step(held.builder);
+  held.builder = next.builder;
+  courier.add(held.id, next.closed);
+}
+
+/** El latido y el número que lo acota: ni más seguido, ni tan espaciado que la reproducción venza. */
+const boundedBeat = (seconds: number) => Math.min(Math.max(seconds, BEAT_MIN_SECONDS), BEAT_MAX_SECONDS);
 
 const subscribeNothing = () => () => undefined;
 /** Verdadero solo ya montada en el navegador: sin JavaScript no hay con qué reproducir. */
@@ -235,6 +274,9 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // Si el video avanza (entonces late su reproducción), y el segundo en que va.
   const [advancing, setAdvancing] = useState(false);
   const at = useRef(0);
+  // Los tramos vistos de la reproducción en curso (T-205), y si se dice «Sin conexión».
+  const segments = useRef<HeldSegments | null>(null);
+  const offline = useSyncExternalStore(courier.subscribe, courier.offline, () => false);
   // Cuando lo que tenía el foco se va (el reproductor al terminar o al fallar), el foco se queda
   // en el lugar del reproductor y no cae al documento.
   useEffect(() => {
@@ -276,22 +318,33 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   const beating = video.kind === "playing" && !video.renewing && advancing ? video.grant : null;
   const beatingId = beating?.playbackSessionId ?? null;
   // Acotado: un valor fuera de rango no deja latir en bucle ni dejar de latir.
-  const beatEvery = Math.min(Math.max(beating?.heartbeatSeconds ?? BEAT_MIN_SECONDS, BEAT_MIN_SECONDS), BEAT_MAX_SECONDS);
-  // Cuándo salió el último latido: pausar y reanudar seguido no manda uno por pulsación.
+  const beatEvery = boundedBeat(beating?.heartbeatSeconds ?? BEAT_MIN_SECONDS);
+  // Cuándo salió el último latido: pausar y reanudar seguido no manda uno por pulsación. Y si uno
+  // va en camino, no sale otro: Next los despacharía uno tras otro, y se apilarían.
   const lastBeat = useRef(Number.NEGATIVE_INFINITY);
+  const beatInFlight = useRef(false);
   useEffect(() => {
     if (beatingId === null) return;
     let current = true;
     const beat = async () => {
+      if (beatInFlight.current) return;
+      beatInFlight.current = true;
       lastBeat.current = Date.now();
-      let reply: PresenceReply;
+      // El latido corta el tramo abierto y lleva lo que la cola tenga de esta reproducción.
+      stepSegments(segments.current?.id === beatingId ? segments.current : null, cutSegment);
+      const events = courier.take(beatingId);
+      let reply: HeartbeatReply;
       try {
-        reply = await playbackPresenceAction(slug, lessonId, beatingId);
+        reply = await courier.timed(playbackPresenceAction(slug, lessonId, beatingId, events), isRedirect);
       } catch {
         // Una redirección (la sesión ya no pasa): Next navega solo. Otro error: el video sigue, y
-        // el siguiente latido lo vuelve a intentar.
+        // el siguiente latido lo vuelve a intentar, con lo mismo.
+        courier.settle(beatingId, events, null);
         return;
+      } finally {
+        beatInFlight.current = false;
       }
+      courier.settle(beatingId, events, reply.batch);
       if (!current || (reply.kind !== "busy" && reply.kind !== "closed")) return;
       // Solo si sigue siendo esta reproducción, y en curso: un cambio que React aún no aplicó (la
       // dirección caducó, terminó, falló) no se pisa. Y un pedido en camino ya no pinta.
@@ -317,6 +370,55 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [beatingId, beatEvery, slug, lessonId]);
+
+  // El armador de la reproducción en curso, y su cola como la actual. Cuando deja de serlo (otra
+  // dirección, el reproductor se va, la pantalla se desmonta al navegar), su tramo se cierra y lo
+  // pendiente sale sin presencia.
+  const playingId = video.kind === "playing" ? video.grant.playbackSessionId : null;
+  const playingDuration = video.kind === "playing" ? video.grant.durationSeconds : null;
+  const playingBeat = video.kind === "playing" ? boundedBeat(video.grant.heartbeatSeconds) : null;
+  useEffect(() => {
+    if (playingId === null) return;
+    configureCourier(playingBeat ?? undefined);
+    courier.own(playingId);
+    const held: HeldSegments = { id: playingId, builder: startSegments(playingDuration) };
+    segments.current = held;
+    return () => {
+      stepSegments(held, stopSegment);
+      if (segments.current === held) segments.current = null;
+      courier.retire(playingId);
+      void courier.flush();
+    };
+  }, [playingId, playingDuration, playingBeat]);
+
+  // Al abrir la lección, lo que quedó de otras visitas sale. Al ocultar la pestaña se corta el
+  // tramo y se manda; al irse la página solo se corta y se guarda.
+  useEffect(() => {
+    configureCourier();
+    void courier.sweep();
+    const onVisibility = () => {
+      if (pageVisible()) return;
+      stepSegments(segments.current, cutSegment);
+      void courier.flush();
+    };
+    const onPageHide = () => stepSegments(segments.current, cutSegment);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, []);
+
+  /** Una muestra del reproductor, o que el tramo se detiene. Mientras se renueva la dirección, el viejo no suma. */
+  function watched(signal: WatchSignal) {
+    if (signal.kind === "stop") stepSegments(segments.current, stopSegment);
+    else if (video.kind === "playing" && !video.renewing) {
+      stepSegments(segments.current, (builder) =>
+        observeWatch(builder, { at: signal.at, clock: clockSeconds(), rate: signal.rate, visible: pageVisible(), duration: signal.duration }),
+      );
+    }
+  }
 
   function expired(second: number) {
     if (video.kind !== "playing" || video.renewing) return;
@@ -374,6 +476,10 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
         <div className="flex flex-col gap-4 lg:col-span-7">
           {/* Pegado arriba al desplazar, en teléfono; PA-34 no: crece, y taparía la página. */}
           <section aria-label={text.player.label} className={video.kind === "busy" ? undefined : "sticky top-0 z-(--z-sticky) lg:static"}>
+            {/* PA-22, «Sin conexión»: una nota chica arriba. Se anuncia en la región viva de abajo. */}
+            <p aria-hidden="true" className="bg-surface-1 text-body-s text-text-2">
+              {offline ? text.player.offline : ""}
+            </p>
             <div
               ref={area}
               tabIndex={-1}
@@ -396,7 +502,13 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                     if (video.renewed) setVideo({ ...video, renewed: false });
                   }}
                   onEnded={() => setVideo({ kind: "ended" })}
-                  onAdvancing={setAdvancing}
+                  onAdvancing={(on) => {
+                    setAdvancing(on);
+                    // En pausa o al final no hay latido: lo pendiente sale sin presencia.
+                    if (!on) void courier.flush();
+                  }}
+                  onWatch={watched}
+                  notice={offline ? text.player.offline : null}
                   onProgress={(second) => {
                     at.current = second;
                   }}
@@ -453,7 +565,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
             </div>
             {/* Lo que el reproductor dice a quien no lo ve: existe desde antes, para que se anuncie. */}
             <p role="status" className="sr-only">
-              {announcementOf(video)}
+              {[announcementOf(video), offline ? text.player.offline : ""].filter((part) => part !== "").join(" ")}
             </p>
           </section>
           <div className="flex flex-col gap-1">

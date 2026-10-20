@@ -1289,14 +1289,58 @@ falla. Veintiuna precisiones que la tabla no dice:
     cola (aceptados, repetidos y rechazados), `discard` (la reproducción no es de quien la manda,
     o el lote no tiene forma: lo enviado se tira) o `retry`. Las acciones son
     `playbackPresenceAction(slug, lección, reproducción, tramos)` y `flushHeartbeatsAction`. Sin
-    el progreso (T-206), los días de práctica ni `rollup_dirty` (T-207). La cola del navegador,
-    con su dueña entre pestañas y sus reintentos, es la segunda solicitud.
+    el progreso (T-206), los días de práctica ni `rollup_dirty` (T-207).
   - Las pruebas: `supabase/tests/23_latidos.test.sql` (en una transacción `now()` no avanza: el
     tiempo vivo se simula moviendo el último latido hacia atrás) y
     `tests/integration/40-reproducciones.test.ts`. Que mandar sin presencia espera el candado de
     la cuenta no se puede probar ahí, por lo mismo que latir; tampoco el mismo lote desde dos
     conexiones a la vez (lo de una transacción que se revierte no lo ve otra). Lo cubren el
     candado de la cuenta, el `for update` de la fila y `seqs_received`.
+  - **El navegador** (segunda solicitud). El reproductor avisa cada muestra mientras el video
+    avanza y cuándo se detiene el tramo (`onWatch`: pausa, final, búsqueda, `waiting`,
+    `emptied`, un error fatal), y lo decide con el elemento en el evento mismo (`paused`), no con
+    el estado de la pantalla. La pantalla arma los tramos con `segments.ts` (dominio, 100 %),
+    que **nunca acredita un segundo que no se reprodujo**: un hueco de más de 1.5 s de reloj entre
+    dos muestras no se puentea, un salto que no cabe en el reloj o que retrocede corta, el inicio
+    de una cadena va hacia arriba y el final hacia abajo, y recorta a la duración de la concesión
+    (`durationSeconds`, la que revisa la base) y a la del reproductor. Mientras se renueva la
+    dirección, el Mux Player viejo no suma. Una propiedad con guiones de reproducción al azar lo
+    exige.
+  - **La cola vive en el módulo, no en la pantalla** (`watch-queue.ts`, un cartero por
+    documento): navegar dentro de la aplicación desmonta la pantalla sin `pagehide`, y la
+    siguiente encuentra ahí las colas. Lo puro (forma guardada, consecutivos desde 0 por
+    reproducción, lotes de 50, qué quita cada respuesta, la espera de 5, 10 y 20 s hasta el
+    latido, la nota a los dos fallos) está en `queue.ts`, del dominio; el navegador lo recibe por
+    `src/services/media/watch-rules.ts`, la única excepción a «las pantallas piden a `media.ts`»,
+    y una prueba exige que solo alcance el dominio. La memoria manda y `localStorage` es el
+    respaldo: una cola se escribe entera solo con su candado (Web Locks), que la pestaña conserva
+    mientras la reproducción es la actual y hasta vaciarla; otra pestaña solo adopta, al abrir
+    una lección, las colas cuyo candado consigue, y relee con él en la mano. Sin Web Locks adopta
+    las que no se escriben hace tres latidos: lo peor es un reenvío, que la base contesta
+    repetido.
+  - **Cuándo sale cada cosa:** el latido corta el tramo abierto y lleva la cola de su
+    reproducción; si uno va en camino no sale otro (Next despacha las acciones una tras otra, y
+    se apilarían). Sin presencia salen: al pausar o terminar, al ocultar la pestaña, al cambiar de
+    reproducción, al irse el reproductor o la pantalla, y en los reintentos. Al irse la página
+    (`pagehide`) solo se corta y se guarda. Un vaciado a la vez; el plazo de 15 s no cancela nada
+    (no se puede), solo cuenta para la nota. «Sin conexión. Reintentando…» sale con dos envíos
+    seguidos que lanzan o no contestan a tiempo, latido o vaciado (una redirección no cuenta, y
+    `retry` contestó), y se quita con el primero que contesta: arriba del reproductor, dentro de
+    él en la pantalla completa propia, y dicha en su región viva.
+  - **Pérdidas conocidas** (RNF-05): lo que no llega a tener consecutivo (un cierre del
+    navegador sin `pagehide`, un pedazo de menos de un segundo, el redondeo de las puntas), lo
+    que otra cuenta del mismo navegador tira con `not_found` (al salir no se vacía la cola), y,
+    si la aplicación no contesta más de tres latidos mientras Mux sigue sirviendo, lo visto en el
+    hueco que pase del presupuesto (la reproducción vence y al volver su reloj crece una sola
+    ventana; sale `faster_than_clock`). El video no se pausa por eso (FL-12 E5). Los huecos de
+    `seqs_received` no ven las primeras.
+  - Las pruebas del navegador: `segments.test.ts` y `queue.test.ts` (dominio, con
+    propiedades), `watch-queue.test.ts` (almacenamiento, candados y relojes simulados),
+    `tests/ui/lesson-screen.test.tsx` y `player.test.tsx`, y en `tests/e2e/equipo/leccion.equipo.ts`
+    el extremo a extremo: el video de mentira define `paused`, `currentTime` y `duration` en el
+    elemento y manda `timeupdate` con el reloj de verdad, porque la base revisa contra el tiempo
+    vivo. Lo que solo se ve en un iPhone (ocultar y volver, cerrar Safari con un tramo abierto,
+    Web Locks) se revisa a mano.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

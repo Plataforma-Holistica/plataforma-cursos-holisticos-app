@@ -152,9 +152,13 @@ describe("el reproductor", () => {
       onLoadedMetadata: _loaded,
       onEnded: _ended,
       onTimeUpdate: _time,
+      onRateChange: _rate,
+      onSeeking: _seeking,
+      onWaiting: _waiting,
+      onEmptied: _emptied,
       ...rest
     } = mux.props ?? {};
-    void [_ref, _error, _playing, _play, _pause, _loaded, _ended, _time];
+    void [_ref, _error, _playing, _play, _pause, _loaded, _ended, _time, _rate, _seeking, _waiting, _emptied];
     expect(rest).toEqual({
       className: "player-mux block h-full w-full",
       playbackId: "PlaybackDePrueba",
@@ -263,6 +267,34 @@ describe("el reproductor", () => {
     expect(onAdvancing.mock.calls).toEqual([[true], [false], [true], [false]]);
   });
 
+  it("dice cada muestra mientras avanza, y cuándo se detiene el tramo, desde el evento mismo (T-205)", () => {
+    const onWatch = vi.fn();
+    const onExpired = vi.fn();
+    render(<Player grant={1} playbackId="P" tokens={TOKENS} startTime={0} speeds={SPEEDS} onExpired={onExpired} onFailed={vi.fn()} onPlaying={vi.fn()} onWatch={onWatch} />);
+    const fire = (name: string, target: unknown, more: Record<string, unknown> = {}) => act(() => (mux.props?.[name] as (event: unknown) => void)({ target, ...more }));
+    const playingAt = (currentTime: number) => ({ currentTime, playbackRate: 1.5, duration: 356, paused: false });
+    fire("onTimeUpdate", playingAt(10));
+    expect(onWatch).toHaveBeenLastCalledWith({ kind: "tick", at: 10, rate: 1.5, duration: 356 });
+    fire("onRateChange", { ...playingAt(11), playbackRate: 2 });
+    expect(onWatch).toHaveBeenLastCalledWith({ kind: "tick", at: 11, rate: 2, duration: 356 });
+    // Una muestra con el video en pausa (después de buscar, por ejemplo) no extiende nada: detiene.
+    fire("onTimeUpdate", { ...playingAt(200), paused: true });
+    expect(onWatch).toHaveBeenLastCalledWith({ kind: "stop" });
+    fire("onTimeUpdate", null);
+    expect(onWatch).toHaveBeenLastCalledWith({ kind: "stop" });
+    onWatch.mockClear();
+    for (const name of ["onSeeking", "onWaiting", "onEmptied", "onEnded"]) fire(name, playingAt(12));
+    fire("onPause", { error: null });
+    expect(onWatch.mock.calls).toEqual([[{ kind: "stop" }], [{ kind: "stop" }], [{ kind: "stop" }], [{ kind: "stop" }], [{ kind: "stop" }]]);
+    // Un error fatal detiene antes de decir que caducó; uno que no es fatal, no.
+    onWatch.mockClear();
+    fire("onError", mux.element, { detail: { fatal: false, muxCode: 2000003 } });
+    expect(onWatch).not.toHaveBeenCalled();
+    fire("onError", mux.element, { detail: { fatal: true, muxCode: TOKEN_EXPIRED } });
+    expect(onWatch).toHaveBeenCalledExactlyOnceWith({ kind: "stop" });
+    expect(onWatch.mock.invocationCallOrder[0]).toBeLessThan(onExpired.mock.invocationCallOrder[0] ?? 0);
+  });
+
   it("sin quien escuche cuándo avanza (la revisión), nada cambia", () => {
     const { onPlaying } = show();
     act(() => {
@@ -270,6 +302,7 @@ describe("el reproductor", () => {
       (mux.props?.onTimeUpdate as (event: unknown) => void)({ target: { currentTime: 3 } });
       (mux.props?.onPause as (event: unknown) => void)({ target: { error: null } });
       (mux.props?.onEnded as () => void)();
+      for (const name of ["onRateChange", "onSeeking", "onWaiting", "onEmptied"]) (mux.props?.[name] as (event: unknown) => void)({ target: null });
     });
     expect(onPlaying).toHaveBeenCalledOnce();
   });
