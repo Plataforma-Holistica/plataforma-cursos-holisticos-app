@@ -513,6 +513,29 @@ describe("la pantalla completa dentro de la página (iPhone; diseño, sección 5
     expect(screen.getByRole("button", { name: "Salir de pantalla completa" })).toHaveFocus();
   });
 
+  it("la nota de la pantalla («Sin conexión») va abajo, sin fondo que tape la marca y sin anunciarse aquí; fuera, no se pinta", () => {
+    render(
+      <Player
+        grant={1}
+        playbackId="P"
+        tokens={TOKENS}
+        startTime={0}
+        speeds={SPEEDS}
+        watermark="ana@correo.com"
+        onExpired={vi.fn()}
+        onFailed={vi.fn()}
+        onPlaying={vi.fn()}
+        notice="Sin conexión. Reintentando…"
+      />,
+    );
+    expect(screen.queryByText("Sin conexión. Reintentando…")).toBeNull();
+    request("mediaenterfullscreenrequest");
+    const note = screen.getByText("Sin conexión. Reintentando…");
+    expect(note).toHaveAttribute("aria-hidden", "true");
+    expect(note.closest("[role=status]")).toHaveClass("player-filled-hint");
+    expect(note.className).not.toMatch(/\bbg-/);
+  });
+
   it("«Salir de pantalla completa» la deja como estaba", () => {
     const { frame } = show("ana@correo.com");
     request("mediaenterfullscreenrequest");

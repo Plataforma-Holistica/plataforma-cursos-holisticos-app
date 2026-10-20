@@ -391,14 +391,16 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     };
   }, [playingId, playingDuration, playingBeat]);
 
-  // Al abrir la lección, lo que quedó de otras visitas sale. Al ocultar la pestaña se corta el
-  // tramo y se manda; al irse la página solo se corta y se guarda.
+  // Al abrir la lección, lo que quedó de otras visitas sale. Ocultar la pestaña detiene la cadena
+  // y manda lo pendiente: si vuelve antes de la siguiente muestra, sin que llegue ninguna oculta,
+  // lo de en medio no sale como visible, porque lo que sigue empieza otra cadena. Al irse la
+  // página, el tramo solo se corta y se guarda.
   useEffect(() => {
     configureCourier();
     void courier.sweep();
     const onVisibility = () => {
       if (pageVisible()) return;
-      stepSegments(segments.current, cutSegment);
+      stepSegments(segments.current, stopSegment);
       void courier.flush();
     };
     const onPageHide = () => stepSegments(segments.current, cutSegment);
@@ -476,8 +478,10 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
         <div className="flex flex-col gap-4 lg:col-span-7">
           {/* Pegado arriba al desplazar, en teléfono; PA-34 no: crece, y taparía la página. */}
           <section aria-label={text.player.label} className={video.kind === "busy" ? undefined : "sticky top-0 z-(--z-sticky) lg:static"}>
-            {/* PA-22, «Sin conexión»: una nota chica arriba. Se anuncia en la región viva de abajo. */}
-            <p aria-hidden="true" className="bg-surface-1 text-body-s text-text-2">
+            {/* PA-22, «Sin conexión»: una nota chica arriba, en su propia región viva (existe desde
+                antes, para que se anuncie): junto con la del reproductor, prenderla o quitarla
+                volvería a decir el estado entero. */}
+            <p aria-live="polite" className="bg-surface-1 text-body-s text-text-2">
               {offline ? text.player.offline : ""}
             </p>
             <div
@@ -565,7 +569,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
             </div>
             {/* Lo que el reproductor dice a quien no lo ve: existe desde antes, para que se anuncie. */}
             <p role="status" className="sr-only">
-              {[announcementOf(video), offline ? text.player.offline : ""].filter((part) => part !== "").join(" ")}
+              {announcementOf(video)}
             </p>
           </section>
           <div className="flex flex-col gap-1">

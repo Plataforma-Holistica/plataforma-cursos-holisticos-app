@@ -506,7 +506,6 @@ export function Player(props: PlayerProps) {
           >
             {text.controls.exitFullscreen}
           </button>
-          {notice ? <p className="rounded-md bg-scrim px-3 py-2 text-body-s text-text">{notice}</p> : null}
           {portrait ? (
             <button
               type="button"
@@ -519,9 +518,16 @@ export function Player(props: PlayerProps) {
           ) : null}
         </div>
       ) : null}
-      {/* Existe desde antes de entrar: una región viva que nace con su texto no se anuncia. */}
+      {/* Existe desde antes de entrar: una región viva que nace con su texto no se anuncia. La nota
+          de la pantalla va abajo, sin fondo, para no tapar la marca, y no se anuncia aquí: la
+          pantalla ya la dice en su propia región viva. */}
       <p role="status" className="player-filled-hint pointer-events-none absolute inset-x-0 bottom-0 m-0 text-center text-body text-text">
         {filled && hint && portrait && !turned ? text.filled.turnHint : ""}
+        {filled && notice ? (
+          <span aria-hidden="true" className="block text-body-s">
+            {notice}
+          </span>
+        ) : null}
       </p>
     </div>
   );

@@ -97,19 +97,17 @@ export function observeWatch(builder: SegmentBuilder, sample: WatchSample): Step
   if (open === null || last === null) return { builder: { ...builder, open: fresh(sample), last: next }, closed: [] };
   const gap = sample.clock - last.clock;
   const moved = sample.at - last.at;
-  const allowed = gap * Math.max(open.rate, sample.rate) + SEGMENT_RULES.aheadSeconds;
-  if (gap < 0 || gap > SEGMENT_RULES.gapSeconds || moved > allowed || moved < -SEGMENT_RULES.backSeconds) {
+  const allowed = gap * open.rate + SEGMENT_RULES.aheadSeconds;
+  const jumped = gap < 0 || gap > SEGMENT_RULES.gapSeconds || moved > allowed || moved < -SEGMENT_RULES.backSeconds;
+  // Cambió la velocidad o la visibilidad: no se sabe en qué momento entre las dos muestras, así
+  // que lo de en medio no se le da a ninguno. Lo de antes se cierra en su última muestra y lo
+  // nuevo empieza otra cadena (hacia arriba): se pierde menos de un segundo, nunca se gana. Así
+  // ningún segundo oculto sale como visible.
+  if (jumped || sample.rate !== open.rate || sample.visible !== open.visible) {
     const segment = close(builder, open);
     return { builder: { ...builder, open: fresh(sample), last: next }, closed: segment === null ? [] : [segment] };
   }
-  const extended: Open = { ...open, to: Math.max(open.to, sample.at) };
-  if (sample.rate === open.rate && sample.visible === open.visible) return { builder: { ...builder, open: extended, last: next }, closed: [] };
-  // Cambió la velocidad o la visibilidad: hasta aquí con lo de antes, y sigue desde el borde. Si
-  // lo de antes no llega a un segundo entero, sigue abierto con lo nuevo: no se pierde.
-  const segment = close({ ...builder, last: next }, extended);
-  const attributes = { rate: sample.rate, visible: sample.visible };
-  const reopened: Open = segment === null ? { ...extended, ...attributes } : { from: segment.to, continued: true, to: extended.to, ...attributes };
-  return { builder: { ...builder, open: reopened, last: next }, closed: segment === null ? [] : [segment] };
+  return { builder: { ...builder, open: { ...open, to: Math.max(open.to, sample.at) }, last: next }, closed: [] };
 }
 
 /** Corta el tramo abierto y sigue desde su borde: cada latido, al ocultar, al irse la página. */

@@ -73,18 +73,32 @@ describe("un tramo seguido", () => {
 });
 
 describe("lo que corta un tramo", () => {
-  it("cambiar la velocidad: hasta ahí con la de antes, desde ahí con la nueva, sin hueco", () => {
+  // No se sabe en qué momento entre dos muestras cambió: lo de en medio no se le da a ninguno, y
+  // lo nuevo empieza otra cadena, hacia arriba. Se pierde menos de un segundo por cambio.
+  it("cambiar la velocidad: hasta la última muestra con la de antes, y otra cadena con la nueva", () => {
     const slow = run(startSegments(null), playing(0, 10, 0));
     const fast = run(slow.builder, playing(10, 30, 10, { rate: 2 }).slice(1));
     expect(fast.closed).toEqual([{ from: 0, to: 10, rate: 1, visible: true }]);
-    expect(stopSegment(fast.builder).closed).toEqual([{ from: 10, to: 30, rate: 2, visible: true }]);
+    expect(stopSegment(fast.builder).closed).toEqual([{ from: 11, to: 30, rate: 2, visible: true }]);
   });
 
   it("ocultar la pestaña: lo de después sale como no visible", () => {
     const shown = run(startSegments(null), playing(0, 10, 0));
     const hidden = run(shown.builder, playing(10, 20, 10, { visible: false }).slice(1));
     expect(hidden.closed).toEqual([{ from: 0, to: 10, rate: 1, visible: true }]);
-    expect(stopSegment(hidden.builder).closed).toEqual([{ from: 10, to: 20, rate: 1, visible: false }]);
+    expect(stopSegment(hidden.builder).closed).toEqual([{ from: 11, to: 20, rate: 1, visible: false }]);
+  });
+
+  it("al volver a la pestaña, nada de lo oculto se acredita como visible, aunque lo oculto no llegue a un segundo", () => {
+    // Una cadena oculta que ya se cortó en 10 y lleva hasta 10.95; vuelve a la vista en 11.2.
+    const hidden = run(startSegments(null), playing(0, 10, 0, { visible: false }));
+    const cut = cutSegment(hidden.builder);
+    const shown = run(cut.builder, [sample(10.25, 10.25, { visible: false }), sample(10.95, 10.95, { visible: false }), ...playing(11.2, 14.2, 11.2)]);
+    const all = [...cut.closed, ...shown.closed, ...stopSegment(shown.builder).closed];
+    expect(all).toEqual([
+      { from: 0, to: 10, rate: 1, visible: false },
+      { from: 12, to: 14, rate: 1, visible: true },
+    ]);
   });
 
   it("un salto hacia adelante que no cabe en el reloj es una búsqueda: no se acredita lo saltado", () => {
@@ -141,11 +155,7 @@ describe("lo que corta un tramo", () => {
     expect(still.closed).toEqual([{ from: 0, to: 5, rate: 1, visible: true }]);
   });
 
-  it("al subir la velocidad, el salto de esa muestra se mide con la nueva: no es una búsqueda", () => {
-    // Un segundo de reloj a velocidad 2 avanza 1.8 s del video: con la velocidad de antes no cabría.
-    const { closed } = run(startSegments(null), [...playing(0, 10, 0), sample(11.8, 11, { rate: 2 })]);
-    expect(closed).toEqual([{ from: 0, to: 11, rate: 1, visible: true }]);
-  });
+
 });
 
 describe("la duración", () => {
@@ -202,22 +212,29 @@ type Step =
   | { kind: "visibility" }
   | { kind: "cut" };
 
+// En décimas y centésimas de segundo: `fc.double` se va casi siempre a los extremos (0, valores
+// diminutos), y así los guiones casi no reproducirían nada.
+const tenths = (max: number) => fc.integer({ min: 0, max: max * 10 }).map((value) => value / 10);
 const step: fc.Arbitrary<Step> = fc.oneof(
-  fc.record({ kind: fc.constant("play" as const), seconds: fc.double({ min: 0, max: 90, noNaN: true }), tick: fc.double({ min: 0.05, max: 0.3, noNaN: true }) }),
-  fc.record({ kind: fc.constant("pause" as const), seconds: fc.double({ min: 0, max: 900, noNaN: true }) }),
-  fc.record({ kind: fc.constant("seek" as const), to: fc.double({ min: 0, max: 400, noNaN: true }) }),
-  fc.record({ kind: fc.constant("stall" as const), seconds: fc.double({ min: 0, max: 20, noNaN: true }) }),
+  fc.record({ kind: fc.constant("play" as const), seconds: tenths(90), tick: fc.integer({ min: 5, max: 30 }).map((value) => value / 100) }),
+  fc.record({ kind: fc.constant("pause" as const), seconds: tenths(900) }),
+  fc.record({ kind: fc.constant("seek" as const), to: tenths(400) }),
+  fc.record({ kind: fc.constant("stall" as const), seconds: tenths(20) }),
   fc.record({ kind: fc.constant("rate" as const), rate: fc.constantFrom(0.5, 0.75, 1, 1.25, 1.5, 1.75, 2) }),
   fc.record({ kind: fc.constant("visibility" as const) }),
   fc.record({ kind: fc.constant("cut" as const) }),
 );
 
+
+/** Un trecho que se reprodujo de verdad, seguido y con la misma velocidad y visibilidad. */
 interface Run {
   from: number;
   to: number;
+  rate: number;
+  visible: boolean;
 }
 
-/** Corre un guion: lo que se reprodujo de verdad (tramos seguidos) y lo que salió. */
+/** Corre un guion: los trechos que se reprodujeron de verdad y lo que salió. */
 function simulate(steps: Step[], duration: number) {
   let builder = startSegments(duration);
   const closed: Segment[] = [];
@@ -238,10 +255,15 @@ function simulate(steps: Step[], duration: number) {
   for (const each of steps) {
     switch (each.kind) {
       case "play": {
-        current ??= { from: at, to: at };
-        runs.push(current);
+        if (current === null) {
+          current = { from: at, to: at, rate, visible };
+          runs.push(current);
+        }
         let left = each.seconds;
-        take(observeWatch(builder, { at, clock, rate, visible, duration }));
+        // Al empezar a avanzar, una muestra en el punto de partida. Si ya venía avanzando (cambió la
+        // velocidad o la visibilidad sin pausa), la primera muestra con lo nuevo llega después de
+        // moverse, como en un navegador: no se sabe en qué momento de en medio cambió.
+        if (builder.open === null) take(observeWatch(builder, { at, clock, rate, visible, duration }));
         while (left > 0 && at < duration) {
           const dt = Math.min(each.tick, left);
           left -= dt;
@@ -261,11 +283,18 @@ function simulate(steps: Step[], duration: number) {
         halt();
         at = Math.min(each.to, duration);
         break;
+      // Cambiar la velocidad o la visibilidad no detiene el video, pero empieza otro trecho. Como
+      // en la pantalla: la velocidad llega como una muestra (`ratechange`), y ocultar detiene la
+      // cadena (`visibilitychange`); volver a la vista llega con la siguiente muestra.
       case "rate":
+        if (each.rate !== rate) current = null;
         rate = each.rate;
+        if (builder.open !== null) take(observeWatch(builder, { at, clock, rate, visible, duration }));
         break;
       case "visibility":
+        current = null;
         visible = !visible;
+        if (!visible) take(stopSegment(builder));
         break;
       case "cut":
         take(cutSegment(builder));
@@ -276,24 +305,44 @@ function simulate(steps: Step[], duration: number) {
   return { closed, runs };
 }
 
+/** Los tramos que caben en ese trecho. */
+const inside = (closed: Segment[], each: Run) => closed.filter((segment) => each.from <= segment.from && segment.to <= each.to + 1e-9);
+
 describe("propiedades, con guiones de reproducción al azar", () => {
-  it("ningún tramo cubre un segundo que no se reprodujo: cada uno cabe en un trecho seguido de verdad", () => {
+  const scripts = fc.tuple(fc.array(step, { minLength: 2, maxLength: 40, size: "max" }), fc.integer({ min: 30, max: 400 }));
+
+  it("ningún tramo cubre un segundo que no se reprodujo, y lleva la velocidad y la visibilidad con que se reprodujo", () => {
     fc.assert(
-      fc.property(fc.array(step, { maxLength: 40 }), fc.integer({ min: 30, max: 400 }), (steps, duration) => {
+      fc.property(scripts, ([steps, duration]) => {
         const { closed, runs } = simulate(steps, duration);
         for (const segment of closed) {
-          expect(
-            runs.some((each) => each.from <= segment.from && segment.to <= each.to + 1e-9),
-            JSON.stringify({ segment, runs }),
-          ).toBe(true);
+          const home = runs.filter((each) => each.from <= segment.from && segment.to <= each.to + 1e-9 && each.visible === segment.visible && Math.round(each.rate * 100) / 100 === segment.rate);
+          expect(home.length, JSON.stringify({ segment, runs })).toBeGreaterThan(0);
         }
       }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("dentro de un trecho, los tramos no se traslapan ni suman más que el trecho", () => {
+    fc.assert(
+      fc.property(scripts, ([steps, duration]) => {
+        const { closed, runs } = simulate(steps, duration);
+        // Un tramo cae en un solo trecho de verdad; dos trechos solo comparten segundos si se volvió a ver.
+        const mine = (each: Run) => inside(closed, each).filter((segment) => !runs.some((other) => other !== each && other.from <= segment.from && segment.to <= other.to + 1e-9));
+        for (const each of runs) {
+          const own = mine(each).sort((a, b) => a.from - b.from);
+          for (let index = 1; index < own.length; index += 1) expect(own[index]?.from).toBeGreaterThanOrEqual(own[index - 1]?.to ?? 0);
+          expect(own.reduce((sum, segment) => sum + segment.to - segment.from, 0)).toBeLessThanOrEqual(each.to - each.from + 1e-9);
+        }
+      }),
+      { numRuns: 500 },
     );
   });
 
   it("todo tramo que sale tiene la forma que la base acepta, y ninguno pasa de la duración", () => {
     fc.assert(
-      fc.property(fc.array(step, { maxLength: 40 }), fc.integer({ min: 30, max: 400 }), (steps, duration) => {
+      fc.property(scripts, ([steps, duration]) => {
         const { closed } = simulate(steps, duration);
         const events = closed.map((segment, seq) => ({ seq, ...segment }));
         for (let index = 0; index < events.length; index += HEARTBEAT_LIMITS.batch) {
@@ -301,20 +350,33 @@ describe("propiedades, con guiones de reproducción al azar", () => {
         }
         for (const segment of closed) expect(segment.to).toBeLessThanOrEqual(duration);
       }),
+      { numRuns: 500 },
     );
   });
 
-  it("lo que se pierde de un trecho seguido es menos de dos segundos (el redondeo de sus dos puntas)", () => {
+  it("lo que se pierde de un trecho es menos de dos segundos (el redondeo de sus dos puntas)", () => {
     fc.assert(
-      fc.property(fc.array(step, { maxLength: 40 }), fc.integer({ min: 30, max: 400 }), (steps, duration) => {
+      fc.property(scripts, ([steps, duration]) => {
         const { closed, runs } = simulate(steps, duration);
-        // Cada trecho se cuenta una vez, aunque el guion lo haya reanudado varias veces.
-        const distinct = [...new Set(runs)];
-        for (const each of distinct) {
-          const credited = closed.filter((segment) => each.from <= segment.from && segment.to <= each.to + 1e-9).reduce((sum, segment) => sum + segment.to - segment.from, 0);
+        for (const each of runs) {
+          const credited = inside(closed, each)
+            .filter((segment) => segment.visible === each.visible)
+            .reduce((sum, segment) => sum + segment.to - segment.from, 0);
           expect(credited).toBeGreaterThan(each.to - each.from - 2);
         }
       }),
+      { numRuns: 500 },
     );
+  });
+
+  it("un corte avanza el borde: dos tramos del mismo trecho no se traslapan", () => {
+    const { builder } = run(startSegments(null), playing(0, 20, 0));
+    const first = cutSegment(builder);
+    const later = run(first.builder, playing(20.25, 30, 20.25));
+    const segments = [...first.closed, ...stopSegment(later.builder).closed];
+    expect(segments).toEqual([
+      { from: 0, to: 20, rate: 1, visible: true },
+      { from: 20, to: 30, rate: 1, visible: true },
+    ]);
   });
 });

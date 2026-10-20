@@ -590,14 +590,34 @@ test("sin red: «Sin conexión. Reintentando…» a los dos envíos fallidos, y 
   await playVideo(page, 0, 3);
   await context.setOffline(true);
   await pauseVideo(page);
-  const note = page.getByText("Sin conexión. Reintentando…").first();
-  // Un envío perdido no la muestra; el segundo, a los 5 s, sí.
+  // Un envío perdido no la muestra: el primero falla en el acto, y el reintento sale a los 5 s.
+  await page.waitForTimeout(2_000);
+  await expect(page.getByText("Sin conexión. Reintentando…")).toHaveCount(0);
+  const note = page.getByText("Sin conexión. Reintentando…");
   await expect(note).toBeVisible({ timeout: 15_000 });
   expect(await watched(who)).toEqual([]);
   expect(await a11yViolations(page)).toEqual([]);
   await context.setOffline(false);
   await expect(page.getByText("Sin conexión. Reintentando…")).toHaveCount(0, { timeout: 20_000 });
   await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
+  await context.close();
+});
+
+test("con la pestaña oculta, lo visto llega como no visible (T-205, RF-403)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await advance(page);
+  // El navegador de prueba siempre está a la vista: se le dice que no, y se avisa.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await playVideo(page, 0, 3);
+  await pauseVideo(page);
+  await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: false })]);
   await context.close();
 });
 

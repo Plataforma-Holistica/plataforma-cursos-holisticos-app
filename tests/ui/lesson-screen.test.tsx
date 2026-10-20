@@ -616,6 +616,12 @@ describe("el latido de presencia (T-204)", () => {
 });
 
 describe("los tramos vistos (T-205)", () => {
+  // El latido resuelve lo que lleva, como el servidor cuando todo sale bien.
+  beforeEach(() => {
+    actions.playbackPresenceAction.mockImplementation((_slug: string, _lesson: string, _id: string, events: { seq: number }[]) =>
+      Promise.resolve({ kind: "ok", batch: { kind: "settled", seqs: events.map((event) => event.seq) } }),
+    );
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -649,14 +655,16 @@ describe("los tramos vistos (T-205)", () => {
   }
   const sent = (call: unknown[] | undefined) => (call?.at(-1) as { seq: number; from: number; to: number; visible: boolean }[] | undefined) ?? [];
   const stored = (id: string) => window.localStorage.getItem(`plataforma-latidos:${id}`);
+  /** Todo lo que salió, con latido o sin presencia, una vez cada consecutivo y en orden. */
+  const everything = () => {
+    const all = [...actions.playbackPresenceAction.mock.calls, ...actions.flushHeartbeatsAction.mock.calls].flatMap((call) => sent(call));
+    return [...new Map(all.map((event) => [event.seq, event])).values()].sort((a, b) => a.seq - b.seq);
+  };
 
   it("el latido corta el tramo abierto y lleva lo visto; lo resuelto sale de la cola", async () => {
     await playing();
     await press("avanza");
     expect(actions.playbackPresenceAction).toHaveBeenLastCalledWith("respirar", LESSON, PLAYBACK, []);
-    actions.playbackPresenceAction.mockImplementation((_slug: string, _lesson: string, _id: string, events: { seq: number }[]) =>
-      Promise.resolve({ kind: "ok", batch: { kind: "settled", seqs: events.map((event) => event.seq) } }),
-    );
     // El latido sale a los 30 s del anterior, con la última muestra antes de él.
     await watch(0, 30);
     expect(actions.playbackPresenceAction).toHaveBeenCalledTimes(2);
@@ -669,17 +677,17 @@ describe("los tramos vistos (T-205)", () => {
     expect(sent(actions.playbackPresenceAction.mock.calls[2])).toEqual([{ seq: 1, from: 29, to: 60, rate: 1, visible: true }]);
   });
 
-  it("un latido que no contesta deja lo suyo en la cola, guardado, y sale en el siguiente", async () => {
+  it("un latido que no contesta deja lo suyo en la cola, guardado, y sale sin presencia a los 5 s", async () => {
     await playing();
     await press("avanza");
     actions.playbackPresenceAction.mockRejectedValueOnce(new Error("sin red"));
     await watch(0, 30);
     expect(sent(actions.playbackPresenceAction.mock.calls[1])).toEqual([{ seq: 0, from: 0, to: 29, rate: 1, visible: true }]);
-    await wait(0);
     expect(JSON.parse(stored(PLAYBACK) ?? "{}").events).toHaveLength(1);
-    await watch(30.25, 60);
-    await wait(250);
-    expect(sent(actions.playbackPresenceAction.mock.calls[2]).map((event) => event.seq)).toEqual([0, 1]);
+    expect(actions.flushHeartbeatsAction).not.toHaveBeenCalled();
+    await wait(5_000);
+    expect(actions.flushHeartbeatsAction).toHaveBeenCalledExactlyOnceWith(PLAYBACK, [{ seq: 0, from: 0, to: 29, rate: 1, visible: true }]);
+    expect(stored(PLAYBACK)).toBeNull();
   });
 
   it("si un latido va en camino, no sale otro", async () => {
@@ -710,7 +718,7 @@ describe("los tramos vistos (T-205)", () => {
     await watch(300, 302);
     await signal({ kind: "stop" });
     await press("se detiene");
-    expect(sent(actions.flushHeartbeatsAction.mock.calls[0])).toEqual([
+    expect(everything()).toEqual([
       { seq: 0, from: 0, to: 5, rate: 1, visible: true },
       { seq: 1, from: 300, to: 302, rate: 1, visible: true },
     ]);
@@ -730,7 +738,31 @@ describe("los tramos vistos (T-205)", () => {
     visibility.mockRestore();
     await signal({ kind: "stop" });
     await press("se detiene");
-    expect(sent(actions.flushHeartbeatsAction.mock.calls[1])).toEqual([{ seq: 1, from: 5, to: 9, rate: 1, visible: false }]);
+    // Ocultar detuvo la cadena: lo oculto empieza en otra, hacia arriba.
+    expect(sent(actions.flushHeartbeatsAction.mock.calls[1])).toEqual([{ seq: 1, from: 6, to: 9, rate: 1, visible: false }]);
+  });
+
+  it("ocultar y volver entre dos muestras detiene la cadena: lo de en medio no sale como visible", async () => {
+    await playing();
+    await press("avanza");
+    await watch(0, 5);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    visibility.mockRestore();
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await watch(5.25, 9);
+    await signal({ kind: "stop" });
+    await press("se detiene");
+    expect(everything()).toEqual([
+      { seq: 0, from: 0, to: 5, rate: 1, visible: true },
+      { seq: 1, from: 6, to: 9, rate: 1, visible: true },
+    ]);
   });
 
   it("al renovar la dirección, lo de la reproducción vieja sale a la vieja, y el viejo no suma mientras llega la nueva", async () => {
@@ -789,12 +821,11 @@ describe("los tramos vistos (T-205)", () => {
     await press("avanza");
     expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);
     await wait(30_000);
-    // La nota a la vista, y dicha en la región viva del reproductor.
-    const notes = screen.getAllByText("Sin conexión. Reintentando…");
-    expect(notes).toHaveLength(2);
-    expect(notes.filter((note) => note.getAttribute("aria-hidden") === "true")).toHaveLength(1);
+    // Una sola vez, en su propia región viva; la del reproductor no la repite.
+    const note = screen.getByText("Sin conexión. Reintentando…");
+    expect(note).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status", { name: "" }).textContent).not.toContain("Sin conexión");
     expect(player.last?.notice).toBe("Sin conexión. Reintentando…");
-    expect(screen.getByRole("status", { name: "" }).textContent).toContain("Sin conexión. Reintentando…");
     actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: null });
     await wait(30_000);
     expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);

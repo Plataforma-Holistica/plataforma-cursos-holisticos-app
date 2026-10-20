@@ -40,13 +40,25 @@ class MemoryStorage implements Storage {
   }
 }
 
-/** Candados compartidos entre «pestañas»: los que se tienen, por nombre. */
+/** Candados compartidos entre «pestañas»: los que se tienen, por nombre, y quién espera cada uno. */
 class MemoryLocks {
   held = new Set<string>();
+  waiting = new Map<string, (() => void)[]>();
   request(name: string, options: { ifAvailable?: boolean }, callback: (lock: { name: string } | null) => unknown): Promise<unknown> {
-    if (this.held.has(name)) return Promise.resolve(callback(null));
-    this.held.add(name);
-    return Promise.resolve(callback({ name })).finally(() => this.held.delete(name));
+    const run = (): Promise<unknown> => {
+      this.held.add(name);
+      return Promise.resolve(callback({ name })).finally(() => {
+        this.held.delete(name);
+        this.waiting.get(name)?.shift()?.();
+      });
+    };
+    if (!this.held.has(name)) return run();
+    if (options.ifAvailable === true) return Promise.resolve(callback(null));
+    return new Promise((resolve) => {
+      const queue = this.waiting.get(name) ?? [];
+      queue.push(() => resolve(run()));
+      this.waiting.set(name, queue);
+    });
   }
 }
 
@@ -131,6 +143,55 @@ describe("la cola propia", () => {
     expect(stored(P1)).toBeNull();
     await settleAll();
     expect(locks.held.has(key(P1))).toBe(false);
+  });
+
+  it("soltada antes de tener su candado y abierta otra vez (los efectos dobles de React): el candado queda con la nueva, y se suelta", async () => {
+    const { courier } = tab();
+    courier.own(P1);
+    courier.retire(P1);
+    courier.own(P1);
+    await settleAll();
+    expect(locks.held.has(key(P1))).toBe(true);
+    courier.retire(P1);
+    await settleAll();
+    expect(locks.held.has(key(P1))).toBe(false);
+  });
+
+  it("un latido sin respuesta, con el video en pausa, programa su reintento sin presencia", async () => {
+    const { courier, sent } = tab();
+    courier.own(P1);
+    courier.add(P1, segments(2));
+    const batch = courier.take(P1);
+    expect(courier.settle(P1, batch, null)).toBe(false);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent).toEqual([{ id: P1, seqs: [0, 1] }]);
+    expect(stored(P1)).toBeNull();
+  });
+
+  it("una respuesta que no resuelve lo enviado cuenta como fallo: espera, no vuelve a mandarlo en el acto", async () => {
+    const { courier, send } = tab(() => Promise.resolve({ kind: "settled", seqs: [] }));
+    courier.own(P1);
+    courier.add(P1, segments(1));
+    await courier.flush();
+    await settleAll();
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("deja de reintentar solo después de diez envíos seguidos sin resolver; lo pendiente se queda guardado", async () => {
+    const { courier, send } = tab(() => Promise.resolve({ kind: "retry" }));
+    courier.own(P1);
+    courier.add(P1, segments(1));
+    await courier.flush();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(send).toHaveBeenCalledTimes(11);
+    expect(stored(P1)?.events).toHaveLength(1);
+    // Un vaciado que alguien pide (una pausa, ocultar) sí sale.
+    await courier.flush();
+    expect(send).toHaveBeenCalledTimes(12);
   });
 
   it("abrir otra reproducción deja de hacer actual a la anterior; vacía, se suelta", async () => {
@@ -440,11 +501,14 @@ describe("las colas de otras pestañas y de otras visitas", () => {
     await courier.sweep();
   });
 
-  it("si el candado no se puede pedir, no se adopta", async () => {
+  it("si el candado no se puede pedir, vale la regla de sin Web Locks", async () => {
     storage.setItem(key(P1), JSON.stringify({ v: 1, touched: NOW, next: 1, events: [{ seq: 0, ...SEGMENT }] }));
+    storage.setItem(key(P2), JSON.stringify({ v: 1, touched: NOW - 90_000, next: 1, events: [{ seq: 0, ...SEGMENT }] }));
     const broken = { request: () => Promise.reject(new Error("no")) } as unknown as LockManager;
     const { courier, sent } = tab(undefined, { locks: () => broken });
     await courier.sweep();
-    expect(sent).toEqual([]);
+    await settleAll();
+    expect(sent).toEqual([{ id: P2, seqs: [0] }]);
+    expect(stored(P1)?.events).toHaveLength(1);
   });
 });

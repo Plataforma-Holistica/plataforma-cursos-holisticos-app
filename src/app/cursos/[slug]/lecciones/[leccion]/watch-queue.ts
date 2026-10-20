@@ -41,6 +41,13 @@ export const SEND_TIMEOUT_MS = 15_000;
 /** Sin Web Locks, una cola ajena se adopta si no se escribe hace este múltiplo del latido. */
 const STALE_BEATS = 3;
 
+/**
+ * Pasados tantos envíos seguidos sin resolver, el cartero deja de reintentar solo (unos cuatro
+ * minutos): sin sesión, `flushHeartbeats` contesta «reintenta» para siempre. Lo pendiente sigue
+ * guardado y sale con el siguiente latido, vaciado o lección.
+ */
+const RETRY_LIMIT = 10;
+
 export type FlushSender = (sessionId: string, events: HeartbeatEvent[]) => Promise<BatchVerdict>;
 
 interface Owned {
@@ -51,7 +58,12 @@ interface Owned {
   current: boolean;
   /** Suelta el candado; nulo si no se tiene (o no hay Web Locks). */
   release: (() => void) | null;
+  /** Ya se soltó: un candado que llegue tarde se devuelve en el acto. */
+  abandoned: boolean;
 }
+
+/** Cómo salió pedir un candado: se tiene, otra pestaña lo tiene, o no se puede pedir. */
+type LockResult = "held" | "busy" | "unsupported";
 
 export interface CourierDeps {
   storage: () => Storage | null;
@@ -82,8 +94,8 @@ export function createCourier(deps: CourierDeps = browserDeps) {
   let heartbeatSeconds = 30;
   /** Envíos seguidos que lanzaron o no contestaron a tiempo (la nota). */
   let failures = 0;
-  /** Vaciados seguidos que no resolvieron nada (la espera del siguiente). */
-  let flushMisses = 0;
+  /** Envíos seguidos que no resolvieron lo que llevaban (la espera del siguiente reintento). */
+  let misses = 0;
   let flushing = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -111,27 +123,31 @@ export function createCourier(deps: CourierDeps = browserDeps) {
   function maybeRelease(id: string, entry: Owned) {
     if (entry.current || entry.queue.events.length > 0) return;
     write(id, entry);
+    entry.abandoned = true;
     entry.release?.();
     owned.delete(id);
   }
 
-  /** Pide el candado de una cola; contesta si se consiguió (o si no hay Web Locks). */
-  function lock(id: string, entry: Owned): Promise<boolean> {
+  /**
+   * Pide el candado de una cola. La propia lo espera (solo lo puede tener una petición suya de
+   * antes, que lo suelta enseguida); una ajena solo si está libre.
+   */
+  function lock(id: string, entry: Owned, wait: boolean): Promise<LockResult> {
     const locks = deps.locks();
-    if (locks === null) return Promise.resolve(true);
-    return new Promise((granted) => {
+    if (locks === null) return Promise.resolve("unsupported");
+    return new Promise((answer) => {
       locks
-        .request(queueKey(id), { ifAvailable: true }, (held) => {
-          if (held === null) {
-            granted(false);
+        .request(queueKey(id), wait ? {} : { ifAvailable: true }, (held) => {
+          if (held === null || entry.abandoned) {
+            answer("busy");
             return undefined;
           }
-          granted(true);
+          answer("held");
           return new Promise<void>((done) => {
             entry.release = done;
           });
         })
-        .catch(() => granted(false));
+        .catch(() => answer("unsupported"));
     });
   }
 
@@ -144,17 +160,30 @@ export function createCourier(deps: CourierDeps = browserDeps) {
     return batch;
   }
 
-  /** La respuesta de un envío de esta cola: lo resuelto sale, lo demás vuelve a la cola. */
-  function settle(id: string, sent: HeartbeatEvent[], verdict: BatchVerdict | null) {
+  /**
+   * La respuesta de un envío de esta cola: lo resuelto sale, lo demás vuelve a la cola. Si algo de
+   * lo enviado se quedó (sin respuesta, «reintenta», o una respuesta que no lo resolvió), se
+   * programa un reintento: el video puede estar en pausa, sin latido que lo lleve. Contesta si
+   * todo lo enviado quedó resuelto.
+   */
+  function settle(id: string, sent: HeartbeatEvent[], verdict: BatchVerdict | null): boolean {
     const entry = owned.get(id);
-    if (entry === undefined) return;
+    if (entry === undefined) return true;
     for (const event of sent) entry.sending.delete(event.seq);
     const next = resolveBatch(entry.queue, sent, verdict, deps.now());
     if (next !== entry.queue) {
       entry.queue = next;
       write(id, entry);
     }
+    const left = new Set(next.events.map((event) => event.seq));
+    const resolved = !sent.some((event) => left.has(event.seq));
+    if (resolved) misses = 0;
+    else {
+      misses += 1;
+      scheduleRetry();
+    }
     maybeRelease(id, entry);
+    return resolved;
   }
 
   /**
@@ -180,13 +209,13 @@ export function createCourier(deps: CourierDeps = browserDeps) {
   }
 
   function scheduleRetry() {
-    if (retryTimer !== null) return;
+    if (retryTimer !== null || misses > RETRY_LIMIT) return;
     retryTimer = deps.setTimer(
       () => {
         retryTimer = null;
         void flush();
       },
-      retryDelaySeconds(flushMisses, heartbeatSeconds) * 1000,
+      retryDelaySeconds(misses, heartbeatSeconds) * 1000,
     );
   }
 
@@ -206,13 +235,7 @@ export function createCourier(deps: CourierDeps = browserDeps) {
         } catch {
           verdict = null;
         }
-        settle(id, batch, verdict);
-        if (verdict === null || verdict.kind === "retry") {
-          flushMisses += 1;
-          scheduleRetry();
-          return;
-        }
-        flushMisses = 0;
+        if (!settle(id, batch, verdict)) return;
       }
     } finally {
       flushing = false;
@@ -244,9 +267,9 @@ export function createCourier(deps: CourierDeps = browserDeps) {
         existing.current = true;
         return;
       }
-      const entry: Owned = { queue: emptyQueue(deps.now()), sending: new Set(), current: true, release: null };
+      const entry: Owned = { queue: emptyQueue(deps.now()), sending: new Set(), current: true, release: null, abandoned: false };
       owned.set(id, entry);
-      void lock(id, entry);
+      void lock(id, entry, true);
     },
 
     /** Ya no es la reproducción en curso (otra dirección, el reproductor se fue): se vacía y se suelta. */
@@ -292,7 +315,6 @@ export function createCourier(deps: CourierDeps = browserDeps) {
         return;
       }
       const now = deps.now();
-      const hasLocks = deps.locks() !== null;
       for (const key of keys) {
         const id = queueSessionOf(key);
         if (id !== null && owned.has(id)) continue;
@@ -310,19 +332,19 @@ export function createCourier(deps: CourierDeps = browserDeps) {
           }
           continue;
         }
-        if (!hasLocks && now - queue.touched < STALE_BEATS * heartbeatSeconds * 1000) continue;
-        const entry: Owned = { queue, sending: new Set(), current: false, release: null };
-        owned.set(id, entry);
-        if (!(await lock(id, entry))) {
-          owned.delete(id);
-          continue;
-        }
-        // Con el candado ya en la mano se relee: la dueña pudo escribir mientras se pedía.
+        // Sin Web Locks (o si pedirlo falla), solo las que no se escriben hace un rato.
+        const entry: Owned = { queue, sending: new Set(), current: false, release: null, abandoned: false };
+        const result = await lock(id, entry, false);
+        if (result === "busy" || owned.has(id)) continue;
+        if (result === "unsupported" && now - queue.touched < STALE_BEATS * heartbeatSeconds * 1000) continue;
+        // Con el candado ya en la mano se relee: la dueña pudo escribir mientras se pedía. Solo
+        // entonces entra a las propias, para que un vaciado en curso no la toque antes.
         try {
           entry.queue = parseQueue(storage.getItem(key), deps.now()) ?? emptyQueue(deps.now());
         } catch {
           // Se queda lo leído antes.
         }
+        owned.set(id, entry);
         maybeRelease(id, entry);
       }
       await flush();
