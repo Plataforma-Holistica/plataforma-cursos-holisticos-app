@@ -64,6 +64,7 @@ pnpm media:upload-test [<archivo> ...]   # sube a Mux videos de ../Videos-Test/ 
 pnpm media:check  # contra Mux: con una dirección firmada vigente sirve el video; caducada o sin firma, no
 pnpm media:captions-test [<archivo>]   # le agrega a un video de prueba de Mux la pista de subtítulos escrita a mano
 pnpm db:student [<correo@prueba.test>]   # publica el curso de prueba y deja una alumna con suscripción, para ver la lección desde otro aparato de la red
+pnpm db:rollup [--completo]   # corre ahora, en la base local, la consolidación de cada noche (T-207) e imprime las corridas y el consolidado del mes
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
@@ -182,6 +183,16 @@ rompe en http: las cookies no llevan `Secure` con `NEXT_PUBLIC_SITE_URL` en http
 acciones comparan `Origin` con `Host`. Las mismas comprobaciones de `db:admins` y
 `DATABASE_URL` local; de un error imprime solo el código. Deja auditoría y consentimientos:
 antes de cualquier prueba, se apaga el servidor y `pnpm db:reset`.
+
+`pnpm db:rollup` corre en la base local la consolidación de cada noche (T-207), como la corre
+`pg_cron` a las 03:00: `call private.nightly_rollup()`, una llamada suelta y con el protocolo
+simple, porque el procedimiento hace `commit` entre pasos. Con `--completo`, el recálculo completo
+del mes en curso y el anterior (RF-408). Después imprime cómo terminó cada corrida y el consolidado
+del mes en curso por alumno y lección (segundos y medios puntos), con los identificadores
+recortados. Es para revisar a mano los puntos sin esperar a la noche: con `db:student`, ver una
+lección entera y otra a medias, y correrlo dos veces (la entera da 2 medios puntos, la de a medias
+1, y la segunda corrida deja lo mismo). Las mismas comprobaciones de `db:student`; deja corridas y
+consolidado: antes de cualquier prueba, `pnpm db:reset`.
 
 Si se tocó `src/domain/access/`, `src/domain/consumption/` o `src/domain/progress/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -1289,8 +1300,9 @@ falla. Veintiuna precisiones que la tabla no dice:
     cola (aceptados, repetidos y rechazados), `discard` (la reproducción no es de quien la manda,
     o el lote no tiene forma: lo enviado se tira) o `retry`. Las acciones son
     `playbackPresenceAction(slug, lección, reproducción, tramos)` y `flushHeartbeatsAction`. Desde
-    T-206 `settled` trae además el estado de la lección (`progress`, abajo). Sin los días de
-    práctica ni `rollup_dirty` (T-207).
+    T-206 `settled` trae además el estado de la lección (`progress`, abajo). La marca para la
+    consolidación y el día de práctica los deja la base en el mismo lote (T-207, abajo); el
+    navegador no se entera.
   - Las pruebas: `supabase/tests/23_latidos.test.sql` (en una transacción `now()` no avanza: el
     tiempo vivo se simula moviendo el último latido hacia atrás) y
     `tests/integration/40-reproducciones.test.ts`. Que mandar sin presencia espera el candado de
@@ -1434,6 +1446,51 @@ falla. Veintiuna precisiones que la tabla no dice:
     `tests/e2e/equipo/leccion.equipo.ts`, guardar y volver donde se quedó, «continuar viendo», y la
     lección que se termina sin recargar (con el progreso de casi toda la lección escrito por el
     dueño, porque ver el 90 % en tiempo real tardaría minutos).
+- **La consolidación nocturna** (T-207; RF-405, RF-408, RN-04; decisiones de Sergio del
+  2026-10-21; 05 §5.4, §5.9, §8.2 y §13). Convierte los latidos en puntos, el insumo del reparto. Vive
+  entera en la base (`t207_consolidacion`): no hay TypeScript en el camino, y por eso la regla se
+  prueba en pgTAP (`supabase/tests/25_consolidacion.test.sql`, con una propiedad de tramos al azar
+  contra un modelo segundo por segundo) y con mutaciones a mano, no con la cobertura de Vitest. Lo
+  que no se ve leyendo un solo archivo:
+  - **El latido deja la marca.** `private.record_heartbeats()` hace upsert en `private.rollup_dirty`
+    (periodo, alumno, lección) con `clock_timestamp()` si aceptó un tramo con `counts_for_payout`.
+    Va en el bloque del lote: si falla, el lote contesta `failed` y el navegador reintenta, porque
+    perder la marca perdería consumo. Y suma en `public.practice_days` los segundos visibles
+    aceptados (a cualquier velocidad, en el día del tope en `ZONA_HORARIA_PERIODO`; cortesía y
+    curso abierto sí, vista previa del dueño no), en su propio bloque: si falla, esos segundos se
+    pierden con un aviso en el registro de la base. Sin clave foránea a `profiles`: chocaría con el
+    candado de anotar una sesión. Nadie de la aplicación lee ni escribe las tablas nuevas (lo exige
+    el vigilante); la persona leerá sus días con T-505.
+  - **La corrida es un procedimiento con `commit`** (`private.nightly_rollup(p_full, p_period)`),
+    que `pg_cron` llama a las 09:00 UTC (03:00 de la Ciudad de México). Postgres no deja `commit`
+    en un procedimiento `security definer` ni con `SET`, ni dentro de un bloque con excepción: por
+    eso no los tiene, pone su `search_path` con `set_config` (y lo devuelve al terminar), y el
+    trabajo de `pg_cron` es solo el `call`. Llamado dentro de una transacción, falla (2D000). Por
+    cada periodo (el mes en curso y el anterior, y cada noche también los anteriores que todavía
+    tengan marcas: el último día de un mes llegan latidos atrasados después de las 03:00) abre su
+    corrida en `public.job_runs` (una viva por trabajo y periodo; una que no latió en 15 minutos
+    queda fallida), da pasos (`private.rollup_step`, 50 pares) con `commit` después de cada uno y la
+    cierra. `p_full` es el recálculo completo (RF-408), solo dentro de la ventana.
+  - **Las marcas se leen sin bloquearlas y se borran solo si siguen como se leyeron.** Cada par se
+    calcula en una sentencia posterior a la lectura (read committed, que `rollup_step` exige), y al
+    final se borran las marcas cuyo `touched_at` no cambió: un latido que llegó en medio la cambió,
+    y lo suyo entra la noche siguiente. Las marcas posteriores al arranque esperan a la siguiente
+    corrida. El latido nunca espera a un paso entero.
+  - **Un par** (`private.rollup_pair`): los tramos con `counts_for_payout` del periodo, unidos con
+    `range_agg` por video (repetir no suma) y recortados a la duración de ese video (la menor de sus
+    reproducciones, la que validó los tramos). Se queda el video con más medios puntos; después, más
+    segundos; después, el vigente; al final, el id. Nunca se suman dos videos. Sin tramos que
+    cuenten, la fila se borra; si nada cambió, no se escribe (`computed_at` dice cuándo cambió). Un
+    par que falla no detiene a los demás: queda marcado para la noche siguiente (también en el
+    recálculo completo) y la corrida termina fallida, con cuántos y el código del primero.
+  - **Los medios puntos** (`private.half_points`, pura): 0, 1 o 2 con enteros, el mismo redondeo que
+    el progreso. Los umbrales son los que rigen **desde el periodo** (`private.payout_thresholds`,
+    por `effective_period_id`), no los de la hora en que corre: el progreso usa el de ahora y los
+    puntos el del periodo, así que una lección puede quedar «terminada» sin dar 2 medios puntos. Sin
+    umbral para un periodo con marcas, su corrida falla; uno sin marcas no los lee.
+  - Hasta producción, que la corrida no corrió o falló solo se ve en `job_runs` (sin aviso en la
+    nube). Las pruebas de integración (`tests/integration/43-consolidacion.test.ts`) llaman al
+    procedimiento de verdad, con la base sin marcas: se niegan a correr si hay alguna.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
