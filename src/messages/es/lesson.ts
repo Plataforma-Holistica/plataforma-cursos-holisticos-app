@@ -16,7 +16,7 @@ export const lesson = defineMessages({
   syllabus: "Temario",
   // La barra del temario (T-206): cuántas lecciones vigentes terminó.
   syllabusProgressLabel: "Avance del curso",
-  syllabusProgress: "{completed} de {total} lecciones",
+  syllabusProgress: { one: "{completed} de {total} lección", other: "{completed} de {total} lecciones" },
   // Se dice una vez, cuando un latido deja terminada la lección que se está viendo.
   justCompleted: "Esta lección ya cuenta como terminada.",
   about: "Sobre esta lección",

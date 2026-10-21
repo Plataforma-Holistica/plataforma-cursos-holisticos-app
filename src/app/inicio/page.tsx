@@ -5,6 +5,7 @@ import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import { requireSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
+import { plural } from "@/messages/format";
 import { sessionEmail } from "@/services/account/account";
 import { lessonPath, ROUTES } from "@/services/account/navigation";
 import { continueWatching } from "@/services/progress/progress";
@@ -51,15 +52,15 @@ export default async function HomePage() {
           <ul aria-labelledby="continuar-viendo" className="flex flex-col gap-4">
             {courses.map((course) => {
               const href = lessonPath(course.courseSlug, course.lesson.id);
+              // Sin una dirección que sirva no hay a dónde llevar: no se pinta una tarjeta sin nombre.
+              if (href === null) return null;
               const words = { number: String(course.lesson.number), total: String(course.total), lesson: course.lesson.title };
               return (
                 <li key={course.courseSlug} className="flex flex-col gap-2 rounded-md border border-border bg-surface-1 p-4">
-                  {href !== null && (
-                    <TextLink href={href}>
-                      <span className="sr-only">{t(text.home.continueName, { ...words, course: course.courseTitle, teacher: course.teacherName })}</span>
-                      <span aria-hidden="true">{course.courseTitle}</span>
-                    </TextLink>
-                  )}
+                  <TextLink href={href}>
+                    <span className="sr-only">{t(text.home.continueName, { ...words, course: course.courseTitle, teacher: course.teacherName })}</span>
+                    <span aria-hidden="true">{course.courseTitle}</span>
+                  </TextLink>
                   <p aria-hidden="true" className="text-body-s text-text-2">
                     {t(text.home.continueLesson, words)}
                   </p>
@@ -67,8 +68,8 @@ export default async function HomePage() {
                     value={course.completed}
                     max={course.total}
                     size="thin"
-                    label={text.home.continueProgressLabel}
-                    text={t(text.home.continueProgress, { completed: String(course.completed), total: String(course.total) })}
+                    label={t(text.home.continueProgressLabel, { course: course.courseTitle })}
+                    text={t(plural(course.total, text.home.continueProgress), { completed: String(course.completed), total: String(course.total) })}
                   />
                 </li>
               );

@@ -8,7 +8,7 @@ import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps, WatchSignal } from "@/app/_video/player";
 import { lesson as text } from "@/messages/es/lesson";
-import { t } from "@/messages/format";
+import { plural, t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
@@ -133,6 +133,9 @@ const BEAT_MAX_SECONDS = 300;
 /** Un reloj monótono en segundos, para armar los tramos: no es la hora. */
 const clockSeconds = () => performance.now() / 1000;
 const pageVisible = () => document.visibilityState === "visible";
+
+/** El orden de los estados: entre lo que trae la página y lo que oyó la pantalla, manda el mayor. */
+const RANK = { not_started: 0, in_progress: 1, completed: 2 } as const;
 
 /** Quien escucha el estado de las lecciones que contestan los lotes: la pantalla montada. */
 let progressListener: ((note: ProgressNote) => void) | null = null;
@@ -307,21 +310,34 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // que se está viendo se acaba de terminar.
   const [heardStates, setHeardStates] = useState<ReadonlyMap<string, SyllabusEntry["state"]>>(() => new Map());
   const [completedNow, setCompletedNow] = useState(false);
+  // Qué hay en el lugar del reproductor, para el aviso de terminada: solo con el video ahí (en
+  // curso o terminado), no si lo que la terminó fue una cola de otra visita al abrir la página.
+  const showing = useRef(video.kind);
   useEffect(() => {
-    // Lo de una lección que no está en este temario no pinta nada: ninguna fila la busca.
+    showing.current = video.kind;
+  }, [video.kind]);
+  useEffect(() => {
+    // Lo de una lección que no está en este temario no pinta nada: ninguna fila la busca. Una nota
+    // sin segundos no dice nada: un lote todo oculto mueve la posición (al recargar, «A medias»),
+    // pero la nota no la trae.
     const listener = (note: ProgressNote) => {
       const state = note.completed ? "completed" : note.coveredSeconds > 0 ? "in_progress" : null;
       if (state !== null) setHeardStates((now) => (now.get(note.lessonId) === state ? now : new Map(now).set(note.lessonId, state)));
-      if (note.justCompleted && note.lessonId === lessonId) setCompletedNow(true);
+      const watching = showing.current === "playing" || showing.current === "ended";
+      if (note.justCompleted && note.lessonId === lessonId && watching) setCompletedNow(true);
     };
     progressListener = listener;
     return () => {
       if (progressListener === listener) progressListener = null;
     };
   }, [lessonId]);
-  // Lo que dijo un lote es más nuevo que la página. Nunca baja: la base no desmarca una terminada,
-  // y un lote sin segundos no dice nada.
-  const rowState = (lesson: SyllabusEntry) => heardStates.get(lesson.id) ?? lesson.state;
+  // Manda el mayor de lo que trae la página y lo que oyó la pantalla: la página se vuelve a pintar
+  // (una acción que escribe una cookie) y puede traer una terminada en otro aparato, y lo que oyó
+  // la pantalla puede ser más nuevo que la página.
+  const rowState = (lesson: SyllabusEntry) => {
+    const heardState = heardStates.get(lesson.id);
+    return heardState !== undefined && RANK[heardState] > RANK[lesson.state] ? heardState : lesson.state;
+  };
   const lessons = modules.flatMap((group) => group.lessons);
   const completedCount = lessons.filter((lesson) => rowState(lesson) === "completed").length;
   // Cuántas van: las de la página, más las que un lote terminó desde que se pintó.
@@ -508,7 +524,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
         value={completedShown}
         max={progress.total}
         label={text.syllabusProgressLabel}
-        text={t(text.syllabusProgress, { completed: String(completedShown), total: String(progress.total) })}
+        text={t(plural(progress.total, text.syllabusProgress), { completed: String(completedShown), total: String(progress.total) })}
       />
       {modules.map((group) => (
         <div key={group.id} className="flex flex-col gap-1">

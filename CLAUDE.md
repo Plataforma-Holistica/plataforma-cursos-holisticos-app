@@ -1413,10 +1413,20 @@ falla. Veintiuna precisiones que la tabla no dice:
     de una lección (`settled.progress`) llega a la pantalla por dos caminos, porque los dos
     envíos pasan por ella: el latido, que manda la pantalla, y los vaciados del cartero, cuyo
     `send` arma la pantalla al configurarlo (`heard`). La pantalla montada escucha
-    (`progressListener`, uno por documento) y solo atiende lecciones de su temario; lo que dice
-    un lote solo sube el estado de una fila, nunca lo baja. Si el lote terminó la que se está
-    viendo, «Esta lección ya cuenta como terminada.» se dice una vez, en una región viva propia.
-    El inicio provisional tiene «Continuar viendo» (`continueWatching`), mínima hasta PA-20.
+    (`progressListener`, uno por documento): lo que contesta tarde el vaciado de una pantalla que
+    se desmontó le llega a la siguiente, que solo pinta las filas de su temario. Entre lo que trae
+    la página y lo que oyó la pantalla manda el mayor (la página se vuelve a pintar cuando una
+    acción escribe una cookie, y puede traer una terminada en otro aparato). Si el lote terminó la
+    que se está viendo, con el video en curso o terminado, «Esta lección ya cuenta como
+    terminada.» se dice una vez, en una región viva propia; lo que termina una cola de otra visita
+    al abrir la página cambia la fila sin anunciarse. Tres límites aceptados (revisión del diff):
+    la nota no trae la posición, así que un lote todo oculto deja la fila como estaba hasta
+    recargar (entonces, «A medias»); «Tu avance está guardado» vale también si el progreso falló,
+    porque el libro lo tiene y se rehace con T-207; y si Mux manda un `timeupdate` en 0 antes de
+    saltar al segundo de arranque, un PA-34 en ese instante guardaría 0 (se revisa a mano en el
+    iPhone). La barra se pinta con los colores del sistema en colores forzados. El inicio
+    provisional tiene «Continuar viendo» (`continueWatching`), mínima hasta PA-20, con la barra de
+    cada curso nombrada con su curso.
   - Las pruebas: `supabase/tests/24_progreso.test.sql`, `tests/integration/40-reproducciones.test.ts`
     (el progreso de punta a punta por la función única de medios),
     `tests/integration/40-leccion.test.ts` (las lecturas, con el progreso escrito por el dueño),

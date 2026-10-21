@@ -116,8 +116,19 @@ describe("el inicio provisional", () => {
     const link = screen.getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, Alargar la salida" });
     expect(link).toHaveAttribute("href", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
     expect(list).toContainElement(link);
-    expect(screen.getByRole("progressbar", { name: "Avance del curso" })).toHaveAttribute("aria-valuetext", "3 de 12 lecciones");
+    expect(screen.getByRole("progressbar", { name: "Avance de Respirar para dormir" })).toHaveAttribute("aria-valuetext", "3 de 12 lecciones");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con una sola lección, en singular; y un curso sin dirección que sirva no se pinta", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
+    const course = { courseSlug: "corto", courseTitle: "Corto", teacherName: "Ana", completed: 0, total: 1, lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Única", number: 1 } };
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [course, { ...course, courseSlug: "Sin Forma", courseTitle: "Roto" }] });
+    render(await HomePage());
+    expect(screen.getByRole("progressbar", { name: "Avance de Corto" })).toHaveAttribute("aria-valuetext", "0 de 1 lección");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByText("Roto")).toBeNull();
   });
 
   it.each([

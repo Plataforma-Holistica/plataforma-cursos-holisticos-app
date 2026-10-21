@@ -241,8 +241,8 @@ export const account = defineMessages({
     continueTitle: "Continuar viendo",
     continueName: "{course}, con {teacher}: lección {number} de {total}, {lesson}",
     continueLesson: "Lección {number} de {total} · {lesson}",
-    continueProgressLabel: "Avance del curso",
-    continueProgress: "{completed} de {total} lecciones",
+    continueProgressLabel: "Avance de {course}",
+    continueProgress: { one: "{completed} de {total} lección", other: "{completed} de {total} lecciones" },
   },
   // PA-25. Por ahora, el nombre, el correo a la vista y las sesiones abiertas: la contraseña
   // llega en su propia solicitud, y cambiar de correo espera al correo propio (T-310).

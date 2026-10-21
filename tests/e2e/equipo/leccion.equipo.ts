@@ -703,7 +703,7 @@ test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo
   await expect(page).toHaveURL("/inicio");
   const offered = page.getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1, Con Mux` });
   await expect(offered).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Avance del curso" })).toHaveAttribute("aria-valuetext", "0 de 1 lecciones");
+  await expect(page.getByRole("progressbar", { name: `Avance de Curso ${SLUG}` })).toHaveAttribute("aria-valuetext", "0 de 1 lección");
   expect(await a11yViolations(page)).toEqual([]);
   await offered.click();
   await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
@@ -727,7 +727,7 @@ test("al llegar a UMBRAL_COMPLETO_PCT, la lección queda terminada sin recargar 
   const context = await browser.newContext();
   const page = await watchFrom(context, who);
   await expect(page.locator("mux-player")).toHaveCount(1);
-  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "0 de 1 lecciones");
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "0 de 1 lección");
   await expect.poll(() => startOf(page)).toBe("315");
   await advance(page);
   await playVideo(page, 315, 322.5);
@@ -735,12 +735,12 @@ test("al llegar a UMBRAL_COMPLETO_PCT, la lección queda terminada sin recargar 
   await expect.poll(() => progressOf(who)).toMatchObject({ completed: true });
   // Sin recargar: la fila y la barra lo dicen, y se anuncia una vez.
   await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, terminada, reproduciendo" }).first()).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lecciones");
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lección");
   await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(1);
   // Recargar: la página la pinta terminada, y no lo vuelve a anunciar.
   await page.reload();
   await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, terminada, reproduciendo" }).first()).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lecciones");
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lección");
   await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(0);
   // Terminada, el curso sale de «continuar viendo» (FL-13 A3).
   await page.getByRole("link", { name: "Volver al inicio" }).click();

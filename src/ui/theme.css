@@ -276,6 +276,23 @@
     background-color: var(--accent);
   }
 }
+/* En colores forzados (alto contraste de Windows) el sistema borraría lo lleno: se pinta con sus
+   colores, y el texto al lado sigue dando el dato. */
+@media (forced-colors: active) {
+  .progress-bar {
+    forced-color-adjust: none;
+    background-color: Canvas;
+    border: 1px solid CanvasText;
+    color: Highlight;
+  }
+  .progress-bar::-webkit-progress-bar {
+    background-color: Canvas;
+  }
+  .progress-bar::-webkit-progress-value,
+  .progress-bar::-moz-progress-bar {
+    background-color: Highlight;
+  }
+}
 @utility progress-bar-thin {
   height: 3px;
 }
