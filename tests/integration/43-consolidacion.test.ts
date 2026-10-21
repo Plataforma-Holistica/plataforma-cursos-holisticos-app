@@ -48,18 +48,20 @@ function before(period: number): number {
 }
 
 async function runsSince(
-  start: Date,
+  start: string,
 ): Promise<{ id: string; period_id: number; status: string; rows_read: string; error: string | null; details: { mode: string } }[]> {
   const result = await owner.query(
-    "select id, period_id, status::text, rows_read, error, details from public.job_runs where job = 'nightly_rollup' and started_at >= $1 order by period_id",
+    "select id, period_id, status::text, rows_read, error, details from public.job_runs where job = 'nightly_rollup' and started_at > $1::timestamptz order by period_id",
     [start],
   );
   seen.push(...result.rows.map((row: { id: string }) => row.id));
   return result.rows;
 }
 
-async function now(): Promise<Date> {
-  return (await owner.query<{ now: Date }>("select clock_timestamp() as now")).rows[0]!.now;
+/** La hora de la base, como texto: un `Date` la corta al milisegundo, y una corrida abierta justo
+ *  antes caería después de ella. */
+async function now(): Promise<string> {
+  return (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
 }
 
 describe("la corrida de cada noche", () => {

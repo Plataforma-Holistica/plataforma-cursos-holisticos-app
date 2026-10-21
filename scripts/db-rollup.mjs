@@ -71,13 +71,13 @@ const short = (id) => (id ? `${String(id).slice(0, 8)}…` : "");
 
 try {
   await client.connect();
-  const start = (await client.query("select clock_timestamp() as now")).rows[0].now;
+  const start = (await client.query("select clock_timestamp()::text as now")).rows[0].now;
   // Una llamada suelta y sin parámetros, como la hace pg_cron: el procedimiento hace commit entre
   // lotes, y eso pide el protocolo simple.
   await client.query(full ? "call private.nightly_rollup(true)" : "call private.nightly_rollup()");
   const runs = await client.query(
     `select period_id, status::text as status, rows_read, rows_written, error, details ->> 'mode' as mode
-     from public.job_runs where job = 'nightly_rollup' and started_at >= $1 order by period_id`,
+     from public.job_runs where job = 'nightly_rollup' and started_at >= $1::timestamptz order by period_id`,
     [start],
   );
   console.log("Corridas:");
