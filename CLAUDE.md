@@ -1406,9 +1406,34 @@ falla. Veintiuna precisiones que la tabla no dice:
     terminó, el más reciente primero, a lo más 20, filtrando a mano lo listado y lo vigente (y el
     tope de lo que se lee, ya sin lo terminado ni lo no listado). La tabla no tiene índice sobre lo
     que cada lote mueve: la actualización se queda en su página.
+  - **Las pantallas** (segunda solicitud). El temario de PA-22 dice el estado de cada fila y,
+    arriba, la barra con cuántas van. La lección arranca en `startSeconds` cuando la pantalla no
+    pide otro segundo: renovar, «Reproducir aquí» y PA-34 piden el suyo, «Reintentar» sigue en el
+    segundo en que iba si ya había empezado, y «Volver a ver» pide 0. Lo que cada lote contesta
+    de una lección (`settled.progress`) llega a la pantalla por dos caminos, porque los dos
+    envíos pasan por ella: el latido, que manda la pantalla, y los vaciados del cartero, cuyo
+    `send` arma la pantalla al configurarlo (`heard`). La pantalla montada escucha
+    (`progressListener`, uno por documento): lo que contesta tarde el vaciado de una pantalla que
+    se desmontó le llega a la siguiente, que solo pinta las filas de su temario. Entre lo que trae
+    la página y lo que oyó la pantalla manda el mayor (la página se vuelve a pintar cuando una
+    acción escribe una cookie, y puede traer una terminada en otro aparato). Si el lote terminó la
+    que se está viendo, con el video en curso o terminado, «Esta lección ya cuenta como
+    terminada.» se dice una vez, en una región viva propia; lo que termina una cola de otra visita
+    al abrir la página cambia la fila sin anunciarse. Tres límites aceptados (revisión del diff):
+    la nota no trae la posición, así que un lote todo oculto deja la fila como estaba hasta
+    recargar (entonces, «A medias»); «Tu avance está guardado» vale también si el progreso falló,
+    porque el libro lo tiene y se rehace con T-207; y si Mux manda un `timeupdate` en 0 antes de
+    saltar al segundo de arranque, un PA-34 en ese instante guardaría 0 (se revisa a mano en el
+    iPhone). La barra se pinta con los colores del sistema en colores forzados. El inicio
+    provisional tiene «Continuar viendo» (`continueWatching`), mínima hasta PA-20, con la barra de
+    cada curso nombrada con su curso.
   - Las pruebas: `supabase/tests/24_progreso.test.sql`, `tests/integration/40-reproducciones.test.ts`
-    (el progreso de punta a punta por la función única de medios) y
-    `tests/integration/40-leccion.test.ts` (las lecturas, con el progreso escrito por el dueño).
+    (el progreso de punta a punta por la función única de medios),
+    `tests/integration/40-leccion.test.ts` (las lecturas, con el progreso escrito por el dueño),
+    `tests/ui/lesson-screen.test.tsx` y `account-pages.test.tsx` (las pantallas), y en
+    `tests/e2e/equipo/leccion.equipo.ts`, guardar y volver donde se quedó, «continuar viendo», y la
+    lección que se termina sin recargar (con el progreso de casi toda la lección escrito por el
+    dueño, porque ver el 90 % en tiempo real tardaría minutos).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
@@ -1426,7 +1451,8 @@ falla. Veintiuna precisiones que la tabla no dice:
     (PA-43).
   - **PA-33 sale al cargar**: la página le pregunta a la función única de medios con
     `lessonAccess`, sin firmar, antes de pintar (`04` §6.2, paso 7). Sin «Ver planes» hasta
-    que exista la pantalla de planes, y sin prometer avance guardado (T-206). Su fecha va en
+    que exista la pantalla de planes, ni constancias ni medallas (T-504, T-505); desde T-206 dice
+    que el avance sigue ahí. Su fecha va en
     palabras desde el servidor (`longDate`). Si la sesión dejó de pasar entre la guarda y esa
     pregunta, la página vuelve a pedirse.
   - **La dirección la pide el reproductor después** (`watchLessonAction`, como el alumno). La
@@ -1448,11 +1474,13 @@ falla. Veintiuna precisiones que la tabla no dice:
     acción `rememberCaptionsAction` solo acepta encendido o apagado, y `rememberCaptions`
     (`management.ts`) corre la guarda y escribe en la cuenta de esa sesión. No contesta nada:
     si no se guardó, el video sigue igual.
-- **Tres componentes base de la lección** (`src/ui/`): `Tabs` (las flechas, Inicio y Fin
+- **Los componentes base de la lección** (`src/ui/`): `Tabs` (las flechas, Inicio y Fin
   cambian; sin JavaScript pinta todos los paneles con su título), `LessonRow` (su nombre va
   entero en un texto que solo se lee y lo visible queda fuera del árbol de accesibilidad:
-  armado con fragmentos, axe marcó que no contenía lo visible) y `BackLink`. Están en
-  `/muestra`.
+  armado con fragmentos, axe marcó que no contenía lo visible; desde T-206, con sus estados) y
+  `BackLink`; y desde T-206, `ProgressBar`, la barra nativa `<progress>` pintada con los tokens
+  desde `theme.css` (`progress-bar`), porque el ancho de lo lleno no se puede poner sin un estilo
+  en línea. Están en `/muestra`.
 - **El reproductor de video es uno solo, `src/app/_video/player.tsx`** (T-108 y T-203; diseño,
   sección 5.4; RF-305, RF-312). Lo que no se ve leyendo un solo archivo:
   - **Mux Player solo se importa ahí**, y cada pantalla lo carga con `next/dynamic` sin

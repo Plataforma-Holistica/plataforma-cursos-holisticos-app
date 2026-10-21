@@ -186,6 +186,9 @@ function closedOf(answer: Extract<PresenceAnswer, { kind: "revoked" }>): Presenc
  */
 export type HeartbeatReply = PresenceReply & { batch: BatchAnswer | null };
 
+/** El estado de una lección que contesta un lote (T-206): con él la pantalla marca su fila al momento. */
+export type ProgressNote = NonNullable<Extract<BatchAnswer, { kind: "settled" }>["progress"]>;
+
 /** Lo que contestó el latido; o volver a la página, como con la presencia sola. */
 export function heartbeatReplyOf(answer: HeartbeatAnswer): HeartbeatReply | { kind: "reload" } {
   const presence = presenceReplyOf(answer.presence);

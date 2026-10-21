@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { a11yViolations } from "../setup/a11y";
+
 // Las páginas de la cuenta, con la guarda y los servicios simulados: qué pinta cada una
 // con cada respuesta. La tabla de la guarda (quién redirige a dónde) está en
 // src/app/_lib/guard-steps.test.ts; aquí se cuida que cada página obedezca lo que no es
@@ -15,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   accountFormFacts: vi.fn(),
   readNotice: vi.fn(),
   currentLegalText: vi.fn(),
+  continueWatching: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
@@ -27,6 +30,7 @@ vi.mock("@/app/_lib/guard", () => ({
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader }));
 vi.mock("@/services/account/account", () => ({ sessionEmail: mocks.sessionEmail, accountFormFacts: mocks.accountFormFacts }));
 vi.mock("@/services/account/notice", () => ({ readNotice: mocks.readNotice }));
+vi.mock("@/services/progress/progress", () => ({ continueWatching: mocks.continueWatching }));
 vi.mock("@/services/legal/texts", async () => ({
   ...(await import("@/services/legal/slugs")),
   ...(await import("@/services/legal/blocks")),
@@ -53,6 +57,7 @@ const query = (params: Record<string, string | string[] | undefined>) => ({ sear
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cookieReader.mockResolvedValue(reader);
+  mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [] });
 });
 
 describe("el inicio provisional", () => {
@@ -86,6 +91,62 @@ describe("el inicio provisional", () => {
     expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/inicio");
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
+  });
+
+  it("«Continuar viendo» (T-206; decisión de Sergio del 2026-10-20): cada curso empezado, con la lección sugerida y su avance", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
+    mocks.continueWatching.mockResolvedValue({
+      kind: "ready",
+      courses: [
+        {
+          courseSlug: "respirar",
+          courseTitle: "Respirar para dormir",
+          teacherName: "Ana Robles",
+          completed: 3,
+          total: 12,
+          lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Alargar la salida", number: 4 },
+        },
+      ],
+    });
+    const { container } = render(await HomePage());
+    expect(mocks.continueWatching).toHaveBeenCalledExactlyOnceWith(claims);
+    const list = screen.getByRole("list", { name: "Continuar viendo" });
+    expect(screen.getByRole("heading", { level: 2, name: "Continuar viendo" })).toBeVisible();
+    const link = screen.getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, Alargar la salida" });
+    expect(link).toHaveAttribute("href", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
+    expect(list).toContainElement(link);
+    expect(screen.getByRole("progressbar", { name: "Avance de Respirar para dormir" })).toHaveAttribute("aria-valuetext", "3 de 12 lecciones");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con una sola lección, en singular; y un curso sin dirección que sirva no se pinta", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
+    const course = { courseSlug: "corto", courseTitle: "Corto", teacherName: "Ana", completed: 0, total: 1, lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Única", number: 1 } };
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [course, { ...course, courseSlug: "Sin Forma", courseTitle: "Roto" }] });
+    render(await HomePage());
+    expect(screen.getByRole("progressbar", { name: "Avance de Corto" })).toHaveAttribute("aria-valuetext", "0 de 1 lección");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByText("Roto")).toBeNull();
+  });
+
+  it.each([
+    ["sin cursos empezados", { kind: "ready", courses: [] }],
+    ["si no se supo", { kind: "unavailable" }],
+  ])("%s, no hay lista; lo demás del inicio sigue", async (_case, answer) => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
+    mocks.continueWatching.mockResolvedValue(answer);
+    render(await HomePage());
+    expect(screen.queryByRole("heading", { name: "Continuar viendo" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+  });
+
+  it("a una cuenta suspendida no le lee «continuar viendo»", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "suspended" });
+    render(await HomePage());
+    expect(mocks.continueWatching).not.toHaveBeenCalled();
   });
 
   it("si el token no trae correo, no inventa uno", async () => {

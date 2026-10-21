@@ -37,11 +37,17 @@ export const ui = defineMessages({
     danger: "Error:",
   },
   // Una lección del temario: el nombre del enlace dice su número, su título, su duración y su
-  // estado. A la vista va lo mismo, sin «Lección».
+  // estado (T-206). A la vista va lo mismo, sin «Lección».
   lessonRow: {
     name: "Lección {number}, {title}, {duration}",
+    nameInProgress: "Lección {number}, {title}, {duration}, a medias",
+    nameCompleted: "Lección {number}, {title}, {duration}, terminada",
     namePlaying: "Lección {number}, {title}, {duration}, reproduciendo",
+    nameCompletedPlaying: "Lección {number}, {title}, {duration}, terminada, reproduciendo",
+    durationInProgress: "{duration} · A medias",
+    durationCompleted: "{duration} · Terminada",
     durationPlaying: "{duration} · Reproduciendo",
+    durationCompletedPlaying: "{duration} · Terminada · Reproduciendo",
   },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
 });

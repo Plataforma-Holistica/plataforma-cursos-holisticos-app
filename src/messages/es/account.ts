@@ -236,6 +236,13 @@ export const account = defineMessages({
     signedInAs: "Entraste como {email}.",
     status: "En construcción.",
     account: "Cuenta",
+    // «Continuar viendo» (T-206), mínima hasta PA-20 (T-210): los cursos empezados y sin
+    // terminar, con la lección sugerida.
+    continueTitle: "Continuar viendo",
+    continueName: "{course}, con {teacher}: lección {number} de {total}, {lesson}",
+    continueLesson: "Lección {number} de {total} · {lesson}",
+    continueProgressLabel: "Avance de {course}",
+    continueProgress: { one: "{completed} de {total} lección", other: "{completed} de {total} lecciones" },
   },
   // PA-25. Por ahora, el nombre, el correo a la vista y las sesiones abiertas: la contraseña
   // llega en su propia solicitud, y cambiar de correo espera al correo propio (T-310).

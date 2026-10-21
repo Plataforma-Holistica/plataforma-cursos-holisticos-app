@@ -12,6 +12,11 @@ import { FullScreenState } from "@/ui/full-screen-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
+import { ProgressBar } from "@/ui/progress-bar";
+
+// Los estados de una fila, como los da el servicio: una prop de estado no es texto.
+const COMPLETED = "completed" as const;
+const IN_PROGRESS = "in_progress" as const;
 import { OTPField } from "@/ui/otp-field";
 import { PasswordField } from "@/ui/password-field";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -206,10 +211,15 @@ export default function SamplePage() {
               id: "temario",
               label: "Temario",
               panel: (
-                <div className="flex flex-col">
-                  <LessonRow href="/muestra" number={1} title="Soltar los hombros" duration="5 min" />
-                  <LessonRow href="/muestra" number={2} title="Respirar acostado, con una pausa larga al final" duration="7 min" current />
-                  <LessonRow href="/muestra" number={3} title="Alargar la salida" duration="6 min" />
+                <div className="flex flex-col gap-3">
+                  <ProgressBar value={1} max={4} label="Avance del curso" text="1 de 4 lecciones" />
+                  <div className="flex flex-col">
+                    <LessonRow href="/muestra" number={1} title="Soltar los hombros" duration="5 min" state={COMPLETED} />
+                    <LessonRow href="/muestra" number={2} title="Respirar acostado, con una pausa larga al final" duration="7 min" state={IN_PROGRESS} current />
+                    <LessonRow href="/muestra" number={3} title="Alargar la salida" duration="6 min" state={IN_PROGRESS} />
+                    <LessonRow href="/muestra" number={4} title="Dormir sin prisa" duration="8 min" />
+                  </div>
+                  <ProgressBar value={3} max={12} label="Avance del curso" text="3 de 12 lecciones" size="thin" />
                 </div>
               ),
             },

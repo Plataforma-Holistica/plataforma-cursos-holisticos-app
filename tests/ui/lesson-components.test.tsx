@@ -7,10 +7,12 @@ import { a11yViolations } from "../setup/a11y";
 
 import { BackLink } from "@/ui/back-link";
 import { LessonRow } from "@/ui/lesson-row";
+import { ProgressBar } from "@/ui/progress-bar";
 import { Tabs } from "@/ui/tabs";
 
 // Los componentes base que llegan con la página de la lección (PA-22, T-203; diseño, sección
-// 5.2 y 5.3): regresar, pestañas y la fila de una lección.
+// 5.2 y 5.3): regresar, pestañas y la fila de una lección; y con el progreso (T-206), los estados
+// de la fila y la barra.
 
 const ITEMS = [
   { id: "temario", label: "Temario", panel: <p>Las lecciones.</p> },
@@ -100,6 +102,60 @@ describe("LessonRow", () => {
     expect(link).toHaveAttribute("aria-current", "page");
     expect(link).toHaveTextContent("7 min · Reproduciendo");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it.each([
+    ["not_started", "Lección 3, Cuatro tiempos, 6 min", "6 min"],
+    ["in_progress", "Lección 3, Cuatro tiempos, 6 min, a medias", "6 min · A medias"],
+    ["completed", "Lección 3, Cuatro tiempos, 6 min, terminada", "6 min · Terminada"],
+  ] as const)("%s: el estado va en el nombre y a la vista (T-206)", async (state, name, seen) => {
+    const { container } = render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" state={state} />);
+    expect(screen.getByRole("link", { name })).toHaveTextContent(seen);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("la que se está viendo, si ya está terminada, dice las dos cosas", () => {
+    render(<LessonRow href="/cursos/x/lecciones/1" number={5} title="Acostado" duration="7 min" state="completed" current />);
+    expect(screen.getByRole("link", { name: "Lección 5, Acostado, 7 min, terminada, reproduciendo" })).toHaveTextContent("7 min · Terminada · Reproduciendo");
+  });
+
+  it("a medias no se repite en la que se está viendo: reproduciendo ya lo dice", () => {
+    render(<LessonRow href="/cursos/x/lecciones/1" number={5} title="Acostado" duration="7 min" state="in_progress" current />);
+    expect(screen.getByRole("link", { name: "Lección 5, Acostado, 7 min, reproduciendo" })).toHaveTextContent("7 min · Reproduciendo");
+  });
+});
+
+describe("ProgressBar", () => {
+  it("es una barra con su valor, y el dato va también en texto a la vista", async () => {
+    const { container } = render(<ProgressBar value={4} max={12} label="Avance del curso" text="4 de 12 lecciones" />);
+    const bar = screen.getByRole("progressbar", { name: "Avance del curso" });
+    expect(bar).toHaveAttribute("aria-valuenow", "4");
+    expect(bar).toHaveAttribute("aria-valuemin", "0");
+    expect(bar).toHaveAttribute("aria-valuemax", "12");
+    expect(bar).toHaveAttribute("aria-valuetext", "4 de 12 lecciones");
+    expect(container).toHaveTextContent("4 de 12 lecciones");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it.each([
+    [0, 12, "0", "12"],
+    [6, 12, "6", "12"],
+    [20, 12, "12", "12"],
+    [-3, 12, "0", "12"],
+    [3, 0, "0", "1"],
+  ])("lo lleno no sale de la barra: %i de %i", (value, max, now, top) => {
+    render(<ProgressBar value={value} max={max} label="Avance" text="x" />);
+    const bar = screen.getByRole("progressbar");
+    expect(bar).toHaveAttribute("value", now);
+    expect(bar).toHaveAttribute("max", top);
+    expect(bar).toHaveAttribute("aria-valuenow", now);
+  });
+
+  it("fina para las tarjetas, media para la ficha", () => {
+    const { rerender } = render(<ProgressBar value={1} max={2} label="Avance" text="x" size="thin" />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("data-size", "thin");
+    rerender(<ProgressBar value={1} max={2} label="Avance" text="x" />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("data-size", "medium");
   });
 });
 
