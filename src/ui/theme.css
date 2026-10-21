@@ -257,6 +257,32 @@
   --focus-halo: var(--surface-3);
 }
 
+/* La barra de progreso (sección 5.3): la nativa, sin su aspecto de fábrica. El riel es
+   `surface-3` y lo lleno, `accent`. Fina de 3 px (tarjetas) o media de 6 px (ficha, temario). */
+@utility progress-bar {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background-color: var(--surface-3);
+  color: var(--accent);
+  &::-webkit-progress-bar {
+    background-color: var(--surface-3);
+  }
+  &::-webkit-progress-value {
+    background-color: var(--accent);
+  }
+  &::-moz-progress-bar {
+    background-color: var(--accent);
+  }
+}
+@utility progress-bar-thin {
+  height: 3px;
+}
+@utility progress-bar-medium {
+  height: 6px;
+}
+
 /* El reproductor (sección 5.4). El contenedor es lo que entra a pantalla completa; dentro, el
    escenario guarda el 16:9 del video y lleva encima la marca, que se mide con su ancho (`cqw`).
    A pantalla completa, de la del navegador o de la propia, el escenario se centra a lo más

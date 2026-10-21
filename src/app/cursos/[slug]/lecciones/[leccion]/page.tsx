@@ -20,7 +20,8 @@ import { LessonScreen, type SyllabusEntry } from "./screen";
 // lección, sin firmar nada (`lessonAccess`): sin acceso, PA-33 ocupa el lugar del reproductor
 // desde el primer momento, también sin JavaScript. La dirección del video la pide el
 // reproductor después, con su acción (RF-305). A la vez lee si la cuenta dejó los subtítulos
-// encendidos (RF-310); si no se supo, arrancan apagados.
+// encendidos (RF-310); si no se supo, arrancan apagados. El temario trae el estado de cada lección
+// para quien mira (T-206); el segundo donde arranca el video lo trae la concesión.
 
 const text = messages.lesson;
 
@@ -53,6 +54,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
     duration: minutes(lesson.durationSeconds),
     current: lesson.current,
     href: lessonPath(page.course.slug, lesson.id) ?? path,
+    state: lesson.state,
   });
 
   return (
@@ -65,6 +67,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
       about={t(text.aboutDuration, { duration: minutes(page.lesson.durationSeconds), module: page.lesson.moduleTitle })}
       modules={page.modules.map((group) => ({ id: group.id, title: group.title, lessons: group.lessons.map(entry) }))}
       next={page.next === null ? null : { title: page.next.title, href: lessonPath(page.course.slug, page.next.id) ?? path }}
+      progress={page.progress}
       initial={initial}
       captions={captions.kind === "ready" && captions.on}
     />

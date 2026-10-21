@@ -81,6 +81,7 @@ const GRANT = {
   playbackSessionId: PLAYBACK,
   heartbeatSeconds: 30,
   durationSeconds: 356,
+  startSeconds: 0,
 };
 /** Una reproducción viva en otra computadora: 01:40 UTC son las 19:40 en el centro de México. */
 const ROW = { sessionId: OTHER, browser: "chrome", system: "windows", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" };
@@ -97,11 +98,20 @@ const PROPS: LessonScreenProps = {
       id: "m1",
       title: "Uno",
       lessons: [
-        { id: "l1", number: 1, title: "Soltar los hombros", duration: "5 min", current: false, href: "/cursos/respirar/lecciones/l1" },
-        { id: LESSON, number: 2, title: "Respirar acostado", duration: "7 min", current: true, href: `/cursos/respirar/lecciones/${LESSON}` },
+        { id: "l1", number: 1, title: "Soltar los hombros", duration: "5 min", current: false, href: "/cursos/respirar/lecciones/l1", state: "not_started" },
+        {
+          id: LESSON,
+          number: 2,
+          title: "Respirar acostado",
+          duration: "7 min",
+          current: true,
+          href: `/cursos/respirar/lecciones/${LESSON}`,
+          state: "not_started",
+        },
       ],
     },
   ],
+  progress: { completed: 0, total: 2 },
   next: { title: "Alargar la salida", href: "/cursos/respirar/lecciones/l3" },
   initial: { kind: "ready" },
   captions: false,
@@ -176,13 +186,13 @@ describe("el lugar del reproductor", () => {
   it("sin acceso desde que carga: PA-33, sin botón de reproducir", () => {
     show({ initial: { kind: "denied", denial: { reason: "expired", date: "1 de octubre de 2026" } } });
     expect(screen.getByRole("heading", { level: 2, name: "Tu acceso terminó el 1 de octubre de 2026" })).toBeVisible();
-    expect(screen.getByText("Para seguir viendo las lecciones, suscríbete de nuevo.")).toBeVisible();
+    expect(screen.getByText("Tu avance sigue aquí.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Reproducir la lección" })).toBeNull();
   });
 
   it.each([
     [{ reason: "never_subscribed" } as const, "Esta lección pide una suscripción", "Con una suscripción ves todo el catálogo."],
-    [{ reason: "grace_ended", date: "2 de octubre de 2026" } as const, "Tu acceso terminó el 2 de octubre de 2026", "No pudimos cobrar tu suscripción."],
+    [{ reason: "grace_ended", date: "2 de octubre de 2026" } as const, "Tu acceso terminó el 2 de octubre de 2026", "No pudimos cobrar tu suscripción. Tu avance sigue aquí."],
     [{ reason: "refunded", date: "3 de octubre de 2026" } as const, "Tu suscripción fue reembolsada", "Puedes volver cuando quieras."],
   ])("PA-33 por cada motivo: %j", (denial, title, sentence) => {
     show({ initial: { kind: "denied", denial } });
@@ -224,7 +234,7 @@ describe("el lugar del reproductor", () => {
     expect(actions.watchLessonAction).toHaveBeenCalledTimes(2);
     await user.click(screen.getByRole("button", { name: "caduca" }));
     expect(await screen.findByRole("button", { name: "Reintentar" })).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent("No pudimos cargar el video.");
+    expect(screen.getByRole("status")).toHaveTextContent("No pudimos cargar el video. Tu avance está guardado.");
     expect(actions.watchLessonAction).toHaveBeenCalledTimes(2);
   });
 
@@ -256,7 +266,7 @@ describe("el lugar del reproductor", () => {
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
     await user.click(await screen.findByRole("button", { name: "falla" }));
-    expect(screen.getByRole("status")).toHaveTextContent("No pudimos cargar el video.");
+    expect(screen.getByRole("status")).toHaveTextContent("No pudimos cargar el video. Tu avance está guardado.");
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeVisible();
   });
 
@@ -595,7 +605,7 @@ describe("el latido de presencia (T-204)", () => {
       answer({ kind: "closed", from: "device", by: OTHER, batch: null });
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(within(playerArea()).getByText("No pudimos cargar el video.")).toBeVisible();
+    expect(within(playerArea()).getByText("No pudimos cargar el video. Tu avance está guardado.")).toBeVisible();
     expect(within(playerArea()).queryByText("Esta reproducción se cerró desde otro dispositivo.")).toBeNull();
   });
 
@@ -830,5 +840,138 @@ describe("los tramos vistos (T-205)", () => {
     await wait(30_000);
     expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);
     expect(player.last?.notice).toBeNull();
+  });
+});
+
+describe("el progreso (T-206, RF-307)", () => {
+  const modules = (first: "not_started" | "in_progress" | "completed", second: "not_started" | "in_progress" | "completed") =>
+    PROPS.modules.map((group) => ({
+      ...group,
+      lessons: group.lessons.map((lesson, index) => ({ ...lesson, state: index === 0 ? first : second })),
+    }));
+
+  it("el temario dice el estado de cada lección y cuántas van, con su barra, en la columna y en la pestaña", async () => {
+    const { view } = show({ modules: modules("completed", "in_progress"), progress: { completed: 1, total: 2 } });
+    expect(screen.getAllByRole("link", { name: "Lección 1, Soltar los hombros, 5 min, terminada", hidden: true })).toHaveLength(2);
+    // La que se está viendo dice «reproduciendo»: a medias ya va implícito.
+    expect(screen.getAllByRole("link", { name: "Lección 2, Respirar acostado, 7 min, reproduciendo", hidden: true })).toHaveLength(2);
+    const bars = screen.getAllByRole("progressbar", { hidden: true });
+    expect(bars).toHaveLength(2);
+    for (const bar of bars) {
+      expect(bar).toHaveAccessibleName("Avance del curso");
+      expect(bar).toHaveAttribute("aria-valuetext", "1 de 2 lecciones");
+    }
+    expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("el video arranca donde se quedó: el segundo lo trae la concesión", async () => {
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, startSeconds: 120 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "120");
+  });
+
+  it("«Volver a ver» arranca desde el principio, aunque la concesión diga otro segundo", async () => {
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, startSeconds: 120 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "termina" }));
+    await user.click(screen.getByRole("button", { name: "Volver a ver" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "0");
+  });
+
+  it("«Reintentar» después de un error sigue en el segundo en que iba, no en 0", async () => {
+    actions.watchLessonAction.mockResolvedValue({ ...GRANT, startSeconds: 10 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "va en 61" }));
+    await user.click(screen.getByRole("button", { name: "falla" }));
+    await user.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "61");
+  });
+
+  it("«Reintentar» sin haber empezado arranca donde diga la concesión", async () => {
+    actions.watchLessonAction.mockRejectedValueOnce(new Error("sin red")).mockResolvedValue({ ...GRANT, startSeconds: 30 });
+    const { user } = show();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await user.click(await screen.findByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByTestId("reproductor")).toHaveAttribute("data-start", "30");
+  });
+
+  describe("al momento", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const settled = (lessonId: string, completed: boolean, justCompleted: boolean) => ({
+      kind: "settled",
+      seqs: [] as number[],
+      progress: { lessonId, coveredSeconds: completed ? 380 : 10, completed, justCompleted },
+    });
+    async function playing() {
+      vi.useFakeTimers();
+      show();
+      fireEvent.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    const press = async (name: string) => {
+      fireEvent.click(screen.getByRole("button", { name }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    };
+    /** El video avanza de `from` a `to`: una muestra cada cuarto de segundo, con el reloj. */
+    async function seen(from: number, to: number) {
+      for (let at = from; at <= to; at += 0.25) {
+        await act(() => (player.last?.onWatch as (signal: unknown) => void)({ kind: "tick", at, rate: 1, duration: 356 }));
+        if (at < to) {
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
+          });
+        }
+      }
+    }
+
+    it("el latido que la termina la marca sin recargar, cuenta una más, y lo dice una vez", async () => {
+      actions.playbackPresenceAction.mockResolvedValue({ kind: "ok", batch: settled(LESSON, true, true) });
+      await playing();
+      await press("avanza");
+      expect(screen.getAllByRole("link", { name: "Lección 2, Respirar acostado, 7 min, terminada, reproduciendo", hidden: true })).toHaveLength(2);
+      for (const bar of screen.getAllByRole("progressbar", { hidden: true })) expect(bar).toHaveAttribute("aria-valuetext", "1 de 2 lecciones");
+      expect(screen.getByText("Esta lección ya cuenta como terminada.")).toBeInTheDocument();
+    });
+
+    it("también si lo dice un envío sin presencia (al pausar), y de otra lección del temario", async () => {
+      actions.flushHeartbeatsAction.mockResolvedValue(settled("l1", true, true));
+      await playing();
+      await seen(0, 3);
+      await act(() => (player.last?.onWatch as (signal: unknown) => void)({ kind: "stop" }));
+      await press("se detiene");
+      expect(screen.getAllByRole("link", { name: "Lección 1, Soltar los hombros, 5 min, terminada", hidden: true })).toHaveLength(2);
+      // De otra lección no se anuncia: no es la que se está viendo.
+      expect(screen.queryByText("Esta lección ya cuenta como terminada.")).toBeNull();
+    });
+
+    it("lo que ya estaba terminada no se anuncia otra vez, y lo de una lección de otro curso no cambia nada", async () => {
+      actions.playbackPresenceAction
+        .mockResolvedValueOnce({ kind: "ok", batch: settled(LESSON, true, false) })
+        .mockResolvedValue({ kind: "ok", batch: settled("de-otro-curso", true, true) });
+      await playing();
+      await press("avanza");
+      expect(screen.getAllByRole("link", { name: "Lección 2, Respirar acostado, 7 min, terminada, reproduciendo", hidden: true })).toHaveLength(2);
+      expect(screen.queryByText("Esta lección ya cuenta como terminada.")).toBeNull();
+      for (const bar of screen.getAllByRole("progressbar", { hidden: true })) expect(bar).toHaveAttribute("aria-valuetext", "1 de 2 lecciones");
+    });
+
+    it("una a medias que se empieza a ver queda a medias, sin anunciarse", async () => {
+      actions.flushHeartbeatsAction.mockResolvedValue(settled("l1", false, false));
+      await playing();
+      await seen(0, 3);
+      await act(() => (player.last?.onWatch as (signal: unknown) => void)({ kind: "stop" }));
+      await press("se detiene");
+      expect(screen.getAllByRole("link", { name: "Lección 1, Soltar los hombros, 5 min, a medias", hidden: true })).toHaveLength(2);
+      for (const bar of screen.getAllByRole("progressbar", { hidden: true })) expect(bar).toHaveAttribute("aria-valuetext", "0 de 2 lecciones");
+    });
   });
 });

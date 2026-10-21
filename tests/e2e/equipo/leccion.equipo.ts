@@ -670,3 +670,81 @@ test("al renovar la dirección, lo visto con la reproducción vieja llega a la v
   expect(old?.reason).toBe("replaced");
   await context.close();
 });
+
+// El progreso (T-206, RF-307): lo visto queda guardado al momento, la lección siguiente vez
+// arranca donde se quedó, el inicio la pone en «continuar viendo», y la lección se marca
+// terminada sin recargar al llegar a UMBRAL_COMPLETO_PCT.
+
+/** El segundo en que arranca el reproductor, como Mux Player lo recibe. */
+const startOf = (page: Page) => page.evaluate(() => document.querySelector("mux-player")?.getAttribute("start-time") ?? null);
+
+/** Lo que la base guarda de esa cuenta en la lección. */
+async function progressOf(who: Person): Promise<{ position: number; covered: number; completed: boolean } | null> {
+  const [row] = await ownerQuery<{ position: number; covered: number; completed: boolean }>(
+    "select last_position_seconds as position, covered_seconds as covered, completed_at is not null as completed from public.lesson_progress where profile_id = $1 and lesson_id = $2",
+    [who.id, lesson],
+  );
+  return row ?? null;
+}
+
+test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo ofrece en «continuar viendo» (T-206)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  expect(await startOf(page)).toBe("0");
+  await advance(page);
+  await playVideo(page, 0, 20);
+  await pauseVideo(page);
+  await expect.poll(() => progressOf(who)).toEqual({ position: 20, covered: 20, completed: false });
+  // El inicio: el curso, con la lección sugerida y su avance.
+  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+  const offered = page.getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1, Con Mux` });
+  await expect(offered).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" })).toHaveAttribute("aria-valuetext", "0 de 1 lecciones");
+  expect(await a11yViolations(page)).toEqual([]);
+  await offered.click();
+  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+  await page.getByRole("button", { name: "Reproducir la lección" }).click();
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await expect.poll(() => startOf(page)).toBe("20");
+  await context.close();
+});
+
+test("al llegar a UMBRAL_COMPLETO_PCT, la lección queda terminada sin recargar (T-206, RF-307)", async ({ browser }) => {
+  const who = await person();
+  await subscribe(who);
+  // Ya vio casi toda la lección (315 de 356 s; el 90 % son 321), como lo dejaría la base.
+  await ownerQuery(
+    `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, covered,
+                                         first_watched_at, last_watched_at, last_playback_session_id, last_seq)
+     select $1, l.id, l.course_id, l.video_asset_id, 315, '{[0,315)}', now() - interval '1 day', now() - interval '1 day', gen_random_uuid(), 0
+     from public.published_lessons l where l.id = $2`,
+    [who.id, lesson],
+  );
+  const context = await browser.newContext();
+  const page = await watchFrom(context, who);
+  await expect(page.locator("mux-player")).toHaveCount(1);
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "0 de 1 lecciones");
+  await expect.poll(() => startOf(page)).toBe("315");
+  await advance(page);
+  await playVideo(page, 315, 322.5);
+  await pauseVideo(page);
+  await expect.poll(() => progressOf(who)).toMatchObject({ completed: true });
+  // Sin recargar: la fila y la barra lo dicen, y se anuncia una vez.
+  await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, terminada, reproduciendo" }).first()).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lecciones");
+  await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(1);
+  // Recargar: la página la pinta terminada, y no lo vuelve a anunciar.
+  await page.reload();
+  await expect(page.getByRole("link", { name: "Lección 1, Con Mux, 6 min, terminada, reproduciendo" }).first()).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lecciones");
+  await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(0);
+  // Terminada, el curso sale de «continuar viendo» (FL-13 A3).
+  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+  await expect(page.getByRole("heading", { name: "Continuar viendo" })).toHaveCount(0);
+  await context.close();
+});

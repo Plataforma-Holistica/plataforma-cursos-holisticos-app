@@ -4,9 +4,9 @@ import { defineMessages } from "../format";
 // reproductor: el cartel, la carga, los errores, el fin de la lección y PA-33. Los nombres de
 // los controles del reproductor viven en su propio bloque (`player.ts`).
 //
-// Lo que todavía no existe no se promete: sin avance guardado (T-206), «No pudimos cargar el
-// video» no dice «tu avance está guardado», y PA-33 no ofrece «Ver planes» hasta que exista la
-// pantalla de planes (T-30x).
+// Lo que todavía no existe no se promete: PA-33 no ofrece «Ver planes» hasta que exista la
+// pantalla de planes (T-30x), ni promete constancias ni medallas (T-504, T-505). El avance sí se
+// guarda desde T-206.
 export const lesson = defineMessages({
   pageTitle: "Lección",
   back: "Volver al inicio",
@@ -14,6 +14,11 @@ export const lesson = defineMessages({
   byline: "{course} · {teacher}",
   tabsLabel: "Partes de la lección",
   syllabus: "Temario",
+  // La barra del temario (T-206): cuántas lecciones vigentes terminó.
+  syllabusProgressLabel: "Avance del curso",
+  syllabusProgress: "{completed} de {total} lecciones",
+  // Se dice una vez, cuando un latido deja terminada la lección que se está viendo.
+  justCompleted: "Esta lección ya cuenta como terminada.",
   about: "Sobre esta lección",
   aboutDuration: "Dura {duration}. Es del módulo «{module}».",
   minutes: "{minutes} min",
@@ -22,7 +27,7 @@ export const lesson = defineMessages({
     play: "Reproducir la lección",
     noScript: "Para ver la lección hace falta JavaScript.",
     loading: "Preparando tu lección…",
-    failed: "No pudimos cargar el video.",
+    failed: "No pudimos cargar el video. Tu avance está guardado.",
     retry: "Reintentar",
     noVideo: "Esta lección no está disponible por ahora.",
     unavailable: "Algo falló de nuestro lado. No es por algo que hayas hecho.",
@@ -37,8 +42,8 @@ export const lesson = defineMessages({
     neverSubscribed: "Esta lección pide una suscripción",
     neverSubscribedText: "Con una suscripción ves todo el catálogo.",
     ended: "Tu acceso terminó el {date}",
-    expiredText: "Para seguir viendo las lecciones, suscríbete de nuevo.",
-    graceEndedText: "No pudimos cobrar tu suscripción.",
+    expiredText: "Tu avance sigue aquí.",
+    graceEndedText: "No pudimos cobrar tu suscripción. Tu avance sigue aquí.",
     refunded: "Tu suscripción fue reembolsada",
     refundedText: "Puedes volver cuando quieras.",
   },

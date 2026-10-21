@@ -15,6 +15,7 @@ import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
 import { LessonRow } from "@/ui/lesson-row";
+import { ProgressBar } from "@/ui/progress-bar";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Tabs } from "@/ui/tabs";
 import { TextLink } from "@/ui/text-link";
@@ -22,7 +23,7 @@ import { TextLink } from "@/ui/text-link";
 import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuilder } from "@/services/media/watch-rules";
 
 import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
-import type { BusyRow, Denial, HeartbeatReply, InitialState, WatchAnswer } from "./outcomes";
+import type { BusyRow, Denial, HeartbeatReply, InitialState, ProgressNote, WatchAnswer } from "./outcomes";
 import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
@@ -54,6 +55,12 @@ import { courier } from "./watch-queue";
 // tramo abierto se guarda y sale la próxima vez que se abra una lección en este navegador
 // (decisión de Sergio del 2026-10-19). «Sin conexión. Reintentando…» va arriba del reproductor, y
 // dentro de él en la pantalla completa propia.
+//
+// El progreso (T-206, RF-307): el temario dice el estado de cada lección y cuántas van, con su
+// barra. El video arranca donde se quedó: el segundo lo trae la concesión, salvo cuando se pide
+// otro (renovar, «Reproducir aquí», «Reintentar» después de haber empezado, y «Volver a ver»,
+// desde 0). Cada lote, con latido o sin presencia, contesta el estado de la lección, y la fila
+// cambia sin recargar; si es la que se está viendo y este lote la terminó, se dice una vez.
 
 /** Una lección del temario, ya en palabras y con su dirección. */
 export interface SyllabusEntry {
@@ -63,6 +70,7 @@ export interface SyllabusEntry {
   duration: string;
   current: boolean;
   href: string;
+  state: "not_started" | "in_progress" | "completed";
 }
 
 export interface LessonScreenProps {
@@ -74,6 +82,8 @@ export interface LessonScreenProps {
   about: string;
   modules: { id: string; title: string; lessons: SyllabusEntry[] }[];
   next: { title: string; href: string } | null;
+  /** Cuántas lecciones vigentes terminó, de cuántas. */
+  progress: { completed: number; total: number };
   initial: Exclude<InitialState, { kind: "suspended" | "reload" }>;
   /** Si la cuenta dejó los subtítulos encendidos. */
   captions: boolean;
@@ -111,8 +121,8 @@ type VideoState =
   | { kind: "denied"; denial: Denial }
   | { kind: "no_video" }
   | { kind: "unavailable" }
-  /** PA-34: el lugar de la cuenta está ocupado en otro navegador. */
-  | { kind: "busy"; live: BusyRow[]; startTime: number }
+  /** PA-34: el lugar de la cuenta está ocupado en otro navegador. `startTime` nulo: el de la concesión. */
+  | { kind: "busy"; live: BusyRow[]; startTime: number | null }
   /** La reproducción se cerró desde otro dispositivo, o se abrió en otra pestaña. `by`: la que tomó su lugar. */
   | { kind: "closed"; from: "device" | "tab"; by: string | null; startTime: number };
 
@@ -124,9 +134,25 @@ const BEAT_MAX_SECONDS = 300;
 const clockSeconds = () => performance.now() / 1000;
 const pageVisible = () => document.visibilityState === "visible";
 
+/** Quien escucha el estado de las lecciones que contestan los lotes: la pantalla montada. */
+let progressListener: ((note: ProgressNote) => void) | null = null;
+
+/** Lo que contestó un lote: si trae el estado de una lección, se le avisa a la pantalla. */
+function heard(batch: HeartbeatReply["batch"]) {
+  // Sin el campo (una respuesta de antes de T-206, que la cola guardó) no hay nada que avisar.
+  if (batch?.kind === "settled" && batch.progress) progressListener?.(batch.progress);
+}
+
 /** El cartero vacía sin presencia con su acción; con el latido de la reproducción, espera según él. */
 function configureCourier(heartbeatSeconds?: number) {
-  courier.configure({ send: (id, events) => flushHeartbeatsAction(id, events), heartbeatSeconds });
+  courier.configure({
+    send: async (id, events) => {
+      const answer = await flushHeartbeatsAction(id, events);
+      heard(answer);
+      return answer;
+    },
+    heartbeatSeconds,
+  });
 }
 
 /** El armador de tramos de una reproducción. */
@@ -264,7 +290,7 @@ function Paywall({ denial }: { denial: Denial }) {
   );
 }
 
-export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, initial, captions }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, progress, initial, captions }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
   const [captionsOn, setCaptionsOn] = useState(captions);
@@ -277,17 +303,44 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // Los tramos vistos de la reproducción en curso (T-205), y si se dice «Sin conexión».
   const segments = useRef<HeldSegments | null>(null);
   const offline = useSyncExternalStore(courier.subscribe, courier.offline, () => false);
+  // Lo que los lotes dijeron de las lecciones de este temario desde que se pintó (T-206), y si la
+  // que se está viendo se acaba de terminar.
+  const [heardStates, setHeardStates] = useState<ReadonlyMap<string, SyllabusEntry["state"]>>(() => new Map());
+  const [completedNow, setCompletedNow] = useState(false);
+  useEffect(() => {
+    // Lo de una lección que no está en este temario no pinta nada: ninguna fila la busca.
+    const listener = (note: ProgressNote) => {
+      const state = note.completed ? "completed" : note.coveredSeconds > 0 ? "in_progress" : null;
+      if (state !== null) setHeardStates((now) => (now.get(note.lessonId) === state ? now : new Map(now).set(note.lessonId, state)));
+      if (note.justCompleted && note.lessonId === lessonId) setCompletedNow(true);
+    };
+    progressListener = listener;
+    return () => {
+      if (progressListener === listener) progressListener = null;
+    };
+  }, [lessonId]);
+  // Lo que dijo un lote es más nuevo que la página. Nunca baja: la base no desmarca una terminada,
+  // y un lote sin segundos no dice nada.
+  const rowState = (lesson: SyllabusEntry) => heardStates.get(lesson.id) ?? lesson.state;
+  const lessons = modules.flatMap((group) => group.lessons);
+  const completedCount = lessons.filter((lesson) => rowState(lesson) === "completed").length;
+  // Cuántas van: las de la página, más las que un lote terminó desde que se pintó.
+  const completedShown = progress.completed + completedCount - lessons.filter((lesson) => lesson.state === "completed").length;
   // Cuando lo que tenía el foco se va (el reproductor al terminar o al fallar), el foco se queda
   // en el lugar del reproductor y no cae al documento.
   useEffect(() => {
     if (video.kind !== "playing" && video.kind !== "poster" && focusIsLost()) area.current?.focus();
   }, [video.kind]);
 
-  /** Pide el video. `closing`: la reproducción que se cierra en el mismo paso (PA-34, «Reproducir aquí»). */
-  async function watch(startTime = 0, renewed = false, closing?: string) {
+  /**
+   * Pide el video. `startTime`: el segundo donde arranca; sin él, el que traiga la concesión (donde
+   * se quedó, T-206). `closing`: la reproducción que se cierra en el mismo paso (PA-34, «Reproducir
+   * aquí»).
+   */
+  async function watch(startTime?: number, renewed = false, closing?: string) {
     ticket.current += 1;
     const mine = ticket.current;
-    at.current = startTime;
+    if (startTime !== undefined) at.current = startTime;
     if (!renewed) {
       setVideo({ kind: "loading" });
       // El botón pulsado se va: el foco se queda en el lugar del reproductor.
@@ -306,9 +359,11 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       // Se late cuando avance este video. Lo que el Mux Player viejo haya dicho mientras llegaba
       // la dirección no cuenta: en un iPhone, el nuevo puede quedarse en pausa esperando un toque.
       setAdvancing(false);
-      setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime, renewed, renewing: false });
+      const start = startTime ?? answer.startSeconds;
+      at.current = start;
+      setVideo({ kind: "playing", grant: answer, grantNumber: mine, startTime: start, renewed, renewing: false });
     }
-    else if (answer.kind === "busy") setVideo({ kind: "busy", live: answer.live, startTime });
+    else if (answer.kind === "busy") setVideo({ kind: "busy", live: answer.live, startTime: startTime ?? null });
     else setVideo(answer);
   }
 
@@ -345,6 +400,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
         beatInFlight.current = false;
       }
       courier.settle(beatingId, events, reply.batch);
+      heard(reply.batch);
       if (!current || (reply.kind !== "busy" && reply.kind !== "closed")) return;
       // Solo si sigue siendo esta reproducción, y en curso: un cambio que React aún no aplicó (la
       // dirección caducó, terminó, falló) no se pisa. Y un pedido en camino ya no pinta.
@@ -448,6 +504,12 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
   // el título «Temario» (h3); en la pestaña no hay título de por medio, y van después del h1 (h2).
   const syllabus = (prefix: string, Heading: "h2" | "h3") => (
     <div className="flex flex-col gap-4">
+      <ProgressBar
+        value={completedShown}
+        max={progress.total}
+        label={text.syllabusProgressLabel}
+        text={t(text.syllabusProgress, { completed: String(completedShown), total: String(progress.total) })}
+      />
       {modules.map((group) => (
         <div key={group.id} className="flex flex-col gap-1">
           <Heading id={`${prefix}-${group.id}`} className="text-label uppercase text-text-3">
@@ -456,7 +518,14 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
           <ul aria-labelledby={`${prefix}-${group.id}`} className="flex flex-col">
             {group.lessons.map((lesson) => (
               <li key={lesson.id}>
-                <LessonRow href={lesson.href} number={lesson.number} title={lesson.title} duration={lesson.duration} current={lesson.current} />
+                <LessonRow
+                  href={lesson.href}
+                  number={lesson.number}
+                  title={lesson.title}
+                  duration={lesson.duration}
+                  current={lesson.current}
+                  state={rowState(lesson)}
+                />
               </li>
             ))}
           </ul>
@@ -522,8 +591,8 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
               ) : video.kind === "busy" ? (
                 <Elsewhere
                   live={video.live}
-                  onClose={(sessionId) => void watch(video.startTime, false, sessionId)}
-                  onRetry={() => void watch(video.startTime)}
+                  onClose={(sessionId) => void watch(video.startTime ?? undefined, false, sessionId)}
+                  onRetry={() => void watch(video.startTime ?? undefined)}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -542,7 +611,8 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                   {(video.kind === "failed" || video.kind === "unavailable") && (
                     <>
                       <p className="text-text-2">{video.kind === "failed" ? text.player.failed : text.player.unavailable}</p>
-                      <Button type="button" variant="secondary" onClick={() => void watch()}>
+                      {/* Si ya había empezado, sigue en el segundo en que iba; si no, donde diga la concesión. */}
+                      <Button type="button" variant="secondary" onClick={() => void watch(at.current > 0 ? at.current : undefined)}>
                         {text.player.retry}
                       </Button>
                     </>
@@ -559,7 +629,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                     <>
                       <p className="text-h3">{text.player.ended}</p>
                       {next !== null && <TextLink href={next.href}>{t(text.player.next, { title: next.title })}</TextLink>}
-                      <Button type="button" variant="secondary" onClick={() => void watch()}>
+                      <Button type="button" variant="secondary" onClick={() => void watch(0)}>
                         {text.player.replay}
                       </Button>
                     </>
@@ -570,6 +640,11 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
             {/* Lo que el reproductor dice a quien no lo ve: existe desde antes, para que se anuncie. */}
             <p role="status" className="sr-only">
               {announcementOf(video)}
+            </p>
+            {/* Que el latido la terminó, una vez, aparte: junto con la del reproductor, volvería a
+                decir el estado entero. */}
+            <p aria-live="polite" className="sr-only">
+              {completedNow ? text.justCompleted : ""}
             </p>
           </section>
           <div className="flex flex-col gap-1">

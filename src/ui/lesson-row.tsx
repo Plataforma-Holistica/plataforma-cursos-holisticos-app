@@ -1,4 +1,4 @@
-import { Circle, CirclePlay } from "lucide";
+import { Circle, CircleCheck, CirclePlay, LoaderCircle } from "lucide";
 import Link from "next/link";
 
 import { t } from "@/messages/format";
@@ -13,8 +13,9 @@ import { Icon } from "./icon";
 // junte cada navegador los espacios entre fragmentos. Dice lo mismo que se ve (WCAG 2.5.3):
 // «Lección 3, Respiración en cuatro tiempos, 6 min, reproduciendo».
 //
-// Estados de hoy: sin empezar y en reproducción. «A medias» y «Terminada» llegan con el avance
-// (T-206), y «Requiere suscripción», con la ficha del curso para el visitante (T-210).
+// Estados: sin empezar (círculo vacío), a medias (un arco en acento), terminada (palomita) y, la
+// que se está viendo, en reproducción, que se suma a terminada y tapa a medias (T-206).
+// «Requiere suscripción» llega con la ficha del curso para el visitante (T-210).
 
 export interface LessonRowProps {
   href: string;
@@ -24,11 +25,32 @@ export interface LessonRowProps {
   duration: string;
   /** La que se está viendo: va marcada y es la página actual. */
   current?: boolean;
+  /** Lo que lleva quien mira (T-206). */
+  state?: "not_started" | "in_progress" | "completed";
 }
 
-export function LessonRow({ href, number, title, duration, current = false }: LessonRowProps) {
+type Words = (typeof ui)["lessonRow"];
+type NameKey = "name" | "nameInProgress" | "nameCompleted" | "namePlaying" | "nameCompletedPlaying";
+type CaptionKey = "durationInProgress" | "durationCompleted" | "durationPlaying" | "durationCompletedPlaying";
+
+/** El nombre y lo que se lee bajo el título, según el estado y si es la que se está viendo. */
+function wording(state: NonNullable<LessonRowProps["state"]>, current: boolean): { name: Words[NameKey]; caption: Words[CaptionKey] | null } {
   const text = ui.lessonRow;
-  const name = t(current ? text.namePlaying : text.name, { number, title, duration });
+  if (current) {
+    return state === "completed"
+      ? { name: text.nameCompletedPlaying, caption: text.durationCompletedPlaying }
+      : { name: text.namePlaying, caption: text.durationPlaying };
+  }
+  if (state === "completed") return { name: text.nameCompleted, caption: text.durationCompleted };
+  if (state === "in_progress") return { name: text.nameInProgress, caption: text.durationInProgress };
+  return { name: text.name, caption: null };
+}
+
+const ICONS = { not_started: Circle, in_progress: LoaderCircle, completed: CircleCheck } as const;
+
+export function LessonRow({ href, number, title, duration, current = false, state = "not_started" }: LessonRowProps) {
+  const words = wording(state, current);
+  const name = t(words.name, { number, title, duration });
   return (
     <Link
       href={href}
@@ -39,13 +61,17 @@ export function LessonRow({ href, number, title, duration, current = false }: Le
       )}
     >
       <span className="sr-only">{name}</span>
-      <Icon icon={current ? CirclePlay : Circle} size={20} className={current ? "mt-0.5 text-accent" : "mt-0.5 text-text-3"} />
+      <Icon
+        icon={current ? CirclePlay : ICONS[state]}
+        size={20}
+        className={current || state !== "not_started" ? "mt-0.5 text-accent" : "mt-0.5 text-text-3"}
+      />
       <span aria-hidden="true" className="w-6 shrink-0 text-body-s text-text-2 tabular-nums">
         {number}
       </span>
       <span aria-hidden="true" className="flex min-w-0 flex-1 flex-col">
         <span className="text-body-s text-text">{title}</span>
-        <span className="text-caption text-text-3">{current ? t(text.durationPlaying, { duration }) : duration}</span>
+        <span className="text-caption text-text-3">{words.caption === null ? duration : t(words.caption, { duration })}</span>
       </span>
     </Link>
   );
