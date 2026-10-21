@@ -1,7 +1,10 @@
 // Lo que pinta la página de una lección (PA-22, T-203), armado con las filas que la base
-// devuelve: el curso, su temario por módulos, la lección que se pidió y la que sigue. Es puro:
+// devuelve: el curso, su temario por módulos, la lección que se pidió y la que sigue, y desde
+// T-206 en qué estado está cada lección para quien mira y cuántas lleva terminadas. Es puro:
 // las filas las lee `records.ts`. Nunca trae nada del video: el reproductor lo pide aparte
-// (RF-305).
+// (RF-305), y con él el segundo donde arranca.
+
+import { courseProgress, lessonState, type LessonProgressFacts, type LessonState } from "@/domain/progress/progress";
 
 /** Una fila: una lección vigente de un curso listado, con su módulo y su curso. */
 export interface LessonRowData {
@@ -16,6 +19,8 @@ export interface LessonRowData {
   lessonTitle: string;
   lessonPosition: number;
   durationSeconds: number;
+  /** Lo guardado de esa lección para quien mira, o nulo si nunca la vio (T-206). */
+  progress: LessonProgressFacts | null;
 }
 
 export interface LessonEntry {
@@ -25,6 +30,7 @@ export interface LessonEntry {
   number: number;
   durationSeconds: number;
   current: boolean;
+  state: LessonState;
 }
 
 export interface LessonPage {
@@ -34,6 +40,8 @@ export interface LessonPage {
   /** La siguiente del temario, o nula si es la última. */
   next: { id: string; title: string } | null;
   lessonCount: number;
+  /** Cuántas lecciones vigentes terminó quien mira, de cuántas (T-206). */
+  progress: { completed: number; total: number };
 }
 
 /**
@@ -59,9 +67,11 @@ export function lessonPageOf(rows: readonly LessonRowData[], lessonId: string): 
       number: position + 1,
       durationSeconds: row.durationSeconds,
       current: row.lessonId === lessonId,
+      state: lessonState(row.progress),
     });
   }
   const following = ordered[index + 1];
+  const { completed, total } = courseProgress(ordered.map((row) => ({ completed: lessonState(row.progress) === "completed" })));
   return {
     course: { slug: current.courseSlug, title: current.courseTitle, summary: current.courseSummary, teacherName: current.teacherName },
     lesson: {
@@ -74,5 +84,6 @@ export function lessonPageOf(rows: readonly LessonRowData[], lessonId: string): 
     modules,
     next: following === undefined ? null : { id: following.lessonId, title: following.lessonTitle },
     lessonCount: ordered.length,
+    progress: { completed, total },
   };
 }

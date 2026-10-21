@@ -57,6 +57,7 @@ describe("watchLessonAction", () => {
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
       durationSeconds: 356,
+      startSeconds: 42,
     });
     const answer = await watchLessonAction("respirar", LESSON);
     expect(mocks.getMediaGrant).toHaveBeenCalledExactlyOnceWith(jar, LESSON, "watch", { closing: undefined });
@@ -69,6 +70,7 @@ describe("watchLessonAction", () => {
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
       durationSeconds: 356,
+      startSeconds: 42,
     });
     // Nada de la base de acceso viaja al navegador.
     expect(JSON.stringify(answer)).not.toMatch(/basis|countsForPayout|until|expiresAt/);
@@ -126,8 +128,8 @@ describe("playbackPresenceAction (T-204)", () => {
   });
 
   it("con los tramos vistos (T-205): se los pasa tal cual, y dice cuáles salen de la cola", async () => {
-    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0] } });
-    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK, EVENTS)).toEqual({ kind: "ok", batch: { kind: "settled", seqs: [0] } });
+    mocks.playbackHeartbeat.mockResolvedValue({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0], progress: null } });
+    expect(await playbackPresenceAction("respirar", LESSON, PLAYBACK, EVENTS)).toEqual({ kind: "ok", batch: { kind: "settled", seqs: [0], progress: null } });
     expect(mocks.playbackHeartbeat).toHaveBeenCalledExactlyOnceWith(jar, PLAYBACK, EVENTS);
   });
 
@@ -158,7 +160,8 @@ describe("playbackPresenceAction (T-204)", () => {
 describe("flushHeartbeatsAction (T-205)", () => {
   const EVENTS = [{ seq: 4, from: 120, to: 135, rate: 1.5, visible: false }];
 
-  it.each([[{ kind: "settled", seqs: [4] }], [{ kind: "discard" }], [{ kind: "retry" }]])(
+  const NOTE = { lessonId: "b0000000-0000-4000-8000-000000000002", coveredSeconds: 321, completed: true, justCompleted: true };
+  it.each([[{ kind: "settled", seqs: [4], progress: null }], [{ kind: "settled", seqs: [4], progress: NOTE }], [{ kind: "discard" }], [{ kind: "retry" }]])(
     "le pasa los tramos tal cual a la función, y le devuelve al navegador lo que dijo: %j",
     async (answer) => {
       mocks.flushHeartbeats.mockResolvedValue(answer);

@@ -49,7 +49,7 @@ pnpm dev         # aplicación en local, en http://localhost:3000. La muestra de
 pnpm typecheck   # tipos
 pnpm lint        # lint, incluida la regla de capas
 pnpm test        # dominio, textos, capas y contraste, y los componentes en un DOM simulado. Sin red ni base
-pnpm test:coverage   # las pruebas de `unit` con cobertura: src/domain/access/ y src/domain/consumption/ deben dar 100 %, archivo por archivo
+pnpm test:coverage   # las pruebas de `unit` con cobertura: src/domain/access/, src/domain/consumption/ y src/domain/progress/ deben dar 100 %, archivo por archivo
 pnpm secrets     # escaneo de secretos en todo el repositorio
 pnpm build       # compilación de producción
 pnpm db:start    # levanta Supabase en local (necesita Docker Desktop abierto)
@@ -183,7 +183,7 @@ acciones comparan `Origin` con `Host`. Las mismas comprobaciones de `db:admins` 
 `DATABASE_URL` local; de un error imprime solo el código. Deja auditoría y consentimientos:
 antes de cualquier prueba, se apaga el servidor y `pnpm db:reset`.
 
-Si se tocó `src/domain/access/` o `src/domain/consumption/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
+Si se tocó `src/domain/access/`, `src/domain/consumption/` o `src/domain/progress/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
 `tests/architecture/` los prohíbe): una rama que no se puede cubrir sobra, y se quita. El
 porcentaje no ve lo que decide una expresión regular o una tabla, así que no basta: cada
@@ -1288,8 +1288,9 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Lo que se contesta del lote (`BatchAnswer`): `settled` con los consecutivos que salen de la
     cola (aceptados, repetidos y rechazados), `discard` (la reproducción no es de quien la manda,
     o el lote no tiene forma: lo enviado se tira) o `retry`. Las acciones son
-    `playbackPresenceAction(slug, lección, reproducción, tramos)` y `flushHeartbeatsAction`. Sin
-    el progreso (T-206), los días de práctica ni `rollup_dirty` (T-207).
+    `playbackPresenceAction(slug, lección, reproducción, tramos)` y `flushHeartbeatsAction`. Desde
+    T-206 `settled` trae además el estado de la lección (`progress`, abajo). Sin los días de
+    práctica ni `rollup_dirty` (T-207).
   - Las pruebas: `supabase/tests/23_latidos.test.sql` (en una transacción `now()` no avanza: el
     tiempo vivo se simula moviendo el último latido hacia atrás) y
     `tests/integration/40-reproducciones.test.ts`. Que mandar sin presencia espera el candado de
@@ -1346,9 +1347,12 @@ falla. Veintiuna precisiones que la tabla no dice:
     que otra cuenta del mismo navegador tira con `not_found` (al salir no se vacía la cola), y,
     si la aplicación no contesta más de tres latidos mientras Mux sigue sirviendo, lo visto en el
     hueco que pase del presupuesto (la reproducción vence y al volver su reloj crece una sola
-    ventana; sale `faster_than_clock`). El video no se pausa por eso (FL-12 E5). Y menos de un
-    segundo en cada cambio de velocidad o de visibilidad. Los huecos de `seqs_received` no ven las
-    primeras.
+    ventana; sale `faster_than_clock`). El video no se pausa por eso (FL-12 E5). Y en cada cambio
+    de velocidad o de visibilidad con el video avanzando, menos de un segundo más lo que avanza el
+    video hasta la primera muestra con lo nuevo (una muestra de `timeupdate`, unos 0.25 s, a la
+    velocidad nueva: a 2×, medio segundo). La guía decía «menos de un segundo»: una corrida de las
+    propiedades del 2026-10-20 lo desmintió, y la cota de la prueba se corrigió. Los huecos de
+    `seqs_received` no ven las primeras.
   - Las pruebas del navegador: `segments.test.ts` y `queue.test.ts` (dominio, con
     propiedades), `watch-queue.test.ts` (almacenamiento, candados y relojes simulados),
     `tests/ui/lesson-screen.test.tsx` y `player.test.tsx`, y en `tests/e2e/equipo/leccion.equipo.ts`
@@ -1356,6 +1360,49 @@ falla. Veintiuna precisiones que la tabla no dice:
     elemento y manda `timeupdate` con el reloj de verdad, porque la base revisa contra el tiempo
     vivo. Lo que solo se ve en un iPhone (ocultar y volver, cerrar Safari con un tramo abierto,
     Web Locks) se revisa a mano.
+- **El progreso** (T-206; RF-307; decisiones de Sergio del 2026-10-20; 05 §5.7 y §9.2). Lo que no
+  se ve leyendo un solo archivo:
+  - **Lo escribe solo la base, en la transacción del libro.** `private.record_heartbeats()` le pasa
+    a `private.merge_progress()` lo aceptado del lote que sirve (visible y dentro de
+    `VELOCIDAD_MAX`, lo mismo que `qualifies`), el consecutivo y el final del último aceptado
+    (sirva o no: la pestaña oculta también avanza el video) y el tope. `lesson_progress` guarda lo
+    visto como multirrango (`covered_seconds` es una columna calculada) y la terminada al llegar a
+    `UMBRAL_COMPLETO_PCT` de la duración, una sola vez y a la hora del tope. El umbral y el fundido
+    viven ahí, como la base decide desde T-205 si un tramo cuenta. Nadie de la aplicación escribe
+    la tabla, y el vigilante lo exige; la persona lee lo suyo sin los tramos, y el servidor no la
+    lee: pregunta `private.lesson_position()`.
+  - **Si el progreso falla, el libro se queda** (decisión de Sergio): va en su propio bloque de
+    excepción dentro del del lote, y contesta `{outcome: 'failed'}`. El servicio lo reporta
+    (`progress_unavailable`) y el lote sale de la cola: el progreso se rehace desde
+    `watch_events.qualifies`. Sin `UMBRAL_COMPLETO_PCT`, o con uno que no es un entero de 1 a
+    10 000, es eso.
+  - **Lo atrasado no regresa a nadie.** La cola del navegador manda tarde lo de reproducciones
+    viejas: los tramos se funden siempre (la unión no depende del orden), pero la posición y el
+    orden de «continuar viendo» (`last_watched_at`) solo se mueven con un lote más nuevo: de la
+    misma reproducción, un consecutivo mayor; de otra, un tope más nuevo. Un empate de topes entre
+    dos reproducciones no mueve.
+  - **El progreso está atado al video.** Si la lección cambió de video, los tramos del anterior se
+    reemplazan con el primer lote del nuevo, y terminada se queda terminada. Un lote de un video
+    que la lección ya no tiene (lo atrasado) no toca el progreso: en el libro sí queda. La vista
+    previa del dueño no deja progreso; la cortesía, el curso abierto y lo visto después de perder
+    el acceso, sí: el progreso no mira el dinero.
+  - **Lo que contesta** cada lote (`settled.progress`): `lessonId`, los segundos, si está terminada
+    y si este lote la terminó, también cuando el lote salió todo repetido: un reenvío cuya
+    respuesta se perdió tiene que enterarse. Nulo si no deja progreso o falló.
+  - **Desde dónde arranca el video** lo trae la concesión (`startSeconds`): `getMediaGrant` lee la
+    posición en la transacción que abre la reproducción, cuando lo guardado en el navegador ya
+    salió (Next despacha las acciones en orden). `resumeAt` (dominio) la acota: desde el
+    principio si le faltaba menos del 5 % de la lección, y al menos 10 s (decisión de Sergio).
+  - **Lo que se lee** está en `src/domain/progress/` (puro, 100 %): el estado de una fila (sin
+    empezar, a medias, terminada; con otro video y sin terminar, sin empezar), cuántas van y la
+    lección sugerida (la última que vio si no la terminó; si no, la siguiente sin terminar; si no
+    hay o ya no está, la primera sin terminar). El temario de la página de la lección lo lee con
+    las lecciones, como la persona (`readCourseLessons`). «Continuar viendo» es
+    `src/services/progress/` (`continueWatching`): los cursos listados que la persona empezó y no
+    terminó, el más reciente primero, a lo más 20, filtrando a mano lo listado y lo vigente.
+  - Las pruebas: `supabase/tests/24_progreso.test.sql`, `tests/integration/40-reproducciones.test.ts`
+    (el progreso de punta a punta por la función única de medios) y
+    `tests/integration/40-leccion.test.ts` (las lecturas, con el progreso escrito por el dueño).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
@@ -1810,7 +1857,8 @@ confirmación dice que va a pasar.
 Con el video (T-108), `src/services/media/`, `src/adapters/mux/` y el servicio de
 revisión, `src/services/review/`; con el reproductor compartido (T-203), `src/app/_video/`,
 donde viven la marca de agua y lo que se le apaga a Mux Player; y con la página de la
-lección, `src/app/cursos/` y `src/services/lessons/`.
+lección, `src/app/cursos/` y `src/services/lessons/`; con el progreso (T-206),
+`src/domain/progress/` y `src/services/progress/`.
 Los demás servicios y adaptadores de cada zona se agregan cuando su tarea los crea. También tiene dueño
 `src/adapters/sentry/`: no es una de las tres zonas, pero decide qué sale hacia un
 tercero.

@@ -354,7 +354,11 @@ describe("propiedades, con guiones de reproducción al azar", () => {
     );
   });
 
-  it("lo que se pierde de un trecho es menos de dos segundos (el redondeo de sus dos puntas)", () => {
+  // El redondeo de las dos puntas, y si el trecho empezó con un cambio de velocidad o de
+  // visibilidad con el video avanzando, lo que avanzó hasta la primera muestra con lo nuevo: una
+  // muestra (a lo más 0.3 s en el guion) a la velocidad nueva (a lo más 2×). Lo encontró una
+  // corrida del 2026-10-20: volver a la vista a 1.25× perdió 2 s de un trecho de 36.
+  it("lo que se pierde de un trecho es menos de dos segundos más lo que avanza hasta la primera muestra", () => {
     fc.assert(
       fc.property(scripts, ([steps, duration]) => {
         const { closed, runs } = simulate(steps, duration);
@@ -362,7 +366,7 @@ describe("propiedades, con guiones de reproducción al azar", () => {
           const credited = inside(closed, each)
             .filter((segment) => segment.visible === each.visible)
             .reduce((sum, segment) => sum + segment.to - segment.from, 0);
-          expect(credited).toBeGreaterThan(each.to - each.from - 2);
+          expect(credited).toBeGreaterThan(each.to - each.from - 2 - 0.3 * 2);
         }
       }),
       { numRuns: 500 },

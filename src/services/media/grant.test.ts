@@ -45,7 +45,7 @@ const PAYING: WatchFacts = {
 const NEVER_PAID: WatchFacts = { ...PAYING, account: { ...PAYING.account, paidThrough: null } };
 const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
 const OTHER_PLAYBACK = "d0000000-0000-4000-8000-000000000005";
-const OPENED: OpenedPlayback = { kind: "opened", sessionId: PLAYBACK, heartbeatSeconds: 30 };
+const OPENED: OpenedPlayback = { kind: "opened", sessionId: PLAYBACK, heartbeatSeconds: 30, position: null };
 const STARTED = new Date("2026-10-15T11:40:00.000Z");
 /** La hora del tope del reloj de la reproducción, que da la base: con ella se decide si el lote cuenta. */
 const AT = new Date("2026-10-15T11:59:30.000Z");
@@ -141,7 +141,7 @@ function grantWith(
             batch =
               counts === "unknown"
                 ? { kind: "unknown" }
-                : (setup.recorded ?? { kind: "recorded", accepted: beat.events.map((each) => each.seq), duplicate: [], rejected: [] });
+                : (setup.recorded ?? { kind: "recorded", accepted: beat.events.map((each) => each.seq), duplicate: [], rejected: [], progress: null });
           }
           return Promise.resolve({ presence: beat.presence ? (setup.presence ?? { kind: "ok" as const }) : null, batch });
         }),
@@ -245,6 +245,7 @@ describe("ver: la guarda de sesión primero", () => {
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
       durationSeconds: 600,
+      startSeconds: 0,
     });
     // La reproducción se abre al final, después de firmar (T-204).
     expect(service.calls).toEqual(["guarda de sesión", `hechos ${LESSON}`, "velocidad", "firma", "abre"]);
@@ -602,10 +603,10 @@ describe("el latido de presencia (T-204)", () => {
 describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
   it("van en el mismo latido que la presencia, y salen de la cola todos los que la base vio", async () => {
     const service = grantWith({
-      recorded: { kind: "recorded", accepted: [2, 0], duplicate: [1], rejected: [{ seq: 3, reason: "faster_than_clock" }] },
+      recorded: { kind: "recorded", accepted: [2, 0], duplicate: [1], rejected: [{ seq: 3, reason: "faster_than_clock" }], progress: null },
     });
     const four = [...EVENTS, { seq: 2, from: 60, to: 90, rate: 1, visible: true }, { seq: 3, from: 90, to: 120, rate: 1, visible: true }];
-    expect(await service.playbackHeartbeat(reader, PLAYBACK, four)).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1, 2, 3] } });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, four)).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1, 2, 3], progress: null } });
     expect(service.calls).toEqual(["guarda de sesión", `late ${PLAYBACK}`, `registra ${PLAYBACK}`]);
     expect(service.beats).toHaveLength(1);
     expect(service.beats[0]).toMatchObject({ sessionId: PLAYBACK, presence: true, events: four });
@@ -616,7 +617,7 @@ describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
     const service = grantWith({ presence: { kind: "revoked", reason: "replaced", by: OTHER_PLAYBACK } });
     expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({
       presence: { kind: "revoked", reason: "replaced", by: OTHER_PLAYBACK },
-      batch: { kind: "settled", seqs: [0, 1] },
+      batch: { kind: "settled", seqs: [0, 1], progress: null },
     });
   });
 
@@ -689,7 +690,7 @@ describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
       expect(answer).toEqual({ presence: { kind: "ok" }, batch: { kind: "retry" } });
       expect(service.reported).toEqual(["heartbeat_unavailable"]);
     } else {
-      expect(answer).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1] } });
+      expect(answer).toEqual({ presence: { kind: "ok" }, batch: { kind: "settled", seqs: [0, 1], progress: null } });
       expect(service.reported).toEqual([]);
     }
   });
@@ -698,21 +699,21 @@ describe("los tramos vistos (T-205, RF-401 a RF-403)", () => {
 describe("mandar los tramos sin presencia (T-205)", () => {
   it("no late: solo registra", async () => {
     const service = grantWith();
-    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1] });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1], progress: null });
     expect(service.calls).toEqual(["guarda de sesión", `registra ${PLAYBACK}`]);
     expect(service.beats[0]).toMatchObject({ sessionId: PLAYBACK, presence: false, events: EVENTS });
   });
 
   it("un lote vacío no le pregunta nada a la base", async () => {
     const service = grantWith();
-    expect(await service.flushHeartbeats(reader, PLAYBACK, [])).toEqual({ kind: "settled", seqs: [] });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, [])).toEqual({ kind: "settled", seqs: [], progress: null });
     expect(service.calls).toEqual(["guarda de sesión"]);
     expect(service.beats).toEqual([]);
   });
 
   it("a una cuenta a la que le falta algo también", async () => {
     const service = grantWith({ session: { kind: "incomplete", claims } as SessionCheck });
-    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1] });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1], progress: null });
   });
 
   it.each<[string, SessionCheck]>([
@@ -746,5 +747,44 @@ describe("mandar los tramos sin presencia (T-205)", () => {
     const service = grantWith(setup);
     expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual(expected);
     expect(service.reported).toEqual(reported);
+  });
+});
+
+describe("el progreso (T-206, RF-307)", () => {
+  const TRACKED = { kind: "tracked" as const, lessonId: LESSON, coveredSeconds: 540, completed: true, justCompleted: true };
+
+  it.each<[string, number | null, number]>([
+    ["sin nada guardado, desde el principio", null, 0],
+    ["donde se quedó", 300, 300],
+    ["le faltaba menos del 5 % de los 600 s: desde el principio", 571, 0],
+  ])("ver arranca en el segundo guardado: %s", async (_case, position, start) => {
+    const service = grantWith({ opened: { ...OPENED, position } });
+    expect(await service.getMediaGrant(reader, LESSON, "watch")).toMatchObject({ kind: "granted", startSeconds: start });
+  });
+
+  it("el lote contesta el estado de la lección, para marcarla al momento", async () => {
+    const service = grantWith({ recorded: { kind: "recorded", accepted: [0, 1], duplicate: [], rejected: [], progress: TRACKED } });
+    const note = { lessonId: LESSON, coveredSeconds: 540, completed: true, justCompleted: true };
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({
+      presence: { kind: "ok" },
+      batch: { kind: "settled", seqs: [0, 1], progress: note },
+    });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1], progress: note });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("ya terminada de antes no es recién terminada", async () => {
+    const service = grantWith({ recorded: { kind: "recorded", accepted: [0], duplicate: [], rejected: [], progress: { ...TRACKED, justCompleted: false } } });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toMatchObject({ progress: { completed: true, justCompleted: false } });
+  });
+
+  it("si el progreso falló, el lote igual sale de la cola: quedó en el libro, y se reporta", async () => {
+    const service = grantWith({ recorded: { kind: "recorded", accepted: [0, 1], duplicate: [], rejected: [], progress: { kind: "failed", code: "P0001" } } });
+    expect(await service.playbackHeartbeat(reader, PLAYBACK, EVENTS)).toEqual({
+      presence: { kind: "ok" },
+      batch: { kind: "settled", seqs: [0, 1], progress: null },
+    });
+    expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1], progress: null });
+    expect(service.reported).toEqual(["progress_unavailable", "progress_unavailable"]);
   });
 });

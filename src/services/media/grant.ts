@@ -19,6 +19,7 @@ import {
 
 import { describeUserAgent, type Device } from "@/domain/access/user-agent";
 import { accessCounts, parseHeartbeatBatch, type AccessCount, type HeartbeatEvent } from "@/domain/consumption/heartbeat";
+import { resumeAt } from "@/domain/progress/progress";
 
 import type { SessionCheck } from "@/services/account/admission";
 import { holds, type TeamCheck } from "@/services/account/team";
@@ -65,6 +66,10 @@ import type {
 // cuenta lo decide aquí la regla de los medios con los hechos a la hora del tope del reloj de
 // la reproducción, que la base da: lo atrasado se mide en su hora, no en la de llegada. La
 // base revisa cada tramo contra la lección y el reloj, y solo puede bajar lo que cuenta.
+//
+// Desde T-206 la base funde además lo visto en el progreso, en la misma transacción, y lo que
+// contesta del lote trae el estado de la lección: la pantalla marca «Terminada» al momento. Ver
+// dice además desde qué segundo arrancar (`startSeconds`), leído al abrir la reproducción.
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -121,6 +126,8 @@ export type MediaGrant =
       heartbeatSeconds: number;
       /** La duración de la lección, la que revisa la base en cada tramo: el navegador recorta a ella (T-205). */
       durationSeconds: number;
+      /** El segundo donde arranca: donde se quedó, o 0 si no hay, es de otro video o le faltaba poco (T-206). */
+      startSeconds: number;
     })
   | Busy
   | Refusal;
@@ -138,10 +145,22 @@ export type PresenceAnswer =
   /** No se supo: el video sigue, y el siguiente latido lo vuelve a intentar. */
   | { kind: "unavailable" };
 
+/** El estado de una lección después de un lote (T-206): con él la pantalla marca su fila al momento. */
+export interface LessonProgressNote {
+  lessonId: string;
+  coveredSeconds: number;
+  completed: boolean;
+  /** Si este lote la terminó. */
+  justCompleted: boolean;
+}
+
 /** Qué pasó con un lote de tramos (T-205), para la cola del navegador. */
 export type BatchAnswer =
-  /** Los consecutivos que salen de la cola: aceptados, repetidos y rechazados. Ninguno se reenvía. */
-  | { kind: "settled"; seqs: number[] }
+  /**
+   * Los consecutivos que salen de la cola: aceptados, repetidos y rechazados. Ninguno se reenvía.
+   * `progress`, el estado de la lección, o nulo si no deja progreso o no se pudo fundir.
+   */
+  | { kind: "settled"; seqs: number[]; progress: LessonProgressNote | null }
   /** La reproducción no existe o no es de quien la manda, o el lote no tiene forma: lo enviado se tira. */
   | { kind: "discard" }
   /** No se supo: todo se queda en la cola y se manda otra vez. */
@@ -372,6 +391,7 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       playbackSessionId: opened.sessionId,
       heartbeatSeconds: opened.heartbeatSeconds,
       durationSeconds: decided.video.durationSeconds,
+      startSeconds: resumeAt(opened.position, decided.video.durationSeconds),
     };
   }
 
@@ -379,11 +399,17 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
   async function settle(batch: BatchRecord | null): Promise<BatchAnswer | null> {
     if (batch === null) return null;
     switch (batch.kind) {
-      case "recorded":
-        return {
-          kind: "settled",
-          seqs: [...new Set([...batch.accepted, ...batch.duplicate, ...batch.rejected.map((each) => each.seq)])].sort((a, b) => a - b),
-        };
+      case "recorded": {
+        const seqs = [...new Set([...batch.accepted, ...batch.duplicate, ...batch.rejected.map((each) => each.seq)])].sort((a, b) => a - b);
+        const saved = batch.progress;
+        // El lote quedó en el libro: el progreso se rehace desde ahí. Alguien lo tiene que saber.
+        if (saved?.kind === "failed") await deps.report("progress_unavailable");
+        const progress =
+          saved?.kind === "tracked"
+            ? { lessonId: saved.lessonId, coveredSeconds: saved.coveredSeconds, completed: saved.completed, justCompleted: saved.justCompleted }
+            : null;
+        return { kind: "settled", seqs, progress };
+      }
       case "not_found":
         return { kind: "discard" };
       case "unknown":
@@ -462,7 +488,7 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     if (session.kind !== "pass" && session.kind !== "incomplete") return { kind: "retry" };
     const id = idOrNull(sessionId);
     if (id === null) return { kind: "discard" };
-    if (batch.length === 0) return { kind: "settled", seqs: [] };
+    if (batch.length === 0) return { kind: "settled", seqs: [], progress: null };
 
     let outcome: HeartbeatOutcome | null;
     try {
@@ -474,7 +500,7 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       await deps.report("heartbeat_unavailable");
       return { kind: "retry" };
     }
-    return (await settle(outcome.batch)) ?? { kind: "settled", seqs: [] };
+    return (await settle(outcome.batch)) ?? { kind: "settled", seqs: [], progress: null };
   }
 
   /**

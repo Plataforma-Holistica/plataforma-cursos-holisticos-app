@@ -330,7 +330,9 @@ select is_empty('select * from private.schema_violations()', '(sin el permiso de
 select pruebas.como_dueno_sistema();
 select throws_ok($$delete from public.published_lessons$$, '42501', 'public.published_lessons: rows are hidden, not deleted',
   'ni el dueño borra lo publicado');
-select throws_ok($$truncate public.published_lessons$$, '42501', 'public.published_lessons: rows are hidden, not deleted',
+-- Con `cascade`: desde T-206 el progreso apunta a las lecciones, y sin él la base se niega antes
+-- de llegar al guardián.
+select throws_ok($$truncate public.published_lessons cascade$$, '42501', 'public.published_lessons: rows are hidden, not deleted',
   'ni lo vacía');
 -- Una lección no puede quedar en un módulo de otro curso: con su propio video, solo eso falla.
 select throws_ok(

@@ -5,6 +5,8 @@ import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/cla
 import type { Tx } from "@/adapters/supabase/db";
 import { createLessons, type LessonStore } from "@/services/lessons/lessons";
 import { readCourseIsOpen, readCourseLessons } from "@/services/lessons/records";
+import { createProgress } from "@/services/progress/progress";
+import { readContinueWatching } from "@/services/progress/records";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -13,7 +15,9 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 
 // La página de una lección (PA-22, T-203) contra la base local: el temario se lee como la
 // persona, filtrando a mano lo listado y lo vigente, y si el curso es el abierto, como sistema.
-// Los cursos se cargan dentro de una transacción del dueño que se revierte.
+// Los cursos se cargan dentro de una transacción del dueño que se revierte. Desde T-206, el
+// temario trae el progreso de quien lee, y «continuar viendo» se lee igual; el progreso lo
+// escribe aquí el dueño (lo escribe de verdad `record_heartbeats`, en 40-reproducciones).
 
 const emails: string[] = [];
 afterAll(async () => {
@@ -32,21 +36,26 @@ async function personClaims(): Promise<{ id: string; claims: VerifiedClaims }> {
   return { id: who.id, claims: check.claims };
 }
 
+const txOn = (owner: Client): Tx => ({
+  query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
+  execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
+});
+
+/** Lee como la persona, dentro de la transacción del dueño. */
+async function asPerson<T>(owner: Client, claims: VerifiedClaims, read: (tx: Tx) => Promise<T>): Promise<T> {
+  await asOwner(owner);
+  await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [readVerifiedClaims(claims).json]);
+  try {
+    return await read(txOn(owner));
+  } finally {
+    await asOwner(owner);
+  }
+}
+
 function storeOn(owner: Client): LessonStore {
-  const tx: Tx = {
-    query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
-    execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
-  };
+  const tx = txOn(owner);
   return {
-    courseLessons: async (claims, slug) => {
-      await asOwner(owner);
-      await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [readVerifiedClaims(claims).json]);
-      try {
-        return await readCourseLessons(tx, slug);
-      } finally {
-        await asOwner(owner);
-      }
-    },
+    courseLessons: (claims, slug) => asPerson(owner, claims, (each) => readCourseLessons(each, slug)),
     courseIsOpen: async (slug) => {
       await asOwner(owner);
       return readCourseIsOpen(tx, slug);
@@ -55,6 +64,29 @@ function storeOn(owner: Client): LessonStore {
 }
 
 const lessons = (owner: Client) => createLessons({ store: storeOn(owner), report: () => Promise.resolve() });
+const progress = (owner: Client) =>
+  createProgress({ store: { continueRows: (claims) => asPerson(owner, claims, readContinueWatching) }, report: () => Promise.resolve() });
+
+/** Lo que dejaría `record_heartbeats`: lo visto de una lección, escrito por el dueño. */
+async function seen(
+  owner: Client,
+  profile: string,
+  lesson: string,
+  options: { covered?: string; completed?: boolean; position?: number; minutesAgo?: number; video?: string } = {},
+): Promise<void> {
+  await asOwner(owner);
+  await owner.query(
+    `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, covered, completed_at,
+                                         first_watched_at, last_watched_at, last_playback_session_id, last_seq)
+     select $1, l.id, l.course_id, coalesce($6::uuid, l.video_asset_id), $5, $3::int4multirange, case when $4 then now() end,
+            now() - make_interval(mins => $7), now() - make_interval(mins => $7), gen_random_uuid(), 0
+     from public.published_lessons l where l.id = $2`,
+    [profile, lesson, options.covered ?? "{[0,30)}", options.completed ?? false, options.position ?? 30, options.video ?? null, options.minutesAgo ?? 0],
+  );
+}
+
+const videoOf = async (owner: Client, lesson: string) =>
+  (await owner.query<{ id: string }>("select video_asset_id::text as id from public.published_lessons where id = $1", [lesson])).rows[0]?.id ?? "";
 
 /** Un curso de dos módulos y tres lecciones, cargado como sistema; el de `listed` se publica y se lista. */
 async function loadCourse(owner: Client, slug: string, listed: boolean, teacherProfile: string | null = null): Promise<string[]> {
@@ -167,4 +199,150 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
       expect(await ask("no-existe")).toBeNull();
     });
   });
+});
+
+describe("el progreso de quien lee (T-206, RF-307)", () => {
+  it("el temario dice de cada lección si está sin empezar, a medias o terminada, y cuántas van; lo de otra cuenta no se ve", async () => {
+    const ana = await personClaims();
+    const beto = await personClaims();
+    await reverted(async (owner) => {
+      const [first, second, third] = await loadCourse(owner, "leccion-avance", true);
+      await seen(owner, ana.id, first ?? "", { covered: "{[0,301)}", completed: true });
+      await seen(owner, ana.id, second ?? "");
+      await seen(owner, beto.id, third ?? "", { completed: true });
+      const answer = await lessons(owner).lessonPage(ana.claims, "leccion-avance", second ?? "");
+      if (answer.kind !== "found") throw new Error(`No la encontró: ${answer.kind}`);
+      expect(answer.page.modules.flatMap((group) => group.lessons.map((lesson) => lesson.state))).toEqual(["completed", "in_progress", "not_started"]);
+      expect(answer.page.progress).toEqual({ completed: 1, total: 3 });
+      const other = await lessons(owner).lessonPage(beto.claims, "leccion-avance", second ?? "");
+      expect(other.kind === "found" && other.page.progress).toEqual({ completed: 1, total: 3 });
+      expect(other.kind === "found" && other.page.modules.flatMap((group) => group.lessons.map((lesson) => lesson.state))).toEqual([
+        "not_started",
+        "not_started",
+        "completed",
+      ]);
+    });
+  });
+
+  it("si la lección cambió de video, lo visto del anterior no la deja a medias, pero terminada se queda", async () => {
+    const { id, claims } = await personClaims();
+    await reverted(async (owner) => {
+      const [first, second, third] = await loadCourse(owner, "leccion-otro-video", true);
+      // Lo guardado es del video de otra lección del curso: como si la lección lo hubiera cambiado.
+      await seen(owner, id, first ?? "", { video: await videoOf(owner, third ?? "") });
+      await seen(owner, id, second ?? "", { completed: true, video: await videoOf(owner, third ?? "") });
+      const answer = await lessons(owner).lessonPage(claims, "leccion-otro-video", first ?? "");
+      if (answer.kind !== "found") throw new Error(`No la encontró: ${answer.kind}`);
+      expect(answer.page.modules.flatMap((group) => group.lessons.map((lesson) => lesson.state))).toEqual(["not_started", "completed", "not_started"]);
+    });
+  });
+
+  it("continuar viendo: los cursos listados que empezó y no terminó, el más reciente primero, con la lección sugerida", async () => {
+    const ana = await personClaims();
+    const beto = await personClaims();
+    await reverted(async (owner) => {
+      const reciente = await loadCourse(owner, "continuar-reciente", true);
+      const viejo = await loadCourse(owner, "continuar-viejo", true);
+      const terminado = await loadCourse(owner, "continuar-terminado", true);
+      const oculto = await loadCourse(owner, "continuar-oculto", false);
+      await seen(owner, ana.id, reciente[0] ?? "", { completed: true, minutesAgo: 5 });
+      await seen(owner, ana.id, viejo[1] ?? "", { minutesAgo: 60 });
+      for (const lesson of terminado) await seen(owner, ana.id, lesson, { completed: true, minutesAgo: 1 });
+      await seen(owner, ana.id, oculto[0] ?? "", { minutesAgo: 1 });
+      await seen(owner, beto.id, reciente[2] ?? "");
+
+      const answer = await progress(owner).continueWatching(ana.claims);
+      expect(answer).toEqual({
+        kind: "ready",
+        courses: [
+          {
+            courseSlug: "continuar-reciente",
+            courseTitle: "Curso continuar-reciente",
+            teacherName: "Maestra de lección",
+            completed: 1,
+            total: 3,
+            lesson: { id: reciente[1], title: "Segunda", number: 2 },
+          },
+          {
+            courseSlug: "continuar-viejo",
+            courseTitle: "Curso continuar-viejo",
+            teacherName: "Maestra de lección",
+            completed: 0,
+            total: 3,
+            lesson: { id: viejo[1], title: "Segunda", number: 2 },
+          },
+        ],
+      });
+      expect(await progress(owner).continueWatching(beto.claims)).toMatchObject({
+        kind: "ready",
+        courses: [{ courseSlug: "continuar-reciente", completed: 0, lesson: { id: reciente[2], number: 3 } }],
+      });
+    });
+  });
+
+  it("una lección que se retiró después de verla: la sugerida es la primera sin terminar (FL-13 A2)", async () => {
+    const { id, claims } = await personClaims();
+    await reverted(async (owner) => {
+      const [first, second] = await loadCourse(owner, "continuar-retirada", true);
+      await seen(owner, id, first ?? "", { completed: true, minutesAgo: 10 });
+      await seen(owner, id, second ?? "", { minutesAgo: 1 });
+      await asSystem(owner);
+      await owner.query("update public.published_lessons set is_current = false, retired_at = now() where id = $1", [second]);
+      await asOwner(owner);
+      const answer = await progress(owner).continueWatching(claims);
+      expect(answer.kind === "ready" && answer.courses.map((course) => [course.lesson.title, course.completed, course.total])).toEqual([["Tercera", 1, 2]]);
+    });
+  });
+});
+
+describe("continuar viendo filtra a mano lo que la maestra dueña ve de más", () => {
+  it("su curso sin listar no sale", async () => {
+    const teacher = await personClaims();
+    await reverted(async (owner) => {
+      const hidden = await loadCourse(owner, "duena-sin-listar", false, teacher.id);
+      await seen(owner, teacher.id, hidden[0] ?? "");
+      expect(await progress(owner).continueWatching(teacher.claims)).toEqual({ kind: "ready", courses: [] });
+    });
+  });
+
+  it("de su curso listado no cuenta la lección retirada", async () => {
+    const teacher = await personClaims();
+    await reverted(async (owner) => {
+      const listed = await loadCourse(owner, "duena-listado", true, teacher.id);
+      await seen(owner, teacher.id, listed[0] ?? "");
+      await asSystem(owner);
+      await owner.query("update public.published_lessons set is_current = false, retired_at = now() where id = $1", [listed[2]]);
+      await asOwner(owner);
+      const answer = await progress(owner).continueWatching(teacher.claims);
+      expect(answer.kind === "ready" && answer.courses.map((course) => [course.courseSlug, course.total])).toEqual([["duena-listado", 2]]);
+    });
+  });
+});
+
+describe("continuar viendo: la última vista y el tope de lo que se lee", () => {
+  it("la sugerida sale de la última lección que vio, no de la primera", async () => {
+    const { id, claims } = await personClaims();
+    await reverted(async (owner) => {
+      const [first, , third] = await loadCourse(owner, "continuar-ultima", true);
+      await seen(owner, id, first ?? "", { completed: true, minutesAgo: 10 });
+      await seen(owner, id, third ?? "", { minutesAgo: 1 });
+      const answer = await progress(owner).continueWatching(claims);
+      expect(answer.kind === "ready" && answer.courses[0]?.lesson.title).toBe("Tercera");
+    });
+  });
+
+  it("con más de 50 cursos empezados se leen los más recientes", async () => {
+    const { id, claims } = await personClaims();
+    await reverted(async (owner) => {
+      const recent = await loadCourse(owner, "continuar-de-hoy", true);
+      await seen(owner, id, recent[0] ?? "", { minutesAgo: 1 });
+      for (let index = 0; index < 50; index += 1) {
+        const [lesson] = await loadCourse(owner, `continuar-viejo-${index}`, true);
+        await seen(owner, id, lesson ?? "", { minutesAgo: 60 + index });
+      }
+      const answer = await progress(owner).continueWatching(claims);
+      expect(answer.kind === "ready" && answer.courses[0]?.courseSlug).toBe("continuar-de-hoy");
+      expect(answer.kind === "ready" && answer.courses).toHaveLength(20);
+    });
+  }, 60_000);
 });

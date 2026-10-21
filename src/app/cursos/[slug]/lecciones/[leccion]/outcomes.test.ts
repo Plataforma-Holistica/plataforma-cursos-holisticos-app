@@ -74,6 +74,7 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
       durationSeconds: 356,
+      startSeconds: 120,
     });
     expect(answer).toEqual({
       kind: "granted",
@@ -84,6 +85,7 @@ describe("al reproducir: lo que dijo getMediaGrant", () => {
       playbackSessionId: PLAYBACK,
       heartbeatSeconds: 30,
       durationSeconds: 356,
+      startSeconds: 120,
     });
   });
 
@@ -126,7 +128,7 @@ describe("el latido de presencia (T-204): lo que dijo playbackPresence", () => {
 });
 
 describe("el latido con los tramos vistos (T-205): lo que dijo playbackHeartbeat", () => {
-  it.each<[BatchAnswer | null]>([[null], [{ kind: "settled", seqs: [0, 1, 2] }], [{ kind: "discard" }], [{ kind: "retry" }]])(
+  it.each<[BatchAnswer | null]>([[null], [{ kind: "settled", seqs: [0, 1, 2], progress: null }], [{ kind: "discard" }], [{ kind: "retry" }]])(
     "lo del lote va tal cual junto a lo de la presencia: %j",
     (batch) => {
     expect(heartbeatReplyOf({ presence: { kind: "ok" }, batch })).toEqual({ kind: "ok", batch });
