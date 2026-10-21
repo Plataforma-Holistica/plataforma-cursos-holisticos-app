@@ -30,6 +30,9 @@
 /src/app/_video/           @SerchFGA @plataformaholisticadev
 /src/app/cursos/           @SerchFGA @plataformaholisticadev
 /src/services/lessons/     @SerchFGA @plataformaholisticadev
+# El progreso de cada cuenta (T-206): lo que se lee de lo que vio
+/src/services/progress/    @SerchFGA @plataformaholisticadev
+/src/domain/progress/      @SerchFGA @plataformaholisticadev
 # La medición de la cabecera de la dirección, de la que dependen el freno y los topes
 /src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
 # Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta

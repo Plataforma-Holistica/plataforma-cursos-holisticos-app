@@ -26,6 +26,7 @@ const ROW: LessonRowData = {
   lessonTitle: "Primera",
   lessonPosition: 1,
   durationSeconds: 60,
+  progress: null,
 };
 
 function lessonsWith(store: { rows?: LessonRowData[] | "throws"; open?: boolean | null | "throws" } = {}) {

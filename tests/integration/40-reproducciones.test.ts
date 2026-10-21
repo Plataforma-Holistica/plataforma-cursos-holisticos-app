@@ -281,6 +281,9 @@ describe("una reproducción a la vez", () => {
 
 const tramo = (seq: number, from: number, to: number) => ({ seq, from, to, rate: 1, visible: true });
 
+/** El estado de la lección que contesta un lote (T-206). */
+const note = (lessonId: string, coveredSeconds: number, completed = false, justCompleted = false) => ({ lessonId, coveredSeconds, completed, justCompleted });
+
 /** Como si la reproducción llevara tantos segundos viva. */
 async function alive(owner: Client, playback: string, seconds: number): Promise<void> {
   await owner.query("update public.playback_sessions set live_seconds = $2 where id = $1", [playback, seconds]);
@@ -307,14 +310,14 @@ describe("los latidos que miden (T-205)", () => {
       const events = [tramo(0, 0, 30), tramo(1, 30, 60)];
       expect(await media.playbackHeartbeat(computer, first.playbackSessionId, events)).toEqual({
         presence: { kind: "ok" },
-        batch: { kind: "settled", seqs: [0, 1] },
+        batch: { kind: "settled", seqs: [0, 1], progress: note(lesson, 60) },
       });
       expect(await ledger(owner, first.playbackSessionId)).toEqual([
         { seq: 0, to_second: 30, counts_for_payout: true },
         { seq: 1, to_second: 60, counts_for_payout: true },
       ]);
       // El navegador no supo la respuesta y los manda otra vez, ahora sin presencia.
-      expect(await media.flushHeartbeats(computer, first.playbackSessionId, events)).toEqual({ kind: "settled", seqs: [0, 1] });
+      expect(await media.flushHeartbeats(computer, first.playbackSessionId, events)).toEqual({ kind: "settled", seqs: [0, 1], progress: note(lesson, 60) });
       expect(await ledger(owner, first.playbackSessionId)).toHaveLength(2);
       expect(media.reported).toEqual([]);
     });
@@ -332,7 +335,12 @@ describe("los latidos que miden (T-205)", () => {
         "update public.subscriptions set current_period_end = now() - interval '1 day', status = 'expired', ended_at = now() - interval '1 day' where profile_id = $1",
         [who.id],
       );
-      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({ kind: "settled", seqs: [0] });
+      // Sin puntos, pero el progreso avanza: no mira el dinero.
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({
+        kind: "settled",
+        seqs: [0],
+        progress: note(lesson, 30),
+      });
       expect(await ledger(owner, first.playbackSessionId)).toEqual([{ seq: 0, to_second: 30, counts_for_payout: false }]);
     });
   });
@@ -356,7 +364,7 @@ describe("los latidos que miden (T-205)", () => {
         "update public.subscriptions set current_period_end = now() - interval '30 minutes', status = 'expired', ended_at = now() - interval '30 minutes' where profile_id = $1",
         [who.id],
       );
-      expect(await media.flushHeartbeats(computer, first.playbackSessionId, [tramo(0, 0, 30)])).toEqual({ kind: "settled", seqs: [0] });
+      expect(await media.flushHeartbeats(computer, first.playbackSessionId, [tramo(0, 0, 30)])).toEqual({ kind: "settled", seqs: [0], progress: note(lesson, 30) });
       expect(await ledger(owner, first.playbackSessionId)).toEqual([{ seq: 0, to_second: 30, counts_for_payout: true }]);
     });
   });
@@ -405,6 +413,7 @@ describe("los latidos que miden (T-205)", () => {
       expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 5), tramo(1, 5, 35)])).batch).toEqual({
         kind: "settled",
         seqs: [0, 1],
+        progress: note(lesson, 0),
       });
       expect(await ledger(owner, first.playbackSessionId)).toEqual([]);
       // Con diez segundos vivos caben 10 × 2 + 5.
@@ -412,6 +421,7 @@ describe("los latidos que miden (T-205)", () => {
       expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(2, 0, 25), tramo(3, 25, 26)])).batch).toEqual({
         kind: "settled",
         seqs: [2, 3],
+        progress: note(lesson, 25),
       });
       expect((await ledger(owner, first.playbackSessionId)).map((row) => row.seq)).toEqual([2]);
       expect(media.reported).toEqual([]);
@@ -451,7 +461,11 @@ describe("los latidos que miden (T-205)", () => {
         const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
         await alive(owner, first.playbackSessionId, 120);
         // Un lote ya escrito y sin confirmar tiene el libro.
-        expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({ kind: "settled", seqs: [0] });
+        expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({
+          kind: "settled",
+          seqs: [0],
+          progress: note(lesson, 30),
+        });
         // El mantenimiento crea otra partición mientras tanto; si esperara, su `lock_timeout` lo cortaría.
         await maintenance.query("begin");
         const created = await maintenance.query<{ created: boolean }>("select private.create_watch_partition(209912) as created");
@@ -461,5 +475,86 @@ describe("los latidos que miden (T-205)", () => {
     } finally {
       await maintenance.end();
     }
+  });
+});
+
+describe("el progreso al momento (T-206, RF-307)", () => {
+  it("al llegar a UMBRAL_COMPLETO_PCT la lección queda terminada en ese lote, y la siguiente dirección arranca donde se quedó", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      expect(first.startSeconds).toBe(0);
+      await alive(owner, first.playbackSessionId, 400);
+      // 356 s al 90 %: hacen falta 321 distintos.
+      const tramos = Array.from({ length: 10 }, (_, index) => tramo(index, index * 32, index * 32 + 32));
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, tramos)).batch).toEqual({
+        kind: "settled",
+        seqs: tramos.map((each) => each.seq),
+        progress: note(lesson, 320),
+      });
+      expect((await media.flushHeartbeats(computer, first.playbackSessionId, [tramo(10, 320, 321)]))).toEqual({
+        kind: "settled",
+        seqs: [10],
+        progress: note(lesson, 321, true, true),
+      });
+      // El reenvío de un lote cuya respuesta se perdió dice el estado de hoy.
+      expect(await media.flushHeartbeats(computer, first.playbackSessionId, [tramo(10, 320, 321)])).toEqual({
+        kind: "settled",
+        seqs: [10],
+        progress: note(lesson, 321, true, false),
+      });
+      // Recargar: otra reproducción, que arranca en el segundo guardado.
+      const again = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      expect(again.startSeconds).toBe(321);
+      const saved = (
+        await owner.query<{ completed: boolean; position: number }>(
+          "select completed_at is not null as completed, last_position_seconds as position from public.lesson_progress where profile_id = $1",
+          [who.id],
+        )
+      ).rows;
+      expect(saved).toEqual([{ completed: true, position: 321 }]);
+      expect(media.reported).toEqual([]);
+    });
+  });
+
+  it("desde otro navegador de la cuenta también arranca ahí: el progreso es de la cuenta (FL-13 A1)", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    const phone = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 90)]);
+      const other = await granted(await media.getMediaGrant(phone, lesson, "watch", { closing: first.playbackSessionId }));
+      expect(other.startSeconds).toBe(90);
+    });
+  });
+});
+
+describe("si el progreso falla, el libro se queda (T-206; decisión de Sergio del 2026-10-20)", () => {
+  it("sin UMBRAL_COMPLETO_PCT: el lote entra al libro, sale de la cola sin progreso y se reporta", async () => {
+    const who = await person();
+    const computer = await browserOf(who);
+    await reverted(async (owner) => {
+      const lesson = await setUp(owner, who.id);
+      const media = mediaOn(owner);
+      const first = await granted(await media.getMediaGrant(computer, lesson, "watch"));
+      await alive(owner, first.playbackSessionId, 120);
+      await asOwner(owner);
+      await owner.query("alter table public.business_parameters disable trigger user");
+      await owner.query("update public.business_parameters set effective_from = effective_from + interval '100 years' where key = 'UMBRAL_COMPLETO_PCT'");
+      expect((await media.playbackHeartbeat(computer, first.playbackSessionId, [tramo(0, 0, 30)])).batch).toEqual({
+        kind: "settled",
+        seqs: [0],
+        progress: null,
+      });
+      expect(await ledger(owner, first.playbackSessionId)).toHaveLength(1);
+      expect(media.reported).toEqual(["progress_unavailable"]);
+    });
   });
 });

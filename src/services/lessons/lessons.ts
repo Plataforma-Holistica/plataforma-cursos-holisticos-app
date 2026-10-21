@@ -13,6 +13,7 @@ import { readCourseIsOpen, readCourseLessons } from "./records";
 // (`lessonAccess` al cargar, `getMediaGrant` al reproducir).
 
 export type { LessonEntry, LessonPage } from "./page";
+export type { LessonState } from "@/domain/progress/progress";
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

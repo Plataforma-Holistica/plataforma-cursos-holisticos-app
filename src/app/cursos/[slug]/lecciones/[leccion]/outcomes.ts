@@ -93,6 +93,8 @@ export type WatchAnswer =
       heartbeatSeconds: number;
       /** La duración de la lección: los tramos no pasan de ella (T-205). */
       durationSeconds: number;
+      /** El segundo donde arranca: donde se quedó (T-206). */
+      startSeconds: number;
     }
   /** El lugar de la cuenta está ocupado en otro navegador (PA-34). */
   | { kind: "busy"; live: BusyRow[] }
@@ -114,6 +116,7 @@ export function watchAnswerOf(grant: MediaGrant): WatchAnswer | { kind: "reload"
         playbackSessionId: grant.playbackSessionId,
         heartbeatSeconds: grant.heartbeatSeconds,
         durationSeconds: grant.durationSeconds,
+        startSeconds: grant.startSeconds,
       };
     case "busy":
       return { kind: "busy", live: busyRows(grant.live) };

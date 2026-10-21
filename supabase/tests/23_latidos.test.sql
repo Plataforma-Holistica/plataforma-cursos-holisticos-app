@@ -61,7 +61,8 @@ begin
   return v;
 end
 $$;
--- Como el servidor: con el tope que dio el blanco (o el que se le diga).
+-- Como el servidor: con el tope que dio el blanco (o el que se le diga). Sin el progreso, que
+-- se prueba en 24_progreso.
 create function pruebas.registra(p_id uuid, p_session uuid, p_playback uuid, p_events jsonb, p_counts boolean default true,
                                  p_at timestamptz default null) returns jsonb
 language plpgsql as $$
@@ -72,7 +73,7 @@ begin
   select private.record_heartbeats(p_playback, p_events, p_counts,
            coalesce(p_at, (private.heartbeat_target(p_playback) ->> 'at')::timestamptz, now())) into v;
   perform pruebas.limpiar();
-  return v;
+  return v - 'progress';
 end
 $$;
 -- La presencia y el lote en la misma transacción, como los manda el servidor.

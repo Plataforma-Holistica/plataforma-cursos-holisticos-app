@@ -22,6 +22,10 @@ const lessonRow = z.object({
   lesson_title: z.string(),
   lesson_position: z.number().int(),
   duration_seconds: z.number().int(),
+  covered_seconds: z.number().int().nonnegative().nullable(),
+  last_position_seconds: z.number().int().nonnegative().nullable(),
+  completed: z.boolean().nullable(),
+  same_video: z.boolean().nullable(),
 });
 
 /**
@@ -29,15 +33,22 @@ const lessonRow = z.object({
  * como la persona, pero **filtrando a mano lo listado y lo vigente**: el maestro dueño y quien
  * tiene Contenido ven más por sus políticas (lo suyo sin listar, lo retirado), y esta página es
  * la del alumno. Lo suyo sin listar lo verá el maestro en su vista previa (PA-43).
+ *
+ * Con cada lección, el progreso de quien lee (T-206): la política solo le deja ver el suyo, y la
+ * consulta lo pide además a mano. Si lo guardado es de otro video, se dice: sus tramos ya no
+ * cuentan, y si la terminó, sigue terminada.
  */
 export async function readCourseLessons(tx: Tx, slug: string): Promise<LessonRowData[]> {
   const rows = await tx.query(
     sql`select c.slug as course_slug, c.title as course_title, c.summary as course_summary, c.teacher_name,
                m.id::text as module_id, m.title as module_title, m.position as module_position,
-               l.id::text as lesson_id, l.title as lesson_title, l.position as lesson_position, l.duration_seconds
+               l.id::text as lesson_id, l.title as lesson_title, l.position as lesson_position, l.duration_seconds,
+               p.covered_seconds, p.last_position_seconds, p.completed_at is not null as completed,
+               p.video_asset_id = l.video_asset_id as same_video
         from public.published_courses c
         join public.published_modules m on m.course_id = c.course_id and m.is_current
         join public.published_lessons l on l.module_id = m.id and l.course_id = c.course_id and l.is_current
+        left join public.lesson_progress p on p.lesson_id = l.id and p.profile_id = (select auth.uid())
         where c.slug = ${slug} and c.is_listed`,
     lessonRow,
   );
@@ -53,6 +64,10 @@ export async function readCourseLessons(tx: Tx, slug: string): Promise<LessonRow
     lessonTitle: row.lesson_title,
     lessonPosition: row.lesson_position,
     durationSeconds: row.duration_seconds,
+    progress:
+      row.covered_seconds === null || row.last_position_seconds === null || row.completed === null || row.same_video === null
+        ? null
+        : { coveredSeconds: row.covered_seconds, position: row.last_position_seconds, completed: row.completed, sameVideo: row.same_video },
   }));
 }
 

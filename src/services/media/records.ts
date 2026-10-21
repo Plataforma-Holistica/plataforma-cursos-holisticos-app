@@ -213,7 +213,8 @@ export interface LivePlayback {
 }
 
 export type OpenedPlayback =
-  | { kind: "opened"; sessionId: string; heartbeatSeconds: number }
+  /** `position`: dónde se quedó quien actúa en esa lección, si lo guardado es del video de hoy (T-206). */
+  | { kind: "opened"; sessionId: string; heartbeatSeconds: number; position: number | null }
   | { kind: "busy"; live: LivePlayback[] }
   /** La lección no existe, o su video ya no es el que se firmó. */
   | { kind: "not_found" }
@@ -271,6 +272,8 @@ const openedRow = z.object({
     .nullable(),
 });
 
+const positionRow = z.object({ position: z.number().int().nonnegative().nullable() });
+
 const presenceRow = z.object({
   answer: z
     .union([
@@ -285,6 +288,8 @@ const presenceRow = z.object({
 /**
  * Abrir una reproducción, o la lista de las vivas si no hay lugar. Nulo si la base no reconoce
  * a quien actúa o no se declaró su sesión. Lo que no tenga la forma lanza: es «no se supo».
+ * Abierta, lee además en la misma transacción dónde se quedó quien actúa (T-206): para entonces
+ * ya salió lo que el navegador tenía guardado, porque Next despacha las acciones en orden.
  */
 export async function openPlayback(tx: Tx, opening: PlaybackOpening): Promise<OpenedPlayback | null> {
   const [row] = await tx.query(
@@ -295,8 +300,10 @@ export async function openPlayback(tx: Tx, opening: PlaybackOpening): Promise<Op
   const answer = row?.answer ?? null;
   if (answer === null) return null;
   switch (answer.outcome) {
-    case "opened":
-      return { kind: "opened", sessionId: answer.session_id, heartbeatSeconds: answer.heartbeat_seconds };
+    case "opened": {
+      const [saved] = await tx.query(sql`select private.lesson_position(${opening.lessonId}::uuid) as position`, positionRow);
+      return { kind: "opened", sessionId: answer.session_id, heartbeatSeconds: answer.heartbeat_seconds, position: saved?.position ?? null };
+    }
     case "busy":
       return { kind: "busy", live: answer.live };
     case "not_found":
@@ -324,7 +331,7 @@ export async function touchPlayback(tx: Tx, sessionId: string): Promise<Presence
 }
 
 // ---------------------------------------------------------------------------------------
-// Los latidos que miden (T-205; RF-401 a RF-403). La presencia y el lote van en la misma
+// Los latidos que miden (T-205; RF-401 a RF-403), y desde T-206 el progreso que dejan. La presencia y el lote van en la misma
 // transacción, la presencia primero (05 §9.2). Antes de registrar se lee el blanco de la
 // reproducción (su lección y el tope de su reloj) y los hechos de la cuenta, y la regla decide
 // a esa hora si lo visto cuenta. Si no se supo, el lote no se registra: un lote guardado en
@@ -334,9 +341,24 @@ export async function touchPlayback(tx: Tx, sessionId: string): Promise<Presence
 export const REJECT_REASONS = ["out_of_range", "faster_than_clock", "session_revoked"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
+/** El progreso de la lección después de un lote (T-206), como lo contesta la base. */
+export type ProgressRecord =
+  | { kind: "tracked"; lessonId: string; coveredSeconds: number; completed: boolean; justCompleted: boolean }
+  /** El progreso falló y el lote sí se registró: se rehace después desde el libro. */
+  | { kind: "failed"; code: string };
+
 export type BatchRecord =
-  /** Cada tramo con su veredicto: todos quedaron recibidos. */
-  | { kind: "recorded"; accepted: number[]; duplicate: number[]; rejected: { seq: number; reason: RejectReason }[] }
+  /**
+   * Cada tramo con su veredicto: todos quedaron recibidos. `progress` es nulo si la reproducción
+   * no deja progreso (la vista previa del dueño) o es de un video que la lección ya no tiene.
+   */
+  | {
+      kind: "recorded";
+      accepted: number[];
+      duplicate: number[];
+      rejected: { seq: number; reason: RejectReason }[];
+      progress: ProgressRecord | null;
+    }
   /** La reproducción no existe, o quien actúa no puede escribir en ella. */
   | { kind: "not_found" }
   /** No se supo si el acceso cuenta: no se registró nada. */
@@ -368,6 +390,31 @@ const targetRow = z.object({
     .nullable(),
 });
 
+const progressShape = z
+  .union([
+    z
+      .object({
+        outcome: z.literal("tracked"),
+        lesson_id: uuid,
+        covered_seconds: z.number().int().nonnegative(),
+        completed: z.boolean(),
+        just_completed: z.boolean(),
+      })
+      .strict(),
+    z.object({ outcome: z.literal("failed"), code: z.string() }).strict(),
+  ])
+  .nullable();
+
+/** El progreso que contestó la base. Una forma que no se conoce cuenta como progreso fallido. */
+function progressOf(value: unknown): ProgressRecord | null {
+  const parsed = progressShape.safeParse(value);
+  if (!parsed.success) return { kind: "failed", code: "unexpected_shape" };
+  const saved = parsed.data;
+  if (saved === null) return null;
+  if (saved.outcome === "failed") return { kind: "failed", code: saved.code };
+  return { kind: "tracked", lessonId: saved.lesson_id, coveredSeconds: saved.covered_seconds, completed: saved.completed, justCompleted: saved.just_completed };
+}
+
 const recordedRow = z.object({
   answer: z
     .union([
@@ -377,6 +424,9 @@ const recordedRow = z.object({
           accepted: z.array(z.number().int()),
           duplicate: z.array(z.number().int()),
           rejected: z.array(z.object({ seq: z.number().int(), reason: z.enum(REJECT_REASONS) }).strict()),
+          // Se lee aparte (abajo): una forma que no se conoce no debe tumbar el lote, que ya está
+          // en el libro de esa misma transacción.
+          progress: z.unknown(),
         })
         .strict(),
       notFound,
@@ -424,7 +474,10 @@ export async function recordHeartbeat(tx: Tx, beat: HeartbeatBeat): Promise<Hear
   if (answer === null) return null;
   switch (answer.outcome) {
     case "recorded":
-      return { presence, batch: { kind: "recorded", accepted: answer.accepted, duplicate: answer.duplicate, rejected: answer.rejected } };
+      return {
+        presence,
+        batch: { kind: "recorded", accepted: answer.accepted, duplicate: answer.duplicate, rejected: answer.rejected, progress: progressOf(answer.progress) },
+      };
     case "not_found":
       return { presence, batch: { kind: "not_found" } };
     case "failed":
