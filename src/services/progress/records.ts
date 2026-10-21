@@ -33,6 +33,10 @@ const COURSES_READ = 50;
  * filtran a mano, como en la página de la lección: el maestro dueño y Contenido ven más por sus
  * políticas. Un curso que se dejó de listar sale de la lista y su progreso se conserva (FL-13
  * E2). La última lección vista cuenta aunque ya no esté vigente: la regla de la sugerida lo sabe.
+ *
+ * Se leen a lo más los 50 cursos más recientes, ya sin los terminados ni los que no se listan:
+ * de ahí salen los 20 de la fila. Un curso donde solo vio un video que la lección ya cambió
+ * sigue contando como empezado (lo empezó), aunque su temario diga «sin empezar».
  */
 export async function readContinueWatching(tx: Tx): Promise<ContinueRowData[]> {
   const rows = await tx.query(
@@ -40,7 +44,15 @@ export async function readContinueWatching(tx: Tx): Promise<ContinueRowData[]> {
           select p.course_id, max(p.last_watched_at) as last_watched_at,
                  (array_agg(p.lesson_id order by p.last_watched_at desc, p.lesson_id))[1] as last_lesson_id
           from public.lesson_progress p
+          join public.published_courses c on c.course_id = p.course_id and c.is_listed
           where p.profile_id = (select auth.uid())
+            -- Con alguna lección vigente sin terminar: el tope se aplica a lo que va a la fila.
+            and exists (
+              select 1
+              from public.published_modules m
+              join public.published_lessons l on l.module_id = m.id and l.course_id = m.course_id and l.is_current
+              left join public.lesson_progress q on q.lesson_id = l.id and q.profile_id = (select auth.uid())
+              where m.course_id = p.course_id and m.is_current and q.completed_at is null)
           group by p.course_id
           order by max(p.last_watched_at) desc
           limit ${COURSES_READ}

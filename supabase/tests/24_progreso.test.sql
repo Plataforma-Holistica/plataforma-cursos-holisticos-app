@@ -13,7 +13,7 @@
 -- reproducción se mueve moviendo hacia atrás su último latido.
 begin;
 \ir _ayuda.psql
-select plan(112);
+select plan(128);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-avanza@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-avanza@prueba.test');
@@ -126,7 +126,7 @@ language sql as $$
       jsonb_build_object('title', 'Lección dos', 'video',
         jsonb_build_object('provider', 'mux', 'asset_id', 'AssetAvancedos', 'playback_id', 'PlaybackAvancedos', 'duration_seconds', 200)),
       jsonb_build_object('title', 'Lección tres', 'video',
-        jsonb_build_object('provider', 'mux', 'asset_id', 'AssetAvancetres', 'playback_id', 'PlaybackAvancetres', 'duration_seconds', 105))))))
+        jsonb_build_object('provider', 'mux', 'asset_id', 'AssetAvancetres', 'playback_id', 'PlaybackAvancetres', 'duration_seconds', 106))))))
 $$;
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
 
@@ -160,8 +160,10 @@ select columns_are('public', 'lesson_progress', array[
 select is((select attgenerated::text from pg_attribute where attrelid = 'public.lesson_progress'::regclass and attname = 'covered_seconds'),
   's', 'los segundos cubiertos salen de los tramos: no se desfasan');
 select has_index('public', 'lesson_progress', 'lesson_progress_course_idx', array['profile_id', 'course_id'], 'el avance de un curso');
-select has_index('public', 'lesson_progress', 'lesson_progress_recent_idx', array['profile_id', 'last_watched_at'], 'continuar viendo');
-select has_index('public', 'lesson_progress', 'lesson_progress_lesson_idx', array['lesson_id'], 'el avance de una lección');
+select is((select count(*)::integer from pg_indexes where schemaname = 'public' and tablename = 'lesson_progress'), 2,
+  'y la clave: nada indexa lo que cada lote mueve');
+select ok((select 'fillfactor=80' = any(reloptions) from pg_class where oid = 'public.lesson_progress'::regclass),
+  'con espacio en cada página para actualizar ahí mismo');
 select ok((select relrowsecurity from pg_class where oid = 'public.lesson_progress'::regclass), 'con seguridad por fila');
 select ok(
   not has_table_privilege(r, 'public.lesson_progress', 'insert, update, delete, truncate, trigger')
@@ -254,6 +256,8 @@ select is(
   pruebas.estado(pruebas.leccion('Lección dos'), 40, false, false), 'otra lección, su propio avance');
 select is((pruebas.fila(pruebas.ana(), pruebas.leccion('Lección dos'))).last_watched_at, now() - interval '90 seconds',
   'visto al tope de esa reproducción');
+select is((pruebas.fila(pruebas.ana(), pruebas.leccion('Lección dos'))).first_watched_at, now() - interval '90 seconds',
+  'y por primera vez a esa hora, no a la de llegada');
 insert into r values ('p3', pruebas.abre(pruebas.ana(), pruebas.telefono(), pruebas.leccion('Lección dos'), 'subscription', true,
                                          (select id from r where name = 'p2')));
 select is(
@@ -356,6 +360,19 @@ select pruebas.como_dueno_sistema();
 update public.published_lessons set is_current = true, retired_at = null where id = pruebas.leccion('Lección dos');
 select pruebas.limpiar();
 
+-- La lección cambia a un video más corto, y el primer lote del nuevo sale rechazado: lo guardado
+-- (80 s del video anterior) no la termina, aunque pase del 90 % del nuevo.
+select pruebas.cambia_video(pruebas.leccion('Lección dos'), 'PlaybackAvancedoscorto');
+select pruebas.como_dueno_sistema();
+update public.video_assets set duration_seconds = 60 where provider_playback_id = 'PlaybackAvancedoscorto';
+update public.published_lessons set duration_seconds = 60 where id = pruebas.leccion('Lección dos');
+select pruebas.limpiar();
+insert into r values ('corto', pruebas.abre(pruebas.beto(), pruebas.sesion(pruebas.beto()), pruebas.leccion('Lección dos')));
+select is(
+  pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'corto'), jsonb_build_array(pruebas.tramo(0, 0, 200))),
+  pruebas.estado(pruebas.leccion('Lección dos'), 0, false, false), 'lo visto del video anterior no termina el nuevo, ni cuenta en la respuesta');
+select is((pruebas.fila(pruebas.beto(), pruebas.leccion('Lección dos'))).completed_at, null, 'sin fecha');
+
 -- ---------------------------------------------------------------------------------------
 -- Quién lee: la persona, lo suyo.
 
@@ -396,6 +413,8 @@ select is(
   1, 'el tramo queda en el libro');
 select is((pruebas.fila(pruebas.ana(), pruebas.leccion('Lección uno'))).covered, '{[0,10)}'::int4multirange, 'el progreso no se tocó');
 select is((pruebas.fila(pruebas.ana(), pruebas.leccion('Lección uno'))).last_position_seconds, 10, 'ni la posición');
+select is((select code from private.progress_rebuilds where profile_id = pruebas.ana() and lesson_id = pruebas.leccion('Lección uno')),
+  'P0001', 'queda anotado qué falta rehacer, con el código');
 update public.business_parameters set effective_from = effective_from - interval '100 years' where key = 'UMBRAL_COMPLETO_PCT';
 update public.business_parameters set value = '"noventa"' where key = 'UMBRAL_COMPLETO_PCT'
   and effective_from = (select max(effective_from) from public.business_parameters where key = 'UMBRAL_COMPLETO_PCT');
@@ -414,6 +433,18 @@ select is(
   pruebas.avanza(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'p4'), jsonb_build_array(pruebas.tramo(4, 40, 50))),
   pruebas.estado(pruebas.leccion('Lección uno'), 20, true, false), 'con el umbral de vuelta, sigue: lo de en medio se rehace desde el libro');
 
+-- La lección vuelve a su primer video, y llega lo atrasado de una reproducción vieja de ese video:
+-- reinicia los tramos, pero no regresa el orden de «continuar viendo».
+select pruebas.como_dueno_sistema();
+update public.published_lessons set video_asset_id = (select video_asset_id from public.playback_sessions where id = (select id from r where name = 'p1'))
+where id = pruebas.leccion('Lección uno');
+select pruebas.limpiar();
+update public.playback_sessions set last_heartbeat_at = now() - interval '3 minutes' where id = (select id from r where name = 'p1');
+select is(
+  pruebas.avanza(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'p1'), jsonb_build_array(pruebas.tramo(9, 0, 5))),
+  pruebas.estado(pruebas.leccion('Lección uno'), 5, true, false), 'el video de vuelta empieza de cero');
+select is((pruebas.fila(pruebas.ana(), pruebas.leccion('Lección uno'))).last_watched_at, now(), 'sin regresar el orden');
+
 -- Lo que no funde contesta el estado sin fila: una lección empezada solo con lo oculto.
 insert into r values ('oculta', pruebas.abre(pruebas.beto(), pruebas.sesion(pruebas.beto()), pruebas.leccion('Lección uno')));
 select is(
@@ -425,8 +456,8 @@ select is(
   pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'oculta'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
   pruebas.estado(pruebas.leccion('Lección uno'), 0, false, false), 'y repetido, el mismo estado');
 
--- El umbral se redondea hacia arriba, y lo terminado lleva la hora en que se vio: 105 s al 90 %
--- son 94.5, y hacen falta 95. La reproducción latió por última vez hace tres minutos.
+-- El umbral se redondea hacia arriba, y lo terminado lleva la hora en que se vio: 106 s al 90 %
+-- son 95.4, y hacen falta 96. La reproducción latió por última vez hace tres minutos.
 insert into r values ('tres', pruebas.abre(pruebas.beto(), pruebas.sesion(pruebas.beto()), pruebas.leccion('Lección tres')));
 update public.playback_sessions set last_heartbeat_at = now() - interval '3 minutes' where id = (select id from r where name = 'tres');
 select is(
@@ -435,12 +466,39 @@ select is(
 select is(pruebas.fila(pruebas.beto(), pruebas.leccion('Lección tres')), null, 'y no crea fila');
 select is(
   pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'), jsonb_build_array(pruebas.tramo(1, 0, 94))),
-  pruebas.estado(pruebas.leccion('Lección tres'), 94, false, false), '94 de 105 no es el 90 %');
+  pruebas.estado(pruebas.leccion('Lección tres'), 94, false, false), '94 de 106 no es el 90 %');
 select is(
   pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'), jsonb_build_array(pruebas.tramo(2, 94, 95))),
-  pruebas.estado(pruebas.leccion('Lección tres'), 95, true, true), '95 sí');
+  pruebas.estado(pruebas.leccion('Lección tres'), 95, false, false), 'ni 95, que sería redondear');
+select is(
+  pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'), jsonb_build_array(pruebas.tramo(3, 95, 96))),
+  pruebas.estado(pruebas.leccion('Lección tres'), 96, true, true), '96 sí');
 select is((pruebas.fila(pruebas.beto(), pruebas.leccion('Lección tres'))).completed_at, now() - interval '90 seconds',
   'terminada a la hora en que se vio, no a la de llegada');
+-- Un consecutivo menor que llega después de uno mayor (llena un hueco): funde y no regresa la posición.
+select is(
+  pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'),
+    jsonb_build_array(pruebas.tramo(5, 100, 104))),
+  pruebas.estado(pruebas.leccion('Lección tres'), 100, true, false), 'el consecutivo 5');
+select is(
+  pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'),
+    jsonb_build_array(pruebas.tramo(4, 96, 100))),
+  pruebas.estado(pruebas.leccion('Lección tres'), 104, true, false), 'el 4 después del 5 funde');
+select is((pruebas.fila(pruebas.beto(), pruebas.leccion('Lección tres'))).last_position_seconds, 104, 'y la posición sigue en el 5');
+-- La primera vez baja si llega lo de antes después.
+update public.lesson_progress set first_watched_at = now() where profile_id = pruebas.beto() and lesson_id = pruebas.leccion('Lección tres');
+select pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'tres'), jsonb_build_array(pruebas.tramo(6, 104, 106)));
+select is((pruebas.fila(pruebas.beto(), pruebas.leccion('Lección tres'))).first_watched_at, now() - interval '90 seconds',
+  'la primera vez es la más vieja que se vio');
+
+-- Un lote atrasado de otra reproducción que completa no pone la terminada antes de lo último visto.
+insert into r values ('vieja', pruebas.abre(pruebas.beto(), pruebas.sesion(pruebas.beto()), pruebas.leccion('Lección uno')));
+update public.playback_sessions set last_heartbeat_at = now() - interval '3 minutes' where id = (select id from r where name = 'vieja');
+select is(
+  pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'vieja'), jsonb_build_array(pruebas.tramo(0, 0, 90))),
+  pruebas.estado(pruebas.leccion('Lección uno'), 90, true, true), 'lo atrasado completa');
+select is((pruebas.fila(pruebas.beto(), pruebas.leccion('Lección uno'))).completed_at, now(),
+  'con la hora de lo último que se vio, no con su tope viejo');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante.
@@ -460,6 +518,22 @@ select ok(
   exists (select 1 from private.schema_violations() where problem = 'progress readable by app_service'),
   'o leerlo entero');
 revoke select on public.lesson_progress from app_service;
+grant select (covered) on public.lesson_progress to authenticated;
+select ok(exists (select 1 from private.schema_violations() where problem = 'progress spans readable by authenticated'),
+  'o que la persona lea los tramos');
+revoke select (covered) on public.lesson_progress from authenticated;
+grant select on private.progress_rebuilds to app_service;
+select ok(exists (select 1 from private.schema_violations() where problem = 'progress rebuilds reachable by app_service'),
+  'o lo que falta rehacer');
+revoke select on private.progress_rebuilds from app_service;
+grant execute on function private.merge_progress(public.playback_sessions, int4multirange, integer, integer, timestamptz) to app_service;
+grant execute on function private.lesson_position(uuid) to authenticated;
+select is(
+  (select array_agg(problem order by problem) from private.schema_violations() where problem like 'progress function%'),
+  array['progress function executable by app_service', 'progress function executable by authenticated'],
+  'o que alguien más funda o pregunte la posición');
+revoke execute on function private.merge_progress(public.playback_sessions, int4multirange, integer, integer, timestamptz) from app_service;
+revoke execute on function private.lesson_position(uuid) from authenticated;
 select is_empty('select * from private.schema_violations()', 'sin nada concedido, el vigilante no dice nada');
 
 select * from finish();

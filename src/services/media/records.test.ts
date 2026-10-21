@@ -6,7 +6,7 @@ import { DatabaseError } from "@/adapters/supabase/errors";
 import { recordHeartbeat, type HeartbeatBeat } from "./records";
 
 // El latido con sus tramos sobre una transacción simulada: solo lo que la integración no puede
-// provocar, que la lectura de los hechos falle. Lo demás lo prueba
+// provocar, que la lectura de los hechos falle, o que la base conteste un progreso con otra forma. Lo demás lo prueba
 // tests/integration/40-reproducciones.test.ts contra la base de verdad.
 
 const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
@@ -60,5 +60,52 @@ describe("leer los hechos antes de registrar (T-205)", () => {
     });
     expect(await recordHeartbeat(tx, beat)).toEqual({ presence: { kind: "ok" }, batch: { kind: "unknown" } });
     expect(tx.asked).toEqual(["presencia", "blanco", "hechos"]);
+  });
+});
+
+describe("el progreso que contesta la base (T-206)", () => {
+  /** Todo contesta bien, y el registro trae ese progreso. */
+  function txRecording(progress: unknown): Tx {
+    return {
+      query: (query, row) => {
+        const text = query.text;
+        if (text.includes("touch_playback")) return Promise.resolve([row.parse({ answer: { outcome: "ok" } })]);
+        if (text.includes("heartbeat_target")) {
+          return Promise.resolve([row.parse({ answer: { outcome: "found", lesson_id: LESSON, at: "2026-10-20T07:00:00.123456+00:00" } })]);
+        }
+        if (text.includes("media_facts")) {
+          return Promise.resolve([
+            row.parse({
+              facts: {
+                now: "2026-10-20T07:00:01Z",
+                viewer: { suspended: false, email_verified: true, teacher_id: null, email: "ana@correo.com" },
+                subscription: null,
+                courtesy: [],
+                lesson: null,
+              },
+              playback_id: null,
+            }),
+          ]);
+        }
+        return Promise.resolve([row.parse({ answer: { outcome: "recorded", accepted: [0], duplicate: [], rejected: [], progress } })]);
+      },
+      execute: () => Promise.reject(new Error("no se usa")),
+    };
+  }
+
+  it("lo que dice, tal cual", async () => {
+    const tracked = { outcome: "tracked", lesson_id: LESSON, covered_seconds: 30, completed: false, just_completed: false };
+    expect((await recordHeartbeat(txRecording(tracked), beat))?.batch).toMatchObject({
+      progress: { kind: "tracked", lessonId: LESSON, coveredSeconds: 30, completed: false, justCompleted: false },
+    });
+    expect((await recordHeartbeat(txRecording({ outcome: "failed", code: "P0001" }), beat))?.batch).toMatchObject({
+      progress: { kind: "failed", code: "P0001" },
+    });
+    expect((await recordHeartbeat(txRecording(null), beat))?.batch).toMatchObject({ progress: null });
+  });
+
+  it("una forma que no se conoce no tumba el lote, que ya está en el libro: cuenta como progreso fallido", async () => {
+    const answer = await recordHeartbeat(txRecording({ outcome: "tracked", lesson_id: LESSON, covered_seconds: "treinta" }), beat);
+    expect(answer?.batch).toEqual({ kind: "recorded", accepted: [0], duplicate: [], rejected: [], progress: { kind: "failed", code: "unexpected_shape" } });
   });
 });

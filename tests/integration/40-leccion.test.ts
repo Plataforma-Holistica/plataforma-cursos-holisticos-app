@@ -345,4 +345,17 @@ describe("continuar viendo: la última vista y el tope de lo que se lee", () => 
       expect(answer.kind === "ready" && answer.courses).toHaveLength(20);
     });
   }, 60_000);
+
+  it("el tope se aplica ya sin los terminados: 50 cursos recientes terminados no tapan uno viejo a medias", async () => {
+    const { id, claims } = await personClaims();
+    await reverted(async (owner) => {
+      const old = await loadCourse(owner, "continuar-pendiente", true);
+      await seen(owner, id, old[0] ?? "", { minutesAgo: 500 });
+      for (let index = 0; index < 50; index += 1) {
+        for (const lesson of await loadCourse(owner, `continuar-hecho-${index}`, true)) await seen(owner, id, lesson, { completed: true, minutesAgo: index });
+      }
+      const answer = await progress(owner).continueWatching(claims);
+      expect(answer.kind === "ready" && answer.courses.map((course) => course.courseSlug)).toEqual(["continuar-pendiente"]);
+    });
+  }, 90_000);
 });

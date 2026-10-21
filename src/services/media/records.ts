@@ -390,6 +390,31 @@ const targetRow = z.object({
     .nullable(),
 });
 
+const progressShape = z
+  .union([
+    z
+      .object({
+        outcome: z.literal("tracked"),
+        lesson_id: uuid,
+        covered_seconds: z.number().int().nonnegative(),
+        completed: z.boolean(),
+        just_completed: z.boolean(),
+      })
+      .strict(),
+    z.object({ outcome: z.literal("failed"), code: z.string() }).strict(),
+  ])
+  .nullable();
+
+/** El progreso que contestó la base. Una forma que no se conoce cuenta como progreso fallido. */
+function progressOf(value: unknown): ProgressRecord | null {
+  const parsed = progressShape.safeParse(value);
+  if (!parsed.success) return { kind: "failed", code: "unexpected_shape" };
+  const saved = parsed.data;
+  if (saved === null) return null;
+  if (saved.outcome === "failed") return { kind: "failed", code: saved.code };
+  return { kind: "tracked", lessonId: saved.lesson_id, coveredSeconds: saved.covered_seconds, completed: saved.completed, justCompleted: saved.just_completed };
+}
+
 const recordedRow = z.object({
   answer: z
     .union([
@@ -399,20 +424,9 @@ const recordedRow = z.object({
           accepted: z.array(z.number().int()),
           duplicate: z.array(z.number().int()),
           rejected: z.array(z.object({ seq: z.number().int(), reason: z.enum(REJECT_REASONS) }).strict()),
-          progress: z
-            .union([
-              z
-                .object({
-                  outcome: z.literal("tracked"),
-                  lesson_id: uuid,
-                  covered_seconds: z.number().int().nonnegative(),
-                  completed: z.boolean(),
-                  just_completed: z.boolean(),
-                })
-                .strict(),
-              z.object({ outcome: z.literal("failed"), code: z.string() }).strict(),
-            ])
-            .nullable(),
+          // Se lee aparte (abajo): una forma que no se conoce no debe tumbar el lote, que ya está
+          // en el libro de esa misma transacción.
+          progress: z.unknown(),
         })
         .strict(),
       notFound,
@@ -459,22 +473,11 @@ export async function recordHeartbeat(tx: Tx, beat: HeartbeatBeat): Promise<Hear
   const answer = row?.answer ?? null;
   if (answer === null) return null;
   switch (answer.outcome) {
-    case "recorded": {
-      const saved = answer.progress;
-      const progress: ProgressRecord | null =
-        saved === null
-          ? null
-          : saved.outcome === "failed"
-            ? { kind: "failed", code: saved.code }
-            : {
-                kind: "tracked",
-                lessonId: saved.lesson_id,
-                coveredSeconds: saved.covered_seconds,
-                completed: saved.completed,
-                justCompleted: saved.just_completed,
-              };
-      return { presence, batch: { kind: "recorded", accepted: answer.accepted, duplicate: answer.duplicate, rejected: answer.rejected, progress } };
-    }
+    case "recorded":
+      return {
+        presence,
+        batch: { kind: "recorded", accepted: answer.accepted, duplicate: answer.duplicate, rejected: answer.rejected, progress: progressOf(answer.progress) },
+      };
     case "not_found":
       return { presence, batch: { kind: "not_found" } };
     case "failed":

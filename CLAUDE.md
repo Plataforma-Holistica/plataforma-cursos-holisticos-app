@@ -1372,17 +1372,21 @@ falla. Veintiuna precisiones que la tabla no dice:
     la tabla, y el vigilante lo exige; la persona lee lo suyo sin los tramos, y el servidor no la
     lee: pregunta `private.lesson_position()`.
   - **Si el progreso falla, el libro se queda** (decisión de Sergio): va en su propio bloque de
-    excepción dentro del del lote, y contesta `{outcome: 'failed'}`. El servicio lo reporta
-    (`progress_unavailable`) y el lote sale de la cola: el progreso se rehace desde
-    `watch_events.qualifies`. Sin `UMBRAL_COMPLETO_PCT`, o con uno que no es un entero de 1 a
-    10 000, es eso.
+    excepción dentro del del lote, y contesta `{outcome: 'failed'}`. El par queda en
+    `private.progress_rebuilds`, el servicio lo reporta (`progress_unavailable`) y el lote sale de
+    la cola: el progreso se rehace desde `watch_events.qualifies` (pendiente, con T-207, antes de
+    que se purguen las reproducciones). Sin `UMBRAL_COMPLETO_PCT`, o con uno que no es un entero
+    de 1 a 10 000, es eso. Una respuesta del progreso con otra forma también cuenta como fallida
+    (`records.ts` la lee aparte): no tumba el lote, que ya está en el libro.
   - **Lo atrasado no regresa a nadie.** La cola del navegador manda tarde lo de reproducciones
     viejas: los tramos se funden siempre (la unión no depende del orden), pero la posición y el
     orden de «continuar viendo» (`last_watched_at`) solo se mueven con un lote más nuevo: de la
     misma reproducción, un consecutivo mayor; de otra, un tope más nuevo. Un empate de topes entre
     dos reproducciones no mueve.
   - **El progreso está atado al video.** Si la lección cambió de video, los tramos del anterior se
-    reemplazan con el primer lote del nuevo, y terminada se queda terminada. Un lote de un video
+    reemplazan con el primer lote del nuevo, y terminada se queda terminada. Lo guardado del video
+    anterior no termina el nuevo (si el primer lote sale rechazado, sigue siendo del anterior), y
+    la terminada lleva la hora de lo último visto, no la de un lote atrasado. Un lote de un video
     que la lección ya no tiene (lo atrasado) no toca el progreso: en el libro sí queda. La vista
     previa del dueño no deja progreso; la cortesía, el curso abierto y lo visto después de perder
     el acceso, sí: el progreso no mira el dinero.
@@ -1399,7 +1403,9 @@ falla. Veintiuna precisiones que la tabla no dice:
     hay o ya no está, la primera sin terminar). El temario de la página de la lección lo lee con
     las lecciones, como la persona (`readCourseLessons`). «Continuar viendo» es
     `src/services/progress/` (`continueWatching`): los cursos listados que la persona empezó y no
-    terminó, el más reciente primero, a lo más 20, filtrando a mano lo listado y lo vigente.
+    terminó, el más reciente primero, a lo más 20, filtrando a mano lo listado y lo vigente (y el
+    tope de lo que se lee, ya sin lo terminado ni lo no listado). La tabla no tiene índice sobre lo
+    que cada lote mueve: la actualización se queda en su página.
   - Las pruebas: `supabase/tests/24_progreso.test.sql`, `tests/integration/40-reproducciones.test.ts`
     (el progreso de punta a punta por la función única de medios) y
     `tests/integration/40-leccion.test.ts` (las lecturas, con el progreso escrito por el dueño).

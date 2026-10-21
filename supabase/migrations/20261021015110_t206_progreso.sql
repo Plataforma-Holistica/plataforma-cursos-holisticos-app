@@ -47,15 +47,17 @@ create table public.lesson_progress (
   primary key (profile_id, lesson_id),
   constraint lesson_progress_position_positive check (last_position_seconds >= 0 and last_seq >= 0),
   constraint lesson_progress_covered_positive check (pg_catalog.lower(covered) is null or pg_catalog.lower(covered) >= 0)
-);
+)
+-- Se actualiza con cada lote: con espacio libre en cada página y sin índices sobre lo que
+-- cambia, la actualización se queda en la misma página (HOT).
+with (fillfactor = 80);
 comment on table public.lesson_progress is 'El progreso de cada cuenta en cada lección (RF-307, T-206). Histórico: no se reinicia y lo terminado no se desmarca. La escribe solo private.record_heartbeats().';
 
--- Avance de un alumno en un curso: temario, ficha y constancia (RF-307, RF-805).
+-- Avance de un alumno en un curso: temario, ficha y constancia (RF-307, RF-805). «Continuar
+-- viendo» agrupa las filas de la cuenta, y le basta el principio de la clave primaria. Sin índice
+-- sobre `last_watched_at` (lo mueve cada lote), y el de una lección para el maestro (RF-613) llega
+-- con quien lo lea.
 create index lesson_progress_course_idx on public.lesson_progress (profile_id, course_id);
--- «Continuar viendo» (RF-301).
-create index lesson_progress_recent_idx on public.lesson_progress (profile_id, last_watched_at desc);
--- Avance de los alumnos de una lección, para el maestro (RF-613).
-create index lesson_progress_lesson_idx on public.lesson_progress (lesson_id);
 
 create trigger touch_updated_at before update on public.lesson_progress
   for each row execute function private.touch_updated_at();
@@ -69,6 +71,20 @@ grant select (profile_id, lesson_id, course_id, video_asset_id, last_position_se
   on public.lesson_progress to authenticated;
 create policy lesson_progress_self_select on public.lesson_progress
   for select to authenticated using (profile_id = (select auth.uid()));
+
+-- Las lecciones cuyo progreso falló al registrar un lote (decisión de Sergio del 2026-10-20: el
+-- libro se guarda igual). El lote quedó en el libro; el progreso de ese par se rehace desde ahí
+-- (pendiente: la consolidación de T-207, antes de que se purguen las reproducciones, que dicen de
+-- qué video era cada tramo). Nadie de la aplicación la toca.
+create table private.progress_rebuilds (
+  profile_id uuid not null,
+  lesson_id uuid not null,
+  failed_at timestamptz not null default now(),
+  code text not null,
+  primary key (profile_id, lesson_id)
+);
+alter table private.progress_rebuilds enable row level security;
+revoke all on private.progress_rebuilds from public, anon, authenticated, service_role, app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- Fundir un lote en el progreso. La llama solo private.record_heartbeats(), bajo el candado de
@@ -121,9 +137,11 @@ begin
         p_top, p_top, p_row.id, p_last_seq);
     elsif v_saved.video_asset_id <> p_row.video_asset_id then
       -- Un video nuevo: los tramos del anterior ya no dicen nada. Terminada se queda terminada.
+      -- El orden de «continuar viendo» no regresa: un video que volvió a ser el de la lección puede
+      -- traer lo atrasado de una reproducción vieja.
       update public.lesson_progress lp
       set video_asset_id = p_row.video_asset_id, covered = coalesce(p_spans, '{}'), last_position_seconds = p_last_to,
-          last_watched_at = p_top, last_playback_session_id = p_row.id, last_seq = p_last_seq
+          last_watched_at = greatest(lp.last_watched_at, p_top), last_playback_session_id = p_row.id, last_seq = p_last_seq
       where lp.profile_id = p_row.profile_id and lp.lesson_id = p_row.lesson_id;
     else
       -- Lo atrasado se funde (la unión no depende del orden), pero solo mueve la posición y el
@@ -133,6 +151,7 @@ begin
                       else p_top > v_saved.last_watched_at end;
       update public.lesson_progress lp
       set covered = lp.covered + coalesce(p_spans, '{}'),
+          first_watched_at = least(lp.first_watched_at, p_top),
           last_position_seconds = case when v_moves then p_last_to else lp.last_position_seconds end,
           last_watched_at = case when v_moves then p_top else lp.last_watched_at end,
           last_playback_session_id = case when v_moves then p_row.id else lp.last_playback_session_id end,
@@ -141,11 +160,15 @@ begin
     end if;
   end if;
 
-  -- Terminada al llegar al umbral, a la hora en que se vio, una sola vez. También sin nada nuevo:
-  -- si el umbral bajó, la lección que ya lo pasa se termina con su siguiente lote.
+  -- Terminada al llegar al umbral, una sola vez, y solo con lo visto de este video: si la lección
+  -- cambió y el primer lote del nuevo salió rechazado, lo guardado sigue siendo del anterior.
+  -- También sin nada nuevo: si el umbral bajó, la lección que ya lo pasa se termina con su
+  -- siguiente lote. La hora es la en que se vio lo último: un lote atrasado que completa no la
+  -- pone antes.
   update public.lesson_progress lp
-  set completed_at = p_top
+  set completed_at = greatest(p_top, lp.last_watched_at)
   where lp.profile_id = p_row.profile_id and lp.lesson_id = p_row.lesson_id
+    and lp.video_asset_id = p_row.video_asset_id
     and lp.completed_at is null and lp.covered_seconds >= v_needed;
   get diagnostics v_completed = row_count;
 
@@ -153,7 +176,7 @@ begin
   where lp.profile_id = p_row.profile_id and lp.lesson_id = p_row.lesson_id;
   return pg_catalog.jsonb_build_object(
     'outcome', 'tracked', 'lesson_id', p_row.lesson_id,
-    'covered_seconds', coalesce(v_saved.covered_seconds, 0),
+    'covered_seconds', case when v_saved.video_asset_id = p_row.video_asset_id then v_saved.covered_seconds else 0 end,
     'completed', v_saved.completed_at is not null,
     'just_completed', v_completed > 0);
 end
@@ -394,6 +417,9 @@ begin
         v_progress := private.merge_progress(v_row, v_spans, v_last_seq, v_last_to, v_top);
       exception when others then
         v_progress := pg_catalog.jsonb_build_object('outcome', 'failed', 'code', sqlstate);
+        insert into private.progress_rebuilds (profile_id, lesson_id, code)
+        values (v_row.profile_id, v_row.lesson_id, sqlstate)
+        on conflict (profile_id, lesson_id) do update set failed_at = excluded.failed_at, code = excluded.code;
       end;
     end if;
 
@@ -631,4 +657,24 @@ as $$
   from app_roles r
   where r.rolname <> 'authenticated'
     and pg_catalog.has_any_column_privilege(r.rolname::name, 'public.lesson_progress'::regclass, 'SELECT')
+  union all
+  -- La persona lee su avance, no los tramos ni de qué reproducción vino.
+  select 'progress spans readable by authenticated', 'public.lesson_progress'
+  where pg_catalog.has_column_privilege('authenticated', 'public.lesson_progress'::regclass, 'covered', 'SELECT')
+     or pg_catalog.has_column_privilege('authenticated', 'public.lesson_progress'::regclass, 'last_playback_session_id', 'SELECT')
+     or pg_catalog.has_column_privilege('authenticated', 'public.lesson_progress'::regclass, 'last_seq', 'SELECT')
+  union all
+  -- Lo que falta rehacer no lo toca nadie de la aplicación.
+  select 'progress rebuilds reachable by ' || r.rolname, 'private.progress_rebuilds'
+  from app_roles r
+  where pg_catalog.has_any_column_privilege(r.rolname::name, 'private.progress_rebuilds'::regclass, 'SELECT, INSERT, UPDATE, REFERENCES')
+     or pg_catalog.has_table_privilege(r.rolname::name, 'private.progress_rebuilds'::regclass, 'DELETE, TRUNCATE, TRIGGER')
+  union all
+  -- Dónde se quedó alguien lo pregunta solo el servidor, y fundir no lo ejecuta nadie.
+  select 'progress function executable by ' || r.rolname, f.signature
+  from app_roles r
+  cross join (values ('private.lesson_position(uuid)'),
+                     ('private.merge_progress(public.playback_sessions, int4multirange, integer, integer, timestamptz)')) as f (signature)
+  where pg_catalog.has_function_privilege(r.rolname::name, f.signature::regprocedure, 'EXECUTE')
+    and not (r.rolname = 'app_service' and f.signature = 'private.lesson_position(uuid)')
 $$;
