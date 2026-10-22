@@ -7,8 +7,10 @@ import { Checkbox } from "@/ui/checkbox";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
 import { FormErrorSummary } from "@/ui/form-error-summary";
 import { PasswordField } from "@/ui/password-field";
+import { Select } from "@/ui/select";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
+import { Textarea } from "@/ui/textarea";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -79,6 +81,72 @@ describe("TextField", () => {
         <TextField label="País" name="country" autoComplete="country-name" optional />
       </form>,
     );
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("Textarea", () => {
+  it("como el campo de texto: etiqueta unida, obligatoria sin asterisco, ayuda y error anunciados", () => {
+    render(<Textarea label="Nota" name="note" hint="Se queda escrita." error="Escribe la nota." defaultValue="Algo" />);
+    const area = screen.getByLabelText("Nota");
+    expect(area.tagName).toBe("TEXTAREA");
+    expect(area).toHaveAttribute("name", "note");
+    expect(area).toHaveAttribute("aria-required", "true");
+    expect(area).toHaveAttribute("aria-invalid", "true");
+    expect(area).toHaveValue("Algo");
+    expect(area).toHaveAccessibleDescription("Se queda escrita. Escribe la nota.");
+  });
+
+  it("Enter escribe un salto de línea y no envía", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn((event: SubmitEvent) => event.preventDefault());
+    render(
+      <form onSubmit={(event) => submit(event.nativeEvent as SubmitEvent)}>
+        <Textarea label="Nota" name="note" />
+        <button type="submit">Guardar</button>
+      </form>,
+    );
+    await user.type(screen.getByLabelText("Nota"), "uno{Enter}dos");
+    expect(screen.getByLabelText("Nota")).toHaveValue("uno\ndos");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("sin reglas de accesibilidad rotas", async () => {
+    const { container } = render(<Textarea label="Nota" name="note" optional />);
+    expect(screen.getByLabelText(`Nota ${ui.field.optional}`)).not.toHaveAttribute("aria-required");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("Select", () => {
+  const OPTIONS = [
+    { value: "a", label: "Uno" },
+    { value: "b", label: "Dos" },
+  ];
+
+  it("ninguna opción viene elegida, y la que pide elegir no se puede volver a elegir", () => {
+    render(<Select label="Motivo" name="reason" prompt="Elige uno" options={OPTIONS} />);
+    const list = screen.getByLabelText("Motivo");
+    expect(list).toHaveValue("");
+    expect(list).toHaveAttribute("aria-required", "true");
+    expect(screen.getByRole("option", { name: "Elige uno" })).toBeDisabled();
+  });
+
+  it("vuelve con lo elegido, si sigue siendo una opción; si no, sin elegir", () => {
+    const { unmount } = render(<Select label="Motivo" name="reason" prompt="Elige uno" options={OPTIONS} defaultValue="b" />);
+    expect(screen.getByLabelText("Motivo")).toHaveValue("b");
+    unmount();
+    render(<Select label="Motivo" name="reason" prompt="Elige uno" options={OPTIONS} defaultValue="fraud" />);
+    expect(screen.getByLabelText("Motivo")).toHaveValue("");
+  });
+
+  it("el error marca la lista y se anuncia; sin reglas de accesibilidad rotas", async () => {
+    const { container } = render(<Select label="Motivo" name="reason" prompt="Elige uno" options={OPTIONS} error="Elige el motivo." />);
+    const list = screen.getByLabelText("Motivo");
+    expect(list).toHaveAttribute("aria-invalid", "true");
+    expect(list).toHaveAccessibleDescription("Elige el motivo.");
+    await userEvent.setup().selectOptions(list, "a");
+    expect(list).toHaveValue("a");
     expect(await a11yViolations(container)).toEqual([]);
   });
 });
