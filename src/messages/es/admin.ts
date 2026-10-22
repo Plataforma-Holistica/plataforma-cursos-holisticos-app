@@ -289,4 +289,131 @@ export const admin = defineMessages({
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite.",
     unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
   },
+  // PA-68 mínima, las alertas de anomalía (T-208). Una alerta no es una acusación: la pantalla
+  // dice «alerta» y «revisión», y «fraude» solo en el bloque donde se decide (diseño, PA-68).
+  // Nadie aparece por su nombre: cada cuenta va con una huella de esa alerta.
+  alerts: {
+    title: "Alertas de anomalía",
+    intro: "Revisa cada alerta y deja escrito qué concluiste. Una alerta no es una acusación: casi siempre tiene una explicación.",
+    backToAdmin: "Ir al inicio de administración",
+    codeBody: "Para revisar una alerta, decidir o excluir hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver las alertas.",
+    codeNotAvailable: "Tu código es correcto, pero por ahora no se puede decidir sobre las alertas. Avisa a quien opera la base de datos.",
+    changeLocked: "Escribe tu código, al inicio de esta página, para poder revisar y decidir.",
+    listTitle: "Las alertas: primero las que esperan revisión",
+    empty: "No hay alertas.",
+    moreAlerts: { one: "Hay {count} alerta más que no cabe aquí.", other: "Hay {count} alertas más que no caben aquí." },
+
+    // Cada alerta.
+    kinds: {
+      teacherPointsJump: "Subida de puntos de {un_maestro}",
+      impossibleCompletion: "Más lecciones de las que caben",
+      unconsumedPoolRatio: "Bote sin consumo",
+    },
+    period: "Periodo: {period}.",
+    open: "Sin revisar",
+    reviewed: "Revisada",
+    triggers: {
+      teacherPointsJump: "Sus puntos del mes subieron más que el umbral respecto al mes anterior.",
+      impossibleCompletion: "Las lecciones que terminó esta cuenta piden más tiempo, a la velocidad máxima, del que pasó del periodo.",
+      unconsumedPoolRatio: "El bote sin consumo pasó del umbral.",
+    },
+    teacher: "{Maestro}: {name}.",
+    jumpPoints: "Medios puntos: {before} el mes anterior, {after} en este.",
+    jumpRise: "Subida al detectarla: {metric}. Umbral: {threshold}.",
+    jumpToday: "Subida hoy: {today}.",
+    impossibleNeeded: "Necesitaba {metric} de video a la velocidad máxima, y habían pasado {threshold}.",
+    impossibleToday: "Hoy necesitaría {today}.",
+    detected: "Detectada el {date}.",
+    hoursMinutes: "{hours} h {minutes} min",
+    minutesOnly: "{minutes} min",
+
+    // Las cuentas.
+    accountsTitle: "Las cuentas que más le aportan",
+    accountTitle: "La cuenta",
+    account: "Cuenta {account}",
+    columns: {
+      account: "Cuenta",
+      age: "Antigüedad",
+      share: "Lo que le aporta",
+      halfPoints: "Medios puntos este mes",
+      before: "El mes anterior",
+      lessons: "Lecciones",
+      covered: "Tiempo visto",
+      state: "Estado",
+    },
+    ages: { under7: "Menos de 7 días", under30: "Menos de 30 días", under90: "Menos de 90 días", over90: "Más de 90 días" },
+    shares: { only: "Solo a este {maestro}", most: "La mayor parte", lessThanHalf: "Menos de la mitad" },
+    finished: { one: "{count} lección terminada, {duration} vistos.", other: "{count} lecciones terminadas, {duration} vistos." },
+    excluded: "Excluida",
+    moreAccounts: { one: "Y {count} cuenta más.", other: "Y {count} cuentas más." },
+
+    // La revisión.
+    reviewTitle: "Revisión",
+    noteLabel: "Nota de la revisión",
+    noteHint: "Qué revisaste y qué concluiste. Se queda escrita.",
+    markReviewed: "Marcar como revisada",
+    reviewedBy: "Revisada el {date} por {name}.",
+    someone: "alguien del equipo",
+    note: "Nota: {note}",
+    working: "Guardando…",
+
+    // Decidir fraude: no se deshace.
+    fraudTitle: "Decidir fraude",
+    fraudBody: "Solo con la evidencia escrita. Decidirlo no se deshace.",
+    fraudAfterReview: "Para decidir fraude, primero marca la alerta como revisada, con su nota.",
+    evidenceLabel: "Evidencia",
+    decideFraud: "Decidir que es fraude",
+    confirmFraudTitle: "¿Decidir que esta alerta es fraude?",
+    confirmFraudBody: "No se deshace. Después podrás excluir del reparto, por fraude, el consumo de las cuentas de esta alerta.",
+    confirmFraud: "Sí, es fraude",
+    fraudDecided: "Decidida como fraude.",
+    evidence: "Evidencia: {evidence}",
+
+    // Excluir del reparto, por cuenta.
+    excludeTitle: "Excluir del reparto",
+    exclude: "Excluir",
+    confirmExcludeTitle: "¿Excluir del reparto la cuenta {account}?",
+    confirmExcludeBody:
+      "Sale todo su consumo de {period}, de todos {los_maestros}, desde la siguiente consolidación. Se puede revertir mientras el periodo siga abierto.",
+    reasonCodeLabel: "Motivo",
+    reasonPrompt: "Elige uno",
+    reasons: { technicalError: "Error técnico", testAccount: "Cuenta de prueba", other: "Otro", fraud: "Fraude" },
+    reasonLabel: "Por qué, escrito",
+    confirmExclude: "Sí, excluir",
+    cancel: "Cancelar",
+    closed: "El periodo de esta alerta ya no recibe latidos: aquí no se excluye ni se revierte.",
+
+    // Lo que ya se excluyó por esta alerta.
+    exclusionsTitle: "Exclusiones de esta alerta",
+    scopes: { account: "toda la cuenta", session: "una reproducción", interval: "un tramo de una lección" },
+    // Lo escrito por la persona va al final y sin punto agregado: ya trae el suyo, o no lo necesita.
+    exclusion: "Cuenta {account}, {scope}, por {name}, el {date}. {reason}: {text}",
+    revokedBy: "Revertida el {date} por {name}: {text}",
+    revoke: "Revertir",
+    confirmRevokeTitle: "¿Revertir esta exclusión?",
+    confirmRevokeBody: "Su consumo vuelve a contar desde la siguiente consolidación, salvo si la cuenta está suspendida por fraude.",
+    revokeReasonLabel: "Por qué se revierte",
+    confirmRevoke: "Sí, revertir",
+
+    // Lo que contestó el último envío.
+    done: {
+      alertReviewed: "Alerta revisada.",
+      fraudDecided: "Alerta decidida como fraude.",
+      accountExcluded: "Cuenta excluida. Sale del reparto desde la siguiente consolidación.",
+      exclusionRevoked: "Exclusión revertida.",
+    },
+    written: "Lo que habías escrito: {text}",
+    needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite.",
+    missingNote: "Escribe la nota de la revisión.",
+    missingEvidence: "Escribe la evidencia.",
+    missingReason: "Elige el motivo y escribe por qué.",
+    alreadyReviewed: "Esa alerta ya estaba revisada. Esta es la de ahora.",
+    alreadyFraud: "Esa alerta ya estaba decidida como fraude.",
+    alreadyExcluded: "Esa cuenta ya estaba excluida por ese motivo.",
+    alreadyRevoked: "Esa exclusión ya estaba revertida.",
+    closedNow: "El periodo de esa alerta ya no recibe latidos: no se excluye ni se revierte.",
+    needsFraudDecision: "Para excluir por fraude, primero decide que la alerta es fraude.",
+    notFound: "Esa alerta o esa cuenta ya no está. Estas son las de ahora.",
+    unknown: "No supimos si tu decisión quedó guardada. Revisa la alerta antes de intentarlo otra vez.",
+  },
 });

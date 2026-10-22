@@ -28,6 +28,8 @@ export const ROUTES = {
   catalog: "/admin/practicas",
   /** PA-61 y PA-62 mínimas, los cursos por revisar: cuelga de administración y pide Contenido. */
   review: "/admin/revision",
+  /** PA-68 mínima, las alertas de anomalía: cuelga de administración y pide finanzas. */
+  alerts: "/admin/alertas",
   /**
    * Los cursos. La ficha de un curso (`/cursos/[slug]`, T-210) es pública; la lección
    * (`/cursos/[slug]/lecciones/[leccion]`, PA-22, T-203) pide sesión. Ver `isLessonPath`.

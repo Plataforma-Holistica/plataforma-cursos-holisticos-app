@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { VerifiedClaims } from "@/services/account/account";
 import type { Capability } from "@/services/account/team";
 
+import { AlertsSection } from "../_alertas/section";
 import { TeamSection } from "../_equipo/section";
 import { CatalogSection } from "../_practicas/section";
 import { ReviewSection } from "../_revision/section";
@@ -34,6 +35,8 @@ const SECTIONS: Record<string, AdminSection> = {
   practicas: { capability: "content", render: (claims) => <CatalogSection claims={claims} /> },
   // PA-61 y PA-62 mínimas, los cursos por revisar: verlos, reproducirlos y aprobarlos.
   revision: { capability: "content", render: (claims) => <ReviewSection claims={claims} /> },
+  // PA-68 mínima, las alertas de anomalía: revisarlas, decidir fraude, excluir y revertir.
+  alertas: { capability: "finance", render: (claims) => <AlertsSection claims={claims} /> },
 };
 
 /**

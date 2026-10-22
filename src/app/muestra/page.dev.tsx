@@ -19,11 +19,13 @@ const COMPLETED = "completed" as const;
 const IN_PROGRESS = "in_progress" as const;
 import { OTPField } from "@/ui/otp-field";
 import { PasswordField } from "@/ui/password-field";
+import { Select } from "@/ui/select";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Spinner } from "@/ui/spinner";
 import { Tabs } from "@/ui/tabs";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
+import { Textarea } from "@/ui/textarea";
 
 // Página de muestra de los componentes base. Solo existe en desarrollo (ver
 // next.config.ts): `pnpm dev` y http://localhost:3000/muestra.
@@ -129,6 +131,18 @@ export default function SamplePage() {
             error="Escribe un correo con arroba, como ana@correo.com."
           />
           <TextField label="País" name="country" autoComplete="country-name" optional />
+          <Textarea label="Nota de la revisión" name="note" hint="Qué revisaste y qué concluiste. Se queda escrita." />
+          <Textarea label="Evidencia" name="evidence" error="Escribe la evidencia." />
+          <Select
+            label="Motivo"
+            name="reason_code"
+            prompt="Elige uno"
+            options={[
+              { value: "technical_error", label: "Error técnico" },
+              { value: "test_account", label: "Cuenta de prueba" },
+              { value: "other", label: "Otro" },
+            ]}
+          />
           <OTPField label="Código de tu aplicación" name="code" hint="Seis dígitos. Puedes pegarlo." />
           <PasswordField
             id="muestra-clave"

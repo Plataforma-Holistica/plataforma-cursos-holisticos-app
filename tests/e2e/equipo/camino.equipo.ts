@@ -1485,6 +1485,130 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     });
   });
 
+  // PA-68 mínima, las alertas de anomalía (T-208). Van aquí porque revisar y excluir escriben en la
+  // auditoría y porque usan a la misma persona con Finanzas. La alerta la abre la detección de la
+  // corrida, llamada por el dueño: una alumna con tres lecciones terminadas diez segundos después
+  // de empezar el mes no cabe ni a la velocidad máxima.
+  const ALERTS = "/admin/alertas";
+  let flagged: Person;
+  const exclusionsOf = (profile: string) =>
+    ownerQuery<{ live: boolean; reason: string }>(
+      "select revoked_at is null as live, reason_code::text as reason from public.consumption_exclusions where profile_id = $1 order by created_at",
+      [profile],
+    );
+
+  test("alertas con JavaScript: lee la alerta sin nada que nombre a la alumna, la revisa, decide fraude, excluye y revierte", async ({ page }) => {
+    test.setTimeout(240_000);
+    flagged = await person();
+    const course = {
+      slug: "alertas-e2e",
+      title: "Curso alertas-e2e",
+      practice: "revision-e2e",
+      level: "basico",
+      modules: [
+        {
+          title: "Uno",
+          lessons: ["Uno", "Dos", "Tres"].map((title) => ({
+            title,
+            video: { provider: "mux", asset_id: `AssetAlertas${title}`, playback_id: `PlaybackAlertas${title}`, duration_seconds: 100 },
+          })),
+        },
+      ],
+    };
+    const [loaded] = await ownerQuery<{ answer: string }>(
+      `with declared as materialized (
+         select set_config('app.actor_kind', 'system', true), set_config('app.local_courses', 'on', true)),
+       practice as materialized (select private.system_catalog_add('practices', 'Revisión e2e') from declared),
+       teacher as materialized (
+         select private.system_add_teacher('Maestra de alertas', 'maestra-alertas-e2e', null) as id from practice)
+       select private.system_load_course((select id from teacher), $1::jsonb) ->> 'answer' as answer from teacher`,
+      [JSON.stringify(course)],
+    );
+    expect(loaded?.answer).toBe("loaded");
+    const [opened] = await ownerQuery<{ opened: string }>(
+      `with period as (select to_char(timezone('America/Mexico_City', now()), 'YYYYMM')::int as p),
+       rows as (
+         insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
+                                          lesson_duration_seconds, covered_seconds, half_points)
+         select period.p, $1, l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, 100, 2
+         from period, public.published_lessons l join public.published_courses c on c.course_id = l.course_id
+         where c.slug = 'alertas-e2e' returning 1)
+       select private.detect_anomalies(p, timezone('America/Mexico_City', to_date(p::text || '01', 'YYYYMMDD')::timestamp) + interval '10 seconds')
+                ->> 'alerts_opened' as opened
+       from period where (select count(*) from rows) = 3`,
+      [flagged.id],
+    );
+    expect(opened?.opened).toBe("1");
+
+    await enterAdmin(page, ana, "/admin");
+    await page.getByRole("link", { name: "Alertas de anomalía" }).click();
+    await expect(page).toHaveURL(ALERTS);
+    await expect(page.getByRole("heading", { level: 1, name: "Alertas de anomalía" })).toBeVisible();
+    const card = page.getByRole("article").filter({ hasText: "Más lecciones de las que caben" });
+    await expect(card.getByText("Sin revisar")).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    // Lo servido no nombra a la alumna: de ella solo viaja su huella en esta alerta.
+    const served = await (await page.request.get(ALERTS)).text();
+    for (const secret of [flagged.id, flagged.email]) expect(served).not.toContain(secret);
+    const account = /Cuenta ([0-9a-f]{12})/.exec(await card.innerText())?.[1] ?? "";
+    expect(account).toMatch(/^[0-9a-f]{12}$/);
+
+    const audited = await auditRows();
+    await card.getByLabel("Nota de la revisión").fill("Tres lecciones en diez segundos.");
+    await card.getByRole("button", { name: "Marcar como revisada" }).click();
+    await expect(page.getByText("Alerta revisada.")).toBeVisible();
+    await expect(card.getByText("Revisada", { exact: true })).toBeVisible();
+
+    await card.getByRole("button", { name: "Decidir que es fraude" }).click();
+    // El botón pulsado se fue con la pregunta: el foco lo toma ella.
+    await expect(card.getByText("¿Decidir que esta alerta es fraude?").locator("..")).toBeFocused();
+    // Sin evidencia la pregunta sigue y lo dice en su campo, sin llamar a nadie.
+    await card.getByRole("button", { name: "Sí, es fraude" }).click();
+    await expect(card.getByLabel("Evidencia")).toHaveAccessibleDescription("Escribe la evidencia.");
+    await card.getByLabel("Evidencia").fill("No caben en el tiempo del periodo.");
+    await card.getByRole("button", { name: "Sí, es fraude" }).click();
+    await expect(page.getByText("Alerta decidida como fraude.")).toBeVisible();
+
+    await card.getByRole("button", { name: `Excluir Cuenta ${account}` }).click();
+    await card.getByLabel("Motivo").selectOption({ label: "Fraude" });
+    await card.getByLabel("Por qué, escrito").fill("Decidida como fraude.");
+    await card.getByRole("button", { name: "Sí, excluir" }).click();
+    await expect(page.getByText(/Cuenta excluida\. Sale del reparto/)).toBeVisible();
+    expect(await exclusionsOf(flagged.id)).toEqual([{ live: true, reason: "fraud" }]);
+
+    await card.getByRole("button", { name: /^Revertir/ }).click();
+    await card.getByLabel("Por qué se revierte").fill("Era para probar.");
+    await card.getByRole("button", { name: "Sí, revertir" }).click();
+    await expect(page.getByText("Exclusión revertida.")).toBeVisible();
+    expect(await exclusionsOf(flagged.id)).toEqual([{ live: false, reason: "fraud" }]);
+    expect(await auditRows()).toBeGreaterThan(audited);
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
+  test("alertas sin JavaScript: excluye en dos pasos, y recargar no reenvía", async ({ browser }) => {
+    test.setTimeout(240_000);
+    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+      await enterAdmin(page, ana, ALERTS);
+      const card = page.getByRole("article").filter({ hasText: "Más lecciones de las que caben" });
+      const account = /Cuenta ([0-9a-f]{12})/.exec(await card.innerText())?.[1] ?? "";
+      await card.getByRole("button", { name: `Excluir Cuenta ${account}` }).click();
+      await expect(page).toHaveURL(`${ALERTS}#bloque-alertas-lista`);
+      const asked = page.getByRole("article").filter({ hasText: "Más lecciones de las que caben" });
+      await asked.getByLabel("Motivo").selectOption({ label: "Cuenta de prueba" });
+      await asked.getByLabel("Por qué, escrito").fill("Sin JavaScript.");
+      await asked.getByRole("button", { name: "Sí, excluir" }).click();
+      await expect(page.getByText(/Cuenta excluida\. Sale del reparto/)).toBeVisible();
+      expect(await exclusionsOf(flagged.id)).toEqual([
+        { live: false, reason: "fraud" },
+        { live: true, reason: "test_account" },
+      ]);
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
+      expect(await exclusionsOf(flagged.id)).toHaveLength(2);
+    });
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.
@@ -1567,6 +1691,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       }
       expect((await otherContext.request.get(CATALOG)).status()).toBe(404);
       expect((await otherContext.request.get(REVIEW)).status()).toBe(404);
+      expect((await otherContext.request.get(ALERTS)).status()).toBe(404);
     });
     expect(await practicesNow()).toEqual(snapshot);
     expect(await auditRows()).toBe(prepared);

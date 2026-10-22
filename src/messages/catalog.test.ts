@@ -101,7 +101,8 @@ describe("catálogo de textos", () => {
   it("ningún texto escribe a mano la palabra del rol ni el nombre de la Plataforma", () => {
     const role = new RegExp(stem(terms), "i");
     for (const [key, text] of texts) {
-      expect(text, `${key} debe citar el término con un marcador`).not.toMatch(role);
+      // Lo que queda fuera de los marcadores: el nombre de un marcador del rol (`{el_maestro}`) es la manera correcta de citarlo.
+      expect(text.replace(MARKER, ""), `${key} debe citar el término con un marcador`).not.toMatch(role);
       expect(text, `${key} debe citar {Plataforma}`).not.toContain(terms.Plataforma);
     }
   });

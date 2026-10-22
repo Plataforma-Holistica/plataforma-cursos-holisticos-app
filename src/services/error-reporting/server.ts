@@ -54,6 +54,8 @@ const FAILURES = {
   review_queue_unavailable: "No se pudo leer la cola de revisión: quien tiene Contenido no pudo ver los cursos por aprobar.",
   course_approval_unavailable: "Aprobar un curso se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó publicado, y a quien lo pidió se le dijo que revise la cola.",
   catalog_change_unavailable: "Un cambio a las prácticas o los niveles del catálogo se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista.",
+  anomaly_alerts_unavailable: "No se pudieron leer las alertas de anomalía: quien tiene finanzas no pudo verlas ni decidir sobre ellas (PA-68).",
+  anomaly_decision_unavailable: "Una decisión de finanzas sobre una alerta de anomalía (revisarla, decidir fraude, excluir o revertir consumo) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien la pidió se le dijo que revise la alerta. También sale cuando alguien dio bien su código y aun así ninguna decisión pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS.",
   legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",

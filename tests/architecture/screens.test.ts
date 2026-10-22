@@ -204,6 +204,15 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // lección, nunca un playback id.
     lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId, "review"\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
   },
+  "src/app/admin/_alertas/actions.ts": {
+    // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
+    alertsCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*alertsCodeOutcome\(await giveFinanceCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Las decisiones: del formulario llega qué botón, de qué alerta y lo escrito. Preguntar no
+    // llama a nadie, y la cuenta llega como su huella: la resuelve la base.
+    alertsAction:
+      /const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "confirming", \.\.\.asked, drafts: request\.drafts, attempt \};[\s\S]*reviewOutcome\(await reviewAlert\(jar, \{ alert: request\.alert, note: request\.drafts\.note \}\)\)[\s\S]*fraudOutcome\(await decideFraud\(jar, \{ alert: request\.alert, evidence: request\.drafts\.evidence \}\)\)[\s\S]*await excludeAccount\(jar, \{\s*alert: request\.alert,\s*account: request\.account,[\s\S]*revokeOutcome\(await revokeExclusion\(jar, \{ exclusion: request\.exclusion, reason: request\.drafts\.reason \}\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
 };
 
 /** El texto de una función exportada de un archivo de acciones: de su `export` a la llave que la cierra. */
@@ -357,7 +366,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_equipo", "_lib", "_practicas", "_revision"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_practicas", "_revision"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -386,6 +395,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
           ["equipo", "config"],
           ["practicas", "content"],
           ["revision", "content"],
+          ["alertas", "finance"],
         ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
         const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
@@ -393,6 +403,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(table).toMatch(/capability: Capability;/);
         const sections = under.filter((source) => /\/_[a-z]+\/section\.tsx$/.test(source.file));
         expect(sections.map((source) => source.file).sort()).toEqual([
+          "src/app/admin/_alertas/section.tsx",
           "src/app/admin/_equipo/section.tsx",
           "src/app/admin/_practicas/section.tsx",
           "src/app/admin/_revision/section.tsx",
@@ -611,6 +622,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
 
   it("hay anclas que revisar", () => {
     expect(anchors.map(({ anchor }) => anchor).sort()).toEqual([
+      "bloque-alertas-codigo",
+      "bloque-alertas-lista",
       "bloque-catalogo-codigo",
       "bloque-catalogo-niveles",
       "bloque-catalogo-practicas",

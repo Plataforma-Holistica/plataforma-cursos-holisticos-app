@@ -191,6 +191,8 @@ export const account = defineMessages({
     catalog: "Prácticas y niveles",
     // PA-61. Solo se le ofrece a quien tiene Contenido.
     review: "Cursos por revisar",
+    // PA-68. Solo se le ofrece a quien tiene finanzas.
+    alerts: "Alertas de anomalía",
     account: "Cuenta",
     capabilities: {
       content: "Contenido",
