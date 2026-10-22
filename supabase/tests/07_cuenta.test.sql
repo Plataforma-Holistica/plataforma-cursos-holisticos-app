@@ -96,9 +96,9 @@ select isnt_empty(
     where problem = 'unexpected column write privilege for authenticated' and object_name = 'public.profiles'$$,
   'schema_violations() avisa si una persona recibe permiso de escribir una columna de más');
 revoke update (status, suspended_for_fraud) on public.profiles from authenticated;
+-- Sin `suspended_for_fraud`: desde T-208 la prende solo una decisión de fraude de finanzas.
 grant update (display_name, status, country_code, country_is_self_declared, locale, adult_declared_at,
-              suspended_at, suspended_by, suspension_reason, suspended_for_fraud, comment_ban_until,
-              deleted_at)
+              suspended_at, suspended_by, suspension_reason, comment_ban_until, deleted_at)
   on public.profiles to app_service;
 select is(
   (select bool_and(password_reset_required) from public.profiles
@@ -113,7 +113,9 @@ select ok(
   'app_service sigue pudiendo escribir ' || c)
 from unnest(array['display_name', 'status', 'country_code', 'country_is_self_declared', 'locale',
                   'adult_declared_at', 'suspended_at', 'suspended_by', 'suspension_reason',
-                  'suspended_for_fraud', 'comment_ban_until', 'deleted_at']) as c;
+                  'comment_ban_until', 'deleted_at']) as c;
+select ok(not has_column_privilege('app_service', 'public.profiles', 'suspended_for_fraud', 'update'),
+  'y ya no la marca de fraude: la prende solo una decisión de finanzas (T-208)');
 select ok(
   not has_column_privilege('app_service', 'public.profiles', 'id', 'update')
     and not has_column_privilege('app_service', 'public.profiles', 'created_at', 'update')

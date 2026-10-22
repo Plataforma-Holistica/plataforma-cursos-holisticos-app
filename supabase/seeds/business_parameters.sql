@@ -66,6 +66,7 @@ from (values
   ('ZONA_HORARIA_PERIODO',      '"America/Mexico_City"', 'proposed'),
   ('ALERTA_SALTO_MAESTRO_PCT',  '5000',                 'proposed'),
   ('ALERTA_SIN_CONSUMO_PCT',    '4000',                 'proposed'),
+  ('ALERTA_SALTO_MINIMO_MEDIOS_PUNTOS', '40',            'proposed'),
   -- Pago a maestros
   ('DIA_CIERRE',                '1',                    'proposed'),
   ('DIA_PAGO',                  '10',                   'proposed'),
