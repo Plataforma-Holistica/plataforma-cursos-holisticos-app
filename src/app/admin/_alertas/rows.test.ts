@@ -189,6 +189,17 @@ describe("alertsView", () => {
     expect(card?.exclusions[0]?.summary).toContain(text.someone);
   });
 
+  it("con el periodo cerrado, una exclusión vigente no se ofrece revertir", () => {
+    const [card] = alertsView(read([{ ...JUMP, canExclude: false }])).alerts;
+    expect(card?.exclusions[0]).toMatchObject({ revoked: null, canRevoke: false });
+  });
+
+  it("decidida como «no es fraude», todavía se puede decidir que sí: la base solo impide deshacer el fraude", () => {
+    const [card] = alertsView(read([{ ...JUMP, isFraud: false }])).alerts;
+    expect(card).toMatchObject({ canDecideFraud: true, fraud: null });
+    expect(card?.reasons.map((reason) => reason.value)).not.toContain("fraud");
+  });
+
   it("la cifra de hoy de lecciones imposibles, si se pudo recalcular", () => {
     const [card] = alertsView(read([{ ...IMPOSSIBLE, today: 9_000 }])).alerts;
     expect(card?.facts.at(-1)).toBe(t(text.impossibleToday, { today: spanText(9_000) }));

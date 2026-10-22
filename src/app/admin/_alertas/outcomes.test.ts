@@ -88,6 +88,8 @@ describe("readAlertsForm", () => {
     ["excluir sin cuenta", formWith(["do", `exclude:${ALERT}`])],
     ["excluir con un identificador por cuenta", formWith(["do", `exclude:${ALERT}:${EXCLUSION}`])],
     ["excluir con la cuenta en mayúsculas", formWith(["do", `exclude:${ALERT}:${ACCOUNT.toUpperCase()}`])],
+    ["excluir con una huella corta", formWith(["do", `exclude:${ALERT}:${ACCOUNT.slice(1)}`])],
+    ["excluir con una huella larga", formWith(["do", `exclude:${ALERT}:${ACCOUNT}0`])],
     ["revertir con una huella por exclusión", formWith(["do", `revoke:${ALERT}:${ACCOUNT}`])],
     ["revertir sin alerta", formWith(["do", `revoke:${EXCLUSION}`])],
     ["partes de más", formWith(["do", `exclude:${ALERT}:${ACCOUNT}:otra`])],

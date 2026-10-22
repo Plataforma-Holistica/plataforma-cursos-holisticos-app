@@ -1578,6 +1578,39 @@ falla. Veintiuna precisiones que la tabla no dice:
     revisión, una vez, y la decisión de fraude, que no se deshace; de una exclusión, solo su
     revocación. Nadie de la aplicación toca las dos tablas: el vigilante lo exige
     (`schema_violations_anomalies`).
+- **La pantalla de las alertas (PA-68 mínima, `/admin/alertas`)** (T-208, segunda solicitud;
+  decisiones de Sergio del 2026-10-22: una sola dirección, y de cada cuenta la antigüedad y lo que
+  aporta, por tramos). Pide Finanzas (PA-88 a quien no la tiene). Vive en
+  `src/app/admin/_alertas/`, con su servicio en `src/services/anomalies/` (en CODEOWNERS) y su
+  lectura en la base (`t208_alertas_lectura`, pgTAP `30_alertas_lectura`). Lo que no se ve leyendo
+  un solo archivo:
+  - **De una cuenta solo viaja su huella en esa alerta** (`private.alert_account_token()`: 12
+    caracteres de un SHA-256 con una llave que vive en la base, distinta por alerta), nunca su
+    identificador, su correo ni su nombre, hasta que exista el alias del alumno (T-408). Excluir
+    desde la pantalla manda la huella, y la base la resuelve contra las cuentas de esa alerta
+    (`private.exclude_alert_account()`; si no es de ninguna, `not_found`). El servicio lee la
+    respuesta con un esquema estricto, y una prueba de arquitectura exige que ni el servicio ni la
+    pantalla nombren un identificador de cuenta.
+  - **Una sola lectura** (`private.finance_alerts()`): nula sin Finanzas, con `fresh_code` y hasta
+    50 alertas (las abiertas de cualquier periodo y las revisadas de los que todavía reciben
+    latidos). De lecciones imposibles, su cuenta con totales; del salto, las diez cuentas que más
+    le aportan a esa maestra y las ya excluidas por la alerta. Leer no pide el código reciente.
+  - **Las decisiones son un solo estado para toda la lista,** cada bloque con su formulario y el
+    botón que dice qué y de cuál (`review:<alerta>`, `exclude:<alerta>:<huella>`,
+    `revoke:<alerta>:<exclusión>`). Decidir fraude, excluir y revertir se confirman en dos pasos
+    dentro de su lugar; confirmar sin lo que hay que escribir vuelve a preguntar sin llamar a
+    nadie (`askedBy`). Lo que sale bien redirige con su aviso (`alert_reviewed`, `fraud_decided`,
+    `account_excluded`, `exclusion_revoked`). Si una confirmación se cierra sin hacerse, lo escrito
+    se repite en el mensaje; la nota de la revisión vuelve a su campo. Límite conocido: dar el
+    código otra vez redirige, y lo que se había escrito se pierde.
+  - El motivo «fraude» solo se ofrece con la alerta decidida como fraude, y decidirlo sobre una
+    alerta ya revisada no pide otra nota. «Tu código» usa su propio servicio
+    (`giveFinanceCode`), que comprueba lo reciente con la lectura de las alertas.
+  - `Textarea` y `Select` entraron aquí como componentes base (diseño, sección 5.3), sin contador
+    ni lista con búsqueda; están en `/muestra`. Las pruebas: `tests/ui/alerts-screen.test.tsx`,
+    `tests/actions/alert-actions.test.ts`, `tests/architecture/anomalies.test.ts`,
+    `tests/integration/46-alertas.test.ts` y, en `tests/e2e/equipo/camino.equipo.ts`, el camino
+    con JavaScript y sin él.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

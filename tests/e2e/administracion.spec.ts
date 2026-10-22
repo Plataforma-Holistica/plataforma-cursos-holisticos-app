@@ -13,9 +13,9 @@ import { clearCounters, ownerQuery, person, SESSION_COOKIE, type Person } from "
 test.beforeEach(clearCounters);
 
 const NOT_FOUND = "No encontramos esa página";
-const TEAM_PATHS = ["/admin", "/admin/equipo", "/admin/practicas", "/admin/revision", "/admin/no-existe/tampoco", "/entrar/segundo-factor", "/entrar/segundo-factor/configurar"];
+const TEAM_PATHS = ["/admin", "/admin/equipo", "/admin/practicas", "/admin/revision", "/admin/alertas", "/admin/no-existe/tampoco", "/entrar/segundo-factor", "/entrar/segundo-factor/configurar"];
 /** Las secciones de administración: todas las de la tabla del comodín. */
-const SECTIONS = ["/admin/equipo", "/admin/practicas", "/admin/revision"];
+const SECTIONS = ["/admin/equipo", "/admin/practicas", "/admin/revision", "/admin/alertas"];
 
 async function signIn(page: Page, who: Pick<Person, "email" | "password">, path = "/entrar"): Promise<void> {
   await page.goto(path);
