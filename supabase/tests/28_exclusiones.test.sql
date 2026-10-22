@@ -10,7 +10,7 @@
 -- En una prueba de base todo corre en una transacción y `now()` no avanza.
 begin;
 \ir _ayuda.psql
-select plan(61);
+select plan(63);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-excluye@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-excluye@prueba.test');
@@ -316,6 +316,9 @@ select isnt((select id from r where name = 'tramo'), null, 'se excluye un tramo 
 select pruebas.consolida();
 select is(pruebas.cubiertos(pruebas.ana(), pruebas.leccion('Dos')), 80, 'Dos pierde esos 20 segundos');
 select is((pruebas.consolidado(pruebas.ana(), pruebas.leccion('Dos'))).half_points, 1::smallint, 'y con ellos, el punto completo');
+insert into private.rollup_dirty (period_id, profile_id, lesson_id) values (pruebas.periodo(), pruebas.ana(), pruebas.leccion('Uno'));
+select pruebas.consolida();
+select is(pruebas.cubiertos(pruebas.ana(), pruebas.leccion('Uno')), 80, 'un tramo excluido de Dos no toca otra lección');
 insert into r select 'todo', (pruebas.excluye(pruebas.finanzas(), 'interval', pruebas.ana(), p_lesson => pruebas.leccion('Dos'), p_from => 0, p_to => 100) -> 'ids' ->> 0)::uuid;
 select pruebas.consolida();
 select is(pruebas.consolidado(pruebas.ana(), pruebas.leccion('Dos')), null, 'un tramo que cubre todo deja la lección sin fila');
@@ -385,13 +388,25 @@ select is((select count(*)::integer from private.rollup_dirty where profile_id =
 -- ---------------------------------------------------------------------------------------
 -- Las exclusiones no se borran ni se editan fuera de su revocación.
 
+-- Como el dueño y con alguien que actúa, para que no lo detenga antes la auditoría: con finanzas,
+-- que pasa la puerta, lo detiene el guardián por lo que se cambia; con una alumna, por la puerta.
+create function pruebas.dueno_a_nombre_de(p_id uuid) returns void
+language sql as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', p_id::text, true), set_config('app.actor_session', pruebas.sesion(p_id)::text, true);
+$$;
+select pruebas.dueno_a_nombre_de(pruebas.finanzas());
 select throws_ok(format('delete from public.consumption_exclusions where id = %L', (select id from r where name = 'cuenta')),
   '42501', null, 'una exclusión no se borra');
 select throws_ok(format('update public.consumption_exclusions set reason = %L where id = %L', 'otro', (select id from r where name = 'cuenta')),
-  '42501', null, 'ni se edita por fuera');
+  '42501', null, 'ni se edita más que la revocación');
+select throws_ok(format('update public.consumption_exclusions set revoke_reason = %L where id = %L', 'otro', (select id from r where name = 'cuenta')),
+  '42501', null, 'ni se cambia una revocación');
 select throws_ok('truncate public.consumption_exclusions cascade', '42501', null, 'ni se vacía');
+select pruebas.dueno_a_nombre_de(pruebas.ana());
 select throws_ok(format('insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by) values (%s, %L, %L, %L, %L, %L)',
-  pruebas.periodo(), 'account', pruebas.beto(), 'other', 'por fuera', pruebas.finanzas()), '42501', null, 'ni se escribe por fuera de sus funciones');
+  pruebas.periodo(), 'account', pruebas.beto(), 'other', 'por fuera', pruebas.ana()), '42501', null, 'ni la escribe quien no pasa la puerta de finanzas');
+select pruebas.limpiar();
 
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 

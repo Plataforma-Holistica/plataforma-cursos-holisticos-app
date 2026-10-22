@@ -78,7 +78,10 @@ describe("la detección en la corrida de cada noche", () => {
     expect(alerts.rows[0]!.n).toBe("0");
   });
 
-  it("un periodo que ya no recibe latidos se consolida, pero no se detecta", async () => {
+  // Un periodo anterior a la ventana con una marca se consolida (o falla, sin umbrales de antes del
+  // arranque, como en la 43), pero no se detecta: no recibe latidos, y lo que abriera ahí ya nadie
+  // lo revisaría antes de cerrar. Lo cuidan la corrida y la propia detección.
+  it("un periodo que ya no recibe latidos no se detecta", async () => {
     const [previous] = await windowPeriods();
     const mark = { period: before(previous!), profile: randomUUID(), lesson: randomUUID() };
     marks.push(mark);

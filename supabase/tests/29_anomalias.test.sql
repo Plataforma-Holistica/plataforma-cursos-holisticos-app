@@ -11,7 +11,7 @@
 -- El consolidado se escribe aquí directo, como el dueño: lo que se prueba es la detección.
 begin;
 \ir _ayuda.psql
-select plan(51);
+select plan(54);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-anomalia@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-anomalia@prueba.test');
@@ -186,6 +186,12 @@ select is((select row(round(metric_value), threshold_value)::text
 select is((select details - 'floor' from pruebas.alerta(pruebas.periodo(1), 'teacher_points_jump', pruebas.maestro('anomalia-a'))),
   '{"before": 6, "after": 10, "students_before": 1, "students_after": 2}'::jsonb, 'con las cifras de los dos meses, sin nadie con nombre');
 
+-- En el mes en curso no se compara, aunque haya un salto: va a medias.
+select pruebas.completas(pruebas.periodo(), p, 'anomalia-c', 3) from unnest(array[pruebas.ana(), pruebas.beto(), pruebas.carla()]) as p;
+select pruebas.detecta(pruebas.periodo(), now());
+select is((select count(*)::integer from public.anomaly_alerts where period_id = pruebas.periodo() and kind = 'teacher_points_jump'), 0,
+  'C sube del mes terminado al en curso, y no hay alerta del mes en curso');
+
 -- Sin el umbral o sin el piso no se adivina: la detección falla y la corrida lo dirá.
 update public.business_parameters set canceled_at = now(), canceled_by = pruebas.finanzas() where key = 'ALERTA_SALTO_MINIMO_MEDIOS_PUNTOS';
 select throws_ok(format('select private.detect_anomalies(%s, now())', pruebas.periodo(1)), 'P0001', null,
@@ -196,10 +202,18 @@ select throws_ok(format('select private.detect_anomalies(%s, now())', pruebas.pe
 
 select throws_ok(format('insert into public.anomaly_alerts (period_id, kind, profile_id, metric_value, threshold_value) values (%s, %L, %L, 1, 1)',
   pruebas.periodo(), 'impossible_completion', pruebas.beto()), '42501', null, 'nadie abre una alerta a mano');
--- Como el dueño declarado sistema, que es quien abre las alertas: tampoco las cambia ni las borra.
-select pruebas.como_dueno_sistema();
+-- Como el dueño y con alguien que actúa, para que no lo detenga antes la auditoría.
+create function pruebas.dueno_a_nombre_de(p_id uuid) returns void
+language sql as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', p_id::text, true), set_config('app.actor_session', pruebas.sesion(p_id)::text, true);
+$$;
+select pruebas.dueno_a_nombre_de(pruebas.ana());
+select throws_ok(format('insert into public.anomaly_alerts (period_id, kind, profile_id, metric_value, threshold_value) values (%s, %L, %L, 1, 1)',
+  pruebas.periodo(), 'impossible_completion', pruebas.carla()), '42501', null, 'ni con alguien que actúa: solo la detección abre alertas');
+select pruebas.dueno_a_nombre_de(pruebas.finanzas());
 select throws_ok(format('update public.anomaly_alerts set metric_value = 0 where kind = %L', 'impossible_completion'),
-  '42501', null, 'ni le cambia la medida');
+  '42501', null, 'ni finanzas le cambia la medida');
 select throws_ok('delete from public.anomaly_alerts', '42501', null, 'ni la borra');
 select throws_ok('truncate public.anomaly_alerts cascade', '42501', null, 'ni las vacía');
 select pruebas.limpiar();
@@ -226,6 +240,10 @@ select is((select row(is_fraud, review_note)::text from public.anomaly_alerts wh
   '(t,"Lo revisé con el otro socio.")', 'la nota de la revisión se queda');
 select is(pruebas.revisa(pruebas.finanzas(), (select id from r where name = 'imposible'), 'No era.', false), 'already_reviewed',
   'y una decisión de fraude no se deshace');
+select pruebas.dueno_a_nombre_de(pruebas.finanzas());
+select throws_ok(format('update public.anomaly_alerts set is_fraud = false where id = %L', (select id from r where name = 'imposible')),
+  '42501', null, 'ni por fuera de la función');
+select pruebas.limpiar();
 select ok((select count(*) from public.audit_log where entity_table = 'public.anomaly_alerts' and actor_kind = 'user'
            and entity_id = (select id from r where name = 'imposible')::text) = 2, 'cada decisión queda en la auditoría');
 
