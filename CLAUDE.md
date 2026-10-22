@@ -1733,7 +1733,17 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   tabla queda cerrada.
 - **Ningún permiso por omisión.** `anon`, `authenticated` y `service_role` no reciben nada
   que la migración no conceda a mano. `private.schema_violations()` debe devolver cero
-  filas, y `supabase/tests/01_estructura.test.sql` lo exige.
+  filas, y `supabase/tests/01_estructura.test.sql` lo exige. **El vigilante va por áreas**
+  (ola 0, migración `w0_vigilante_por_areas`): `private.schema_violations()` es un agregador que
+  descubre en el catálogo las funciones `private.schema_violations_<área>()` y las corre; un área
+  que no se puede usar (otro nombre, otro dueño, argumentos o forma) o que lanza se dice con una
+  fila, y sin ninguna también. **Una regla nueva va en un área nueva, por dominio**
+  (`schema_violations_anomalies` para T-208): misma firma, `language sql stable set search_path =
+  ''`, sin `security definer` y con `revoke all … from public`; nunca se reescribe el agregador ni
+  un área ajena. Su firma del sistema y sus libros van en su área, con el mismo texto de regla.
+  `supabase/tests/27_vigilante.test.sql` provoca cada regla y prueba la mecánica, y la prueba de
+  cada tarea provoca las suyas. Una excepción nueva a las reglas de `base` (un permiso previsto
+  para una persona con sesión) va en una solicitud corta que solo cambia esa área.
 - **Una persona con sesión casi no escribe.** Lo que depende de una validación va por el
   servidor (`app_service`), que declara en la transacción por quién actúa y con qué
   sesión (`app.actor_id`, `app.actor_session`) o que es el sistema (`app.actor_kind`).
