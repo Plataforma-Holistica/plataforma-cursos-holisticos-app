@@ -24,7 +24,11 @@ jobs:
       # Cada acción va por el identificador exacto de su commit, no por su etiqueta: una
       # etiqueta se puede mover a otro código sin que aquí cambie nada. Dependabot propone
       # las actualizaciones (.github/dependabot.yml).
+      # Con la historia entera: la comprobación del orden de las migraciones compara contra lo que
+      # main tenía antes.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
@@ -32,6 +36,21 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+
+      # Las migraciones nuevas van después de todas las de main, y las de main no se tocan (ola 0:
+      # dos carriles en paralelo). En una solicitud, HEAD es la fusión de prueba con main y HEAD^1
+      # es main. Al entrar a main se compara contra lo que main tenía antes del empuje, que puede
+      # traer varios commits (una fusión con rebase). Sin dependencias: va antes de instalar.
+      - name: Migraciones en orden
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node scripts/migraciones-en-orden.mjs "$BEFORE" HEAD
+          else
+            node scripts/migraciones-en-orden.mjs HEAD^1 HEAD
+          fi
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile

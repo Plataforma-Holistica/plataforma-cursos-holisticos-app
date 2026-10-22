@@ -81,4 +81,5 @@
 /tests/e2e/                @SerchFGA @plataformaholisticadev
 /playwright.config.ts      @SerchFGA @plataformaholisticadev
 /vitest.config.ts          @SerchFGA @plataformaholisticadev
+/tests/scripts/            @SerchFGA @plataformaholisticadev
 /scripts/                  @SerchFGA @plataformaholisticadev
