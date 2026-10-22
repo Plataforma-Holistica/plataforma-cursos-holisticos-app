@@ -143,7 +143,11 @@ export type AlertsState =
    * falta algo escrito. Lo escrito se conserva.
    */
   | { kind: "confirming"; confirming: Confirming; drafts: Drafts; problem: ConfirmProblem | null; attempt: number }
-  | { kind: "failed"; reason: AlertsFailure; alert: string | null; drafts: Drafts; attempt: number };
+  /** Qué paso falló: lo escrito en la nota vuelve a su campo solo si falló revisar. */
+  | { kind: "failed"; reason: AlertsFailure; step: DecisionStep; alert: string | null; drafts: Drafts; attempt: number };
+
+/** Los pasos que llegan al servicio. */
+export type DecisionStep = "review" | "fraud" | "exclude" | "revoke";
 
 export type AlertsOutcome = Leave | { kind: "failed"; reason: AlertsFailure };
 
@@ -223,7 +227,9 @@ export function fraudOutcome(result: AlertReviewed): AlertsOutcome {
       return { kind: "failed", reason: "missing_evidence" };
     case "answered":
       switch (result.answer) {
-        // Con la alerta abierta, la revisa y la decide a la vez.
+        // No llega: la pantalla solo ofrece decidir fraude con la alerta ya revisada, y con la
+        // alerta abierta la base pide la nota (contesta `malformed`). Si llegara, la base la revisó
+        // y la decidió como fraude en el mismo cambio.
         case "reviewed":
         case "marked_fraud":
           return done("fraud_decided");

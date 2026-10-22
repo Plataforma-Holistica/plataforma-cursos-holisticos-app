@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { admin } from "@/messages/es/admin";
 import { t } from "@/messages/format";
-import { EXCLUSION_REASONS, type FinanceAlert, type FinanceAlerts } from "@/services/anomalies/anomalies";
+import { EXCLUSION_REASONS, NOTE_MAX, REASON_MAX, type FinanceAlert, type FinanceAlerts } from "@/services/anomalies/anomalies";
 
 import { alertsButton } from "./outcomes";
 import { alertsView, percentText, periodText, REASON_LABELS, spanText } from "./rows";
@@ -120,7 +120,8 @@ describe("alertsView", () => {
       t(text.jumpRise, { metric: percentText(6666.667), threshold: percentText(5000) }),
       t(text.jumpToday, { today: percentText(7000) }),
     ]);
-    expect(card?.canDecideFraud).toBe(true);
+    // Abierta: decidir fraude espera a la revisión, que es la que pide la nota.
+    expect(card).toMatchObject({ canDecideFraud: false, fraudWaits: true });
     expect(card?.closed).toBeNull();
     expect(card?.accountsTitle).toBe(text.accountsTitle);
     expect(card?.moreAccounts).toBe(t(text.moreAccounts.other, { count: "3" }));
@@ -145,7 +146,25 @@ describe("alertsView", () => {
 
   it("sin fraude decidido, el motivo de fraude no se ofrece", () => {
     const [card] = alertsView(read([JUMP])).alerts;
-    expect(card?.reasons.map((reason) => reason.value)).toEqual(["technical_error", "test_account", "other"]);
+    expect(card?.accounts[0]?.reasons.map((reason) => reason.value)).toEqual(["technical_error", "test_account", "other"]);
+  });
+
+  it("con fraude decidido, una cuenta excluida por otro motivo se puede excluir por fraude, y solo por eso", () => {
+    const [card] = alertsView(read([{ ...JUMP, status: "reviewed", isFraud: true, evidence: "Once cuentas." }])).alerts;
+    const [free, other] = card?.accounts ?? [];
+    expect(free?.reasons.map((reason) => reason.value)).toEqual(["technical_error", "test_account", "other", "fraud"]);
+    expect(other).toMatchObject({ excluded: true, canExclude: true });
+    expect(other?.reasons.map((reason) => reason.value)).toEqual(["fraud"]);
+  });
+
+  it("excluida ya por fraude por esta alerta, no se ofrece otra vez", () => {
+    const exclusions = [{ ...JUMP.exclusions[0]!, reasonCode: "fraud" as const }];
+    const [card] = alertsView(read([{ ...JUMP, status: "reviewed", isFraud: true, evidence: "Once cuentas.", exclusions }])).alerts;
+    expect(card?.accounts[1]).toMatchObject({ excluded: true, canExclude: false });
+    // Una revertida no cuenta.
+    const revoked = [{ ...exclusions[0]!, revokedAt: "2026-11-03T18:00:00Z" }];
+    const [again] = alertsView(read([{ ...JUMP, status: "reviewed", isFraud: true, evidence: "Once cuentas.", exclusions: revoked }])).alerts;
+    expect(again?.accounts[1]).toMatchObject({ canExclude: true });
   });
 
   it("una exclusión vigente con el periodo abierto se puede revertir", () => {
@@ -170,12 +189,12 @@ describe("alertsView", () => {
 
   it("lecciones imposibles, revisada, decidida como fraude y con el periodo cerrado", () => {
     const [card] = alertsView(read([IMPOSSIBLE])).alerts;
-    expect(card).toMatchObject({ open: false, status: text.reviewed, canDecideFraud: false, closed: text.closed, accountsTitle: text.accountTitle, moreAccounts: null });
+    expect(card).toMatchObject({ open: false, status: text.reviewed, canDecideFraud: false, fraudWaits: false, closed: text.closed, accountsTitle: text.accountTitle, moreAccounts: null });
     expect(card?.facts).toEqual([t(text.impossibleNeeded, { metric: spanText(7_200), threshold: spanText(3_600) })]);
     expect(card?.reviewed).toBe(t(text.reviewedBy, { date: "20 de octubre de 2026", name: text.someone }));
     expect(card?.note).toBe(t(text.note, { note: "Lo revisé." }));
     expect(card?.fraud).toBe(`${text.fraudDecided} ${t(text.evidence, { evidence: "Cinco lecciones en una hora." })}`);
-    expect(card?.reasons.map((reason) => reason.value)).toEqual(["technical_error", "test_account", "other", "fraud"]);
+    expect(card?.accounts[0]?.reasons.map((reason) => reason.value)).toEqual(["technical_error", "test_account", "other", "fraud"]);
     expect(card?.accounts[0]).toMatchObject({ canExclude: false });
     expect(card?.accounts[0]?.facts).toEqual([
       { label: text.columns.age, value: text.ages.under30 },
@@ -195,14 +214,18 @@ describe("alertsView", () => {
   });
 
   it("decidida como «no es fraude», todavía se puede decidir que sí: la base solo impide deshacer el fraude", () => {
-    const [card] = alertsView(read([{ ...JUMP, isFraud: false }])).alerts;
-    expect(card).toMatchObject({ canDecideFraud: true, fraud: null });
-    expect(card?.reasons.map((reason) => reason.value)).not.toContain("fraud");
+    const [card] = alertsView(read([{ ...JUMP, status: "reviewed", isFraud: false }])).alerts;
+    expect(card).toMatchObject({ canDecideFraud: true, fraudWaits: false, fraud: null });
+    expect(card?.accounts[0]?.reasons.map((reason) => reason.value)).not.toContain("fraud");
   });
 
   it("la cifra de hoy de lecciones imposibles, si se pudo recalcular", () => {
     const [card] = alertsView(read([{ ...IMPOSSIBLE, today: 9_000 }])).alerts;
     expect(card?.facts.at(-1)).toBe(t(text.impossibleToday, { today: spanText(9_000) }));
+  });
+
+  it("los topes de los textos son los de la base", () => {
+    expect(alertsView(read([JUMP])).limits).toEqual({ note: NOTE_MAX, reason: REASON_MAX });
   });
 
   it("sin código reciente, y con alertas que no caben", () => {

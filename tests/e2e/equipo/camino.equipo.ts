@@ -1573,7 +1573,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await card.getByLabel("Motivo").selectOption({ label: "Fraude" });
     await card.getByLabel("Por qué, escrito").fill("Decidida como fraude.");
     await card.getByRole("button", { name: "Sí, excluir" }).click();
-    await expect(page.getByText(/^Cuenta excluida\./)).toBeVisible();
+    await expect(page.getByText(/Cuenta excluida\. Sale del reparto/)).toBeVisible();
     expect(await exclusionsOf(flagged.id)).toEqual([{ live: true, reason: "fraud" }]);
 
     await card.getByRole("button", { name: /^Revertir/ }).click();
@@ -1597,7 +1597,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await asked.getByLabel("Motivo").selectOption({ label: "Cuenta de prueba" });
       await asked.getByLabel("Por qué, escrito").fill("Sin JavaScript.");
       await asked.getByRole("button", { name: "Sí, excluir" }).click();
-      await expect(page.getByText(/^Cuenta excluida\./)).toBeVisible();
+      await expect(page.getByText(/Cuenta excluida\. Sale del reparto/)).toBeVisible();
       expect(await exclusionsOf(flagged.id)).toEqual([
         { live: false, reason: "fraud" },
         { live: true, reason: "test_account" },

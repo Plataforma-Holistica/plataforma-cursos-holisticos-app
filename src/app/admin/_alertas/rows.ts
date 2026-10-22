@@ -11,6 +11,7 @@ import type {
   FinanceAlerts,
   ShareTier,
 } from "@/services/anomalies/anomalies";
+import { NOTE_MAX, REASON_MAX } from "@/services/anomalies/anomalies";
 
 import { alertsButton } from "./outcomes";
 
@@ -32,8 +33,13 @@ export interface AccountRow {
   title: string;
   facts: Fact[];
   excluded: boolean;
-  /** Se ofrece excluirla: el periodo sigue abierto y no está excluida ya. */
+  /**
+   * Se ofrece excluirla: el periodo sigue abierto, y no está excluida ya o, con la alerta decidida
+   * como fraude, lo está por otro motivo (la base acepta excluir por fraude encima de otra causa).
+   */
   canExclude: boolean;
+  /** Los motivos que se ofrecen: fraude solo con la alerta decidida como fraude, y solo fraude si ya está excluida. */
+  reasons: { value: ExclusionReason; label: string }[];
   confirmTitle: string;
   /** Qué pasa al excluirla: sale su consumo del periodo de la alerta. */
   confirmBody: string;
@@ -66,16 +72,16 @@ export interface AlertCard {
   note: string | null;
   /** Ya se decidió que es fraude, con su evidencia. */
   fraud: string | null;
-  /** Se ofrece decidir fraude: todavía no se decidió. */
+  /** Se ofrece decidir fraude: la alerta ya está revisada y todavía no se decidió (la base pide la nota de la revisión antes). */
   canDecideFraud: boolean;
+  /** Todavía no se decidió, pero la alerta sigue abierta: se dice que primero se revisa. */
+  fraudWaits: boolean;
   /** El periodo ya no recibe latidos: se dice, y no se ofrece excluir ni revertir. */
   closed: string | null;
   accountsTitle: string;
   accounts: AccountRow[];
   moreAccounts: string | null;
   exclusions: ExclusionRow[];
-  /** Los motivos que se ofrecen al excluir: fraude, solo con la alerta decidida como fraude. */
-  reasons: { value: ExclusionReason; label: string }[];
   buttons: { review: string; askFraud: string; fraud: string };
 }
 
@@ -85,6 +91,8 @@ export interface AlertsView {
   alerts: AlertCard[];
   /** Cuántas hay que no caben, en palabras; nulo si caben todas. */
   more: string | null;
+  /** Los topes de los textos, los de la base: el campo no deja escribir más. */
+  limits: { note: number; reason: number };
 }
 
 // Lo que dice cada valor de la base. Escritas enteras: un valor nuevo no compila sin su texto.
@@ -182,13 +190,20 @@ function accountFacts(row: AlertAccount): Fact[] {
   return facts;
 }
 
+const reasonsOf = (codes: readonly ExclusionReason[]) => codes.map((value) => ({ value, label: REASON_LABELS[value] }));
+
 function accountRow(alert: FinanceAlert, row: AlertAccount): AccountRow {
+  const fraud = alert.isFraud === true;
+  // Excluida por esta alerta con fraude ya no se excluye otra vez; por otro motivo, sí, por fraude.
+  const byFraud = alert.exclusions.some((each) => each.account === row.account && each.revokedAt === null && each.reasonCode === "fraud");
+  const codes = (Object.keys(REASON_LABELS) as ExclusionReason[]).filter((reason) => (row.excluded ? reason === "fraud" : reason !== "fraud" || fraud));
   return {
     account: row.account,
     title: t(text.account, { account: row.account }),
     facts: accountFacts(row),
     excluded: row.excluded,
-    canExclude: alert.canExclude && !row.excluded,
+    canExclude: alert.canExclude && (!row.excluded || (fraud && !byFraud)),
+    reasons: reasonsOf(codes),
     confirmTitle: t(text.confirmExcludeTitle, { account: row.account }),
     confirmBody: t(text.confirmExcludeBody, { period: periodText(alert.period) }),
     buttons: { ask: alertsButton.askExclusion(alert.id, row.account), confirm: alertsButton.exclude(alert.id, row.account) },
@@ -231,15 +246,13 @@ function alertCard(alert: FinanceAlert): AlertCard {
       open || alert.reviewedAt === null ? null : t(text.reviewedBy, { date: longDate(alert.reviewedAt), name: alert.reviewedByName ?? text.someone }),
     note: alert.reviewNote === null ? null : t(text.note, { note: alert.reviewNote }),
     fraud: alert.isFraud === true ? (alert.evidence === null ? text.fraudDecided : `${text.fraudDecided} ${t(text.evidence, { evidence: alert.evidence })}`) : null,
-    canDecideFraud: alert.isFraud !== true,
+    canDecideFraud: !open && alert.isFraud !== true,
+    fraudWaits: open && alert.isFraud !== true,
     closed: alert.canExclude ? null : text.closed,
     accountsTitle: alert.kind === "impossible_completion" ? text.accountTitle : text.accountsTitle,
     accounts: alert.accounts.map((row) => accountRow(alert, row)),
     moreAccounts: alert.moreAccounts > 0 ? t(plural(alert.moreAccounts, text.moreAccounts), { count: COUNT.format(alert.moreAccounts) }) : null,
     exclusions: alert.exclusions.map((row) => exclusionRow(alert, row)),
-    reasons: (Object.keys(REASON_LABELS) as ExclusionReason[])
-      .filter((reason) => reason !== "fraud" || alert.isFraud === true)
-      .map((value) => ({ value, label: REASON_LABELS[value] })),
     buttons: { review: alertsButton.review(alert.id), askFraud: alertsButton.askFraud(alert.id), fraud: alertsButton.fraud(alert.id) },
   };
 }
@@ -250,5 +263,6 @@ export function alertsView(read: FinanceAlerts): AlertsView {
     canChange: read.freshCode,
     alerts: read.alerts.map(alertCard),
     more: hidden > 0 ? t(plural(hidden, text.moreAlerts), { count: COUNT.format(hidden) }) : null,
+    limits: { note: NOTE_MAX, reason: REASON_MAX },
   };
 }

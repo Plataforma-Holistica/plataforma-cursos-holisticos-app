@@ -146,6 +146,9 @@ describe("las alertas y las decisiones de finanzas, contra la base", () => {
       const served = JSON.stringify(first);
       for (const secret of [student.id, student.email, "Alumna Señalada"]) expect(served).not.toContain(secret);
 
+      // Abierta, decidir fraude no pasa: la base pide antes la nota de la revisión. Por eso la
+      // pantalla solo lo ofrece con la alerta revisada.
+      expect(await service.decideFraud(jar, { alert, evidence: "Tres lecciones en diez segundos." })).toEqual({ kind: "answered", answer: "malformed" });
       expect(await service.reviewAlert(jar, { alert, note: "Lo revisé con el consolidado." })).toEqual({ kind: "answered", answer: "reviewed" });
       expect(await service.reviewAlert(jar, { alert, note: "Otra vez." })).toEqual({ kind: "answered", answer: "already_reviewed" });
       // Sin fraude decidido, excluir por fraude no pasa.

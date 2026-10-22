@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => {
     excludeAccount: logged("excludeAccount", unavailable),
     revokeExclusion: logged("revokeExclusion", unavailable),
     leaveNotice: logged("leaveNotice", () => undefined),
+    // Se borra siempre, también al preguntar: no se anota en el orden de lo que se llamó.
+    clearNotice: vi.fn(),
     refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
       calls.order.push("redirect");
@@ -38,7 +40,7 @@ vi.mock("@/services/anomalies/anomalies", () => ({
   revokeExclusion: mocks.revokeExclusion,
 }));
 vi.mock("@/services/account/account", () => ({ signOut: vi.fn(), forgetBrowserProofs: vi.fn() }));
-vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
+vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice, clearNotice: mocks.clearNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
@@ -89,6 +91,9 @@ describe("alertsAction: los primeros pasos no llaman a nadie", () => {
       confirming: { step: "revoke", alert: ALERT, exclusion: EXCLUSION },
     });
     expect(calls.order).toEqual([]);
+    // El aviso con que se llegó ya se leyó: no vuelve a salir junto a la pregunta.
+    expect(mocks.clearNotice).toHaveBeenCalledTimes(3);
+    expect(mocks.clearNotice).toHaveBeenCalledWith(jar);
   });
 
   it("confirmar sin lo escrito vuelve a preguntar, con lo que falta y lo que sí se escribió", async () => {
@@ -155,7 +160,7 @@ describe("alertsAction: las decisiones", () => {
     once("excludeAccount", { kind: "answered", answer: "needs_fresh_code" });
     expect(
       await alertsAction(IDLE, pressed(alertsButton.exclude(ALERT, ACCOUNT), { reason_code: "other", reason: "Un motivo." })),
-    ).toEqual({ kind: "failed", reason: "needs_code", alert: ALERT, drafts: { ...NO_DRAFTS, reason: "Un motivo.", reasonCode: "other" }, attempt: 1 });
+    ).toEqual({ kind: "failed", reason: "needs_code", step: "exclude", alert: ALERT, drafts: { ...NO_DRAFTS, reason: "Un motivo.", reasonCode: "other" }, attempt: 1 });
     expect(calls.order).toEqual(["excludeAccount", "refresh"]);
   });
 

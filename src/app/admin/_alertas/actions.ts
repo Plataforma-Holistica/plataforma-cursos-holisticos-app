@@ -6,6 +6,7 @@ import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { checkCode, readGiveCodeForm } from "@/app/(cuenta)/entrar/segundo-factor/outcomes";
 import { cookieJar } from "@/app/_lib/request-context";
+import { clearNotice } from "@/services/account/notice";
 import { decideFraud, excludeAccount, giveFinanceCode, reviewAlert, revokeExclusion } from "@/services/anomalies/anomalies";
 
 import {
@@ -54,10 +55,12 @@ export async function alertsAction(previous: AlertsState, form: FormData): Promi
   const request = readAlertsForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
+  const jar = await cookieJar();
+  // El aviso con el que se llegó ya se leyó: no vuelve a salir junto a otra respuesta.
+  clearNotice(jar);
   const asked = askedBy(request);
   if (asked !== null) return { kind: "confirming", ...asked, drafts: request.drafts, attempt };
 
-  const jar = await cookieJar();
   let outcome: AlertsOutcome;
   switch (request.step) {
     case "review":
@@ -85,5 +88,5 @@ export async function alertsAction(previous: AlertsState, form: FormData): Promi
   }
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
-  return { kind: "failed", reason: outcome.reason, alert: request.alert, drafts: request.drafts, attempt };
+  return { kind: "failed", reason: outcome.reason, step: request.step, alert: request.alert, drafts: request.drafts, attempt };
 }

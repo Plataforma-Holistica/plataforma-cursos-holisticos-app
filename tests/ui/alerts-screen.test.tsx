@@ -75,6 +75,8 @@ const readOf = (over: Partial<FinanceAlerts> = {}, alert: Partial<FinanceAlert> 
 const show = (read: FinanceAlerts = readOf()) => ({ user: userEvent.setup(), ...render(<AlertsScreen view={alertsView(read)} />) });
 const formOf = (call = 0) => Object.fromEntries(actions.alertsAction.mock.calls[call]?.[1] as FormData);
 const card = () => screen.getByRole("article", { name: t(text.kinds.teacherPointsJump) });
+/** Revisada: decidir fraude solo se ofrece así (la base pide la nota de la revisión antes). */
+const REVIEWED: Partial<FinanceAlert> = { status: "reviewed", reviewedAt: "2026-11-03T18:00:00Z", reviewedByName: "Beto", reviewNote: "Lo revisé." };
 
 describe("en reposo", () => {
   it("cada alerta con sus cifras, sus cuentas por huella y sus exclusiones, sin reglas rotas", async () => {
@@ -86,7 +88,9 @@ describe("en reposo", () => {
     expect(alert.getByText(t(text.account, { account: ACCOUNT }), { selector: "p" })).toBeVisible();
     expect(alert.getByText(text.excluded)).toBeVisible();
     expect(alert.getByRole("button", { name: text.markReviewed })).toBeVisible();
-    expect(alert.getByRole("button", { name: text.decideFraud })).toBeVisible();
+    // Abierta: decidir fraude espera a la revisión, y lo dice.
+    expect(alert.queryByRole("button", { name: text.decideFraud })).not.toBeInTheDocument();
+    expect(alert.getByText(text.fraudAfterReview)).toBeVisible();
     // La cuenta ya excluida no se ofrece otra vez; su exclusión vigente, revertir sí.
     expect(alert.getAllByRole("button", { name: new RegExp(`^${text.exclude} `) })).toHaveLength(1);
     expect(alert.getByRole("button", { name: `${text.exclude} ${t(text.account, { account: ACCOUNT })}` })).toBeVisible();
@@ -140,7 +144,7 @@ describe("las decisiones", () => {
   });
 
   it("si revisar falla, lo escrito vuelve a su campo y lo que pasó se dice arriba", async () => {
-    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "unknown", alert: ALERT, drafts: { note: "La revisé." }, attempt: 1 });
+    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "unknown", step: "review", alert: ALERT, drafts: { note: "La revisé." }, attempt: 1 });
     const { user } = show();
     await user.click(within(card()).getByRole("button", { name: text.markReviewed }));
     expect(await screen.findByText(text.unknown)).toBeVisible();
@@ -151,7 +155,7 @@ describe("las decisiones", () => {
     const confirming: AlertsState = { kind: "confirming", confirming: { step: "fraud", alert: ALERT }, drafts: {}, problem: null, attempt: 1 };
     let release: (value: unknown) => void = () => undefined;
     actions.alertsAction.mockResolvedValueOnce(confirming).mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
-    const { user } = show();
+    const { user } = show(readOf({}, REVIEWED));
     await user.click(within(card()).getByRole("button", { name: text.decideFraud }));
     expect(formOf(0)).toEqual({ do: `ask_fraud:${ALERT}` });
     const question = await screen.findByText(text.confirmFraudTitle);
@@ -167,7 +171,7 @@ describe("las decisiones", () => {
     const asked: AlertsState = { kind: "confirming", confirming: { step: "fraud", alert: ALERT }, drafts: {}, problem: null, attempt: 1 };
     const again: AlertsState = { ...asked, drafts: { evidence: "  " }, problem: "missing_evidence", attempt: 2 };
     actions.alertsAction.mockResolvedValueOnce(asked).mockResolvedValueOnce(again);
-    const { user } = show();
+    const { user } = show(readOf({}, REVIEWED));
     await user.click(within(card()).getByRole("button", { name: text.decideFraud }));
     await user.click(await screen.findByRole("button", { name: text.confirmFraud }));
     await waitFor(() => expect(screen.getByLabelText(text.evidenceLabel)).toHaveAccessibleDescription(text.missingEvidence));
@@ -233,7 +237,7 @@ describe("las decisiones", () => {
     actions.alertsAction
       .mockResolvedValueOnce({ kind: "confirming", confirming: { step: "fraud", alert: ALERT }, drafts: {}, problem: null, attempt: 1 })
       .mockResolvedValueOnce({ kind: "idle" });
-    const { user } = show();
+    const { user } = show(readOf({}, REVIEWED));
     await user.click(within(card()).getByRole("button", { name: text.decideFraud }));
     await user.click(await screen.findByRole("button", { name: text.cancel }));
     expect(formOf(1)).toEqual({ do: "cancel", evidence: "" });
@@ -241,18 +245,55 @@ describe("las decisiones", () => {
   });
 
   it("si la confirmación se cerró sin hacerse, lo escrito se dice con el resultado", async () => {
-    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "needs_fraud_decision", alert: ALERT, drafts: { reason: "Once cuentas.", reasonCode: "fraud" }, attempt: 1 });
+    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "needs_fraud_decision", step: "exclude", alert: ALERT, drafts: { reason: "Once cuentas.", reasonCode: "fraud" }, attempt: 1 });
     const { user } = show();
     await user.click(within(card()).getByRole("button", { name: text.markReviewed }));
     expect(await screen.findByText(`${text.needsFraudDecision} ${t(text.written, { text: "Once cuentas." })}`)).toBeVisible();
   });
 
   it("«tu código ya no es reciente» deja de decirse en cuanto la página lee uno reciente", async () => {
-    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "needs_code", alert: ALERT, drafts: {}, attempt: 1 });
+    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "needs_code", step: "review", alert: ALERT, drafts: {}, attempt: 1 });
     const { user } = show();
     await user.click(within(card()).getByRole("button", { name: text.markReviewed }));
     await act(async () => undefined);
     expect(screen.queryByText(text.needsCode)).not.toBeInTheDocument();
+  });
+
+  it("la nota que no se envió no se borra porque falle otra decisión de la misma alerta", async () => {
+    actions.alertsAction
+      .mockResolvedValueOnce({ kind: "failed", reason: "closed", step: "exclude", alert: ALERT, drafts: {}, attempt: 1 });
+    const { user } = show();
+    await user.type(within(card()).getByLabelText(text.noteLabel), "A medio escribir.");
+    await user.click(within(card()).getByRole("button", { name: `${text.exclude} ${t(text.account, { account: ACCOUNT })}` }));
+    expect(await screen.findByText(text.closedNow)).toBeVisible();
+    expect(within(card()).getByLabelText(text.noteLabel)).toHaveValue("A medio escribir.");
+  });
+
+  it("la nota que volvió porque falló revisar se queda aunque después se pregunte otra cosa", async () => {
+    actions.alertsAction
+      .mockResolvedValueOnce({ kind: "failed", reason: "unknown", step: "review", alert: ALERT, drafts: { note: "La revisé." }, attempt: 1 })
+      .mockResolvedValueOnce({ kind: "confirming", confirming: { step: "exclude", alert: ALERT, account: ACCOUNT }, drafts: {}, problem: null, attempt: 2 });
+    const { user } = show();
+    await user.click(within(card()).getByRole("button", { name: text.markReviewed }));
+    await waitFor(() => expect(within(card()).getByLabelText(text.noteLabel)).toHaveValue("La revisé."));
+    await user.click(within(card()).getByRole("button", { name: `${text.exclude} ${t(text.account, { account: ACCOUNT })}` }));
+    expect(await screen.findByText(t(text.confirmExcludeTitle, { account: ACCOUNT }))).toBeVisible();
+    expect(within(card()).getByLabelText(text.noteLabel)).toHaveValue("La revisé.");
+  });
+
+  it("el aviso de lo que salió bien deja de decirse con otra respuesta", async () => {
+    actions.alertsAction.mockResolvedValueOnce({ kind: "failed", reason: "unknown", step: "review", alert: ALERT, drafts: {}, attempt: 1 });
+    const user = userEvent.setup();
+    render(<AlertsScreen view={alertsView(readOf())} done="account_excluded" />);
+    expect(screen.getByText(text.done.accountExcluded)).toBeVisible();
+    await user.click(within(card()).getByRole("button", { name: text.markReviewed }));
+    expect(await screen.findByText(text.unknown)).toBeVisible();
+    expect(screen.queryByText(text.done.accountExcluded)).not.toBeInTheDocument();
+  });
+
+  it("los campos no dejan escribir más que el tope de la base", () => {
+    show();
+    expect(within(card()).getByLabelText(text.noteLabel)).toHaveAttribute("maxlength", String(alertsView(readOf()).limits.note));
   });
 
   it("de vuelta con el aviso de una decisión: lo dice, y toma el foco si quedó sin dueño", async () => {

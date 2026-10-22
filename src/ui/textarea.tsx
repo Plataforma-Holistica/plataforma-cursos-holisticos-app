@@ -23,10 +23,12 @@ export interface TextareaProps {
   /** Lo que la persona ya había escrito: no se pierde al volver con errores. */
   defaultValue?: string;
   rows?: number;
+  /** El tope de lo que se puede escribir: el navegador no deja pasar de ahí, tampoco al pegar. */
+  maxLength?: number;
   readOnly?: boolean;
 }
 
-export function Textarea({ label, name, id, hint, error, optional = false, defaultValue, rows = 4, readOnly }: TextareaProps) {
+export function Textarea({ label, name, id, hint, error, optional = false, defaultValue, rows = 4, maxLength, readOnly }: TextareaProps) {
   const generated = useId();
   const fieldId = id ?? generated;
   const hintId = `${fieldId}-hint`;
@@ -41,6 +43,7 @@ export function Textarea({ label, name, id, hint, error, optional = false, defau
         id={fieldId}
         name={name}
         rows={rows}
+        maxLength={maxLength}
         defaultValue={defaultValue}
         readOnly={readOnly}
         aria-required={optional ? undefined : true}

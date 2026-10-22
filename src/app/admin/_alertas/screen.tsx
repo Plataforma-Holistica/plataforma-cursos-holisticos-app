@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useActionState, useEffect, useRef } from "react";
+import { type RefObject, useActionState, useEffect, useRef, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { admin } from "@/messages/es/admin";
@@ -105,8 +105,15 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
   const { block, answer, spoken } = useAnswerFocus(listPending, attempt, result);
 
   const confirming = list.kind === "confirming" ? list : null;
-  // Lo escrito en la nota de una alerta vuelve a su campo si su envío falló.
-  const failedHere = list.kind === "failed" ? list : null;
+  // La nota de una alerta vuelve a su campo cuando falló revisarla, y se queda ahí con lo que
+  // conteste después otro bloque: se anota la última vez que falló revisar, y solo eso rearma el
+  // campo. Se ajusta al pintar, sin efecto, para que el campo no se arme dos veces.
+  const [noteBack, setNoteBack] = useState<NoteBack | null>(null);
+  if (list.kind === "failed" && list.step === "review" && list.alert !== null && noteBack?.attempt !== list.attempt) {
+    setNoteBack({ alert: list.alert, note: list.drafts.note, attempt: list.attempt });
+  }
+  // El aviso de lo que salió bien deja de decirse en cuanto hay otra respuesta, o una en camino.
+  const showDone = done !== null && list.kind === "idle" && !listPending;
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-10 px-4 py-16 outline-none">
@@ -132,9 +139,9 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
           {text.listTitle}
         </h2>
         {!view.canChange && <p className="text-body-s text-text-2">{text.changeLocked}</p>}
-        {done !== null && (
+        {showDone && (
           <div ref={doneBox} tabIndex={-1} className="outline-none">
-            <InlineAlert tone="success">{DONE[done]}</InlineAlert>
+            <InlineAlert tone="success">{done === null ? null : DONE[done]}</InlineAlert>
           </div>
         )}
         <BlockResult message={result} tone={tone} pending={listPending} pendingText={text.working} answer={answer} spoken={spoken} />
@@ -148,7 +155,8 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
                 alert={alert}
                 canChange={view.canChange}
                 confirming={confirming !== null && confirming.confirming.alert === alert.id ? confirming : null}
-                note={failedHere !== null && failedHere.alert === alert.id ? { drafts: failedHere.drafts, attempt: failedHere.attempt } : null}
+                note={noteBack !== null && noteBack.alert === alert.id ? noteBack : null}
+                limits={view.limits}
                 answer={answer}
                 action={sendList}
                 pending={listPending}
@@ -177,6 +185,13 @@ function focusIsLost(): boolean {
   return document.activeElement === null || document.activeElement === document.body;
 }
 
+/** Lo que se había escrito en la nota de una alerta cuando falló revisarla. */
+interface NoteBack {
+  alert: string;
+  note: string | undefined;
+  attempt: number;
+}
+
 /** Lo que se está preguntando en esta alerta, con lo escrito y lo que falta. */
 interface Asked {
   confirming: Confirming;
@@ -189,15 +204,16 @@ interface AlertProps {
   alert: AlertCard;
   canChange: boolean;
   confirming: Asked | null;
-  /** Lo que se había escrito en la nota, si el último envío fue de esta alerta y falló. */
-  note: { drafts: Drafts; attempt: number } | null;
+  /** Lo que se había escrito en la nota, la última vez que falló revisar esta alerta. */
+  note: NoteBack | null;
+  limits: AlertsView["limits"];
   /** Dónde va el foco cuando llega la pregunta: el botón pulsado desaparece con ella. */
   answer: RefObject<HTMLDivElement | null>;
   action: (form: FormData) => void;
   pending: boolean;
 }
 
-function Alert({ alert, canChange, confirming, note, answer, action, pending }: AlertProps) {
+function Alert({ alert, canChange, confirming, note, limits, answer, action, pending }: AlertProps) {
   const headingId = `alertas-alerta-${alert.id}`;
   const asking = (step: Confirming["step"]) => (confirming !== null && confirming.confirming.step === step ? confirming : null);
   const askingFraud = asking("fraud");
@@ -240,7 +256,8 @@ function Alert({ alert, canChange, confirming, note, answer, action, pending }: 
               label={text.noteLabel}
               name="note"
               hint={text.noteHint}
-              defaultValue={note?.drafts.note}
+              defaultValue={note?.note}
+              maxLength={limits.note}
             />
             <div>
               <Button type="submit" name="do" value={alert.buttons.review} size="md" disabled={pending}>
@@ -264,6 +281,7 @@ function Alert({ alert, canChange, confirming, note, answer, action, pending }: 
                   label={text.evidenceLabel}
                   name="evidence"
                   defaultValue={askingFraud.drafts.evidence}
+                  maxLength={limits.note}
                   error={askingFraud.problem === null ? undefined : PROBLEMS[askingFraud.problem]}
                 />
                 <Confirm value={alert.buttons.fraud} label={text.confirmFraud} pending={pending} />
@@ -277,6 +295,12 @@ function Alert({ alert, canChange, confirming, note, answer, action, pending }: 
             )}
           </form>
         )}
+        {canChange && alert.fraudWaits && (
+          <div className="flex flex-col gap-1">
+            <h4 className="text-body-l font-semibold">{text.fraudTitle}</h4>
+            <p className="text-text-2">{text.fraudAfterReview}</p>
+          </div>
+        )}
 
         {alert.accounts.length > 0 && (
           <section className="flex flex-col gap-3">
@@ -288,7 +312,7 @@ function Alert({ alert, canChange, confirming, note, answer, action, pending }: 
                   key={row.account}
                   row={row}
                   alertId={alert.id}
-                  reasons={alert.reasons}
+                  limit={limits.reason}
                   canChange={canChange}
                   confirming={matches(confirming, row.account) ? confirming : null}
                   answer={answer}
@@ -310,6 +334,7 @@ function Alert({ alert, canChange, confirming, note, answer, action, pending }: 
                   key={row.id}
                   row={row}
                   alertId={alert.id}
+                  limit={limits.reason}
                   canChange={canChange}
                   confirming={matches(confirming, row.id) ? confirming : null}
                   answer={answer}
@@ -349,7 +374,7 @@ function Confirm({ value, label, pending }: { value: string; label: string; pend
 interface AccountProps {
   row: AccountRow;
   alertId: string;
-  reasons: AlertCard["reasons"];
+  limit: number;
   canChange: boolean;
   confirming: Asked | null;
   answer: RefObject<HTMLDivElement | null>;
@@ -357,7 +382,7 @@ interface AccountProps {
   pending: boolean;
 }
 
-function Account({ row, alertId, reasons, canChange, confirming, answer, action, pending }: AccountProps) {
+function Account({ row, alertId, limit, canChange, confirming, answer, action, pending }: AccountProps) {
   const fieldId = `alertas-${alertId}-${row.account}`;
   return (
     <li className="flex flex-col gap-2">
@@ -390,7 +415,7 @@ function Account({ row, alertId, reasons, canChange, confirming, answer, action,
                 label={text.reasonCodeLabel}
                 name="reason_code"
                 prompt={text.reasonPrompt}
-                options={reasons}
+                options={row.reasons}
                 defaultValue={confirming.drafts.reasonCode}
                 error={confirming.problem === null ? undefined : PROBLEMS[confirming.problem]}
               />
@@ -400,6 +425,7 @@ function Account({ row, alertId, reasons, canChange, confirming, answer, action,
                 label={text.reasonLabel}
                 name="reason"
                 defaultValue={confirming.drafts.reason}
+                maxLength={limit}
               />
               <Confirm value={row.buttons.confirm} label={text.confirmExclude} pending={pending} />
             </div>
@@ -421,6 +447,7 @@ function Account({ row, alertId, reasons, canChange, confirming, answer, action,
 interface ExclusionProps {
   row: ExclusionRow;
   alertId: string;
+  limit: number;
   canChange: boolean;
   confirming: Asked | null;
   answer: RefObject<HTMLDivElement | null>;
@@ -428,7 +455,7 @@ interface ExclusionProps {
   pending: boolean;
 }
 
-function Exclusion({ row, alertId, canChange, confirming, answer, action, pending }: ExclusionProps) {
+function Exclusion({ row, alertId, limit, canChange, confirming, answer, action, pending }: ExclusionProps) {
   return (
     <li className="flex flex-col gap-2">
       <p className="text-body-s break-words whitespace-pre-line">{row.summary}</p>
@@ -445,6 +472,7 @@ function Exclusion({ row, alertId, canChange, confirming, answer, action, pendin
                 label={text.revokeReasonLabel}
                 name="reason"
                 defaultValue={confirming.drafts.reason}
+                maxLength={limit}
                 error={confirming.problem === null ? undefined : PROBLEMS[confirming.problem]}
               />
               <Confirm value={row.buttons.confirm} label={text.confirmRevoke} pending={pending} />

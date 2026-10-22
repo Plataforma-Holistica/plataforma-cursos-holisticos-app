@@ -360,6 +360,7 @@ export const admin = defineMessages({
     // Decidir fraude: no se deshace.
     fraudTitle: "Decidir fraude",
     fraudBody: "Solo con la evidencia escrita. Decidirlo no se deshace.",
+    fraudAfterReview: "Para decidir fraude, primero marca la alerta como revisada, con su nota.",
     evidenceLabel: "Evidencia",
     decideFraud: "Decidir que es fraude",
     confirmFraudTitle: "¿Decidir que esta alerta es fraude?",
@@ -385,8 +386,9 @@ export const admin = defineMessages({
     // Lo que ya se excluyó por esta alerta.
     exclusionsTitle: "Exclusiones de esta alerta",
     scopes: { account: "toda la cuenta", session: "una reproducción", interval: "un tramo de una lección" },
-    exclusion: "Cuenta {account}, {scope}. {reason}: {text}. Por {name}, el {date}.",
-    revokedBy: "Revertida el {date} por {name}: {text}.",
+    // Lo escrito por la persona va al final y sin punto agregado: ya trae el suyo, o no lo necesita.
+    exclusion: "Cuenta {account}, {scope}, por {name}, el {date}. {reason}: {text}",
+    revokedBy: "Revertida el {date} por {name}: {text}",
     revoke: "Revertir",
     confirmRevokeTitle: "¿Revertir esta exclusión?",
     confirmRevokeBody: "Su consumo vuelve a contar desde la siguiente consolidación, salvo si la cuenta está suspendida por fraude.",

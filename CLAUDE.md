@@ -1603,9 +1603,19 @@ falla. Veintiuna precisiones que la tabla no dice:
     `account_excluded`, `exclusion_revoked`). Si una confirmación se cierra sin hacerse, lo escrito
     se repite en el mensaje; la nota de la revisión vuelve a su campo. Límite conocido: dar el
     código otra vez redirige, y lo que se había escrito se pierde.
-  - El motivo «fraude» solo se ofrece con la alerta decidida como fraude, y decidirlo sobre una
-    alerta ya revisada no pide otra nota. «Tu código» usa su propio servicio
-    (`giveFinanceCode`), que comprueba lo reciente con la lectura de las alertas.
+  - **Decidir fraude solo se ofrece con la alerta ya revisada:** con la alerta abierta, la base
+    pide la nota de la revisión y contesta `malformed` (lo encontró la revisión del diff); la
+    pantalla dice que primero se revisa. Sobre una revisada no pide otra nota. El motivo «fraude»
+    solo se ofrece con la alerta decidida como fraude, y una cuenta ya excluida por otro motivo se
+    puede excluir encima por fraude (la base lo acepta; solo el mismo motivo es `already_excluded`).
+  - Cada decisión borra el aviso con que se llegó (`clearNotice`), y la pantalla no lo pinta junto
+    a otra respuesta. La nota vuelve a su campo solo cuando falló revisar (el estado `failed` dice
+    qué paso falló), y no se borra con lo que contesten después otros bloques. Los campos llevan
+    el tope de la base (`maxLength`).
+  - Revertir recibe la exclusión, no la alerta: un formulario armado a mano podría revertir una
+    exclusión de otra alerta. No es una escalada (Finanzas puede revertir cualquiera), y se
+    aceptó así. «Tu código» usa su propio servicio (`giveFinanceCode`), que comprueba lo reciente
+    con la lectura de las alertas.
   - `Textarea` y `Select` entraron aquí como componentes base (diseño, sección 5.3), sin contador
     ni lista con búsqueda; están en `/muestra`. Las pruebas: `tests/ui/alerts-screen.test.tsx`,
     `tests/actions/alert-actions.test.ts`, `tests/architecture/anomalies.test.ts`,
