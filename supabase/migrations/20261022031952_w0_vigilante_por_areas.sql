@@ -7,7 +7,8 @@
 -- dominio, y un agregador que las descubre en el catálogo. Agregar reglas es crear un área nueva
 -- (por dominio: `schema_violations_anomalies` para T-208), sin tocar las demás ni el agregador.
 -- Las reglas y sus textos son los de antes, sin cambiar una letra; `supabase/tests/27_vigilante.test.sql`
--- provoca cada una.
+-- provoca cada una. Hay una sola regla nueva, en `base`: un área no la ejecuta nadie de la
+-- aplicación.
 --
 -- Un área es `language sql stable set search_path = ''`, con la firma del vigilante, sin
 -- `security definer` y sin permisos para nadie: la corre el agregador, que sí es definer, con los
@@ -85,6 +86,15 @@ as $$
   from information_schema.role_table_grants g
   where (g.grantee = 'service_role' and g.table_schema in ('public', 'private'))
      or (g.grantee in ('anon', 'authenticated') and g.table_schema = 'private')
+  union all
+  -- Un área del vigilante no la ejecuta nadie de la aplicación: la corre el agregador, como su
+  -- dueño (ola 0). La regla de arriba solo ve lo concedido a PUBLIC.
+  select 'watchdog area executable by ' || r.rolname, n.nspname || '.' || p.proname
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+  cross join (values ('anon'), ('authenticated'), ('service_role'), ('app_service')) as r (rolname)
+  where p.proname like 'schema\_violation%' and p.proname <> 'schema_violations'
+    and pg_catalog.has_function_privilege(r.rolname::name, p.oid, 'EXECUTE')
 $$;
 revoke all on function private.schema_violations_base() from public;
 

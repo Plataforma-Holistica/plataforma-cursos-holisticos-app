@@ -120,6 +120,18 @@ describe("migraciones en orden", () => {
     expect(check("HEAD^1", "HEAD")).toMatchObject({ status: 0 });
   });
 
+  it("al entrar a main con varios commits (una fusión con rebase), contra lo que main tenía antes", () => {
+    const before = git("rev-parse", "main").trim();
+    migration("20261022031952_tres.sql");
+    commit("tres");
+    migration("20261022031952_tres.sql", "select 3;\n");
+    commit("tres, corregida en la misma rama");
+    git("checkout", "-q", "main");
+    git("merge", "-q", "--ff-only", "rama");
+    expect(check(before, "HEAD")).toMatchObject({ status: 0 });
+    expect(check("HEAD^1", "HEAD")).toMatchObject({ status: 1, out: expect.stringContaining("ya estaba") });
+  });
+
   it("sin dos referencias, no corre", () => {
     const run = spawnSync(process.execPath, [SCRIPT, "main"], { cwd: repo, encoding: "utf8" });
     expect(run.status).toBe(2);

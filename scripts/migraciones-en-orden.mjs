@@ -6,8 +6,9 @@
 //   node scripts/migraciones-en-orden.mjs <base> <cabeza>
 //   pnpm db:orden                       # contra origin/main, antes de pedir una fusión
 //
-// En la integración continua corre con `HEAD^1 HEAD`: en una solicitud, HEAD es la fusión de prueba
-// con main y HEAD^1 es main; al entrar a main, HEAD^1 es main de antes.
+// En la integración continua, en una solicitud corre con `HEAD^1 HEAD` (HEAD es la fusión de prueba
+// con main y HEAD^1 es main), y al entrar a main, contra lo que main tenía antes del empuje, que
+// puede traer varios commits.
 //
 // Falla si una migración nueva no tiene la forma `AAAAMMDDHHMMSS_nombre.sql`, si su versión no es
 // posterior a la última de la base, si repite una versión, o si el cambio edita o borra una

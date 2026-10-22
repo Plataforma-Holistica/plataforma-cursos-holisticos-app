@@ -1741,8 +1741,9 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
   (`schema_violations_anomalies` para T-208): misma firma, `language sql stable set search_path =
   ''`, sin `security definer` y con `revoke all … from public`; nunca se reescribe el agregador ni
   un área ajena. Su firma del sistema y sus libros van en su área, con el mismo texto de regla.
-  `supabase/tests/27_vigilante.test.sql` provoca cada regla y prueba la mecánica, y la prueba de
-  cada tarea provoca las suyas. Una excepción nueva a las reglas de `base` (un permiso previsto
+  `supabase/tests/27_vigilante.test.sql` provoca cada regla y prueba la mecánica; la prueba de
+  cada tarea provoca las reglas de su área y exige que el área esté en `private.watchdog_areas()`
+  (si se borrara, el agregador no lo notaría). Una excepción nueva a las reglas de `base` (un permiso previsto
   para una persona con sesión) va en una solicitud corta que solo cambia esa área.
 - **Una persona con sesión casi no escribe.** Lo que depende de una validación va por el
   servidor (`app_service`), que declara en la transacción por quién actúa y con qué

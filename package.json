@@ -34,7 +34,7 @@
     "media:captions-test": "node scripts/media-captions-test.mjs",
     "team:handoff": "node scripts/team-handoff.mjs",
     "db:migration": "supabase migration new",
-    "db:orden": "node scripts/migraciones-en-orden.mjs origin/main HEAD",
+    "db:orden": "git fetch -q origin main && node scripts/migraciones-en-orden.mjs origin/main HEAD",
     "test:db": "supabase test db",
     "prepare": "git config core.hooksPath .githooks"
   },

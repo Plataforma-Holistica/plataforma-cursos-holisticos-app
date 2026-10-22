@@ -9,7 +9,7 @@
 -- que no sirve o que lanza se reporta en vez de tumbar al vigilante.
 begin;
 \ir _ayuda.psql
-select plan(62);
+select plan(64);
 
 -- Los problemas que el vigilante dice de un objeto, ordenados.
 create function pruebas.vigila(p_object text) returns text[]
@@ -244,6 +244,11 @@ select is_empty($$
   where p.prosecdef or not ('search_path=""' = any (coalesce(p.proconfig, '{}')))$$,
   'ni es security definer, y tiene el search_path vacío');
 
+grant execute on function private.schema_violations_team() to authenticated;
+select is(pruebas.vigila('private.schema_violations_team'), array['watchdog area executable by authenticated'],
+  'y el vigilante dice si alguien le concede ejecutar un área');
+revoke execute on function private.schema_violations_team() from authenticated;
+
 set local role app_service;
 select is_empty('select * from private.schema_violations()', 'como el servidor, el vigilante corre y no dice nada');
 select throws_ok('select * from private.schema_violations_base()', '42501', null, 'pero un área sola no la puede llamar');
@@ -288,16 +293,18 @@ drop function private.schema_violations_zz_args(integer);
 drop function private.schema_violations_zz_forma();
 drop procedure private.schema_violations_zz_proc();
 
--- Un área de otro dueño no se ejecuta con los permisos del agregador.
+-- Un área de otro dueño no se ejecuta con los permisos del agregador, aunque cualquiera la pueda
+-- ejecutar (Postgres le da el permiso a PUBLIC al crearla).
 grant create on schema private to app_service;
 set local role app_service;
 create function private.schema_violations_zz_ajena() returns table (problem text, object_name text)
 language sql stable set search_path = '' as $$ select 'ajena'::text, 'ajena'::text $$;
-revoke all on function private.schema_violations_zz_ajena() from public;
 reset role;
-select is(pruebas.vigila('private.schema_violations_zz_ajena'), array['watchdog area not usable: owner'],
+select ok('watchdog area not usable: owner' = any (pruebas.vigila('private.schema_violations_zz_ajena')),
   'un área de otro dueño se dice');
 select ok(not exists (select 1 from private.schema_violations() where problem = 'ajena'), 'y no se ejecuta');
+select ok('function executable by PUBLIC' = any (pruebas.vigila('private.schema_violations_zz_ajena')),
+  'y también que cualquiera la ejecuta');
 drop function private.schema_violations_zz_ajena();
 revoke create on schema private from app_service;
 
