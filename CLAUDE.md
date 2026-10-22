@@ -67,6 +67,8 @@ pnpm db:student [<correo@prueba.test>]   # publica el curso de prueba y deja una
 pnpm db:rollup [--completo]   # corre ahora, en la base local, la consolidación de cada noche (T-207) e imprime las corridas y el consolidado del mes
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
+pnpm db:orden    # que las migraciones de esta rama van después de las de main, y que no toca ninguna de main (la integración continua lo corre también)
+pnpm db:turno [soltar [--forzar]]   # de quién es el turno de la base local; con dos carriles, soltarlo (abajo, «Dos carriles»)
 pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base local
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
 pnpm test:e2e    # extremo a extremo de tests/e2e/ (Playwright): un navegador contra la aplicación compilada y la pila local
@@ -240,6 +242,45 @@ Versiones que no se suben sin revisar:
 - **TypeScript 6.0**: el lint de TypeScript todavía no admite la 7.
 - **ESLint 9**: los plugins que trae `eslint-config-next` fallan con la 10. La 9 ya no
   recibe correcciones, así que se sube en cuanto esos plugins lo permitan.
+
+## Dos carriles
+
+Desde la ola 0 (decisión de Sergio del 2026-10-21) puede haber dos sesiones trabajando en
+paralelo, cada una en su carril y con su copia del repositorio: el carril A en `plataforma/` y
+el B en `plataforma-b/`, un `git worktree` hermano. Cada tarea es una rama corta que entra a
+`main` por su cuenta; la otra trae `main` antes de verificar y antes de pedir la fusión. Lo
+que no se ve leyendo un solo archivo:
+
+- **La base local es una sola, y se turna** (`scripts/db-turno.mjs`). Los guiones que la tocan
+  piden el turno solos (`package.json`): pasa si es de esta copia, si está libre o si venció
+  (ningún proceso que lo pidió sigue vivo y nadie lo usó en 30 minutos; un `pnpm dev` o un
+  extremo a extremo vivos lo retienen), y si es de la otra copia, se niega. `test:db`,
+  `test:int`, los extremo a extremo y los `db:*` que leen la base exigen además que la base
+  tenga exactamente las migraciones de esta copia (las compara con
+  `supabase_migrations.schema_migrations`); si no, piden `pnpm db:reset`. `dev` y `start` solo
+  avisan, y van siempre en el puerto 3000: `next dev` se pasaría solo al 3001, donde los
+  enlaces del Auth local y las cookies de `localhost` apuntan a la otra copia. El candado vive
+  en el directorio común de git; en la integración continua no hace nada. Al terminar de
+  verificar, `pnpm db:turno soltar`.
+- **Migraciones en orden.** Antes de pedir la fusión, `pnpm db:orden`. Si el otro carril
+  fusionó antes una migración más nueva, la tuya se renombra (`git mv`) con la marca que el
+  guion sugiere, y después `db:reset` y `test:db` otra vez. Una migración que ya está en
+  `main` no se renombra ni se edita. `main` exige ramas al día antes de fusionar: al entrar una
+  solicitud, la otra vuelve a correr su integración continua.
+- **Lo que es de un solo carril.** Del A: `private.record_heartbeats`, `merge_progress`, la
+  consolidación (`rollup_*`, `nightly_rollup`, `half_points`, `payout_thresholds`), las corridas
+  (`open_job_run`, `close_job_run`), rehacer el progreso, las particiones, y las áreas del
+  vigilante `watch`, `playback`, `progress`, `rollup` y las que cree. Del B: el área `catalog`,
+  `saved_courses` y las áreas que cree. Congelados mientras haya dos carriles: el agregador del
+  vigilante, `private.watchdog_areas()`, las áreas `base`, `ledgers`, `account` y `team`, y
+  `supabase/tests/_ayuda.psql` (cada carril pone sus ayudantes en su propio archivo de prueba).
+- **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
+  reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
+  de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
+  propio archivo. Números de prueba: el A usa pgTAP del 28 al 34 e integración del 45 al 49; el
+  B, pgTAP del 35 al 39 e integración del 70 al 74. `pnpm-lock.yaml` se rehace con
+  `pnpm install`, nunca a mano. En `../planeacion/` cada carril edita solo la fila y la sección
+  de su tarea.
 
 ## Estructura y capas
 
@@ -1993,7 +2034,8 @@ que la integración continua pase. Lo que sigue depende de lo que toca:
   propuesta.
 
 La protección de `main` no se cambia para dejar pasar una solicitud: eso es reconfigurar
-un proveedor, y se pregunta. `main` no se despliega mientras producción no exista
+un proveedor, y se pregunta. Desde la ola 0, `main` exige además que la rama esté al día antes de
+fusionar (decisión de Sergio del 2026-10-21, para los dos carriles). `main` no se despliega mientras producción no exista
 (`vercel.json`), así que fusionar no publica nada.
 
 Los cuatro ejemplos de `../planeacion/01-prd.md` §6.3 son pruebas automáticas. Si fallan,
