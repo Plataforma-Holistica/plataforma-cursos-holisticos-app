@@ -156,7 +156,7 @@ export async function readFinanceAlerts(tx: Tx): Promise<FinanceAlerts | null> {
 }
 
 /** Revisa, o decide fraude (`private.review_alert()`). Devuelve lo que contestó, sin juzgarlo. */
-export async function askReview(tx: Tx, alertId: string, note: string | null, isFraud: boolean | null, evidence: string | null): Promise<unknown> {
+export async function askAlertReview(tx: Tx, alertId: string, note: string | null, isFraud: boolean | null, evidence: string | null): Promise<unknown> {
   const [row] = await tx.query(
     sql`select private.review_alert(${alertId}::uuid, ${note}::text, ${isFraud}::boolean, ${evidence}::text) ->> 'outcome' as outcome`,
     outcomeRow,
@@ -165,7 +165,7 @@ export async function askReview(tx: Tx, alertId: string, note: string | null, is
 }
 
 /** Excluye una cuenta de una alerta por su huella (`private.exclude_alert_account()`). */
-export async function askExclude(tx: Tx, alertId: string, accountToken: string, reasonCode: ExclusionReason, reason: string): Promise<unknown> {
+export async function askAlertExclusion(tx: Tx, alertId: string, accountToken: string, reasonCode: ExclusionReason, reason: string): Promise<unknown> {
   const [row] = await tx.query(
     sql`select private.exclude_alert_account(${alertId}::uuid, ${accountToken}::text, ${reasonCode}::text, ${reason}::text) ->> 'outcome' as outcome`,
     outcomeRow,
@@ -174,7 +174,7 @@ export async function askExclude(tx: Tx, alertId: string, accountToken: string, 
 }
 
 /** Revierte una exclusión (`private.revoke_exclusion()`). */
-export async function askRevoke(tx: Tx, exclusionId: string, reason: string): Promise<unknown> {
+export async function askExclusionRevocation(tx: Tx, exclusionId: string, reason: string): Promise<unknown> {
   const [row] = await tx.query(sql`select private.revoke_exclusion(${exclusionId}::uuid, ${reason}::text) ->> 'outcome' as outcome`, outcomeRow);
   return row?.outcome ?? null;
 }

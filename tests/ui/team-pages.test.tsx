@@ -36,6 +36,8 @@ vi.mock("@/services/catalog/catalog", () => ({ catalogLists: vi.fn() }));
 vi.mock("@/app/admin/_practicas/actions", () => ({ catalogCodeAction: vi.fn(), practicesAction: vi.fn(), levelsAction: vi.fn() }));
 vi.mock("@/app/admin/_revision/actions", () => ({ reviewCodeAction: vi.fn(), approveAction: vi.fn(), lessonVideoAction: vi.fn() }));
 vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));
+vi.mock("@/app/admin/_alertas/actions", () => ({ alertsCodeAction: vi.fn(), alertsAction: vi.fn() }));
+vi.mock("@/services/anomalies/anomalies", () => ({ anomalyAlerts: vi.fn() }));
 
 import FactorSetupPage from "@/app/(cuenta)/entrar/segundo-factor/configurar/page";
 import SecondFactorPage from "@/app/(cuenta)/entrar/segundo-factor/page";

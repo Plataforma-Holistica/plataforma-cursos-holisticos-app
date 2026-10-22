@@ -1,6 +1,7 @@
 import type { FreshCode } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
+import type { FinanceCode } from "@/services/anomalies/anomalies";
 import type { CatalogCode } from "@/services/catalog/catalog";
 
 // «Tu código» en las secciones de administración que cambian algo con un código reciente:
@@ -30,7 +31,7 @@ export type CodeOutcome = Leave | { kind: "failed"; reason: "wrong_code" | "unav
  * quien la guarda no dejó, se va a esa misma página: decide su guarda, y recargar no reenvía
  * un código.
  */
-export function givenCodeOutcome(result: FreshCode | CatalogCode, page: string): CodeOutcome {
+export function givenCodeOutcome(result: FreshCode | CatalogCode | FinanceCode, page: string): CodeOutcome {
   const toPage: Leave = { kind: "leave", to: page, notice: null };
   switch (result.kind) {
     case "verified":

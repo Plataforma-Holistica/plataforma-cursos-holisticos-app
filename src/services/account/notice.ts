@@ -26,6 +26,11 @@ export const NOTICES = [
   "capability_removed",
   // Un curso quedó aprobado y publicado (T-108): la cola lo dice al volver a pintarse.
   "course_approved",
+  // Las decisiones de finanzas sobre una alerta (T-208): las alertas lo dicen al volver a pintarse.
+  "alert_reviewed",
+  "fraud_decided",
+  "account_excluded",
+  "exclusion_revoked",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 
