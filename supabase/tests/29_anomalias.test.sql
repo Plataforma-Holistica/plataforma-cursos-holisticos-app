@@ -11,7 +11,7 @@
 -- El consolidado se escribe aquí directo, como el dueño: lo que se prueba es la detección.
 begin;
 \ir _ayuda.psql
-select plan(54);
+select plan(58);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-anomalia@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-anomalia@prueba.test');
@@ -84,6 +84,20 @@ begin
   perform pruebas.a_nombre_de(p_actor);
   select private.exclude_consumption('account', p_period, p_profile, null, null, null, null, 'fraud',
                                      'Cuentas creadas para inflar los puntos.', p_alert) into v;
+  perform pruebas.limpiar();
+  return v ->> 'outcome';
+end
+$$;
+create function pruebas.excluye_con(p_actor uuid, p_scope text, p_profile uuid, p_period integer, p_lesson uuid,
+                                    p_reason_code text, p_alert uuid) returns text
+language plpgsql as $$
+declare
+  v jsonb;
+begin
+  perform pruebas.a_nombre_de(p_actor);
+  select private.exclude_consumption(p_scope::public.exclusion_scope, p_period, p_profile, null, p_lesson,
+                                     case when p_scope = 'interval' then 0 end, case when p_scope = 'interval' then 10 end,
+                                     p_reason_code, 'Una prueba.', p_alert) into v;
   perform pruebas.limpiar();
   return v ->> 'outcome';
 end
@@ -186,6 +200,11 @@ select is((select row(round(metric_value), threshold_value)::text
 select is((select details - 'floor' from pruebas.alerta(pruebas.periodo(1), 'teacher_points_jump', pruebas.maestro('anomalia-a'))),
   '{"before": 6, "after": 10, "students_before": 1, "students_after": 2}'::jsonb, 'con las cifras de los dos meses, sin nadie con nombre');
 
+-- Un periodo que ya no recibe latidos no se detecta, aunque tenga lecciones imposibles.
+select is(pruebas.detecta(pruebas.periodo(2), pruebas.inicio(pruebas.periodo(2)) + interval '10 seconds') ->> 'alerts_opened', '0',
+  'fuera de la ventana no se detecta');
+select is((select count(*)::integer from public.anomaly_alerts where period_id = pruebas.periodo(2)), 0, 'ni queda nada de ese periodo');
+
 -- En el mes en curso no se compara, aunque haya un salto: va a medias.
 select pruebas.completas(pruebas.periodo(), p, 'anomalia-c', 3) from unnest(array[pruebas.ana(), pruebas.beto(), pruebas.carla()]) as p;
 select pruebas.detecta(pruebas.periodo(), now());
@@ -254,14 +273,18 @@ select is(pruebas.excluye(pruebas.finanzas(), pruebas.beto(), pruebas.periodo(),
   'not_related', 'no a otra cuenta que la de la alerta');
 select is(pruebas.excluye(pruebas.finanzas(), pruebas.ana(), pruebas.periodo(1), (select id from r where name = 'imposible')),
   'needs_fraud_decision', 'ni en otro periodo que el de la alerta');
+select is(pruebas.excluye_con(pruebas.finanzas(), 'account', pruebas.ana(), pruebas.periodo(), null, 'other', null),
+  'excluded', 'antes, una exclusión de la cuenta por otra causa');
 select is(pruebas.excluye(pruebas.finanzas(), pruebas.ana(), pruebas.periodo(), (select id from r where name = 'imposible')),
-  'excluded', 'a Ana, en su periodo, sí');
+  'excluded', 'que no impide la de fraude: a Ana, en su periodo, sí');
 select is((select anomaly_alert_id from public.consumption_exclusions where reason_code = 'fraud' and profile_id = pruebas.ana()),
   (select id from r where name = 'imposible'), 'ligada a la alerta');
 select is(pruebas.revisa(pruebas.finanzas(), (select id from r where name = 'salto'), 'Dos cuentas nuevas sostienen el salto.', true,
   'Las dos cuentas se crearon el mismo día y solo ven a esta maestra.'), 'reviewed', 'el salto de la maestra A, decidido como fraude');
 select is(pruebas.excluye(pruebas.finanzas(), pruebas.carla(), pruebas.periodo(1), (select id from r where name = 'salto')),
   'not_related', 'del salto, no a quien no vio a esa maestra');
+select is(pruebas.excluye_con(pruebas.finanzas(), 'interval', pruebas.beto(), pruebas.periodo(1), pruebas.leccion('anomalia-c', 'Uno'),
+  'fraud', (select id from r where name = 'salto')), 'not_related', 'del salto, no un tramo de otro maestro');
 select is(pruebas.excluye(pruebas.finanzas(), pruebas.beto(), pruebas.periodo(1), (select id from r where name = 'salto')),
   'excluded', 'a quien sí la vio en ese periodo, sí');
 

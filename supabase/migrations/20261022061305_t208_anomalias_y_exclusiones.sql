@@ -365,7 +365,10 @@ $$;
 --                                    ventana aunque se haya cerrado el día 1)
 --   needs_fraud_decision             por fraude, sin una alerta de ese periodo decidida como fraude
 --   not_related                      por fraude, una cuenta que no provocó esa alerta
---   already_excluded                 ya hay una vigente igual
+--   already_excluded                 ya hay una vigente igual (con el mismo motivo y la misma alerta:
+--                                    una exclusión por otra causa no impide decidir el fraude)
+-- Una reproducción se excluye en los periodos que ya tocó: si sigue viva y cruza de mes después,
+-- lo nuevo no queda excluido (revocar reproducciones por fraude llega con T-307).
 create function private.exclude_consumption(p_scope public.exclusion_scope, p_period public.period_id, p_profile uuid,
                                             p_session uuid, p_lesson uuid, p_from integer, p_to integer,
                                             p_reason_code text, p_reason text, p_alert uuid)
@@ -444,7 +447,12 @@ begin
               exists (select 1 from public.watch_rollup w
                       where w.period_id = v_alert.period_id and w.profile_id = p_profile and w.teacher_id = v_alert.teacher_id)
               or exists (select 1 from public.watch_events e join public.published_lessons l on l.id = e.lesson_id
-                         where e.period_id = v_alert.period_id and e.profile_id = p_profile and l.teacher_id = v_alert.teacher_id)))) then
+                         where e.period_id = v_alert.period_id and e.profile_id = p_profile and l.teacher_id = v_alert.teacher_id))
+            -- Por tramo o por reproducción, solo lo de ese maestro.
+            and (p_scope <> 'interval' or exists (select 1 from public.published_lessons l
+                                                  where l.id = p_lesson and l.teacher_id = v_alert.teacher_id))
+            and (p_scope <> 'session' or exists (select 1 from public.playback_sessions s join public.published_lessons l on l.id = s.lesson_id
+                                                 where s.id = p_session and l.teacher_id = v_alert.teacher_id)))) then
       return '{"outcome": "not_related"}'::jsonb;
     end if;
   end if;
@@ -454,7 +462,8 @@ begin
       select 1 from public.consumption_exclusions x
       where x.period_id = v_period and x.profile_id = p_profile and x.scope = p_scope and x.revoked_at is null
         and x.playback_session_id is not distinct from p_session and x.lesson_id is not distinct from p_lesson
-        and x.from_second is not distinct from p_from and x.to_second is not distinct from p_to);
+        and x.from_second is not distinct from p_from and x.to_second is not distinct from p_to
+        and x.reason_code = p_reason_code and x.anomaly_alert_id is not distinct from p_alert);
     insert into public.consumption_exclusions (period_id, scope, profile_id, playback_session_id, lesson_id, from_second, to_second,
                                                reason_code, reason, anomaly_alert_id, created_by)
     values (v_period, p_scope, p_profile, p_session, p_lesson, p_from, p_to, p_reason_code, v_reason, p_alert, v_actor)

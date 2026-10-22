@@ -10,7 +10,7 @@
 -- En una prueba de base todo corre en una transacción y `now()` no avanza.
 begin;
 \ir _ayuda.psql
-select plan(63);
+select plan(64);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-excluye@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-excluye@prueba.test');
@@ -403,10 +403,17 @@ select throws_ok(format('update public.consumption_exclusions set reason = %L wh
 select throws_ok(format('update public.consumption_exclusions set revoke_reason = %L where id = %L', 'otro', (select id from r where name = 'cuenta')),
   '42501', null, 'ni se cambia una revocación');
 select throws_ok('truncate public.consumption_exclusions cascade', '42501', null, 'ni se vacía');
+-- Una exclusión de un periodo que ya no recibe latidos (escrita a mano por finanzas) no se revierte.
+with x as (
+  insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by)
+  values (pruebas.periodo(2), 'account', pruebas.beto(), 'other', 'de antes', pruebas.finanzas()) returning id)
+insert into r select 'vieja', id from x;
 select pruebas.dueno_a_nombre_de(pruebas.ana());
 select throws_ok(format('insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by) values (%s, %L, %L, %L, %L, %L)',
   pruebas.periodo(), 'account', pruebas.beto(), 'other', 'por fuera', pruebas.ana()), '42501', null, 'ni la escribe quien no pasa la puerta de finanzas');
 select pruebas.limpiar();
+select is(pruebas.revierte(pruebas.finanzas(), (select id from r where name = 'vieja')) ->> 'outcome', 'outside_window',
+  'una exclusión de un periodo que ya no recibe latidos no se revierte');
 
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 

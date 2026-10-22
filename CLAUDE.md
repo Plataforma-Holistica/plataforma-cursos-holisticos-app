@@ -1552,6 +1552,32 @@ falla. Veintiuna precisiones que la tabla no dice:
     cuenta ya no existe, sale. Rehacer no toca las marcas ni los días de práctica. Las pruebas:
     `supabase/tests/26_rehacer_progreso.test.sql` y, el procedimiento de verdad,
     `tests/integration/44-rehacer-progreso.test.ts`, que solo anota cuentas que no existen.
+- **Las exclusiones y las alertas de anomalía** (T-208; RF-404, RF-406, RN-08, RN-17; decisiones
+  de Sergio del 2026-10-21; 05 §5.4 y §8.2). Viven en la base (`t208_anomalias_y_exclusiones`), y
+  se prueban en pgTAP (`28_exclusiones`, `29_anomalias`) y con mutaciones a mano. Lo que no se ve
+  leyendo un solo archivo:
+  - **Una exclusión es una regla, no un borrado** (`public.consumption_exclusions`): por cuenta,
+    por reproducción o por tramo de una lección, con autor y motivo; el latido no se toca.
+    `private.rollup_pair()` la resta en la misma sentencia que lee los tramos, junto con
+    `profiles.suspended_for_fraud` (una cuenta suspendida por fraude no cuenta nada en los
+    periodos abiertos). Crearla, revertirla o cambiar esa marca marca en `rollup_dirty` los pares
+    que cambian (`private.mark_pairs_for()`: salen del libro y del consolidado, para que revertir
+    restaure; una marca que ya estaba se renueva, para que un paso que la leyó antes no la borre).
+  - **Las decisiones son de finanzas** (`exclude_consumption`, `revoke_exclusion`,
+    `review_alert`): `security definer`, solo para `app_service`, con su puerta
+    (`private.finance_change_gate()`: la capacidad y el código reciente), un candado por cuenta y
+    una lista cerrada de respuestas. Excluir por fraude exige una alerta del mismo periodo
+    decidida como fraude, con evidencia, y una cuenta relacionada con ella. Fuera de la ventana
+    del latido no se toca nada (hasta T-601). **La marca `suspended_for_fraud` ya no la escribe
+    el servidor:** la prenderá solo una decisión de fraude de finanzas (T-307), no soporte.
+  - **Las alertas las abre la corrida** (`private.detect_anomalies()`, paso 7 de 8.2), como el
+    sistema y una sola vez por periodo, tipo y sujeto: lecciones imposibles en cada periodo de la
+    ventana (red de seguridad) y el salto de puntos solo en el mes anterior terminado, con el piso
+    `ALERTA_SALTO_MINIMO_MEDIOS_PUNTOS`. Los parámetros se leen solo si hay algo que evaluar. Si
+    falla, la corrida lo anota (`anomalies_failed`) y termina fallida. De una alerta cambia solo su
+    revisión, una vez, y la decisión de fraude, que no se deshace; de una exclusión, solo su
+    revocación. Nadie de la aplicación toca las dos tablas: el vigilante lo exige
+    (`schema_violations_anomalies`).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
