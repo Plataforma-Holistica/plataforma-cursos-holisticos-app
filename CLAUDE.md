@@ -1386,8 +1386,8 @@ falla. Veintiuna precisiones que la tabla no dice:
   - **Si el progreso falla, el libro se queda** (decisión de Sergio): va en su propio bloque de
     excepción dentro del del lote, y contesta `{outcome: 'failed'}`. El par queda en
     `private.progress_rebuilds`, el servicio lo reporta (`progress_unavailable`) y el lote sale de
-    la cola: el progreso se rehace desde `watch_events.qualifies` (pendiente, con T-207, antes de
-    que se purguen las reproducciones). Sin `UMBRAL_COMPLETO_PCT`, o con uno que no es un entero
+    la cola: el progreso se rehace desde `watch_events` cada hora (T-207, abajo), antes de que se
+    purguen las reproducciones. Sin `UMBRAL_COMPLETO_PCT`, o con uno que no es un entero
     de 1 a 10 000, es eso. Una respuesta del progreso con otra forma también cuenta como fallida
     (`records.ts` la lee aparte): no tumba el lote, que ya está en el libro.
   - **Lo atrasado no regresa a nadie.** La cola del navegador manda tarde lo de reproducciones
@@ -1434,7 +1434,7 @@ falla. Veintiuna precisiones que la tabla no dice:
     al abrir la página cambia la fila sin anunciarse. Tres límites aceptados (revisión del diff):
     la nota no trae la posición, así que un lote todo oculto deja la fila como estaba hasta
     recargar (entonces, «A medias»); «Tu avance está guardado» vale también si el progreso falló,
-    porque el libro lo tiene y se rehace con T-207; y si Mux manda un `timeupdate` en 0 antes de
+    porque el libro lo tiene y se rehace (T-207); y si Mux manda un `timeupdate` en 0 antes de
     saltar al segundo de arranque, un PA-34 en ese instante guardaría 0 (se revisa a mano en el
     iPhone). La barra se pinta con los colores del sistema en colores forzados. El inicio
     provisional tiene «Continuar viendo» (`continueWatching`), mínima hasta PA-20, con la barra de
@@ -1491,6 +1491,22 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Hasta producción, que la corrida no corrió o falló solo se ve en `job_runs` (sin aviso en la
     nube). Las pruebas de integración (`tests/integration/43-consolidacion.test.ts`) llaman al
     procedimiento de verdad, con la base sin marcas: se niegan a correr si hay alguna.
+  - **Rehacer el progreso que falló** (segunda solicitud, `t207_rehacer_progreso`). Cada hora, a
+    la media, `pg_cron` llama `private.rebuild_progress()`, otro procedimiento con `commit` (uno
+    por par, con su corrida en `job_runs`, trabajo `progress_rebuild`, sin periodo). Recorre
+    `private.progress_rebuilds` (lo anotado antes de arrancar, lo más viejo primero) y rehace
+    cada par con `private.rebuild_pair()`: toma el candado de la cuenta, el del latido, sin
+    esperar (ocupado, se queda para la hora siguiente), y vuelve a fundir cada reproducción del
+    par con la misma `private.merge_progress()`, en el orden de su tope. Así rehacer da lo mismo
+    que si no hubiera fallado, y dos veces da lo mismo. Exacto en tramos, posición y terminada;
+    aproximado en las horas, porque el libro no guarda el tope de cada lote: el de una
+    reproducción es el menor entre su último lote recibido, su cierre y su último latido más una
+    ventana. Los tramos se leen de los meses que la reproducción pudo tocar, de su arranque a su
+    último latido más una ventana. La anotación se borra solo si su `failed_at` sigue siendo el
+    que leyó la corrida; si vuelve a fallar, se queda con la hora y el código nuevos; si la
+    cuenta ya no existe, sale. Rehacer no toca las marcas ni los días de práctica. Las pruebas:
+    `supabase/tests/26_rehacer_progreso.test.sql` y, el procedimiento de verdad,
+    `tests/integration/44-rehacer-progreso.test.ts`, que solo anota cuentas que no existen.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
