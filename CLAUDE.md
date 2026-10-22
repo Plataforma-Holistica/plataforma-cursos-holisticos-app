@@ -261,7 +261,11 @@ que no se ve leyendo un solo archivo:
   avisan, y van siempre en el puerto 3000: `next dev` se pasaría solo al 3001, donde los
   enlaces del Auth local y las cookies de `localhost` apuntan a la otra copia. El candado vive
   en el directorio común de git; en la integración continua no hace nada. Al terminar de
-  verificar, `pnpm db:turno soltar`.
+  verificar, `pnpm db:turno soltar`. Un turno que no se suelta (Windows reusa los números de
+  proceso) lo suelta la copia dueña, o se borra el candado: `pnpm db:turno` dice dónde está.
+- **La segunda copia se arma una vez:** `git worktree add ../plataforma-b --detach origin/main`
+  desde `plataforma/`, y en ella `pnpm install`, `.env.local` y `supabase/local/test-videos.json`
+  copiados de la primera (git no los trae: no se versionan).
 - **Migraciones en orden.** Antes de pedir la fusión, `pnpm db:orden`. Si el otro carril
   fusionó antes una migración más nueva, la tuya se renombra (`git mv`) con la marca que el
   guion sugiere, y después `db:reset` y `test:db` otra vez. Una migración que ya está en

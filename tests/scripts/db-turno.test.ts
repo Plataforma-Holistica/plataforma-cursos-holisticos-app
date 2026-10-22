@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,7 +18,7 @@ let lock: string;
 /** El entorno sin las marcas de la integración continua: con ellas, el guion no hace nada. */
 function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   // En Windows los nombres no distinguen mayúsculas: se quitan en cualquier forma.
-  const drop = new Set(["ci", "vercel", "vercel_env", "database_url_direct", "npm_lifecycle_event"]);
+  const drop = new Set(["ci", "vercel", "vercel_env", "app_env", "database_url_direct", "npm_lifecycle_event"]);
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !drop.has(key.toLowerCase())));
   return { ...clean, NODE_ENV: process.env.NODE_ENV, npm_lifecycle_event: "test:db", ...extra };
 }
@@ -61,7 +61,8 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe("el turno de la base", () => {
+// Cada caso corre varias veces node y git: en Windows y en la integración continua tarda.
+describe("el turno de la base", { timeout: 30_000 }, () => {
   it("libre, una copia lo toma y lo dice", () => {
     expect(run(a, "estado").out).toContain("libre");
     expect(run(a, "exigir")).toMatchObject({ status: 0 });
@@ -126,8 +127,19 @@ describe("el turno de la base", () => {
   });
 
   it("con --base y sin con qué comparar la base se niega; con --base=aviso solo avisa", () => {
-    expect(run(a, "exigir", "--base")).toMatchObject({ status: 1, out: expect.stringContaining("DATABASE_URL_DIRECT") });
+    expect(run(a, "exigir", "--base")).toMatchObject({ status: 1, out: expect.stringContaining("APP_ENV no es local") });
+    const local = spawnSync(process.execPath, [SCRIPT, "exigir", "--base"], { cwd: a, encoding: "utf8", env: env({ APP_ENV: "local" }) });
+    expect(local.status).toBe(1);
+    expect(`${local.stdout}${local.stderr}`).toContain("falta DATABASE_URL_DIRECT");
     expect(run(a, "exigir", "--base=aviso")).toMatchObject({ status: 0, out: expect.stringContaining("aviso") });
+  });
+
+  it("un mutex huérfano (un corte a media escritura) se recupera en la misma llamada", () => {
+    writeFileSync(`${lock}.mutex`, "");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${lock}.mutex`, old, old);
+    expect(run(a, "exigir")).toMatchObject({ status: 0 });
+    expect(existsSync(`${lock}.mutex`)).toBe(false);
   });
 
   it("un argumento que no conoce se niega", () => {

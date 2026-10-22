@@ -14,6 +14,10 @@
 // que la base tenga exactamente las migraciones de esta copia, y si no, pide `pnpm db:reset`;
 // `--base=aviso` solo avisa (lo usan `dev` y `start`).
 //
+// `exigir --base` toma el turno aunque la base no coincida: quien falla es quien sigue, con su
+// `db:reset`. Si un turno no se suelta (en Windows un número de proceso se puede reusar), la copia
+// dueña lo suelta, o se borra el candado: `pnpm db:turno` dice dónde está.
+//
 // El candado vive en el directorio común de git, que comparten las dos copias y que nunca se
 // versiona. En la integración continua y en Vercel no hace nada: ahí no hay dos copias.
 
@@ -25,7 +29,7 @@ const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const EXPIRES_MS = 30 * 60 * 1000;
 // Un proceso anotado hace más de doce horas ya no cuenta: Windows reusa los números de proceso.
 const PROCESS_MAX_MS = 12 * 60 * 60 * 1000;
-const MUTEX_STALE_MS = 15 * 1000;
+const MUTEX_STALE_MS = 5 * 1000;
 
 function fail(message) {
   console.error(`db:turno: ${message}`);
@@ -58,11 +62,13 @@ function sleep(ms) {
  * no sale del proceso: devuelve un mensaje de error o nada, y el mutex se suelta siempre.
  */
 function withMutex(fn) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  // 200 intentos de 50 ms: más que lo que tarda un mutex huérfano en tenerse por viejo.
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       closeSync(openSync(mutexPath, "wx"));
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      // En Windows, un archivo que se está borrando contesta EPERM o EACCES, y uno abierto, EBUSY.
+      if (!["EEXIST", "EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
       try {
         if (Date.now() - statSync(mutexPath).mtimeMs > MUTEX_STALE_MS) rmSync(mutexPath, { force: true });
       } catch {
@@ -77,7 +83,7 @@ function withMutex(fn) {
       rmSync(mutexPath, { force: true });
     }
   }
-  return `el candado del turno está tomado desde hace rato; si nada lo está usando, borra ${mutexPath}`;
+  return `el candado del turno sigue tomado; vuelve a intentarlo, y si insiste, borra ${mutexPath}`;
 }
 
 /** El estado del candado, o `null` si no se pudo leer o no tiene forma. */
@@ -135,7 +141,9 @@ const UNREADABLE = "el candado del turno no se pudo leer: pnpm db:turno soltar -
 
 /** Las versiones de las migraciones de esta copia contra las que la base dice que aplicó. */
 async function compareBase() {
-  if (existsSync(".env.local")) process.loadEnvFile(".env.local");
+  const envFile = join(copy, ".env.local");
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
+  if (process.env.APP_ENV !== "local") return "APP_ENV no es local: no hay base local que comparar. Mira .env.local.";
   const raw = process.env.DATABASE_URL_DIRECT;
   if (!raw) return "falta DATABASE_URL_DIRECT: no hay con qué comparar la base. Mira .env.example.";
   let direct;
@@ -169,6 +177,7 @@ async function compareBase() {
     await client.connect();
     applied = (await client.query("select version from supabase_migrations.schema_migrations")).rows.map((row) => row.version);
   } catch (error) {
+    if (error?.code === "42P01") return "la base no tiene registro de migraciones: pnpm db:reset.";
     return `no se pudo leer qué migraciones tiene la base (${error?.code ?? "desconocido"}): ¿está arriba? pnpm db:start.`;
   } finally {
     await client.end().catch(() => {});
@@ -195,6 +204,7 @@ if (command === "estado") {
   const now = Date.now();
   if (!state.turno) console.log("db:turno: libre.");
   else console.log(`db:turno: ${same(state.turno.copia, copy) ? "de esta copia" : "de la otra copia"}: ${describe(state.turno, now)}.`);
+  console.log(`db:turno: el candado está en ${lockPath}`);
 } else if (command === "exigir") {
   const base = args[0];
   if (args.length > 1 || (base !== undefined && base !== "--base" && base !== "--base=aviso")) fail("uso: exigir [--base | --base=aviso]");
