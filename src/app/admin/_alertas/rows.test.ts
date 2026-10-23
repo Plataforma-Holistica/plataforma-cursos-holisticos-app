@@ -252,6 +252,10 @@ describe("alertsView", () => {
       t(text.unconsumedAmount, { unconsumed: moneyText(17_148), pool: moneyText(34_296) }),
       t(text.unconsumedStudents, { without: "2", students: "3" }),
     ]);
+    // No señala a nadie: abierta o revisada, no se ofrece decidirla como fraude.
+    expect(card).toMatchObject({ canDecideFraud: false, fraudWaits: false });
+    const [reviewed] = alertsView(read([{ ...unconsumed, status: "reviewed", reviewNote: "Lo revisé.", reviewedAt: "2026-11-02T18:00:00Z" }])).alerts;
+    expect(reviewed).toMatchObject({ open: false, canDecideFraud: false, fraudWaits: false });
     // Sin sus cifras en los detalles, solo la proporción.
     const [bare] = alertsView(read([{ ...unconsumed, details: { pool_cents: "34296", students: 3 } }])).alerts;
     expect(bare?.facts).toEqual([t(text.unconsumedRatio, { metric: percentText(5_000), threshold: percentText(4_000) })]);

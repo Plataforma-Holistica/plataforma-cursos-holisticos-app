@@ -28,7 +28,7 @@
 -- que el cierre (T-602) escriba lo que devuelve sin volver a cruzar la entrada.
 
 -- ---------------------------------------------------------------------------------------
--- Los tipos. En `private`, como las funciones que los usan: nadie de la aplicación los ve.
+-- Los tipos. En `private`, como las funciones que los usan, y sin uso para la aplicación.
 
 create type private.payout_base as (profile_id uuid, base_cents bigint);
 create type private.payout_points as (profile_id uuid, teacher_id uuid, tiebreak_rank bigint, half_points integer);
@@ -44,12 +44,14 @@ create type private.payout_line as (
   base_cents bigint,      -- la base del alumno (en su bote)
   half_points integer     -- sus medios puntos: todos en su bote, los de ese maestro en la parte
 );
+-- Un tipo nuevo nace con uso para PUBLIC, y la aplicación entra al esquema `private`: se le quita.
+revoke usage on type private.payout_base, private.payout_points, private.payout_line_kind, private.payout_line from public;
 
 -- ---------------------------------------------------------------------------------------
 -- RN-07: la única rutina de redondeo. Reparte un monto entre partes con peso: cada una hacia
 -- abajo, y los centavos que sobran uno por uno a las de mayor residuo; en empate, a la de orden
 -- menor. Devuelve las partes en el orden en que llegaron. Un peso cero no entra (quien llama lo
--- deja fuera), y sin partes no devuelve nada.
+-- deja fuera), y un monto positivo sin partes lanza: no se pierde en silencio.
 
 create function private.allocate_largest_remainder(p_total bigint, p_ids uuid[], p_weights bigint[], p_ranks bigint[])
 returns table (id uuid, cents bigint)
@@ -63,6 +65,9 @@ begin
   end if;
   if p_ids is null or p_weights is null or p_ranks is null then
     raise exception 'allocation needs ids, weights and ranks' using errcode = '22023';
+  end if;
+  if p_total > 0 and coalesce(v_n, 0) = 0 then
+    raise exception 'allocation of a positive total needs at least one part' using errcode = '22023';
   end if;
   -- Con arreglos de distinto largo, `rows from` rellena con nulos: los rechaza la revisión de abajo.
   if exists (select 1 from rows from (pg_catalog.unnest(p_ids), pg_catalog.unnest(p_weights), pg_catalog.unnest(p_ranks)) as x (i, w, r) where x.i is null or x.w is null or x.r is null or x.w <= 0)
@@ -89,8 +94,9 @@ $$;
 revoke all on function private.allocate_largest_remainder(bigint, uuid[], bigint[], bigint[]) from public;
 
 -- ---------------------------------------------------------------------------------------
--- RNF-04, la red: las líneas de un reparto cuadran al centavo, o se lanza. Aparte del cálculo para
--- poder probarla con líneas alteradas: un error del código, no de la entrada (XX000).
+-- RNF-04, la red: las líneas de un reparto cuadran al centavo y cada una tiene a quién, o se lanza.
+-- Aparte del cálculo para poder probarla con líneas alteradas: un error del código, no de la
+-- entrada (XX000).
 
 create function private.check_payout_lines(p_carried_in_cents bigint, p_lines private.payout_line[])
 returns void
@@ -109,6 +115,10 @@ begin
     when exists (select 1 from pools where pools.profile_id is null or pools.half_points is null)
       or (select pg_catalog.count(*) from pools) <> (select pg_catalog.count(distinct pools.profile_id) from pools)
       then 'a student pool without its student or repeated'
+    when exists (select 1 from l where l.kind in ('share', 'unconsumed_share') and (l.teacher_id is null or l.tiebreak_rank is null))
+      or exists (select 1 from l where l.kind = 'share' group by l.profile_id, l.teacher_id having pg_catalog.count(*) > 1)
+      or exists (select 1 from l where l.kind = 'unconsumed_share' group by l.teacher_id having pg_catalog.count(*) > 1)
+      then 'a share without its teacher, or repeated'
     when exists (select 1 from l where l.kind = 'share' and not exists (select 1 from pools p where p.profile_id = l.profile_id))
       then 'a share without its student pool'
     when exists (select 1 from pools p
@@ -137,6 +147,7 @@ revoke all on function private.check_payout_lines(bigint, private.payout_line[])
 -- El reparto de un periodo, puro: no lee tablas. Recibe el porcentaje del bote, lo que llegó del
 -- periodo anterior, la base de cada alumno y sus medios puntos con cada maestro; devuelve las
 -- líneas en orden estable (tipo, alumno, orden del maestro), que la huella del cierre necesita.
+-- Un bote que no cabe en un `bigint` (más de 9.2 × 10^18 centavos) lanza 22003 al sumar.
 
 create function private.compute_payout(p_pool_bps integer, p_carried_in_cents bigint,
                                        p_bases private.payout_base[], p_points private.payout_points[])
@@ -430,8 +441,8 @@ revoke all on function private.detect_anomalies(public.period_id, timestamptz) f
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante: el área del reparto (de este carril). Cada función existe (renombrar una no pasa
--- en silencio), nadie de la aplicación la ejecuta, ninguna es `security definer`, todas tienen el
--- `search_path` fijo, y el cálculo, el redondeo y la red no leen tablas.
+-- en silencio), nadie de la aplicación la ejecuta ni usa sus tipos, ninguna es `security definer`,
+-- todas tienen el `search_path` fijo, y el cálculo, el redondeo y la red no leen tablas.
 
 create function private.schema_violations_payout()
 returns table (problem text, object_name text)
@@ -462,5 +473,11 @@ as $$
   select 'payout function not immutable', found.oid::regprocedure::text
   from found
   where found.pure and found.provolatile <> 'i'
+  union all
+  select 'payout type usable by ' || r.rolname, t.type_name
+  from app_roles r
+  cross join (values ('private.payout_base'), ('private.payout_points'), ('private.payout_line_kind'), ('private.payout_line'))
+       as t (type_name)
+  where pg_catalog.has_type_privilege(r.rolname::name, t.type_name, 'USAGE')
 $$;
 revoke all on function private.schema_violations_payout() from public;

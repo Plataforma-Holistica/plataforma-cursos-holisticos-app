@@ -264,8 +264,9 @@ function alertCard(alert: FinanceAlert): AlertCard {
       open || alert.reviewedAt === null ? null : t(text.reviewedBy, { date: longDate(alert.reviewedAt), name: alert.reviewedByName ?? text.someone }),
     note: alert.reviewNote === null ? null : t(text.note, { note: alert.reviewNote }),
     fraud: alert.isFraud === true ? (alert.evidence === null ? text.fraudDecided : `${text.fraudDecided} ${t(text.evidence, { evidence: alert.evidence })}`) : null,
-    canDecideFraud: !open && alert.isFraud !== true,
-    fraudWaits: open && alert.isFraud !== true,
+    // La del bote sin consumo no señala a nadie: se revisa con una nota, no se decide como fraude (03, PA-68).
+    canDecideFraud: !open && alert.isFraud !== true && alert.kind !== "unconsumed_pool_ratio",
+    fraudWaits: open && alert.isFraud !== true && alert.kind !== "unconsumed_pool_ratio",
     closed: alert.canExclude ? null : text.closed,
     accountsTitle: alert.kind === "impossible_completion" ? text.accountTitle : text.accountsTitle,
     accounts: alert.accounts.map((row) => accountRow(alert, row)),

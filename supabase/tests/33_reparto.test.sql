@@ -5,12 +5,12 @@
 -- alerta del bote sin consumo (RF-406). El porcentaje sale de `BOTE_PCT_BASE` hasta T-601.
 --
 -- Los ejemplos del PRD van en octubre de 2026 (el periodo de la semilla y el de 05 §8.7). La
--- alerta mira el mes que terminó, así que esa parte usa periodos relativos a hoy, con sus
--- parámetros escritos aquí como el dueño.
+-- alerta del bote sin consumo, que mira periodos relativos a hoy, está en
+-- `34_reparto_alerta_y_propiedades`.
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(121);
+select plan(127);
 
 -- Alumnos `a…n` y maestros `f…n` de mentira, para el cálculo puro; en la parte de punta a punta
 -- los maestros son de verdad y se nombran en `etiquetas`.
@@ -134,6 +134,11 @@ select is((select array_agg(p.proname::text order by p.proname) from pg_proc p j
              and p.proname in ('allocate_largest_remainder', 'compute_payout', 'check_payout_lines')),
   array['allocate_largest_remainder', 'check_payout_lines', 'compute_payout'],
   'el cálculo, el redondeo y la red son puros: no leen tablas');
+select ok(not exists (
+    select 1 from unnest(array['private.payout_base', 'private.payout_points', 'private.payout_line_kind', 'private.payout_line']) t (name)
+    cross join unnest(array['anon', 'authenticated', 'service_role', 'app_service']) as r (rolname)
+    where has_type_privilege(r.rolname, t.name, 'USAGE')),
+  'ni usa sus tipos');
 
 -- ---------------------------------------------------------------------------------------
 -- RN-07: el mayor residuo, la única rutina de redondeo.
@@ -146,7 +151,8 @@ select is(pruebas.residuo(2, array[1, 2, 3], array[1, 1, 1]::bigint[], array[3, 
 select is(pruebas.residuo(10, array[1, 2], array[1, 2]::bigint[], array[1, 2]::bigint[]), array['m1 3', 'm2 7'],
   'el centavo va al de mayor residuo, no al de orden menor');
 select is(pruebas.residuo(0, array[1, 2], array[1, 2]::bigint[], array[1, 2]::bigint[]), array['m1 0', 'm2 0'], 'cero da ceros');
-select is(pruebas.residuo(5, '{}', '{}', '{}'), '{}', 'sin partes no hay filas');
+select is(pruebas.residuo(0, '{}', '{}', '{}'), '{}', 'cero sin partes: nada');
+select throws_ok($$select pruebas.residuo(5, '{}', '{}', '{}')$$, '22023', null, 'un monto sin partes lanza: no se pierde en silencio');
 select is(pruebas.residuo(9000000000000000000, array[1, 2], array[9000000000000000000, 1]::bigint[], array[1, 2]::bigint[]),
   array['m1 8999999999999999999', 'm2 1'], 'montos que desbordarían un bigint, al centavo');
 select is(pruebas.residuo(1999999999999999999, array[1, 2], array[1000000000000000000, 1000000000000000000]::bigint[], array[1, 2]::bigint[]),
@@ -308,6 +314,15 @@ select throws_ok($$select pruebas.revisa_lineas(0, array[pruebas.linea('student_
                                                          pruebas.linea('carried_over', null, null, 0, null, null)])$$,
   'XX000', null, 'ni un arrastre de 0 junto a un sin consumo, aunque nada esté asignado');
 select throws_ok($$select pruebas.revisa_lineas(null, pruebas.prd())$$, 'XX000', null, 'ni sin decir qué se arrastró');
+-- Cada línea tiene a quién, una vez.
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.prd() || pruebas.linea('unconsumed_share', null, null, 0, null, null))$$,
+  'XX000', null, 'ni una parte sin maestro');
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.altera(pruebas.altera(pruebas.prd(), 'share', 1, -100), 'share', 2, 0)
+                                                   || pruebas.linea('share', 1, 1, 100, null, 0))$$,
+  'XX000', null, 'ni una parte repetida del mismo alumno y maestro');
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.altera(pruebas.prd(), 'unconsumed_share', 1, -100)
+                                                   || pruebas.linea('unconsumed_share', null, 1, 100, null, null))$$,
+  'XX000', null, 'ni dos partes del sin consumo para el mismo maestro');
 
 -- ---------------------------------------------------------------------------------------
 -- El porcentaje del bote, por periodo (`BOTE_PCT_BASE`, hasta los tramos de T-601).
@@ -477,6 +492,10 @@ alter function private.check_payout_lines(bigint, private.payout_line[]) stable;
 select ok(exists (select 1 from private.schema_violations() where problem = 'payout function not immutable'
                   and object_name like 'private.check_payout_lines(%'), 've la red como si leyera tablas');
 alter function private.check_payout_lines(bigint, private.payout_line[]) immutable;
+grant usage on type private.payout_line to authenticated;
+select ok(exists (select 1 from private.schema_violations() where problem = 'payout type usable by authenticated'
+                  and object_name = 'private.payout_line'), 've un tipo del reparto al alcance de quien tiene sesión');
+revoke usage on type private.payout_line from authenticated;
 alter function private.close_input_points(public.period_id) rename to close_input_points_renombrada;
 select ok(exists (select 1 from private.schema_violations() where problem = 'payout function missing'
                   and object_name = 'private.close_input_points'), 've una función del reparto que falta');

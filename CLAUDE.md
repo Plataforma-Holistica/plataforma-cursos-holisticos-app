@@ -1695,9 +1695,15 @@ falla. Veintiuna precisiones que la tabla no dice:
     (decisión de Sergio).
   - **La alerta del bote sin consumo** va al final de `private.detect_anomalies()` en su propio
     bloque: si falla, las otras dos alertas se quedan y la función devuelve `anomalies_failed`.
-    Mira solo el mes que terminó, contra el bote sin lo arrastrado. El vigilante lo exige
-    (`schema_violations_payout`: cada función existe, nadie de la aplicación la ejecuta, ninguna
-    es `security definer`, `search_path` fijo, y las tres puras son `immutable`).
+    Mira solo el mes que terminó, contra el bote sin lo arrastrado. No señala a nadie: PA-68 no
+    ofrece decidirla como fraude.
+  - **El vigilante** (`schema_violations_payout`) exige que cada función del reparto exista, que
+    nadie de la aplicación la ejecute ni use sus tipos, que ninguna sea `security definer`, el
+    `search_path` fijo, y que las tres puras sean `immutable`.
+  - **La entrada es tan buena como el consolidado.** Lo que T-208 quita (una cuenta suspendida
+    por fraude, una exclusión) sale del consolidado cuando la corrida procesa sus marcas: antes,
+    o si su par falló, sus puntos siguen contando. Por eso el cierre (T-602) exige el periodo sin
+    marcas antes de llamar a `payout_for_period()`.
   - Para después: el porcentaje por tramos y lo arrastrado guardado (T-601); escribir lo que
     devuelve el cálculo y congelarlo (T-602); el estimado del maestro (T-408); el bono y el pago
     mínimo (T-603).

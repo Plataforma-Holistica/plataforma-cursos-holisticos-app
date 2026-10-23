@@ -325,7 +325,7 @@ export const admin = defineMessages({
     impossibleToday: "Hoy necesitaría {today}.",
     unconsumedRatio: "Sin consumo al detectarla: {metric} del bote. Umbral: {threshold}.",
     unconsumedAmount: "{unconsumed} sin consumo, de un bote de {pool}.",
-    unconsumedStudents: "Alumnos que no vieron nada: {without} de {students}.",
+    unconsumedStudents: "Alumnos sin consumo que cuente (también los excluidos): {without} de {students}.",
     detected: "Detectada el {date}.",
     hoursMinutes: "{hours} h {minutes} min",
     minutesOnly: "{minutes} min",

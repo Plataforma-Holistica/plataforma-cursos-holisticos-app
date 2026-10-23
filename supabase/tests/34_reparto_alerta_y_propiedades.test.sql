@@ -8,7 +8,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(24);
+select plan(25);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a0000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -66,7 +66,8 @@ select ('c0000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid, pruebas.al(
 from generate_series(11, 14) n;
 
 -- Un mes sin bases no abre nada, ni falla: ni siquiera busca el porcentaje, que en un mes anterior al
--- arranque no existe (aquí, todavía sin los parámetros de abajo).
+-- arranque no existe (aquí, todavía sin los parámetros de abajo). Esto lo prueba de verdad mientras
+-- el mes que terminó sea anterior a 202610; después, la semilla ya trae sus parámetros.
 select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minutes'), '{"alerts_opened": 0}'::jsonb,
   'un mes sin bases no abre nada, ni falla');
 
@@ -96,9 +97,12 @@ select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minu
 select is(array[pruebas.cobra(11, pruebas.inicio(pruebas.periodo(1)) + interval '3 days', 34900),
                 pruebas.cobra(12, pruebas.inicio(pruebas.periodo(1)) + interval '4 days', 34900)],
   array['recorded', 'recorded'], 'dos mensuales: la mitad del bote sin consumo');
+select set_config('app.actor_kind', 'prueba', true);
 select ok((select r ? 'anomalies_failed' and (r ->> 'alerts_opened')::integer = 1
            from private.detect_anomalies(pruebas.periodo(1), pruebas.inicio(pruebas.periodo(1)) + interval '10 seconds') r),
   'sin un umbral que valga, la alerta falla y lo dice, y la de lecciones imposibles sí se abre');
+select is(current_setting('app.actor_kind', true), 'prueba', 'y quien actúa queda como estaba, aunque el bloque fallara');
+select pruebas.como_dueno_sistema();
 select ok(exists (select 1 from public.anomaly_alerts where period_id = pruebas.periodo(1) and kind = 'impossible_completion'
                   and profile_id = pruebas.al(11)), 'la otra alerta quedó');
 select is((pruebas.sin_consumo(pruebas.periodo(1))).id, null, 'la del sin consumo no');
@@ -235,9 +239,9 @@ select cmp_ok((select count(*)::integer from azar a
 select cmp_ok((select count(*)::integer from azar a
                where not exists (select 1 from unnest(a.points) p join unnest(a.bases) b on b.profile_id = p.profile_id)
                  and cardinality(a.bases) > 0), '>', 40, 'y algunos donde nadie con base tuvo puntos');
-select is((select count(*)::integer from azar a, unnest(pruebas.fallas(a.bps, a.carried, a.bases, a.points)) f), 0,
-  'tres mil periodos al azar: ningún invariante falla');
-select is((select array_agg(distinct f) from azar a, unnest(pruebas.fallas(a.bps, a.carried, a.bases, a.points)) f), null,
+create temporary table fallas as select a.i, f from azar a, unnest(pruebas.fallas(a.bps, a.carried, a.bases, a.points)) f;
+select is((select count(*)::integer from fallas), 0, 'tres mil periodos al azar: ningún invariante falla');
+select is((select array_agg(distinct f) from fallas), null,
   'ni uno solo, ni el bote, ni los pares, ni el piso, ni el residuo, ni el arrastre, ni la suma');
 select is((select count(*)::integer from azar a
            where array(select l from private.compute_payout(a.bps, a.carried, a.bases, a.points) l)
