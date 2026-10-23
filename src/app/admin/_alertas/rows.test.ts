@@ -5,7 +5,7 @@ import { t } from "@/messages/format";
 import { EXCLUSION_REASONS, NOTE_MAX, REASON_MAX, type FinanceAlert, type FinanceAlerts } from "@/services/anomalies/anomalies";
 
 import { alertsButton } from "./outcomes";
-import { alertsView, percentText, periodText, REASON_LABELS, spanText } from "./rows";
+import { alertsView, moneyText, percentText, periodText, REASON_LABELS, spanText } from "./rows";
 
 // Lo que PA-68 mínima pinta, ya en palabras: qué se ofrece y qué se dice de cada alerta. Puro.
 
@@ -102,6 +102,12 @@ describe("las cifras en palabras", () => {
     expect(spanText(43_500)).toBe(t(text.hoursMinutes, { hours: "12", minutes: "5" }));
     expect(spanText(2_400)).toBe(t(text.minutesOnly, { minutes: "40" }));
     expect(spanText(-1)).toBe("");
+  });
+
+  it("los centavos, como pesos", () => {
+    expect(moneyText(17_148)).toMatch(/^\$171\.48$/);
+    expect(moneyText(6_368_700)).toMatch(/^\$63,687\.00$/);
+    expect(moneyText(Number.NaN)).toBe("");
   });
 });
 
@@ -222,6 +228,37 @@ describe("alertsView", () => {
   it("la cifra de hoy de lecciones imposibles, si se pudo recalcular", () => {
     const [card] = alertsView(read([{ ...IMPOSSIBLE, today: 9_000 }])).alerts;
     expect(card?.facts.at(-1)).toBe(t(text.impossibleToday, { today: spanText(9_000) }));
+  });
+
+  it("el bote sin consumo: la proporción, los montos y los alumnos, sin señalar a nadie (T-407)", () => {
+    const unconsumed: FinanceAlert = {
+      ...JUMP,
+      id: "a1e70000-0000-4000-8000-000000000011",
+      kind: "unconsumed_pool_ratio",
+      metric: 5_000,
+      threshold: 4_000,
+      today: null,
+      details: { pool_cents: 34_296, assigned_cents: 17_148, unconsumed_cents: 17_148, pool_bps: 6_000, students: 3, students_without_points: 2 },
+      teacherName: null,
+      accounts: [],
+      moreAccounts: 0,
+      exclusions: [],
+    };
+    const [card] = alertsView(read([unconsumed])).alerts;
+    expect(card?.title).toBe(text.kinds.unconsumedPoolRatio);
+    expect(card?.trigger).toBe(text.triggers.unconsumedPoolRatio);
+    expect(card?.facts).toEqual([
+      t(text.unconsumedRatio, { metric: percentText(5_000), threshold: percentText(4_000) }),
+      t(text.unconsumedAmount, { unconsumed: moneyText(17_148), pool: moneyText(34_296) }),
+      t(text.unconsumedStudents, { without: "2", students: "3" }),
+    ]);
+    // No señala a nadie: abierta o revisada, no se ofrece decidirla como fraude.
+    expect(card).toMatchObject({ canDecideFraud: false, fraudWaits: false });
+    const [reviewed] = alertsView(read([{ ...unconsumed, status: "reviewed", reviewNote: "Lo revisé.", reviewedAt: "2026-11-02T18:00:00Z" }])).alerts;
+    expect(reviewed).toMatchObject({ open: false, canDecideFraud: false, fraudWaits: false });
+    // Sin sus cifras en los detalles, solo la proporción.
+    const [bare] = alertsView(read([{ ...unconsumed, details: { pool_cents: "34296", students: 3 } }])).alerts;
+    expect(bare?.facts).toEqual([t(text.unconsumedRatio, { metric: percentText(5_000), threshold: percentText(4_000) })]);
   });
 
   it("los topes de los textos son los de la base", () => {
