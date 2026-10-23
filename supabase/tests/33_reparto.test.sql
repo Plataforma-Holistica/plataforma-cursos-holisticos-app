@@ -10,7 +10,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(110);
+select plan(121);
 
 -- Alumnos `a…n` y maestros `f…n` de mentira, para el cálculo puro; en la parte de punta a punta
 -- los maestros son de verdad y se nombran en `etiquetas`.
@@ -88,6 +88,11 @@ as $$ select array(select l from unnest(p_lines) with ordinality as x (kind, pro
                    where x.o <> (select min(o2) from unnest(p_lines) with ordinality as z (kind, profile_id, teacher_id, tiebreak_rank, cents, base_cents, half_points, o2)
                                  where z.kind::text = p_kind)
                    order by x.o) $$;
+-- Una línea hecha a mano.
+create function pruebas.linea(p_kind text, p_n integer, p_t integer, p_cents bigint, p_base bigint, p_half integer)
+returns private.payout_line language sql immutable
+as $$ select row(p_kind, case when p_n is not null then pruebas.al(p_n) end, case when p_t is not null then pruebas.ma(p_t) end,
+                 p_t, p_cents, p_base, p_half)::private.payout_line $$;
 create function pruebas.revisa_lineas(p_carried bigint, p_lines private.payout_line[]) returns void language sql stable
 as $$ select private.check_payout_lines(p_carried, p_lines) $$;
 
@@ -144,6 +149,9 @@ select is(pruebas.residuo(0, array[1, 2], array[1, 2]::bigint[], array[1, 2]::bi
 select is(pruebas.residuo(5, '{}', '{}', '{}'), '{}', 'sin partes no hay filas');
 select is(pruebas.residuo(9000000000000000000, array[1, 2], array[9000000000000000000, 1]::bigint[], array[1, 2]::bigint[]),
   array['m1 8999999999999999999', 'm2 1'], 'montos que desbordarían un bigint, al centavo');
+select is(pruebas.residuo(1999999999999999999, array[1, 2], array[1000000000000000000, 1000000000000000000]::bigint[], array[1, 2]::bigint[]),
+  array['m1 1000000000000000000', 'm2 999999999999999999'],
+  'en división entera: el piso de una división en numeric aquí daría 10^18 a los dos (se redondea antes)');
 select throws_ok($$select pruebas.residuo(-1, array[1], array[1]::bigint[], array[1]::bigint[])$$, '22023', null, 'un total negativo no');
 select throws_ok($$select pruebas.residuo(null, array[1], array[1]::bigint[], array[1]::bigint[])$$, '22023', null, 'ni nulo');
 select throws_ok($$select pruebas.residuo(5, array[1, 2], array[1]::bigint[], array[1, 2]::bigint[])$$, '22023', null,
@@ -257,10 +265,14 @@ select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5)], array
   '22023', null, 'ni sin orden');
 select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5)], array[pruebas.p(1, 1, 2), pruebas.p(1, 1, 3)])$$, '22023', null,
   'un par alumno y maestro una vez');
+select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5)], array[pruebas.p(9, 1, 2), pruebas.p(9, 1, 3)])$$, '22023', null,
+  'también el de un alumno sin base, aunque sus puntos no cuenten');
 select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5), pruebas.b(2, 5)], array[pruebas.p(1, 1, 2, 1), pruebas.p(2, 1, 2, 7)])$$,
   '22023', null, 'un maestro con un solo orden');
 select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5)], array[pruebas.p(1, 1, 2, 4), pruebas.p(1, 2, 2, 4)])$$,
   '22023', null, 'y un orden por maestro');
+select throws_ok($$select pruebas.reparto(6000, 0, array[pruebas.b(1, 5)], array[pruebas.p(1, 1, 2, 4), pruebas.p(9, 2, 2, 4)])$$,
+  '22023', null, 'también si uno de los dos solo lo vio un alumno sin base');
 
 -- ---------------------------------------------------------------------------------------
 -- La red (RNF-04): lo que no cuadra no sale.
@@ -282,6 +294,20 @@ select throws_ok($$select pruebas.revisa_lineas(0, pruebas.prd() || row('carried
   'XX000', null, 'ni un arrastre junto al sin consumo');
 select throws_ok($$select pruebas.revisa_lineas(0, pruebas.altera(pruebas.altera(pruebas.prd(), 'unconsumed_share', 1, -6596), 'unconsumed_share', 2, 6596))$$,
   'XX000', null, 'ni un monto negativo, aunque la suma cuadre');
+-- Lo que no mueve la suma también se rechaza.
+select throws_ok($$select pruebas.revisa_lineas(0, array[pruebas.linea('student_pool', 4, null, 0, 1, 0), pruebas.linea('student_pool', 4, null, 0, 1, 0)])$$,
+  'XX000', null, 'ni un bote repetido, aunque sea de 0');
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.prd() || pruebas.linea('share', 9, 1, 0, null, 1))$$, 'XX000', null,
+  'ni una parte de 0 de un alumno sin bote');
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.prd() || pruebas.linea('share', 4, 1, 0, null, 0))$$, 'XX000', null,
+  'ni una parte de 0 de quien no vio nada');
+select throws_ok($$select pruebas.revisa_lineas(0, pruebas.calcula(6000, 0, array[pruebas.b(1, 28581)], array[pruebas.p(1, 1, 2)])
+                                                   || pruebas.linea('carried_over', null, null, 0, null, null))$$,
+  'XX000', null, 'ni un arrastre de 0 con algo asignado');
+select throws_ok($$select pruebas.revisa_lineas(0, array[pruebas.linea('student_pool', 4, null, 100, 200, 0), pruebas.linea('unconsumed_share', null, 1, 100, null, null),
+                                                         pruebas.linea('carried_over', null, null, 0, null, null)])$$,
+  'XX000', null, 'ni un arrastre de 0 junto a un sin consumo, aunque nada esté asignado');
+select throws_ok($$select pruebas.revisa_lineas(null, pruebas.prd())$$, 'XX000', null, 'ni sin decir qué se arrastró');
 
 -- ---------------------------------------------------------------------------------------
 -- El porcentaje del bote, por periodo (`BOTE_PCT_BASE`, hasta los tramos de T-601).
@@ -323,12 +349,12 @@ select throws_ok($$select private.pool_bps(202509)$$, 'P0001', null, 'otra regla
 -- ---------------------------------------------------------------------------------------
 -- De punta a punta: el ejemplo del PRD desde sus cobros y su consolidado (05 §8.7).
 
-select pruebas.alta(pruebas.al(n), format('alumno%s-reparto@prueba.test', n)) from generate_series(1, 5) n;
-insert into etiquetas select pruebas.al(n), (array['A', 'B', 'C', 'D', 'E'])[n] from generate_series(1, 5) n;
+select pruebas.alta(pruebas.al(n), format('alumno%s-reparto@prueba.test', n)) from generate_series(1, 6) n;
+insert into etiquetas select pruebas.al(n), (array['A', 'B', 'C', 'D', 'E', 'F'])[n] from generate_series(1, 6) n;
 insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
 select ('c0000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid, pruebas.al(n), 'manual', 'sus-reparto-' || n,
        case when n = 3 then 'annual' else 'monthly' end::public.subscription_plan, 'pending', 'MXN'
-from generate_series(1, 5) n;
+from generate_series(1, 6) n;
 create function pruebas.cobra(p_n integer, p_at timestamptz, p_gross bigint) returns text language sql
 as $$
   select private.record_charge(pruebas.al(p_n), ('c0000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid, 'manual',
@@ -384,6 +410,9 @@ select is(array(select pruebas.et(t.id) from public.teachers t join public.publi
 select is(array[pruebas.cobra(1, '2026-10-05 12:00-06', 34900), pruebas.cobra(2, '2026-10-06 12:00-06', 34900),
                 pruebas.cobra(3, '2026-10-07 12:00-06', 299000), pruebas.cobra(4, '2026-10-08 12:00-06', 34900)],
   array['recorded', 'recorded', 'recorded', 'recorded'], 'los cuatro cobros del ejemplo');
+-- F pagó un centavo: su ingreso neto es 0, y una base de 0 no aporta ni entra al cálculo.
+select is(pruebas.cobra(6, '2026-10-08 13:00-06', 1), 'recorded', 'un cobro de un centavo');
+select ok(not exists (select 1 from private.close_input_students(202610) where profile_id = pruebas.al(6)), 'una base de 0 no entra');
 select pruebas.fila(202610, pruebas.al(1), 'reparto-m1', t, 2) from unnest(array['Uno', 'Dos', 'Tres', 'Cuatro']) t;
 select pruebas.fila(202610, pruebas.al(1), 'reparto-m2', 'Uno', 2), pruebas.fila(202610, pruebas.al(1), 'reparto-m2', 'Dos', 2),
        pruebas.fila(202610, pruebas.al(1), 'reparto-m2', 'Tres', 1);

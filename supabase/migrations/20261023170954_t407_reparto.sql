@@ -61,10 +61,10 @@ begin
   if p_total is null or p_total < 0 then
     raise exception 'allocation total must be zero or more' using errcode = '22023';
   end if;
-  if p_ids is null or p_weights is null or p_ranks is null
-     or pg_catalog.cardinality(p_weights) <> v_n or pg_catalog.cardinality(p_ranks) <> v_n then
-    raise exception 'allocation needs ids, weights and ranks of the same length' using errcode = '22023';
+  if p_ids is null or p_weights is null or p_ranks is null then
+    raise exception 'allocation needs ids, weights and ranks' using errcode = '22023';
   end if;
+  -- Con arreglos de distinto largo, `rows from` rellena con nulos: los rechaza la revisión de abajo.
   if exists (select 1 from rows from (pg_catalog.unnest(p_ids), pg_catalog.unnest(p_weights), pg_catalog.unnest(p_ranks)) as x (i, w, r) where x.i is null or x.w is null or x.r is null or x.w <= 0)
      or (select pg_catalog.count(distinct x.i) from pg_catalog.unnest(p_ids) as x (i)) <> v_n
      or (select pg_catalog.count(distinct x.r) from pg_catalog.unnest(p_ranks) as x (r)) <> v_n then
@@ -273,9 +273,10 @@ declare
   v_bps jsonb := private.period_parameter('BOTE_PCT_BASE', p_period);
   v_rule jsonb := private.period_parameter('BOTE_SIN_CONSUMO', p_period);
 begin
-  if v_bps is null or v_rule is null then
+  if v_bps is null then
     raise exception 'pool percentage is not set for period %', p_period using errcode = 'P0001';
   end if;
+  -- Sin la regla también lanza: nulo es distinto de la que sigue este cálculo.
   if v_rule is distinct from '"proportional_to_assigned_pool"'::jsonb then
     raise exception 'pool for period % has an unknown BOTE_SIN_CONSUMO', p_period using errcode = 'P0001';
   end if;
@@ -403,7 +404,8 @@ begin
              pg_catalog.count(*) filter (where l.kind = 'student_pool' and l.half_points = 0)
       into v_pool, v_assigned, v_students, v_without
       from private.payout_for_period(p_period, 0) l;
-      if v_pool > 0 and (v_pool - v_assigned) * 10000 > v_unconsumed_bps::bigint * v_pool then
+      -- Con el bote en 0, el sin consumo también es 0 y no se abre: no se divide entre cero.
+      if (v_pool - v_assigned) * 10000 > v_unconsumed_bps::bigint * v_pool then
         insert into public.anomaly_alerts (period_id, kind, metric_value, threshold_value, details)
         values (p_period, 'unconsumed_pool_ratio', pg_catalog.round((v_pool - v_assigned) * 10000.0 / v_pool, 3),
                 v_unconsumed_bps::integer,

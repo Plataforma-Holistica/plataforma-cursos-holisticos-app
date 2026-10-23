@@ -65,6 +65,11 @@ insert into public.subscriptions (id, profile_id, provider, provider_subscriptio
 select ('c0000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid, pruebas.al(n), 'manual', 'sus-alerta-' || n, 'monthly', 'pending', 'MXN'
 from generate_series(11, 14) n;
 
+-- Un mes sin bases no abre nada, ni falla: ni siquiera busca el porcentaje, que en un mes anterior al
+-- arranque no existe (aquí, todavía sin los parámetros de abajo).
+select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minutes'), '{"alerts_opened": 0}'::jsonb,
+  'un mes sin bases no abre nada, ni falla');
+
 -- El mes que terminó puede ser anterior al arranque: sus reglas, con los valores de la semilla.
 select pruebas.como_dueno_sistema();
 select pruebas.parametro(k, v, pruebas.periodo(2))
@@ -85,8 +90,6 @@ insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, te
 select pruebas.periodo(1), pruebas.al(11), l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, 100, 2
 from public.published_lessons l join public.published_courses c on c.course_id = l.course_id where c.slug = 'alerta-m1';
 
-select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minutes'), '{"alerts_opened": 0}'::jsonb,
-  'un mes sin bases no abre nada, ni falla');
 select is(pruebas.cobra(13, pruebas.inicio(pruebas.periodo(1)) + interval '2 days', 2), 'recorded', 'un cobro de 2 centavos: base 1, bote 0');
 select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minutes'), '{"alerts_opened": 0}'::jsonb,
   'con el bote en 0 no hay proporción: nada, sin dividir entre cero');
