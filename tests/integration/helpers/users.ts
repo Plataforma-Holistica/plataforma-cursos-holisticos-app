@@ -118,6 +118,23 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
       await owner.query("delete from public.consents where profile_id = any($1::uuid[])", [ids]);
       await owner.query("alter table public.consents enable trigger consents_guard");
     }
+    // Los cobros y sus partes también son libros (T-301), y cuelgan del perfil y de la
+    // suscripción: igual que con los consentimientos, se apagan sus guardias dentro de esta
+    // transacción, solo para las personas de prueba. El vigilante (`schema_violations_revenue`)
+    // exige que queden prendidas. Los dos libros se toman en el orden en que los escribe
+    // `private.record_charge()` (cobros y después partes), para no cruzarse con un cobro en vuelo.
+    const charged = await owner.query("select 1 from public.charges where profile_id = any($1::uuid[]) limit 1", [ids]);
+    if ((charged.rowCount ?? 0) > 0) {
+      await owner.query("lock table public.charges, public.revenue_allocations in share row exclusive mode");
+      await owner.query("alter table public.charges disable trigger ledger_no_update_delete");
+      await owner.query("alter table public.revenue_allocations disable trigger ledger_no_update_delete");
+      await owner.query("delete from public.revenue_allocations where profile_id = any($1::uuid[])", [ids]);
+      await owner.query("delete from public.charges where profile_id = any($1::uuid[])", [ids]);
+      await owner.query("alter table public.revenue_allocations enable trigger ledger_no_update_delete");
+      await owner.query("alter table public.charges enable trigger ledger_no_update_delete");
+    }
+    // Las suscripciones no son un libro; cuelgan del perfil.
+    await owner.query("delete from public.subscriptions where profile_id = any($1::uuid[])", [ids]);
     await owner.query("delete from public.profiles where id = any($1::uuid[])", [ids]);
     await owner.query("commit");
   } catch (error) {
