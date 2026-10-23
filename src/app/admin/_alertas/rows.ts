@@ -142,6 +142,13 @@ export function percentText(basisPoints: number): string {
   return Number.isFinite(basisPoints) ? PERCENT.format(basisPoints / 10_000) : "";
 }
 
+const MONEY = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+
+/** «$171.48», de centavos. */
+export function moneyText(cents: number): string {
+  return Number.isFinite(cents) ? MONEY.format(cents / 100) : "";
+}
+
 /** «12 h 5 min», «40 min»: un tiempo largo, a minutos. */
 export function spanText(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "";
@@ -174,8 +181,19 @@ function factsOf(alert: FinanceAlert): string[] {
       if (alert.today !== null) facts.push(t(text.impossibleToday, { today: spanText(alert.today) }));
       return facts;
     }
-    case "unconsumed_pool_ratio":
-      return [];
+    case "unconsumed_pool_ratio": {
+      // No señala a nadie: sus cifras son las del bote del periodo (T-407).
+      const facts = [t(text.unconsumedRatio, { metric: percentText(alert.metric), threshold: percentText(alert.threshold) })];
+      const unconsumed = detail(alert, "unconsumed_cents");
+      const pool = detail(alert, "pool_cents");
+      if (unconsumed !== null && pool !== null) facts.push(t(text.unconsumedAmount, { unconsumed: moneyText(unconsumed), pool: moneyText(pool) }));
+      const students = detail(alert, "students");
+      const without = detail(alert, "students_without_points");
+      if (students !== null && without !== null) {
+        facts.push(t(text.unconsumedStudents, { without: COUNT.format(without), students: COUNT.format(students) }));
+      }
+      return facts;
+    }
   }
 }
 

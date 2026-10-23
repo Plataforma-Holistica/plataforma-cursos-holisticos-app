@@ -283,6 +283,12 @@ que no se ve leyendo un solo archivo:
   `check_revenue_parts`, y tres funciones de periodo de nombre genérico que el carril B no debe
   repetir con otro sentido: `private.period_of`, `period_plus` y `period_parameter`. El área
   `revenue` del vigilante es del A.
+- **Lo que T-407 suma al carril A.** El reparto (`private.compute_payout`,
+  `allocate_largest_remainder`, `check_payout_lines`, `close_input_students`,
+  `close_input_points`, `pool_bps`, `payout_for_period`, los tipos `private.payout_*`),
+  `detect_anomalies` (ya era del A) y el área `payout` del vigilante. Con la 33 y la 34 el carril A
+  agotó sus números de pgTAP: antes de su próxima prueba de base se acuerda un rango nuevo con el
+  carril B.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1663,6 +1669,38 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Para después: los reversos (`charge_reversals`, `reversal_id` y la regla, T-307); la bandeja y
     la clave del aviso (T-303); `charges_period_fk` y el congelado de lo cerrado (T-601); la
     lectura del alumno (T-306) y la de finanzas (T-605).
+- **El reparto** (T-407; RF-502, RN-03, RN-05 a RN-07, RNF-04; decisiones de Sergio del
+  2026-10-23; 05 §8.4). Vive en la base (`t407_reparto`), y se prueba en pgTAP (`33_reparto`, con
+  los cuatro ejemplos del PRD directos y desde sus cobros; `34_reparto_alerta_y_propiedades`, con
+  tres mil periodos al azar contra un oráculo en enteros), en integración (`48-reparto`, línea por
+  línea contra un oráculo en TypeScript con fast-check) y con mutaciones a mano. Lo que no se ve
+  leyendo un solo archivo:
+  - **No hay `computePayout` en TypeScript ni `src/domain/payout/`.** `private.compute_payout()`
+    es puro (no lee tablas): recibe el porcentaje, lo arrastrado, las bases y los medios puntos, y
+    devuelve líneas (`student_pool`, `share`, `unconsumed_share`, `carried_over`) con su base y sus
+    medios puntos, en orden estable. `private.payout_for_period()` le arma la entrada
+    (`close_input_students`, `close_input_points`, `pool_bps`): es lo que usan la alerta de cada
+    noche y usarán el estimado (T-408) y el cierre (T-602). Lo arrastrado no tiene valor por
+    omisión: quien llama lo pasa. Un oráculo para las pruebas no se mueve a `src/`.
+  - **El redondeo es uno solo** (`private.allocate_largest_remainder()`, RN-07): cada parte hacia
+    abajo y los centavos de sobra al mayor residuo, en empate al `tiebreak_rank` menor. Se calcula
+    con `div` y `mod`, nunca con `floor` de una división en `numeric`, que se redondea antes del
+    piso y con montos grandes se equivoca. Un peso cero no entra: un maestro con puntos y 0
+    asignado se queda fuera del sin consumo. La red (`private.check_payout_lines()`) va aparte del
+    cálculo para poder probarla con líneas alteradas.
+  - **Lo que decide la regla y no se ve en el PRD**: se arrastra todo cuando lo asignado es cero,
+    no solo «si nadie tuvo puntos»; el bote del alumno es el piso de la suma de sus partes por el
+    porcentaje; los puntos de quien no tiene base no cuentan; un bote de 0 con puntos lleva sus
+    partes de 0; y una cuenta suspendida por fraude conserva su base, que va al sin consumo
+    (decisión de Sergio).
+  - **La alerta del bote sin consumo** va al final de `private.detect_anomalies()` en su propio
+    bloque: si falla, las otras dos alertas se quedan y la función devuelve `anomalies_failed`.
+    Mira solo el mes que terminó, contra el bote sin lo arrastrado. El vigilante lo exige
+    (`schema_violations_payout`: cada función existe, nadie de la aplicación la ejecuta, ninguna
+    es `security definer`, `search_path` fijo, y las tres puras son `immutable`).
+  - Para después: el porcentaje por tramos y lo arrastrado guardado (T-601); escribir lo que
+    devuelve el cálculo y congelarlo (T-602); el estimado del maestro (T-408); el bono y el pago
+    mínimo (T-603).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
