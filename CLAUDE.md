@@ -1621,6 +1621,35 @@ falla. Veintiuna precisiones que la tabla no dice:
     `tests/actions/alert-actions.test.ts`, `tests/architecture/anomalies.test.ts`,
     `tests/integration/46-alertas.test.ts` y, en `tests/e2e/equipo/camino.equipo.ts`, el camino
     con JavaScript y sin él.
+- **El libro propio de ingresos** (T-301; RF-211, RN-02; decisiones de Sergio del 2026-10-22; 05
+  §5.3). Vive en la base (`t301_libro_de_ingresos`), y se prueba en pgTAP (`31_libro_de_ingresos`,
+  `32_ingresos_propiedades`, con miles de casos al azar), en integración (`47-cobros`, el mismo
+  cobro a la vez desde diez conexiones) y con mutaciones a mano. Lo que no se ve leyendo un solo
+  archivo:
+  - **La regla vive en la base, no en TypeScript.** `private.record_charge()` registra el cobro y
+    escribe sus partes en la misma transacción: el sin IVA mitad hacia arriba, el neto después de
+    la comisión fija hacia abajo (`private.revenue_amounts()`), y un mensual en una parte o un
+    anual en doce periodos seguidos, la última con la diferencia (`private.revenue_parts()`). No
+    hay `allocateRevenue`: el reparto (T-407) lee `revenue_allocations.base_cents`. La regla se
+    lee por periodo (`private.period_parameter()`, como `payout_thresholds`) y lanza si
+    `IVA_EN_PRECIO`, `BASE_COMISION` o `INGRESO_POR_PERIODO` dicen otra cosa que RN-02.
+  - **El cobro guarda la regla que se le aplicó** (`iva_bps`, `fee_bps`, `revenue_net_mxn_cents`),
+    y la tabla la exige con sus `check`: un libro no se corrige, y una columna obligatoria no se
+    agrega después (el relleno sería un `update`). Solo pesos (`charges_mxn_only`, hasta LF-07);
+    `provider_event_id` nulo hasta que T-303 cree la bandeja y su clave. Las claves compuestas
+    atan la suscripción y cada parte a la cuenta del cobro.
+  - **Nadie de la aplicación lee ni escribe los dos libros**, ni llama la función: la abre T-303
+    al aviso del proveedor. Repetir un cobro contesta `already_recorded` comparando solo lo que lo
+    define (cuenta, suscripción, plan, instante, moneda y monto); lo que el proveedor mande después
+    no se agrega. Pide *read committed*: la segunda llamada espera a la primera en el índice único
+    y tiene que ver su cobro confirmado. El vigilante lo exige (`schema_violations_revenue`: las
+    guardias de los dos libros, encendidas; ningún permiso; la función como dueño).
+  - **Las pruebas de integración que cobren** se limpian solas: `deleteTestUsers`
+    (`tests/integration/helpers/users.ts`, de los dos carriles) borra cobros, partes y
+    suscripciones de las cuentas de prueba apagando las guardias dentro de su transacción.
+  - Para después: los reversos (`charge_reversals`, `reversal_id` y la regla, T-307); la bandeja y
+    la clave del aviso (T-303); `charges_period_fk` y el congelado de lo cerrado (T-601); la
+    lectura del alumno (T-306) y la de finanzas (T-605).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
