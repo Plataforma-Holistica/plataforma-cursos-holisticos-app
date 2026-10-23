@@ -289,6 +289,8 @@ que no se ve leyendo un solo archivo:
   `detect_anomalies` (ya era del A) y el área `payout` del vigilante. Con la 33 y la 34 el carril A
   agotó sus números de pgTAP: antes de su próxima prueba de base se acuerda un rango nuevo con el
   carril B.
+- **Los números de pgTAP del carril A, desde el 2026-10-23** (decisión de Sergio): sus pruebas de
+  base nuevas van del 40 al 49, que el B no usa.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
