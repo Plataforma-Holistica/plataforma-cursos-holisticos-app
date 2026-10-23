@@ -236,7 +236,7 @@ los planes Teams o Enterprise de Supabase: ver la lista de salida
 
 Versiones que no se suben sin revisar:
 
-- **Next.js 16.3**. Esta versión cambió respecto a las
+- **Next.js 16.4** (desde el 2026-10-22, por dos avisos críticos de 16.0 a 16.4.0). Esta versión cambió respecto a las
   anteriores: su documentación exacta está en `node_modules/next/dist/docs/`, y se lee
   antes de usar una API de Next.
 - **TypeScript 6.0**: el lint de TypeScript todavía no admite la 7.
