@@ -24,7 +24,10 @@
 --     no se puede agregar después (el relleno sería un `update`);
 --   · solo pesos (`charges_mxn_only`), y `provider_event_id` nulo hasta que T-303 cree la bandeja
 --     y su clave foránea;
---   · claves compuestas: la suscripción es de la misma cuenta que el cobro, y la parte también;
+--   · claves compuestas: la suscripción es de la misma cuenta que el cobro, y la parte es de la
+--     cuenta y la comisión de su cobro; sin clave directa al perfil (la compuesta ya dice que
+--     existe, y una clave al perfil chocaría con el candado de `note_session`, como en
+--     `practice_days`); y lo que suman las partes lo revisa la tabla al confirmar;
 --   · `revenue_allocations` sin `reversal_id`, y `revenue_allocations_sign` solo admite partes de
 --     cobro (T-307 agrega la columna y reemplaza la restricción); el tipo `allocation_kind` ya
 --     trae los dos valores;
@@ -43,7 +46,7 @@ alter table public.subscriptions add constraint subscriptions_id_profile_uq uniq
 
 create table public.charges (
   id uuid primary key default gen_random_uuid(),
-  profile_id uuid not null references public.profiles (id),
+  profile_id uuid not null,                   -- existe por la clave compuesta hacia su suscripción
   subscription_id uuid not null,
   provider text not null,
   provider_charge_id text not null,
@@ -69,13 +72,14 @@ create table public.charges (
   receipt_url text,
   created_at timestamptz not null default now(),
   constraint charges_provider_uq unique (provider, provider_charge_id),
-  constraint charges_id_profile_uq unique (id, profile_id),
+  constraint charges_id_profile_fee_uq unique (id, profile_id, fee_bps),
   constraint charges_subscription_fk foreign key (subscription_id, profile_id)
     references public.subscriptions (id, profile_id),
   constraint charges_provider_known check (provider in ('stripe', 'mercadopago', 'manual')),
-  constraint charges_provider_ids_length check (
-    length(provider_charge_id) between 1 and 255
-    and (provider_invoice_id is null or length(provider_invoice_id) between 1 and 255)),
+  -- ASCII visible, sin espacios: un mismo cobro con un espacio de más sería otro cobro.
+  constraint charges_provider_ids_format check (
+    provider_charge_id ~ '^[!-~]{1,255}$'
+    and (provider_invoice_id is null or provider_invoice_id ~ '^[!-~]{1,255}$')),
   constraint charges_event_later check (provider_event_id is null),
   constraint charges_currency_format check (currency ~ '^[A-Z]{3}$'),
   constraint charges_mxn_only check (currency = 'MXN'),
@@ -86,7 +90,7 @@ create table public.charges (
   constraint charges_gross_sane check (gross_cents <= 1000000000),
   constraint charges_fee_positive check (provider_fee_cents >= 0),
   constraint charges_provider_net_positive check (provider_net_cents >= 0),
-  constraint charges_fx_positive check (fx_rate_to_mxn > 0),
+  constraint charges_fx_positive check (fx_rate_to_mxn > 0 and fx_rate_to_mxn <> 'NaN'),
   constraint charges_fx_source_known check (fx_source in ('same_currency', 'provider', 'parameter')),
   constraint charges_mxn_is_identity check (
     currency <> 'MXN' or (fx_rate_to_mxn = 1 and gross_mxn_cents = gross_cents and fx_source = 'same_currency')),
@@ -121,8 +125,8 @@ create table public.revenue_allocations (
   fee_bps public.bps not null,                -- la comisión de su cobro
   rule text not null,                         -- con qué regla se asignó (PQ-12)
   created_at timestamptz not null default now(),
-  constraint revenue_allocations_charge_fk foreign key (charge_id, profile_id)
-    references public.charges (id, profile_id),
+  constraint revenue_allocations_charge_fk foreign key (charge_id, profile_id, fee_bps)
+    references public.charges (id, profile_id, fee_bps),
   constraint revenue_allocations_parts check (part_no >= 1 and part_no <= parts_total),
   constraint revenue_allocations_rule_known check (rule in ('charge_date_v1', 'service_days_v1')),
   -- Hasta T-307, solo partes de un cobro.
@@ -134,6 +138,34 @@ create unique index revenue_allocations_charge_part_uq
   on public.revenue_allocations (charge_id, part_no) where kind = 'charge';
 -- Entrada del cierre: base de cada alumno en el periodo (05 §8.4).
 create index revenue_allocations_period_idx on public.revenue_allocations (period_id, profile_id);
+
+-- Las partes de un cobro, al confirmar la transacción que las escribe: tantas como pide su plan,
+-- una por periodo desde el del cobro, y que sumen su ingreso neto. Un cobro sin partes no lo
+-- revisa (lo escribe la misma función que las escribe).
+create function private.check_revenue_parts() returns trigger
+language plpgsql set search_path = ''
+as $$
+declare
+  v_ok boolean;
+begin
+  select coalesce(sum(a.base_cents), 0) = c.revenue_net_mxn_cents
+         and count(a.id) = case c.plan when 'monthly' then 1 else 12 end
+         and bool_and(a.parts_total = case c.plan when 'monthly' then 1 else 12 end)
+         and bool_and(a.period_id = private.period_plus(c.period_id, a.part_no - 1))
+    into v_ok
+  from public.charges c
+  join public.revenue_allocations a on a.charge_id = c.id and a.kind = 'charge'
+  where c.id = new.charge_id
+  group by c.id, c.revenue_net_mxn_cents, c.plan, c.period_id;
+  if v_ok is distinct from true then
+    raise exception 'revenue parts of charge % do not match it', new.charge_id using errcode = '23514';
+  end if;
+  return null;
+end
+$$;
+revoke all on function private.check_revenue_parts() from public;
+create constraint trigger revenue_allocations_match_charge after insert on public.revenue_allocations
+  deferrable initially deferred for each row execute function private.check_revenue_parts();
 
 -- Dos libros: ni el dueño edita, borra o vacía (05 §7.1).
 create trigger ledger_no_update_delete before update or delete on public.charges
@@ -293,8 +325,8 @@ begin
 
   if p_profile is null or p_subscription is null or p_plan is null or p_charged_at is null
      or p_provider is null or p_provider not in ('stripe', 'mercadopago', 'manual')
-     or p_provider_charge_id is null or length(p_provider_charge_id) not between 1 and 255
-     or (p_provider_invoice_id is not null and length(p_provider_invoice_id) not between 1 and 255)
+     or p_provider_charge_id is null or p_provider_charge_id !~ '^[!-~]{1,255}$'
+     or p_provider_invoice_id !~ '^[!-~]{1,255}$'
      or p_currency is null or p_currency !~ '^[A-Z]{3}$'
      or p_gross_cents is null or p_gross_cents not between 1 and 1000000000
      or p_provider_fee_cents < 0 or p_provider_net_cents < 0
@@ -308,8 +340,11 @@ begin
   if p_currency <> 'MXN' then
     return jsonb_build_object('outcome', 'unsupported_currency', 'charge_id', null::uuid);
   end if;
-  if not exists (select 1 from public.subscriptions s
-                 where s.id = p_subscription and s.profile_id = p_profile and s.provider = p_provider) then
+  -- Con candado: que no cambie de cuenta ni de proveedor antes de escribir el cobro.
+  perform 1 from public.subscriptions s
+  where s.id = p_subscription and s.profile_id = p_profile and s.provider = p_provider
+  for key share;
+  if not found then
     return jsonb_build_object('outcome', 'not_found', 'charge_id', null::uuid);
   end if;
 
@@ -374,30 +409,33 @@ as $$
   where pg_catalog.has_any_column_privilege(r.rolname::name, t.table_name::regclass, 'SELECT, INSERT, UPDATE, REFERENCES')
      or pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'DELETE, TRUNCATE, TRIGGER')
   union all
-  select 'revenue ledger without ' || g.trigger_name, t.table_name
-  from (values ('public.charges'), ('public.revenue_allocations')) as t (table_name)
-  cross join (values ('ledger_no_update_delete'), ('ledger_no_truncate')) as g (trigger_name)
+  select 'revenue ledger without ' || g.trigger_name, g.table_name
+  from (values ('public.charges', 'ledger_no_update_delete', 'reject_mutation'),
+               ('public.charges', 'ledger_no_truncate', 'reject_mutation'),
+               ('public.revenue_allocations', 'ledger_no_update_delete', 'reject_mutation'),
+               ('public.revenue_allocations', 'ledger_no_truncate', 'reject_mutation'),
+               ('public.revenue_allocations', 'revenue_allocations_match_charge', 'check_revenue_parts'))
+       as g (table_name, trigger_name, function_name)
   where not exists (
     select 1 from pg_catalog.pg_trigger tg
     join pg_catalog.pg_proc p on p.oid = tg.tgfoid
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-    where tg.tgrelid = t.table_name::regclass and tg.tgname = g.trigger_name and tg.tgenabled <> 'D'
-      and n.nspname = 'private' and p.proname = 'reject_mutation')
+    where tg.tgrelid = g.table_name::regclass and tg.tgname = g.trigger_name and tg.tgenabled in ('O', 'A')
+      and n.nspname = 'private' and p.proname = g.function_name)
   union all
-  select 'revenue function executable by ' || r.rolname, f.signature
+  select 'revenue function executable by ' || r.rolname, p.oid::regprocedure::text
   from app_roles r
-  cross join (values ('private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text)'),
-                     ('private.revenue_rule(public.period_id)'),
-                     ('private.revenue_parts(bigint, public.subscription_plan, public.period_id)'),
-                     ('private.revenue_amounts(bigint, integer, integer)'),
-                     ('private.period_of(timestamptz)'),
-                     ('private.period_plus(public.period_id, integer)'),
-                     ('private.period_parameter(text, public.period_id)')) as f (signature)
-  where pg_catalog.has_function_privilege(r.rolname::name, f.signature::regprocedure, 'EXECUTE')
+  cross join pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'private'
+    and p.proname in ('record_charge', 'revenue_rule', 'revenue_parts', 'revenue_amounts', 'period_of', 'period_plus',
+                      'period_parameter', 'check_revenue_parts')
+    and pg_catalog.has_function_privilege(r.rolname::name, p.oid, 'EXECUTE')
   union all
   select 'revenue function not security definer with fixed search_path', p.oid::regprocedure::text
   from pg_catalog.pg_proc p
-  where p.oid = 'private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text)'::regprocedure
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'private' and p.proname = 'record_charge'
     and not (p.prosecdef and coalesce(p.proconfig, '{}') @> array['search_path=""'])
 $$;
 revoke all on function private.schema_violations_revenue() from public;

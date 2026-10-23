@@ -4,6 +4,8 @@
 -- cero) y llegan hasta el tope de un cobro; los periodos cruzan años, hasta 209801.
 begin;
 \ir _ayuda.psql
+-- La revisión de las partes de un cobro es diferida: aquí, al final de cada sentencia.
+set constraints all immediate;
 select plan(15);
 select setseed(0.301);
 

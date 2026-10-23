@@ -278,6 +278,11 @@ que no se ve leyendo un solo archivo:
   `saved_courses` y las áreas que cree. Congelados mientras haya dos carriles: el agregador del
   vigilante, `private.watchdog_areas()`, las áreas `base`, `ledgers`, `account` y `team`, y
   `supabase/tests/_ayuda.psql` (cada carril pone sus ayudantes en su propio archivo de prueba).
+- **Lo que T-301 suma al carril A.** El libro de ingresos (`charges`, `revenue_allocations`),
+  `private.record_charge`, `revenue_rule`, `revenue_amounts`, `revenue_parts`,
+  `check_revenue_parts`, y tres funciones de periodo de nombre genérico que el carril B no debe
+  repetir con otro sentido: `private.period_of`, `period_plus` y `period_parameter`. El área
+  `revenue` del vigilante es del A.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1637,13 +1642,21 @@ falla. Veintiuna precisiones que la tabla no dice:
     y la tabla la exige con sus `check`: un libro no se corrige, y una columna obligatoria no se
     agrega después (el relleno sería un `update`). Solo pesos (`charges_mxn_only`, hasta LF-07);
     `provider_event_id` nulo hasta que T-303 cree la bandeja y su clave. Las claves compuestas
-    atan la suscripción y cada parte a la cuenta del cobro.
+    atan la suscripción a la cuenta del cobro, y cada parte a la cuenta y la comisión de su cobro;
+    no hay clave directa al perfil (chocaría con el candado de `note_session`, como en
+    `practice_days`). Al confirmar, `revenue_allocations_match_charge` (diferida) revisa que las
+    partes de un cobro sean las de su plan, en periodos seguidos, y sumen su neto: las pruebas de
+    base la ponen `immediate`, porque se revierten sin confirmar. Los identificadores del proveedor
+    son ASCII visible sin espacios: con un espacio de más, el mismo cobro entraría dos veces.
   - **Nadie de la aplicación lee ni escribe los dos libros**, ni llama la función: la abre T-303
     al aviso del proveedor. Repetir un cobro contesta `already_recorded` comparando solo lo que lo
     define (cuenta, suscripción, plan, instante, moneda y monto); lo que el proveedor mande después
     no se agrega. Pide *read committed*: la segunda llamada espera a la primera en el índice único
-    y tiene que ver su cobro confirmado. El vigilante lo exige (`schema_violations_revenue`: las
-    guardias de los dos libros, encendidas; ningún permiso; la función como dueño).
+    y tiene que ver su cobro confirmado. Las comprobaciones de forma van antes que buscar el cobro:
+    `malformed`, `unsupported_currency` o `not_found` no quieren decir que el cobro no esté. El
+    vigilante lo exige (`schema_violations_revenue`: las guardias de los dos libros y la de las
+    partes, encendidas y no en réplica; ningún permiso; las funciones por su nombre, así que una
+    sobrecarga también cuenta, y `record_charge` como dueño).
   - **Las pruebas de integración que cobren** se limpian solas: `deleteTestUsers`
     (`tests/integration/helpers/users.ts`, de los dos carriles) borra cobros, partes y
     suscripciones de las cuentas de prueba apagando las guardias dentro de su transacción.
