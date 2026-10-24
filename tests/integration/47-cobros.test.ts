@@ -18,6 +18,8 @@ let user: TestUser;
 let subscription: string;
 
 beforeAll(async () => {
+  // Octubre de 2026 con fila (T-601): sus cobros no son tardíos, corra el día que corra.
+  await ownerQuery("select private.open_period(202610)");
   user = await createTestUser();
   subscription = randomUUID();
   await ownerQuery(

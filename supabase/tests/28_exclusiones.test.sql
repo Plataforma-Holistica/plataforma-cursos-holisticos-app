@@ -12,6 +12,18 @@ begin;
 \ir _ayuda.psql
 select plan(64);
 
+-- El mes anterior, abierto (T-601): sus latidos atrasados entran hasta su día de cierre, y así esta
+-- prueba no depende de qué día del mes corre. Sin el guardián, que no deja volver a abierto.
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard;
+insert into public.payout_periods (period_id, starts_at, ends_at, timezone)
+select m.p, timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp),
+       timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp + interval '1 month'), 'America/Mexico_City'
+from (select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer as p) m
+on conflict (period_id) do update set status = 'open', entered_closing_at = null;
+alter table public.payout_periods enable trigger payout_periods_guard;
+select pruebas.limpiar();
+
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-excluye@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-excluye@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido-excluye@prueba.test');
