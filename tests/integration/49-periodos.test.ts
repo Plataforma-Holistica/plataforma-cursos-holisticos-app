@@ -3,15 +3,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { localOwnerUrl } from "./helpers/local";
 import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
+import { createTestUser, deleteTestUsers } from "./helpers/users";
 
 // Los periodos (T-601; RF-501) contra la base local, en lo que una transacción revertida no puede
 // mostrar: dos que abren el mismo periodo a la vez dejan una sola fila; el paso a cierre espera al
-// cobro que leyó el periodo abierto (y al revés); y la corrida de cada noche, que hace `commit`, pasa
-// a cierre al terminar. Qué hace cada regla lo prueba `supabase/tests/40_periodos.test.sql`.
+// cobro que leyó el periodo abierto (y al revés); y la corrida de cada noche, que hace `commit`, toma
+// la foto de los periodos que terminaron al empezar y pasa a cierre al terminar. Qué hace cada regla
+// lo prueban `supabase/tests/40_periodos.test.sql` y `41_tramos.test.sql`.
 //
-// Usa meses de la segunda mitad de 2020 y de 2022, que ninguna otra prueba usa. Las filas de
-// periodo no se borran: la limpieza las quita con su guardián apagado, solo esas; las corridas que
-// deja, también. La auditoría se queda.
+// Usa meses de la segunda mitad de 2020 y del primer trimestre de 2022, que ninguna otra prueba usa.
+// Las filas de periodo no se borran: la limpieza las quita con su guardián apagado, solo esas; las
+// corridas que deja, también. La auditoría se queda.
 
 const OPEN = 202006;
 const LOCKED = 202007;
@@ -22,7 +24,9 @@ const CLOSED = 202011;
 const FAILING = 202012;
 const RETRY_FROM = 202201;
 const RETRY_NEXT = 202202;
-const OURS = [OPEN, LOCKED, NIGHTLY, FIRST, SECOND, CLOSED, FAILING, RETRY_FROM, RETRY_NEXT];
+const NO_PHOTO = 202203;
+const MANUAL = 202204;
+const OURS = [OPEN, LOCKED, NIGHTLY, FIRST, SECOND, CLOSED, FAILING, RETRY_FROM, RETRY_NEXT, NO_PHOTO, MANUAL];
 
 let owner: Client;
 let suiteStart: string;
@@ -60,6 +64,11 @@ function openRow(period: number): Promise<void> {
       [period],
     ),
   );
+}
+
+/** La foto de un periodo que terminó (sin ella no pasa a cierre), como la toma la corrida: 0 alumnos. */
+function photo(period: number): Promise<void> {
+  return asSystem(() => owner.query("update public.payout_periods set active_students = 0 where period_id = $1", [period]));
 }
 
 /** Un estado que T-601 todavía no escribe (cerrado), con el guardián apagado. */
@@ -177,6 +186,7 @@ describe("los periodos a la vez", () => {
     await openRow(RETRY_FROM);
     await force(RETRY_FROM, "closed");
     await openRow(RETRY_NEXT);
+    await photo(RETRY_NEXT);
     const transition = await connect();
     const charge = await connect();
     try {
@@ -200,6 +210,7 @@ describe("los periodos a la vez", () => {
 
   it("el paso a cierre espera al cobro que leyó el periodo abierto", async () => {
     await openRow(LOCKED);
+    await photo(LOCKED);
     const charge = await connect();
     const transition = await connect();
     try {
@@ -261,14 +272,21 @@ describe("la corrida de cada noche", () => {
         ["period_transition", null, "succeeded"],
       ]);
       expect(runs.rows[1]!.details.entered_closing).toContain(NIGHTLY);
+      // Antes de consolidar tomó su foto: sin ella no habría pasado a cierre.
+      expect((runs.rows[1]!.details.photos as { taken: number[] }).taken).toContain(NIGHTLY);
+      const taken = await owner.query("select active_students from public.payout_periods where period_id = $1", [NIGHTLY]);
+      expect(taken.rows).toEqual([{ active_students: 0 }]);
       const ahead = await owner.query<{ n: number }>(
         `select count(*)::int as n from public.payout_periods
          where period_id in (select private.period_plus(private.period_of(now()), k) from generate_series(0, 2) k) and status = 'open'`,
       );
       expect(ahead.rows[0]!.n).toBe(3);
-      // Con un solo periodo es un recálculo a mano: no pasa nada a cierre.
+      // Con un solo periodo es un recálculo a mano: no pasa nada a cierre, ni se toma ninguna foto.
+      await openRow(MANUAL);
       const manual = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
       await owner.query("call private.nightly_rollup(false, private.period_of(now()))");
+      const untaken = await owner.query("select active_students from public.payout_periods where period_id = $1", [MANUAL]);
+      expect(untaken.rows).toEqual([{ active_students: null }]);
       const transitions = await owner.query("select 1 from public.job_runs where job = 'period_transition' and started_at > $1::timestamptz", [
         manual,
       ]);
@@ -307,6 +325,36 @@ describe("la corrida de cada noche", () => {
       expect(left.rows.map((row: { period_id: number }) => row.period_id)).toEqual([CLOSED, FAILING]);
     } finally {
       await owner.query("delete from private.rollup_dirty where profile_id = $1", [mark]);
+      await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
+    }
+  });
+
+  it("una foto que falla deja el periodo abierto, y la corrida del paso a cierre fallida", async () => {
+    await openRow(NO_PHOTO);
+    // Una gracia de una falla de 2020, cuando no existía GRACIA_COBRO_DIAS: los alumnos activos de
+    // cualquier instante posterior no se saben, y la foto no se toma.
+    const user = await createTestUser();
+    const start = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
+    try {
+      await owner.query(
+        `insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, currency,
+           current_period_start, current_period_end, last_renewal_failed_at, created_at)
+         values ($1, 'manual', $2, 'monthly', 'in_grace', 'MXN', '2020-02-10', '2020-03-10', '2020-03-10', '2020-01-01')`,
+        [user.id, `it-sin-foto-${user.id}`],
+      );
+      await owner.query("call private.nightly_rollup()");
+      const runs = await owner.query<{ status: string; error: string; details: { photo_missing?: number[]; photos: { failed?: Record<string, string> } } }>(
+        "select status::text, error, details from public.job_runs where started_at > $1::timestamptz and job = 'period_transition'",
+        [start],
+      );
+      expect(runs.rows).toHaveLength(1);
+      expect(runs.rows[0]!.status).toBe("failed");
+      expect(runs.rows[0]!.details.photo_missing).toContain(NO_PHOTO);
+      expect(Object.keys(runs.rows[0]!.details.photos.failed ?? {})).toContain(String(NO_PHOTO));
+      expect(runs.rows[0]!.error).toMatch(/photos failed: .*photo missing: /);
+      expect(await status(NO_PHOTO)).toBe("open");
+    } finally {
+      await deleteTestUsers([user]);
       await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
     }
   });

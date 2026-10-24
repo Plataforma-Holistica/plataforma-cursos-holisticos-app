@@ -350,7 +350,9 @@ select lives_ok($$select pruebas.parte_como('{"charge_id": "d0000000-0000-0000-0
   'la parte que sí cuadra entra (el control)');
 
 -- ---------------------------------------------------------------------------------------
--- El vigilante: su área está y avisa.
+-- El vigilante: su área está y avisa. Los disparadores de los parámetros, otra vez prendidos: el
+-- vigilante de los periodos los mira desde T-601.
+alter table public.business_parameters enable trigger user;
 
 select ok(exists (select 1 from private.watchdog_areas() where function_name = 'schema_violations_revenue' and unusable_reason is null),
   'el área de los ingresos está');

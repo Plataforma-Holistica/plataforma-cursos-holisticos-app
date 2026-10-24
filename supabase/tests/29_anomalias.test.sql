@@ -305,8 +305,9 @@ grant execute on function private.review_alert(uuid, text, boolean, text) to aut
 select ok(exists (select 1 from private.schema_violations() where problem = 'finance function executable by authenticated'),
   'o le deja a una persona decidir por finanzas');
 revoke execute on function private.review_alert(uuid, text, boolean, text) from authenticated;
+-- Los disparadores de los parámetros, otra vez prendidos: el vigilante de los periodos los mira (T-601).
+alter table public.business_parameters enable trigger user;
 select is((select count(*)::integer from private.schema_violations()), 0, 'sin nada concedido, nada');
 
-alter table public.business_parameters enable trigger user;
 select * from finish();
 rollback;

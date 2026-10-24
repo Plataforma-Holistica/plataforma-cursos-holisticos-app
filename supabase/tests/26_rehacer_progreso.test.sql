@@ -435,8 +435,9 @@ select is((select row((select count(*) from private.rollup_dirty), (select sum(s
   (select row(marcas, dias)::text from otras), 'ni marcas ni días de práctica');
 
 -- El vigilante conoce lo nuevo.
+-- Los disparadores de los parámetros, otra vez prendidos: el vigilante de los periodos los mira (T-601).
+alter table public.business_parameters enable trigger user;
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 
-alter table public.business_parameters enable trigger user;
 select * from finish();
 rollback;

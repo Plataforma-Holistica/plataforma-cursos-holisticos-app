@@ -2,7 +2,7 @@
 -- el valor anterior no se pierde y solo lo cambia quien tiene configuración.
 begin;
 \ir _ayuda.psql
-select plan(36);
+select plan(37);
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana@prueba.test');      -- alumna
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config1@prueba.test');  -- configuración
@@ -27,6 +27,9 @@ select is_empty(
 
 -- El valor de arranque, para comparar. Queda en una variable de psql.
 select private.parameter_value('GRACIA_COBRO_DIAS') as gracia_inicial \gset
+-- Un periodo que no ha empezado y su primer instante, para un parámetro del reparto (RF-707).
+select private.period_plus(private.period_of(now()), 2) as periodo_futuro,
+       private.period_start(private.period_plus(private.period_of(now()), 2)) as inicio_futuro \gset
 
 -- ---------------------------------------------------------------------------------------
 -- Cambiar un parámetro: lo hace el servidor a nombre de alguien con configuración.
@@ -170,16 +173,22 @@ select throws_ok(
     values ('NO_EXISTE', '1', 'proposed', now() + interval '3 days')$$,
   '23503', null, 'un parámetro sin definición se rechaza');
 
--- Un parámetro que afecta al reparto necesita su periodo de vigencia (RF-707).
+-- Un parámetro que afecta al reparto necesita su periodo de vigencia, y rige desde su inicio
+-- (RF-707). Eso último se revisa al confirmar (T-601): aquí, al terminar la sentencia. El porcentaje
+-- base no va aquí: es el tramo de 0, y lo escribe la función de los tramos (41_tramos).
+set constraints business_parameters_timing immediate;
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('BOTE_PCT_BASE', '6200', 'proposed', now() + interval '40 days')$$,
+    values ('UMBRAL_MEDIO_PCT', '2600', 'proposed', now() + interval '40 days')$$,
   '23514', null, 'un parámetro de reparto sin periodo de vigencia se rechaza');
+select throws_ok(
+  format($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+           values ('UMBRAL_MEDIO_PCT', '2600', 'proposed', %L::timestamptz + interval '1 hour', %s)$$, :'inicio_futuro', :'periodo_futuro'),
+  '23514', null, 'ni con otro instante que el inicio de su periodo');
 select lives_ok(
-  $$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
-    values ('BOTE_PCT_BASE', '6200', 'proposed', now() + interval '40 days',
-            to_char(now() + interval '40 days', 'YYYYMM')::integer)$$,
-  'con su periodo de vigencia se acepta');
+  format($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+           values ('UMBRAL_MEDIO_PCT', '2600', 'proposed', %L, %s)$$, :'inicio_futuro', :'periodo_futuro'),
+  'con su periodo, desde que empieza, se acepta');
 
 -- ---------------------------------------------------------------------------------------
 -- Quién lee los parámetros con su sesión.
