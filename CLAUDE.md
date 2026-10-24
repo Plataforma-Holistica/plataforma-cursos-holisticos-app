@@ -289,6 +289,13 @@ que no se ve leyendo un solo archivo:
   `detect_anomalies` (ya era del A) y el área `payout` del vigilante. Con la 33 y la 34 el carril A
   agotó sus números de pgTAP: antes de su próxima prueba de base se acuerda un rango nuevo con el
   carril B.
+- **Lo que T-601 suma al carril A.** Los periodos (`payout_periods`, `period_status`), las
+  funciones `private.month_bounds`, `period_zone`, `period_bounds`, `period_closing_at`,
+  `period_reached_closing`, `period_status_of`, `open_period`, `period_transition`,
+  `allocation_start`, `guard_payout_period` y `guard_frozen_period`, la ventana
+  (`rollup_window`, ya era del A), los congelados de cobros, partes, alertas y exclusiones, y el
+  área `periods` del vigilante. Sus pruebas de integración nuevas van del 51 al 59 (decisión de
+  Sergio del 2026-10-23: el 50 es del proxy, y la 49 fue la última del 45 al 49).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1707,6 +1714,57 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Para después: el porcentaje por tramos y lo arrastrado guardado (T-601); escribir lo que
     devuelve el cálculo y congelarlo (T-602); el estimado del maestro (T-408); el bono y el pago
     mínimo (T-603).
+- **Los periodos** (T-601, primera solicitud; RF-501; decisiones de Sergio del 2026-10-23; 05
+  §8.3). Viven en la base (`t601_periodos`) y se prueban en pgTAP (`40_periodos`) y en
+  integración (`49-periodos`, lo que a la vez: abrir, el candado del cobro contra el paso a
+  cierre, y la corrida de cada noche). Lo que no se ve leyendo un solo archivo:
+  - **La migración no escribe filas, y un mes sin fila toma su estado del reloj**
+    (`private.period_status_of()`): abierto hasta su día de cierre, en cierre después. Cerrado y
+    pagado solo existen con fila. Las filas las abre el paso a cierre (el mes en curso y los dos
+    siguientes) y el primer cobro de un mes. Como nada cierra un periodo hasta T-602, una fila
+    que se queda entra a la ventana para siempre cuando su mes termina: las pruebas de
+    integración que corren la corrida quitan al terminar las filas que se crearon mientras
+    corrían (`tests/integration/helpers/periods.ts`), y antes exigen la ventana de siempre. Las de
+    pgTAP usan meses de 2020, 2021 y de 2030 en adelante, o abren la del mes que necesitan, y la
+    que mira la ventana exacta quita las filas dentro de su transacción. El `pg_cron` de la base
+    local y `pnpm db:rollup` también abren filas y pasan meses a cierre: con el tiempo, la base
+    local pide `pnpm db:reset`.
+  - **El mes pasa a en cierre el día `DIA_CIERRE` (3) del mes siguiente**, a las 00:00 en su
+    zona: lo hace `private.period_transition()`, que la corrida de cada noche llama al terminar,
+    en su propia corrida `period_transition` de `job_runs`, solo si consolidó ese mes sin error
+    de paso (un par que falla no es error de paso). Primero pasa a cierre y después abre las
+    filas, cada una en su bloque: si una no abre (`open_failed`), la corrida termina fallida. Con
+    un solo periodo (`nightly_rollup(false, p)`) no corre. Hasta entonces el latido acepta el mes;
+    en cierre ya no (contesta `not_found`, como a un mes viejo). Esto reemplaza lo que dicen las
+    viñetas de T-205 («el periodo en curso o el anterior») y de T-208 («el salto solo en el mes
+    anterior terminado»; «fuera de la ventana del latido»): la ventana ya no es la del latido.
+  - **Una sola verdad de dónde empieza un mes**: `private.period_of()` lee la fila que contiene el
+    instante y, si no hay, corta con la zona de ahora. El latido y el cobro la usan.
+  - **La ventana** (`private.rollup_window()`) es el mes anterior y el en curso por reloj, más los
+    periodos abiertos o en cierre que ya empezaron, menos los cerrados y los pagados. Un periodo
+    en cierre se sigue corrigiendo (exclusiones, recálculo) hasta que finanzas lo cierre. Una
+    fila abierta o en cierre de un mes viejo entra a la ventana.
+  - **El cobro tardío.** `charges.period_id` es el mes del cobro, sin clave foránea (un mes de
+    antes del arranque no tiene fila); `allocation_start_period_id` dice dónde empiezan sus
+    partes, con clave. Si su mes está cerrado o pagado, o es de antes de la ventana sin fila, las
+    partes empiezan en el primer periodo abierto después, con la regla `late_charge_v1` y la tasa
+    de su propio mes, y `record_charge` contesta además `"late": true`.
+    `private.allocation_start()` deja la fila con candado compartido: el paso a cierre espera.
+  - **Lo cerrado se congela** con `private.guard_frozen_period()` (código 55000): no entra un
+    cobro, una parte, una alerta ni una exclusión, ni se revierte una. Revisar una alerta sigue.
+  - **El guardián** solo deja pasar de abierto a en cierre, y solo a un mes que ya llegó a su día;
+    pone él `entered_closing_at`, exige los instantes del mes en una zona con nombre de lugar, y
+    no deja borrar ni vaciar. Que dos periodos no se encimen lo cuida una restricción de exclusión
+    (`payout_periods_no_overlap`, código 23P01), sin candado: dos que se abren a la vez no se
+    esperan. Para poner un estado
+    que todavía no se escribe (cerrado, pagado), una prueba apaga `payout_periods_guard` dentro
+    de su transacción.
+  - Para después: los tramos, la foto de los alumnos activos y RF-707 por instante (la segunda
+    solicitud de T-601); cerrar y pagar, lo arrastrado, sellar y purgar las particiones,
+    congelar `watch_rollup` y las claves foráneas que faltan (T-602). Con T-602 un anual tardío
+    puede empezar en un mes viejo que se quedó abierto y caer con sus doce partes sobre uno ya
+    cerrado: el congelado lo rechazaría y el cobro no se registraría; T-602 decide desde dónde
+    empieza. Y que un mes que se queda abierto noches seguidas (`held_open`) avise.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

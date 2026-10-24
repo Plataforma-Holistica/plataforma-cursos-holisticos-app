@@ -68,7 +68,7 @@ from (values
   ('ALERTA_SIN_CONSUMO_PCT',    '4000',                 'proposed'),
   ('ALERTA_SALTO_MINIMO_MEDIOS_PUNTOS', '40',            'proposed'),
   -- Pago a maestros
-  ('DIA_CIERRE',                '1',                    'proposed'),
+  ('DIA_CIERRE',                '3',                    'decided'),
   ('DIA_PAGO',                  '10',                   'proposed'),
   ('PAGO_MINIMO',               '50000',                'proposed'),
   ('FUNDADOR_MULTIPLICADOR',    '{"multiplier": "1.15", "months": 24}', 'to_confirm'),

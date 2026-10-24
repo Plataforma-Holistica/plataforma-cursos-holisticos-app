@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { localOwnerUrl } from "./helpers/local";
+import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
 
 // La corrida de la consolidación (T-207; RF-405, RF-408; 05 §8.2), contra la base local. Es un
 // procedimiento que hace `commit` entre pasos, y eso no se puede probar dentro de una
@@ -13,12 +14,15 @@ import { localOwnerUrl } from "./helpers/local";
 // se borra). Las corridas y las marcas que deja se borran al terminar cada caso.
 
 let owner: Client;
+let suiteStart: string;
 const seen: string[] = [];
 const marks: { period: number; profile: string; lesson: string }[] = [];
 
 beforeAll(async () => {
   owner = new Client({ connectionString: localOwnerUrl() });
   await owner.connect();
+  await assertPlainWindow(owner);
+  suiteStart = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
   // Con marcas de otra cosa, la corrida consolidaría y confirmaría: no se puede deshacer.
   const pending = await owner.query<{ n: string }>("select count(*) as n from private.rollup_dirty");
   if (pending.rows[0]?.n !== "0") throw new Error("hay marcas en la base local: pnpm db:reset");
@@ -34,6 +38,8 @@ afterEach(async () => {
   if (seen.length > 0) await owner.query("delete from public.job_runs where id = any($1::uuid[])", [seen.splice(0)]);
 });
 afterAll(async () => {
+  // Las filas que abrió el paso a cierre de cada corrida (T-601), y esas corridas.
+  await dropTransitionLeftovers(owner, suiteStart);
   await owner.end();
 });
 

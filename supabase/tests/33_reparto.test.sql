@@ -364,6 +364,10 @@ select throws_ok($$select private.pool_bps(202509)$$, 'P0001', null, 'otra regla
 -- ---------------------------------------------------------------------------------------
 -- De punta a punta: el ejemplo del PRD desde sus cobros y su consolidado (05 §8.7).
 
+-- Octubre de 2026, con fila (T-601): sus cobros no son tardíos, corra el día que corra.
+select pruebas.como_dueno_sistema();
+select private.open_period(202610);
+select pruebas.como_dueno();
 select pruebas.alta(pruebas.al(n), format('alumno%s-reparto@prueba.test', n)) from generate_series(1, 6) n;
 insert into etiquetas select pruebas.al(n), (array['A', 'B', 'C', 'D', 'E', 'F'])[n] from generate_series(1, 6) n;
 insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
