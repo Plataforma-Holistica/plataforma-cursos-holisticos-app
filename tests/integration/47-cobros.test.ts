@@ -16,10 +16,12 @@ import { createTestUser, deleteTestUsers, ownerQuery, type TestUser } from "./he
 const CALLERS = 9;
 let user: TestUser;
 let subscription: string;
+let openedOctober = false;
 
 beforeAll(async () => {
-  // Octubre de 2026 con fila (T-601): sus cobros no son tardíos, corra el día que corra.
-  await ownerQuery("select private.open_period(202610)");
+  // Octubre de 2026 con fila (T-601): sus cobros no son tardíos, corra el día que corra. Si la abrió
+  // esta prueba, la quita al terminar.
+  openedOctober = (await ownerQuery<{ created: boolean }>("select private.open_period(202610) as created"))[0]!.created;
   user = await createTestUser();
   subscription = randomUUID();
   await ownerQuery(
@@ -31,6 +33,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (user) await deleteTestUsers([user]);
+  if (openedOctober) {
+    await ownerQuery(
+      `begin;
+       alter table public.payout_periods disable trigger payout_periods_guard;
+       delete from public.payout_periods p where p.period_id = 202610
+         and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id);
+       alter table public.payout_periods enable trigger payout_periods_guard;
+       commit;`,
+    );
+  }
   const guards = await ownerQuery<{ off: number }>(
     `select count(*)::int as off from pg_trigger
      where tgrelid in ('public.charges'::regclass, 'public.revenue_allocations'::regclass)

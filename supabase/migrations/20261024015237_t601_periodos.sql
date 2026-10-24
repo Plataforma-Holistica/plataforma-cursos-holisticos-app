@@ -48,7 +48,9 @@ create table public.payout_periods (
   constraint payout_periods_order check (ends_at > starts_at),
   constraint payout_periods_closing_consistent check ((status = 'open') = (entered_closing_at is null)),
   constraint payout_periods_active_students_positive check (active_students >= 0),
-  constraint payout_periods_carried_in_positive check (carried_in_cents >= 0)
+  constraint payout_periods_carried_in_positive check (carried_in_cents >= 0),
+  -- Dos periodos no se enciman, aunque tengan zonas distintas.
+  constraint payout_periods_no_overlap exclude using gist (pg_catalog.tstzrange(starts_at, ends_at) with operator(pg_catalog.&&))
 );
 comment on table public.payout_periods is 'Los periodos de pago y su estado (RF-501, T-601). Un mes sin fila toma su estado del reloj; no se borra ninguno.';
 alter table public.payout_periods enable row level security;
@@ -197,11 +199,12 @@ end
 $$;
 revoke all on function private.open_period(public.period_id) from public;
 
--- El guardián. Al insertar: los instantes de su mes en su zona, abierto o en cierre (la hora de en
--- cierre la pone la base), sin cifras, y sin encimarse con otro (solo puede pasar si cambió la zona;
--- con candado, para que dos que se abren a la vez se revisen de uno en uno). Después solo avanza el
--- estado, de abierto a en cierre por ahora: cerrar y pagar llegan con T-602. No se borra ni se vacía.
--- Escribe solo el dueño: nadie de la aplicación tiene privilegios sobre la tabla.
+-- El guardián. Al insertar: los instantes de su mes en una zona con nombre de lugar, abierto o en
+-- cierre, sin cifras. Después solo avanza el estado, de abierto a en cierre por ahora (cerrar y pagar
+-- llegan con T-602). En cierre solo un mes que ya llegó a su día: un error aquí taparía los latidos.
+-- La hora de en cierre la pone la base. No se borra ni se vacía. Que dos periodos no se encimen (solo
+-- puede pasar si cambió la zona) lo cuida la restricción de exclusión de la tabla. Escribe solo el
+-- dueño: nadie de la aplicación tiene privilegios sobre la tabla.
 create function private.guard_payout_period() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -230,13 +233,12 @@ begin
       raise exception '%.%: period % starts open or closing, without figures', tg_table_schema, tg_table_name, new.period_id
         using errcode = '23514';
     end if;
+    if new.status = 'closing' and not private.period_reached_closing(new.period_id) then
+      raise exception '%.%: period % has not reached its closing day', tg_table_schema, tg_table_name, new.period_id
+        using errcode = '23514';
+    end if;
     new.entered_closing_at := case when new.status = 'closing' then pg_catalog.now() end;
     new.created_at := pg_catalog.now();
-    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('payout_periods', 0));
-    if exists (select 1 from public.payout_periods o
-               where o.period_id <> new.period_id and o.starts_at < new.ends_at and o.ends_at > new.starts_at) then
-      raise exception '%.%: period % overlaps another', tg_table_schema, tg_table_name, new.period_id using errcode = '23514';
-    end if;
     return new;
   end if;
 
@@ -254,6 +256,10 @@ begin
   if not (old.status = 'open' and new.status = 'closing') then
     raise exception '%.%: period % goes only from open to closing (closing it comes with T-602)', tg_table_schema, tg_table_name,
       old.period_id using errcode = '23514';
+  end if;
+  if not private.period_reached_closing(old.period_id) then
+    raise exception '%.%: period % has not reached its closing day', tg_table_schema, tg_table_name, old.period_id
+      using errcode = '23514';
   end if;
   new.entered_closing_at := pg_catalog.now();
   return new;
@@ -298,10 +304,12 @@ update public.parameter_definitions set description = 'Día del mes siguiente en
 where key = 'DIA_CIERRE';
 
 -- Lo llama la corrida de cada noche al terminar (`private.nightly_rollup()`), con los periodos que
--- consolidó sin error de paso (las anomalías no frenan el cierre). Abre las filas del mes en curso y
--- los dos siguientes, y pasa a en cierre cada periodo abierto que ya llegó a su día de cierre, si se
--- consolidó. El que llegó y no se consolidó se queda abierto (`held_open`) hasta la noche siguiente.
--- Como el sistema: lo que cambia queda en la auditoría. Devuelve {opened, entered_closing, held_open}.
+-- consolidó sin error de paso (las anomalías no frenan el cierre). Pasa a en cierre cada periodo
+-- abierto que ya llegó a su día de cierre, si se consolidó; el que llegó y no se consolidó se queda
+-- abierto (`held_open`) hasta la noche siguiente. Después abre las filas del mes en curso y los dos
+-- siguientes, cada una en su propio bloque: si una no se puede abrir (`open_failed`), el paso a
+-- cierre ya quedó y la corrida termina fallida. Como el sistema: lo que cambia queda en la auditoría.
+-- Devuelve {entered_closing, held_open, opened} y, si falló alguna, `open_failed`.
 create function private.period_transition(p_consolidated public.period_id[]) returns jsonb
 language plpgsql volatile set search_path = ''
 as $$
@@ -312,15 +320,9 @@ declare
   v_opened integer[] := '{}';
   v_due integer[];
   v_closing integer[];
+  v_failed jsonb := '{}'::jsonb;
 begin
   perform pg_catalog.set_config('app.actor_kind', 'system', true);
-  v_current := private.period_of(pg_catalog.now());
-  foreach v_month in array array[v_current, private.period_plus(v_current, 1), private.period_plus(v_current, 2)] loop
-    if private.open_period(v_month) then
-      v_opened := v_opened || v_month;
-    end if;
-  end loop;
-
   v_due := array(select p.period_id from public.payout_periods p
                  where p.status = 'open' and private.period_reached_closing(p.period_id) order by 1);
   with moved as (
@@ -329,11 +331,23 @@ begin
     returning p.period_id)
   select coalesce(pg_catalog.array_agg(m.period_id order by m.period_id), '{}') into v_closing from moved m;
 
+  v_current := private.period_of(pg_catalog.now());
+  foreach v_month in array array[v_current, private.period_plus(v_current, 1), private.period_plus(v_current, 2)] loop
+    begin
+      if private.open_period(v_month) then
+        v_opened := v_opened || v_month;
+      end if;
+    exception when others then
+      v_failed := v_failed || pg_catalog.jsonb_build_object(v_month::text, sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
+    end;
+  end loop;
+
   perform pg_catalog.set_config('app.actor_kind', coalesce(v_kind, ''), true);
   return pg_catalog.jsonb_build_object(
-    'opened', pg_catalog.to_jsonb(v_opened),
     'entered_closing', pg_catalog.to_jsonb(v_closing),
-    'held_open', pg_catalog.to_jsonb(array(select d from pg_catalog.unnest(v_due) d where not d = any (v_closing) order by 1)));
+    'held_open', pg_catalog.to_jsonb(array(select d from pg_catalog.unnest(v_due) d where not d = any (v_closing) order by 1)),
+    'opened', pg_catalog.to_jsonb(v_opened))
+    || case when v_failed = '{}'::jsonb then '{}'::jsonb else pg_catalog.jsonb_build_object('open_failed', v_failed) end;
 end
 $$;
 revoke all on function private.period_transition(public.period_id[]) from public;
@@ -366,7 +380,7 @@ begin
   v_periods := v_window;
   if p_period is not null then
     if not p_period = any (v_periods) then
-      raise exception 'period % no longer receives heartbeats', p_period using errcode = '22023';
+      raise exception 'period % is not in the consolidation window', p_period using errcode = '22023';
     end if;
     v_periods := array[p_period];
   elsif not p_full then
@@ -426,6 +440,9 @@ begin
     exception when others then
       v_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
     end;
+    if v_transition ? 'open_failed' then
+      v_error := 'open failed: ' || pg_catalog.left((v_transition -> 'open_failed')::text, 250);
+    end if;
     insert into public.job_runs (job, status, started_at, heartbeat_at, finished_at, details, error)
     values ('period_transition', case when v_error is null then 'succeeded' else 'failed' end::public.run_status,
             v_transition_start, pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(),
@@ -686,8 +703,8 @@ alter table public.revenue_allocations
 
 -- Dónde empiezan las partes de un cobro de un mes. En su mes si está abierto o en cierre (si no
 -- tiene fila y no es de antes de la ventana, la abre); si está cerrado o pagado, o es de antes de la
--- ventana sin fila, el cobro es tardío: en el primer periodo abierto después del suyo (el en curso,
--- abriéndolo si hace falta). Deja la fila con candado compartido hasta el final de la transacción:
+-- ventana sin fila, el cobro es tardío: en el primer periodo abierto después del suyo (si no hay
+-- ninguno, el en curso, abriéndolo). Puede ser uno viejo que se quedó abierto porque no se consolidó. Deja la fila con candado compartido hasta el final de la transacción:
 -- el paso a cierre espera a que el cobro se escriba. Uno que pasó a cierre entre leerlo y tomar el
 -- candado ya no sirve para un tardío: se busca el siguiente.
 create function private.allocation_start(p_period public.period_id) returns public.period_id

@@ -2,14 +2,16 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { localOwnerUrl } from "./helpers/local";
+import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
 
 // Los periodos (T-601; RF-501) contra la base local, en lo que una transacción revertida no puede
 // mostrar: dos que abren el mismo periodo a la vez dejan una sola fila; el paso a cierre espera al
 // cobro que leyó el periodo abierto (y al revés); y la corrida de cada noche, que hace `commit`, pasa
 // a cierre al terminar. Qué hace cada regla lo prueba `supabase/tests/40_periodos.test.sql`.
 //
-// Usa meses de 2020 y 2021 que nadie más deja en la base. Las filas de periodo no se borran: la limpieza las quita
-// con su guardián apagado, solo esas; las corridas que deja, también. La auditoría se queda.
+// Usa meses de la segunda mitad de 2020 y de 2022, que ninguna otra prueba usa. Las filas de
+// periodo no se borran: la limpieza las quita con su guardián apagado, solo esas; las corridas que
+// deja, también. La auditoría se queda.
 
 const OPEN = 202006;
 const LOCKED = 202007;
@@ -18,11 +20,12 @@ const FIRST = 202009;
 const SECOND = 202010;
 const CLOSED = 202011;
 const FAILING = 202012;
-const RETRY_FROM = 202103;
-const RETRY_NEXT = 202104;
+const RETRY_FROM = 202201;
+const RETRY_NEXT = 202202;
 const OURS = [OPEN, LOCKED, NIGHTLY, FIRST, SECOND, CLOSED, FAILING, RETRY_FROM, RETRY_NEXT];
 
 let owner: Client;
+let suiteStart: string;
 
 async function connect(): Promise<Client> {
   const client = new Client({ connectionString: localOwnerUrl() });
@@ -91,8 +94,13 @@ async function waitBehind(first: Client, count: number): Promise<void> {
 
 beforeAll(async () => {
   owner = await connect();
+  // Con marcas de otra cosa, la corrida consolidaría y confirmaría: no se puede deshacer.
+  const pending = await owner.query<{ n: string }>("select count(*) as n from private.rollup_dirty");
+  if (pending.rows[0]?.n !== "0") throw new Error("hay marcas en la base local: pnpm db:reset");
+  await assertPlainWindow(owner);
+  suiteStart = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
   const taken = await owner.query("select 1 from public.payout_periods where period_id = any($1::int[])", [OURS]);
-  if ((taken.rowCount ?? 0) > 0) throw new Error("hay periodos de 2020 en la base local: pnpm db:reset");
+  if ((taken.rowCount ?? 0) > 0) throw new Error("hay periodos de 2020 o 2022 en la base local: pnpm db:reset");
 });
 
 afterAll(async () => {
@@ -105,6 +113,7 @@ afterAll(async () => {
     "select count(*)::int as off from pg_trigger where tgrelid = 'public.payout_periods'::regclass and tgenabled = 'D'",
   );
   expect(guard.rows[0]?.off).toBe(0);
+  await dropTransitionLeftovers(owner, suiteStart);
   await owner.end();
 });
 
@@ -145,16 +154,18 @@ describe("los periodos a la vez", () => {
     }
   });
 
-  it("dos periodos distintos que se abren a la vez se revisan de uno en uno", async () => {
+  it("dos periodos distintos que se abren a la vez no se esperan", async () => {
     const first = await connect();
     const second = await connect();
     try {
       await first.query("begin");
       expect((await first.query("select private.open_period($1) as created", [FIRST])).rows[0].created).toBe(true);
-      const waiting = second.query<{ created: boolean }>("select private.open_period($1) as created", [SECOND]);
-      await waitBehind(first, 1);
+      const answer = await Promise.race([
+        second.query<{ created: boolean }>("select private.open_period($1) as created", [SECOND]).then((result) => result.rows[0]!.created),
+        new Promise((resolve) => setTimeout(() => resolve("esperó"), 2_000)),
+      ]);
+      expect(answer).toBe(true);
       await first.query("commit");
-      expect((await waiting).rows[0]!.created).toBe(true);
       expect([await status(FIRST), await status(SECOND)]).toEqual(["closing", "closing"]);
     } finally {
       await first.query("rollback").catch(() => undefined);
@@ -263,7 +274,7 @@ describe("la corrida de cada noche", () => {
       ]);
       expect(transitions.rowCount).toBe(0);
     } finally {
-      await owner.query("delete from public.job_runs where started_at > $1::timestamptz", [start]);
+      await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
     }
   });
 
@@ -293,10 +304,10 @@ describe("la corrida de cada noche", () => {
       expect(runs.rows[1]!.details.held_open).toContain(FAILING);
       expect(await status(FAILING)).toBe("open");
       const left = await owner.query("select period_id from private.rollup_dirty where profile_id = $1 order by 1", [mark]);
-      expect(left.rows.map((row: { period_id: number }) => row.period_id)).toEqual([FAILING, CLOSED]);
+      expect(left.rows.map((row: { period_id: number }) => row.period_id)).toEqual([CLOSED, FAILING]);
     } finally {
       await owner.query("delete from private.rollup_dirty where profile_id = $1", [mark]);
-      await owner.query("delete from public.job_runs where started_at > $1::timestamptz", [start]);
+      await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
     }
   });
 });

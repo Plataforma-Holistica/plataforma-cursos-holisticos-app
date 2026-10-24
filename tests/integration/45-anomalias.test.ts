@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { localOwnerUrl } from "./helpers/local";
+import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
 
 // La detección de anomalías dentro de la corrida de cada noche (T-208; RF-406; 05 §8.2, paso 7),
 // contra la base local. La corrida es un procedimiento que hace `commit`: aquí corre como la corre
@@ -13,12 +14,15 @@ import { localOwnerUrl } from "./helpers/local";
 // al terminar cada caso.
 
 let owner: Client;
+let suiteStart: string;
 const seen: string[] = [];
 const marks: { period: number; profile: string; lesson: string }[] = [];
 
 beforeAll(async () => {
   owner = new Client({ connectionString: localOwnerUrl() });
   await owner.connect();
+  await assertPlainWindow(owner);
+  suiteStart = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
   const pending = await owner.query<{ marks: string; alerts: string }>(
     "select (select count(*) from private.rollup_dirty) as marks, (select count(*) from public.anomaly_alerts) as alerts",
   );
@@ -37,6 +41,8 @@ afterEach(async () => {
   if (seen.length > 0) await owner.query("delete from public.job_runs where id = any($1::uuid[])", [seen.splice(0)]);
 });
 afterAll(async () => {
+  // Las filas que abrió el paso a cierre de cada corrida (T-601), y esas corridas.
+  await dropTransitionLeftovers(owner, suiteStart);
   await owner.end();
 });
 

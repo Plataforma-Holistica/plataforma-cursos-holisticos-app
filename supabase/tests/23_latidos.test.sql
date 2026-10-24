@@ -529,7 +529,10 @@ set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interva
     started_at = date_trunc('month', now()) - interval '8 hours'
 where id = (select id from r where name = 'cierre');
 select pruebas.como_dueno_sistema();
-update public.payout_periods set status = 'closing' where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+alter table public.payout_periods disable trigger payout_periods_guard;
+update public.payout_periods set status = 'closing', entered_closing_at = now()
+where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+alter table public.payout_periods enable trigger payout_periods_guard;
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'cierre'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
   '{"outcome": "not_found"}'::jsonb, 'con su mes en cierre, lo atrasado ya no entra');
