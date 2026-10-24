@@ -97,7 +97,9 @@ grant execute on function private.period_start(public.period_id) to app_service;
 -- la sesión y con la hora del reloj, así que una transacción abierta a las 23:59 que confirma con el
 -- periodo ya empezado se rechaza. El límite: quien escribe puede adelantar la revisión
 -- (`set constraints all immediate`), y entonces se revisa con la hora de la sentencia; no puede
--- apagarla ni posponerla.
+-- apagarla ni posponerla. Si cambia de rol antes de confirmar, la revisión falla cerrada. Como mira
+-- el reloj al confirmar, un parámetro que el servidor quiera que rija ya se programa en un instante
+-- futuro.
 create function private.guard_payout_timing() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -120,6 +122,9 @@ begin
   end if;
 
   select d.affects_payout into v_affects from public.parameter_definitions d where d.key = new.key;
+  -- Falla cerrado: quien no lee la definición (el servidor que cambió de rol antes de confirmar)
+  -- se revisa como si el parámetro fuera del reparto.
+  v_affects := v_affects is distinct from false;
   if tg_op = 'INSERT' then
     if v_affects then
       if new.effective_from is distinct from private.period_start(new.effective_period_id) then
@@ -135,6 +140,9 @@ begin
     if old.effective_from <= v_now or (v_affects and private.period_start(old.effective_period_id) <= v_now) then
       raise exception 'parameter %: a value already in force is not canceled (RF-707)', new.key using errcode = '23514';
     end if;
+  elsif old.canceled_at is not null and new.canceled_by is distinct from old.canceled_by then
+    -- Una cancelación del sistema queda sin persona, y nadie la firma después.
+    raise exception 'parameter %: a cancellation is not signed afterwards', new.key using errcode = '23514';
   end if;
   return null;
 end
@@ -284,7 +292,7 @@ as $$
 declare
   v_start timestamptz;
   v_ceiling jsonb;
-  v_zero integer;
+  v_set record;
   v_owner_session boolean;
 begin
   if p_period is null then
@@ -317,21 +325,34 @@ begin
   from pg_catalog.unnest(p_thresholds) with ordinality as t (threshold, o)
   join pg_catalog.unnest(p_bps) with ordinality as b (bps, o2) on b.o2 = t.o;
 
-  -- El tramo de 0 es el porcentaje base: si no es el que rige en el periodo, la versión de ese
-  -- periodo (si la había) se cancela y se escribe la nueva, desde su inicio.
-  v_zero := (select b.bps from pg_catalog.unnest(p_bps) with ordinality as b (bps, o) order by b.o limit 1);
-  if private.period_parameter('BOTE_PCT_BASE', p_period) is distinct from pg_catalog.to_jsonb(v_zero) then
-    update public.business_parameters b set canceled_at = pg_catalog.now(), canceled_by = private.actor_id()
-    where b.key = 'BOTE_PCT_BASE' and b.effective_from = v_start and b.canceled_at is null;
-    insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
-    values ('BOTE_PCT_BASE', pg_catalog.to_jsonb(v_zero), 'decided', v_start, p_period);
-  end if;
+  -- El tramo de 0 es el porcentaje base: en este periodo y en cada uno de los que tienen juego
+  -- después (escribir uno anterior cambia lo que heredan), si no es el que rige ahí, la versión de
+  -- ese periodo (si la había) se cancela y se escribe la nueva, desde su inicio. Los de después
+  -- tampoco han empezado.
+  for v_set in
+    select x.effective_period_id as period_id, (pg_catalog.array_agg(x.pool_bps order by x.min_active_students))[1]::integer as zero
+    from public.pool_tiers x
+    where x.canceled_at is null and x.effective_period_id >= p_period
+    group by x.effective_period_id
+    order by 1
+  loop
+    if private.period_parameter('BOTE_PCT_BASE', v_set.period_id) is distinct from pg_catalog.to_jsonb(v_set.zero) then
+      v_start := private.period_start(v_set.period_id);
+      update public.business_parameters b set canceled_at = pg_catalog.now(), canceled_by = private.actor_id()
+      where b.key = 'BOTE_PCT_BASE' and b.effective_from = v_start and b.canceled_at is null;
+      insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+      values ('BOTE_PCT_BASE', pg_catalog.to_jsonb(v_set.zero), 'decided', v_start, v_set.period_id);
+    end if;
+  end loop;
 end
 $$;
 revoke all on function private.set_pool_tiers(public.period_id, integer[], integer[]) from public;
 
 create trigger pool_tiers_actor before insert or update on public.pool_tiers
   for each row execute function private.guard_config_actor();
+-- Como un parámetro (T-105): quien tiene configuración da su código reciente; el sistema, no.
+create trigger pool_tiers_fresh_code before insert or update on public.pool_tiers
+  for each row execute function private.guard_parameter_fresh_code();
 create trigger pool_tiers_guard before insert or update or delete on public.pool_tiers
   for each row execute function private.guard_pool_tier();
 create trigger pool_tiers_no_truncate before truncate on public.pool_tiers
@@ -432,8 +453,9 @@ $$;
 revoke all on function private.effective_pool_bps(public.period_id, integer) from public;
 
 -- El porcentaje del bote de un periodo (RN-13): el guardado por la foto; si no, el de sus alumnos
--- activos, los de la foto o, sin ella, los de ahora o los de su último instante si ya terminó (solo
--- pasa entre el fin del mes y la corrida, o si la foto falló: así el periodo no pasa a cierre). La
+-- activos, los de la foto o, sin ella, los de ahora (un mes en curso o futuro: el estimado) o los de
+-- su último instante si ya terminó (entre el fin del mes y la corrida, o si la foto falló: así el
+-- periodo no pasa a cierre). La
 -- alerta, el estimado y el cierre leen el mismo número. Reemplaza al de T-407, que leía
 -- `BOTE_PCT_BASE`.
 create or replace function private.pool_bps(p_period public.period_id) returns integer
@@ -461,8 +483,10 @@ $$;
 -- A cada periodo abierto o en cierre que ya terminó y no la tiene: sus alumnos activos en su último
 -- instante y su porcentaje (nulo si no tiene juego de tramos, como los de antes del arranque), en
 -- orden y cada uno en su bloque: el porcentaje de uno lee el del anterior. Como el sistema: queda en
--- la auditoría. La llama la corrida de cada noche al empezar. Devuelve {taken} y, si falló alguna,
--- `failed`.
+-- la auditoría. La llama la corrida de cada noche al empezar (no un recálculo de un solo periodo).
+-- Devuelve {taken} y, si falló alguna, `failed`. Límite: `subscriptions` guarda el estado de ahora, y
+-- la foto se toma el día 1 a las 03:00, con el periodo todavía abierto: una renovación del fin del
+-- mes que se registre después ya no entra en ella.
 create function private.period_photos() returns jsonb
 language plpgsql volatile set search_path = ''
 as $$
@@ -499,7 +523,8 @@ revoke all on function private.period_photos() from public;
 
 -- El guardián (`t601_periodos`), con la foto: el periodo nace sin ella, y el sistema la escribe una
 -- vez, sus alumnos y su porcentaje juntos (el porcentaje puede quedar nulo), a un periodo que ya
--- terminó y sin cambiar su estado. Lo demás no cambia.
+-- terminó y sin cambiar su estado; sin ella no pasa de abierto a en cierre (un mes viejo sí puede
+-- nacer en cierre: la foto se la toma la corrida). Lo demás no cambia.
 create or replace function private.guard_payout_period() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -570,6 +595,10 @@ begin
     raise exception '%.%: period % goes only from open to closing (closing it comes with T-602)', tg_table_schema, tg_table_name,
       old.period_id using errcode = '23514';
   end if;
+  if old.active_students is null then
+    raise exception '%.%: period % needs its photo before closing', tg_table_schema, tg_table_name, old.period_id
+      using errcode = '23514';
+  end if;
   if not private.period_reached_closing(old.period_id) then
     raise exception '%.%: period % has not reached its closing day', tg_table_schema, tg_table_name, old.period_id
       using errcode = '23514';
@@ -627,8 +656,8 @@ begin
 end
 $$;
 
--- La corrida de cada noche (`t601_periodos`), con la foto: al empezar la corrida completa (no la de un
--- solo periodo), antes de consolidar y de detectar, toma la foto de los periodos que terminaron, y
+-- La corrida de cada noche (`t601_periodos`), con la foto: al empezar toda corrida que no es de un
+-- solo periodo (la de cada noche y el recálculo de la ventana), antes de consolidar y de detectar, toma la foto de los periodos que terminaron, y
 -- confirma. Lo que hizo va en la corrida del paso a cierre (`photos`), que termina fallida si una foto
 -- falló o si un periodo llegó a su día sin ella. Lo demás no cambia.
 create or replace procedure private.nightly_rollup(p_full boolean default false, p_period integer default null)
@@ -777,6 +806,7 @@ as $$
            ('public.consumption_exclusions', 'consumption_exclusions_frozen', 'guard_frozen_period', false),
            ('public.anomaly_alerts', 'anomaly_alerts_frozen', 'guard_frozen_period', false),
            ('public.pool_tiers', 'pool_tiers_actor', 'guard_config_actor', false),
+           ('public.pool_tiers', 'pool_tiers_fresh_code', 'guard_parameter_fresh_code', false),
            ('public.pool_tiers', 'pool_tiers_guard', 'guard_pool_tier', false),
            ('public.pool_tiers', 'pool_tiers_no_truncate', 'guard_pool_tier', false),
            ('public.pool_tiers', 'audit_changes', 'audit_row_change', false),

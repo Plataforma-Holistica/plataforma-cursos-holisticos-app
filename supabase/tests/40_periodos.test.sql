@@ -11,7 +11,7 @@ begin;
 \ir _ayuda.psql
 -- La revisión de las partes de un cobro es diferida: aquí, al final de cada sentencia.
 set constraints all immediate;
-select plan(142);
+select plan(143);
 
 create function pruebas.ana() returns uuid language sql immutable as $$ select 'a0000000-0000-0000-0000-000000000001'::uuid $$;
 -- El mes en curso y el anterior, por el reloj, en la zona de la semilla.
@@ -186,6 +186,9 @@ select pruebas.fila(202110);
 select pruebas.como_dueno_sistema();
 select throws_ok($$update public.payout_periods set status = 'closing' where period_id = 203701$$, '23514', null,
   'un mes que no ha llegado a su día no pasa a en cierre');
+select throws_ok($$update public.payout_periods set status = 'closing' where period_id = 202109$$, '23514',
+  'public.payout_periods: period 202109 needs its photo before closing', 'sin su foto no pasa a en cierre');
+update public.payout_periods set active_students = 0 where period_id = 202109;
 update public.payout_periods set status = 'closing', entered_closing_at = '2000-01-01 00:00Z' where period_id = 202109;
 select results_eq($$select status::text, entered_closing_at = now() from public.payout_periods where period_id = 202109$$,
   $$values ('closing', true)$$, 'de abierto a en cierre, con la hora que pone la base');
@@ -205,8 +208,12 @@ select throws_ok($$delete from public.payout_periods where period_id = 202109$$,
 select throws_ok($$truncate public.payout_periods cascade$$, '42501', null, 'ni se vacía la tabla');
 select results_eq(
   $$select actor_kind, old_value ->> 'status', new_value ->> 'status' from public.audit_log
-    where occurred_at = now() and entity_table = 'public.payout_periods' and entity_id = '202109' and action = 'payout_periods.update'$$,
+    where occurred_at = now() and entity_table = 'public.payout_periods' and entity_id = '202109' and action = 'payout_periods.update'
+      and new_value ->> 'status' = 'closing'$$,
   $$values ('system', 'open', 'closing')$$, 'el cambio de estado queda en la auditoría, con el de antes');
+select pruebas.como_dueno();
+select pruebas.como_dueno_sistema();
+update public.payout_periods set active_students = 0 where period_id = 202110;
 select pruebas.como_dueno();
 select throws_ok($$update public.payout_periods set status = 'closing' where period_id = 202110$$, '42501', null,
   'sin quien actúe, no hay cambio (la auditoría lo exige)');

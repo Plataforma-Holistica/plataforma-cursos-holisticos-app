@@ -10,7 +10,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(173);
+select plan(184);
 
 create function pruebas.inicio(p_period integer) returns timestamptz
 language sql stable as $$ select timezone('America/Mexico_City', to_date(p_period::text || '01', 'YYYYMMDD')::timestamp) $$;
@@ -181,6 +181,10 @@ select pruebas.tramos(203101, '{0}', '{6000}');
 select is(pruebas.base_de(203101), array['6000'::jsonb], 'y de regreso al de antes');
 select is(private.period_parameter('BOTE_PCT_BASE', 203101), '6000'::jsonb, 'el panel dice lo mismo que el tramo de 0');
 select is(pruebas.juego(203101), array['0:6000'], 'el juego vivo es el último');
+select pruebas.tramos(203111, '{0}', '{6000}');
+select pruebas.tramos(203110, '{0}', '{6400}');
+select is(array[private.period_parameter('BOTE_PCT_BASE', 203110), private.period_parameter('BOTE_PCT_BASE', 203111)], array['6400'::jsonb, '6000'::jsonb],
+  'escribir un periodo anterior no le cambia el porcentaje base a uno posterior con su propio juego');
 
 select pruebas.como_dueno_sistema();
 select throws_ok($$select private.set_pool_tiers(203102, '{0,100}', '{6000}')$$, '22023', null, 'umbrales y porcentajes del mismo largo');
@@ -233,6 +237,19 @@ as $$ update public.pool_tiers set canceled_at = now() where effective_period_id
 create function pruebas.programa(p_key text, p_value jsonb, p_period integer) returns void language sql security definer
 as $$ insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
       values (p_key, p_value, 'decided', private.period_start(p_period), p_period) $$;
+create function pruebas.tramo_suelto(p_period integer) returns void language sql security definer
+as $$ insert into public.pool_tiers (effective_period_id, min_active_students, pool_bps) values (p_period, 500, 7000) $$;
+-- El servidor que cambia de rol antes de confirmar: como `authenticated` no lee la definición del
+-- parámetro, y la revisión no puede tomarlo por uno que no es del reparto.
+create function pruebas.cambia_de_rol() returns void language plpgsql
+as $$
+begin
+  insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+  values ('VELOCIDAD_MAX', '"9"', 'decided', now() + interval '1 minute', 202610);
+  perform set_config('role', 'authenticated', true);
+  set constraints business_parameters_timing immediate;
+end
+$$;
 grant execute on all functions in schema pruebas to app_service;
 create function pruebas.como_config() returns void language sql
 as $$ select pruebas.como_servicio('c0000000-0000-0000-0000-000000000041'); select set_config('app.reason', 'Prueba de tramos', true); $$;
@@ -269,6 +286,12 @@ select throws_ok($$update public.business_parameters set canceled_at = now(), ca
 select throws_ok(format('select pruebas.cancela_tramos(%s)', 202610), '23514', null,
   'dentro de una función del dueño, tampoco cancela los tramos de un periodo empezado');
 select lives_ok('select pruebas.cancela_tramos(203105)', 'los de uno por empezar, sí');
+select throws_ok('select pruebas.tramo_suelto(202610)', '23514', null, 'ni escribe un tramo de un periodo empezado desde una función del dueño');
+set constraints business_parameters_timing deferred;
+-- Se rechaza por permiso (42501) o, si ya se revisó antes en la transacción, por RF-707 (23514).
+select throws_ok('select pruebas.cambia_de_rol()', null, null,
+  'cambiar de rol antes de confirmar no salta la revisión: falla cerrada');
+set constraints all immediate;
 select throws_ok($$select pruebas.programa('UMBRAL_MEDIO_PCT', '2600', 202509)$$, '23514', null,
   'ni programa un parámetro del reparto en un mes que ya empezó');
 
@@ -287,9 +310,21 @@ select throws_ok($$insert into public.business_parameters (key, value, status, e
 select throws_ok($$insert into public.business_parameters (key, value, status, effective_from)
                    values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() - interval '1 second')$$,
   '23514', null, 'un parámetro que no es del reparto tampoco rige hacia atrás (la gracia mueve los alumnos activos)');
+select throws_ok($$insert into public.business_parameters (key, value, status, effective_from)
+                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() + interval '1 millisecond')$$,
+  '23514', null, 'la hora es la del reloj, no la del inicio de la transacción');
 select lives_ok($$insert into public.business_parameters (key, value, status, effective_from)
                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() + interval '1 day')$$,
   'hacia adelante, sí');
+-- Una versión del reparto con un instante futuro en un periodo ya empezado solo la deja el dueño;
+-- el servidor no la cancela.
+select pruebas.como_dueno_sistema();
+insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+values ('UMBRAL_MEDIO_PCT', '2550', 'decided', now() + interval '2 days', 202610);
+select pruebas.como_config();
+select throws_ok($$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000041'
+                   where key = 'UMBRAL_MEDIO_PCT' and value = '2550'$$,
+  '23514', null, 'ni se cancela una del reparto cuyo periodo ya empezó, aunque no rija todavía');
 select throws_ok($$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000041'
                    where key = 'GRACIA_COBRO_DIAS' and effective_from <= now() and canceled_at is null$$,
   '23514', null, 'una versión que ya rige no se cancela');
@@ -302,6 +337,12 @@ select lives_ok($$update public.business_parameters set canceled_at = now(), can
 select lives_ok($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
                   values ('UMBRAL_MEDIO_PCT', '2700', 'decided', '2031-06-01 06:00Z', 203106)$$,
   'y se vuelve a programar en el mismo instante: el índice único no cuenta la cancelada');
+select pruebas.como_dueno();
+update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '16 minutes'
+  where session_id = pruebas.sesion('c0000000-0000-0000-0000-000000000041');
+select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000041');
+select throws_ok($$select private.set_pool_tiers(203109, '{0,10}', '{6000,6100}')$$, '42501',
+  'public.pool_tiers: a recent second factor code is required', 'sin un código reciente no cambia un tramo, como un parámetro');
 select pruebas.como_dueno_sistema();
 select lives_ok(format($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
                          values ('UMBRAL_MEDIO_PCT', '2500', 'decided', now() - interval '1 hour', %s)$$, pruebas.mes(0)),
@@ -315,6 +356,10 @@ select results_eq($$select canceled_at = now(), canceled_by from public.pool_tie
 select lives_ok($$update public.business_parameters set canceled_at = now()
                   where key = 'GRACIA_COBRO_DIAS' and value = '9' and canceled_at is null$$,
   'el sistema cancela sin persona que lo firme');
+select pruebas.como_config();
+select throws_ok($$update public.business_parameters set canceled_by = 'c0000000-0000-0000-0000-000000000041'
+                   where key = 'GRACIA_COBRO_DIAS' and value = '9'$$,
+  '23514', null, 'y nadie la firma después');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
@@ -368,6 +413,12 @@ select is(pruebas.activos(), 4, 'una suscripción nueva vencida no tapa a una vi
 select pruebas.suscribe(16, 'canceled', '2030-06-18 12:00Z', '2030-01-01', null, null, 1);
 select pruebas.suscribe(16, 'active', '2030-07-01 12:00Z', '2030-05-01', null, null, 2);
 select is(pruebas.activos(), 5, 'y una cuenta con dos que cuentan, cuenta una vez');
+select pruebas.suscribe(18, 'active', '2030-06-20 12:00Z', '2030-06-15 12:00Z');
+select is(pruebas.activos(), 6, 'una creada justo en ese instante sí cuenta');
+select pruebas.suscribe(19, 'refunded', '2030-06-30 12:00Z', '2030-01-01', null, '2030-06-15 12:00Z');
+select is(pruebas.activos(), 6, 'y una cortada justo en ese instante, no');
+select pruebas.parametro('GRACIA_COBRO_DIAS', '1', null, '2030-06-14 00:00Z');
+select is(pruebas.activos(), 6, 'la gracia es la de la hora de la falla: un cambio posterior no la acorta');
 select throws_ok($$select private.active_students_at(null)$$, '22023', null, 'sin instante no se cuenta');
 
 -- ---------------------------------------------------------------------------------------
@@ -448,8 +499,10 @@ select ok(current_setting('pruebas.paso')::jsonb -> 'held_open' @> '[202402]', '
 
 select is(private.pool_bps(202304), 6666, 'el guardado');
 select is(private.pool_bps(202305), 6666, 'mayo tenía 0 alumnos y el porcentaje no bajó');
-select throws_ok($$select private.pool_bps(202303)$$, 'P0001', null, 'un mes sin juego de tramos lanza: no se adivina');
-select throws_ok($$select private.pool_bps(202012)$$, 'P0001', null, 'ni sin la regla de los tramos');
+select throws_ok($$select private.pool_bps(202303)$$, 'P0001', 'pool tiers are not set for period 202303',
+  'un mes sin juego de tramos lanza: no se adivina');
+select throws_ok($$select private.pool_bps(202012)$$, 'P0001', 'pool for period 202012 has an unknown BOTE_REGLA_TRAMO',
+  'ni sin la regla de los tramos');
 select pruebas.tramos(202303, '{0,3}', '{6000,6900}');
 select is(private.pool_bps(202303), 6450, 'con un juego escrito después de la foto, con los alumnos de la foto: (2 × 6000 + 2 × 6900) / 4');
 select pruebas.suscribe(25, 'canceled', '2023-04-15 12:00Z', '2023-01-01');
@@ -480,8 +533,10 @@ select is(private.pool_bps(202107), 7000, 'julio de 2021: la pagada hasta su úl
 select is(private.pool_bps(202108), 6000, 'agosto no tiene alumnos, y julio sin fila no lo sube');
 select pruebas.parametro('BOTE_REGLA_TRAMO', '"flat"', 202405);
 select pruebas.tramos(202405, '{0}', '{6000}');
-select throws_ok($$select private.pool_bps(202405)$$, 'P0001', null, 'otra regla de tramos lanza');
-select throws_ok($$select private.pool_bps(202402)$$, 'P0001', null, 'y otra regla del sin consumo');
+select throws_ok($$select private.pool_bps(202405)$$, 'P0001', 'pool for period 202405 has an unknown BOTE_REGLA_TRAMO',
+  'otra regla de tramos lanza');
+select throws_ok($$select private.pool_bps(202402)$$, 'P0001', 'pool for period 202402 has an unknown BOTE_SIN_CONSUMO',
+  'y otra regla del sin consumo');
 select is(private.pool_bps(202610), 6000, 'octubre de 2026, con la semilla: un solo tramo de 60 %, tenga los alumnos que tenga');
 
 -- ---------------------------------------------------------------------------------------
@@ -523,6 +578,10 @@ alter table public.pool_tiers disable trigger pool_tiers_guard;
 select results_eq($$select problem, object_name from private.schema_violations_periods()$$,
   $$values ('period trigger missing or disabled: pool_tiers_guard', 'public.pool_tiers')$$, 'el guardián de los tramos apagado');
 alter table public.pool_tiers enable trigger pool_tiers_guard;
+alter table public.pool_tiers disable trigger pool_tiers_fresh_code;
+select results_eq($$select problem, object_name from private.schema_violations_periods()$$,
+  $$values ('period trigger missing or disabled: pool_tiers_fresh_code', 'public.pool_tiers')$$, 'los tramos sin pedir el código reciente');
+alter table public.pool_tiers enable trigger pool_tiers_fresh_code;
 drop trigger business_parameters_timing on public.business_parameters;
 create constraint trigger business_parameters_timing after insert or update on public.business_parameters
   not deferrable for each row execute function private.guard_payout_timing();

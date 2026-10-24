@@ -305,8 +305,13 @@ que no se ve leyendo un solo archivo:
   `BOTE_PCT_BASE` la escribe solo `set_pool_tiers`, porque es el tramo de 0) y
   `business_parameters_timing` (RF-707 por instante, diferido). Para el B: un parámetro del
   reparto que escriba el servidor rige exactamente desde `private.period_start()` de su periodo,
-  que no ha empezado; ninguno rige hacia atrás; y una prueba que apague los disparadores de la
-  tabla (`disable trigger user`) los prende antes de mirar el vigilante, que los exige.
+  que no ha empezado; ninguno rige hacia atrás, y como la hora es la del reloj al confirmar, uno
+  que deba regir ya se programa en un instante futuro (`now()` es el inicio de la transacción, y
+  ya pasó); el índice único de una versión cuenta solo las vivas, así que una cancelada no impide
+  volver a programar el mismo instante; una cancelación puede quedar sin persona (la del
+  sistema), y no se firma después; si el servidor cambia de rol antes de confirmar, la revisión
+  falla cerrada; y una prueba que apague los disparadores de la tabla (`disable trigger user`)
+  los prende antes de mirar el vigilante, que los exige.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1786,12 +1791,14 @@ falla. Veintiuna precisiones que la tabla no dice:
     `security definer`, que nadie de la aplicación ejecuta todavía (PA-85 la abre): lo valida
     (el primer umbral en 0, umbrales que crecen, porcentajes de 1 a `BOTE_PCT_TECHO` que no
     bajan), cancela el juego que hubiera en ese periodo y escribe el nuevo, solo en read
-    committed y con un candado consultivo. El guardián de `pool_tiers` deja escribir solo al
-    dueño de la tabla (desde esa función, o la sesión del dueño), pone los autores y las horas, y
-    de un tramo solo deja cancelar, una vez.
-  - **El tramo de 0 es el porcentaje base.** `pool_bps` ya no lee `BOTE_PCT_BASE`: si el tramo de
-    0 cambia, la función escribe la versión de `BOTE_PCT_BASE` del periodo, y el servidor no la
-    escribe ni la cancela por fuera (`business_parameters_origin`).
+    committed y con un candado consultivo. Como un parámetro, pide el código reciente a quien
+    tiene configuración. El guardián de `pool_tiers` deja escribir solo al dueño de la tabla
+    (desde esa función, o la sesión del dueño), pone los autores y las horas, y de un tramo solo
+    deja cancelar, una vez.
+  - **El tramo de 0 es el porcentaje base.** `pool_bps` ya no lee `BOTE_PCT_BASE`: la función
+    escribe la versión de `BOTE_PCT_BASE` del periodo cuando no es su tramo de 0, y también la de
+    cada periodo posterior con juego propio (escribir uno anterior cambia lo que heredan). El
+    servidor no la escribe ni la cancela por fuera (`business_parameters_origin`).
   - **RF-707 por instante** (`private.guard_payout_timing()`, disparador de restricción diferido y
     sin `security definer`, en `business_parameters` y en `pool_tiers`): un parámetro del reparto
     rige exactamente desde el inicio de su periodo (`private.period_start()`, la única función de
@@ -1800,18 +1807,22 @@ falla. Veintiuna precisiones que la tabla no dice:
     **sesión del dueño**: la que entró como el dueño de la tabla y no cambió de rol (la semilla, una
     corrección a mano). Dentro de una función `security definer` `current_user` es el dueño pero
     la sesión no, así que el servidor no hereda la excepción. Las pruebas de base la ponen
-    `immediate`, porque se revierten sin confirmar. Límite: quien escribe puede adelantar la
-    revisión, no apagarla ni posponerla.
+    `immediate`, porque se revierten sin confirmar. Si quien escribe no puede leer la definición
+    del parámetro (cambió de rol antes de confirmar), se revisa como del reparto: falla cerrada.
+    Límite: quien escribe puede adelantar la revisión, no apagarla ni posponerla. Dentro de una
+    transacción, `plpgsql` no vuelve a revisar el permiso de una función que ya llamó: por eso un
+    rechazo puede llegar como 23514 y no como 42501.
   - **Los alumnos activos** (`private.active_students_at(instante)`): cuentas activas y sin
     suspensión por fraude, con **alguna** suscripción no pendiente, creada a esa hora, que daba
     acceso por pago o por gracia (la lectura de `account-access.ts`, con la gracia de la hora de
     la falla: sin ella, lanza). No la sola que elige la regla de acceso, que mira el estado de
     ahora. Sin cortesías.
-  - **La foto** (`private.period_photos()`): al empezar la corrida completa de cada noche, antes de
-    consolidar, a cada periodo abierto o en cierre que ya terminó y no la tiene, sus alumnos
+  - **La foto** (`private.period_photos()`): al empezar la corrida de cada noche (no un recálculo
+    de un solo periodo), antes de consolidar, a cada periodo abierto o en cierre que ya terminó y no la tiene, sus alumnos
     activos en su último instante y su porcentaje (nulo sin juego de tramos), una vez, en orden y
-    cada uno en su bloque. El guardián de `payout_periods` la deja escribir solo así. Sin foto, el
-    paso a cierre no pasa el periodo (`photo_missing`) y su corrida termina fallida; la corrida
+    cada uno en su bloque. El guardián de `payout_periods` la deja escribir solo así, y sin ella
+    no deja pasar de abierto a en cierre. Sin foto, el paso a cierre no pasa el periodo
+    (`photo_missing`) y su corrida termina fallida; la corrida
     del paso dice también qué fotos se tomaron (`photos`). Una prueba que llame al paso a cierre
     directo escribe antes la foto, como el sistema.
   - **`private.pool_bps(periodo)`**: el guardado; si no, el de los alumnos de la foto o, sin ella,

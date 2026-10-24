@@ -349,7 +349,8 @@ select is(private.pool_bps(202502), 5000, 'el porcentaje es el de su periodo');
 select is(private.pool_bps(202503), 5000, 'y rige en los siguientes');
 select is(private.period_parameter('BOTE_PCT_BASE', 202502), '5000'::jsonb, 'y es el porcentaje base que dice el panel');
 select pruebas.parametro('BOTE_SIN_CONSUMO', '"by_points"', 202509);
-select throws_ok($$select private.pool_bps(202509)$$, 'P0001', null, 'otra regla del sin consumo lanza: no se adivina (PQ-06)');
+select throws_ok($$select private.pool_bps(202509)$$, 'P0001', 'pool for period 202509 has an unknown BOTE_SIN_CONSUMO',
+  'otra regla del sin consumo lanza: no se adivina (PQ-06)');
 
 -- ---------------------------------------------------------------------------------------
 -- De punta a punta: el ejemplo del PRD desde sus cobros y su consolidado (05 §8.7).
