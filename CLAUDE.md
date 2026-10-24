@@ -296,6 +296,17 @@ que no se ve leyendo un solo archivo:
   (`rollup_window`, ya era del A), los congelados de cobros, partes, alertas y exclusiones, y el
   área `periods` del vigilante. Sus pruebas de integración nuevas van del 51 al 59 (decisión de
   Sergio del 2026-10-23: el 50 es del proxy, y la 49 fue la última del 45 al 49).
+- **Lo que la segunda solicitud de T-601 suma al carril A.** Los tramos (`pool_tiers`) y las
+  funciones `private.period_start`, `check_pool_tiers`, `marginal_pool_bps`, `pool_tiers_for`,
+  `set_pool_tiers`, `active_students_at`, `effective_pool_bps`, `period_photos`,
+  `guard_payout_timing`, `guard_pool_tier` y `guard_pool_base_origin`. Desde el 2026-10-23
+  (decisión de Sergio) el A usa además pgTAP del 40 al 49, que el B no usa. `business_parameters`
+  es de los dos y gana dos disparadores: `business_parameters_origin` (una versión de
+  `BOTE_PCT_BASE` la escribe solo `set_pool_tiers`, porque es el tramo de 0) y
+  `business_parameters_timing` (RF-707 por instante, diferido). Para el B: un parámetro del
+  reparto que escriba el servidor rige exactamente desde `private.period_start()` de su periodo,
+  que no ha empezado; ninguno rige hacia atrás; y una prueba que apague los disparadores de la
+  tabla (`disable trigger user`) los prende antes de mirar el vigilante, que los exige.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1765,6 +1776,50 @@ falla. Veintiuna precisiones que la tabla no dice:
     puede empezar en un mes viejo que se quedó abierto y caer con sus doce partes sobre uno ya
     cerrado: el congelado lo rechazaría y el cobro no se registraría; T-602 decide desde dónde
     empieza. Y que un mes que se queda abierto noches seguidas (`held_open`) avise.
+- **Los tramos del bote** (T-601, segunda solicitud; RN-13, RF-511, RF-707; decisiones de Sergio
+  del 2026-10-23: tramos marginales, con el porcentaje hacia abajo al punto base; 05 §5.5, §7.3,
+  §8.3 y §8.4). Viven en la base (`t601_tramos`) y se prueban en pgTAP (`41_tramos`), en
+  integración (`51-tramos`, contra oráculos en TypeScript; la `49`, la foto en la corrida) y con
+  mutaciones a mano. Esto reemplaza lo que dice la viñeta de T-407 de que `pool_bps` lee
+  `BOTE_PCT_BASE`. Lo que no se ve leyendo un solo archivo:
+  - **Un juego se escribe entero con `private.set_pool_tiers(periodo, umbrales, porcentajes)`**,
+    `security definer`, que nadie de la aplicación ejecuta todavía (PA-85 la abre): lo valida
+    (el primer umbral en 0, umbrales que crecen, porcentajes de 1 a `BOTE_PCT_TECHO` que no
+    bajan), cancela el juego que hubiera en ese periodo y escribe el nuevo, solo en read
+    committed y con un candado consultivo. El guardián de `pool_tiers` deja escribir solo al
+    dueño de la tabla (desde esa función, o la sesión del dueño), pone los autores y las horas, y
+    de un tramo solo deja cancelar, una vez.
+  - **El tramo de 0 es el porcentaje base.** `pool_bps` ya no lee `BOTE_PCT_BASE`: si el tramo de
+    0 cambia, la función escribe la versión de `BOTE_PCT_BASE` del periodo, y el servidor no la
+    escribe ni la cancela por fuera (`business_parameters_origin`).
+  - **RF-707 por instante** (`private.guard_payout_timing()`, disparador de restricción diferido y
+    sin `security definer`, en `business_parameters` y en `pool_tiers`): un parámetro del reparto
+    rige exactamente desde el inicio de su periodo (`private.period_start()`, la única función de
+    los periodos que el servidor ejecuta) y ese periodo no ha empezado; ninguno rige hacia atrás;
+    no se cancela lo que ya rige; y no cambia un tramo de un periodo empezado. No lo revisa para la
+    **sesión del dueño**: la que entró como el dueño de la tabla y no cambió de rol (la semilla, una
+    corrección a mano). Dentro de una función `security definer` `current_user` es el dueño pero
+    la sesión no, así que el servidor no hereda la excepción. Las pruebas de base la ponen
+    `immediate`, porque se revierten sin confirmar. Límite: quien escribe puede adelantar la
+    revisión, no apagarla ni posponerla.
+  - **Los alumnos activos** (`private.active_students_at(instante)`): cuentas activas y sin
+    suspensión por fraude, con **alguna** suscripción no pendiente, creada a esa hora, que daba
+    acceso por pago o por gracia (la lectura de `account-access.ts`, con la gracia de la hora de
+    la falla: sin ella, lanza). No la sola que elige la regla de acceso, que mira el estado de
+    ahora. Sin cortesías.
+  - **La foto** (`private.period_photos()`): al empezar la corrida completa de cada noche, antes de
+    consolidar, a cada periodo abierto o en cierre que ya terminó y no la tiene, sus alumnos
+    activos en su último instante y su porcentaje (nulo sin juego de tramos), una vez, en orden y
+    cada uno en su bloque. El guardián de `payout_periods` la deja escribir solo así. Sin foto, el
+    paso a cierre no pasa el periodo (`photo_missing`) y su corrida termina fallida; la corrida
+    del paso dice también qué fotos se tomaron (`photos`). Una prueba que llame al paso a cierre
+    directo escribe antes la foto, como el sistema.
+  - **`private.pool_bps(periodo)`**: el guardado; si no, el de los alumnos de la foto o, sin ella,
+    los de ahora o los del último instante; con los tramos marginales y **no baja**: si el periodo
+    anterior tiene fila y juego, el mayor de los dos. La alerta, el estimado y el cierre leen el
+    mismo número.
+  - Para después: la pantalla, sus permisos y el aviso de `AVISO_CAMBIO_REPARTO_DIAS` (PA-85);
+    copiar el porcentaje al cerrar y lo arrastrado (T-602); el estimado (T-408).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

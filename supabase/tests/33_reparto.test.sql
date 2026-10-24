@@ -2,7 +2,7 @@
 -- Decisiones de Sergio del 2026-10-23: el reparto vive en la base (lo usan la alerta de cada
 -- noche, el estimado de T-408 y el cierre de T-602, sin TypeScript de por medio); el bote de una
 -- cuenta suspendida por fraude va al bote sin consumo; y T-407 son el cálculo, su entrada y la
--- alerta del bote sin consumo (RF-406). El porcentaje sale de `BOTE_PCT_BASE` hasta T-601.
+-- alerta del bote sin consumo (RF-406). El porcentaje sale de los tramos desde T-601 (`41_tramos`).
 --
 -- Los ejemplos del PRD van en octubre de 2026 (el periodo de la semilla y el de 05 §8.7). La
 -- alerta del bote sin consumo, que mira periodos relativos a hoy, está en
@@ -10,7 +10,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(127);
+select plan(124);
 
 -- Alumnos `a…n` y maestros `f…n` de mentira, para el cálculo puro; en la parte de punta a punta
 -- los maestros son de verdad y se nombran en `etiquetas`.
@@ -325,7 +325,8 @@ select throws_ok($$select pruebas.revisa_lineas(0, pruebas.altera(pruebas.prd(),
   'XX000', null, 'ni dos partes del sin consumo para el mismo maestro');
 
 -- ---------------------------------------------------------------------------------------
--- El porcentaje del bote, por periodo (`BOTE_PCT_BASE`, hasta los tramos de T-601).
+-- El porcentaje del bote, por periodo: desde T-601, el de los tramos (los prueba `41_tramos`). Aquí,
+-- que la semilla da el 60 % y lo que hace lanzar.
 
 create function pruebas.parametro(p_key text, p_value jsonb, p_period integer, p_from timestamptz default null) returns void
 language sql as $$
@@ -335,29 +336,18 @@ language sql as $$
 $$;
 -- Los parámetros los escribe el sistema, como la semilla.
 select pruebas.como_dueno_sistema();
-select is(private.pool_bps(202610), 6000, 'octubre de 2026: el 60 % de la semilla');
+select is(private.pool_bps(202610), 6000, 'octubre de 2026: el tramo de 0 de la semilla, el 60 %');
 select is(private.pool_bps(202703), 6000, 'y los meses que siguen, mientras no cambie');
-select throws_ok($$select private.pool_bps(202412)$$, 'P0001', null, 'un periodo sin porcentaje lanza');
-select pruebas.parametro('BOTE_PCT_BASE', '5000', 202502);
-select throws_ok($$select private.pool_bps(202502)$$, 'P0001', null, 'y sin la regla del sin consumo, también');
+select throws_ok($$select private.pool_bps(202412)$$, 'P0001', null, 'un periodo sin reglas lanza');
+select pruebas.parametro('BOTE_PCT_TECHO', '7500', 202502);
+select pruebas.parametro('BOTE_REGLA_TRAMO', '"marginal_tiers"', 202502);
+select throws_ok($$select private.pool_bps(202502)$$, 'P0001', null, 'sin la regla del sin consumo, también');
 select pruebas.parametro('BOTE_SIN_CONSUMO', '"proportional_to_assigned_pool"', 202502);
+select throws_ok($$select private.pool_bps(202502)$$, 'P0001', null, 'y sin tramos');
+select private.set_pool_tiers(202502, '{0}', '{5000}');
 select is(private.pool_bps(202502), 5000, 'el porcentaje es el de su periodo');
 select is(private.pool_bps(202503), 5000, 'y rige en los siguientes');
-select pruebas.parametro('BOTE_PCT_BASE', '10000', 202504);
-select is(private.pool_bps(202504), 10000, 'hasta el 100 %');
-select pruebas.parametro('BOTE_PCT_BASE', '1', 202505);
-select is(private.pool_bps(202505), 1, 'desde 1 punto base');
-select pruebas.parametro('BOTE_PCT_BASE', '0', 202506);
-select throws_ok($$select private.pool_bps(202506)$$, 'P0001', null, 'cero no vale');
--- La tabla de parámetros ya rechaza lo que no es un número de puntos base; la función se defiende
--- igual, por si un día lo deja pasar.
-alter table public.business_parameters disable trigger business_parameters_effective;
-select pruebas.parametro('BOTE_PCT_BASE', '10001', 202507);
-select pruebas.parametro('BOTE_PCT_BASE', '"6000"', 202508);
-alter table public.business_parameters enable trigger business_parameters_effective;
-select throws_ok($$select private.pool_bps(202507)$$, 'P0001', null, 'más del 100 % tampoco');
-select throws_ok($$select private.pool_bps(202508)$$, 'P0001', null, 'ni un texto');
-select pruebas.parametro('BOTE_PCT_BASE', '6000', 202509);
+select is(private.period_parameter('BOTE_PCT_BASE', 202502), '5000'::jsonb, 'y es el porcentaje base que dice el panel');
 select pruebas.parametro('BOTE_SIN_CONSUMO', '"by_points"', 202509);
 select throws_ok($$select private.pool_bps(202509)$$, 'P0001', null, 'otra regla del sin consumo lanza: no se adivina (PQ-06)');
 

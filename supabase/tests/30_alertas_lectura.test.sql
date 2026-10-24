@@ -294,8 +294,9 @@ grant execute on function private.finance_alerts() to authenticated;
 select ok(exists (select 1 from private.schema_violations() where problem = 'finance function executable by authenticated'
                   and object_name = 'private.finance_alerts()'), 'o a una persona leer las alertas');
 revoke execute on function private.finance_alerts() from authenticated;
+-- Los disparadores de los parámetros, otra vez prendidos: el vigilante de los periodos los mira (T-601).
+alter table public.business_parameters enable trigger user;
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 
-alter table public.business_parameters enable trigger user;
 select * from finish();
 rollback;

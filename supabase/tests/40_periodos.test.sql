@@ -11,7 +11,7 @@ begin;
 \ir _ayuda.psql
 -- La revisión de las partes de un cobro es diferida: aquí, al final de cada sentencia.
 set constraints all immediate;
-select plan(141);
+select plan(142);
 
 create function pruebas.ana() returns uuid language sql immutable as $$ select 'a0000000-0000-0000-0000-000000000001'::uuid $$;
 -- El mes en curso y el anterior, por el reloj, en la zona de la semilla.
@@ -63,7 +63,8 @@ select has_table('public', 'payout_periods', 'la tabla de los periodos');
 select enum_has_labels('public', 'period_status', array['open', 'closing', 'closed', 'paid'], 'abierto, en cierre, cerrado y pagado');
 select col_is_pk('public', 'payout_periods', 'period_id', 'un periodo por mes');
 select columns_are('public', 'payout_periods',
-  array['period_id', 'starts_at', 'ends_at', 'timezone', 'status', 'entered_closing_at', 'active_students', 'carried_in_cents', 'created_at'],
+  array['period_id', 'starts_at', 'ends_at', 'timezone', 'status', 'entered_closing_at', 'active_students', 'carried_in_cents', 'created_at',
+        'pool_bps'],
   'lo de T-601; las cifras del cierre llegan con T-602');
 select ok((select relrowsecurity from pg_class where oid = 'public.payout_periods'::regclass), 'con seguridad por fila');
 select has_trigger('public', 'payout_periods', 'payout_periods_guard', 'con su guardián');
@@ -197,8 +198,8 @@ select throws_ok($$update public.payout_periods set starts_at = starts_at + inte
   'ni sus instantes');
 select throws_ok($$update public.payout_periods set timezone = 'UTC' where period_id = 202109$$, '23514', null, 'ni su zona');
 select throws_ok($$update public.payout_periods set carried_in_cents = 1 where period_id = 202109$$, '23514', null, 'ni lo arrastrado');
-select throws_ok($$update public.payout_periods set active_students = 1 where period_id = 202109$$, '23514', null,
-  'ni los alumnos activos (los escribe la segunda solicitud)');
+select throws_ok($$update public.payout_periods set active_students = 1 where period_id = 203701$$, '23514', null,
+  'ni toma la foto de un mes que no ha terminado (la foto, en 41_tramos)');
 select throws_ok($$update public.payout_periods set period_id = 202112 where period_id = 202109$$, '23514', null, 'ni el periodo');
 select throws_ok($$delete from public.payout_periods where period_id = 202109$$, '42501', null, 'un periodo no se borra');
 select throws_ok($$truncate public.payout_periods cascade$$, '42501', null, 'ni se vacía la tabla');
@@ -252,6 +253,9 @@ delete from public.payout_periods
 where period_id in (pruebas.mes(0), private.period_plus(pruebas.mes(0), 1), private.period_plus(pruebas.mes(0), 2));
 alter table public.payout_periods enable trigger payout_periods_guard;
 select pruebas.fila(203901);
+-- Sin la foto (sus alumnos activos) no pasa a cierre: la toma la corrida al empezar (41_tramos).
+select pruebas.como_dueno_sistema();
+update public.payout_periods set active_students = 0 where period_id = 202104;
 select set_config('app.actor_kind', 'prueba', true);
 select set_config('pruebas.paso', private.period_transition(array[202104, 203901, pruebas.mes(0)])::text, true);
 select is(current_setting('app.actor_kind', true), 'prueba', 'quien actúa queda como estaba');
@@ -270,8 +274,10 @@ select is((select count(*)::integer from public.payout_periods
            where period_id in (pruebas.mes(0), private.period_plus(pruebas.mes(0), 1), private.period_plus(pruebas.mes(0), 2)) and status = 'open'), 3,
   'abiertas');
 select ok(not current_setting('pruebas.paso')::jsonb ? 'open_failed', 'sin ninguna que no se pudiera abrir');
+select ok(not current_setting('pruebas.paso')::jsonb ? 'photo_missing', 'ni sin foto: el que no se consolidó no la pide todavía');
 select is((select actor_kind from public.audit_log
-           where occurred_at = now() and entity_table = 'public.payout_periods' and entity_id = '202104' and action = 'payout_periods.update'),
+           where occurred_at = now() and entity_table = 'public.payout_periods' and entity_id = '202104' and action = 'payout_periods.update'
+             and new_value ->> 'status' = 'closing'),
   'system', 'el paso queda en la auditoría como el sistema');
 select is(private.period_transition(array[202104]) -> 'entered_closing', '[]'::jsonb, 'otra vez no pasa nada');
 select pruebas.como_dueno();
@@ -458,8 +464,12 @@ select pruebas.forzar(pruebas.mes(1), 'closing');
 -- La detección en un periodo en cierre más viejo que el anterior: el bote sin consumo se mira en
 -- todo periodo de la ventana que ya terminó.
 
-select pruebas.parametro('BOTE_PCT_BASE', '6000', 202001);
+select pruebas.parametro('BOTE_PCT_TECHO', '7500', 202001);
+select pruebas.parametro('BOTE_REGLA_TRAMO', '"marginal_tiers"', 202001);
 select pruebas.parametro('BOTE_SIN_CONSUMO', '"proportional_to_assigned_pool"', 202001);
+select pruebas.como_dueno_sistema();
+select private.set_pool_tiers(202001, '{0}', '{6000}');
+select pruebas.como_dueno();
 select pruebas.fila(202106, 'closing');
 select pruebas.cobro_directo('viejo-en-cierre', 202106, 202106);
 insert into public.revenue_allocations (charge_id, profile_id, period_id, kind, part_no, parts_total, base_cents, fee_bps, rule)

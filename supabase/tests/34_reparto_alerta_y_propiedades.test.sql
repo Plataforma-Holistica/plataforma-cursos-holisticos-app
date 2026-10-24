@@ -75,9 +75,12 @@ select is(private.detect_anomalies(pruebas.periodo(1), now() + interval '90 minu
 select pruebas.como_dueno_sistema();
 select pruebas.parametro(k, v, pruebas.periodo(2))
 from (values ('IVA_EN_PRECIO', 'true'::jsonb), ('IVA_PCT', '1600'), ('COMISION_COBRO_PCT', '500'), ('BASE_COMISION', '"fixed_rate"'),
-             ('INGRESO_POR_PERIODO', '"monthly_when_charged_annual_in_twelfths"'), ('BOTE_PCT_BASE', '6000'),
-             ('BOTE_SIN_CONSUMO', '"proportional_to_assigned_pool"'), ('VELOCIDAD_MAX', '"2"')) as x (k, v)
+             ('INGRESO_POR_PERIODO', '"monthly_when_charged_annual_in_twelfths"'), ('BOTE_PCT_TECHO', '7500'),
+             ('BOTE_REGLA_TRAMO', '"marginal_tiers"'), ('BOTE_SIN_CONSUMO', '"proportional_to_assigned_pool"'),
+             ('VELOCIDAD_MAX', '"2"')) as x (k, v)
 where pruebas.periodo(2) < 202610;
+-- El porcentaje es el de los tramos (T-601): uno solo, de 60 %, como la semilla.
+select private.set_pool_tiers(pruebas.periodo(2), '{0}', '{6000}') where pruebas.periodo(2) < 202610;
 -- El umbral se lee al detectar (no afecta al reparto): versiones en el futuro, para que la de la
 -- semilla no estorbe; y una que no vale al empezar el mes que terminó.
 select pruebas.parametro('ALERTA_SIN_CONSUMO_PCT', '0', null, pruebas.inicio(pruebas.periodo(1)) + interval '5 seconds');
