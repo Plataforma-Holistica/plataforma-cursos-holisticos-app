@@ -132,7 +132,7 @@ select throws_ok(
   'ni se programa un cambio de parámetro');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '12', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '12', 'proposed', now() + interval '3 days')$$,
   '42501', 'public.business_parameters: a recent second factor code is required',
   'de ninguno: no es una lista de parámetros delicados');
 select throws_ok(
@@ -143,7 +143,7 @@ select throws_ok(
 select pruebas.como_sistema();
 select lives_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '2 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '2 days')$$,
   'el sistema sí: no da códigos');
 select pruebas.limpiar();
 select ok(pruebas.tiene('c0000000-0000-0000-0000-000000000001', 'config'), '(y eso que la puerta de 12 horas sí la pasa)');
@@ -155,7 +155,7 @@ select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000001');
 select set_config('app.reason', 'Prueba', true);
 select lives_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '10', 'proposed', now() + interval '1 day')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '10', 'proposed', now() + interval '1 day')$$,
   'y se puede programar un cambio de parámetro');
 select pruebas.limpiar();
 update auth.mfa_amr_claims set updated_at = clock_timestamp() + interval '6 minutes'
