@@ -231,6 +231,12 @@ afterAll(async () => {
   await owner.query("begin");
   try {
     await owner.query("set local session_replication_role = replica");
+    await owner.query(
+      "delete from public.payout_status_events where payout_id in (select id from public.payouts where period_id = any($1::int[]))",
+      [OURS],
+    );
+    await owner.query("delete from public.payouts where period_id = any($1::int[])", [OURS]);
+    await owner.query("delete from public.bonuses where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_shares where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_student_pools where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_teacher_totals where period_id = any($1::int[])", [OURS]);

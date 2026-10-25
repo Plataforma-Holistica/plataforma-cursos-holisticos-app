@@ -284,6 +284,7 @@ select ok((select started_by = pruebas.finanzas() and code_version = private.cod
   'con quién la corrió y la versión del código');
 select is((select parameters from public.close_runs where id = (select (r ->> 'run_id')::uuid from ensayo_abierto)),
   '{"BOTE_REGLA_TRAMO": "marginal_tiers", "BOTE_SIN_CONSUMO": "proportional_to_assigned_pool",
+    "FUNDADOR_MULTIPLICADOR": {"multiplier": "1.15", "months": 24}, "founders": [],
     "tiers": {"thresholds": [0], "bps": [6000]}, "active_students": null}'::jsonb,
   'y los parámetros que deciden el cálculo (sin foto, sin alumnos activos)');
 select ok(exists (select 1 from public.audit_log where entity_table = 'public.close_runs' and action = 'close_runs.insert'

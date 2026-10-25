@@ -328,6 +328,14 @@ que no se ve leyendo un solo archivo:
   (`disable trigger payout_periods_guard, disable trigger payout_periods_balanced`): si no, el paso
   forzado deja su comprobación pendiente, falla al confirmar, y mientras tanto Postgres no deja otro
   `alter table` sobre la tabla («pending trigger events»).
+- **Lo que T-603 suma al carril A** (primera solicitud). Las tablas `payouts`, `payout_status_events` y
+  `bonuses`, los tipos `payout_status`, `bonus_kind` y `bonus_status`, la columna
+  `close_run_teacher_totals.founder_bonus_cents`, las funciones `private.founder_bonus`,
+  `close_founder_bonuses`, `guard_payout`, `guard_bonus` y `log_payout_status`, y el área `payouts` del
+  vigilante (el área `payout` de T-407 es otra). Cambian `close_input`, `rehearse_close`, `close_period` y
+  `assert_period_balanced`. Usa pgTAP 45 (y amplía la 44). Para el B: un periodo cerrado de verdad ya
+  tiene liquidaciones y, si hay fundadores, bonos; una prueba que borre periodos cerrados borra antes,
+  en réplica, `payout_status_events`, `payouts` y `bonuses`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1952,6 +1960,29 @@ falla. Veintiuna precisiones que la tabla no dice:
   - Para después: las liquidaciones, el bono, el pago mínimo, de cerrado a pagado y purgar (T-603);
     los avisos sin procesar (T-303); PA-78, PA-80, el CSV y la conciliación (T-605); el alias y el
     desglose de finanzas (T-408).
+- **Las liquidaciones y el bono del fundador, al cerrar** (T-603, primera solicitud; RF-505, RF-508,
+  RN-12; decisiones de Sergio del 2026-10-25; 05 §5.5, §7.3, §8.6 y §8.7). Viven en la base
+  (`t603_liquidaciones`) y se prueban en pgTAP (`45_liquidaciones`, con el ejemplo del PRD y M3
+  fundador; `44_cierre_propiedades`, con fundadores y regla al azar) y con mutaciones a mano. Nadie de
+  la aplicación las lee todavía (T-604, T-605). Lo que no se ve leyendo un solo archivo:
+  - **El cierre crea una liquidación por maestro con total**, calculada, con su total (su parte del bote
+    con la del sin consumo) como subtotal y neto; y el bono de cada fundador, **propuesto**. Las dos en
+    la misma transacción, con el periodo todavía en cierre (`require_period_closing` las exige así).
+    Liberar, retener, capturar, confirmar y anular llegan con la segunda solicitud: hasta entonces
+    ninguna de las dos cambia (23514), y no se borran ni se vacían (42501).
+  - **El bono del fundador** (`private.founder_bonus`, pura): el piso del total por el multiplicador
+    menos uno, en puntos base enteros (un multiplicador que no cabe, o la regla que falta, lanza); vale en
+    los `months` periodos que empiezan en el que contiene `founder_since`, contando ese; no mira el
+    estado del maestro (lo cobra suspendido o ido); si da 0 no hay fila.
+  - **Entra a la huella**: `close_input` lleva `FUNDADOR_MULTIPLICADOR` del periodo y la lista de
+    todos los fundadores con su fecha. Un cambio de fundador o de regla deja viejo el ensayo, y el ensayo
+    dice el bono por maestro (`close_run_teacher_totals.founder_bonus_cents`) y en su respuesta.
+  - **La comprobación al confirmar suma dos**: la 9 (cada maestro con total tiene su liquidación
+    calculada, por su total y con la corrida del cierre, y no hay de más; es la 6 del 05, que aquí ya era
+    otra) y la 10 (los bonos del fundador son los que da la regla con lo escrito y con la regla y los
+    fundadores que guardó la corrida, propuestos; y la corrida dice el mismo bono).
+  - Las retenciones y el IVA quedan en 0 hasta T-409: la lista de salida exige T-409 antes de liberar en
+    producción.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
