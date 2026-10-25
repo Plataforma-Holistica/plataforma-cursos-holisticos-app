@@ -15,13 +15,13 @@ select plan(64);
 -- El mes anterior, abierto (T-601): sus latidos atrasados entran hasta su día de cierre, y así esta
 -- prueba no depende de qué día del mes corre. Sin el guardián, que no deja volver a abierto.
 select pruebas.como_dueno_sistema();
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 insert into public.payout_periods (period_id, starts_at, ends_at, timezone)
 select m.p, timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp),
        timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp + interval '1 month'), 'America/Mexico_City'
 from (select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer as p) m
 on conflict (period_id) do update set status = 'open', entered_closing_at = null;
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.limpiar();
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-excluye@prueba.test');
@@ -422,10 +422,10 @@ with x as (
   insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by)
   values (pruebas.periodo(2), 'account', pruebas.beto(), 'other', 'de antes', pruebas.finanzas()) returning id)
 insert into r select 'vieja', id from x;
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set status = 'closed', entered_closing_at = coalesce(entered_closing_at, now())
 where period_id = pruebas.periodo(2);
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.dueno_a_nombre_de(pruebas.ana());
 select throws_ok(format('insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by) values (%s, %L, %L, %L, %L, %L)',
   pruebas.periodo(), 'account', pruebas.beto(), 'other', 'por fuera', pruebas.ana()), '42501', null, 'ni la escribe quien no pasa la puerta de finanzas');

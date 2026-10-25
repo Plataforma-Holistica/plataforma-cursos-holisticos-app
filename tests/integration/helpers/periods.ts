@@ -26,7 +26,7 @@ export async function assertPlainWindow(owner: Client): Promise<void> {
 export async function dropTransitionLeftovers(owner: Client, since: string): Promise<void> {
   await owner.query("begin");
   try {
-    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
     await owner.query(
       `delete from public.payout_periods p where p.created_at >= $1::timestamptz
          and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)
@@ -35,7 +35,7 @@ export async function dropTransitionLeftovers(owner: Client, since: string): Pro
          and not exists (select 1 from public.consumption_exclusions x where x.period_id = p.period_id)`,
       [since],
     );
-    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
     await owner.query("delete from public.job_runs where job = 'period_transition' and started_at >= $1::timestamptz", [since]);
     await owner.query("commit");
   } catch (error) {

@@ -74,14 +74,14 @@ function photo(period: number): Promise<void> {
 /** Un estado que T-601 todavía no escribe (cerrado), con el guardián apagado. */
 function force(period: number, next: string): Promise<void> {
   return asSystem(async () => {
-    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
     await owner.query(
       `update public.payout_periods set status = $2::public.period_status,
               entered_closing_at = case when $2 = 'open' then null else coalesce(entered_closing_at, now()) end
        where period_id = $1`,
       [period, next],
     );
-    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   });
 }
 
@@ -114,9 +114,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await asSystem(async () => {
-    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
     await owner.query("delete from public.payout_periods where period_id = any($1::int[])", [OURS]);
-    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   });
   const guard = await owner.query<{ off: number }>(
     "select count(*)::int as off from pg_trigger where tgrelid = 'public.payout_periods'::regclass and tgenabled = 'D'",

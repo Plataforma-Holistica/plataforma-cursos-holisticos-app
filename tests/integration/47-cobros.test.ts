@@ -36,10 +36,10 @@ afterAll(async () => {
   if (openedOctober) {
     await ownerQuery(
       `begin;
-       alter table public.payout_periods disable trigger payout_periods_guard;
+       alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
        delete from public.payout_periods p where p.period_id = 202610
          and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id);
-       alter table public.payout_periods enable trigger payout_periods_guard;
+       alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
        commit;`,
     );
   }

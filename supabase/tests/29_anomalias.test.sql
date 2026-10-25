@@ -206,10 +206,10 @@ select is((select details - 'floor' from pruebas.alerta(pruebas.periodo(1), 'tea
 -- consolidado tiene fila de periodo, que lo metería a la ventana: es uno cerrado (con el guardián
 -- apagado).
 select set_config('app.actor_kind', 'system', true);
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set status = 'closed', entered_closing_at = coalesce(entered_closing_at, now())
 where period_id = pruebas.periodo(2);
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select set_config('app.actor_kind', '', true);
 select is(pruebas.detecta(pruebas.periodo(2), pruebas.inicio(pruebas.periodo(2)) + interval '10 seconds') ->> 'alerts_opened', '0',
   'fuera de la ventana no se detecta');
