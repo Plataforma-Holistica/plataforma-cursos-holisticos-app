@@ -1525,6 +1525,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       [JSON.stringify(course)],
     );
     expect(loaded?.answer).toBe("loaded");
+    // El consolidado apunta a su periodo (T-602): la fila del mes en curso, antes.
+    await ownerQuery("select private.open_period(to_char(timezone('America/Mexico_City', now()), 'YYYYMM')::int)");
     const [opened] = await ownerQuery<{ opened: string }>(
       `with period as (select to_char(timezone('America/Mexico_City', now()), 'YYYYMM')::int as p),
        rows as (

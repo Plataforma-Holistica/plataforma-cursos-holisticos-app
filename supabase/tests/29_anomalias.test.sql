@@ -45,6 +45,8 @@ language sql as $$ select teacher_id from public.published_courses where slug = 
 -- Una fila del consolidado, escrita como el dueño.
 create function pruebas.fila(p_period integer, p_profile uuid, p_lesson uuid, p_covered integer, p_half_points integer) returns void
 language sql as $$
+  -- El consolidado apunta a su periodo (T-602): su fila, antes.
+  select private.open_period(p_period);
   insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                    lesson_duration_seconds, covered_seconds, half_points)
   select p_period, p_profile, l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, p_covered, p_half_points
@@ -200,7 +202,15 @@ select is((select row(round(metric_value), threshold_value)::text
 select is((select details - 'floor' from pruebas.alerta(pruebas.periodo(1), 'teacher_points_jump', pruebas.maestro('anomalia-a'))),
   '{"before": 6, "after": 10, "students_before": 1, "students_after": 2}'::jsonb, 'con las cifras de los dos meses, sin nadie con nombre');
 
--- Un periodo que ya no recibe latidos no se detecta, aunque tenga lecciones imposibles.
+-- Un periodo que ya no recibe latidos no se detecta, aunque tenga lecciones imposibles. Desde T-602 su
+-- consolidado tiene fila de periodo, que lo metería a la ventana: es uno cerrado (con el guardián
+-- apagado).
+select set_config('app.actor_kind', 'system', true);
+alter table public.payout_periods disable trigger payout_periods_guard;
+update public.payout_periods set status = 'closed', entered_closing_at = coalesce(entered_closing_at, now())
+where period_id = pruebas.periodo(2);
+alter table public.payout_periods enable trigger payout_periods_guard;
+select set_config('app.actor_kind', '', true);
 select is(pruebas.detecta(pruebas.periodo(2), pruebas.inicio(pruebas.periodo(2)) + interval '10 seconds') ->> 'alerts_opened', '0',
   'fuera de la ventana no se detecta');
 select is((select count(*)::integer from public.anomaly_alerts where period_id = pruebas.periodo(2)), 0, 'ni queda nada de ese periodo');

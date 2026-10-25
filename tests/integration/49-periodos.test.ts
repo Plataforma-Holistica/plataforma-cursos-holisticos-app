@@ -123,6 +123,8 @@ afterAll(async () => {
   );
   expect(guard.rows[0]?.off).toBe(0);
   await dropTransitionLeftovers(owner, suiteStart);
+  // La partición que creó la prueba del sellado.
+  await owner.query(`drop table if exists public.watch_events_${CLOSED}`);
   await owner.end();
 });
 
@@ -308,23 +310,81 @@ describe("la corrida de cada noche", () => {
       mark,
     ]);
     const start = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
+    // Ayer también se quedó abierto (T-602): la segunda noche seguida, la corrida del paso lo dice y falla.
+    const yesterday = (
+      await owner.query<{ id: string }>(
+        `insert into public.job_runs (job, status, started_at, heartbeat_at, finished_at, details)
+         select 'period_transition', 'succeeded', t, t, t, jsonb_build_object('held_open', jsonb_build_array($1::int))
+         from (select timezone('America/Mexico_City', date_trunc('day', timezone('America/Mexico_City', now())) - interval '12 hours') as t) x
+         returning id`,
+        [FAILING],
+      )
+    ).rows[0]!.id;
     try {
       await owner.query("call private.nightly_rollup()");
-      const runs = await owner.query<{ job: string; period_id: number | null; status: string; details: Record<string, unknown> }>(
-        `select job, period_id, status::text, details from public.job_runs
+      const runs = await owner.query<{ job: string; period_id: number | null; status: string; error: string | null; details: Record<string, unknown> }>(
+        `select job, period_id, status::text, error, details from public.job_runs
          where started_at > $1::timestamptz and (job = 'period_transition' or period_id in ($2, $3)) order by job`,
         [start, FAILING, CLOSED],
       );
       expect(runs.rows.map((run) => [run.job, run.period_id, run.status])).toEqual([
         ["nightly_rollup", FAILING, "failed"],
-        ["period_transition", null, "succeeded"],
+        ["period_transition", null, "failed"],
       ]);
       expect(runs.rows[1]!.details.held_open).toContain(FAILING);
+      expect(runs.rows[1]!.details.held_open_again).toEqual([FAILING]);
+      expect(runs.rows[1]!.error).toMatch(/held open again/);
       expect(await status(FAILING)).toBe("open");
       const left = await owner.query("select period_id from private.rollup_dirty where profile_id = $1 order by 1", [mark]);
       expect(left.rows.map((row: { period_id: number }) => row.period_id)).toEqual([CLOSED, FAILING]);
     } finally {
+      await owner.query("delete from public.job_runs where id = $1", [yesterday]);
       await owner.query("delete from private.rollup_dirty where profile_id = $1", [mark]);
+      await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
+    }
+  });
+
+  it("la primera noche en cierre recalcula completo, y al terminar sella lo cerrado (T-602)", async () => {
+    // NIGHTLY pasó a cierre en una prueba anterior; CLOSED está cerrado. La partición de CLOSED, para sellarla.
+    expect(await status(NIGHTLY)).toBe("closing");
+    await owner.query("select private.create_watch_partition($1)", [CLOSED]);
+    const start = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
+    // Alguien lee la partición mientras la corrida quiere sellarla: espera 2 s, no la sella y lo dice.
+    const reader = await connect();
+    try {
+      await reader.query("begin");
+      await reader.query(`select 1 from public.watch_events_${CLOSED} limit 1`);
+      await owner.query("call private.nightly_rollup()");
+      await reader.query("rollback");
+      const failed = await owner.query<{ status: string; failures: Record<string, string> | null }>(
+        "select status::text, details -> 'seal_failed' as failures from public.job_runs where job = 'period_transition' and started_at > $1::timestamptz",
+        [start],
+      );
+      expect(failed.rows[0]!.status).toBe("failed");
+      expect(Object.keys(failed.rows[0]!.failures ?? {})).toEqual([String(CLOSED)]);
+      const first = await owner.query<{ mode: string }>(
+        "select details ->> 'mode' as mode from public.job_runs where job = 'nightly_rollup' and period_id = $1 and started_at > $2::timestamptz",
+        [NIGHTLY, start],
+      );
+      expect(first.rows).toEqual([{ mode: "full" }]);
+      // Sin quien la lea, la noche siguiente la sella.
+      const again = (await owner.query<{ now: string }>("select clock_timestamp()::text as now")).rows[0]!.now;
+      await owner.query("call private.nightly_rollup()");
+      const transition = await owner.query<{ sealed: number[] }>(
+        "select details -> 'sealed' as sealed from public.job_runs where job = 'period_transition' and started_at > $1::timestamptz",
+        [again],
+      );
+      expect(transition.rows[0]!.sealed).toContain(CLOSED);
+      const sealed = await owner.query("select 1 from pg_constraint where conname = $1", [`watch_events_${CLOSED}_sealed`]);
+      expect(sealed.rowCount).toBe(1);
+      const second = await owner.query<{ mode: string }>(
+        "select details ->> 'mode' as mode from public.job_runs where job = 'nightly_rollup' and period_id = $1 and started_at > $2::timestamptz",
+        [NIGHTLY, again],
+      );
+      expect(second.rows).toEqual([{ mode: "dirty" }]);
+    } finally {
+      await reader.query("rollback").catch(() => undefined);
+      await reader.end();
       await owner.query("delete from public.job_runs where started_at > $1::timestamptz and job <> 'period_transition'", [start]);
     }
   });

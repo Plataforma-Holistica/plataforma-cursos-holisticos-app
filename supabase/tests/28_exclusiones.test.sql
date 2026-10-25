@@ -416,10 +416,16 @@ select throws_ok(format('update public.consumption_exclusions set revoke_reason 
   '42501', null, 'ni se cambia una revocación');
 select throws_ok('truncate public.consumption_exclusions cascade', '42501', null, 'ni se vacía');
 -- Una exclusión de un periodo que ya no recibe latidos (escrita a mano por finanzas) no se revierte.
+-- El periodo tiene fila (la exclusión apunta a ella, T-602) y se cierra después, con su guardián apagado.
+select private.open_period(pruebas.periodo(2));
 with x as (
   insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by)
   values (pruebas.periodo(2), 'account', pruebas.beto(), 'other', 'de antes', pruebas.finanzas()) returning id)
 insert into r select 'vieja', id from x;
+alter table public.payout_periods disable trigger payout_periods_guard;
+update public.payout_periods set status = 'closed', entered_closing_at = coalesce(entered_closing_at, now())
+where period_id = pruebas.periodo(2);
+alter table public.payout_periods enable trigger payout_periods_guard;
 select pruebas.dueno_a_nombre_de(pruebas.ana());
 select throws_ok(format('insert into public.consumption_exclusions (period_id, scope, profile_id, reason_code, reason, created_by) values (%s, %L, %L, %L, %L, %L)',
   pruebas.periodo(), 'account', pruebas.beto(), 'other', 'por fuera', pruebas.ana()), '42501', null, 'ni la escribe quien no pasa la puerta de finanzas');

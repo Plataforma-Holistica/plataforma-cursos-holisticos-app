@@ -5,7 +5,8 @@ import type { Client } from "pg";
 // nada cierra un periodo hasta T-602, así que una fila que se queda entra a la ventana para siempre
 // cuando su mes termina. Por eso cada prueba que corre la corrida quita, al terminar, las filas que
 // se crearon mientras corría y las corridas del paso a cierre. Las filas no se borran: se quitan con
-// su guardián apagado, solo esas y si ningún cobro empieza en ellas. La auditoría se queda.
+// su guardián apagado, solo esas y si nada apunta a ellas (un cobro, el consolidado, una alerta o una
+// exclusión). La auditoría se queda.
 
 /** La ventana es la de siempre (el mes anterior y el en curso): si no, la base local tiene periodos de otra corrida. */
 export async function assertPlainWindow(owner: Client): Promise<void> {
@@ -28,7 +29,10 @@ export async function dropTransitionLeftovers(owner: Client, since: string): Pro
     await owner.query("alter table public.payout_periods disable trigger payout_periods_guard");
     await owner.query(
       `delete from public.payout_periods p where p.created_at >= $1::timestamptz
-         and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)`,
+         and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)
+         and not exists (select 1 from public.watch_rollup w where w.period_id = p.period_id)
+         and not exists (select 1 from public.anomaly_alerts a where a.period_id = p.period_id)
+         and not exists (select 1 from public.consumption_exclusions x where x.period_id = p.period_id)`,
       [since],
     );
     await owner.query("alter table public.payout_periods enable trigger payout_periods_guard");
