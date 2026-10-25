@@ -317,6 +317,17 @@ que no se ve leyendo un solo archivo:
   `watch_rollup`, `anomaly_alerts` y `consumption_exclusions` tienen clave foránea a
   `payout_periods`, así que una prueba que escriba ahí en un mes sin fila la abre antes
   (`private.open_period()`).
+- **Lo que T-602 suma al carril A** (segunda solicitud). Las tablas del cierre (`close_runs`,
+  `close_run_teacher_totals`, `payout_student_pools`, `payout_shares`, `payout_teacher_totals`), las
+  funciones `private.code_version`, `close_input`, `close_teacher_totals`, `rehearse_close`,
+  `close_period`, `assert_period_balanced`, `check_period_balanced`, `guard_close_run` y
+  `require_period_closing`, y el área `close` del vigilante. Usa pgTAP 43 y 44 e integración 53. Para
+  el B: `payout_periods` tiene un disparador de restricción diferido (`payout_periods_balanced`) que
+  corre cuando un periodo pasa de en cierre a cerrado. Una prueba que fuerce un estado con
+  `payout_periods_guard` apagado apaga también ese, en la misma sentencia
+  (`disable trigger payout_periods_guard, disable trigger payout_periods_balanced`): si no, el paso
+  forzado deja su comprobación pendiente, falla al confirmar, y mientras tanto Postgres no deja otro
+  `alter table` sobre la tabla («pending trigger events»).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1873,6 +1884,74 @@ falla. Veintiuna precisiones que la tabla no dice:
     corrida queda como un par fallido y se reintenta.
   - **`check_revenue_parts` corre como el dueño**: es un disparador diferido, corre al confirmar
     con el rol de la sesión, y el servidor (cuando T-303 abra `record_charge`) no lee los libros.
+- **El ensayo y el cierre** (T-602, segunda solicitud; RF-502, RF-503, RN-09, RNF-04; decisiones de
+  Sergio del 2026-10-24; 05 §5.5, §8.4 a §8.6 y §9.3). Viven en la base (`t602_cierre`) y se prueban
+  en pgTAP (`43_cierre`, con el ejemplo del PRD cerrado al centavo y cada comprobación con un cierre
+  descuadrado a propósito; `44_cierre_propiedades`, con quince rondas de doce meses encadenados al
+  azar), en integración (`53-cierre`, lo que pasa a la vez y la comprobación al confirmar de verdad) y
+  con mutaciones a mano. Nadie de la aplicación ensaya ni cierra todavía (PA-80, T-605), y **ningún
+  periodo se cierra en producción antes de T-303 y T-603** (lista de salida): uno cerrado ya no se
+  completa. Lo que no se ve leyendo un solo archivo:
+  - **Una sola entrada, leída una vez** (`private.close_input()`): en una sentencia, las bases y los
+    medios puntos ordenados, el porcentaje (en cierre, el de la foto; si no, el de ahora: el ensayo
+    parcial), lo recibido del periodo anterior, los parámetros que deciden el cálculo (las dos reglas,
+    el juego de tramos y los alumnos activos), el periodo y la versión del código (la última migración
+    aplicada, `private.code_version()`). La huella es el SHA-256 de su `jsonb`, que escribe sus llaves
+    siempre en el mismo orden; la del resultado, el de las líneas del reparto en su orden. El ensayo y
+    el cierre le pasan los mismos arreglos a `compute_payout`, y lo escrito es lo que devuelve
+    `payout_for_period()` con lo recibido (la 44 lo exige).
+  - **El ensayo** (`private.rehearse_close()`, `security definer`, con la puerta de finanzas y solo en
+    read committed) escribe su corrida (`close_runs`, de solo inserción) y el total de cada maestro,
+    nada más. Con el periodo abierto es parcial, en cierre usa la foto, y cerrado contesta
+    `already_closed`. No toca `payout_periods`: a un mes sin fila contesta `no_period`. Un cálculo que
+    lanza queda como corrida fallida, con su error. Toma la fila del periodo con candado compartido.
+  - **El cierre** (`private.close_period()`, igual de puerta y aislamiento) toma la fila para sí
+    (`for update`), así que espera a cada escritura en vuelo sobre lo congelado, al ensayo y a otro
+    cierre; el segundo contesta `already_closed` con el cierre que existe. Abierto o sin fila,
+    `not_closing`. Las precondiciones van en orden, cada una con su respuesta y sin escribir nada:
+    `before_launch` (sin juego de tramos), `previous_not_closed` (un periodo anterior, desde el
+    arranque, con fila y sin cerrar; dice cuál), `photo_missing`, `no_pool_bps`, `rollup_running` (una
+    consolidación del periodo con latido en los últimos 15 minutos), `last_rollup_failed` (la corrida
+    más reciente desde que entró en cierre no terminó bien: falló, o se quedó colgada sin latido y
+    nadie la ha dado por fallida), `needs_full_rollup` (sin una completa correcta desde que
+    entró), `rollup_marks`, `open_alerts`, `rehearsal_missing` (sin un ensayo con los datos finales) y
+    `rehearsal_stale` (ninguno con la huella de ahora). Después escribe la corrida, los botes de los
+    alumnos, las partes y los totales en el orden de las líneas (los totales, también en su corrida),
+    cierra el periodo con sus cifras (la
+    hora y quién lo cerró las pone su guardián) y le pasa al siguiente lo que no se repartió
+    (`carried_in_cents`, una vez y solo lo que pasó el anterior cerrado; le abre la fila si no la tiene:
+    un ensayo que ya tenía queda viejo). Un cobro que confirma mientras el cierre espera cambia la
+    entrada: el cierre contesta `rehearsal_stale`. Al empezar pone su comprobación en diferida: si quien
+    llama la puso inmediata, correría antes de escribir lo arrastrado y el cierre fallaría.
+  - **La comprobación al confirmar** (`payout_periods_balanced`, diferida; la función del disparador
+    es `security definer` porque corre con el rol de la sesión): los botes de los alumnos y sus bases
+    suman lo del periodo; cada alumno con puntos reparte su bote; lo asignado es la suma de las partes;
+    cada maestro con partes tiene su total y sale de ellas; RNF-04 al centavo; lo que pasa al siguiente
+    llega; la corrida del cierre dice las mismas cifras y tiene un ensayo con los datos finales, la
+    misma huella de entrada y el mismo resultado; y lo escrito es lo que calcula el reparto con lo
+    escrito (bases, medios puntos, porcentaje y lo recibido), línea por línea, con la huella de resultado
+    de la corrida: así tampoco pasa un centavo movido entre dos partes del sin consumo o entre dos botes
+    sin puntos. Las liquidaciones (la 6 del 05) llegan con T-603. En pgTAP nada confirma: las
+    pruebas la adelantan (`set constraints payout_periods_balanced immediate`) y, para descuadrar lo
+    escrito, ponen la sesión en réplica (`set local session_replication_role = replica`: Supabase se lo
+    deja al dueño con la sentencia, no con `set_config`), porque con la comprobación pendiente no se
+    puede `alter table`.
+  - **En integración**, quien ensaya y cierra es alguien de finanzas de verdad (su factor y su sesión
+    del Auth local, su código dado una vez dentro de una transacción que se revierte); su capacidad y su
+    factor atado se escriben en cada transacción con la sesión en réplica y se quitan igual antes de
+    confirmar, para no dejar renglones de capacidades en la auditoría. Lo que el cierre escribe sí queda
+    en ella. El cierre va en orden: la 53 quita antes las filas abiertas desde el arranque a las que nada
+    apunta (las abre cada noche el paso a cierre del `pg_cron` local) y exige que no quede otra abierta o
+    en cierre (si no, `pnpm db:reset`). La 43 y la 44 borran, dentro de su transacción, las corridas que
+    ese `pg_cron` haya dejado de sus meses: si no, dependerían de la hora.
+  - Límites dichos: el orden mira los periodos con fila, y un mes sin fila entre el arranque y otro no
+    lo detiene (el paso a cierre abre cada noche el mes en curso y los dos siguientes, así que solo pasa
+    si `pg_cron` dejó de correr meses); y la clave de `payout_student_pools` a `profiles` hace que una
+    entrada a la cuenta de un alumno con base espere a que el cierre confirme (el cierre es mensual y
+    corto; `watch_rollup` ya tiene la misma clave).
+  - Para después: las liquidaciones, el bono, el pago mínimo, de cerrado a pagado y purgar (T-603);
+    los avisos sin procesar (T-303); PA-78, PA-80, el CSV y la conciliación (T-605); el alias y el
+    desglose de finanzas (T-408).
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

@@ -29,11 +29,11 @@ create function pruebas.forzar(p_period integer, p_status text) returns void
 language plpgsql as $$
 begin
   perform pruebas.como_dueno_sistema();
-  alter table public.payout_periods disable trigger payout_periods_guard;
+  alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
   update public.payout_periods set status = p_status::public.period_status,
          entered_closing_at = case when p_status = 'open' then null else coalesce(entered_closing_at, now()) end
   where period_id = p_period;
-  alter table public.payout_periods enable trigger payout_periods_guard;
+  alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
   perform pruebas.como_dueno();
 end
 $$;

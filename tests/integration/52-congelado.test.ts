@@ -84,9 +84,9 @@ afterAll(async () => {
     await owner.query("delete from public.anomaly_alerts where period_id = any($1::int[])", [OURS]);
     await owner.query("alter table public.anomaly_alerts enable trigger anomaly_alerts_frozen");
     await owner.query("alter table public.anomaly_alerts enable trigger alerts_guard");
-    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
     await owner.query("delete from public.payout_periods where period_id = any($1::int[])", [OURS]);
-    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard");
+    await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
     await owner.query("commit");
   } catch (error) {
     await owner.query("rollback");
@@ -132,9 +132,9 @@ describe("lo congelado contra el cierre", () => {
       await closer.query("begin");
       await closer.query("select set_config('app.actor_kind', 'system', true)");
       await closer.query("select 1 from public.payout_periods where period_id = $1 for update", [WHILE_CLOSING]);
-      await closer.query("alter table public.payout_periods disable trigger payout_periods_guard");
+      await closer.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
       await closer.query("update public.payout_periods set status = 'closed', entered_closing_at = now() where period_id = $1", [WHILE_CLOSING]);
-      await closer.query("alter table public.payout_periods enable trigger payout_periods_guard");
+      await closer.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
       await writer.query("begin");
       const attempt = insertAlert(writer, WHILE_CLOSING).then(
         () => "entró",

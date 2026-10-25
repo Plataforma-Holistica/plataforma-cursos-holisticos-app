@@ -25,11 +25,11 @@ create function pruebas.forzar(p_period integer, p_status text) returns void
 language plpgsql as $$
 begin
   perform pruebas.como_dueno_sistema();
-  alter table public.payout_periods disable trigger payout_periods_guard;
+  alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
   update public.payout_periods set status = p_status::public.period_status,
          entered_closing_at = case when p_status = 'open' then null else coalesce(entered_closing_at, now()) end
   where period_id = p_period;
-  alter table public.payout_periods enable trigger payout_periods_guard;
+  alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
   perform pruebas.como_dueno();
 end
 $$;
@@ -222,9 +222,9 @@ select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
 select pruebas.fila(203206);
 -- Su fin, en el pasado, para que haya llegado a su día; se mueve con el guardián apagado.
 select pruebas.como_dueno_sistema();
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set starts_at = '2021-12-01 06:00Z', ends_at = '2022-01-01 06:00Z' where period_id = 203206;
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.como_dueno();
 select set_config('pruebas.paso', private.period_transition(array[]::public.period_id[])::text, true);
 select ok(current_setting('pruebas.paso')::jsonb -> 'held_open' @> '[203206]', 'llegó a su día y no se consolidó: se queda abierto');
@@ -268,13 +268,13 @@ create function pruebas.mes(p_back integer default 0) returns integer language s
 as $$ select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - make_interval(months => p_back), 'YYYYMM')::integer $$;
 grant execute on function pruebas.mes(integer) to app_service;
 select pruebas.como_dueno_sistema();
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 delete from public.payout_periods p where p.period_id in (pruebas.mes(0), pruebas.mes(1))
   and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)
   and not exists (select 1 from public.watch_rollup w where w.period_id = p.period_id)
   and not exists (select 1 from public.anomaly_alerts a where a.period_id = p.period_id)
   and not exists (select 1 from public.consumption_exclusions x where x.period_id = p.period_id);
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.como_dueno();
 select is((select count(*)::integer from public.payout_periods where period_id in (pruebas.mes(0), pruebas.mes(1))), 0,
   'el mes en curso y el anterior, sin fila');

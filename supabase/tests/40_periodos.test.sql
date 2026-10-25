@@ -36,11 +36,11 @@ create function pruebas.forzar(p_period integer, p_status text) returns void
 language plpgsql as $$
 begin
   perform pruebas.como_dueno_sistema();
-  alter table public.payout_periods disable trigger payout_periods_guard;
+  alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
   update public.payout_periods set status = p_status::public.period_status,
          entered_closing_at = case when p_status = 'open' then null else coalesce(entered_closing_at, now()) end
   where period_id = p_period;
-  alter table public.payout_periods enable trigger payout_periods_guard;
+  alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
   perform pruebas.como_dueno();
 end
 $$;
@@ -64,8 +64,9 @@ select enum_has_labels('public', 'period_status', array['open', 'closing', 'clos
 select col_is_pk('public', 'payout_periods', 'period_id', 'un periodo por mes');
 select columns_are('public', 'payout_periods',
   array['period_id', 'starts_at', 'ends_at', 'timezone', 'status', 'entered_closing_at', 'active_students', 'carried_in_cents', 'created_at',
-        'pool_bps'],
-  'lo de T-601; las cifras del cierre llegan con T-602');
+        'pool_bps', 'net_revenue_cents', 'student_pools_cents', 'pool_cents', 'assigned_cents', 'unconsumed_cents', 'carried_out_cents',
+        'close_run_id', 'closed_at', 'closed_by'],
+  'lo de T-601, y las cifras del cierre de T-602');
 select ok((select relrowsecurity from pg_class where oid = 'public.payout_periods'::regclass), 'con seguridad por fila');
 select has_trigger('public', 'payout_periods', 'payout_periods_guard', 'con su guardián');
 select has_trigger('public', 'payout_periods', 'payout_periods_no_truncate', 'que tampoco se vacía');
@@ -255,10 +256,10 @@ select pruebas.fila(202104);
 select pruebas.fila(202105);
 -- Las filas del mes en curso y los dos siguientes que dejaron otras corridas en la base local, fuera
 -- (dentro de esta transacción): así se ve que el paso las abre.
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 delete from public.payout_periods
 where period_id in (pruebas.mes(0), private.period_plus(pruebas.mes(0), 1), private.period_plus(pruebas.mes(0), 2));
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.fila(203901);
 -- Sin la foto (sus alumnos activos) no pasa a cierre: la toma la corrida al empezar (41_tramos).
 select pruebas.como_dueno_sistema();
@@ -492,10 +493,10 @@ select is((select (details ->> 'pool_cents')::bigint from public.anomaly_alerts 
 select pruebas.fila(202111);
 select pruebas.forzar(202111, 'closed');
 select pruebas.como_dueno_sistema();
-alter table public.payout_periods disable trigger payout_periods_guard;
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set status = 'closed', entered_closing_at = coalesce(entered_closing_at, now())
 where status = 'open' and period_id > 202111;
-alter table public.payout_periods enable trigger payout_periods_guard;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select pruebas.como_dueno();
 select throws_ok($$select private.allocation_start(202111)$$, 'P0001', null,
   'sin un periodo abierto después del suyo ni el en curso, el cobro tardío no se escribe');
