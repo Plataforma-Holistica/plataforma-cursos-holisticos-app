@@ -88,7 +88,9 @@ select pruebas.parametro('ALERTA_SIN_CONSUMO_PCT', '5000', null, now() + interva
 select pruebas.parametro('ALERTA_SIN_CONSUMO_PCT', '5001', null, now() + interval '2 hours');
 select pruebas.parametro('ALERTA_SIN_CONSUMO_PCT', '4999', null, now() + interval '3 hours');
 
--- La cuenta 11 terminó la lección de M1 en el mes; la 12 y la 13 no vieron nada.
+-- La cuenta 11 terminó la lección de M1 en el mes; la 12 y la 13 no vieron nada. El consolidado
+-- apunta a su periodo (T-602): su fila, antes.
+select private.open_period(pruebas.periodo(1));
 insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                  lesson_duration_seconds, covered_seconds, half_points)
 select pruebas.periodo(1), pruebas.al(11), l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, 100, 2

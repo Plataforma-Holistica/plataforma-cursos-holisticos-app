@@ -389,6 +389,8 @@ language sql as $$
 $$;
 create function pruebas.fila(p_period integer, p_profile uuid, p_course text, p_title text, p_half_points integer) returns void
 language sql as $$
+  -- El consolidado apunta a su periodo (T-602): su fila, antes.
+  select private.open_period(p_period);
   insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                    lesson_duration_seconds, covered_seconds, half_points)
   select p_period, p_profile, l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, 50 * p_half_points, p_half_points

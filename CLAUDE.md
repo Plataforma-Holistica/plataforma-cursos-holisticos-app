@@ -312,6 +312,11 @@ que no se ve leyendo un solo archivo:
   sistema), y no se firma después; si el servidor cambia de rol antes de confirmar, la revisión
   falla cerrada; y una prueba que apague los disparadores de la tabla (`disable trigger user`)
   los prende antes de mirar el vigilante, que los exige.
+- **Lo que T-602 suma al carril A** (primera solicitud). Las funciones `private.rollup_mode`,
+  `seal_watch_partition` y `unsealed_partitions`, y `mark_pairs_for` (ya era del A). Para el B:
+  `watch_rollup`, `anomaly_alerts` y `consumption_exclusions` tienen clave foránea a
+  `payout_periods`, así que una prueba que escriba ahí en un mes sin fila la abre antes
+  (`private.open_period()`).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1831,6 +1836,35 @@ falla. Veintiuna precisiones que la tabla no dice:
     mismo número.
   - Para después: la pantalla, sus permisos y el aviso de `AVISO_CAMBIO_REPARTO_DIAS` (PA-85);
     copiar el porcentaje al cerrar y lo arrastrado (T-602); el estimado (T-408).
+- **Lo que congela un periodo cerrado** (T-602, primera solicitud; RN-09; decisiones de Sergio del
+  2026-10-24: el cierre va en orden, exige un recálculo completo, las liquidaciones son de T-603;
+  05 §5.10, §7.3, §8.2 y §13.2). Vive en la base (`t602_congelado`) y se prueba en pgTAP
+  (`42_congelado`), en integración (`52-congelado`, lo que pasa a la vez) y con mutaciones a mano.
+  El cierre llega con la segunda solicitud. Lo que no se ve leyendo un solo archivo:
+  - **El consolidado, las alertas y las exclusiones apuntan a su periodo** (claves foráneas). La
+    fila de un mes se abre justo antes de escribir en él (`rollup_pair`, la alerta del bote sin
+    consumo, `exclude_consumption`), no al empezar la corrida: un mes de antes del arranque no gana
+    fila, porque sin tramos nunca se cerraría y con el cierre en orden detendría a los siguientes.
+  - **`guard_frozen_period` toma candado compartido sobre la fila del periodo** y mira la fila
+    vieja y la nueva: el cierre, que la toma para sí (`for update`), espera a cada escritura en
+    vuelo, y la que llega después lo ve cerrado (55000). Vale para los cinco congelados, ahora
+    también `watch_rollup_frozen` (insertar, cambiar y borrar). `mark_pairs_for` y cada paso de la
+    corrida toman el mismo candado: marcar no marca un periodo cerrado, y un paso sobre uno
+    cerrado no lee nada y lo anota (`period_closed`). Una prueba que necesite un periodo cerrado
+    lo fuerza con `payout_periods_guard` apagado, y declara quién actúa (la auditoría lo pide).
+  - **El recálculo completo de la primera noche en cierre**: `private.rollup_mode()` decide el
+    modo de cada periodo en la corrida de cada noche: completo si se pide, o si está en cierre y no
+    tiene una corrida completa correcta desde que entró; y el modo completo borra las marcas de
+    antes de empezar de los pares que procesó. El cierre (segunda solicitud) exige esa corrida.
+  - **Sellar**: al final de la corrida de cada noche, `private.seal_watch_partition()` le pone a la
+    partición de cada periodo cerrado o pagado una restricción `check (false) not valid`, con un
+    tope de espera de 2 s por su candado exclusivo; la corrida del paso a cierre dice qué selló
+    (`sealed`) y termina fallida si una no se pudo (`seal_failed`). Purgar es de T-603.
+  - **Un periodo que se queda abierto dos noches seguidas** (llegó a su día y no se consolidó)
+    hace que la corrida del paso termine fallida (`held_open_again`). Se mide por días en la zona
+    de los periodos, no por corridas.
+  - **`check_revenue_parts` corre como el dueño**: es un disparador diferido, corre al confirmar
+    con el rol de la sesión, y el servidor (cuando T-303 abra `record_charge`) no lee los libros.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

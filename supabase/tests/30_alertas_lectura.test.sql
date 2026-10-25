@@ -49,6 +49,8 @@ create function pruebas.maestro(p_course text) returns uuid
 language sql as $$ select teacher_id from public.published_courses where slug = p_course $$;
 create function pruebas.fila(p_period integer, p_profile uuid, p_lesson uuid, p_covered integer, p_half_points integer) returns void
 language sql as $$
+  -- El consolidado apunta a su periodo (T-602): su fila, antes.
+  select private.open_period(p_period);
   insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                    lesson_duration_seconds, covered_seconds, half_points)
   select p_period, p_profile, l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, p_covered, p_half_points
