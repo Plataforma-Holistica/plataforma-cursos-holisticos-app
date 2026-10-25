@@ -101,7 +101,7 @@ afterAll(async () => {
 });
 
 describe("lo congelado contra el cierre", () => {
-  it("el cierre espera a una escritura en vuelo de su periodo", async () => {
+  it("el cierre espera a una escritura en vuelo de su periodo (aquí ya basta la clave foránea)", async () => {
     const writer = await connect();
     const closer = await connect();
     try {

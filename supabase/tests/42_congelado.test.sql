@@ -3,10 +3,11 @@
 -- va en orden, exige un recálculo completo, y las liquidaciones son de T-603.
 --
 -- Aquí ningún periodo se cierra todavía: el estado cerrado se fuerza con el guardián apagado,
--- dentro de la transacción. Los meses con fila son de 2032, que ninguna otra prueba toca.
+-- dentro de la transacción. Los meses con fila son de 2032, que ninguna otra prueba toca, salvo los
+-- de la sección que abre filas al escribir, que usa el mes en curso y los dos anteriores.
 begin;
 \ir _ayuda.psql
-select plan(61);
+select plan(67);
 
 create function pruebas.inicio(p_period integer) returns timestamptz
 language sql stable as $$ select timezone('America/Mexico_City', to_date(p_period::text || '01', 'YYYYMMDD')::timestamp) $$;
@@ -63,6 +64,7 @@ select pruebas.como_dueno_sistema();
 select set_config('app.local_courses', 'on', true);
 select private.system_catalog_add('practices', 'Naturaleza'), private.system_catalog_add('levels', 'Principiante');
 select private.system_load_course(private.system_add_teacher('Maestra congelado', 'maestra-congelado', null), pruebas.curso('congelado-m1'));
+select private.system_load_course(private.system_add_teacher('Maestra congelado dos', 'maestra-congelado-dos', null), pruebas.curso('congelado-m2'));
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
@@ -109,6 +111,10 @@ select is(pruebas.marcas(203203), 1, 'con su marca');
 select is(private.mark_pairs_for(pruebas.ana(), 203201, null, null), 0, 'uno cerrado, no');
 select is(pruebas.marcas(203201), 0, 'sin marca');
 select is(private.mark_pairs_for(pruebas.ana(), 203212, null, null), 0, 'uno sin fila, sin nada que marcar, tampoco');
+select pruebas.fila(203210);
+select pruebas.consolidado(203210);
+select pruebas.forzar(203210, 'paid');
+select is(private.mark_pairs_for(pruebas.ana(), 203210, null, null), 0, 'ni uno pagado');
 select is((select provolatile::text from pg_proc where oid = 'private.mark_pairs_for(uuid, public.period_id, uuid, uuid)'::regprocedure), 'v',
   'marcar es volátil: toma candado');
 
@@ -124,6 +130,13 @@ select is(private.rollup_step(current_setting('pruebas.corrida')::uuid, now() + 
 select is((select details ->> 'period_closed' from public.job_runs where id = current_setting('pruebas.corrida')::uuid), 'true',
   'y la corrida lo dice');
 select is(pruebas.marcas(203201), 1, 'la marca se queda: la corrida de cada noche ya no recorre un periodo cerrado');
+select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
+insert into private.rollup_dirty (period_id, profile_id, lesson_id, touched_at)
+select 203210, pruebas.ana(), l.id, now() - interval '1 day'
+from public.published_lessons l join public.published_courses c on c.course_id = l.course_id where c.slug = 'congelado-m1';
+select set_config('pruebas.corrida', private.open_job_run('nightly_rollup', 203210, 'dirty')::text, true);
+select is(private.rollup_step(current_setting('pruebas.corrida')::uuid, now() + interval '1 hour') ->> 'read', '0',
+  'ni sobre uno pagado, aunque tenga una marca');
 select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
 
 -- ---------------------------------------------------------------------------------------
@@ -146,6 +159,10 @@ insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, f
 values ('nightly_rollup', 203204, 'succeeded', clock_timestamp(), clock_timestamp(), clock_timestamp(), '{"mode": "dirty"}');
 select is(private.rollup_mode(203204, false), 'full', 'ni una de marcas');
 insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
+values ('nightly_rollup', 203205, 'succeeded', clock_timestamp(), clock_timestamp(), clock_timestamp(), '{"mode": "full"}'),
+       ('progress_rebuild', 203204, 'succeeded', clock_timestamp(), clock_timestamp(), clock_timestamp(), '{"mode": "full"}');
+select is(private.rollup_mode(203204, false), 'full', 'ni una completa de otro periodo, ni otro trabajo');
+insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
 values ('nightly_rollup', 203204, 'succeeded', clock_timestamp(), clock_timestamp(), clock_timestamp(), '{"mode": "full"}');
 select is(private.rollup_mode(203204, false), 'dirty', 'con una completa correcta desde que entró en cierre, de marcas');
 select pruebas.forzar(203201, 'closed');
@@ -157,10 +174,38 @@ select pruebas.fila(203205);
 select pruebas.consolidado(203205);
 insert into private.rollup_dirty (period_id, profile_id, lesson_id, touched_at)
 select 203205, pruebas.ana(), l.id, now() - interval '1 hour'
+from public.published_lessons l join public.published_courses c on c.course_id = l.course_id where c.slug in ('congelado-m1', 'congelado-m2');
+select set_config('pruebas.corrida', private.open_job_run('nightly_rollup', 203205, 'full')::text, true);
+select is(private.rollup_step(current_setting('pruebas.corrida')::uuid, now()) ->> 'read', '1', 'el completo procesa el par');
+select is(pruebas.marcas(203205), 1, 'y borra su marca de antes de empezar');
+select is((select l.title from private.rollup_dirty d join public.published_lessons l on l.id = d.lesson_id
+           join public.published_courses c on c.course_id = l.course_id
+           where d.period_id = 203205 and c.slug = 'congelado-m2'), 'Uno', 'pero no la de otro par, que no procesó');
+delete from private.rollup_dirty where period_id = 203205;
+select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
+
+-- Una marca que cambia mientras se consolida su par (un latido que confirma a la mitad, con una hora
+-- de antes de que empezara la corrida): no se vio, y se queda. Lo simula un disparador que, al
+-- borrar el consolidado (el par no tiene tramos), le cambia la hora a la marca.
+create function pruebas.marca_en_medio() returns trigger language plpgsql as $$
+begin
+  update private.rollup_dirty set touched_at = now() - interval '30 minutes'
+  where period_id = old.period_id and profile_id = old.profile_id and lesson_id = old.lesson_id;
+  return old;
+end
+$$;
+create trigger marca_en_medio after delete on public.watch_rollup
+  for each row execute function pruebas.marca_en_medio();
+select pruebas.consolidado(203205);
+insert into private.rollup_dirty (period_id, profile_id, lesson_id, touched_at)
+select 203205, pruebas.ana(), l.id, now() - interval '1 hour'
 from public.published_lessons l join public.published_courses c on c.course_id = l.course_id where c.slug = 'congelado-m1';
 select set_config('pruebas.corrida', private.open_job_run('nightly_rollup', 203205, 'full')::text, true);
 select is(private.rollup_step(current_setting('pruebas.corrida')::uuid, now()) ->> 'read', '1', 'el completo procesa el par');
-select is(pruebas.marcas(203205), 0, 'y borra su marca de antes de empezar');
+select is(pruebas.marcas(203205), 1, 'y la marca que cambió en medio se queda, aunque su hora sea de antes de empezar');
+select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
+drop trigger marca_en_medio on public.watch_rollup;
+delete from private.rollup_dirty where period_id = 203205;
 select private.close_job_run(current_setting('pruebas.corrida')::uuid, null);
 insert into private.rollup_dirty (period_id, profile_id, lesson_id, touched_at)
 select 203205, pruebas.ana(), l.id, now() + interval '1 hour'

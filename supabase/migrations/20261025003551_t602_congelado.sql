@@ -147,8 +147,9 @@ revoke all on function private.rollup_mode(public.period_id, boolean) from publi
 -- ---------------------------------------------------------------------------------------
 -- Sellar la partición de los latidos de un periodo cerrado o pagado (05 §13.2): una restricción
 -- `check (false) not valid`, que no revisa lo que ya estaba ni estorba las lecturas, y con la que no
--- entra ningún latido nuevo. Toma un candado exclusivo sobre la partición: con un tope de espera
--- corto, para no detener a quien la lee; si no lo consigue, lanza y se intenta la noche siguiente.
+-- entra ningún latido nuevo. Toma un candado exclusivo sobre la partición, con un tope de espera de
+-- 2 s: mientras espera, quien la lee se forma detrás, así que la espera se acota a eso; si no lo
+-- consigue, lanza y se intenta la noche siguiente. La corrida confirma después de cada una.
 -- Contesta si la partición quedó sellada (falso: no hay partición). Purgarla llega con T-603.
 create function private.seal_watch_partition(p_period public.period_id) returns boolean
 language plpgsql volatile set search_path = ''
@@ -287,6 +288,8 @@ declare
   v_failed integer := 0;
   v_first_failure text;
   v_status public.period_status;
+  v_mark_profiles uuid[];
+  v_mark_lessons uuid[];
 begin
   -- Borrar una marca solo si sigue como se leyó pide ver lo confirmado en cada sentencia.
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
@@ -332,6 +335,18 @@ begin
     return pg_catalog.jsonb_build_object('read', 0, 'written', 0, 'last_profile', null, 'last_lesson', null);
   end if;
 
+  -- En el modo completo, las marcas de antes de empezar de los pares elegidos, leídas antes de
+  -- consolidarlos (T-602): al final se borran solo si siguen como se leyeron. Una que confirmó durante
+  -- el paso no se vio aquí, y lo suyo quizá tampoco al consolidar: se queda para la noche siguiente.
+  if v_mode <> 'dirty' then
+    select pg_catalog.array_agg(d.profile_id), pg_catalog.array_agg(d.lesson_id), pg_catalog.array_agg(d.touched_at)
+    into v_mark_profiles, v_mark_lessons, v_touched
+    from private.rollup_dirty d
+    join rows from (pg_catalog.unnest(v_profiles), pg_catalog.unnest(v_lessons)) as m (profile_id, lesson_id)
+      on m.profile_id = d.profile_id and m.lesson_id = d.lesson_id
+    where d.period_id = v_period and d.touched_at < p_before;
+  end if;
+
   select t.half_bps, t.full_bps into v_half, v_full from private.payout_thresholds(v_period) t;
   for i in 1 .. pg_catalog.array_length(v_profiles, 1) loop
     begin
@@ -352,14 +367,16 @@ begin
       as m (profile_id, lesson_id, touched_at)
     where d.period_id = v_period and d.profile_id = m.profile_id and d.lesson_id = m.lesson_id
       and d.touched_at = m.touched_at;
-  else
+  elsif v_mark_profiles is not null then
     -- El recálculo completo deja al día cada par que procesó: sus marcas de antes de que empezara la
-    -- corrida sobran (T-602; si no, el cierre esperaría una noche más). Las de un latido posterior, y
-    -- las de un par que falló (se marcan con la hora del reloj), se quedan.
+    -- corrida sobran (T-602; si no, el cierre esperaría una noche más). Solo las que se leyeron arriba y
+    -- siguen igual: las de un latido posterior, las que cambiaron durante el paso y las de un par que
+    -- falló (se marcan con la hora del reloj) se quedan.
     delete from private.rollup_dirty d
-    using rows from (pg_catalog.unnest(v_profiles), pg_catalog.unnest(v_lessons)) as m (profile_id, lesson_id)
+    using rows from (pg_catalog.unnest(v_mark_profiles), pg_catalog.unnest(v_mark_lessons), pg_catalog.unnest(v_touched))
+      as m (profile_id, lesson_id, touched_at)
     where d.period_id = v_period and d.profile_id = m.profile_id and d.lesson_id = m.lesson_id
-      and d.touched_at < p_before;
+      and d.touched_at = m.touched_at;
   end if;
 
   update public.job_runs j
@@ -631,6 +648,12 @@ begin
                  where p.status = 'open' and private.period_reached_closing(p.period_id) order by 1);
   v_missing := array(select p.period_id from public.payout_periods p
                      where p.period_id = any (v_due) and p.period_id = any (p_consolidated) and p.active_students is null order by 1);
+  -- Las filas que se mueven, con su candado en orden de periodo (T-602): un escritor que toma candado
+  -- compartido sobre varias, también en orden, no se cruza con este.
+  perform 1 from public.payout_periods p
+  where p.status = 'open' and p.period_id = any (v_due) and p.period_id = any (p_consolidated) and p.active_students is not null
+  order by p.period_id
+  for no key update;
   with moved as (
     update public.payout_periods p set status = 'closing'
     where p.status = 'open' and p.period_id = any (v_due) and p.period_id = any (p_consolidated) and p.active_students is not null
@@ -693,6 +716,7 @@ declare
   v_transition_start timestamptz;
   v_photos jsonb;
   v_seal integer;
+  v_to_seal integer[];
   v_sealed integer[];
   v_seal_failed jsonb;
 begin
@@ -773,9 +797,16 @@ begin
     end;
     -- Sellar la partición de los latidos de cada periodo cerrado o pagado que no lo esté (T-602),
     -- cada una en su bloque: la que no se pudo (un candado ocupado) se intenta la noche siguiente.
+    -- Cada sellado confirma enseguida: su candado exclusivo no dura más que él.
     v_sealed := '{}';
     v_seal_failed := '{}'::jsonb;
-    for v_seal in select u.period_id from private.unsealed_partitions() u loop
+    begin
+      v_to_seal := array(select u.period_id from private.unsealed_partitions() u);
+    exception when others then
+      v_to_seal := '{}';
+      v_seal_failed := pg_catalog.jsonb_build_object('unsealed_partitions', sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
+    end;
+    foreach v_seal in array v_to_seal loop
       begin
         if private.seal_watch_partition(v_seal) then
           v_sealed := v_sealed || v_seal;
@@ -783,6 +814,7 @@ begin
       exception when others then
         v_seal_failed := v_seal_failed || pg_catalog.jsonb_build_object(v_seal::text, sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
       end;
+      commit;
     end loop;
     v_error := nullif(pg_catalog.array_to_string(array[
       v_error,

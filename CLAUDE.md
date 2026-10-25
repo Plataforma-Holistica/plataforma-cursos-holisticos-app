@@ -1839,8 +1839,10 @@ falla. Veintiuna precisiones que la tabla no dice:
 - **Lo que congela un periodo cerrado** (T-602, primera solicitud; RN-09; decisiones de Sergio del
   2026-10-24: el cierre va en orden, exige un recálculo completo, las liquidaciones son de T-603;
   05 §5.10, §7.3, §8.2 y §13.2). Vive en la base (`t602_congelado`) y se prueba en pgTAP
-  (`42_congelado`), en integración (`52-congelado`, lo que pasa a la vez) y con mutaciones a mano.
-  El cierre llega con la segunda solicitud. Lo que no se ve leyendo un solo archivo:
+  (`42_congelado`), en integración (`52-congelado`, lo que pasa a la vez; la `49`, la corrida) y
+  con mutaciones a mano. El cierre llega con la segunda solicitud. Esto reemplaza lo que dice la
+  viñeta de T-601 de que las filas las abren solo el paso a cierre y el primer cobro, y lo que
+  listaba para T-602 de congelar, sellar y las claves. Lo que no se ve leyendo un solo archivo:
   - **El consolidado, las alertas y las exclusiones apuntan a su periodo** (claves foráneas). La
     fila de un mes se abre justo antes de escribir en él (`rollup_pair`, la alerta del bote sin
     consumo, `exclude_consumption`), no al empezar la corrida: un mes de antes del arranque no gana
@@ -1855,14 +1857,20 @@ falla. Veintiuna precisiones que la tabla no dice:
   - **El recálculo completo de la primera noche en cierre**: `private.rollup_mode()` decide el
     modo de cada periodo en la corrida de cada noche: completo si se pide, o si está en cierre y no
     tiene una corrida completa correcta desde que entró; y el modo completo borra las marcas de
-    antes de empezar de los pares que procesó. El cierre (segunda solicitud) exige esa corrida.
+    antes de empezar de los pares que procesó, solo si siguen como las leyó antes de consolidarlos
+    (una que confirmó durante el paso se queda). El cierre (segunda solicitud) exige esa corrida.
   - **Sellar**: al final de la corrida de cada noche, `private.seal_watch_partition()` le pone a la
     partición de cada periodo cerrado o pagado una restricción `check (false) not valid`, con un
     tope de espera de 2 s por su candado exclusivo; la corrida del paso a cierre dice qué selló
-    (`sealed`) y termina fallida si una no se pudo (`seal_failed`). Purgar es de T-603.
+    (`sealed`) y termina fallida si una no se pudo (`seal_failed`). Cada sellado confirma enseguida.
+    Un recálculo de un solo periodo (`p_period`) no sella. Purgar es de T-603.
   - **Un periodo que se queda abierto dos noches seguidas** (llegó a su día y no se consolidó)
     hace que la corrida del paso termine fallida (`held_open_again`). Se mide por días en la zona
-    de los periodos, no por corridas.
+    de los periodos, no por corridas; si ayer el paso lanzó, ayer no anotó nada y hoy no avisa.
+  - Límites dichos: una exclusión que se pide justo cuando su periodo se cierra contesta con el
+    55000 del congelado, no con `outside_window` (revisa la ventana sin candado); y dos que abren
+    la fila del mismo mes a la vez pueden chocar con la restricción de exclusión (23P01): en la
+    corrida queda como un par fallido y se reintenta.
   - **`check_revenue_parts` corre como el dueño**: es un disparador diferido, corre al confirmar
     con el rol de la sesión, y el servidor (cuando T-303 abra `record_charge`) no lee los libros.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
