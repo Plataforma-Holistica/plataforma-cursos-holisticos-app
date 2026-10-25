@@ -6,7 +6,7 @@
 -- dentro de la transacción. Los meses con fila son de 2032, que ninguna otra prueba toca.
 begin;
 \ir _ayuda.psql
-select plan(55);
+select plan(61);
 
 create function pruebas.inicio(p_period integer) returns timestamptz
 language sql stable as $$ select timezone('America/Mexico_City', to_date(p_period::text || '01', 'YYYYMMDD')::timestamp) $$;
@@ -213,6 +213,63 @@ select pruebas.fila(203209);
 select private.create_watch_partition(203209);
 select pruebas.forzar(203209, 'paid');
 select ok(exists (select 1 from private.unsealed_partitions() where period_id = 203209), 'la de uno pagado sin sellar, sí');
+
+-- ---------------------------------------------------------------------------------------
+-- La fila de un mes se abre justo antes de escribir en él: una exclusión del mes en curso y la alerta
+-- del bote sin consumo del mes anterior, sin fila. Las filas que dejaron otras corridas en la base
+-- local, fuera (dentro de esta transacción), si nada apunta a ellas.
+
+create function pruebas.mes(p_back integer default 0) returns integer language sql stable
+as $$ select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - make_interval(months => p_back), 'YYYYMM')::integer $$;
+grant execute on function pruebas.mes(integer) to app_service;
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard;
+delete from public.payout_periods p where p.period_id in (pruebas.mes(0), pruebas.mes(1))
+  and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)
+  and not exists (select 1 from public.watch_rollup w where w.period_id = p.period_id)
+  and not exists (select 1 from public.anomaly_alerts a where a.period_id = p.period_id)
+  and not exists (select 1 from public.consumption_exclusions x where x.period_id = p.period_id);
+alter table public.payout_periods enable trigger payout_periods_guard;
+select pruebas.como_dueno();
+select is((select count(*)::integer from public.payout_periods where period_id in (pruebas.mes(0), pruebas.mes(1))), 0,
+  'el mes en curso y el anterior, sin fila');
+
+select pruebas.alta('b0000000-0000-0000-0000-000000000042', 'finanzas-congelado@prueba.test');
+select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000042', 'finance');
+select pruebas.como_servicio('b0000000-0000-0000-0000-000000000042');
+select is(private.exclude_consumption('account', pruebas.mes(0), pruebas.ana(), null, null, null, null, 'technical_error',
+                                      'Una prueba de la plataforma.', null) ->> 'outcome', 'excluded',
+  'finanzas excluye una cuenta en el mes en curso, que no tenía fila');
+select pruebas.como_dueno();
+select is(pruebas.estado(pruebas.mes(0)), 'open', 'y la fila del mes se abrió para ella');
+
+-- Las reglas del bote del mes anterior (si es de antes del arranque, como la semilla) y un anual que
+-- empieza dos meses atrás: su parte cae en el mes anterior, que no tiene fila.
+select pruebas.como_dueno_sistema();
+insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+select k, v, 'decided', pruebas.inicio(pruebas.mes(2)), pruebas.mes(2)
+from (values ('BOTE_PCT_TECHO', '7500'::jsonb), ('BOTE_REGLA_TRAMO', '"marginal_tiers"'),
+             ('BOTE_SIN_CONSUMO', '"proportional_to_assigned_pool"')) as x (k, v)
+where pruebas.mes(2) < 202610;
+select private.set_pool_tiers(pruebas.mes(2), '{0}', '{6000}') where pruebas.mes(2) < 202610;
+select private.open_period(pruebas.mes(2));
+insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
+values ('c0000000-0000-0000-0000-000000000042', pruebas.ana(), 'manual', 'sus-congelado-anual', 'annual', 'pending', 'MXN');
+insert into public.charges (id, profile_id, subscription_id, provider, provider_charge_id, plan, charged_at, period_id,
+                            allocation_start_period_id, currency, gross_cents, tax_cents, fx_rate_to_mxn, fx_source,
+                            gross_mxn_cents, net_of_tax_mxn_cents, iva_bps, fee_bps, revenue_net_mxn_cents)
+values ('d0000000-0000-0000-0000-000000000042', pruebas.ana(), 'c0000000-0000-0000-0000-000000000042', 'manual', 'anual-congelado',
+        'annual', pruebas.inicio(pruebas.mes(2)) + interval '1 day', pruebas.mes(2), pruebas.mes(2), 'MXN', 299000, 41241, 1,
+        'same_currency', 299000, 257759, 1600, 500, 244871);
+insert into public.revenue_allocations (charge_id, profile_id, period_id, kind, part_no, parts_total, base_cents, fee_bps, rule)
+select 'd0000000-0000-0000-0000-000000000042', pruebas.ana(), private.period_plus(pruebas.mes(2), n - 1), 'charge', n, 12,
+       case when n < 12 then 20405 else 20416 end, 500, 'charge_date_v1'
+from generate_series(1, 12) n;
+select is(pruebas.estado(pruebas.mes(1)), null, 'la parte del mes anterior no le abre fila');
+select is(private.detect_anomalies(pruebas.mes(1), now()) ->> 'alerts_opened', '1',
+  'el bote sin consumo del mes anterior abre su alerta: nadie vio nada');
+select ok(pruebas.estado(pruebas.mes(1)) in ('open', 'closing'), 'con la fila del mes, que se abrió para ella (abierta o en cierre, según el día)');
+select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
 -- La revisión de las partes de un cobro corre con el rol de quien confirma: el servidor (T-303).
