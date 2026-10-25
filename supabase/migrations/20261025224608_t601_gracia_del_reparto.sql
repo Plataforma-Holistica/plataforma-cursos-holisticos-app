@@ -19,7 +19,11 @@ update public.parameter_definitions set affects_payout = true where key = 'GRACI
 -- `private.period_parameter()` no vería. Cada versión viva que empieza justo en el inicio de un periodo
 -- se cancela y se vuelve a escribir con su periodo, como el sistema: queda en la auditoría. Una que
 -- empiece a medio mes no se adivina. Tras `pnpm db:reset` no hay ninguna: la semilla corre después y
--- ya le pone su periodo.
+-- ya le pone su periodo. Como la semilla, depende de correr en la sesión del dueño, que RF-707 por
+-- instante (`guard_payout_timing`) no revisa: con otro rol que entre y haga `set role`, la versión
+-- vigente no se cancela y la migración falla con 23514. La fila nueva no copia `reason` ni
+-- `announced_at`, y su autor es el sistema; lo de antes queda en la cancelada y en la auditoría.
+-- Probado a mano sobre una base sembrada el 2026-10-25.
 do $$
 declare
   v record;
