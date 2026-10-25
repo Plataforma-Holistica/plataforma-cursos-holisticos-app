@@ -66,6 +66,8 @@ create function pruebas.escritas(p_period integer) returns text[] language sql s
     order by x.k, x.a nulls first, x.b nulls first)
 $$;
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
+-- Las corridas que el `pg_cron` de la base local haya dejado de estos meses no cuentan aquí.
+delete from public.job_runs where period_id between 202610 and 202709;
 
 -- Ocho alumnos (los impares anuales), finanzas y cuatro maestros con tres lecciones cada uno.
 select pruebas.alta(pruebas.al(n), format('alumno%s-cierre-azar@prueba.test', n)) from generate_series(1, 8) n;

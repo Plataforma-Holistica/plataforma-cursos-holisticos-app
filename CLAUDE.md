@@ -1903,8 +1903,8 @@ falla. Veintiuna precisiones que la tabla no dice:
   - **El ensayo** (`private.rehearse_close()`, `security definer`, con la puerta de finanzas y solo en
     read committed) escribe su corrida (`close_runs`, de solo inserción) y el total de cada maestro,
     nada más. Con el periodo abierto es parcial, en cierre usa la foto, y cerrado contesta
-    `already_closed`. A un mes que no empezó y no tiene fila no se la abre (`not_started`). Un cálculo
-    que lanza queda como corrida fallida, con su error. Toma la fila del periodo con candado compartido.
+    `already_closed`. No toca `payout_periods`: a un mes sin fila contesta `no_period`. Un cálculo que
+    lanza queda como corrida fallida, con su error. Toma la fila del periodo con candado compartido.
   - **El cierre** (`private.close_period()`, igual de puerta y aislamiento) toma la fila para sí
     (`for update`), así que espera a cada escritura en vuelo sobre lo congelado, al ensayo y a otro
     cierre; el segundo contesta `already_closed` con el cierre que existe. Abierto o sin fila,
@@ -1912,20 +1912,26 @@ falla. Veintiuna precisiones que la tabla no dice:
     `before_launch` (sin juego de tramos), `previous_not_closed` (un periodo anterior, desde el
     arranque, con fila y sin cerrar; dice cuál), `photo_missing`, `no_pool_bps`, `rollup_running` (una
     consolidación del periodo con latido en los últimos 15 minutos), `last_rollup_failed` (la corrida
-    más reciente desde que entró en cierre), `needs_full_rollup` (sin una completa correcta desde que
+    más reciente desde que entró en cierre no terminó bien: falló, o se quedó colgada sin latido y
+    nadie la ha dado por fallida), `needs_full_rollup` (sin una completa correcta desde que
     entró), `rollup_marks`, `open_alerts`, `rehearsal_missing` (sin un ensayo con los datos finales) y
     `rehearsal_stale` (ninguno con la huella de ahora). Después escribe la corrida, los botes de los
-    alumnos, las partes y los totales en el orden de las líneas, cierra el periodo con sus cifras (la
+    alumnos, las partes y los totales en el orden de las líneas (los totales, también en su corrida),
+    cierra el periodo con sus cifras (la
     hora y quién lo cerró las pone su guardián) y le pasa al siguiente lo que no se repartió
     (`carried_in_cents`, una vez y solo lo que pasó el anterior cerrado; le abre la fila si no la tiene:
     un ensayo que ya tenía queda viejo). Un cobro que confirma mientras el cierre espera cambia la
-    entrada: el cierre contesta `rehearsal_stale`.
+    entrada: el cierre contesta `rehearsal_stale`. Al empezar pone su comprobación en diferida: si quien
+    llama la puso inmediata, correría antes de escribir lo arrastrado y el cierre fallaría.
   - **La comprobación al confirmar** (`payout_periods_balanced`, diferida; la función del disparador
     es `security definer` porque corre con el rol de la sesión): los botes de los alumnos y sus bases
     suman lo del periodo; cada alumno con puntos reparte su bote; lo asignado es la suma de las partes;
     cada maestro con partes tiene su total y sale de ellas; RNF-04 al centavo; lo que pasa al siguiente
-    llega; y la corrida del cierre dice las mismas cifras y tiene un ensayo con los datos finales y la
-    misma huella. Las liquidaciones (la 6 del 05) llegan con T-603. En pgTAP nada confirma: las
+    llega; la corrida del cierre dice las mismas cifras y tiene un ensayo con los datos finales, la
+    misma huella de entrada y el mismo resultado; y lo escrito es lo que calcula el reparto con lo
+    escrito (bases, medios puntos, porcentaje y lo recibido), línea por línea, con la huella de resultado
+    de la corrida: así tampoco pasa un centavo movido entre dos partes del sin consumo o entre dos botes
+    sin puntos. Las liquidaciones (la 6 del 05) llegan con T-603. En pgTAP nada confirma: las
     pruebas la adelantan (`set constraints payout_periods_balanced immediate`) y, para descuadrar lo
     escrito, ponen la sesión en réplica (`set local session_replication_role = replica`: Supabase se lo
     deja al dueño con la sentencia, no con `set_config`), porque con la comprobación pendiente no se
@@ -1934,8 +1940,15 @@ falla. Veintiuna precisiones que la tabla no dice:
     del Auth local, su código dado una vez dentro de una transacción que se revierte); su capacidad y su
     factor atado se escriben en cada transacción con la sesión en réplica y se quitan igual antes de
     confirmar, para no dejar renglones de capacidades en la auditoría. Lo que el cierre escribe sí queda
-    en ella. La 53 exige que ningún periodo desde el arranque esté abierto o en cierre (si no,
-    `pnpm db:reset`): el cierre va en orden.
+    en ella. El cierre va en orden: la 53 quita antes las filas abiertas desde el arranque a las que nada
+    apunta (las abre cada noche el paso a cierre del `pg_cron` local) y exige que no quede otra abierta o
+    en cierre (si no, `pnpm db:reset`). La 43 y la 44 borran, dentro de su transacción, las corridas que
+    ese `pg_cron` haya dejado de sus meses: si no, dependerían de la hora.
+  - Límites dichos: el orden mira los periodos con fila, y un mes sin fila entre el arranque y otro no
+    lo detiene (el paso a cierre abre cada noche el mes en curso y los dos siguientes, así que solo pasa
+    si `pg_cron` dejó de correr meses); y la clave de `payout_student_pools` a `profiles` hace que una
+    entrada a la cuenta de un alumno con base espere a que el cierre confirme (el cierre es mensual y
+    corto; `watch_rollup` ya tiene la misma clave).
   - Para después: las liquidaciones, el bono, el pago mínimo, de cerrado a pagado y purgar (T-603);
     los avisos sin procesar (T-303); PA-78, PA-80, el CSV y la conciliación (T-605); el alias y el
     desglose de finanzas (T-408).

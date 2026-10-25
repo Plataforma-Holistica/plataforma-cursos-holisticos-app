@@ -9,7 +9,7 @@
 -- lo cerrado corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(145);
+select plan(150);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6020000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -165,6 +165,10 @@ create function pruebas.escrito(p_period integer) returns integer language sql s
 $$;
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
 
+-- Las corridas que el `pg_cron` de la base local haya dejado de estos meses no cuentan aquí: así la
+-- prueba no depende de la hora a la que corre.
+delete from public.job_runs where period_id between 202609 and 202712;
+
 -- Las cuentas: cuatro alumnos del ejemplo, finanzas (dos personas) y contenido.
 select pruebas.alta(pruebas.al(n), format('alumno%s-cierre@prueba.test', n)) from generate_series(1, 4) n;
 insert into pruebas.etiquetas select pruebas.al(n), (array['A', 'B', 'C', 'D'])[n] from generate_series(1, 4) n;
@@ -247,8 +251,8 @@ select pruebas.sin_codigo(pruebas.finanzas());
 select is(pruebas.o(pruebas.ensaya(202610)), 'needs_fresh_code', 'con finanzas y sin código reciente, que lo dé');
 select is(pruebas.o(pruebas.cierra(202610)), 'needs_fresh_code', 'también para cerrar');
 select pruebas.equipar(pruebas.finanzas());
-select is(pruebas.o(pruebas.ensaya(203501)), 'not_started', 'un mes que no ha empezado no se ensaya');
-select ok(not exists (select 1 from public.payout_periods where period_id = 203501), 'y no gana fila');
+select is(pruebas.o(pruebas.ensaya(203501)), 'no_period', 'un mes sin fila no se ensaya');
+select ok(not exists (select 1 from public.payout_periods where period_id = 203501), 'y el ensayo no le abre la fila');
 -- Septiembre de 2026, antes del arranque: llega en cierre por el reloj y sin tramos.
 select pruebas.como_dueno_sistema();
 select private.open_period(202609);
@@ -304,7 +308,8 @@ select is(pruebas.o(pruebas.cierra(202610)), 'needs_full_rollup', 'uno de antes 
 create temporary table viva as select pruebas.corrida(202610, 'running', 'full', '-1 hour', '-1 minute') as id;
 select is(pruebas.o(pruebas.cierra(202610)), 'rollup_running', 'con una consolidación viva del periodo, no');
 update public.job_runs set heartbeat_at = now() - interval '20 minutes' where id = (select id from viva);
-select is(pruebas.o(pruebas.cierra(202610)), 'needs_full_rollup', 'una sin latido hace 15 minutos ya no cuenta como viva');
+select is(pruebas.o(pruebas.cierra(202610)), 'last_rollup_failed',
+  'una sin latido hace 15 minutos ya no está viva, pero tampoco terminó bien');
 update public.job_runs set status = 'failed', finished_at = now() - interval '5 minutes', error = 'stale' where id = (select id from viva);
 select is(pruebas.o(pruebas.cierra(202610)), 'last_rollup_failed', 'si la última corrida desde que entró en cierre falló, no');
 create temporary table muerta as select pruebas.corrida(202610, 'running', 'dirty', '-270 seconds', '-20 minutes') as id;
@@ -313,6 +318,10 @@ update public.job_runs set status = 'failed', finished_at = now() - interval '4 
 select pruebas.corrida(202610, 'succeeded', 'dirty', '-4 minutes');
 select is(pruebas.o(pruebas.cierra(202610)), 'needs_full_rollup', 'una de marcas correcta no es el recálculo completo');
 select pruebas.corrida(202610, 'succeeded', 'full', '-3 minutes');
+create temporary table colgada as select pruebas.corrida(202610, 'running', 'dirty', '-150 seconds', '-20 minutes') as id;
+select is(pruebas.o(pruebas.cierra(202610)), 'last_rollup_failed', 'una corrida colgada después del recálculo completo, tampoco');
+update public.job_runs set status = 'failed', finished_at = now() - interval '2 minutes', error = 'stale' where id = (select id from colgada);
+select pruebas.corrida(202610, 'succeeded', 'dirty', '-100 seconds');
 select pruebas.corrida(202611, 'failed', 'dirty', '-2 minutes');
 insert into private.rollup_dirty (period_id, profile_id, lesson_id) values (202610, pruebas.al(4), pruebas.leccion('cierre-m3', 'Dos'));
 select is(pruebas.o(pruebas.cierra(202610)), 'rollup_marks', 'con marcas del periodo, no (la falla de otro periodo no cuenta)');
@@ -393,6 +402,18 @@ select throws_like($$select pruebas.descuadra(202610, $s$update public.payout_te
                                                          total_cents = total_cents + 1
                                                          where period_id = 202610 and teacher_id = (select id from pruebas.etiquetas where et = 'M1')$s$)$$,
   '%RNF-04%', 'lo que reciben los maestros no es el bote: RNF-04');
+select throws_like($$select pruebas.descuadra(202610, $s$
+    update public.payout_teacher_totals set unconsumed_cents = unconsumed_cents + 1, total_cents = total_cents + 1
+      where period_id = 202610 and teacher_id = (select id from pruebas.etiquetas where et = 'M1');
+    update public.payout_teacher_totals set unconsumed_cents = unconsumed_cents - 1, total_cents = total_cents - 1
+      where period_id = 202610 and teacher_id = (select id from pruebas.etiquetas where et = 'M2')$s$)$$,
+  '%not what the payout computes%', 'un centavo del sin consumo que pasa de un maestro a otro');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.close_runs set result_hash = sha256('otro'::bytea)
+                                                         where period_id = 202610 and kind = 'close'$s$)$$,
+  '%same result%', 'el cierre con otro resultado que su ensayo');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.close_runs set result_hash = sha256('otro'::bytea)
+                                                         where period_id = 202610$s$)$$,
+  '%result does not match what was written%', 'una huella del resultado que no es la de lo escrito');
 select throws_like($$select pruebas.descuadra(202610, $s$update public.close_runs set assigned_cents = assigned_cents + 1
                                                          where period_id = 202610 and kind = 'close'$s$)$$,
   '%close run%', 'el cierre anotado con otras cifras que el periodo');
@@ -434,6 +455,10 @@ select is((select count(distinct close_run_id)::integer from (
              union all select close_run_id from public.payout_shares where period_id = 202610
              union all select close_run_id from public.payout_teacher_totals where period_id = 202610) x
            where close_run_id = (select (r ->> 'close_run_id')::uuid from cierre)), 1, 'todo con la corrida del cierre');
+select results_eq($$select teacher_id, half_points, students, assigned_cents, unconsumed_cents, total_cents from public.close_run_teacher_totals
+                    where close_run_id = (select (r ->> 'close_run_id')::uuid from cierre) order by 1$$,
+  $$select teacher_id, half_points, students, assigned_cents, unconsumed_cents, total_cents from public.payout_teacher_totals
+    where period_id = 202610 order by 1$$, 'la corrida del cierre lleva también el total de cada maestro');
 select is((select encode(input_hash, 'hex') from public.close_runs where id = (select (r ->> 'close_run_id')::uuid from cierre)),
   (select r ->> 'input_hash' from ensayo), 'el ensayo y el cierre con la misma entrada dan la misma huella');
 select is((select encode(result_hash, 'hex') from public.close_runs where id = (select (r ->> 'close_run_id')::uuid from cierre)),
@@ -502,7 +527,8 @@ select is(pruebas.o(pruebas.cierra(202612)), 'rehearsal_stale', 'el ensayo de di
 create temporary table ensayo_dic2 as select pruebas.ensaya(202612) as r;
 select is((select format('arrastrado=%s bote=%s', r ->> 'carried_in_cents', r ->> 'pool_cents') from ensayo_dic2),
   'arrastrado=12243 bote=24486', 'ensayado otra vez, con lo arrastrado');
-select is(pruebas.o(pruebas.cierra(202612)), 'closed', 'diciembre se cierra');
+set constraints payout_periods_balanced immediate;
+select is(pruebas.o(pruebas.cierra(202612)), 'closed', 'diciembre se cierra, aunque quien llama haya puesto la comprobación inmediata');
 select is(pruebas.cifras(202612), 'neto=20405 alumnos=12243 arrastrado=12243 bote=24486 asignado=0 sin_consumo=24486 pasa=24486',
   'y pasa todo, con lo que recibió');
 select is((select carried_in_cents from public.payout_periods where period_id = 202701), 24486::bigint,

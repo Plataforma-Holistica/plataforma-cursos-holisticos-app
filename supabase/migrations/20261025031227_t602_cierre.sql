@@ -23,7 +23,10 @@
 --     `private.close_period()`, cada una con su respuesta, y el candado es el de la fila del periodo
 --     (`for update`), que los congelados toman compartido desde la primera solicitud;
 --   · `assert_period_balanced` no comprueba las liquidaciones (la 6 del 05 llega con T-603); sí que lo
---     que pasa al periodo siguiente llegue, y que la corrida del cierre diga las mismas cifras.
+--     que pasa al periodo siguiente llegue, que la corrida del cierre diga las mismas cifras y el mismo
+--     resultado que su ensayo, y que lo escrito sea lo que calcula el reparto con lo escrito;
+--   · el ensayo no abre filas: un mes sin fila contesta `no_period`;
+--   · el cierre también deja el total de cada maestro en su corrida (`close_run_teacher_totals`).
 --
 -- Nadie de la aplicación ensaya ni cierra todavía (PA-80, T-605). Y en la lista de salida: ningún
 -- periodo se cierra en producción antes de T-303 y T-603, porque uno cerrado ya no se completa (RN-09).
@@ -453,7 +456,7 @@ revoke all on function private.close_teacher_totals(private.payout_line[]) from 
 -- abierto es parcial; en cierre, con los datos finales; cerrado o pagado, no se ensaya. Escribe su
 -- corrida y el total de cada maestro, nada más; un cálculo que lanza queda como corrida fallida, con
 -- su error. Toma la fila del periodo con candado compartido: no ensaya uno que se está cerrando, y el
--- cierre espera al ensayo. A un mes que no ha empezado y no tiene fila no se la abre.
+-- cierre espera al ensayo. No toca `payout_periods` (05 §8.5): a un mes sin fila no se la abre.
 create function private.rehearse_close(p_period public.period_id) returns jsonb
 language plpgsql volatile security definer set search_path = ''
 as $$
@@ -485,10 +488,7 @@ begin
     return '{"outcome": "before_launch"}'::jsonb;
   end if;
   if not exists (select 1 from public.payout_periods p where p.period_id = p_period) then
-    if (select b.starts_at from private.period_bounds(p_period) b) > pg_catalog.now() then
-      return '{"outcome": "not_started"}'::jsonb;
-    end if;
-    perform private.open_period(p_period);
+    return '{"outcome": "no_period"}'::jsonb;
   end if;
 
   select p.status, p.active_students, p.pool_bps, p.close_run_id into v_row
@@ -577,6 +577,9 @@ begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'closes run in read committed' using errcode = '25000';
   end if;
+  -- La comprobación corre al confirmar, cuando ya está escrito lo arrastrado al siguiente: si quien
+  -- llama la puso inmediata, el cierre fallaría a la mitad.
+  set constraints public.payout_periods_balanced deferred;
   v_gate := private.finance_change_gate();
   if v_gate is not null then
     return pg_catalog.jsonb_build_object('outcome', v_gate);
@@ -619,13 +622,14 @@ begin
                and j.heartbeat_at >= pg_catalog.now() - interval '15 minutes') then
     return '{"outcome": "rollup_running"}'::jsonb;
   end if;
-  -- La corrida más reciente desde que entró en cierre: si falló, una detección pudo no abrir sus alertas.
+  -- La corrida más reciente desde que entró en cierre terminó bien: si falló, o se quedó colgada (sin
+  -- latido, que solo la siguiente da por fallida), una detección pudo no abrir sus alertas.
   select j.status into v_last
   from public.job_runs j
-  where j.job = 'nightly_rollup' and j.period_id = p_period and j.status <> 'running' and j.started_at >= v_period.entered_closing_at
+  where j.job = 'nightly_rollup' and j.period_id = p_period and j.started_at >= v_period.entered_closing_at
   order by j.started_at desc
   limit 1;
-  if v_last = 'failed' then
+  if v_last is distinct from 'succeeded' and v_last is not null then
     return '{"outcome": "last_rollup_failed"}'::jsonb;
   end if;
   if not exists (select 1 from public.job_runs j
@@ -681,6 +685,9 @@ begin
                                             unconsumed_cents, total_cents)
   select p_period, t.teacher_id, v_run, t.half_points, t.students, t.assigned_cents, t.unconsumed_cents, t.total_cents
   from private.close_teacher_totals(v_lines) t;
+  insert into public.close_run_teacher_totals (close_run_id, teacher_id, half_points, students, assigned_cents, unconsumed_cents, total_cents)
+  select t.close_run_id, t.teacher_id, t.half_points, t.students, t.assigned_cents, t.unconsumed_cents, t.total_cents
+  from public.payout_teacher_totals t where t.period_id = p_period;
 
   update public.payout_periods p
   set status = 'closed', net_revenue_cents = v_net, student_pools_cents = v_pools, pool_cents = v_pools + v_in.carried_in_cents,
@@ -722,6 +729,8 @@ declare
   v_shares bigint;
   v_totals bigint;
   v_bad integer;
+  v_written private.payout_line[];
+  v_computed private.payout_line[];
 begin
   select * into strict p from public.payout_periods x where x.period_id = p_period;
 
@@ -802,9 +811,50 @@ begin
        select 1 from public.close_runs c
        join public.close_runs r
          on r.period_id = c.period_id and r.kind = 'rehearsal' and r.status = 'succeeded'
-        and r.period_status_at_run = 'closing' and r.input_hash = c.input_hash
+        and r.period_status_at_run = 'closing' and r.input_hash = c.input_hash and r.result_hash = c.result_hash
        where c.id = p.close_run_id) then
-    raise exception 'period %: no rehearsal with final data and the same input (RF-503)', p_period using errcode = '23514';
+    raise exception 'period %: no rehearsal with final data, the same input and the same result (RF-503)', p_period
+      using errcode = '23514';
+  end if;
+
+  -- 8. Lo escrito es lo que calcula el reparto con lo escrito (las bases, los medios puntos, el
+  -- porcentaje y lo recibido), línea por línea y en su orden, y su huella es la de la corrida. Así
+  -- tampoco pasa un centavo movido entre dos partes del sin consumo o entre dos botes sin puntos, que
+  -- las sumas de arriba no ven.
+  v_written := array(
+    select x.l from (
+      select row('student_pool', s.profile_id, null, null, s.pool_cents, s.base_cents, s.half_points)::private.payout_line as l,
+             1 as k, s.profile_id as a, null::bigint as b
+      from public.payout_student_pools s where s.period_id = p_period
+      union all
+      select row('share', s.profile_id, s.teacher_id, t.tiebreak_rank, s.amount_cents, null, s.half_points)::private.payout_line,
+             2, s.profile_id, t.tiebreak_rank
+      from public.payout_shares s join public.teachers t on t.id = s.teacher_id where s.period_id = p_period
+      union all
+      select row('unconsumed_share', null, u.teacher_id, t.tiebreak_rank, u.unconsumed_cents, null, null)::private.payout_line,
+             3, null, t.tiebreak_rank
+      from public.payout_teacher_totals u join public.teachers t on t.id = u.teacher_id
+      where u.period_id = p_period and u.unconsumed_cents > 0
+      union all
+      select row('carried_over', null, null, null, p.carried_out_cents, null, null)::private.payout_line, 4, null, null
+      where p.carried_out_cents > 0) x
+    order by x.k, x.a nulls first, x.b nulls first);
+  v_computed := array(
+    select row(c.kind, c.profile_id, c.teacher_id, c.tiebreak_rank, c.cents, c.base_cents, c.half_points)::private.payout_line
+    from private.compute_payout(
+      p.pool_bps, p.carried_in_cents,
+      array(select row(s.profile_id, s.base_cents)::private.payout_base
+            from public.payout_student_pools s where s.period_id = p_period order by s.profile_id),
+      array(select row(s.profile_id, s.teacher_id, t.tiebreak_rank, s.half_points)::private.payout_points
+            from public.payout_shares s join public.teachers t on t.id = s.teacher_id
+            where s.period_id = p_period order by s.profile_id, s.teacher_id)) with ordinality c
+    order by c.ordinality);
+  if v_written::text is distinct from v_computed::text then
+    raise exception 'period %: what was written is not what the payout computes', p_period using errcode = '23514';
+  end if;
+  if pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.to_jsonb(v_written)::text, 'UTF8'))
+     is distinct from (select c.result_hash from public.close_runs c where c.id = p.close_run_id) then
+    raise exception 'period %: the close run result does not match what was written', p_period using errcode = '23514';
   end if;
 end
 $$;

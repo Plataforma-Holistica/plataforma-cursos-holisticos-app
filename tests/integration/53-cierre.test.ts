@@ -21,8 +21,9 @@ import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUser
 // las pruebas de base cuentan esos renglones. Lo que el cierre escribe sí queda en la auditoría.
 //
 // Usa meses de 2036, que ninguna otra prueba usa, y el cierre va en orden desde el arranque: antes de
-// empezar exige que ningún periodo anterior esté abierto o en cierre (si no, `pnpm db:reset`). Al
-// terminar quita lo suyo con las guardias apagadas.
+// empezar quita las filas abiertas desde el arranque a las que nada apunta (las abre cada noche el paso
+// a cierre del `pg_cron` local, que las vuelve a abrir), y exige que no quede ninguna otra abierta o en
+// cierre (si no, `pnpm db:reset`). Al terminar quita lo suyo con las guardias apagadas.
 
 const FIRST = 203601;
 const OURS = [203601, 203602, 203603, 203604, 203605, 203606, 203607];
@@ -173,6 +174,21 @@ beforeAll(async () => {
   owner = await connect();
   const taken = await owner.query("select 1 from public.payout_periods where period_id = any($1::int[])", [OURS]);
   if ((taken.rowCount ?? 0) > 0) throw new Error("hay periodos de 2036 en la base local: pnpm db:reset");
+  await owner.query("begin");
+  await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
+  await owner.query(
+    `delete from public.payout_periods p
+     where p.status = 'open' and p.period_id < $1
+       and p.period_id >= (select min(effective_period_id) from public.pool_tiers where canceled_at is null)
+       and not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id)
+       and not exists (select 1 from public.watch_rollup w where w.period_id = p.period_id)
+       and not exists (select 1 from public.anomaly_alerts a where a.period_id = p.period_id)
+       and not exists (select 1 from public.consumption_exclusions x where x.period_id = p.period_id)
+       and not exists (select 1 from public.close_runs r where r.period_id = p.period_id)`,
+    [FIRST],
+  );
+  await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
+  await owner.query("commit");
   const before = await owner.query(
     `select period_id from public.payout_periods
      where status in ('open', 'closing') and period_id < $1
