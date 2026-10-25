@@ -30,6 +30,7 @@ create type public.payout_status as enum (
   'ready_to_pay', 'paid', 'carried_forward', 'on_hold', 'payment_returned');
 create type public.bonus_kind as enum ('founder', 'open_course', 'discretionary');
 create type public.bonus_status as enum ('proposed', 'confirmed', 'void');
+revoke usage on type public.payout_status, public.bonus_kind, public.bonus_status from public;
 
 create table public.payouts (
   id uuid primary key default gen_random_uuid(),
@@ -148,6 +149,10 @@ alter table public.close_run_teacher_totals
 -- El de un maestro fundador en un periodo, de su total: el multiplicador menos uno, en puntos base, y
 -- el piso del total por eso. Vale en los `months` periodos que empiezan en el que contiene
 -- `founder_since`; fuera de ellos da 0. Una regla que falta o que no cabe en puntos base no se adivina.
+-- La regla se lee del periodo que se cierra, así que vale para todo fundador con total aunque esté fuera
+-- de su ventana: el programa de fundadores se termina con un multiplicador de 1, nunca cancelando el
+-- parámetro (sin regla, ningún periodo con un fundador con total se cierra); y un `months` nuevo mueve la
+-- ventana de todos los fundadores desde el periodo en que rige.
 create function private.founder_bonus(p_total bigint, p_founder_since date, p_period public.period_id, p_rule jsonb,
   out multiplier_bps integer, out amount_cents bigint)
 language plpgsql immutable set search_path = ''
@@ -176,8 +181,8 @@ begin
     raise exception 'a founder bonus needs a total, a founder date and a period' using errcode = '22023';
   end if;
   multiplier_bps := v_bps::integer;
-  v_since := pg_catalog.to_char(p_founder_since, 'YYYYMM')::integer;
-  v_offset := ((p_period / 100) * 12 + p_period % 100) - ((v_since / 100) * 12 + v_since % 100);
+  v_since := pg_catalog.date_part('year', p_founder_since)::integer * 12 + pg_catalog.date_part('month', p_founder_since)::integer;
+  v_offset := ((p_period / 100) * 12 + p_period % 100) - v_since;
   amount_cents := case when v_offset >= 0 and v_offset < v_months then p_total * multiplier_bps / 10000 else 0 end;
 end
 $$;
@@ -866,6 +871,11 @@ as $$
   select 'payouts function security definer or without fixed search_path', found.oid::regprocedure::text
   from found
   where found.prosecdef or not coalesce(found.proconfig, '{}') @> array['search_path=""']
+  union all
+  select 'payouts type usable by ' || r.rolname, t.type_name
+  from app_roles r
+  cross join (values ('public.payout_status'), ('public.bonus_kind'), ('public.bonus_status')) as t (type_name)
+  where pg_catalog.has_type_privilege(r.rolname::name, t.type_name, 'USAGE')
   union all
   select 'payouts trigger missing or disabled: ' || g.trigger_name, g.table_name
   from payout_triggers g

@@ -1971,9 +1971,11 @@ falla. Veintiuna precisiones que la tabla no dice:
     Liberar, retener, capturar, confirmar y anular llegan con la segunda solicitud: hasta entonces
     ninguna de las dos cambia (23514), y no se borran ni se vacían (42501).
   - **El bono del fundador** (`private.founder_bonus`, pura): el piso del total por el multiplicador
-    menos uno, en puntos base enteros (un multiplicador que no cabe, o la regla que falta, lanza); vale en
-    los `months` periodos que empiezan en el que contiene `founder_since`, contando ese; no mira el
-    estado del maestro (lo cobra suspendido o ido); si da 0 no hay fila.
+    menos uno, en puntos base enteros (un multiplicador que no cabe, o la regla que falta o sin duración,
+    lanza si hay un fundador con total); vale en los `months` periodos que empiezan en el que contiene
+    `founder_since`, contando ese; no mira el estado del maestro (lo cobra suspendido o ido); si da 0 no
+    hay fila. La regla se lee del periodo que se cierra: el programa se termina con un multiplicador de
+    1, nunca cancelando el parámetro, y un `months` nuevo mueve la ventana de todos desde que rige.
   - **Entra a la huella**: `close_input` lleva `FUNDADOR_MULTIPLICADOR` del periodo y la lista de
     todos los fundadores con su fecha. Un cambio de fundador o de regla deja viejo el ensayo, y el ensayo
     dice el bono por maestro (`close_run_teacher_totals.founder_bonus_cents`) y en su respuesta.

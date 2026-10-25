@@ -9,7 +9,7 @@
 -- `pruebas.cierra()`, como en `43_cierre`.
 begin;
 \ir _ayuda.psql
-select plan(86);
+select plan(96);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6030000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -231,6 +231,12 @@ select throws_ok($$select private.founder_bonus(3350, '2026-10-01', 202610, null
   'sin la regla, un fundador no se adivina: lanza');
 select throws_ok($$select private.founder_bonus(3350, '2026-10-01', 202610, '{"multiplier": "0.9", "months": 24}')$$, 'P0001', null,
   'un multiplicador menor que 1 tampoco');
+select throws_ok($$select private.founder_bonus(3350, '2026-10-01', 202610, '{"multiplier": "2.5", "months": 24}')$$, 'P0001', null,
+  'ni uno de más del doble');
+select throws_ok($$select private.founder_bonus(3350, '2026-10-01', 202610, '{"multiplier": "1.15"}')$$, 'P0001', null,
+  'una regla sin su duración no da 0 en silencio: lanza');
+select throws_ok($$select private.founder_bonus(3350, '2026-10-01', 202610, '{"multiplier": "1.15", "months": 0}')$$, 'P0001', null,
+  'ni con una duración de 0');
 select results_eq(
   format($$select teacher_id, basis_cents, multiplier_bps, amount_cents
            from private.close_founder_bonuses(pruebas.lineas('{"%s": 3350, "%s": 24494, "%s": 6}'),
@@ -305,6 +311,10 @@ select throws_like($$select pruebas.descuadra(202610, $s$delete from public.payo
 select throws_like($$select pruebas.descuadra(202610, $s$update public.payouts set pool_cents = pool_cents + 1, subtotal_cents = subtotal_cents + 1,
                                                          net_cents = net_cents + 1 where period_id = 202610 and teacher_id = pruebas.id('M1')$s$)$$,
   '%without a matching payout%', 'una liquidación que no es su total');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.payouts set status = 'carried_forward', released_at = now(),
+                                                         released_by = pruebas.finanzas()
+                                                         where period_id = 202610 and teacher_id = pruebas.id('M1')$s$)$$,
+  '%without a matching payout%', 'una liquidación que no nace calculada');
 select throws_like($$select pruebas.descuadra(202610, $s$update public.payouts set close_run_id = (select id from public.close_runs
                                                            where period_id = 202610 and kind = 'rehearsal' limit 1)
                                                          where period_id = 202610 and teacher_id = pruebas.id('M2')$s$)$$,
@@ -316,6 +326,16 @@ select throws_like($$select pruebas.descuadra(202610, $s$insert into public.payo
 select throws_like($$select pruebas.descuadra(202610, $s$update public.bonuses set amount_cents = amount_cents + 1
                                                          where period_id = 202610$s$)$$,
   '%founder bonuses%', 'un bono que no es el piso del total');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.bonuses set basis_cents = basis_cents + 1
+                                                         where period_id = 202610$s$)$$,
+  '%founder bonuses%', 'un bono sobre otra base');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.bonuses set multiplier_bps = multiplier_bps + 1
+                                                         where period_id = 202610$s$)$$,
+  '%founder bonuses%', 'con otro multiplicador');
+select throws_like($$select pruebas.descuadra(202610, $s$update public.bonuses set close_run_id = (select id from public.close_runs
+                                                           where period_id = 202610 and kind = 'rehearsal' limit 1)
+                                                         where period_id = 202610$s$)$$,
+  '%founder bonuses%', 'o con otra corrida');
 select throws_like($$select pruebas.descuadra(202610, $s$delete from public.bonuses where period_id = 202610$s$)$$,
   '%founder bonuses%', 'un fundador sin su bono');
 select throws_like($$select pruebas.descuadra(202610, $s$insert into public.bonuses (teacher_id, period_id, kind, amount_cents, basis_cents,
@@ -330,6 +350,13 @@ select throws_like($$select pruebas.descuadra(202610, $s$update public.close_run
                                                          where close_run_id = (select close_run_id from public.payout_periods
                                                                                where period_id = 202610)$s$)$$,
   '%close run founder bonus%', 'la corrida del cierre que dice otro bono');
+select throws_ok($$select pruebas.descuadra(202610, $s$update public.teachers set is_founder = false, founder_since = null
+                                                       where id = pruebas.id('M3')$s$)$$,
+  'P0002', 'cuadra', 'la comprobación usa los fundadores que leyó el cierre, no los de ahora');
+select throws_ok($$select pruebas.descuadra(202610, $s$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+                                                       values ('FUNDADOR_MULTIPLICADOR', '{"multiplier": "1.3", "months": 24}', 'decided',
+                                                               now(), 202610)$s$)$$,
+  'P0002', 'cuadra', 'ni la regla de ahora');
 select is((select count(*)::integer from public.payouts where period_id = 202610), 0, 'nada de eso quedó');
 
 -- ---------------------------------------------------------------------------------------
@@ -367,7 +394,7 @@ select results_eq(
 select is((select close_run_id from public.bonuses where period_id = 202610), (select (r ->> 'close_run_id')::uuid from cierre),
   'calculado por el cierre');
 select is((select count(*)::integer from public.audit_log where entity_table = 'public.bonuses' and action = 'bonuses.insert'
-           and category = 'money'), 1, 'y auditado');
+           and category = 'money' and actor_id = pruebas.finanzas() and new_value ->> 'period_id' = '202610'), 1, 'y auditado');
 select results_eq(
   $$select pruebas.et(teacher_id), founder_bonus_cents from public.close_run_teacher_totals
     where close_run_id = (select (r ->> 'close_run_id')::uuid from cierre) order by 1$$,
@@ -445,6 +472,10 @@ grant execute on function private.founder_bonus(bigint, date, public.period_id, 
 select results_eq($$select problem, object_name like 'private.founder_bonus(%' from private.schema_violations_payouts()$$,
   $$values ('payouts function executable by app_service', true)$$, 'el bono al alcance del servidor');
 revoke execute on function private.founder_bonus(bigint, date, public.period_id, jsonb) from app_service;
+grant usage on type public.payout_status to anon;
+select results_eq($$select problem, object_name from private.schema_violations_payouts()$$,
+  $$values ('payouts type usable by anon', 'public.payout_status')$$, 'un tipo de las liquidaciones al alcance de un visitante');
+revoke usage on type public.payout_status from anon;
 alter function private.guard_payout() security definer;
 select results_eq($$select problem, object_name like 'private.guard_payout(%' from private.schema_violations_payouts()$$,
   $$values ('payouts function security definer or without fixed search_path', true)$$, 'un guardián que corre como el dueño');
