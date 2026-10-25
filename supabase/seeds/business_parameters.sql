@@ -45,7 +45,7 @@ from (values
   -- Bote
   ('BOTE_PCT_BASE',             '6000',                 'decided'),
   ('BOTE_PCT_TECHO',            '7500',                 'to_confirm'),
-  ('BOTE_REGLA_TRAMO',          '"marginal_tiers"',     'proposed'),
+  ('BOTE_REGLA_TRAMO',          '"marginal_tiers"',     'decided'),
   ('COMISION_COBRO_PCT',        '500',                  'to_confirm'),
   ('RESERVA_PCT',               '500',                  'to_confirm'),
   ('AVISO_CAMBIO_REPARTO_DIAS', '30',                   'proposed'),
@@ -68,7 +68,7 @@ from (values
   ('ALERTA_SIN_CONSUMO_PCT',    '4000',                 'proposed'),
   ('ALERTA_SALTO_MINIMO_MEDIOS_PUNTOS', '40',            'proposed'),
   -- Pago a maestros
-  ('DIA_CIERRE',                '1',                    'proposed'),
+  ('DIA_CIERRE',                '3',                    'decided'),
   ('DIA_PAGO',                  '10',                   'proposed'),
   ('PAGO_MINIMO',               '50000',                'proposed'),
   ('FUNDADOR_MULTIPLICADOR',    '{"multiplier": "1.15", "months": 24}', 'to_confirm'),
@@ -106,6 +106,12 @@ from (values
   ('RECURSO_TAMANO_MAX',        '52428800',             'proposed')
 ) as v (key, value, status)
 join public.parameter_definitions d on d.key = v.key
-on conflict (key, effective_from) do nothing;
+on conflict (key, effective_from) where canceled_at is null do nothing;
+
+-- Los tramos del bote (RN-13): uno solo, desde 0 alumnos activos, con el porcentaje base. Lo escribe
+-- la función de los tramos, como el sistema; no escribe otra versión de `BOTE_PCT_BASE`, que ya es
+-- la misma. Los umbrales de `BOTE_TRAMOS` siguen abiertos (PQ-03).
+select private.set_pool_tiers(202610, '{0}', '{6000}')
+where not exists (select 1 from public.pool_tiers where effective_period_id = 202610 and canceled_at is null);
 
 commit;

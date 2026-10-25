@@ -14,7 +14,19 @@
 -- se simula moviendo hacia atrás el último latido de la reproducción.
 begin;
 \ir _ayuda.psql
-select plan(114);
+select plan(116);
+
+-- El mes anterior, abierto (T-601): sus latidos atrasados entran hasta su día de cierre, y así esta
+-- prueba no depende de qué día del mes corre. Sin el guardián, que no deja volver a abierto.
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
+insert into public.payout_periods (period_id, starts_at, ends_at, timezone)
+select m.p, timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp),
+       timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp + interval '1 month'), 'America/Mexico_City'
+from (select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer as p) m
+on conflict (period_id) do update set status = 'open', entered_closing_at = null;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
+select pruebas.limpiar();
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-late@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-late@prueba.test');
@@ -509,6 +521,27 @@ where id = (select id from r where name = 'vieja');
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'vieja'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
   '{"outcome": "not_found"}'::jsonb, 'lo de antes del mes pasado ya no entra: ese periodo no cambia');
+-- Con el mes anterior en cierre (T-601), su atrasado ya no entra: contesta como un mes viejo.
+insert into r values ('cierre', pruebas.abre(pruebas.computadora()));
+update public.playback_sessions
+set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interval '7 hours',
+    revoked_at = date_trunc('month', now()) - interval '7 hours', revoke_reason = 'replaced',
+    started_at = date_trunc('month', now()) - interval '8 hours'
+where id = (select id from r where name = 'cierre');
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
+update public.payout_periods set status = 'closing', entered_closing_at = now()
+where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
+select is(
+  pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'cierre'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
+  '{"outcome": "not_found"}'::jsonb, 'con su mes en cierre, lo atrasado ya no entra');
+select is((select count(*)::integer from pruebas.latidos((select id from r where name = 'cierre'))), 0, 'y nada queda en el libro');
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
+update public.payout_periods set status = 'open', entered_closing_at = null
+where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que no cuenta (RF-403): la base lo calcula; lo que dice TypeScript solo lo baja.

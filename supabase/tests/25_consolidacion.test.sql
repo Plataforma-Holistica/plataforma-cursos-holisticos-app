@@ -215,6 +215,11 @@ select is((select schedule from cron.job where jobname = 'nightly_rollup'), '0 9
 select is((select command from cron.job where jobname = 'nightly_rollup'), 'call private.nightly_rollup()',
   'y su trabajo es solo la llamada: así puede hacer commit entre lotes');
 select is((select schedule from public.job_definitions where job = 'nightly_rollup'), '0 9 * * *', 'el trabajo está declarado');
+-- Sin las filas de periodo que dejaron otras corridas en la base local (T-601), dentro de esta
+-- transacción: con ellas, la ventana suma los periodos en cierre que nadie ha cerrado.
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
+delete from public.payout_periods p where not exists (select 1 from public.charges c where c.allocation_start_period_id = p.period_id);
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select is(array(select p::integer from private.rollup_window() as p order by 1),array[pruebas.periodo(1), pruebas.periodo()]::integer[],
   'cada noche: el periodo en curso y el anterior, los que todavía reciben latidos');
 

@@ -71,12 +71,16 @@ select is((select count(*)::integer from partes
 -- La tabla y la función dicen lo mismo.
 
 -- Cada caso, escrito a mano como el dueño con lo que calculó la función: la regla atada en la
--- tabla lo acepta.
-insert into public.charges (profile_id, subscription_id, provider, provider_charge_id, plan, charged_at, period_id, currency,
+-- tabla lo acepta. Sus meses, con fila (T-601: las partes empiezan en un periodo que existe).
+select pruebas.como_dueno_sistema();
+select count(private.open_period(m.period)) from (select distinct period from montos) m;
+select pruebas.como_dueno();
+insert into public.charges (profile_id, subscription_id, provider, provider_charge_id, plan, charged_at, period_id,
+                            allocation_start_period_id, currency,
                             gross_cents, tax_cents, fx_rate_to_mxn, fx_source, gross_mxn_cents, net_of_tax_mxn_cents,
                             iva_bps, fee_bps, revenue_net_mxn_cents)
 select 'a0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'manual', 'caso-' || i, plan,
-       '2026-10-10 12:00-06', period, 'MXN', gross, gross - net_of_tax, 1, 'same_currency', gross, net_of_tax, iva, fee, net
+       '2026-10-10 12:00-06', period, period, 'MXN', gross, gross - net_of_tax, 1, 'same_currency', gross, net_of_tax, iva, fee, net
 from montos;
 select is((select count(*)::integer from public.charges where provider_charge_id like 'caso-%'), 3000,
   'la tabla acepta los tres mil: su regla es la de la función');

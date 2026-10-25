@@ -60,6 +60,13 @@ $$;
 
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
 
+-- Los meses de esta prueba, con fila (T-601): un cobro de un mes con fila, abierto o en cierre, no es
+-- tardío, corra el día que corra. Los abre el sistema, con el estado que les da el reloj.
+select pruebas.como_dueno_sistema();
+select private.open_period(p) from generate_series(202512, 202512) p
+union all select private.open_period(p) from generate_series(202601, 202610) p;
+select pruebas.como_dueno();
+
 -- ---------------------------------------------------------------------------------------
 -- Las tablas: dos libros que nadie de la aplicación toca.
 
@@ -343,7 +350,9 @@ select lives_ok($$select pruebas.parte_como('{"charge_id": "d0000000-0000-0000-0
   'la parte que sí cuadra entra (el control)');
 
 -- ---------------------------------------------------------------------------------------
--- El vigilante: su área está y avisa.
+-- El vigilante: su área está y avisa. Los disparadores de los parámetros, otra vez prendidos: el
+-- vigilante de los periodos los mira desde T-601.
+alter table public.business_parameters enable trigger user;
 
 select ok(exists (select 1 from private.watchdog_areas() where function_name = 'schema_violations_revenue' and unusable_reason is null),
   'el área de los ingresos está');

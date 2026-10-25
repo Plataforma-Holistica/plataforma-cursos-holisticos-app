@@ -49,6 +49,8 @@ create function pruebas.maestro(p_course text) returns uuid
 language sql as $$ select teacher_id from public.published_courses where slug = p_course $$;
 create function pruebas.fila(p_period integer, p_profile uuid, p_lesson uuid, p_covered integer, p_half_points integer) returns void
 language sql as $$
+  -- El consolidado apunta a su periodo (T-602): su fila, antes.
+  select private.open_period(p_period);
   insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                    lesson_duration_seconds, covered_seconds, half_points)
   select p_period, p_profile, l.id, l.course_id, l.teacher_id, l.video_asset_id, 100, p_covered, p_half_points
@@ -294,8 +296,9 @@ grant execute on function private.finance_alerts() to authenticated;
 select ok(exists (select 1 from private.schema_violations() where problem = 'finance function executable by authenticated'
                   and object_name = 'private.finance_alerts()'), 'o a una persona leer las alertas');
 revoke execute on function private.finance_alerts() from authenticated;
+-- Los disparadores de los parámetros, otra vez prendidos: el vigilante de los periodos los mira (T-601).
+alter table public.business_parameters enable trigger user;
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 
-alter table public.business_parameters enable trigger user;
 select * from finish();
 rollback;

@@ -14,6 +14,18 @@ begin;
 \ir _ayuda.psql
 select plan(65);
 
+-- El mes anterior, abierto (T-601): sus latidos atrasados entran hasta su día de cierre, y así esta
+-- prueba no depende de qué día del mes corre. Sin el guardián, que no deja volver a abierto.
+select pruebas.como_dueno_sistema();
+alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
+insert into public.payout_periods (period_id, starts_at, ends_at, timezone)
+select m.p, timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp),
+       timezone('America/Mexico_City', to_date(m.p::text || '01', 'YYYYMMDD')::timestamp + interval '1 month'), 'America/Mexico_City'
+from (select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer as p) m
+on conflict (period_id) do update set status = 'open', entered_closing_at = null;
+alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
+select pruebas.limpiar();
+
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'ana-rehace@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-rehace@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000003', 'carla-rehace@prueba.test');
@@ -423,8 +435,9 @@ select is((select row((select count(*) from private.rollup_dirty), (select sum(s
   (select row(marcas, dias)::text from otras), 'ni marcas ni días de práctica');
 
 -- El vigilante conoce lo nuevo.
+-- Los disparadores de los parámetros, otra vez prendidos: el vigilante de los periodos los mira (T-601).
+alter table public.business_parameters enable trigger user;
 select is((select count(*)::integer from private.schema_violations()), 0, 'el vigilante no encuentra nada');
 
-alter table public.business_parameters enable trigger user;
 select * from finish();
 rollback;

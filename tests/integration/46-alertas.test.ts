@@ -65,6 +65,8 @@ async function impossibleAlert(owner: Client, student: string): Promise<string> 
   if (loaded?.answer !== "loaded") throw new Error(`No cargó el curso: ${loaded?.answer}`);
   await asOwner(owner);
   const period = (await owner.query<{ p: number }>("select to_char(timezone('America/Mexico_City', now()), 'YYYYMM')::int as p")).rows[0]!.p;
+  // El consolidado apunta a su periodo (T-602): su fila, antes (dentro de la transacción que se revierte).
+  await owner.query("select private.open_period($1)", [period]);
   await owner.query(
     `insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
                                       lesson_duration_seconds, covered_seconds, half_points)
