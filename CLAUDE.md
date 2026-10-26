@@ -2057,6 +2057,8 @@ falla. Veintiuna precisiones que la tabla no dice:
     fila a más de un año (`malformed`: es un error de captura).
   - El separador de sentencias del CLI de Supabase corta una función con `case ... end` dentro de la
     condición de un `if`: calcula el `case` en una variable antes.
+  - Límite dicho: `release_payouts` toma un candado consultivo por maestro y los guarda hasta confirmar;
+    con miles de maestros habrá que mirar `max_locks_per_transaction`.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un
