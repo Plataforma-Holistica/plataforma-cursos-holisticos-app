@@ -65,8 +65,8 @@ select col_is_pk('public', 'payout_periods', 'period_id', 'un periodo por mes');
 select columns_are('public', 'payout_periods',
   array['period_id', 'starts_at', 'ends_at', 'timezone', 'status', 'entered_closing_at', 'active_students', 'carried_in_cents', 'created_at',
         'pool_bps', 'net_revenue_cents', 'student_pools_cents', 'pool_cents', 'assigned_cents', 'unconsumed_cents', 'carried_out_cents',
-        'close_run_id', 'closed_at', 'closed_by'],
-  'lo de T-601, y las cifras del cierre de T-602');
+        'close_run_id', 'closed_at', 'closed_by', 'payouts_released_at', 'payouts_released_by', 'paid_at'],
+  'lo de T-601, las cifras del cierre de T-602, y la liberación y el pago de T-603');
 select ok((select relrowsecurity from pg_class where oid = 'public.payout_periods'::regclass), 'con seguridad por fila');
 select has_trigger('public', 'payout_periods', 'payout_periods_guard', 'con su guardián');
 select has_trigger('public', 'payout_periods', 'payout_periods_no_truncate', 'que tampoco se vacía');
