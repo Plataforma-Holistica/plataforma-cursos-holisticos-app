@@ -14,7 +14,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(104);
+select plan(117);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6040000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -184,6 +184,7 @@ select pruebas.fila(202610, pruebas.al(3), 'lib-m1', t, 2) from unnest(array['Un
 select pruebas.fila(202610, pruebas.al(3), 'lib-m2', 'Uno', 2), pruebas.fila(202610, pruebas.al(3), 'lib-m3', 'Uno', 2);
 select pruebas.abierto(202611);
 select pruebas.abierto(202612);
+select pruebas.abierto(202702);
 
 -- ---------------------------------------------------------------------------------------
 -- Las piezas.
@@ -345,6 +346,9 @@ select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 9999, 202
   'captured', 'uno de un centavo menos para M4');
 select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 30000, 202612, %L)', pruebas.id('M1'), 'discretionary', 'Lo compensa.'))),
   'captured', 'y uno para M1 que compensa su saldo en contra');
+select is((select format('%s %s', r ->> 'outcome', r ->> 'applied_period_id') from (select pruebas.hace(format(
+             'private.capture_adjustment(%L, 202612, 500, %L)', pruebas.id('M1'), 'Desde un mes cerrado sin liberar.')) as r) x),
+  'captured 202701', 'un ajuste desde un mes cerrado y sin liberar va al siguiente, no a él');
 select is(pruebas.liq(202612)::text, array['M1 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0',
   'M2 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0', 'M3 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0',
   'M4 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0']::text,
@@ -392,10 +396,12 @@ select is((select period_id::integer from public.bonuses where reason = 'Tarde.'
 -- ---------------------------------------------------------------------------------------
 -- El ensayo estima las liquidaciones (FL-50, paso 4).
 
+select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 1000, 202701, %L)', pruebas.id('M4'), 'discretionary', 'Uno chico.'))),
+  'captured', 'un bono chico para M4');
 select pruebas.en_cierre(202701);
 create temporary table ensayo as select pruebas.hace('private.rehearse_close(202701)') as r;
 select is((select array_agg(pruebas.et(x::uuid) order by pruebas.et(x::uuid)) from ensayo, jsonb_array_elements_text(r -> 'below_minimum') x),
-  array['M2', 'M3', 'M4'], 'el ensayo dice quién quedaría debajo del mínimo (M4 con lo acumulado de su retenida)');
+  array['M1', 'M2', 'M3'], 'el ensayo dice quién quedaría debajo del mínimo; M4 no, por lo acumulado de su retenida');
 select is((select e from public.close_runs c, jsonb_array_elements(c.payout_preview) e
            where c.id = (select (r ->> 'run_id')::uuid from ensayo) and e ->> 'teacher_id' = pruebas.id('M2')::text),
   jsonb_build_object('teacher_id', pruebas.id('M2'), 'pool_cents', 0, 'founder_bonus_cents', 0, 'bonuses_cents', 1000,
@@ -408,8 +414,17 @@ select is((select e from public.close_runs c, jsonb_array_elements(c.payout_prev
 select pruebas.como_finanzas();
 select throws_ok($$update public.payouts set status = 'invoice_in_review' where id = pruebas.y('M2', 202612)$$,
   '23514', null, 'la factura llega con T-604');
-select throws_ok($$update public.payouts set bonuses_cents = 1, subtotal_cents = subtotal_cents + 1, net_cents = net_cents + 1
-                   where id = pruebas.y('M2', 202612)$$, '23514', null, 'lo liberado no cambia de monto');
+select throws_ok($$update public.payouts set bonuses_cents = bonuses_cents + 1, subtotal_cents = subtotal_cents + 1, net_cents = net_cents + 1
+                   where id = pruebas.y('M2', 202612)$$, '23514', 'public.payouts: payout ' || pruebas.y('M2', 202612)
+                   || ': its amounts change only when it is released (RF-505)', 'lo liberado no cambia de monto');
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M2', 202612), 'Para la prueba.'))), 'held', '(se retiene)');
+select pruebas.como_finanzas();
+select throws_ok($$update public.payouts set status = 'ready_to_pay' where id = pruebas.y('M2', 202612)$$, '23514', null,
+  'una retenida no vuelve a otro estado que el suyo');
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null)', pruebas.y('M2', 202612)))), 'released_from_hold', '(se suelta)');
+select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set status = 'paid' where period_id = 202612$$, '23514', null,
   'un periodo con liquidaciones por pagar no pasa a pagado');
 select throws_ok($$update public.payout_periods set payouts_released_at = null, payouts_released_by = null where period_id = 202612$$,
@@ -437,10 +452,6 @@ select pruebas.como_dueno();
 -- ---------------------------------------------------------------------------------------
 -- La comprobación al confirmar de cada liberación (05 §8.6).
 
-select pruebas.abierto(202702);
-select pruebas.como_finanzas();
-select private.capture_bonus(pruebas.id('M4'), 'discretionary', 20000, 202701, 'Para descuadrar.');
-select pruebas.como_dueno();
 select pruebas.como_finanzas();
 select private.close_period(202701);
 set constraints payout_periods_balanced immediate;
@@ -454,11 +465,38 @@ select throws_like($$select pruebas.descuadra(202701, $s$update public.payouts s
   '%minimum%', 'una que llega al mínimo y se acumula');
 select throws_like($$select pruebas.descuadra(202701, $s$update public.teacher_balance_entries set amount_cents = amount_cents + 1
                      where payout_id = pruebas.y('M3', 202701) and kind = 'carried_forward'$s$)$$,
-  '%balance%', 'un saldo acumulado que no es el bruto');
+  '%balance entries%', 'un saldo acumulado que no es el bruto');
 select throws_like($$select pruebas.descuadra(202701, $s$delete from public.teacher_balance_entries
                      where payout_id = pruebas.y('M3', 202701) and kind = 'applied_to_payout'$s$)$$,
-  '%balance%', 'un saldo aplicado sin su renglón');
+  '%balance entries%', 'un saldo aplicado sin su renglón');
+select throws_like($$select pruebas.descuadra(202701, $s$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind,
+                                                                                                   amount_cents, created_at)
+                     values (pruebas.id('M3'), pruebas.y('M3', 202610), 202610, 'applied_to_payout', 1, '2000-01-01')$s$)$$,
+  '%teacher balance%', 'un saldo del maestro que no es el que quedó al liberar');
 select is(pruebas.estado(202701), 'closed', 'nada de eso quedó');
+
+-- ---------------------------------------------------------------------------------------
+-- Febrero: se cierra antes de liberar enero, con un mínimo de 0.
+
+select pruebas.en_cierre(202702);
+select is(pruebas.o(pruebas.cierra(202702)), 'closed', 'febrero se cierra');
+select is(pruebas.o(pruebas.hace('private.release_payouts(202701)')), 'released', 'enero se libera después: M1 y M2 acumulan');
+select pruebas.parametro('PAGO_MINIMO', '0', 202702);
+select is((select format('%s %s', r ->> 'outcome', r ->> 'applied_period_id') from (select pruebas.hace(format(
+             'private.capture_adjustment(%L, 202701, -1000, %L)', pruebas.id('M2'), 'Compensa su saldo.')) as r) x),
+  'captured 202702', 'un ajuste que compensa el saldo de M2');
+select is(pruebas.o(pruebas.hace('private.release_payouts(202702)')), 'released', 'febrero se libera');
+select is(pruebas.liq(202702),
+  array['M1 awaiting_invoice pool=0 bonos=0 ajustes=0 saldo=500 bruto=500',
+        'M2 carried_forward pool=0 bonos=0 ajustes=-1000 saldo=1000 bruto=0',
+        'M3 awaiting_invoice pool=0 bonos=0 ajustes=0 saldo=3852 bruto=3852',
+        'M4 carried_forward pool=0 bonos=0 ajustes=0 saldo=0 bruto=0'],
+  'liberar le da su liquidación a quien acumuló después del cierre (M1); con un mínimo de 0, un bruto de 0 se acumula');
+select is((select count(*)::integer from public.teacher_balance_entries where payout_id = pruebas.y('M2', 202702) and kind = 'carried_forward'),
+  0, 'sin renglón acumulado de 0');
+select pruebas.como_finanzas();
+select is(private.release_payout(pruebas.y('M1', 202702), 0)::text, 'awaiting_invoice', 'una liquidación liberada no se vuelve a liberar');
+select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante.
