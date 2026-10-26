@@ -2049,9 +2049,12 @@ falla. Veintiuna precisiones que la tabla no dice:
     transacción): con el periodo cerrado o pagado, `RETENCION_LATIDOS` desde el cierre, sin retenidas y sin
     progreso por rehacer que lea esos latidos. Borrar la partición toma el candado de la tabla madre: lo
     espera 2 s, y si no, falla ese periodo y la corrida lo dice; la fila del periodo, sin esperarla
-    (`nowait`). La corrida confirma y después borra, en otra transacción, las reproducciones sin ninguna
-    partición viva (`purge_playback_sessions`), salvo las que otra que se queda señala como la que tomó su
-    lugar: así los latidos no esperan ese borrado. Devuelve al terminar los ajustes de sesión que puso.
+    (`for no key update nowait`). Al final, en otra transacción, borra las reproducciones sin ninguna
+    partición viva (`purge_playback_sessions`, con el periodo purgado más reciente: es idempotente y
+    recoge lo que una noche anterior no alcanzó), salvo las que otra que se queda señala como la que tomó
+    su lugar: así los latidos no esperan ese borrado. Devuelve al terminar los ajustes de sesión que puso.
+  - Una liquidación no nace con IVA ni retenciones (llegan con T-409), y un bono a mano no abre un mes sin
+    fila a más de un año (`malformed`: es un error de captura).
   - El separador de sentencias del CLI de Supabase corta una función con `case ... end` dentro de la
     condición de un `if`: calcula el `case` en una variable antes.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones

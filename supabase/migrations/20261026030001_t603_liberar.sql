@@ -1636,7 +1636,7 @@ create constraint trigger payouts_released after update on public.payouts
 -- pagado, pasó `RETENCION_LATIDOS` desde el cierre, no tiene liquidaciones retenidas (el crudo es la
 -- evidencia de una investigación) y no queda progreso por rehacer que lea esos latidos. Con un candado
 -- de 2 s: borrar una partición toma el de la tabla madre, y un latido no espera más; tampoco espera la
--- fila del periodo (`nowait`). Las reproducciones se borran aparte (`purge_playback_sessions`), después
+-- fila del periodo (`for no key update nowait`: choca con retener, pero no con una clave foránea). Las reproducciones se borran aparte (`purge_playback_sessions`), después
 -- de confirmar. Solo la corre el dueño.
 
 create function private.purge_watch_partition(p_period public.period_id) returns text
@@ -1665,7 +1665,7 @@ begin
     return 'within_retention';
   end if;
   -- Ya en retención, la fila del periodo, sin esperarla: retener toma la misma.
-  perform 1 from public.payout_periods p where p.period_id = p_period for update nowait;
+  perform 1 from public.payout_periods p where p.period_id = p_period for no key update nowait;
   if exists (select 1 from public.payouts y where y.period_id = p_period and y.status = 'on_hold') then
     return 'on_hold';
   end if;
@@ -1723,8 +1723,8 @@ $$;
 revoke all on function private.purge_playback_sessions(public.period_id) from public;
 
 -- La corrida diaria: los periodos cerrados o pagados que todavía tienen partición, del más viejo al más
--- nuevo, cada uno en su propia transacción; anota en `job_runs` cuántos borró, cuántos se saltó y
--- cuántos fallaron.
+-- nuevo, cada uno en su propia transacción; después, en otra, las reproducciones que ya no tienen
+-- partición. Anota en `job_runs` cuántos borró, cuántos se saltó y cuántos fallaron.
 create procedure private.raw_retention()
 language plpgsql
 as $$
@@ -1762,19 +1762,23 @@ begin
       v_first := coalesce(v_first, v_period::text || ': ' || sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
     end;
     commit;
-    if v_outcome = 'purged' then
-      begin
-        v_sessions := v_sessions + private.purge_playback_sessions(v_period);
-      exception when others then
-        v_failed := v_failed + 1;
-        v_first := coalesce(v_first, v_period::text || ' (sessions): ' || sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
-      end;
-      commit;
-    end if;
   end loop;
+  -- Las reproducciones, una vez, con el periodo cerrado más reciente que ya no tiene partición: es
+  -- idempotente y recoge también lo que una noche anterior no alcanzó a borrar.
+  select pg_catalog.max(p.period_id) into v_period from public.payout_periods p
+  where p.status in ('closed', 'paid') and pg_catalog.to_regclass('public.watch_events_' || p.period_id::text) is null;
+  if v_period is not null then
+    begin
+      v_sessions := private.purge_playback_sessions(v_period);
+    exception when others then
+      v_failed := v_failed + 1;
+      v_first := coalesce(v_first, 'sessions: ' || sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
+    end;
+    commit;
+  end if;
   insert into public.job_runs (job, status, started_at, heartbeat_at, finished_at, rows_read, rows_written, details, error)
   values ('raw_retention', case when v_failed = 0 then 'succeeded' else 'failed' end::public.run_status, v_start,
-          pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), v_purged + v_skipped + v_failed, v_purged,
+          pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), v_purged + v_skipped, v_purged,
           pg_catalog.jsonb_build_object('purged', v_purged, 'skipped', v_skipped, 'failed', v_failed, 'sessions', v_sessions), v_first);
   commit;
   perform pg_catalog.set_config('search_path', v_path, false);
