@@ -26,7 +26,7 @@ select is_empty(
   'los valores de arranque no tienen autor: los cargó el sistema');
 
 -- El valor de arranque, para comparar. Queda en una variable de psql.
-select private.parameter_value('GRACIA_COBRO_DIAS') as gracia_inicial \gset
+select private.parameter_value('VENTANA_REEMBOLSO_DIAS') as ventana_inicial \gset
 -- Un periodo que no ha empezado y su primer instante, para un parámetro del reparto (RF-707).
 select private.period_plus(private.period_of(now()), 2) as periodo_futuro,
        private.period_start(private.period_plus(private.period_of(now()), 2)) as inicio_futuro \gset
@@ -37,15 +37,15 @@ select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select set_config('app.reason', 'Prueba de cambio', true);
 select lives_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '10', 'proposed', now() + interval '1 day')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '10', 'proposed', now() + interval '1 day')$$,
   'configuración programa un cambio de parámetro');
 
 select results_eq(
   $$select value, previous_value, changed_by, changed_at = now()
     from public.business_parameters
-    where key = 'GRACIA_COBRO_DIAS' and effective_from > now()$$,
+    where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from > now()$$,
   format($$values ('10'::jsonb, %L::jsonb, 'c0000000-0000-0000-0000-000000000001'::uuid, true)$$,
-         :'gracia_inicial'),
+         :'ventana_inicial'),
   'la fila guarda el valor nuevo, el anterior, quién y cuándo');
 
 -- Deja rastro (la verificación de T-103).
@@ -56,38 +56,38 @@ select results_eq(
     from public.audit_log order by id desc limit 1$$,
   format($$values ('c0000000-0000-0000-0000-000000000001'::uuid, 'user', 'config',
                    'business_parameters.insert', 'public.business_parameters', 'Prueba de cambio',
-                   'GRACIA_COBRO_DIAS', '10'::jsonb, %L::jsonb)$$, :'gracia_inicial'),
+                   'VENTANA_REEMBOLSO_DIAS', '10'::jsonb, %L::jsonb)$$, :'ventana_inicial'),
   'cambiar un parámetro deja un renglón de auditoría con quién, qué, y el valor anterior y el nuevo');
 
 -- Vigencia: el cambio rige desde su fecha, no antes.
 select is(
-  private.parameter_value('GRACIA_COBRO_DIAS'), :'gracia_inicial'::jsonb,
+  private.parameter_value('VENTANA_REEMBOLSO_DIAS'), :'ventana_inicial'::jsonb,
   'hoy sigue vigente el valor anterior');
 select is(
-  private.parameter_value('GRACIA_COBRO_DIAS', now() + interval '2 days'), '10'::jsonb,
+  private.parameter_value('VENTANA_REEMBOLSO_DIAS', now() + interval '2 days'), '10'::jsonb,
   'pasado mañana rige el nuevo');
 
 -- El valor no se edita ni se borra: un error se corrige con una fila nueva.
 select throws_ok(
-  $$update public.business_parameters set value = '99' where key = 'GRACIA_COBRO_DIAS'$$,
+  $$update public.business_parameters set value = '99' where key = 'VENTANA_REEMBOLSO_DIAS'$$,
   '42501', null, 'ni el dueño de la tabla edita el valor de un parámetro');
 select throws_ok(
-  $$delete from public.business_parameters where key = 'GRACIA_COBRO_DIAS'$$,
+  $$delete from public.business_parameters where key = 'VENTANA_REEMBOLSO_DIAS'$$,
   '42501', null, 'ni lo borra');
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
-  $$update public.business_parameters set value = '99' where key = 'GRACIA_COBRO_DIAS'$$,
+  $$update public.business_parameters set value = '99' where key = 'VENTANA_REEMBOLSO_DIAS'$$,
   '42501', null, 'el servidor tampoco edita el valor');
 
 -- Un cambio programado se cancela, una sola vez.
 select lives_ok(
   $$update public.business_parameters
     set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000001'
-    where key = 'GRACIA_COBRO_DIAS' and effective_from > now()$$,
+    where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from > now()$$,
   'un cambio programado se puede cancelar');
 select pruebas.como_dueno();
 select is(
-  private.parameter_value('GRACIA_COBRO_DIAS', now() + interval '2 days'), :'gracia_inicial'::jsonb,
+  private.parameter_value('VENTANA_REEMBOLSO_DIAS', now() + interval '2 days'), :'ventana_inicial'::jsonb,
   'cancelado, vuelve a regir el valor anterior');
 select is(
   (select action from public.audit_log order by id desc limit 1), 'business_parameters.update',
@@ -95,7 +95,7 @@ select is(
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$update public.business_parameters set canceled_at = now() + interval '1 hour'
-    where key = 'GRACIA_COBRO_DIAS' and effective_from > now()$$,
+    where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from > now()$$,
   '42501', null, 'una cancelación no se reescribe');
 
 -- ---------------------------------------------------------------------------------------
@@ -103,25 +103,25 @@ select throws_ok(
 select pruebas.como_servicio('f0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
   '42501', null, 'finanzas no puede cambiar un parámetro');
 
 select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
   '42501', null, 'una alumna tampoco, aunque el servidor lo intente a su nombre');
 
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001', 'aal1');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
   '42501', null, 'configuración sin segundo factor no puede');
 
 select pruebas.como_servicio();
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
   '42501', null, 'sin autor declarado no hay cambio');
 
 select pruebas.como_servicio('f0000000-0000-0000-0000-000000000001');
@@ -134,7 +134,7 @@ select throws_ok(
 select pruebas.como_usuario('c0000000-0000-0000-0000-000000000001', 'aal2');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '11', 'proposed', now() + interval '3 days')$$,
   '42501', null, 'con su sesión, ni configuración escribe directo en la tabla');
 
 -- ---------------------------------------------------------------------------------------
@@ -142,11 +142,11 @@ select throws_ok(
 select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '"diez"', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '"diez"', 'proposed', now() + interval '3 days')$$,
   '23514', null, 'un texto donde va un entero se rechaza');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)
-    values ('GRACIA_COBRO_DIAS', '7.5', 'proposed', now() + interval '3 days')$$,
+    values ('VENTANA_REEMBOLSO_DIAS', '7.5', 'proposed', now() + interval '3 days')$$,
   '23514', null, 'un número con decimales donde va un entero se rechaza');
 select throws_ok(
   $$insert into public.business_parameters (key, value, status, effective_from)

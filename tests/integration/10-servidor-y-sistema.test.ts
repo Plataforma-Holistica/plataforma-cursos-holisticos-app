@@ -95,11 +95,11 @@ const lastAudit = (table: string) => sql`
 
 const proposeParameter = sql`
   insert into public.business_parameters (key, value, status, effective_from)
-  values ('GRACIA_COBRO_DIAS', '10', 'proposed', now() + interval '1 day')`;
+  values ('VENTANA_REEMBOLSO_DIAS', '10', 'proposed', now() + interval '1 day')`;
 
 const pendingParameters = sql`
   select count(*)::int as n from public.business_parameters
-  where key = 'GRACIA_COBRO_DIAS' and effective_from > now()`;
+  where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from > now()`;
 const count = z.object({ n: z.number() });
 
 describe("asSystem", () => {
