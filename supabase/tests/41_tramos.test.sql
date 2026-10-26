@@ -10,7 +10,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(184);
+select plan(189);
 
 create function pruebas.inicio(p_period integer) returns timestamptz
 language sql stable as $$ select timezone('America/Mexico_City', to_date(p_period::text || '01', 'YYYYMMDD')::timestamp) $$;
@@ -308,13 +308,13 @@ select throws_ok($$insert into public.business_parameters (key, value, status, e
                    values ('UMBRAL_MEDIO_PCT', '2700', 'decided', '2025-09-01 06:00Z', 202509)$$,
   '23514', null, 'ni en un periodo que ya empezó, aunque sea desde su inicio');
 select throws_ok($$insert into public.business_parameters (key, value, status, effective_from)
-                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() - interval '1 second')$$,
-  '23514', null, 'un parámetro que no es del reparto tampoco rige hacia atrás (la gracia mueve los alumnos activos)');
+                   values ('VENTANA_REEMBOLSO_DIAS', '9', 'proposed', now() - interval '1 second')$$,
+  '23514', null, 'un parámetro que no es del reparto tampoco rige hacia atrás');
 select throws_ok($$insert into public.business_parameters (key, value, status, effective_from)
-                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() + interval '1 millisecond')$$,
+                   values ('VENTANA_REEMBOLSO_DIAS', '9', 'proposed', now() + interval '1 millisecond')$$,
   '23514', null, 'la hora es la del reloj, no la del inicio de la transacción');
 select lives_ok($$insert into public.business_parameters (key, value, status, effective_from)
-                  values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() + interval '1 day')$$,
+                  values ('VENTANA_REEMBOLSO_DIAS', '9', 'proposed', now() + interval '1 day')$$,
   'hacia adelante, sí');
 -- Una versión del reparto con un instante futuro en un periodo ya empezado solo la deja el dueño;
 -- el servidor no la cancela.
@@ -326,10 +326,10 @@ select throws_ok($$update public.business_parameters set canceled_at = now(), ca
                    where key = 'UMBRAL_MEDIO_PCT' and value = '2550'$$,
   '23514', null, 'ni se cancela una del reparto cuyo periodo ya empezó, aunque no rija todavía');
 select throws_ok($$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000041'
-                   where key = 'GRACIA_COBRO_DIAS' and effective_from <= now() and canceled_at is null$$,
+                   where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from <= now() and canceled_at is null$$,
   '23514', null, 'una versión que ya rige no se cancela');
 select lives_ok($$update public.business_parameters set announced_at = now()
-                  where key = 'GRACIA_COBRO_DIAS' and effective_from <= now() and canceled_at is null$$,
+                  where key = 'VENTANA_REEMBOLSO_DIAS' and effective_from <= now() and canceled_at is null$$,
   'avisar de ella sí: solo se revisa una cancelación');
 select lives_ok($$update public.business_parameters set canceled_at = now(), canceled_by = 'c0000000-0000-0000-0000-000000000041'
                   where key = 'UMBRAL_MEDIO_PCT' and effective_period_id = 203106$$,
@@ -352,14 +352,32 @@ update public.pool_tiers set canceled_at = '2000-01-01', canceled_by = 'c0000000
 where effective_period_id = 203102 and canceled_at is null;
 select results_eq($$select canceled_at = now(), canceled_by from public.pool_tiers where effective_period_id = 203102$$,
   $$values (true, null::uuid)$$, 'quién y cuándo de una cancelación también los pone la base');
--- La gracia de 9 días programada arriba movería los casos de abajo: el sistema la cancela, sin persona.
+-- La ventana de 9 días programada arriba: el sistema la cancela, sin persona.
 select lives_ok($$update public.business_parameters set canceled_at = now()
-                  where key = 'GRACIA_COBRO_DIAS' and value = '9' and canceled_at is null$$,
+                  where key = 'VENTANA_REEMBOLSO_DIAS' and value = '9' and canceled_at is null$$,
   'el sistema cancela sin persona que lo firme');
 select pruebas.como_config();
 select throws_ok($$update public.business_parameters set canceled_by = 'c0000000-0000-0000-0000-000000000041'
-                   where key = 'GRACIA_COBRO_DIAS' and value = '9'$$,
+                   where key = 'VENTANA_REEMBOLSO_DIAS' and value = '9'$$,
   '23514', null, 'y nadie la firma después');
+
+-- La gracia es del reparto (decisión de Sergio del 2026-10-25): mueve los alumnos activos, y con
+-- ellos el tramo, así que un cambio rige desde el inicio de un periodo que no ha empezado. Sin el
+-- aviso de 30 días a los maestros, que la base no revisa.
+select is((select row(value_type, affects_payout, group_name)::text from public.parameter_definitions
+           where key = 'GRACIA_COBRO_DIAS'), '(integer,t,pricing)', 'la gracia es un parámetro del reparto');
+select throws_ok($$insert into public.business_parameters (key, value, status, effective_from)
+                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', now() + interval '1 day')$$,
+  '23514', null, 'la gracia sin su periodo se rechaza');
+select throws_ok($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+                   values ('GRACIA_COBRO_DIAS', '9', 'proposed', '2031-07-14 06:00Z', 203107)$$,
+  '23514', null, 'ni a medio mes, aunque el mes no haya empezado: movería los alumnos activos de ese mes');
+select lives_ok($$insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+                  values ('GRACIA_COBRO_DIAS', '9', 'proposed', '2031-07-01 06:00Z', 203107)$$,
+  'desde el inicio de un periodo que no ha empezado, sí');
+select results_eq($$select private.parameter_value('GRACIA_COBRO_DIAS', '2031-07-01 05:59:59Z'),
+                           private.parameter_value('GRACIA_COBRO_DIAS', '2031-07-01 06:00Z')$$,
+  $$values ('7'::jsonb, '9'::jsonb)$$, 'y rige justo desde ahí: el mes anterior conserva la suya');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
@@ -417,8 +435,8 @@ select pruebas.suscribe(18, 'active', '2030-06-20 12:00Z', '2030-06-15 12:00Z');
 select is(pruebas.activos(), 6, 'una creada justo en ese instante sí cuenta');
 select pruebas.suscribe(19, 'refunded', '2030-06-30 12:00Z', '2030-01-01', null, '2030-06-15 12:00Z');
 select is(pruebas.activos(), 6, 'y una cortada justo en ese instante, no');
-select pruebas.parametro('GRACIA_COBRO_DIAS', '1', null, '2030-06-14 00:00Z');
-select is(pruebas.activos(), 6, 'la gracia es la de la hora de la falla: un cambio posterior no la acorta');
+select pruebas.parametro('GRACIA_COBRO_DIAS', '1', 203006, '2030-06-14 00:00Z');
+select is(pruebas.activos(), 6, 'la gracia es la de la hora de la falla: un cambio posterior no la acorta (solo el dueño lo pone a medio mes)');
 select throws_ok($$select private.active_students_at(null)$$, '22023', null, 'sin instante no se cuenta');
 
 -- ---------------------------------------------------------------------------------------

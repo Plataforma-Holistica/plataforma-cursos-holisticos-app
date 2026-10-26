@@ -328,6 +328,16 @@ que no se ve leyendo un solo archivo:
   (`disable trigger payout_periods_guard, disable trigger payout_periods_balanced`): si no, el paso
   forzado deja su comprobación pendiente, falla al confirmar, y mientras tanto Postgres no deja otro
   `alter table` sobre la tabla («pending trigger events»).
+- **La gracia es del reparto** (decisión de Sergio del 2026-10-25; `t601_gracia_del_reparto`).
+  `GRACIA_COBRO_DIAS` decide quién cuenta como alumno activo, y con ello el tramo del bote: ahora
+  exige `effective_period_id` y rige desde `private.period_start()` de un periodo que no ha empezado.
+  Solo la sesión del dueño la pone a medio mes. Va sin el aviso de 30 días a los maestros, que la base
+  no revisa. Una prueba que necesite un parámetro que no es del reparto usa `VENTANA_REEMBOLSO_DIAS`
+  (así quedaron `04_parametros`, `13_invitaciones`, `41_tramos` y las integraciones 10 y 51). Para el
+  B: una prueba que programe la gracia sin periodo falla con 23514, y `plataforma-b` trae `main` antes
+  de verificar.
+- **Los números de prueba del carril A, desde el 2026-10-25** (decisión de Sergio): además de pgTAP
+  del 40 al 49 e integración del 51 al 59, el A usa pgTAP del 50 al 59 e integración del 80 al 89.
 - **Lo que T-603 suma al carril A** (primera solicitud). Las tablas `payouts`, `payout_status_events` y
   `bonuses`, los tipos `payout_status`, `bonus_kind` y `bonus_status`, la columna
   `close_run_teacher_totals.founder_bonus_cents`, las funciones `private.founder_bonus`,

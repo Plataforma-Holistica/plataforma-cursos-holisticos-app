@@ -335,11 +335,42 @@ describe("RF-707 por instante, con la conexión del servidor", () => {
     try {
       await asSystem(() =>
         server.query(`insert into public.business_parameters (key, value, status, effective_from)
-                      values ('GRACIA_COBRO_DIAS', '8', 'proposed', now() - interval '1 minute')`),
+                      values ('VENTANA_REEMBOLSO_DIAS', '8', 'proposed', now() - interval '1 minute')`),
       );
       await expect(server.query("commit")).rejects.toMatchObject({ code: "23514" });
     } finally {
       await server.query("rollback").catch(() => undefined);
+    }
+  });
+
+  it("la gracia es del reparto: el servidor no la programa a medio mes, y desde el inicio de un periodo sí", async () => {
+    const next = await owner.query("select private.period_of(now() + interval '1 day') as period");
+    try {
+      await asSystem(() =>
+        server.query(
+          `insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+           values ('GRACIA_COBRO_DIAS', '8', 'proposed', now() + interval '1 day', $1)`,
+          [next.rows[0].period],
+        ),
+      );
+      await expect(server.query("commit")).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await server.query("rollback").catch(() => undefined);
+    }
+    const left = await owner.query(
+      "select 1 from public.business_parameters where key = 'GRACIA_COBRO_DIAS' and value = '8'",
+    );
+    expect(left.rowCount).toBe(0);
+    try {
+      await asSystem(async () => {
+        await server.query("set constraints business_parameters_timing immediate");
+        await server.query(
+          `insert into public.business_parameters (key, value, status, effective_from, effective_period_id)
+           values ('GRACIA_COBRO_DIAS', '8', 'proposed', private.period_start(204001), 204001)`,
+        );
+      });
+    } finally {
+      await server.query("rollback");
     }
   });
 
