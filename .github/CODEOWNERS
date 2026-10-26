@@ -69,6 +69,10 @@
 # Lo que sale hacia un tercero: qué recolecta el registro de errores y el filtro de datos
 # personales por el que pasa cada error (TRD §10.5)
 /src/adapters/sentry/      @SerchFGA @plataformaholisticadev
+# Las librerías de terceros: una actualización decide qué código corre y qué sale hacia un
+# tercero (decisión de Sergio del 2026-10-23). El candado se rehace con `pnpm install`
+/package.json              @SerchFGA @plataformaholisticadev
+/pnpm-lock.yaml            @SerchFGA @plataformaholisticadev
 
 # Las reglas de capas y la integración continua, que protegen todo lo anterior
 /eslint.config.mjs         @SerchFGA @plataformaholisticadev
