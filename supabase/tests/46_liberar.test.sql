@@ -14,7 +14,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(100);
+select plan(104);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6040000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -226,6 +226,10 @@ select is(pruebas.o(pruebas.hace('private.release_payouts(202611)')), 'not_close
 select is(pruebas.o(pruebas.hace('private.release_payouts(203601)')), 'not_closed', 'ni uno sin fila');
 select is(pruebas.hace('private.release_payouts(202610)'), '{"outcome": "founder_bonuses_pending", "count": 1}'::jsonb,
   'con el bono del fundador sin decidir, no se libera');
+select pruebas.como_finanzas();
+select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202610$$, '23514', null,
+  'ni marcándolo a mano: el guardián también lo exige');
+select pruebas.como_dueno();
 create temporary table semilla as
   select id from public.business_parameters where key = 'PAGO_MINIMO' and canceled_at is null and effective_period_id = 202610;
 select pruebas.como_dueno_sistema();
@@ -419,6 +423,15 @@ select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payou
   'pagar el saldo al salir llega con la baja del maestro');
 select throws_ok($$update public.bonuses set status = 'void', void_reason = 'No.', voided_by = pruebas.finanzas(), voided_at = now()
                    where reason = 'Lo compensa.'$$, '55000', null, 'un bono de un mes liberado no cambia');
+select throws_ok($$insert into public.bonuses (teacher_id, period_id, kind, amount_cents, reason)
+                   values (pruebas.id('M1'), 202612, 'discretionary', 100, 'A mano.')$$, '55000', null,
+  'ni nace a mano en un mes liberado');
+select throws_ok($$insert into public.payout_adjustments (teacher_id, origin_period_id, applied_period_id, amount_cents, reason)
+                   values (pruebas.id('M1'), 202701, 202702, 100, 'A mano.')$$, '55000', null,
+  'un ajuste sale de un mes cerrado');
+select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
+                   values (pruebas.id('M1'), pruebas.y('M3', 202612), 202612, 'carried_forward', 1)$$, '23514', null,
+  'y un renglón del saldo es de su liquidación');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------

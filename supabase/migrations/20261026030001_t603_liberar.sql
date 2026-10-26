@@ -1524,8 +1524,8 @@ $$;
 
 -- ---------------------------------------------------------------------------------------
 -- La comprobación al confirmar de cada liberación: los bonos y los ajustes son los de su periodo, el
--- estado sigue la regla del mínimo, los renglones del saldo son exactos y no hay otros, y si es la
--- última liberada del maestro, su saldo es lo que esta acumuló (o 0).
+-- estado sigue la regla del mínimo, los renglones del saldo son exactos y no hay otros, y el saldo del
+-- maestro justo al liberarla es lo que esta acumuló (o 0).
 
 create function private.assert_payout_released(p_payout uuid) returns void
 language plpgsql stable set search_path = ''
@@ -1540,6 +1540,8 @@ declare
   v_entries text[];
   v_wanted text[] := '{}';
   v_left bigint;
+  v_at timestamptz;
+  v_after bigint;
 begin
   select * into strict y from public.payouts x where x.id = p_payout;
   select coalesce(pg_catalog.sum(b.amount_cents), 0) into v_bonuses
@@ -1575,11 +1577,17 @@ begin
   if v_entries is distinct from (select coalesce(pg_catalog.array_agg(w order by w), '{}') from pg_catalog.unnest(v_wanted) w) then
     raise exception 'payout %: its balance entries are not what it applied and carried', p_payout using errcode = '23514';
   end if;
+  -- El saldo del maestro justo al liberarla (sus renglones hasta el de la historia que lo dice; las dos
+  -- horas son del reloj, y cada liberación del mismo maestro espera a la anterior): lo que acumuló, o 0.
+  -- Una liberación posterior, también de un periodo anterior al soltar una retenida, lo cambia después.
   v_left := case when v_expected = 'carried_forward' then y.subtotal_cents else 0 end;
-  if not exists (select 1 from public.payouts z
-                 where z.teacher_id = y.teacher_id and z.period_id > y.period_id and z.released_at is not null)
-     and private.teacher_balance(y.teacher_id) <> v_left then
-    raise exception 'payout %: the teacher balance is % after it', p_payout, private.teacher_balance(y.teacher_id)
+  select e.occurred_at into v_at from public.payout_status_events e
+  where e.payout_id = p_payout and e.from_status = 'calculated' and e.to_status in ('awaiting_invoice', 'carried_forward')
+  order by e.occurred_at desc limit 1;
+  select coalesce(pg_catalog.sum(b.amount_cents), 0) into v_after
+  from public.teacher_balance_entries b where b.teacher_id = y.teacher_id and b.created_at <= v_at;
+  if v_at is null or v_after <> v_left then
+    raise exception 'payout %: the teacher balance was % right after it, not %', p_payout, v_after, v_left
       using errcode = '23514';
   end if;
 end
