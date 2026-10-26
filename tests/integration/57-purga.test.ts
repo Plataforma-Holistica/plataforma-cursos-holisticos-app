@@ -80,10 +80,17 @@ describe("la purga diaria, de verdad", () => {
     }
   });
 
-  it("al día siguiente, suelta, la purga y la corrida termina bien", async () => {
+  it("al día siguiente, suelta, la purga y la corrida termina bien; la sesión que la llamó queda como estaba", async () => {
     const runner = await connect();
     try {
+      const before = (await runner.query<{ path: string; kind: string }>(
+        "select current_setting('search_path') as path, coalesce(current_setting('app.actor_kind', true), '') as kind",
+      )).rows[0];
       await runner.query("call private.raw_retention()");
+      const after = (await runner.query<{ path: string; kind: string }>(
+        "select current_setting('search_path') as path, coalesce(current_setting('app.actor_kind', true), '') as kind",
+      )).rows[0];
+      expect(after).toEqual(before);
     } finally {
       await runner.end();
     }

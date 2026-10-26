@@ -8,7 +8,7 @@
 -- Usa los meses de 2032, que ninguna otra prueba usa, con sus propias particiones.
 begin;
 \ir _ayuda.psql
-select plan(26);
+select plan(29);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6060000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -127,6 +127,8 @@ select is(private.purge_watch_partition(203501), 'no_partition', 'un periodo sin
 select is(private.purge_watch_partition(203201), 'purged', 'a los 90 días exactos, con todo en orden, se purga');
 select ok(to_regclass('public.watch_events_203201') is null, 'la partición de enero ya no existe');
 select ok(to_regclass('public.watch_events_203202') is not null, 'la de febrero sigue');
+select ok(pruebas.queda(1), 'borrar la partición no borra reproducciones: van aparte, en otra transacción');
+select is(private.purge_playback_sessions(203201), 4, 'después se borran las de enero que ya no tienen partición');
 select ok(not pruebas.queda(1), 'la reproducción solo de enero se fue');
 select ok(pruebas.queda(2), 'la que cruza a febrero, que tiene partición, se queda');
 select ok(not pruebas.queda(3) and not pruebas.queda(4), 'la reemplazada y la que la reemplazó, las dos de enero, se fueron');
@@ -136,6 +138,7 @@ select is(private.purge_watch_partition(203201), 'no_partition', 'purgar otra ve
 
 -- Febrero: con su partición se van las que quedaban.
 select is(private.purge_watch_partition(203202), 'purged', 'febrero se purga');
+select is(private.purge_playback_sessions(203202), 4, 'y sus reproducciones');
 select ok(not pruebas.queda(2) and not pruebas.queda(5) and not pruebas.queda(7) and not pruebas.queda(8),
   'y con él las reproducciones que quedaban');
 

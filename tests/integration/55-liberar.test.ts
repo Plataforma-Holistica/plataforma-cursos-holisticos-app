@@ -238,6 +238,35 @@ describe("liberar, de verdad", () => {
     });
   });
 
+  it("dos bonos a la vez para un maestro sin liquidación en un mes cerrado: nace una sola, y los dos se capturan", async () => {
+    const first = await connect();
+    const second = await connect();
+    try {
+      await first.query("begin");
+      await actAs(first, financeA);
+      expect(await call(first, "private.capture_bonus($1, 'discretionary', 1000, 203707, 'Uno.')", [teacher])).toMatchObject({
+        outcome: "captured",
+        period_id: 203707,
+      });
+      await second.query("begin");
+      await actAs(second, financeB);
+      const waiting = call(second, "private.capture_bonus($1, 'discretionary', 2000, 203707, 'Dos.')", [teacher]);
+      await waitBehind(owner, first, 1);
+      await retire(first, financeA);
+      await first.query("commit");
+      expect(await waiting).toMatchObject({ outcome: "captured", period_id: 203707 });
+      await retire(second, financeB);
+      await second.query("commit");
+    } finally {
+      for (const client of [first, second]) {
+        await client.query("rollback").catch(() => undefined);
+        await client.end();
+      }
+    }
+    const payouts = await owner.query("select 1 from public.payouts where period_id = 203707 and teacher_id = $1", [teacher]);
+    expect(payouts.rowCount).toBe(1);
+  });
+
   it("el mes siguiente no se libera mientras uno anterior se está liberando: contesta sin esperar", async () => {
     const first = await connect();
     try {

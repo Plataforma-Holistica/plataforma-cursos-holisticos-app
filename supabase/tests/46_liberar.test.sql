@@ -14,7 +14,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(117);
+select plan(129);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6040000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -76,6 +76,16 @@ begin
 end
 $$;
 create function pruebas.o(p jsonb) returns text language sql immutable as $$ select p ->> 'outcome' $$;
+-- Una sentencia a mano como finanzas, con la comprobación de lo liberado adelantada; si pasa, lanza P0002
+-- para deshacerla.
+create function pruebas.a_mano(p_sql text) returns void language plpgsql as $$
+begin
+  perform pruebas.como_finanzas();
+  execute p_sql;
+  set constraints payouts_released immediate;
+  raise exception 'cuadra' using errcode = 'P0002';
+end
+$$;
 create function pruebas.en_cierre(p_period integer) returns void language plpgsql as $$
 begin
   perform pruebas.como_dueno_sistema();
@@ -231,6 +241,15 @@ select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202610$$, '23514', null,
   'ni marcándolo a mano: el guardián también lo exige');
 select pruebas.como_dueno();
+-- Con las tres liquidaciones retenidas no queda ninguna calculada: lo detiene el bono propuesto.
+select is(array_agg(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y(m, 202610), 'Un momento.')))),
+          array['held', 'held', 'held']) from unnest(array['M1', 'M2', 'M3']) m;
+select pruebas.como_finanzas();
+select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202610$$, '23514', null,
+  'ni con sus liquidaciones retenidas');
+select pruebas.como_dueno();
+select is(array_agg(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null)', pruebas.y(m, 202610))))),
+          array['released_from_hold', 'released_from_hold', 'released_from_hold']) from unnest(array['M1', 'M2', 'M3']) m;
 create temporary table semilla as
   select id from public.business_parameters where key = 'PAGO_MINIMO' and canceled_at is null and effective_period_id = 202610;
 select pruebas.como_dueno_sistema();
@@ -260,11 +279,16 @@ select ok((select payouts_released_by = pruebas.finanzas() and payouts_released_
            from public.payout_periods where period_id = 202610), 'octubre queda liberado y cerrado: hay liquidaciones por pagar');
 select results_eq(
   $$select pruebas.et(y.teacher_id), e.from_status::text, e.to_status::text from public.payout_status_events e
-    join public.payouts y on y.id = e.payout_id where y.period_id = 202610 and e.from_status is not null order by 1$$,
+    join public.payouts y on y.id = e.payout_id where y.period_id = 202610 and e.from_status = 'calculated'
+      and e.to_status in ('awaiting_invoice', 'carried_forward') order by 1$$,
   $$values ('M1', 'calculated', 'awaiting_invoice'), ('M2', 'calculated', 'awaiting_invoice'), ('M3', 'calculated', 'carried_forward')$$,
   'cada paso en su historia');
 select is(pruebas.hace('private.release_payouts(202610)'), '{"outcome": "already_released", "period_id": 202610}'::jsonb,
   'liberar otra vez no escribe nada');
+select pruebas.como_finanzas();
+select throws_ok($$update public.payout_periods set payouts_released_at = now() + interval '1 hour' where period_id = 202610$$, '23514', null,
+  'ni marcándolo a mano otra vez');
+select pruebas.como_dueno();
 select is((select count(*)::integer from public.teacher_balance_entries), 1, 'ni otro renglón de saldo');
 
 -- ---------------------------------------------------------------------------------------
@@ -280,6 +304,9 @@ select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 1000, 202
   'no_teacher', 'ni a quien no es maestro');
 select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 1000, 202609, %L)', pruebas.id('M1'), 'discretionary', 'No.'))),
   'before_launch', 'ni antes del arranque');
+select is(pruebas.o(pruebas.hace(format('private.capture_bonus(%L, %L, 1000, 206201, %L)', pruebas.id('M1'), 'discretionary', 'No.'))),
+  'malformed', 'ni a un mes sin fila de dentro de muchos años: es un error de captura');
+select ok(not exists (select 1 from public.payout_periods where period_id = 206201), 'y no le abre la fila');
 create temporary table tardio as
   select pruebas.hace(format('private.capture_bonus(%L, %L, 2500, 202610, %L)', pruebas.id('M2'), 'discretionary', 'Un taller extra.')) as r;
 select is((select format('%s %s %s', r ->> 'outcome', r ->> 'period_id', r ->> 'moved') from tardio), 'captured 202611 true',
@@ -447,6 +474,13 @@ select throws_ok($$insert into public.payout_adjustments (teacher_id, origin_per
 select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
                    values (pruebas.id('M1'), pruebas.y('M3', 202612), 202612, 'carried_forward', 1)$$, '23514', null,
   'y un renglón del saldo es de su liquidación');
+select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
+                   values (pruebas.id('M2'), pruebas.y('M2', 202612), 202612, 'applied_to_payout', 1)$$, '23514', null,
+  'y se escribe al liberarla, no después');
+select throws_ok($$insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, vat_cents, income_tax_withheld_cents,
+                                               subtotal_cents, net_cents)
+                   values (202701, pruebas.id('M1'), gen_random_uuid(), 100, 50, 50, 100, 100)$$, '23514', null,
+  'una liquidación no nace con IVA ni retenciones (llegan con T-409)');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
@@ -457,6 +491,20 @@ select private.close_period(202701);
 set constraints payout_periods_balanced immediate;
 set constraints payout_periods_balanced deferred;
 select pruebas.como_dueno();
+select pruebas.como_finanzas();
+select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202701$$, '23514', null,
+  'un periodo no se marca liberado con liquidaciones por liberar');
+select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
+                   values (pruebas.id('M3'), pruebas.y('M3', 202701), 202701, 'paid_on_exit', 3852)$$, '23514', null,
+  'pagar el saldo al salir no se escribe, ni en una liquidación por liberar');
+select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
+                   values (pruebas.id('M1'), pruebas.y('M3', 202701), 202701, 'carried_forward', 1)$$, '23514', null,
+  'ni un renglón de otro maestro en una liquidación por liberar');
+select pruebas.como_dueno();
+select throws_like($$select pruebas.a_mano($s$update public.payouts set status = 'awaiting_invoice', bonuses_cents = 1000,
+                     balance_applied_cents = 9999, subtotal_cents = 10999, net_cents = 10999 where id = pruebas.y('M4', 202701)$s$)$$,
+  '%released outside the release of its period%',
+  'una liberación a mano, sin liberar el periodo, no se guarda: la comprobación corre aunque la sentencia no nombre released_at');
 select throws_ok($$select pruebas.descuadra(202701, null)$$, 'P0002', 'cuadra', 'una liberación sin tocar cuadra');
 select throws_like($$select pruebas.descuadra(202701, $s$update public.payouts set bonuses_cents = bonuses_cents + 1,
                      subtotal_cents = subtotal_cents + 1, net_cents = net_cents + 1 where id = pruebas.y('M4', 202701)$s$)$$,
@@ -512,13 +560,13 @@ select results_eq($$select problem, object_name like 'private.release_payouts(%'
   $$values ('payouts function not security definer', true)$$, 'liberar sin correr como el dueño');
 alter function private.release_payouts(public.period_id) security definer;
 drop trigger payouts_released on public.payouts;
-create constraint trigger payouts_released after update of released_at on public.payouts
+create constraint trigger payouts_released after update on public.payouts
   not deferrable for each row when (old.released_at is null and new.released_at is not null)
   execute function private.check_payout_released();
 select results_eq($$select problem, object_name from private.schema_violations_payouts()$$,
   $$values ('payouts trigger not deferred: payouts_released', 'public.payouts')$$, 'la comprobación de lo liberado sin diferir');
 drop trigger payouts_released on public.payouts;
-create constraint trigger payouts_released after update of released_at on public.payouts
+create constraint trigger payouts_released after update on public.payouts
   deferrable initially deferred for each row when (old.released_at is null and new.released_at is not null)
   execute function private.check_payout_released();
 select is_empty($$select * from private.schema_violations_payouts()$$, 'y todo en su lugar otra vez');

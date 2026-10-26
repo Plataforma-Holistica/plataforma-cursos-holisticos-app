@@ -149,6 +149,10 @@ begin
         raise exception '%.%: period % still has founder bonuses to decide', tg_table_schema, tg_table_name, old.period_id
           using errcode = '23514';
       end if;
+      if exists (select 1 from public.payouts y where y.period_id = old.period_id and y.status = 'calculated') then
+        raise exception '%.%: period % still has payouts to release', tg_table_schema, tg_table_name, old.period_id
+          using errcode = '23514';
+      end if;
       new.payouts_released_by := private.actor_id();
       new.payouts_released_at := pg_catalog.now();
       return new;
@@ -272,7 +276,8 @@ declare
   v_total bigint;
 begin
   if tg_op = 'INSERT' then
-    if new.pool_cents < 0 or new.adjustments_cents <> 0 or new.balance_applied_cents <> 0
+    -- Con el IVA en 0, las retenciones también (el neto es el subtotal).
+    if new.pool_cents < 0 or new.adjustments_cents <> 0 or new.balance_applied_cents <> 0 or new.vat_cents <> 0
        or new.subtotal_cents <> new.pool_cents or new.net_cents <> new.pool_cents
        or pg_catalog.num_nonnulls(new.released_at, new.released_by, new.held_from_status, new.held_at, new.held_by,
                                   new.hold_reason, new.anomaly_alert_id) > 0 then
@@ -479,7 +484,8 @@ end
 $$;
 revoke all on function private.guard_payout_adjustment() from public;
 
--- Un renglón del saldo es de su liquidación. Pagar el saldo al salir llega con la baja de un maestro.
+-- Un renglón del saldo es de su liquidación, y se escribe al liberarla (antes de que deje de estar
+-- calculada). Pagar el saldo al salir llega con la baja de un maestro.
 create function private.guard_balance_entry() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -491,6 +497,10 @@ begin
   if not exists (select 1 from public.payouts y
                  where y.id = new.payout_id and y.teacher_id = new.teacher_id and y.period_id = new.period_id) then
     raise exception '%.%: a balance entry belongs to its payout', tg_table_schema, tg_table_name using errcode = '23514';
+  end if;
+  if not exists (select 1 from public.payouts y where y.id = new.payout_id and y.status = 'calculated' and y.released_at is null) then
+    raise exception '%.%: a balance entry is written while its payout is released', tg_table_schema, tg_table_name
+      using errcode = '23514';
   end if;
   new.created_at := pg_catalog.clock_timestamp();
   return new;
@@ -570,12 +580,17 @@ begin
   if found then
     return v;
   end if;
+  -- Dos capturas a la vez para el mismo maestro: la segunda espera el índice único y no inserta.
   insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
   select p_period, p_teacher, p.close_run_id, coalesce(t.total_cents, 0), coalesce(t.total_cents, 0), coalesce(t.total_cents, 0)
   from public.payout_periods p
   left join public.payout_teacher_totals t on t.period_id = p.period_id and t.teacher_id = p_teacher
   where p.period_id = p_period
+  on conflict (period_id, teacher_id) do nothing
   returning id into v;
+  if v is null then
+    select y.id into v from public.payouts y where y.period_id = p_period and y.teacher_id = p_teacher;
+  end if;
   return v;
 end
 $$;
@@ -633,8 +648,6 @@ begin
     insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
     values (y.teacher_id, y.id, y.period_id, 'carried_forward', v_subtotal);
   end if;
-  -- `released_at` va en la sentencia (el guardián pone la hora y quién): la comprobación al confirmar
-  -- cuelga de esa columna.
   update public.payouts x
   set status = v_status, bonuses_cents = v_bonuses, adjustments_cents = v_adjustments, balance_applied_cents = v_balance,
       subtotal_cents = v_subtotal, net_cents = v_subtotal, released_at = pg_catalog.now(), released_by = private.actor_id()
@@ -868,6 +881,11 @@ begin
   select pg_catalog.min(t.effective_period_id) into v_launch from public.pool_tiers t where t.canceled_at is null;
   if v_launch is null or p_period < v_launch then
     return '{"outcome": "before_launch"}'::jsonb;
+  end if;
+  -- Un mes sin fila más allá de un año no se abre por un bono: es un error de captura.
+  if p_period > private.period_plus(private.period_of(pg_catalog.now()), 12)
+     and not exists (select 1 from public.payout_periods p where p.period_id = p_period) then
+    return '{"outcome": "malformed"}'::jsonb;
   end if;
   loop
     v_target := private.first_unreleased_period(p_period);
@@ -1523,7 +1541,8 @@ end
 $$;
 
 -- ---------------------------------------------------------------------------------------
--- La comprobación al confirmar de cada liberación: los bonos y los ajustes son los de su periodo, el
+-- La comprobación al confirmar de cada liberación (de cualquier sentencia que la libere, no solo de las que
+-- nombran `released_at`): su periodo se liberó, los bonos y los ajustes son los de su periodo, el
 -- estado sigue la regla del mínimo, los renglones del saldo son exactos y no hay otros, y el saldo del
 -- maestro justo al liberarla es lo que esta acumuló (o 0).
 
@@ -1544,6 +1563,9 @@ declare
   v_after bigint;
 begin
   select * into strict y from public.payouts x where x.id = p_payout;
+  if (select p.payouts_released_at from public.payout_periods p where p.period_id = y.period_id) is null then
+    raise exception 'payout %: released outside the release of its period', p_payout using errcode = '23514';
+  end if;
   select coalesce(pg_catalog.sum(b.amount_cents), 0) into v_bonuses
   from public.bonuses b where b.period_id = y.period_id and b.teacher_id = y.teacher_id and b.status = 'confirmed';
   if y.bonuses_cents <> v_bonuses then
@@ -1604,7 +1626,7 @@ end
 $$;
 revoke all on function private.check_payout_released() from public;
 
-create constraint trigger payouts_released after update of released_at on public.payouts
+create constraint trigger payouts_released after update on public.payouts
   deferrable initially deferred
   for each row when (old.released_at is null and new.released_at is not null)
   execute function private.check_payout_released();
@@ -1613,9 +1635,9 @@ create constraint trigger payouts_released after update of released_at on public
 -- La purga de los latidos (05 §11.4, §13.2). Una partición se borra cuando su periodo está cerrado o
 -- pagado, pasó `RETENCION_LATIDOS` desde el cierre, no tiene liquidaciones retenidas (el crudo es la
 -- evidencia de una investigación) y no queda progreso por rehacer que lea esos latidos. Con un candado
--- de 2 s: borrar una partición toma el de la tabla madre, y un latido no espera más. Después borra las
--- reproducciones que ya no tienen ninguna partición viva, salvo las que otra señala como la que tomó su
--- lugar (se borran en una vuelta posterior, cuando se borra esa). Solo la corre el dueño.
+-- de 2 s: borrar una partición toma el de la tabla madre, y un latido no espera más; tampoco espera la
+-- fila del periodo (`nowait`). Las reproducciones se borran aparte (`purge_playback_sessions`), después
+-- de confirmar. Solo la corre el dueño.
 
 create function private.purge_watch_partition(p_period public.period_id) returns text
 language plpgsql volatile set search_path = ''
@@ -1626,7 +1648,6 @@ declare
   v_name text := 'watch_events_' || p_period::text;
   v_window interval;
   v_lock text;
-  v_deleted integer;
 begin
   begin
     v_days := (private.parameter_value('RETENCION_LATIDOS') #>> '{}')::integer;
@@ -1636,13 +1657,15 @@ begin
   if v_days is null or v_days < 0 then
     return 'no_retention';
   end if;
-  select * into v_period from public.payout_periods p where p.period_id = p_period for update;
+  select * into v_period from public.payout_periods p where p.period_id = p_period;
   if not found or v_period.status not in ('closed', 'paid') then
     return 'not_closed';
   end if;
   if v_period.closed_at > pg_catalog.now() - pg_catalog.make_interval(days => v_days) then
     return 'within_retention';
   end if;
+  -- Ya en retención, la fila del periodo, sin esperarla: retener toma la misma.
+  perform 1 from public.payout_periods p where p.period_id = p_period for update nowait;
   if exists (select 1 from public.payouts y where y.period_id = p_period and y.status = 'on_hold') then
     return 'on_hold';
   end if;
@@ -1659,6 +1682,28 @@ begin
   perform pg_catalog.set_config('lock_timeout', '2s', true);
   execute pg_catalog.format('drop table public.%I', v_name);
   perform pg_catalog.set_config('lock_timeout', v_lock, true);
+  return 'purged';
+end
+$$;
+revoke all on function private.purge_watch_partition(public.period_id) from public;
+
+-- Las reproducciones de un periodo purgado que ya no tienen ninguna partición viva, salvo las que otra
+-- que se queda señala como la que tomó su lugar. Va en su propia transacción, después de confirmar la
+-- purga de la partición: borrarla tiene tomada la tabla madre de los latidos hasta confirmar. Devuelve
+-- cuántas borró.
+create function private.purge_playback_sessions(p_period public.period_id) returns integer
+language plpgsql volatile set search_path = ''
+as $$
+declare
+  v_period public.payout_periods;
+  v_window interval := pg_catalog.make_interval(secs => 3 * (private.playback_limits()).heartbeat_seconds);
+  v_deleted integer;
+  v_total integer := 0;
+begin
+  select * into v_period from public.payout_periods p where p.period_id = p_period;
+  if not found then
+    return 0;
+  end if;
   loop
     delete from public.playback_sessions s
     where s.started_at < v_period.ends_at
@@ -1669,12 +1714,13 @@ begin
                                         pg_catalog.timezone(v_period.timezone, s.last_heartbeat_at + v_window), interval '1 month') m
         where pg_catalog.to_regclass('public.watch_events_' || pg_catalog.to_char(m, 'YYYYMM')) is not null);
     get diagnostics v_deleted = row_count;
+    v_total := v_total + v_deleted;
     exit when v_deleted = 0;
   end loop;
-  return 'purged';
+  return v_total;
 end
 $$;
-revoke all on function private.purge_watch_partition(public.period_id) from public;
+revoke all on function private.purge_playback_sessions(public.period_id) from public;
 
 -- La corrida diaria: los periodos cerrados o pagados que todavía tienen partición, del más viejo al más
 -- nuevo, cada uno en su propia transacción; anota en `job_runs` cuántos borró, cuántos se saltó y
@@ -1689,9 +1735,13 @@ declare
   v_purged integer := 0;
   v_skipped integer := 0;
   v_failed integer := 0;
+  v_sessions integer := 0;
   v_first text;
+  v_path text := pg_catalog.current_setting('search_path');
+  v_kind text := pg_catalog.current_setting('app.actor_kind', true);
 begin
-  -- De la sesión, como en la consolidación: un ajuste local se iría con el primer `commit`.
+  -- De la sesión, como en la consolidación: un ajuste local se iría con el primer `commit`. Al terminar
+  -- se devuelven.
   perform pg_catalog.set_config('search_path', '', false);
   perform pg_catalog.set_config('app.actor_kind', 'system', false);
   for v_period in
@@ -1699,6 +1749,7 @@ begin
     where p.status in ('closed', 'paid') and pg_catalog.to_regclass('public.watch_events_' || p.period_id::text) is not null
     order by p.period_id
   loop
+    v_outcome := null;
     begin
       v_outcome := private.purge_watch_partition(v_period);
       if v_outcome = 'purged' then
@@ -1711,12 +1762,23 @@ begin
       v_first := coalesce(v_first, v_period::text || ': ' || sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
     end;
     commit;
+    if v_outcome = 'purged' then
+      begin
+        v_sessions := v_sessions + private.purge_playback_sessions(v_period);
+      exception when others then
+        v_failed := v_failed + 1;
+        v_first := coalesce(v_first, v_period::text || ' (sessions): ' || sqlstate || ': ' || pg_catalog.left(sqlerrm, 200));
+      end;
+      commit;
+    end if;
   end loop;
   insert into public.job_runs (job, status, started_at, heartbeat_at, finished_at, rows_read, rows_written, details, error)
   values ('raw_retention', case when v_failed = 0 then 'succeeded' else 'failed' end::public.run_status, v_start,
           pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), v_purged + v_skipped + v_failed, v_purged,
-          pg_catalog.jsonb_build_object('purged', v_purged, 'skipped', v_skipped, 'failed', v_failed), v_first);
+          pg_catalog.jsonb_build_object('purged', v_purged, 'skipped', v_skipped, 'failed', v_failed, 'sessions', v_sessions), v_first);
   commit;
+  perform pg_catalog.set_config('search_path', v_path, false);
+  perform pg_catalog.set_config('app.actor_kind', coalesce(v_kind, ''), false);
 end
 $$;
 revoke all on procedure private.raw_retention() from public;
@@ -1748,6 +1810,7 @@ as $$
            ('check_payout_released', true, true), ('release_payouts', true, true), ('hold_payout', true, true),
            ('unhold_payout', true, true), ('capture_bonus', true, true), ('confirm_founder_bonus', true, true),
            ('void_bonus', true, true), ('capture_adjustment', true, true), ('purge_watch_partition', false, true),
+           ('purge_playback_sessions', false, true),
            ('raw_retention', false, false)),
   found as (
     select f.name, f.definer, f.fixed_path, p.oid, p.prosecdef, p.proconfig
