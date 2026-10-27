@@ -324,16 +324,23 @@ describe("el cierre desde la aplicación, de verdad", () => {
      * confundir con la suya: está viva (y es completa). Con `close`, esa conexión además cierra el periodo antes de
      * confirmar.
      */
-    async function runnerLosesTheRun(id: string, close: boolean) {
+    async function runnerLosesTheRun(close: boolean) {
       const blocker = await connect();
       let live: string | undefined;
-      // Una corrida terminada y no completa del periodo, también después: tampoco es la suya.
-      const done = (await owner.query<{ id: string }>(
+      let id: string | undefined;
+      // Señuelos terminados que tampoco son su corrida: una del periodo que no es completa (después), una
+      // completa del periodo de antes de marcar el pedido, y una completa de otro periodo (después).
+      const decoys = (await owner.query<{ id: string }>(
         `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
          values ('nightly_rollup', $1, 'succeeded', now() + interval '1 minute', now() + interval '1 minute', now() + interval '2 minutes',
-                 '{"mode": "dirty"}') returning id::text`,
-        [current],
-      )).rows[0]!.id;
+                 '{"mode": "dirty"}'),
+                ('nightly_rollup', $1, 'succeeded', now() - interval '2 minutes', now() - interval '2 minutes', now() - interval '1 minute',
+                 '{"mode": "full"}'),
+                ('nightly_rollup', $2, 'succeeded', now() + interval '1 minute', now() + interval '1 minute', now() + interval '2 minutes',
+                 '{"mode": "full"}')
+         returning id::text`,
+        [current, FIRST],
+      )).rows.map((row) => row.id);
       try {
         await blocker.query("begin");
         live = (await blocker.query<{ id: string }>(
@@ -342,6 +349,7 @@ describe("el cierre desde la aplicación, de verdad", () => {
           [current],
         )).rows[0]!.id;
         if (close) await force(blocker, "closed");
+        id = await byHand(current);
         const running = runner();
         await waitBehind(owner, blocker, 1);
         await blocker.query("commit");
@@ -358,7 +366,8 @@ describe("el cierre desde la aplicación, de verdad", () => {
           await owner.query("rollback");
           throw error;
         }
-        await owner.query("delete from public.job_runs where id = any($1::uuid[])", [[done, live].filter(Boolean)]);
+        await owner.query("delete from public.job_runs where id = any($1::uuid[])", [[...decoys, live].filter(Boolean)]);
+        if (id) await forget(id);
       }
     }
 
@@ -377,8 +386,8 @@ describe("el cierre desde la aplicación, de verdad", () => {
       await owner.query("commit");
     });
 
-    it("con una consolidación viva, de cualquier periodo, no empieza, y el pedido sigue pendiente", async () => {
-      if (await paused()) return;
+    it("con una consolidación viva, de cualquier periodo, no empieza, y el pedido sigue pendiente", async (ctx) => {
+      if (await paused()) ctx.skip();
       const live = (await owner.query<{ id: string }>(
         `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
          values ('nightly_rollup', $1, 'running', now(), now(), '{"mode": "dirty"}') returning id::text`,
@@ -394,8 +403,8 @@ describe("el cierre desde la aplicación, de verdad", () => {
       }
     });
 
-    it("mientras `pg_cron` diga que la consolidación de la noche corre, no empieza", async () => {
-      if (await paused()) return;
+    it("mientras `pg_cron` diga que la consolidación de la noche corre, no empieza", async (ctx) => {
+      if (await paused()) ctx.skip();
       const runid = (await owner.query<{ id: string }>(
         `insert into cron.job_run_details (jobid, runid, job_pid, database, username, command, status, start_time)
          select jobid, 9000000000 + (random() * 1000000)::bigint, 0, 'postgres', 'postgres', command, 'running', now()
@@ -411,12 +420,28 @@ describe("el cierre desde la aplicación, de verdad", () => {
       }
     });
 
-    it("si otro corredor tiene el candado, no hace nada", async () => {
-      if (await paused()) return;
-      const other = await connect();
+    it("un renglón de la noche que se quedó corriendo hace más de un día ya no lo detiene", async (ctx) => {
+      if (await paused()) ctx.skip();
+      const runid = (await owner.query<{ id: string }>(
+        `insert into cron.job_run_details (jobid, runid, job_pid, database, username, command, status, start_time)
+         select jobid, 9000000000 + (random() * 1000000)::bigint, 0, 'postgres', 'postgres', command, 'running', now() - interval '2 days'
+         from cron.job where jobname = 'nightly_rollup' returning runid::text as id`,
+      )).rows[0]!.id;
       const id = await byHand(current);
       try {
-        await other.query("select pg_advisory_lock(hashtextextended('rollup_requests', 0))");
+        expect(await until(id, (status) => status === "succeeded" || status === "failed")).toMatchObject({ status: "succeeded", mode: "full" });
+      } finally {
+        await forget(id);
+        await owner.query("delete from cron.job_run_details where runid = $1", [runid]);
+      }
+    });
+
+    it("si otro corredor tiene el candado, no hace nada", async (ctx) => {
+      if (await paused()) ctx.skip();
+      const other = await connect();
+      await other.query("select pg_advisory_lock(hashtextextended('rollup_requests', 0))");
+      const id = await byHand(current);
+      try {
         await runner();
         expect((await state(id)).status).toBe("pending");
       } finally {
@@ -434,8 +459,8 @@ describe("el cierre desde la aplicación, de verdad", () => {
       }
     });
 
-    it("uno de un periodo que la consolidación ya no recorre falla sin correr nada", async () => {
-      if (await paused()) return;
+    it("uno de un periodo que la consolidación ya no recorre falla sin correr nada", async (ctx) => {
+      if (await paused()) ctx.skip();
       const later = (await owner.query<{ p: number }>("select private.period_plus(private.period_of(now()), 2)::int as p")).rows[0]!.p;
       const existed = (await owner.query("select 1 from public.payout_periods where period_id = $1", [later])).rowCount === 1;
       await owner.query("begin");
@@ -456,31 +481,21 @@ describe("el cierre desde la aplicación, de verdad", () => {
       }
     });
 
-    it("si su corrida no se abre (otra del periodo tenía el lugar), el pedido vuelve a pendiente", async () => {
-      if (await paused()) return;
-      const id = await byHand(current);
-      try {
-        expect(await runnerLosesTheRun(id, false)).toMatchObject({ status: "pending", mode: null });
-      } finally {
-        await forget(id);
-      }
+    it("si su corrida no se abre (otra del periodo tenía el lugar), el pedido vuelve a pendiente", async (ctx) => {
+      if (await paused()) ctx.skip();
+      expect(await runnerLosesTheRun(false)).toMatchObject({ status: "pending", mode: null });
     });
 
-    it("si el periodo se cerró mientras corría, el pedido falla sin darse por hecho", async () => {
-      if (await paused()) return;
-      const id = await byHand(current);
-      try {
-        expect(await runnerLosesTheRun(id, true)).toMatchObject({ status: "failed", error: "closed" });
-      } finally {
-        await forget(id);
-      }
+    it("si el periodo se cerró mientras corría, el pedido falla sin darse por hecho", async (ctx) => {
+      if (await paused()) ctx.skip();
+      expect(await runnerLosesTheRun(true)).toMatchObject({ status: "failed", error: "closed" });
     });
 
-    it("el pedido de finanzas lo corre el corredor: un recálculo completo, y el pedido termina con esa corrida", async () => {
+    it("el pedido de finanzas lo corre el corredor: un recálculo completo, y el pedido termina con esa corrida", async (ctx) => {
       const answer = await asServer((client) => call(client, "request_rollup", current));
       expect(answer.outcome).toBe("requested");
       const id = answer.request_id as string;
-      if (await paused()) return;
+      if (await paused()) ctx.skip();
       expect(await until(id, (status) => status === "succeeded" || status === "failed")).toEqual({
         status: "succeeded",
         error: null,

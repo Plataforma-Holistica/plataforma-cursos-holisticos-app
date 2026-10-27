@@ -486,9 +486,13 @@ begin
   commit;
 
   if not private.rollup_requests_paused(pg_catalog.clock_timestamp())
-     and not exists (select 1 from cron.job_run_details d join cron.job c on c.jobid = d.jobid
-                     where c.jobname = 'nightly_rollup' and d.status in ('starting', 'running')
-                       and d.start_time >= pg_catalog.clock_timestamp() - interval '1 day')
+     -- Solo el último renglón de la noche (por `runid`, su índice): la tabla de `pg_cron` crece cada minuto. Uno
+     -- que se quedó corriendo tras una caída deja de contar al día; uno en `starting` todavía no tiene hora.
+     and not exists (select 1 from (select d.status, d.start_time from cron.job_run_details d
+                                    where d.jobid = (select c.jobid from cron.job c where c.jobname = 'nightly_rollup')
+                                    order by d.runid desc limit 1) l
+                     where l.status in ('starting', 'running')
+                       and coalesce(l.start_time, pg_catalog.clock_timestamp()) >= pg_catalog.clock_timestamp() - interval '1 day')
      and not exists (select 1 from private.rollup_requests q where q.status = 'running')
      and not exists (select 1 from public.job_runs j
                      where j.job = 'nightly_rollup' and j.status = 'running'
