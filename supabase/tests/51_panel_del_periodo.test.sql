@@ -7,7 +7,7 @@
 -- Octubre de 2026 es el ejemplo del PRD, como en `43_cierre`.
 begin;
 \ir _ayuda.psql
-select plan(53);
+select plan(56);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6051000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -198,6 +198,17 @@ select ok(exists (select 1 from private.schema_violations() where problem = 'clo
 alter function private.close_export_csv(uuid, bigint) security invoker;
 select ok(exists (select 1 from cron.job where jobname = 'rollup_requests' and schedule = '* * * * *'
                   and command = 'call private.run_rollup_requests()'), 'los pedidos se atienden cada minuto');
+select cron.alter_job((select jobid from cron.job where jobname = 'rollup_requests'), active := false);
+select ok(exists (select 1 from private.schema_violations() where problem = 'close job missing or inactive: rollup_requests'),
+  've el trabajo de los pedidos apagado');
+select cron.alter_job((select jobid from cron.job where jobname = 'rollup_requests'), active := true);
+-- La pausa del corredor está atada al horario de la consolidación de cada noche.
+select ok(exists (select 1 from cron.job where jobname = 'nightly_rollup' and schedule = '0 9 * * *'),
+  'la consolidación de cada noche es a las 09:00 UTC; si cambia, cambia la pausa del corredor');
+select is(array[private.rollup_requests_paused('2026-10-27 07:59:59+00'), private.rollup_requests_paused('2026-10-27 08:00:00+00'),
+                private.rollup_requests_paused('2026-10-27 08:59:59+00'), private.rollup_requests_paused('2026-10-27 09:00:00+00'),
+                private.rollup_requests_paused('2026-10-27 02:30:00-06')],
+  array[false, true, true, false, true], 'el corredor no empieza en la hora antes de la noche, en UTC');
 select is((select count(*)::integer from private.schema_violations()), 0, 'todo en su lugar otra vez');
 
 -- ---------------------------------------------------------------------------------------

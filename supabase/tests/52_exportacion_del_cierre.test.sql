@@ -9,7 +9,7 @@
 -- La comprobación al confirmar corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(50);
+select plan(52);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6050000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -344,6 +344,20 @@ select ok(exists (select 1 from public.audit_log where entity_table = 'private.c
   'la descarga queda en la auditoría, con quién y su petición');
 select is((select count(*) from public.audit_log where entity_table = 'private.close_exports'), (select n + 1 from auditoria_antes),
   'una vez por descarga');
+
+-- Un total de 0 (medio punto con un reparto que redondeó a 0) queda debajo aunque el mínimo sea 0, como al liberar
+-- (un maestro a mano, con la sesión en réplica).
+set local session_replication_role = replica;
+insert into public.close_run_teacher_totals (close_run_id, teacher_id, half_points, students, assigned_cents, unconsumed_cents, total_cents)
+values ((select (r ->> 'close_run_id')::uuid from cierre), 'ffffffff-0000-0000-0000-000000000000', 1, 1, 0, 0, 0);
+set local session_replication_role = origin;
+select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0)
+            like '%ffffffff-0000-0000-0000-000000000000,"",0.00,0.00,0.00,0.00,sí' || E'
+',
+  'un total de 0 queda debajo aunque el mínimo sea 0');
+select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0) like '%,358.43,53.76,no' || E'
+' || '%',
+  'y uno que pasa de 0, no');
 
 select * from finish();
 rollback;

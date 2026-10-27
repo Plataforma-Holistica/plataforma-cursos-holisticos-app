@@ -71,7 +71,8 @@ create trigger ledger_no_truncate before truncate on private.close_exports
 -- El CSV de una corrida del cierre, desde lo que congeló: un renglón por maestro con total, en el orden de
 -- su identificador. El nombre es el publicado, como está ahora: al cerrar, el disparador lo deja con
 -- candado hasta confirmar. «Debajo» compara el total y el bono propuesto contra el mínimo que se le da: es
--- un estimado, porque liberar suma bonos confirmados, ajustes y saldo.
+-- un estimado, porque liberar suma bonos confirmados, ajustes y saldo. Con la misma regla que liberar: un
+-- total de 0 o menos también queda debajo.
 create function private.close_export_csv(p_run uuid, p_minimum bigint) returns text
 language sql stable set search_path = ''
 as $$
@@ -87,7 +88,7 @@ as $$
                 private.csv_money(t.total_cents),
                 private.csv_money(t.founder_bonus_cents),
                 case when p_minimum is null then ''
-                     when t.total_cents + t.founder_bonus_cents < p_minimum then 'sí'
+                     when t.total_cents + t.founder_bonus_cents < p_minimum or t.total_cents + t.founder_bonus_cents <= 0 then 'sí'
                      else 'no' end) || E'\r\n',
               '' order by t.teacher_id), '')
   from public.close_runs r
@@ -220,7 +221,8 @@ as $$
            'unconsumed_cents', t.unconsumed_cents, 'total_cents', t.total_cents, 'founder_bonus_cents', t.founder_bonus_cents,
            'estimate_cents', coalesce((e ->> 'estimate_cents')::bigint, t.total_cents + t.founder_bonus_cents),
            'below_minimum', case when e is not null then (e ->> 'below_minimum')::boolean
-                                 when p_minimum is not null then t.total_cents + t.founder_bonus_cents < p_minimum end)
+                                 when p_minimum is not null then t.total_cents + t.founder_bonus_cents < p_minimum
+                                                                 or t.total_cents + t.founder_bonus_cents <= 0 end)
          order by pt.display_name collate "C", t.teacher_id), '[]'::jsonb)
   from public.close_run_teacher_totals t
   join public.close_runs r on r.id = t.close_run_id
@@ -422,7 +424,9 @@ begin
   on conflict (period_id) where status in ('pending', 'running') do nothing
   returning id into v_id;
   if v_id is null then
-    select q.id into v_id from private.rollup_requests q where q.period_id = p_period and q.status in ('pending', 'running');
+    -- El que chocó, o, si terminó en este instante, el último del periodo.
+    select q.id into v_id from private.rollup_requests q where q.period_id = p_period
+    order by (q.status in ('pending', 'running')) desc, q.requested_at desc limit 1;
     return pg_catalog.jsonb_build_object('outcome', 'already_requested', 'request_id', v_id);
   end if;
   return pg_catalog.jsonb_build_object('outcome', 'requested', 'request_id', v_id);
@@ -431,16 +435,30 @@ $$;
 revoke all on function private.request_rollup(public.period_id) from public;
 grant execute on function private.request_rollup(public.period_id) to app_service;
 
+-- La pausa antes de la consolidación de cada noche (`pg_cron`, `0 9 * * *` en UTC): un recálculo completo
+-- tarda minutos, y si a las 09:00 todavía tiene la corrida de su periodo, la de la noche lo salta y ese
+-- periodo no pasa a en cierre esa noche. De las 08:00 a las 09:00 UTC el corredor no empieza nada (la de la
+-- noche, mientras corre, también lo detiene). `51_panel_del_periodo` exige el horario de la noche.
+create function private.rollup_requests_paused(p_at timestamptz) returns boolean
+language sql immutable set search_path = ''
+as $$ select pg_catalog.date_part('hour', p_at at time zone 'UTC') = 8 $$;
+revoke all on function private.rollup_requests_paused(timestamptz) from public;
+
 -- Correr el pedido más viejo, uno a la vez: `nightly_rollup(true, periodo)`. Como ella, es un procedimiento
 -- con `commit` y sin `SET` ni `security definer` (Postgres no los deja juntos), que pone su `search_path`
--- con `set_config` y lo devuelve. No corre si hay una consolidación viva: el siguiente minuto lo intenta.
--- Si la corrida no se abrió (otra del mismo periodo la tenía), el pedido vuelve a pendiente. Uno que se
--- quedó corriendo sin consolidación viva (la conexión se cayó) se da por fallido a los 15 minutos.
+-- con `set_config` y lo devuelve. Uno a la vez de verdad: un candado consultivo de la sesión, que sobrevive
+-- a los `commit`; si otro corredor lo tiene, no hace nada. Tampoco empieza si hay una consolidación viva o
+-- en la pausa de antes de la noche. Su corrida es la completa del periodo que se abrió después de marcarlo
+-- corriendo; si no hay una terminada (otra corrida del periodo tenía el lugar), el pedido vuelve a
+-- pendiente. Si el periodo se cerró mientras tanto, el pedido falla (`closed`): no recalculó nada. Uno que
+-- se quedó corriendo sin consolidación viva (la conexión se cayó, o la corrida lanzó) se da por fallido a
+-- los 15 minutos (`abandoned`).
 create procedure private.run_rollup_requests()
 language plpgsql
 as $$
 declare
   v_path text := pg_catalog.current_setting('search_path');
+  v_lock bigint := pg_catalog.hashtextextended('rollup_requests', 0);
   v_id uuid;
   v_period integer;
   v_started timestamptz;
@@ -449,6 +467,10 @@ declare
   v_run_error text;
 begin
   perform pg_catalog.set_config('search_path', '', false);
+  if not pg_catalog.pg_try_advisory_lock(v_lock) then
+    perform pg_catalog.set_config('search_path', v_path, false);
+    return;
+  end if;
   update private.rollup_requests q
   set status = 'failed', finished_at = pg_catalog.clock_timestamp(), error = 'abandoned'
   where q.status = 'running' and q.started_at < pg_catalog.clock_timestamp() - interval '15 minutes'
@@ -457,17 +479,18 @@ begin
                       and j.heartbeat_at >= pg_catalog.clock_timestamp() - interval '15 minutes');
   commit;
 
-  if not exists (select 1 from private.rollup_requests q where q.status = 'running')
+  if not private.rollup_requests_paused(pg_catalog.clock_timestamp())
+     and not exists (select 1 from private.rollup_requests q where q.status = 'running')
      and not exists (select 1 from public.job_runs j
                      where j.job = 'nightly_rollup' and j.status = 'running'
                        and j.heartbeat_at >= pg_catalog.clock_timestamp() - interval '15 minutes') then
     select q.id, q.period_id into v_id, v_period
     from private.rollup_requests q where q.status = 'pending'
-    order by q.requested_at, q.id limit 1
-    for update skip locked;
+    order by q.requested_at, q.id limit 1;
   end if;
   if v_id is null then
     commit;
+    perform pg_catalog.pg_advisory_unlock(v_lock);
     perform pg_catalog.set_config('search_path', v_path, false);
     return;
   end if;
@@ -476,6 +499,7 @@ begin
     update private.rollup_requests q set status = 'failed', started_at = v_started, finished_at = v_started, error = 'not_rollable'
     where q.id = v_id;
     commit;
+    perform pg_catalog.pg_advisory_unlock(v_lock);
     perform pg_catalog.set_config('search_path', v_path, false);
     return;
   end if;
@@ -487,8 +511,13 @@ begin
   select j.id, j.status, j.error into v_run_id, v_run_status, v_run_error
   from public.job_runs j
   where j.job = 'nightly_rollup' and j.period_id = v_period and j.started_at >= v_started
-  order by j.started_at desc limit 1;
-  if v_run_id is null then
+    and j.details ->> 'mode' = 'full' and j.status <> 'running'
+  order by j.started_at limit 1;
+  if exists (select 1 from public.payout_periods p where p.period_id = v_period and p.status in ('closed', 'paid')) then
+    update private.rollup_requests q
+    set status = 'failed', finished_at = pg_catalog.clock_timestamp(), job_run_id = v_run_id, error = 'closed'
+    where q.id = v_id;
+  elsif v_run_id is null then
     update private.rollup_requests q set status = 'pending', started_at = null where q.id = v_id;
   else
     update private.rollup_requests q
@@ -497,6 +526,7 @@ begin
     where q.id = v_id;
   end if;
   commit;
+  perform pg_catalog.pg_advisory_unlock(v_lock);
   perform pg_catalog.set_config('search_path', v_path, false);
 end
 $$;
@@ -527,7 +557,8 @@ as $$
            ('write_close_export', false, false, true), ('assert_close_export', false, false, true),
            ('close_export_download', true, true, true), ('finance_run_teachers', false, false, true),
            ('finance_periods', true, true, true), ('finance_period', true, true, true), ('finance_close', true, true, true),
-           ('request_rollup', true, true, true), ('run_rollup_requests', false, false, false)),
+           ('request_rollup', true, true, true), ('rollup_requests_paused', false, false, true),
+           ('run_rollup_requests', false, false, false)),
   found as (
     select f.name, f.definer, f.server, f.pinned, p.oid, p.prosecdef, p.proconfig
     from close_functions f
@@ -588,5 +619,10 @@ as $$
   from close_triggers g
   join pg_catalog.pg_trigger tg on tg.tgrelid = pg_catalog.to_regclass(g.table_name) and tg.tgname = g.trigger_name
   where g.deferred and (tg.tgconstraint = 0 or not tg.tgdeferrable or not tg.tginitdeferred)
+  union all
+  -- Sin su trabajo, los pedidos se quedarían pendientes y el índice único negaría los nuevos.
+  select 'close job missing or inactive: rollup_requests', 'cron.job'
+  where not exists (select 1 from cron.job j where j.jobname = 'rollup_requests' and j.active
+                    and j.schedule = '* * * * *' and j.command = 'call private.run_rollup_requests()')
 $$;
 revoke all on function private.schema_violations_close() from public;
