@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { actAs, clearPeriodsBefore, connect, financePerson, retire } from "../integration/helpers/finance";
 import { localOwnerUrl } from "../integration/helpers/local";
 import { assertPlainWindow } from "../integration/helpers/periods";
 
@@ -14,7 +15,8 @@ import { assertPlainWindow } from "../integration/helpers/periods";
 // `analyze` y con él, sin `vacuum` y con él; la selección de antes, en una muestra del cursor; la
 // selección sin el blindaje del plan, con plan genérico; una noche normal con 10 000 pares marcados
 // (`nightly_rollup()` entero) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
-// consolidado que pasar todos los pares por el modo marcado.
+// consolidado que pasar todos los pares por el modo marcado. Al final, sobre ese mes, el reparto (que
+// tiene que caber en el tope de una sentencia del servidor) y el ensayo y el cierre (que se miden).
 //
 // No corre en la integración continua ni con `pnpm test:int`: escribe y confirma millones de filas en
 // un libro que no se borra. La corre `pnpm test:escala`, que pide el turno de la base y la rehace al
@@ -478,5 +480,137 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
       [since],
     );
     expect(transition).toEqual({ status: "succeeded", error: null });
+  });
+});
+
+// El reparto y el cierre (T-611, segunda solicitud), sobre el mismo mes ya consolidado. Van al final:
+// cerrar congela el periodo. El reparto tiene que caber en el `statement_timeout` del servidor
+// (`src/adapters/supabase/db.ts`), seis veces seguidas en la misma sesión, por si Postgres pasa al plan
+// genérico. El ensayo y el cierre se corren como los correrá el servidor (finanzas con su sesión, en
+// una transacción, con el `commit` aparte, que es donde corre `assert_period_balanced`), y solo se
+// mide si caben: cómo corre el cierre lo decide T-605 (decisión de Sergio del 2026-10-26).
+const SERVER_STATEMENT_MS = 10_000;
+
+describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
+  it("el reparto del periodo cabe en el tope de una sentencia del servidor, también la sexta vez", async () => {
+    const pairs = Number(
+      (await one<{ n: string }>("select count(distinct (profile_id, teacher_id)) as n from public.watch_rollup where period_id = $1", [period])).n,
+    );
+    const times: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      await tx(async () => {
+        await owner.query("set local statement_timeout = '10s'");
+        const start = performance.now();
+        const lines = await one<{ pools: string; shares: string }>(
+          `select count(*) filter (where l.kind = 'student_pool') as pools, count(*) filter (where l.kind = 'share') as shares
+           from private.payout_for_period($1, 0) l`,
+          [period],
+        );
+        times.push(ms(start));
+        // Un bote por alumno, y una parte por cada alumno y maestro con medios puntos.
+        expect(Number(lines.pools)).toBe(STUDENTS);
+        expect(Number(lines.shares)).toBe(pairs);
+      });
+    }
+    // Las piezas, una vez: la entrada, el reparto con ella ya armada, la red sola y los totales.
+    let start = performance.now();
+    await owner.query("create temporary table close_in as select * from private.close_input($1)", [period]);
+    const input = ms(start);
+    start = performance.now();
+    await owner.query(`
+      create temporary table close_lines as
+      select array(select row(x.kind, x.profile_id, x.teacher_id, x.tiebreak_rank, x.cents, x.base_cents, x.half_points)::private.payout_line
+                   from close_in i, private.compute_payout(i.pool_bps, i.carried_in_cents, i.bases, i.points) with ordinality x
+                   order by x.ordinality) as lines`);
+    const compute = ms(start);
+    start = performance.now();
+    await owner.query("select private.check_payout_lines(i.carried_in_cents, l.lines) from close_in i, close_lines l");
+    const check = ms(start);
+    start = performance.now();
+    await owner.query("select count(*) from close_lines, private.close_teacher_totals(lines)");
+    const totals = ms(start);
+    report.payout = {
+      payout_for_period_ms: times,
+      close_input_ms: input,
+      compute_payout_ms: compute,
+      check_payout_lines_ms: check,
+      close_teacher_totals_ms: totals,
+      lines: Number((await one<{ n: string }>("select cardinality(lines) as n from close_lines")).n),
+    };
+    expect(Math.max(...times)).toBeLessThan(SERVER_STATEMENT_MS);
+  });
+
+  it("el ensayo y el cierre, como los correrá el servidor: se mide si caben", async () => {
+    // El cierre va en orden desde el arranque, y no con alertas abiertas: las que dejó la noche normal
+    // se revisan antes, como lo haría finanzas.
+    await clearPeriodsBefore(owner, period);
+    const emails: string[] = [];
+    const finance = await financePerson(emails);
+    const client = await connect();
+    const timed = async (sql: string): Promise<{ r: Record<string, unknown>; ms: number }> => {
+      const start = performance.now();
+      const r = (await client.query<{ r: Record<string, unknown> }>(sql, [period])).rows[0]!.r;
+      return { r, ms: ms(start) };
+    };
+    try {
+      await client.query("begin");
+      await actAs(client, finance);
+      const alerts = await client.query<{ r: { outcome: string } }>(
+        "select private.review_alert(id, 'Revisada en la prueba de escala.', false, null) as r from public.anomaly_alerts where period_id = $1 and status = 'open'",
+        [period],
+      );
+      expect(alerts.rows.every((row) => row.r.outcome === "reviewed")).toBe(true);
+      await retire(client, finance);
+      await client.query("commit");
+
+      await client.query("begin");
+      await actAs(client, finance);
+      const rehearsal = await timed("select private.rehearse_close($1) as r");
+      expect(rehearsal.r.outcome).toBe("rehearsed");
+      await retire(client, finance);
+      let start = performance.now();
+      await client.query("commit");
+      const rehearsalCommit = ms(start);
+
+      await client.query("begin");
+      await actAs(client, finance);
+      const close = await timed("select private.close_period($1) as r");
+      expect(close.r.outcome).toBe("closed");
+      await retire(client, finance);
+      start = performance.now();
+      await client.query("commit");
+      const closeCommit = ms(start);
+
+      start = performance.now();
+      await owner.query("select private.assert_period_balanced($1)", [period]);
+      const balanced = ms(start);
+      const written = await one<{ pools: string; shares: string; pairs: string; payouts: string }>(
+        `select (select count(*) from public.payout_student_pools where period_id = $1) as pools,
+                (select count(*) from public.payout_shares where period_id = $1) as shares,
+                (select count(distinct (profile_id, teacher_id)) from public.watch_rollup where period_id = $1) as pairs,
+                (select count(*) from public.payouts where period_id = $1) as payouts`,
+        [period],
+      );
+      report.close = {
+        alerts_reviewed: alerts.rowCount,
+        rehearse_close_ms: rehearsal.ms,
+        rehearse_commit_ms: rehearsalCommit,
+        close_period_ms: close.ms,
+        close_commit_ms: closeCommit,
+        assert_period_balanced_ms: balanced,
+        // El tope del servidor es por sentencia, y el `commit` es otra.
+        fits_server_statement: [rehearsal.ms, rehearsalCommit, close.ms, closeCommit].every((time) => time < SERVER_STATEMENT_MS),
+        student_pools: Number(written.pools),
+        shares: Number(written.shares),
+        payouts: Number(written.payouts),
+      };
+      // Un bote por alumno, y una parte por cada alumno y maestro con medios puntos.
+      expect(Number(written.pools)).toBe(STUDENTS);
+      expect(Number(written.shares)).toBe(Number(written.pairs));
+      expect(Number(written.payouts)).toBe(report.teachers);
+    } finally {
+      await client.query("rollback").catch(() => undefined);
+      await client.end();
+    }
   });
 });

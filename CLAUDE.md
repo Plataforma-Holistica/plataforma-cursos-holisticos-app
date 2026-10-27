@@ -205,8 +205,15 @@ cierre a mano con su foto (el anterior no sirve: en una base nueva los umbrales 
 arranque). Mide con su propio reloj cada paso del recálculo completo con el consolidado vacío y
 lleno, sin `analyze` y con él, sin `vacuum` y con él; la selección de antes en una muestra del
 cursor; la selección sin su blindaje con plan genérico; una noche normal con 10 000 pares marcados;
-y `detect_anomalies`. Falla si un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir
-15, o si el recálculo completo no deja el mismo consolidado que el modo marcado. Imprime las cifras
+y `detect_anomalies`. Al final, sobre ese mes ya consolidado, el reparto (`payout_for_period`, seis
+veces seguidas, cada una con el `statement_timeout` de 10 s del servidor, y sus piezas) y el ensayo y
+el cierre como los correrá el servidor: finanzas de verdad (`tests/integration/helpers/finance.ts`),
+en una transacción y con el `commit` aparte. Van al final porque cerrar congela el periodo. Falla si
+un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir 15, si el recálculo completo no
+deja el mismo consolidado que el modo marcado, o si el reparto pasa de 10 s; del ensayo y del cierre
+no exige un tiempo: dice si caben (lo decide T-605, decisión de Sergio del 2026-10-26), y falla si no
+ensayan o no cierran, o si lo escrito no son un bote por alumno, una parte por pareja y una
+liquidación por maestro. Imprime las cifras
 al final. Confirma un libro que no se borra, así que `scripts/test-escala.mjs` rehace la base al
 terminar, pase o falle; si se corta, `pnpm db:reset`. No corre en la integración continua, ni a la
 hora del `pg_cron` local (03:00 de la Ciudad de México), y pide la base sin nada en el mes. Las cifras
@@ -385,6 +392,11 @@ que no se ve leyendo un solo archivo:
   área `rollup` del vigilante), la prueba de escala (`tests/escala/`, `pnpm test:escala`) y el proyecto
   `escala` de Vitest. Cambia `rollup_step`. Usa pgTAP 49. Para el B: `pnpm test:escala` toma la base
   local de 10 a 20 minutos y la rehace al terminar; mientras corre, el turno es del A.
+- **Lo que T-611 suma al carril A** (segunda solicitud). Ninguna función nueva: cambian
+  `private.compute_payout` y `check_payout_lines`, con la misma salida (abajo, en «El reparto»). Usa
+  pgTAP 50. La prueba de escala mide además el reparto, el ensayo y el cierre. Para el B: un periodo
+  que esté en cierre al aplicar la migración se ensaya otra vez (`rehearsal_stale`), porque
+  `code_version` entra en la huella de la entrada.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1798,6 +1810,21 @@ falla. Veintiuna precisiones que la tabla no dice:
     piso y con montos grandes se equivoca. Un peso cero no entra: un maestro con puntos y 0
     asignado se queda fuera del sin consumo. La red (`private.check_payout_lines()`) va aparte del
     cálculo para poder probarla con líneas alteradas.
+  - **Sin uniones entre lo que sale de `unnest`** (T-611, `t611_reparto_lineal`). El reparto y la
+    red de T-407 buscaban, por cada alumno, en todo lo que salía de `unnest`, y crecían con el
+    cuadrado de los alumnos (más de siete minutos a 13 000). Postgres no sabe cuántas filas salen de
+    `unnest` ni de un CTE filtrado (con el plan genérico supone 10), y una unión entre ellos la
+    resuelve con un ciclo anidado: una reescritura con `left join` a agregados era rápida a 2 000
+    alumnos y tardaba 43 s a 13 000. Por eso las dos son un solo `group by` por alumno (bases y
+    puntos juntos con `union all`; en la red, el bote y la suma de sus partes lado a lado). El
+    redondeo y los maestros de cada alumno van juntos por posición en un solo `rows from`: con dos
+    laterales, según el orden de la unión, el redondeo se llamaba una vez por maestro. A 13 000
+    alumnos, 2.4 s. Un cambio aquí se compara contra el reparto de T-407 copiado como oráculo en
+    `50_reparto_lineal`: el mismo texto de las líneas, y con una entrada mala el mismo `sqlstate` y
+    el mismo mensaje, también en un periodo de mil alumnos (con el plan que la sesión ya tenía y
+    con uno a la medida) y con el planificador forzado a otros planes (el genérico, sin agregados
+    con la entrada ya ordenada, sin agrupar por hash). Que siga siendo lineal lo mide
+    `pnpm test:escala`.
   - **Lo que decide la regla y no se ve en el PRD**: se arrastra todo cuando lo asignado es cero,
     no solo «si nadie tuvo puntos»; el bote del alumno es el piso de la suma de sus partes por el
     porcentaje; los puntos de quien no tiene base no cuentan; un bote de 0 con puntos lleva sus
