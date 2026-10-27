@@ -232,10 +232,11 @@ select is((select array_agg(p.proname::text order by p.proname) from pg_proc p j
                                'assert_period_balanced', 'check_period_balanced', 'require_period_closing', 'guard_close_run')),
   array['check_period_balanced', 'close_period', 'rehearse_close'],
   'como el dueño corren solo el ensayo, el cierre y la comprobación al confirmar');
-select ok(not has_function_privilege('app_service', 'private.rehearse_close(public.period_id)', 'execute')
-          and not has_function_privilege('app_service', 'private.close_period(public.period_id)', 'execute')
+-- Desde T-605 (PA-80) el servidor ensaya y cierra; nadie más (`51_panel_del_periodo`).
+select ok(has_function_privilege('app_service', 'private.rehearse_close(public.period_id)', 'execute')
+          and has_function_privilege('app_service', 'private.close_period(public.period_id)', 'execute')
           and not has_function_privilege('authenticated', 'private.close_period(public.period_id)', 'execute'),
-  'el servidor todavía no ensaya ni cierra (PA-80)');
+  'el servidor ensaya y cierra, y quien tiene sesión no');
 select ok((select bool_and(pg_get_functiondef(oid) like '%transaction_isolation%') from pg_proc
            where oid in ('private.rehearse_close(public.period_id)'::regprocedure, 'private.close_period(public.period_id)'::regprocedure)),
   'los dos exigen read committed: cada sentencia ve lo que confirmó quien esperaba el candado');
@@ -641,10 +642,10 @@ grant select on public.payout_shares to authenticated;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close table reachable by authenticated'
                   and object_name = 'public.payout_shares'), 've una tabla del cierre al alcance de quien tiene sesión');
 revoke select on public.payout_shares from authenticated;
-grant execute on function private.close_period(public.period_id) to app_service;
-select ok(exists (select 1 from private.schema_violations() where problem = 'close function executable by app_service'
-                  and object_name like 'private.close_period(%'), 've el cierre ejecutable por el servidor');
-revoke execute on function private.close_period(public.period_id) from app_service;
+grant execute on function private.close_period(public.period_id) to authenticated;
+select ok(exists (select 1 from private.schema_violations() where problem = 'close function executable by authenticated'
+                  and object_name like 'private.close_period(%'), 've el cierre ejecutable por quien tiene sesión');
+revoke execute on function private.close_period(public.period_id) from authenticated;
 alter function private.close_input(public.period_id) security definer;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function security definer or without fixed search_path'
                   and object_name like 'private.close_input(%'), 've la entrada como `security definer`');
