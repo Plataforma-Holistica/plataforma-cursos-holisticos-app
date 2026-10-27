@@ -1761,6 +1761,20 @@ falla. Veintiuna precisiones que la tabla no dice:
     piso y con montos grandes se equivoca. Un peso cero no entra: un maestro con puntos y 0
     asignado se queda fuera del sin consumo. La red (`private.check_payout_lines()`) va aparte del
     cálculo para poder probarla con líneas alteradas.
+  - **Sin uniones entre lo que sale de `unnest`** (T-611, `t611_reparto_lineal`). El reparto y la
+    red de T-407 buscaban, por cada alumno, en todo lo que salía de `unnest`, y crecían con el
+    cuadrado de los alumnos (más de siete minutos a 13 000). Postgres no sabe cuántas filas salen de
+    `unnest` ni de un CTE filtrado (con el plan genérico supone 10), y una unión entre ellos la
+    resuelve con un ciclo anidado: una reescritura con `left join` a agregados era rápida a 2 000
+    alumnos y tardaba 43 s a 13 000. Por eso las dos son un solo `group by` por alumno (bases y
+    puntos juntos con `union all`; en la red, el bote y la suma de sus partes lado a lado). El
+    redondeo y los maestros de cada alumno van juntos por posición en un solo `rows from`: con dos
+    laterales, según el orden de la unión, el redondeo se llamaba una vez por maestro. A 13 000
+    alumnos, 2.4 s. Un cambio aquí se compara contra el reparto de T-407 copiado como oráculo en
+    `50_reparto_lineal`: el mismo texto de las líneas, y con una entrada mala el mismo `sqlstate` y
+    el mismo mensaje, también en un periodo de mil alumnos y con el planificador forzado a otros
+    planes (el genérico, sin uniones por hash, sin ciclos anidados). Que siga siendo lineal lo mide
+    `pnpm test:escala`.
   - **Lo que decide la regla y no se ve en el PRD**: se arrastra todo cuando lo asignado es cero,
     no solo «si nadie tuvo puntos»; el bote del alumno es el piso de la suma de sus partes por el
     porcentaje; los puntos de quien no tiene base no cuentan; un bote de 0 con puntos lleva sus
