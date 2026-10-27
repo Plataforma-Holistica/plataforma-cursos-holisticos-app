@@ -352,11 +352,9 @@ insert into public.close_run_teacher_totals (close_run_id, teacher_id, half_poin
 values ((select (r ->> 'close_run_id')::uuid from cierre), 'ffffffff-0000-0000-0000-000000000000', 1, 1, 0, 0, 0);
 set local session_replication_role = origin;
 select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0)
-            like '%ffffffff-0000-0000-0000-000000000000,"",0.00,0.00,0.00,0.00,sí' || E'
-',
+            like '%ffffffff-0000-0000-0000-000000000000,"",0.00,0.00,0.00,0.00,sí' || E'\r\n',
   'un total de 0 queda debajo aunque el mínimo sea 0');
-select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0) like '%,358.43,53.76,no' || E'
-' || '%',
+select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0) like '%,358.43,53.76,no' || E'\r\n' || '%',
   'y uno que pasa de 0, no');
 
 select * from finish();
