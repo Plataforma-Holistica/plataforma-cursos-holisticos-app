@@ -205,8 +205,13 @@ cierre a mano con su foto (el anterior no sirve: en una base nueva los umbrales 
 arranque). Mide con su propio reloj cada paso del recálculo completo con el consolidado vacío y
 lleno, sin `analyze` y con él, sin `vacuum` y con él; la selección de antes en una muestra del
 cursor; la selección sin su blindaje con plan genérico; una noche normal con 10 000 pares marcados;
-y `detect_anomalies`. Falla si un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir
-15, o si el recálculo completo no deja el mismo consolidado que el modo marcado. Imprime las cifras
+y `detect_anomalies`. Al final, sobre ese mes ya consolidado, el reparto (`payout_for_period`, seis
+veces seguidas, cada una con el `statement_timeout` de 10 s del servidor, y sus piezas) y el ensayo y
+el cierre como los correrá el servidor: finanzas de verdad (`tests/integration/helpers/finance.ts`),
+en una transacción y con el `commit` aparte. Van al final porque cerrar congela el periodo. Falla si
+un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir 15, si el recálculo completo no
+deja el mismo consolidado que el modo marcado, o si el reparto pasa de 10 s; del ensayo y del cierre
+solo dice si caben (lo decide T-605, decisión de Sergio del 2026-10-26). Imprime las cifras
 al final. Confirma un libro que no se borra, así que `scripts/test-escala.mjs` rehace la base al
 terminar, pase o falle; si se corta, `pnpm db:reset`. No corre en la integración continua, ni a la
 hora del `pg_cron` local (03:00 de la Ciudad de México), y pide la base sin nada en el mes. Las cifras
@@ -385,6 +390,11 @@ que no se ve leyendo un solo archivo:
   área `rollup` del vigilante), la prueba de escala (`tests/escala/`, `pnpm test:escala`) y el proyecto
   `escala` de Vitest. Cambia `rollup_step`. Usa pgTAP 49. Para el B: `pnpm test:escala` toma la base
   local de 10 a 20 minutos y la rehace al terminar; mientras corre, el turno es del A.
+- **Lo que T-611 suma al carril A** (segunda solicitud). Ninguna función nueva: cambian
+  `private.compute_payout` y `check_payout_lines`, con la misma salida (abajo, en «El reparto»). Usa
+  pgTAP 50. La prueba de escala mide además el reparto, el ensayo y el cierre. Para el B: un periodo
+  que esté en cierre al aplicar la migración se ensaya otra vez (`rehearsal_stale`), porque
+  `code_version` entra en la huella de la entrada.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
