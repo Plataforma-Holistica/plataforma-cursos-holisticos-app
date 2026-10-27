@@ -320,9 +320,9 @@ select throws_like($$select pruebas.descuadra(202610, $s$update public.payouts s
                                                          where period_id = 202610 and teacher_id = pruebas.id('M2')$s$)$$,
   '%without a matching payout%', 'una liquidación con otra corrida');
 select throws_like($$select pruebas.descuadra(202610, $s$insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-                                                         select 202610, pruebas.id('M4'), close_run_id, 0, 0, 0
+                                                         select 202610, pruebas.id('M4'), close_run_id, 100, 100, 100
                                                          from public.payout_periods where period_id = 202610$s$)$$,
-  '%payouts without a teacher total%', 'una liquidación de quien no tiene total');
+  '%payouts without a teacher total%', 'una liquidación con bote de quien no tiene total (la de 0, de quien tiene algo pendiente, sí: T-603, segunda)');
 select throws_like($$select pruebas.descuadra(202610, $s$update public.bonuses set amount_cents = amount_cents + 1
                                                          where period_id = 202610$s$)$$,
   '%founder bonuses%', 'un bono que no es el piso del total');
@@ -421,8 +421,8 @@ select throws_ok($$update public.bonuses set status = 'confirmed', decided_at = 
 select throws_ok($$delete from public.bonuses where period_id = 202610$$, '42501', null, 'un bono no se borra');
 select throws_ok($$truncate public.bonuses$$, '42501', null, 'ni se vacían');
 select throws_ok($$insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-                   values (202610, pruebas.id('M4'), (select close_run_id from public.payout_periods where period_id = 202610), 0, 0, 0)$$,
-  '55000', null, 'ni entra una liquidación a un periodo que no está en cierre');
+                   values (202610, pruebas.id('M4'), (select close_run_id from public.payout_periods where period_id = 202610), 100, 100, 100)$$,
+  '23514', null, 'en un periodo cerrado, una liquidación nace solo con el total del maestro (o 0)');
 select throws_ok($$insert into public.bonuses (teacher_id, period_id, kind, amount_cents, reason, created_by)
                    values (pruebas.id('M1'), 202610, 'discretionary', 1000, 'Prueba.', pruebas.finanzas())$$,
   '23514', null, 'ni un bono a mano, todavía');

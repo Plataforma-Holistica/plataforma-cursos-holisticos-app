@@ -9,7 +9,7 @@
 -- lo cerrado corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(150);
+select plan(151);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6020000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -523,6 +523,10 @@ select is(pruebas.o(pruebas.cierra(202611)), 'closed', 'noviembre se cierra');
 select is(pruebas.cifras(202611), 'neto=20405 alumnos=12243 arrastrado=0 bote=12243 asignado=0 sin_consumo=12243 pasa=12243',
   'nadie tuvo puntos: todo pasa al siguiente (RN-06)');
 select is((select count(*)::integer from public.payout_teacher_totals where period_id = 202611), 0, 'ningún maestro recibe nada');
+select pruebas.como_finanzas();
+select throws_ok($$update public.payout_periods set status = 'paid' where period_id = 202611$$, '23514', null,
+  'un periodo sin liquidaciones tampoco pasa a pagado sin liberarse (T-603)');
+select pruebas.como_dueno();
 select is((select carried_in_cents from public.payout_periods where period_id = 202612), 12243::bigint, 'y diciembre lo recibe');
 select is(pruebas.o(pruebas.cierra(202612)), 'rehearsal_stale', 'el ensayo de diciembre quedó viejo: cambió lo arrastrado');
 create temporary table ensayo_dic2 as select pruebas.ensaya(202612) as r;

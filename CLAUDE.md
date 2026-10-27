@@ -365,6 +365,22 @@ que no se ve leyendo un solo archivo:
   `assert_period_balanced`. Usa pgTAP 45 (y amplía la 44). Para el B: un periodo cerrado de verdad ya
   tiene liquidaciones y, si hay fundadores, bonos; una prueba que borre periodos cerrados borra antes,
   en réplica, `payout_status_events`, `payouts` y `bonuses`.
+- **Lo que T-603 suma al carril A** (segunda solicitud). Las tablas `payout_adjustments` y
+  `teacher_balance_entries`, el tipo `balance_entry_kind`, las columnas `payout_periods.payouts_released_at`,
+  `payouts_released_by` y `paid_at` y `close_runs.payout_preview`; las funciones `private.release_payouts`,
+  `hold_payout`, `unhold_payout`, `capture_bonus`, `confirm_founder_bonus`, `void_bonus`, `capture_adjustment`,
+  `release_payout`, `ensure_payout`, `settle_period`, `teacher_balance`, `payout_pending_teachers`,
+  `first_unreleased_period`, `minimum_payout`, `assert_payout_released`, `check_payout_released`,
+  `guard_payout_adjustment`, `guard_balance_entry`, `purge_watch_partition` y `purge_playback_sessions`; el procedimiento
+  `private.raw_retention` y su trabajo de `pg_cron` (`raw_retention`, a las 09:45 UTC); el disparador
+  diferido `payouts_released`. Cambian `guard_payout_period`, `guard_payout`, `guard_bonus`,
+  `log_payout_status`, `close_period`, `rehearse_close` y `assert_period_balanced`, y `require_period_closing`
+  ya no cuelga de `payouts` ni de `bonuses` (esto reemplaza lo que dice la viñeta de la primera solicitud:
+  desde aquí una liquidación y un bono cambian por sus pasos). Usa pgTAP 46 a 48 e integración 55 y 57; la maquinaria de
+  finanzas de las pruebas de integración vive en `tests/integration/helpers/finance.ts`. Para el B: forzar
+  `'paid'` con el guardián apagado sigue sirviendo (las reglas nuevas del periodo van en su guardián, no en
+  restricciones); y el `pg_cron` local borra cada mañana la partición de latidos de un periodo cerrado hace
+  más de `RETENCION_LATIDOS` días.
 - **Lo que T-611 suma al carril A** (primera solicitud). La función `private.rollup_full_pairs` (en el
   área `rollup` del vigilante), la prueba de escala (`tests/escala/`, `pnpm test:escala`) y el proyecto
   `escala` de Vitest. Cambia `rollup_step`. Usa pgTAP 49. Para el B: `pnpm test:escala` toma la base
@@ -2032,6 +2048,54 @@ falla. Veintiuna precisiones que la tabla no dice:
     fundadores que guardó la corrida, propuestos; y la corrida dice el mismo bono).
   - Las retenciones y el IVA quedan en 0 hasta T-409: la lista de salida exige T-409 antes de liberar en
     producción.
+- **Liberar las liquidaciones** (T-603, segunda solicitud; RF-501, RF-505 a RF-508, RN-11, RN-17; decisiones
+  de Sergio del 2026-10-25; 05 §5.5, §7.3, §8.1, §9.4, §11.4 y §13). Viven en la base (`t603_liberar`) y se
+  prueban en pgTAP (`46_liberar`, con el ejemplo del PRD y un mínimo de 100 MXN; `47_liberar_propiedades`,
+  diez rondas al azar; `48_purga`), en integración (`55-liberar`, lo que pasa a la vez, y `57-purga`, la
+  corrida diaria de verdad) y con mutaciones a mano. Nadie de la aplicación las ejecuta todavía (PA-81 a
+  PA-83, T-605), y **no se libera en producción antes de T-409** (las retenciones y el IVA quedan en 0).
+  Lo que no se ve leyendo un solo archivo:
+  - **Liberar** (`release_payouts`) toma la fila del periodo para sí y va en orden desde el arranque
+    (`previous_not_released`), con los bonos del fundador decididos y `PAGO_MINIMO` del periodo. Le da su
+    liquidación a quien tiene algo pendiente (saldo, ajuste o bono confirmado) y libera cada calculada:
+    bruto = lo del bote + bonos confirmados + ajustes + el saldo del maestro; si llega al mínimo (`>=` y
+    mayor que 0) espera su factura, y si no queda acumulada y su bruto pasa al saldo (que puede ser
+    negativo). El saldo es un libro (`teacher_balance_entries`): cada liberación aplica todo el saldo
+    (renglón `applied_to_payout`) y, si acumula, escribe su bruto (`carried_forward`); uno de 0 no se
+    escribe, y un renglón solo se escribe al liberar su liquidación. Cada liberación de un maestro toma un
+    candado consultivo de su saldo. Dos capturas a la vez para un maestro sin liquidación en un periodo
+    cerrado crean una sola (`ensure_payout`, `on conflict do nothing`).
+  - **Las retenidas no se liberan**: soltar una (`unhold_payout`) la regresa al estado en que estaba, y si
+    era calculada en un periodo ya liberado la libera ahí mismo. La nota de soltar queda en su historia por
+    `app.reason`, que `log_payout_status` usa como nota cuando no es una retención.
+  - **Pagado al instante** (`settle_period`): un periodo liberado sin nada por pagar pasa a pagado en la
+    misma transacción; las vencidas de factura las suma T-604.
+  - **Los bonos a mano y los ajustes** van al primer periodo sin liberar (`first_unreleased_period`): un
+    bono, desde el suyo; un ajuste, desde el siguiente a su origen. Les abren la fila si no la tiene, y si
+    ese periodo ya cerró, el maestro recibe su liquidación de 0 del bote. Un bono se anula mientras su
+    periodo no se libere; después, con un ajuste.
+  - **La comprobación de cada liberación al confirmar** (`payouts_released`, diferida, como el dueño): su
+    periodo se liberó, los bonos y los ajustes son los de su periodo, el estado sigue el mínimo, los renglones del saldo son
+    exactos, y el saldo del maestro **justo al liberarla** (sus renglones hasta el renglón de la historia
+    que lo dice, los dos con la hora del reloj) es lo que acumuló o 0. No «la última por periodo»: soltar
+    una retenida vieja la libera después de otra más nueva (la 47 lo encontró). El disparador es `after
+    update`, sin columna: un `update ... of released_at` solo correría si la sentencia nombra la columna, y
+    el guardián la pone él (la revisión del diff lo encontró). Si el reloj del sistema retrocede entre dos
+    liberaciones del mismo maestro, la segunda falla al confirmar: falla cerrada.
+  - **La purga** (`purge_watch_partition`, solo el dueño; la corre `raw_retention`, un periodo por
+    transacción): con el periodo cerrado o pagado, `RETENCION_LATIDOS` desde el cierre, sin retenidas y sin
+    progreso por rehacer que lea esos latidos. Borrar la partición toma el candado de la tabla madre: lo
+    espera 2 s, y si no, falla ese periodo y la corrida lo dice; la fila del periodo, sin esperarla
+    (`for no key update nowait`). Al final, en otra transacción, borra las reproducciones sin ninguna
+    partición viva (`purge_playback_sessions`, con el periodo purgado más reciente: es idempotente y
+    recoge lo que una noche anterior no alcanzó), salvo las que otra que se queda señala como la que tomó
+    su lugar: así los latidos no esperan ese borrado. Devuelve al terminar los ajustes de sesión que puso.
+  - Una liquidación no nace con IVA ni retenciones (llegan con T-409), y un bono a mano no abre un mes sin
+    fila a más de un año (`malformed`: es un error de captura).
+  - El separador de sentencias del CLI de Supabase corta una función con `case ... end` dentro de la
+    condición de un `if`: calcula el `case` en una variable antes.
+  - Límite dicho: `release_payouts` toma un candado consultivo por maestro y los guarda hasta confirmar;
+    con miles de maestros habrá que mirar `max_locks_per_transaction`.
 - **La página de una lección (PA-22, `/cursos/[slug]/lecciones/[leccion]`)** (T-203; decisiones
   de Sergio del 2026-10-15). Vive en `src/app/cursos/[slug]/lecciones/[leccion]/`, y lo que
   pinta alrededor del reproductor lo lee `src/services/lessons/`. Lo que no se ve leyendo un

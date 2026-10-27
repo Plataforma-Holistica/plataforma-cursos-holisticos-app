@@ -1,14 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { Client } from "pg";
+import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { claimedUser, freshOrigin, testServices } from "./helpers/account";
-import { memoryJar, secondFactorFor, type KnownUser } from "./helpers/auth";
-import { localOwnerUrl } from "./helpers/local";
-import { asOwner, asSystem, reverted, teamStoreOn } from "./helpers/team";
-import { totpCode } from "./helpers/totp";
-import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
+import { actAs, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
+import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // El ensayo y el cierre (T-602; RF-502, RF-503, RN-09) contra la base local, en lo que una transacción
 // revertida no puede mostrar: dos cierres a la vez, el cierre contra una escritura en vuelo de su
@@ -28,94 +24,12 @@ import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUser
 const FIRST = 203601;
 const OURS = [203601, 203602, 203603, 203604, 203605, 203606, 203607];
 
-interface Finance {
-  person: KnownUser;
-  factorId: string;
-  sessionId: string;
-}
-
 let owner: Client;
 let financeA: Finance;
 let financeB: Finance;
 let student: TestUser;
 let subscription: string;
 const emails: string[] = [];
-
-async function connect(): Promise<Client> {
-  const client = new Client({ connectionString: localOwnerUrl() });
-  await client.connect();
-  await client.query("set lock_timeout = '20s'");
-  return client;
-}
-
-/** Espera a que `count` conexiones estén detenidas por la de `first`. */
-async function waitBehind(first: Client, count: number): Promise<void> {
-  const pid = (await first.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
-  const deadline = Date.now() + 4_000;
-  for (;;) {
-    const rows = await owner.query<{ waiting: number }>(
-      "select count(*)::int as waiting from pg_stat_activity where wait_event_type = 'Lock' and $1::int = any(pg_blocking_pids(pid))",
-      [pid],
-    );
-    if ((rows.rows[0]?.waiting ?? 0) >= count) return;
-    if (Date.now() > deadline) throw new Error("La otra conexión no llegó a esperar.");
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-}
-
-/** Alguien de finanzas, de verdad, con su código dado hace un momento. */
-async function financePerson(): Promise<Finance> {
-  const person = await claimedUser();
-  emails.push(person.email);
-  await completeAccountAsOwner(person.id);
-  const factor = await secondFactorFor(person);
-  const jar = memoryJar();
-  const entered = await testServices().signIn(jar, person, freshOrigin());
-  if (entered.kind !== "entered") throw new Error(`La persona de prueba no entró: ${entered.kind}`);
-  const sessionId = await reverted(async (tx) => {
-    const services = testServices({ teamStore: teamStoreOn(tx) });
-    await asSystem(tx);
-    await tx.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'finance')", [person.id]);
-    await tx.query("insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, $3)", [
-      person.id,
-      factor.factorId,
-      person.email.toLowerCase(),
-    ]);
-    await asOwner(tx);
-    expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
-    const standing = await services.teamStanding(jar);
-    if (standing.kind !== "team" || !standing.claims.sessionId) throw new Error("La persona de prueba no quedó en el equipo.");
-    return standing.claims.sessionId;
-  });
-  return { person, factorId: factor.factorId, sessionId };
-}
-
-/** En esta transacción, la persona es de finanzas y actúa con su sesión. */
-async function actAs(client: Client, finance: Finance): Promise<void> {
-  await client.query("set local session_replication_role = replica");
-  await client.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'finance')", [finance.person.id]);
-  await client.query("insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, $3)", [
-    finance.person.id,
-    finance.factorId,
-    finance.person.email.toLowerCase(),
-  ]);
-  await client.query("set local session_replication_role = origin");
-  await client.query("select set_config('app.actor_id', $1, true), set_config('app.actor_session', $2, true)", [
-    finance.person.id,
-    finance.sessionId,
-  ]);
-}
-
-/** Antes de confirmar: se quita lo que `actAs` puso, sin dejarlo en la auditoría. */
-async function retire(client: Client, finance: Finance): Promise<void> {
-  await client.query("set local session_replication_role = replica");
-  await client.query("delete from private.admin_factors where profile_id = $1", [finance.person.id]);
-  await client.query("delete from public.admin_capabilities where profile_id = $1", [finance.person.id]);
-  await client.query("set local session_replication_role = origin");
-}
-
-const outcomeOf = async (client: Client, call: string, period: number) =>
-  (await client.query<{ r: Record<string, unknown> }>(`select private.${call}($1) as r`, [period])).rows[0]!.r;
 
 /** Un ensayo confirmado de finanzas. */
 async function rehearse(period: number, finance = financeA): Promise<Record<string, unknown>> {
@@ -197,8 +111,8 @@ beforeAll(async () => {
   );
   if ((before.rowCount ?? 0) > 0) throw new Error("hay periodos abiertos desde el arranque en la base local: pnpm db:reset");
 
-  financeA = await financePerson();
-  financeB = await financePerson();
+  financeA = await financePerson(emails);
+  financeB = await financePerson(emails);
   student = await createTestUser();
   subscription = randomUUID();
   await ownerQuery(
@@ -290,7 +204,7 @@ describe("el cierre, de verdad", () => {
       await second.query("begin");
       await actAs(second, financeB);
       const waiting = outcomeOf(second, "close_period", 203601);
-      await waitBehind(first, 1);
+      await waitBehind(owner, first, 1);
       await retire(first, financeA);
       await first.query("commit");
       expect(await waiting).toEqual({ outcome: "already_closed", close_run_id: closed.close_run_id });
@@ -318,7 +232,7 @@ describe("el cierre, de verdad", () => {
       await closer.query("begin");
       await actAs(closer, financeA);
       const waiting = outcomeOf(closer, "close_period", 203602);
-      await waitBehind(writer, 1);
+      await waitBehind(owner, writer, 1);
       await writer.query("commit");
       expect((await waiting).outcome).toBe("rehearsal_stale");
       await closer.query("rollback");
@@ -357,7 +271,7 @@ describe("el cierre, de verdad", () => {
       await rehearsing.query("begin");
       await actAs(rehearsing, financeB);
       const late = outcomeOf(rehearsing, "rehearse_close", 203603);
-      await waitBehind(closer, 2);
+      await waitBehind(owner, closer, 2);
       await retire(closer, financeA);
       await closer.query("commit");
       expect(await attempt).toBe("55000");
@@ -386,7 +300,7 @@ describe("el cierre, de verdad", () => {
       await closer.query("begin");
       await actAs(closer, financeA);
       const waiting = outcomeOf(closer, "close_period", 203604);
-      await waitBehind(rehearsing, 1);
+      await waitBehind(owner, rehearsing, 1);
       await retire(rehearsing, financeB);
       await rehearsing.query("commit");
       expect((await waiting).outcome).toBe("closed");
