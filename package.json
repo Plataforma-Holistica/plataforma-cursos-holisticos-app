@@ -18,6 +18,7 @@
     "test:int": "node scripts/db-turno.mjs exigir --base && vitest run --project integration",
     "test:e2e": "node scripts/db-turno.mjs exigir --base && playwright test",
     "test:e2e:equipo": "node scripts/db-turno.mjs exigir --base && node scripts/e2e-equipo.mjs",
+    "test:escala": "node scripts/db-turno.mjs exigir --base && node scripts/test-escala.mjs",
     "secrets": "secretlint \"**/*\"",
     "db:start": "node scripts/db-turno.mjs exigir && supabase start",
     "db:stop": "node scripts/db-turno.mjs exigir && supabase stop",

@@ -4,11 +4,11 @@ import { defineConfig } from "vitest/config";
 
 const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
-// Tres proyectos. `pnpm test` corre `unit` y `ui`, sin red ni base:
+// Cuatro proyectos. `pnpm test` corre `unit` y `ui`, sin red ni base:
 //   - `unit`: dominio, configuración, catálogo de textos y la prueba de capas.
 //   - `ui`: componentes y pantallas, con un DOM simulado.
 // `pnpm test:int` corre `integration`: necesita la base local arriba y a app_service con
-// entrada (`pnpm db:login`).
+// entrada (`pnpm db:login`). Y `pnpm test:escala` corre `escala`, aparte de todo (abajo).
 export default defineConfig({
   resolve: {
     alias: {
@@ -40,7 +40,7 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
-          exclude: ["node_modules/**", "tests/architecture/fixtures/**", "tests/integration/**"],
+          exclude: ["node_modules/**", "tests/architecture/fixtures/**", "tests/integration/**", "tests/escala/**"],
         },
       },
       {
@@ -64,6 +64,19 @@ export default defineConfig({
           fileParallelism: false,
           testTimeout: 20_000,
           hookTimeout: 30_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // La prueba de escala (T-611): la corre solo `pnpm test:escala`, que rehace la base al
+          // terminar. Confirma millones de latidos en la base local, y tarda de 10 a 20 minutos.
+          name: "escala",
+          include: ["tests/escala/**/*.test.ts"],
+          globalSetup: ["./tests/integration/global-setup.ts"],
+          fileParallelism: false,
+          testTimeout: 60 * 60_000,
+          hookTimeout: 60_000,
         },
       },
     ],
