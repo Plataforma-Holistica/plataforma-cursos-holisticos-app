@@ -73,6 +73,7 @@ pnpm test:db     # pruebas de base (pgTAP) de supabase/tests/, contra la base lo
 pnpm test:int    # pruebas de integración de tests/integration/, contra la base, el Auth y el buzón locales
 pnpm test:e2e    # extremo a extremo de tests/e2e/ (Playwright): un navegador contra la aplicación compilada y la pila local
 pnpm test:e2e:equipo   # el camino del equipo, de extremo a extremo: deja residuo, y rehace la base local al terminar
+pnpm test:escala   # la prueba de escala de la consolidación (T-611): 13 000 alumnos en la base local; la rehace al terminar
 ```
 
 Antes de dar una tarea por terminada corren, en este orden: `typecheck`, `lint`, `test` y
@@ -195,6 +196,24 @@ recortados. Es para revisar a mano los puntos sin esperar a la noche: con `db:st
 lección entera y otra a medias, y correrlo dos veces (la entera da 2 medios puntos, la de a medias
 1, y la segunda corrida deja lo mismo). Las mismas comprobaciones de `db:student`; deja corridas y
 consolidado: antes de cualquier prueba, `pnpm db:reset`.
+
+`pnpm test:escala` es la prueba de escala de la consolidación (T-611; RNF-06, RNF-07;
+`tests/escala/`, el proyecto `escala` de Vitest). Carga en la base local `HORIZONTE_ESCALA`: 13 000
+cuentas con suscripción y cobro (por `record_charge`), 100 maestros con 900 lecciones, 260 000
+reproducciones y 9.36 millones de latidos intercalados como llegan, en el mes en curso puesto en
+cierre a mano con su foto (el anterior no sirve: en una base nueva los umbrales rigen desde el
+arranque). Mide con su propio reloj cada paso del recálculo completo con el consolidado vacío y
+lleno, sin `analyze` y con él, sin `vacuum` y con él; la selección de antes en una muestra del
+cursor; la selección sin su blindaje con plan genérico; una noche normal con 10 000 pares marcados;
+y `detect_anomalies`. Falla si un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir
+15, o si el recálculo completo no deja el mismo consolidado que el modo marcado. Imprime las cifras
+al final. Confirma un libro que no se borra, así que `scripts/test-escala.mjs` rehace la base al
+terminar, pase o falle; si se corta, `pnpm db:reset`. No corre en la integración continua, ni a la
+hora del `pg_cron` local (03:00 de la Ciudad de México), y pide la base sin nada en el mes. Las cifras
+las escribe la prueba a un archivo y el guion las imprime: Vitest calla la consola de un archivo que
+pasa. Desde el 2026-10-26 el Postgres local puede morir con `signal 11` a media corrida, dentro de
+`private.rollup_step`, también con el código de T-602 (`../planeacion/05-esquema-backend.md` §14.4):
+la prueba falla con «Connection terminated unexpectedly», y no es una falla de la regla.
 
 Si se tocó `src/domain/access/`, `src/domain/consumption/` o `src/domain/progress/`: `test:coverage`. Ahí la cobertura es del 100 % en ramas,
 líneas, funciones y sentencias, sin comentarios de exclusión (una prueba de
@@ -362,6 +381,10 @@ que no se ve leyendo un solo archivo:
   `'paid'` con el guardián apagado sigue sirviendo (las reglas nuevas del periodo van en su guardián, no en
   restricciones); y el `pg_cron` local borra cada mañana la partición de latidos de un periodo cerrado hace
   más de `RETENCION_LATIDOS` días.
+- **Lo que T-611 suma al carril A** (primera solicitud). La función `private.rollup_full_pairs` (en el
+  área `rollup` del vigilante), la prueba de escala (`tests/escala/`, `pnpm test:escala`) y el proyecto
+  `escala` de Vitest. Cambia `rollup_step`. Usa pgTAP 49. Para el B: `pnpm test:escala` toma la base
+  local de 10 a 20 minutos y la rehace al terminar; mientras corre, el turno es del A.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
@@ -1636,6 +1659,20 @@ falla. Veintiuna precisiones que la tabla no dice:
     cuenta ya no existe, sale. Rehacer no toca las marcas ni los días de práctica. Las pruebas:
     `supabase/tests/26_rehacer_progreso.test.sql` y, el procedimiento de verdad,
     `tests/integration/44-rehacer-progreso.test.ts`, que solo anota cuentas que no existen.
+  - **El recálculo completo elige sus pares por el índice** (T-611, `t611_pares_por_indice`). Antes,
+    cada paso armaba la unión entera de los latidos y el consolidado del periodo: el recálculo crecía
+    con el cuadrado del periodo. Ahora `private.rollup_full_pairs()` corta cada rama por su índice
+    desde el cursor y vuelve a cortar la unión de los dos cortes; da los mismos pares en el mismo orden
+    siempre que la rama de los latidos lleve su `distinct` (sin él, un par con muchos latidos llena el
+    corte y el cursor salta los que siguen). Va en su propia función por una razón: lleva
+    `plan_cache_mode = force_custom_plan`, porque con el plan genérico que Postgres guarda tras unas
+    llamadas el límite se estima como una parte de la tabla y vuelve el recorrido de la partición
+    entera, y ese ajuste no debe alcanzar a `rollup_pair`. La prueba es
+    `supabase/tests/49_pares_por_indice.test.sql`, contra la selección de antes copiada como oráculo.
+    Tres mutaciones sobreviven: quitar el `order by` de la rama de los latidos (en el
+    primer paso o con cursor) y el orden final. En todo plan que Postgres arma ahí esa salida ya viene
+    ordenada (del índice, o del orden que pide la unión), y la prueba no tiene cómo forzar otro: apagar
+    a la vez los índices y el orden lo devuelve a los índices.
 - **Las exclusiones y las alertas de anomalía** (T-208; RF-404, RF-406, RN-08, RN-17; decisiones
   de Sergio del 2026-10-21; 05 §5.4 y §8.2). Viven en la base (`t208_anomalias_y_exclusiones`), y
   se prueban en pgTAP (`28_exclusiones`, `29_anomalias`) y con mutaciones a mano. Lo que no se ve
