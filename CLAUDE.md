@@ -211,7 +211,9 @@ el cierre como los correrá el servidor: finanzas de verdad (`tests/integration/
 en una transacción y con el `commit` aparte. Van al final porque cerrar congela el periodo. Falla si
 un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir 15, si el recálculo completo no
 deja el mismo consolidado que el modo marcado, o si el reparto pasa de 10 s; del ensayo y del cierre
-solo dice si caben (lo decide T-605, decisión de Sergio del 2026-10-26). Imprime las cifras
+no exige un tiempo: dice si caben (lo decide T-605, decisión de Sergio del 2026-10-26), y falla si no
+ensayan o no cierran, o si lo escrito no son un bote por alumno, una parte por pareja y una
+liquidación por maestro. Imprime las cifras
 al final. Confirma un libro que no se borra, así que `scripts/test-escala.mjs` rehace la base al
 terminar, pase o falle; si se corta, `pnpm db:reset`. No corre en la integración continua, ni a la
 hora del `pg_cron` local (03:00 de la Ciudad de México), y pide la base sin nada en el mes. Las cifras
@@ -1819,8 +1821,9 @@ falla. Veintiuna precisiones que la tabla no dice:
     laterales, según el orden de la unión, el redondeo se llamaba una vez por maestro. A 13 000
     alumnos, 2.4 s. Un cambio aquí se compara contra el reparto de T-407 copiado como oráculo en
     `50_reparto_lineal`: el mismo texto de las líneas, y con una entrada mala el mismo `sqlstate` y
-    el mismo mensaje, también en un periodo de mil alumnos y con el planificador forzado a otros
-    planes (el genérico, sin uniones por hash, sin ciclos anidados). Que siga siendo lineal lo mide
+    el mismo mensaje, también en un periodo de mil alumnos (con el plan que la sesión ya tenía y
+    con uno a la medida) y con el planificador forzado a otros planes (el genérico, sin agregados
+    con la entrada ya ordenada, sin agrupar por hash). Que siga siendo lineal lo mide
     `pnpm test:escala`.
   - **Lo que decide la regla y no se ve en el PRD**: se arrastra todo cuando lo asignado es cero,
     no solo «si nadie tuvo puntos»; el bote del alumno es el piso de la suma de sus partes por el

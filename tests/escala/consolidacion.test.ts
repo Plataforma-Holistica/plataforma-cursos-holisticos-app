@@ -493,14 +493,23 @@ const SERVER_STATEMENT_MS = 10_000;
 
 describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
   it("el reparto del periodo cabe en el tope de una sentencia del servidor, también la sexta vez", async () => {
+    const pairs = Number(
+      (await one<{ n: string }>("select count(distinct (profile_id, teacher_id)) as n from public.watch_rollup where period_id = $1", [period])).n,
+    );
     const times: number[] = [];
     for (let i = 0; i < 6; i++) {
       await tx(async () => {
         await owner.query("set local statement_timeout = '10s'");
         const start = performance.now();
-        const lines = await one<{ n: string }>("select count(*) as n from private.payout_for_period($1, 0)", [period]);
+        const lines = await one<{ pools: string; shares: string }>(
+          `select count(*) filter (where l.kind = 'student_pool') as pools, count(*) filter (where l.kind = 'share') as shares
+           from private.payout_for_period($1, 0) l`,
+          [period],
+        );
         times.push(ms(start));
-        expect(Number(lines.n)).toBeGreaterThan(STUDENTS);
+        // Un bote por alumno, y una parte por cada alumno y maestro con medios puntos.
+        expect(Number(lines.pools)).toBe(STUDENTS);
+        expect(Number(lines.shares)).toBe(pairs);
       });
     }
     // Las piezas, una vez: la entrada, el reparto con ella ya armada, la red sola y los totales.
@@ -515,7 +524,7 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
                    order by x.ordinality) as lines`);
     const compute = ms(start);
     start = performance.now();
-    await owner.query("select private.check_payout_lines(0, lines) from close_lines");
+    await owner.query("select private.check_payout_lines(i.carried_in_cents, l.lines) from close_in i, close_lines l");
     const check = ms(start);
     start = performance.now();
     await owner.query("select count(*) from close_lines, private.close_teacher_totals(lines)");
@@ -589,7 +598,8 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
         close_period_ms: close.ms,
         close_commit_ms: closeCommit,
         assert_period_balanced_ms: balanced,
-        fits_server_statement: rehearsal.ms < SERVER_STATEMENT_MS && close.ms < SERVER_STATEMENT_MS && closeCommit < SERVER_STATEMENT_MS,
+        // El tope del servidor es por sentencia, y el `commit` es otra.
+        fits_server_statement: [rehearsal.ms, rehearsalCommit, close.ms, closeCommit].every((time) => time < SERVER_STATEMENT_MS),
         student_pools: Number(written.pools),
         shares: Number(written.shares),
         payouts: Number(written.payouts),

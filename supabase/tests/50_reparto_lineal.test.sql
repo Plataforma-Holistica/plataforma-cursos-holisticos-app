@@ -9,7 +9,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(29);
+select plan(30);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a0000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -321,8 +321,9 @@ select is(pruebas.salida(true, 6000, 0, array[null::private.payout_base], '{}'),
 select is(pruebas.salida(true, 6000, 0, array[pruebas.b(1, 100)], array[null::private.payout_points]),
           '22023 each student and teacher appear once in the points, with positive half points', 'unos puntos nulos tampoco');
 
--- Un periodo grande, después de miles de llamadas en esta sesión: el plan de una sentencia puede
--- cambiar con el tamaño y con las llamadas, y la salida tiene que seguir siendo la misma.
+-- Un periodo grande, después de miles de llamadas en esta sesión, con el plan que la sesión ya tenía
+-- guardado (casi seguro el genérico) y con uno a la medida, que es el que ve el largo de los arreglos:
+-- el que tendrá cada conexión del servidor en sus primeras llamadas. La salida tiene que ser la misma.
 create temporary table grande as
   select array(select row(pg_catalog.md5('a' || g)::uuid, (25000 + (g * 37) % 9000)::bigint)::private.payout_base
                from generate_series(1, 1000) g order by 1) as bases,
@@ -331,9 +332,13 @@ create temporary table grande as
                from generate_series(1, 1050) g
                cross join lateral (select distinct 1 + ((g * 7 + k * 13) % 100) as t from generate_series(1, 18) k) x
                where g % 10 <> 0 order by 1) as points;
-select is((select pruebas.salida(true, 6000, 12345, bases, points) from grande),
-          (select pruebas.salida(false, 6000, 12345, bases, points) from grande),
+create temporary table grande_antes as select pruebas.salida(false, 6000, 12345, bases, points) as antes from grande;
+select is((select pruebas.salida(true, 6000, 12345, bases, points) from grande), (select antes from grande_antes),
   'mil alumnos con 18 maestros cada uno (y 45 con puntos y sin base): las mismas líneas');
+select set_config('plan_cache_mode', 'force_custom_plan', true);
+select is((select pruebas.salida(true, 6000, 12345, bases, points) from grande), (select antes from grande_antes),
+  'y con un plan a la medida, que sabe que son mil, también');
+select set_config('plan_cache_mode', 'auto', true);
 select cmp_ok((select count(*)::integer from grande, private.compute_payout(6000, 12345, bases, points)), '>', 17000,
   'que son más de diecisiete mil');
 
