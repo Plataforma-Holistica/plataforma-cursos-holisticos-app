@@ -258,19 +258,31 @@ describe("el cierre desde la aplicación, de verdad", () => {
     expect(after.rows[0]).toEqual({ n: before + 1, actor: finance.person.id });
   });
 
-  describe("el corredor de los pedidos de recálculo, de verdad", () => {
+  describe("el corredor de los pedidos de recálculo, de verdad", { timeout: 120_000 }, () => {
     // El `pg_cron` local también corre el corredor cada minuto: cada caso espera a que el pedido llegue a lo
-    // que espera, lo corra quien lo corra. En la hora antes de la noche (08:00 UTC) el corredor no empieza
-    // nada, y los casos que necesitan que empiece lo comprueban así y terminan.
-    const paused = async () => (await owner.query<{ p: boolean }>("select private.rollup_requests_paused(now()) as p")).rows[0]!.p;
+    // que espera, lo corra quien lo corra. De las 08:00 a las 09:30 UTC el corredor no empieza nada: los casos
+    // que necesitan que empiece (o que no empiece por otra razón) terminan sin probar en esa pausa y en los
+    // tres minutos antes. Cada llamada al corredor va en su propia conexión, que se cierra: así, si lanza, su
+    // candado de sesión no se queda tomado.
+    const paused = async () =>
+      (await owner.query<{ p: boolean }>(
+        "select private.rollup_requests_paused(now()) or private.rollup_requests_paused(now() + interval '3 minutes') as p",
+      )).rows[0]!.p;
     const state = async (id: string) =>
       (await owner.query<{ status: string; error: string | null; mode: string | null; run_status: string | null; after: boolean | null }>(
         `select q.status, q.error, j.details ->> 'mode' as mode, j.status::text as run_status, j.started_at >= q.started_at as after
          from private.rollup_requests q left join public.job_runs j on j.id = q.job_run_id where q.id = $1`,
         [id],
       )).rows[0]!;
-    async function until(id: string, done: (status: string) => boolean) {
-      await owner.query("call private.run_rollup_requests()");
+    async function runner(): Promise<void> {
+      const client = await connect();
+      try {
+        await client.query("call private.run_rollup_requests()");
+      } finally {
+        await client.end();
+      }
+    }
+    async function settle(id: string, done: (status: string) => boolean) {
       const deadline = Date.now() + 90_000;
       for (;;) {
         const row = await state(id);
@@ -278,6 +290,10 @@ describe("el cierre desde la aplicación, de verdad", () => {
         if (Date.now() > deadline) throw new Error(`el pedido no llegó: ${JSON.stringify(row)}`);
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
+    }
+    async function until(id: string, done: (status: string) => boolean) {
+      await runner();
+      return settle(id, done);
     }
     /** Un pedido escrito a mano, con la sesión en réplica (sin auditoría). */
     async function byHand(period: number, status = "pending", startedAgo?: string): Promise<string> {
@@ -290,6 +306,60 @@ describe("el cierre desde la aplicación, de verdad", () => {
       )).rows[0]!.id;
       await owner.query("commit");
       return id;
+    }
+    const forget = (id: string) => owner.query("delete from private.rollup_requests where id = $1", [id]);
+    /** El periodo en curso, forzado a un estado con la sesión en réplica, dentro de la transacción de `client`. */
+    async function force(client: Client, status: string): Promise<void> {
+      await client.query("set local session_replication_role = replica");
+      await client.query(
+        "update public.payout_periods set status = $2::public.period_status, entered_closing_at = case when $2::text = 'open' then null else now() end where period_id = $1",
+        [current, status],
+      );
+      await client.query("set local session_replication_role = origin");
+    }
+    /**
+     * La corrida del pedido no se abre: otra conexión inserta, sin confirmar, una corrida viva del periodo (que la
+     * revisión de corridas vivas del corredor no ve), el corredor queda esperando en `open_job_run` y, al
+     * confirmarla, su corrida no se abre. Esa corrida empieza un minuto después, para que el corredor la pudiera
+     * confundir con la suya: está viva (y es completa). Con `close`, esa conexión además cierra el periodo antes de
+     * confirmar.
+     */
+    async function runnerLosesTheRun(id: string, close: boolean) {
+      const blocker = await connect();
+      let live: string | undefined;
+      // Una corrida terminada y no completa del periodo, también después: tampoco es la suya.
+      const done = (await owner.query<{ id: string }>(
+        `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
+         values ('nightly_rollup', $1, 'succeeded', now() + interval '1 minute', now() + interval '1 minute', now() + interval '2 minutes',
+                 '{"mode": "dirty"}') returning id::text`,
+        [current],
+      )).rows[0]!.id;
+      try {
+        await blocker.query("begin");
+        live = (await blocker.query<{ id: string }>(
+          `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
+           values ('nightly_rollup', $1, 'running', now() + interval '1 minute', now(), '{"mode": "full"}') returning id::text`,
+          [current],
+        )).rows[0]!.id;
+        if (close) await force(blocker, "closed");
+        const running = runner();
+        await waitBehind(owner, blocker, 1);
+        await blocker.query("commit");
+        await running;
+        return await settle(id, (status) => (close ? status === "failed" || status === "succeeded" : status !== "running"));
+      } finally {
+        await blocker.query("rollback").catch(() => undefined);
+        await blocker.end();
+        try {
+          await owner.query("begin");
+          await force(owner, "open");
+          await owner.query("commit");
+        } catch (error) {
+          await owner.query("rollback");
+          throw error;
+        }
+        await owner.query("delete from public.job_runs where id = any($1::uuid[])", [[done, live].filter(Boolean)]);
+      }
     }
 
     beforeAll(async () => {
@@ -308,38 +378,60 @@ describe("el cierre desde la aplicación, de verdad", () => {
     });
 
     it("con una consolidación viva, de cualquier periodo, no empieza, y el pedido sigue pendiente", async () => {
+      if (await paused()) return;
       const live = (await owner.query<{ id: string }>(
         `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
          values ('nightly_rollup', $1, 'running', now(), now(), '{"mode": "dirty"}') returning id::text`,
         [FIRST],
       )).rows[0]!.id;
+      const id = await byHand(current);
       try {
-        const id = await byHand(current);
-        await owner.query("call private.run_rollup_requests()");
+        await runner();
         expect((await state(id)).status).toBe("pending");
-        await owner.query("delete from private.rollup_requests where id = $1", [id]);
       } finally {
+        await forget(id);
         await owner.query("delete from public.job_runs where id = $1", [live]);
       }
     });
 
+    it("mientras `pg_cron` diga que la consolidación de la noche corre, no empieza", async () => {
+      if (await paused()) return;
+      const runid = (await owner.query<{ id: string }>(
+        `insert into cron.job_run_details (jobid, runid, job_pid, database, username, command, status, start_time)
+         select jobid, 9000000000 + (random() * 1000000)::bigint, 0, 'postgres', 'postgres', command, 'running', now()
+         from cron.job where jobname = 'nightly_rollup' returning runid::text as id`,
+      )).rows[0]!.id;
+      const id = await byHand(current);
+      try {
+        await runner();
+        expect((await state(id)).status).toBe("pending");
+      } finally {
+        await forget(id);
+        await owner.query("delete from cron.job_run_details where runid = $1", [runid]);
+      }
+    });
+
     it("si otro corredor tiene el candado, no hace nada", async () => {
+      if (await paused()) return;
       const other = await connect();
+      const id = await byHand(current);
       try {
         await other.query("select pg_advisory_lock(hashtextextended('rollup_requests', 0))");
-        const id = await byHand(current);
-        await owner.query("call private.run_rollup_requests()");
+        await runner();
         expect((await state(id)).status).toBe("pending");
-        await owner.query("delete from private.rollup_requests where id = $1", [id]);
       } finally {
+        await forget(id);
         await other.end();
       }
     });
 
     it("uno que se quedó corriendo sin consolidación viva se da por fallido a los 15 minutos", async () => {
       const id = await byHand(current, "running", "20 minutes");
-      expect(await until(id, (status) => status !== "running")).toMatchObject({ status: "failed", error: "abandoned" });
-      await owner.query("delete from private.rollup_requests where id = $1", [id]);
+      try {
+        expect(await until(id, (status) => status !== "running")).toMatchObject({ status: "failed", error: "abandoned" });
+      } finally {
+        await forget(id);
+      }
     });
 
     it("uno de un periodo que la consolidación ya no recorre falla sin correr nada", async () => {
@@ -353,8 +445,8 @@ describe("el cierre desde la aplicación, de verdad", () => {
       try {
         const id = await byHand(later);
         expect(await until(id, (status) => status !== "pending")).toMatchObject({ status: "failed", error: "not_rollable", mode: null });
-        await owner.query("delete from private.rollup_requests where id = $1", [id]);
       } finally {
+        await owner.query("delete from private.rollup_requests where period_id = $1", [later]);
         if (!existed) {
           await owner.query("begin");
           await owner.query("set local session_replication_role = replica");
@@ -364,15 +456,31 @@ describe("el cierre desde la aplicación, de verdad", () => {
       }
     });
 
+    it("si su corrida no se abre (otra del periodo tenía el lugar), el pedido vuelve a pendiente", async () => {
+      if (await paused()) return;
+      const id = await byHand(current);
+      try {
+        expect(await runnerLosesTheRun(id, false)).toMatchObject({ status: "pending", mode: null });
+      } finally {
+        await forget(id);
+      }
+    });
+
+    it("si el periodo se cerró mientras corría, el pedido falla sin darse por hecho", async () => {
+      if (await paused()) return;
+      const id = await byHand(current);
+      try {
+        expect(await runnerLosesTheRun(id, true)).toMatchObject({ status: "failed", error: "closed" });
+      } finally {
+        await forget(id);
+      }
+    });
+
     it("el pedido de finanzas lo corre el corredor: un recálculo completo, y el pedido termina con esa corrida", async () => {
       const answer = await asServer((client) => call(client, "request_rollup", current));
       expect(answer.outcome).toBe("requested");
       const id = answer.request_id as string;
-      if (await paused()) {
-        await owner.query("call private.run_rollup_requests()");
-        expect((await state(id)).status).toBe("pending");
-        return;
-      }
+      if (await paused()) return;
       expect(await until(id, (status) => status === "succeeded" || status === "failed")).toEqual({
         status: "succeeded",
         error: null,

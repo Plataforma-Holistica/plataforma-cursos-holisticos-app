@@ -9,7 +9,7 @@
 -- La comprobación al confirmar corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(52);
+select plan(53);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6050000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -356,6 +356,9 @@ select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cie
   'un total de 0 queda debajo aunque el mínimo sea 0');
 select ok(private.close_export_csv((select (r ->> 'close_run_id')::uuid from cierre), 0) like '%,358.43,53.76,no' || E'\r\n' || '%',
   'y uno que pasa de 0, no');
+select is((select jsonb_agg(e -> 'below_minimum' order by (e ->> 'total_cents')::bigint)
+           from jsonb_array_elements(private.finance_run_teachers((select (r ->> 'close_run_id')::uuid from cierre), 0)) e),
+  '[true, false, false, false]'::jsonb, 'la lectura del ensayo y cierre usa la misma regla');
 
 select * from finish();
 rollback;

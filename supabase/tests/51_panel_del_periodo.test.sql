@@ -203,12 +203,14 @@ select ok(exists (select 1 from private.schema_violations() where problem = 'clo
   've el trabajo de los pedidos apagado');
 select cron.alter_job((select jobid from cron.job where jobname = 'rollup_requests'), active := true);
 -- La pausa del corredor está atada al horario de la consolidación de cada noche.
-select ok(exists (select 1 from cron.job where jobname = 'nightly_rollup' and schedule = '0 9 * * *'),
+select ok(exists (select 1 from cron.job where jobname = 'nightly_rollup' and schedule = '0 9 * * *')
+          and current_setting('cron.timezone') in ('GMT', 'UTC'),
   'la consolidación de cada noche es a las 09:00 UTC; si cambia, cambia la pausa del corredor');
 select is(array[private.rollup_requests_paused('2026-10-27 07:59:59+00'), private.rollup_requests_paused('2026-10-27 08:00:00+00'),
                 private.rollup_requests_paused('2026-10-27 08:59:59+00'), private.rollup_requests_paused('2026-10-27 09:00:00+00'),
+                private.rollup_requests_paused('2026-10-27 09:29:59+00'), private.rollup_requests_paused('2026-10-27 09:30:00+00'),
                 private.rollup_requests_paused('2026-10-27 02:30:00-06')],
-  array[false, true, true, false, true], 'el corredor no empieza en la hora antes de la noche, en UTC');
+  array[false, true, true, true, true, false, true], 'el corredor no empieza de las 08:00 a las 09:30 UTC');
 select is((select count(*)::integer from private.schema_violations()), 0, 'todo en su lugar otra vez');
 
 -- ---------------------------------------------------------------------------------------

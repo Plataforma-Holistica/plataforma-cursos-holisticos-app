@@ -435,13 +435,18 @@ $$;
 revoke all on function private.request_rollup(public.period_id) from public;
 grant execute on function private.request_rollup(public.period_id) to app_service;
 
--- La pausa antes de la consolidación de cada noche (`pg_cron`, `0 9 * * *` en UTC): un recálculo completo
--- tarda minutos, y si a las 09:00 todavía tiene la corrida de su periodo, la de la noche lo salta y ese
--- periodo no pasa a en cierre esa noche. De las 08:00 a las 09:00 UTC el corredor no empieza nada (la de la
--- noche, mientras corre, también lo detiene). `51_panel_del_periodo` exige el horario de la noche.
+-- La pausa alrededor de la consolidación de cada noche (`pg_cron`, `0 9 * * *` en UTC): un recálculo
+-- completo tarda minutos, y si la noche encuentra la corrida de su periodo, lo salta y ese periodo no pasa a
+-- en cierre esa noche. De las 08:00 a las 09:30 UTC el corredor no empieza nada: antes, para terminar a
+-- tiempo; después de las 09:00, porque la noche toma la foto y confirma antes de abrir su primera corrida.
+-- Mientras `pg_cron` diga que la noche sigue corriendo, tampoco (en el corredor). `51_panel_del_periodo`
+-- exige el horario de la noche y que `pg_cron` esté en UTC.
 create function private.rollup_requests_paused(p_at timestamptz) returns boolean
 language sql immutable set search_path = ''
-as $$ select pg_catalog.date_part('hour', p_at at time zone 'UTC') = 8 $$;
+as $$
+  select pg_catalog.date_part('hour', p_at at time zone 'UTC') = 8
+         or (pg_catalog.date_part('hour', p_at at time zone 'UTC') = 9 and pg_catalog.date_part('minute', p_at at time zone 'UTC') < 30)
+$$;
 revoke all on function private.rollup_requests_paused(timestamptz) from public;
 
 -- Correr el pedido más viejo, uno a la vez: `nightly_rollup(true, periodo)`. Como ella, es un procedimiento
@@ -452,7 +457,8 @@ revoke all on function private.rollup_requests_paused(timestamptz) from public;
 -- corriendo; si no hay una terminada (otra corrida del periodo tenía el lugar), el pedido vuelve a
 -- pendiente. Si el periodo se cerró mientras tanto, el pedido falla (`closed`): no recalculó nada. Uno que
 -- se quedó corriendo sin consolidación viva (la conexión se cayó, o la corrida lanzó) se da por fallido a
--- los 15 minutos (`abandoned`).
+-- los 15 minutos (`abandoned`). Se llama solo desde una sesión que se cierra (`pg_cron` abre una por
+-- corrida): si algo lanza a la mitad, el candado de la sesión se suelta al cerrarla.
 create procedure private.run_rollup_requests()
 language plpgsql
 as $$
@@ -480,6 +486,9 @@ begin
   commit;
 
   if not private.rollup_requests_paused(pg_catalog.clock_timestamp())
+     and not exists (select 1 from cron.job_run_details d join cron.job c on c.jobid = d.jobid
+                     where c.jobname = 'nightly_rollup' and d.status in ('starting', 'running')
+                       and d.start_time >= pg_catalog.clock_timestamp() - interval '1 day')
      and not exists (select 1 from private.rollup_requests q where q.status = 'running')
      and not exists (select 1 from public.job_runs j
                      where j.job = 'nightly_rollup' and j.status = 'running'
