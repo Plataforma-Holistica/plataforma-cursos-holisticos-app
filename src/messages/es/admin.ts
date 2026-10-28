@@ -460,6 +460,7 @@ export const admin = defineMessages({
     collectedContext: "{net} sin IVA ni comisión, de {count} cobros.",
     assigned: "Asignado al periodo",
     assignedContext: "Lo que reparte el cierre, de {count} alumnos, con la parte de los anuales cobrados antes.",
+    assignedClosedContext: "Lo que repartió el cierre, con la parte de los anuales cobrados antes.",
     students: "Alumnos activos",
     pool: "Bote",
     poolPercent: "Porcentaje aplicado",

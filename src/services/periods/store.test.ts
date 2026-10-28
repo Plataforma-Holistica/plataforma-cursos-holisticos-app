@@ -18,13 +18,13 @@ const claims = { userId: "a0000000-0000-4000-8000-000000000001", aal: "aal2", se
 const pgError = (code: string) => toDatabaseError({ code, severity: "ERROR", message: "x" });
 
 /** Un `asServer` de mentira: lanza los errores que se le digan, uno por transacción, y después contesta `outcome`. */
-function runnerWith(outcome: unknown, failures: unknown[] = []) {
+function runnerWith(outcome: unknown, failures: unknown[] = [], recent = false) {
   const opened: ServerActor[] = [];
   const queue = [...failures];
   const tx: Tx = {
     query<Row>(_query: SqlQuery, row: ZodType<Row>): Promise<Row[]> {
-      // La revisión de «un ensayo por minuto» contesta que no hay uno reciente.
-      return Promise.resolve([row.parse({ outcome, recent: false })]);
+      // La revisión de «un ensayo por minuto» contesta `recent`; la llamada, `outcome`.
+      return Promise.resolve([row.parse({ outcome, recent })]);
     },
     execute: () => Promise.reject(new Error("Estas consultas no ejecutan sentencias.")),
   };
@@ -45,6 +45,16 @@ describe("ensayar y cerrar", () => {
     const close = runnerWith("closed");
     expect(await close.store.closePeriod(claims, 202710)).toBe("closed");
     expect(close.opened).toEqual([{ claims, reason: "period_close" }]);
+  });
+
+  it("con un ensayo de hace menos de un minuto contesta «demasiado pronto», sin ensayar", async () => {
+    expect(await runnerWith("rehearsed", [], true).store.rehearse(claims, 202710)).toBe("too_soon");
+  });
+
+  it("un choque de candados al ensayar también se intenta una vez más", async () => {
+    const once = runnerWith("rehearsed", [pgError("40P01")]);
+    expect(await once.store.rehearse(claims, 202710)).toBe("rehearsed");
+    expect(once.opened).toHaveLength(2);
   });
 
   it("un choque de candados se intenta una vez más, y solo una", async () => {

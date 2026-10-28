@@ -207,7 +207,8 @@ export function periodView(read: Extract<FinancePeriod, { period: object }>, ale
       label: text.assigned,
       // Cerrado, lo que congeló el cierre: lo asignado de ahora podría ya no ser lo que se repartió.
       value: money(read.close?.netRevenueCents ?? read.assigned.baseCents),
-      context: t(text.assignedContext, { count: read.assigned.students }),
+      // El conteo de ahora no es el congelado: cerrado, no se dice.
+      context: read.close?.netRevenueCents == null ? t(text.assignedContext, { count: read.assigned.students }) : text.assignedClosedContext,
       tag: partialNow,
     },
     ...figureTiles(source, sourceTag),
@@ -410,12 +411,17 @@ function recent(iso: string, now: string): boolean {
 
 /** Si PA-80 pinta ese aviso: «cerrado» solo con el periodo cerrado; «ensayado» solo con un ensayo de hace un momento. */
 export function acceptedCloseNotice(notice: "period_rehearsed" | "period_closed" | null, read: Extract<FinanceClose, { period: object }>, now: string): boolean {
-  if (notice === "period_closed") return read.close !== null;
-  if (notice === "period_rehearsed") return read.rehearsal !== null && recent(read.rehearsal.at, now);
+  if (notice === "period_closed") return read.close !== null && read.close.at !== null && recent(read.close.at, now);
+  if (notice === "period_rehearsed") return read.rehearsal !== null && read.rehearsal.status === "succeeded" && recent(read.rehearsal.at, now);
   return false;
 }
 
-/** Si PA-79 pinta «Recálculo pedido»: solo con un pedido de hace un momento. */
+/**
+ * Si PA-79 pinta «Recálculo pedido»: con un pedido de hace un momento, o con uno pendiente o corriendo
+ * (pedirlo otra vez contesta «ya pedido», y lo que se quería sigue en marcha).
+ */
 export function acceptedRollupNotice(read: Extract<FinancePeriod, { period: object }>, now: string): boolean {
-  return read.rollupRequest !== null && recent(read.rollupRequest.requestedAt, now);
+  const request = read.rollupRequest;
+  if (request === null) return false;
+  return request.status === "pending" || request.status === "running" || recent(request.requestedAt, now);
 }

@@ -432,7 +432,15 @@ que no se ve leyendo un solo archivo:
   `tests/e2e/equipo/camino.equipo.ts`, dos casos con meses de 2040 que llegan hasta la respuesta del cierre
   (cerrar va en orden y el mes en curso sigue abierto en ese camino). Para el B: la sección de periodos lee
   `anomalyAlerts`, así que una prueba de página que monte el comodín simula también
-  `@/services/periods/periods`.
+  `@/services/periods/periods`. Dos cosas de las revisiones del diff: los avisos de lo que salió bien viajan
+  en una cookie sin periodo, así que cada pantalla los pinta solo si lo que tiene delante es lo que el aviso
+  dice (`acceptedCloseNotice`, `acceptedRollupNotice`); y «Cerrar periodo» se ofrece solo si el último ensayo
+  salió bien, con datos finales y con la suma cuadrada. **Límite conocido, decidido con Sergio el
+  2026-10-27:** `close_period` acepta cualquier ensayo con datos finales cuya entrada sea la de ahora, y
+  la pantalla muestra el último; si la entrada vuelve a la de un ensayo anterior (se revierte una exclusión
+  y se recalcula), o alguien ensaya entre abrir el diálogo y confirmar, se congela un reparto que quien
+  confirma no vio. Lo cierra la solicitud corta que sigue a esta, con migración: confirmar lleva el ensayo
+  mostrado y la base exige que sea el último y de la entrada de ahora.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

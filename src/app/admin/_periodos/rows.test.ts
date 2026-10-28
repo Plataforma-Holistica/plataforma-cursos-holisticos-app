@@ -343,7 +343,7 @@ describe("closeView (PA-80)", () => {
 
 describe("los avisos de lo que salió bien son del periodo que se ve (revisión de la 70)", () => {
   it("«Periodo cerrado» solo en un periodo cerrado", () => {
-    const run = { ...figures, at: "2027-11-03T18:00:00Z", closedBy: null, export: null, teachers: [] };
+    const run = { ...figures, at: "2027-11-02T17:59:30Z", closedBy: null, export: null, teachers: [] };
     expect(acceptedCloseNotice("period_closed", close({ close: run }, "closed"), NOW)).toBe(true);
     expect(acceptedCloseNotice("period_closed", close(), NOW)).toBe(false);
   });
@@ -359,7 +359,13 @@ describe("los avisos de lo que salió bien son del periodo que se ve (revisión 
   it("«Recálculo pedido» solo si su último pedido es de hace un momento", () => {
     const asked = (iso: string) => period({ rollupRequest: { status: "pending", requestedAt: iso, startedAt: null, finishedAt: null } });
     expect(acceptedRollupNotice(asked("2027-11-02T17:59:30Z"), NOW)).toBe(true);
-    expect(acceptedRollupNotice(asked("2027-11-02T17:50:00Z"), NOW)).toBe(false);
+    // Uno viejo que ya terminó no es de este envío.
+    expect(
+      acceptedRollupNotice(
+        period({ rollupRequest: { status: "succeeded", requestedAt: "2027-11-02T17:50:00Z", startedAt: "2027-11-02T17:51:00Z", finishedAt: "2027-11-02T17:55:00Z" } }),
+        NOW,
+      ),
+    ).toBe(false);
     expect(acceptedRollupNotice(period(), NOW)).toBe(false);
   });
 });
@@ -390,5 +396,40 @@ describe("lo asignado a un periodo cerrado es lo que congeló el cierre (revisi�
     const closed = periodView(period({ close: { ...figures, netRevenueCents: 3_700_000 }, rehearsal: null }, "closed"), null, NOW);
     expect(closed.assigned.value).toBe("$37,000.00");
     expect(periodView(period(), null, NOW).assigned.value).toBe("$38,000.00");
+  });
+});
+
+describe("los avisos, más finos (segunda revisión de la 70)", () => {
+  const run = { ...figures, closedBy: null, export: null, teachers: [] };
+  it("«Periodo cerrado» solo si este cierre es de hace un momento", () => {
+    expect(acceptedCloseNotice("period_closed", close({ close: { ...run, at: "2027-11-02T17:59:30Z" } }, "closed"), NOW)).toBe(true);
+    expect(acceptedCloseNotice("period_closed", close({ close: { ...run, at: "2027-08-02T17:59:30Z" } }, "closed"), NOW)).toBe(false);
+    expect(acceptedCloseNotice("period_closed", close({ close: { ...run, at: null } }, "closed"), NOW)).toBe(false);
+  });
+
+  it("«Ensayo listo» no sale junto a un ensayo que falló", () => {
+    const failed = close({ rehearsal: { ...close().rehearsal!, at: "2027-11-02T17:59:30Z", status: "failed" } });
+    expect(acceptedCloseNotice("period_rehearsed", failed, NOW)).toBe(false);
+  });
+
+  it("la ventana del aviso: hasta un minuto y medio antes, y unos segundos después por el reloj", () => {
+    const at = (iso: string) => close({ rehearsal: { ...close().rehearsal!, at: iso } });
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T17:58:31Z"), NOW)).toBe(true);
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T17:58:29Z"), NOW)).toBe(false);
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T18:00:04Z"), NOW)).toBe(true);
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T18:00:06Z"), NOW)).toBe(false);
+  });
+
+  it("«Recálculo pedido» también con un pedido viejo que sigue pendiente o corriendo (ya pedido)", () => {
+    const old = (status: "pending" | "running" | "succeeded") =>
+      period({ rollupRequest: { status, requestedAt: "2027-11-02T08:30:00Z", startedAt: status === "pending" ? null : "2027-11-02T09:31:00Z", finishedAt: null } });
+    expect(acceptedRollupNotice(old("pending"), NOW)).toBe(true);
+    expect(acceptedRollupNotice(old("running"), NOW)).toBe(true);
+    expect(acceptedRollupNotice(old("succeeded"), NOW)).toBe(false);
+  });
+
+  it("cerrado: lo asignado no dice un conteo de alumnos de ahora", () => {
+    const closed = periodView(period({ close: { ...figures, netRevenueCents: 3_700_000 }, rehearsal: null }, "closed"), null, NOW);
+    expect(closed.assigned.context).toBe(text.assignedClosedContext);
   });
 });
