@@ -208,7 +208,9 @@ describe("liberar, de verdad", () => {
     expect(await payoutOf(203703)).toMatchObject({ status: "awaiting_invoice", subtotal: "73000" });
   });
 
-  it("una retención que llega mientras se libera espera, y retiene lo liberado; al soltarla vuelve a donde estaba", async () => {
+  // Cambió con el requisito (T-605, cuarta solicitud): retener lleva el estado que se vio. Antes la retención
+  // que esperaba retenía lo ya liberado; ahora quien la pidió se entera de que ya se liberó.
+  it("una retención que llega mientras se libera espera, y dice que ya se liberó; con el estado de ahora retiene, y al soltarla vuelve a donde estaba", async () => {
     expect((await bonus(80000, 203704)).outcome).toBe("captured");
     const payout = (await payoutOf(203704))!.id;
     const releaser = await connect();
@@ -219,11 +221,15 @@ describe("liberar, de verdad", () => {
       expect((await outcomeOf(releaser, "release_payouts", 203704)).outcome).toBe("released");
       await holder.query("begin");
       await actAs(holder, financeB);
-      const waiting = call(holder, "private.hold_payout($1, 'Se investiga.')", [payout]);
+      const waiting = call(holder, "private.hold_payout($1, 'Se investiga.', 'calculated')", [payout]);
       await waitBehind(owner, releaser, 1);
       await retire(releaser, financeA);
       await releaser.query("commit");
-      expect(await waiting).toEqual({ outcome: "held", from: "awaiting_invoice" });
+      expect(await waiting).toEqual({ outcome: "changed", status: "awaiting_invoice" });
+      expect(await call(holder, "private.hold_payout($1, 'Se investiga.', 'awaiting_invoice')", [payout])).toEqual({
+        outcome: "held",
+        from: "awaiting_invoice",
+      });
       await retire(holder, financeB);
       await holder.query("commit");
     } finally {
@@ -232,7 +238,7 @@ describe("liberar, de verdad", () => {
         await client.end();
       }
     }
-    expect(await asFinance(financeA, (client) => call(client, "private.unhold_payout($1, 'Todo en orden.')", [payout]))).toEqual({
+    expect(await asFinance(financeA, (client) => call(client, "private.unhold_payout($1, 'Todo en orden.', private.unhold_preview($1) ->> 'fingerprint')", [payout]))).toEqual({
       outcome: "released_from_hold",
       to: "awaiting_invoice",
       period_status: "closed",

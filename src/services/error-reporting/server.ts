@@ -65,6 +65,13 @@ const FAILURES = {
     "Un ensayo del cierre falló dentro de la base (rehearse_close contestó failed): quedó la corrida fallida del ensayo con el texto del error, que la pantalla no muestra. Revisar ese texto: es un defecto del cálculo o falta un parámetro.",
   close_unbalanced:
     "Al confirmar un cierre, la comprobación diferida rechazó la suma (23514: el reparto no es igual al bote, o la exportación no es la que regenera la base). No se cerró nada. Es un defecto del cálculo: revisar check_period_balanced y el registro de la base.",
+  payouts_unavailable: "No se pudieron leer las liquidaciones de un periodo: quien tiene finanzas no pudo verlas (PA-81).",
+  payout_change_unavailable:
+    "Una decisión de finanzas sobre las liquidaciones (liberar, retener, soltar, confirmar o anular el bono del fundador) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y la pantalla vuelve a leer las liquidaciones.",
+  release_timed_out:
+    "Liberar las liquidaciones, o soltar una retenida que se libera ahí mismo, pasó del tope de tiempo de la base (statement_timeout, 57014): no se guardó nada y se le pidió a finanzas intentar de nuevo. Si se repite, liberar ya no cabe en una transacción del servidor: medirlo con test:escala.",
+  release_unbalanced:
+    "Al confirmar una liberación, la comprobación diferida de lo liberado la rechazó (23514, check_payout_released): no se liberó nada. Es un defecto del cálculo: revisar assert_payout_released y el registro de la base.",
   legal_text_unavailable:"No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",

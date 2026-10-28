@@ -24,10 +24,26 @@ import {
   type RunFigures,
   type RunTeacher,
 } from "./panel";
+import {
+  BONUS_STATUSES,
+  CONFIRM_ANSWERS,
+  HOLD_ANSWERS,
+  PAYOUT_STATUSES,
+  RELEASE_ANSWERS,
+  UNHOLD_ANSWERS,
+  VOID_ANSWERS,
+  type ConfirmDecided,
+  type FinancePayouts,
+  type HoldDecided,
+  type Released,
+  type UnholdDecided,
+  type VoidAnswer,
+} from "./payouts";
 
 // Lo que el servicio de los periodos le pregunta a la base (05 §8.6; T-605): las tres lecturas de
-// finanzas, el pedido de recálculo, el ensayo, el cierre y la descarga de la exportación. Cada función
-// recibe la transacción ya abierta como servidor; ninguna recibe quién actúa.
+// finanzas, el pedido de recálculo, el ensayo, el cierre y la descarga de la exportación; y, desde la
+// cuarta solicitud, las liquidaciones de PA-81 (leerlas, liberar, retener, soltar y el bono del fundador).
+// Cada función recibe la transacción ya abierta como servidor; ninguna recibe quién actúa.
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const id = z.string().regex(ID);
@@ -388,4 +404,157 @@ export async function askClose(tx: Tx, periodId: number, runId: string): Promise
 /** La exportación de un cierre (`private.close_export_download()`), que deja la descarga en la auditoría. */
 export async function askDownload(tx: Tx, runId: string): Promise<unknown> {
   return readData(tx, sql`select private.close_export_download(${runId}::uuid) as data`);
+}
+
+// ---------------------------------------------------------------------------------------
+// Las liquidaciones del periodo (PA-81; T-605, cuarta solicitud).
+
+const payoutStatus = z.enum(PAYOUT_STATUSES);
+const fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
+const payoutRow = z.strictObject({
+  teacher_id: id,
+  name: z.string().nullable(),
+  payout_id: id.nullable(),
+  status: payoutStatus.nullable(),
+  held_from_status: payoutStatus.nullable(),
+  hold_reason: z.string().nullable(),
+  held_at: at.nullable(),
+  released_at: at.nullable(),
+  pool_cents: cents,
+  founder_bonus: z
+    .strictObject({ bonus_id: id, status: z.enum(BONUS_STATUSES), amount_cents: cents, basis_cents: cents.nullable() })
+    .nullable(),
+  manual_bonuses_cents: cents,
+  adjustments_cents: cents,
+  balance_cents: cents,
+  subtotal_cents: cents,
+  estimated: z.boolean(),
+  reaches_minimum: z.boolean().nullable(),
+  unhold_fingerprint: fingerprint.nullable(),
+});
+const payoutsSchema = z.strictObject({
+  fresh_code: z.boolean(),
+  period: z.strictObject({
+    period_id: period,
+    status,
+    closed_at: at.nullable(),
+    payouts_released_at: at.nullable(),
+    paid_at: at.nullable(),
+    minimum_cents: cents.nullable(),
+  }),
+  release: z.strictObject({ fingerprint, pending_founder_bonuses: count }).nullable(),
+  payouts: z.array(payoutRow),
+});
+
+/** La lectura de PA-81. Nula: quien actúa no tiene finanzas. Otra forma lanza. */
+export function payoutsReadOf(raw: unknown): FinancePayouts | null {
+  if (raw === null) return null;
+  const none = missing.safeParse(raw);
+  if (none.success) return { freshCode: none.data.fresh_code, period: null };
+  const read = payoutsSchema.parse(raw);
+  const p = read.period;
+  return {
+    freshCode: read.fresh_code,
+    period: {
+      periodId: p.period_id,
+      status: p.status,
+      closedAt: p.closed_at,
+      payoutsReleasedAt: p.payouts_released_at,
+      paidAt: p.paid_at,
+      minimumCents: p.minimum_cents,
+    },
+    release: read.release === null ? null : { fingerprint: read.release.fingerprint, pendingFounderBonuses: read.release.pending_founder_bonuses },
+    payouts: read.payouts.map((row) => ({
+      teacherId: row.teacher_id,
+      name: row.name,
+      payoutId: row.payout_id,
+      status: row.status,
+      heldFromStatus: row.held_from_status,
+      holdReason: row.hold_reason,
+      heldAt: row.held_at,
+      releasedAt: row.released_at,
+      poolCents: row.pool_cents,
+      founderBonus:
+        row.founder_bonus === null
+          ? null
+          : {
+              bonusId: row.founder_bonus.bonus_id,
+              status: row.founder_bonus.status,
+              amountCents: row.founder_bonus.amount_cents,
+              basisCents: row.founder_bonus.basis_cents,
+            },
+      manualBonusesCents: row.manual_bonuses_cents,
+      adjustmentsCents: row.adjustments_cents,
+      balanceCents: row.balance_cents,
+      subtotalCents: row.subtotal_cents,
+      estimated: row.estimated,
+      reachesMinimum: row.reaches_minimum,
+      unholdFingerprint: row.unhold_fingerprint,
+    })),
+  };
+}
+
+const answered = z.looseObject({ outcome: z.string() });
+const releasedSchema = z.looseObject({ period: z.number().int().optional(), period_status: status.optional() });
+const heldSchema = z.looseObject({ status: payoutStatus.optional() });
+const unheldSchema = z.looseObject({ to: payoutStatus.optional() });
+const decidedSchema = z.looseObject({ status: z.enum(BONUS_STATUSES).optional() });
+
+/** Lo que contestó liberar. Una respuesta fuera de su lista lanza. */
+export function releasedOf(raw: unknown): Released {
+  const answer = answerIn(RELEASE_ANSWERS, answered.parse(raw).outcome);
+  const extra = releasedSchema.parse(raw);
+  return {
+    answer,
+    blockingPeriod: answer === "previous_not_released" ? (extra.period ?? null) : null,
+    periodStatus: answer === "released" ? (extra.period_status ?? null) : null,
+  };
+}
+export function heldOf(raw: unknown): HoldDecided {
+  const answer = answerIn(HOLD_ANSWERS, answered.parse(raw).outcome);
+  return { answer, status: answer === "changed" || answer === "not_holdable" ? (heldSchema.parse(raw).status ?? null) : null };
+}
+export function unheldOf(raw: unknown): UnholdDecided {
+  const answer = answerIn(UNHOLD_ANSWERS, answered.parse(raw).outcome);
+  return { answer, to: answer === "released_from_hold" ? (unheldSchema.parse(raw).to ?? null) : null };
+}
+export function confirmedOf(raw: unknown): ConfirmDecided {
+  const answer = answerIn(CONFIRM_ANSWERS, answered.parse(raw).outcome);
+  return { answer, status: answer === "already_decided" ? (decidedSchema.parse(raw).status ?? null) : null };
+}
+export const voidedOf = (raw: unknown): VoidAnswer => answerIn(VOID_ANSWERS, answered.parse(raw).outcome);
+
+export async function readPayouts(tx: Tx, periodId: number): Promise<FinancePayouts | null> {
+  return payoutsReadOf(await readData(tx, sql`select private.finance_payouts(${periodId}::integer) as data`));
+}
+
+/** Libera (`private.release_payouts()`) con la huella de lo que se vio. Lo liberado se comprueba al confirmar: un 23514 sale del `commit`. */
+export async function askRelease(tx: Tx, periodId: number, seen: string): Promise<unknown> {
+  return readData(tx, sql`select private.release_payouts(${periodId}::integer, ${seen}::text) as data`);
+}
+
+/** Retiene (`private.hold_payout()`) con el estado que se vio. Sin alerta: PA-81 no la enlaza todavía. */
+export async function askHold(tx: Tx, payoutId: string, reason: string, seen: string): Promise<unknown> {
+  return readData(tx, sql`select private.hold_payout(${payoutId}::uuid, ${reason}::text, ${seen}::text) as data`);
+}
+
+/** Suelta (`private.unhold_payout()`) con la huella de lo que se vio; si se libera ahí mismo, se comprueba al confirmar. */
+export async function askUnhold(tx: Tx, payoutId: string, note: string | null, seen: string): Promise<unknown> {
+  return readData(tx, sql`select private.unhold_payout(${payoutId}::uuid, ${note}::text, ${seen}::text) as data`);
+}
+
+export async function askConfirmFounder(tx: Tx, bonusId: string): Promise<unknown> {
+  return readData(tx, sql`select private.confirm_founder_bonus(${bonusId}::uuid) as data`);
+}
+
+/**
+ * Anula el bono (`private.void_bonus()`) solo si es el del fundador de ese periodo, leído en la misma
+ * transacción: `void_bonus` anula cualquiera, y capturar y anular los demás es de PA-83. El tipo de un bono no
+ * cambia, así que leerlo antes basta. Sin finanzas la lectura es nula, y no se anula nada.
+ */
+export async function askVoidFounder(tx: Tx, periodId: number, bonusId: string, reason: string): Promise<unknown> {
+  const read = await readPayouts(tx, periodId);
+  if (read === null) return { outcome: "forbidden" };
+  if (read.period === null || !read.payouts.some((row) => row.founderBonus?.bonusId === bonusId)) return { outcome: "not_found" };
+  return readData(tx, sql`select private.void_bonus(${bonusId}::uuid, ${reason}::text) as data`);
 }

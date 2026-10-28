@@ -80,6 +80,7 @@ declare
   v_period integer;
   v_periods integer[] := array(select (to_char(date '2026-10-01' + make_interval(months => m), 'YYYYMM'))::integer from generate_series(0, 11) m);
   v_r jsonb;
+  v_preview jsonb;
   v_problems text[];
   v_seen text[];
   v_y record;
@@ -161,16 +162,26 @@ begin
           end if;
         end loop;
         for v_y in select y.id from public.payouts y where y.period_id = v_period and y.status = 'calculated' and random() < 0.15 loop
-          perform private.hold_payout(v_y.id, 'Retenida al azar.');
+          perform private.hold_payout(v_y.id, 'Retenida al azar.', 'calculated');
         end loop;
         -- Liberar, y a veces soltar lo retenido de este mes o de antes.
-        v_r := private.release_payouts(v_period);
+        v_preview := private.release_preview(v_period);
+        v_r := private.release_payouts(v_period, v_preview ->> 'fingerprint');
         if v_r ->> 'outcome' is distinct from 'released' then
           v_problems := v_problems || format('%s no se liberó: %s', v_period, v_r);
           exit;
         end if;
+        -- La vista de liberar (T-605, cuarta solicitud) dice lo que liberar escribió: el bruto y si llega al mínimo.
+        select v_problems || array_agg(format('%s: la vista decía %s, se liberó %s %s', v_period, x, y.status, y.subtotal_cents))
+        into v_problems
+        from jsonb_array_elements(v_preview -> 'rows') x
+        join public.payouts y on y.period_id = v_period and y.teacher_id = (x ->> 'teacher_id')::uuid
+        where x ->> 'status' is distinct from 'on_hold'
+          and (y.subtotal_cents <> (x ->> 'subtotal_cents')::bigint
+               or (y.status = 'awaiting_invoice') <> (x ->> 'reaches_minimum')::boolean);
+        v_problems := coalesce(v_problems, '{}');
         for v_y in select y.id from public.payouts y where y.status = 'on_hold' and random() < 0.5 order by y.period_id, y.id loop
-          perform private.unhold_payout(v_y.id, 'Suelta al azar.');
+          perform private.unhold_payout(v_y.id, 'Suelta al azar.', private.unhold_preview(v_y.id) ->> 'fingerprint');
         end loop;
         -- Un ajuste con signo, de este mes al siguiente.
         if random() < 0.5 then

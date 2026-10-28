@@ -62,7 +62,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.release_payouts(p_period);
+  v := private.release_payouts(p_period, pruebas.vista(p_period));
   if v ->> 'outcome' <> 'released' then
     raise exception 'no liberó: %', v;
   end if;
@@ -76,6 +76,10 @@ begin
 end
 $$;
 create function pruebas.o(p jsonb) returns text language sql immutable as $$ select p ->> 'outcome' $$;
+-- Desde PA-81 (T-605, cuarta solicitud) liberar lleva la huella de lo que se vio, y retener el estado que se vio.
+create function pruebas.vista(p_period integer) returns text language sql stable
+as $$ select private.release_preview(p_period) ->> 'fingerprint' $$;
+create function pruebas.estado_y(p_id uuid) returns text language sql stable as $$ select status::text from public.payouts where id = p_id $$;
 -- Una sentencia a mano como finanzas, con la comprobación de lo liberado adelantada; si pasa, lanza P0002
 -- para deshacerla.
 create function pruebas.a_mano(p_sql text) returns void language plpgsql as $$
@@ -219,36 +223,38 @@ select is((select array_agg(p.proname::text order by p.proname) from pg_proc p j
   array['capture_adjustment', 'capture_bonus', 'check_payout_released', 'confirm_founder_bonus', 'hold_payout',
         'release_payouts', 'unhold_payout', 'void_bonus'],
   'como el dueño corren las funciones de finanzas y la comprobación al confirmar');
-select ok(not has_function_privilege('app_service', 'private.release_payouts(public.period_id)', 'execute')
+-- Cambió con el requisito (T-605, cuarta solicitud): desde PA-81 el servidor libera, retiene y suelta (`55_liquidaciones_del_periodo`).
+select ok(has_function_privilege('app_service', 'private.release_payouts(public.period_id, text)', 'execute')
+          and not has_function_privilege('app_service', 'private.capture_bonus(uuid, text, bigint, public.period_id, text)', 'execute')
           and not has_function_privilege('authenticated', 'private.capture_bonus(uuid, text, bigint, public.period_id, text)', 'execute'),
-  'el servidor todavía no libera ni captura (PA-81 a PA-83, T-605)');
+  'el servidor libera (PA-81), pero todavía no captura (PA-83)');
 
 -- ---------------------------------------------------------------------------------------
 -- Octubre: el ejemplo del PRD, liberado con un mínimo de 100 MXN.
 
 select pruebas.en_cierre(202610);
 select is(pruebas.o(pruebas.cierra(202610)), 'closed', 'octubre se cierra');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202610)', pruebas.contenido())), 'forbidden', 'sin finanzas no se libera');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610)), pruebas.contenido())), 'forbidden', 'sin finanzas no se libera');
 select pruebas.sin_codigo(pruebas.finanzas());
-select is(pruebas.o(pruebas.hace('private.release_payouts(202610)')), 'needs_fresh_code', 'sin código reciente, tampoco');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610)))), 'needs_fresh_code', 'sin código reciente, tampoco');
 select pruebas.equipar(pruebas.finanzas());
-select is(pruebas.o(pruebas.hace('private.release_payouts(null)')), 'malformed', 'sin periodo');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202611)')), 'not_closed', 'un periodo abierto no se libera');
-select is(pruebas.o(pruebas.hace('private.release_payouts(203601)')), 'not_closed', 'ni uno sin fila');
-select is(pruebas.hace('private.release_payouts(202610)'), '{"outcome": "founder_bonuses_pending", "count": 1}'::jsonb,
+select is(pruebas.o(pruebas.hace('private.release_payouts(null, ''x'')')), 'malformed', 'sin periodo');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202611, pruebas.vista(202611)))), 'not_closed', 'un periodo abierto no se libera');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 203601, pruebas.vista(203601)))), 'not_closed', 'ni uno sin fila');
+select is(pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610))), '{"outcome": "founder_bonuses_pending", "count": 1}'::jsonb,
   'con el bono del fundador sin decidir, no se libera');
 select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202610$$, '23514', null,
   'ni marcándolo a mano: el guardián también lo exige');
 select pruebas.como_dueno();
 -- Con las tres liquidaciones retenidas no queda ninguna calculada: lo detiene el bono propuesto.
-select is(array_agg(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y(m, 202610), 'Un momento.')))),
+select is(array_agg(pruebas.o(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y(m, 202610), pruebas.estado_y(pruebas.y(m, 202610)), 'Un momento.')))),
           array['held', 'held', 'held']) from unnest(array['M1', 'M2', 'M3']) m;
 select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set payouts_released_at = now() where period_id = 202610$$, '23514', null,
   'ni con sus liquidaciones retenidas');
 select pruebas.como_dueno();
-select is(array_agg(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null)', pruebas.y(m, 202610))))),
+select is(array_agg(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null, %L)', pruebas.y(m, 202610), private.unhold_preview(pruebas.y(m, 202610)) ->> 'fingerprint')))),
           array['released_from_hold', 'released_from_hold', 'released_from_hold']) from unnest(array['M1', 'M2', 'M3']) m;
 create temporary table semilla as
   select id from public.business_parameters where key = 'PAGO_MINIMO' and canceled_at is null and effective_period_id = 202610;
@@ -259,9 +265,9 @@ select is(pruebas.o(pruebas.hace(format('private.confirm_founder_bonus(%L)', (se
   'confirmed', 'finanzas confirma el bono del fundador');
 select is(pruebas.hace(format('private.confirm_founder_bonus(%L)', (select id from public.bonuses where period_id = 202610))),
   '{"outcome": "already_decided", "status": "confirmed"}'::jsonb, 'una vez');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202610)')), 'no_minimum', 'sin el pago mínimo del periodo no se libera');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610)))), 'no_minimum', 'sin el pago mínimo del periodo no se libera');
 select pruebas.parametro('PAGO_MINIMO', '10000', 202610);
-create temporary table liberacion as select pruebas.hace('private.release_payouts(202610)') as r;
+create temporary table liberacion as select pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610))) as r;
 select is((select r from liberacion),
   '{"outcome": "released", "period_id": 202610, "released": 3, "awaiting_invoice": 2, "carried_forward": 1, "held": 0, "period_status": "closed"}'::jsonb,
   'se libera: dos se pagan, una se acumula');
@@ -283,7 +289,7 @@ select results_eq(
       and e.to_status in ('awaiting_invoice', 'carried_forward') order by 1$$,
   $$values ('M1', 'calculated', 'awaiting_invoice'), ('M2', 'calculated', 'awaiting_invoice'), ('M3', 'calculated', 'carried_forward')$$,
   'cada paso en su historia');
-select is(pruebas.hace('private.release_payouts(202610)'), '{"outcome": "already_released", "period_id": 202610}'::jsonb,
+select is(pruebas.hace(format('private.release_payouts(%s, %L)', 202610, pruebas.vista(202610))), '{"outcome": "already_released", "period_id": 202610}'::jsonb,
   'liberar otra vez no escribe nada');
 select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set payouts_released_at = now() + interval '1 hour' where period_id = 202610$$, '23514', null,
@@ -350,9 +356,9 @@ select is(pruebas.liq(202611),
   'el cierre crea la liquidación de quien tiene algo pendiente, aunque no tenga reparto');
 select pruebas.en_cierre(202612);
 select is(pruebas.o(pruebas.cierra(202612)), 'closed', 'diciembre también');
-select is(pruebas.hace('private.release_payouts(202612)'), '{"outcome": "previous_not_released", "period": 202611}'::jsonb,
+select is(pruebas.hace(format('private.release_payouts(%s, %L)', 202612, pruebas.vista(202612))), '{"outcome": "previous_not_released", "period": 202611}'::jsonb,
   'liberar va en orden');
-select is((select format('%s %s', r ->> 'outcome', r ->> 'period_status') from (select pruebas.hace('private.release_payouts(202611)') as r) x),
+select is((select format('%s %s', r ->> 'outcome', r ->> 'period_status') from (select pruebas.hace(format('private.release_payouts(%s, %L)', 202611, pruebas.vista(202611))) as r) x),
   'released paid', 'noviembre se libera, y como todas quedan acumuladas, pasa a pagado al instante');
 select is(pruebas.liq(202611),
   array['M1 carried_forward pool=0 bonos=0 ajustes=-30000 saldo=0 bruto=-30000',
@@ -380,18 +386,18 @@ select is(pruebas.liq(202612)::text, array['M1 calculated pool=0 bonos=0 ajustes
   'M2 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0', 'M3 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0',
   'M4 calculated pool=0 bonos=0 ajustes=0 saldo=0 bruto=0']::text,
   'un bono sobre un mes cerrado le da su liquidación al maestro que no la tenía');
-select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M4', 202612), ''))), 'malformed', 'retener pide motivo');
-select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', pruebas.y('M4', 202612), 'Revisión.', gen_random_uuid()))),
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M4', 202612), pruebas.estado_y(pruebas.y('M4', 202612)), ''))), 'malformed', 'retener pide motivo');
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L, %L)', pruebas.y('M4', 202612), 'Revisión.', 'calculated', gen_random_uuid()))),
   'no_alert', 'y una alerta que exista');
-select is(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M4', 202612), 'Se investiga.')),
+select is(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M4', 202612), pruebas.estado_y(pruebas.y('M4', 202612)), 'Se investiga.')),
   '{"outcome": "held", "from": "calculated"}'::jsonb, 'se retiene una calculada');
-select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M4', 202612), 'Otra vez.'))), 'already_held', 'una vez');
-select is(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M3', 202611), 'No.')),
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M4', 202612), pruebas.estado_y(pruebas.y('M4', 202612)), 'Otra vez.'))), 'already_held', 'una vez');
+select is(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M3', 202611), pruebas.estado_y(pruebas.y('M3', 202611)), 'No.')),
   '{"outcome": "not_holdable", "status": "carried_forward"}'::jsonb, 'una acumulada no se retiene');
-select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, %L)', pruebas.y('M1', 202612), 'No.'))), 'not_held',
+select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, %L, %L)', pruebas.y('M1', 202612), 'No.', private.unhold_preview(pruebas.y('M1', 202612)) ->> 'fingerprint'))), 'not_held',
   'ni se suelta una que no está retenida');
-select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', gen_random_uuid(), 'No.'))), 'not_found', 'ni una que no existe');
-select is(pruebas.hace('private.release_payouts(202612)'),
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', gen_random_uuid(), 'No.', 'calculated'))), 'not_found', 'ni una que no existe');
+select is(pruebas.hace(format('private.release_payouts(%s, %L)', 202612, pruebas.vista(202612))),
   '{"outcome": "released", "period_id": 202612, "released": 3, "awaiting_invoice": 1, "carried_forward": 2, "held": 1, "period_status": "closed"}'::jsonb,
   'diciembre se libera sin tocar la retenida');
 select is(pruebas.liq(202612),
@@ -401,7 +407,7 @@ select is(pruebas.liq(202612),
         'M4 on_hold pool=0 bonos=0 ajustes=0 saldo=0 bruto=0'],
   'exactamente el mínimo se paga; el saldo en contra se descuenta del bono');
 select is(pruebas.saldo('M1'), 0::bigint, 'M1 queda en 0, sin renglón acumulado de 0');
-select is(pruebas.hace(format('private.unhold_payout(%L, %L)', pruebas.y('M4', 202612), 'No era fraude.')),
+select is(pruebas.hace(format('private.unhold_payout(%L, %L, %L)', pruebas.y('M4', 202612), 'No era fraude.', private.unhold_preview(pruebas.y('M4', 202612)) ->> 'fingerprint')),
   '{"outcome": "released_from_hold", "to": "carried_forward", "period_status": "closed"}'::jsonb,
   'soltar una retenida desde calculada en un mes liberado la libera ahí mismo: un centavo menos que el mínimo, acumulada');
 select results_eq(
@@ -409,10 +415,10 @@ select results_eq(
     where e.payout_id = pruebas.y('M4', 202612) and e.from_status is not null order by e.occurred_at$$,
   $$values ('calculated', 'on_hold', 'Se investiga.'), ('on_hold', 'calculated', 'No era fraude.'), ('calculated', 'carried_forward', null)$$,
   'su historia: retenida, de vuelta a calculada y liberada');
-select is(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M2', 202612), 'Revisión de su factura.')),
+select is(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M2', 202612), pruebas.estado_y(pruebas.y('M2', 202612)), 'Revisión de su factura.')),
   '{"outcome": "held", "from": "awaiting_invoice"}'::jsonb, 'una en espera de factura también se retiene');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202612)')), 'already_released', '(liberar no la toca)');
-select is(pruebas.hace(format('private.unhold_payout(%L, %L)', pruebas.y('M2', 202612), 'Todo en orden.')),
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202612, pruebas.vista(202612)))), 'already_released', '(liberar no la toca)');
+select is(pruebas.hace(format('private.unhold_payout(%L, %L, %L)', pruebas.y('M2', 202612), 'Todo en orden.', private.unhold_preview(pruebas.y('M2', 202612)) ->> 'fingerprint')),
   '{"outcome": "released_from_hold", "to": "awaiting_invoice", "period_status": "closed"}'::jsonb,
   'y vuelve a donde estaba');
 select is(pruebas.estado(202612), 'closed', 'diciembre sigue cerrado: M2 espera su factura (T-604)');
@@ -445,12 +451,12 @@ select throws_ok($$update public.payouts set bonuses_cents = bonuses_cents + 1, 
                    where id = pruebas.y('M2', 202612)$$, '23514', 'public.payouts: payout ' || pruebas.y('M2', 202612)
                    || ': its amounts change only when it is released (RF-505)', 'lo liberado no cambia de monto');
 select pruebas.como_dueno();
-select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L)', pruebas.y('M2', 202612), 'Para la prueba.'))), 'held', '(se retiene)');
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%1$L, %3$L, %2$L)', pruebas.y('M2', 202612), pruebas.estado_y(pruebas.y('M2', 202612)), 'Para la prueba.'))), 'held', '(se retiene)');
 select pruebas.como_finanzas();
 select throws_ok($$update public.payouts set status = 'ready_to_pay' where id = pruebas.y('M2', 202612)$$, '23514', null,
   'una retenida no vuelve a otro estado que el suyo');
 select pruebas.como_dueno();
-select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null)', pruebas.y('M2', 202612)))), 'released_from_hold', '(se suelta)');
+select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null, %L)', pruebas.y('M2', 202612), private.unhold_preview(pruebas.y('M2', 202612)) ->> 'fingerprint'))), 'released_from_hold', '(se suelta)');
 select pruebas.como_finanzas();
 select throws_ok($$update public.payout_periods set status = 'paid' where period_id = 202612$$, '23514', null,
   'un periodo con liquidaciones por pagar no pasa a pagado');
@@ -528,12 +534,12 @@ select is(pruebas.estado(202701), 'closed', 'nada de eso quedó');
 
 select pruebas.en_cierre(202702);
 select is(pruebas.o(pruebas.cierra(202702)), 'closed', 'febrero se cierra');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202701)')), 'released', 'enero se libera después: M1 y M2 acumulan');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202701, pruebas.vista(202701)))), 'released', 'enero se libera después: M1 y M2 acumulan');
 select pruebas.parametro('PAGO_MINIMO', '0', 202702);
 select is((select format('%s %s', r ->> 'outcome', r ->> 'applied_period_id') from (select pruebas.hace(format(
              'private.capture_adjustment(%L, 202701, -1000, %L)', pruebas.id('M2'), 'Compensa su saldo.')) as r) x),
   'captured 202702', 'un ajuste que compensa el saldo de M2');
-select is(pruebas.o(pruebas.hace('private.release_payouts(202702)')), 'released', 'febrero se libera');
+select is(pruebas.o(pruebas.hace(format('private.release_payouts(%s, %L)', 202702, pruebas.vista(202702)))), 'released', 'febrero se libera');
 select is(pruebas.liq(202702),
   array['M1 awaiting_invoice pool=0 bonos=0 ajustes=0 saldo=500 bruto=500',
         'M2 carried_forward pool=0 bonos=0 ajustes=-1000 saldo=1000 bruto=0',
@@ -551,14 +557,15 @@ select pruebas.como_dueno();
 
 select is_empty($$select * from private.schema_violations_payouts()$$, 'en orden');
 select pruebas.como_dueno_sistema();
-grant execute on function private.release_payouts(public.period_id) to app_service;
-select results_eq($$select problem, object_name like 'private.release_payouts(%' from private.schema_violations_payouts()$$,
-  $$values ('payouts function executable by app_service', true)$$, 'liberar al alcance del servidor');
-revoke execute on function private.release_payouts(public.period_id) from app_service;
-alter function private.release_payouts(public.period_id) security invoker;
+-- Cambió con el requisito (T-605, cuarta solicitud): liberar ya es del servidor; capturar un bono, todavía no.
+grant execute on function private.capture_bonus(uuid, text, bigint, public.period_id, text) to app_service;
+select results_eq($$select problem, object_name like 'private.capture_bonus(%' from private.schema_violations_payouts()$$,
+  $$values ('payouts function executable by app_service', true)$$, 'capturar un bono al alcance del servidor');
+revoke execute on function private.capture_bonus(uuid, text, bigint, public.period_id, text) from app_service;
+alter function private.release_payouts(public.period_id, text) security invoker;
 select results_eq($$select problem, object_name like 'private.release_payouts(%' from private.schema_violations_payouts()$$,
   $$values ('payouts function not security definer', true)$$, 'liberar sin correr como el dueño');
-alter function private.release_payouts(public.period_id) security definer;
+alter function private.release_payouts(public.period_id, text) security definer;
 drop trigger payouts_released on public.payouts;
 create constraint trigger payouts_released after update on public.payouts
   not deferrable for each row when (old.released_at is null and new.released_at is not null)
