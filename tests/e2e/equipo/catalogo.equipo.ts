@@ -103,14 +103,29 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
 
   await expect(page.getByRole("heading", { level: 2, name: "Continuar viendo" })).toHaveCount(0);
   const starters = page.getByRole("list", { name: "Para empezar" });
+  // «Para empezar» lleva los del nivel más bajo que tenga cursos listados. Otras pruebas del grupo
+  // aprueban cursos con niveles creados antes que los de aquí: cuál es se le pregunta a la base.
+  const [first] = await ownerQuery<{ title: string; teacher: string }>(
+    `select c.title, c.teacher_name as teacher
+       from public.published_courses c
+       join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
+       join public.levels l on l.id = c.level_id and l.is_active
+      where c.is_listed
+      order by l.position, c.published_at desc, c.slug
+      limit 1`,
+  );
+  if (first === undefined) throw new Error("No hay cursos listados con nivel.");
   // Lo público se recuerda 30 segundos (`CATALOG_MEMORY_MS`): si otra prueba ya leyó el inicio
   // antes de que se cargaran estos cursos, aparecen al vencer esa memoria.
+  const newest = page.getByRole("list", { name: "Nuevos" });
   await expect(async () => {
     await page.reload();
-    await expect(starters.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` })).toBeVisible({ timeout: 1_000 });
+    await expect(newest.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` })).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 45_000, intervals: [2_000] });
+  await expect(starters.getByRole("link", { name: `${first.title}, con ${first.teacher}` })).toBeVisible();
+  // El avanzado se creó después que el inicial: nunca es el más bajo.
   await expect(starters.getByRole("link", { name: new RegExp(ADVANCED) })).toHaveCount(0);
-  await expect(page.getByRole("list", { name: "Nuevos" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
+  await expect(newest.getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
   await expect(page.getByRole("list", { name: "Meditación e2e" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
   await expect(page.getByRole("list", { name: "Por maestro" }).getByRole("link", { name: `Maestra ${BEGINNER}, maestro de Respiración e2e` })).toBeVisible();
   // Solo aparece lo publicado.
@@ -118,7 +133,7 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   expect(await a11yViolations(page)).toEqual([]);
 
   // Sin suscripción, la ficha ofrece suscribirse y lleva a la lección, donde PA-33 dice por qué.
-  await starters.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` }).click();
+  await newest.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` }).click();
   await expect(page).toHaveURL(new RegExp(`/cursos/${BEGINNER}$`));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Curso ${BEGINNER}`);
   await expect(page.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", new RegExp(`^/cursos/${BEGINNER}/lecciones/`));
