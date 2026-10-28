@@ -253,25 +253,25 @@ describe("periodView (PA-79)", () => {
 
 describe("closeView (PA-80)", () => {
   it("el último ensayo: con datos finales o parcial, o fallido", () => {
-    expect(closeView(close(), NOW).rehearsal).toMatchObject({ banner: text.finalBanner, failed: false });
-    expect(closeView(close({ rehearsal: { ...close().rehearsal!, statusAtRun: "open" } }, "open"), NOW).rehearsal).toMatchObject({ banner: text.partialBanner });
-    const failed = closeView(close({ rehearsal: { ...close().rehearsal!, status: "failed", poolCents: null, teachers: [] } }), NOW);
+    expect(closeView(close()).rehearsal).toMatchObject({ banner: text.finalBanner, failed: false });
+    expect(closeView(close({ rehearsal: { ...close().rehearsal!, statusAtRun: "open" } }, "open")).rehearsal).toMatchObject({ banner: text.partialBanner });
+    const failed = closeView(close({ rehearsal: { ...close().rehearsal!, status: "failed", poolCents: null, teachers: [] } }));
     expect(failed.rehearsal).toMatchObject({ failed: true, banner: text.rehearsalFailedBanner });
     expect(failed.lastRehearsal).toMatch(/Falló\.$/);
-    expect(closeView(close({ rehearsal: null }), NOW).lastRehearsal).toBe(text.noRehearsal);
+    expect(closeView(close({ rehearsal: null })).lastRehearsal).toBe(text.noRehearsal);
   });
 
   it("la suma repartida contra el bote, al centavo", () => {
-    expect(closeView(close(), NOW).rehearsal?.sum).toMatchObject({ value: "$12,000.00", ok: true });
+    expect(closeView(close()).rehearsal?.sum).toMatchObject({ value: "$12,000.00", ok: true });
     const off = close({ rehearsal: { ...close().rehearsal!, teachers: [teacher({ totalCents: 1_199_999 })] } });
-    expect(closeView(off, NOW).rehearsal?.sum).toMatchObject({ ok: false });
+    expect(closeView(off).rehearsal?.sum).toMatchObject({ ok: false });
     const carried = close({ rehearsal: { ...close().rehearsal!, carriedOutCents: 100, teachers: [teacher({ totalCents: 1_199_900 })] } });
-    expect(closeView(carried, NOW).rehearsal?.sum).toMatchObject({ ok: true, carried: "$1.00 pasan al periodo siguiente." });
+    expect(closeView(carried).rehearsal?.sum).toMatchObject({ ok: true, carried: "$1.00 pasan al periodo siguiente." });
   });
 
   it("sin nada asignado: el bote entero pasa al siguiente", () => {
     const empty = close({ rehearsal: { ...close().rehearsal!, assignedCents: 0, unconsumedCents: 1_200_000, carriedOutCents: 1_200_000, teachers: [] } });
-    expect(closeView(empty, NOW).rehearsal?.nothingAssigned).toBe(true);
+    expect(closeView(empty).rehearsal?.nothingAssigned).toBe(true);
   });
 
   it("la tabla por maestro: lo que queda y los totales", () => {
@@ -282,22 +282,21 @@ describe("closeView (PA-80)", () => {
           teachers: [teacher({ totalCents: 600_000, belowMinimum: false }), teacher({ teacherId: "x", name: null, totalCents: 600_000, founderBonusCents: 10_000, belowMinimum: true })],
         },
       }),
-      NOW,
     );
     expect(view.rehearsal?.teachers.map((row) => [row.name, row.remains, row.bonus])).toEqual([
       ["Ana", text.toPay, ""],
       [text.noName, text.belowMinimum, "$100.00"],
     ]);
     expect(view.rehearsal?.totals).toMatchObject({ total: "$12,000.00", bonus: "$100.00" });
-    const unknown = closeView(close({ rehearsal: { ...close().rehearsal!, teachers: [teacher({ belowMinimum: null })] } }), NOW);
+    const unknown = closeView(close({ rehearsal: { ...close().rehearsal!, teachers: [teacher({ belowMinimum: null })] } }));
     expect(unknown.rehearsal?.teachers[0]?.remains).toBe(text.unknownRemains);
   });
 
   it("la lista de lo que falta para cerrar, y cerrar solo con la lista completa", () => {
-    const ready = closeView(close(), NOW);
+    const ready = closeView(close());
     expect(ready.checks.every((check) => check.done)).toBe(true);
     expect(ready.close).toEqual({ kind: "ready", button: periodsButton.askClose(202710) });
-    const missing = closeView(close({ checks: { openAlerts: 2, finalRehearsal: false, lastRollup: "failed", rollupMarks: true } }), NOW);
+    const missing = closeView(close({ checks: { openAlerts: 2, finalRehearsal: false, lastRollup: "failed", rollupMarks: true } }));
     expect(missing.checks.filter((check) => !check.done).map((check) => check.label)).toEqual([
       text.checks.rollupFailed,
       text.checks.marksPending,
@@ -306,18 +305,18 @@ describe("closeView (PA-80)", () => {
     ]);
     expect(missing.checks.find((check) => check.label.startsWith("Todas"))?.href).toBe(ROUTES.alerts);
     expect(missing.close).toEqual({ kind: "waits" });
-    expect(closeView(close({ checks: { ...close().checks, lastRollup: "running" } }), NOW).checks.some((check) => check.label === text.checks.rollupRunning)).toBe(true);
-    expect(closeView(close({ checks: { ...close().checks, lastRollup: null } }), NOW).checks.some((check) => check.label === text.checks.rollupNone)).toBe(true);
+    expect(closeView(close({ checks: { ...close().checks, lastRollup: "running" } })).checks.some((check) => check.label === text.checks.rollupRunning)).toBe(true);
+    expect(closeView(close({ checks: { ...close().checks, lastRollup: null } })).checks.some((check) => check.label === text.checks.rollupNone)).toBe(true);
   });
 
   it("el mes no ha terminado: no hay botón de cerrar, solo se ensaya", () => {
-    const open = closeView(close({}, "open"), NOW);
+    const open = closeView(close({}, "open"));
     expect(open.close).toEqual({ kind: "month_open" });
     expect(open.rehearse).toBe(periodsButton.rehearse(202710));
   });
 
   it("sin el código reciente, ni ensayar ni cerrar se ofrecen", () => {
-    const locked = closeView(close({ freshCode: false }), NOW);
+    const locked = closeView(close({ freshCode: false }));
     expect(locked.rehearse).toBeNull();
     expect(locked.close).toEqual({ kind: "waits" });
   });
@@ -330,14 +329,14 @@ describe("closeView (PA-80)", () => {
       export: { rows: 1, sha256: "ab".repeat(32), createdAt: "2027-11-03T18:00:00Z" },
       teachers: [teacher()],
     };
-    const closed = closeView(close({ close: run }, "closed"), NOW);
+    const closed = closeView(close({ close: run }, "closed"));
     expect(closed.rehearse).toBeNull();
     expect(closed.close).toEqual({ kind: "closed" });
     expect(closed.closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las .* por Finanzas\.$/);
     expect(closed.result?.teachers).toHaveLength(1);
     expect(closed.download).toEqual({ kind: "offered", button: periodsButton.download(RUN) });
-    expect(closeView(close({ freshCode: false, close: run }, "closed"), NOW).download).toEqual({ kind: "locked" });
-    expect(closeView(close({ close: { ...run, export: null } }, "closed"), NOW).download).toEqual({ kind: "missing" });
-    expect(closeView(close({ close: { ...run, closedBy: null } }, "closed"), NOW).closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las [^,]*\.$/);
+    expect(closeView(close({ freshCode: false, close: run }, "closed")).download).toEqual({ kind: "locked" });
+    expect(closeView(close({ close: { ...run, export: null } }, "closed")).download).toEqual({ kind: "missing" });
+    expect(closeView(close({ close: { ...run, closedBy: null } }, "closed")).closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las [^,]*\.$/);
   });
 });

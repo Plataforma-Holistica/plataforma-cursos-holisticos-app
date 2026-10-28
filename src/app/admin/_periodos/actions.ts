@@ -99,7 +99,7 @@ export async function downloadAction(target: unknown, previous: DownloadState, f
   const jar = await cookieJar();
   clearNotice(jar);
   const period = periodFrom(target);
-  if (period === null) return leaveFor(jar, { kind: "leave", to: ROUTES.periods, notice: null });
+  if (period === null) return leaveFor(jar, { to: ROUTES.periods, notice: null });
   const outcome = downloadOutcome(await downloadExport(jar, { run: request.run }), period);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   if (outcome.kind === "file") return { kind: "file", filename: outcome.filename, rows: outcome.rows, href: outcome.href, attempt };

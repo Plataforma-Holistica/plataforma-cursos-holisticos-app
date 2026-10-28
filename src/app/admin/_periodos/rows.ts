@@ -321,7 +321,7 @@ function runResult(run: RunFigures & { carriedInCents?: number | null }, teacher
   };
 }
 
-export function closeView(read: Extract<FinanceClose, { period: object }>, _now: string): CloseView {
+export function closeView(read: Extract<FinanceClose, { period: object }>): CloseView {
   const { period, checks, rehearsal } = read;
   const open = period.status === "open";
   const closed = period.status === "closed" || period.status === "paid";

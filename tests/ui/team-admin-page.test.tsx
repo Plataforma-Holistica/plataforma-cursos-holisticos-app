@@ -39,6 +39,7 @@ vi.mock("@/app/admin/_revision/actions", () => ({ reviewCodeAction: vi.fn(), app
 vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));
 vi.mock("@/app/admin/_alertas/actions", () => ({ alertsCodeAction: vi.fn(), alertsAction: vi.fn() }));
 vi.mock("@/services/anomalies/anomalies", () => ({ anomalyAlerts: vi.fn() }));
+vi.mock("@/services/periods/periods", () => ({ financePeriods: vi.fn(), financePeriod: vi.fn(), financeClose: vi.fn() }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
 import { TeamSection } from "@/app/admin/_equipo/section";

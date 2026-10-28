@@ -204,6 +204,20 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // lección, nunca un playback id.
     lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId, "review"\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
   },
+  "src/app/admin/_periodos/actions.ts": {
+    // Dar el código otra vez: el de los periodos, que comprueba lo reciente con la lista que pide finanzas.
+    // A dónde vuelve llega atado desde la pantalla, y se revisa.
+    periodCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*periodsCodeOutcome\(await givePeriodsCode\(jar, code\), periodCodeTarget\(target\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Pedir el recálculo: del formulario solo llega qué botón y de qué periodo.
+    panelAction: /rollupOutcome\(await requestRollup\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Ensayar y cerrar: abrir el diálogo, o confirmar sin la casilla, no llama a nadie.
+    closeAction:
+      /if \(request\.step === "ask_close"\) return \{ kind: "confirming", period: request\.period, missingUnderstood: false, attempt \};\s*if \(request\.step === "close" && !request\.understood\) return \{ kind: "confirming", period: request\.period, missingUnderstood: true, attempt \};[\s\S]*rehearseOutcome\(await rehearse\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*closeOutcome\(await closePeriod\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Descargar: del formulario llega la corrida; el periodo, atado desde la pantalla, se revisa.
+    downloadAction:
+      /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const outcome = downloadOutcome\(await downloadExport\(jar, \{ run: request\.run \}\), period\);/,
+  },
   "src/app/admin/_alertas/actions.ts": {
     // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
     alertsCodeAction:
@@ -629,6 +643,9 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-catalogo-codigo",
       "bloque-catalogo-niveles",
       "bloque-catalogo-practicas",
+      "bloque-cierre-codigo",
+      "bloque-cierre-descarga",
+      "bloque-cierre-ensayo",
       "bloque-contrasena",
       "bloque-equipo-codigo",
       "bloque-equipo-invitaciones",
@@ -636,6 +653,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-equipo-personas",
       "bloque-equipo-restablecer",
       "bloque-nombre",
+      "bloque-periodo-codigo",
+      "bloque-periodo-recalculo",
       "bloque-revision-codigo",
       "bloque-revision-cola",
       "bloque-sesiones",
