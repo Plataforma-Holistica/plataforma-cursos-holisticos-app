@@ -62,7 +62,7 @@ const FAILURES = {
   close_timed_out:
     "Un ensayo o un cierre pasó del tope de tiempo de la base (statement_timeout, 57014): no se guardó nada y se le pidió a finanzas intentar de nuevo. Si se repite, el cierre ya no cabe en una transacción del servidor (05 §14.4): medirlo con scale_test.",
   rehearsal_failed:
-    "Un ensayo del cierre falló dentro de la base (rehearse_close contestó failed): quedó una corrida fallida en close_runs con el texto del error, que la pantalla no muestra. Revisar ese texto: es un defecto del cálculo o falta un parámetro.",
+    "Un ensayo del cierre falló dentro de la base (rehearse_close contestó failed): quedó la corrida fallida del ensayo con el texto del error, que la pantalla no muestra. Revisar ese texto: es un defecto del cálculo o falta un parámetro.",
   close_unbalanced:
     "Al confirmar un cierre, la comprobación diferida rechazó la suma (23514: el reparto no es igual al bote, o la exportación no es la que regenera la base). No se cerró nada. Es un defecto del cálculo: revisar check_period_balanced y el registro de la base.",
   legal_text_unavailable:"No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
