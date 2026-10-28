@@ -11,7 +11,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(69);
+select plan(70);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6055000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -361,6 +361,9 @@ select is(pruebas.o(pruebas.libera(202611)), 'released', 'noviembre se libera co
 select is(array(select format('%s %s %s', pruebas.et(teacher_id), status, subtotal_cents) from public.payouts
                 where period_id = 202611 order by pruebas.et(teacher_id)),
   array['M3 carried_forward 3852', 'M4 carried_forward 5000'], 'liberar le dio su liquidación a M3, y los dos se acumulan');
+-- M4 tiene saldo y no tiene liquidación en octubre, ya liberado: octubre no lo muestra (liberado, solo las suyas).
+select is(array(select pruebas.et((r ->> 'teacher_id')::uuid) from jsonb_array_elements(pruebas.lee(202610) -> 'payouts') r order by 1),
+  array['M1', 'M2', 'M3'], 'un periodo liberado muestra solo sus liquidaciones, no a quien tiene saldo en otro');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante: la columna del servidor, en los dos sentidos.
