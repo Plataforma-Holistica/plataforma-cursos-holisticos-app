@@ -150,6 +150,8 @@ describe("la ficha de un curso (PA-02)", () => {
 });
 
 describe("la ficha de un maestro (PA-03)", () => {
+  beforeEach(() => mocks.publicViewer.mockResolvedValue({ kind: "visitor" }));
+
   it("su nombre, sus prácticas, su semblanza y sus cursos", async () => {
     mocks.teacherPage.mockResolvedValue({
       kind: "found",
@@ -162,7 +164,15 @@ describe("la ficha de un maestro (PA-03)", () => {
     expect(screen.getByText("Enseña a respirar.")).toBeVisible();
     const courses = screen.getByRole("region", { name: "Cursos de Ana Robles" });
     expect(within(courses).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
+    expect(screen.queryByRole("navigation", { name: "Principal" })).toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("al alumno le pinta su barra", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+    mocks.teacherPage.mockResolvedValue({ kind: "found", teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: [], courseCount: 1 }, courses: [COURSE] });
+    render(await TeacherRoute(params("ana-robles")));
+    expect(screen.getByRole("navigation", { name: "Principal" })).toBeVisible();
   });
 
   it("un maestro que no existe, o sin cursos, contesta lo mismo que una ruta que no existe", async () => {

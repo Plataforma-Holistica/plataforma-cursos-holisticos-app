@@ -89,8 +89,10 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
           className="flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pb-2 scrollbar-none sm:scroll-px-8 sm:px-8"
         >
           {Children.toArray(children).map((child, index) => (
-            // `toArray` ya quitó lo vacío y le dio a cada tarjeta su propia llave.
-            <li key={isValidElement(child) && child.key !== null ? child.key : index} className={cx("shrink-0 snap-start", WIDTHS[shape])}>
+            // `toArray` ya quitó lo vacío y le dio a cada tarjeta su propia llave. `relative`: el
+            // nombre de la tarjeta (`sr-only`) es absoluto, y sin un ancestro posicionado dentro de
+            // la lista se escaparía de ella y ensancharía la página entera.
+            <li key={isValidElement(child) && child.key !== null ? child.key : index} className={cx("relative shrink-0 snap-start", WIDTHS[shape])}>
               {child}
             </li>
           ))}
