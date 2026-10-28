@@ -207,6 +207,12 @@ describe("lo que contesta la base", () => {
     expect(close.calls).toEqual(["guarda", "cerrar 202710"]);
   });
 
+  it("un ensayo que falló dentro de la base se dice como tal, y se reporta", async () => {
+    const service = serviceWith({ answer: "failed" });
+    expect(await service.rehearse(reader, { period: 202710 })).toEqual({ kind: "answered", answer: "failed" });
+    expect(service.reported).toEqual(["rehearsal_failed"]);
+  });
+
   it("si lanza: no se supo, y se reporta; nunca se pinta como hecho", async () => {
     const service = serviceWith({ answer: "throws", download: "throws" });
     expect(await service.requestRollup(reader, { period: 202710 })).toEqual({ kind: "unknown" });

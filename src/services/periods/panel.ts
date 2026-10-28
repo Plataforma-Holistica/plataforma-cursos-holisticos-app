@@ -355,6 +355,8 @@ export function createPeriodsPanel(deps: { report: (code: FailureCode) => Promis
     const period = periodOf(input.period);
     if (period === null) return { kind: "malformed" };
     const result = await decide(() => store.rehearse(admitted.claims, period));
+    // El cálculo falló dentro de la base: quedó la corrida fallida, con su error, y alguien tiene que verlo.
+    if (result.ok && result.answer === "failed") await deps.report("rehearsal_failed");
     if (result.ok) return { kind: "answered", answer: result.answer };
     // Un ensayo no confirma una suma: lo que no es el tiempo vencido es «no se supo».
     return result.result.kind === "timed_out" ? result.result : { kind: "unknown" };

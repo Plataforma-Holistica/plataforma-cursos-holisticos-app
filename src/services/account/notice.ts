@@ -31,6 +31,10 @@ export const NOTICES = [
   "fraud_decided",
   "account_excluded",
   "exclusion_revoked",
+  // Las decisiones de finanzas sobre un periodo (T-605): el panel y el cierre lo dicen al volver a pintarse.
+  "rollup_requested",
+  "period_rehearsed",
+  "period_closed",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

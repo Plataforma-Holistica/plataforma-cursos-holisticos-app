@@ -30,6 +30,8 @@ export const ROUTES = {
   review: "/admin/revision",
   /** PA-68 mínima, las alertas de anomalía: cuelga de administración y pide finanzas. */
   alerts: "/admin/alertas",
+  /** PA-78, los periodos: cuelga de administración y pide finanzas. El panel de uno y su cierre, `periodPath`. */
+  periods: "/admin/periodos",
   /**
    * Los cursos. La ficha de un curso (`/cursos/[slug]`, T-210) es pública; la lección
    * (`/cursos/[slug]/lecciones/[leccion]`, PA-22, T-203) pide sesión. Ver `isLessonPath`.
@@ -68,6 +70,17 @@ export function isLessonPath(pathname: string): boolean {
 export function lessonPath(slug: string, lessonId: string): string | null {
   return SLUG.test(slug) && LESSON_ID.test(lessonId) ? `${ROUTES.courses}/${slug}/lecciones/${lessonId}` : null;
 }
+
+/** El periodo en la dirección: `202710` es `2027-10`. */
+function periodSegment(period: number): string {
+  return `${Math.floor(period / 100)}-${String(period % 100).padStart(2, "0")}`;
+}
+
+/** PA-79, el panel de un periodo (`AAAAMM`). */
+export const periodPath = (period: number): string => `${ROUTES.periods}/${periodSegment(period)}`;
+
+/** PA-80, el ensayo y el cierre de un periodo. */
+export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
 /**
  * A dónde se puede volver después de entrar. Va por lo que se permite: una ruta nueva no

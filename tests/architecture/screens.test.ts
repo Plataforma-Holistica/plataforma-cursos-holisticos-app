@@ -366,7 +366,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_practicas", "_revision"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_periodos", "_practicas", "_revision"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -396,6 +396,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
           ["practicas", "content"],
           ["revision", "content"],
           ["alertas", "finance"],
+          ["periodos", "finance"],
         ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
         const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
@@ -405,6 +406,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(sections.map((source) => source.file).sort()).toEqual([
           "src/app/admin/_alertas/section.tsx",
           "src/app/admin/_equipo/section.tsx",
+          "src/app/admin/_periodos/section.tsx",
           "src/app/admin/_practicas/section.tsx",
           "src/app/admin/_revision/section.tsx",
         ]);
