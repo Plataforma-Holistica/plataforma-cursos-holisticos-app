@@ -10,6 +10,7 @@ import {
   consentsPageStep,
   factorSetupPageStep,
   lessonPageStep,
+  publicPageStep,
   secondFactorPageStep,
   sessionPageStep,
   visitorPageStep,
@@ -52,6 +53,14 @@ export async function requireIncompleteSession(returnTo: string | null | undefin
   const step = consentsPageStep(await checkSession(await cookieReader()), returnTo);
   if (step.kind === "redirect") redirect(step.to);
   return step;
+}
+
+/**
+ * Para una pantalla pública que cambia según quién mira (PA-02, T-210): nunca redirige. Dice si
+ * mira un alumno con sesión que pasa, con sus claims, o un visitante.
+ */
+export async function publicViewer() {
+  return publicPageStep(await checkSession(await cookieReader()));
 }
 
 /** Para una pantalla de visitante: quien ya tiene sesión se va a su inicio. */

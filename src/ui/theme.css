@@ -150,6 +150,16 @@
   --color-cover-6: var(--cover-6);
   --color-cover-7: var(--cover-7);
   --color-cover-8: var(--cover-8);
+  /* El tono profundo de cada uno: la portada generada es un degradado del profundo al medio
+     (diseño, sección 4.2; T-210). */
+  --color-cover-1-deep: var(--cover-1-deep);
+  --color-cover-2-deep: var(--cover-2-deep);
+  --color-cover-3-deep: var(--cover-3-deep);
+  --color-cover-4-deep: var(--cover-4-deep);
+  --color-cover-5-deep: var(--cover-5-deep);
+  --color-cover-6-deep: var(--cover-6-deep);
+  --color-cover-7-deep: var(--cover-7-deep);
+  --color-cover-8-deep: var(--cover-8-deep);
 
   /* `--brand-font-*` las pone next/font en <html> (src/app/fonts.ts). */
   --font-display: var(--brand-font-display), "Arial Narrow", system-ui, sans-serif;
@@ -206,6 +216,33 @@
   --text-stat--line-height: 2.75rem;
   --text-stat--letter-spacing: -0.01em;
   --text-stat--font-weight: 600;
+  /* El título de una portada generada se mide contra el ancho de la portada (diseño, sección
+     4.3): hasta 24 caracteres, 9 %; de 25 a 44, 7 %; de 45 a 60, 5.6 %. La portada es un
+     contenedor (`@container`), y `cqw` es un centésimo de su ancho. */
+  --text-cover-l: 9cqw;
+  --text-cover-l--line-height: 1.05;
+  --text-cover-l--letter-spacing: -0.02em;
+  --text-cover-l--font-weight: 700;
+  --text-cover-m: 7cqw;
+  --text-cover-m--line-height: 1.08;
+  --text-cover-m--letter-spacing: -0.02em;
+  --text-cover-m--font-weight: 700;
+  --text-cover-s: 5.6cqw;
+  --text-cover-s--line-height: 1.1;
+  --text-cover-s--letter-spacing: -0.02em;
+  --text-cover-s--font-weight: 700;
+  /* La práctica y el maestro sobre la portada, también contra su ancho. */
+  --text-cover-label: 3.2cqw;
+  --text-cover-label--line-height: 1.2;
+  --text-cover-label--letter-spacing: 0.12em;
+  --text-cover-label--font-weight: 600;
+  --text-cover-name: 3.8cqw;
+  --text-cover-name--line-height: 1.2;
+  --text-cover-name--font-weight: 600;
+  /* La inicial de un maestro sin retrato, sobre su tono (PA-03). */
+  --text-cover-initial: 40cqw;
+  --text-cover-initial--line-height: 1;
+  --text-cover-initial--font-weight: 700;
 
   --spacing: 0.25rem; /* base de 4 px: p-4 son 16 px */
   /* Altos de control: `h-control` (48 px, alumno), `h-control-sm` (40 px, administración).
@@ -213,6 +250,8 @@
   --spacing-control: 3rem;
   --spacing-control-sm: 2.5rem;
   --spacing-touch: 2.75rem;
+  /* El margen interior de una portada generada: 6 % de su ancho (diseño, sección 4.3). */
+  --spacing-cover: 6cqw;
 
   --radius-*: initial;
   --radius-none: 0;
@@ -244,6 +283,15 @@
 /* El velo sobre una imagen que lleva texto encima. */
 @utility bg-veil {
   background-image: var(--veil);
+}
+
+/* Un carrusel (sección 5.3) se recorre deslizando, con flechas o con el tabulador: su barra de
+   desplazamiento sobra. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Lo que vive sobre una superficie le dice al foco de qué color es su halo. */

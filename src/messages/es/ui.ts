@@ -50,4 +50,21 @@ export const ui = defineMessages({
     durationCompletedPlaying: "{duration} · Terminada · Reproduciendo",
   },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
+  // Tarjetas y carruseles del catálogo (diseño, sección 5.3; T-210). Toda la tarjeta es un solo
+  // enlace, y su nombre dice lo mismo que se ve.
+  courseCard: {
+    name: "{title}, con {teacher}",
+    nameWithProgress: "{title}, con {teacher}: lección {number} de {total}",
+    lessons: { one: "{count} lección", other: "{count} lecciones" },
+    lessonOf: "Lección {number} de {total}",
+    open: "Curso abierto",
+  },
+  teacherCard: {
+    name: "{name}, {maestro} de {practices}",
+    nameWithoutPractices: "{name}, {maestro}",
+  },
+  carousel: {
+    previous: "Ver anteriores de {row}",
+    next: "Ver más de {row}",
+  },
 });

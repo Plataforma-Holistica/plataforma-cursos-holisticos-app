@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   readNotice: vi.fn(),
   currentLegalText: vi.fn(),
   continueWatching: vi.fn(),
+  accountProfile: vi.fn(),
+  homeShelf: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
@@ -28,7 +30,12 @@ vi.mock("@/app/_lib/guard", () => ({
   visitorOnly: mocks.visitorOnly,
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader }));
-vi.mock("@/services/account/account", () => ({ sessionEmail: mocks.sessionEmail, accountFormFacts: mocks.accountFormFacts }));
+vi.mock("@/services/account/account", () => ({
+  sessionEmail: mocks.sessionEmail,
+  accountFormFacts: mocks.accountFormFacts,
+  accountProfile: mocks.accountProfile,
+}));
+vi.mock("@/services/browse/browse", () => ({ homeShelf: mocks.homeShelf }));
 vi.mock("@/services/account/notice", () => ({ readNotice: mocks.readNotice }));
 vi.mock("@/services/progress/progress", () => ({ continueWatching: mocks.continueWatching }));
 vi.mock("@/services/legal/texts", async () => ({
@@ -60,17 +67,55 @@ beforeEach(() => {
   mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [] });
 });
 
-describe("el inicio provisional", () => {
-  it("le pide a la guarda una sesión para su propia ruta, y dice con qué correo se entró", async () => {
+const COURSE = {
+  slug: "respirar",
+  title: "Respirar para dormir",
+  summary: null,
+  teacherName: "Ana Robles",
+  teacherSlug: "ana-robles",
+  practice: { slug: "meditacion", name: "Meditación", tone: 3, position: 1 },
+  level: { slug: "principiante", name: "Principiante", position: 1 },
+  lessonCount: 12,
+  totalSeconds: 3600,
+  publishedAt: new Date(0),
+  isOpen: false,
+};
+const shelfWith = (over: Record<string, unknown> = {}) => ({
+  kind: "ready",
+  shelf: {
+    starters: [COURSE],
+    newest: [COURSE],
+    practices: [{ slug: "meditacion", name: "Meditación", tone: 3, courses: [COURSE] }],
+    teachers: [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], courseCount: 1 }],
+    ...over,
+  },
+});
+
+describe("el inicio del alumno (PA-20; T-210)", () => {
+  beforeEach(() => {
+    mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana" });
+    mocks.homeShelf.mockResolvedValue(shelfWith());
+  });
+
+  it("le pide a la guarda una sesión para su propia ruta, saluda y dice con qué correo se entró", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
     render(await HomePage());
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/inicio");
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inicio");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Hola, Ana");
     expect(screen.getByText("Entraste como ana@prueba.test.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
-    // Mientras no haya menú de la cuenta, de aquí sale el enlace a PA-25.
-    expect(screen.getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
+    // La barra del alumno: el inicio es la página actual, y la cuenta ocupa el lugar de Perfil.
+    const nav = screen.getByRole("navigation", { name: "Principal" });
+    expect(within(nav).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
+  });
+
+  it("si no se supo el nombre, saluda sin él", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.accountProfile.mockResolvedValue({ kind: "unavailable" });
+    render(await HomePage());
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^Hola$/);
   });
 
   it("a una cuenta suspendida no le pinta el inicio: ve PA-35, con «Cerrar sesión»", async () => {
@@ -79,9 +124,11 @@ describe("el inicio provisional", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Salir" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Cuenta" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Principal" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
+    expect(mocks.continueWatching).not.toHaveBeenCalled();
+    expect(mocks.homeShelf).not.toHaveBeenCalled();
   });
 
   it("cuando no se supo si la sesión vale, tampoco: ofrece reintentar ahí mismo", async () => {
@@ -93,7 +140,7 @@ describe("el inicio provisional", () => {
     expect(mocks.sessionEmail).not.toHaveBeenCalled();
   });
 
-  it("«Continuar viendo» (T-206; decisión de Sergio del 2026-10-20): cada curso empezado, con la lección sugerida y su avance", async () => {
+  it("«Continuar viendo» va primero, con la lección sugerida, y entonces no hay «Para empezar»", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
     mocks.continueWatching.mockResolvedValue({
@@ -107,46 +154,60 @@ describe("el inicio provisional", () => {
           total: 12,
           lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Alargar la salida", number: 4 },
         },
+        // Un curso sin dirección que sirva no se pinta.
+        { courseSlug: "Sin Forma", courseTitle: "Roto", teacherName: "Ana", completed: 0, total: 1, lesson: { id: "x", title: "y", number: 1 } },
       ],
     });
     const { container } = render(await HomePage());
     expect(mocks.continueWatching).toHaveBeenCalledExactlyOnceWith(claims);
     const list = screen.getByRole("list", { name: "Continuar viendo" });
-    expect(screen.getByRole("heading", { level: 2, name: "Continuar viendo" })).toBeVisible();
-    const link = screen.getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, Alargar la salida" });
+    const link = within(list).getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12" });
     expect(link).toHaveAttribute("href", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
-    expect(list).toContainElement(link);
-    expect(screen.getByRole("progressbar", { name: "Avance de Respirar para dormir" })).toHaveAttribute("aria-valuetext", "3 de 12 lecciones");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByText("Roto")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Para empezar" })).toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("con una sola lección, en singular; y un curso sin dirección que sirva no se pinta", async () => {
+  it("sin cursos empezados: «Para empezar», «Nuevos», una fila por práctica y «Por maestro»", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
-    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
-    const course = { courseSlug: "corto", courseTitle: "Corto", teacherName: "Ana", completed: 0, total: 1, lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Única", number: 1 } };
-    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [course, { ...course, courseSlug: "Sin Forma", courseTitle: "Roto" }] });
-    render(await HomePage());
-    expect(screen.getByRole("progressbar", { name: "Avance de Corto" })).toHaveAttribute("aria-valuetext", "0 de 1 lección");
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.queryByText("Roto")).toBeNull();
-  });
-
-  it.each([
-    ["sin cursos empezados", { kind: "ready", courses: [] }],
-    ["si no se supo", { kind: "unavailable" }],
-  ])("%s, no hay lista; lo demás del inicio sigue", async (_case, answer) => {
-    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
-    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
-    mocks.continueWatching.mockResolvedValue(answer);
-    render(await HomePage());
+    const { container } = render(await HomePage());
     expect(screen.queryByRole("heading", { name: "Continuar viendo" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "Para empezar",
+      "Nuevos",
+      "Meditación",
+      "Por maestro",
+    ]);
+    const starters = screen.getByRole("list", { name: "Para empezar" });
+    expect(within(starters).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
+    const teachers = screen.getByRole("list", { name: "Por maestro" });
+    expect(within(teachers).getByRole("link", { name: "Ana Robles, maestro de Meditación" })).toHaveAttribute("href", "/maestros/ana-robles");
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("a una cuenta suspendida no le lee «continuar viendo»", async () => {
-    mocks.requireSession.mockResolvedValue({ kind: "suspended" });
+  it("si no se supo «continuar viendo», el inicio sigue con lo demás", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.continueWatching.mockResolvedValue({ kind: "unavailable" });
     render(await HomePage());
-    expect(mocks.continueWatching).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Nuevos" })).toBeVisible();
+  });
+
+  it("con el catálogo vacío, el estado vacío en lugar de las filas", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.homeShelf.mockResolvedValue(shelfWith({ starters: [], newest: [], practices: [], teachers: [] }));
+    render(await HomePage());
+    expect(screen.getByText("Estamos preparando los primeros cursos.")).toBeVisible();
+    expect(screen.queryAllByRole("heading", { level: 2 })).toEqual([]);
+  });
+
+  it("si no se pudieron leer los cursos, lo dice y ofrece reintentar", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.homeShelf.mockResolvedValue({ kind: "unavailable" });
+    render(await HomePage());
+    expect(screen.getByText("No pudimos cargar los cursos. Inténtalo de nuevo en un momento.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/inicio");
+    expect(screen.queryByText("Estamos preparando los primeros cursos.")).toBeNull();
   });
 
   it("si el token no trae correo, no inventa uno", async () => {

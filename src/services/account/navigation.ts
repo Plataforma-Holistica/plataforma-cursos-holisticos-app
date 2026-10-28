@@ -35,6 +35,8 @@ export const ROUTES = {
    * (`/cursos/[slug]/lecciones/[leccion]`, PA-22, T-203) pide sesión. Ver `isLessonPath`.
    */
   courses: "/cursos",
+  /** La ficha de un maestro (`/maestros/[slug]`, PA-03, T-210): pública. */
+  teachers: "/maestros",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -67,6 +69,16 @@ export function isLessonPath(pathname: string): boolean {
 /** La dirección de una lección, o nulo si el slug o el id no tienen forma. */
 export function lessonPath(slug: string, lessonId: string): string | null {
   return SLUG.test(slug) && LESSON_ID.test(lessonId) ? `${ROUTES.courses}/${slug}/lecciones/${lessonId}` : null;
+}
+
+/** La ficha de un curso (PA-02), o nulo si el slug no tiene forma. */
+export function coursePath(slug: string): string | null {
+  return SLUG.test(slug) ? `${ROUTES.courses}/${slug}` : null;
+}
+
+/** La ficha de un maestro (PA-03), o nulo si el slug no tiene forma. */
+export function teacherPath(slug: string): string | null {
+  return SLUG.test(slug) ? `${ROUTES.teachers}/${slug}` : null;
 }
 
 /**

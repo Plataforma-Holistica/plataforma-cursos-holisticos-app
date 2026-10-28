@@ -1,90 +1,149 @@
 import type { Metadata } from "next";
 
+import { StudentNav } from "@/app/_catalog/nav";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import { requireSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
-import { plural } from "@/messages/format";
-import { sessionEmail } from "@/services/account/account";
-import { lessonPath, ROUTES } from "@/services/account/navigation";
+import { accountProfile, sessionEmail } from "@/services/account/account";
+import { coursePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { homeShelf, type ShelfCourse } from "@/services/browse/browse";
 import { continueWatching } from "@/services/progress/progress";
 import { Button } from "@/ui/button";
-import { ProgressBar } from "@/ui/progress-bar";
+import { Carousel } from "@/ui/carousel";
+import { CourseCard } from "@/ui/course-card";
+import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
-import { TextLink } from "@/ui/text-link";
+import { TeacherCard } from "@/ui/teacher-card";
 
-// El inicio de quien entró, provisional: el del alumno (PA-20) llega con el catálogo
-// (T-210). Existe para que haya a dónde llegar después de entrar, y dónde salir. Mientras
-// no haya menú de la cuenta, de aquí sale también el enlace a PA-25.
+// El inicio del alumno (PA-20; RF-301; FL-10; T-210). Reemplaza al provisional. De arriba abajo:
+// el saludo, «Continuar viendo» (o «Para empezar» para quien no ha empezado nada), «Nuevos», un
+// carrusel por práctica en el orden de PA-67, y «Por maestro». Una práctica sin cursos no pinta
+// su fila; con el catálogo vacío, el estado vacío en lugar de las filas.
 //
-// Dice con qué correo se entró. No es un adorno: es lo que le avisa a alguien que completó
-// una cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla.
-//
-// Desde T-206, «Continuar viendo» en su forma mínima (decisión de Sergio del 2026-10-20): cada
-// curso empezado y sin terminar, el más reciente primero, con un enlace a la lección sugerida y su
-// avance. Sin cursos empezados, o si no se supo, no hay lista: lo demás del inicio sigue.
+// Bajo el saludo sigue diciendo con qué correo se entró: le avisa a alguien que completó una
+// cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla. Y al pie, «Salir»,
+// mientras no haya menú de la cuenta. «Mi lista» llega con la tercera solicitud de T-210, y
+// «Ver todo» con explorar (la segunda).
 
-const text = messages.account;
+const text = messages.browse.home;
 
-export const metadata: Metadata = { title: text.home.pageTitle };
+export const metadata: Metadata = { title: text.pageTitle };
+
+function courseCard(course: ShelfCourse) {
+  const href = coursePath(course.slug);
+  if (href === null) return null;
+  return (
+    <CourseCard
+      key={course.slug}
+      href={href}
+      title={course.title}
+      teacherName={course.teacherName}
+      practice={course.practice}
+      levelName={course.level?.name ?? null}
+      lessonCount={course.lessonCount}
+      isOpen={course.isOpen}
+    />
+  );
+}
 
 export default async function HomePage() {
   const session = await requireSession(ROUTES.home);
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
   if (session.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.home} withSession />;
 
-  const [email, watching] = await Promise.all([sessionEmail(await cookieReader()), continueWatching(session.claims)]);
-  const courses = watching.kind === "ready" ? watching.courses : [];
+  const [email, profile, watching, shelf] = await Promise.all([
+    sessionEmail(await cookieReader()),
+    accountProfile(session.claims),
+    continueWatching(session.claims),
+    homeShelf(),
+  ]);
+  const name = profile.kind === "ready" ? profile.name : null;
+  const started = watching.kind === "ready" ? watching.courses : [];
+  // La práctica de cada curso empezado, para su portada: de cualquier fila donde aparezca.
+  const listed = shelf.kind === "ready" ? [...shelf.shelf.newest, ...shelf.shelf.practices.flatMap((row) => row.courses)] : [];
+  const tones = new Map(listed.map((course) => [course.slug, course.practice]));
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
-      <h1 className="text-h1">{text.home.title}</h1>
-      <div className="flex flex-col gap-2 text-text-2">
-        {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
-        <p>{text.home.status}</p>
-      </div>
-      {courses.length > 0 && (
-        <section aria-labelledby="continuar-viendo" className="flex flex-col gap-3">
-          <h2 id="continuar-viendo" className="text-h3">
-            {text.home.continueTitle}
-          </h2>
-          <ul aria-labelledby="continuar-viendo" className="flex flex-col gap-4">
-            {courses.map((course) => {
+    <>
+      <StudentNav current={ROUTES.home} />
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 pt-8 pb-24 outline-none sm:pb-16">
+        <div className="flex flex-col gap-1 px-4 sm:px-8">
+          <h1 className="text-h1">{name === null ? text.greetingAnonymous : t(text.greeting, { name })}</h1>
+          {email !== null && <p className="text-body-s text-text-3">{t(messages.account.home.signedInAs, { email })}</p>}
+        </div>
+
+        {shelf.kind === "unavailable" && (
+          <div className="px-4 sm:px-8">
+            <InlineAlert tone="warning" action={<Button href={ROUTES.home} variant="secondary">{text.retry}</Button>}>
+              {text.unavailable}
+            </InlineAlert>
+          </div>
+        )}
+
+        {started.length > 0 && (
+          <Carousel id="continuar-viendo" title={text.continueTitle}>
+            {started.map((course) => {
               const href = lessonPath(course.courseSlug, course.lesson.id);
-              // Sin una dirección que sirva no hay a dónde llevar: no se pinta una tarjeta sin nombre.
               if (href === null) return null;
-              const words = { number: String(course.lesson.number), total: String(course.total), lesson: course.lesson.title };
+              const practice = tones.get(course.courseSlug) ?? null;
               return (
-                <li key={course.courseSlug} className="flex flex-col gap-2 rounded-md border border-border bg-surface-1 p-4">
-                  <TextLink href={href}>
-                    <span className="sr-only">{t(text.home.continueName, { ...words, course: course.courseTitle, teacher: course.teacherName })}</span>
-                    <span aria-hidden="true">{course.courseTitle}</span>
-                  </TextLink>
-                  <p aria-hidden="true" className="text-body-s text-text-2">
-                    {t(text.home.continueLesson, words)}
-                  </p>
-                  <ProgressBar
-                    value={course.completed}
-                    max={course.total}
-                    size="thin"
-                    label={t(text.home.continueProgressLabel, { course: course.courseTitle })}
-                    text={t(plural(course.total, text.home.continueProgress), { completed: String(course.completed), total: String(course.total) })}
-                  />
-                </li>
+                <CourseCard
+                  key={course.courseSlug}
+                  href={href}
+                  title={course.courseTitle}
+                  teacherName={course.teacherName}
+                  practice={practice === null ? null : { name: practice.name, tone: practice.tone }}
+                  levelName={null}
+                  lessonCount={course.total}
+                  progress={{ completed: course.completed, total: course.total, lessonNumber: course.lesson.number }}
+                />
               );
             })}
-          </ul>
-        </section>
-      )}
-      <p>
-        <TextLink href={ROUTES.account}>{text.home.account}</TextLink>
-      </p>
-      <form action={signOutAction}>
-        <Button type="submit" variant="secondary">
-          {text.common.signOut}
-        </Button>
-      </form>
-    </main>
+          </Carousel>
+        )}
+
+        {shelf.kind === "ready" && shelf.shelf.newest.length === 0 && (
+          <p className="px-4 text-body-l text-text-2 sm:px-8">{text.empty}</p>
+        )}
+
+        {shelf.kind === "ready" && (
+          <>
+            {started.length === 0 && shelf.shelf.starters.length > 0 && (
+              <Carousel id="para-empezar" title={text.startersTitle}>
+                {shelf.shelf.starters.map(courseCard)}
+              </Carousel>
+            )}
+            {shelf.shelf.newest.length > 0 && (
+              <Carousel id="nuevos" title={text.newestTitle}>
+                {shelf.shelf.newest.map(courseCard)}
+              </Carousel>
+            )}
+            {shelf.shelf.practices.map((row) => (
+              <Carousel key={row.slug} id={`practica-${row.slug}`} title={row.name}>
+                {row.courses.map(courseCard)}
+              </Carousel>
+            ))}
+            {shelf.shelf.teachers.length > 0 && (
+              <Carousel id="por-maestro" title={t(text.teachersTitle)} shape="tall">
+                {shelf.shelf.teachers.map((teacher) => {
+                  const href = teacherPath(teacher.slug);
+                  if (href === null) return null;
+                  const tone = listed.find((course) => course.teacherSlug === teacher.slug)?.practice?.tone ?? null;
+                  return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={tone} />;
+                })}
+              </Carousel>
+            )}
+          </>
+        )}
+
+        <form action={signOutAction} className="px-4 sm:px-8">
+          <Button type="submit" variant="text">
+            {messages.account.common.signOut}
+          </Button>
+        </form>
+      </main>
+    </>
   );
 }

@@ -8,6 +8,7 @@ import {
   consentsPageStep,
   factorSetupPageStep,
   lessonPageStep,
+  publicPageStep,
   secondFactorPageStep,
   sessionPageStep,
   visitorPageStep,
@@ -128,6 +129,17 @@ describe("una pantalla de visitante: entrar y registrarse", () => {
     ["unavailable", { kind: "render" }],
   ] as const)("%s", (name, expected) => {
     expect(visitorPageStep(check(name))).toEqual(expected);
+  });
+});
+
+describe("una pantalla pública que cambia según quién mira (T-210)", () => {
+  it("con una sesión que pasa, mira un alumno, con sus claims", () => {
+    expect(publicPageStep(check("pass"))).toEqual({ kind: "student", claims });
+  });
+
+  // Nunca redirige ni pinta un estado: lo que cualquiera ve, se ve.
+  it.each(["anonymous", "incomplete", "suspended", "closeToRecover", "closeToSignIn", "unavailable"] as const)("%s mira como visitante", (name) => {
+    expect(publicPageStep(check(name))).toEqual({ kind: "visitor" });
   });
 });
 
