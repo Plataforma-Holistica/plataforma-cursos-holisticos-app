@@ -308,6 +308,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/cursos/[slug]/lecciones/[leccion]",
       "/entrar/segundo-factor",
       "/entrar/segundo-factor/configurar",
+      "/explorar",
       "/inicio",
     ]);
   });
