@@ -221,6 +221,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Descargar: del formulario llega la corrida; el periodo, atado desde la pantalla, se revisa.
     downloadAction:
       /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const outcome = downloadOutcome\(await downloadExport\(jar, \{ run: request\.run \}\), period\);/,
+    // Las liquidaciones (PA-81): el periodo llega atado y se revisa; del formulario llega qué botón, con lo que
+    // se vio. El primer paso de liberar, retener, soltar y anular no llama a nadie; confirmar sin la casilla o
+    // sin el motivo vuelve a preguntar.
+    payoutsAction:
+      /const bound = payoutsPeriodFrom\(target\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
   "src/app/admin/_alertas/actions.ts": {
     // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
@@ -656,6 +661,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-equipo-invitar",
       "bloque-equipo-personas",
       "bloque-equipo-restablecer",
+      "bloque-liquidaciones",
+      "bloque-liquidaciones-codigo",
       "bloque-nombre",
       "bloque-periodo-codigo",
       "bloque-periodo-recalculo",

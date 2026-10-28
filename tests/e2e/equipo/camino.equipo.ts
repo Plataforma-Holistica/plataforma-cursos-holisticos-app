@@ -1737,6 +1737,31 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     });
   });
 
+  // PA-81 (T-605, cuarta solicitud): en este camino ningún mes se cierra, así que las liquidaciones se ven en
+  // cierre, sin filas. La tabla, liberar, retener y soltar los prueban `tests/ui/payouts-screen.test.tsx` y, contra
+  // la base, `56-periodos.test.ts` y `58-liquidaciones.test.ts`.
+  test("liquidaciones: la ruta pasa por la guarda; en cierre dice que nacen al cerrar y enlaza al cierre, con JavaScript y sin él", async ({ page, browser }) => {
+    await enterAdmin(page, ana, `${PERIODS}/2040-01`);
+    // Sin cerrar, el panel no enlaza a las liquidaciones.
+    await expect(page.getByRole("link", { name: "Liquidaciones" })).toHaveCount(0);
+    await page.goto(`${PERIODS}/2040-01/liquidaciones`);
+    await expect(page.getByRole("heading", { level: 1, name: "Liquidaciones" })).toBeVisible();
+    await expect(page.getByText("Este periodo todavía no se cierra: las liquidaciones nacen al cerrar.", { exact: false })).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    await page.getByRole("link", { name: "Ir al ensayo y cierre" }).click();
+    await expect(page).toHaveURL(`${PERIODS}/2040-01/cierre`);
+    // Un mes que la base no tiene, o una página que no existe bajo el periodo: no existe.
+    await page.goto(`${PERIODS}/2049-01/liquidaciones`);
+    await expect(page.getByRole("heading", { level: 1, name: "Liquidaciones" })).toHaveCount(0);
+    await page.goto(`${PERIODS}/2040-01/liquidaciones/otra`);
+    await expect(page.getByRole("heading", { level: 1, name: "Liquidaciones" })).toHaveCount(0);
+    await inContext(browser, { javaScriptEnabled: false }, async (bare) => {
+      await enterAdmin(bare, ana, `${PERIODS}/2040-02/liquidaciones`);
+      await expect(bare.getByRole("heading", { level: 1, name: "Liquidaciones" })).toBeVisible();
+      await expect(bare.getByRole("link", { name: "Ir al ensayo y cierre" })).toBeVisible();
+    });
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.

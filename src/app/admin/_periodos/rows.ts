@@ -1,7 +1,7 @@
 import { clockTime, longDate, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { admin } from "@/messages/es/admin";
 import { plural, t } from "@/messages/format";
-import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
+import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import type { AlertKind, FinanceAlerts } from "@/services/anomalies/anomalies";
 import type { FinanceClose, FinancePeriod, FinancePeriods, PeriodStatus, RunFigures, RunTeacher } from "@/services/periods/periods";
 
@@ -121,6 +121,8 @@ export interface PeriodView {
     button: string | null;
   };
   closeHref: string;
+  /** PA-81, con el periodo cerrado o pagado: antes no hay liquidaciones. */
+  payoutsHref: string | null;
 }
 
 const KINDS: Record<AlertKind, string> = {
@@ -267,6 +269,7 @@ export function periodView(read: Extract<FinancePeriod, { period: object }>, ale
       button: read.freshCode && !closed && !requestInFlight ? periodsButton.rollup(period.periodId) : null,
     },
     closeHref: periodClosePath(period.periodId),
+    payoutsHref: closed ? periodPayoutsPath(period.periodId) : null,
   };
 }
 

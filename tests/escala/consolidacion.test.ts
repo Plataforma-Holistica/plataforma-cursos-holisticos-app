@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire, SHOWN } from "../integration/helpers/finance";
+import { actAs, clearPeriodsBefore, connect, financePerson, retire, SEEN, SHOWN } from "../integration/helpers/finance";
 import { localOwnerUrl } from "../integration/helpers/local";
 import { assertPlainWindow } from "../integration/helpers/periods";
 
@@ -612,6 +612,46 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
       expect(Number(written.payouts)).toBe(report.teachers);
       // Y su exportación (T-605), escrita y comprobada en el cierre: una fila por maestro.
       expect(Number(written.exported)).toBe(report.teachers);
+
+      // Liberar (T-605, cuarta solicitud), como lo correrá el servidor desde PA-81: los bonos del fundador
+      // decididos antes, la lectura de la pantalla con su huella, y liberar con ella. Toma un candado de saldo
+      // por maestro; la comprobación de cada liquidación liberada corre al confirmar, bajo el mismo tope.
+      await client.query("begin");
+      await actAs(client, finance);
+      const founders = await client.query<{ r: { outcome: string } }>(
+        "select private.confirm_founder_bonus(id) as r from public.bonuses where period_id = $1 and kind = 'founder' and status = 'proposed'",
+        [period],
+      );
+      expect(founders.rows.every((row) => row.r.outcome === "confirmed")).toBe(true);
+      await retire(client, finance);
+      await client.query("commit");
+
+      await client.query("begin");
+      await actAs(client, finance);
+      const read = await timed("select private.finance_payouts($1) as r");
+      await client.query("rollback");
+      await client.query("begin");
+      await actAs(client, finance);
+      const release = await timed(`select private.release_payouts($1, ${SEEN}) as r`);
+      expect(release.r.outcome).toBe("released");
+      await retire(client, finance);
+      start = performance.now();
+      await client.query("commit");
+      const releaseCommit = ms(start);
+      const released = await one<{ calculated: string }>(
+        "select count(*) filter (where status = 'calculated') as calculated from public.payouts where period_id = $1",
+        [period],
+      );
+      report.release = {
+        founder_bonuses_confirmed: founders.rowCount,
+        finance_payouts_ms: read.ms,
+        release_payouts_ms: release.ms,
+        release_commit_ms: releaseCommit,
+        fits_server_statement: [read.ms, release.ms, releaseCommit].every((time) => time < SERVER_STATEMENT_MS),
+        released: Number(release.r.released),
+      };
+      expect(Number(release.r.released)).toBe(report.teachers);
+      expect(Number(released.calculated)).toBe(0);
     } finally {
       await client.query("rollback").catch(() => undefined);
       await client.end();

@@ -483,6 +483,31 @@ que no se ve leyendo un solo archivo:
   `tests/e2e/equipo/catalogo.equipo.ts`, FL-10: como lo público se recuerda 30 s, una prueba que carga
   cursos después de que otra leyó el inicio recarga hasta verlos. Para el A: el inicio ya no se titula
   «Inicio» sino «Hola, …», y «continuar viendo» es un carrusel.
+- **Lo que T-605 suma al carril A** (cuarta solicitud, `t605_liquidaciones`; PA-81 mínimo; plan aprobado por
+  Sergio el 2026-10-28, con la revisión independiente del diseño). **Liberar, retener y soltar cambiaron de
+  firma:** `release_payouts(p_period, p_seen)` lleva la huella de la vista que se vio
+  (`private.release_preview()`, la única definición de lo que liberar escribiría) y contesta `preview_changed`
+  si ya no es esa; `hold_payout(p_payout, p_reason, p_seen, p_alert)` lleva el estado visto, como texto (el
+  servidor no usa el tipo `payout_status`), y contesta `changed`; `unhold_payout(p_payout, p_note, p_seen)` lleva
+  la huella de `private.unhold_preview()` y contesta `changed`. Las firmas de antes no existen. Liberar toma
+  los candados de saldo (`teacher_balance:`) de todos sus maestros, en orden, antes de recalcular la vista, y
+  soltar el de su maestro antes de comparar: así soltar una retenida de otro mes no se cuela entre ver y
+  liberar (`tests/integration/58-liquidaciones.test.ts` lo prueba en los dos sentidos). El servidor ejecuta
+  las cinco funciones de finanzas de PA-81 y `private.finance_payouts()`; `capture_bonus` y
+  `capture_adjustment` siguen cerradas (PA-83), y el área `payouts` del vigilante tiene la columna `server`,
+  en los dos sentidos. **En producción la aplicación no libera** (decisión de Sergio del 2026-10-28): con
+  `APP_ENV=production` el servicio contesta `not_enabled` sin preguntarle a la base, y una prueba de
+  arquitectura lo exige; T-409 lo quita. El servicio vive en `src/services/periods/payouts.ts` (con sus
+  consultas en `records.ts` y su almacén en `store.ts`), y la pantalla en `src/app/admin/_periodos/payouts-*`
+  (`/admin/periodos/2027-10/liquidaciones`, por `DEEPER`): un solo formulario para la tabla y liberar, cada botón
+  con lo que se vio (`release:AAAAMM:<huella>`, `hold:<liquidación>:<estado>`, `unhold:` o `unhold_release:`
+  con la huella de la fila); anular solo se ofrece para el bono del fundador, y el almacén lo busca entre los
+  del periodo antes de anular (`void_bonus` anula cualquiera). Un 57014 al liberar o al soltar se dice como
+  tiempo vencido y un 23514 al confirmar como lo liberado que no cuadra, con sus reportes (`release_timed_out`,
+  `release_unbalanced`). Usa pgTAP 55 e integración 58 (y suma un caso a la 56); la 46, la 47 y la
+  integración 55 cambiaron sus llamadas por el requisito, y la 47 exige además, en rondas al azar, que lo
+  liberado sea lo que la vista decía. `test:escala` mide también liberar. Para el B: una prueba que libere,
+  retenga o suelte pasa lo que se vio (`SEEN` en `tests/integration/helpers/finance.ts` para liberar).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

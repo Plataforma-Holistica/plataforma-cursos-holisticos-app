@@ -15,16 +15,17 @@ const codeOf = (file: string) => sources.find((source) => source.file === file)?
 const panel = codeOf("src/services/periods/panel.ts");
 const store = codeOf("src/services/periods/store.ts");
 const records = codeOf("src/services/periods/records.ts");
+const payouts = codeOf("src/services/periods/payouts.ts");
 
-const bodyOf = (name: string) => {
-  const start = panel.indexOf(`  async function ${name}(`);
-  const end = panel.indexOf("\n  }\n", start);
-  return start === -1 || end === -1 ? "" : panel.slice(start, end);
+const bodyOf = (name: string, code = panel) => {
+  const start = code.indexOf(`  async function ${name}(`);
+  const end = code.indexOf("\n  }\n", start);
+  return start === -1 || end === -1 ? "" : code.slice(start, end);
 };
 
 describe("los periodos pasan por las funciones de la base", () => {
   it("hay archivos que revisar", () => {
-    for (const code of [panel, store, records]) expect(code.length).toBeGreaterThan(0);
+    for (const code of [panel, store, records, payouts]) expect(code.length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -36,6 +37,13 @@ describe("los periodos pasan por las funciones de la base", () => {
     ["rehearse_close", 1],
     ["close_period", 1],
     ["close_export_download", 1],
+    // PA-81 (T-605, cuarta solicitud): la lectura, que anular también usa para saber si el bono es del fundador.
+    ["finance_payouts", 1],
+    ["release_payouts", 1],
+    ["hold_payout", 1],
+    ["unhold_payout", 1],
+    ["confirm_founder_bonus", 1],
+    ["void_bonus", 1],
   ] as const)("private.%s() se nombra solo en records.ts, %i veces", (name, times) => {
     const naming = sources.filter((source) => new RegExp(`private\\.${name}\\b`).test(source.text)).map((source) => source.file);
     expect(naming).toEqual(["src/services/periods/records.ts"]);
@@ -54,8 +62,27 @@ describe("los periodos pasan por las funciones de la base", () => {
   });
 
   it("el servicio no abre transacciones ni lee la base por su cuenta", () => {
-    expect(panel).not.toMatch(/adapters\/supabase\/db|adapters\/supabase\/auth["']/);
-    expect(panel).not.toMatch(/\bas(?:User|Server|System)\(/);
+    for (const code of [panel, payouts]) {
+      expect(code).not.toMatch(/adapters\/supabase\/db|adapters\/supabase\/auth["']/);
+      expect(code).not.toMatch(/\bas(?:User|Server|System)\(/);
+    }
+  });
+
+  it("nadie de la aplicación calcula las vistas de liberar o soltar, ni captura: eso es de la base y de PA-83", () => {
+    const naming = sources.filter((source) => /private\.(release_preview|unhold_preview|capture_bonus|capture_adjustment)\b/.test(source.text));
+    expect(naming.map((source) => source.file)).toEqual([]);
+  });
+
+  it("en las liquidaciones, la guarda pide finanzas y cada decisión la corre antes que cualquier otra cosa", () => {
+    expect(bodyOf("admit", payouts)).toMatch(/const team = await core\.teamStanding\(reader\);[\s\S]*holds\(team\.standing, "finance"\)/);
+    for (const name of ["releasePayouts", "holdPayout", "unholdPayout", "confirmFounderBonus", "voidFounderBonus"]) {
+      expect(bodyOf(name, payouts), name).toMatch(new RegExp(`^ {2}async function ${name}\\([^)]*\\)[^{]*\\{\\n {4}const admitted = await admit\\(reader\\);`));
+    }
+  });
+
+  it("el freno de producción se revisa antes de liberar, y lo arma periods.ts con APP_ENV", () => {
+    expect(bodyOf("releasePayouts", payouts)).toMatch(/if \(!deps\.releaseEnabled\(\)\) return \{ kind: "not_enabled" \};\n {4}const result = await decide\(\(\) => store\.release\(/);
+    expect(codeOf("src/services/periods/periods.ts")).toMatch(/releaseEnabled: \(\) => getEnv\(\)\.APP_ENV !== "production"/);
   });
 
   it("la guarda pide finanzas, y cada decisión la corre antes que cualquier otra cosa", () => {
@@ -67,7 +94,7 @@ describe("los periodos pasan por las funciones de la base", () => {
   });
 
   it("ni el servicio ni las pantallas reciben un identificador de alumno", () => {
-    for (const code of [panel, records]) expect(code).not.toMatch(/\b(student|profile)(?:_id|Id)\b/);
+    for (const code of [panel, records, payouts]) expect(code).not.toMatch(/\b(student|profile)(?:_id|Id)\b/);
     const screens = sources.filter((source) => source.file.startsWith("src/app/admin/_periodos/"));
     expect(screens.length).toBeGreaterThan(0);
     for (const source of screens) expect(source.text, source.file).not.toMatch(/\b(student|profile)(?:_id|Id)\b/);
