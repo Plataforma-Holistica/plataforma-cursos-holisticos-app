@@ -85,6 +85,16 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
  * cada acción hace con cada respuesta lo prueban `tests/actions/` y sus tablas.
  */
 const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
+  "src/app/_catalog/my-list/actions.ts": {
+    // Mi lista (T-210): del formulario solo qué botón y qué curso; el servicio corre la guarda y
+    // escribe a nombre de esa sesión. A qué pantalla se vuelve lo ata cada acción.
+    courseListAction:
+      /const result = request\.kind === "save" \? await saveCourse\(jar, request\.slug\) : await removeCourse\(jar, request\.slug\);\s*return settle\(jar, listOutcome\("course", request\.slug, result\), request\.slug, nextAttempt\(previous\)\);/,
+    homeListAction:
+      /const result = request\.kind === "save" \? await saveCourse\(jar, request\.slug\) : await removeCourse\(jar, request\.slug\);\s*return settle\(jar, listOutcome\("home", request\.slug, result\), request\.slug, nextAttempt\(previous\)\);/,
+    exploreListAction:
+      /const result = request\.kind === "save" \? await saveCourse\(jar, request\.slug\) : await removeCourse\(jar, request\.slug\);\s*return settle\(jar, listOutcome\("explore", request\.slug, result\), request\.slug, nextAttempt\(previous\)\);/,
+  },
   "src/app/(cuenta)/entrar/actions.ts": {
     // Entrar es de visitante: el servicio cuenta el intento, le pregunta a Auth y corre la guarda.
     signInAction: /await signIn\(jar, \{ email, password \}, await requestOrigin\(\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
@@ -662,8 +672,10 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-equipo-invitar",
       "bloque-equipo-personas",
       "bloque-equipo-restablecer",
+      "bloque-ficha-lista",
       "bloque-liquidaciones",
       "bloque-liquidaciones-codigo",
+      "bloque-mi-lista",
       "bloque-nombre",
       "bloque-periodo-codigo",
       "bloque-periodo-recalculo",

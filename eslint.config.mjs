@@ -207,6 +207,8 @@ const NON_TEXT_ATTRIBUTES =
   "/^(" +
   [
     "className|class|id|name|type|href|src|srcSet|rel|target|method|encType|htmlFor|form",
+    // A dónde vuelve un formulario sin JavaScript (el tercer argumento de `useActionState`).
+    "permalink",
     // El valor que un campo manda con el formulario, no lo que la gente lee.
     "value",
     // Un manejador no es un texto, aunque adentro compare o navegue con cadenas.

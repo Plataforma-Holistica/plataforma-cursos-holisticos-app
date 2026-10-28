@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { X } from "lucide";
 import Link from "next/link";
 
+import { exploreListAction } from "@/app/_catalog/my-list/actions";
+import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
 import { StudentNav } from "@/app/_catalog/nav";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireSession } from "@/app/_lib/guard";
 import { messages, plural, t } from "@/messages";
 import { coursePath, explorePath, ROUTES, teacherPath } from "@/services/account/navigation";
-import { explore, exploreQueryOf, type ExploreQuery, type ShelfCourse } from "@/services/browse/browse";
+import { explore, exploreQueryOf, myList, type ExploreQuery, type ShelfCourse } from "@/services/browse/browse";
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
@@ -23,19 +25,27 @@ import { ExploreForm } from "./explore-form";
 // filtro ni búsqueda, un carrusel por práctica; con algo pedido, cuántos cursos y la cuadrícula
 // (la única de la Plataforma, D-19), y arriba los maestros cuyo nombre coincide con la búsqueda.
 // Sin resultados, lo dice, ofrece limpiar los filtros y muestra «Nuevos» debajo. Los filtros y la
-// búsqueda viven en la dirección: regresar de una ficha no los pierde. «Guardar en mi lista»
-// llega con la tercera solicitud.
+// búsqueda viven en la dirección: regresar de una ficha no los pierde.
+//
+// Bajo cada tarjeta, «Guardar en mi lista» o «Quitar de mi lista» (RF-311; decisión de Sergio del
+// 2026-10-28). Si la lista no se pudo leer, no se sabe cuál toca, y las tarjetas van sin botón.
+// Sin JavaScript el formulario vuelve a explorar con los mismos filtros, en la tarjeta.
 
 const text = messages.browse.explore;
 
 export const metadata: Metadata = { title: text.pageTitle };
 
-function courseCard(course: ShelfCourse) {
+/** Lo que hace falta para el botón de Mi lista: qué está guardado, y a dónde vuelve. Nulo si no se supo. */
+type Saving = { saved: ReadonlySet<string>; shownPath: string } | null;
+
+/** El ancla de la tarjeta de un curso: ahí vuelve su formulario sin JavaScript. */
+const cardAnchor = (slug: string) => `bloque-explorar-${slug}`;
+
+function courseCard(course: ShelfCourse, saving: Saving) {
   const href = coursePath(course.slug);
   if (href === null) return null;
-  return (
+  const card = (
     <CourseCard
-      key={course.slug}
       href={href}
       title={course.title}
       teacherName={course.teacherName}
@@ -45,6 +55,19 @@ function courseCard(course: ShelfCourse) {
       isOpen={course.isOpen}
     />
   );
+  if (saving === null) return <div key={course.slug}>{card}</div>;
+  return (
+    <div key={course.slug} id={cardAnchor(course.slug)} className="flex flex-col gap-3">
+      {card}
+      <SaveCourseButton
+        action={exploreListAction}
+        slug={course.slug}
+        title={course.title}
+        saved={saving.saved.has(course.slug)}
+        permalink={`${saving.shownPath}#${cardAnchor(course.slug)}`}
+      />
+    </div>
+  );
 }
 
 export default async function ExplorePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -53,7 +76,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
   if (session.kind === "unavailable") return <UnavailableScreen retryHref={explorePath(asked)} withSession />;
 
-  const answer = await explore(asked);
+  const [answer, saved] = await Promise.all([explore(asked), myList(session.claims)]);
 
   return (
     <>
@@ -67,7 +90,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
             </InlineAlert>
           </div>
         ) : (
-          <Explore answer={answer} />
+          <Explore answer={answer} saved={saved.kind === "ready" ? new Set(saved.courses.map((course) => course.slug)) : null} />
         )}
       </main>
     </>
@@ -76,8 +99,10 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
 
 type Ready = Extract<Awaited<ReturnType<typeof explore>>, { kind: "ready" }>;
 
-function Explore({ answer }: { answer: Ready }) {
+function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> | null }) {
   const { query, facets, results, shelf } = answer;
+  const saving: Saving = saved === null ? null : { saved, shownPath: explorePath(query) };
+  const card = (course: ShelfCourse) => courseCard(course, saving);
   const chips = activeFilters(query, facets);
   const hasFilters = chips.length > 0;
 
@@ -134,7 +159,7 @@ function Explore({ answer }: { answer: Ready }) {
             title={row.name}
             action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}
           >
-            {row.courses.map(courseCard)}
+            {row.courses.map(card)}
           </Carousel>
           ))
         )
@@ -162,7 +187,7 @@ function Explore({ answer }: { answer: Ready }) {
               <ul aria-labelledby="resultados" className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
                 {results.courses.map((course) => (
                   <li key={course.slug} className="relative min-w-0">
-                    {courseCard(course)}
+                    {card(course)}
                   </li>
                 ))}
               </ul>
@@ -183,7 +208,7 @@ function Explore({ answer }: { answer: Ready }) {
           </section>
           {results.courses.length === 0 && shelf.newest.length > 0 && (
             <Carousel id="seleccion" title={text.selectionTitle}>
-              {shelf.newest.map(courseCard)}
+              {shelf.newest.map(card)}
             </Carousel>
           )}
         </>

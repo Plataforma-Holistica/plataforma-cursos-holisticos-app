@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { homeListAction } from "@/app/_catalog/my-list/actions";
+import { MyListBlock } from "@/app/_catalog/my-list/my-list-block";
 import { StudentNav } from "@/app/_catalog/nav";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
@@ -8,7 +10,7 @@ import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { accountProfile, sessionEmail } from "@/services/account/account";
 import { coursePath, explorePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
-import { homeShelf, type ShelfCourse } from "@/services/browse/browse";
+import { homeShelf, myList, type ShelfCourse } from "@/services/browse/browse";
 import { continueWatching } from "@/services/progress/progress";
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
@@ -25,12 +27,20 @@ import { TextLink } from "@/ui/text-link";
 //
 // Bajo el saludo sigue diciendo con qué correo se entró: le avisa a alguien que completó una
 // cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla. Y al pie, «Salir»,
-// mientras no haya menú de la cuenta. «Mi lista» llega con la tercera solicitud de T-210. «Ver
-// todo» lleva a explorar con el filtro de la fila: «Para empezar», su nivel; cada práctica, la
-// suya. «Nuevos» no lo lleva: explorar no ordena por otra cosa que lo más nuevo, y sin filtro
-// pinta un carrusel por práctica (decisión mía sin confirmar, 2026-10-28).
+// mientras no haya menú de la cuenta. «Ver todo» lleva a explorar con el filtro de la fila:
+// «Para empezar», su nivel; cada práctica, la suya. «Nuevos» no lo lleva: explorar no ordena por
+// otra cosa que lo más nuevo, y sin filtro pinta un carrusel por práctica (decisión mía sin
+// confirmar, 2026-10-28).
+//
+// «Mi lista» (RF-311, tercera solicitud de T-210) va después de «Continuar viendo» o «Para
+// empezar» y antes de «Nuevos», solo si tiene algo. Si no se pudo leer, no se pinta (el servicio
+// lo reporta). El bloque está siempre, vacío o no: su región dice «Quitado de tu lista» aunque
+// se haya quitado el último.
 
 const text = messages.browse.home;
+
+/** El bloque de «Mi lista»: el ancla a la que vuelve su formulario sin JavaScript. */
+const MY_LIST_ID = "bloque-mi-lista";
 
 export const metadata: Metadata = { title: text.pageTitle };
 
@@ -66,11 +76,12 @@ export default async function HomePage() {
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
   if (session.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.home} withSession />;
 
-  const [email, profile, watching, shelf] = await Promise.all([
+  const [email, profile, watching, shelf, saved] = await Promise.all([
     sessionEmail(await cookieReader()),
     accountProfile(session.claims),
     continueWatching(session.claims),
     homeShelf(),
+    myList(session.claims),
   ]);
   const name = profile.kind === "ready" ? profile.name : null;
   const started = watching.kind === "ready" ? watching.courses : [];
@@ -130,6 +141,30 @@ export default async function HomePage() {
               >
                 {shelf.shelf.starters.map(courseCard)}
               </Carousel>
+            )}
+            {saved.kind === "ready" && (
+              <MyListBlock
+                id={MY_LIST_ID}
+                action={homeListAction}
+                permalink={`${ROUTES.home}#${MY_LIST_ID}`}
+                courses={saved.courses.flatMap((course) => {
+                  const href = coursePath(course.slug);
+                  return href === null
+                    ? []
+                    : [
+                        {
+                          slug: course.slug,
+                          href,
+                          title: course.title,
+                          teacherName: course.teacherName,
+                          practice: course.practice,
+                          levelName: course.level?.name ?? null,
+                          lessonCount: course.lessonCount,
+                          isOpen: course.isOpen,
+                        },
+                      ];
+                })}
+              />
             )}
             {shelf.shelf.newest.length > 0 && (
               <Carousel id="nuevos" title={text.newestTitle}>

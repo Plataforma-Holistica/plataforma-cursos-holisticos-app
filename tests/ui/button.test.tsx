@@ -93,6 +93,31 @@ describe("Button", () => {
     expect(broken).toBeDefined();
   });
 
+  // En camino sin deshabilitarse (Mi lista): un botón deshabilitado pierde el foco en el
+  // navegador, y el formulario que se pinta otra vez lo necesita donde estaba.
+  it("en camino: dice lo que hace y se anuncia, sin deshabilitarse ni soltar el foco", () => {
+    const { rerender } = render(<Button loadingLabel="Guardando…">Guardar cambios</Button>);
+    const button = screen.getByRole("button", { name: "Guardar cambios" });
+    button.focus();
+    rerender(
+      <Button pending loadingLabel="Guardando…">
+        Guardar cambios
+      </Button>,
+    );
+    expect(screen.getByRole("button", { name: "Guardando…" })).toBe(button);
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("Guardando…");
+  });
+
+  it("no se puede poner en camino sin decir qué está haciendo", () => {
+    // @ts-expect-error `pending` exige `loadingLabel`
+    const broken = <Button pending>Guardar cambios</Button>;
+    expect(broken).toBeDefined();
+  });
+
   it("un botón sin texto de carga no trae región viva", () => {
     render(<Button>Guardar cambios</Button>);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
