@@ -56,7 +56,14 @@ const FAILURES = {
   catalog_change_unavailable: "Un cambio a las prácticas o los niveles del catálogo se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien lo pidió se le dijo que revise la lista.",
   anomaly_alerts_unavailable: "No se pudieron leer las alertas de anomalía: quien tiene finanzas no pudo verlas ni decidir sobre ellas (PA-68).",
   anomaly_decision_unavailable: "Una decisión de finanzas sobre una alerta de anomalía (revisarla, decidir fraude, excluir o revertir consumo) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y a quien la pidió se le dijo que revise la alerta. También sale cuando alguien dio bien su código y aun así ninguna decisión pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS.",
-  legal_text_unavailable: "No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
+  periods_unavailable: "No se pudieron leer los periodos, el panel de uno o su ensayo y cierre: quien tiene finanzas no pudo verlos (PA-78 a PA-80).",
+  period_change_unavailable:
+    "Una decisión de finanzas sobre un periodo (pedir el recálculo, ensayar, cerrar o descargar la exportación) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si se hizo, y la pantalla vuelve a leer el periodo. También sale cuando alguien dio bien su código y aun así ninguna decisión pasaría: entonces falta el parámetro VIGENCIA_CODIGO_RECIENTE_MINUTOS.",
+  close_timed_out:
+    "Un ensayo o un cierre pasó del tope de tiempo de la base (statement_timeout, 57014): no se guardó nada y se le pidió a finanzas intentar de nuevo. Si se repite, el cierre ya no cabe en una transacción del servidor (05 §14.4): medirlo con scale_test.",
+  close_unbalanced:
+    "Al confirmar un cierre, la comprobación diferida rechazó la suma (23514: el reparto no es igual al bote, o la exportación no es la que regenera la base). No se cerró nada. Es un defecto del cálculo: revisar check_period_balanced y el registro de la base.",
+  legal_text_unavailable:"No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
   password_change_incomplete: "Una contraseña se cambió desde la cuenta y la aplicación no pudo fechar el cambio: una entrada hecha antes con la contraseña vieja podría quedar reconocida.",
