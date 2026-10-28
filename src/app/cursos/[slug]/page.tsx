@@ -42,6 +42,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 /** El estado de una lección para quien no tiene avance que leer. */
 const NOT_STARTED = "not_started" as const;
+const LOCKED = "locked" as const;
 
 const BUTTON_LABEL: Record<Exclude<PrimaryAction["kind"], "none" | "continue">, string> = {
   start: text.start,
@@ -65,6 +66,8 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
   }
   const action = primaryAction(detail, who);
   const standing = who.kind === "student" ? who.standing : null;
+  // Al visitante, las lecciones de un curso que pide suscripción llevan candado (PA-02, «Estados»).
+  const locked = who.kind === "visitor" && !course.isOpen;
   const teacherHref = detail.teacher === null ? null : teacherPath(detail.teacher.slug);
   const tags = [course.practice?.name, course.level?.name].filter((tag): tag is string => typeof tag === "string");
 
@@ -140,7 +143,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
                             number={lesson.number}
                             title={lesson.title}
                             duration={lessonMinutes(lesson.durationSeconds)}
-                            state={standing?.states.get(lesson.id) ?? NOT_STARTED}
+                            state={locked ? LOCKED : (standing?.states.get(lesson.id) ?? NOT_STARTED)}
                           />
                         </li>
                       );

@@ -12,7 +12,8 @@ import { cx } from "./cx";
 // abierto. La vista ampliada, la vertical y la de fila llegan después.
 //
 // Toda la tarjeta es un solo enlace, y su nombre va entero en un texto que solo se lee: lo
-// visible queda fuera del árbol de accesibilidad, como en la fila de lección.
+// visible queda fuera del árbol de accesibilidad, como en la fila de lección. Por eso lo que dice
+// la barra de avance (cuántas van) va también en el nombre.
 
 export interface CourseCardProps {
   href: string;
@@ -32,7 +33,13 @@ export function CourseCard({ href, title, teacherName, practice, levelName, less
   const name =
     progress === undefined
       ? t(text.name, { title, teacher: teacherName })
-      : t(text.nameWithProgress, { title, teacher: teacherName, number: progress.lessonNumber, total: progress.total });
+      : t(text.nameWithProgress, {
+          title,
+          teacher: teacherName,
+          number: progress.lessonNumber,
+          total: progress.total,
+          completed: t(plural(progress.total, text.completedOf), { completed: Math.min(progress.completed, progress.total), total: progress.total }),
+        });
   const meta = [practice?.name, levelName, t(plural(lessonCount, text.lessons), { count: lessonCount })].filter(
     (part): part is string => typeof part === "string",
   );

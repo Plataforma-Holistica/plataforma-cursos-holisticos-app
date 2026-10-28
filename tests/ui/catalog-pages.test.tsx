@@ -80,7 +80,8 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", `/registro?volver=${encodeURIComponent(lesson(L1))}`);
     const syllabus = screen.getByRole("region", { name: "Temario" });
     expect(within(syllabus).getByRole("heading", { name: "Módulo 1 · Preparar el cuerpo" })).toBeVisible();
-    expect(within(syllabus).getByRole("link", { name: "Lección 2, La postura, 7 min" })).toHaveAttribute("href", lesson(L2));
+    // Las lecciones llevan candado (PA-02, «Estados»), y siguen llevando a la lección, que manda a entrar.
+    expect(within(syllabus).getByRole("link", { name: "Lección 2, La postura, 7 min, requiere suscripción" })).toHaveAttribute("href", lesson(L2));
     expect(screen.getByRole("link", { name: "Ver la ficha de Ana Robles" })).toHaveAttribute("href", "/maestros/ana-robles");
     // Sin sesión no hay barra del alumno, ni avance, ni pregunta de acceso.
     expect(screen.queryByRole("navigation", { name: "Principal" })).toBeNull();
@@ -96,6 +97,8 @@ describe("la ficha de un curso (PA-02)", () => {
     render(await CourseRoute(params("respirar")));
     expect(screen.getByRole("link", { name: "Verlo sin costo" })).toBeVisible();
     expect(screen.getByText("Este es el curso abierto: lo puedes ver sin suscripción, con tu cuenta.")).toBeVisible();
+    // El abierto no pide suscripción: sin candado.
+    expect(within(screen.getByRole("region", { name: "Temario" })).getByRole("link", { name: "Lección 2, La postura, 7 min" })).toHaveAttribute("href", lesson(L2));
   });
 
   it("al alumno con avance: su barra, el estado de cada lección y «Continuar: lección 2»", async () => {

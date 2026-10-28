@@ -162,7 +162,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     const { container } = render(await HomePage());
     expect(mocks.continueWatching).toHaveBeenCalledExactlyOnceWith(claims);
     const list = screen.getByRole("list", { name: "Continuar viendo" });
-    const link = within(list).getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12" });
+    // Lo que dice la barra, que solo se ve, va en el nombre.
+    const link = within(list).getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, 3 de 12 terminadas" });
     expect(link).toHaveAttribute("href", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
     expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.queryByText("Roto")).toBeNull();
@@ -187,11 +188,13 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("si no se supo «continuar viendo», el inicio sigue con lo demás", async () => {
+  it("si no se supo «continuar viendo», el inicio sigue con lo demás, sin «Para empezar»: no se sabe si es alguien nuevo", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.continueWatching.mockResolvedValue({ kind: "unavailable" });
     render(await HomePage());
     expect(screen.getByRole("heading", { name: "Nuevos" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Continuar viendo" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Para empezar" })).toBeNull();
   });
 
   it("con el catálogo vacío, el estado vacío en lugar de las filas", async () => {

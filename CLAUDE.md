@@ -469,9 +469,13 @@ que no se ve leyendo un solo archivo:
   lo vigente, y se recuerda 30 s, también cuando no se supo; el avance de cada quien, como la persona), el
   inicio nuevo (PA-20), la ficha de un curso (`/cursos/[slug]`, PA-02) y la de un maestro
   (`/maestros/[slug]`, PA-03), las dos públicas. La guarda `publicViewer` (`publicPageStep`) nunca
-  redirige: con una sesión que pasa mira un alumno, y con cualquier otra respuesta, un visitante. La ficha
+  redirige: con una sesión que pasa mira un alumno; sin sesión, un visitante; y con una cuenta a medias,
+  suspendida o «no se supo», no se sabe quién mira (`unknown`), y la ficha va sin botón. La ficha
   del curso elige su botón en `outcomes.ts` y le pregunta a `lessonAccess` por la primera lección, sin
-  firmar. Componentes base nuevos: `CourseCover` (la portada generada, con `@container` y los tokens
+  firmar: solo con `allowed` o `denied` hay botón; con cualquier otra respuesta (también `no_video`, que
+  es lo que da una lección del proveedor de prueba) no se sabe cuál le toca, y va sin él. En el inicio,
+  «Para empezar» sale solo si se supo que no hay nada empezado. El nombre de una tarjeta con avance dice
+  también lo que dice su barra, que solo se ve. Componentes base nuevos: `CourseCover` (la portada generada, con `@container` y los tokens
   `text-cover-*`, `p-cover` y `cover-N-deep`), `CourseCard`, `TeacherCard` y `Carousel` (cada tarjeta va
   en un `<li>` posicionado: el nombre `sr-only` es absoluto y sin eso ensanchaba la página). `pnpm
   db:courses` carga desde aquí ocho cursos de prueba (un video de Mux va en una sola lección; las

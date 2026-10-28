@@ -85,7 +85,10 @@ describe("el alumno", () => {
     expect(primaryAction(detail(), { kind: "student", access: allowed, standing: null })).toEqual({ kind: "start", href: lesson(FIRST) });
   });
 
-  it.each(["no_video", "refused", "unavailable"] as const)("si el acceso contesta %s, decide el avance: la lección lo explica", (kind) => {
-    expect(primaryAction(detail(), { kind: "student", access: { kind }, standing: standing({}) })).toEqual({ kind: "start", href: lesson(FIRST) });
+  // Ni «Empezar» ni «Suscribirme»: no se sabe cuál le toca, como cuando no se sabe quién mira.
+  it.each(["no_video", "refused", "unavailable"] as const)("si el acceso contesta %s, sin botón, con avance o sin él", (kind) => {
+    for (const progress of [standing({}), standing({ started: true, completed: 2, suggested: { id: THIRD, number: 3 } }), null]) {
+      expect(primaryAction(detail(), { kind: "student", access: { kind }, standing: progress })).toEqual({ kind: "none" });
+    }
   });
 });

@@ -233,11 +233,13 @@ describe("el avance de cada quien, leído como la persona", () => {
     const ana = await personClaims();
     const beto = await personClaims();
     await reverted(async (owner) => {
-      const [first, second] = await loadCourse(owner, "catalogo-avance", true);
+      const [first, second, third] = await loadCourse(owner, "catalogo-avance", true);
+      // Beto terminó lo que Ana no: si su avance se colara, cambiarían las cuentas y los estados de Ana.
       for (const [profile, lesson, completed] of [
         [ana.id, first, true],
         [ana.id, second, false],
-        [beto.id, first, true],
+        [beto.id, second, true],
+        [beto.id, third, true],
       ] as const) {
         await owner.query(
           `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, covered, completed_at,
@@ -253,6 +255,7 @@ describe("el avance de cada quien, leído como la persona", () => {
       if (standing.kind !== "ready") throw new Error(`No se leyó: ${standing.kind}`);
       expect(standing.standing).toMatchObject({ completed: 1, total: 3, started: true, finished: false, suggested: { id: second, number: 2 } });
       expect(standing.standing.states.get(second ?? "")).toBe("in_progress");
+      expect(standing.standing.states.get(third ?? "")).not.toBe("completed");
     });
   });
 });

@@ -108,7 +108,8 @@ export default async function HomePage() {
 
         {shelf.kind === "ready" && (
           <>
-            {started.length === 0 && shelf.shelf.starters.length > 0 && (
+            {/* «Para empezar» es para quien no ha empezado nada: si no se supo, no se sabe (PA-20). */}
+            {watching.kind === "ready" && started.length === 0 && shelf.shelf.starters.length > 0 && (
               <Carousel id="para-empezar" title={text.startersTitle}>
                 {shelf.shelf.starters.map(courseCard)}
               </Carousel>

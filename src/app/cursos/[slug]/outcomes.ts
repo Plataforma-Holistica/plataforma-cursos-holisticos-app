@@ -12,7 +12,7 @@ import type { LessonAccess } from "@/services/media/media";
 export type PrimaryAction =
   | { kind: "start" | "again" | "subscribe" | "open_free"; href: string }
   | { kind: "continue"; href: string; number: number }
-  /** No se sabe quién mira, o la cuenta está suspendida: la ficha se ve, sin botón. */
+  /** No se sabe quién mira o si tiene acceso, o la cuenta está suspendida: la ficha se ve, sin botón. */
   | { kind: "none" };
 
 export type Viewer = { kind: "visitor" } | { kind: "unknown" } | { kind: "student"; access: LessonAccess; standing: CourseStanding | null };
@@ -27,12 +27,14 @@ export function primaryAction(detail: CourseDetail, viewer: Viewer): PrimaryActi
   if (viewer.kind === "visitor") return { kind: detail.course.isOpen ? "open_free" : "subscribe", href: signUpPath(first) };
 
   switch (viewer.access.kind) {
-    case "suspended":
-      return { kind: "none" };
     case "denied":
       return { kind: "subscribe", href: first };
-    default:
+    case "allowed":
       break;
+    // Suspendida, sin video que ver, o no se supo: no se sabe qué botón le toca, y ninguno se
+    // promete (como cuando no se sabe quién mira). El temario sigue llevando a cada lección.
+    default:
+      return { kind: "none" };
   }
 
   const standing = viewer.standing;
