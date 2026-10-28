@@ -186,6 +186,11 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
 
       <div className="flex flex-wrap items-center gap-4">
         <Button href={view.closeHref}>{text.rehearseAndClose}</Button>
+        {view.payoutsHref !== null && (
+          <Button href={view.payoutsHref} variant="secondary">
+            {text.goToPayouts}
+          </Button>
+        )}
       </div>
 
       <p className="text-body-s">

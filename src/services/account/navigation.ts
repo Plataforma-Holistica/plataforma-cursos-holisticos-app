@@ -116,6 +116,9 @@ export function explorePath({ q = null, practice = null, teacher = null, level =
 
 export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
+/** PA-81, las liquidaciones de un periodo. */
+export const periodPayoutsPath = (period: number): string => `${periodPath(period)}/liquidaciones`;
+
 /**
  * A dónde se puede volver después de entrar. Va por lo que se permite: una ruta nueva no
  * es destino hasta que alguien la agrega. Las pantallas por las que se entra (entrar,

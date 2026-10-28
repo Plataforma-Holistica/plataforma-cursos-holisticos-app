@@ -5,7 +5,7 @@ import type { Capability } from "@/services/account/team";
 
 import { AlertsSection } from "../_alertas/section";
 import { TeamSection } from "../_equipo/section";
-import { CloseSection, PeriodSection, PeriodsSection } from "../_periodos/section";
+import { CloseSection, PayoutsSection, PeriodSection, PeriodsSection } from "../_periodos/section";
 import { CatalogSection } from "../_practicas/section";
 import { ReviewSection } from "../_revision/section";
 
@@ -54,8 +54,8 @@ export function periodAt(segment: string | undefined): number | null {
 }
 
 /**
- * Lo que cuelga de una sección, por la ruta que sigue a su nombre: PA-79 (`/admin/periodos/2027-10`)
- * y PA-80 (`/admin/periodos/2027-10/cierre`). Si el periodo existe lo dice su sección, después de
+ * Lo que cuelga de una sección, por la ruta que sigue a su nombre: PA-79 (`/admin/periodos/2027-10`),
+ * PA-80 (`/admin/periodos/2027-10/cierre`) y PA-81 (`/admin/periodos/2027-10/liquidaciones`). Si el periodo existe lo dice su sección, después de
  * la guarda: aquí solo la forma.
  */
 const DEEPER: Record<string, (deeper: readonly string[]) => AdminSection | null> = {
@@ -65,6 +65,7 @@ const DEEPER: Record<string, (deeper: readonly string[]) => AdminSection | null>
     if (period === null || more.length > 0) return null;
     if (page === undefined) return { capability: "finance", render: (claims) => <PeriodSection claims={claims} period={period} /> };
     if (page === "cierre") return { capability: "finance", render: (claims) => <CloseSection claims={claims} period={period} /> };
+    if (page === "liquidaciones") return { capability: "finance", render: (claims) => <PayoutsSection claims={claims} period={period} /> };
     return null;
   },
 };

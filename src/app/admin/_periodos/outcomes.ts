@@ -1,4 +1,4 @@
-import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
+import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import type { Closed, ExportDownloaded, PeriodsCode, Rehearsed, RollupRequested } from "@/services/periods/periods";
 
 import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
@@ -90,8 +90,8 @@ export const UNDERSTOOD = "yes";
 
 /**
  * A dónde vuelve quien dio su código: la página de donde lo dio. Llega atado a la acción desde la
- * pantalla, y una acción es una puerta pública: lo que no sea un periodo con forma y una de las dos
- * páginas va a la lista.
+ * pantalla, y una acción es una puerta pública: lo que no sea un periodo con forma y una de sus
+ * páginas (el panel, el cierre o las liquidaciones) va a la lista.
  */
 export function periodCodeTarget(target: unknown): string {
   if (typeof target !== "object" || target === null) return ROUTES.periods;
@@ -100,6 +100,7 @@ export function periodCodeTarget(target: unknown): string {
   if (period === null) return ROUTES.periods;
   if (page === "panel") return periodPath(period);
   if (page === "close") return periodClosePath(period);
+  if (page === "payouts") return periodPayoutsPath(period);
   return ROUTES.periods;
 }
 

@@ -4,10 +4,11 @@ import type { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createPeriodsPanel } from "@/services/periods/panel";
+import { createPayoutsPanel } from "@/services/periods/payouts";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor, type KnownUser, type MemoryJar } from "./helpers/auth";
-import { periodStoreOn } from "./helpers/period-store";
+import { payoutStoreOn, periodStoreOn } from "./helpers/period-store";
 import { asOwner, asSystem, reverted, teamStoreOn } from "./helpers/team";
 import { totpCode } from "./helpers/totp";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
@@ -142,6 +143,16 @@ function periodsOn(owner: Client) {
   return { ...panel, reported, services };
 }
 
+function payoutsOn(owner: Client, releaseEnabled = true) {
+  const services = testServices({ teamStore: teamStoreOn(owner) });
+  const reported: string[] = [];
+  const panel = createPayoutsPanel(
+    { report: (code) => (reported.push(code), Promise.resolve()), releaseEnabled: () => releaseEnabled },
+    { teamStanding: services.teamStanding, store: payoutStoreOn(owner) },
+  );
+  return { ...panel, reported };
+}
+
 async function claimsOf(service: ReturnType<typeof periodsOn>, jar: MemoryJar) {
   const check = await service.services.teamStanding(jar);
   if (check.kind !== "team") throw new Error("La persona de prueba no quedó en el equipo.");
@@ -221,6 +232,62 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
     });
   });
 
+  it("las liquidaciones (PA-81): las lee, retiene y suelta con lo que vio, y libera con la huella de la vista", async () => {
+    await staged(["finance"], async ({ jar, owner, student }) => {
+      const service = periodsOn(owner);
+      const payouts = payoutsOn(owner);
+      const claims = await claimsOf(service, jar);
+      expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "rehearsed" });
+      const rehearsed = await service.financeClose(jar, claims, PERIOD);
+      if (rehearsed.kind !== "close" || rehearsed.close.period === null) throw new Error("No leyó el ensayo.");
+      expect(await service.closePeriod(jar, { period: PERIOD, run: rehearsed.close.rehearsal!.runId })).toEqual({ kind: "answered", answer: "closed" });
+
+      const read = await payouts.financePayouts(jar, claims, PERIOD);
+      if (read.kind !== "payouts" || read.payouts.period === null) throw new Error("No leyó las liquidaciones.");
+      expect(read.payouts.period).toMatchObject({ periodId: PERIOD, status: "closed", payoutsReleasedAt: null, minimumCents: 50000 });
+      expect(read.payouts.release).toMatchObject({ pendingFounderBonuses: 0 });
+      expect(read.payouts.payouts.map((row) => [row.name, row.status, row.estimated])).toEqual([
+        ["Maestra Periodos Dos", "calculated", true],
+        ["Maestra Periodos Uno", "calculated", true],
+      ]);
+      const first = read.payouts.payouts[0]!;
+
+      // Retener con el estado que se vio, y soltar con la huella que trae la lectura.
+      expect(await payouts.holdPayout(jar, { payout: first.payoutId, reason: "Se revisa.", seen: "awaiting_invoice" })).toMatchObject({
+        kind: "answered",
+        answer: "changed",
+        status: "calculated",
+      });
+      expect(await payouts.holdPayout(jar, { payout: first.payoutId, reason: "Se revisa.", seen: "calculated" })).toMatchObject({ kind: "answered", answer: "held" });
+      const held = await payouts.financePayouts(jar, claims, PERIOD);
+      if (held.kind !== "payouts" || held.payouts.period === null) throw new Error("No leyó las liquidaciones.");
+      const row = held.payouts.payouts.find((each) => each.payoutId === first.payoutId)!;
+      expect(row).toMatchObject({ status: "on_hold", heldFromStatus: "calculated", holdReason: "Se revisa." });
+      expect(await payouts.unholdPayout(jar, { payout: first.payoutId, note: "", seen: row.unholdFingerprint })).toMatchObject({
+        kind: "answered",
+        answer: "released_from_hold",
+        to: "calculated",
+      });
+
+      // Liberar: retener y soltar dejan la misma vista, así que la huella de antes sirve; una inventada, no. El
+      // freno de producción no le pregunta a la base.
+      expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: "ab".repeat(32) })).toMatchObject({ kind: "answered", answer: "preview_changed" });
+      expect(await payoutsOn(owner, false).releasePayouts(jar, { period: PERIOD, seen: read.payouts.release!.fingerprint })).toEqual({ kind: "not_enabled" });
+      expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: read.payouts.release!.fingerprint })).toMatchObject({ kind: "answered", answer: "released" });
+      const released = await payouts.financePayouts(jar, claims, PERIOD);
+      if (released.kind !== "payouts" || released.payouts.period === null) throw new Error("No leyó las liquidaciones.");
+      expect(released.payouts.release).toBeNull();
+      expect(released.payouts.payouts.every((each) => !each.estimated && each.status === "carried_forward")).toBe(true);
+      expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: read.payouts.release!.fingerprint })).toMatchObject({ kind: "answered", answer: "already_released" });
+      // Un bono que no es del fundador de ese periodo no se anula.
+      expect(await payouts.voidFounderBonus(jar, { period: PERIOD, bonus: randomUUID(), reason: "No." })).toEqual({ kind: "answered", answer: "not_found" });
+
+      const served = JSON.stringify([read, held, released]);
+      for (const secret of [student.id, student.email, "Alumno del Cierre"]) expect(served).not.toContain(secret);
+      expect([...service.reported, ...payouts.reported]).toEqual([]);
+    });
+  });
+
   it("con el código vencido, ensayar pide el código antes de decir que espere un minuto", async () => {
     await staged(["finance"], async ({ jar, owner, person }) => {
       const service = periodsOn(owner);
@@ -250,6 +317,10 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
       expect(await service.closePeriod(jar, { period: PERIOD, run: randomUUID() })).toEqual({ kind: "refused" });
       expect(await service.financePeriods(jar, claims)).toEqual({ kind: "unavailable" });
       expect(service.reported).toEqual([]);
+      const payouts = payoutsOn(owner);
+      expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: "ab".repeat(32) })).toEqual({ kind: "refused" });
+      expect(await payouts.financePayouts(jar, claims, PERIOD)).toEqual({ kind: "unavailable" });
+      expect(payouts.reported).toEqual([]);
     });
   });
 });
