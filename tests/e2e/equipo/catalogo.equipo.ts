@@ -103,7 +103,12 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
 
   await expect(page.getByRole("heading", { level: 2, name: "Continuar viendo" })).toHaveCount(0);
   const starters = page.getByRole("list", { name: "Para empezar" });
-  await expect(starters.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` })).toBeVisible();
+  // Lo público se recuerda 30 segundos (`CATALOG_MEMORY_MS`): si otra prueba ya leyó el inicio
+  // antes de que se cargaran estos cursos, aparecen al vencer esa memoria.
+  await expect(async () => {
+    await page.reload();
+    await expect(starters.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` })).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 45_000, intervals: [2_000] });
   await expect(starters.getByRole("link", { name: new RegExp(ADVANCED) })).toHaveCount(0);
   await expect(page.getByRole("list", { name: "Nuevos" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
   await expect(page.getByRole("list", { name: "Meditación e2e" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();

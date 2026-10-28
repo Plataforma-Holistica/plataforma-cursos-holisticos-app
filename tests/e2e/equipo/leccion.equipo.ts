@@ -701,9 +701,9 @@ test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo
   // El inicio: el curso, con la lección sugerida y su avance.
   await page.getByRole("link", { name: "Volver al inicio" }).click();
   await expect(page).toHaveURL("/inicio");
-  const offered = page.getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1, Con Mux` });
+  // Desde T-210, una tarjeta del carrusel: su nombre dice la lección sugerida, y su barra es parte de la tarjeta.
+  const offered = page.getByRole("list", { name: "Continuar viendo" }).getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1` });
   await expect(offered).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: `Avance de Curso ${SLUG}` })).toHaveAttribute("aria-valuetext", "0 de 1 lección");
   expect(await a11yViolations(page)).toEqual([]);
   await offered.click();
   await expect(page).toHaveURL(lessonUrl(SLUG, lesson));

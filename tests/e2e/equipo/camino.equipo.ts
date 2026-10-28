@@ -199,7 +199,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   expect(await partial.text()).not.toMatch(/Tus capacidades|No tienes pendientes/);
   // Y el segundo factor solo se pide en administración: su inicio y su cuenta siguen abiertos.
   await page.goto("/inicio");
-  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: /^Hola/ })).toBeVisible();
 
   // La acción de dar el código, llamada directo con la sesión de una alumna: no verifica
   // nada, y la manda a la misma pantalla, donde la guarda le contesta que no existe.
@@ -402,7 +402,7 @@ test("las acciones de configurar, llamadas directo por quien no es del equipo, n
     expect(await teamOf(invitedId)).toEqual({ bound: [], capabilities: [] });
     // Y sigue con su sesión.
     await other.goto("/inicio");
-    await expect(other.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
+    await expect(other.getByRole("heading", { level: 1, name: /^Hola/ })).toBeVisible();
   });
 
   // Sin ninguna sesión: a entrar, y tampoco pasa nada.
