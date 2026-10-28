@@ -5,6 +5,7 @@ import type { Capability } from "@/services/account/team";
 
 import { AlertsSection } from "../_alertas/section";
 import { TeamSection } from "../_equipo/section";
+import { CloseSection, PeriodSection, PeriodsSection } from "../_periodos/section";
 import { CatalogSection } from "../_practicas/section";
 import { ReviewSection } from "../_revision/section";
 
@@ -19,7 +20,9 @@ import { ReviewSection } from "../_revision/section";
 // de una ruta a otra solo cambia la ruta que se pidió.
 //
 // Una sección nueva entra a esta tabla, con la capacidad que pide, y vive en una carpeta
-// privada (`_nombre/`), sin `page.tsx`. Una prueba de arquitectura exige las dos cosas.
+// privada (`_nombre/`), sin `page.tsx`. Una prueba de arquitectura exige las dos cosas. Lo que
+// cuelga de una sección (el panel de un periodo y su cierre) entra a `DEEPER`, con la forma exacta
+// de cada segmento y la misma capacidad que la sección.
 
 export interface AdminSection {
   /** La capacidad que esa sección pide. Toda sección pide una (PA-88). */
@@ -37,6 +40,33 @@ const SECTIONS: Record<string, AdminSection> = {
   revision: { capability: "content", render: (claims) => <ReviewSection claims={claims} /> },
   // PA-68 mínima, las alertas de anomalía: revisarlas, decidir fraude, excluir y revertir.
   alertas: { capability: "finance", render: (claims) => <AlertsSection claims={claims} /> },
+  // PA-78, los periodos (T-605). El panel de uno y su cierre, abajo.
+  periodos: { capability: "finance", render: (claims) => <PeriodsSection claims={claims} /> },
+};
+
+/** Un periodo en la dirección: `AAAA-MM`, de 2000 a 2999, mes de 01 a 12. Lo demás no es un periodo. */
+const PERIOD_SEGMENT = /^(2\d{3})-(0[1-9]|1[0-2])$/;
+
+/** El periodo de un segmento de la dirección (`2027-10` es 202710), o nulo si no tiene forma. */
+export function periodAt(segment: string | undefined): number | null {
+  const match = PERIOD_SEGMENT.exec(segment ?? "");
+  return match ? Number(match[1]) * 100 + Number(match[2]) : null;
+}
+
+/**
+ * Lo que cuelga de una sección, por la ruta que sigue a su nombre: PA-79 (`/admin/periodos/2027-10`)
+ * y PA-80 (`/admin/periodos/2027-10/cierre`). Si el periodo existe lo dice su sección, después de
+ * la guarda: aquí solo la forma.
+ */
+const DEEPER: Record<string, (deeper: readonly string[]) => AdminSection | null> = {
+  periodos: (deeper) => {
+    const [segment, page, ...more] = deeper;
+    const period = periodAt(segment);
+    if (period === null || more.length > 0) return null;
+    if (page === undefined) return { capability: "finance", render: (claims) => <PeriodSection claims={claims} period={period} /> };
+    if (page === "cierre") return { capability: "finance", render: (claims) => <CloseSection claims={claims} period={period} /> };
+    return null;
+  },
 };
 
 /**
@@ -46,6 +76,7 @@ const SECTIONS: Record<string, AdminSection> = {
 export function sectionAt(rest: readonly string[]): AdminSection | null {
   const [name, ...deeper] = rest;
   // Solo las propias de la tabla: «constructor» no es una sección.
-  if (name === undefined || deeper.length > 0 || !Object.hasOwn(SECTIONS, name)) return null;
-  return SECTIONS[name] ?? null;
+  if (name === undefined || !Object.hasOwn(SECTIONS, name)) return null;
+  if (deeper.length === 0) return SECTIONS[name] ?? null;
+  return Object.hasOwn(DEEPER, name) ? (DEEPER[name]?.(deeper) ?? null) : null;
 }

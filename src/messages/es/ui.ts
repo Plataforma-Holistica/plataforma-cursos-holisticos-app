@@ -49,6 +49,14 @@ export const ui = defineMessages({
     durationPlaying: "{duration} · Reproduciendo",
     durationCompletedPlaying: "{duration} · Terminada · Reproduciendo",
   },
+  // La cifra sin dato (diseño, sección 5): nunca un cero que no se midió.
+  stat: {
+    noData: "Sin datos todavía",
+  },
+  // El diálogo irreversible lo dice también con palabras, no solo con el color del botón.
+  dialog: {
+    irreversible: "Acción irreversible",
+  },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
   // Tarjetas y carruseles del catálogo (diseño, sección 5.3; T-210). Toda la tarjeta es un solo
   // enlace, y su nombre dice lo mismo que se ve.
