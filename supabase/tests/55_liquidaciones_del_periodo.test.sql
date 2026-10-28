@@ -11,7 +11,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(70);
+select plan(77);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6055000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -274,9 +274,15 @@ select is(pruebas.filas((select r from ahora)),
         'M3 on_hold pool=3350 fundador=confirmed:502 bonos=0 ajustes=0 saldo=0 bruto=3852 estimado=true minimo=false'],
   'con el bono confirmado y el mínimo de 100 MXN: M1 y M2 llegan; M3, retenida, no llegaría');
 select is((select r -> 'release' ->> 'pending_founder_bonuses' from ahora), '0', 'sin bonos por decidir');
+create temporary table suelta_antes as select private.unhold_preview(pruebas.y('M3', 202610)) ->> 'fingerprint' as h;
+select is((private.unhold_preview(pruebas.y('M3', 202610)) ->> 'releases')::boolean, false, 'sin liberar, soltar a M3 solo la devuelve a calculada');
 create temporary table liberacion as
   select pruebas.hace(format('private.release_payouts(202610, %L)', (select r -> 'release' ->> 'fingerprint' from ahora))) as r;
 select is((select r ->> 'outcome' from liberacion), 'released', 'con la huella de lo que se ve, se libera');
+-- Quien vio la retenida antes de liberar vio «vuelve a calculada»; liberado el periodo, soltarla la liberaría ahí mismo.
+-- La huella de antes ya no sirve: así nadie libera dinero sin el diálogo irreversible.
+select is(pruebas.hace(format('private.unhold_payout(%L, null, %L)', pruebas.y('M3', 202610), (select h from suelta_antes))),
+  '{"outcome": "changed"}'::jsonb, 'soltar con la huella de antes de liberar no la suelta: ahora la liberaría');
 select is(array(select format('%s %s %s', pruebas.et(teacher_id), status, subtotal_cents) from public.payouts
                 where period_id = 202610 and status <> 'on_hold' order by pruebas.et(teacher_id)),
   (select array(select format('%s %s %s', pruebas.et((x ->> 'teacher_id')::uuid),
@@ -364,6 +370,21 @@ select is(array(select format('%s %s %s', pruebas.et(teacher_id), status, subtot
 -- M4 tiene saldo y no tiene liquidación en octubre, ya liberado: octubre no lo muestra (liberado, solo las suyas).
 select is(array(select pruebas.et((r ->> 'teacher_id')::uuid) from jsonb_array_elements(pruebas.lee(202610) -> 'payouts') r order by 1),
   array['M1', 'M2', 'M3'], 'un periodo liberado muestra solo sus liquidaciones, no a quien tiene saldo en otro');
+
+-- ---------------------------------------------------------------------------------------
+-- Diciembre, con un mínimo de 0: un bruto de 0 no llega al mínimo (se acumula), y la vista lo dice igual que liberar.
+
+select pruebas.parametro('PAGO_MINIMO', '0', 202612);
+select pruebas.en_cierre(202612);
+select is(pruebas.o(pruebas.cierra(202612)), 'closed', 'diciembre se cierra');
+select is((pruebas.hace(format('private.capture_adjustment(%L, 202611, -5000, %L)', pruebas.id('M4'), 'Se pagó dos veces.')))
+           ->> 'applied_period_id', '202612', 'un ajuste en contra de M4 entra a diciembre');
+select is((select x ->> 'subtotal_cents' || ' ' || (x ->> 'reaches_minimum') from jsonb_array_elements(private.release_preview(202612) -> 'rows') x
+           where (x ->> 'teacher_id')::uuid = pruebas.id('M4')),
+  '0 false', 'M4 queda en 0: con un mínimo de 0, no llega');
+select is(pruebas.o(pruebas.libera(202612)), 'released', 'diciembre se libera');
+select is((select status::text || ' ' || subtotal_cents from public.payouts where period_id = 202612 and teacher_id = pruebas.id('M4')),
+  'carried_forward 0', 'y liberar lo acumula, como la vista decía');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante: la columna del servidor, en los dos sentidos.
