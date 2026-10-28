@@ -1,19 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import type { SessionCheck } from "@/services/account/account";
 
 import { CATALOG_MEMORY_MS, createBrowse, type BrowseStore } from "./browse";
 import type { CourseLessonRow } from "./course";
 import type { ShelfCourse } from "./shelf";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/adapters/supabase/db", () => ({ asSystem: vi.fn(), asUser: vi.fn() }));
+vi.mock("@/adapters/supabase/db", () => ({ asServer: vi.fn(), asSystem: vi.fn(), asUser: vi.fn() }));
+vi.mock("@/services/account/account", () => ({ checkSession: vi.fn() }));
 vi.mock("@/services/error-reporting/server", () => ({ reportFailure: vi.fn() }));
 
 // El servicio del catálogo del alumno, con su almacén simulado: qué se le pregunta, qué se
 // recuerda y qué se contesta. Contra la base de verdad, en tests/integration/70-catalogo.test.ts.
 
 const claims = { userId: "a0000000-0000-4000-8000-000000000001" } as VerifiedClaims;
+const reader = {} as CookieReader;
 
 const COURSE: ShelfCourse = {
   slug: "respirar",
@@ -44,6 +48,8 @@ type Fake = {
   lessons?: CourseLessonRow[] | "throws";
   teacher?: typeof TEACHER | null | "throws";
   search?: { courses: string[]; teachers: string[] } | "throws";
+  saved?: { slug: string }[] | "throws";
+  session?: SessionCheck;
 };
 
 function browseWith(fake: Fake = {}) {
@@ -57,11 +63,15 @@ function browseWith(fake: Fake = {}) {
       const lessons = fake.lessons ?? [LESSON];
       return lessons === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve({ teacher: TEACHER, lessons });
     }),
-    myCourseProgress: vi.fn(() => Promise.resolve([])),
+    myCourse: vi.fn(() => Promise.resolve({ progress: [], saved: false })),
     search: vi.fn(() => answer(fake.search ?? { courses: ["respirar"], teachers: ["ana-robles"] })),
+    mySavedCourses: vi.fn(() => answer(fake.saved ?? [])),
+    saveCourse: vi.fn<BrowseStore["saveCourse"]>(() => Promise.resolve("saved")),
+    removeCourse: vi.fn<BrowseStore["removeCourse"]>(() => Promise.resolve()),
   } satisfies BrowseStore;
-  const service = createBrowse({ store, report: (code) => (reported.push(code), Promise.resolve()), now: () => clock });
-  return { ...service, store, reported, advance: (ms: number) => (clock += ms) };
+  const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(fake.session ?? { kind: "pass", claims }));
+  const service = createBrowse({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()), now: () => clock });
+  return { ...service, store, checkSession, reported, advance: (ms: number) => (clock += ms) };
 }
 
 describe("el inicio", () => {
@@ -134,13 +144,21 @@ describe("la ficha de un curso", () => {
     const service = browseWith();
     const page = await service.coursePage("respirar");
     if (page.kind !== "found") throw new Error("sin ficha");
-    expect(await service.courseStanding(claims, page.detail)).toMatchObject({ kind: "ready", standing: { completed: 0, total: 1 } });
-    expect(service.store.myCourseProgress).toHaveBeenCalledExactlyOnceWith(claims, "respirar");
+    expect(await service.courseStanding(claims, page.detail)).toMatchObject({ kind: "ready", standing: { completed: 0, total: 1 }, saved: false });
+    expect(service.store.myCourse).toHaveBeenCalledExactlyOnceWith(claims, "respirar");
+  });
+
+  it("dice, en la misma lectura, si el curso está en su lista", async () => {
+    const service = browseWith();
+    service.store.myCourse.mockResolvedValueOnce({ progress: [], saved: true });
+    const page = await service.coursePage("respirar");
+    if (page.kind !== "found") throw new Error("sin ficha");
+    expect(await service.courseStanding(claims, page.detail)).toMatchObject({ kind: "ready", saved: true });
   });
 
   it("si no se supo el avance, se reporta aparte", async () => {
     const service = browseWith();
-    service.store.myCourseProgress.mockRejectedValueOnce(new Error("sin base"));
+    service.store.myCourse.mockRejectedValueOnce(new Error("sin base"));
     const page = await service.coursePage("respirar");
     if (page.kind !== "found") throw new Error("sin ficha");
     expect(await service.courseStanding(claims, page.detail)).toEqual({ kind: "unavailable" });
@@ -241,5 +259,81 @@ describe("explorar (PA-21)", () => {
     const service = browseWith({ courses: "throws" });
     expect(await service.explore({ ...NOTHING, q: "ana" })).toEqual({ kind: "unavailable" });
     expect(service.store.search).not.toHaveBeenCalled();
+  });
+});
+
+describe("Mi lista (RF-311)", () => {
+  const SECOND: ShelfCourse = { ...COURSE, slug: "soltar", title: "Soltar", publishedAt: new Date(1) };
+
+  it("la lee como la persona y la cruza con lo listado, en el orden en que la guardó", async () => {
+    const service = browseWith({ courses: [COURSE, SECOND], saved: [{ slug: "soltar" }, { slug: "ya-no-listado" }, { slug: "respirar" }] });
+    const answer = await service.myList(claims);
+    expect(answer).toEqual({ kind: "ready", courses: [SECOND, COURSE] });
+    expect(service.store.mySavedCourses).toHaveBeenCalledExactlyOnceWith(claims);
+  });
+
+  it("no se recuerda: cada lectura le pregunta a la base", async () => {
+    const service = browseWith();
+    await service.myList(claims);
+    await service.myList(claims);
+    expect(service.store.mySavedCourses).toHaveBeenCalledTimes(2);
+  });
+
+  it("si lo listado no se supo, no la lee", async () => {
+    const service = browseWith({ courses: "throws" });
+    expect(await service.myList(claims)).toEqual({ kind: "unavailable" });
+    expect(service.store.mySavedCourses).not.toHaveBeenCalled();
+    expect(service.reported).toEqual(["catalog_unavailable"]);
+  });
+
+  it("si la lista no se pudo leer, «no se supo», reportado aparte", async () => {
+    const service = browseWith({ saved: "throws" });
+    expect(await service.myList(claims)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["saved_courses_unavailable"]);
+  });
+
+  describe.each([
+    ["saveCourse", "saved"],
+    ["removeCourse", "removed"],
+  ] as const)("%s", (method, done) => {
+    it("corre la guarda y escribe a nombre de la sesión que pasó", async () => {
+      const service = browseWith();
+      expect(await service[method](reader, "respirar")).toEqual({ kind: done });
+      expect(service.checkSession).toHaveBeenCalledExactlyOnceWith(reader);
+      expect(service.store[method]).toHaveBeenCalledExactlyOnceWith(claims, "respirar");
+    });
+
+    it.each(["", "Respirar", "../respirar", "a".repeat(101), "respirar-"])("un slug sin forma (%j) no llega a la guarda ni a la base", async (slug) => {
+      const service = browseWith();
+      expect(await service[method](reader, slug)).toEqual({ kind: "not_found" });
+      expect(service.checkSession).not.toHaveBeenCalled();
+      expect(service.store[method]).not.toHaveBeenCalled();
+    });
+
+    it.each<SessionCheck>([
+      { kind: "anonymous" },
+      { kind: "suspended" },
+      { kind: "must_sign_out", then: "sign_in" },
+      { kind: "unavailable" },
+      { kind: "incomplete", claims, variant: "complete_account", missing: { name: true, adultDeclaration: false, documents: [] } },
+    ])("lo que no pasa la guarda ($kind) sale tal cual, sin escribir", async (check) => {
+      const service = browseWith({ session: check });
+      expect(await service[method](reader, "respirar")).toEqual({ kind: "session", check });
+      expect(service.store[method]).not.toHaveBeenCalled();
+    });
+
+    it("si la base no contestó, «no se supo», reportado", async () => {
+      const service = browseWith();
+      service.store[method].mockRejectedValueOnce(new Error("sin base"));
+      expect(await service[method](reader, "respirar")).toEqual({ kind: "unavailable" });
+      expect(service.reported).toEqual(["saved_courses_unavailable"]);
+    });
+  });
+
+  it("guardar un curso que no está listado contesta que no existe", async () => {
+    const service = browseWith();
+    service.store.saveCourse.mockResolvedValueOnce("not_found");
+    expect(await service.saveCourse(reader, "retirado")).toEqual({ kind: "not_found" });
+    expect(service.reported).toEqual([]);
   });
 });

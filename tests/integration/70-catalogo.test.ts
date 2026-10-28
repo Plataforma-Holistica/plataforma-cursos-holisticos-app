@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { createBrowse } from "@/services/browse/browse";
-import { readCourseLessons, readListedCourses, readListedTeacher, readMyCourseProgress, searchCatalog } from "@/services/browse/records";
+import { readCourseLessons, readIsSaved, readListedCourses, readListedTeacher, readMyCourseProgress, searchCatalog } from "@/services/browse/records";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -60,9 +60,15 @@ const browse = (owner: Client) =>
       listedCourses: () => asServerRead(owner, readListedCourses),
       listedTeacher: (slug) => asServerRead(owner, (tx) => readListedTeacher(tx, slug)),
       courseLessons: (slug) => asServerRead(owner, (tx) => readCourseLessons(tx, slug)),
-      myCourseProgress: (claims, slug) => asPerson(owner, claims, (tx) => readMyCourseProgress(tx, slug)),
+      myCourse: (claims, slug) =>
+        asPerson(owner, claims, async (tx) => ({ progress: await readMyCourseProgress(tx, slug), saved: await readIsSaved(tx, slug) })),
       search: (q) => asServerRead(owner, (tx) => searchCatalog(tx, q)),
+      // Mi lista se prueba en 71-mi-lista.test.ts.
+      mySavedCourses: () => Promise.reject(new Error("Mi lista no se usa aquí.")),
+      saveCourse: () => Promise.reject(new Error("Mi lista no se usa aquí.")),
+      removeCourse: () => Promise.reject(new Error("Mi lista no se usa aquí.")),
     },
+    checkSession: () => Promise.reject(new Error("La guarda no se usa aquí.")),
     report: () => Promise.resolve(),
   });
 

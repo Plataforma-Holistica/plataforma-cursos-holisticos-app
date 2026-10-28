@@ -1,13 +1,25 @@
 import "server-only";
 
+import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
-import { asSystem, asUser } from "@/adapters/supabase/db";
+import { asServer, asSystem, asUser } from "@/adapters/supabase/db";
 
+import { checkSession, type SessionCheck } from "@/services/account/account";
 import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
 
 import { courseDetailOf, courseStandingOf, type CourseDetail, type CourseLessonRow, type CourseStanding, type MyLessonProgress } from "./course";
 import { asksForResults, exploreResultsOf, facetsOf, knownQuery, type ExploreFacets, type ExploreQuery, type ExploreResults } from "./explore";
-import { readCourseLessons, readListedCourses, readListedTeacher, readMyCourseProgress, searchCatalog } from "./records";
+import {
+  readCourseLessons,
+  readIsSaved,
+  readListedCourses,
+  readListedTeacher,
+  readMyCourseProgress,
+  readMySavedCourses,
+  removeSavedCourse,
+  saveListedCourse,
+  searchCatalog,
+} from "./records";
 import { homeShelfOf, newestFirst, teachersOf, type HomeShelf, type ShelfCourse, type ShelfTeacher } from "./shelf";
 
 // El catálogo del alumno (T-210): el inicio (PA-20), la ficha de un curso (PA-02), la de un
@@ -15,6 +27,10 @@ import { homeShelfOf, newestFirst, teachersOf, type HomeShelf, type ShelfCourse,
 // recuerda treinta segundos, también cuando no se supo, porque esas páginas usan la misma
 // reserva de conexiones con la que la gente entra. Lo de cada quien (en qué va de un curso) se
 // lee como la persona y no se recuerda.
+//
+// Mi lista (RF-311; decisión de Sergio del 2026-10-28): la persona la lee como ella misma, y la
+// escribe el servidor, después de la guarda de sesión y a nombre de la sesión que pasó. Ni una
+// cuenta llega de fuera: la base escribe a nombre de quien actúa (`private.actor_id()`).
 
 export type { CourseDetail, CourseStanding } from "./course";
 export { exploreQueryOf, QUERY_MAX_LENGTH, type ExploreFacets, type ExploreQuery, type ExploreResults, type FacetOption } from "./explore";
@@ -26,9 +42,16 @@ export interface BrowseStore {
   listedCourses(): Promise<ShelfCourse[]>;
   listedTeacher(slug: string): Promise<{ slug: string; name: string; bio: string | null } | null>;
   courseLessons(slug: string): Promise<{ teacher: CourseDetail["teacher"]; lessons: CourseLessonRow[] }>;
-  myCourseProgress(claims: VerifiedClaims, slug: string): Promise<MyLessonProgress[]>;
+  /** Lo de quien trae esas claims en el curso `slug`, en una lectura: su avance y si está en su lista. */
+  myCourse(claims: VerifiedClaims, slug: string): Promise<{ progress: MyLessonProgress[]; saved: boolean }>;
   /** Los slugs de los cursos listados y de los maestros listados que encuentra la búsqueda `q`. */
   search(q: string): Promise<{ courses: string[]; teachers: string[] }>;
+  /** Los slugs de la lista de quien trae esas claims, lo último guardado primero. */
+  mySavedCourses(claims: VerifiedClaims): Promise<{ slug: string }[]>;
+  /** Guarda el curso listado `slug` a nombre de esa sesión. `not_found` si no está listado; ya guardado cuenta como guardado. */
+  saveCourse(claims: VerifiedClaims, slug: string): Promise<"saved" | "not_found">;
+  /** Quita el curso `slug` de la lista de esa sesión. Si no estaba, no hace nada. */
+  removeCourse(claims: VerifiedClaims, slug: string): Promise<void>;
 }
 
 export type ShelfAnswer = { kind: "ready"; shelf: HomeShelf } | { kind: "unavailable" };
@@ -48,7 +71,16 @@ export type ExploreAnswer =
       shelf: HomeShelf;
     }
   | { kind: "unavailable" };
-export type StandingAnswer = { kind: "ready"; standing: CourseStanding } | { kind: "unavailable" };
+export type StandingAnswer = { kind: "ready"; standing: CourseStanding; saved: boolean } | { kind: "unavailable" };
+export type MyListAnswer = { kind: "ready"; courses: ShelfCourse[] } | { kind: "unavailable" };
+/** Lo que contesta guardar o quitar. Lo que no pasa la guarda sale tal cual: no se escribió nada. */
+export type ListChange =
+  | { kind: "saved" }
+  | { kind: "removed" }
+  /** El slug no tiene forma, o el curso no está listado. */
+  | { kind: "not_found" }
+  | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
+  | { kind: "unavailable" };
 
 /** Cuánto se recuerda lo público. Publicar o retirar un curso tarda a lo más esto en verse. */
 export const CATALOG_MEMORY_MS = 30_000;
@@ -57,7 +89,12 @@ const MEMORY_SIZE = 500;
 
 type Remembered<T> = { value: T | "unavailable"; at: number };
 
-export function createBrowse(deps: { store: BrowseStore; report: (code: FailureCode) => Promise<void>; now?: () => number }) {
+export function createBrowse(deps: {
+  store: BrowseStore;
+  checkSession: (reader: CookieReader) => Promise<SessionCheck>;
+  report: (code: FailureCode) => Promise<void>;
+  now?: () => number;
+}) {
   const now = deps.now ?? Date.now;
   let courses: Remembered<ShelfCourse[]> | null = null;
   const lessons = new Map<string, Remembered<Awaited<ReturnType<BrowseStore["courseLessons"]>>>>();
@@ -153,22 +190,79 @@ export function createBrowse(deps: { store: BrowseStore; report: (code: FailureC
    */
   async function courseStanding(claims: VerifiedClaims, detail: CourseDetail): Promise<StandingAnswer> {
     try {
-      return { kind: "ready", standing: courseStandingOf(detail, await deps.store.myCourseProgress(claims, detail.course.slug)) };
+      const mine = await deps.store.myCourse(claims, detail.course.slug);
+      return { kind: "ready", standing: courseStandingOf(detail, mine.progress), saved: mine.saved };
     } catch {
       await deps.report("course_progress_unavailable");
       return { kind: "unavailable" };
     }
   }
 
-  return { homeShelf, coursePage, teacherPage, explore, courseStanding };
+  /**
+   * La lista de quien trae esas claims (las que la guarda le dio a la página): sus cursos que
+   * siguen listados, lo último guardado primero. Uno que dejó de estar listado no se pinta, y
+   * vuelve si se lista otra vez. La lectura de la persona no ve el registro de cursos: lo
+   * listado sale de lo que ya se recuerda, que trae la tarjeta entera.
+   */
+  async function myList(claims: VerifiedClaims): Promise<MyListAnswer> {
+    const all = await listed();
+    if (all === "unavailable") return { kind: "unavailable" };
+    let saved: { slug: string }[];
+    try {
+      saved = await deps.store.mySavedCourses(claims);
+    } catch {
+      await deps.report("saved_courses_unavailable");
+      return { kind: "unavailable" };
+    }
+    const bySlug = new Map(all.map((course) => [course.slug, course]));
+    return { kind: "ready", courses: saved.flatMap(({ slug }) => bySlug.get(slug) ?? []) };
+  }
+
+  /** Corre la guarda y escribe a nombre de la sesión que pasó. Un slug sin forma no llega a nadie. */
+  async function changeList(reader: CookieReader, slug: string, write: (claims: VerifiedClaims) => Promise<ListChange>): Promise<ListChange> {
+    if (slug.length > 100 || !SLUG.test(slug)) return { kind: "not_found" };
+    const check = await deps.checkSession(reader);
+    if (check.kind !== "pass") return { kind: "session", check };
+    try {
+      return await write(check.claims);
+    } catch {
+      await deps.report("saved_courses_unavailable");
+      return { kind: "unavailable" };
+    }
+  }
+
+  /** Guarda el curso `slug` en la lista de quien pide (FL-11 paso 6). Dos veces da lo mismo. */
+  function saveCourse(reader: CookieReader, slug: string): Promise<ListChange> {
+    return changeList(reader, slug, async (claims) =>
+      (await deps.store.saveCourse(claims, slug)) === "saved" ? { kind: "saved" } : { kind: "not_found" },
+    );
+  }
+
+  /** Quita el curso `slug` de la lista de quien pide, esté listado o no. Si no estaba, también es «quitado». */
+  function removeCourse(reader: CookieReader, slug: string): Promise<ListChange> {
+    return changeList(reader, slug, async (claims) => {
+      await deps.store.removeCourse(claims, slug);
+      return { kind: "removed" };
+    });
+  }
+
+  return { homeShelf, coursePage, teacherPage, explore, courseStanding, myList, saveCourse, removeCourse };
 }
 
 export const databaseBrowseStore: BrowseStore = {
   listedCourses: () => asSystem({ reason: "catalog_read" }, (tx) => readListedCourses(tx)),
   listedTeacher: (slug) => asSystem({ reason: "catalog_read" }, (tx) => readListedTeacher(tx, slug)),
   courseLessons: (slug) => asSystem({ reason: "catalog_read" }, (tx) => readCourseLessons(tx, slug)),
-  myCourseProgress: (claims, slug) => asUser(claims, (tx) => readMyCourseProgress(tx, slug)),
+  myCourse: (claims, slug) =>
+    asUser(claims, async (tx) => ({ progress: await readMyCourseProgress(tx, slug), saved: await readIsSaved(tx, slug) })),
   search: (q) => asSystem({ reason: "catalog_read" }, (tx) => searchCatalog(tx, q)),
+  mySavedCourses: (claims) => asUser(claims, (tx) => readMySavedCourses(tx)),
+  saveCourse: (claims, slug) => asServer({ claims, reason: "save_course" }, (tx) => saveListedCourse(tx, slug)),
+  removeCourse: (claims, slug) => asServer({ claims, reason: "remove_course" }, (tx) => removeSavedCourse(tx, slug)),
 };
 
-export const { homeShelf, coursePage, teacherPage, explore, courseStanding } = createBrowse({ store: databaseBrowseStore, report: reportFailure });
+export const { homeShelf, coursePage, teacherPage, explore, courseStanding, myList, saveCourse, removeCourse } = createBrowse({
+  store: databaseBrowseStore,
+  checkSession,
+  report: reportFailure,
+});
