@@ -6,6 +6,7 @@ import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { Checkbox } from "@/ui/checkbox";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
+import { DataTable } from "@/ui/data-table";
 import { Disclaimer } from "@/ui/disclaimer";
 import { FormErrorSummary } from "@/ui/form-error-summary";
 import { FullScreenState } from "@/ui/full-screen-state";
@@ -22,6 +23,8 @@ import { PasswordField } from "@/ui/password-field";
 import { Select } from "@/ui/select";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Spinner } from "@/ui/spinner";
+import { StatTile } from "@/ui/stat-tile";
+import { StatusBadge } from "@/ui/status-badge";
 import { Tabs } from "@/ui/tabs";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
@@ -260,6 +263,42 @@ export default function SamplePage() {
             <p>Puede que la dirección esté mal o que ya no esté disponible.</p>
           </FullScreenState>
         </div>
+      </Section>
+
+      {/* El diálogo no va aquí: con JavaScript se abre como modal al montarse y taparía la muestra. Se revisa
+          en el cierre de un periodo (PA-80) y en tests/ui/data-components.test.tsx. */}
+      <Section title="Datos: estados, cifras y tablas">
+        <div className="flex flex-wrap gap-4">
+          <StatusBadge tone="neutral">Abierto</StatusBadge>
+          <StatusBadge tone="active">En cierre</StatusBadge>
+          <StatusBadge tone="attention">Acumulada</StatusBadge>
+          <StatusBadge tone="good">Cerrado</StatusBadge>
+          <StatusBadge tone="bad">Con error</StatusBadge>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile label="Bote" value="$12,000.00" context="Del cierre del 3 de noviembre de 2027." />
+          <StatTile label="Cobrado en el periodo" value="$45,370.00" tag="Parcial, al 2 de noviembre de 2027" />
+          <StatTile label="Bote sin consumo" value="$500.00" tone="attention" context="4.17 % del bote." />
+          <StatTile label="Alumnos activos" value={null} />
+        </div>
+        <DataTable
+          caption="El reparto (desplazable en el teléfono, con la primera columna fija)"
+          scroll
+          columns={[
+            { key: "name", header: "Nombre" },
+            { key: "assigned", header: "Reparto", numeric: true },
+            { key: "unconsumed", header: "Sin consumo", numeric: true },
+            { key: "total", header: "Total", numeric: true },
+            { key: "remains", header: "Queda" },
+          ]}
+          rows={[
+            { key: "a", cells: { name: "Ana Aguilar Benítez", assigned: "$11,500.00", unconsumed: "$500.00", total: "$12,000.00", remains: "Por pagar" } },
+            { key: "b", cells: { name: "Beto Carrillo", assigned: "$80.00", unconsumed: "$0.00", total: "$80.00", remains: "Acumulada: debajo del pago mínimo" } },
+          ]}
+          totals={{ name: "Total", assigned: "$11,580.00", unconsumed: "$500.00", total: "$12,080.00", remains: "" }}
+          empty="Nadie tuvo consumo que cuente."
+        />
+        <DataTable caption="Vacía" columns={[{ key: "a", header: "Periodo" }, { key: "b", header: "Estado" }]} rows={[]} empty="Todavía no hay periodos." />
       </Section>
     </main>
   );
