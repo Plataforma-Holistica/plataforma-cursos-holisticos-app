@@ -11,7 +11,7 @@
 -- comprobación al confirmar corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(33);
+select plan(37);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6054000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -207,16 +207,43 @@ select is(pruebas.cierra(202610, (select id from ensayos where et = 'fallido')) 
 select is(pruebas.cierra(202610, (select id from ensayos where et = 'c')) ->> 'outcome', 'rehearsal_superseded',
   'con el bueno de antes, tampoco: la pantalla muestra el fallido');
 
+-- Un ensayo parcial (hecho con el periodo abierto) como el último, con la huella de ahora: tampoco.
+set local session_replication_role = replica;
+insert into public.close_runs (period_id, kind, status, period_status_at_run, input_hash, result_hash, code_version, parameters,
+                               active_students, pool_bps, carried_in_cents, net_revenue_cents, student_pools_cents, pool_cents,
+                               assigned_cents, unconsumed_cents, carried_out_cents, started_by)
+select period_id, kind, status, 'open', input_hash, result_hash, code_version, parameters, active_students, pool_bps, carried_in_cents,
+       net_revenue_cents, student_pools_cents, pool_cents, assigned_cents, unconsumed_cents, carried_out_cents, started_by
+from public.close_runs where id = (select id from ensayos where et = 'c');
+set local session_replication_role = origin;
+insert into ensayos values ('parcial', private.last_rehearsal(202610));
+select is(pruebas.cierra(202610, (select id from ensayos where et = 'parcial')) ->> 'outcome', 'rehearsal_missing',
+  'con un ensayo parcial a la vista, aunque su huella sea la de ahora, falta uno con datos finales');
+
 -- ---------------------------------------------------------------------------------------
 -- Lo que leen las pantallas es el mismo «último».
 
-select is((pruebas.lee('finance_close', 202610) #>> '{rehearsal,run_id}')::uuid, (select id from ensayos where et = 'fallido'),
-  'PA-80 muestra el último ensayo, bueno o fallido');
-select is((pruebas.lee('finance_period', 202610) #>> '{rehearsal,run_id}')::uuid, (select id from ensayos where et = 'c'),
+select is((pruebas.lee('finance_close', 202610) #>> '{rehearsal,run_id}')::uuid, (select id from ensayos where et = 'parcial'),
+  'PA-80 muestra el último ensayo, bueno, parcial o fallido');
+select is((pruebas.lee('finance_period', 202610) #>> '{rehearsal,run_id}')::uuid, (select id from ensayos where et = 'parcial'),
   'PA-79 toma sus cifras del último ensayo que salió bien');
 
 -- ---------------------------------------------------------------------------------------
 -- El umbral del bote sin consumo, en PA-79.
+
+-- Con 200 pesos que pasaron del periodo anterior: el sin consumo del mes es 26.9 % de su bote (no pasa el 40 %
+-- sembrado), pero sobre el bote con lo anterior sería 44.2 %. La alerta mira el del mes, y la tarjeta también.
+set local session_replication_role = replica;
+update public.payout_periods set carried_in_cents = 20000 where period_id = 202610;
+set local session_replication_role = origin;
+insert into ensayos values ('llevado', pruebas.ensaya(202610));
+select is((pruebas.lee('finance_period', 202610) ->> 'unconsumed_over')::boolean,
+          (select (r.student_pools_cents - r.assigned_cents) * 10000 > 4000::bigint * r.student_pools_cents
+           from public.close_runs r where r.id = (select id from ensayos where et = 'llevado')),
+  'lo que pasó del periodo anterior no cuenta para el umbral, como en la alerta');
+set local session_replication_role = replica;
+update public.payout_periods set carried_in_cents = 0 where period_id = 202610;
+set local session_replication_role = origin;
 
 -- Un ensayo bueno, con datos finales, vuelve a ser el último.
 insert into ensayos values ('d', pruebas.ensaya(202610));
@@ -255,6 +282,17 @@ select is((select result_hash from public.close_runs where id = (select (r ->> '
 select is((pruebas.lee('finance_period', 202610) ->> 'unconsumed_alert_bps')::integer,
           nullif(private.parameter_value('ALERTA_SIN_CONSUMO_PCT', (select closed_at from public.payout_periods where period_id = 202610)) #>> '{}', '')::integer,
   'cerrado, el umbral es el vigente al cerrar');
+
+-- Si el parámetro cambia después del cierre, el cerrado sigue con el de entonces: el cierre se mueve a hace dos días y
+-- desde ayer rige otro umbral (escrito sin su guardián).
+set local session_replication_role = replica;
+update public.payout_periods set closed_at = now() - interval '2 days' where period_id = 202610;
+insert into public.business_parameters (key, value, status, effective_from)
+values ('ALERTA_SIN_CONSUMO_PCT', '1', 'proposed', now() - interval '1 day');
+set local session_replication_role = origin;
+select is((pruebas.lee('finance_period', 202610) ->> 'unconsumed_alert_bps')::integer, 4000,
+  'un cerrado sigue con el umbral vigente al cerrar, no con el de ahora');
+select is((pruebas.lee('finance_period', 202610) ->> 'unconsumed_over')::boolean, false, 'y con él decide si lo pasa');
 
 -- ---------------------------------------------------------------------------------------
 -- Un periodo abierto: el ensayo es parcial y no se pinta la atención.

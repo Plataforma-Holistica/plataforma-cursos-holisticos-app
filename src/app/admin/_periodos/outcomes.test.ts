@@ -49,6 +49,7 @@ describe("readPeriodsForm", () => {
     ["cerrar sin el ensayo (antes de la tercera solicitud)", formWith(["do", `close:${PERIOD}`])],
     ["cerrar con un ensayo sin forma", formWith(["do", `close:${PERIOD}:no`])],
     ["abrir el diálogo sin el ensayo", formWith(["do", `ask_close:${PERIOD}`])],
+    ["abrir el diálogo con un ensayo sin forma", formWith(["do", `ask_close:${PERIOD}:no`])],
     ["ensayar con un ensayo", formWith(["do", `rehearse:${PERIOD}:${RUN}`])],
     ["un verbo desconocido", formWith(["do", `reopen:${PERIOD}`])],
     ["un periodo sin forma", formWith(["do", "rehearse:202713"])],
