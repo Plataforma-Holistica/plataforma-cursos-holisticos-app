@@ -196,5 +196,5 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
 }
 
 function Figure({ tile }: { tile: Tile }) {
-  return <StatTile label={tile.label} value={tile.value} context={tile.context} tag={tile.tag} />;
+  return <StatTile label={tile.label} value={tile.value} context={tile.context} tag={tile.tag} tone={tile.tone} />;
 }

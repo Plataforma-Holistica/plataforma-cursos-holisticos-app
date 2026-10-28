@@ -37,6 +37,8 @@ export interface Tile {
   value: string | null;
   context?: string;
   tag?: string;
+  /** La cifra pasó su umbral (el bote sin consumo, con datos finales). */
+  tone?: "attention";
 }
 
 // ---------------------------------------------------------------------------------------
@@ -148,6 +150,32 @@ function figureTiles(source: RunFigures | null, tag: string | undefined) {
   };
 }
 
+/**
+ * El bote sin consumo de PA-79 (T-605, tercera solicitud; decisiones de Sergio del 2026-10-27): su proporción sobre
+ * el bote del mes, sin lo que pasó del anterior, como la alerta; con el umbral, si es válido; y en atención solo si la
+ * base dice que lo pasa, que lo dice solo con datos finales.
+ */
+function unconsumedTile(read: Extract<FinancePeriod, { period: object }>, source: RunFigures | null, tag: string | undefined): Tile {
+  const unconsumed = source?.unconsumedCents ?? null;
+  const pools = source?.studentPoolsCents ?? null;
+  const assigned = source?.assignedCents ?? null;
+  let context: string | undefined;
+  if (pools !== null && assigned !== null && pools > 0) {
+    const share = percent(shareOf(pools - assigned, pools));
+    context =
+      read.unconsumedAlertBps === null
+        ? t(text.unconsumedMonthContext, { percent: share })
+        : t(text.unconsumedThresholdContext, { percent: share, threshold: percent(read.unconsumedAlertBps) });
+  }
+  return {
+    label: text.unconsumed,
+    value: unconsumed === null ? null : money(unconsumed),
+    context,
+    tag,
+    tone: read.unconsumedOver === true ? "attention" : undefined,
+  };
+}
+
 export function periodView(read: Extract<FinancePeriod, { period: object }>, alerts: FinanceAlerts | null, now: string): PeriodView {
   const { period } = read;
   const open = period.status === "open";
@@ -212,6 +240,7 @@ export function periodView(read: Extract<FinancePeriod, { period: object }>, ale
       tag: partialNow,
     },
     ...figureTiles(source, sourceTag),
+    unconsumed: unconsumedTile(read, source, sourceTag),
     figuresSource,
     alerts:
       alerts === null
@@ -285,7 +314,8 @@ export interface CloseView {
   /** El último ensayo, si el periodo no ha cerrado. */
   rehearsal: (RunResult & { banner: string; failed: boolean }) | null;
   checks: Check[];
-  close: { kind: "month_open" } | { kind: "waits" } | { kind: "ready"; button: string } | { kind: "closed" };
+  /** Listo para cerrar: con el ensayo que se ve, que viaja en los dos botones (T-605, tercera solicitud). */
+  close: { kind: "month_open" } | { kind: "waits" } | { kind: "ready"; run: string; button: string; confirm: string } | { kind: "closed" };
   /** El título del diálogo de cierre. */
   dialogTitle: string;
   closedLine: string | null;
@@ -364,7 +394,9 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
   let close: CloseView["close"];
   if (closed) close = { kind: "closed" };
   else if (open) close = { kind: "month_open" };
-  else close = read.freshCode && list.every((check) => check.done) ? { kind: "ready", button: periodsButton.askClose(period.periodId) } : { kind: "waits" };
+  else if (read.freshCode && rehearsal !== null && list.every((check) => check.done))
+    close = { kind: "ready", run: rehearsal.runId, button: periodsButton.askClose(period.periodId, rehearsal.runId), confirm: periodsButton.close(period.periodId, rehearsal.runId) };
+  else close = { kind: "waits" };
 
   const run = read.close;
   let closedLine: string | null = null;

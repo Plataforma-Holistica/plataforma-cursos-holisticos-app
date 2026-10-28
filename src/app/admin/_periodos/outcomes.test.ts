@@ -35,17 +35,21 @@ describe("readPeriodsForm", () => {
   it("lee los valores que arma periodsButton", () => {
     expect(readPeriodsForm(formWith(["do", periodsButton.rollup(PERIOD)]))).toEqual({ step: "rollup", period: PERIOD });
     expect(readPeriodsForm(formWith(["do", periodsButton.rehearse(PERIOD)]))).toEqual({ step: "rehearse", period: PERIOD });
-    expect(readPeriodsForm(formWith(["do", periodsButton.askClose(PERIOD)]))).toEqual({ step: "ask_close", period: PERIOD });
-    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD)], ["understood", "yes"]))).toEqual({ step: "close", period: PERIOD, understood: true });
-    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD)]))).toEqual({ step: "close", period: PERIOD, understood: false });
-    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD)], ["understood", "on"]))).toEqual({ step: "close", period: PERIOD, understood: false });
+    expect(readPeriodsForm(formWith(["do", periodsButton.askClose(PERIOD, RUN)]))).toEqual({ step: "ask_close", period: PERIOD, run: RUN });
+    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)], ["understood", "yes"]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: true });
+    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: false });
+    expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)], ["understood", "on"]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: false });
     expect(readPeriodsForm(formWith(["do", periodsButton.download(RUN)]))).toEqual({ step: "download", run: RUN });
     expect(readPeriodsForm(formWith(["do", periodsButton.cancel()]))).toEqual({ step: "cancel" });
   });
 
   it.each([
     ["sin botón", formWith()],
-    ["dos botones", formWith(["do", periodsButton.rehearse(PERIOD)], ["do", periodsButton.close(PERIOD)])],
+    ["dos botones", formWith(["do", periodsButton.rehearse(PERIOD)], ["do", periodsButton.close(PERIOD, RUN)])],
+    ["cerrar sin el ensayo (antes de la tercera solicitud)", formWith(["do", `close:${PERIOD}`])],
+    ["cerrar con un ensayo sin forma", formWith(["do", `close:${PERIOD}:no`])],
+    ["abrir el diálogo sin el ensayo", formWith(["do", `ask_close:${PERIOD}`])],
+    ["ensayar con un ensayo", formWith(["do", `rehearse:${PERIOD}:${RUN}`])],
     ["un verbo desconocido", formWith(["do", `reopen:${PERIOD}`])],
     ["un periodo sin forma", formWith(["do", "rehearse:202713"])],
     ["un periodo con letras", formWith(["do", "rehearse:2027-10"])],
@@ -165,6 +169,7 @@ describe("closeOutcome", () => {
     ["open_alerts", "open_alerts"],
     ["rehearsal_missing", "rehearsal_missing"],
     ["rehearsal_stale", "rehearsal_stale"],
+    ["rehearsal_superseded", "rehearsal_superseded"],
     ["needs_fresh_code", "needs_code"],
     ["malformed", "unknown"],
   ])("%s dice %s", (answer, reason) => {

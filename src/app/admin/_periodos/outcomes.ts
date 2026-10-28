@@ -37,8 +37,9 @@ export type PeriodsRequest =
   | { step: "cancel" }
   | { step: "rollup"; period: number }
   | { step: "rehearse"; period: number }
-  | { step: "ask_close"; period: number }
-  | { step: "close"; period: number; understood: boolean }
+  /** Cerrar lleva el ensayo que se tenía a la vista (T-605, tercera solicitud). */
+  | { step: "ask_close"; period: number; run: string }
+  | { step: "close"; period: number; run: string; understood: boolean }
   | { step: "download"; run: string };
 
 /** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. */
@@ -48,21 +49,22 @@ export function readPeriodsForm(form: unknown): PeriodsRequest {
   const pressed = form.getAll("do");
   const [only] = pressed;
   if (pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return { step: "none" };
-  const [verb, target, ...rest] = only.split(":");
+  const [verb, target, shown, ...rest] = only.split(":");
   if (rest.length > 0) return { step: "none" };
   if (verb === "cancel") return target === undefined ? { step: "cancel" } : { step: "none" };
   if (target === undefined) return { step: "none" };
-  if (verb === "download") return ID.test(target) ? { step: "download", run: target } : { step: "none" };
+  if (verb === "download") return ID.test(target) && shown === undefined ? { step: "download", run: target } : { step: "none" };
   if (!PERIOD.test(target)) return { step: "none" };
   const period = Number(target);
   switch (verb) {
     case "rollup":
     case "rehearse":
+      return shown === undefined ? { step: verb, period } : { step: "none" };
     case "ask_close":
-      return { step: verb, period };
+      return shown !== undefined && ID.test(shown) ? { step: "ask_close", period, run: shown } : { step: "none" };
     case "close":
       // La casilla «Entiendo que no se puede deshacer»: solo su valor cuenta.
-      return { step: "close", period, understood: form.get("understood") === "yes" };
+      return shown !== undefined && ID.test(shown) ? { step: "close", period, run: shown, understood: form.get("understood") === "yes" } : { step: "none" };
     default:
       return { step: "none" };
   }
@@ -72,8 +74,8 @@ export function readPeriodsForm(form: unknown): PeriodsRequest {
 export const periodsButton = {
   rollup: (period: number) => `rollup:${period}`,
   rehearse: (period: number) => `rehearse:${period}`,
-  askClose: (period: number) => `ask_close:${period}`,
-  close: (period: number) => `close:${period}`,
+  askClose: (period: number, run: string) => `ask_close:${period}:${run}`,
+  close: (period: number, run: string) => `close:${period}:${run}`,
   download: (run: string) => `download:${run}`,
   cancel: () => "cancel",
 } as const;
@@ -128,6 +130,7 @@ export type PeriodFailure =
   | "open_alerts"
   | "rehearsal_missing"
   | "rehearsal_stale"
+  | "rehearsal_superseded"
   | "timed_out"
   | "unbalanced"
   | "not_found"
@@ -142,8 +145,8 @@ export type PanelState = { kind: "idle" } | { kind: "failed"; reason: PeriodFail
 /** Lo que pinta el ensayo y el cierre (PA-80) después de un envío. */
 export type CloseState =
   | { kind: "idle" }
-  /** El diálogo de cierre, abierto: el primer paso, o confirmar sin marcar la casilla. */
-  | { kind: "confirming"; period: number; missingUnderstood: boolean; attempt: number }
+  /** El diálogo de cierre, abierto: el primer paso, o confirmar sin marcar la casilla. Con el ensayo que se veía. */
+  | { kind: "confirming"; period: number; run: string; missingUnderstood: boolean; attempt: number }
   | { kind: "failed"; reason: PeriodFailure; step: "rehearse" | "close"; attempt: number };
 
 /** Lo que pinta la descarga después de un envío. Su propio estado: el archivo no viaja con los otros formularios. */
@@ -266,6 +269,8 @@ export function closeOutcome(result: Closed, period: number): PeriodOutcome {
           return { kind: "failed", reason: "rehearsal_missing" };
         case "rehearsal_stale":
           return { kind: "failed", reason: "rehearsal_stale" };
+        case "rehearsal_superseded":
+          return { kind: "failed", reason: "rehearsal_superseded" };
         case "forbidden":
           return toClose(period);
         case "needs_fresh_code":
