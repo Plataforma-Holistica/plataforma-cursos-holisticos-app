@@ -1,6 +1,7 @@
 // Deja la base LOCAL lista para ver una lección como alumna con suscripción desde otro aparato
 // de la misma red (el iPhone de quien revisa; T-203, decisión de Sergio del 2026-10-19): el
-// curso de prueba «prueba-naturaleza» publicado y listado, y una alumna con su cuenta completa
+// curso de prueba «prueba-naturaleza» publicado y listado (desde T-210, también los demás cursos
+// de prueba que `db:courses` dejó en revisión), y una alumna con su cuenta completa
 // y una suscripción vigente. Imprime la dirección de «El bosque» con la IP de la red, el correo y
 // una contraseña nueva.
 //
@@ -202,6 +203,7 @@ async function refuseIfNotAStudent(id) {
 const password = newPassword();
 let lessonId;
 let published;
+let othersPublished = 0;
 let subscription;
 try {
   await client.connect();
@@ -225,6 +227,16 @@ try {
   if (first.status !== "ready") fail("el video de «El bosque» no está listo.");
   lessonId = first.lesson_id;
   published = await publish(first.course_id);
+  // Los demás cursos de prueba, para que el catálogo (T-210) se vea con algo: los que
+  // `db:courses` dejó en revisión. Sus lecciones van con el video del proveedor de prueba.
+  const others = await client.query(
+    `select c.course_id from public.published_courses c
+       join public.course_registry r on r.course_id = c.course_id
+      where r.state = 'in_review' and c.slug <> $1 order by c.slug`,
+    [SLUG],
+  );
+  for (const row of others.rows) await publish(row.course_id);
+  othersPublished = others.rowCount ?? 0;
 
   // La alumna, en el Auth local: nueva, o la misma con otra contraseña.
   const auth = createClient(authUrl.origin, secret, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -302,7 +314,7 @@ try {
 
 const path = `/cursos/${SLUG}/lecciones/${lessonId}`;
 const addresses = lanAddresses();
-console.log(`db:student: el curso ${SLUG}: ${published}. Suscripción: ${subscription}.`);
+console.log(`db:student: el curso ${SLUG}: ${published}. Otros cursos publicados ahora: ${othersPublished}. Suscripción: ${subscription}.`);
 console.log("");
 console.log(`  Correo:      ${email}`);
 console.log(`  Contraseña:  ${password}   (nueva en cada corrida; si ya había entrado, entra de nuevo)`);

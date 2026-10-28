@@ -138,9 +138,21 @@ function courseOf(course) {
 const data = readData();
 const videos = readVideos();
 
-/** El video de una lección: el de Mux si ya se subió su archivo, si no el de prueba. */
+// Un video de Mux es de una sola lección (la base no repite un asset): desde T-210 varios cursos
+// de prueba repiten archivo, y solo la primera lección que lo usa, en el orden del archivo, lo
+// lleva de Mux. Las demás, de prueba.
+const muxLesson = new Map();
+for (const course of data.courses) {
+  for (const part of course.modules) {
+    for (const lesson of part.lessons) {
+      if (videos.has(lesson.file) && !muxLesson.has(lesson.file)) muxLesson.set(lesson.file, lesson);
+    }
+  }
+}
+
+/** El video de una lección: el de Mux si ya se subió su archivo y es la lección que lo lleva, si no el de prueba. */
 function videoOf(course, lesson, number) {
-  const mux = videos.get(lesson.file);
+  const mux = muxLesson.get(lesson.file) === lesson ? videos.get(lesson.file) : undefined;
   if (mux) return { provider: "mux", asset_id: mux.asset_id, playback_id: mux.playback_id, duration_seconds: mux.duration_seconds };
   return { provider: "test", asset_id: `${course.slug}-video-${number}`, playback_id: `prueba:${lesson.file}`, duration_seconds: lesson.duration_seconds };
 }
