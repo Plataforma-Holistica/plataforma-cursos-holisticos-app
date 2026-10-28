@@ -193,6 +193,8 @@ export const account = defineMessages({
     review: "Cursos por revisar",
     // PA-68. Solo se le ofrece a quien tiene finanzas.
     alerts: "Alertas de anomalía",
+    // PA-78. Solo se le ofrece a quien tiene finanzas.
+    periods: "Periodos",
     account: "Cuenta",
     capabilities: {
       content: "Contenido",

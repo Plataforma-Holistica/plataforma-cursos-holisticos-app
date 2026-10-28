@@ -7,6 +7,8 @@ import {
   homeOf,
   isLessonPath,
   lessonPath,
+  periodClosePath,
+  periodPath,
   proxySignsIn,
   requiresSession,
   resolveDestination,
@@ -307,5 +309,13 @@ describe("a dónde va quien acaba de entrar, según su estado en el equipo", () 
         expect(entryDestination(state, returnTo), `${state} con ${returnTo}`).toMatch(/^\/entrar\/segundo-factor/);
       }
     }
+  });
+});
+
+describe("las direcciones de un periodo (T-605)", () => {
+  it("el periodo va como AAAA-MM, con el mes en dos cifras", () => {
+    expect(periodPath(202710)).toBe("/admin/periodos/2027-10");
+    expect(periodPath(202701)).toBe("/admin/periodos/2027-01");
+    expect(periodClosePath(202612)).toBe("/admin/periodos/2026-12/cierre");
   });
 });

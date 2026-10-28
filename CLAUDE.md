@@ -413,6 +413,34 @@ que no se ve leyendo un solo archivo:
   que borre corridas del cierre borra antes, en réplica, `private.close_exports`; y el `pg_cron` local
   corre cada minuto `call private.run_rollup_requests()`, que sin pedidos no hace nada. La integración 54
   le da `app_service` a `postgres` (sin heredarlo) y se lo quita al terminar.
+- **Lo que T-605 suma al carril A** (segunda solicitud, sin migración). Las pantallas PA-78 a PA-80
+  (`src/app/admin/_periodos/`, servidas por el comodín: `sectionAt` acepta ahora rutas de varios
+  segmentos por la tabla `DEEPER`, con la forma exacta de cada uno: `/admin/periodos/2027-10` y
+  `/admin/periodos/2027-10/cierre`), su servicio (`src/services/periods/`, en CODEOWNERS, con el patrón de
+  las alertas: la guarda primero, esquemas estrictos y una lista cerrada por respuesta) y cuatro
+  componentes base (`DataTable`, `StatTile`, `StatusBadge` y `Dialog`), que el carril B puede usar (T-408).
+  Lo que no se ve leyendo un solo archivo: ensayar y cerrar corren mientras la pantalla espera, con el tope
+  de 10 s; el servicio traduce un 57014 a «tardó más de lo permitido» y un 23514 al confirmar el cierre a
+  «la suma no cuadra», los dos reportados; un ensayo de hace menos de un minuto contesta `too_soon` sin
+  ensayar (la revisión no toma candado: dos envíos a la vez pueden ensayar los dos); la exportación se
+  descarga con su propia acción y su propio estado, y vuelve como dirección de datos (`data:text/csv`) en
+  un enlace con `download`, que con JavaScript se pulsa solo: bajo administración no hay rutas, y así el
+  archivo no viaja con los demás formularios sin JavaScript. El diálogo es un `<dialog open>` que pinta el
+  servidor y que con JavaScript se vuelve modal (`showModal`), con Escape como «Seguir revisando». El panel
+  lee además las alertas (`anomalyAlerts`) para su tabla, y si no se pudieron leer lo dice y sigue. Usa
+  integración 56 (el almacén contra la base, en una transacción que se revierte) y, en
+  `tests/e2e/equipo/camino.equipo.ts`, dos casos con meses de 2040 que llegan hasta la respuesta del cierre
+  (cerrar va en orden y el mes en curso sigue abierto en ese camino). Para el B: la sección de periodos lee
+  `anomalyAlerts`, así que una prueba de página que monte el comodín simula también
+  `@/services/periods/periods`. Dos cosas de las revisiones del diff: los avisos de lo que salió bien viajan
+  en una cookie sin periodo, así que cada pantalla los pinta solo si lo que tiene delante es lo que el aviso
+  dice (`acceptedCloseNotice`, `acceptedRollupNotice`); y «Cerrar periodo» se ofrece solo si el último ensayo
+  salió bien, con datos finales y con la suma cuadrada. **Límite conocido, decidido con Sergio el
+  2026-10-27:** `close_period` acepta cualquier ensayo con datos finales cuya entrada sea la de ahora, y
+  la pantalla muestra el último; si la entrada vuelve a la de un ensayo anterior (se revierte una exclusión
+  y se recalcula), o alguien ensaya entre abrir el diálogo y confirmar, se congela un reparto que quien
+  confirma no vio. Lo cierra la solicitud corta que sigue a esta, con migración: confirmar lleva el ensayo
+  mostrado y la base exige que sea el último y de la entrada de ahora.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

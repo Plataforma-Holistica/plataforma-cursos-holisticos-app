@@ -39,6 +39,7 @@ vi.mock("@/app/admin/_revision/actions", () => ({ reviewCodeAction: vi.fn(), app
 vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));
 vi.mock("@/app/admin/_alertas/actions", () => ({ alertsCodeAction: vi.fn(), alertsAction: vi.fn() }));
 vi.mock("@/services/anomalies/anomalies", () => ({ anomalyAlerts: vi.fn() }));
+vi.mock("@/services/periods/periods", () => ({ financePeriods: vi.fn(), financePeriod: vi.fn(), financeClose: vi.fn() }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
 import { TeamSection } from "@/app/admin/_equipo/section";
@@ -95,6 +96,33 @@ describe("qué sección atiende cada ruta de administración", () => {
 
   it("las prácticas y los niveles piden Contenido", () => {
     expect(sectionAt(["practicas"])?.capability).toBe("content");
+  });
+
+  it("los periodos piden finanzas, también el panel de uno y su cierre (rutas de varios segmentos, T-605)", () => {
+    expect(sectionAt(["periodos"])?.capability).toBe("finance");
+    expect(sectionAt(["periodos", "2027-10"])?.capability).toBe("finance");
+    expect(sectionAt(["periodos", "2027-10", "cierre"])?.capability).toBe("finance");
+    expect(sectionAt(["periodos", "2000-01"])?.capability).toBe("finance");
+    expect(sectionAt(["periodos", "2999-12", "cierre"])?.capability).toBe("finance");
+  });
+
+  it.each<[string[]]>([
+    [["periodos", "2027-13"]],
+    [["periodos", "2027-00"]],
+    [["periodos", "2027-1"]],
+    [["periodos", "202710"]],
+    [["periodos", "1999-12"]],
+    [["periodos", "3000-01"]],
+    [["periodos", " 2027-10"]],
+    [["periodos", "2027-10", "Cierre"]],
+    [["periodos", "2027-10", "cierre", "x"]],
+    [["periodos", "2027-10", ""]],
+    [["periodos", "constructor"]],
+    [["periodos", ""]],
+    [["alertas", "2027-10"]],
+    [["equipo", "2027-10", "cierre"]],
+  ])("en %j no hay ninguna: debajo de los periodos solo valen un periodo con forma y su cierre", (rest) => {
+    expect(sectionAt(rest)).toBeNull();
   });
 
   it.each<[string[]]>([[[]], [["otra"]], [["equipo", "invitar"]], [["Equipo"]], [["equipo", ""]], [["practicas", "niveles"]], [["Practicas"]], [["constructor"]], [["__proto__"]], [["toString"]]])(
