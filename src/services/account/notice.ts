@@ -35,6 +35,9 @@ export const NOTICES = [
   "rollup_requested",
   "period_rehearsed",
   "period_closed",
+  // Las liquidaciones del periodo (PA-81, T-605): liberar, y cualquier otra decisión sobre una fila.
+  "payouts_released",
+  "payouts_updated",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

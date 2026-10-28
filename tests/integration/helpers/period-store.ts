@@ -2,7 +2,8 @@ import type { Client } from "pg";
 
 import type { asServer as runAsServer, Tx } from "@/adapters/supabase/db";
 import type { PeriodStore } from "@/services/periods/panel";
-import { createPeriodStore } from "@/services/periods/store";
+import type { PayoutStore } from "@/services/periods/payouts";
+import { createPayoutStore, createPeriodStore } from "@/services/periods/store";
 
 import { asOwner, asServer } from "./team";
 
@@ -14,6 +15,15 @@ import { asOwner, asServer } from "./team";
  * comprobación diferida del cierre) lo prueba `54-panel-del-periodo.test.ts`.
  */
 export function periodStoreOn(owner: Client): PeriodStore {
+  return createPeriodStore(runOn(owner));
+}
+
+/** Lo mismo para las liquidaciones de PA-81 (T-605, cuarta solicitud): `createPayoutStore` sobre la misma transacción. */
+export function payoutStoreOn(owner: Client): PayoutStore {
+  return createPayoutStore(runOn(owner));
+}
+
+function runOn(owner: Client): typeof runAsServer {
   const tx: Tx = {
     query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
     execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
@@ -26,5 +36,5 @@ export function periodStoreOn(owner: Client): PeriodStore {
       await asOwner(owner);
     }
   }) as unknown as typeof runAsServer;
-  return createPeriodStore(run);
+  return run;
 }
