@@ -1,10 +1,39 @@
 {
-  "comment": "Cursos de prueba de la base local (T-107; decisión de Sergio del 2026-10-14). No son los pilotos: esos llegan con T-004 y el documento de PQ-25. Los maestros son ficticios. Cada video es uno de Videos-Test/ (carpeta del proyecto, fuera de git), con la duración que midió ffprobe redondeada al segundo; en T-108 se suben a Mux. Los carga `pnpm db:courses`, solo contra la base local.",
-  "practices": ["Naturaleza", "Océano"],
-  "levels": ["Principiante"],
+  "comment": "Cursos de prueba de la base local (T-107; decisión de Sergio del 2026-10-14). No son los pilotos: esos llegan con T-004 y el documento de PQ-25. Los maestros son ficticios. Cada video es uno de Videos-Test/ (carpeta del proyecto, fuera de git), con la duración que midió ffprobe redondeada al segundo; en T-108 se suben a Mux. Desde T-210 son ocho, de prácticas y niveles distintos, para que el catálogo se vea con algo (decisión de Sergio del 2026-10-27: carril B); varias lecciones repiten video. Los carga `pnpm db:courses`, solo contra la base local.",
+  "practices": [
+    "Naturaleza",
+    "Océano",
+    "Meditación",
+    "Respiración",
+    "Yoga",
+    "Sonido"
+  ],
+  "levels": [
+    "Principiante",
+    "Intermedio",
+    "Avanzado"
+  ],
   "teachers": [
-    { "slug": "maestra-de-prueba-bosque", "name": "Maestra de prueba (bosque)", "bio": "Una maestra que no existe, para probar la Plataforma." },
-    { "slug": "maestro-de-prueba-mar", "name": "Maestro de prueba (mar)", "bio": "Un maestro que no existe, para probar la Plataforma." }
+    {
+      "slug": "maestra-de-prueba-bosque",
+      "name": "Maestra de prueba (bosque)",
+      "bio": "Una maestra que no existe, para probar la Plataforma."
+    },
+    {
+      "slug": "maestro-de-prueba-mar",
+      "name": "Maestro de prueba (mar)",
+      "bio": "Un maestro que no existe, para probar la Plataforma."
+    },
+    {
+      "slug": "maestra-de-prueba-montana",
+      "name": "Maestra de prueba (montaña)",
+      "bio": "Otra maestra que no existe. Su semblanza es larga a propósito, para ver cómo se acomoda el texto de una ficha de maestro cuando ocupa varias líneas en un teléfono."
+    },
+    {
+      "slug": "maestro-de-prueba-cielo",
+      "name": "Maestro de prueba (cielo)",
+      "bio": "Otro maestro que no existe, para probar la Plataforma."
+    }
   ],
   "courses": [
     {
@@ -18,8 +47,16 @@
         {
           "title": "Bosque y río",
           "lessons": [
-            { "title": "El bosque", "file": "Nature + Forest.mp4", "duration_seconds": 356 },
-            { "title": "El río", "file": "Nature + River.mp4", "duration_seconds": 409 }
+            {
+              "title": "El bosque",
+              "file": "Nature + Forest.mp4",
+              "duration_seconds": 356
+            },
+            {
+              "title": "El río",
+              "file": "Nature + River.mp4",
+              "duration_seconds": 409
+            }
           ]
         }
       ]
@@ -35,8 +72,186 @@
         {
           "title": "Ballenas y olas",
           "lessons": [
-            { "title": "Las ballenas", "file": "Ocean + whales.mp4", "duration_seconds": 360 },
-            { "title": "Las olas", "file": "Ocean+Waves-4.mp4", "duration_seconds": 414 }
+            {
+              "title": "Las ballenas",
+              "file": "Ocean + whales.mp4",
+              "duration_seconds": 360
+            },
+            {
+              "title": "Las olas",
+              "file": "Ocean+Waves-4.mp4",
+              "duration_seconds": 414
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestra-de-prueba-montana",
+      "slug": "prueba-meditacion-inicial",
+      "title": "Meditación para empezar (curso de prueba)",
+      "summary": "Un curso de prueba para quien nunca ha meditado. No es contenido real de la Plataforma.",
+      "practice": "meditacion",
+      "level": "principiante",
+      "modules": [
+        {
+          "title": "Sentarse",
+          "lessons": [
+            {
+              "title": "La postura",
+              "file": "Nature + Forest.mp4",
+              "duration_seconds": 356
+            },
+            {
+              "title": "El primer minuto",
+              "file": "Nature + River.mp4",
+              "duration_seconds": 409
+            }
+          ]
+        },
+        {
+          "title": "Quedarse",
+          "lessons": [
+            {
+              "title": "Volver a la respiración",
+              "file": "Ocean + whales.mp4",
+              "duration_seconds": 360
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestra-de-prueba-montana",
+      "slug": "prueba-meditacion-profunda",
+      "title": "Meditación sostenida (curso de prueba)",
+      "summary": "Un curso de prueba con sesiones más largas. No es contenido real de la Plataforma.",
+      "practice": "meditacion",
+      "level": "avanzado",
+      "modules": [
+        {
+          "title": "Sesiones largas",
+          "lessons": [
+            {
+              "title": "Veinte minutos",
+              "file": "Ocean+Waves-4.mp4",
+              "duration_seconds": 414
+            },
+            {
+              "title": "Cuarenta minutos",
+              "file": "Nature + Forest.mp4",
+              "duration_seconds": 356
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestro-de-prueba-cielo",
+      "slug": "prueba-respiracion",
+      "title": "Respirar con calma (curso de prueba)",
+      "summary": "Un curso de prueba de respiración. No es contenido real de la Plataforma.",
+      "practice": "respiracion",
+      "level": "principiante",
+      "modules": [
+        {
+          "title": "Lo básico",
+          "lessons": [
+            {
+              "title": "Notar la respiración",
+              "file": "Nature + River.mp4",
+              "duration_seconds": 409
+            },
+            {
+              "title": "Exhalar más largo",
+              "file": "Ocean + whales.mp4",
+              "duration_seconds": 360
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestro-de-prueba-cielo",
+      "slug": "prueba-yoga-suave",
+      "title": "Yoga suave (curso de prueba)",
+      "summary": "Un curso de prueba de yoga para la mañana. No es contenido real de la Plataforma.",
+      "practice": "yoga",
+      "level": "intermedio",
+      "modules": [
+        {
+          "title": "Mañana",
+          "lessons": [
+            {
+              "title": "Despertar el cuerpo",
+              "file": "Ocean+Waves-4.mp4",
+              "duration_seconds": 414
+            },
+            {
+              "title": "Saludo al sol",
+              "file": "Nature + Forest.mp4",
+              "duration_seconds": 356
+            }
+          ]
+        },
+        {
+          "title": "Noche",
+          "lessons": [
+            {
+              "title": "Soltar el día",
+              "file": "Nature + River.mp4",
+              "duration_seconds": 409
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestra-de-prueba-bosque",
+      "slug": "prueba-sonido",
+      "title": "Sonido y descanso (curso de prueba)",
+      "summary": "Un curso de prueba para escuchar. No es contenido real de la Plataforma.",
+      "practice": "sonido",
+      "level": "intermedio",
+      "modules": [
+        {
+          "title": "Escuchar",
+          "lessons": [
+            {
+              "title": "El agua",
+              "file": "Nature + River.mp4",
+              "duration_seconds": 409
+            },
+            {
+              "title": "Las olas",
+              "file": "Ocean+Waves-4.mp4",
+              "duration_seconds": 414
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "teacher": "maestro-de-prueba-mar",
+      "slug": "prueba-oceano-avanzado",
+      "title": "Océano profundo (curso de prueba)",
+      "summary": "Un segundo curso de prueba del mar. No es contenido real de la Plataforma.",
+      "practice": "oceano",
+      "level": "avanzado",
+      "modules": [
+        {
+          "title": "Mar adentro",
+          "lessons": [
+            {
+              "title": "Ballenas",
+              "file": "Ocean + whales.mp4",
+              "duration_seconds": 360
+            },
+            {
+              "title": "Corrientes",
+              "file": "Ocean+Waves-4.mp4",
+              "duration_seconds": 414
+            }
           ]
         }
       ]

@@ -55,6 +55,10 @@ const PUBLIC_PAGES = [
   // Recuperar la contraseña (PA-13): quien la olvidó puede tener o no una sesión abierta.
   "src/app/(cuenta)/recuperar/page.tsx",
   "src/app/(cuenta)/recuperar/[token]/page.tsx",
+  // Las fichas de curso y de maestro (PA-02, PA-03; T-210): las ve cualquiera. La del curso
+  // pregunta quién mira (`publicViewer`), que nunca redirige ni niega nada.
+  "src/app/cursos/[slug]/page.tsx",
+  "src/app/maestros/[slug]/page.tsx",
   // La muestra de componentes, que solo existe con `pnpm dev`.
   "src/app/muestra/page.dev.tsx",
   "src/app/muestra/error/page.dev.tsx",

@@ -108,7 +108,8 @@ describe("LessonRow", () => {
     ["not_started", "Lección 3, Cuatro tiempos, 6 min", "6 min"],
     ["in_progress", "Lección 3, Cuatro tiempos, 6 min, a medias", "6 min · A medias"],
     ["completed", "Lección 3, Cuatro tiempos, 6 min, terminada", "6 min · Terminada"],
-  ] as const)("%s: el estado va en el nombre y a la vista (T-206)", async (state, name, seen) => {
+    ["locked", "Lección 3, Cuatro tiempos, 6 min, requiere suscripción", "6 min · Requiere suscripción"],
+  ] as const)("%s: el estado va en el nombre y a la vista (T-206, T-210)", async (state, name, seen) => {
     const { container } = render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" state={state} />);
     expect(screen.getByRole("link", { name })).toHaveTextContent(seen);
     expect(await a11yViolations(container)).toEqual([]);
