@@ -78,7 +78,9 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
   const result = failure === null ? null : FAILURES[failure];
   const { block, answer, spoken } = useAnswerFocus(pending, attempt, result);
   const showDone = done !== null && state.kind === "idle" && !pending;
-  const confirming = state.kind === "confirming" && view.close.kind === "ready" ? state : null;
+  // El diálogo solo con el ensayo que se ve: si la página se volvió a leer con otro, confirmar llevaría uno que ya no se ve.
+  const ready = view.close.kind === "ready" ? view.close : null;
+  const confirming = state.kind === "confirming" && ready !== null && state.run === ready.run ? state : null;
   // Confirmar sin marcar la casilla: el foco va a la casilla, que tiene el error como descripción, y así se oye.
   const missingAttempt = confirming !== null && confirming.missingUnderstood ? confirming.attempt : 0;
   useEffect(() => {
@@ -161,7 +163,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
               </Button>
             </form>
           )}
-          {confirming !== null && (
+          {confirming !== null && ready !== null && (
             <form action={send} noValidate>
               <Dialog
                 title={view.dialogTitle}
@@ -183,7 +185,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
                   </Button>
                 }
                 confirm={
-                  <Button type="submit" variant="danger" name="do" value={periodsButton.close(view.periodId)} loading={pending} loadingLabel={text.closing}>
+                  <Button type="submit" variant="danger" name="do" value={ready.confirm} loading={pending} loadingLabel={text.closing}>
                     {text.confirmClose}
                   </Button>
                 }

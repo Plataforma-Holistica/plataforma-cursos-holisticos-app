@@ -15,6 +15,7 @@ import { createPeriodStore } from "./store";
 // `tests/integration/56-periodos.test.ts`; la confirmación de verdad del cierre, en la 54.
 
 const claims = { userId: "a0000000-0000-4000-8000-000000000001", aal: "aal2", sessionId: "5e000000-0000-4000-8000-000000000001", issuedAt: 0 } as VerifiedClaims;
+const RUN = "c1000000-0000-4000-8000-000000000001";
 const pgError = (code: string) => toDatabaseError({ code, severity: "ERROR", message: "x" });
 
 /** Un `asServer` de mentira: lanza los errores que se le digan, uno por transacción, y después contesta `outcome`. */
@@ -43,7 +44,7 @@ describe("ensayar y cerrar", () => {
     expect(await rehearse.store.rehearse(claims, 202710)).toBe("rehearsed");
     expect(rehearse.opened).toEqual([{ claims, reason: "period_rehearsal" }]);
     const close = runnerWith("closed");
-    expect(await close.store.closePeriod(claims, 202710)).toBe("closed");
+    expect(await close.store.closePeriod(claims, 202710, RUN)).toBe("closed");
     expect(close.opened).toEqual([{ claims, reason: "period_close" }]);
   });
 
@@ -59,33 +60,33 @@ describe("ensayar y cerrar", () => {
 
   it("un choque de candados se intenta una vez más, y solo una", async () => {
     const once = runnerWith("closed", [pgError("40P01")]);
-    expect(await once.store.closePeriod(claims, 202710)).toBe("closed");
+    expect(await once.store.closePeriod(claims, 202710, RUN)).toBe("closed");
     expect(once.opened).toHaveLength(2);
     const twice = runnerWith("closed", [pgError("55P03"), pgError("55P03")]);
-    await expect(twice.store.closePeriod(claims, 202710)).rejects.toBeInstanceOf(DatabaseError);
+    await expect(twice.store.closePeriod(claims, 202710, RUN)).rejects.toBeInstanceOf(DatabaseError);
     expect(twice.opened).toHaveLength(2);
   });
 
   it("el tiempo vencido de la base se dice por su nombre, al ensayar y al cerrar", async () => {
     await expect(runnerWith("rehearsed", [pgError("57014")]).store.rehearse(claims, 202710)).rejects.toEqual(new CloseFailure("timed_out"));
-    await expect(runnerWith("closed", [pgError("57014")]).store.closePeriod(claims, 202710)).rejects.toEqual(new CloseFailure("timed_out"));
+    await expect(runnerWith("closed", [pgError("57014")]).store.closePeriod(claims, 202710, RUN)).rejects.toEqual(new CloseFailure("timed_out"));
   });
 
   it("la suma que no cuadra solo al cerrar: al ensayar, un 23514 es otra cosa y sigue como error", async () => {
-    await expect(runnerWith("closed", [pgError("23514")]).store.closePeriod(claims, 202710)).rejects.toEqual(new CloseFailure("unbalanced"));
+    await expect(runnerWith("closed", [pgError("23514")]).store.closePeriod(claims, 202710, RUN)).rejects.toEqual(new CloseFailure("unbalanced"));
     const rehearse = runnerWith("rehearsed", [pgError("23514")]).store.rehearse(claims, 202710);
     await expect(rehearse).rejects.toBeInstanceOf(DatabaseError);
     await expect(rehearse).rejects.not.toBeInstanceOf(CloseFailure);
   });
 
   it("otro error de la base, o uno que no es de la base, sigue tal cual", async () => {
-    await expect(runnerWith("closed", [pgError("42501")]).store.closePeriod(claims, 202710)).rejects.toBeInstanceOf(DatabaseError);
+    await expect(runnerWith("closed", [pgError("42501")]).store.closePeriod(claims, 202710, RUN)).rejects.toBeInstanceOf(DatabaseError);
     const other = new Error("sin conexión");
-    await expect(runnerWith("closed", [other]).store.closePeriod(claims, 202710)).rejects.toBe(other);
+    await expect(runnerWith("closed", [other]).store.closePeriod(claims, 202710, RUN)).rejects.toBe(other);
   });
 
   it("una respuesta que no está en su lista lanza: no se pinta como hecha", async () => {
-    await expect(runnerWith("closing").store.closePeriod(claims, 202710)).rejects.toThrow();
+    await expect(runnerWith("closing").store.closePeriod(claims, 202710, RUN)).rejects.toThrow();
     await expect(runnerWith("reopened").store.rehearse(claims, 202710)).rejects.toThrow();
   });
 });

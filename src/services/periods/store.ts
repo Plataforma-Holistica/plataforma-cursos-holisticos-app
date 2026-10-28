@@ -48,9 +48,9 @@ export function createPeriodStore(run: typeof asServer = asServer): PeriodStore 
         throw named(error, false);
       }
     },
-    closePeriod: async (claims, period) => {
+    closePeriod: async (claims, period, runId) => {
       try {
-        return closeAnswerOf(await withLockRetry(() => run({ claims, reason: "period_close" }, (tx) => askClose(tx, period)), isLockConflict));
+        return closeAnswerOf(await withLockRetry(() => run({ claims, reason: "period_close" }, (tx) => askClose(tx, period, runId)), isLockConflict));
       } catch (error) {
         throw named(error, true);
       }

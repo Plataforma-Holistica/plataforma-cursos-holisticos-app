@@ -129,40 +129,40 @@ describe("panelAction", () => {
 
 describe("closeAction", () => {
   it("«Cerrar periodo» solo abre el diálogo, sin llamar a nadie", async () => {
-    expect(await closeAction(IDLE, pressed(periodsButton.askClose(PERIOD)))).toEqual({ kind: "confirming", period: PERIOD, missingUnderstood: false, attempt: 1 });
+    expect(await closeAction(IDLE, pressed(periodsButton.askClose(PERIOD, RUN)))).toEqual({ kind: "confirming", period: PERIOD, run: RUN, missingUnderstood: false, attempt: 1 });
     expect(calls.order).toEqual([]);
     expect(mocks.clearNotice).toHaveBeenCalledTimes(1);
   });
 
   it("confirmar sin marcar la casilla vuelve a preguntar, sin llamar a nadie", async () => {
-    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD)))).toEqual({ kind: "confirming", period: PERIOD, missingUnderstood: true, attempt: 1 });
+    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD, RUN)))).toEqual({ kind: "confirming", period: PERIOD, run: RUN, missingUnderstood: true, attempt: 1 });
     expect(calls.order).toEqual([]);
   });
 
   it("cancelar cierra el diálogo", async () => {
-    expect(await closeAction({ kind: "confirming", period: PERIOD, missingUnderstood: false, attempt: 1 }, pressed(periodsButton.cancel()))).toEqual(IDLE);
+    expect(await closeAction({ kind: "confirming", period: PERIOD, run: RUN, missingUnderstood: false, attempt: 1 }, pressed(periodsButton.cancel()))).toEqual(IDLE);
     expect(calls.order).toEqual([]);
   });
 
   it("confirmado: cierra y vuelve al cierre con su aviso", async () => {
     once("closePeriod", Promise.resolve({ kind: "answered", answer: "closed" }));
-    await expect(closeAction(IDLE, pressed(periodsButton.close(PERIOD), { understood: "yes" }))).rejects.toThrow(`redirige a ${periodClosePath(PERIOD)}`);
-    expect(mocks.closePeriod).toHaveBeenCalledWith(jar, { period: PERIOD });
+    await expect(closeAction(IDLE, pressed(periodsButton.close(PERIOD, RUN), { understood: "yes" }))).rejects.toThrow(`redirige a ${periodClosePath(PERIOD)}`);
+    expect(mocks.closePeriod).toHaveBeenCalledWith(jar, { period: PERIOD, run: RUN });
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "period_closed");
   });
 
   it("una precondición que falta, la suma que no cuadra o no se supo: se dice, y la página se vuelve a pedir", async () => {
     once("closePeriod", Promise.resolve({ kind: "answered", answer: "rehearsal_stale" }));
-    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD), { understood: "yes" }))).toEqual({
+    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD, RUN), { understood: "yes" }))).toEqual({
       kind: "failed",
       reason: "rehearsal_stale",
       step: "close",
       attempt: 1,
     });
     once("closePeriod", Promise.resolve({ kind: "unbalanced" }));
-    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD), { understood: "yes" }))).toMatchObject({ reason: "unbalanced" });
+    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD, RUN), { understood: "yes" }))).toMatchObject({ reason: "unbalanced" });
     once("closePeriod", Promise.resolve({ kind: "unknown" }));
-    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD), { understood: "yes" }))).toMatchObject({ reason: "unknown" });
+    expect(await closeAction(IDLE, pressed(periodsButton.close(PERIOD, RUN), { understood: "yes" }))).toMatchObject({ reason: "unknown" });
     expect(calls.order).toEqual(["closePeriod", "refresh", "closePeriod", "refresh", "closePeriod", "refresh"]);
   });
 
@@ -207,7 +207,7 @@ describe("downloadAction", () => {
   });
 
   it("otro botón no es nada", async () => {
-    expect(await downloadAction(PERIOD, IDLE, pressed(periodsButton.close(PERIOD)))).toEqual(IDLE);
+    expect(await downloadAction(PERIOD, IDLE, pressed(periodsButton.close(PERIOD, RUN)))).toEqual(IDLE);
     expect(calls.order).toEqual([]);
   });
 });

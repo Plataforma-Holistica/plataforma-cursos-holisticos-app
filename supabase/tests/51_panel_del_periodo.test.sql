@@ -7,7 +7,7 @@
 -- Octubre de 2026 es el ejemplo del PRD, como en `43_cierre`.
 begin;
 \ir _ayuda.psql
-select plan(56);
+select plan(57);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6051000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -27,7 +27,11 @@ begin
   else
     perform pruebas.a_nombre_de(p_actor);
   end if;
-  execute format('select private.%I(%s)', p_call, coalesce(p_period::text, '')) into v;
+  -- Cerrar recibe el ensayo que se tenía a la vista: el que lee la pantalla (T-605, tercera solicitud).
+  execute format('select private.%I(%s)', p_call,
+                 case when p_call = 'close_period'
+                      then format('%s, (private.finance_close(%s) #>> ''{rehearsal,run_id}'')::uuid', p_period, p_period)
+                      else coalesce(p_period::text, '') end) into v;
   perform pruebas.limpiar();
   return v;
 end
@@ -129,7 +133,7 @@ select pruebas.fila(202610, pruebas.al(3), 'panel-m2', 'Uno', 2), pruebas.fila(2
 -- Quién ejecuta qué.
 
 select ok(has_function_privilege('app_service', 'private.rehearse_close(public.period_id)', 'execute')
-          and has_function_privilege('app_service', 'private.close_period(public.period_id)', 'execute'),
+          and has_function_privilege('app_service', 'private.close_period(public.period_id, uuid)', 'execute'),
   'el servidor ensaya y cierra (PA-80)');
 select ok(has_function_privilege('app_service', 'private.finance_periods()', 'execute')
           and has_function_privilege('app_service', 'private.finance_period(public.period_id)', 'execute')
@@ -139,7 +143,7 @@ select ok(has_function_privilege('app_service', 'private.finance_periods()', 'ex
   'y lee el panel, descarga la exportación y pide el recálculo');
 select ok(not exists (
             select 1 from (values ('anon'), ('authenticated'), ('service_role')) r (rolname),
-                 (values ('private.rehearse_close(public.period_id)'), ('private.close_period(public.period_id)'),
+                 (values ('private.rehearse_close(public.period_id)'), ('private.close_period(public.period_id, uuid)'),
                          ('private.finance_periods()'), ('private.finance_period(public.period_id)'),
                          ('private.finance_close(public.period_id)'), ('private.close_export_download(uuid)'),
                          ('private.request_rollup(public.period_id)')) f (sig)
@@ -164,10 +168,10 @@ select is((select array_agg(p.proname::text order by p.proname) from pg_proc p j
 select ok(exists (select 1 from private.watchdog_areas() where function_name = 'schema_violations_close' and unusable_reason is null),
   'el área del cierre está y se puede usar');
 select is((select count(*)::integer from private.schema_violations()), 0, 'y no encuentra nada');
-revoke execute on function private.close_period(public.period_id) from app_service;
+revoke execute on function private.close_period(public.period_id, uuid) from app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function not executable by app_service'
                   and object_name like 'private.close_period(%'), 've el cierre que el servidor ya no puede correr');
-grant execute on function private.close_period(public.period_id) to app_service;
+grant execute on function private.close_period(public.period_id, uuid) to app_service;
 grant execute on function private.close_export_csv(uuid, bigint) to app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function executable by app_service'
                   and object_name like 'private.close_export_csv(%'), 've una pieza de la exportación al alcance del servidor');
@@ -266,9 +270,9 @@ select ok(exists (select 1 from public.close_runs where id = (select (r ->> 'run
 create temporary table panel as select pruebas.servidor(pruebas.finanzas(), 'finance_period', 202610) as r;
 select is((select (r -> 'rehearsal') - 'at' from panel),
   jsonb_build_object('run_id', (select r ->> 'run_id' from ensayo), 'period_status_at_run', 'closing', 'active_students', 4,
-                     'pool_bps', 6000, 'net_revenue_cents', 106148, 'pool_cents', 63687, 'assigned_cents', 46539,
-                     'unconsumed_cents', 17148, 'carried_out_cents', 0),
-  'el panel da las cifras del último ensayo, sin recalcular');
+                     'pool_bps', 6000, 'net_revenue_cents', 106148, 'student_pools_cents', 63687, 'pool_cents', 63687,
+                     'assigned_cents', 46539, 'unconsumed_cents', 17148, 'carried_out_cents', 0),
+  'el panel da las cifras del último ensayo, sin recalcular (con el bote del mes, desde la tercera solicitud)');
 select is((select (r ->> 'open_alerts')::integer from panel), 1, 'y cuántas alertas faltan por revisar');
 create temporary table cierre_antes as select pruebas.servidor(pruebas.finanzas(), 'finance_close', 202610) as r;
 select is((select jsonb_path_query_array(r, '$.rehearsal.teachers[*].total_cents') from cierre_antes), '[24494, 35843, 3350]'::jsonb,
@@ -281,11 +285,12 @@ select is((select r -> 'checks' from cierre_antes),
 select is((select r -> 'close' from cierre_antes), 'null'::jsonb, 'todavía sin cierre');
 select ok((select pruebas.sin_alumnos(r) from cierre_antes), 'sin el identificador de ningún alumno');
 -- Un ensayo que falla después: el panel sigue con las cifras del último bueno; el ensayo y cierre dice que falló, sin su error.
+-- «Después» es por cuándo terminó (`finished_at`, desde la tercera solicitud): la hora del reloj al escribirlo.
 set local session_replication_role = replica;
 insert into public.close_runs (period_id, kind, status, period_status_at_run, code_version, parameters, started_by, started_at,
                                finished_at, error)
 values (202610, 'rehearsal', 'failed', 'closing', 'prueba', '{}', pruebas.finanzas(), now() + interval '1 second',
-        now() + interval '2 seconds', 'XX000: un error interno de prueba');
+        clock_timestamp(), 'XX000: un error interno de prueba');
 set local session_replication_role = origin;
 select is(pruebas.servidor(pruebas.finanzas(), 'finance_period', 202610) #>> '{rehearsal,run_id}', (select r ->> 'run_id' from ensayo),
   'después de un ensayo fallido, el panel sigue con el último que salió bien');
@@ -299,6 +304,9 @@ select ok((select r #>> '{rehearsal,status}' = 'failed' and r::text not like '%u
 set local session_replication_role = replica;
 delete from public.anomaly_alerts where period_id = 202610;
 set local session_replication_role = origin;
+-- Desde la tercera solicitud de T-605 el cierre usa el último ensayo, el que la pantalla muestra, y ese es el fallido de
+-- arriba: el servidor ensaya otra vez antes de cerrar.
+select is(pruebas.servidor(pruebas.finanzas(), 'rehearse_close', 202610) ->> 'outcome', 'rehearsed', 'con el último ensayo fallido, se ensaya otra vez');
 create temporary table cierre as select pruebas.servidor(pruebas.finanzas(), 'close_period', 202610) as r;
 select is((select r ->> 'outcome' from cierre), 'closed', 'el servidor cierra');
 set constraints payout_periods_balanced immediate;

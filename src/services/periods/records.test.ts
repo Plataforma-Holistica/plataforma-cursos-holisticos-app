@@ -48,7 +48,9 @@ const PERIOD = {
   collected: { charges: 130, gross_mxn_cents: 4_537_000, revenue_net_mxn_cents: 3_911_200 },
   assigned: { students: 120, base_cents: 3_800_000 },
   close: null,
-  rehearsal: { ...FIGURES, at: "2027-11-02T10:00:00+00:00", period_status_at_run: "closing" },
+  rehearsal: { ...FIGURES, student_pools_cents: 1_234_500, at: "2027-11-02T10:00:00+00:00", period_status_at_run: "closing" },
+  unconsumed_alert_bps: 1500,
+  unconsumed_over: false,
   open_alerts: 2,
   last_rollup: { status: "failed", mode: "dirty", started_at: "2027-11-02T09:00:00+00:00", finished_at: "2027-11-02T09:01:00+00:00" },
   last_good_rollup: { mode: "full", started_at: "2027-11-01T09:00:00+00:00", finished_at: "2027-11-01T09:05:00+00:00" },
@@ -124,7 +126,9 @@ describe("periodReadOf", () => {
       collected: { charges: 130, grossCents: 4_537_000, netCents: 3_911_200 },
       assigned: { students: 120, baseCents: 3_800_000 },
       close: null,
-      rehearsal: { runId: RUN, at: PERIOD.rehearsal.at, statusAtRun: "closing", poolCents: 1_234_500 },
+      rehearsal: { runId: RUN, at: PERIOD.rehearsal.at, statusAtRun: "closing", poolCents: 1_234_500, studentPoolsCents: 1_234_500 },
+      unconsumedAlertBps: 1500,
+      unconsumedOver: false,
       openAlerts: 2,
       lastRollup: { status: "failed", mode: "dirty" },
       lastGoodRollup: { mode: "full", startedAt: PERIOD.last_good_rollup.started_at },
@@ -189,6 +193,7 @@ describe("las respuestas", () => {
     expect(rehearseAnswerOf("rehearsed")).toBe("rehearsed");
     expect(rehearseAnswerOf("too_soon")).toBe("too_soon");
     expect(closeAnswerOf("rehearsal_stale")).toBe("rehearsal_stale");
+    expect(closeAnswerOf("rehearsal_superseded")).toBe("rehearsal_superseded");
     expect(() => closeAnswerOf("closing")).toThrow();
     expect(() => rehearseAnswerOf(null)).toThrow();
     expect(() => rollupAnswerOf("closed")).toThrow();
@@ -202,5 +207,21 @@ describe("las respuestas", () => {
     expect(() => downloadOf({ ...file, filename: "../x.csv" })).toThrow();
     expect(() => downloadOf({ ...file, extra: 1 })).toThrow();
     expect(() => downloadOf({ outcome: "malformed" })).toThrow();
+  });
+});
+
+describe("el umbral del bote sin consumo (T-605, tercera solicitud)", () => {
+  it("nulo si no hay umbral válido o datos finales; un umbral fuera de 1 a 10 000 lanza", () => {
+    expect(periodReadOf({ ...PERIOD, unconsumed_alert_bps: null, unconsumed_over: null })).toMatchObject({ unconsumedAlertBps: null, unconsumedOver: null });
+    expect(() => periodReadOf({ ...PERIOD, unconsumed_alert_bps: 0 })).toThrow();
+    expect(() => periodReadOf({ ...PERIOD, unconsumed_alert_bps: 10_001 })).toThrow();
+  });
+
+  it("el cierre trae también el bote del mes", () => {
+    const closed = periodReadOf({
+      ...PERIOD,
+      close: { run_id: RUN, net_revenue_cents: 1, student_pools_cents: 2, pool_cents: 2, assigned_cents: 1, unconsumed_cents: 1, carried_out_cents: 0 },
+    });
+    expect(closed).toMatchObject({ close: { studentPoolsCents: 2 } });
   });
 });

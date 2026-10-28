@@ -38,7 +38,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
   perform pruebas.limpiar();
@@ -52,7 +52,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   if v ->> 'outcome' <> 'closed' then
     raise exception 'no cerró: %', v;
   end if;

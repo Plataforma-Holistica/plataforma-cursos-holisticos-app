@@ -441,6 +441,28 @@ que no se ve leyendo un solo archivo:
   y se recalcula), o alguien ensaya entre abrir el diálogo y confirmar, se congela un reparto que quien
   confirma no vio. Lo cierra la solicitud corta que sigue a esta, con migración: confirmar lleva el ensayo
   mostrado y la base exige que sea el último y de la entrada de ahora.
+- **Lo que T-605 suma al carril A** (tercera solicitud, `t605_cierre_del_ensayo_mostrado`; decisión de Sergio
+  del 2026-10-27; cierra el límite de la viñeta de arriba). **`close_period` cambió de firma:**
+  `close_period(p_period, p_run)`, y la de un argumento ya no existe. Quien cierra dice qué ensayo tenía a la
+  vista, y la base solo cierra si ese es el último del periodo (`rehearsal_superseded`, respuesta nueva),
+  salió bien con datos finales (`rehearsal_missing`) y su huella es la de la entrada de ahora
+  (`rehearsal_stale`); después del cálculo, el resultado debe ser el de ese ensayo (si no, lanza `XX000`, que
+  no es «la suma no cuadra»). «El último» es `private.last_rehearsal()`, por `finished_at` (`started_at` es
+  `now()` y empata dentro de una transacción), y lo leen igual el cierre y `finance_close` (PA-80);
+  `finance_period` y `finance_periods` (PA-79 y PA-78) toman sus cifras del último que salió bien, ordenado
+  igual. Entre aplicar la migración y desplegar la aplicación, cerrar falla (la firma de un argumento ya no
+  existe) y se ve como «no se supo»: se aplican seguidas. Si la aserción del resultado salta, se reporta como
+  `period_change_unavailable`. En la pantalla, «Cerrar periodo» y confirmar llevan el ensayo
+  (`close:AAAAMM:<ensayo>`), y el diálogo se pinta solo si su ensayo es el que se ve. `finance_period` da
+  además el umbral de `ALERTA_SIN_CONSUMO_PCT` (el vigente al cerrar, si cerró) y si el bote sin consumo lo
+  pasa, calculado en la base con la expresión de la alerta y solo con datos finales (decisiones de Sergio de
+  ese día); en PA-79 la cifra del bote sin consumo es la del mes, y lo que pasó del anterior se dice aparte. Usa
+  pgTAP 54. Cambiaron, por el requisito, la 45 y la 51 (después de un ensayo fallido se ensaya
+  otra vez), la integración 53 (un cierre que espera a un ensayo en vuelo que no vio contesta
+  `rehearsal_superseded`) y la llamada al cierre en todas las pruebas: las de base pasan
+  `private.last_rehearsal(p)`, y las de integración y la escala el ensayo que lee la pantalla (`SHOWN`, en
+  `tests/integration/helpers/finance.ts`). Para el B: una prueba que llame a `close_period` pasa el ensayo, y
+  un ensayo fallido escrito a mano después de uno bueno pasa a ser el último.
 - **Lo que T-210 suma al carril B** (primera solicitud, sin migración; decisiones de Sergio del 2026-10-27:
   carril rápido, «Para empezar» son los del nivel más bajo, los más nuevos primero). El catálogo del
   alumno: el servicio `src/services/browse/` (lo público se lee como sistema, filtrando a mano lo listado y

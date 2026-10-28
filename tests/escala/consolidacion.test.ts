@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire } from "../integration/helpers/finance";
+import { actAs, clearPeriodsBefore, connect, financePerson, retire, SHOWN } from "../integration/helpers/finance";
 import { localOwnerUrl } from "../integration/helpers/local";
 import { assertPlainWindow } from "../integration/helpers/periods";
 
@@ -574,7 +574,7 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
 
       await client.query("begin");
       await actAs(client, finance);
-      const close = await timed("select private.close_period($1) as r");
+      const close = await timed(`select private.close_period($1, ${SHOWN}) as r`);
       expect(close.r.outcome).toBe("closed");
       await retire(client, finance);
       start = performance.now();

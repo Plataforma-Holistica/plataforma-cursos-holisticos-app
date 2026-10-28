@@ -145,7 +145,7 @@ begin
                 '{"mode": "full"}');
         perform pruebas.como_finanzas();
         perform private.rehearse_close(v_period);
-        v_r := private.close_period(v_period);
+        v_r := private.close_period(v_period, private.last_rehearsal(v_period));
         set constraints payout_periods_balanced immediate;
         set constraints payout_periods_balanced deferred;
         if v_r ->> 'outcome' is distinct from 'closed' then

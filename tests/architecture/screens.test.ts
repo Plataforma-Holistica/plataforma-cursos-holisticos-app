@@ -217,7 +217,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     panelAction: /rollupOutcome\(await requestRollup\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
     // Ensayar y cerrar: abrir el diálogo, o confirmar sin la casilla, no llama a nadie.
     closeAction:
-      /if \(request\.step === "ask_close"\) return \{ kind: "confirming", period: request\.period, missingUnderstood: false, attempt \};\s*if \(request\.step === "close" && !request\.understood\) return \{ kind: "confirming", period: request\.period, missingUnderstood: true, attempt \};[\s\S]*rehearseOutcome\(await rehearse\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*closeOutcome\(await closePeriod\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
+      /if \(request\.step === "ask_close"\) return \{ kind: "confirming", period: request\.period, run: request\.run, missingUnderstood: false, attempt \};\s*if \(request\.step === "close" && !request\.understood\) return \{ kind: "confirming", period: request\.period, run: request\.run, missingUnderstood: true, attempt \};[\s\S]*rehearseOutcome\(await rehearse\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*closeOutcome\(await closePeriod\(jar, \{ period: request\.period, run: request\.run \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
     // Descargar: del formulario llega la corrida; el periodo, atado desde la pantalla, se revisa.
     downloadAction:
       /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const outcome = downloadOutcome\(await downloadExport\(jar, \{ run: request\.run \}\), period\);/,

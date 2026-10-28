@@ -70,8 +70,10 @@ function period(overrides: Partial<Period> = {}, status: Period["period"]["statu
     collected: { charges: 130, grossCents: 4_537_000, netCents: 3_911_200 },
     assigned: { students: 120, baseCents: 3_800_000 },
     close: null,
-    rehearsal: { ...figures, at: "2027-11-02T10:00:00Z", statusAtRun: "closing" },
+    rehearsal: { ...figures, studentPoolsCents: 1_200_000, at: "2027-11-02T10:00:00Z", statusAtRun: "closing" },
     openAlerts: 0,
+    unconsumedAlertBps: 1500,
+    unconsumedOver: false,
     lastRollup: { status: "succeeded", mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     lastGoodRollup: { mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     rollupRequest: null,
@@ -221,12 +223,12 @@ describe("PA-80, el ensayo y el cierre", () => {
   });
 
   it("cerrar abre el diálogo irreversible, que pide marcar la casilla", async () => {
-    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, missingUnderstood: false, attempt: 1 });
-    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, missingUnderstood: true, attempt: 2 });
+    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, run: RUN, missingUnderstood: false, attempt: 1 });
+    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, run: RUN, missingUnderstood: true, attempt: 2 });
     const user = userEvent.setup();
     render(<CloseScreen view={closeView(close())} />);
     await user.click(screen.getByRole("button", { name: text.closeButton }));
-    expect(sent(actions.closeAction)).toEqual({ do: periodsButton.askClose(202710) });
+    expect(sent(actions.closeAction)).toEqual({ do: periodsButton.askClose(202710, RUN) });
     const dialog = await screen.findByRole("dialog", { name: "¿Cerrar octubre de 2027?" });
     expect(within(dialog).getByText(text.dialogUndo)).toBeInTheDocument();
     // Cancelar primero.
@@ -234,7 +236,7 @@ describe("PA-80, el ensayo y el cierre", () => {
     expect(first).toHaveAccessibleName(text.keepReviewing);
     expect(second).toHaveAccessibleName(text.confirmClose);
     await user.click(within(dialog).getByRole("button", { name: text.confirmClose }));
-    expect(sent(actions.closeAction, 1)).toEqual({ do: periodsButton.close(202710) });
+    expect(sent(actions.closeAction, 1)).toEqual({ do: periodsButton.close(202710, RUN) });
     expect(await screen.findByText(text.missingUnderstood)).toBeInTheDocument();
     // El error se oye: el foco va a la casilla, que lo tiene como descripción.
     const box = within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood });
@@ -242,8 +244,25 @@ describe("PA-80, el ensayo y el cierre", () => {
     expect(box).toHaveAccessibleDescription(text.missingUnderstood);
   });
 
+  it("el diálogo de un ensayo que ya no es el que se ve no se pinta (alguien ensayó después y la página se volvió a leer)", async () => {
+    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, run: "c2000000-0000-4000-8000-000000000002", missingUnderstood: false, attempt: 1 });
+    const user = userEvent.setup();
+    render(<CloseScreen view={closeView(close())} />);
+    await user.click(screen.getByRole("button", { name: text.closeButton }));
+    await waitFor(() => expect(actions.closeAction).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("si alguien ensayó después, confirmar no cierra y lo dice", async () => {
+    actions.closeAction.mockResolvedValueOnce({ kind: "failed", reason: "rehearsal_superseded", step: "close", attempt: 1 });
+    const user = userEvent.setup();
+    render(<CloseScreen view={closeView(close())} />);
+    await user.click(screen.getByRole("button", { name: text.closeButton }));
+    expect(await screen.findByText(text.failures.rehearsalSuperseded)).toBeInTheDocument();
+  });
+
   it("marcada la casilla, confirmar la manda; la suma que no cuadra se dice sin monto", async () => {
-    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, missingUnderstood: false, attempt: 1 });
+    actions.closeAction.mockResolvedValueOnce({ kind: "confirming", period: 202710, run: RUN, missingUnderstood: false, attempt: 1 });
     actions.closeAction.mockResolvedValueOnce({ kind: "failed", reason: "unbalanced", step: "close", attempt: 2 });
     const user = userEvent.setup();
     render(<CloseScreen view={closeView(close())} />);
@@ -251,7 +270,7 @@ describe("PA-80, el ensayo y el cierre", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("checkbox", { name: text.understood }));
     await user.click(within(dialog).getByRole("button", { name: text.confirmClose }));
-    expect(sent(actions.closeAction, 1)).toEqual({ do: periodsButton.close(202710), understood: "yes" });
+    expect(sent(actions.closeAction, 1)).toEqual({ do: periodsButton.close(202710, RUN), understood: "yes" });
     expect(await screen.findByText(text.failures.unbalanced)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

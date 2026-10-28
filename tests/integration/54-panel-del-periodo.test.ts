@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, clearPeriodsBefore, connect, financePerson, retire, SHOWN, waitBehind, type Finance } from "./helpers/finance";
 import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // El panel del periodo, el cierre desde la aplicación y su exportación (T-605; RF-705, RF-509, RF-408)
@@ -50,8 +50,9 @@ async function asServer<T>(work: (client: Client) => Promise<T>, client?: Client
   }
 }
 
+// Cerrar recibe el ensayo que se tenía a la vista (`SHOWN`, T-605 tercera solicitud).
 const call = async (client: Client, fn: string, arg: unknown) =>
-  (await client.query<{ r: Record<string, unknown> }>(`select private.${fn}($1) as r`, [arg])).rows[0]!.r;
+  (await client.query<{ r: Record<string, unknown> }>(`select private.${fn}(${fn === "close_period" ? `$1, ${SHOWN}` : "$1"}) as r`, [arg])).rows[0]!.r;
 
 /** El consumo y el cobro de un mes: el alumno paga 349.00 y ve a los dos maestros. */
 async function monthOf(period: number): Promise<void> {

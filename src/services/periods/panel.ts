@@ -57,6 +57,8 @@ export interface RunFigures {
   activeStudents: number | null;
   poolBps: number | null;
   netRevenueCents: number | null;
+  /** El bote del mes, sin lo que pasó del anterior (para el porcentaje sin consumo, como la alerta). Nulo si no se leyó. */
+  studentPoolsCents?: number | null;
   poolCents: number | null;
   assignedCents: number | null;
   unconsumedCents: number | null;
@@ -95,6 +97,10 @@ export type FinancePeriod =
       close: RunFigures | null;
       rehearsal: (RunFigures & { at: string; statusAtRun: PeriodStatus }) | null;
       openAlerts: number;
+      /** El umbral de `ALERTA_SIN_CONSUMO_PCT` (puntos base), el vigente al cerrar si ya cerró; nulo si no es válido. */
+      unconsumedAlertBps: number | null;
+      /** Si el bote sin consumo lo pasa, con datos finales (decisiones de Sergio del 2026-10-27); nulo sin datos finales. */
+      unconsumedOver: boolean | null;
       lastRollup: RollupRun | null;
       lastGoodRollup: Omit<RollupRun, "status"> | null;
       rollupRequest: { status: RollupRequestStatus; requestedAt: string; startedAt: string | null; finishedAt: string | null } | null;
@@ -176,6 +182,8 @@ export const CLOSE_ANSWERS = [
   "open_alerts",
   "rehearsal_missing",
   "rehearsal_stale",
+  // El ensayo que se tenía a la vista ya no es el último: alguien ensayó después (T-605, tercera solicitud).
+  "rehearsal_superseded",
   "malformed",
   "forbidden",
   "needs_fresh_code",
@@ -215,7 +223,8 @@ export interface PeriodStore {
   close(claims: VerifiedClaims, period: number): Promise<FinanceClose | null>;
   requestRollup(claims: VerifiedClaims, period: number): Promise<RollupAnswer>;
   rehearse(claims: VerifiedClaims, period: number): Promise<RehearseAnswer>;
-  closePeriod(claims: VerifiedClaims, period: number): Promise<CloseAnswer>;
+  /** Cierra con el ensayo que se tenía a la vista: la base solo cierra si es el último y de los datos de ahora. */
+  closePeriod(claims: VerifiedClaims, period: number, run: string): Promise<CloseAnswer>;
   download(claims: VerifiedClaims, run: string): Promise<({ outcome: "ok" } & CloseExportFile) | { outcome: DownloadAnswer }>;
 }
 
@@ -362,13 +371,17 @@ export function createPeriodsPanel(deps: { report: (code: FailureCode) => Promis
     return result.result.kind === "timed_out" ? result.result : { kind: "unknown" };
   }
 
-  /** Cerrar el periodo (RF-502, RN-09): congela, y no se deshace. Cerrar otra vez contesta `already_closed`. */
-  async function closePeriod(reader: CookieReader, input: { period: unknown }): Promise<Closed> {
+  /**
+   * Cerrar el periodo (RF-502, RN-09): congela, y no se deshace. Cerrar otra vez contesta `already_closed`. Lleva el
+   * ensayo que se tenía a la vista: sin él, o sin forma, no llega a la base (T-605, tercera solicitud).
+   */
+  async function closePeriod(reader: CookieReader, input: { period: unknown; run: unknown }): Promise<Closed> {
     const admitted = await admit(reader);
     if (!admitted.ok) return admitted.result;
     const period = periodOf(input.period);
-    if (period === null) return { kind: "malformed" };
-    const result = await decide(() => store.closePeriod(admitted.claims, period));
+    const run = idOf(input.run);
+    if (period === null || run === null) return { kind: "malformed" };
+    const result = await decide(() => store.closePeriod(admitted.claims, period, run));
     return result.ok ? { kind: "answered", answer: result.answer } : result.result;
   }
 
