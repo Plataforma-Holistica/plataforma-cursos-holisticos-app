@@ -441,6 +441,22 @@ que no se ve leyendo un solo archivo:
   y se recalcula), o alguien ensaya entre abrir el diálogo y confirmar, se congela un reparto que quien
   confirma no vio. Lo cierra la solicitud corta que sigue a esta, con migración: confirmar lleva el ensayo
   mostrado y la base exige que sea el último y de la entrada de ahora.
+- **Lo que T-210 suma al carril B** (primera solicitud, sin migración; decisiones de Sergio del 2026-10-27:
+  carril rápido, «Para empezar» son los del nivel más bajo, los más nuevos primero). El catálogo del
+  alumno: el servicio `src/services/browse/` (lo público se lee como sistema, filtrando a mano lo listado y
+  lo vigente, y se recuerda 30 s, también cuando no se supo; el avance de cada quien, como la persona), el
+  inicio nuevo (PA-20), la ficha de un curso (`/cursos/[slug]`, PA-02) y la de un maestro
+  (`/maestros/[slug]`, PA-03), las dos públicas. La guarda `publicViewer` (`publicPageStep`) nunca
+  redirige: con una sesión que pasa mira un alumno, y con cualquier otra respuesta, un visitante. La ficha
+  del curso elige su botón en `outcomes.ts` y le pregunta a `lessonAccess` por la primera lección, sin
+  firmar. Componentes base nuevos: `CourseCover` (la portada generada, con `@container` y los tokens
+  `text-cover-*`, `p-cover` y `cover-N-deep`), `CourseCard`, `TeacherCard` y `Carousel` (cada tarjeta va
+  en un `<li>` posicionado: el nombre `sr-only` es absoluto y sin eso ensanchaba la página). `pnpm
+  db:courses` carga desde aquí ocho cursos de prueba (un video de Mux va en una sola lección; las
+  repeticiones, con el de prueba) y `pnpm db:student` publica todos. Usa integración 70 y, en
+  `tests/e2e/equipo/catalogo.equipo.ts`, FL-10: como lo público se recuerda 30 s, una prueba que carga
+  cursos después de que otra leyó el inicio recarga hasta verlos. Para el A: el inicio ya no se titula
+  «Inicio» sino «Hola, …», y «continuar viendo» es un carrusel.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
