@@ -1611,6 +1611,132 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     });
   });
 
+  // PA-78 a PA-80, los periodos, el ensayo y el cierre (T-605). Van aquí porque usan a la misma persona
+  // con finanzas. Cada caso deja un mes de 2040 en cierre, escrito por el dueño: un cobro de la alumna de
+  // las alertas, dos maestros con su consumo y una consolidación completa. Cerrarlo de verdad no se puede
+  // en este camino: el mes en curso, que abrieron los casos de antes, sigue abierto y va antes (cerrar va
+  // en orden). Por eso cada caso llega hasta la respuesta del cierre («falta cerrar un periodo anterior»);
+  // el cierre confirmado y su exportación los prueban `54-panel-del-periodo.test.ts` y `56-periodos.test.ts`.
+  const PERIODS = "/admin/periodos";
+  async function closingMonth(period: number, student: string): Promise<void> {
+    const owner = new Client({ connectionString: localOwnerUrl() });
+    await owner.connect();
+    try {
+      await owner.query("begin");
+      await owner.query("select set_config('app.actor_kind', 'system', true)");
+      await owner.query("select private.open_period($1)", [period]);
+      await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
+      await owner.query(
+        "update public.payout_periods set status = 'closing', entered_closing_at = now() - interval '2 days', active_students = 1, pool_bps = 6000 where period_id = $1",
+        [period],
+      );
+      await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
+      await owner.query(
+        `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
+         values ('nightly_rollup', $1, 'succeeded', now() - interval '1 hour', now() - interval '1 hour', now() - interval '59 minutes', '{"mode": "full"}')`,
+        [period],
+      );
+      await owner.query("set local session_replication_role = replica");
+      const charge = (await owner.query<{ id: string }>("select gen_random_uuid()::text as id")).rows[0]!.id;
+      await owner.query(
+        `insert into public.charges (id, profile_id, subscription_id, provider, provider_charge_id, plan, charged_at, period_id,
+                                     allocation_start_period_id, currency, gross_cents, tax_cents, fx_rate_to_mxn, fx_source, gross_mxn_cents,
+                                     net_of_tax_mxn_cents, iva_bps, fee_bps, revenue_net_mxn_cents, payment_method, country_code)
+         values ($1, $2, gen_random_uuid(), 'manual', $3, 'monthly', now(), $4, $4, 'MXN', 34900, 4814, 1, 'same_currency', 34900, 30086, 1600, 500,
+                 28581, 'card', 'MX')`,
+        [charge, student, `e2e-${charge}`, period],
+      );
+      await owner.query(
+        `insert into public.revenue_allocations (charge_id, profile_id, period_id, kind, part_no, parts_total, base_cents, fee_bps, rule)
+         values ($1, $2, $3, 'charge', 1, 1, 28581, 500, 'charge_date_v1')`,
+        [charge, student, period],
+      );
+      for (const [n, name] of ["Maestra Cierre Uno", "Maestra Cierre Dos"].entries()) {
+        const teacher = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;
+        await owner.query("insert into public.published_teachers (teacher_id, slug, display_name) values ($1, $2, $3)", [teacher, `e2e-cierre-${teacher.slice(0, 8)}`, name]);
+        await owner.query(
+          `insert into public.watch_rollup (period_id, profile_id, lesson_id, course_id, teacher_id, video_asset_id,
+                                            lesson_duration_seconds, covered_seconds, half_points)
+           values ($1, $2, gen_random_uuid(), gen_random_uuid(), $3, gen_random_uuid(), 100, 100, $4)`,
+          [period, student, teacher, n + 1],
+        );
+      }
+      await owner.query("commit");
+    } finally {
+      await owner.query("rollback").catch(() => undefined);
+      await owner.end();
+    }
+  }
+  const closeRuns = async (period: number) =>
+    Number((await ownerQuery<{ n: string }>("select count(*)::text as n from public.close_runs where period_id = $1", [period]))[0]?.n);
+
+  test("periodos con JavaScript: la lista, el panel, recalcular, ensayar, el diálogo de cierre y su respuesta", async ({ page }) => {
+    test.setTimeout(240_000);
+    await closingMonth(204001, flagged.id);
+    await enterAdmin(page, ana, PERIODS);
+    const table = page.getByRole("table", { name: "Todos los periodos, el más reciente primero" });
+    await table.getByRole("link", { name: "enero de 2040" }).click();
+    await expect(page).toHaveURL(`${PERIODS}/2040-01`);
+    await expect(page.getByRole("heading", { level: 1, name: "enero de 2040" })).toBeVisible();
+    await expect(page.getByText("$349.00")).toBeVisible();
+    await expect(page.getByText("Ensaya el cierre para verlos.", { exact: false })).toBeVisible();
+    // Fuera de la ventana de la consolidación no se recalcula.
+    await page.getByRole("button", { name: "Recalcular" }).click();
+    await expect(page.getByText("Este periodo ya no se puede recalcular", { exact: false })).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+
+    await page.getByRole("link", { name: "Ensayo y cierre" }).click();
+    await expect(page).toHaveURL(`${PERIODS}/2040-01/cierre`);
+    await page.getByRole("button", { name: "Ensayar" }).click();
+    await expect(page.getByText("Ensayo listo. No congeló nada.")).toBeVisible();
+    await expect(page.getByText("Ensayo con datos finales. No congela nada.")).toBeVisible();
+    await expect(page.getByRole("table", { name: "El reparto por maestro" }).getByRole("rowheader", { name: "Maestra Cierre Uno" })).toBeVisible();
+    await expect(page.getByText("Igual al bote, al centavo.", { exact: false })).toBeVisible();
+    expect(await closeRuns(204001)).toBe(1);
+    // Otro ensayo en el mismo minuto no se corre.
+    await page.getByRole("button", { name: "Ensayar" }).click();
+    await expect(page.getByText("Espera un minuto para volver a ensayar.")).toBeVisible();
+    expect(await closeRuns(204001)).toBe(1);
+
+    // El diálogo es modal: Escape lo cierra sin cerrar nada.
+    await page.getByRole("button", { name: "Cerrar periodo" }).click();
+    const dialog = page.getByRole("dialog", { name: "¿Cerrar enero de 2040?" });
+    await expect(dialog).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await page.getByRole("button", { name: "Cerrar periodo" }).click();
+    await dialog.getByRole("button", { name: "Cerrar el periodo" }).click();
+    await expect(dialog.getByText("Marca «Entiendo que no se puede deshacer» para cerrar.")).toBeVisible();
+    await dialog.getByRole("checkbox", { name: "Entiendo que no se puede deshacer." }).check();
+    await dialog.getByRole("button", { name: "Cerrar el periodo" }).click();
+    await expect(page.getByText("Falta cerrar un periodo anterior.")).toBeVisible();
+    expect((await ownerQuery<{ status: string }>("select status::text as status from public.payout_periods where period_id = 204001"))[0]?.status).toBe("closing");
+  });
+
+  test("periodos sin JavaScript: ensayar y el diálogo de cierre en su lugar, y recargar no reenvía", async ({ browser }) => {
+    test.setTimeout(240_000);
+    await closingMonth(204002, flagged.id);
+    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+      await enterAdmin(page, ana, `${PERIODS}/2040-02/cierre`);
+      await page.getByRole("button", { name: "Ensayar" }).click();
+      await expect(page.getByText("Ensayo listo. No congeló nada.")).toBeVisible();
+      expect(await closeRuns(204002)).toBe(1);
+      await page.getByRole("button", { name: "Cerrar periodo" }).click();
+      const dialog = page.getByRole("dialog", { name: "¿Cerrar febrero de 2040?" });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Cerrar el periodo" }).click();
+      await expect(page.getByText("Marca «Entiendo que no se puede deshacer» para cerrar.")).toBeVisible();
+      await page.getByRole("checkbox", { name: "Entiendo que no se puede deshacer." }).check();
+      await page.getByRole("button", { name: "Cerrar el periodo" }).click();
+      await expect(page.getByText("Falta cerrar un periodo anterior.")).toBeVisible();
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
+      expect(await closeRuns(204002)).toBe(1);
+    });
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.
