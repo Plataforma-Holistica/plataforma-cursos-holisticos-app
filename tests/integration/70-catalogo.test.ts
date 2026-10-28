@@ -128,6 +128,8 @@ describe("lo público del catálogo, leído como sistema", () => {
         slug: "maestra-catalogo-listado",
         name: "Maestra de catálogo",
         practices: ["Práctica de catálogo"],
+        // El tono de su práctica: la base lo da por rotación al crearla.
+        tone: course?.practice?.tone,
         courseCount: 1,
       });
     });
