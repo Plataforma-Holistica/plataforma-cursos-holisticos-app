@@ -149,9 +149,22 @@ test("para una alumna, una sección de administración y una ruta que no existe 
   await signIn(page, ana);
   await expect(page).toHaveURL("/inicio");
 
-  const MISSING = "/admin/zzznoexiste";
-  /** El cuerpo sin la ruta que se pidió: es lo único que puede cambiar de una a otra. */
-  const bare = (body: string, path: string) => body.replaceAll(path, "[ruta]").replaceAll(path.split("/").at(-1) ?? "", "[parte]");
+  /**
+   * Una ruta que no existe, con tantos segmentos como la sección: Next nombra cada segmento de la ruta
+   * pedida en el documento, así que solo se comparan rutas de la misma profundidad (T-605, las rutas de
+   * varios segmentos de los periodos).
+   */
+  const missingLike = (path: string) =>
+    path
+      .split("/")
+      .slice(2)
+      .reduce((built, _segment, index) => `${built}/${index === 0 ? "zzznoexiste" : `zzzotro${index}`}`, "/admin");
+  /** El cuerpo sin la ruta que se pidió: es lo único que puede cambiar de una a otra. Cada segmento, en su lugar. */
+  const bare = (body: string, path: string) =>
+    path
+      .split("/")
+      .slice(2)
+      .reduce((done, segment) => done.replaceAll(segment, "[parte]"), body.replaceAll(path, "[ruta]"));
   /** Next numera cada respuesta por partes con identificadores al azar: no dicen nada de la ruta. */
   const steady = (body: string) => body.replaceAll(/"[A-Za-z0-9_-]{22}"/g, '"[id]"');
   /** Las cabeceras que no cambian solas de una petición a otra. */
@@ -160,6 +173,7 @@ test("para una alumna, una sección de administración y una ruta que no existe 
 
   for (const SECTION of SECTIONS) {
     // El documento.
+    const MISSING = missingLike(SECTION);
     const section = await page.request.get(SECTION);
     const missing = await page.request.get(MISSING);
     expect(section.status(), SECTION).toBe(404);
@@ -192,6 +206,7 @@ test("para una alumna, una sección de administración y una ruta que no existe 
         maxRedirects: 0,
       });
     for (const SECTION of SECTIONS) {
+      const MISSING = missingLike(SECTION);
       const toSection = await send(SECTION);
       const toMissing = await send(MISSING);
       expect(toSection.status(), name).toBe(toMissing.status());
