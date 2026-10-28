@@ -212,8 +212,8 @@ en una transacción y con el `commit` aparte. Van al final porque cerrar congela
 un recálculo pasa de 30 minutos, si un paso deja la corrida sin latir 15, si el recálculo completo no
 deja el mismo consolidado que el modo marcado, o si el reparto pasa de 10 s; del ensayo y del cierre
 no exige un tiempo: dice si caben (lo decide T-605, decisión de Sergio del 2026-10-26), y falla si no
-ensayan o no cierran, o si lo escrito no son un bote por alumno, una parte por pareja y una
-liquidación por maestro. Imprime las cifras
+ensayan o no cierran, o si lo escrito no son un bote por alumno, una parte por pareja, una
+liquidación por maestro y, desde T-605, una exportación con una fila por maestro. Imprime las cifras
 al final. Confirma un libro que no se borra, así que `scripts/test-escala.mjs` rehace la base al
 terminar, pase o falle; si se corta, `pnpm db:reset`. No corre en la integración continua, ni a la
 hora del `pg_cron` local (03:00 de la Ciudad de México), y pide la base sin nada en el mes. Las cifras
@@ -397,6 +397,22 @@ que no se ve leyendo un solo archivo:
   pgTAP 50. La prueba de escala mide además el reparto, el ensayo y el cierre. Para el B: un periodo
   que esté en cierre al aplicar la migración se ensaya otra vez (`rehearsal_stale`), porque
   `code_version` entra en la huella de la entrada.
+- **Lo que T-605 suma al carril A** (primera solicitud, `t605_panel_del_periodo`; decisiones de Sergio del
+  2026-10-27). El servidor ensaya y cierra: `rehearse_close` y `close_period` ya son de `app_service`, y el
+  área `close` del vigilante lo exige (columna `server`, como la de periodos). Las tablas
+  `private.close_exports` (el CSV de cada cierre con su huella, de solo inserción) y
+  `private.rollup_requests` (los recálculos pedidos desde PA-79); las funciones `private.csv_money`,
+  `csv_text`, `close_export_csv`, `write_close_export` (el disparador del paso de en cierre a cerrado que
+  escribe la exportación), `assert_close_export`, `close_export_download`, `finance_run_teachers`,
+  `finance_periods`, `finance_period`, `finance_close` y `request_rollup`, y el procedimiento
+  `private.run_rollup_requests` con su trabajo de `pg_cron` (`rollup_requests`, cada minuto). Cambia
+  `check_period_balanced`: al confirmar comprueba también la exportación. Usa pgTAP 51 a 53 e
+  integración 54; la 43 cambió dos aserciones (el servidor ya ensaya y cierra). Para el B: un paso a
+  cerrado forzado a mano sin la corrida de un cierre del periodo no exporta, y la comprobación al
+  confirmar lo rechaza (las pruebas que fuerzan el estado ya apagan `payout_periods_balanced`); una prueba
+  que borre corridas del cierre borra antes, en réplica, `private.close_exports`; y el `pg_cron` local
+  corre cada minuto `call private.run_rollup_requests()`, que sin pedidos no hace nada. La integración 54
+  le da `app_service` a `postgres` (sin heredarlo) y se lo quita al terminar.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

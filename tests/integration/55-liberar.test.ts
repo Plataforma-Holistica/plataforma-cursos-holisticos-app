@@ -99,6 +99,7 @@ afterAll(async () => {
       "delete from public.close_run_teacher_totals where close_run_id in (select id from public.close_runs where period_id = any($1::int[]))",
       [OURS],
     );
+    await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 203708", [OURS]);

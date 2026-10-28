@@ -584,11 +584,12 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
       start = performance.now();
       await owner.query("select private.assert_period_balanced($1)", [period]);
       const balanced = ms(start);
-      const written = await one<{ pools: string; shares: string; pairs: string; payouts: string }>(
+      const written = await one<{ pools: string; shares: string; pairs: string; payouts: string; exported: string }>(
         `select (select count(*) from public.payout_student_pools where period_id = $1) as pools,
                 (select count(*) from public.payout_shares where period_id = $1) as shares,
                 (select count(distinct (profile_id, teacher_id)) from public.watch_rollup where period_id = $1) as pairs,
-                (select count(*) from public.payouts where period_id = $1) as payouts`,
+                (select count(*) from public.payouts where period_id = $1) as payouts,
+                (select row_count from private.close_exports where period_id = $1) as exported`,
         [period],
       );
       report.close = {
@@ -603,11 +604,14 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
         student_pools: Number(written.pools),
         shares: Number(written.shares),
         payouts: Number(written.payouts),
+        exported_rows: Number(written.exported),
       };
       // Un bote por alumno, y una parte por cada alumno y maestro con medios puntos.
       expect(Number(written.pools)).toBe(STUDENTS);
       expect(Number(written.shares)).toBe(Number(written.pairs));
       expect(Number(written.payouts)).toBe(report.teachers);
+      // Y su exportación (T-605), escrita y comprobada en el cierre: una fila por maestro.
+      expect(Number(written.exported)).toBe(report.teachers);
     } finally {
       await client.query("rollback").catch(() => undefined);
       await client.end();
