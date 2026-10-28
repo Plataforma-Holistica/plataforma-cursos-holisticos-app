@@ -81,19 +81,25 @@ function Explore({ answer }: { answer: Ready }) {
   const chips = activeFilters(query, facets);
   const hasFilters = chips.length > 0;
 
+  const count = results === null ? null : t(plural(results.courses.length, text.count), { count: results.courses.length });
+
   return (
     <>
-      <div className="flex flex-col gap-4 px-4 sm:px-8">
-        <ExploreForm
-          action={ROUTES.explore}
-          query={query}
-          shownPath={explorePath(query)}
-          withoutSearch={explorePath({ ...query, q: null })}
-          practices={facets.practices}
-          teachers={facets.teachers}
-          levels={facets.levels}
-        />
-        {hasFilters && (
+      <ExploreForm
+        action={ROUTES.explore}
+        query={query}
+        shownPath={explorePath(query)}
+        withoutSearch={explorePath({ ...query, q: null })}
+        practices={facets.practices}
+        teachers={facets.teachers}
+        levels={facets.levels}
+      />
+      {/* Existe desde antes de la primera búsqueda: una región que aparece ya con texto no siempre se anuncia. */}
+      <p role="status" className="sr-only">
+        {count}
+      </p>
+      {hasFilters && (
+        <div className="px-4 sm:px-8">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="sr-only">{text.activeFilters}</h2>
             <ul className="flex flex-wrap gap-2">
@@ -114,11 +120,14 @@ function Explore({ answer }: { answer: Ready }) {
             </ul>
             <TextLink href={explorePath({ q: query.q })}>{text.clearFilters}</TextLink>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {results === null ? (
-        shelf.practices.map((row) => (
+        shelf.practices.length === 0 ? (
+          <p className="px-4 text-body-l text-text-2 sm:px-8">{messages.browse.home.empty}</p>
+        ) : (
+          shelf.practices.map((row) => (
           <Carousel
             key={row.slug}
             id={`practica-${row.slug}`}
@@ -127,7 +136,8 @@ function Explore({ answer }: { answer: Ready }) {
           >
             {row.courses.map(courseCard)}
           </Carousel>
-        ))
+          ))
+        )
       ) : (
         <>
           {results.teachers.length > 0 && (
@@ -144,8 +154,8 @@ function Explore({ answer }: { answer: Ready }) {
               <h2 id="resultados" className="text-h2">
                 {text.resultsTitle}
               </h2>
-              <p role="status" className="text-body-s text-text-2">
-                {t(plural(results.courses.length, text.count), { count: results.courses.length })}
+              <p aria-hidden="true" className="text-body-s text-text-2">
+                {count}
               </p>
             </div>
             {results.courses.length > 0 ? (

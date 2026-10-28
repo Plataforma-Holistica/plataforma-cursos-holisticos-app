@@ -86,7 +86,8 @@ describe("explorar (PA-21)", () => {
     expect(screen.getByRole("searchbox", { name: "Buscar por curso o maestro" })).toHaveValue("");
     expect(screen.getByRole("combobox", { name: "Práctica" })).toHaveValue("");
     expect(screen.getByRole("link", { name: "Ver todo: Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
-    expect(screen.queryByRole("status")).toBeNull();
+    // La región que dice cuántos existe desde antes de la primera búsqueda, vacía.
+    expect(screen.getByRole("status")).toHaveTextContent(/^$/);
     const nav = screen.getByRole("navigation", { name: "Principal" });
     expect(within(nav).getByRole("link", { name: "Explorar" })).toHaveAttribute("aria-current", "page");
     expect(await a11yViolations(container)).toEqual([]);
@@ -145,7 +146,30 @@ describe("explorar (PA-21)", () => {
   });
 });
 
+describe("explorar sin cursos", () => {
+  it("lo dice, como el inicio", async () => {
+    mocks.explore.mockResolvedValue({ ...ready({}, null), facets: { practices: [], teachers: [], levels: [] }, shelf: { ...SHELF, practices: [], newest: [] } });
+    render(await ExplorePage(params({})));
+    expect(screen.getByText("Estamos preparando los primeros cursos.")).toBeVisible();
+  });
+});
+
 describe("el formulario de explorar busca solo", () => {
+  /** Lo que el formulario manda, leído después de React y sin navegar. */
+  function capture(): { sent: () => string[] | null; disabled: () => number; stop: () => void } {
+    let sent: string[] | null = null;
+    let disabled = 0;
+    const listen = (event: Event) => {
+      const form = event.target as HTMLFormElement;
+      sent = [...new FormData(form).keys()];
+      // Un campo apagado pierde el foco en un navegador (jsdom no lo hace): ninguno se apaga.
+      disabled = [...form.elements].filter((element) => (element as HTMLInputElement).disabled).length;
+      event.preventDefault();
+    };
+    document.addEventListener("submit", listen);
+    return { sent: () => sent, disabled: () => disabled, stop: () => document.removeEventListener("submit", listen) };
+  }
+
   it("al dejar de escribir 400 ms, una sola vez", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     render(await ExplorePage(params({})));
@@ -162,28 +186,82 @@ describe("el formulario de explorar busca solo", () => {
     submit.mockRestore();
   });
 
-  it("al cambiar un filtro, en el acto", async () => {
+  it("no busca lo que ya se está mostrando", async () => {
+    mocks.explore.mockResolvedValue(ready({ q: "ana" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ q: "ana" })));
+    vi.useFakeTimers();
+    const submit = vi.spyOn(HTMLFormElement.prototype, "requestSubmit").mockImplementation(() => undefined);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: " ana  " } });
+    act(() => vi.advanceTimersByTime(400));
+    expect(submit).not.toHaveBeenCalled();
+    submit.mockRestore();
+  });
+
+  it("al salir del buscador con un envío pendiente, sale ya: el enlace que se pulse después manda", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     render(await ExplorePage(params({})));
+    vi.useFakeTimers();
     const submit = vi.spyOn(HTMLFormElement.prototype, "requestSubmit").mockImplementation(() => undefined);
-    fireEvent.change(screen.getByRole("combobox", { name: "Nivel" }), { target: { value: "principiante" } });
+    const box = screen.getByRole("searchbox");
+    box.focus();
+    fireEvent.change(box, { target: { value: "resp" } });
+    act(() => box.blur());
+    expect(submit).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(400));
     expect(submit).toHaveBeenCalledTimes(1);
     submit.mockRestore();
   });
 
-  it("los campos vacíos no viajan en la dirección", async () => {
+  it("al cambiar un filtro, con la misma pausa (las flechas sobre la lista cerrada cambian con cada tecla)", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     render(await ExplorePage(params({})));
-    const form = screen.getByRole("search") as HTMLFormElement;
-    let sent: string[] | null = null;
-    // Después de React: el envío llega al documento cuando el formulario ya apagó lo vacío.
-    const listen = (event: Event) => {
-      sent = [...new FormData(form).keys()];
-      event.preventDefault();
-    };
-    document.addEventListener("submit", listen);
+    vi.useFakeTimers();
+    const submit = vi.spyOn(HTMLFormElement.prototype, "requestSubmit").mockImplementation(() => undefined);
+    fireEvent.change(screen.getByRole("combobox", { name: "Nivel" }), { target: { value: "principiante" } });
+    expect(submit).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(400));
+    expect(submit).toHaveBeenCalledTimes(1);
+    submit.mockRestore();
+  });
+
+  it("los campos vacíos no viajan en la dirección, y los filtros fuera del buscador sí viajan", async () => {
+    mocks.explore.mockResolvedValue(ready({}, null));
+    render(await ExplorePage(params({})));
+    vi.useFakeTimers();
+    const form = capture();
     fireEvent.change(screen.getByRole("combobox", { name: "Práctica" }), { target: { value: "meditacion" } });
-    document.removeEventListener("submit", listen);
-    expect(sent).toEqual(["practica"]);
+    act(() => vi.advanceTimersByTime(400));
+    form.stop();
+    expect(form.sent()).toEqual(["practica"]);
+  });
+
+  it("borrar la búsqueda no le quita el foco al buscador, y vuelve a tener su nombre", async () => {
+    mocks.explore.mockResolvedValue(ready({ q: "ana" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ q: "ana" })));
+    vi.useFakeTimers();
+    const form = capture();
+    const box = screen.getByRole("searchbox");
+    box.focus();
+    fireEvent.change(box, { target: { value: "" } });
+    act(() => vi.advanceTimersByTime(400));
+    form.stop();
+    expect(form.sent()).toEqual([]);
+    expect(form.disabled()).toBe(0);
+    expect(box).toHaveFocus();
+    act(() => vi.advanceTimersByTime(1));
+    expect(box).toHaveAttribute("name", "q");
+  });
+
+  it("si lo pulsado se fue con la respuesta (quitar un filtro), el foco lo toma el buscador; al cargar, no", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    const { rerender } = render(await ExplorePage(params({ practica: "meditacion" })));
+    expect(screen.getByRole("searchbox")).not.toHaveFocus();
+    const chip = screen.getByRole("link", { name: "Quitar filtro: Meditación" });
+    chip.focus();
+    mocks.explore.mockResolvedValue(ready({}, null));
+    rerender(await ExplorePage(params({})));
+    expect(screen.queryByRole("link", { name: "Quitar filtro: Meditación" })).toBeNull();
+    expect(screen.getByRole("searchbox")).toHaveFocus();
+    expect(screen.getByRole("combobox", { name: "Práctica" })).toHaveValue("");
   });
 });

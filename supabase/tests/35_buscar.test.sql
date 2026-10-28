@@ -4,7 +4,7 @@
 -- (`private.catalog_key`), así un nombre se compara igual en todas partes.
 begin;
 \ir _ayuda.psql
-select plan(33);
+select plan(39);
 
 -- Lo que dice si un texto encuentra a otro: el lado del curso y el de quien busca.
 create function pruebas.halla(p_doc text, p_query text) returns boolean
@@ -57,6 +57,13 @@ select ok(pruebas.halla('Respiración consciente', 'resp'), 'el principio de una
 select ok(pruebas.halla('Respiración consciente', 'consc'), 'de cualquiera de sus palabras');
 select ok(not pruebas.halla('Respiración consciente', 'piracion'), 'el medio de una palabra no');
 select ok(pruebas.halla('Curso 5 minutos', '5'), 'las cifras también');
+-- El texto exacto de un título lo encuentra, aunque el analizador lo partiría de otro modo.
+select ok(pruebas.halla('Respiración 4-7-8', '4-7-8'), '«4-7-8» encuentra «4-7-8»');
+select ok(pruebas.halla('Respiración 4-7-8', '7'), 'y cada una de sus cifras');
+select ok(pruebas.halla('Mindfulness 2.0', '2.0'), '«2.0» encuentra «2.0»');
+select ok(pruebas.halla('Yoga con ana.robles', 'ana.robles'), 'lo que parece un dominio también');
+select ok(pruebas.halla('Yoga con Łucja', 'Łucja'), 'una letra que no se descompone, igual en las dos puntas');
+select ok(pruebas.halla('Yoga con Łucja', 'ucj'), 'y el resto de esa palabra, por su principio');
 
 -- ---------------------------------------------------------------------------------------
 -- Varias palabras: todas, en cualquier orden. El título y el maestro son un solo texto.

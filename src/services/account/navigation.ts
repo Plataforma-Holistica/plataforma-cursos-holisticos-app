@@ -94,7 +94,6 @@ function periodSegment(period: number): string {
 /** PA-79, el panel de un periodo (`AAAAMM`). */
 export const periodPath = (period: number): string => `${ROUTES.periods}/${periodSegment(period)}`;
 
-/** PA-80, el ensayo y el cierre de un periodo. */
 /** Lo que explorar lleva en la dirección (PA-21): cada filtro por su slug, y la búsqueda. */
 export interface ExploreParams {
   q?: string | null;
@@ -114,6 +113,7 @@ export function explorePath({ q = null, practice = null, teacher = null, level =
   return query === "" ? ROUTES.explore : `${ROUTES.explore}?${query}`;
 }
 
+/** PA-80, el ensayo y el cierre de un periodo. */
 export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
 /** PA-81, las liquidaciones de un periodo. */

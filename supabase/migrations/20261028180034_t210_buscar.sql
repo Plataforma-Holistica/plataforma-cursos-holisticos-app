@@ -9,7 +9,11 @@
 -- configuración `simple`, sin raíces ni palabras vacías. Quien busca da palabras: cada una se
 -- busca como principio de una palabra del título o del maestro, y todas tienen que estar.
 
--- Lo que se guarda de un curso para buscarlo. Inmutable: la usa una columna generada. Postgres
+-- Lo que se guarda de un curso para buscarlo. Las dos puntas parten el texto igual: todo lo que
+-- no es letra sin acento o cifra separa palabras, antes del analizador de `to_tsvector`, que si no
+-- haría de «4-7-8» un 4 y dos negativos, de «2.0» una sola pieza y dejaría la «ł» dentro de
+-- «Łucja», y buscar con el texto exacto del título no lo encontraría. Inmutable: la usa una
+-- columna generada. Postgres
 -- la calcula con los permisos de quien escribe la fila, en cada escritura y antes de los
 -- disparadores: sin permiso, quien intenta escribir directo recibiría «sin permiso sobre la
 -- función» en lugar del rechazo del guardián. Por eso la ejecuta cualquiera; es del dueño
@@ -17,7 +21,8 @@
 create function private.catalog_search(p_text text) returns tsvector
 language sql immutable security definer set search_path = ''
 as $$
-  select pg_catalog.to_tsvector('pg_catalog.simple'::pg_catalog.regconfig, private.catalog_key(coalesce(p_text, '')))
+  select pg_catalog.to_tsvector('pg_catalog.simple'::pg_catalog.regconfig,
+    pg_catalog.regexp_replace(private.catalog_key(coalesce(p_text, '')), '[^a-z0-9]+', ' ', 'g'))
 $$;
 
 -- La consulta de quien busca, o nula si no trae nada que buscar. Solo letras sin acento y
