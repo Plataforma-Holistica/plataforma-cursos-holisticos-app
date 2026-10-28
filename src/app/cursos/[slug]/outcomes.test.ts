@@ -53,6 +53,10 @@ describe("el visitante", () => {
   });
 });
 
+it("si no se sabe quién mira, sin botón: ni registrarse ni empezar", () => {
+  expect(primaryAction(detail(), { kind: "unknown" })).toEqual({ kind: "none" });
+});
+
 describe("el alumno", () => {
   it("sin acceso: «Suscribirme para verlo», a la lección, donde PA-33 dice por qué", () => {
     const denied = { kind: "denied", account: { kind: "never" } } as unknown as LessonAccess;

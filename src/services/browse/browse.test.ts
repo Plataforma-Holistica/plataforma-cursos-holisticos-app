@@ -106,6 +106,14 @@ describe("la ficha de un curso", () => {
     expect(service.store.courseLessons).not.toHaveBeenCalled();
   });
 
+  it("el temario se recuerda treinta segundos, también si no se supo", async () => {
+    const service = browseWith({ lessons: "throws" });
+    await service.coursePage("respirar");
+    await service.coursePage("respirar");
+    expect(service.store.courseLessons).toHaveBeenCalledTimes(1);
+    expect(service.reported).toEqual(["catalog_unavailable"]);
+  });
+
   it("un curso listado sin lecciones vigentes tampoco existe", async () => {
     expect(await browseWith({ lessons: [] }).coursePage("respirar")).toEqual({ kind: "not_found" });
   });
@@ -140,6 +148,23 @@ describe("la ficha de un maestro", () => {
     const answer = await browseWith({ courses: [COURSE, other] }).teacherPage("ana-robles");
     expect(answer).toMatchObject({ kind: "found", teacher: { slug: "ana-robles", name: "Ana Robles", bio: "Semblanza.", practices: ["Meditación"] } });
     if (answer.kind === "found") expect(answer.courses.map((each) => each.slug)).toEqual(["respirar"]);
+  });
+
+  it("un slug que no es de nadie no llega a la base: lo decide la lista recordada", async () => {
+    const service = browseWith();
+    for (const slug of ["a1", "a2", "a3"]) expect(await service.teacherPage(slug)).toEqual({ kind: "not_found" });
+    expect(service.store.listedTeacher).not.toHaveBeenCalled();
+    expect(service.store.listedCourses).toHaveBeenCalledTimes(1);
+  });
+
+  it("la semblanza se recuerda treinta segundos", async () => {
+    const service = browseWith();
+    await service.teacherPage("ana-robles");
+    await service.teacherPage("ana-robles");
+    expect(service.store.listedTeacher).toHaveBeenCalledTimes(1);
+    service.advance(CATALOG_MEMORY_MS);
+    await service.teacherPage("ana-robles");
+    expect(service.store.listedTeacher).toHaveBeenCalledTimes(2);
   });
 
   it.each([

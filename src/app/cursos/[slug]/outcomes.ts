@@ -12,16 +12,18 @@ import type { LessonAccess } from "@/services/media/media";
 export type PrimaryAction =
   | { kind: "start" | "again" | "subscribe" | "open_free"; href: string }
   | { kind: "continue"; href: string; number: number }
-  /** Cuenta suspendida: la ficha se ve, sin botón. Su pantalla se lo dice al entrar a la lección. */
+  /** No se sabe quién mira, o la cuenta está suspendida: la ficha se ve, sin botón. */
   | { kind: "none" };
 
-export type Viewer = { kind: "visitor" } | { kind: "student"; access: LessonAccess; standing: CourseStanding | null };
+export type Viewer = { kind: "visitor" } | { kind: "unknown" } | { kind: "student"; access: LessonAccess; standing: CourseStanding | null };
 
 export function primaryAction(detail: CourseDetail, viewer: Viewer): PrimaryAction {
   const slug = detail.course.slug;
   const first = lessonPath(slug, detail.firstLesson.id);
   if (first === null) return { kind: "none" };
 
+  // No se sabe quién mira (una cuenta suspendida o a medias, o no se supo): sin botón.
+  if (viewer.kind === "unknown") return { kind: "none" };
   if (viewer.kind === "visitor") return { kind: detail.course.isOpen ? "open_free" : "subscribe", href: signUpPath(first) };
 
   switch (viewer.access.kind) {

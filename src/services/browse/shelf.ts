@@ -1,9 +1,9 @@
 // Las filas del catálogo del alumno (RF-301, RF-303; T-210), armadas con los cursos listados
 // que lee `records.ts`. Es puro: no toca la base ni el reloj.
 //
-// «Para empezar» (FL-10) son los cursos del primer nivel del orden de PA-67, los más nuevos
-// primero (decisión de Sergio del 2026-10-27: «principiante, nuevos primero»). Si ningún curso
-// listado es de ese nivel, la fila no aparece.
+// «Para empezar» (FL-10) son los cursos del nivel más bajo del orden de PA-67 que tenga cursos
+// listados, los más nuevos primero (decisión de Sergio del 2026-10-27: «principiante, nuevos
+// primero»). Si ningún curso listado tiene nivel, la fila no aparece.
 
 /** Un curso listado, con lo que lleva su tarjeta y su ficha. */
 export interface ShelfCourse {
@@ -27,6 +27,8 @@ export interface ShelfTeacher {
   name: string;
   /** Las prácticas de sus cursos listados, en el orden de PA-67. */
   practices: string[];
+  /** El tono de la primera de esas prácticas, para su tarjeta; nulo si ninguno de sus cursos tiene práctica. */
+  tone: number | null;
   courseCount: number;
 }
 
@@ -42,6 +44,8 @@ export interface HomeShelf {
   newest: ShelfCourse[];
   practices: PracticeRow[];
   teachers: ShelfTeacher[];
+  /** La práctica de cada curso listado, por slug, de todos y no solo de las filas: «continuar viendo» pinta con ella su portada. */
+  practiceOf: ReadonlyMap<string, { name: string; tone: number } | null>;
 }
 
 /** Cuántas tarjetas lleva una fila, como mucho: lo demás se encuentra en explorar. */
@@ -54,7 +58,7 @@ export function newestFirst(a: ShelfCourse, b: ShelfCourse): number {
 
 /** Los maestros con cursos listados, por nombre, con sus prácticas en el orden de PA-67. */
 export function teachersOf(courses: readonly ShelfCourse[]): ShelfTeacher[] {
-  const found = new Map<string, { name: string; practices: Map<string, number>; count: number }>();
+  const found = new Map<string, { name: string; practices: Map<string, { position: number; tone: number }>; count: number }>();
   for (const course of courses) {
     if (course.teacherSlug === null) continue;
     let teacher = found.get(course.teacherSlug);
@@ -63,15 +67,13 @@ export function teachersOf(courses: readonly ShelfCourse[]): ShelfTeacher[] {
       found.set(course.teacherSlug, teacher);
     }
     teacher.count += 1;
-    if (course.practice !== null) teacher.practices.set(course.practice.name, course.practice.position);
+    if (course.practice !== null) teacher.practices.set(course.practice.name, { position: course.practice.position, tone: course.practice.tone });
   }
   return [...found.entries()]
-    .map(([slug, teacher]) => ({
-      slug,
-      name: teacher.name,
-      practices: [...teacher.practices.entries()].sort((a, b) => a[1] - b[1]).map(([name]) => name),
-      courseCount: teacher.count,
-    }))
+    .map(([slug, teacher]) => {
+      const practices = [...teacher.practices.entries()].sort((a, b) => a[1].position - b[1].position);
+      return { slug, name: teacher.name, practices: practices.map(([name]) => name), tone: practices[0]?.[1].tone ?? null, courseCount: teacher.count };
+    })
     .sort((a, b) => a.name.localeCompare(b.name, "es") || a.slug.localeCompare(b.slug));
 }
 
@@ -103,5 +105,6 @@ export function homeShelfOf(courses: readonly ShelfCourse[]): HomeShelf {
       .sort((a, b) => a.position - b.position)
       .map((row) => ({ slug: row.slug, name: row.name, tone: row.tone, courses: row.courses })),
     teachers: teachersOf(ordered),
+    practiceOf: new Map(ordered.map((course) => [course.slug, course.practice === null ? null : { name: course.practice.name, tone: course.practice.tone }])),
   };
 }

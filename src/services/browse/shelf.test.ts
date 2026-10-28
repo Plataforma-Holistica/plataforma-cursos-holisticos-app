@@ -26,7 +26,7 @@ function course(slug: string, day: number, extra: Partial<ShelfCourse> = {}): Sh
 
 describe("homeShelfOf", () => {
   it("sin cursos, todas las filas van vacías", () => {
-    expect(homeShelfOf([])).toEqual({ starters: [], newest: [], practices: [], teachers: [] });
+    expect(homeShelfOf([])).toEqual({ starters: [], newest: [], practices: [], teachers: [], practiceOf: new Map() });
   });
 
   it("«Nuevos» va del más nuevo al más viejo, y en un empate por slug", () => {
@@ -56,6 +56,14 @@ describe("homeShelfOf", () => {
     ]);
   });
 
+  it("la práctica de cada curso se sabe aunque el curso no quepa en ninguna fila", () => {
+    const many = Array.from({ length: ROW_LIMIT + 3 }, (_, index) => course(`c${String(index).padStart(2, "0")}`, index + 1));
+    const shelf = homeShelfOf(many);
+    expect(shelf.practiceOf.get("c00")).toEqual({ name: "Meditación", tone: 3 });
+    expect(shelf.newest.some((each) => each.slug === "c00")).toBe(false);
+    expect(homeShelfOf([course("sin", 1, { practice: null })]).practiceOf.get("sin")).toBeNull();
+  });
+
   it("ninguna fila pasa del tope", () => {
     const many = Array.from({ length: ROW_LIMIT + 3 }, (_, index) => course(`c${String(index).padStart(2, "0")}`, index + 1));
     const shelf = homeShelfOf(many);
@@ -76,8 +84,8 @@ describe("teachersOf", () => {
       course("d", 4, { teacherName: "Beto Luna", teacherSlug: "beto-luna", practice: null }),
     ]);
     expect(teachers).toEqual([
-      { slug: "ana-robles", name: "Ana Robles", practices: ["Yoga", "Meditación"], courseCount: 3 },
-      { slug: "beto-luna", name: "Beto Luna", practices: [], courseCount: 1 },
+      { slug: "ana-robles", name: "Ana Robles", practices: ["Yoga", "Meditación"], tone: 5, courseCount: 3 },
+      { slug: "beto-luna", name: "Beto Luna", practices: [], tone: null, courseCount: 1 },
     ]);
   });
 

@@ -44,12 +44,9 @@ export const browse = defineMessages({
     moduleTitle: "Módulo {number} · {title}",
     about: "Sobre {name}",
     seeTeacher: "Ver la ficha de {name}",
-    unavailable: "No pudimos cargar este curso. Inténtalo de nuevo en un momento.",
   },
   teacher: {
     pageTitle: "{Maestro}",
-    back: "Volver al inicio",
     courses: "Cursos de {name}",
-    initialLabel: "{name}",
   },
 });

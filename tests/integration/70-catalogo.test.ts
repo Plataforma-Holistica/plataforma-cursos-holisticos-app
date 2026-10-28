@@ -196,6 +196,36 @@ describe("lo público del catálogo, leído como sistema", () => {
   });
 });
 
+describe("lo que no está publicado de verdad, no aparece", () => {
+  it("un curso retirado no aparece aunque siga marcado como listado", async () => {
+    await reverted(async (owner) => {
+      await loadCourse(owner, "catalogo-retirado", true);
+      await asSystem(owner);
+      await owner.query(
+        `update public.course_registry set state = 'withdrawn', withdrawn_at = now(), withdrawal_reason = 'Prueba del catálogo'
+          where course_id = (select course_id from public.published_courses where slug = 'catalogo-retirado')`,
+      );
+      const answer = await browse(owner).homeShelf();
+      if (answer.kind !== "ready") throw new Error(`No se leyó: ${answer.kind}`);
+      expect(mine(answer.shelf.newest.map((course) => course.slug))).toEqual([]);
+      expect(await browse(owner).coursePage("catalogo-retirado")).toEqual({ kind: "not_found" });
+    });
+  });
+
+  it("el curso de una maestra sin listar se ve, sin enlace a ella, y su ficha no existe", async () => {
+    await reverted(async (owner) => {
+      await loadCourse(owner, "catalogo-sin-maestra", true);
+      await asSystem(owner);
+      await owner.query("update public.published_teachers set is_listed = false where slug = 'maestra-catalogo-sin-maestra'");
+      const page = await browse(owner).coursePage("catalogo-sin-maestra");
+      if (page.kind !== "found") throw new Error(`No la encontró: ${page.kind}`);
+      expect(page.detail.course.teacherSlug).toBeNull();
+      expect(page.detail.teacher).toBeNull();
+      expect(await browse(owner).teacherPage("maestra-catalogo-sin-maestra")).toEqual({ kind: "not_found" });
+    });
+  });
+});
+
 describe("el avance de cada quien, leído como la persona", () => {
   it("lee solo lo suyo, de las lecciones vigentes del curso", async () => {
     const ana = await personClaims();

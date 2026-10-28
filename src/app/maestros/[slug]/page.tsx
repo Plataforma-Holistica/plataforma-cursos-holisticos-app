@@ -21,7 +21,11 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 const text = messages.browse.teacher;
 
-export const metadata: Metadata = { title: t(text.pageTitle) };
+/** El nombre del maestro en la pestaña. La lectura es la misma de la página, y se recuerda. */
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const found = await teacherPage((await params).slug);
+  return { title: found.kind === "found" ? found.teacher.name : t(text.pageTitle) };
+}
 
 export default async function TeacherRoute({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -29,7 +33,6 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
   if (found.kind === "not_found") notFound();
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={teacherPath(slug) ?? ROUTES.landing} withSession={viewer.kind === "student"} />;
   const { teacher, courses } = found;
-  const tone = courses.find((course) => course.practice !== null)?.practice?.tone ?? null;
   const initial = [...teacher.name.trim()][0]?.toUpperCase() ?? "";
 
   return (
@@ -39,7 +42,7 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
         <header className="grid gap-6 sm:grid-cols-12 sm:items-end sm:gap-10">
           <div
             aria-hidden="true"
-            className={cx("@container flex aspect-2/3 max-h-96 items-center justify-center rounded-md bg-linear-to-t shadow-raised sm:col-span-4 lg:col-span-3", toneClasses(tone))}
+            className={cx("@container flex aspect-2/3 max-h-96 items-center justify-center rounded-md bg-linear-to-t shadow-raised sm:col-span-4 lg:col-span-3", toneClasses(teacher.tone))}
           >
             <span className="font-display text-cover-initial text-text">{initial}</span>
           </div>

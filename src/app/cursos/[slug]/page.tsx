@@ -23,16 +23,22 @@ import { primaryAction, type PrimaryAction, type Viewer } from "./outcomes";
 
 // La ficha de un curso (PA-02; RF-302, RF-307, RF-309; T-210). Es pública: la ve completa
 // cualquiera, con sesión o sin ella. Solo cambian el botón principal, el avance y el estado de
-// cada lección, según quién mira (`publicViewer`, que nunca redirige). Al alumno se le pregunta a
-// la función única de medios si puede ver la primera lección, sin firmar nada.
+// cada lección, según quién mira (`publicViewer`, que nunca redirige; si no se sabe quién mira,
+// va sin botón). Al alumno se le pregunta a la función única de medios si puede ver la primera
+// lección, sin firmar nada.
 //
 // Se pinta en el servidor en cada visita (decisión mía sin confirmar, 2026-10-27): lo estático
-// con regeneración, los metadatos y la imagen para compartir quedan para T-606. Recursos,
+// con regeneración, la descripción y la imagen para compartir quedan para T-606. La pestaña sí
+// lleva el título del curso. Recursos,
 // constancia y deslinde no se pintan hasta que existan (T-404, T-504, T-507).
 
 const text = messages.browse.course;
 
-export const metadata: Metadata = { title: text.pageTitle };
+/** El título del curso en la pestaña. La lectura es la misma de la página, y se recuerda. */
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const found = await coursePage((await params).slug);
+  return { title: found.kind === "found" ? found.detail.course.title : text.pageTitle };
+}
 
 /** El estado de una lección para quien no tiene avance que leer. */
 const NOT_STARTED = "not_started" as const;
@@ -52,7 +58,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
   const { detail } = found;
   const { course } = detail;
 
-  let who: Viewer = { kind: "visitor" };
+  let who: Viewer = viewer.kind === "unknown" ? { kind: "unknown" } : { kind: "visitor" };
   if (viewer.kind === "student") {
     const [access, standing] = await Promise.all([lessonAccess(await cookieReader(), detail.firstLesson.id), courseStanding(viewer.claims, detail)]);
     who = { kind: "student", access, standing: standing.kind === "ready" ? standing.standing : null };

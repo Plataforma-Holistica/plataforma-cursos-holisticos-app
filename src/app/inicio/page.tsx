@@ -61,9 +61,7 @@ export default async function HomePage() {
   ]);
   const name = profile.kind === "ready" ? profile.name : null;
   const started = watching.kind === "ready" ? watching.courses : [];
-  // La práctica de cada curso empezado, para su portada: de cualquier fila donde aparezca.
-  const listed = shelf.kind === "ready" ? [...shelf.shelf.newest, ...shelf.shelf.practices.flatMap((row) => row.courses)] : [];
-  const tones = new Map(listed.map((course) => [course.slug, course.practice]));
+
 
   return (
     <>
@@ -87,14 +85,14 @@ export default async function HomePage() {
             {started.map((course) => {
               const href = lessonPath(course.courseSlug, course.lesson.id);
               if (href === null) return null;
-              const practice = tones.get(course.courseSlug) ?? null;
+              const practice = shelf.kind === "ready" ? (shelf.shelf.practiceOf.get(course.courseSlug) ?? null) : null;
               return (
                 <CourseCard
                   key={course.courseSlug}
                   href={href}
                   title={course.courseTitle}
                   teacherName={course.teacherName}
-                  practice={practice === null ? null : { name: practice.name, tone: practice.tone }}
+                  practice={practice}
                   levelName={null}
                   lessonCount={course.total}
                   progress={{ completed: course.completed, total: course.total, lessonNumber: course.lesson.number }}
@@ -130,8 +128,7 @@ export default async function HomePage() {
                 {shelf.shelf.teachers.map((teacher) => {
                   const href = teacherPath(teacher.slug);
                   if (href === null) return null;
-                  const tone = listed.find((course) => course.teacherSlug === teacher.slug)?.practice?.tone ?? null;
-                  return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={tone} />;
+                  return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} />;
                 })}
               </Carousel>
             )}

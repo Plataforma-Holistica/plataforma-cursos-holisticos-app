@@ -135,6 +135,22 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
+  it("al alumno sin acceso: «Suscribirme para verlo» lleva a la lección, donde PA-33 dice por qué", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+    mocks.lessonAccess.mockResolvedValue({ kind: "denied", account: { kind: "never" } });
+    mocks.courseStanding.mockResolvedValue({ kind: "ready", standing: { states: new Map(), completed: 0, total: 2, started: false, finished: false, suggested: { id: L1, number: 1 } } });
+    render(await CourseRoute(params("respirar")));
+    expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", lesson(L1));
+  });
+
+  it("si no se sabe quién mira (no se supo, suspendida o a medias), la ficha se ve sin botón y sin preguntar más", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "unknown" });
+    render(await CourseRoute(params("respirar")));
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Respirar para dormir");
+    expect(screen.queryByRole("link", { name: /Suscribirme|Empezar|Verlo sin costo/ })).toBeNull();
+    expect(mocks.lessonAccess).not.toHaveBeenCalled();
+  });
+
   it("un curso que no existe contesta lo mismo que una ruta que no existe", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
     mocks.coursePage.mockResolvedValue({ kind: "not_found" });

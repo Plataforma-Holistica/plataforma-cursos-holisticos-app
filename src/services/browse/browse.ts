@@ -63,7 +63,7 @@ export function createBrowse(deps: { store: BrowseStore; report: (code: FailureC
     const known = memory.get(key);
     if (fresh(known)) return (known as Remembered<T>).value;
     const value = await attempt(read);
-    if (memory.size >= MEMORY_SIZE) memory.clear();
+    if (memory.size >= MEMORY_SIZE && !memory.has(key)) memory.clear();
     memory.set(key, { value, at: now() });
     return value;
   }
@@ -97,12 +97,16 @@ export function createBrowse(deps: { store: BrowseStore; report: (code: FailureC
   /** La ficha del maestro `slug` (PA-03). `not_found` si no está listado o no tiene cursos listados: se ve igual (PA-19). */
   async function teacherPage(slug: string): Promise<TeacherAnswer> {
     if (!SLUG.test(slug)) return { kind: "not_found" };
-    const [all, teacher] = await Promise.all([listed(), remembered(teachers, slug, () => deps.store.listedTeacher(slug))]);
-    if (all === "unavailable" || teacher === "unavailable") return { kind: "unavailable" };
-    if (teacher === null) return { kind: "not_found" };
+    // Primero lo listado, que ya se recuerda: un slug que no es de nadie no llega a la base, y no
+    // desplaza de la memoria a los que sí existen.
+    const all = await listed();
+    if (all === "unavailable") return { kind: "unavailable" };
     const theirs = all.filter((course) => course.teacherSlug === slug).sort(newestFirst);
     const [summary] = teachersOf(theirs);
     if (summary === undefined) return { kind: "not_found" };
+    const teacher = await remembered(teachers, slug, () => deps.store.listedTeacher(slug));
+    if (teacher === "unavailable") return { kind: "unavailable" };
+    if (teacher === null) return { kind: "not_found" };
     return { kind: "found", teacher: { ...summary, name: teacher.name, bio: teacher.bio }, courses: theirs };
   }
 

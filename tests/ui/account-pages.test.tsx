@@ -86,7 +86,8 @@ const shelfWith = (over: Record<string, unknown> = {}) => ({
     starters: [COURSE],
     newest: [COURSE],
     practices: [{ slug: "meditacion", name: "Meditación", tone: 3, courses: [COURSE] }],
-    teachers: [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], courseCount: 1 }],
+    teachers: [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, courseCount: 1 }],
+    practiceOf: new Map([["respirar", { name: "Meditación", tone: 3 }]]),
     ...over,
   },
 });

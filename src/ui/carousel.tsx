@@ -60,14 +60,20 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
     };
   }, [measure]);
 
+  // La flecha que tiene el foco. Al llegar al final con el teclado, la de ese lado ya no hace
+  // falta, pero quitarla tiraría el foco al documento (WCAG 2.4.3): se queda, inactiva, hasta que
+  // el foco se va. Lo encontró la revisión del diff.
+  const [focused, setFocused] = useState<1 | -1 | null>(null);
+  const shown = (direction: 1 | -1) => (direction === 1 ? edges?.end === true : edges?.start === true);
+
   const move = (direction: 1 | -1) => {
     const element = list.current;
-    if (element === null) return;
+    if (element === null || !shown(direction)) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     element.scrollBy({ left: direction * element.clientWidth * 0.9, behavior: reduced ? "auto" : "smooth" });
   };
 
-  const arrow = "absolute top-1/3 z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 md:flex";
+  const arrow = "absolute top-1/3 z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 aria-disabled:cursor-default aria-disabled:text-text-disabled md:flex";
 
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
@@ -78,8 +84,15 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
         {action}
       </div>
       <div className="relative">
-        {edges?.start === true && (
-          <button type="button" onClick={() => move(-1)} className={cx(arrow, "left-2")}>
+        {(shown(-1) || focused === -1) && (
+          <button
+            type="button"
+            onClick={() => move(-1)}
+            onFocus={() => setFocused(-1)}
+            onBlur={() => setFocused(null)}
+            aria-disabled={!shown(-1)}
+            className={cx(arrow, "left-2")}
+          >
             <Icon icon={ChevronLeft} size={24} label={t(ui.carousel.previous, { row: title })} />
           </button>
         )}
@@ -97,8 +110,15 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
             </li>
           ))}
         </ul>
-        {edges?.end === true && (
-          <button type="button" onClick={() => move(1)} className={cx(arrow, "right-2")}>
+        {(shown(1) || focused === 1) && (
+          <button
+            type="button"
+            onClick={() => move(1)}
+            onFocus={() => setFocused(1)}
+            onBlur={() => setFocused(null)}
+            aria-disabled={!shown(1)}
+            className={cx(arrow, "right-2")}
+          >
             <Icon icon={ChevronRight} size={24} label={t(ui.carousel.next, { row: title })} />
           </button>
         )}

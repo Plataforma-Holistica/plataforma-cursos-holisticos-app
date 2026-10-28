@@ -10,7 +10,9 @@ import type { ShelfCourse } from "./shelf";
 
 // Lo que el catálogo del alumno le pregunta a la base (T-210). Cada función recibe la
 // transacción ya abierta. Lo público se lee como sistema y filtra a mano lo listado y lo
-// vigente: el servidor salta la seguridad por fila, y estas páginas son las de cualquiera.
+// vigente: el servidor salta la seguridad por fila, y estas páginas son las de cualquiera. Además
+// del listado, el registro tiene que decir publicado (o con cambios pendientes): retirar quita lo
+// listado por convención, y esto no depende de ella.
 
 const courseRow = z.object({
   slug: z.string(),
@@ -69,7 +71,7 @@ export async function readListedCourses(tx: Tx): Promise<ShelfCourse[]> {
                lv.slug as level_slug, lv.name as level_name, lv.position as level_position,
                c.lesson_count, c.total_duration_seconds, c.published_at::text as published_at, r.is_open
         from public.published_courses c
-        join public.course_registry r on r.course_id = c.course_id
+        join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
         left join public.practices p on p.id = c.practice_id and p.is_active
         left join public.levels lv on lv.id = c.level_id and lv.is_active
         left join public.published_teachers t on t.teacher_id = c.teacher_id and t.is_listed
@@ -115,6 +117,7 @@ export async function readCourseLessons(
                m.id::text as module_id, m.title as module_title, m.position as module_position,
                l.id::text as lesson_id, l.title as lesson_title, l.position as lesson_position, l.duration_seconds
         from public.published_courses c
+        join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
         join public.published_modules m on m.course_id = c.course_id and m.is_current
         join public.published_lessons l on l.module_id = m.id and l.course_id = c.course_id and l.is_current
         left join public.published_teachers t on t.teacher_id = c.teacher_id and t.is_listed

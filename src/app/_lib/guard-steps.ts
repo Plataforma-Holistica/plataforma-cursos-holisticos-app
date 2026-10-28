@@ -117,13 +117,21 @@ export function visitorPageStep(check: SessionCheck): { kind: "render" } | Redir
 
 /**
  * Una pantalla pública que cambia según quién mira (la ficha de un curso, PA-02; T-210): se pinta
- * siempre. Con una sesión que pasa, como alumno; con cualquier otra respuesta, como visitante. A
- * quien le falta algo, o tiene la cuenta suspendida, o no se supo, se le ofrece lo del visitante:
- * la pantalla a la que lleve su botón vuelve a preguntarle a la guarda. Una página pública no
- * redirige ni pinta un estado: nadie se queda sin ver lo que cualquiera ve.
+ * siempre, nunca redirige ni pinta un estado. Con una sesión que pasa, como alumno. Sin sesión, o
+ * con una cookie que ya no vale, como visitante: entrar o registrarse cierra esa sesión. A una
+ * cuenta suspendida o a medias, o cuando no se supo, no se le ofrece lo del visitante
+ * (`unavailable` nunca se trata como «sin sesión»): se le muestra lo que cualquiera ve, sin botón.
  */
-export function publicPageStep(check: SessionCheck): { kind: "student"; claims: VerifiedClaims } | { kind: "visitor" } {
-  return check.kind === "pass" ? { kind: "student", claims: check.claims } : { kind: "visitor" };
+export function publicPageStep(check: SessionCheck): { kind: "student"; claims: VerifiedClaims } | { kind: "visitor" } | { kind: "unknown" } {
+  switch (check.kind) {
+    case "pass":
+      return { kind: "student", claims: check.claims };
+    case "anonymous":
+    case "must_sign_out":
+      return { kind: "visitor" };
+    default:
+      return { kind: "unknown" };
+  }
 }
 
 // Las pantallas del equipo (T-105; flujo de la app §6.2). Su entrada es lo que contesta
