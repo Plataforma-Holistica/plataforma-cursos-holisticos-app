@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { createBrowse } from "@/services/browse/browse";
-import { readCourseLessons, readListedCourses, readListedTeacher, readMyCourseProgress } from "@/services/browse/records";
+import { readCourseLessons, readListedCourses, readListedTeacher, readMyCourseProgress, searchCatalog } from "@/services/browse/records";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -61,6 +61,7 @@ const browse = (owner: Client) =>
       listedTeacher: (slug) => asServerRead(owner, (tx) => readListedTeacher(tx, slug)),
       courseLessons: (slug) => asServerRead(owner, (tx) => readCourseLessons(tx, slug)),
       myCourseProgress: (claims, slug) => asPerson(owner, claims, (tx) => readMyCourseProgress(tx, slug)),
+      search: (q) => asServerRead(owner, (tx) => searchCatalog(tx, q)),
     },
     report: () => Promise.resolve(),
   });
@@ -103,6 +104,43 @@ async function loadCourse(owner: Client, slug: string, listed: boolean, level = 
 }
 
 const mine = (slugs: readonly string[]) => slugs.filter((slug) => slug.startsWith("catalogo-"));
+
+describe("buscar (RF-304, PA-21), contra la base", () => {
+  it("por el título y por la maestra, sin acentos y por el principio; solo lo listado", async () => {
+    await reverted(async (owner) => {
+      await loadCourse(owner, "catalogo-buscar-listado", true);
+      await loadCourse(owner, "catalogo-buscar-oculto", false);
+      const search = (q: string) => asServerRead(owner, (tx) => searchCatalog(tx, q));
+      expect(mine((await search("buscar")).courses)).toEqual(["catalogo-buscar-listado"]);
+      expect(mine((await search("MAESTRA catál")).courses)).toEqual(["catalogo-buscar-listado"]);
+      expect((await search("maestra catalogo")).teachers).toContain("maestra-catalogo-buscar-listado");
+      expect((await search("maestra catalogo")).teachers).not.toContain("maestra-catalogo-buscar-oculto");
+      expect(mine((await search("uscar")).courses)).toEqual([]);
+      expect(await search("¿?")).toEqual({ courses: [], teachers: [] });
+    });
+  });
+
+  it("un título que cambia se busca por el nuevo: la columna se calcula con la fila", async () => {
+    await reverted(async (owner) => {
+      await loadCourse(owner, "catalogo-renombrado", true);
+      await asSystem(owner);
+      await owner.query("update public.published_courses set title = 'Respiración nocturna' where slug = 'catalogo-renombrado'");
+      const found = await asServerRead(owner, (tx) => searchCatalog(tx, "respiracion noct"));
+      expect(mine(found.courses)).toEqual(["catalogo-renombrado"]);
+    });
+  });
+
+  it("explorar junta la búsqueda con los filtros y nombra a la maestra que encontró", async () => {
+    await reverted(async (owner) => {
+      await loadCourse(owner, "catalogo-explorar", true);
+      const answer = await browse(owner).explore({ q: "maestra de catalogo", practice: "practica-de-catalogo", teacher: null, level: null });
+      if (answer.kind !== "ready") throw new Error(`No se leyó: ${answer.kind}`);
+      expect(mine(answer.results?.courses.map((each) => each.slug) ?? [])).toEqual(["catalogo-explorar"]);
+      expect(answer.results?.teachers.map((each) => each.slug)).toContain("maestra-catalogo-explorar");
+      expect(answer.facets.practices).toContainEqual({ slug: "practica-de-catalogo", name: "Práctica de catálogo" });
+    });
+  });
+});
 
 describe("lo público del catálogo, leído como sistema", () => {
   it("el inicio lleva solo lo listado, con su práctica, su nivel y su maestra", async () => {

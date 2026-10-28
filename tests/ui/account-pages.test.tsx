@@ -109,7 +109,16 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     // La barra del alumno: el inicio es la página actual, y la cuenta ocupa el lugar de Perfil.
     const nav = screen.getByRole("navigation", { name: "Principal" });
     expect(within(nav).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Explorar" })).toHaveAttribute("href", "/explorar");
     expect(within(nav).getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
+  });
+
+  it("«Ver todo» lleva a explorar con el filtro de la fila; «Nuevos» no lo lleva (PA-20, PA-21)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    render(await HomePage());
+    expect(screen.getByRole("link", { name: "Ver todo: Para empezar" })).toHaveAttribute("href", "/explorar?nivel=principiante");
+    expect(screen.getByRole("link", { name: "Ver todo: Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
+    expect(screen.queryByRole("link", { name: "Ver todo: Nuevos" })).toBeNull();
   });
 
   it("si no se supo el nombre, saluda sin él", async () => {

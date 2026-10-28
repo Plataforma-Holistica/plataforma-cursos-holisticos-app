@@ -513,3 +513,8 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* 5. El buscador de explorar (PA-21) lleva su propio botón de borrar: el del navegador se quita. */
+input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+}

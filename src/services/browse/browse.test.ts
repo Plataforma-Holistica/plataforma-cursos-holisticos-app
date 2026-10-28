@@ -39,7 +39,12 @@ const LESSON: CourseLessonRow = {
 };
 const TEACHER = { slug: "ana-robles", name: "Ana Robles", bio: "Semblanza." };
 
-type Fake = { courses?: ShelfCourse[] | "throws"; lessons?: CourseLessonRow[] | "throws"; teacher?: typeof TEACHER | null | "throws" };
+type Fake = {
+  courses?: ShelfCourse[] | "throws";
+  lessons?: CourseLessonRow[] | "throws";
+  teacher?: typeof TEACHER | null | "throws";
+  search?: { courses: string[]; teachers: string[] } | "throws";
+};
 
 function browseWith(fake: Fake = {}) {
   let clock = 1_000_000;
@@ -53,6 +58,7 @@ function browseWith(fake: Fake = {}) {
       return lessons === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve({ teacher: TEACHER, lessons });
     }),
     myCourseProgress: vi.fn(() => Promise.resolve([])),
+    search: vi.fn(() => answer(fake.search ?? { courses: ["respirar"], teachers: ["ana-robles"] })),
   } satisfies BrowseStore;
   const service = createBrowse({ store, report: (code) => (reported.push(code), Promise.resolve()), now: () => clock });
   return { ...service, store, reported, advance: (ms: number) => (clock += ms) };
@@ -177,5 +183,63 @@ describe("la ficha de un maestro", () => {
 
   it("si no se supo, lo dice", async () => {
     expect(await browseWith({ teacher: "throws" }).teacherPage("ana-robles")).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("explorar (PA-21)", () => {
+  const NOTHING = { q: null, practice: null, teacher: null, level: null };
+  const OTHER: ShelfCourse = { ...COURSE, slug: "otro", title: "Otro", practice: null, level: null, publishedAt: new Date(5) };
+
+  it("sin filtro ni búsqueda da los filtros y el inicio, sin resultados ni búsqueda", async () => {
+    const service = browseWith({ courses: [COURSE, OTHER] });
+    const answer = await service.explore(NOTHING);
+    expect(answer.kind).toBe("ready");
+    if (answer.kind !== "ready") return;
+    expect(answer.results).toBeNull();
+    expect(answer.facets.practices).toEqual([{ slug: "meditacion", name: "Meditación" }]);
+    expect(answer.shelf.practices.map((row) => row.slug)).toEqual(["meditacion"]);
+    expect(service.store.search).not.toHaveBeenCalled();
+  });
+
+  it("con un filtro, filtra lo listado sin preguntarle a la base", async () => {
+    const service = browseWith({ courses: [COURSE, OTHER] });
+    const answer = await service.explore({ ...NOTHING, practice: "meditacion" });
+    if (answer.kind !== "ready") throw new Error(answer.kind);
+    expect(answer.results?.courses.map((each) => each.slug)).toEqual(["respirar"]);
+    expect(service.store.search).not.toHaveBeenCalled();
+  });
+
+  it("un filtro que no existe no se aplica: se contesta como si no se hubiera pedido", async () => {
+    const service = browseWith();
+    const answer = await service.explore({ ...NOTHING, practice: "reiki" });
+    if (answer.kind !== "ready") throw new Error(answer.kind);
+    expect(answer.query.practice).toBeNull();
+    expect(answer.results).toBeNull();
+  });
+
+  it("con búsqueda, le pregunta a la base y recuerda la respuesta treinta segundos", async () => {
+    const service = browseWith({ courses: [COURSE, OTHER] });
+    const answer = await service.explore({ ...NOTHING, q: "ana" });
+    if (answer.kind !== "ready") throw new Error(answer.kind);
+    expect(service.store.search).toHaveBeenCalledExactlyOnceWith("ana");
+    expect(answer.results?.courses.map((each) => each.slug)).toEqual(["respirar"]);
+    expect(answer.results?.teachers.map((each) => each.slug)).toEqual(["ana-robles"]);
+    await service.explore({ ...NOTHING, q: "ana", practice: "meditacion" });
+    expect(service.store.search).toHaveBeenCalledTimes(1);
+    service.advance(CATALOG_MEMORY_MS);
+    await service.explore({ ...NOTHING, q: "ana" });
+    expect(service.store.search).toHaveBeenCalledTimes(2);
+  });
+
+  it("si la búsqueda no se pudo, «no se supo», reportado", async () => {
+    const service = browseWith({ search: "throws" });
+    expect(await service.explore({ ...NOTHING, q: "ana" })).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["catalog_unavailable"]);
+  });
+
+  it("si lo listado no se pudo, «no se supo», sin buscar", async () => {
+    const service = browseWith({ courses: "throws" });
+    expect(await service.explore({ ...NOTHING, q: "ana" })).toEqual({ kind: "unavailable" });
+    expect(service.store.search).not.toHaveBeenCalled();
   });
 });

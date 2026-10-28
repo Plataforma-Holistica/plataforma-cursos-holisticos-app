@@ -83,6 +83,34 @@ export async function readListedCourses(tx: Tx): Promise<ShelfCourse[]> {
   return rows.map(shelfCourseOf);
 }
 
+const matchRow = z.object({ kind: z.enum(["course", "teacher"]), slug: z.string() });
+
+/**
+ * Lo que encuentra la búsqueda `q` (RF-304): los cursos listados por su título y el nombre de su
+ * maestro, y los maestros listados por su nombre. Sin acentos y por el principio de cada palabra:
+ * la consulta la arma la base (`private.catalog_query`), que no deja pasar operadores.
+ */
+export async function searchCatalog(tx: Tx, q: string): Promise<{ courses: string[]; teachers: string[] }> {
+  const rows = await tx.query(
+    sql`with wanted as (select private.catalog_query(${q}) as query)
+        select 'course' as kind, c.slug
+        from public.published_courses c
+        join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
+        cross join wanted
+        where c.is_listed and c.search_tsv @@ wanted.query
+        union all
+        select 'teacher' as kind, t.slug
+        from public.published_teachers t
+        cross join wanted
+        where t.is_listed and private.catalog_search(t.display_name) @@ wanted.query`,
+    matchRow,
+  );
+  return {
+    courses: rows.filter((row) => row.kind === "course").map((row) => row.slug),
+    teachers: rows.filter((row) => row.kind === "teacher").map((row) => row.slug),
+  };
+}
+
 const teacherRow = z.object({ slug: z.string(), display_name: z.string(), bio: z.string().nullable() });
 
 /** Un maestro listado, por su slug, o nulo. */

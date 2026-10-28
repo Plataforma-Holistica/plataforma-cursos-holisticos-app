@@ -7,7 +7,7 @@ import { requireSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { accountProfile, sessionEmail } from "@/services/account/account";
-import { coursePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { coursePath, explorePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
 import { homeShelf, type ShelfCourse } from "@/services/browse/browse";
 import { continueWatching } from "@/services/progress/progress";
 import { Button } from "@/ui/button";
@@ -16,6 +16,7 @@ import { CourseCard } from "@/ui/course-card";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TeacherCard } from "@/ui/teacher-card";
+import { TextLink } from "@/ui/text-link";
 
 // El inicio del alumno (PA-20; RF-301; FL-10; T-210). Reemplaza al provisional. De arriba abajo:
 // el saludo, «Continuar viendo» (o «Para empezar» para quien no ha empezado nada), «Nuevos», un
@@ -24,12 +25,24 @@ import { TeacherCard } from "@/ui/teacher-card";
 //
 // Bajo el saludo sigue diciendo con qué correo se entró: le avisa a alguien que completó una
 // cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla. Y al pie, «Salir»,
-// mientras no haya menú de la cuenta. «Mi lista» llega con la tercera solicitud de T-210, y
-// «Ver todo» con explorar (la segunda).
+// mientras no haya menú de la cuenta. «Mi lista» llega con la tercera solicitud de T-210. «Ver
+// todo» lleva a explorar con el filtro de la fila: «Para empezar», su nivel; cada práctica, la
+// suya. «Nuevos» no lo lleva: explorar no ordena por otra cosa que lo más nuevo, y sin filtro
+// pinta un carrusel por práctica (decisión mía sin confirmar, 2026-10-28).
 
 const text = messages.browse.home;
 
 export const metadata: Metadata = { title: text.pageTitle };
+
+/** «Ver todo» de una fila: visible así, y con el nombre de la fila para quien no la ve. */
+function SeeAll({ href, row }: { href: string; row: string }) {
+  return (
+    <TextLink href={href}>
+      <span aria-hidden="true">{text.seeAll}</span>
+      <span className="sr-only">{t(text.seeAllOf, { row })}</span>
+    </TextLink>
+  );
+}
 
 function courseCard(course: ShelfCourse) {
   const href = coursePath(course.slug);
@@ -110,7 +123,11 @@ export default async function HomePage() {
           <>
             {/* «Para empezar» es para quien no ha empezado nada: si no se supo, no se sabe (PA-20). */}
             {watching.kind === "ready" && started.length === 0 && shelf.shelf.starters.length > 0 && (
-              <Carousel id="para-empezar" title={text.startersTitle}>
+              <Carousel
+                id="para-empezar"
+                title={text.startersTitle}
+                action={shelf.shelf.starters[0]?.level && <SeeAll href={explorePath({ level: shelf.shelf.starters[0].level.slug })} row={text.startersTitle} />}
+              >
                 {shelf.shelf.starters.map(courseCard)}
               </Carousel>
             )}
@@ -120,7 +137,7 @@ export default async function HomePage() {
               </Carousel>
             )}
             {shelf.shelf.practices.map((row) => (
-              <Carousel key={row.slug} id={`practica-${row.slug}`} title={row.name}>
+              <Carousel key={row.slug} id={`practica-${row.slug}`} title={row.name} action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}>
                 {row.courses.map(courseCard)}
               </Carousel>
             ))}

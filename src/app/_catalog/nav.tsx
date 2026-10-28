@@ -1,4 +1,4 @@
-import { House, UserRound } from "lucide";
+import { Compass, House, UserRound } from "lucide";
 import Link from "next/link";
 
 import { messages, t } from "@/messages";
@@ -7,14 +7,15 @@ import { cx } from "@/ui/cx";
 import { Icon } from "@/ui/icon";
 
 // La barra del alumno (`AppHeader` y `BottomNav`, diseño, sección 5; T-210): arriba en
-// escritorio, abajo y fija en el teléfono. Por ahora, Inicio y Cuenta: Explorar llega con la
-// segunda solicitud de T-210, y la Cuenta ocupa el lugar de Perfil (PA-23) mientras no exista.
+// escritorio, abajo y fija en el teléfono. Inicio, Explorar (PA-21) y Cuenta: la Cuenta ocupa el
+// lugar de Perfil (PA-23) mientras no exista, y Mi lista llega con la tercera solicitud de T-210.
 // Una sola lista de enlaces, que el CSS acomoda: así no se repite para el lector de pantalla.
 
 const text = messages.browse.nav;
 
 const LINKS = [
   { href: ROUTES.home, label: text.home, icon: House },
+  { href: ROUTES.explore, label: text.explore, icon: Compass },
   { href: ROUTES.account, label: text.account, icon: UserRound },
 ] as const;
 

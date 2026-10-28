@@ -39,6 +39,8 @@ export const ROUTES = {
   courses: "/cursos",
   /** La ficha de un maestro (`/maestros/[slug]`, PA-03, T-210): pública. */
   teachers: "/maestros",
+  /** Explorar y buscar (PA-21, T-210): pide sesión (RF-304). Con filtros, `explorePath`. */
+  explore: "/explorar",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -50,6 +52,7 @@ export const RETURN_PARAM = "volver";
  */
 export const SESSION_ROUTES: readonly string[] = [
   ROUTES.home,
+  ROUTES.explore,
   ROUTES.consents,
   ROUTES.account,
   // Con ella entra también la de configurar, que cuelga de esta.
@@ -91,6 +94,25 @@ function periodSegment(period: number): string {
 /** PA-79, el panel de un periodo (`AAAAMM`). */
 export const periodPath = (period: number): string => `${ROUTES.periods}/${periodSegment(period)}`;
 
+/** Lo que explorar lleva en la dirección (PA-21): cada filtro por su slug, y la búsqueda. */
+export interface ExploreParams {
+  q?: string | null;
+  practice?: string | null;
+  teacher?: string | null;
+  level?: string | null;
+}
+
+/** Explorar con esos filtros, siempre en el mismo orden; sin ninguno, `/explorar`. */
+export function explorePath({ q = null, practice = null, teacher = null, level = null }: ExploreParams = {}): string {
+  const params = new URLSearchParams();
+  if (practice !== null) params.set("practica", practice);
+  if (teacher !== null) params.set("maestro", teacher);
+  if (level !== null) params.set("nivel", level);
+  if (q !== null) params.set("q", q);
+  const query = params.toString();
+  return query === "" ? ROUTES.explore : `${ROUTES.explore}?${query}`;
+}
+
 /** PA-80, el ensayo y el cierre de un periodo. */
 export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
@@ -106,7 +128,7 @@ export const periodPayoutsPath = (period: number): string => `${periodPath(perio
  * Administración vale con todo lo que cuelgue de ella: por eso bajo `/admin` no puede haber
  * una lectura con efectos.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore];
 
 /** Las rutas de `SESSION_ROUTES`: la ruta exacta y lo que cuelga de ella. */
 function underSessionRoute(pathname: string): boolean {
