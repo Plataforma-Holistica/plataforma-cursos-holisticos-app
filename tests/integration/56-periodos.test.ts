@@ -107,7 +107,7 @@ async function closingPeriod(owner: Client, student: string): Promise<void> {
 }
 
 /** Alguien del equipo con esas capacidades y su código dado, y enero de 2039 en cierre, dentro de la transacción. */
-async function staged<T>(capabilities: string[], fn: (stage: { owner: Client; jar: MemoryJar; student: KnownUser }) => Promise<T>) {
+async function staged<T>(capabilities: string[], fn: (stage: { owner: Client; jar: MemoryJar; person: KnownUser; student: KnownUser }) => Promise<T>) {
   const person = await claimedUser();
   const student = await claimedUser();
   emails.push(person.email, student.email);
@@ -126,7 +126,7 @@ async function staged<T>(capabilities: string[], fn: (stage: { owner: Client; ja
     await asOwner(owner);
     expect(await services.giveSecondFactorCode(jar, totpCode(factor.secret))).toEqual({ kind: "verified" });
     await closingPeriod(owner, student.id);
-    return fn({ owner, jar, student });
+    return fn({ owner, jar, person, student });
   });
   expect(await counts()).toEqual(before);
   return result;
@@ -215,6 +215,18 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
       const after = await service.financePeriod(jar, claims, PERIOD);
       expect(after).toMatchObject({ kind: "period", period: { period: { status: "closed" }, close: { runId } } });
       expect(service.reported).toEqual([]);
+    });
+  });
+
+  it("con el código vencido, ensayar pide el código antes de decir que espere un minuto", async () => {
+    await staged(["finance"], async ({ jar, owner, person }) => {
+      const service = periodsOn(owner);
+      expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "rehearsed" });
+      await owner.query(
+        "update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '1 hour' where session_id in (select id from auth.sessions where user_id = $1)",
+        [person.id],
+      );
+      expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "needs_fresh_code" });
     });
   });
 

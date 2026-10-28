@@ -6,7 +6,7 @@ import type { FinanceAlerts } from "@/services/anomalies/anomalies";
 import type { FinanceClose, FinancePeriod, FinancePeriods, RunTeacher } from "@/services/periods/periods";
 
 import { periodsButton } from "./outcomes";
-import { closeView, money, percent, periodName, periodsView, periodView } from "./rows";
+import { acceptedCloseNotice, acceptedRollupNotice, closeView, money, percent, periodName, periodsView, periodView } from "./rows";
 
 // Lo que PA-78 a PA-80 pintan, ya en palabras: qué cifra sale de dónde, qué se ofrece y qué falta para
 // cerrar. Puro: sin servicios ni base.
@@ -338,5 +338,57 @@ describe("closeView (PA-80)", () => {
     expect(closeView(close({ freshCode: false, close: run }, "closed")).download).toEqual({ kind: "locked" });
     expect(closeView(close({ close: { ...run, export: null } }, "closed")).download).toEqual({ kind: "missing" });
     expect(closeView(close({ close: { ...run, closedBy: null } }, "closed")).closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las [^,]*\.$/);
+  });
+});
+
+describe("los avisos de lo que salió bien son del periodo que se ve (revisión de la 70)", () => {
+  it("«Periodo cerrado» solo en un periodo cerrado", () => {
+    const run = { ...figures, at: "2027-11-03T18:00:00Z", closedBy: null, export: null, teachers: [] };
+    expect(acceptedCloseNotice("period_closed", close({ close: run }, "closed"), NOW)).toBe(true);
+    expect(acceptedCloseNotice("period_closed", close(), NOW)).toBe(false);
+  });
+
+  it("«Ensayo listo» solo si su último ensayo es de hace un momento", () => {
+    const at = (iso: string) => close({ rehearsal: { ...close().rehearsal!, at: iso } });
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T17:59:30Z"), NOW)).toBe(true);
+    expect(acceptedCloseNotice("period_rehearsed", at("2027-11-02T17:50:00Z"), NOW)).toBe(false);
+    expect(acceptedCloseNotice("period_rehearsed", close({ rehearsal: null }), NOW)).toBe(false);
+    expect(acceptedCloseNotice(null, close(), NOW)).toBe(false);
+  });
+
+  it("«Recálculo pedido» solo si su último pedido es de hace un momento", () => {
+    const asked = (iso: string) => period({ rollupRequest: { status: "pending", requestedAt: iso, startedAt: null, finishedAt: null } });
+    expect(acceptedRollupNotice(asked("2027-11-02T17:59:30Z"), NOW)).toBe(true);
+    expect(acceptedRollupNotice(asked("2027-11-02T17:50:00Z"), NOW)).toBe(false);
+    expect(acceptedRollupNotice(period(), NOW)).toBe(false);
+  });
+});
+
+describe("cerrar solo con el reparto a la vista (revisión de la 70)", () => {
+  it("si el último ensayo falló, aunque haya uno bueno antes, la lista lo dice y no se ofrece cerrar", () => {
+    const failed = closeView(close({ rehearsal: { ...close().rehearsal!, status: "failed", poolCents: null, teachers: [] } }));
+    expect(failed.checks.find((check) => !check.done)?.label).toBe(text.checks.rehearsalFailed);
+    expect(failed.close).toEqual({ kind: "waits" });
+  });
+
+  it("si el último ensayo es parcial, no se ofrece cerrar", () => {
+    const partial = closeView(close({ rehearsal: { ...close().rehearsal!, statusAtRun: "open" } }));
+    expect(partial.close).toEqual({ kind: "waits" });
+    expect(partial.checks.some((check) => check.label === text.checks.finalRehearsalMissing && !check.done)).toBe(true);
+  });
+
+  it("si la suma no cuadra, la lista lo dice y no se ofrece cerrar", () => {
+    const off = closeView(close({ rehearsal: { ...close().rehearsal!, teachers: [teacher({ totalCents: 1_199_999 })] } }));
+    expect(off.checks.find((check) => !check.done)?.label).toBe(text.checks.sumOff);
+    expect(off.close).toEqual({ kind: "waits" });
+    expect(closeView(close()).checks.some((check) => check.label === text.checks.sumOk && check.done)).toBe(true);
+  });
+});
+
+describe("lo asignado a un periodo cerrado es lo que congeló el cierre (revisión de la 70)", () => {
+  it("cerrado: el ingreso neto del cierre, no la suma de ahora", () => {
+    const closed = periodView(period({ close: { ...figures, netRevenueCents: 3_700_000 }, rehearsal: null }, "closed"), null, NOW);
+    expect(closed.assigned.value).toBe("$37,000.00");
+    expect(periodView(period(), null, NOW).assigned.value).toBe("$38,000.00");
   });
 });

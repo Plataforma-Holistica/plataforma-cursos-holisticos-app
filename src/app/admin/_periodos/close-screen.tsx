@@ -79,6 +79,11 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
   const { block, answer, spoken } = useAnswerFocus(pending, attempt, result);
   const showDone = done !== null && state.kind === "idle" && !pending;
   const confirming = state.kind === "confirming" && view.close.kind === "ready" ? state : null;
+  // Confirmar sin marcar la casilla: el foco va a la casilla, que tiene el error como descripción, y así se oye.
+  const missingAttempt = confirming !== null && confirming.missingUnderstood ? confirming.attempt : 0;
+  useEffect(() => {
+    if (missingAttempt > 0) document.getElementById(UNDERSTOOD_ID)?.focus();
+  }, [missingAttempt]);
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">

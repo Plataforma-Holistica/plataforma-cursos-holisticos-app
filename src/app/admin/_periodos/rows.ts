@@ -205,7 +205,8 @@ export function periodView(read: Extract<FinancePeriod, { period: object }>, ale
     },
     assigned: {
       label: text.assigned,
-      value: money(read.assigned.baseCents),
+      // Cerrado, lo que congeló el cierre: lo asignado de ahora podría ya no ser lo que se repartió.
+      value: money(read.close?.netRevenueCents ?? read.assigned.baseCents),
       context: t(text.assignedContext, { count: read.assigned.students }),
       tag: partialNow,
     },
@@ -345,8 +346,19 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
     checks.openAlerts > 0
       ? { label: t(plural(checks.openAlerts, text.checks.alertsPending), { count: checks.openAlerts }), done: false, href: ROUTES.alerts }
       : { label: text.checks.alertsClear, done: true },
-    checks.finalRehearsal ? { label: text.checks.finalRehearsal, done: true } : { label: text.checks.finalRehearsalMissing, done: false },
+    // Cerrar usa el último ensayo con datos finales, pero la pantalla solo muestra el último: si ese falló
+    // o es parcial, quien confirma no estaría viendo el reparto que congela (revisión de la 70).
+    rehearsal?.status === "failed"
+      ? { label: text.checks.rehearsalFailed, done: false }
+      : checks.finalRehearsal && rehearsal?.statusAtRun === "closing"
+        ? { label: text.checks.finalRehearsal, done: true }
+        : { label: text.checks.finalRehearsalMissing, done: false },
   ];
+  // La suma del último ensayo que salió bien, contra su bote: la misma regla que la base revisa al cerrar.
+  if (rehearsal !== null && rehearsal.status === "succeeded") {
+    const shown = runResult(rehearsal, rehearsal.teachers);
+    list.push(shown.sum.ok ? { label: text.checks.sumOk, done: true } : { label: text.checks.sumOff, done: false });
+  }
 
   let close: CloseView["close"];
   if (closed) close = { kind: "closed" };
@@ -384,4 +396,26 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
     result: run === null ? null : runResult(run, run.teachers),
     download,
   };
+}
+
+// ---------------------------------------------------------------------------------------
+// Los avisos de lo que salió bien. Viajan en una cookie de 60 segundos que no dice de qué periodo son:
+// cada pantalla los pinta solo si lo que tiene delante es lo que el aviso dice (revisión de la 70).
+
+/** Un momento de hace menos de un minuto y medio (lo que dura el aviso, con holgura), o un poco después. */
+function recent(iso: string, now: string): boolean {
+  const ago = new Date(now).getTime() - new Date(iso).getTime();
+  return ago >= -5_000 && ago <= 90_000;
+}
+
+/** Si PA-80 pinta ese aviso: «cerrado» solo con el periodo cerrado; «ensayado» solo con un ensayo de hace un momento. */
+export function acceptedCloseNotice(notice: "period_rehearsed" | "period_closed" | null, read: Extract<FinanceClose, { period: object }>, now: string): boolean {
+  if (notice === "period_closed") return read.close !== null;
+  if (notice === "period_rehearsed") return read.rehearsal !== null && recent(read.rehearsal.at, now);
+  return false;
+}
+
+/** Si PA-79 pinta «Recálculo pedido»: solo con un pedido de hace un momento. */
+export function acceptedRollupNotice(read: Extract<FinancePeriod, { period: object }>, now: string): boolean {
+  return read.rollupRequest !== null && recent(read.rollupRequest.requestedAt, now);
 }

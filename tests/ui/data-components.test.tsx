@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ui } from "@/messages/es/ui";
@@ -133,12 +133,26 @@ describe("Dialog", () => {
     return { ...view, cancel };
   }
 
-  it("es un diálogo modal con su título y sus consecuencias", async () => {
+  it("es un diálogo con su título y sus consecuencias; sin `showModal` (sin JavaScript) no se dice modal", async () => {
     const { container } = dialog();
     const box = screen.getByRole("dialog", { name: "¿Cerrar octubre de 2027?" });
-    expect(box).toHaveAttribute("aria-modal", "true");
+    expect(box).not.toHaveAttribute("aria-modal");
     expect(box).toHaveAccessibleDescription("No se puede deshacer.");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con `showModal` se abre como modal, y entonces se dice modal", async () => {
+    const showModal = vi.fn();
+    const close = vi.fn();
+    Object.assign(HTMLDialogElement.prototype, { showModal, close });
+    try {
+      dialog();
+      expect(showModal).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByRole("dialog", { hidden: true })).toHaveAttribute("aria-modal", "true"));
+    } finally {
+      Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
+      Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+    }
   });
 
   it("cancelar va primero", () => {

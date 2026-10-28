@@ -11,7 +11,7 @@ import { financeClose, financePeriod, financePeriods } from "@/services/periods/
 import { CloseScreen, type CloseNotice } from "./close-screen";
 import { PeriodsScreen } from "./list-screen";
 import { PeriodScreen } from "./panel-screen";
-import { closeView, periodsView, periodView } from "./rows";
+import { acceptedCloseNotice, acceptedRollupNotice, closeView, periodsView, periodView } from "./rows";
 
 // PA-78, PA-79 y PA-80 · Los periodos, el panel de uno y su ensayo y cierre (`/admin/periodos`,
 // `/admin/periodos/2027-10` y `/admin/periodos/2027-10/cierre`; RF-501 a RF-503, RF-509, RF-705, RF-408;
@@ -38,10 +38,10 @@ export async function PeriodSection({ claims, period }: { claims: VerifiedClaims
   if (read.kind === "not_found" || read.period.period === null) notFound();
   // Las alertas del periodo salen de su propia lectura: si no se pudo, el panel lo dice y sigue.
   const alerts = await anomalyAlerts(reader, claims);
-  const done = readNotice(reader) === "rollup_requested";
-  return (
-    <PeriodScreen view={periodView(read.period, alerts.kind === "alerts" ? alerts.alerts : null, new Date().toISOString())} done={done} />
-  );
+  const now = new Date().toISOString();
+  // El aviso no dice de qué periodo es: se pinta solo si este tiene un pedido de hace un momento.
+  const done = readNotice(reader) === "rollup_requested" && acceptedRollupNotice(read.period, now);
+  return <PeriodScreen view={periodView(read.period, alerts.kind === "alerts" ? alerts.alerts : null, now)} done={done} />;
 }
 
 export async function CloseSection({ claims, period }: { claims: VerifiedClaims; period: number }) {
@@ -50,7 +50,9 @@ export async function CloseSection({ claims, period }: { claims: VerifiedClaims;
   if (read.kind === "unavailable") return <UnavailableScreen retryHref={periodClosePath(period)} withSession />;
   if (read.kind === "not_found" || read.close.period === null) notFound();
   // Ensayar y cerrar redirigen aquí con su aviso: lo de ahora ya trae lo hecho.
+  // El aviso no dice de qué periodo es: se pinta solo si lo de este periodo es lo que el aviso dice.
   const notice = readNotice(reader);
-  const done = CLOSE_NOTICES.find((each) => each === notice) ?? null;
+  const found = CLOSE_NOTICES.find((each) => each === notice) ?? null;
+  const done = acceptedCloseNotice(found, read.close, new Date().toISOString()) ? found : null;
   return <CloseScreen view={closeView(read.close)} done={done} />;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { TriangleAlert } from "lucide";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { ui } from "@/messages/es/ui";
 
@@ -38,6 +38,8 @@ export function Dialog({ title, children, cancel, confirm, irreversible = false,
   const box = useRef<HTMLDialogElement>(null);
   const cancelBox = useRef<HTMLSpanElement>(null);
   const busyNow = useRef(busy);
+  // Modal solo cuando de verdad lo es: sin JavaScript queda en su lugar, y decirlo modal mentiría.
+  const [modal, setModal] = useState(false);
   const titleId = useId();
   const bodyId = useId();
 
@@ -53,6 +55,7 @@ export function Dialog({ title, children, cancel, confirm, irreversible = false,
     if (typeof dialog.showModal === "function") {
       dialog.close();
       dialog.showModal();
+      setModal(true);
     }
     const onCancel = (event: Event) => {
       event.preventDefault();
@@ -72,7 +75,7 @@ export function Dialog({ title, children, cancel, confirm, irreversible = false,
     <dialog
       ref={box}
       open
-      aria-modal="true"
+      aria-modal={modal || undefined}
       aria-labelledby={titleId}
       aria-describedby={bodyId}
       className="m-auto w-full max-w-form rounded-md border border-border bg-surface-1 p-6 text-text shadow-overlay backdrop:bg-scrim max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none"

@@ -236,6 +236,10 @@ describe("PA-80, el ensayo y el cierre", () => {
     await user.click(within(dialog).getByRole("button", { name: text.confirmClose }));
     expect(sent(actions.closeAction, 1)).toEqual({ do: periodsButton.close(202710) });
     expect(await screen.findByText(text.missingUnderstood)).toBeInTheDocument();
+    // El error se oye: el foco va a la casilla, que lo tiene como descripción.
+    const box = within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood });
+    await waitFor(() => expect(box).toHaveFocus());
+    expect(box).toHaveAccessibleDescription(text.missingUnderstood);
   });
 
   it("marcada la casilla, confirmar la manda; la suma que no cuadra se dice sin monto", async () => {

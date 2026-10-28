@@ -346,13 +346,15 @@ export async function askRollup(tx: Tx, periodId: number): Promise<unknown> {
 
 /**
  * Ensaya (`private.rehearse_close()`), salvo que haya un ensayo de ese periodo, bien o fallido, de hace
- * menos de un minuto: entonces contesta `too_soon` sin ensayar. Cada ensayo es un renglón de
- * `close_runs`, que no se borra (decisión mía sin confirmar del 2026-10-27). La revisión no toma
- * candado: dos envíos a la vez pueden ensayar los dos, y no pasa nada.
+ * menos de un minuto: entonces contesta `too_soon` sin ensayar. Cada ensayo es un renglón que no se borra
+ * (decisión mía sin confirmar del 2026-10-27). La puerta va primero: sin el código reciente no se dice
+ * «espera», se ensaya y la base pide el código (revisión de la 70). La revisión no toma candado: dos
+ * envíos a la vez pueden ensayar los dos, y no pasa nada.
  */
 export async function askRehearsal(tx: Tx, periodId: number): Promise<unknown> {
   const [recent] = await tx.query(
-    sql`select (private.finance_close(${periodId}::integer) #>> '{rehearsal,at}')::timestamptz > now() - interval '1 minute' as recent`,
+    sql`select (r ->> 'fresh_code')::boolean and (r #>> '{rehearsal,at}')::timestamptz > now() - interval '1 minute' as recent
+        from private.finance_close(${periodId}::integer) as r`,
     recentRow,
   );
   if (recent?.recent === true) return "too_soon";
