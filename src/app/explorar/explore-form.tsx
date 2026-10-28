@@ -196,7 +196,10 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
                 </Link>
               )}
             </div>
-            <Button type="submit">{text.search}</Button>
+            {/* Junto al campo también en el teléfono: el primario ocupa todo el ancho por omisión. */}
+            <Button type="submit" className="shrink-0 max-sm:w-auto">
+              {text.search}
+            </Button>
           </div>
         </Form>
       </div>
