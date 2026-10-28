@@ -164,7 +164,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
 
           <form action={send} noValidate className="flex flex-col gap-6">
             {view.release.kind === "waits" && <p className="text-text-2">{view.release.text}</p>}
-            {view.release.kind === "offered" && releaseAsked === null && (
+            {view.release.kind === "offered" && asking === null && (
               <div>
                 <Button type="submit" variant="danger" name="do" value={view.release.ask}>
                   {text.release}
