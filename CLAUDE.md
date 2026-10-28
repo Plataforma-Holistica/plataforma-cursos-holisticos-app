@@ -463,6 +463,26 @@ que no se ve leyendo un solo archivo:
   `private.last_rehearsal(p)`, y las de integración y la escala el ensayo que lee la pantalla (`SHOWN`, en
   `tests/integration/helpers/finance.ts`). Para el B: una prueba que llame a `close_period` pasa el ensayo, y
   un ensayo fallido escrito a mano después de uno bueno pasa a ser el último.
+- **Lo que T-210 suma al carril B** (primera solicitud, sin migración; decisiones de Sergio del 2026-10-27:
+  carril rápido, «Para empezar» son los del nivel más bajo, los más nuevos primero). El catálogo del
+  alumno: el servicio `src/services/browse/` (lo público se lee como sistema, filtrando a mano lo listado y
+  lo vigente, y se recuerda 30 s, también cuando no se supo; el avance de cada quien, como la persona), el
+  inicio nuevo (PA-20), la ficha de un curso (`/cursos/[slug]`, PA-02) y la de un maestro
+  (`/maestros/[slug]`, PA-03), las dos públicas. La guarda `publicViewer` (`publicPageStep`) nunca
+  redirige: con una sesión que pasa mira un alumno; sin sesión, un visitante; y con una cuenta a medias,
+  suspendida o «no se supo», no se sabe quién mira (`unknown`), y la ficha va sin botón. La ficha
+  del curso elige su botón en `outcomes.ts` y le pregunta a `lessonAccess` por la primera lección, sin
+  firmar: solo con `allowed` o `denied` hay botón; con cualquier otra respuesta (también `no_video`, que
+  es lo que da una lección del proveedor de prueba) no se sabe cuál le toca, y va sin él. En el inicio,
+  «Para empezar» sale solo si se supo que no hay nada empezado. El nombre de una tarjeta con avance dice
+  también lo que dice su barra, que solo se ve. Componentes base nuevos: `CourseCover` (la portada generada, con `@container` y los tokens
+  `text-cover-*`, `p-cover` y `cover-N-deep`), `CourseCard`, `TeacherCard` y `Carousel` (cada tarjeta va
+  en un `<li>` posicionado: el nombre `sr-only` es absoluto y sin eso ensanchaba la página). `pnpm
+  db:courses` carga desde aquí ocho cursos de prueba (un video de Mux va en una sola lección; las
+  repeticiones, con el de prueba) y `pnpm db:student` publica todos. Usa integración 70 y, en
+  `tests/e2e/equipo/catalogo.equipo.ts`, FL-10: como lo público se recuerda 30 s, una prueba que carga
+  cursos después de que otra leyó el inicio recarga hasta verlos. Para el A: el inicio ya no se titula
+  «Inicio» sino «Hola, …», y «continuar viendo» es un carrusel.
 - **Lo que T-605 suma al carril A** (cuarta solicitud, `t605_liquidaciones`; PA-81 mínimo; plan aprobado por
   Sergio el 2026-10-28, con la revisión independiente del diseño). **Liberar, retener y soltar cambiaron de
   firma:** `release_payouts(p_period, p_seen)` lleva la huella de la vista que se vio

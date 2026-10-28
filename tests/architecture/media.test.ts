@@ -152,7 +152,11 @@ describe("solo la función única de medios firma", () => {
     // La lección pide como el alumno; la página, antes de pintar, solo decide (no firma).
     const lessonActions = readFileSync(join(src, "app/cursos/[slug]/lecciones/[leccion]/actions.ts"), "utf8");
     expect(lessonActions).toMatch(/getMediaGrant\(jar, lessonId, "watch", \{ closing \}\)/);
-    expect(naming(/\blessonAccess\b/).filter((file) => file.startsWith("src/app/"))).toEqual(["src/app/cursos/[slug]/lecciones/[leccion]/page.tsx"]);
+    // La ficha del curso (T-210) también solo decide: con eso elige su botón principal.
+    expect(naming(/\blessonAccess\b/).filter((file) => file.startsWith("src/app/"))).toEqual([
+      "src/app/cursos/[slug]/lecciones/[leccion]/page.tsx",
+      "src/app/cursos/[slug]/page.tsx",
+    ]);
   });
 
   it("Mux Player se importa en un solo archivo, el reproductor compartido, y las pantallas lo cargan con next/dynamic", () => {

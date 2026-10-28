@@ -212,7 +212,7 @@ const NON_TEXT_ATTRIBUTES =
     // Un manejador no es un texto, aunque adentro compare o navegue con cadenas.
     "on[A-Z][A-Za-z]*",
     // `translate` dice si un traductor del navegador puede tocar el texto: no es texto.
-    "role|lang|dir|translate|key|ref|slot|is|as|variant|size|tone|noticeTone|idPrefix",
+    "role|lang|dir|translate|key|ref|slot|is|as|variant|size|tone|noticeTone|idPrefix|shape",
     "autoComplete|autoCapitalize|autoCorrect|inputMode|enterKeyHint|spellCheck|pattern|accept",
     "loading|decoding|fetchPriority|crossOrigin|referrerPolicy|integrity|nonce|sandbox|allow",
     "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",

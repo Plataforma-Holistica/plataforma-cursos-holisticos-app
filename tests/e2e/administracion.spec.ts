@@ -134,7 +134,7 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
 
   // La alumna sigue con su sesión, y nada quedó en la auditoría.
   await page.goto("/inicio");
-  await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: /^Hola/ })).toBeVisible();
   expect(await auditRows()).toBe(audited);
 });
 
