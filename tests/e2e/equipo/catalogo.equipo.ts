@@ -25,7 +25,11 @@ const slugOf = (name: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-");
 
-/** Un curso de dos lecciones de prueba, cargado como el guion local; si `listed`, publicado y listado como sistema con su maestra. */
+/**
+ * Un curso de dos lecciones, cargado como el guion local; si `listed`, publicado y listado como sistema con su maestra.
+ * La primera es de Mux, como en `leccion.equipo.ts`: de una de prueba la ficha no sabe si hay acceso (`no_video`) y
+ * ofrece «Empezar» a cualquiera, y lo que se prueba es el botón de quien no tiene suscripción.
+ */
 async function loadCourse(slug: string, practice: string, level: string, listed: boolean): Promise<void> {
   const course = {
     slug,
@@ -37,7 +41,7 @@ async function loadCourse(slug: string, practice: string, level: string, listed:
       {
         title: "Uno",
         lessons: [
-          { title: "Primera", video: { provider: "test", asset_id: `${slug}-1`, playback_id: `prueba:${slug}-1`, duration_seconds: 300 } },
+          { title: "Primera", video: { provider: "mux", asset_id: `Asset${slug.replaceAll("-", "")}`, playback_id: `Playback${slug.replaceAll("-", "")}`, duration_seconds: 300 } },
           { title: "Segunda", video: { provider: "test", asset_id: `${slug}-2`, playback_id: `prueba:${slug}-2`, duration_seconds: 300 } },
         ],
       },
