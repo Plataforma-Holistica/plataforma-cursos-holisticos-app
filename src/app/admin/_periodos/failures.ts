@@ -27,6 +27,7 @@ export const FAILURES: Record<PeriodFailure, string> = {
   open_alerts: text.openAlerts,
   rehearsal_missing: text.rehearsalMissing,
   rehearsal_stale: text.rehearsalStale,
+  rehearsal_superseded: text.rehearsalSuperseded,
   timed_out: text.timedOut,
   unbalanced: text.unbalanced,
   not_found: text.notFound,

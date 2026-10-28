@@ -291,7 +291,9 @@ describe("el cierre, de verdad", () => {
     expect(rows[0]).toEqual({ carried_in: "17148", pool: "17148" });
   });
 
-  it("el cierre espera al ensayo en vuelo, y con él confirmado, cierra", async () => {
+  // Cambió con la tercera solicitud de T-605 (decisión de Sergio del 2026-10-27): antes, el cierre que esperaba a
+  // un ensayo en vuelo cerraba con él; ahora quien cierra no lo vio, y el cierre no congela lo que no se vio.
+  it("el cierre espera al ensayo en vuelo, y como quien cierra no lo vio, no cierra; con el ensayo nuevo a la vista, sí", async () => {
     const rehearsing = await connect();
     const closer = await connect();
     try {
@@ -304,7 +306,9 @@ describe("el cierre, de verdad", () => {
       await waitBehind(owner, rehearsing, 1);
       await retire(rehearsing, financeB);
       await rehearsing.query("commit");
-      expect((await waiting).outcome).toBe("closed");
+      expect((await waiting).outcome).toBe("rehearsal_superseded");
+      // Con el ensayo nuevo a la vista (la lectura de la pantalla ya lo ve), cierra.
+      expect((await outcomeOf(closer, "close_period", 203604)).outcome).toBe("closed");
       await retire(closer, financeA);
       await closer.query("commit");
     } finally {

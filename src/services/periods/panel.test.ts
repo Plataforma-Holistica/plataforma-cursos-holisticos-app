@@ -68,8 +68,8 @@ function serviceWith(
       calls.push(`ensayar ${period}`);
       return answer();
     }),
-    closePeriod: vi.fn((_claims, period: number) => {
-      calls.push(`cerrar ${period}`);
+    closePeriod: vi.fn((_claims, period: number, run: string) => {
+      calls.push(`cerrar ${period} ${run}`);
       return answer();
     }),
     download: vi.fn((_claims, run: string) => {
@@ -157,7 +157,7 @@ describe("las decisiones: la guarda primero", () => {
   const decisions = (service: ReturnType<typeof serviceWith>) => [
     () => service.requestRollup(reader, { period: 202710 }),
     () => service.rehearse(reader, { period: 202710 }),
-    () => service.closePeriod(reader, { period: 202710 }),
+    () => service.closePeriod(reader, { period: 202710, run: RUN }),
     () => service.downloadExport(reader, { run: RUN }),
   ];
 
@@ -183,9 +183,11 @@ describe("las decisiones: la guarda primero", () => {
     for (const period of ["202710", null, 202713, 2027.1, undefined]) {
       expect(await service.requestRollup(reader, { period })).toEqual({ kind: "malformed" });
       expect(await service.rehearse(reader, { period })).toEqual({ kind: "malformed" });
-      expect(await service.closePeriod(reader, { period })).toEqual({ kind: "malformed" });
+      expect(await service.closePeriod(reader, { period, run: RUN })).toEqual({ kind: "malformed" });
     }
     for (const run of ["no", RUN.toUpperCase(), 7, null]) expect(await service.downloadExport(reader, { run })).toEqual({ kind: "malformed" });
+    // Cerrar sin decir qué ensayo se tenía a la vista, o con uno sin forma, no llega a la base (T-605, tercera solicitud).
+    for (const run of ["no", RUN.toUpperCase(), 7, null, undefined]) expect(await service.closePeriod(reader, { period: 202710, run })).toEqual({ kind: "malformed" });
     expect(service.calls.filter((call) => call !== "guarda")).toEqual([]);
   });
 });
@@ -202,9 +204,11 @@ describe("lo que contesta la base", () => {
   it("ensayar y cerrar: la respuesta de su lista", async () => {
     const rehearse = serviceWith({ answer: "too_soon" });
     expect(await rehearse.rehearse(reader, { period: 202710 })).toEqual({ kind: "answered", answer: "too_soon" });
+    const superseded = serviceWith({ answer: "rehearsal_superseded" });
+    expect(await superseded.closePeriod(reader, { period: 202710, run: RUN })).toEqual({ kind: "answered", answer: "rehearsal_superseded" });
     const close = serviceWith({ answer: "rehearsal_stale" });
-    expect(await close.closePeriod(reader, { period: 202710 })).toEqual({ kind: "answered", answer: "rehearsal_stale" });
-    expect(close.calls).toEqual(["guarda", "cerrar 202710"]);
+    expect(await close.closePeriod(reader, { period: 202710, run: RUN })).toEqual({ kind: "answered", answer: "rehearsal_stale" });
+    expect(close.calls).toEqual(["guarda", `cerrar 202710 ${RUN}`]);
   });
 
   it("un ensayo que falló dentro de la base se dice como tal, y se reporta", async () => {
@@ -217,7 +221,7 @@ describe("lo que contesta la base", () => {
     const service = serviceWith({ answer: "throws", download: "throws" });
     expect(await service.requestRollup(reader, { period: 202710 })).toEqual({ kind: "unknown" });
     expect(await service.rehearse(reader, { period: 202710 })).toEqual({ kind: "unknown" });
-    expect(await service.closePeriod(reader, { period: 202710 })).toEqual({ kind: "unknown" });
+    expect(await service.closePeriod(reader, { period: 202710, run: RUN })).toEqual({ kind: "unknown" });
     expect(await service.downloadExport(reader, { run: RUN })).toEqual({ kind: "unknown" });
     expect(service.reported).toEqual(Array(4).fill("period_change_unavailable"));
   });
@@ -225,13 +229,13 @@ describe("lo que contesta la base", () => {
   it("el tiempo vencido del ensayo o del cierre se dice como tal, y se reporta", async () => {
     const service = serviceWith({ answer: new CloseFailure("timed_out") });
     expect(await service.rehearse(reader, { period: 202710 })).toEqual({ kind: "timed_out" });
-    expect(await service.closePeriod(reader, { period: 202710 })).toEqual({ kind: "timed_out" });
+    expect(await service.closePeriod(reader, { period: 202710, run: RUN })).toEqual({ kind: "timed_out" });
     expect(service.reported).toEqual(["close_timed_out", "close_timed_out"]);
   });
 
   it("la suma que no cuadra al confirmar el cierre se dice como tal, y se reporta", async () => {
     const service = serviceWith({ answer: new CloseFailure("unbalanced") });
-    expect(await service.closePeriod(reader, { period: 202710 })).toEqual({ kind: "unbalanced" });
+    expect(await service.closePeriod(reader, { period: 202710, run: RUN })).toEqual({ kind: "unbalanced" });
     expect(service.reported).toEqual(["close_unbalanced"]);
   });
 

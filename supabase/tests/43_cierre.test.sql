@@ -41,7 +41,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas(p_id);
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
   perform pruebas.limpiar();
@@ -58,7 +58,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   if v ->> 'outcome' <> 'closed' then
     raise exception 'no cerró: %', v;
   end if;
@@ -234,11 +234,11 @@ select is((select array_agg(p.proname::text order by p.proname) from pg_proc p j
   'como el dueño corren solo el ensayo, el cierre y la comprobación al confirmar');
 -- Desde T-605 (PA-80) el servidor ensaya y cierra; nadie más (`51_panel_del_periodo`).
 select ok(has_function_privilege('app_service', 'private.rehearse_close(public.period_id)', 'execute')
-          and has_function_privilege('app_service', 'private.close_period(public.period_id)', 'execute')
-          and not has_function_privilege('authenticated', 'private.close_period(public.period_id)', 'execute'),
+          and has_function_privilege('app_service', 'private.close_period(public.period_id, uuid)', 'execute')
+          and not has_function_privilege('authenticated', 'private.close_period(public.period_id, uuid)', 'execute'),
   'el servidor ensaya y cierra, y quien tiene sesión no');
 select ok((select bool_and(pg_get_functiondef(oid) like '%transaction_isolation%') from pg_proc
-           where oid in ('private.rehearse_close(public.period_id)'::regprocedure, 'private.close_period(public.period_id)'::regprocedure)),
+           where oid in ('private.rehearse_close(public.period_id)'::regprocedure, 'private.close_period(public.period_id, uuid)'::regprocedure)),
   'los dos exigen read committed: cada sentencia ve lo que confirmó quien esperaba el candado');
 select is(private.code_version(), (select max(version) from supabase_migrations.schema_migrations),
   'la versión del código es la última migración aplicada');
@@ -642,18 +642,18 @@ grant select on public.payout_shares to authenticated;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close table reachable by authenticated'
                   and object_name = 'public.payout_shares'), 've una tabla del cierre al alcance de quien tiene sesión');
 revoke select on public.payout_shares from authenticated;
-grant execute on function private.close_period(public.period_id) to authenticated;
+grant execute on function private.close_period(public.period_id, uuid) to authenticated;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function executable by authenticated'
                   and object_name like 'private.close_period(%'), 've el cierre ejecutable por quien tiene sesión');
-revoke execute on function private.close_period(public.period_id) from authenticated;
+revoke execute on function private.close_period(public.period_id, uuid) from authenticated;
 alter function private.close_input(public.period_id) security definer;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function security definer or without fixed search_path'
                   and object_name like 'private.close_input(%'), 've la entrada como `security definer`');
 alter function private.close_input(public.period_id) security invoker;
-alter function private.close_period(public.period_id) security invoker;
+alter function private.close_period(public.period_id, uuid) security invoker;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close function not security definer'
                   and object_name like 'private.close_period(%'), 've el cierre sin correr como el dueño');
-alter function private.close_period(public.period_id) security definer;
+alter function private.close_period(public.period_id, uuid) security definer;
 alter table public.payout_shares disable trigger require_period_closing;
 select ok(exists (select 1 from private.schema_violations() where problem = 'close trigger missing or disabled: require_period_closing'
                   and object_name = 'public.payout_shares'), 've una tabla del reparto que acepta filas fuera del cierre');

@@ -177,8 +177,8 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
 
       // Enero de 2039 está fuera de la ventana de la consolidación: no se recalcula.
       expect(await service.requestRollup(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "not_rollable" });
-      // Sin ensayo con datos finales, no cierra.
-      expect(await service.closePeriod(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "rehearsal_missing" });
+      // Sin ensayo con datos finales, no cierra (ni con un ensayo que no existe).
+      expect(await service.closePeriod(jar, { period: PERIOD, run: randomUUID() })).toEqual({ kind: "answered", answer: "rehearsal_missing" });
 
       expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "rehearsed" });
       expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "too_soon" });
@@ -192,8 +192,11 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
       const shared = rehearsed.close.rehearsal?.teachers.reduce((sum, row) => sum + row.totalCents, 0);
       expect(shared).toBe((rehearsed.close.rehearsal?.poolCents ?? 0) - (rehearsed.close.rehearsal?.carriedOutCents ?? 0));
 
-      expect(await service.closePeriod(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "closed" });
-      expect(await service.closePeriod(jar, { period: PERIOD })).toEqual({ kind: "answered", answer: "already_closed" });
+      // Cierra con el ensayo que la pantalla muestra; con otro, no (T-605, tercera solicitud).
+      const shown = rehearsed.close.rehearsal!.runId;
+      expect(await service.closePeriod(jar, { period: PERIOD, run: randomUUID() })).toEqual({ kind: "answered", answer: "rehearsal_superseded" });
+      expect(await service.closePeriod(jar, { period: PERIOD, run: shown })).toEqual({ kind: "answered", answer: "closed" });
+      expect(await service.closePeriod(jar, { period: PERIOD, run: shown })).toEqual({ kind: "answered", answer: "already_closed" });
 
       const closed = await service.financeClose(jar, claims, PERIOD);
       if (closed.kind !== "close" || closed.close.period === null) throw new Error("No leyó el cierre.");
@@ -244,7 +247,7 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
       const service = periodsOn(owner);
       const claims = await claimsOf(service, jar);
       expect(await service.rehearse(jar, { period: PERIOD })).toEqual({ kind: "refused" });
-      expect(await service.closePeriod(jar, { period: PERIOD })).toEqual({ kind: "refused" });
+      expect(await service.closePeriod(jar, { period: PERIOD, run: randomUUID() })).toEqual({ kind: "refused" });
       expect(await service.financePeriods(jar, claims)).toEqual({ kind: "unavailable" });
       expect(service.reported).toEqual([]);
     });

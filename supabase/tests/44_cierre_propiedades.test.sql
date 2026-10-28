@@ -159,7 +159,7 @@ begin
                 '{"mode": "full"}');
         perform pruebas.como_finanzas();
         v_r := private.rehearse_close(v_period);
-        v_c := private.close_period(v_period);
+        v_c := private.close_period(v_period, private.last_rehearsal(v_period));
         set constraints payout_periods_balanced immediate;
         set constraints payout_periods_balanced deferred;
         perform pruebas.como_dueno();

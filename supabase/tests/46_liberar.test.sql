@@ -48,7 +48,7 @@ declare
 begin
   perform pruebas.como_finanzas();
   perform private.rehearse_close(p_period);
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
   perform pruebas.limpiar();
@@ -487,7 +487,7 @@ select pruebas.como_dueno();
 -- La comprobación al confirmar de cada liberación (05 §8.6).
 
 select pruebas.como_finanzas();
-select private.close_period(202701);
+select private.close_period(202701, private.last_rehearsal(202701));
 set constraints payout_periods_balanced immediate;
 set constraints payout_periods_balanced deferred;
 select pruebas.como_dueno();

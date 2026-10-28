@@ -57,10 +57,11 @@ describe("StatTile", () => {
     expect(tag.compareDocumentPosition(screen.getByText("$1.00")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("en tono de atención, con su icono", () => {
+  it("en tono de atención, con su icono, y lo dice también a quien no ve el color", () => {
     const { container } = render(<StatTile label="Bote sin consumo" value="$1.00" tone="attention" />);
     expect(screen.getByText("$1.00")).toHaveClass("text-warning");
     expect(container.querySelector("svg")).not.toBeNull();
+    expect(screen.getByText(ui.stat.attention)).toHaveClass("sr-only");
   });
 });
 

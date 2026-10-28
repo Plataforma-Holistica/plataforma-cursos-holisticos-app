@@ -75,12 +75,12 @@ export async function closeAction(previous: CloseState, form: FormData): Promise
   const attempt = nextAttempt(previous);
   const jar = await cookieJar();
   clearNotice(jar);
-  if (request.step === "ask_close") return { kind: "confirming", period: request.period, missingUnderstood: false, attempt };
-  if (request.step === "close" && !request.understood) return { kind: "confirming", period: request.period, missingUnderstood: true, attempt };
+  if (request.step === "ask_close") return { kind: "confirming", period: request.period, run: request.run, missingUnderstood: false, attempt };
+  if (request.step === "close" && !request.understood) return { kind: "confirming", period: request.period, run: request.run, missingUnderstood: true, attempt };
 
   let outcome: PeriodOutcome;
   if (request.step === "rehearse") outcome = rehearseOutcome(await rehearse(jar, { period: request.period }), request.period);
-  else outcome = closeOutcome(await closePeriod(jar, { period: request.period }), request.period);
+  else outcome = closeOutcome(await closePeriod(jar, { period: request.period, run: request.run }), request.period);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
   return { kind: "failed", reason: outcome.reason, step: request.step, attempt };

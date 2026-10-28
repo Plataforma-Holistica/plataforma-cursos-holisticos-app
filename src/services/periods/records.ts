@@ -102,13 +102,16 @@ const periodSchema = z.strictObject({
     .strictObject({
       run_id: id,
       net_revenue_cents: cents.nullable(),
+      student_pools_cents: cents.nullable(),
       pool_cents: cents.nullable(),
       assigned_cents: cents.nullable(),
       unconsumed_cents: cents.nullable(),
       carried_out_cents: cents.nullable(),
     })
     .nullable(),
-  rehearsal: z.strictObject({ ...figures, at, period_status_at_run: status }).nullable(),
+  rehearsal: z.strictObject({ ...figures, student_pools_cents: cents.nullable(), at, period_status_at_run: status }).nullable(),
+  unconsumed_alert_bps: z.number().int().min(1).max(10_000).nullable(),
+  unconsumed_over: z.boolean().nullable(),
   open_alerts: count,
   last_rollup: z.strictObject({ status: z.enum(RUN_STATUSES), mode: z.string().nullable(), started_at: at, finished_at: at.nullable() }).nullable(),
   last_good_rollup: z.strictObject({ mode: z.string().nullable(), started_at: at, finished_at: at.nullable() }).nullable(),
@@ -232,12 +235,23 @@ export function periodReadOf(raw: unknown): FinancePeriod | null {
             activeStudents: p.active_students,
             poolBps: p.pool_bps,
             netRevenueCents: read.close.net_revenue_cents,
+            studentPoolsCents: read.close.student_pools_cents,
             poolCents: read.close.pool_cents,
             assignedCents: read.close.assigned_cents,
             unconsumedCents: read.close.unconsumed_cents,
             carriedOutCents: read.close.carried_out_cents,
           },
-    rehearsal: read.rehearsal === null ? null : { ...figuresOf(read.rehearsal), at: read.rehearsal.at, statusAtRun: read.rehearsal.period_status_at_run },
+    rehearsal:
+      read.rehearsal === null
+        ? null
+        : {
+            ...figuresOf(read.rehearsal),
+            studentPoolsCents: read.rehearsal.student_pools_cents,
+            at: read.rehearsal.at,
+            statusAtRun: read.rehearsal.period_status_at_run,
+          },
+    unconsumedAlertBps: read.unconsumed_alert_bps,
+    unconsumedOver: read.unconsumed_over,
     openAlerts: read.open_alerts,
     lastRollup:
       read.last_rollup === null
@@ -362,9 +376,12 @@ export async function askRehearsal(tx: Tx, periodId: number): Promise<unknown> {
   return row?.outcome ?? null;
 }
 
-/** Cierra (`private.close_period()`). La suma se comprueba al confirmar: un 23514 sale del `commit`. */
-export async function askClose(tx: Tx, periodId: number): Promise<unknown> {
-  const [row] = await tx.query(sql`select private.close_period(${periodId}::integer) ->> 'outcome' as outcome`, outcomeRow);
+/**
+ * Cierra (`private.close_period()`) con el ensayo que se tenía a la vista. La suma se comprueba al confirmar: un
+ * 23514 sale del `commit`.
+ */
+export async function askClose(tx: Tx, periodId: number, runId: string): Promise<unknown> {
+  const [row] = await tx.query(sql`select private.close_period(${periodId}::integer, ${runId}::uuid) ->> 'outcome' as outcome`, outcomeRow);
   return row?.outcome ?? null;
 }
 

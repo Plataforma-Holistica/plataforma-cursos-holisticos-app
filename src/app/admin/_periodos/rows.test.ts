@@ -48,8 +48,10 @@ function period(overrides: Partial<Period> = {}, status: Period["period"]["statu
     collected: { charges: 130, grossCents: 4_537_000, netCents: 3_911_200 },
     assigned: { students: 120, baseCents: 3_800_000 },
     close: null,
-    rehearsal: { ...figures, at: "2027-11-02T10:00:00Z", statusAtRun: "closing" },
+    rehearsal: { ...figures, studentPoolsCents: 1_200_000, at: "2027-11-02T10:00:00Z", statusAtRun: "closing" },
     openAlerts: 0,
+    unconsumedAlertBps: 1500,
+    unconsumedOver: false,
     lastRollup: { status: "succeeded", mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     lastGoodRollup: { mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     rollupRequest: null,
@@ -189,7 +191,7 @@ describe("periodView (PA-79)", () => {
     const rehearsed = periodView(period(), null, NOW);
     expect(rehearsed.pool.value).toBe("$12,000.00");
     expect(rehearsed.poolPercent.value).toBe("60 %");
-    expect(rehearsed.unconsumed).toMatchObject({ value: "$500.00", context: "4.17 % del bote." });
+    expect(rehearsed.unconsumed).toMatchObject({ value: "$500.00", context: "4.17 % del bote del mes. Umbral: 15 %.", tone: undefined });
     expect(rehearsed.figuresSource).toBe("Del ensayo del 2 de noviembre de 2027.");
     const partial = periodView(period({ rehearsal: { ...figures, at: "2027-10-20T10:00:00Z", statusAtRun: "open" } }, "open"), null, NOW);
     expect(partial.pool.tag).toBe("Parcial, del ensayo del 20 de octubre de 2027");
@@ -295,7 +297,7 @@ describe("closeView (PA-80)", () => {
   it("la lista de lo que falta para cerrar, y cerrar solo con la lista completa", () => {
     const ready = closeView(close());
     expect(ready.checks.every((check) => check.done)).toBe(true);
-    expect(ready.close).toEqual({ kind: "ready", button: periodsButton.askClose(202710) });
+    expect(ready.close).toEqual({ kind: "ready", run: RUN, button: periodsButton.askClose(202710, RUN), confirm: periodsButton.close(202710, RUN) });
     const missing = closeView(close({ checks: { openAlerts: 2, finalRehearsal: false, lastRollup: "failed", rollupMarks: true } }));
     expect(missing.checks.filter((check) => !check.done).map((check) => check.label)).toEqual([
       text.checks.rollupFailed,
@@ -431,5 +433,27 @@ describe("los avisos, más finos (segunda revisión de la 70)", () => {
   it("cerrado: lo asignado no dice un conteo de alumnos de ahora", () => {
     const closed = periodView(period({ close: { ...figures, netRevenueCents: 3_700_000 }, rehearsal: null }, "closed"), null, NOW);
     expect(closed.assigned.context).toBe(text.assignedClosedContext);
+  });
+});
+
+describe("el umbral del bote sin consumo en PA-79 (T-605, tercera solicitud)", () => {
+  it("sobre el bote del mes, sin lo que pasó del anterior, como la alerta", () => {
+    const carried = periodView(
+      period({ rehearsal: { ...figures, poolCents: 1_300_000, unconsumedCents: 150_000, studentPoolsCents: 1_200_000, at: "2027-11-02T10:00:00Z", statusAtRun: "closing" } }),
+      null,
+      NOW,
+    );
+    // La cifra es la del mes, como el porcentaje; lo que pasó del anterior se dice aparte (revisión de la 72).
+    expect(carried.unconsumed.value).toBe("$500.00");
+    expect(carried.unconsumed.context).toBe("4.17 % del bote del mes. Umbral: 15 %. Sin contar $1,000.00 que pasaron del periodo anterior.");
+  });
+
+  it("en tono de atención solo si la base dice que lo pasa", () => {
+    expect(periodView(period({ unconsumedOver: true }), null, NOW).unconsumed.tone).toBe("attention");
+    expect(periodView(period({ unconsumedOver: null }), null, NOW).unconsumed.tone).toBeUndefined();
+  });
+
+  it("sin umbral válido, el contexto no lo nombra", () => {
+    expect(periodView(period({ unconsumedAlertBps: null }), null, NOW).unconsumed.context).toBe("4.17 % del bote del mes.");
   });
 });

@@ -52,6 +52,8 @@ export const ui = defineMessages({
   // La cifra sin dato (diseño, sección 5): nunca un cero que no se midió.
   stat: {
     noData: "Sin datos todavía",
+    // La cifra en tono de atención, para quien no ve el color ni el icono.
+    attention: "Pasa el umbral:",
   },
   // El diálogo irreversible lo dice también con palabras, no solo con el color del botón.
   dialog: {
