@@ -483,6 +483,22 @@ que no se ve leyendo un solo archivo:
   `tests/e2e/equipo/catalogo.equipo.ts`, FL-10: como lo público se recuerda 30 s, una prueba que carga
   cursos después de que otra leyó el inicio recarga hasta verlos. Para el A: el inicio ya no se titula
   «Inicio» sino «Hola, …», y «continuar viendo» es un carrusel.
+- **Lo que T-210 suma al carril B** (segunda solicitud, `t210_buscar`; decisión de Sergio del 2026-10-27:
+  sin acentos y por prefijo). Explorar y buscar (`/explorar`, PA-21), que pide sesión (RF-304). La columna
+  `published_courses.search_tsv` sale ahora de `private.catalog_search(título || ' ' || maestro)`: la clave
+  de las listas (`catalog_key`) con la configuración `simple`, sin raíces. La consulta la arma
+  `private.catalog_query(q)` (solo de `app_service`): cada palabra de letras sin acento y cifras como
+  principio (`:*`), todas a la vez, sin operadores de quien escribe; nula si no trae nada que buscar.
+  `catalog_search` la ejecuta cualquiera porque Postgres calcula la columna con los permisos de quien escribe
+  la fila, antes de los disparadores: sin eso, una escritura directa recibía «sin permiso sobre la función»
+  y no el rechazo del guardián (lo vio la 18). El servicio (`explore` en `src/services/browse/`) filtra por
+  práctica, maestro y nivel lo listado que ya se recuerda, y la búsqueda se le pregunta a la base
+  (`searchCatalog`) y se recuerda 30 s por texto; un filtro que no nombra una opción con cursos no se aplica.
+  La pantalla es un formulario GET (`next/form`) que funciona sin JavaScript; con él, busca al dejar de
+  escribir 400 ms y al cambiar un filtro, y no deja los campos vacíos en la dirección. Explorar entra a la
+  barra del alumno, y el inicio gana «Ver todo» en «Para empezar» (al nivel) y en cada práctica. Usa pgTAP
+  35, la integración 70 y, en `tests/e2e/equipo/catalogo.equipo.ts`, FL-11 con JavaScript y sin él. Para el
+  A: la columna de búsqueda cambió de definición; ninguna pieza del A la lee.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

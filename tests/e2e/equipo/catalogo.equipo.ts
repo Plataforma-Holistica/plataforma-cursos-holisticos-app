@@ -5,7 +5,7 @@ import { clearCounters, ownerQuery, person, type Person } from "../support/stack
 
 // El catálogo del alumno (T-210), de extremo a extremo: FL-10 (el inicio de quien no ha empezado
 // nada, y de ahí a la ficha de un curso), las fichas públicas para el visitante, con JavaScript y
-// sin él, y que solo aparece lo publicado.
+// sin él, FL-11 (explorar y buscar, con JavaScript y sin él), y que solo aparece lo publicado.
 //
 // Va con el camino del equipo porque cargar y publicar un curso escriben en la auditoría, que no
 // admite borrado: `pnpm test:e2e:equipo` rehace la base al terminar.
@@ -165,4 +165,58 @@ test("el visitante ve la ficha completa y su botón lleva a registrarse; un curs
     expect((await page.goto(`/maestros/maestra-${HIDDEN}`))?.status()).toBe(404);
     await context.close();
   }
+});
+
+test("FL-11: explorar pide sesión, filtra y busca sin acentos, y regresar de una ficha no pierde lo pedido", async ({ page }) => {
+  const who = await person();
+  // Sin sesión, a entrar; y al entrar, de vuelta a lo que se pidió, con su filtro.
+  await signIn(page, who, `/explorar?practica=${slugOf("Meditación e2e")}`);
+  await expect(page).toHaveURL(new RegExp(`/explorar\\?practica=${slugOf("Meditación e2e")}$`));
+  const results = page.getByRole("region", { name: "Resultados" });
+  await expect(async () => {
+    await page.reload();
+    await expect(results.getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 45_000, intervals: [2_000] });
+  await expect(page.getByRole("link", { name: "Quitar filtro: Meditación e2e" })).toBeVisible();
+  await expect(results.getByRole("link", { name: new RegExp(BEGINNER) })).toHaveCount(0);
+  await expect(page.getByText(HIDDEN)).toHaveCount(0);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Sin filtros, y buscando con acento y mayúsculas el principio de unas palabras: busca solo.
+  await page.getByRole("link", { name: "Limpiar filtros" }).first().click();
+  await expect(page).toHaveURL(/\/explorar$/);
+  await page.getByRole("searchbox", { name: "Buscar por curso o maestro" }).fill("CATÁLOGO-INIC");
+  await expect(page).toHaveURL(/\/explorar\?q=CAT%C3%81LOGO-INIC$/);
+  await expect(results.getByRole("link", { name: new RegExp(`^Curso ${BEGINNER}`) })).toBeVisible();
+  await expect(results.getByRole("link", { name: new RegExp(ADVANCED) })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Maestros" }).getByRole("link", { name: new RegExp(`^Maestra ${BEGINNER}`) })).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // A la ficha y de regreso: la búsqueda sigue ahí.
+  await results.getByRole("link", { name: new RegExp(`^Curso ${BEGINNER}`) }).click();
+  await expect(page).toHaveURL(new RegExp(`/cursos/${BEGINNER}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(/\/explorar\?q=CAT%C3%81LOGO-INIC$/);
+  await expect(page.getByRole("searchbox")).toHaveValue("CATÁLOGO-INIC");
+  await expect(results.getByRole("link", { name: new RegExp(`^Curso ${BEGINNER}`) })).toBeVisible();
+
+  // Sin resultados: lo dice y muestra una selección.
+  await page.getByRole("searchbox").fill("zzzz-ninguno");
+  await expect(page.getByText("No encontramos cursos con esos filtros.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Nuevos" })).toBeVisible();
+});
+
+test("FL-11 sin JavaScript: «Buscar» envía, y la dirección lleva lo pedido", async ({ browser }) => {
+  const who = await person();
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await signIn(page, who, "/explorar");
+  await expect(page).toHaveURL(/\/explorar$/);
+  await page.getByRole("searchbox", { name: "Buscar por curso o maestro" }).fill("maestra catalogo-avan");
+  await page.getByRole("combobox", { name: "Nivel" }).selectOption(slugOf("Avanzado e2e"));
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await expect(page).toHaveURL(/\/explorar\?q=maestra\+catalogo-avan/);
+  await expect(page.getByRole("region", { name: "Resultados" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Quitar filtro: Avanzado e2e" })).toBeVisible();
+  await context.close();
 });
