@@ -40,7 +40,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
   perform pruebas.limpiar();
@@ -54,7 +54,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
-  v := private.close_period(p_period);
+  v := private.close_period(p_period, private.last_rehearsal(p_period));
   if v ->> 'outcome' <> 'closed' then
     raise exception 'no cerró: %', v;
   end if;
@@ -298,6 +298,9 @@ create temporary table ensayo_fallido as select pruebas.ensaya(202610) as r;
 select is((select pruebas.o(r) from ensayo_fallido), 'failed', 'una regla que no cabe en puntos base deja el ensayo fallido');
 select ok((select r ->> 'error' like 'P0001: %' from ensayo_fallido), 'con su error');
 select pruebas.cancela((select id from mala_regla));
+-- Desde la tercera solicitud de T-605 (decisión de Sergio del 2026-10-27) el cierre usa el último ensayo, el que
+-- la pantalla muestra; ese es el fallido: se ensaya otra vez, ya con la regla buena.
+select pruebas.ensaya(202610);
 
 -- ---------------------------------------------------------------------------------------
 -- La comprobación al confirmar: las liquidaciones y el bono (05 §8.6, 9 y 10).

@@ -97,7 +97,14 @@ export async function retire(client: Client, finance: Finance): Promise<void> {
 
 /** La respuesta de una función de finanzas de un solo argumento. */
 export const outcomeOf = async (client: Client, call: string, arg: unknown) =>
-  (await client.query<{ r: Record<string, unknown> }>(`select private.${call}($1) as r`, [arg])).rows[0]!.r;
+  (await client.query<{ r: Record<string, unknown> }>(`select private.${call}(${call === "close_period" ? `$1, ${SHOWN}` : "$1"}) as r`, [arg]))
+    .rows[0]!.r;
+
+/**
+ * Cerrar recibe el ensayo que se tenía a la vista (T-605, tercera solicitud): el último del periodo, como lo lee
+ * la pantalla con la lectura del servidor. Las pruebas que no tratan de eso cierran con ese.
+ */
+export const SHOWN = "(private.finance_close($1) #>> '{rehearsal,run_id}')::uuid";
 
 /** Una llamada de finanzas confirmada: lo que se compruebe al confirmar corre de verdad. */
 export async function asFinance<T>(finance: Finance, work: (client: Client) => Promise<T>): Promise<T> {
