@@ -71,7 +71,7 @@ const FAILURES = {
   release_timed_out:
     "Liberar las liquidaciones, o soltar una retenida que se libera ahí mismo, pasó del tope de tiempo de la base (statement_timeout, 57014): no se guardó nada y se le pidió a finanzas intentar de nuevo. Si se repite, liberar ya no cabe en una transacción del servidor: medirlo con test:escala.",
   release_unbalanced:
-    "Al confirmar una liberación, la comprobación diferida de lo liberado la rechazó (23514, check_payout_released): no se liberó nada. Es un defecto del cálculo: revisar assert_payout_released y el registro de la base.",
+    "Liberar, o soltar una retenida que se libera ahí mismo, lo rechazó la base con 23514 (un guardián del saldo o de la liquidación a media sentencia, o la comprobación diferida de lo liberado al confirmar, check_payout_released): no se liberó nada. Es un defecto del cálculo: revisar assert_payout_released, los guardianes y el registro de la base.",
   legal_text_unavailable:"No se pudo leer un texto legal de la base: quien lo abrió no pudo leerlo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",

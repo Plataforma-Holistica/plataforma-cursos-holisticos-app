@@ -11,7 +11,7 @@ import { financeClose, financePayouts, financePeriod, financePeriods } from "@/s
 import { CloseScreen, type CloseNotice } from "./close-screen";
 import { PeriodsScreen } from "./list-screen";
 import { PeriodScreen } from "./panel-screen";
-import { acceptedReleaseNotice, payoutsView } from "./payouts-rows";
+import { acceptedReleaseNotice, acceptedUpdateNotice, payoutsView } from "./payouts-rows";
 import { PayoutsScreen, type PayoutsNotice } from "./payouts-screen";
 import { acceptedCloseNotice, acceptedRollupNotice, closeView, periodsView, periodView } from "./rows";
 
@@ -65,11 +65,11 @@ export async function PayoutsSection({ claims, period }: { claims: VerifiedClaim
   const read = await financePayouts(reader, claims, period);
   if (read.kind === "unavailable") return <UnavailableScreen retryHref={periodPayoutsPath(period)} withSession />;
   if (read.kind === "not_found" || read.payouts.period === null) notFound();
-  // Liberar redirige aquí con su aviso, que no dice de qué periodo es: se pinta solo si este se liberó hace un
-  // momento. El de las demás decisiones dice solo que la tabla ya muestra el cambio.
+  // Las decisiones redirigen aquí con su aviso, que no dice de qué periodo es: se pinta solo si este se liberó (o
+  // cambió) hace un momento.
   const notice = readNotice(reader);
   const now = new Date().toISOString();
   const done: PayoutsNotice | null =
-    notice === "payouts_released" ? (acceptedReleaseNotice(read.payouts, now) ? notice : null) : notice === "payouts_updated" ? notice : null;
+    notice === "payouts_released" ? (acceptedReleaseNotice(read.payouts, now) ? notice : null) : notice === "payouts_updated" && acceptedUpdateNotice(read.payouts, now) ? notice : null;
   return <PayoutsScreen view={payoutsView(read.payouts)} done={done} />;
 }

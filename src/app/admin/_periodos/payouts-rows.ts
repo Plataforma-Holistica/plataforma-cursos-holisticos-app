@@ -217,10 +217,18 @@ export function payoutsView(read: Read): PayoutsView {
   };
 }
 
-/** El aviso de que se liberó (cookie sin periodo): solo si este periodo se liberó hace un momento. */
-export function acceptedReleaseNotice(read: Read, now: string): boolean {
-  const at = read.period.payoutsReleasedAt;
+const recent = (at: string | null, now: string): boolean => {
   if (at === null) return false;
   const age = new Date(now).getTime() - new Date(at).getTime();
   return age >= 0 && age < 120_000;
+};
+
+/** El aviso de que se liberó (cookie sin periodo): solo si este periodo se liberó hace un momento. */
+export function acceptedReleaseNotice(read: Read, now: string): boolean {
+  return recent(read.period.payoutsReleasedAt, now);
+}
+
+/** El aviso «Listo» de las demás decisiones (cookie sin periodo): solo si este periodo cambió hace un momento. */
+export function acceptedUpdateNotice(read: Read, now: string): boolean {
+  return recent(read.period.changedAt, now);
 }

@@ -78,6 +78,8 @@ export type FinancePayouts =
         payoutsReleasedAt: string | null;
         paidAt: string | null;
         minimumCents: number | null;
+        /** El último cambio a sus liquidaciones o a sus bonos; nulo si no tiene. */
+        changedAt: string | null;
       };
       /** Lo que hace falta para liberar; nulo si no se libera (abierto, en cierre o ya liberado). */
       release: { fingerprint: string; pendingFounderBonuses: number } | null;

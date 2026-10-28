@@ -62,7 +62,7 @@ const BETO = row({
 
 const read = (over: Partial<Read> = {}, period: Partial<Read["period"]> = {}): Read => ({
   freshCode: true,
-  period: { periodId: 202710, status: "closed", closedAt: "2027-11-02T10:00:00Z", payoutsReleasedAt: null, paidAt: null, minimumCents: 10000, ...period },
+  period: { periodId: 202710, status: "closed", closedAt: "2027-11-02T10:00:00Z", payoutsReleasedAt: null, paidAt: null, minimumCents: 10000, changedAt: null, ...period },
   release: { fingerprint: SEEN, pendingFounderBonuses: 0 },
   payouts: [row({}), row({ ...BETO, founderBonus: { ...BETO.founderBonus!, status: "confirmed" }, subtotalCents: 3852 })],
   ...over,
@@ -106,13 +106,25 @@ describe("PA-81, las liquidaciones del periodo", () => {
     expect(box).toHaveAccessibleDescription(text.missingUnderstood);
   });
 
-  it("el diálogo de una vista que ya no es la que se ve no se pinta", async () => {
+  // Cambió con la revisión del diff: antes no se pintaba nada, y la persona pulsaba «Liberar» sin respuesta.
+  it("el diálogo de una vista que ya no es la que se ve no se pinta, y se dice que las cifras cambiaron", async () => {
     actions.payoutsAction.mockResolvedValueOnce({ kind: "asking", ask: { what: "release", seen: "ef".repeat(32) }, missing: null, attempt: 1 });
     const user = userEvent.setup();
     render(<PayoutsScreen view={payoutsView(read())} />);
     await user.click(screen.getByRole("button", { name: text.release }));
-    await waitFor(() => expect(actions.payoutsAction).toHaveBeenCalled());
+    expect(await screen.findByText(text.failures.previewChanged)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("mientras se pregunta liberar, la tabla muestra todas, aunque haya un filtro puesto", async () => {
+    actions.payoutsAction.mockResolvedValueOnce({ kind: "asking", ask: { what: "release", seen: SEEN }, missing: null, attempt: 1 });
+    const user = userEvent.setup();
+    render(<PayoutsScreen view={payoutsView(read({ payouts: [row({}), row({ ...BETO, status: "on_hold", founderBonus: null })] }))} />);
+    await user.click(within(screen.getByRole("group", { name: text.filterLabel })).getByRole("button", { name: "Retenida (1)" }));
+    expect(within(screen.getByRole("table")).queryByRole("rowheader", { name: "Ana" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: text.release }));
+    await screen.findByRole("dialog");
+    expect(within(screen.getByRole("table")).getByRole("rowheader", { name: "Ana" })).toBeInTheDocument();
   });
 
   it("si las cifras cambiaron desde que se vio, liberar no libera y lo dice", async () => {
@@ -145,6 +157,8 @@ describe("PA-81, las liquidaciones del periodo", () => {
     await user.click(first!);
     expect(sent(actions.payoutsAction)).toEqual({ do: payoutsButton.askHold(Y1, "calculated") });
     const reason = await screen.findByRole("textbox", { name: text.holdReason });
+    // El botón pulsado se fue con la respuesta: el foco va al motivo.
+    await waitFor(() => expect(reason).toHaveFocus());
     expect(screen.queryAllByRole("button", { name: text.hold })).toHaveLength(0);
     expect(screen.queryByRole("button", { name: text.release })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: text.confirmHold }));

@@ -179,7 +179,15 @@ begin
         where x ->> 'status' is distinct from 'on_hold'
           and (y.subtotal_cents <> (x ->> 'subtotal_cents')::bigint
                or (y.status = 'awaiting_invoice') <> (x ->> 'reaches_minimum')::boolean);
-        v_problems := coalesce(v_problems, '{}');
+        v_problems := coalesce(v_problems, '{}');
+        -- Y al revés (revisión del diff de la 73): lo liberado en este mes es exactamente lo que la vista decía.
+        if (select array_agg(y.teacher_id order by y.teacher_id) from public.payouts y
+            where y.period_id = v_period and y.released_at is not null and y.status <> 'on_hold')
+           is distinct from
+           (select array_agg((x ->> 'teacher_id')::uuid order by (x ->> 'teacher_id')::uuid) from jsonb_array_elements(v_preview -> 'rows') x
+            where x ->> 'status' is distinct from 'on_hold') then
+          v_problems := v_problems || format('%s: lo liberado no son las filas de la vista', v_period);
+        end if;
         for v_y in select y.id from public.payouts y where y.status = 'on_hold' and random() < 0.5 order by y.period_id, y.id loop
           perform private.unhold_payout(v_y.id, 'Suelta al azar.', private.unhold_preview(v_y.id) ->> 'fingerprint');
         end loop;

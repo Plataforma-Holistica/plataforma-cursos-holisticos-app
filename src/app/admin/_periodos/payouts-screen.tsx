@@ -85,18 +85,24 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
 
   const attempt = state.kind === "idle" ? 0 : state.attempt;
   const failure = pending || state.kind !== "failed" ? null : state.reason === "needs_code" && view.canChange ? null : state;
-  const result = failure === null ? null : payoutFailureText(failure.reason, failure.detail);
+  const asking = state.kind === "asking" && view.canChange && askStillShown(state.ask, view) ? state : null;
+  // Se preguntaba por algo que, con la página leída de nuevo, ya no es lo que se ve: se dice, en vez de callar.
+  const stale = !pending && state.kind === "asking" && view.canChange && asking === null ? (state.ask.what === "release" ? "preview_changed" : "changed") : null;
+  const result = failure !== null ? payoutFailureText(failure.reason, failure.detail) : stale !== null ? payoutFailureText(stale) : null;
   const { block, answer, spoken } = useAnswerFocus(pending, attempt, result);
   const showDone = done !== null && state.kind === "idle" && !pending;
-  const asking = state.kind === "asking" && view.canChange && askStillShown(state.ask, view) ? state : null;
-  // Confirmar sin la casilla o sin el motivo: el foco va al campo, que tiene el error como descripción.
-  const missingAttempt = asking !== null && asking.missing !== null ? asking.attempt : 0;
+  // Retener y anular abren su motivo, y el botón pulsado se va: el foco va al motivo. Confirmar sin la casilla o
+  // sin el motivo: el foco va al campo, que tiene el error como descripción.
+  const askedWhat = asking?.ask.what ?? null;
+  const focusAttempt = asking !== null && (asking.missing !== null || askedWhat === "hold" || askedWhat === "void") ? asking.attempt : 0;
+  const focusTarget = asking?.missing === "understood" ? UNDERSTOOD_ID : REASON_ID;
   useEffect(() => {
-    if (missingAttempt > 0) document.getElementById(asking?.missing === "reason" ? REASON_ID : UNDERSTOOD_ID)?.focus();
-  }, [missingAttempt, asking?.missing]);
+    if (focusAttempt > 0) document.getElementById(focusTarget)?.focus();
+  }, [focusAttempt, focusTarget]);
 
-  const shown = filter === "all" ? view.rows : view.rows.filter((row) => row.filter === filter);
   const releaseAsked = asking !== null && asking.ask.what === "release" && view.release.kind === "offered" ? asking : null;
+  // Liberar libera todas: mientras se pregunta, la tabla las muestra todas, sin filtro.
+  const shown = filter === "all" || releaseAsked !== null ? view.rows : view.rows.filter((row) => row.filter === filter);
   const unholdAsked = asking !== null && asking.ask.what === "unhold" ? asking.ask : null;
   const unholdRow = unholdAsked === null ? null : (view.rows.find((row) => row.unhold?.ask === payoutsButton.askUnhold(unholdAsked.payout, unholdAsked.seen)) ?? null);
 
@@ -143,7 +149,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
           <h2 id={HEADING_ID} className="sr-only">
             {t(text.caption)}
           </h2>
-          <BlockResult message={result} tone={failure === null ? "warning" : payoutToneOf(failure.reason)} pending={pending} pendingText={text.releasing} answer={answer} spoken={spoken} />
+          <BlockResult message={result} tone={failure === null ? "warning" : payoutToneOf(failure.reason)} pending={pending} pendingText={text.working} answer={answer} spoken={spoken} />
           {view.estimated && <p className="text-text-2">{text.estimatedNote}</p>}
 
           {mounted && view.filters.length > 2 && (

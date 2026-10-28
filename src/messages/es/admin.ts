@@ -626,7 +626,6 @@ export const admin = defineMessages({
         one: "Liberar liquidaciones: falta decidir {count} bono de fundador.",
         other: "Liberar liquidaciones: falta decidir {count} bonos de fundador.",
       },
-      releaseNotEnabled: "En producción las liquidaciones no se liberan mientras falten la CLABE y las retenciones de cada liquidación.",
       releaseDialogTitle: "¿Liberar las liquidaciones de {period}?",
       releaseDialogBody: {
         one: "{count} liquidación pasa a «en espera de factura» y {carried} a «acumulada», con los montos de la tabla. Las retenidas se quedan como están.",
@@ -651,7 +650,7 @@ export const admin = defineMessages({
       confirmUnhold: "Soltar la liquidación",
       unholding: "Soltando…",
       confirmBonus: "Confirmar bono",
-      confirmingBonus: "Confirmando…",
+      working: "Un momento…",
       voidBonus: "Anular bono",
       voidReason: "Motivo de la anulación",
       voidReasonMissing: "Escribe por qué se anula.",

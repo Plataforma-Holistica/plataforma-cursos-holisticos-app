@@ -441,6 +441,7 @@ const payoutsSchema = z.strictObject({
     payouts_released_at: at.nullable(),
     paid_at: at.nullable(),
     minimum_cents: cents.nullable(),
+    changed_at: at.nullable(),
   }),
   release: z.strictObject({ fingerprint, pending_founder_bonuses: count }).nullable(),
   payouts: z.array(payoutRow),
@@ -462,6 +463,7 @@ export function payoutsReadOf(raw: unknown): FinancePayouts | null {
       payoutsReleasedAt: p.payouts_released_at,
       paidAt: p.paid_at,
       minimumCents: p.minimum_cents,
+      changedAt: p.changed_at,
     },
     release: read.release === null ? null : { fingerprint: read.release.fingerprint, pendingFounderBonuses: read.release.pending_founder_bonuses },
     payouts: read.payouts.map((row) => ({

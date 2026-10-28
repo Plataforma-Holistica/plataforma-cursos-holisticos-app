@@ -43,7 +43,7 @@ const row = (over: Partial<PayoutRow>): PayoutRow => ({
 
 const read = (over: Partial<Read> = {}, period: Partial<Read["period"]> = {}): Read => ({
   freshCode: true,
-  period: { periodId: PERIOD, status: "closed", closedAt: "2027-11-02T10:00:00Z", payoutsReleasedAt: null, paidAt: null, minimumCents: 10000, ...period },
+  period: { periodId: PERIOD, status: "closed", closedAt: "2027-11-02T10:00:00Z", payoutsReleasedAt: null, paidAt: null, minimumCents: 10000, changedAt: null, ...period },
   release: { fingerprint: SEEN, pendingFounderBonuses: 0 },
   payouts: [row({})],
   ...over,

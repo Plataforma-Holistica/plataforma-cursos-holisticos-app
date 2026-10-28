@@ -135,6 +135,9 @@ declare
   v_pending integer;
   v_minimum bigint;
   v_teacher uuid;
+  v_locked uuid[] := '{}';
+  v_preview jsonb;
+  v_row jsonb;
   v_payout uuid;
   v_status public.payout_status;
   v_released integer := 0;
@@ -178,20 +181,30 @@ begin
   end if;
   -- Los candados de saldo de sus maestros, en orden, antes de mirar la vista: soltar una retenida de otro
   -- periodo mueve un saldo con su candado, y así no lo mueve entre la vista y la liberación. Soltar toma uno
-  -- solo: no hay ciclo. Quien pasa a tener algo pendiente después de tomarlos cambia la vista.
+  -- solo: no hay ciclo.
   for v_teacher in select y.teacher_id from public.payouts y where y.period_id = p_period
                    union select x from private.payout_pending_teachers(p_period) as x
                    order by 1 loop
     perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('teacher_balance:' || v_teacher::text, 0));
+    v_locked := v_locked || v_teacher;
   end loop;
-  if private.release_preview(p_period) ->> 'fingerprint' is distinct from p_seen then
+  v_preview := private.release_preview(p_period);
+  if v_preview ->> 'fingerprint' is distinct from p_seen then
+    return '{"outcome": "preview_changed"}'::jsonb;
+  end if;
+  -- Quien pasó a tener algo pendiente entre los candados y la vista no tiene el suyo: su saldo podría moverse.
+  if exists (select 1 from pg_catalog.jsonb_array_elements(v_preview -> 'rows') x
+             where not ((x.value ->> 'teacher_id')::uuid = any (v_locked))) then
     return '{"outcome": "preview_changed"}'::jsonb;
   end if;
 
-  for v_teacher in select * from private.payout_pending_teachers(p_period) loop
-    perform private.ensure_payout(p_period, v_teacher);
-  end loop;
-  for v_payout in select y.id from public.payouts y where y.period_id = p_period and y.status = 'calculated' order by y.teacher_id loop
+  -- Se libera la vista que se comparó, no una consulta nueva: en read committed otra sentencia vería a quien
+  -- pasó a tener algo pendiente después (soltando en otro periodo), y le daría y liberaría una liquidación que
+  -- nadie vio. Ese saldo entra al periodo siguiente sin liberar, como todo lo que llega después.
+  for v_row in select x.value from pg_catalog.jsonb_array_elements(v_preview -> 'rows') x
+               where x.value ->> 'status' is null or x.value ->> 'status' = 'calculated'
+               order by x.value ->> 'teacher_id' loop
+    v_payout := coalesce((v_row ->> 'payout_id')::uuid, private.ensure_payout(p_period, (v_row ->> 'teacher_id')::uuid));
     v_status := private.release_payout(v_payout, v_minimum);
     v_released := v_released + 1;
     if v_status = 'awaiting_invoice' then
@@ -344,7 +357,12 @@ begin
     'fresh_code', private.finance_change_gate() is null,
     'period', pg_catalog.jsonb_build_object(
       'period_id', p.period_id, 'status', p.status, 'closed_at', p.closed_at, 'payouts_released_at', p.payouts_released_at,
-      'paid_at', p.paid_at, 'minimum_cents', v_minimum),
+      'paid_at', p.paid_at, 'minimum_cents', v_minimum,
+      -- El último cambio a sus liquidaciones o a sus bonos: el aviso «Listo» se pinta solo si fue hace un momento.
+      'changed_at', (select pg_catalog.max(t) from (
+                       select y.updated_at from public.payouts y where y.period_id = p_period
+                       union all select b.decided_at from public.bonuses b where b.period_id = p_period
+                       union all select b.voided_at from public.bonuses b where b.period_id = p_period) c (t))),
     'release', case when v_preview is not null and v_unreleased then pg_catalog.jsonb_build_object(
                  'fingerprint', v_preview ->> 'fingerprint',
                  'pending_founder_bonuses', (select pg_catalog.count(*) from public.bonuses b
