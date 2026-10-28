@@ -9,7 +9,8 @@
 -- la base solo cierra si ese es el último del periodo, salió bien con datos finales y es de la entrada de
 -- ahora (`rehearsal_superseded`, `rehearsal_missing`, `rehearsal_stale`). «El último» tiene una sola
 -- definición (`last_rehearsal`, por `finished_at`: `started_at` empata dentro de una transacción), la misma
--- que leen las pantallas.
+-- que muestra PA-80 (`finance_close`). PA-79 y la lista toman sus cifras del último que salió bien, ordenado
+-- igual.
 --
 -- Además, PA-79 lee el umbral de `ALERTA_SIN_CONSUMO_PCT` y si el bote sin consumo lo pasa, con la expresión
 -- de la alerta (decisiones de Sergio del 2026-10-27: el umbral vigente al cerrar, solo con datos finales,

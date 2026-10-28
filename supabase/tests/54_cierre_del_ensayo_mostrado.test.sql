@@ -267,7 +267,8 @@ select is((pruebas.lee('finance_period', 202610) #>> '{rehearsal,student_pools_c
 set local session_replication_role = replica;
 update public.close_runs set result_hash = sha256(convert_to('otro', 'UTF8')) where id = (select id from ensayos where et = 'd');
 set local session_replication_role = origin;
-select throws_ok($$select pruebas.cierra(202610, (select id from ensayos where et = 'd'))$$, 'XX000', null,
+select throws_ok($$select pruebas.cierra(202610, (select id from ensayos where et = 'd'))$$, 'XX000',
+  'close result differs from the rehearsal on view',
   'si lo calculado no es el resultado del ensayo mostrado, no se cierra');
 set local session_replication_role = replica;
 update public.close_runs r set result_hash = s.result_hash

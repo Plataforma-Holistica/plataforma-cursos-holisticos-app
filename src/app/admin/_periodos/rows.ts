@@ -135,18 +135,12 @@ const modeOf = (mode: string | null) => (mode === "full" ? text.rollupModes.full
 const shareOf = (part: number, whole: number) => Math.round((part * 10_000) / whole);
 
 function figureTiles(source: RunFigures | null, tag: string | undefined) {
-  const pool = source?.poolCents ?? null;
   const unconsumed = source?.unconsumedCents ?? null;
   return {
     students: { label: text.students, value: source?.activeStudents == null ? null : String(source.activeStudents), tag },
-    pool: { label: text.pool, value: pool === null ? null : money(pool), tag },
+    pool: { label: text.pool, value: source?.poolCents == null ? null : money(source.poolCents), tag },
     poolPercent: { label: text.poolPercent, value: source?.poolBps == null ? null : percent(source.poolBps), tag },
-    unconsumed: {
-      label: text.unconsumed,
-      value: unconsumed === null ? null : money(unconsumed),
-      context: unconsumed === null || pool === null || pool <= 0 ? undefined : t(text.unconsumedContext, { percent: percent(shareOf(unconsumed, pool)) }),
-      tag,
-    },
+    unconsumed: { label: text.unconsumed, value: unconsumed === null ? null : money(unconsumed), tag },
   };
 }
 
@@ -156,21 +150,29 @@ function figureTiles(source: RunFigures | null, tag: string | undefined) {
  * base dice que lo pasa, que lo dice solo con datos finales.
  */
 function unconsumedTile(read: Extract<FinancePeriod, { period: object }>, source: RunFigures | null, tag: string | undefined): Tile {
-  const unconsumed = source?.unconsumedCents ?? null;
   const pools = source?.studentPoolsCents ?? null;
   const assigned = source?.assignedCents ?? null;
-  let context: string | undefined;
-  if (pools !== null && assigned !== null && pools > 0) {
+  // Sin el bote del mes (una lectura de antes), la cifra con lo que pasó del anterior, sin proporción.
+  if (pools === null || assigned === null) {
+    const unconsumed = source?.unconsumedCents ?? null;
+    return { label: text.unconsumed, value: unconsumed === null ? null : money(unconsumed), tag };
+  }
+  // La cifra y su proporción son del mes, como la alerta (revisión de la 72); lo que pasó del anterior se dice aparte.
+  const parts: string[] = [];
+  if (pools > 0) {
     const share = percent(shareOf(pools - assigned, pools));
-    context =
+    parts.push(
       read.unconsumedAlertBps === null
         ? t(text.unconsumedMonthContext, { percent: share })
-        : t(text.unconsumedThresholdContext, { percent: share, threshold: percent(read.unconsumedAlertBps) });
+        : t(text.unconsumedThresholdContext, { percent: share, threshold: percent(read.unconsumedAlertBps) }),
+    );
   }
+  const carried = (source?.poolCents ?? pools) - pools;
+  if (carried > 0) parts.push(t(text.unconsumedCarried, { amount: money(carried) }));
   return {
     label: text.unconsumed,
-    value: unconsumed === null ? null : money(unconsumed),
-    context,
+    value: money(pools - assigned),
+    context: parts.length === 0 ? undefined : parts.join(" "),
     tag,
     tone: read.unconsumedOver === true ? "attention" : undefined,
   };
@@ -377,8 +379,8 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
     checks.openAlerts > 0
       ? { label: t(plural(checks.openAlerts, text.checks.alertsPending), { count: checks.openAlerts }), done: false, href: ROUTES.alerts }
       : { label: text.checks.alertsClear, done: true },
-    // Cerrar usa el último ensayo con datos finales, pero la pantalla solo muestra el último: si ese falló
-    // o es parcial, quien confirma no estaría viendo el reparto que congela (revisión de la 70).
+    // Cerrar usa el último ensayo, el que se muestra, y exige que haya salido bien con datos finales (T-605,
+    // tercera solicitud): si falló o es parcial, la lista lo dice y no se ofrece cerrar.
     rehearsal?.status === "failed"
       ? { label: text.checks.rehearsalFailed, done: false }
       : checks.finalRehearsal && rehearsal?.statusAtRun === "closing"

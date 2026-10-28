@@ -443,7 +443,9 @@ describe("el umbral del bote sin consumo en PA-79 (T-605, tercera solicitud)", (
       null,
       NOW,
     );
-    expect(carried.unconsumed.context).toBe("4.17 % del bote del mes. Umbral: 15 %.");
+    // La cifra es la del mes, como el porcentaje; lo que pasó del anterior se dice aparte (revisión de la 72).
+    expect(carried.unconsumed.value).toBe("$500.00");
+    expect(carried.unconsumed.context).toBe("4.17 % del bote del mes. Umbral: 15 %. Sin contar $1,000.00 que pasaron del periodo anterior.");
   });
 
   it("en tono de atención solo si la base dice que lo pasa", () => {

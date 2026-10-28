@@ -34,6 +34,7 @@ export function StatTile({ label, value, context, tag, tone }: StatTileProps) {
       ) : (
         <p className="flex items-center gap-2">
           {attention && <Icon icon={TriangleAlert} className="text-warning" />}
+          {attention && <span className="sr-only">{ui.stat.attention}</span>}
           <span className={cx("text-stat tabular-nums", attention ? "text-warning" : "text-text")}>{value}</span>
         </p>
       )}
