@@ -365,7 +365,7 @@ test("con acceso y sin JavaScript: la página se lee, y dice que para ver hace f
   await expect(page.getByRole("heading", { level: 2, name: "Sobre esta lección" })).toBeVisible();
   await expect(page.getByText("Un curso para probar la lección.").first()).toBeVisible();
   // El deslinde (RF-809), al pie.
-  await expect(page.getByRole("main").locator("> p").last()).toHaveText("La Plataforma es educativa. No sustituye la atención médica ni psicológica profesional.");
+  await expect(page.getByRole("main").locator("> :last-child")).toHaveText("La Plataforma es educativa. No sustituye la atención médica ni psicológica profesional.");
   await context.close();
 });
 

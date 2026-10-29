@@ -37,6 +37,7 @@ import { completeView, LEGAL_BOX, type CompleteState } from "@/app/(cuenta)/veri
 import { CompleteScreen } from "@/app/(cuenta)/verificar/[token]/screen";
 import type { ResendState } from "@/app/(cuenta)/verificar/outcomes";
 import { CheckMailScreen } from "@/app/(cuenta)/verificar/screen";
+import { terms as termsBlock } from "@/messages/es/terms";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -77,6 +78,9 @@ describe("la pantalla de registro (PA-10)", () => {
     // En otra pestaña: no se pierde lo escrito.
     for (const link of [terms, privacy]) expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar");
+    // El deslinde (RF-809) se lee antes del botón.
+    const disclaimer = screen.getByText(`${termsBlock.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`);
+    expect(disclaimer.compareDocumentPosition(screen.getByRole("button", { name: "Crear mi cuenta" }))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(await a11yViolations(container)).toEqual([]);
   });
 
