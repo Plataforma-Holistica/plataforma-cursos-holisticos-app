@@ -6,6 +6,7 @@ import { clearCounters, ownerQuery, person, type Person } from "../support/stack
 // El catálogo del alumno (T-210), de extremo a extremo: FL-10 (el inicio de quien no ha empezado
 // nada, y de ahí a la ficha de un curso), las fichas públicas para el visitante, con JavaScript y
 // sin él, FL-11 (explorar y buscar, con JavaScript y sin él), y que solo aparece lo publicado.
+// Desde la tercera solicitud, FL-11 paso 6: guardar en Mi lista y quitar, con JavaScript y sin él.
 //
 // Va con el camino del equipo porque cargar y publicar un curso escriben en la auditoría, que no
 // admite borrado: `pnpm test:e2e:equipo` rehace la base al terminar.
@@ -218,5 +219,99 @@ test("FL-11 sin JavaScript: «Buscar» envía, y la dirección lleva lo pedido",
   await expect(page).toHaveURL(/\/explorar\?q=maestra\+catalogo-avan/);
   await expect(page.getByRole("region", { name: "Resultados" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
   await expect(page.getByRole("link", { name: "Quitar filtro: Avanzado e2e" })).toBeVisible();
+  await context.close();
+});
+
+const MEDITATION = slugOf("Meditación e2e");
+const saveButton = (page: Page, slug: string) => page.getByRole("button", { name: `Guardar en mi lista: Curso ${slug}` });
+const removeButton = (page: Page, slug: string) => page.getByRole("button", { name: `Quitar de mi lista: Curso ${slug}` });
+
+/** La ficha de un curso, ya con lo listado de ahora: lo público se recuerda 30 segundos. */
+async function openCourse(page: Page, slug: string): Promise<void> {
+  await expect(async () => {
+    await page.goto(`/cursos/${slug}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Curso ${slug}`, { timeout: 1_000 });
+  }).toPass({ timeout: 45_000, intervals: [2_000] });
+}
+
+test("FL-11 paso 6: guardar en la ficha, verlo en «Mi lista», quitar desde el carrusel y guardar desde explorar con los filtros puestos", async ({ page }) => {
+  const who = await person();
+  await signIn(page, who, "/entrar?volver=%2Finicio");
+  await expect(page).toHaveURL(/\/inicio$/);
+  await expect(page.getByRole("heading", { level: 2, name: "Mi lista" })).toHaveCount(0);
+
+  // En la ficha: guardar, y el botón dice ya quitar, sin soltar el foco.
+  await openCourse(page, BEGINNER);
+  await saveButton(page, BEGINNER).click();
+  await expect(removeButton(page, BEGINNER)).toBeFocused();
+  await expect(page.getByText("Guardado en tu lista.")).toBeAttached();
+  expect(await a11yViolations(page)).toEqual([]);
+  await openCourse(page, ADVANCED);
+  await saveButton(page, ADVANCED).click();
+  await expect(removeButton(page, ADVANCED)).toBeVisible();
+
+  // En el inicio, después de «Para empezar» y antes de «Nuevos», lo último guardado primero.
+  await page.goto("/inicio");
+  const row = page.getByRole("list", { name: "Mi lista" });
+  await expect(row.getByRole("link")).toHaveText([new RegExp(`^Curso ${ADVANCED}`), new RegExp(`^Curso ${BEGINNER}`)]);
+  const headings = await page.getByRole("heading", { level: 2 }).allTextContents();
+  expect(headings.indexOf("Mi lista")).toBe(headings.indexOf("Para empezar") + 1);
+  expect(headings.indexOf("Nuevos")).toBe(headings.indexOf("Mi lista") + 1);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Quitar desde el carrusel: la tarjeta se va al momento y el foco pasa a la siguiente.
+  await removeButton(page, ADVANCED).click();
+  await expect(row.getByRole("link")).toHaveCount(1);
+  await expect(removeButton(page, BEGINNER)).toBeFocused();
+  await expect(page.getByText("Quitado de tu lista.")).toBeAttached();
+
+  // En explorar, con un filtro: guardar no lo pierde.
+  await page.goto(`/explorar?practica=${MEDITATION}`);
+  const results = page.getByRole("region", { name: "Resultados" });
+  await results.getByRole("button", { name: `Guardar en mi lista: Curso ${ADVANCED}` }).click();
+  await expect(results.getByRole("button", { name: `Quitar de mi lista: Curso ${ADVANCED}` })).toBeFocused();
+  await expect(page).toHaveURL(new RegExp(`/explorar\\?practica=${MEDITATION}$`));
+  expect(await a11yViolations(page)).toEqual([]);
+  await page.goto("/inicio");
+  await expect(row.getByRole("link")).toHaveText([new RegExp(`^Curso ${ADVANCED}`), new RegExp(`^Curso ${BEGINNER}`)]);
+
+  // Lo de otra persona no se ve: su inicio no tiene «Mi lista».
+  const other = await person();
+  const otherContext = await page.context().browser()?.newContext();
+  if (otherContext === undefined) throw new Error("Sin navegador.");
+  const otherPage = await otherContext.newPage();
+  await signIn(otherPage, other, "/entrar?volver=%2Finicio");
+  await expect(otherPage).toHaveURL(/\/inicio$/);
+  await expect(otherPage.getByRole("heading", { level: 2, name: "Nuevos" })).toBeVisible();
+  await expect(otherPage.getByRole("heading", { level: 2, name: "Mi lista" })).toHaveCount(0);
+  await otherContext.close();
+});
+
+test("FL-11 paso 6 sin JavaScript: cada botón vuelve a su pantalla, en su lugar", async ({ browser }) => {
+  const who = await person();
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await signIn(page, who, "/entrar?volver=%2Finicio");
+  await expect(page).toHaveURL(/\/inicio$/);
+
+  await openCourse(page, BEGINNER);
+  await saveButton(page, BEGINNER).click();
+  await expect(page).toHaveURL(new RegExp(`/cursos/${BEGINNER}#bloque-ficha-lista$`));
+  await expect(removeButton(page, BEGINNER)).toBeVisible();
+
+  await page.goto(`/explorar?practica=${MEDITATION}`);
+  await saveButton(page, ADVANCED).click();
+  await expect(page).toHaveURL(new RegExp(`/explorar\\?practica=${MEDITATION}#bloque-explorar-${ADVANCED}$`));
+  await expect(page.getByRole("link", { name: "Quitar filtro: Meditación e2e" })).toBeVisible();
+  await expect(removeButton(page, ADVANCED)).toBeVisible();
+
+  await page.goto("/inicio");
+  const row = page.getByRole("list", { name: "Mi lista" });
+  await expect(row.getByRole("link")).toHaveCount(2);
+  await removeButton(page, ADVANCED).click();
+  await expect(page).toHaveURL(/\/inicio#bloque-mi-lista$/);
+  await expect(row.getByRole("link")).toHaveText([new RegExp(`^Curso ${BEGINNER}`)]);
+  await removeButton(page, BEGINNER).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Mi lista" })).toHaveCount(0);
   await context.close();
 });

@@ -15,6 +15,11 @@
 /src/services/catalog/     @SerchFGA @plataformaholisticadev
 /src/services/media/       @SerchFGA @plataformaholisticadev
 /src/services/review/      @SerchFGA @plataformaholisticadev
+# El catálogo del alumno y Mi lista (T-210): lo de cada quien se lee como la persona, y la
+# lista la escribe el servidor tras la guarda, a nombre de la sesión que pasó
+/src/services/browse/      @SerchFGA @plataformaholisticadev
+/src/app/_catalog/         @SerchFGA @plataformaholisticadev
+/src/app/explorar/         @SerchFGA @plataformaholisticadev
 # El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
 # No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev
