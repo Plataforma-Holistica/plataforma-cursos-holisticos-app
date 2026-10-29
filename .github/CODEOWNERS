@@ -47,6 +47,7 @@
 # Los textos legales que la gente lee antes de aceptar
 /src/app/legal/            @SerchFGA @plataformaholisticadev
 /src/services/legal/       @SerchFGA @plataformaholisticadev
+/src/domain/legal/         @SerchFGA @plataformaholisticadev
 # Las cabeceras de las páginas con enlace de correo
 /next.config.ts            @SerchFGA @plataformaholisticadev
 # La configuración de Auth y sus correos: confirmación, vigencias, contraseña mínima

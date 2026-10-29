@@ -23,6 +23,9 @@ describe("el título", () => {
     ["x".repeat(5_000), "too_long"],
     ["Re\u0007embolsos", "invalid"],
     ["Dos\nrenglones", "invalid"],
+    // La base puede contarlos como de control según su configuración regional: los dos lados los rechazan.
+    ["Reem bolsos", "invalid"],
+    ["Reem bolsos", "invalid"],
   ] as const)("%j no pasa: %s", (input, reason) => {
     expect(parseLegalTitle(input)).toEqual({ ok: false, reason });
   });
@@ -43,6 +46,7 @@ describe("el texto", () => {
     ["", "empty"],
     [" \n\t \r\n ", "empty"],
     ["a".repeat(LEGAL_BODY_MAX_LENGTH + 1), "too_long"],
+    ["Uno\u0000dos", "invalid"],
     ["Uno\u0001dos", "invalid"],
     ["Uno\u000bdos", "invalid"],
     ["Uno\u007fdos", "invalid"],

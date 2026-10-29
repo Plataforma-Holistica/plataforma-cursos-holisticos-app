@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
-import { parseLegalBody, parseLegalTitle } from "@/domain/legal/version";
+import { isCalendarDay, parseLegalBody, parseLegalTitle } from "@/domain/legal/version";
 
 import { holds, type CodeGiven, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
@@ -142,7 +142,6 @@ export type LegalCode =
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{64}$/;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** La huella de un texto como la calcula la base: SHA-256 de su UTF-8, en hexadecimal. */
 export function bodyFingerprint(body: string): string {
@@ -225,7 +224,7 @@ export function createLegalAdmin(deps: { report: (code: FailureCode) => Promise<
     const docType = docTypeOf(input.docType);
     const title = typeof input.title === "string" ? parseLegalTitle(input.title) : null;
     const body = typeof input.body === "string" ? parseLegalBody(input.body) : null;
-    const day = typeof input.day === "string" && DAY.test(input.day) ? input.day : null;
+    const day = typeof input.day === "string" && isCalendarDay(input.day) ? input.day : null;
     const seenVersion = seenOf(input.seenVersion);
     const seenSha = typeof input.seenSha === "string" && SHA.test(input.seenSha) ? input.seenSha : null;
     if (docType === null || !title?.ok || !body?.ok || day === null || seenVersion === undefined || seenSha === null) {
@@ -242,7 +241,29 @@ export function createLegalAdmin(deps: { report: (code: FailureCode) => Promise<
     }
     // Falta ZONA_HORARIA_PERIODO: solo lo arregla el dueño de la base.
     if (published.answer === "unavailable") await deps.report("legal_change_unavailable");
+    if (published.answer === "changed" && published.version !== null) {
+      const twin = await sameAsLast(admitted.claims, docType, published.version, title.title, seenSha);
+      if (twin !== null) return { kind: "answered", answer: "published", id: twin.id, version: twin.version, effectiveFrom: twin.effectiveFrom };
+    }
     return { kind: "answered", ...published };
+  }
+
+  /**
+   * Un doble clic sin JavaScript manda «Publicar» dos veces: el segundo envío encuentra la versión que
+   * entró con el primero y la base contesta `changed`. Si esa última versión tiene el mismo título y la
+   * misma huella que lo que se confirmó, lo confirmado ya está publicado: decir «otra persona publicó»
+   * invitaría a publicarlo otra vez (y, con unos términos, a pedirle a todas las cuentas que acepten de
+   * nuevo). Sin lectura, se queda en `changed`, que no publica nada.
+   */
+  async function sameAsLast(claims: VerifiedClaims, docType: LegalDocType, version: number, title: string, sha: string): Promise<LegalVersion | null> {
+    let documents: LegalDocuments | null;
+    try {
+      documents = await store.documents(claims);
+    } catch {
+      return null;
+    }
+    const last = documents?.documents.find((row) => row.docType === docType)?.versions[0];
+    return last !== undefined && last.version === version && last.title === title && last.bodySha256 === sha ? last : null;
   }
 
   /**

@@ -11,7 +11,7 @@
 -- depende de ellos se lee de la tabla antes de probarlo.
 begin;
 \ir _ayuda.psql
-select plan(75);
+select plan(78);
 
 select pruebas.alta('c1100000-0000-0000-0000-000000000001', 'config-textos@prueba.test');
 select pruebas.alta('b1100000-0000-0000-0000-000000000001', 'contenido-textos@prueba.test');
@@ -109,6 +109,8 @@ select is(pruebas.publica('c1100000-0000-0000-0000-000000000001', 'refund_policy
   'invalid', 'un título de más de 200 caracteres: invalid');
 select is(pruebas.publica('c1100000-0000-0000-0000-000000000001', 'refund_policy', E'Re\u0007embolsos', 'Texto', pruebas.hoy(), null) ->> 'answer',
   'invalid', 'un título con un carácter de control: invalid');
+select is(pruebas.publica('c1100000-0000-0000-0000-000000000001', 'refund_policy', E'Reem bolsos', 'Texto', pruebas.hoy(), null) ->> 'answer',
+  'invalid', 'un título con un separador de renglón: invalid, diga lo que diga la configuración regional');
 select is(pruebas.publica('c1100000-0000-0000-0000-000000000001', 'refund_policy', 'Reembolsos', E' \n\t ', pruebas.hoy(), null) ->> 'answer',
   'invalid', 'un texto en blanco: invalid');
 select is(pruebas.publica('c1100000-0000-0000-0000-000000000001', 'refund_policy', 'Reembolsos', repeat('a', 200001), pruebas.hoy(), null) ->> 'answer',
@@ -359,7 +361,22 @@ select results_eq($$select problem, object_name from private.schema_violations_l
   $$values ('legal trigger missing or disabled: legal_documents_fill', 'public.legal_documents')$$,
   'avisa si el guardián se apaga');
 alter table public.legal_documents enable trigger legal_documents_fill;
+alter table public.legal_documents disable trigger legal_documents_actor;
+select results_eq($$select problem, object_name from private.schema_violations_legal()$$,
+  $$values ('legal trigger missing or disabled: legal_documents_actor', 'public.legal_documents')$$,
+  'avisa si se apaga el guardián de quién publica');
+alter table public.legal_documents enable trigger legal_documents_actor;
 select is_empty($$select * from private.schema_violations_legal()$$, 'y todo en su lugar otra vez');
+
+-- Si publicar no es del dueño de la tabla, el guardián rechazaría toda versión publicada.
+-- Va al último: devolverle la función a su dueño pediría ser el nuevo. Lo deshace el rollback del final,
+-- como el permiso de crear en el esquema que necesita el dueño nuevo.
+grant app_service to postgres;
+grant create on schema private to app_service;
+alter function private.publish_legal_document(text, text, text, date, integer) owner to app_service;
+select results_eq($$select problem, object_name like 'private.publish_legal_document(%' from private.schema_violations_legal()$$,
+  $$values ('legal function not owned by the table owner', true)$$,
+  'avisa si la función de publicar cambia de dueño');
 
 select pruebas.limpiar();
 select * from finish();

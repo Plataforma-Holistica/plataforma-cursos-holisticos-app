@@ -121,6 +121,7 @@ describe("publicar", () => {
     ["un texto vacío", { body: "\n" }],
     ["un texto con un carácter de control", { body: "a\u0001b" }],
     ["un día sin forma", { day: "28/10/2026" }],
+    ["un día que no existe", { day: "2026-02-30" }],
     ["una versión vista negativa", { seenVersion: -1 }],
     ["una versión vista que no es entera", { seenVersion: 1.5 }],
     ["una versión vista como texto", { seenVersion: "1" }],
@@ -151,6 +152,38 @@ describe("publicar", () => {
       const service = adminWith({ published });
       expect(await service.publishLegalVersion(reader, INPUT)).toEqual({ kind: "answered", ...published });
       expect(service.reported).toEqual([]);
+    }
+  });
+
+  it("un reenvío de lo que ya entró no dice que otra persona publicó: es la versión publicada", async () => {
+    const twin = { id: VERSION, version: 2, title: "Reembolsos", effectiveFrom: "2026-10-28T18:00:00Z", publishedAt: "2026-10-28T18:00:00Z", bodySha256: SHA, isDraft: false, state: "current" };
+    const documents = { ...DOCUMENTS, documents: [{ docType: "refund_policy", lastVersion: 2, versions: [twin] }] } as unknown as LegalDocuments;
+    const service = adminWith({ published: { answer: "changed", version: 2 }, documents });
+    expect(await service.publishLegalVersion(reader, INPUT)).toEqual({
+      kind: "answered",
+      answer: "published",
+      id: VERSION,
+      version: 2,
+      effectiveFrom: "2026-10-28T18:00:00Z",
+    });
+    expect(service.calls.at(-1)).toBe("documents");
+  });
+
+  it.each([
+    ["otro texto", { bodySha256: "0".repeat(64) }],
+    ["otro título", { title: "Otra cosa" }],
+    ["otra versión", { version: 3 }],
+  ])("con %s en la última versión, sí es changed", async (_name, change) => {
+    const last = { id: VERSION, version: 2, title: "Reembolsos", effectiveFrom: "x", publishedAt: "y", bodySha256: SHA, isDraft: false, state: "current", ...change };
+    const documents = { ...DOCUMENTS, documents: [{ docType: "refund_policy", lastVersion: last.version, versions: [last] }] } as unknown as LegalDocuments;
+    const service = adminWith({ published: { answer: "changed", version: 2 }, documents });
+    expect(await service.publishLegalVersion(reader, INPUT)).toEqual({ kind: "answered", answer: "changed", version: 2 });
+  });
+
+  it("si la lectura para comparar no llega, se queda en changed", async () => {
+    for (const documents of [null, "throws"] as const) {
+      const service = adminWith({ published: { answer: "changed", version: 2 }, documents });
+      expect(await service.publishLegalVersion(reader, INPUT)).toEqual({ kind: "answered", answer: "changed", version: 2 });
     }
   });
 

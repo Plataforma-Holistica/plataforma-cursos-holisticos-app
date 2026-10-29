@@ -117,8 +117,10 @@ begin
     return pg_catalog.jsonb_build_object('answer', v_gate);
   end if;
 
+  -- El título: sin caracteres de control, ni los separadores de renglón y de párrafo, que [[:cntrl:]]
+  -- incluye o no según la configuración regional de la base.
   if p_doc_type is null or not (p_doc_type = any (pg_catalog.enum_range(null::public.legal_doc_type)::text[]))
-     or pg_catalog.char_length(v_title) not between 1 and 200 or v_title ~ '[[:cntrl:]]'
+     or pg_catalog.char_length(v_title) not between 1 and 200 or v_title ~ '[[:cntrl:]]' or v_title ~ E'[\u2028\u2029]'
      or p_body is null or pg_catalog.btrim(p_body, E' \n\t') = '' or pg_catalog.char_length(p_body) > 200000
      or p_body ~ E'[\\x01-\\x08\\x0b-\\x1f\\x7f]'
      or p_day is null then
@@ -230,8 +232,9 @@ grant execute on function
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante del área `legal` (carril A). Lo que el área `ledgers` no mira: que ningún rol de la
--- aplicación inserte en la tabla, que las tres funciones sean del servidor y solo suyas, y que el
--- guardián esté puesto.
+-- aplicación inserte en la tabla, que las tres funciones sean del servidor y solo suyas, que los dos
+-- guardianes (quién publica y qué se publica) estén puestos, y que publicar sea del dueño de la tabla:
+-- con otro dueño, el guardián rechazaría toda versión publicada.
 
 create function private.schema_violations_legal()
 returns table (problem text, object_name text)
@@ -274,12 +277,19 @@ as $$
   from found
   where found.definer and not found.prosecdef
   union all
-  select 'legal trigger missing or disabled: legal_documents_fill', 'public.legal_documents'
+  select 'legal function not owned by the table owner', found.oid::regprocedure::text
+  from found
+  join pg_catalog.pg_proc p on p.oid = found.oid
+  where found.name = 'publish_legal_document'
+    and p.proowner <> (select c.relowner from pg_catalog.pg_class c where c.oid = 'public.legal_documents'::regclass)
+  union all
+  select 'legal trigger missing or disabled: ' || t.tgname, 'public.legal_documents'
+  from (values ('legal_documents_actor', 'guard_config_actor'), ('legal_documents_fill', 'guard_legal_document')) t (tgname, proname)
   where not exists (
     select 1 from pg_catalog.pg_trigger tg
     join pg_catalog.pg_proc p on p.oid = tg.tgfoid
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-    where tg.tgrelid = 'public.legal_documents'::regclass and tg.tgname = 'legal_documents_fill'
-      and tg.tgenabled in ('O', 'A') and n.nspname = 'private' and p.proname = 'guard_legal_document')
+    where tg.tgrelid = 'public.legal_documents'::regclass and tg.tgname = t.tgname
+      and tg.tgenabled in ('O', 'A') and n.nspname = 'private' and p.proname = t.proname)
 $$;
 revoke all on function private.schema_violations_legal() from public;

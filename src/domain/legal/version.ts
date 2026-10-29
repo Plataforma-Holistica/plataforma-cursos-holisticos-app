@@ -19,10 +19,12 @@ export const LEGAL_DAYS_AHEAD_MAX = 366;
 const TITLE_INPUT_MAX = 2_000;
 const BODY_INPUT_MAX = 4 * LEGAL_BODY_MAX_LENGTH;
 
-const TITLE_FORBIDDEN = /\p{Cc}/u;
+// Los separadores de renglón y de párrafo no son de control para Unicode, pero la base puede contarlos así
+// según su configuración regional (y la función los rechaza aparte): aquí también.
+const TITLE_FORBIDDEN = /[\p{Cc}\u2028\u2029]/u;
 // Los de la base: todo control salvo el salto de línea y el tabulador (el retorno de carro ya se
-// cambió por un salto).
-const BODY_FORBIDDEN = /[\u0001-\u0008\u000b-\u001f\u007f]/;
+// cambió por un salto). El nulo no cabe en un texto de Postgres: el controlador fallaría antes.
+const BODY_FORBIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 const BODY_BLANK = /^[ \n\t]*$/;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -65,6 +67,11 @@ function calendarDay(input: string): number | null {
   const date = new Date(at);
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return at / 86_400_000;
+}
+
+/** Si `input` es un día del calendario (`AAAA-MM-DD`) que existe: lo que el servicio revisa sin saber qué día es hoy. */
+export function isCalendarDay(input: string): boolean {
+  return calendarDay(input) !== null;
 }
 
 /**
