@@ -15,6 +15,7 @@ import { lessonAccess } from "@/services/media/media";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
+import { Disclaimer } from "@/ui/disclaimer";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
 import { ProgressBar } from "@/ui/progress-bar";
@@ -31,8 +32,8 @@ import { primaryAction, type PrimaryAction, type Viewer } from "./outcomes";
 //
 // Se pinta en el servidor en cada visita (decisión mía sin confirmar, 2026-10-27): lo estático
 // con regeneración, la descripción y la imagen para compartir quedan para T-606. La pestaña sí
-// lleva el título del curso. Recursos,
-// constancia y deslinde no se pintan hasta que existan (T-404, T-504, T-507).
+// lleva el título del curso. Recursos y constancia no se pintan hasta que existan (T-404,
+// T-504). El deslinde (RF-809; T-507) va al pie, sea quien sea el que mira.
 //
 // «Guardar en mi lista» (RF-311) va junto al botón principal, solo para el alumno, y solo si se
 // supo si ya lo tiene guardado (se lee con su avance). Al visitante no se le ofrece (decisión de
@@ -189,6 +190,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
             </aside>
           )}
         </div>
+        <Disclaimer />
       </main>
     </>
   );
