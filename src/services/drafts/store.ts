@@ -1,0 +1,84 @@
+import "server-only";
+
+import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import { asServer, asUser, type Tx } from "@/adapters/supabase/db";
+import { isLockConflict } from "@/adapters/supabase/errors";
+
+import { withLockRetry } from "@/services/account/team";
+
+import {
+  ADD_ANSWERS,
+  CREATE_ANSWERS,
+  DELETE_ANSWERS,
+  MOVE_ANSWERS,
+  SAVE_ANSWERS,
+  SAVE_COURSE_ANSWERS,
+  type DraftsStore,
+} from "./drafts";
+import {
+  answerOf,
+  askAddLesson,
+  askAddModule,
+  askCreate,
+  askDeleteCourse,
+  askDeleteLesson,
+  askDeleteModule,
+  askMoveLesson,
+  askMoveModule,
+  askRenameModule,
+  askSaveCourse,
+  askSaveLesson,
+  createdOf,
+  readDraftCourse,
+  readTeacherCourses,
+} from "./records";
+
+// Lo que el servicio del borrador le pregunta a la base, a nombre de las claims que verificó. Leer
+// va como la persona; cada cambio abre su transacción como servidor, con quién actúa y con qué
+// sesión tomados de esas claims.
+
+/** `run` es `asServer` y `read` es `asUser`. Solo las pruebas pasan otros. */
+export function createDraftsStore(run: typeof asServer = asServer, read: typeof asUser = asUser): DraftsStore {
+  /**
+   * Un cambio. Toman el candado del curso (y los de las listas, al guardar los datos) y ninguno
+   * escribe antes de rechazar: un choque de candados revierte la transacción entera, y se intenta
+   * una vez más. Lo que contestó se entiende ya confirmada.
+   */
+  function change<Result>(claims: VerifiedClaims, reason: string, work: (tx: Tx) => Promise<Result>): Promise<Result> {
+    return withLockRetry(() => run({ claims, reason }, work), isLockConflict);
+  }
+
+  return {
+    teacherCourses: (claims) => read(claims, (tx) => readTeacherCourses(tx)),
+    draftCourse: (claims, course) => read(claims, (tx) => readDraftCourse(tx, course)),
+    create: async (claims, title) => createdOf(CREATE_ANSWERS, await change(claims, "draft_create", (tx) => askCreate(tx, title))),
+    saveCourse: async (claims, course, seen, fields) =>
+      answerOf(SAVE_COURSE_ANSWERS, (await change(claims, "draft_save_course", (tx) => askSaveCourse(tx, course, seen, fields))).answer),
+    addModule: async (claims, course, seen, title) =>
+      createdOf(ADD_ANSWERS, await change(claims, "draft_add_module", (tx) => askAddModule(tx, course, seen, title))),
+    renameModule: async (claims, course, module, seen, title) =>
+      answerOf(SAVE_ANSWERS, (await change(claims, "draft_rename_module", (tx) => askRenameModule(tx, course, module, seen, title))).answer),
+    deleteModule: async (claims, course, module, seen) =>
+      answerOf(DELETE_ANSWERS, (await change(claims, "draft_delete_module", (tx) => askDeleteModule(tx, course, module, seen))).answer),
+    moveModule: async (claims, course, module, seenPosition, toPosition) =>
+      answerOf(
+        MOVE_ANSWERS,
+        (await change(claims, "draft_move_module", (tx) => askMoveModule(tx, course, module, seenPosition, toPosition))).answer,
+      ),
+    addLesson: async (claims, course, module, seen, title) =>
+      createdOf(ADD_ANSWERS, await change(claims, "draft_add_lesson", (tx) => askAddLesson(tx, course, module, seen, title))),
+    saveLesson: async (claims, course, lesson, seen, fields) =>
+      answerOf(
+        SAVE_ANSWERS,
+        (await change(claims, "draft_save_lesson", (tx) => askSaveLesson(tx, course, lesson, seen, fields.title, fields.description))).answer,
+      ),
+    deleteLesson: async (claims, course, lesson, seen) =>
+      answerOf(DELETE_ANSWERS, (await change(claims, "draft_delete_lesson", (tx) => askDeleteLesson(tx, course, lesson, seen))).answer),
+    moveLesson: async (claims, course, lesson, seen, to) =>
+      answerOf(MOVE_ANSWERS, (await change(claims, "draft_move_lesson", (tx) => askMoveLesson(tx, course, lesson, seen, to))).answer),
+    deleteCourse: async (claims, course, seen) =>
+      answerOf(DELETE_ANSWERS, (await change(claims, "draft_delete_course", (tx) => askDeleteCourse(tx, course, seen))).answer),
+  };
+}
+
+export const databaseDraftsStore = createDraftsStore();
