@@ -1,9 +1,23 @@
 -- T-104 · Textos legales con versión y consentimientos (RF-108, RF-713).
 -- Esquema de backend §5.8, §6.5 y §7. Usa tipos de documento que los borradores locales
 -- no cargan, para dar lo mismo con ellos y sin ellos.
+--
+-- Desde T-110 (2026-10-28) el servidor ya no inserta en la tabla: de la versión 1 en adelante
+-- publica private.publish_legal_document(), que prueba la 56. Lo que aquí se afirma de lo que
+-- escribe la base, de quién no publica y de cómo crecen las versiones se prueba como el dueño
+-- de la tabla a nombre de una persona (pruebas.dueno_por), que es como inserta esa función.
 begin;
 \ir _ayuda.psql
 select plan(71);
+
+-- El dueño de la tabla, a nombre de una persona y con su sesión de pruebas, sin repararle nada.
+create function pruebas.dueno_por(p_id uuid) returns void
+language sql
+as $$
+  select pruebas.limpiar();
+  select set_config('app.actor_id', p_id::text, true),
+         set_config('app.actor_session', pruebas.sesion(p_id)::text, true);
+$$;
 
 select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-legal@prueba.test');
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-legal@prueba.test');
@@ -30,11 +44,11 @@ select ok(
   'el visitante no lee consentimientos');
 select ok(
   has_table_privilege('app_service', 'public.legal_documents', 'select')
-    and has_table_privilege('app_service', 'public.legal_documents', 'insert')
+    and not has_table_privilege('app_service', 'public.legal_documents', 'insert')
     and not has_any_column_privilege('app_service', 'public.legal_documents', 'update')
     and not has_table_privilege('app_service', 'public.legal_documents', 'delete')
     and not has_table_privilege('app_service', 'public.legal_documents', 'truncate'),
-  'app_service lee e inserta textos legales, y nada más');
+  'app_service lee textos legales, y nada más: publica por la función (T-110)');
 select ok(
   has_table_privilege('app_service', 'public.consents', 'select')
     and has_table_privilege('app_service', 'public.consents', 'insert')
@@ -46,7 +60,8 @@ select ok(
 -- ---------------------------------------------------------------------------------------
 -- Publicar: la huella, el autor y la fecha los escribe la base, no quien inserta.
 
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+select pruebas.dueno_por('c0000000-0000-0000-0000-000000000001');
 select lives_ok(
   $$insert into public.legal_documents
       (doc_type, version, title, body, body_sha256, effective_from, published_by, published_at)
@@ -74,17 +89,18 @@ select results_eq(
   'publicar deja un renglón de auditoría con la huella y sin el texto');
 
 -- Quién no publica.
-select pruebas.como_servicio();
+select pruebas.como_dueno();
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('license_annex', 1, 'T', 'B', now())$$,
   '42501', null, 'sin autor declarado no se publica');
-select pruebas.como_servicio('a0000000-0000-0000-0000-000000000001');
+select pruebas.dueno_por('a0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('license_annex', 1, 'T', 'B', now())$$,
   '42501', null, 'una alumna no publica, ni por el camino de servicio');
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001', 'aal1');
+select pruebas.sin_codigo('c0000000-0000-0000-0000-000000000001');
+select pruebas.dueno_por('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('license_annex', 1, 'T', 'B', now())$$,
@@ -101,7 +117,7 @@ select throws_ok(
   '42501', null, 'el visitante no publica');
 
 -- El sistema puede cargar la primera versión, y queda sin autor.
-select pruebas.como_sistema();
+select pruebas.como_dueno_sistema();
 select lives_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('community_policy', 1, 'Comunidad', 'Texto de arranque', now())$$,
@@ -114,7 +130,8 @@ select is(
 -- ---------------------------------------------------------------------------------------
 -- Las versiones crecen y ninguna rige hacia atrás.
 
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
+select pruebas.equipar('c0000000-0000-0000-0000-000000000001');
+select pruebas.dueno_por('c0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('refund_policy', 1, 'T', 'B', now() + interval '1 day')$$,
@@ -153,7 +170,7 @@ select is(
   private.current_legal_document('teacher_privacy_notice', now() + interval '300 years'),
   (select id from public.legal_documents where doc_type = 'teacher_privacy_notice' and version = 2),
   'y lo sigue siendo el día en que llegue la fecha equivocada: manda la versión, no la fecha');
-select pruebas.como_sistema();
+select pruebas.como_dueno_sistema();
 select throws_ok(
   $$insert into public.legal_documents (doc_type, version, title, body, effective_from)
     values ('refund_policy', 3, 'T', 'B', now() + interval '2 days')$$,
@@ -224,7 +241,7 @@ select throws_ok(
 -- ---------------------------------------------------------------------------------------
 -- Lectura: lo vigente y público para todos; lo de maestros y lo futuro, no.
 
-select pruebas.como_servicio('c0000000-0000-0000-0000-000000000001');
+select pruebas.dueno_por('c0000000-0000-0000-0000-000000000001');
 insert into public.legal_documents (doc_type, version, title, body, effective_from)
   values ('teacher_agreement', 1, 'Contrato', 'Texto de maestros', now());
 

@@ -38,6 +38,8 @@ export const NOTICES = [
   // Las liquidaciones del periodo (PA-81, T-605): liberar, y cualquier otra decisión sobre una fila.
   "payouts_released",
   "payouts_updated",
+  // Una versión de un texto legal quedó publicada (PA-89, T-110).
+  "legal_published",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

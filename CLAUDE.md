@@ -531,6 +531,29 @@ que no se ve leyendo un solo archivo:
   barra del alumno, y el inicio gana «Ver todo» en «Para empezar» (al nivel) y en cada práctica. Usa pgTAP
   35, la integración 70 y, en `tests/e2e/equipo/catalogo.equipo.ts`, FL-11 con JavaScript y sin él. Para el
   A: la columna de búsqueda cambió de definición; ninguna pieza del A la lee.
+- **Lo que T-110 suma al carril A** (`t110_textos_legales`; PA-89; decisiones de Sergio del 2026-10-28: la cadena
+  T-110, T-401 y T-409 va en el A, los textos provisionales siguen siendo los borradores de versión 0 de local, PA-89
+  publica nueve tipos y una versión nueva del consentimiento del historial se vuelve a pedir). **El servidor ya no
+  inserta en `legal_documents`:** de la versión 1 en adelante publica `private.publish_legal_document(tipo, título,
+  cuerpo, día, versión vista)`, con la puerta de configuración y código reciente (`team_change_gate`, la de los
+  parámetros), el candado del tipo (`legal_document:`) en read committed, la versión que pone la base (la última más
+  uno) y `changed` si la vista no es la última; el día es de `ZONA_HORARIA_PERIODO` (hoy rige al publicar, otro día a
+  su medianoche, uno pasado contesta `past`, a lo más 366 días). El guardián (`guard_legal_document`) decide quién
+  vuelve a aceptar por el tipo (términos, los dos avisos y el historial sí; lo demás no), sin importar lo que mande
+  quien inserta, y desde la versión 1 solo deja insertar al dueño de la tabla. Dos lecturas solo para configuración:
+  `private.legal_documents_admin()` (los nueve tipos, cada versión con su estado: `current`, `scheduled`,
+  `superseded` si una más nueva rige desde antes, `previous`) y `private.legal_document_admin(id)`. El área `legal` del
+  vigilante es del A. El servicio vive en `src/services/legal/admin*.ts` (lo importan las pantallas por
+  `legal-admin.ts`), y la pantalla en `src/app/admin/_textos/` (`/admin/textos-legales`, y el texto de una versión en
+  `/admin/textos-legales/<identificador>` por `DEEPER`): «Nueva versión» y «Ver cómo queda» no llaman a nadie, y
+  «Publicar» lleva la versión vista y la huella del texto de la vista previa (`publish:<tipo>:<versión>:<huella>`); si
+  el texto que llega ya no es ese, el servicio contesta `preview_stale` sin preguntarle a la base. El cuerpo de un
+  texto se pinta con `src/app/_lib/legal-body.tsx`, el mismo en `/legal` y en PA-89. Usa pgTAP 56 e integración 59;
+  cambiaron por el requisito la 05 (publica como el dueño a nombre de una persona, `pruebas.dueno_por`) y la
+  integración 60 (publica como el dueño declarado sistema), y el guion de borradores ya no manda `requires_reconsent`.
+  El ayudante de finanzas de integración (`financePerson`) arma también a alguien con configuración. Para el B: una
+  prueba que publique un texto legal lo hace como el dueño de la base, y unos términos nuevos siempre se vuelven a
+  pedir.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

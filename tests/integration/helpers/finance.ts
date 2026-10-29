@@ -19,6 +19,8 @@ export interface Finance {
   person: KnownUser;
   factorId: string;
   sessionId: string;
+  /** La capacidad con que actúa: finanzas, salvo en PA-89 (T-110), que pide configuración. */
+  capability: "finance" | "config";
 }
 
 /** Una conexión del dueño, que no espera más de 20 s un candado. */
@@ -44,8 +46,11 @@ export async function waitBehind(owner: Client, first: Client, count: number): P
   }
 }
 
-/** Alguien de finanzas, de verdad, con su código dado hace un momento. Su correo se anota en `emails`. */
-export async function financePerson(emails: string[]): Promise<Finance> {
+/**
+ * Alguien de finanzas, de verdad, con su código dado hace un momento. Su correo se anota en `emails`. Con
+ * `capability`, alguien con otra capacidad del equipo, de la misma manera (configuración, para PA-89).
+ */
+export async function financePerson(emails: string[], capability: Finance["capability"] = "finance"): Promise<Finance> {
   const person = await claimedUser();
   emails.push(person.email);
   await completeAccountAsOwner(person.id);
@@ -56,7 +61,7 @@ export async function financePerson(emails: string[]): Promise<Finance> {
   const sessionId = await reverted(async (tx) => {
     const services = testServices({ teamStore: teamStoreOn(tx) });
     await asSystem(tx);
-    await tx.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'finance')", [person.id]);
+    await tx.query("insert into public.admin_capabilities (profile_id, capability) values ($1, $2)", [person.id, capability]);
     await tx.query("insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, $3)", [
       person.id,
       factor.factorId,
@@ -68,13 +73,13 @@ export async function financePerson(emails: string[]): Promise<Finance> {
     if (standing.kind !== "team" || !standing.claims.sessionId) throw new Error("La persona de prueba no quedó en el equipo.");
     return standing.claims.sessionId;
   });
-  return { person, factorId: factor.factorId, sessionId };
+  return { person, factorId: factor.factorId, sessionId, capability };
 }
 
-/** En esta transacción, la persona es de finanzas y actúa con su sesión. */
+/** En esta transacción, la persona tiene su capacidad (finanzas, o la que diga) y actúa con su sesión. */
 export async function actAs(client: Client, finance: Finance): Promise<void> {
   await client.query("set local session_replication_role = replica");
-  await client.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'finance')", [finance.person.id]);
+  await client.query("insert into public.admin_capabilities (profile_id, capability) values ($1, $2)", [finance.person.id, finance.capability]);
   await client.query("insert into private.admin_factors (profile_id, factor_id, bound_email) values ($1, $2, $3)", [
     finance.person.id,
     finance.factorId,
