@@ -51,7 +51,8 @@ export function createDraftsStore(run: typeof asServer = asServer, read: typeof 
   return {
     teacherCourses: (claims) => read(claims, (tx) => readTeacherCourses(tx)),
     draftCourse: (claims, course) => read(claims, (tx) => readDraftCourse(tx, course)),
-    create: async (claims, title) => createdOf(CREATE_ANSWERS, await change(claims, "draft_create", (tx) => askCreate(tx, title))),
+    create: async (claims, token, title) =>
+      createdOf(CREATE_ANSWERS, await change(claims, "draft_create", (tx) => askCreate(tx, token, title))),
     saveCourse: async (claims, course, seen, fields) =>
       answerOf(SAVE_COURSE_ANSWERS, (await change(claims, "draft_save_course", (tx) => askSaveCourse(tx, course, seen, fields))).answer),
     addModule: async (claims, course, seen, title) =>

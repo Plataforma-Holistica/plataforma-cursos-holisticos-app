@@ -616,11 +616,16 @@ que no se ve leyendo un solo archivo:
   (prácticas y niveles solo al guardar los datos del curso, siempre los dos) y `course_lock`, y filtra cada
   módulo o lección por su id **y** el del curso. Un maestro suspendido recibe `suspended` y quien no es maestro
   `not_teacher`. Cada fila lleva su revisión, y un formulario de antes contesta `changed`: los datos del curso
-  (`revision`), agregar o borrar un módulo (`structure_revision`), el módulo (renombrarlo, y entrar o salir una
-  lección) y cada lección; mover lleva la posición (y el módulo) que se vio. Las posiciones son únicas
+  (`revision`), agregar o borrar un módulo (`structure_revision`), el módulo (renombrarlo, y entrar, salir o
+  cambiar una lección), cada lección, y todo el contenido (`content_revision`, la que lleva borrar el curso);
+  mover lleva la posición (y el módulo) que se vio. Crear lleva el testigo del formulario (`create_token`, único
+  por maestro): el mismo devuelve el curso que ya creó, también al reintentar después de «no se supo». Las posiciones son únicas
   `deferrable initially immediate`: se recorren en una sentencia, y mover las difiere dentro de la función.
   Las restricciones de texto llaman a `private.draft_text_ok()`, que solo ejecuta el dueño: un permiso de
-  escritura concedido por error tampoco escribe. Guardián propio (`guard_draft`: solo el dueño escribe, nadie
+  escritura concedido por error tampoco escribe. Esa regla va con rangos escritos y no con clases como
+  `[[:space:]]` o `[[:cntrl:]]`, que cambian con la configuración regional de la base; sus espacios de las
+  puntas son los que quita `trim()`, para que lo que la regla del dominio deja pasar no lo rechace la base. Un
+  tabulador pegado se vuelve espacio en el dominio. El borrador se lee en una sola consulta (una foto). Guardián propio (`guard_draft`: solo el dueño escribe, nadie
   vacía), sin `guard_publication` y sin auditoría (el registro sí se audita al crear y al borrar). Borrar el
   curso borra el registro, y el borrador se va en cascada. «En uso» (`catalog_in_use`) no cambia. El área
   `drafts` del vigilante es del B. El servicio vive en `src/services/drafts/` (las pantallas importan
@@ -2646,7 +2651,7 @@ En la base, diez reglas que salen de `../planeacion/05-esquema-backend.md` §16.
     pantallas importan sale de `catalog.ts`. Una práctica o un nivel que usa un curso sin
     retirar no se desactiva: la base contesta `in_use` (T-107, `t107_en_uso`), y la lectura
     trae por fila cuántos la usan (`inUse`); PA-67 no ofrece desactivar y lo dice. Los
-    borradores cuentan desde T-402. **Todo camino que liste un curso o le cambie la práctica
+    borradores no cuentan (decisión de Sergio del 2026-10-29, T-402). **Todo camino que liste un curso o le cambie la práctica
     o el nivel toma los candados de las dos listas y comprueba que estén activas**: si no,
     «en uso» tendría una carrera. `giveCatalogCode` da el código
     otra vez y comprueba lo reciente con las listas del catálogo; pasa dos veces por la

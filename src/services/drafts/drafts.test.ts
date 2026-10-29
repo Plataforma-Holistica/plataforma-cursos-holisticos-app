@@ -19,6 +19,7 @@ const MODULE = "d0000000-0000-4000-8000-000000000001";
 const OTHER_MODULE = "d0000000-0000-4000-8000-000000000002";
 const LESSON = "e0000000-0000-4000-8000-000000000001";
 const PRACTICE = "f0000000-0000-4000-8000-000000000001";
+const TOKEN = "b0000000-0000-4000-8000-000000000001";
 
 function setup(session: SessionCheck = { kind: "pass", claims }) {
   const reported: FailureCode[] = [];
@@ -45,14 +46,15 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
 describe("cambiar el borrador", () => {
   it("crea con el título ya revisado y a nombre de la sesión que pasó", async () => {
     const service = setup();
-    expect(await service.createCourse(reader, "  Respirar\u0301  ")).toEqual({ kind: "created", id: COURSE });
+    expect(await service.createCourse(reader, { token: TOKEN, title: "  Respirar\u0301  " })).toEqual({ kind: "created", id: COURSE });
     expect(service.checkSession).toHaveBeenCalledExactlyOnceWith(reader);
-    expect(service.store.create).toHaveBeenCalledExactlyOnceWith(claims, "Respirar\u0301".normalize("NFC"));
+    expect(service.store.create).toHaveBeenCalledExactlyOnceWith(claims, TOKEN, "Respirar\u0301".normalize("NFC"));
   });
 
   it.each([
-    ["un título vacío", () => setup().createCourse(reader, "  ")],
-    ["un título largo", () => setup().createCourse(reader, "a".repeat(61))],
+    ["un título vacío", () => setup().createCourse(reader, { token: TOKEN, title: "  " })],
+    ["un testigo sin forma", () => setup().createCourse(reader, { token: "otro", title: "Respirar" })],
+    ["un título largo", () => setup().createCourse(reader, { token: TOKEN, title: "a".repeat(61) })],
     ["un curso sin forma", () => setup().saveCourse(reader, { course: "x", seen: 1, title: "T", summary: null, practiceId: null, levelId: null })],
     ["una revisión cero", () => setup().saveCourse(reader, { course: COURSE, seen: 0, title: "T", summary: null, practiceId: null, levelId: null })],
     ["una práctica sin forma", () => setup().saveCourse(reader, { course: COURSE, seen: 1, title: "T", summary: null, practiceId: "x", levelId: null })],

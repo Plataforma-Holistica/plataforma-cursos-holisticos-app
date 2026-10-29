@@ -18,6 +18,8 @@ describe("parseDraftText", () => {
     ["un resumen de varias líneas", "summary", "Primera.\nSegunda.", "Primera.\nSegunda."],
     ["con los saltos de Windows, que quedan en uno", "description", "Uno.\r\nDos.\rTres.", "Uno.\nDos.\nTres."],
     ["una descripción del tope exacto", "description", "d".repeat(2000), "d".repeat(2000)],
+    ["un tabulador pegado, que se vuelve espacio", "summary", "Uno\tdos", "Uno dos"],
+    ["un tabulador en las puntas, que se va", "lessonTitle", "\tUna\t", "Una"],
   ] as const)("acepta %s", (_name, kind, input, text) => {
     expect(parseDraftText(kind, input)).toEqual({ ok: true, text });
   });
@@ -55,10 +57,11 @@ describe("parseDraftText", () => {
 
   it.each([
     ["un salto de línea en un título", "courseTitle", "Respirar\nen calma"],
-    ["un tabulador en un resumen", "summary", "Uno\tdos"],
     ["un carácter de ancho cero", "lessonTitle", "Respi\u200brar"],
     ["un control C1", "description", "Uno\u0085dos"],
     ["un aislador de dirección", "moduleTitle", "Uno\u2066dos"],
+    ["un separador de línea en un título", "courseTitle", "Uno\u2028dos"],
+    ["un separador de párrafo en una descripción", "description", "Uno\u2029dos"],
   ] as const)("rechaza %s", (_name, kind, input) => {
     expect(parseDraftText(kind, input)).toEqual({ ok: false, reason: "invalid" });
   });

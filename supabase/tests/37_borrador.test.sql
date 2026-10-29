@@ -6,7 +6,7 @@
 -- carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(122);
+select plan(143);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a3700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -61,6 +61,8 @@ end
 $$;
 create function pruebas.estructura(p_course uuid) returns bigint language sql stable
 as $$ select structure_revision from public.course_drafts where course_id = p_course $$;
+create function pruebas.contenido(p_course uuid) returns bigint language sql stable
+as $$ select content_revision from public.course_drafts where course_id = p_course $$;
 create function pruebas.vigila() returns text[]
 language sql as $$
   select coalesce(array_agg(v.problem order by v.problem), '{}') from private.schema_violations_drafts() v
@@ -69,10 +71,11 @@ grant execute on all functions in schema pruebas to anon, authenticated, app_ser
 grant select on pruebas.ids to anon, authenticated, app_service;
 
 -- Ana (1) y Beto (2), maestros activos; Caro (3), activa para crear su curso y después suspendida;
--- Dani (4), alumna sin maestro; Eva (5), de Contenido.
-select pruebas.alta(pruebas.p(n), 'borrador-' || n || '@prueba.test') from generate_series(1, 5) n;
-select pruebas.confirmar(pruebas.p(n)) from generate_series(1, 5) n;
-select pruebas.maestro(1, 'active'), pruebas.maestro(2, 'active'), pruebas.maestro(3, 'active');
+-- Dani (4), alumna sin maestro; Eva (5), de Contenido; Fer (6), maestra activa con la cuenta suspendida.
+select pruebas.alta(pruebas.p(n), 'borrador-' || n || '@prueba.test') from generate_series(1, 6) n;
+select pruebas.confirmar(pruebas.p(n)) from generate_series(1, 6) n;
+select pruebas.maestro(1, 'active'), pruebas.maestro(2, 'active'), pruebas.maestro(3, 'active'), pruebas.maestro(6, 'active');
+select pruebas.suspender(pruebas.p(6));
 select pruebas.dar_capacidad(pruebas.p(5), 'content');
 select pruebas.equipar(pruebas.p(5));
 select pruebas.como_dueno_sistema();
@@ -92,7 +95,7 @@ select ok((select array_agg(function_name) from private.watchdog_areas()) @> arr
 -- ---------------------------------------------------------------------------------------
 -- Crear un curso.
 
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', 'Respirar en calma'), 'ana'), 'created',
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Respirar en calma'), 'ana'), 'created',
   'la maestra activa crea un curso');
 select is((select row(teacher_id, state)::text from public.course_registry where course_id = pruebas.id('ana')),
   row(pruebas.m(1), 'draft'::public.course_state)::text, 'el registro nace en borrador y es de ella');
@@ -103,21 +106,31 @@ select is((select row(teacher_id, version, title, summary, practice_id, level_id
 select is((select actor_id from public.audit_log where entity_table = 'public.course_registry'
            and entity_id = pruebas.id('ana')::text and action like '%insert'), pruebas.p(1),
   'el alta del registro queda en la auditoría a su nombre');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', repeat('a', 60)), 'ana60'), 'created',
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), repeat('a', 60)), 'ana60'), 'created',
   'un título de 60 caracteres cabe');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', repeat('a', 61))), 'invalid', 'uno de 61 no');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', '')), 'invalid', 'ni uno vacío');
-select is(pruebas.b(pruebas.p(1), 'private.draft_create(null)'), 'invalid', 'ni uno nulo');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', ' Respirar')), 'invalid', 'ni con espacio al principio');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', E'Respirar\nen calma')), 'invalid',
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), repeat('a', 61))), 'invalid', 'uno de 61 no');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), '')), 'invalid', 'ni uno vacío');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, null)', gen_random_uuid())), 'invalid', 'ni uno nulo');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), ' Respirar')), 'invalid', 'ni con espacio al principio');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Respirar\nen calma')), 'invalid',
   'ni con un salto de línea');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', E'Respi\u200brar')), 'invalid',
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Respi\u200brar')), 'invalid',
   'ni con un carácter que no se ve');
-select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L)', E'Cafe\u0301')), 'invalid',
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Uno\u2028dos')), 'invalid',
+  'ni con un separador de línea (lo trae un texto pegado)');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Uno\u0085dos')), 'invalid',
+  'ni con un control C1');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', 'a3700000-0000-0000-0002-000000000001', 'Con testigo'), 'tok'), 'created',
+  'crea con el testigo de su formulario');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', 'a3700000-0000-0000-0002-000000000001', 'Con testigo')), 'created',
+  'el mismo formulario reenviado contesta created');
+select is((select count(*)::integer from public.course_drafts where create_token = 'a3700000-0000-0000-0002-000000000001'), 1, 'y no crea otro');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(null, %L)', 'Sin testigo')), 'invalid', 'sin testigo no crea');
+select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Cafe\u0301')), 'invalid',
   'ni sin normalizar (NFC)');
-select is(pruebas.b(pruebas.p(3), format('private.draft_create(%L)', 'El curso de Caro'), 'caro'), 'created',
+select is(pruebas.b(pruebas.p(3), format('private.draft_create(%L, %L)', gen_random_uuid(), 'El curso de Caro'), 'caro'), 'created',
   'Caro, activa todavía, crea el suyo');
-select is(pruebas.b(pruebas.p(2), format('private.draft_create(%L)', 'El curso de Beto'), 'beto'), 'created',
+select is(pruebas.b(pruebas.p(2), format('private.draft_create(%L, %L)', gen_random_uuid(), 'El curso de Beto'), 'beto'), 'created',
   'y Beto el suyo');
 
 -- Caro queda suspendida como maestra.
@@ -125,18 +138,20 @@ select pruebas.como_dueno_sistema();
 update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = pruebas.m(3);
 select pruebas.limpiar();
 
-select is(pruebas.b(pruebas.p(3), format('private.draft_create(%L)', 'Otro')), 'suspended',
+select is(pruebas.b(pruebas.p(3), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Otro')), 'suspended',
   'suspendida, ya no crea: lo dice');
-select is(pruebas.b(pruebas.p(4), format('private.draft_create(%L)', 'Otro')), 'not_teacher',
+select is(pruebas.b(pruebas.p(6), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Otro')), 'suspended',
+  'una maestra activa con la cuenta suspendida tampoco crea');
+select is(pruebas.b(pruebas.p(4), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Otro')), 'not_teacher',
   'una alumna sin maestro no crea');
 select pruebas.como_sistema();
-select is(private.draft_create('Otro') ->> 'answer', 'not_teacher', 'ni un trabajo del sistema');
+select is(private.draft_create(gen_random_uuid(), 'Otro') ->> 'answer', 'not_teacher', 'ni un trabajo del sistema');
 select pruebas.como_usuario(pruebas.p(1));
-select throws_ok($$select private.draft_create('Otro')$$, '42501', null, 'la persona no la ejecuta: solo el servidor');
+select throws_ok($$select private.draft_create(gen_random_uuid(), 'Otro')$$, '42501', null, 'la persona no la ejecuta: solo el servidor');
 select pruebas.como_visitante();
-select throws_ok($$select private.draft_create('Otro')$$, '42501', null, 'ni el visitante');
+select throws_ok($$select private.draft_create(gen_random_uuid(), 'Otro')$$, '42501', null, 'ni el visitante');
 select pruebas.como_dueno();
-select is((select count(*)::integer from public.course_drafts), 4, 'nada más se creó');
+select is((select count(*)::integer from public.course_drafts), 5, 'nada más se creó');
 
 -- ---------------------------------------------------------------------------------------
 -- Los datos del curso.
@@ -255,10 +270,17 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_save_lesson(%L, %L, 2, %
   'Dos', 'x')), 'changed', 'la revisión es la de cada lección: la de otra no sirve');
 select is(pruebas.b(pruebas.p(1), format('private.draft_save_lesson(%L, %L, 1, %L, %L)', pruebas.id('ana'), pruebas.id('l2'),
   'Dos', 'x')), 'saved', 'y mover o editar otra lección no invalida el formulario de esta');
+select is(pruebas.rev('draft_modules', pruebas.id('m1')), 7::bigint,
+  'guardar una lección sube la revisión de su módulo: borrar el módulo no se lleva lo que no se vio');
 -- Mover dentro del módulo y entre módulos.
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 3, %L, 1)', pruebas.id('ana'), pruebas.id('l3'),
   pruebas.id('m1'), pruebas.id('m1'))), 'moved', 'sube la tercera al primer lugar');
 select is(pruebas.lecciones(pruebas.id('m1')), array['Tres', 'Una lección', 'Dos'], 'y el orden cambia');
+select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 1, %L, 3)', pruebas.id('ana'), pruebas.id('l3'),
+  pruebas.id('m1'), pruebas.id('m1'))), 'moved', 'la baja al último lugar');
+select is(pruebas.lecciones(pruebas.id('m1')), array['Una lección', 'Dos', 'Tres'], 'y las de en medio suben');
+select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 3, %L, 1)', pruebas.id('ana'), pruebas.id('l3'),
+  pruebas.id('m1'), pruebas.id('m1'))), 'moved', 'y la vuelve a subir');
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 3, %L, 1)', pruebas.id('ana'), pruebas.id('l3'),
   pruebas.id('m1'), pruebas.id('m1'))), 'changed', 'el mismo movimiento reenviado no la mueve otra vez');
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 2, %L, 1)', pruebas.id('ana'), pruebas.id('l1'),
@@ -285,6 +307,9 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_delete_lesson(%L, %L, 1)
   'una que cambió desde que se vio no se borra');
 select is(pruebas.b(pruebas.p(1), format('private.draft_add_module(%L, %s, %L)', pruebas.id('ana'), pruebas.estructura(pruebas.id('ana')),
   'Tercero'), 'm3'), 'created', 'agrega un tercer módulo, al final');
+select is(pruebas.b(pruebas.p(1), format('private.draft_move_module(%L, %L, 1, 3)', pruebas.id('ana'), pruebas.id('m2'))), 'moved',
+  'baja el primero al último lugar');
+select is(pruebas.modulos(pruebas.id('ana')), array['Inicio', 'Tercero', 'Segundo'], 'y los de en medio suben');
 select is(pruebas.b(pruebas.p(1), format('private.draft_delete_module(%L, %L, %s)', pruebas.id('ana'), pruebas.id('m1'),
   pruebas.rev('draft_modules', pruebas.id('m1')) - 1)), 'changed', 'un módulo que cambió desde que se vio no se borra');
 select is(pruebas.b(pruebas.p(1), format('private.draft_delete_module(%L, %L, %s)', pruebas.id('ana'), pruebas.id('m1'),
@@ -292,7 +317,7 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_delete_module(%L, %L, %s
 select is((select count(*)::integer from public.draft_lessons where course_id = pruebas.id('ana')), 0,
   'sus lecciones se fueron con él');
 select is(pruebas.modulos(pruebas.id('ana')) || (select array_agg(position::text order by position) from public.draft_modules
-           where course_id = pruebas.id('ana')), array['Segundo', 'Tercero', '1', '2'],
+           where course_id = pruebas.id('ana')), array['Tercero', 'Segundo', '1', '2'],
   'y los que quedan se recorren');
 select ok((select updated_at from public.course_drafts where course_id = pruebas.id('ana')) is not null,
   'el borrador sabe cuándo se guardó');
@@ -309,7 +334,7 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_delete_lesson(%L, %L, 1)
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 1, %L, 1)', pruebas.id('ana'), pruebas.id('lb'),
   pruebas.id('mb'), pruebas.id('m2'))), 'not_found', 'ni se la lleva a un módulo suyo');
 select pruebas.como_usuario(pruebas.p(1));
-select is((select array_agg(title order by title collate "C") from public.course_drafts), array['Respirar sin prisa', repeat('a', 60)],
+select is((select array_agg(title order by title collate "C") from public.course_drafts), array['Con testigo', 'Respirar sin prisa', repeat('a', 60)],
   'Ana lee sus borradores y ninguno más');
 select is((select count(*)::integer from public.draft_modules), 2, 'y sus módulos');
 select is((select count(*)::integer from public.draft_lessons), 0, 'y no las lecciones de Beto');
@@ -349,7 +374,7 @@ select throws_ok('truncate public.draft_lessons', '42501', null, 'ni el dueño v
 -- Borrar un borrador que nunca se envió.
 
 select is(pruebas.b(pruebas.p(2), format('private.draft_delete_course(%L, %s)', pruebas.id('ana'),
-  pruebas.rev('course_drafts', pruebas.id('ana')))), 'not_found', 'Beto no borra el de Ana');
+  pruebas.contenido(pruebas.id('ana')))), 'not_found', 'Beto no borra el de Ana');
 select is(pruebas.b(pruebas.p(3), format('private.draft_delete_course(%L, 1)', pruebas.id('caro'))), 'suspended',
   'Caro, suspendida, no borra el suyo');
 select is(pruebas.b(pruebas.p(1), format('private.draft_delete_course(%L, 1)', pruebas.id('ana60'))), 'not_editable',
@@ -357,7 +382,10 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_delete_course(%L, 1)', p
 select is(pruebas.b(pruebas.p(1), format('private.draft_delete_course(%L, 1)', pruebas.id('ana'))), 'changed',
   'con un formulario de antes, changed');
 select is(pruebas.b(pruebas.p(1), format('private.draft_delete_course(%L, %s)', pruebas.id('ana'),
-  pruebas.rev('course_drafts', pruebas.id('ana')))), 'deleted', 'Ana borra su borrador');
+  pruebas.rev('course_drafts', pruebas.id('ana')))), 'changed',
+  'con la revisión de los datos no basta: la de todo el contenido es la que cuenta');
+select is(pruebas.b(pruebas.p(1), format('private.draft_delete_course(%L, %s)', pruebas.id('ana'),
+  pruebas.contenido(pruebas.id('ana')))), 'deleted', 'Ana borra su borrador');
 select is((select count(*)::integer from public.course_registry where course_id = pruebas.id('ana'))
           + (select count(*)::integer from public.course_drafts where course_id = pruebas.id('ana'))
           + (select count(*)::integer from public.draft_modules where course_id = pruebas.id('ana')), 0,
@@ -378,10 +406,10 @@ grant select on public.draft_lessons to anon;
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table readable by anon'),
   've que el visitante la lee');
 revoke select on public.draft_lessons from anon;
-grant execute on function private.draft_create(text) to authenticated;
+grant execute on function private.draft_create(uuid, text) to authenticated;
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function executable by authenticated'),
   've que la persona ejecuta una función del borrador');
-revoke execute on function private.draft_create(text) from authenticated;
+revoke execute on function private.draft_create(uuid, text) from authenticated;
 alter function private.draft_delete_course(uuid, bigint) security invoker;
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function not security definer'),
   've una función que dejó de ser security definer');
@@ -398,7 +426,33 @@ create policy draft_lessons_content on public.draft_lessons for select to authen
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft policy other than teacher read'),
   've una política de más');
 drop policy draft_lessons_content on public.draft_lessons;
+create function private.draft_extra() returns integer language sql as 'select 1';
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function not in the watchdog area'),
+  've una función del borrador que el área no conoce');
+drop function private.draft_extra();
+alter table public.draft_lessons drop constraint draft_lessons_title_ok;
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table without constraint draft_lessons_title_ok'),
+  've que falta una restricción de los textos');
+alter table public.draft_lessons add constraint draft_lessons_title_ok check (private.draft_text_ok(title, 120, false));
+create trigger ajeno before insert on public.draft_modules for each row execute function private.guard_draft();
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table with a foreign trigger'),
+  've un disparador ajeno');
+drop trigger ajeno on public.draft_modules;
+alter function private.draft_open(uuid, uuid) reset search_path;
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function without fixed search_path'),
+  've una función sin el search_path fijo');
+alter function private.draft_open(uuid, uuid) set search_path = '';
+revoke execute on function private.draft_delete_lesson(uuid, uuid, bigint) from app_service;
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function not executable by app_service'),
+  've que el servidor ya no ejecuta una');
+grant execute on function private.draft_delete_lesson(uuid, uuid, bigint) to app_service;
+alter function private.guard_draft() security definer;
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function security definer'),
+  've el guardián como security definer');
+alter function private.guard_draft() security invoker;
 select is(pruebas.vigila(), '{}', 'deshecho todo, otra vez en orden');
+drop function private.draft_refusal();
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function missing'), 've una función que falta');
 
 select * from finish();
 rollback;

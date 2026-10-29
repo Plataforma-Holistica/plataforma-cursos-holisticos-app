@@ -21,15 +21,19 @@
 
 -- ---------------------------------------------------------------------------------------
 -- La forma de un texto: en NFC, sin espacios en las puntas, sin caracteres que no se ven (la lista de
--- `catalog_name_ok`) y sin controles; un texto de varias líneas admite el salto de línea y nada más.
+-- `catalog_name_ok`) y sin controles ni separadores de línea; un texto de varias líneas admite el salto
+-- de línea y nada más. Con rangos escritos, no con clases como `[[:space:]]`: esas cambian con la
+-- configuración regional de la base. Los espacios de las puntas son los que quita `trim()` del
+-- navegador, para que lo que la regla del dominio deja pasar no lo rechace la base.
 
 create function private.draft_text_ok(p_text text, p_max integer, p_multiline boolean) returns boolean
 language sql immutable set search_path = ''
 as $$
   select p_text is not null and pg_catalog.char_length(p_text) between 1 and p_max
      and p_text is nfc normalized
-     and p_text !~ '^[[:space:]]|[[:space:]]$'
-     and p_text !~ case when p_multiline then '[\x01-\x09\x0b-\x1f\x7f-\x9f]' else '[[:cntrl:]]' end
+     and p_text !~ '^[\x09-\x0d\x20\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]|[\x09-\x0d\x20\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]$'
+     and p_text !~ case when p_multiline then '[\x01-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]'
+                        else '[\x01-\x1f\x7f-\x9f\u2028\u2029]' end
      and p_text !~ '[\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'
 $$;
 revoke all on function private.draft_text_ok(text, integer, boolean) from public;
@@ -47,11 +51,14 @@ create table public.course_drafts (
   level_id uuid references public.levels (id),
   revision bigint not null default 1,           -- sube con cada cambio a los datos del curso
   structure_revision bigint not null default 1, -- sube al agregar o borrar un módulo
+  content_revision bigint not null default 1,   -- sube con todo cambio al borrador: borrar el curso la lleva
+  create_token uuid not null,                   -- el del formulario que lo creó: un reenvío no crea otro
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),  -- «Guardado a las…»: cualquier cambio al borrador
   constraint course_drafts_course_teacher_fk foreign key (course_id, teacher_id)
     references public.course_registry (course_id, teacher_id) on delete cascade,
   constraint course_drafts_course_teacher_uq unique (course_id, teacher_id),
+  constraint course_drafts_create_token_uq unique (teacher_id, create_token),
   constraint course_drafts_version_positive check (version >= 1),
   constraint course_drafts_title_ok check (private.draft_text_ok(title, 60, false)),
   constraint course_drafts_summary_ok check (summary is null or private.draft_text_ok(summary, 500, true))
@@ -65,7 +72,7 @@ create table public.draft_modules (
   teacher_id uuid not null,
   title text not null,
   position integer not null,                      -- dentro del curso, desde 1
-  revision bigint not null default 1,             -- sube al renombrarlo y al entrar o salir una lección
+  revision bigint not null default 1,             -- sube al renombrarlo, y al entrar, salir o cambiar una lección
   constraint draft_modules_course_fk foreign key (course_id, teacher_id)
     references public.course_drafts (course_id, teacher_id) on delete cascade,
   constraint draft_modules_id_course_uq unique (id, course_id),
@@ -191,7 +198,10 @@ revoke all on function private.draft_open(uuid, uuid) from public;
 --   created, saved, moved, deleted, changed, invalid, not_found, not_editable, suspended,
 --   not_teacher, practice_inactive, level_inactive
 
-create function private.draft_create(p_title text) returns jsonb
+-- Crear lleva el testigo que la pantalla puso en el formulario: el mismo testigo devuelve el curso que
+-- ya creó (un doble clic sin JavaScript, o «Reintentar» después de una respuesta que se perdió). El
+-- candado del maestro pone en fila dos envíos a la vez con el mismo testigo.
+create function private.draft_create(p_token uuid, p_title text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -201,11 +211,16 @@ begin
   if v_teacher is null then
     return private.draft_refusal();
   end if;
-  if not private.draft_text_ok(p_title, 60, false) then
+  if p_token is null or not private.draft_text_ok(p_title, 60, false) then
     return pg_catalog.jsonb_build_object('answer', 'invalid');
   end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('draft_create:' || v_teacher::text, 0));
+  select course_id into v_course from public.course_drafts where teacher_id = v_teacher and create_token = p_token;
+  if v_course is not null then
+    return pg_catalog.jsonb_build_object('answer', 'created', 'course', v_course);
+  end if;
   insert into public.course_registry (teacher_id) values (v_teacher) returning course_id into v_course;
-  insert into public.course_drafts (course_id, teacher_id, title) values (v_course, v_teacher, p_title);
+  insert into public.course_drafts (course_id, teacher_id, title, create_token) values (v_course, v_teacher, p_title, p_token);
   return pg_catalog.jsonb_build_object('answer', 'created', 'course', v_course);
 end
 $$;
@@ -258,7 +273,7 @@ begin
   end if;
   update public.course_drafts
      set title = p_title, summary = p_summary, practice_id = p_practice, level_id = p_level,
-         revision = revision + 1, updated_at = now()
+         revision = revision + 1, updated_at = now(), content_revision = content_revision + 1
    where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'saved');
 end
@@ -291,7 +306,7 @@ begin
   select p_course, v_teacher, p_title, coalesce(max(m.position), 0) + 1
   from public.draft_modules m where m.course_id = p_course
   returning id into v_module;
-  update public.course_drafts set structure_revision = structure_revision + 1, updated_at = now()
+  update public.course_drafts set structure_revision = structure_revision + 1, updated_at = now(), content_revision = content_revision + 1
    where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'created', 'module', v_module);
 end
@@ -324,7 +339,7 @@ begin
   end if;
   update public.draft_modules set title = p_title, revision = revision + 1
    where id = p_module and course_id = p_course;
-  update public.course_drafts set updated_at = now() where course_id = p_course;
+  update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'saved');
 end
 $$;
@@ -356,7 +371,7 @@ begin
   delete from public.draft_modules where id = p_module and course_id = p_course;
   update public.draft_modules set position = position - 1
    where course_id = p_course and position > v_module.position;
-  update public.course_drafts set structure_revision = structure_revision + 1, updated_at = now()
+  update public.course_drafts set structure_revision = structure_revision + 1, updated_at = now(), content_revision = content_revision + 1
    where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'deleted');
 end
@@ -402,7 +417,7 @@ begin
     end if;
     update public.draft_modules set position = p_to_position where id = p_module and course_id = p_course;
     set constraints public.draft_modules_position_uq immediate;
-    update public.course_drafts set updated_at = now() where course_id = p_course;
+    update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   end if;
   return pg_catalog.jsonb_build_object('answer', 'moved');
 end
@@ -440,7 +455,7 @@ begin
   from public.draft_lessons l where l.module_id = p_module
   returning id into v_lesson;
   update public.draft_modules set revision = revision + 1 where id = p_module;
-  update public.course_drafts set updated_at = now() where course_id = p_course;
+  update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'created', 'lesson', v_lesson);
 end
 $$;
@@ -474,7 +489,9 @@ begin
   end if;
   update public.draft_lessons set title = p_title, description = p_description, revision = revision + 1
    where id = p_lesson and course_id = p_course;
-  update public.course_drafts set updated_at = now() where course_id = p_course;
+  update public.draft_modules set revision = revision + 1
+   where id = (select module_id from public.draft_lessons where id = p_lesson) and course_id = p_course;
+  update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'saved');
 end
 $$;
@@ -505,7 +522,7 @@ begin
   update public.draft_lessons set position = position - 1
    where module_id = v_lesson.module_id and position > v_lesson.position;
   update public.draft_modules set revision = revision + 1 where id = v_lesson.module_id;
-  update public.course_drafts set updated_at = now() where course_id = p_course;
+  update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'deleted');
 end
 $$;
@@ -566,13 +583,14 @@ begin
   update public.draft_lessons set module_id = p_to_module, position = p_to_position
    where id = p_lesson and course_id = p_course;
   set constraints public.draft_lessons_position_uq immediate;
-  update public.course_drafts set updated_at = now() where course_id = p_course;
+  update public.course_drafts set updated_at = now(), content_revision = content_revision + 1 where course_id = p_course;
   return pg_catalog.jsonb_build_object('answer', 'moved');
 end
 $$;
 
 -- Borrar un borrador que nunca se envió (decisión de Sergio del 2026-10-29): se va el registro, y
--- con él todo el borrador. Lleva la revisión de los datos que se vio. Hasta T-405 todo borrador es
+-- con él todo el borrador. Lleva la revisión del contenido entero que se vio: un módulo o una lección
+-- de otra pestaña también la sube. Hasta T-405 todo borrador es
 -- nunca enviado; T-405 suma esa condición. El guardián de lo publicado lo vuelve a exigir.
 create function private.draft_delete_course(p_course uuid, p_seen bigint) returns jsonb
 language plpgsql security definer set search_path = ''
@@ -588,7 +606,7 @@ begin
   if v_answer is not null then
     return pg_catalog.jsonb_build_object('answer', v_answer);
   end if;
-  if (select revision from public.course_drafts where course_id = p_course) is distinct from p_seen then
+  if (select content_revision from public.course_drafts where course_id = p_course) is distinct from p_seen then
     return pg_catalog.jsonb_build_object('answer', 'changed');
   end if;
   delete from public.course_registry where course_id = p_course and teacher_id = v_teacher;
@@ -600,7 +618,7 @@ do $$
 declare f text;
 begin
   foreach f in array array[
-    'private.draft_create(text)',
+    'private.draft_create(uuid, text)',
     'private.draft_save_course(uuid, bigint, text, text, uuid, uuid)',
     'private.draft_add_module(uuid, bigint, text)',
     'private.draft_rename_module(uuid, uuid, bigint, text)',
@@ -632,7 +650,7 @@ as $$
            ('public.draft_lessons', 'draft_lessons')),
   -- Las del servidor (`server`) y las que nadie de la aplicación ejecuta.
   draft_functions (signature, server) as (
-    values ('private.draft_create(text)', true),
+    values ('private.draft_create(uuid, text)', true),
            ('private.draft_save_course(uuid, bigint, text, text, uuid, uuid)', true),
            ('private.draft_add_module(uuid, bigint, text)', true),
            ('private.draft_rename_module(uuid, uuid, bigint, text)', true),
@@ -701,6 +719,36 @@ as $$
   union all
   select 'draft function missing', f.signature
   from found f where f.oid is null
+  union all
+  -- Una función del borrador que el área no conoce (otra firma de una que sí, o una nueva) se agrega a
+  -- la lista: si no, nadie revisaría a quién se le concede.
+  select 'draft function not in the watchdog area', p.oid::regprocedure::text
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+  where (p.proname like 'draft\_%' or p.proname = 'guard_draft')
+    and not exists (select 1 from found f where f.oid = p.oid)
+  union all
+  -- Las restricciones que sostienen lo que las funciones suponen: los textos, el borrado en cascada
+  -- desde el registro y las posiciones únicas que se pueden diferir dentro de una función.
+  select 'draft table without constraint ' || c.name, c.table_name
+  from (values
+      ('public.course_drafts', 'course_drafts_title_ok', 'c', false),
+      ('public.course_drafts', 'course_drafts_summary_ok', 'c', false),
+      ('public.course_drafts', 'course_drafts_course_teacher_fk', 'f', false),
+      ('public.course_drafts', 'course_drafts_create_token_uq', 'u', false),
+      ('public.draft_modules', 'draft_modules_title_ok', 'c', false),
+      ('public.draft_modules', 'draft_modules_course_fk', 'f', false),
+      ('public.draft_modules', 'draft_modules_position_uq', 'u', true),
+      ('public.draft_lessons', 'draft_lessons_title_ok', 'c', false),
+      ('public.draft_lessons', 'draft_lessons_description_ok', 'c', false),
+      ('public.draft_lessons', 'draft_lessons_course_fk', 'f', false),
+      ('public.draft_lessons', 'draft_lessons_module_fk', 'f', false),
+      ('public.draft_lessons', 'draft_lessons_position_uq', 'u', true)) as c (table_name, name, kind, deferred_ok)
+  where not exists (
+    select 1 from pg_catalog.pg_constraint k
+    where k.conrelid = c.table_name::regclass and k.conname = c.name and k.contype = c.kind::"char" and k.convalidated
+      and (c.kind <> 'f' or k.confdeltype = 'c')
+      and k.condeferrable = c.deferred_ok and not k.condeferred)
   union all
   select 'draft function executable by ' || r.rolname, f.signature
   from found f cross join app_roles r

@@ -31,7 +31,8 @@ export interface TeacherCourse {
   title: string;
   /** Lo último guardado en su borrador, o el último cambio del registro. */
   updatedAt: string;
-  hasDraft: boolean;
+  /** La revisión de todo su borrador, la que lleva borrarlo; nula si no tiene borrador. */
+  contentRevision: number | null;
 }
 
 export interface DraftLesson {
@@ -58,6 +59,8 @@ export interface DraftCourse {
   levelId: string | null;
   revision: number;
   structureRevision: number;
+  /** Sube con todo cambio al borrador: la lleva borrar el curso. */
+  contentRevision: number;
   updatedAt: string;
   modules: DraftModule[];
 }
@@ -95,7 +98,7 @@ export interface CourseFields {
 export interface DraftsStore {
   teacherCourses: (claims: VerifiedClaims) => Promise<TeacherCourse[]>;
   draftCourse: (claims: VerifiedClaims, course: string) => Promise<DraftCourse | null>;
-  create: (claims: VerifiedClaims, title: string) => Promise<Created<CreateAnswer>>;
+  create: (claims: VerifiedClaims, token: string, title: string) => Promise<Created<CreateAnswer>>;
   saveCourse: (claims: VerifiedClaims, course: string, seen: number, fields: CourseFields) => Promise<SaveCourseAnswer>;
   addModule: (claims: VerifiedClaims, course: string, seen: number, title: string) => Promise<Created<AddAnswer>>;
   renameModule: (claims: VerifiedClaims, course: string, module: string, seen: number, title: string) => Promise<SaveAnswer>;
@@ -190,10 +193,14 @@ export function createDrafts(deps: DraftsDeps) {
     }
   }
 
-  function createCourse(reader: CookieReader, title: string | null) {
-    const parsed = textOf("courseTitle", title);
-    return change<CreateAnswer>(reader, parsed !== null, async (claims) => {
-      const created = await deps.store.create(claims, parsed?.text ?? "");
+  /**
+   * Crea un curso. `token` es el testigo que la pantalla pone en el formulario: el mismo devuelve el
+   * curso que ya creó (un doble envío, o reintentar después de «no se supo»).
+   */
+  function createCourse(reader: CookieReader, input: { token: string; title: string | null }) {
+    const parsed = textOf("courseTitle", input.title);
+    return change<CreateAnswer>(reader, isId(input.token) && parsed !== null, async (claims) => {
+      const created = await deps.store.create(claims, input.token, parsed?.text ?? "");
       return created.answer === "created" ? { kind: created.answer, id: created.id } : { kind: created.answer };
     });
   }
@@ -299,7 +306,10 @@ export function createDrafts(deps: DraftsDeps) {
     }));
   }
 
-  /** Borra un borrador que nunca se envió (decisión de Sergio del 2026-10-29), con todo lo suyo. */
+  /**
+   * Borra un borrador que nunca se envió (decisión de Sergio del 2026-10-29), con todo lo suyo. `seen` es
+   * la revisión del contenido entero (`contentRevision`): lo que otra pestaña agregó también la sube.
+   */
   function deleteCourse(reader: CookieReader, input: { course: string; seen: number }) {
     const formed = isId(input.course) && isCount(input.seen);
     return change<DeleteAnswer>(reader, formed, async (claims) => ({

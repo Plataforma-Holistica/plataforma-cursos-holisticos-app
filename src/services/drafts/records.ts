@@ -17,7 +17,13 @@ const state = z.enum(COURSE_STATES);
 const count = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const instant = z.union([z.string(), z.date()]).transform((value) => (value instanceof Date ? value.toISOString() : value));
 
-const teacherCourseRow = z.object({ course_id: id, state, title: z.string(), updated_at: instant, has_draft: z.boolean() });
+const teacherCourseRow = z.object({
+  course_id: id,
+  state,
+  title: z.string(),
+  updated_at: instant,
+  content_revision: count.nullable(),
+});
 
 /**
  * Los cursos del maestro de la sesión. La política del registro le da a Contenido todos: por eso
@@ -26,7 +32,7 @@ const teacherCourseRow = z.object({ course_id: id, state, title: z.string(), upd
 export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
   const rows = await tx.query(
     sql`select r.course_id, r.state, coalesce(d.title, p.title, '') as title,
-               coalesce(d.updated_at, r.updated_at) as updated_at, d.course_id is not null as has_draft
+               coalesce(d.updated_at, r.updated_at) as updated_at, d.content_revision
         from public.course_registry r
         left join public.course_drafts d on d.course_id = r.course_id
         left join public.published_courses p on p.course_id = r.course_id
@@ -39,10 +45,24 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     state: row.state,
     title: row.title,
     updatedAt: row.updated_at,
-    hasDraft: row.has_draft,
+    contentRevision: row.content_revision,
   }));
 }
 
+const lessonSchema = z.strictObject({
+  id,
+  title: z.string(),
+  description: z.string().nullable(),
+  position: z.number().int().min(1),
+  revision: count,
+});
+const moduleSchema = z.strictObject({
+  id,
+  title: z.string(),
+  position: z.number().int().min(1),
+  revision: count,
+  lessons: z.array(lessonSchema),
+});
 const draftRow = z.object({
   course_id: id,
   state,
@@ -53,39 +73,36 @@ const draftRow = z.object({
   level_id: id.nullable(),
   revision: count,
   structure_revision: count,
+  content_revision: count,
   updated_at: instant,
-});
-const moduleRow = z.object({ id, title: z.string(), position: z.number().int().min(1), revision: count });
-const lessonRow = z.object({
-  id,
-  module_id: id,
-  title: z.string(),
-  description: z.string().nullable(),
-  position: z.number().int().min(1),
-  revision: count,
+  modules: z.array(moduleSchema),
 });
 
-/** El borrador entero del curso `course`, si es del maestro de la sesión; si no, nulo. */
+/**
+ * El borrador entero del curso `course`, si es del maestro de la sesión; si no, nulo. En una sola
+ * consulta: con varias, en read committed, cada una vería otra foto, y una lección que se movió entre
+ * dos de ellas a un módulo nuevo se perdería de la vista.
+ */
 export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCourse | null> {
   const [draft] = await tx.query(
     sql`select d.course_id, r.state, d.version, d.title, d.summary, d.practice_id, d.level_id,
-               d.revision, d.structure_revision, d.updated_at
+               d.revision, d.structure_revision, d.content_revision, d.updated_at,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                          'id', m.id, 'title', m.title, 'position', m.position, 'revision', m.revision,
+                          'lessons', coalesce((
+                            select jsonb_agg(jsonb_build_object(
+                                     'id', l.id, 'title', l.title, 'description', l.description,
+                                     'position', l.position, 'revision', l.revision) order by l.position)
+                            from public.draft_lessons l where l.module_id = m.id), '[]'::jsonb))
+                        order by m.position)
+                 from public.draft_modules m where m.course_id = d.course_id), '[]'::jsonb) as modules
         from public.course_drafts d
         join public.course_registry r on r.course_id = d.course_id
         where d.course_id = ${course}::uuid and d.teacher_id = (select private.current_teacher_id())`,
     draftRow,
   );
   if (!draft) return null;
-  const modules = await tx.query(
-    sql`select id, title, position, revision from public.draft_modules
-        where course_id = ${course}::uuid order by position`,
-    moduleRow,
-  );
-  const lessons = await tx.query(
-    sql`select id, module_id, title, description, position, revision from public.draft_lessons
-        where course_id = ${course}::uuid order by position`,
-    lessonRow,
-  );
   return {
     id: draft.course_id,
     state: draft.state,
@@ -96,22 +113,9 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
     levelId: draft.level_id,
     revision: draft.revision,
     structureRevision: draft.structure_revision,
+    contentRevision: draft.content_revision,
     updatedAt: draft.updated_at,
-    modules: modules.map((module) => ({
-      id: module.id,
-      title: module.title,
-      position: module.position,
-      revision: module.revision,
-      lessons: lessons
-        .filter((lesson) => lesson.module_id === module.id)
-        .map((lesson) => ({
-          id: lesson.id,
-          title: lesson.title,
-          description: lesson.description,
-          position: lesson.position,
-          revision: lesson.revision,
-        })),
-    })),
+    modules: draft.modules,
   };
 }
 
@@ -130,7 +134,8 @@ async function ask(tx: Tx, query: ReturnType<typeof sql>): Promise<{ answer: str
   return { answer: result.answer, id: result.course ?? result.module ?? result.lesson ?? null };
 }
 
-export const askCreate = (tx: Tx, title: string) => ask(tx, sql`select private.draft_create(${title}::text) as result`);
+export const askCreate = (tx: Tx, token: string, title: string) =>
+  ask(tx, sql`select private.draft_create(${token}::uuid, ${title}::text) as result`);
 
 export const askSaveCourse = (tx: Tx, course: string, seen: number, fields: CourseFields) =>
   ask(
