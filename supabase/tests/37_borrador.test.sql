@@ -6,7 +6,7 @@
 -- carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(143);
+select plan(147);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a3700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -125,6 +125,10 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', 'a37000
 select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', 'a3700000-0000-0000-0002-000000000001', 'Con testigo')), 'created',
   'el mismo formulario reenviado contesta created');
 select is((select count(*)::integer from public.course_drafts where create_token = 'a3700000-0000-0000-0002-000000000001'), 1, 'y no crea otro');
+select pruebas.a_nombre_de(pruebas.p(1));
+select is(private.draft_create('a3700000-0000-0000-0002-000000000001', 'Con testigo') ->> 'course', pruebas.id('tok')::text,
+  'devuelve el mismo curso');
+select pruebas.como_dueno();
 select is(pruebas.b(pruebas.p(1), format('private.draft_create(null, %L)', 'Sin testigo')), 'invalid', 'sin testigo no crea');
 select is(pruebas.b(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), E'Cafe\u0301')), 'invalid',
   'ni sin normalizar (NFC)');
@@ -281,6 +285,8 @@ select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 
 select is(pruebas.lecciones(pruebas.id('m1')), array['Una lección', 'Dos', 'Tres'], 'y las de en medio suben');
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 3, %L, 1)', pruebas.id('ana'), pruebas.id('l3'),
   pruebas.id('m1'), pruebas.id('m1'))), 'moved', 'y la vuelve a subir');
+select is(pruebas.rev('draft_modules', pruebas.id('m1')), 10::bigint,
+  'mover dentro del módulo también sube su revisión (de 7 a 10, con tres movimientos)');
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 3, %L, 1)', pruebas.id('ana'), pruebas.id('l3'),
   pruebas.id('m1'), pruebas.id('m1'))), 'changed', 'el mismo movimiento reenviado no la mueve otra vez');
 select is(pruebas.b(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, 2, %L, 1)', pruebas.id('ana'), pruebas.id('l1'),
@@ -430,9 +436,20 @@ create function private.draft_extra() returns integer language sql as 'select 1'
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft function not in the watchdog area'),
   've una función del borrador que el área no conoce');
 drop function private.draft_extra();
+create function private.draftextra() returns integer language sql as 'select 1';
+create function public.draft_publica() returns integer language sql as 'select 1';
+select is((select array_agg(object_name order by object_name) from private.schema_violations_drafts()
+           where problem = 'draft function not in the watchdog area'), array['public.draft_publica()'],
+  'también una en public, y solo las que empiezan con «draft_»');
+drop function private.draftextra();
+drop function public.draft_publica();
 alter table public.draft_lessons drop constraint draft_lessons_title_ok;
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table without constraint draft_lessons_title_ok'),
   've que falta una restricción de los textos');
+alter table public.draft_lessons add constraint draft_lessons_title_ok check (true);
+select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table without constraint draft_lessons_title_ok'),
+  'y que no basta una con el mismo nombre que no revisa nada');
+alter table public.draft_lessons drop constraint draft_lessons_title_ok;
 alter table public.draft_lessons add constraint draft_lessons_title_ok check (private.draft_text_ok(title, 120, false));
 create trigger ajeno before insert on public.draft_modules for each row execute function private.guard_draft();
 select ok(exists (select 1 from unnest(pruebas.vigila()) p where p like 'draft table with a foreign trigger'),

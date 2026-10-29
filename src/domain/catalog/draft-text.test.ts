@@ -61,6 +61,7 @@ describe("parseDraftText", () => {
     ["un control C1", "description", "Uno\u0085dos"],
     ["un aislador de dirección", "moduleTitle", "Uno\u2066dos"],
     ["un separador de línea en un título", "courseTitle", "Uno\u2028dos"],
+    ["un suplente suelto", "lessonTitle", "Uno\ud800dos"],
     ["un separador de párrafo en una descripción", "description", "Uno\u2029dos"],
   ] as const)("rechaza %s", (_name, kind, input) => {
     expect(parseDraftText(kind, input)).toEqual({ ok: false, reason: "invalid" });

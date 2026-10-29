@@ -200,7 +200,9 @@ revoke all on function private.draft_open(uuid, uuid) from public;
 
 -- Crear lleva el testigo que la pantalla puso en el formulario: el mismo testigo devuelve el curso que
 -- ya creó (un doble clic sin JavaScript, o «Reintentar» después de una respuesta que se perdió). El
--- candado del maestro pone en fila dos envíos a la vez con el mismo testigo.
+-- candado del maestro pone en fila dos envíos a la vez con el mismo testigo, y en read committed la
+-- búsqueda de después ve lo que confirmó el primero. Si el curso se borró, su testigo se fue con él: el
+-- mismo formulario, reenviado desde el historial, crea otro.
 create function private.draft_create(p_token uuid, p_title text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -213,6 +215,9 @@ begin
   end if;
   if p_token is null or not private.draft_text_ok(p_title, 60, false) then
     return pg_catalog.jsonb_build_object('answer', 'invalid');
+  end if;
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'course changes run in read committed' using errcode = '25000';
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('draft_create:' || v_teacher::text, 0));
   select course_id into v_course from public.course_drafts where teacher_id = v_teacher and create_token = p_token;
@@ -528,7 +533,7 @@ end
 $$;
 
 -- Mover una lección lleva el módulo y la posición que se vieron. Dentro del mismo módulo va de 1 a
--- cuántas hay; a otro, de 1 a una después de la última.
+-- cuántas hay; a otro, de 1 a una después de la última. Sube la revisión de los módulos que toca.
 create function private.draft_move_lesson(p_course uuid, p_lesson uuid, p_seen_module uuid, p_seen_position integer,
                                           p_to_module uuid, p_to_position integer) returns jsonb
 language plpgsql security definer set search_path = ''
@@ -573,6 +578,7 @@ begin
       update public.draft_lessons set position = position - 1
        where module_id = p_to_module and position > v_lesson.position and position <= p_to_position;
     end if;
+    update public.draft_modules set revision = revision + 1 where id = p_to_module;
   else
     update public.draft_lessons set position = position - 1
      where module_id = v_lesson.module_id and position > v_lesson.position;
@@ -724,7 +730,7 @@ as $$
   -- la lista: si no, nadie revisaría a quién se le concede.
   select 'draft function not in the watchdog area', p.oid::regprocedure::text
   from pg_catalog.pg_proc p
-  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname in ('private', 'public')
   where (p.proname like 'draft\_%' or p.proname = 'guard_draft')
     and not exists (select 1 from found f where f.oid = p.oid)
   union all
@@ -732,23 +738,33 @@ as $$
   -- desde el registro y las posiciones únicas que se pueden diferir dentro de una función.
   select 'draft table without constraint ' || c.name, c.table_name
   from (values
-      ('public.course_drafts', 'course_drafts_title_ok', 'c', false),
-      ('public.course_drafts', 'course_drafts_summary_ok', 'c', false),
-      ('public.course_drafts', 'course_drafts_course_teacher_fk', 'f', false),
-      ('public.course_drafts', 'course_drafts_create_token_uq', 'u', false),
-      ('public.draft_modules', 'draft_modules_title_ok', 'c', false),
-      ('public.draft_modules', 'draft_modules_course_fk', 'f', false),
-      ('public.draft_modules', 'draft_modules_position_uq', 'u', true),
-      ('public.draft_lessons', 'draft_lessons_title_ok', 'c', false),
-      ('public.draft_lessons', 'draft_lessons_description_ok', 'c', false),
-      ('public.draft_lessons', 'draft_lessons_course_fk', 'f', false),
-      ('public.draft_lessons', 'draft_lessons_module_fk', 'f', false),
-      ('public.draft_lessons', 'draft_lessons_position_uq', 'u', true)) as c (table_name, name, kind, deferred_ok)
+      ('public.course_drafts', 'course_drafts_course_teacher_fk',
+       'FOREIGN KEY (course_id, teacher_id) REFERENCES public.course_registry(course_id, teacher_id) ON DELETE CASCADE'),
+      ('public.course_drafts', 'course_drafts_create_token_uq', 'UNIQUE (teacher_id, create_token)'),
+      ('public.course_drafts', 'course_drafts_summary_ok', 'CHECK (((summary IS NULL) OR private.draft_text_ok(summary, 500, true)))'),
+      ('public.course_drafts', 'course_drafts_title_ok', 'CHECK (private.draft_text_ok(title, 60, false))'),
+      ('public.course_drafts', 'course_drafts_version_positive', 'CHECK ((version >= 1))'),
+      ('public.draft_modules', 'draft_modules_course_fk',
+       'FOREIGN KEY (course_id, teacher_id) REFERENCES public.course_drafts(course_id, teacher_id) ON DELETE CASCADE'),
+      ('public.draft_modules', 'draft_modules_position_positive', 'CHECK (("position" >= 1))'),
+      ('public.draft_modules', 'draft_modules_position_uq', 'UNIQUE (course_id, "position") DEFERRABLE'),
+      ('public.draft_modules', 'draft_modules_title_ok', 'CHECK (private.draft_text_ok(title, 120, false))'),
+      ('public.draft_lessons', 'draft_lessons_course_fk',
+       'FOREIGN KEY (course_id, teacher_id) REFERENCES public.course_drafts(course_id, teacher_id) ON DELETE CASCADE'),
+      ('public.draft_lessons', 'draft_lessons_description_ok',
+       'CHECK (((description IS NULL) OR private.draft_text_ok(description, 2000, true)))'),
+      ('public.draft_lessons', 'draft_lessons_module_fk',
+       'FOREIGN KEY (module_id, course_id) REFERENCES public.draft_modules(id, course_id) ON DELETE CASCADE'),
+      ('public.draft_lessons', 'draft_lessons_position_positive', 'CHECK (("position" >= 1))'),
+      ('public.draft_lessons', 'draft_lessons_position_uq', 'UNIQUE (module_id, "position") DEFERRABLE'),
+      ('public.draft_lessons', 'draft_lessons_title_ok', 'CHECK (private.draft_text_ok(title, 120, false))')
+    ) as c (table_name, name, definition)
+  -- La definición entera, como la escribe la base con el search_path vacío: un `check (true)` con el
+  -- mismo nombre no pasa, y una posición única diferible no puede nacer diferida.
   where not exists (
     select 1 from pg_catalog.pg_constraint k
-    where k.conrelid = c.table_name::regclass and k.conname = c.name and k.contype = c.kind::"char" and k.convalidated
-      and (c.kind <> 'f' or k.confdeltype = 'c')
-      and k.condeferrable = c.deferred_ok and not k.condeferred)
+    where k.conrelid = c.table_name::regclass and k.conname = c.name and k.convalidated
+      and not k.condeferred and pg_catalog.pg_get_constraintdef(k.oid) = c.definition)
   union all
   select 'draft function executable by ' || r.rolname, f.signature
   from found f cross join app_roles r

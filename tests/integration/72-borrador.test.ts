@@ -105,7 +105,9 @@ describe("El borrador de un curso (RF-603), contra la base", () => {
     await reverted(async (owner) => {
       await teacher(owner, ana);
       const service = drafts(owner);
-      const course = await created(service.createCourse(ana.jar, { token: randomUUID(), title: "Respirar en calma" }));
+      const token = randomUUID();
+      const course = await created(service.createCourse(ana.jar, { token, title: "Respirar en calma" }));
+      expect(await service.createCourse(ana.jar, { token, title: "Respirar en calma" })).toEqual({ kind: "created", id: course });
       expect(await service.saveCourse(ana.jar, { course, seen: 1, title: "Respirar", summary: "Para empezar.\r\nDespacio.", practiceId: null, levelId: null }))
         .toEqual({ kind: "saved" });
       const first = await created(service.addModule(ana.jar, { course, seen: 1, title: "Inicio" }));
@@ -129,7 +131,7 @@ describe("El borrador de un curso (RF-603), contra la base", () => {
       expect(draft.modules[1]?.lessons[0]).toMatchObject({ id: one, description: "Qué se hace.", revision: 2 });
 
       const courses = await service.teacherCourses(ana.claims);
-      expect(courses).toEqual({ kind: "ready", value: [expect.objectContaining({ id: course, state: "draft", title: "Respirar", contentRevision: expect.any(Number) })] });
+      expect(courses).toEqual({ kind: "ready", value: [expect.objectContaining({ id: course, state: "draft", title: "Respirar", contentRevision: draft.contentRevision })] });
     });
   });
 
