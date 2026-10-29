@@ -237,6 +237,15 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     payoutsAction:
       /const bound = payoutsPeriodFrom\(target\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/admin/_textos/actions.ts": {
+    // Dar el código otra vez: el de los textos legales, que comprueba lo reciente con la lectura que pide configuración.
+    legalCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*legalCodeOutcome\(await giveLegalCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Una versión nueva: abrir, seguir editando y ver cómo queda no llaman a nadie; publicar lleva la versión
+    // vista y la huella del texto de la vista previa, y lo escrito se revisa antes.
+    legalAction:
+      /if \(request\.step === "edit"\) return \{ kind: "composing"[\s\S]*if \(!checked\.ok\) return \{ kind: "composing"[\s\S]*if \(request\.step === "preview"\) return previewOf\([\s\S]*publishOutcome\(\s*await publishLegalVersion\(jar, \{[\s\S]*seenVersion: draft\.seen,\s*seenSha: request\.sha,[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
   "src/app/admin/_alertas/actions.ts": {
     // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
     alertsCodeAction:
@@ -400,7 +409,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_periodos", "_practicas", "_revision"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_periodos", "_practicas", "_revision", "_textos"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -424,13 +433,15 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
       it("toda sección declara la capacidad que pide, y ninguna corre la guarda por su cuenta", () => {
         const table = codeOf("src/app/admin/_lib/sections.tsx");
-        const entries = [...table.matchAll(/^ {2}(\w+): \{ capability: "(\w+)", render: \(claims\) => <\w+ claims=\{claims\} \/> \},$/gm)];
+        // Un nombre con guion va entre comillas («"textos-legales"»).
+        const entries = [...table.matchAll(/^ {2}(\w+|"[a-z-]+"): \{ capability: "(\w+)", render: \(claims\) => <\w+ claims=\{claims\} \/> \},$/gm)];
         expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([
           ["equipo", "config"],
           ["practicas", "content"],
           ["revision", "content"],
           ["alertas", "finance"],
           ["periodos", "finance"],
+          ['"textos-legales"', "config"],
         ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
         const body = /const SECTIONS: Record<string, AdminSection> = \{\n([\s\S]*?)\n\};/.exec(table)?.[1] ?? "";
@@ -443,6 +454,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
           "src/app/admin/_periodos/section.tsx",
           "src/app/admin/_practicas/section.tsx",
           "src/app/admin/_revision/section.tsx",
+          "src/app/admin/_textos/section.tsx",
         ]);
         for (const section of sections) expect(section.code).not.toMatch(/\brequire\w+\(|\bcheckSession\b|\bteamStanding\b/);
       });
@@ -682,6 +694,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-revision-codigo",
       "bloque-revision-cola",
       "bloque-sesiones",
+      "bloque-textos-codigo",
+      "bloque-textos-lista",
     ]);
   });
 

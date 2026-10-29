@@ -24,6 +24,7 @@ import {
   type MemoryJar,
 } from "./helpers/auth";
 import { localOwnerUrl } from "./helpers/local";
+import { reverted as revertedAsOwner } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // La guarda de sesión aplicada (TRD §9.2, fila «Lo que entra sin pasar por el formulario»,
@@ -450,30 +451,37 @@ describe("cuando no se puede saber", () => {
 
 describe("los hechos de los textos, leídos de la base", () => {
   // Publicar una versión no se puede deshacer: se hace dentro de una transacción que se
-  // revierte, y ahí mismo se le pregunta a la guarda.
-  const publish = (tx: Tx, requiresReconsent: boolean) =>
-    tx.execute(sql`
-      insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
-      values ('terms', 1, 'Términos', 'Texto publicado', now(), ${requiresReconsent})`);
+  // revierte, y ahí mismo se le pregunta a la guarda. Desde T-110 el servidor no inserta
+  // textos legales (publica private.publish_legal_document(), que prueba la 56): aquí publica
+  // el dueño declarado sistema, y quién vuelve a aceptar lo decide el guardián por el tipo.
+  const withTerms = <T>(
+    { tomorrow = false, saying = true }: { tomorrow?: boolean; saying?: boolean },
+    work: (tx: Tx) => Promise<T>,
+  ) =>
+    revertedAsOwner(async (owner) => {
+      await owner.query("select set_config('app.actor_kind', 'system', true)");
+      await owner.query(
+        `insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
+         values ('terms', 1, 'Términos', 'Texto publicado', now() + $1::interval, $2)`,
+        [tomorrow ? "1 day" : "0", saying],
+      );
+      const tx: Tx = {
+        query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
+        execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
+      };
+      return work(tx);
+    }, false);
 
   // Una versión se puede publicar con fecha: mientras no rija, no le pide nada a nadie.
   it("una versión que todavía no rige no pide volver a aceptar, aunque lo vaya a pedir", async () => {
     const account = await user({ complete: true });
-    const view = await reverted(async (tx) => {
-      await tx.execute(sql`
-        insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
-        values ('terms', 1, 'Términos', 'Texto por venir', now() + interval '1 day', true)`);
-      return evaluateGate(tx, account.id, true);
-    });
+    const view = await withTerms({ tomorrow: true }, (tx) => evaluateGate(tx, account.id, true));
     expect(view).toEqual({ kind: "pass" });
   });
 
-  it("una versión nueva que pide volver a aceptar se le presenta como texto actualizado", async () => {
+  it("una versión nueva de los términos se le presenta como texto actualizado", async () => {
     const account = await user({ complete: true });
-    const view = await reverted(async (tx) => {
-      await publish(tx, true);
-      return evaluateGate(tx, account.id, true);
-    });
+    const view = await withTerms({}, (tx) => evaluateGate(tx, account.id, true));
     expect(view).toEqual({
       kind: "incomplete",
       variant: "updated_texts",
@@ -481,21 +489,22 @@ describe("los hechos de los textos, leídos de la base", () => {
     });
   });
 
-  it("una versión nueva que no lo pide no detiene a nadie", async () => {
+  // Antes de T-110 quien publicaba elegía si se volvía a pedir, y aquí se probaba que unos
+  // términos que no lo pedían no detenían a nadie. Ahora lo decide el tipo (decisión de
+  // Sergio del 2026-10-28): unos términos nuevos siempre se vuelven a pedir.
+  it("unos términos nuevos se vuelven a pedir aunque quien los publique diga que no", async () => {
     const account = await user({ complete: true });
-    const view = await reverted(async (tx) => {
-      await publish(tx, false);
-      return evaluateGate(tx, account.id, true);
+    const view = await withTerms({ saying: false }, (tx) => evaluateGate(tx, account.id, true));
+    expect(view).toEqual({
+      kind: "incomplete",
+      variant: "updated_texts",
+      missing: { name: false, adultDeclaration: false, documents: [{ docType: "terms", why: "new_version" }] },
     });
-    expect(view).toEqual({ kind: "pass" });
   });
 
   it("con una versión publicada, el texto vigente ya no es un borrador ni fuera de local", async () => {
     const account = await user({ complete: true });
-    const view = await reverted(async (tx) => {
-      await publish(tx, false);
-      return evaluateGate(tx, account.id, false);
-    });
+    const view = await withTerms({}, (tx) => evaluateGate(tx, account.id, false));
     // Los otros dos tipos siguen siendo borradores: fuera de local, esos faltan.
     expect(view).toEqual({ kind: "unavailable", reason: "no_current_text" });
   });

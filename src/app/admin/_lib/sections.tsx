@@ -8,6 +8,7 @@ import { TeamSection } from "../_equipo/section";
 import { CloseSection, PayoutsSection, PeriodSection, PeriodsSection } from "../_periodos/section";
 import { CatalogSection } from "../_practicas/section";
 import { ReviewSection } from "../_revision/section";
+import { LegalSection, LegalVersionSection } from "../_textos/section";
 
 // Las secciones de administración que cuelgan de `/admin`. Ninguna tiene su propia página:
 // todas las sirve el comodín (`[...resto]/page.tsx`), después de correr la guarda.
@@ -42,7 +43,12 @@ const SECTIONS: Record<string, AdminSection> = {
   alertas: { capability: "finance", render: (claims) => <AlertsSection claims={claims} /> },
   // PA-78, los periodos (T-605). El panel de uno y su cierre, abajo.
   periodos: { capability: "finance", render: (claims) => <PeriodsSection claims={claims} /> },
+  // PA-89, los textos legales (T-110). El texto de una versión, abajo.
+  "textos-legales": { capability: "config", render: (claims) => <LegalSection claims={claims} /> },
 };
+
+/** Un identificador de la base en la dirección: solo minúsculas, para que dos iguales se escriban igual. */
+const ID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Un periodo en la dirección: `AAAA-MM`, de 2000 a 2999, mes de 01 a 12. Lo demás no es un periodo. */
 const PERIOD_SEGMENT = /^(2\d{3})-(0[1-9]|1[0-2])$/;
@@ -67,6 +73,12 @@ const DEEPER: Record<string, (deeper: readonly string[]) => AdminSection | null>
     if (page === "cierre") return { capability: "finance", render: (claims) => <CloseSection claims={claims} period={period} /> };
     if (page === "liquidaciones") return { capability: "finance", render: (claims) => <PayoutsSection claims={claims} period={period} /> };
     return null;
+  },
+  // El texto de una versión de PA-89 (`/admin/textos-legales/<identificador>`).
+  "textos-legales": (deeper) => {
+    const [id, ...more] = deeper;
+    if (id === undefined || !ID_SEGMENT.test(id) || more.length > 0) return null;
+    return { capability: "config", render: (claims) => <LegalVersionSection claims={claims} id={id} /> };
   },
 };
 

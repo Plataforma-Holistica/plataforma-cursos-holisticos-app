@@ -11,7 +11,7 @@ export interface TextFieldProps {
   name: string;
   /** Obligatorio: así el navegador y los gestores de contraseñas pueden llenarlo. */
   autoComplete: HTMLInputAutoCompleteAttribute;
-  type?: "text" | "email" | "tel" | "url" | "search";
+  type?: "text" | "email" | "tel" | "url" | "search" | "date";
   inputMode?: "text" | "email" | "tel" | "url" | "numeric" | "decimal" | "search";
   /** Para que el resumen de errores pueda enlazar a este campo. */
   id?: string;

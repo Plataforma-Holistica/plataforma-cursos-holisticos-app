@@ -23,11 +23,12 @@ const DRAFTS_DIR = join("supabase", "local", "legal-drafts");
 const EFFECTIVE_FROM = "2026-10-01 06:00:00+00";
 
 // Los únicos tipos que se cargan como borrador: los tres textos sin los que no se puede
-// completar un registro (RF-108). Un archivo con otro nombre es un error.
+// completar un registro (RF-108). Un archivo con otro nombre es un error. Si se vuelven a
+// pedir no lo dice el guion: lo decide la base por el tipo (T-110).
 const DRAFTS = new Map([
-  ["terms.md", { docType: "terms", requiresReconsent: true }],
-  ["student_privacy_notice.md", { docType: "student_privacy_notice", requiresReconsent: true }],
-  ["course_history_consent.md", { docType: "course_history_consent", requiresReconsent: false }],
+  ["terms.md", { docType: "terms" }],
+  ["student_privacy_notice.md", { docType: "student_privacy_notice" }],
+  ["course_history_consent.md", { docType: "course_history_consent" }],
 ]);
 
 function fail(message) {
@@ -103,10 +104,10 @@ try {
   await client.query("select set_config('app.actor_kind', 'system', true), set_config('app.legal_drafts', 'on', true)");
   for (const draft of drafts) {
     await client.query(
-      `insert into public.legal_documents (doc_type, version, title, body, effective_from, requires_reconsent)
-       values ($1::public.legal_doc_type, 0, $2, $3, $4::timestamptz, $5)
+      `insert into public.legal_documents (doc_type, version, title, body, effective_from)
+       values ($1::public.legal_doc_type, 0, $2, $3, $4::timestamptz)
        on conflict (doc_type, version) do nothing`,
-      [draft.docType, draft.title, draft.body, EFFECTIVE_FROM, draft.requiresReconsent],
+      [draft.docType, draft.title, draft.body, EFFECTIVE_FROM],
     );
   }
   // Un texto legal no se edita. Si el archivo cambió después de cargarse, la base conserva

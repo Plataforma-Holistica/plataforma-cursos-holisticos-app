@@ -33,6 +33,7 @@ vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));
 vi.mock("@/app/admin/_alertas/actions", () => ({ alertsCodeAction: vi.fn(), alertsAction: vi.fn() }));
 vi.mock("@/services/anomalies/anomalies", () => ({ anomalyAlerts: vi.fn() }));
 vi.mock("@/services/periods/periods", () => ({ financePeriods: vi.fn(), financePeriod: vi.fn(), financeClose: vi.fn() }));
+vi.mock("@/services/legal/legal-admin", () => ({ legalDocuments: vi.fn(), legalVersion: vi.fn(), legalBlocks: vi.fn(() => []) }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
