@@ -57,7 +57,7 @@ function courseCard(course: ShelfCourse, saving: Saving) {
   );
   if (saving === null) return <div key={course.slug}>{card}</div>;
   return (
-    <div key={course.slug} id={cardAnchor(course.slug)} className="flex flex-col gap-3">
+    <div key={course.slug} id={cardAnchor(course.slug)} className="flex h-full flex-col gap-3">
       {card}
       {/* Con otros filtros, otro botón: lo que contestó el anterior (un aviso de error) no se queda. */}
       <SaveCourseButton
@@ -67,6 +67,7 @@ function courseCard(course: ShelfCourse, saving: Saving) {
         title={course.title}
         saved={saving.saved.has(course.slug)}
         permalink={`${saving.shownPath}#${cardAnchor(course.slug)}`}
+        className="mt-auto"
       />
     </div>
   );

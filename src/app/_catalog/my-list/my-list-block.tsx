@@ -112,7 +112,7 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
         <form ref={form} action={formAction} onSubmit={onSubmit}>
           <Carousel id="mi-lista" title={text.title}>
             {courses.map((course) => (
-              <div key={course.slug} className="flex flex-col items-start gap-2">
+              <div key={course.slug} className="flex h-full flex-col items-start gap-3">
                 <CourseCard
                   href={course.href}
                   title={course.title}
@@ -125,14 +125,14 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
                 />
                 <Button
                   type="submit"
-                  variant="text"
+                  variant="secondary"
                   size="md"
                   name="do"
                   value={removeValue(course.slug)}
                   pending={pending && pressedSlug === course.slug}
                   held={pending && pressedSlug !== course.slug}
                   loadingLabel={text.removing}
-                  className="px-0"
+                  className="mt-auto"
                 >
                   <span aria-hidden="true">{text.removeShort}</span>
                   <span className="sr-only">{t(text.removeNamed, { title: course.title })}</span>
