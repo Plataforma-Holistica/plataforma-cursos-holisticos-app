@@ -62,8 +62,10 @@ select is(pruebas.vigila('private.zz_privada'), array['unexpected column privile
   'o la tabla entera');
 revoke select on private.zz_privada from anon;
 
--- Las excepciones escritas: la lista propia (insertar y borrar, con T-210), las cuatro columnas de
--- la persona y dónde se quedó, solo para el servidor.
+-- Las excepciones escritas: la lista propia (insertar y borrar), las cuatro columnas de la persona
+-- y dónde se quedó, solo para el servidor. La de la lista sigue en el área `base`, congelada,
+-- pero desde T-210 (decisión de Sergio del 2026-10-28: la escribe el servidor) el área `catalog`
+-- la prohíbe: el área `base` no dice nada propio, y el vigilante sí (36_mi_lista).
 do $$ begin
   if to_regclass('public.saved_courses') is null then
     create table public.saved_courses (profile_id uuid, course_id uuid);
@@ -71,10 +73,12 @@ do $$ begin
   end if;
 end $$;
 grant insert, delete on public.saved_courses to authenticated;
-select is(pruebas.vigila('public.saved_courses'), '{}'::text[], 'la lista propia: insertar y borrar, sí');
+select is(pruebas.vigila('public.saved_courses'), array['saved list writable by authenticated'],
+  'la lista propia: insertar y borrar, el área base no lo dice; el catálogo, sí');
 grant update on public.saved_courses to authenticated;
 select is(pruebas.vigila('public.saved_courses'),
-  array['unexpected column write privilege for authenticated', 'unexpected write privilege for authenticated'], 'editarla, no');
+  array['saved list writable by authenticated', 'unexpected column write privilege for authenticated',
+        'unexpected write privilege for authenticated'], 'editarla, tampoco el área base');
 revoke insert, update, delete on public.saved_courses from authenticated;
 grant update (display_name, country_code, country_is_self_declared, locale) on public.profiles to authenticated;
 select is(pruebas.vigila('public.profiles'), '{}'::text[], 'las cuatro columnas de la persona, sí');

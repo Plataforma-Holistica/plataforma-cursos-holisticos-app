@@ -201,3 +201,75 @@ export async function readMyCourseProgress(tx: Tx, slug: string): Promise<MyLess
     lastWatchedAt: row.last_watched_at,
   }));
 }
+
+// ---------------------------------------------------------------------------------------
+// Mi lista (RF-311). La persona lee la suya como ella misma: la política le deja ver sus filas,
+// y la consulta lo pide además a mano. Escribe el servidor, a nombre de quien actúa
+// (`private.actor_id()`): ni una cuenta llega de fuera, y el guardián de la tabla lo exige.
+
+const savedRow = z.object({ slug: z.string() });
+
+/**
+ * Los slugs de la lista de quien lee, lo último guardado primero. La persona no ve el registro
+ * de cursos: quien llama cruza con lo listado.
+ */
+export async function readMySavedCourses(tx: Tx): Promise<{ slug: string }[]> {
+  return tx.query(
+    sql`select c.slug
+        from public.saved_courses s
+        join public.published_courses c on c.course_id = s.course_id
+        where s.profile_id = (select auth.uid()) and c.is_listed
+        order by s.created_at desc, c.slug`,
+    savedRow,
+  );
+}
+
+const isSavedRow = z.object({ saved: z.boolean() });
+
+/** Si el curso `slug` está en la lista de quien lee. */
+export async function readIsSaved(tx: Tx, slug: string): Promise<boolean> {
+  const [row] = await tx.query(
+    sql`select exists (
+          select 1 from public.saved_courses s
+          join public.published_courses c on c.course_id = s.course_id
+          where s.profile_id = (select auth.uid()) and c.slug = ${slug}) as saved`,
+    isSavedRow,
+  );
+  return row?.saved ?? false;
+}
+
+const saveRow = z.object({ listed: z.boolean() });
+
+/**
+ * Guarda el curso `slug` si está listado y publicado, como lo pinta el catálogo. Una sola
+ * sentencia dice por separado si el curso existe y, sin importar si ya estaba, lo deja guardado.
+ * Límite conocido: el guardián de la tabla mira el curso con su propia foto. Si se retira justo
+ * entre las dos, el guardián lanza, y quien guardaba recibe «no se supo» (reportado) en lugar de
+ * «ya no está». Es raro, y no guarda nada que no deba.
+ */
+export async function saveListedCourse(tx: Tx, slug: string): Promise<"saved" | "not_found"> {
+  const [row] = await tx.query(
+    sql`with course as (
+          select c.course_id
+          from public.published_courses c
+          join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
+          where c.slug = ${slug} and c.is_listed),
+        added as (
+          insert into public.saved_courses (profile_id, course_id)
+          select private.actor_id(), course.course_id from course
+          on conflict do nothing
+          returning 1)
+        select exists (select 1 from course) as listed`,
+    saveRow,
+  );
+  return row?.listed === true ? "saved" : "not_found";
+}
+
+/** Quita el curso `slug` de la lista de quien actúa, esté listado o no. */
+export async function removeSavedCourse(tx: Tx, slug: string): Promise<void> {
+  await tx.execute(
+    sql`delete from public.saved_courses s
+        using public.published_courses c
+        where c.course_id = s.course_id and c.slug = ${slug} and s.profile_id = private.actor_id()`,
+  );
+}

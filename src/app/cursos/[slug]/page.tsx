@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { courseListAction } from "@/app/_catalog/my-list/actions";
+import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
 import { StudentNav } from "@/app/_catalog/nav";
 import { courseDuration, lessonMinutes } from "@/app/_catalog/format";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
@@ -31,8 +33,15 @@ import { primaryAction, type PrimaryAction, type Viewer } from "./outcomes";
 // con regeneración, la descripción y la imagen para compartir quedan para T-606. La pestaña sí
 // lleva el título del curso. Recursos,
 // constancia y deslinde no se pintan hasta que existan (T-404, T-504, T-507).
+//
+// «Guardar en mi lista» (RF-311) va junto al botón principal, solo para el alumno, y solo si se
+// supo si ya lo tiene guardado (se lee con su avance). Al visitante no se le ofrece (decisión de
+// Sergio del 2026-10-28).
 
 const text = messages.browse.course;
+
+/** El botón de Mi lista: el ancla a la que vuelve su formulario sin JavaScript. */
+const MY_LIST_ID = "bloque-ficha-lista";
 
 /** El título del curso en la pestaña. La lectura es la misma de la página, y se recuerda. */
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -60,9 +69,12 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
   const { course } = detail;
 
   let who: Viewer = viewer.kind === "unknown" ? { kind: "unknown" } : { kind: "visitor" };
+  // Si está en su lista; nulo si no mira un alumno o no se supo.
+  let saved: boolean | null = null;
   if (viewer.kind === "student") {
     const [access, standing] = await Promise.all([lessonAccess(await cookieReader(), detail.firstLesson.id), courseStanding(viewer.claims, detail)]);
     who = { kind: "student", access, standing: standing.kind === "ready" ? standing.standing : null };
+    saved = standing.kind === "ready" ? standing.saved : null;
   }
   const action = primaryAction(detail, who);
   const standing = who.kind === "student" ? who.standing : null;
@@ -110,9 +122,22 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
                 text={t(plural(standing.total, text.progress), { completed: standing.completed, total: standing.total })}
               />
             )}
-            {action.kind !== "none" && (
-              <div>
-                <Button href={action.href}>{action.kind === "continue" ? t(text.continue, { number: action.number }) : BUTTON_LABEL[action.kind]}</Button>
+            {(action.kind !== "none" || saved !== null) && (
+              <div className="flex flex-wrap items-start gap-3">
+                {action.kind !== "none" && (
+                  <Button href={action.href}>{action.kind === "continue" ? t(text.continue, { number: action.number }) : BUTTON_LABEL[action.kind]}</Button>
+                )}
+                {saved !== null && (
+                  <div id={MY_LIST_ID}>
+                    <SaveCourseButton
+                      action={courseListAction}
+                      slug={course.slug}
+                      title={course.title}
+                      saved={saved}
+                      permalink={`${coursePath(course.slug) ?? ROUTES.home}#${MY_LIST_ID}`}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -52,6 +52,7 @@ const FAILURES = {
   continue_watching_unavailable: "No se pudo leer «continuar viendo» de una cuenta (T-206): su inicio se pintó sin esa lista.",
   catalog_unavailable: "No se pudieron leer los cursos listados (T-210): el inicio, una ficha de curso o de maestro dijo «algo falló».",
   course_progress_unavailable: "No se pudo leer el avance de una cuenta en un curso (T-210): su ficha se pintó sin el avance.",
+  saved_courses_unavailable: "No se pudo leer o cambiar la lista de una cuenta (Mi lista, T-210): su inicio se pintó sin el carrusel, o guardar o quitar dijo «algo falló».",
   media_email_unverified: "Una cuenta que pasó la guarda pidió un video sin tener su correo verificado. No debería pasar: el registro verifica el correo. La regla siguió sin abrirle el curso abierto.",
   review_queue_unavailable: "No se pudo leer la cola de revisión: quien tiene Contenido no pudo ver los cursos por aprobar.",
   course_approval_unavailable: "Aprobar un curso se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó publicado, y a quien lo pidió se le dijo que revise la cola.",

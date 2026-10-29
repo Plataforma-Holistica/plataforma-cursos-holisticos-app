@@ -24,6 +24,7 @@ vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader 
 vi.mock("@/services/browse/browse", () => ({ coursePage: mocks.coursePage, courseStanding: mocks.courseStanding, teacherPage: mocks.teacherPage }));
 vi.mock("@/services/media/media", () => ({ lessonAccess: mocks.lessonAccess }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
+vi.mock("@/app/_catalog/my-list/actions", () => ({ courseListAction: vi.fn() }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 
 import CourseRoute from "@/app/cursos/[slug]/page";
@@ -152,6 +153,43 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Respirar para dormir");
     expect(screen.queryByRole("link", { name: /Suscribirme|Empezar|Verlo sin costo/ })).toBeNull();
     expect(mocks.lessonAccess).not.toHaveBeenCalled();
+  });
+
+  describe("Mi lista (RF-311)", () => {
+    const standing = { states: new Map(), completed: 0, total: 2, started: false, finished: false, suggested: { id: L1, number: 1 } };
+    const myListButton = () => screen.queryByRole("button", { name: /mi lista/ });
+
+    it.each([
+      [false, "Guardar en mi lista: Respirar para dormir"],
+      [true, "Quitar de mi lista: Respirar para dormir"],
+    ])("al alumno (guardado: %s), junto al botón principal: %s", async (saved, name) => {
+      mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+      mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+      mocks.courseStanding.mockResolvedValue({ kind: "ready", standing, saved });
+      const { container } = render(await CourseRoute(params("respirar")));
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("value", `${saved ? "remove" : "save"}:respirar`);
+      expect(button.closest("#bloque-ficha-lista")).not.toBeNull();
+      expect(button.closest("#bloque-ficha-lista")?.parentElement).toContainElement(screen.getByRole("link", { name: "Empezar" }));
+      expect(await a11yViolations(container)).toEqual([]);
+    });
+
+    it("si no se supo si lo tiene guardado, sin el botón", async () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+      mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+      mocks.courseStanding.mockResolvedValue({ kind: "unavailable" });
+      render(await CourseRoute(params("respirar")));
+      expect(myListButton()).toBeNull();
+    });
+
+    it("sin botón para el visitante (decisión de Sergio) ni para quien no se sabe quién es", async () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+      render(await CourseRoute(params("respirar")));
+      expect(myListButton()).toBeNull();
+      mocks.publicViewer.mockResolvedValue({ kind: "unknown" });
+      render(await CourseRoute(params("respirar")));
+      expect(myListButton()).toBeNull();
+    });
   });
 
   it("un curso que no existe contesta lo mismo que una ruta que no existe", async () => {

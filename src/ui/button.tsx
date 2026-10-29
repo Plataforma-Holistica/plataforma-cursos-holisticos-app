@@ -48,17 +48,31 @@ interface CommonProps {
   className?: string;
 }
 
+// En camino (sin `disabled`): se ve y se anuncia como cargando, pero conserva el foco. Un
+// botón deshabilitado lo pierde en el navegador, y un formulario que se pinta de nuevo en la
+// misma pantalla (Mi lista) lo necesita donde estaba. No detiene el clic: el formulario no
+// envía otra vez mientras espera. Con el prefijo `aria-busy:`, como `LOADING` con `disabled:`:
+// sin él, chocaría con el color y el borde de la variante, y ganaría el orden de la hoja.
+const PENDING =
+  "aria-busy:cursor-progress aria-busy:border-transparent aria-busy:bg-surface-2 aria-busy:text-text-2 aria-busy:no-underline";
+// En espera: otro botón del mismo formulario va en camino, y este no envía nada hasta que
+// conteste. Inactivo para quien no ve (`aria-disabled`), sin deshabilitarse ni dejar de leerse.
+const HELD = "aria-disabled:cursor-progress";
+
 // Cargando, el texto de reposo se oculta. Sin texto de carga quedaría un botón vacío y
-// sin nombre: por eso no se puede pedir `loading` sin `loadingLabel`.
+// sin nombre: por eso no se puede pedir `loading` ni `pending` sin `loadingLabel`.
 type Loading =
   | {
       loading?: false;
+      pending?: false;
       /** El texto en gerundio mientras carga: «Guardando…». */
       loadingLabel?: string;
     }
   | {
       /** Está trabajando: no acepta un segundo clic. */
-      loading: boolean;
+      loading?: boolean;
+      /** Está trabajando, sin deshabilitarse: conserva el foco (arriba, `PENDING`). */
+      pending?: boolean;
       loadingLabel: string;
     };
 
@@ -73,6 +87,8 @@ type AsButton = CommonProps &
   disabled?: boolean;
   /** Por qué está inactivo. Un control deshabilitado siempre tiene al lado su razón. */
   disabledReason?: string;
+  /** En espera de otro envío del mismo formulario (arriba, `HELD`). */
+  held?: boolean;
 };
 
 interface AsLink extends CommonProps {
@@ -94,7 +110,8 @@ export function Button(props: ButtonProps) {
     );
   }
 
-  const { type = "button", loading = false, loadingLabel, disabled = false, disabledReason } = props;
+  const { type = "button", loading = false, pending = false, held = false, loadingLabel, disabled = false, disabledReason } = props;
+  const busy = loading || pending;
 
   const button = (
     <button
@@ -104,15 +121,16 @@ export function Button(props: ButtonProps) {
       form={props.form}
       onClick={props.onClick}
       disabled={disabled || loading}
-      aria-busy={loading || undefined}
+      aria-disabled={pending || held || undefined}
+      aria-busy={busy || undefined}
       aria-describedby={disabledReason ? reasonId : undefined}
-      className={cx(classes, loading ? LOADING : DISABLED)}
+      className={cx(classes, loading ? LOADING : DISABLED, pending && PENDING, held && !pending && HELD)}
     >
-      <span className={cx(LAYER, loading && "invisible")} aria-hidden={loading || undefined}>
+      <span className={cx(LAYER, busy && "invisible")} aria-hidden={busy || undefined}>
         {children}
       </span>
       {loadingLabel !== undefined && (
-        <span className={cx(LAYER, !loading && "invisible")} aria-hidden={loading ? undefined : true}>
+        <span className={cx(LAYER, !busy && "invisible")} aria-hidden={busy ? undefined : true}>
           <Spinner size={16} decorative />
           {loadingLabel}
         </span>
@@ -125,7 +143,7 @@ export function Button(props: ButtonProps) {
   // clic sirvió.
   const status = loadingLabel !== undefined && (
     <span role="status" className="sr-only">
-      {loading ? loadingLabel : null}
+      {busy ? loadingLabel : null}
     </span>
   );
 

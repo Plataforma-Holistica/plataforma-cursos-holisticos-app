@@ -77,4 +77,20 @@ export const browse = defineMessages({
     pageTitle: "{Maestro}",
     courses: "Cursos de {name}",
   },
+  // Mi lista (RF-311): el carrusel del inicio y el botón de la ficha y de explorar. El texto
+  // visible dice la acción; el nombre para quien no ve lleva además el curso.
+  myList: {
+    title: "Mi lista",
+    save: "Guardar en mi lista",
+    remove: "Quitar de mi lista",
+    removeShort: "Quitar",
+    saveNamed: "Guardar en mi lista: {title}",
+    removeNamed: "Quitar de mi lista: {title}",
+    saving: "Guardando…",
+    removing: "Quitando…",
+    saved: "Guardado en tu lista.",
+    removed: "Quitado de tu lista.",
+    gone: "Ese curso ya no está disponible.",
+    unavailable: "No pudimos cambiar tu lista. Inténtalo de nuevo en un momento.",
+  },
 });

@@ -531,6 +531,36 @@ que no se ve leyendo un solo archivo:
   barra del alumno, y el inicio gana «Ver todo» en «Para empezar» (al nivel) y en cada práctica. Usa pgTAP
   35, la integración 70 y, en `tests/e2e/equipo/catalogo.equipo.ts`, FL-11 con JavaScript y sin él. Para el
   A: la columna de búsqueda cambió de definición; ninguna pieza del A la lee.
+- **Lo que T-210 suma al carril B** (tercera solicitud, `t210_mi_lista`; decisiones de Sergio del
+  2026-10-28: la escribe el servidor, el visitante no ve el botón, el botón va en la ficha, en el
+  carrusel «Mi lista» y bajo las tarjetas de explorar, y al quitar la tarjeta se va al momento). Mi
+  lista (RF-311): la tabla `saved_courses`, que la persona solo lee (la suya, por su política) y
+  que escribe `app_service` (`select, insert, delete`, sin `update`). **Contra lo que planeaba el
+  05:** la persona ya no escribe directo; el área `base` del vigilante, congelada, sigue permitiendo
+  ese permiso, y el área `catalog` ahora lo prohíbe (la 27 cambió dos aserciones por eso). El
+  guardián `private.guard_saved_course()` (antes de insertar, security definer) exige el curso
+  listado y publicado y `profile_id = private.actor_id()`: un trabajo del sistema, o el dueño sin
+  persona declarada, no guardan. Otro guardián, al quitar (`private.guard_saved_course_delete()`,
+  sin definer: mira quién ejecuta), solo deja a quien no es el dueño de la tabla quitar filas de
+  `private.actor_id()`: el servidor salta la seguridad por fila, y una consulta que olvidara a la
+  persona vaciaría ese curso de todas las listas. El dueño pasa, porque el borrado en cascada corre
+  como él. El vigilante exige los dos, fila por fila, antes, con su función y prendidos para las
+  sesiones normales (`O` o `A`; uno en réplica no corre). La lista de un perfil borrado se va con él (`on delete cascade`;
+  en producción un perfil no se borra). Un curso que deja de estar listado no se borra de ninguna
+  lista: la lectura lo oculta, y vuelve si se lista otra vez. La lectura de la persona (`myList`) no
+  ve el registro de cursos, así que trae solo los slugs y el servicio los cruza con lo listado que
+  ya se recuerda; la ficha sabe si el curso está guardado en la misma lectura que el avance
+  (`courseStanding`, que ahora contesta `saved`). Guardar y quitar (`saveCourse`, `removeCourse`)
+  corren la guarda de sesión y escriben con `asServer`; la base pone a la persona. El formulario
+  manda la intención (`do=save:<slug>` o `remove:<slug>`), nunca «cambiar»: un doble envío no se
+  anula. Hay una acción por pantalla (`src/app/_catalog/my-list/actions.ts`), con su tabla: sin
+  JavaScript vuelve a la misma pantalla en el mismo lugar (el ancla del botón, y en explorar con
+  sus filtros), y con él, `refresh()`. `Button` ganó `pending`: en camino sin deshabilitarse, para
+  no soltar el foco. En el carrusel del inicio, al quitar, el foco pasa al «Quitar» siguiente, al
+  anterior o al contenido, salvo si la persona se fue a otra cosa mientras esperaba (la regla del
+  bloque de sesiones de la cuenta). Usa pgTAP 36, integración 71 y, en
+  `tests/e2e/equipo/catalogo.equipo.ts`, FL-11 paso 6 con JavaScript y sin él. Para el A: nada que
+  le toque; `tests/architecture/browse.test.ts` es nueva.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
