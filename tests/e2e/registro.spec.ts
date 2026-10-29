@@ -114,6 +114,8 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   await page.goto("/registro");
   await expect(page.getByRole("heading", { level: 1, name: "Crea tu cuenta" })).toBeVisible();
   await expect(page).toHaveTitle("Crear cuenta · La Plataforma");
+  // El deslinde (RF-809) se lee antes de crear la cuenta.
+  await expect(page.getByText("La Plataforma es educativa. No sustituye la atención médica ni psicológica profesional.")).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
 
   await page.getByLabel("Correo").fill(email);

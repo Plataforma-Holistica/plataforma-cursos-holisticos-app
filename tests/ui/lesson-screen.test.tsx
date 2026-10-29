@@ -68,6 +68,7 @@ vi.mock("@/app/_video/player", () => ({
 
 import { LessonScreen, type LessonScreenProps } from "@/app/cursos/[slug]/lecciones/[leccion]/screen";
 import { createCourier } from "@/app/cursos/[slug]/lecciones/[leccion]/watch-queue";
+import { terms } from "@/messages/es/terms";
 
 const LESSON = "b0000000-0000-4000-8000-000000000002";
 const PLAYBACK = "d0000000-0000-4000-8000-000000000004";
@@ -163,6 +164,13 @@ describe("lo de alrededor del reproductor", () => {
     show();
     const tabs = screen.getAllByRole("tab", { hidden: true }).map((tab) => tab.textContent);
     expect(tabs).toEqual(["Temario", "Sobre esta lección"]);
+  });
+
+  it("el deslinde (RF-809) va al pie", () => {
+    show();
+    const disclaimer = screen.getByText(`${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`).closest("p");
+    expect(disclaimer).toBeVisible();
+    expect(screen.getByRole("main").lastElementChild).toBe(disclaimer);
   });
 
   it("pasa las reglas de accesibilidad", async () => {
