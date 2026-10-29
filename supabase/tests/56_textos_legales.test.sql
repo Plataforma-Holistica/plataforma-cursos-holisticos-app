@@ -11,7 +11,7 @@
 -- depende de ellos se lee de la tabla antes de probarlo.
 begin;
 \ir _ayuda.psql
-select plan(78);
+select plan(80);
 
 select pruebas.alta('c1100000-0000-0000-0000-000000000001', 'config-textos@prueba.test');
 select pruebas.alta('b1100000-0000-0000-0000-000000000001', 'contenido-textos@prueba.test');
@@ -366,6 +366,25 @@ select results_eq($$select problem, object_name from private.schema_violations_l
   $$values ('legal trigger missing or disabled: legal_documents_actor', 'public.legal_documents')$$,
   'avisa si se apaga el guardián de quién publica');
 alter table public.legal_documents enable trigger legal_documents_actor;
+-- Con el mismo nombre y la misma función, pero después de insertar o para otra operación, ya no detiene nada.
+drop trigger legal_documents_fill on public.legal_documents;
+create trigger legal_documents_fill after insert on public.legal_documents
+  for each row execute function private.guard_legal_document();
+select results_eq($$select problem, object_name from private.schema_violations_legal()$$,
+  $$values ('legal trigger missing or disabled: legal_documents_fill', 'public.legal_documents')$$,
+  'avisa si el guardián corre después de insertar');
+drop trigger legal_documents_fill on public.legal_documents;
+create trigger legal_documents_fill before insert on public.legal_documents
+  for each row execute function private.guard_legal_document();
+drop trigger legal_documents_actor on public.legal_documents;
+create trigger legal_documents_actor before update on public.legal_documents
+  for each statement execute function private.guard_config_actor();
+select results_eq($$select problem, object_name from private.schema_violations_legal()$$,
+  $$values ('legal trigger missing or disabled: legal_documents_actor', 'public.legal_documents')$$,
+  'avisa si el guardián de quién publica no corre al insertar cada fila');
+drop trigger legal_documents_actor on public.legal_documents;
+create trigger legal_documents_actor before insert on public.legal_documents
+  for each row execute function private.guard_config_actor();
 select is_empty($$select * from private.schema_violations_legal()$$, 'y todo en su lugar otra vez');
 
 -- Si publicar no es del dueño de la tabla, el guardián rechazaría toda versión publicada.

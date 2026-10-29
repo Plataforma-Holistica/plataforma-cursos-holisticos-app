@@ -242,7 +242,7 @@ export function createLegalAdmin(deps: { report: (code: FailureCode) => Promise<
     // Falta ZONA_HORARIA_PERIODO: solo lo arregla el dueño de la base.
     if (published.answer === "unavailable") await deps.report("legal_change_unavailable");
     if (published.answer === "changed" && published.version !== null) {
-      const twin = await sameAsLast(admitted.claims, docType, published.version, title.title, seenSha);
+      const twin = await sameAsLast(admitted.claims, { docType, version: published.version, seenVersion, title: title.title, sha: seenSha, day });
       if (twin !== null) return { kind: "answered", answer: "published", id: twin.id, version: twin.version, effectiveFrom: twin.effectiveFrom };
     }
     return { kind: "answered", ...published };
@@ -253,17 +253,28 @@ export function createLegalAdmin(deps: { report: (code: FailureCode) => Promise<
    * entró con el primero y la base contesta `changed`. Si esa última versión tiene el mismo título y la
    * misma huella que lo que se confirmó, lo confirmado ya está publicado: decir «otra persona publicó»
    * invitaría a publicarlo otra vez (y, con unos términos, a pedirle a todas las cuentas que acepten de
-   * nuevo). Sin lectura, se queda en `changed`, que no publica nada.
+   * nuevo). Tiene que ser justo lo que este envío habría publicado: la versión siguiente a la vista (nunca
+   * un borrador, que es la 0), y vigente desde hoy. Otra persona pudo publicar el mismo texto con otro día, y entonces
+   * no rige cuando se pidió. Un día futuro se queda en `changed`: aquí no se sabe la zona del periodo para
+   * comparar el día de una programada, y publicarla otra vez con el mismo día no pide aceptar dos veces.
+   * Sin lectura, también `changed`, que no publica nada.
    */
-  async function sameAsLast(claims: VerifiedClaims, docType: LegalDocType, version: number, title: string, sha: string): Promise<LegalVersion | null> {
+  async function sameAsLast(
+    claims: VerifiedClaims,
+    sent: { docType: LegalDocType; version: number; seenVersion: number | null; title: string; sha: string; day: string },
+  ): Promise<LegalVersion | null> {
+    if (sent.version !== (sent.seenVersion ?? 0) + 1) return null;
     let documents: LegalDocuments | null;
     try {
       documents = await store.documents(claims);
     } catch {
       return null;
     }
-    const last = documents?.documents.find((row) => row.docType === docType)?.versions[0];
-    return last !== undefined && last.version === version && last.title === title && last.bodySha256 === sha ? last : null;
+    if (documents === null || sent.day !== documents.today) return null;
+    const versions = documents.documents.find((row) => row.docType === sent.docType)?.versions ?? [];
+    const last = versions.reduce<LegalVersion | undefined>((top, each) => (top === undefined || each.version > top.version ? each : top), undefined);
+    const same = last !== undefined && last.version === sent.version && last.state === "current";
+    return same && last.title === sent.title && last.bodySha256 === sent.sha ? last : null;
   }
 
   /**

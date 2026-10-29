@@ -180,6 +180,35 @@ describe("publicar", () => {
     expect(await service.publishLegalVersion(reader, INPUT)).toEqual({ kind: "answered", answer: "changed", version: 2 });
   });
 
+  // Lo de la segunda revisión del diff: «publicado» solo si lo que encontró es justo lo que este envío habría
+  // publicado. Otra persona pudo publicar el mismo texto con otro día, y entonces no rige cuando se pidió.
+  const TWIN = { id: VERSION, version: 2, title: "Reembolsos", effectiveFrom: "2026-10-28T18:00:00Z", publishedAt: "2026-10-28T18:00:00Z", bodySha256: SHA, isDraft: false, state: "current" };
+  const withVersions = (versions: object[], today: string | null = "2026-10-28") =>
+    ({ ...DOCUMENTS, today, documents: [{ docType: "refund_policy", lastVersion: 2, versions }] }) as unknown as LegalDocuments;
+
+  it.each([
+    ["la vista no era la anterior a esa versión", { ...INPUT, seenVersion: 0 }, [TWIN], "2026-10-28"],
+    ["se pidió otro día y esa versión está programada", { ...INPUT, day: "2026-11-20" }, [{ ...TWIN, state: "scheduled", effectiveFrom: "2026-11-20T06:00:00Z" }], "2026-10-28"],
+    ["se pidió hoy y esa versión está programada", INPUT, [{ ...TWIN, state: "scheduled", effectiveFrom: "2026-11-20T06:00:00Z" }], "2026-10-28"],
+    ["no se sabe qué día es hoy", INPUT, [TWIN], null],
+    ["se pidió un día futuro, aunque sea el mismo", { ...INPUT, day: "2026-11-20" }, [TWIN], "2026-10-28"],
+  ])("si %s, sí es changed", async (_name, input, versions, today) => {
+    const service = adminWith({ published: { answer: "changed", version: 2 }, documents: withVersions(versions, today) });
+    expect(await service.publishLegalVersion(reader, input)).toEqual({ kind: "answered", answer: "changed", version: 2 });
+  });
+
+  it("un borrador con el mismo texto no es «publicado»", async () => {
+    const draft = { ...TWIN, version: 0, isDraft: true };
+    const service = adminWith({ published: { answer: "changed", version: 0 }, documents: withVersions([draft]) });
+    expect(await service.publishLegalVersion(reader, { ...INPUT, seenVersion: null })).toEqual({ kind: "answered", answer: "changed", version: 0 });
+  });
+
+  it("compara con la versión más alta aunque la lista llegue en otro orden", async () => {
+    const older = { ...TWIN, id: "b0000000-0000-4000-8000-000000000001", version: 1, title: "Antes", state: "previous" };
+    const service = adminWith({ published: { answer: "changed", version: 2 }, documents: withVersions([older, TWIN]) });
+    expect(await service.publishLegalVersion(reader, INPUT)).toMatchObject({ kind: "answered", answer: "published", version: 2 });
+  });
+
   it("si la lectura para comparar no llega, se queda en changed", async () => {
     for (const documents of [null, "throws"] as const) {
       const service = adminWith({ published: { answer: "changed", version: 2 }, documents });

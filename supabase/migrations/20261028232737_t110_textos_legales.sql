@@ -290,6 +290,8 @@ as $$
     join pg_catalog.pg_proc p on p.oid = tg.tgfoid
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace
     where tg.tgrelid = 'public.legal_documents'::regclass and tg.tgname = t.tgname
-      and tg.tgenabled in ('O', 'A') and n.nspname = 'private' and p.proname = t.proname)
+      and tg.tgenabled in ('O', 'A') and n.nspname = 'private' and p.proname = t.proname
+      -- Por fila (1), antes (2) y al insertar (4): con el mismo nombre, después o en otra operación no detiene nada.
+      and (tg.tgtype & 7) = 7)
 $$;
 revoke all on function private.schema_violations_legal() from public;
