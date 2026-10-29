@@ -1,6 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { terms } from "@/messages/es/terms";
+
 import { a11yViolations } from "../setup/a11y";
 
 // Las fichas públicas del catálogo (PA-02, PA-03; T-210), con la guarda y los servicios
@@ -61,6 +63,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
   ],
   firstLesson: { id: L1, title: "Soltar los hombros" },
 });
+const DISCLAIMER = `${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`;
 const params = (slug: string) => ({ params: Promise.resolve({ slug }) });
 const lesson = (id: string) => `/cursos/respirar/lecciones/${id}`;
 
@@ -153,6 +156,19 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Respirar para dormir");
     expect(screen.queryByRole("link", { name: /Suscribirme|Empezar|Verlo sin costo/ })).toBeNull();
     expect(mocks.lessonAccess).not.toHaveBeenCalled();
+  });
+
+  it("el deslinde (RF-809) va al pie, sea quien sea el que mira", async () => {
+    for (const viewer of [{ kind: "visitor" }, { kind: "student", claims }, { kind: "unknown" }]) {
+      mocks.publicViewer.mockResolvedValue(viewer);
+      mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+      mocks.courseStanding.mockResolvedValue({ kind: "unavailable" });
+      const { unmount } = render(await CourseRoute(params("respirar")));
+      const disclaimer = screen.getByText(DISCLAIMER).closest("p");
+      expect(disclaimer).toBeVisible();
+      expect(screen.getByRole("main").lastElementChild).toBe(disclaimer);
+      unmount();
+    }
   });
 
   describe("Mi lista (RF-311)", () => {
