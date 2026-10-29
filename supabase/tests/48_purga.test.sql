@@ -95,8 +95,10 @@ create temporary table retencion as
   select id from public.business_parameters where key = 'RETENCION_LATIDOS' and canceled_at is null;
 update public.business_parameters set canceled_at = now() where id in (select id from retencion);
 select is(private.purge_watch_partition(203201), 'no_retention', 'sin RETENCION_LATIDOS no se purga nada');
+-- Rige desde antes del inicio de la transacción, que es la hora con que la purga lo lee (`now()`). Con la
+-- del reloj, una preparación de más de un segundo lo dejaba sin regir y todo salía `no_retention`.
 insert into public.business_parameters (key, value, status, effective_from)
-values ('RETENCION_LATIDOS', '90', 'decided', clock_timestamp() - interval '1 second');
+values ('RETENCION_LATIDOS', '90', 'decided', now() - interval '1 second');
 select pruebas.como_dueno();
 select is(private.purge_watch_partition(203203), 'not_closed', 'un periodo abierto no se purga');
 select is(private.purge_watch_partition(203601), 'not_closed', 'ni uno sin fila');
