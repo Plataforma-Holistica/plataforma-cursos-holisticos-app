@@ -32,6 +32,8 @@ export const ROUTES = {
   alerts: "/admin/alertas",
   /** PA-78, los periodos: cuelga de administración y pide finanzas. El panel de uno y su cierre, `periodPath`. */
   periods: "/admin/periodos",
+  /** PA-89, los textos legales: cuelga de administración y pide configuración. Una versión, `legalVersionPath`. */
+  legalTexts: "/admin/textos-legales",
   /**
    * Los cursos. La ficha de un curso (`/cursos/[slug]`, T-210) es pública; la lección
    * (`/cursos/[slug]/lecciones/[leccion]`, PA-22, T-203) pide sesión. Ver `isLessonPath`.
@@ -90,6 +92,9 @@ export function teacherPath(slug: string): string | null {
 function periodSegment(period: number): string {
   return `${Math.floor(period / 100)}-${String(period % 100).padStart(2, "0")}`;
 }
+
+/** El texto de una versión de un texto legal (PA-89, «Ver el texto»), por su identificador. */
+export const legalVersionPath = (id: string): string => `${ROUTES.legalTexts}/${id}`;
 
 /** PA-79, el panel de un periodo (`AAAAMM`). */
 export const periodPath = (period: number): string => `${ROUTES.periods}/${periodSegment(period)}`;

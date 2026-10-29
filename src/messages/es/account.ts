@@ -195,6 +195,8 @@ export const account = defineMessages({
     alerts: "Alertas de anomalía",
     // PA-78. Solo se le ofrece a quien tiene finanzas.
     periods: "Periodos",
+    // PA-89. Solo se le ofrece a quien tiene configuración.
+    legalTexts: "Textos legales",
     account: "Cuenta",
     capabilities: {
       content: "Contenido",

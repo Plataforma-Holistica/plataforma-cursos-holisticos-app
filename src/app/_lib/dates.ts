@@ -13,6 +13,13 @@ import { plural, t } from "@/messages/format";
 export const PRODUCT_TIME_ZONE = "America/Mexico_City";
 
 const LONG_DATE = new Intl.DateTimeFormat("es-MX", { dateStyle: "long", timeZone: PRODUCT_TIME_ZONE });
+// `en-CA` escribe la fecha como AAAA-MM-DD.
+const CALENDAR_DAY = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: PRODUCT_TIME_ZONE });
+
+/** El día de un momento en la zona del producto, como AAAA-MM-DD (el de un `<input type="date">`). */
+export function productDay(date: Date): string {
+  return CALENDAR_DAY.format(date);
+}
 
 /** «12 de noviembre de 2026», o vacío si la fecha no se entiende. */
 export function longDate(iso: string): string {

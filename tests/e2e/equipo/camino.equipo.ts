@@ -1762,6 +1762,81 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     });
   });
 
+  // PA-89 (T-110): publicar con JavaScript y sin él. Publica textos que no le piden a nadie aceptar nada
+  // (reembolsos y comunidad): unos términos vigentes mandarían a PA-15 a todas las cuentas de los casos que
+  // siguen. Que unos términos nuevos vuelvan a pedir el consentimiento lo prueban la integración 59 y la 60.
+  const LEGAL = "/admin/textos-legales";
+  const legalRows = (docType: string) =>
+    ownerQuery<{ version: number; published_by: string | null; requires_reconsent: boolean; rules_now: boolean }>(
+      `select version, published_by::text, requires_reconsent, effective_from <= now() as rules_now
+       from public.legal_documents where doc_type = $1 order by version`,
+      [docType],
+    );
+
+  test("textos legales con JavaScript: nueva versión, vista previa con su consecuencia, publicar y ver el texto", async ({ page }) => {
+    await enterAdmin(page, ana, "/admin");
+    await page.getByRole("link", { name: "Textos legales" }).click();
+    await expect(page).toHaveURL(LEGAL);
+    await expect(page.getByRole("heading", { level: 1, name: "Textos legales" })).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    const refunds = page.getByRole("region", { name: "Política de reembolsos" });
+    await expect(refunds.getByText("Todavía no tiene ninguna versión.")).toBeVisible();
+
+    await refunds.getByRole("button", { name: "Nueva versión de Política de reembolsos" }).click();
+    const title = refunds.getByRole("textbox", { name: "Título" });
+    await expect(title).toBeFocused();
+    await expect(title).toHaveValue("Política de reembolsos");
+    // Sin texto, el error se dice en su campo.
+    await refunds.getByRole("button", { name: "Ver cómo queda" }).click();
+    await expect(refunds.getByRole("link", { name: "Pega el texto." })).toBeVisible();
+    await refunds.getByRole("textbox", { name: "Texto" }).fill("# Política de reembolsos\n\nSe devuelve el pago dentro de la ventana.");
+    await refunds.getByRole("button", { name: "Ver cómo queda" }).click();
+    await expect(refunds.getByRole("heading", { name: "Así se verá: Política de reembolsos, versión 1" })).toBeFocused();
+    await expect(refunds.getByText("Se actualiza la página. No se pide aceptar nada.")).toBeVisible();
+    await expect(refunds.getByText("Rige en cuanto la publiques.")).toBeVisible();
+    await expect(refunds.getByText("Se devuelve el pago dentro de la ventana.")).toBeVisible();
+    expect(await a11yViolations(page)).toEqual([]);
+    await refunds.getByRole("button", { name: "Publicar la versión 1" }).click();
+    await expect(page.getByText("Versión publicada.")).toBeVisible();
+    await expect(refunds.getByText(/^Vigente: versión 1, desde el /)).toBeVisible();
+    expect(await legalRows("refund_policy")).toEqual([{ version: 1, published_by: ana.id, requires_reconsent: false, rules_now: true }]);
+
+    // Recargar no publica otra vez: la acción redirigió.
+    await page.reload();
+    await expect(refunds.getByText(/^Vigente: versión 1, desde el /)).toBeVisible();
+    expect(await legalRows("refund_policy")).toHaveLength(1);
+
+    // El texto de una versión, en su propia ruta.
+    await refunds.getByText("Todas las versiones").click();
+    await refunds.getByRole("link", { name: "Ver el texto" }).click();
+    await expect(page).toHaveURL(/\/admin\/textos-legales\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Política de reembolsos, versión 1" })).toBeVisible();
+    await expect(page.getByText("Se devuelve el pago dentro de la ventana.")).toBeVisible();
+    // Un identificador que no existe, o sin forma: no existe.
+    await page.goto(`${LEGAL}/f0000000-0000-4000-8000-000000000000`);
+    await expect(page.getByRole("heading", { level: 1, name: /versión/ })).toHaveCount(0);
+    await page.goto(`${LEGAL}/otra`);
+    await expect(page.getByRole("heading", { level: 1, name: /versión/ })).toHaveCount(0);
+  });
+
+  test("textos legales sin JavaScript: una versión programada para mañana, y recargar no reenvía", async ({ browser }) => {
+    const [tomorrow] = await ownerQuery<{ day: string }>("select ((now() at time zone 'America/Mexico_City')::date + 1)::text as day");
+    await inContext(browser, { javaScriptEnabled: false }, async (bare) => {
+      await enterAdmin(bare, ana, LEGAL);
+      const community = bare.getByRole("region", { name: "Política de comunidad" });
+      await community.getByRole("button", { name: "Nueva versión de Política de comunidad" }).click();
+      await community.getByRole("textbox", { name: "Texto" }).fill("Trato respetuoso entre todas las personas.");
+      await community.getByLabel("Rige desde").fill(tomorrow!.day);
+      await community.getByRole("button", { name: "Ver cómo queda" }).click();
+      await expect(community.getByText(/^Rige desde el /)).toBeVisible();
+      await community.getByRole("button", { name: "Publicar la versión 1" }).click();
+      await expect(bare.getByText("Versión publicada.")).toBeVisible();
+      await expect(community.getByText(/^Programada: versión 1, desde el /)).toBeVisible();
+      await bare.reload();
+      expect(await legalRows("community_policy")).toEqual([{ version: 1, published_by: ana.id, requires_reconsent: false, rules_now: false }]);
+    });
+  });
+
   test("prácticas y niveles: quien no tiene Contenido, o no tiene su código reciente, no cambia nada aunque llame a las acciones directo", async ({ page, browser }) => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.

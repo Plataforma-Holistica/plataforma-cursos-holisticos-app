@@ -4,8 +4,9 @@ import { connection } from "next/server";
 import { cache } from "react";
 
 import { longDate } from "@/app/_lib/dates";
+import { LegalBody } from "@/app/_lib/legal-body";
 import { messages, t } from "@/messages";
-import { currentLegalText, docTypeOfSlug, legalBlocks, type LegalBlock } from "@/services/legal/texts";
+import { currentLegalText, docTypeOfSlug, legalBlocks } from "@/services/legal/texts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -48,16 +49,6 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   return read.kind === "found" ? { title: read.text.title } : {};
 }
 
-const HEADINGS = { 1: "text-h2", 2: "text-h3", 3: "text-body-l font-semibold" } as const;
-
-function Block({ block }: { block: LegalBlock }) {
-  if (block.kind === "paragraph") return <p>{block.text}</p>;
-  // El título de la página es el del texto: los del cuerpo empiezan un nivel abajo.
-  if (block.level === 1) return <h2 className={HEADINGS[1]}>{block.text}</h2>;
-  if (block.level === 2) return <h3 className={HEADINGS[2]}>{block.text}</h3>;
-  return <h4 className={HEADINGS[3]}>{block.text}</h4>;
-}
-
 export default async function LegalPage({ params, searchParams }: Props) {
   const slug = (await params).documento;
   const read = await load(slug, announcedVersion((await searchParams).v));
@@ -67,10 +58,6 @@ export default async function LegalPage({ params, searchParams }: Props) {
   if (read.kind === "unavailable") return <UnavailableScreen retryHref={self} withSession={false} />;
 
   const found = read.text;
-  // Si el cuerpo abre repitiendo su título, ese título ya es el de la página.
-  const blocks = legalBlocks(found.body).filter(
-    (block, index) => !(index === 0 && block.kind === "heading" && block.level === 1 && block.text === found.title),
-  );
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
       <div className="flex flex-col gap-2">
@@ -80,12 +67,7 @@ export default async function LegalPage({ params, searchParams }: Props) {
         </p>
       </div>
       {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
-      <div className="flex flex-col gap-4 text-body-l text-text">
-        {blocks.map((block, index) => (
-          // Los bloques de un texto no cambian de orden: su posición los identifica.
-          <Block key={`${index}-${block.kind}`} block={block} />
-        ))}
-      </div>
+      <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
     </main>
   );
 }
