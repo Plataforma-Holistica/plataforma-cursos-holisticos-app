@@ -584,6 +584,29 @@ que no se ve leyendo un solo archivo:
   bloque de sesiones de la cuenta). Usa pgTAP 36, integración 71 y, en
   `tests/e2e/equipo/catalogo.equipo.ts`, FL-11 paso 6 con JavaScript y sin él. Para el A: nada que
   le toque; `tests/architecture/browse.test.ts` es nueva.
+- **Lo que T-401 suma al carril A** (primera solicitud, `t401_maestro_activo`; decisión de Sergio del
+  2026-10-29: va antes que T-402, con el contrato que pidió el carril B). `private.current_active_teacher_id()`
+  da el maestro de quien actúa (`private.actor_id()`: la persona por su sesión o la que declara el servidor)
+  solo si el maestro está `active` y su cuenta también, y **toma su fila para compartir** (`for share`, por eso
+  es volátil): escribir a su nombre y suspender al maestro van uno tras otro. La fila de la cuenta no la toma:
+  suspender la cuenta no espera. **Solo dentro de una escritura:** ningún rol de la aplicación la ejecuta (la
+  llaman las funciones del dueño), y para leer está `current_teacher_id()`, porque un candado de fila falla
+  en una transacción de solo lectura. **El orden de candados** de toda función que escribe a nombre del
+  maestro: primero esa fila (llamando a la función, antes de tocar `course_registry`), después prácticas,
+  niveles y `course_lock`; suspender toma la fila del maestro y no toca `course_lock`. `guard_publication`
+  gana un solo paso, en `course_registry`: a nombre del maestro activo, el dueño de la tabla da de alta un
+  borrador limpio suyo (`draft`, con la hora de la transacción, sin versión pendiente, sin abrir, sin publicar
+  ni retirar) y borra un borrador suyo que nunca se publicó (`draft` y `first_published_at` nulo; es el único
+  borrado que admite el guardián). Un borrador que ya tiene filas que lo nombran (un video, reproducciones)
+  no se borra: ninguna de esas claves borra en cascada, y falla con 23503. Ningún cambio a su nombre, ni en
+  otra tabla de lo publicado: lo demás lo siguen haciendo el sistema y Contenido, y Contenido sigue sin
+  borrar. Un maestro suspendido, una cuenta suspendida o quien no es maestro no pasan: así se cumple «un
+  suspendido no envía cursos». `private.audit_row_change()` busca ahora también el `course_id` de la fila
+  borrada, para que el borrado tenga entidad en la auditoría. El área `teachers` del vigilante es del A. Usa
+  pgTAP 57. Para el B: las tablas del borrador de T-402 no llevan `guard_publication` (si nombran a
+  `course_registry` sin cascada, su borrador tampoco se borra), y la guarda del portal (`requireTeacher`) la
+  construye el B en su segunda solicitud; el A le agrega después los estados de la invitación y del aviso del
+  maestro.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
