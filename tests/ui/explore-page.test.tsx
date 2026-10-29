@@ -11,12 +11,15 @@ import { a11yViolations } from "../setup/a11y";
 const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
   explore: vi.fn(),
+  myList: vi.fn(),
 }));
 vi.mock("@/app/_lib/guard", () => ({ requireSession: mocks.requireSession }));
 vi.mock("@/services/browse/browse", async (original) => ({
   exploreQueryOf: (await original<typeof import("@/services/browse/explore")>()).exploreQueryOf,
   explore: mocks.explore,
+  myList: mocks.myList,
 }));
+vi.mock("@/app/_catalog/my-list/actions", () => ({ exploreListAction: vi.fn() }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 // `next/form` necesita el enrutador de la aplicación montado: aquí es un formulario a secas.
 vi.mock("next/form", () => ({
@@ -70,6 +73,8 @@ const params = (search: Record<string, string>) => ({ searchParams: Promise.reso
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+  // Sin la lista, las tarjetas van sin botón: las pruebas de Mi lista la dan aparte.
+  mocks.myList.mockResolvedValue({ kind: "unavailable" });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -110,6 +115,47 @@ describe("explorar (PA-21)", () => {
     expect(screen.getByRole("link", { name: "Limpiar filtros" })).toHaveAttribute("href", "/explorar?q=ana");
     expect(screen.getByRole("link", { name: "Borrar la búsqueda" })).toHaveAttribute("href", "/explorar?practica=meditacion");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("Mi lista: bajo cada tarjeta, guardar o quitar según lo que tiene guardado (RF-311)", async () => {
+    const SOLTAR = { ...COURSE, slug: "soltar", title: "Soltar" };
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE, SOLTAR], teachers: [] }));
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [SOLTAR] });
+    const { container } = render(await ExplorePage(params({ practica: "meditacion" })));
+    expect(mocks.myList).toHaveBeenCalledExactlyOnceWith(claims);
+    const results = screen.getByRole("region", { name: "Resultados" });
+    const save = within(results).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" });
+    expect(save).toHaveAttribute("value", "save:respirar");
+    expect(save.closest("li")).toContainElement(within(results).getByRole("link", { name: /^Respirar para dormir/ }));
+    expect(save.closest("a")).toBeNull();
+    expect(within(results).getByRole("button", { name: "Quitar de mi lista: Soltar" })).toHaveAttribute("value", "remove:soltar");
+    expect(container.querySelector("#bloque-explorar-soltar")).not.toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("Mi lista: con otros filtros, el botón se arma de nuevo y no arrastra lo que contestó el anterior", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
+    const { rerender } = render(await ExplorePage(params({ practica: "meditacion" })));
+    const before = screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" });
+    rerender(await ExplorePage(params({ practica: "meditacion" })));
+    expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBe(before);
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion", level: "principiante" }, { courses: [COURSE], teachers: [] }));
+    rerender(await ExplorePage(params({ practica: "meditacion", nivel: "principiante" })));
+    expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).not.toBe(before);
+  });
+
+  it("Mi lista: también en los carruseles por práctica", async () => {
+    mocks.explore.mockResolvedValue(ready({}, null));
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
+    render(await ExplorePage(params({})));
+    expect(within(screen.getByRole("list", { name: "Meditación" })).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBeVisible();
+  });
+
+  it("Mi lista: si no se pudo leer, las tarjetas van sin botón", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ practica: "meditacion" })));
+    expect(screen.queryByRole("button", { name: /mi lista/ })).toBeNull();
   });
 
   it("sin resultados: lo dice, ofrece limpiar los filtros y muestra «Nuevos» debajo", async () => {

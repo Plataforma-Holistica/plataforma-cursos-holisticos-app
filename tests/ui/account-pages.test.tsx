@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   continueWatching: vi.fn(),
   accountProfile: vi.fn(),
   homeShelf: vi.fn(),
+  myList: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
@@ -35,7 +36,8 @@ vi.mock("@/services/account/account", () => ({
   accountFormFacts: mocks.accountFormFacts,
   accountProfile: mocks.accountProfile,
 }));
-vi.mock("@/services/browse/browse", () => ({ homeShelf: mocks.homeShelf }));
+vi.mock("@/services/browse/browse", () => ({ homeShelf: mocks.homeShelf, myList: mocks.myList }));
+vi.mock("@/app/_catalog/my-list/actions", () => ({ homeListAction: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ readNotice: mocks.readNotice }));
 vi.mock("@/services/progress/progress", () => ({ continueWatching: mocks.continueWatching }));
 vi.mock("@/services/legal/texts", async () => ({
@@ -96,6 +98,7 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
   beforeEach(() => {
     mocks.accountProfile.mockResolvedValue({ kind: "ready", name: "Ana" });
     mocks.homeShelf.mockResolvedValue(shelfWith());
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
   });
 
   it("le pide a la guarda una sesión para su propia ruta, saluda y dice con qué correo se entró", async () => {
@@ -195,6 +198,36 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     const teachers = screen.getByRole("list", { name: "Por maestro" });
     expect(within(teachers).getByRole("link", { name: "Ana Robles, maestro de Meditación" })).toHaveAttribute("href", "/maestros/ana-robles");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("«Mi lista» va después de «Para empezar» y antes de «Nuevos», con «Quitar» en cada curso, y se le pide con las claims de la guarda", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [{ ...COURSE, slug: "soltar", title: "Soltar" }] });
+    const { container } = render(await HomePage());
+    expect(mocks.myList).toHaveBeenCalledExactlyOnceWith(claims);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "Para empezar",
+      "Mi lista",
+      "Nuevos",
+      "Meditación",
+      "Por maestro",
+    ]);
+    const row = screen.getByRole("list", { name: "Mi lista" });
+    expect(within(row).getByRole("link", { name: "Soltar, con Ana Robles" })).toHaveAttribute("href", "/cursos/soltar");
+    const remove = within(row).getByRole("button", { name: "Quitar de mi lista: Soltar" });
+    expect(remove).toHaveAttribute("value", "remove:soltar");
+    expect(remove.closest("#bloque-mi-lista")).not.toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin nada guardado, o si no se pudo leer la lista, no hay «Mi lista»", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    render(await HomePage());
+    expect(screen.queryByRole("heading", { name: "Mi lista" })).toBeNull();
+    mocks.myList.mockResolvedValue({ kind: "unavailable" });
+    render(await HomePage());
+    expect(screen.queryByRole("heading", { name: "Mi lista" })).toBeNull();
+    expect(screen.getAllByRole("heading", { name: "Nuevos" })).toHaveLength(2);
   });
 
   it("si no se supo «continuar viendo», el inicio sigue con lo demás, sin «Para empezar»: no se sabe si es alguien nuevo", async () => {
