@@ -130,6 +130,7 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
                   name="do"
                   value={removeValue(course.slug)}
                   pending={pending && pressedSlug === course.slug}
+                  held={pending && pressedSlug !== course.slug}
                   loadingLabel={text.removing}
                   className="px-0"
                 >

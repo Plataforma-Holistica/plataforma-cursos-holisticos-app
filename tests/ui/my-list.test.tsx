@@ -146,10 +146,15 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     const { rerender } = render(page(action, [A, B, C]));
     await user.click(quitar("Dos"));
     expect(await screen.findByRole("button", { name: "Quitando…" })).toHaveAttribute("aria-disabled", "true");
+    // Los demás «Quitar» esperan: inactivos para quien no ve, sin deshabilitarse ni cambiar de nombre.
+    expect(quitar("Uno")).toHaveAttribute("aria-disabled", "true");
+    expect(quitar("Uno")).toBeEnabled();
+    expect(quitar("Uno")).not.toHaveAttribute("aria-busy");
     expect(sent).toEqual(["remove:dos"]);
     await answer({ kind: "removed", slug: "dos", attempt: 1 });
     rerender(page(action, [A, C]));
     expect(quitar("Tres")).toHaveFocus();
+    expect(quitar("Uno")).not.toHaveAttribute("aria-disabled");
     expect(result()).toHaveTextContent("Quitado de tu lista.");
   });
 

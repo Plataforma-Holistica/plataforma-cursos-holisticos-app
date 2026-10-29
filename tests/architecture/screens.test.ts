@@ -688,6 +688,12 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
   it.each(anchors)("$anchor solo se escribe en $file", ({ file, anchor }) => {
     expect(everything.filter((source) => source.code.includes(anchor)).map((source) => source.file)).toEqual([file]);
   });
+
+  // Las anclas que se arman con el curso (una por tarjeta) no salen arriba: se cuida su prefijo.
+  it.each([["bloque-explorar-", "src/app/explorar/page.tsx"]])("el prefijo %s solo se escribe en %s", (prefix, file) => {
+    expect(everything.filter((source) => source.code.includes(prefix)).map((source) => source.file)).toEqual([file]);
+    expect(anchors.filter(({ anchor }) => anchor.startsWith(prefix))).toEqual([]);
+  });
 });
 
 describe("la petición se lee en un solo archivo", () => {

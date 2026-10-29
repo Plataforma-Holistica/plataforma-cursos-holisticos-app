@@ -51,8 +51,13 @@ interface CommonProps {
 // En camino (sin `disabled`): se ve y se anuncia como cargando, pero conserva el foco. Un
 // botón deshabilitado lo pierde en el navegador, y un formulario que se pinta de nuevo en la
 // misma pantalla (Mi lista) lo necesita donde estaba. No detiene el clic: el formulario no
-// envía otra vez mientras espera.
-const PENDING = "cursor-progress border-transparent bg-surface-2 text-text-2 no-underline";
+// envía otra vez mientras espera. Con el prefijo `aria-busy:`, como `LOADING` con `disabled:`:
+// sin él, chocaría con el color y el borde de la variante, y ganaría el orden de la hoja.
+const PENDING =
+  "aria-busy:cursor-progress aria-busy:border-transparent aria-busy:bg-surface-2 aria-busy:text-text-2 aria-busy:no-underline";
+// En espera: otro botón del mismo formulario va en camino, y este no envía nada hasta que
+// conteste. Inactivo para quien no ve (`aria-disabled`), sin deshabilitarse ni dejar de leerse.
+const HELD = "aria-disabled:cursor-progress";
 
 // Cargando, el texto de reposo se oculta. Sin texto de carga quedaría un botón vacío y
 // sin nombre: por eso no se puede pedir `loading` ni `pending` sin `loadingLabel`.
@@ -82,6 +87,8 @@ type AsButton = CommonProps &
   disabled?: boolean;
   /** Por qué está inactivo. Un control deshabilitado siempre tiene al lado su razón. */
   disabledReason?: string;
+  /** En espera de otro envío del mismo formulario (arriba, `HELD`). */
+  held?: boolean;
 };
 
 interface AsLink extends CommonProps {
@@ -103,7 +110,7 @@ export function Button(props: ButtonProps) {
     );
   }
 
-  const { type = "button", loading = false, pending = false, loadingLabel, disabled = false, disabledReason } = props;
+  const { type = "button", loading = false, pending = false, held = false, loadingLabel, disabled = false, disabledReason } = props;
   const busy = loading || pending;
 
   const button = (
@@ -114,10 +121,10 @@ export function Button(props: ButtonProps) {
       form={props.form}
       onClick={props.onClick}
       disabled={disabled || loading}
-      aria-disabled={pending || undefined}
+      aria-disabled={pending || held || undefined}
       aria-busy={busy || undefined}
       aria-describedby={disabledReason ? reasonId : undefined}
-      className={cx(classes, loading ? LOADING : DISABLED, pending && PENDING)}
+      className={cx(classes, loading ? LOADING : DISABLED, pending && PENDING, held && !pending && HELD)}
     >
       <span className={cx(LAYER, busy && "invisible")} aria-hidden={busy || undefined}>
         {children}

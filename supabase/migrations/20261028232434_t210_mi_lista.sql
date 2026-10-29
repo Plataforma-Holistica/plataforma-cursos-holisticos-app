@@ -7,9 +7,10 @@
 -- permite ese permiso: el área `catalog`, de este carril, ahora lo prohíbe.
 --
 -- Decisiones mías sin confirmar: la lista de un perfil borrado se va con él (en producción un
--- perfil no se borra, queda lápida; las pruebas sí los borran); un guardián exige que el curso
--- esté listado y publicado y que la fila sea de la persona por la que actúa el servidor, para que
--- la base lo impida aunque la consulta se equivoque; y sin índice extra: la clave primaria empieza
+-- perfil no se borra, queda lápida; las pruebas sí los borran); dos guardianes, para que la base
+-- lo impida aunque la consulta se equivoque: al guardar, el curso listado y publicado y la fila de
+-- la persona por la que actúa el servidor; al quitar, solo filas de esa persona (salvo el dueño
+-- de la tabla, que es quien borra en cascada); y sin índice extra: la clave primaria empieza
 -- por la persona. Un curso que deja de estar listado no se borra de las listas: la lectura lo
 -- oculta, y vuelve si se lista otra vez.
 
@@ -55,6 +56,29 @@ revoke all on function private.guard_saved_course() from public;
 
 create trigger saved_courses_guard before insert on public.saved_courses
   for each row execute function private.guard_saved_course();
+
+-- Y al quitar: quien no es el dueño de la tabla solo quita filas de la persona por la que actúa.
+-- No es security definer: mira quién ejecuta. El servidor salta la seguridad por fila, así que
+-- sin esto una consulta que olvidara a la persona quitaría el curso de todas las listas. El dueño
+-- pasa: el borrado en cascada de un perfil corre como él, y el borrado de cuenta (T-311) también.
+create function private.guard_saved_course_delete() returns trigger
+language plpgsql set search_path = ''
+as $$
+declare
+  v_owner name;
+begin
+  select pg_catalog.pg_get_userbyid(c.relowner) into v_owner from pg_catalog.pg_class c where c.oid = tg_relid;
+  if current_user::name <> v_owner and old.profile_id is distinct from private.actor_id() then
+    raise exception 'public.saved_courses: only for the person the server acts for'
+      using errcode = '42501';
+  end if;
+  return old;
+end
+$$;
+revoke all on function private.guard_saved_course_delete() from public;
+
+create trigger saved_courses_guard_delete before delete on public.saved_courses
+  for each row execute function private.guard_saved_course_delete();
 
 -- ---------------------------------------------------------------------------------------
 -- El área `catalog` del vigilante, del carril B: sus reglas de antes sin cambiar una letra, y
@@ -124,10 +148,15 @@ as $$
              and p.polroles = array['authenticated'::regrole]::oid[]
              and pg_catalog.pg_get_expr(p.polqual, p.polrelid) = '(profile_id = ( SELECT auth.uid() AS uid))')
   union all
-  -- El guardián, presente y prendido.
-  select 'saved list without insert guard', 'public.saved_courses'
+  -- Los dos guardianes, antes de guardar y antes de quitar, fila por fila, con su función y
+  -- prendidos para las sesiones normales (`O`, o `A` siempre; `R` solo corre en réplica). El tipo
+  -- es la suma de fila (1), antes (2) e insertar (4) o borrar (8).
+  select 'saved list without ' || g.label || ' guard', 'public.saved_courses'
+  from (values ('insert', 'saved_courses_guard', 'private.guard_saved_course()', 7),
+               ('delete', 'saved_courses_guard_delete', 'private.guard_saved_course_delete()', 11)) as g (label, name, fn, kind)
   where not exists (
     select 1 from pg_catalog.pg_trigger t
-    where t.tgrelid = 'public.saved_courses'::regclass and t.tgname = 'saved_courses_guard' and t.tgenabled <> 'D')
+    where t.tgrelid = 'public.saved_courses'::regclass and t.tgname = g.name
+      and t.tgfoid = g.fn::regprocedure and t.tgtype = g.kind and t.tgenabled in ('O', 'A'))
 $$;
 revoke all on function private.schema_violations_catalog() from public;

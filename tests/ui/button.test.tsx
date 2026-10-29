@@ -112,6 +112,14 @@ describe("Button", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Guardando…");
   });
 
+  it("en espera de otro botón del formulario: inactivo para quien no ve, con su nombre y sin cargar", () => {
+    render(<Button held>Quitar</Button>);
+    const button = screen.getByRole("button", { name: "Quitar" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("aria-busy");
+  });
+
   it("no se puede poner en camino sin decir qué está haciendo", () => {
     // @ts-expect-error `pending` exige `loadingLabel`
     const broken = <Button pending>Guardar cambios</Button>;

@@ -133,6 +133,18 @@ describe("explorar (PA-21)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("Mi lista: con otros filtros, el botón se arma de nuevo y no arrastra lo que contestó el anterior", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
+    const { rerender } = render(await ExplorePage(params({ practica: "meditacion" })));
+    const before = screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" });
+    rerender(await ExplorePage(params({ practica: "meditacion" })));
+    expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBe(before);
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion", level: "principiante" }, { courses: [COURSE], teachers: [] }));
+    rerender(await ExplorePage(params({ practica: "meditacion", nivel: "principiante" })));
+    expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).not.toBe(before);
+  });
+
   it("Mi lista: también en los carruseles por práctica", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });

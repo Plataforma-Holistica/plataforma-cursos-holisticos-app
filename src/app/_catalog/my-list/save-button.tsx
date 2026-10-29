@@ -59,7 +59,6 @@ export function SaveCourseButton({ action, slug, title, saved, permalink, classN
         value={`${saved ? "remove" : "save"}:${slug}`}
         pending={pending}
         loadingLabel={saved ? text.removing : text.saving}
-        className="max-sm:w-auto"
       >
         <span aria-hidden="true">{saved ? text.remove : text.save}</span>
         <span className="sr-only">{t(saved ? text.removeNamed : text.saveNamed, { title })}</span>

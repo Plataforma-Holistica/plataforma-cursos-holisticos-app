@@ -540,7 +540,12 @@ que no se ve leyendo un solo archivo:
   ese permiso, y el área `catalog` ahora lo prohíbe (la 27 cambió dos aserciones por eso). El
   guardián `private.guard_saved_course()` (antes de insertar, security definer) exige el curso
   listado y publicado y `profile_id = private.actor_id()`: un trabajo del sistema, o el dueño sin
-  persona declarada, no guardan. La lista de un perfil borrado se va con él (`on delete cascade`;
+  persona declarada, no guardan. Otro guardián, al quitar (`private.guard_saved_course_delete()`,
+  sin definer: mira quién ejecuta), solo deja a quien no es el dueño de la tabla quitar filas de
+  `private.actor_id()`: el servidor salta la seguridad por fila, y una consulta que olvidara a la
+  persona vaciaría ese curso de todas las listas. El dueño pasa, porque el borrado en cascada corre
+  como él. El vigilante exige los dos, fila por fila, antes, con su función y prendidos para las
+  sesiones normales (`O` o `A`; uno en réplica no corre). La lista de un perfil borrado se va con él (`on delete cascade`;
   en producción un perfil no se borra). Un curso que deja de estar listado no se borra de ninguna
   lista: la lectura lo oculta, y vuelve si se lista otra vez. La lectura de la persona (`myList`) no
   ve el registro de cursos, así que trae solo los slugs y el servicio los cruza con lo listado que

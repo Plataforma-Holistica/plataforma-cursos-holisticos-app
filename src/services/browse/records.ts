@@ -243,6 +243,9 @@ const saveRow = z.object({ listed: z.boolean() });
 /**
  * Guarda el curso `slug` si está listado y publicado, como lo pinta el catálogo. Una sola
  * sentencia dice por separado si el curso existe y, sin importar si ya estaba, lo deja guardado.
+ * Límite conocido: el guardián de la tabla mira el curso con su propia foto. Si se retira justo
+ * entre las dos, el guardián lanza, y quien guardaba recibe «no se supo» (reportado) en lugar de
+ * «ya no está». Es raro, y no guarda nada que no deba.
  */
 export async function saveListedCourse(tx: Tx, slug: string): Promise<"saved" | "not_found"> {
   const [row] = await tx.query(

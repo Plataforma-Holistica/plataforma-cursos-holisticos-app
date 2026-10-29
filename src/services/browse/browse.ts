@@ -202,7 +202,9 @@ export function createBrowse(deps: {
    * La lista de quien trae esas claims (las que la guarda le dio a la página): sus cursos que
    * siguen listados, lo último guardado primero. Uno que dejó de estar listado no se pinta, y
    * vuelve si se lista otra vez. La lectura de la persona no ve el registro de cursos: lo
-   * listado sale de lo que ya se recuerda, que trae la tarjeta entera.
+   * listado sale de lo que ya se recuerda, que trae la tarjeta entera. Límite conocido: lo
+   * recordado son los `COURSES_READ` más nuevos (`records.ts`), así que con más cursos listados
+   * que eso uno guardado y viejo no se pintaría; es el mismo pendiente de las fichas.
    */
   async function myList(claims: VerifiedClaims): Promise<MyListAnswer> {
     const all = await listed();

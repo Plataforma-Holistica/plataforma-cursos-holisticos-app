@@ -6,7 +6,7 @@
 -- vuelve si se lista otra vez. Las reglas nuevas del área `catalog` del vigilante se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(52);
+select plan(64);
 
 select pruebas.alta('a3600000-0000-0000-0000-000000000001', 'ana-lista@prueba.test');
 select pruebas.alta('a3600000-0000-0000-0000-000000000002', 'beto-lista@prueba.test');
@@ -106,7 +106,8 @@ select table_privs_are('public', 'saved_courses', 'authenticated', array['SELECT
 select table_privs_are('public', 'saved_courses', 'app_service', array['DELETE', 'INSERT', 'SELECT'],
   'el servidor lee, guarda y quita, sin editar');
 select table_privs_are('public', 'saved_courses', 'service_role', '{}'::text[], 'la clave secreta, nada');
-select has_trigger('public', 'saved_courses', 'saved_courses_guard', 'tiene su guardián');
+select has_trigger('public', 'saved_courses', 'saved_courses_guard', 'tiene su guardián al guardar');
+select has_trigger('public', 'saved_courses', 'saved_courses_guard_delete', 'y al quitar');
 select is_empty('select * from private.schema_violations()', 'y el vigilante no dice nada');
 
 -- ---------------------------------------------------------------------------------------
@@ -120,14 +121,14 @@ select is(pruebas.filas(),
   'quedan las tres filas');
 select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-uno')$$, '23505', null,
   'el mismo curso dos veces es una sola fila');
-select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-sin-aprobar')$$, '23514', null,
+select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-sin-aprobar')$$, '23514', 'public.saved_courses: the course is not listed',
   'un curso sin aprobar no se guarda');
-select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.beto(), 'lista-dos')$$, '42501', null,
+select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.beto(), 'lista-dos')$$, '42501', 'public.saved_courses: only for the person the server acts for',
   'ni a nombre de otra persona que la que actúa');
 
 select pruebas.como_sistema();
 select throws_ok($$insert into public.saved_courses (profile_id, course_id) values (pruebas.beto(), pruebas.curso_lista('lista-dos'))$$,
-  '42501', null, 'un trabajo del sistema no guarda: no hay persona');
+  '42501', 'public.saved_courses: only for the person the server acts for', 'un trabajo del sistema no guarda: no hay persona');
 select pruebas.limpiar();
 
 select pruebas.a_nombre_de(pruebas.ana());
@@ -139,7 +140,7 @@ select pruebas.limpiar();
 -- El dueño tampoco guarda sin persona: el guardián no mira quién escribe, sino por quién.
 select pruebas.como_dueno();
 select throws_ok($$insert into public.saved_courses (profile_id, course_id) values (pruebas.beto(), pruebas.curso_lista('lista-dos'))$$,
-  '42501', null, 'el dueño sin persona declarada, tampoco');
+  '42501', 'public.saved_courses: only for the person the server acts for', 'el dueño sin persona declarada, tampoco');
 
 -- ---------------------------------------------------------------------------------------
 -- La persona lee la suya, y nada más.
@@ -158,11 +159,19 @@ select pruebas.como_visitante();
 select throws_ok($$select count(*) from public.saved_courses$$, '42501', null, 'el visitante no la lee');
 select pruebas.limpiar();
 
--- Quitar, a nombre de quien actúa: el servidor borra con la persona en la consulta.
+-- Quitar, a nombre de quien actúa: el servidor borra con la persona en la consulta, y el guardián
+-- no lo deja borrar la de otra persona aunque la consulta lo olvide.
 select pruebas.a_nombre_de(pruebas.ana());
+select throws_ok($$delete from public.saved_courses where course_id = pruebas.curso_lista('lista-uno')$$, '42501', 'public.saved_courses: only for the person the server acts for',
+  'el servidor no quita de la lista de otra persona');
 delete from public.saved_courses where profile_id = pruebas.ana() and course_id = pruebas.curso_lista('lista-dos');
 select pruebas.limpiar();
 select is(pruebas.ve(pruebas.ana()), array['lista-uno'], 'el servidor quita un curso de la lista');
+select is(pruebas.ve(pruebas.beto()), array['lista-uno'], 'y la de la otra persona sigue igual');
+select pruebas.como_sistema();
+select throws_ok($$delete from public.saved_courses where profile_id = pruebas.beto()$$, '42501', 'public.saved_courses: only for the person the server acts for',
+  'un trabajo del sistema no quita: no hay persona');
+select pruebas.limpiar();
 
 -- ---------------------------------------------------------------------------------------
 -- Un curso que deja de estar listado: no se guarda de nuevo, y lo guardado se queda.
@@ -171,7 +180,7 @@ select pruebas.como_dueno_sistema();
 update public.published_courses set is_listed = false where slug = 'lista-uno';
 select pruebas.limpiar();
 select lives_ok($$select pruebas.guarda(pruebas.beto(), pruebas.beto(), 'lista-dos')$$, 'el otro, listado, sí');
-select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-uno')$$, '23514', null,
+select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-uno')$$, '23514', 'public.saved_courses: the course is not listed',
   'uno que dejó de estar listado no se guarda');
 select is(pruebas.filas(),
   array['ana-lista@prueba.test:lista-uno', 'beto-lista@prueba.test:lista-dos', 'beto-lista@prueba.test:lista-uno'],
@@ -183,7 +192,7 @@ update public.published_courses set is_listed = true where slug = 'lista-uno';
 update public.course_registry set state = 'withdrawn', withdrawn_at = now(), withdrawal_reason = 'prueba', is_open = false
   where course_id = pruebas.curso_lista('lista-uno');
 select pruebas.limpiar();
-select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-uno')$$, '23514', null,
+select throws_ok($$select pruebas.guarda(pruebas.ana(), pruebas.ana(), 'lista-uno')$$, '23514', 'public.saved_courses: the course is not listed',
   'un curso retirado no se guarda, aunque diga listado');
 
 -- Publicado otra vez, se guarda de nuevo.
@@ -235,9 +244,37 @@ alter policy saved_courses_self_select on public.saved_courses to authenticated;
 alter policy saved_courses_self_select on public.saved_courses using (true);
 select is(pruebas.vigila_lista(), array['saved list policy other than self read'], 'la propia, sin mirar de quién es la fila');
 alter policy saved_courses_self_select on public.saved_courses using (profile_id = (select auth.uid()));
+grant references on public.saved_courses to authenticated;
+select is(pruebas.vigila_lista(), array['saved list writable by authenticated'], 'apuntarle con una clave, la persona');
+revoke references on public.saved_courses from authenticated;
+grant trigger on public.saved_courses to app_service;
+select is(pruebas.vigila_lista(), array['saved list editable by app_service'], 'ponerle disparadores, el servidor');
+revoke trigger on public.saved_courses from app_service;
+grant insert on public.saved_courses to service_role;
+select ok('saved list writable by service_role' = any (pruebas.vigila_lista()), 'escribirla, la clave secreta');
+revoke insert on public.saved_courses from service_role;
+grant select on public.saved_courses to service_role;
+select ok('saved list readable by service_role' = any (pruebas.vigila_lista()), 'leerla, la clave secreta');
+revoke select on public.saved_courses from service_role;
 alter table public.saved_courses disable trigger saved_courses_guard;
 select is(pruebas.vigila_lista(), array['saved list without insert guard'], 'el guardián apagado');
+alter table public.saved_courses enable replica trigger saved_courses_guard;
+select is(pruebas.vigila_lista(), array['saved list without insert guard'], 'el guardián solo en réplica, que no corre');
 alter table public.saved_courses enable trigger saved_courses_guard;
+drop trigger saved_courses_guard on public.saved_courses;
+create trigger saved_courses_guard before insert on public.saved_courses
+  for each row execute function private.touch_updated_at();
+select is(pruebas.vigila_lista(), array['saved list without insert guard'], 'un guardián con otra función');
+drop trigger saved_courses_guard on public.saved_courses;
+create trigger saved_courses_guard after insert on public.saved_courses
+  for each row execute function private.guard_saved_course();
+select is(pruebas.vigila_lista(), array['saved list without insert guard'], 'el guardián después de guardar, cuando ya no ataja');
+drop trigger saved_courses_guard on public.saved_courses;
+create trigger saved_courses_guard before insert on public.saved_courses
+  for each row execute function private.guard_saved_course();
+alter table public.saved_courses disable trigger saved_courses_guard_delete;
+select is(pruebas.vigila_lista(), array['saved list without delete guard'], 'el guardián de quitar apagado');
+alter table public.saved_courses enable trigger saved_courses_guard_delete;
 select is_empty('select * from private.schema_violations()', 'deshecho todo, el vigilante otra vez no dice nada');
 
 select * from finish();

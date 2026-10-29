@@ -59,7 +59,9 @@ function courseCard(course: ShelfCourse, saving: Saving) {
   return (
     <div key={course.slug} id={cardAnchor(course.slug)} className="flex flex-col gap-3">
       {card}
+      {/* Con otros filtros, otro botón: lo que contestó el anterior (un aviso de error) no se queda. */}
       <SaveCourseButton
+        key={saving.shownPath}
         action={exploreListAction}
         slug={course.slug}
         title={course.title}
