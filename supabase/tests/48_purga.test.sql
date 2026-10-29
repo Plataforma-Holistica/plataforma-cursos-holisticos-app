@@ -96,7 +96,9 @@ create temporary table retencion as
 update public.business_parameters set canceled_at = now() where id in (select id from retencion);
 select is(private.purge_watch_partition(203201), 'no_retention', 'sin RETENCION_LATIDOS no se purga nada');
 -- Rige desde antes del inicio de la transacción, que es la hora con que la purga lo lee (`now()`). Con la
--- del reloj, una preparación de más de un segundo lo dejaba sin regir y todo salía `no_retention`.
+-- del reloj, una preparación de más de un segundo lo dejaba sin regir y la purga contestaba `no_retention`.
+-- Cancelar el vigente y programar uno en el pasado solo se puede porque la prueba no confirma: al
+-- confirmar, `guard_payout_timing` rechazaría las dos cosas.
 insert into public.business_parameters (key, value, status, effective_from)
 values ('RETENCION_LATIDOS', '90', 'decided', now() - interval '1 second');
 select pruebas.como_dueno();
