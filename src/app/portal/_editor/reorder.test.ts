@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { arranged, dropButton, stepTo } from "./reorder";
+import { dropButton, stepTo } from "./reorder";
 
 // Arrastrar en la estructura del editor (PA-43; tercera solicitud de T-402): con el teclado la fila se
 // mueve dentro de su lista; con el ratón, a cualquier lugar. Lo que se manda al soltar es un botón con
@@ -23,14 +23,6 @@ describe("stepTo", () => {
     expect(stepTo(3, 2, "down")).toBe(3);
     expect(stepTo(3, 1, "up")).toBe(1);
     expect(stepTo(3, 3, "down")).toBe(3);
-  });
-});
-
-describe("arranged", () => {
-  it("pinta la lista con la fila en el lugar que lleva", () => {
-    expect(arranged(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
-    expect(arranged(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
-    expect(arranged(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
   });
 });
 

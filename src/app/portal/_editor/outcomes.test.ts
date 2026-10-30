@@ -88,6 +88,7 @@ describe("readEditorForm", () => {
     ["mover a un destino sin forma", [["do", editorButton.lessonMove(LESSON, MODULE, 2)], ["to", "x:1"]]],
     ["llevar un módulo a su mismo lugar", [["do", editorButton.moduleTo(MODULE, 2, 2)]]],
     ["llevar un módulo al lugar cero", [["do", `module-to:${MODULE}:2:0`]]],
+    ["llevar un módulo a un lugar que no cabe en un entero", [["do", `module-to:${MODULE}:2:99999999999`]]],
     ["llevar una lección a un módulo sin forma", [["do", `lesson-to:${LESSON}:${MODULE}:2:x:1`]]],
     ["llevar una lección a su mismo lugar", [["do", editorButton.lessonTo(LESSON, MODULE, 2, MODULE, 2)]]],
     ["llevar una lección con un dato de más", [["do", `${editorButton.lessonTo(LESSON, MODULE, 2, OTHER, 1)}:9`]]],

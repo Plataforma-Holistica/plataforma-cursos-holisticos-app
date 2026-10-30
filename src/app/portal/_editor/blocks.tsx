@@ -23,7 +23,7 @@ import { DATA_ID, LESSON_ID, MODULE_ID, STRUCTURE_ID } from "./anchors";
 import { editorButton, type BlockState, type Problems, type Values } from "./outcomes";
 import { dropButton, stepTo, type Dragged } from "./reorder";
 import type { EditorView, ModuleRow, Option, Selected } from "./rows";
-import { useUnsaved } from "./unsaved";
+import { STRUCTURE_KEY, useUnsaved } from "./unsaved";
 
 // Los bloques del editor de curso (PA-43; T-402). Cada uno es su sección, con sus formularios ligados a
 // la misma acción y a su propio estado, y su resultado se dice en el bloque. Todo funciona sin
@@ -114,18 +114,25 @@ function fieldError(kind: DraftTextKind, problem: Problems[string] | null): stri
 }
 
 /**
- * Lo que un formulario le dice a la barra: escribir lo deja sin guardar, enviarlo no. Al irse el bloque (se
- * eligió otra cosa), lo suyo deja de contar.
+ * Lo que un formulario le dice a la barra: escribir lo deja sin guardar, y solo la respuesta que lo guardó
+ * (o la que dice que otra pestaña cambió lo mismo, que pinta lo de ahora) lo limpia. Un envío que no se
+ * hizo deja lo escrito en pantalla, sin guardar. Al irse el bloque (se eligió otra cosa), lo suyo deja de
+ * contar. `target` es el formulario en la respuesta (`BlockState`).
  */
-function useTyping(key: string, onInput: () => void) {
+function useTyping(key: string, target: string, state: BlockState, onInput: () => void) {
   const { mark } = useUnsaved();
   useEffect(() => () => mark(key, false), [key, mark]);
+  useEffect(() => {
+    const saved = state.kind === "done" && state.target === target;
+    const replaced = state.kind === "failed" && state.target === target && state.values === null;
+    if (saved || replaced) mark(key, false);
+  }, [state, key, target, mark]);
   return {
     onInput: () => {
       onInput();
       mark(key, true);
     },
-    onSubmit: () => mark(key, false),
+    form: { "data-unsaved-key": key },
   };
 }
 
@@ -142,7 +149,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
-  const typing = useTyping("course", result.onInput);
+  const typing = useTyping("datos", "course", state, result.onInput);
   const { data } = view;
   const titleError = fieldError("courseTitle", problemOf(state, "title", "course"));
   const summaryError = fieldError("summary", problemOf(state, "summary", "course"));
@@ -161,7 +168,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
         {text.courseData}
       </h2>
       {view.editable ? (
-        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-6">
+        <form action={action} onInput={typing.onInput} {...typing.form} className="flex flex-col gap-6">
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
           <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
           <CourseField course={view.course} />
@@ -285,6 +292,7 @@ function MoveButtons({ up, down, upName, downName, action, course }: MoveButtons
 }
 
 const DRAG_HINT_ID = "editor-arrastrar-ayuda";
+const DRAG_TYPE = "application/x-plataforma-fila";
 
 /** La fila que se tomó con el teclado: de qué lista (el curso para los módulos, o su módulo), y dónde va. */
 interface Picked extends Dragged {
@@ -299,14 +307,23 @@ interface Picked extends Dragged {
 interface DragKit {
   /** Sin JavaScript no hay asas: «Subir», «Bajar» y «Mover a» son lo único. */
   enabled: boolean;
+  /** Con un envío en camino las asas siguen ahí (el foco no se pierde), pero no hacen nada. */
+  busy: boolean;
   picked: Picked | null;
   setPicked: (picked: Picked | null) => void;
-  mouse: Dragged | null;
+  /**
+   * La fila que se arrastra con el ratón. Se lee en el momento de cada evento (una referencia, no estado): los
+   * primeros `dragover` llegan antes de que React vuelva a pintar.
+   */
+  dragging: () => Dragged | null;
   setMouse: (dragged: Dragged | null) => void;
   /** Lo que se dice por la región viva de la estructura. */
   say: (words: string) => void;
-  /** Manda un botón por el formulario oculto de la estructura: el mismo camino que «Subir». */
-  send: (value: string) => void;
+  /**
+   * Manda un botón por el formulario oculto de la estructura: el mismo camino que «Subir». Con el teclado,
+   * lleva además la fila (para devolverle el foco) y lo que se dirá cuando la base conteste.
+   */
+  send: (value: string, keyboard?: { id: string; words: string }) => void;
   drop: (over: Dragged) => void;
 }
 
@@ -326,6 +343,11 @@ function DragHandle({ item, kit }: HandleProps) {
   const words = (template: typeof text.grabbed | typeof text.dropped | typeof text.dragTo, position: number) => t(template, { title: item.title, position, total: item.total });
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    // Una tecla mantenida no toma, suelta y vuelve a tomar en ráfaga.
+    if (event.repeat || kit.busy) {
+      if (event.key === " " || event.key === "Enter") event.preventDefault();
+      return;
+    }
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       if (picked === null) {
@@ -338,11 +360,11 @@ function DragHandle({ item, kit }: HandleProps) {
         kit.say(t(text.dragCancelled, { title: item.title }));
         return;
       }
-      kit.say(words(text.dropped, picked.current));
       kit.send(
         item.kind === "module"
           ? editorButton.moduleTo(item.id, picked.from, picked.current)
           : editorButton.lessonTo(item.id, item.list, picked.from, item.list, picked.current),
+        { id: item.id, words: words(text.dropped, picked.current) },
       );
       return;
     }
@@ -361,8 +383,13 @@ function DragHandle({ item, kit }: HandleProps) {
   }
 
   function onDragStart(event: DragEvent<HTMLButtonElement>) {
+    if (kit.busy) {
+      event.preventDefault();
+      return;
+    }
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", item.id);
+    // Un tipo propio: soltar el asa sobre un campo de texto no escribe nada en él.
+    event.dataTransfer.setData(DRAG_TYPE, item.id);
     kit.setMouse({ kind: item.kind, id: item.id });
   }
 
@@ -371,12 +398,16 @@ function DragHandle({ item, kit }: HandleProps) {
     <span className="flex items-center gap-2">
       <button
         type="button"
-        draggable
+        draggable={!kit.busy}
+        data-handle={item.id}
         aria-pressed={picked !== null}
+        aria-disabled={kit.busy || undefined}
         aria-describedby={DRAG_HINT_ID}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          if (picked !== null) kit.setPicked(null);
+          if (picked === null) return;
+          kit.setPicked(null);
+          kit.say(t(text.dragCancelled, { title: item.title }));
         }}
         onDragStart={onDragStart}
         onDragEnd={() => kit.setMouse(null)}
@@ -395,12 +426,14 @@ function dropZone(kit: DragKit, over: Dragged, accepts: Dragged["kind"][]) {
   if (!kit.enabled) return {};
   return {
     onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (kit.mouse === null || !accepts.includes(kit.mouse.kind) || (kit.mouse.kind === over.kind && kit.mouse.id === over.id)) return;
+      const dragged = kit.dragging();
+      if (dragged === null || !accepts.includes(dragged.kind) || (dragged.kind === over.kind && dragged.id === over.id)) return;
       event.preventDefault();
       event.stopPropagation();
     },
     onDrop: (event: DragEvent<HTMLElement>) => {
-      if (kit.mouse === null || !accepts.includes(kit.mouse.kind)) return;
+      const dragged = kit.dragging();
+      if (dragged === null || !accepts.includes(dragged.kind)) return;
       event.preventDefault();
       event.stopPropagation();
       kit.drop(over);
@@ -424,7 +457,7 @@ interface ModuleItemProps {
 function ModuleItem({ module, view, state, responses, action, onInput, pending, kit, position, total }: ModuleItemProps) {
   const lessonError = fieldError("lessonTitle", problemOf(state, "title", module.id));
   const fieldId = `editor-leccion-nueva-${module.id}`;
-  const typing = useTyping(`leccion-${module.id}`, onInput);
+  const typing = useTyping(`${STRUCTURE_KEY}leccion-${module.id}`, module.id, state, onInput);
   return (
     <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col gap-3 rounded-md border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -488,7 +521,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
         </ol>
       )}
       {view.editable && (
-        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-2">
+        <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
             key={responses.keyOf(module.id)}
@@ -517,29 +550,44 @@ export function StructureBlock({ view }: { view: EditorView }) {
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
-  const typing = useTyping("modulo", result.onInput);
+  const typing = useTyping(`${STRUCTURE_KEY}modulo`, "module", state, result.onInput);
   const hydrated = useHydrated();
   const dropForm = useRef<HTMLFormElement>(null);
   const dropValue = useRef<HTMLInputElement>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [mouse, setMouse] = useState<Dragged | null>(null);
+  const mouse = useRef<Dragged | null>(null);
   const [voice, setVoice] = useState("");
-  const send = (value: string) => {
+  // Lo que se soltó con el teclado: a qué asa vuelve el foco y qué se dice cuando la base conteste.
+  const dropped = useRef<{ id: string; words: string } | null>(null);
+  const send = (value: string, keyboard?: { id: string; words: string }) => {
     if (dropForm.current === null || dropValue.current === null) return;
+    dropped.current = keyboard ?? null;
     dropValue.current.value = value;
     dropForm.current.requestSubmit();
   };
+  useEffect(() => {
+    const done = dropped.current;
+    if (done === null || state.kind === "idle" || pending) return;
+    dropped.current = null;
+    if (state.kind === "done" && state.target === "move") setVoice(done.words);
+    // Después de que el bloque mueva el foco a su respuesta: el asa lo recupera, para seguir con el teclado.
+    const timer = window.setTimeout(() => document.querySelector<HTMLElement>(`[data-handle="${done.id}"]`)?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [state, pending]);
   const kit: DragKit = {
-    enabled: hydrated && !pending,
+    enabled: hydrated,
+    busy: pending,
     picked,
     setPicked,
-    mouse,
-    setMouse,
+    dragging: () => mouse.current,
+    setMouse: (dragged) => {
+      mouse.current = dragged;
+    },
     say: setVoice,
     send,
     drop: (over) => {
-      const dragged = mouse;
-      setMouse(null);
+      const dragged = mouse.current;
+      mouse.current = null;
       if (dragged === null) return;
       const value = dropButton(view.structure.modules, dragged, over);
       if (value !== null) send(value);
@@ -564,7 +612,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
       </Link>
       <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
       <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
-      {view.editable && (
+      {view.editable && hydrated && (
         <>
           <p id={DRAG_HINT_ID} className="sr-only">
             {text.dragHint}
@@ -602,7 +650,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
         </ol>
       )}
       {view.editable && (
-        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-2">
+        <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
             key={responses.keyOf("module")}
@@ -637,7 +685,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   const result = useResult(state, pending, view.paths.self);
   // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
   const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), result.message);
-  const typing = useTyping("item", result.onInput);
+  const typing = useTyping("elegido", "item", state, result.onInput);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.
@@ -665,7 +713,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
         {selected.title}
       </h2>
       {view.editable ? (
-        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-6">
+        <form action={action} onInput={typing.onInput} {...typing.form} className="flex flex-col gap-6">
           <CourseField course={view.course} />
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
           <BlockResult

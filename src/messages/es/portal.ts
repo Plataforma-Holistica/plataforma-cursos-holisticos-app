@@ -135,7 +135,7 @@ export const portal = defineMessages({
     backToStructure: "Volver a la estructura",
     unsaved: "Cambios sin guardar",
     dragHandle: "Arrastrar {title}",
-    dragHint: "Espacio toma la fila, las flechas la mueven, Espacio la suelta y Escape cancela.",
+    dragHint: "Espacio o Intro toma la fila, las flechas la mueven, Espacio o Intro la suelta y Escape cancela.",
     dragPlace: "Lugar {position} de {total}",
     grabbed: "Tomaste {title}, en el lugar {position} de {total}.",
     dragTo: "{title}, lugar {position} de {total}.",

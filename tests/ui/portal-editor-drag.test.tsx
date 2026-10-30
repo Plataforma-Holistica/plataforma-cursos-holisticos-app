@@ -78,7 +78,33 @@ describe("arrastrar con el teclado", () => {
     expect(screen.getByText("Lugar 3 de 3")).toBeTruthy();
     await user.keyboard(" ");
     await waitFor(() => expect(sent()).toEqual([`lesson-to:${L1}:${M1}:1:${M1}:3`]));
-    expect(voice()).toContain("Soltaste Una en el lugar 3 de 3.");
+    // Se dice cuando la base contestó, y el foco vuelve al asa para seguir con el teclado.
+    await waitFor(() => expect(voice()).toContain("Soltaste Una en el lugar 3 de 3."));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Arrastrar Una" })).toHaveFocus());
+  });
+
+  it("con un envío en camino las asas siguen ahí, pero no hacen nada", async () => {
+    let answer: (state: unknown) => void = () => undefined;
+    actions.editorAction.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { user } = show();
+    screen.getByRole("button", { name: "Arrastrar Una" }).focus();
+    await user.keyboard(" {ArrowDown} ");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Arrastrar Dos" }).getAttribute("aria-disabled")).toBe("true"));
+    screen.getByRole("button", { name: "Arrastrar Dos" }).focus();
+    await user.keyboard(" ");
+    expect(screen.getByRole("button", { name: "Arrastrar Dos" }).getAttribute("aria-pressed")).toBe("false");
+    answer({ kind: "done", what: "moved", target: "move", attempt: 1 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Arrastrar Dos" }).getAttribute("aria-disabled")).toBeNull());
+    expect(sent()).toHaveLength(1);
+  });
+
+  it("si la base dice que cambió, no se anuncia que se soltó", async () => {
+    actions.editorAction.mockResolvedValueOnce({ kind: "failed", reason: "changed", values: null, target: "move", attempt: 1 });
+    const { user } = show();
+    screen.getByRole("button", { name: "Arrastrar Una" }).focus();
+    await user.keyboard(" {ArrowDown} ");
+    await waitFor(() => expect(screen.getByText(/Esto cambió mientras lo veías/)).toBeTruthy());
+    expect(voice()).not.toContain("Soltaste");
   });
 
   it("un módulo se mueve igual, entre los módulos", async () => {
@@ -102,7 +128,7 @@ describe("arrastrar con el teclado", () => {
   it("las asas explican cómo se usan y no rompen la accesibilidad; al suspendido no se le ofrecen", async () => {
     const { container } = show();
     const handle = screen.getByRole("button", { name: "Arrastrar Una" });
-    expect(document.getElementById(handle.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Espacio toma la fila");
+    expect(document.getElementById(handle.getAttribute("aria-describedby") ?? "")?.textContent).toContain("toma la fila");
     expect(await a11yViolations(container)).toEqual([]);
   });
 
@@ -116,7 +142,9 @@ describe("cambios sin guardar", () => {
   const assign = vi.fn();
   const original = window.location;
   beforeEach(() => {
-    Object.defineProperty(window, "location", { configurable: true, value: { ...original, href: original.href, origin: original.origin, pathname: original.pathname, search: original.search, assign } });
+    // La dirección del editor: un enlace a otra cosa de la estructura es de la misma pantalla.
+    const here = `${original.origin}/portal/cursos/${COURSE}`;
+    Object.defineProperty(window, "location", { configurable: true, value: { ...original, href: here, origin: original.origin, pathname: `/portal/cursos/${COURSE}`, search: "", assign } });
   });
   afterEach(() => {
     Object.defineProperty(window, "location", { configurable: true, value: original });
@@ -145,6 +173,50 @@ describe("cambios sin guardar", () => {
     await user.click(screen.getAllByRole("link", { name: "Mis cursos" })[0] as HTMLElement);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Salir sin guardar" }));
     expect(assign).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\/portal\/cursos$/));
+  });
+
+  it("un envío que no se hizo deja lo escrito sin guardar", async () => {
+    actions.editorAction.mockResolvedValue({ kind: "invalid", problems: { title: "too_long" }, values: { title: "x", summary: "", practice: "", level: "" }, target: "course", attempt: 1 });
+    const { user } = show();
+    await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(actions.editorAction).toHaveBeenCalled());
+    expect(screen.getByText("Cambios sin guardar")).toBeTruthy();
+  });
+
+  it("un formulario que se lleva a otra pantalla (cerrar sesión) pregunta si hay algo sin guardar, y al salir se envía", async () => {
+    const leave = vi.fn((event: { preventDefault: () => void }) => event.preventDefault());
+    const user = userEvent.setup();
+    render(
+      <>
+        <form data-leaves="all" onSubmit={leave}>
+          <button type="submit">Cerrar sesión</button>
+        </form>
+        <EditorScreen view={editorView(draft, choices, { readOnly: false, search: {}, now: new Date() })} />
+      </>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
+    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    expect(leave).not.toHaveBeenCalled();
+    await user.click(within(screen.getByRole("dialog", { name: "Salir sin guardar" })).getByRole("button", { name: "Salir sin guardar" }));
+    expect(leave).toHaveBeenCalledOnce();
+  });
+
+  it("ir a otra lección con algo escrito solo en la estructura no pregunta: la estructura se queda", async () => {
+    const { user } = show();
+    await user.type(screen.getByRole("textbox", { name: "Título del módulo nuevo" }), "A medias");
+    expect(screen.getByText("Cambios sin guardar")).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Dos" });
+    let stopped = true;
+    const spy = (event: Event) => {
+      stopped = event.defaultPrevented;
+      event.preventDefault();
+    };
+    document.addEventListener("click", spy);
+    await user.click(link);
+    document.removeEventListener("click", spy);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(stopped).toBe(false);
   });
 
   it("sin nada escrito, salir no pregunta", async () => {

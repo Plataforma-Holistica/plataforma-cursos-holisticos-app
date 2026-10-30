@@ -34,7 +34,8 @@ async function signIn(page: Page, who: Person, path: string): Promise<void> {
   await page.getByLabel("Correo").fill(who.email);
   await page.getByLabel("Contraseña", { exact: true }).fill(who.password);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page).toHaveURL(path);
+  // Entrar es lo primero que pide la aplicación recién arrancada: puede tardar más que la espera por omisión.
+  await expect(page).toHaveURL(path, { timeout: 15_000 });
 }
 
 async function noJs(browser: Browser) {
@@ -52,7 +53,7 @@ const coursesOf = async (who: Person) =>
 
 /** Las lecciones de un módulo, en orden, como las pinta el editor. */
 const lessonsIn = (page: Page, module: string) =>
-  page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > a");
+  page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > span > a");
 
 /**
  * Los campos ocultos del formulario con acción de servidor que trae `needle`: el menú del portal tiene

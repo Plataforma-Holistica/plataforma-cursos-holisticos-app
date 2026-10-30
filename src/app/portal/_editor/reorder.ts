@@ -23,15 +23,6 @@ export function stepTo(count: number, current: number, key: "up" | "down"): numb
   return key === "up" ? Math.max(1, current - 1) : Math.min(count, current + 1);
 }
 
-/** La lista con la fila que estaba en `from` puesta en `to` (índices desde 0), para pintarla mientras se mueve. */
-export function arranged<T>(items: readonly T[], from: number, to: number): T[] {
-  const copy = [...items];
-  const [moved] = copy.splice(from, 1);
-  if (moved === undefined) return copy;
-  copy.splice(to, 0, moved);
-  return copy;
-}
-
 /** El botón que manda soltar `dragged` sobre `over`, o nulo si no cambia nada. */
 export function dropButton(modules: readonly Structure[], dragged: Dragged, over: Dragged): string | null {
   if (dragged.kind === "module") {
