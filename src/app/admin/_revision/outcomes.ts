@@ -71,6 +71,7 @@ export const reviewButton = {
 
 export type ReviewFailure =
   | "not_pending"
+  | "self"
   | "incomplete"
   | "practice_inactive"
   | "level_inactive"
@@ -111,6 +112,8 @@ export function approveOutcome(result: CourseApproved): ApproveOutcome {
         case "not_found":
         case "not_pending":
           return { kind: "failed", reason: "not_pending" };
+        case "self":
+          return { kind: "failed", reason: "self" };
         case "incomplete":
           return { kind: "failed", reason: "incomplete" };
         case "practice_inactive":
