@@ -342,7 +342,7 @@ function DragHandle({ item, kit }: HandleProps) {
   const picked = kit.picked !== null && kit.picked.kind === item.kind && kit.picked.id === item.id ? kit.picked : null;
   const words = (template: typeof text.grabbed | typeof text.dropped | typeof text.dragTo, position: number) => t(template, { title: item.title, position, total: item.total });
 
-  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function onKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
     // Una tecla mantenida no toma, suelta y vuelve a tomar en ráfaga.
     if (event.repeat || kit.busy) {
       if (event.key === " " || event.key === "Enter") event.preventDefault();
@@ -382,7 +382,7 @@ function DragHandle({ item, kit }: HandleProps) {
     }
   }
 
-  function onDragStart(event: DragEvent<HTMLButtonElement>) {
+  function onDragStart(event: DragEvent<HTMLSpanElement>) {
     if (kit.busy) {
       event.preventDefault();
       return;
@@ -396,8 +396,11 @@ function DragHandle({ item, kit }: HandleProps) {
   if (!kit.enabled) return null;
   return (
     <span className="flex items-center gap-2">
-      <button
-        type="button"
+      {/* Un `<span>` con papel de botón y no un `<button>`: Chrome no empieza a arrastrar desde un botón (medido el
+          2026-10-29 en el extremo a extremo: ni un `dragstart`). El teclado lo atiende `onKeyDown`. */}
+      <span
+        role="button"
+        tabIndex={0}
         draggable={!kit.busy}
         data-handle={item.id}
         aria-pressed={picked !== null}
@@ -415,7 +418,7 @@ function DragHandle({ item, kit }: HandleProps) {
       >
         <Icon icon={GripVertical} />
         <span className="sr-only">{t(text.dragHandle, { title: item.title })}</span>
-      </button>
+      </span>
       {picked !== null && <span className="text-caption text-accent">{t(text.dragPlace, { position: picked.current, total: item.total })}</span>}
     </span>
   );

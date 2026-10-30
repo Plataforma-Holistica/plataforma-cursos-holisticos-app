@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 
 import { actionFields, postAction } from "../support/actions";
 import { a11yViolations } from "../support/a11y";
@@ -64,6 +64,21 @@ function fieldsOf(html: string, needle: string): Record<string, string> {
   const position = forms.findIndex((form) => form.includes(needle));
   if (position < 0) throw new Error(`Ningún formulario trae ${needle}.`);
   return actionFields(html, position);
+}
+
+/**
+ * Arrastrar con el ratón: los eventos de arrastrar y soltar, con su `DataTransfer`, a la aplicación de verdad.
+ * El arrastre nativo de Playwright no es confiable en esta máquina (medido el 2026-10-29: a veces no llega ni un
+ * `dragstart`); que el arrastre arranca desde el asa lo midió una sonda ese día. Esto recorre los manejadores, el
+ * formulario oculto de la estructura y la base.
+ */
+async function drag(page: Page, from: Locator, to: Locator): Promise<void> {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await from.dispatchEvent("dragstart", { dataTransfer });
+  await to.dispatchEvent("dragenter", { dataTransfer });
+  await to.dispatchEvent("dragover", { dataTransfer });
+  await to.dispatchEvent("drop", { dataTransfer });
+  await from.dispatchEvent("dragend", { dataTransfer });
 }
 
 let created: { teacher: Person; course: string } | null = null;
@@ -321,9 +336,9 @@ test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar
   expect(await a11yViolations(page)).toEqual([]);
 
   // Con el ratón: una lección sobre otro módulo va al final de ese módulo; un módulo sobre otro toma su lugar.
-  await page.getByRole("button", { name: "Arrastrar Tres" }).dragTo(page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
+  await drag(page, page.getByRole("button", { name: "Arrastrar Tres" }), page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
-  await page.getByRole("button", { name: "Arrastrar Cierre" }).dragTo(page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
+  await drag(page, page.getByRole("button", { name: "Arrastrar Cierre" }), page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
   await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
 
   // Salir con algo escrito pregunta; sin nada, no.
