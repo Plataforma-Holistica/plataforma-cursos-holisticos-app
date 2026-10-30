@@ -1,6 +1,6 @@
 "use client";
 
-import { GripVertical } from "lucide";
+import { FileText, GripVertical } from "lucide";
 import Link from "next/link";
 import { type DragEvent, type KeyboardEvent, useActionState, useEffect, useRef, useState } from "react";
 
@@ -11,6 +11,7 @@ import { plural, t } from "@/messages/format";
 import { DRAFT_TEXT_LIMITS, type DraftTextKind } from "@/services/drafts/field-rules";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
+import { cx } from "@/ui/cx";
 import { FormErrorSummary, type FormError } from "@/ui/form-error-summary";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
@@ -194,48 +195,58 @@ export function CourseBlock({ view }: { view: EditorView }) {
           <CourseField course={view.course} />
           {data.inactive && <InlineAlert tone="warning">{text.inactiveNotice}</InlineAlert>}
           <div key={responses.keyOf("course")} className="flex flex-col gap-6">
-            <CountedField
-              id="editor-titulo"
-              name="title"
-              label={text.titleLabel}
-              max={DRAFT_TEXT_LIMITS.courseTitle}
-              warnAt={WARN_AT.courseTitle}
-              defaultValue={responses.valueOf("course", "title", data.title)}
-              error={titleError}
-              readOnly={pending}
-            />
-            <CountedField
-              id="editor-resumen"
-              name="summary"
-              label={text.summaryLabel}
-              max={DRAFT_TEXT_LIMITS.summary}
-              warnAt={WARN_AT.summary}
-              defaultValue={responses.valueOf("course", "summary", data.summary)}
-              error={summaryError}
-              optional
-              multiline
-              readOnly={pending}
-            />
-            <Select
-              id="editor-practica"
-              name="practice"
-              label={text.practiceLabel}
-              options={data.practices}
-              prompt={text.choose}
-              defaultValue={chosen(responses.valueOf("course", "practice", data.practice), data.practices, data.practice)}
-              error={practiceError}
-              optional
-            />
-            <Select
-              id="editor-nivel"
-              name="level"
-              label={text.levelLabel}
-              options={data.levels}
-              prompt={text.choose}
-              defaultValue={chosen(responses.valueOf("course", "level", data.level), data.levels, data.level)}
-              error={levelError}
-              optional
-            />
+            <div role="group" aria-labelledby="editor-presentacion" className={CARD}>
+              <GroupHeading id="editor-presentacion" title={text.presentation} hint={text.presentationHint} />
+              <CountedField
+                id="editor-titulo"
+                name="title"
+                label={text.titleLabel}
+                max={DRAFT_TEXT_LIMITS.courseTitle}
+                warnAt={WARN_AT.courseTitle}
+                defaultValue={responses.valueOf("course", "title", data.title)}
+                error={titleError}
+                readOnly={pending}
+              />
+              <CountedField
+                id="editor-resumen"
+                name="summary"
+                label={text.summaryLabel}
+                max={DRAFT_TEXT_LIMITS.summary}
+                warnAt={WARN_AT.summary}
+                defaultValue={responses.valueOf("course", "summary", data.summary)}
+                error={summaryError}
+                optional
+                multiline
+                readOnly={pending}
+              />
+            </div>
+            <div role="group" aria-labelledby="editor-clasificacion" className={CARD}>
+              <GroupHeading id="editor-clasificacion" title={text.classification} hint={text.classificationHint} />
+              <div className="grid gap-6 sm:grid-cols-2">
+                <Select
+                  id="editor-practica"
+                  name="practice"
+                  label={text.practiceLabel}
+                  options={data.practices}
+                  prompt={data.practices.length === 0 ? text.noPractices : text.choose}
+                  hint={data.practices.length === 0 ? text.noChoicesHint : undefined}
+                  defaultValue={chosen(responses.valueOf("course", "practice", data.practice), data.practices, data.practice)}
+                  error={practiceError}
+                  optional
+                />
+                <Select
+                  id="editor-nivel"
+                  name="level"
+                  label={text.levelLabel}
+                  options={data.levels}
+                  prompt={data.levels.length === 0 ? text.noLevels : text.choose}
+                  hint={data.levels.length === 0 ? text.noChoicesHint : undefined}
+                  defaultValue={chosen(responses.valueOf("course", "level", data.level), data.levels, data.level)}
+                  error={levelError}
+                  optional
+                />
+              </div>
+            </div>
           </div>
           <div>
             <Button type="submit" name="do" value={data.save} loading={pending} loadingLabel={text.saving}>
@@ -263,8 +274,8 @@ export function CourseBlock({ view }: { view: EditorView }) {
           </div>
         </dl>
       )}
-      <div className="flex flex-col gap-2">
-        <p className="text-body-s font-semibold">{text.cover}</p>
+      <div role="group" aria-labelledby="editor-portada" className={CARD}>
+        <GroupHeading id="editor-portada" title={text.cover} hint={text.coverHint} />
         <CourseCover
           title={data.cover.title}
           teacherName={data.cover.teacherName}
@@ -272,14 +283,31 @@ export function CourseBlock({ view }: { view: EditorView }) {
           tone={data.cover.tone}
           className="w-full max-w-md rounded-sm"
         />
-        <p className="text-caption text-text-3">{text.coverHint}</p>
       </div>
     </section>
   );
 }
 
+/** Un grupo de campos del bloque de la derecha: su fondo y su borde lo separan del fondo de la pantalla. */
+const CARD = "flex flex-col gap-6 rounded-md border border-border bg-surface-1 p-4 sm:p-6";
+
+function GroupHeading({ id, title, hint }: { id: string; title: string; hint: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <h3 id={id} className="text-h3">
+        {title}
+      </h3>
+      <p className="text-body-s text-text-3">{hint}</p>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------------------
 // La estructura: los módulos con sus lecciones, agregar, subir, bajar, mover y arrastrar.
+//
+// La jerarquía se ve (observación de Sergio del 2026-10-30): «Datos del curso» es una fila propia con su
+// ícono; cada módulo es una tarjeta con su número arriba y su título grande; sus lecciones van adentro,
+// sangradas tras una línea, más chicas y con su número («1.2»). Lo elegido lleva el fondo del acento.
 
 interface MoveButtonsProps {
   up: string | null;
@@ -489,12 +517,18 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
   const fieldId = `editor-leccion-nueva-${module.id}`;
   const typing = useTyping(`${STRUCTURE_KEY}leccion-${module.id}`, module.id, state, onInput, view.paths.self);
   return (
-    <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col gap-3 rounded-md border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2">
+    <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col rounded-md border border-border bg-surface-1">
+      <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b border-border p-3", module.current ? "bg-accent-subtle" : "bg-surface-2")}>
+        <span className="flex min-w-0 items-center gap-2">
           {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
-          <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center font-semibold text-text hover:underline">
-            {t(text.moduleLink, { label: module.label, title: module.title })}
+          <Link
+            href={module.href}
+            aria-current={module.current ? "true" : undefined}
+            aria-label={t(text.moduleLink, { label: module.label, title: module.title })}
+            className="flex min-h-touch min-w-0 flex-col justify-center text-text hover:underline"
+          >
+            <span className="text-label text-text-3 uppercase">{module.label}</span>
+            <span className="text-h3 break-words">{module.title}</span>
           </Link>
         </span>
         {view.editable && (
@@ -508,69 +542,82 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
           />
         )}
       </div>
-      {module.lessons.length === 0 ? (
-        <p className="text-body-s text-text-3">{text.noLessons}</p>
-      ) : (
-        <ol className="flex flex-col gap-2">
-          {module.lessons.map((lesson, index) => (
-            <li key={lesson.id} {...dropZone(kit, { kind: "lesson", id: lesson.id }, ["lesson"])} className="flex flex-col gap-2 border-t border-border pt-2">
-              <span className="flex items-center gap-2">
-                {view.editable && (
-                  <DragHandle
-                    item={{ kind: "lesson", id: lesson.id, title: lesson.title, list: module.id, position: index + 1, total: module.lessons.length }}
-                    kit={kit}
-                  />
-                )}
-                <Link href={lesson.href} aria-current={lesson.current ? "true" : undefined} className="min-h-touch content-center text-text hover:underline">
-                  {lesson.title}
-                </Link>
-              </span>
-              {view.editable && (
-                <div className="flex flex-wrap items-end gap-2">
-                  <MoveButtons
-                    up={lesson.up}
-                    down={lesson.down}
-                    upName={t(text.upNamed, { title: lesson.title })}
-                    downName={t(text.downNamed, { title: lesson.title })}
-                    action={action}
-                    course={view.course}
-                  />
-                  {lesson.move !== null && (
-                    <form action={action} className="flex items-end gap-2">
-                      <CourseField course={view.course} />
-                      <Select id={`editor-mover-${lesson.id}`} name="to" label={t(text.moveToNamed, { title: lesson.title })} options={lesson.targets} prompt={text.moveTo} />
-                      <Button type="submit" name="do" value={lesson.move} variant="secondary" size="md">
-                        {text.move}
-                      </Button>
-                    </form>
+      <div className="flex flex-col gap-3 p-3">
+        {module.lessons.length === 0 ? (
+          <p className="ml-3 border-l-2 border-border pl-3 text-body-s text-text-3">{text.noLessons}</p>
+        ) : (
+          <ol className="ml-3 flex flex-col gap-1 border-l-2 border-border pl-3">
+            {module.lessons.map((lesson, index) => (
+              <li
+                key={lesson.id}
+                {...dropZone(kit, { kind: "lesson", id: lesson.id }, ["lesson"])}
+                className={cx("flex flex-col gap-2 rounded-md px-2 py-1", lesson.current && "bg-accent-subtle")}
+              >
+                <span className="flex items-center gap-2">
+                  {view.editable && (
+                    <DragHandle
+                      item={{ kind: "lesson", id: lesson.id, title: lesson.title, list: module.id, position: index + 1, total: module.lessons.length }}
+                      kit={kit}
+                    />
                   )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      {view.editable && (
-        <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
-          <CourseField course={view.course} />
-          <CountedField
-            key={`${responses.keyOf(module.id)}-${typing.fresh}`}
-            id={fieldId}
-            name="title"
-            label={text.newLessonLabel}
-            max={DRAFT_TEXT_LIMITS.lessonTitle}
-            warnAt={WARN_AT.lessonTitle}
-            defaultValue={responses.valueOf(module.id, "title", "")}
-            error={lessonError}
-            readOnly={pending}
-          />
-          <div>
-            <Button type="submit" name="do" value={module.addLesson} variant="secondary">
-              {text.addLesson}
-            </Button>
-          </div>
-        </form>
-      )}
+                  <span aria-hidden="true" className="text-caption text-text-3 tabular-nums">
+                    {lesson.number}
+                  </span>
+                  <Link
+                    href={lesson.href}
+                    aria-current={lesson.current ? "true" : undefined}
+                    className={cx("min-h-touch content-center break-words hover:text-text hover:underline", lesson.current ? "font-semibold text-text" : "text-text-2")}
+                  >
+                    {lesson.title}
+                  </Link>
+                </span>
+                {view.editable && (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <MoveButtons
+                      up={lesson.up}
+                      down={lesson.down}
+                      upName={t(text.upNamed, { title: lesson.title })}
+                      downName={t(text.downNamed, { title: lesson.title })}
+                      action={action}
+                      course={view.course}
+                    />
+                    {lesson.move !== null && (
+                      <form action={action} className="flex items-end gap-2">
+                        <CourseField course={view.course} />
+                        <Select id={`editor-mover-${lesson.id}`} name="to" label={t(text.moveToNamed, { title: lesson.title })} options={lesson.targets} prompt={text.moveTo} />
+                        <Button type="submit" name="do" value={lesson.move} variant="secondary" size="md">
+                          {text.move}
+                        </Button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+        {view.editable && (
+          <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="ml-3 flex flex-col gap-2 pl-3">
+            <CourseField course={view.course} />
+            <CountedField
+              key={`${responses.keyOf(module.id)}-${typing.fresh}`}
+              id={fieldId}
+              name="title"
+              label={text.newLessonLabel}
+              max={DRAFT_TEXT_LIMITS.lessonTitle}
+              warnAt={WARN_AT.lessonTitle}
+              defaultValue={responses.valueOf(module.id, "title", "")}
+              error={lessonError}
+              readOnly={pending}
+            />
+            <div>
+              <Button type="submit" name="do" value={module.addLesson} variant="secondary">
+                {text.addLesson}
+              </Button>
+            </div>
+          </form>
+        )}
+      </div>
     </li>
   );
 }
@@ -641,7 +688,15 @@ export function StructureBlock({ view }: { view: EditorView }) {
       <h2 id="editor-estructura-titulo" className="text-h2">
         {text.structure}
       </h2>
-      <Link href={view.paths.base} aria-current={view.selected.kind === "course" ? "true" : undefined} className="min-h-touch content-center text-text hover:underline">
+      <Link
+        href={view.paths.base}
+        aria-current={view.selected.kind === "course" ? "true" : undefined}
+        className={cx(
+          "flex min-h-touch items-center gap-3 rounded-md border p-3 font-semibold text-text hover:underline",
+          view.selected.kind === "course" ? "border-accent bg-accent-subtle" : "border-border bg-surface-1",
+        )}
+      >
+        <Icon icon={FileText} />
         {text.courseData}
       </Link>
       <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
@@ -684,7 +739,13 @@ export function StructureBlock({ view }: { view: EditorView }) {
         </ol>
       )}
       {view.editable && (
-        <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
+        <form
+          action={action}
+          onInput={typing.onInput}
+          {...typing.form}
+          data-leaves="detail"
+          className="flex flex-col gap-2 rounded-md border border-dashed border-border-control p-3"
+        >
           <CourseField course={view.course} />
           <CountedField
             key={`${responses.keyOf("module")}-${typing.fresh}`}
@@ -743,9 +804,12 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
 
   return (
     <section id={blockId} ref={block} tabIndex={-1} aria-labelledby="editor-elegido-encabezado" className="flex flex-col gap-6 outline-none">
-      <h2 id="editor-elegido-encabezado" className="text-h2">
-        {selected.title}
-      </h2>
+      <div className="flex flex-col gap-1">
+        <p className="text-label text-text-3 uppercase">{selected.place}</p>
+        <h2 id="editor-elegido-encabezado" className="text-h2 break-words">
+          {selected.title}
+        </h2>
+      </div>
       {view.editable ? (
         <form action={action} onInput={typing.onInput} {...typing.form} className="flex flex-col gap-6">
           <CourseField course={view.course} />
@@ -758,7 +822,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
             answer={answer}
             spoken={spoken}
           />
-          <div key={responses.keyOf("item")} className="flex flex-col gap-6">
+          <div key={responses.keyOf("item")} className={CARD}>
             <CountedField
               id="editor-elegido-titulo"
               name="title"

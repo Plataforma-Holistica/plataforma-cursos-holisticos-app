@@ -79,6 +79,8 @@ describe("editorView", () => {
     expect(first?.lessons[0]).toMatchObject({ up: null, down: `lesson-down:${L1}:${M1}:1`, move: `lesson-move:${L1}:${M1}:1` });
     expect(first?.lessons[0]?.targets).toEqual([{ value: `${M2}:2`, label: "Cierre" }]);
     expect(first?.lessons[1]).toMatchObject({ up: `lesson-up:${L2}:${M1}:2`, down: null });
+    expect(first?.lessons.map((lesson) => lesson.number)).toEqual(["1.1", "1.2"]);
+    expect(second?.lessons[0]?.number).toBe("2.1");
     expect(first?.lessons[0]?.href).toBe(`/portal/cursos/${COURSE}?leccion=${L1}`);
   });
 
@@ -87,12 +89,15 @@ describe("editorView", () => {
       kind: "lesson",
       id: L2,
       title: "Dos",
+      place: "Módulo 1 · Lección 2",
       description: "Qué se hace.",
       save: `save-lesson:${L2}:2`,
       askDelete: `ask-delete-lesson:${L2}`,
       remove: `delete-lesson:${L2}:2`,
     });
-    expect(view({ modulo: M1 }).selected).toMatchObject({ kind: "module", id: M1, lessons: 2, save: `save-module:${M1}:5`, remove: `delete-module:${M1}:5` });
+    expect(view({ modulo: M1 }).selected).toMatchObject({ kind: "module", id: M1, place: "Módulo 1", lessons: 2, save: `save-module:${M1}:5`, remove: `delete-module:${M1}:5` });
+    expect(view({ leccion: L3 }).selected).toMatchObject({ kind: "lesson", place: "Módulo 2 · Lección 1" });
+    expect(view({ modulo: M2 }).selected).toMatchObject({ kind: "module", place: "Módulo 2" });
     expect(view({ leccion: "e0000000-0000-4000-8000-0000000000ff" }).selected).toEqual({ kind: "course" });
     expect(view({ modulo: L1 }).selected).toEqual({ kind: "course" });
     expect(view({ leccion: L1 }).paths.self).toBe(`/portal/cursos/${COURSE}?leccion=${L1}`);

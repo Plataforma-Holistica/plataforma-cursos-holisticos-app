@@ -28,6 +28,8 @@ export interface Option {
 export interface LessonRow {
   id: string;
   title: string;
+  /** Su número en el curso («1.2»), solo para la vista: el lector de pantalla ya oye el lugar en la lista. */
+  number: string;
   href: string;
   current: boolean;
   up: string | null;
@@ -51,8 +53,8 @@ export interface ModuleRow {
 
 export type Selected =
   | { kind: "course" }
-  | { kind: "module"; id: string; title: string; lessons: number; save: string; askDelete: string; remove: string }
-  | { kind: "lesson"; id: string; title: string; description: string | null; save: string; askDelete: string; remove: string };
+  | { kind: "module"; id: string; title: string; place: string; lessons: number; save: string; askDelete: string; remove: string }
+  | { kind: "lesson"; id: string; title: string; place: string; description: string | null; save: string; askDelete: string; remove: string };
 
 export interface EditorView {
   course: string;
@@ -121,12 +123,14 @@ export function editorView(
 
   let selected: Selected = { kind: "course" };
   let self = base;
+  const moduleLabel = (id: string) => t(text.module, { number: draft.modules.findIndex((module) => module.id === id) + 1 });
   if (lessonHit !== undefined) {
-    const { lesson } = lessonHit;
+    const { lesson, module } = lessonHit;
     selected = {
       kind: "lesson",
       id: lesson.id,
       title: lesson.title,
+      place: t(text.lessonPlace, { module: moduleLabel(module.id), number: module.lessons.indexOf(lesson) + 1 }),
       description: lesson.description,
       save: editorButton.saveLesson(lesson.id, lesson.revision),
       askDelete: editorButton.askDeleteLesson(lesson.id),
@@ -138,6 +142,7 @@ export function editorView(
       kind: "module",
       id: moduleHit.id,
       title: moduleHit.title,
+      place: moduleLabel(moduleHit.id),
       lessons: moduleHit.lessons.length,
       save: editorButton.saveModule(moduleHit.id, moduleHit.revision),
       askDelete: editorButton.askDeleteModule(moduleHit.id),
@@ -163,9 +168,10 @@ export function editorView(
       up: module.position > 1 ? editorButton.moduleUp(module.id, module.position) : null,
       down: module.position < lastModule ? editorButton.moduleDown(module.id, module.position) : null,
       addLesson: editorButton.addLesson(module.id, module.revision),
-      lessons: module.lessons.map((lesson) => ({
+      lessons: module.lessons.map((lesson, place) => ({
         id: lesson.id,
         title: lesson.title,
+        number: t(text.lessonNumber, { module: index + 1, lesson: place + 1 }),
         href: link({ lesson: lesson.id }),
         current: selected.kind === "lesson" && selected.id === lesson.id,
         up: lesson.position > 1 ? editorButton.lessonUp(lesson.id, module.id, lesson.position) : null,

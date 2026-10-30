@@ -122,6 +122,42 @@ describe("PA-43 · El editor de curso", () => {
     expect(screen.getByText(/ya no está disponible/)).toBeTruthy();
   });
 
+  it("una lista sin opciones lo dice en la lista misma, con quién las da de alta", async () => {
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [], levels: [] } });
+    const { container } = render(await at());
+    const practice = screen.getByRole("combobox", { name: /Práctica/ });
+    expect(within(practice).getAllByRole("option").map((option) => option.textContent)).toEqual(["Todavía no hay prácticas para elegir"]);
+    expect(practice.getAttribute("aria-describedby")).toContain("editor-practica-hint");
+    const level = screen.getByRole("combobox", { name: /Nivel/ });
+    expect(within(level).getAllByRole("option").map((option) => option.textContent)).toEqual(["Todavía no hay niveles para elegir"]);
+    expect(screen.getAllByText(/Las da de alta el equipo de contenido/)).toHaveLength(2);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con opciones, la lista pide elegir y no lleva esa nota", async () => {
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: true }], levels: [{ id: P1, name: "Inicial", active: true }] } });
+    render(await at());
+    expect(within(screen.getByRole("combobox", { name: /Práctica/ })).getByRole("option", { name: "Elige una opción" })).toBeTruthy();
+    expect(screen.queryByText(/Las da de alta el equipo de contenido/)).toBeNull();
+  });
+
+  it("la jerarquía: los datos en sus grupos, cada módulo con su número y sus lecciones numeradas", async () => {
+    render(await at());
+    expect(screen.getByRole("group", { name: "Presentación" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Práctica y nivel" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Portada" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Módulo 1: Inicio" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Datos del curso" }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByText("1.2").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("lo elegido dice de dónde es, arriba de su título", async () => {
+    render(await at({ leccion: L2 }));
+    expect(screen.getByText("Módulo 1 · Lección 2")).toBeTruthy();
+    render(await at({ modulo: M2 }));
+    expect(screen.getByRole("heading", { level: 2, name: "Cierre" })).toBeTruthy();
+  });
+
   it("lo elegido por la dirección: la lección, con su descripción y «Borrar lección»", async () => {
     const { container } = render(await at({ leccion: L2 }));
     expect(screen.getByRole("heading", { level: 2, name: "Dos" })).toBeTruthy();
