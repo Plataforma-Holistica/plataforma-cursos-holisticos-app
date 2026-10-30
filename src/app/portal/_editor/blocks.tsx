@@ -1,8 +1,10 @@
 "use client";
 
+import { GripVertical } from "lucide";
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { type DragEvent, type KeyboardEvent, useActionState, useEffect, useRef, useState } from "react";
 
+import { useHydrated } from "@/app/(cuenta)/_lib/hooks";
 import { BlockResult, useAnswerFocus } from "@/app/admin/_lib/answer";
 import { portal } from "@/messages/es/portal";
 import { plural, t } from "@/messages/format";
@@ -10,6 +12,7 @@ import { DRAFT_TEXT_LIMITS, type DraftTextKind } from "@/services/drafts/field-r
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
 import { FormErrorSummary, type FormError } from "@/ui/form-error-summary";
+import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { Select } from "@/ui/select";
 
@@ -17,8 +20,10 @@ import { CountedField } from "../_lib/counted-field";
 import { failureText, problemText } from "../_lib/words";
 import { editorAction } from "./actions";
 import { DATA_ID, LESSON_ID, MODULE_ID, STRUCTURE_ID } from "./anchors";
-import type { BlockState, Problems, Values } from "./outcomes";
+import { editorButton, type BlockState, type Problems, type Values } from "./outcomes";
+import { dropButton, stepTo, type Dragged } from "./reorder";
 import type { EditorView, ModuleRow, Option, Selected } from "./rows";
+import { useUnsaved } from "./unsaved";
 
 // Los bloques del editor de curso (PA-43; T-402). Cada uno es su sección, con sus formularios ligados a
 // la misma acción y a su propio estado, y su resultado se dice en el bloque. Todo funciona sin
@@ -108,6 +113,22 @@ function fieldError(kind: DraftTextKind, problem: Problems[string] | null): stri
   return problemText(kind, problem);
 }
 
+/**
+ * Lo que un formulario le dice a la barra: escribir lo deja sin guardar, enviarlo no. Al irse el bloque (se
+ * eligió otra cosa), lo suyo deja de contar.
+ */
+function useTyping(key: string, onInput: () => void) {
+  const { mark } = useUnsaved();
+  useEffect(() => () => mark(key, false), [key, mark]);
+  return {
+    onInput: () => {
+      onInput();
+      mark(key, true);
+    },
+    onSubmit: () => mark(key, false),
+  };
+}
+
 /** Una elección que volvió con la respuesta, solo si sigue entre las opciones; si no, la leída. */
 function chosen(value: string, options: readonly Option[], read: string): string {
   return value === "" || options.some((option) => option.value === value) ? value : read;
@@ -121,6 +142,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
+  const typing = useTyping("course", result.onInput);
   const { data } = view;
   const titleError = fieldError("courseTitle", problemOf(state, "title", "course"));
   const summaryError = fieldError("summary", problemOf(state, "summary", "course"));
@@ -139,7 +161,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
         {text.courseData}
       </h2>
       {view.editable ? (
-        <form action={action} onInput={result.onInput} className="flex flex-col gap-6">
+        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-6">
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
           <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
           <CourseField course={view.course} />
@@ -230,7 +252,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
 }
 
 // ---------------------------------------------------------------------------------------
-// La estructura: los módulos con sus lecciones, agregar, subir, bajar y mover.
+// La estructura: los módulos con sus lecciones, agregar, subir, bajar, mover y arrastrar.
 
 interface MoveButtonsProps {
   up: string | null;
@@ -262,6 +284,130 @@ function MoveButtons({ up, down, upName, downName, action, course }: MoveButtons
   );
 }
 
+const DRAG_HINT_ID = "editor-arrastrar-ayuda";
+
+/** La fila que se tomó con el teclado: de qué lista (el curso para los módulos, o su módulo), y dónde va. */
+interface Picked extends Dragged {
+  title: string;
+  list: string;
+  from: number;
+  current: number;
+  total: number;
+}
+
+/** Lo que la estructura comparte con cada fila para arrastrar. */
+interface DragKit {
+  /** Sin JavaScript no hay asas: «Subir», «Bajar» y «Mover a» son lo único. */
+  enabled: boolean;
+  picked: Picked | null;
+  setPicked: (picked: Picked | null) => void;
+  mouse: Dragged | null;
+  setMouse: (dragged: Dragged | null) => void;
+  /** Lo que se dice por la región viva de la estructura. */
+  say: (words: string) => void;
+  /** Manda un botón por el formulario oculto de la estructura: el mismo camino que «Subir». */
+  send: (value: string) => void;
+  drop: (over: Dragged) => void;
+}
+
+interface HandleProps {
+  item: Dragged & { title: string; list: string; position: number; total: number };
+  kit: DragKit;
+}
+
+/**
+ * El asa de una fila (diseño, `ReorderList`): con el ratón se arrastra; con el teclado, Espacio la toma,
+ * las flechas la mueven dentro de su lista, Espacio la suelta y Escape cancela. La fila no cambia de lugar
+ * en el documento mientras se mueve (el foco se perdería): el asa dice el lugar al que va, y cada
+ * movimiento se anuncia.
+ */
+function DragHandle({ item, kit }: HandleProps) {
+  const picked = kit.picked !== null && kit.picked.kind === item.kind && kit.picked.id === item.id ? kit.picked : null;
+  const words = (template: typeof text.grabbed | typeof text.dropped | typeof text.dragTo, position: number) => t(template, { title: item.title, position, total: item.total });
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      if (picked === null) {
+        kit.setPicked({ kind: item.kind, id: item.id, title: item.title, list: item.list, from: item.position, current: item.position, total: item.total });
+        kit.say(words(text.grabbed, item.position));
+        return;
+      }
+      kit.setPicked(null);
+      if (picked.current === picked.from) {
+        kit.say(t(text.dragCancelled, { title: item.title }));
+        return;
+      }
+      kit.say(words(text.dropped, picked.current));
+      kit.send(
+        item.kind === "module"
+          ? editorButton.moduleTo(item.id, picked.from, picked.current)
+          : editorButton.lessonTo(item.id, item.list, picked.from, item.list, picked.current),
+      );
+      return;
+    }
+    if (picked === null) return;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const current = stepTo(item.total, picked.current, event.key === "ArrowUp" ? "up" : "down");
+      kit.setPicked({ ...picked, current });
+      kit.say(words(text.dragTo, current));
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      kit.setPicked(null);
+      kit.say(t(text.dragCancelled, { title: item.title }));
+    }
+  }
+
+  function onDragStart(event: DragEvent<HTMLButtonElement>) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", item.id);
+    kit.setMouse({ kind: item.kind, id: item.id });
+  }
+
+  if (!kit.enabled) return null;
+  return (
+    <span className="flex items-center gap-2">
+      <button
+        type="button"
+        draggable
+        aria-pressed={picked !== null}
+        aria-describedby={DRAG_HINT_ID}
+        onKeyDown={onKeyDown}
+        onBlur={() => {
+          if (picked !== null) kit.setPicked(null);
+        }}
+        onDragStart={onDragStart}
+        onDragEnd={() => kit.setMouse(null)}
+        className="flex size-touch cursor-grab items-center justify-center rounded-md text-text-2 hover:bg-surface-2 hover:text-text aria-pressed:bg-surface-2 aria-pressed:text-text"
+      >
+        <Icon icon={GripVertical} />
+        <span className="sr-only">{t(text.dragHandle, { title: item.title })}</span>
+      </button>
+      {picked !== null && <span className="text-caption text-accent">{t(text.dragPlace, { position: picked.current, total: item.total })}</span>}
+    </span>
+  );
+}
+
+/** Lo que deja soltar sobre una fila: la del tipo que acepta, y no sobre sí misma. */
+function dropZone(kit: DragKit, over: Dragged, accepts: Dragged["kind"][]) {
+  if (!kit.enabled) return {};
+  return {
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (kit.mouse === null || !accepts.includes(kit.mouse.kind) || (kit.mouse.kind === over.kind && kit.mouse.id === over.id)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      if (kit.mouse === null || !accepts.includes(kit.mouse.kind)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      kit.drop(over);
+    },
+  };
+}
+
 interface ModuleItemProps {
   module: ModuleRow;
   view: EditorView;
@@ -270,17 +416,24 @@ interface ModuleItemProps {
   action: (form: FormData) => void;
   onInput: () => void;
   pending: boolean;
+  kit: DragKit;
+  position: number;
+  total: number;
 }
 
-function ModuleItem({ module, view, state, responses, action, onInput, pending }: ModuleItemProps) {
+function ModuleItem({ module, view, state, responses, action, onInput, pending, kit, position, total }: ModuleItemProps) {
   const lessonError = fieldError("lessonTitle", problemOf(state, "title", module.id));
   const fieldId = `editor-leccion-nueva-${module.id}`;
+  const typing = useTyping(`leccion-${module.id}`, onInput);
   return (
-    <li className="flex flex-col gap-3 rounded-md border border-border p-3">
+    <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col gap-3 rounded-md border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center font-semibold text-text hover:underline">
-          {t(text.moduleLink, { label: module.label, title: module.title })}
-        </Link>
+        <span className="flex items-center gap-2">
+          {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
+          <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center font-semibold text-text hover:underline">
+            {t(text.moduleLink, { label: module.label, title: module.title })}
+          </Link>
+        </span>
         {view.editable && (
           <MoveButtons
             up={module.up}
@@ -296,11 +449,19 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending }
         <p className="text-body-s text-text-3">{text.noLessons}</p>
       ) : (
         <ol className="flex flex-col gap-2">
-          {module.lessons.map((lesson) => (
-            <li key={lesson.id} className="flex flex-col gap-2 border-t border-border pt-2">
-              <Link href={lesson.href} aria-current={lesson.current ? "true" : undefined} className="min-h-touch content-center text-text hover:underline">
-                {lesson.title}
-              </Link>
+          {module.lessons.map((lesson, index) => (
+            <li key={lesson.id} {...dropZone(kit, { kind: "lesson", id: lesson.id }, ["lesson"])} className="flex flex-col gap-2 border-t border-border pt-2">
+              <span className="flex items-center gap-2">
+                {view.editable && (
+                  <DragHandle
+                    item={{ kind: "lesson", id: lesson.id, title: lesson.title, list: module.id, position: index + 1, total: module.lessons.length }}
+                    kit={kit}
+                  />
+                )}
+                <Link href={lesson.href} aria-current={lesson.current ? "true" : undefined} className="min-h-touch content-center text-text hover:underline">
+                  {lesson.title}
+                </Link>
+              </span>
               {view.editable && (
                 <div className="flex flex-wrap items-end gap-2">
                   <MoveButtons
@@ -327,7 +488,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending }
         </ol>
       )}
       {view.editable && (
-        <form action={action} onInput={onInput} className="flex flex-col gap-2">
+        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
             key={responses.keyOf(module.id)}
@@ -356,6 +517,35 @@ export function StructureBlock({ view }: { view: EditorView }) {
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
+  const typing = useTyping("modulo", result.onInput);
+  const hydrated = useHydrated();
+  const dropForm = useRef<HTMLFormElement>(null);
+  const dropValue = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [mouse, setMouse] = useState<Dragged | null>(null);
+  const [voice, setVoice] = useState("");
+  const send = (value: string) => {
+    if (dropForm.current === null || dropValue.current === null) return;
+    dropValue.current.value = value;
+    dropForm.current.requestSubmit();
+  };
+  const kit: DragKit = {
+    enabled: hydrated && !pending,
+    picked,
+    setPicked,
+    mouse,
+    setMouse,
+    say: setVoice,
+    send,
+    drop: (over) => {
+      const dragged = mouse;
+      setMouse(null);
+      if (dragged === null) return;
+      const value = dropButton(view.structure.modules, dragged, over);
+      if (value !== null) send(value);
+    },
+  };
+
   const moduleError = fieldError("moduleTitle", problemOf(state, "title", "module"));
   const errors: FormError[] = [];
   if (moduleError) errors.push({ fieldId: "editor-modulo-nuevo", message: moduleError });
@@ -374,17 +564,45 @@ export function StructureBlock({ view }: { view: EditorView }) {
       </Link>
       <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
       <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
+      {view.editable && (
+        <>
+          <p id={DRAG_HINT_ID} className="sr-only">
+            {text.dragHint}
+          </p>
+          {/* Existe desde antes: una región que nace con su texto no siempre se anuncia. */}
+          <p role="status" className="sr-only">
+            {voice}
+          </p>
+          {/* Soltar una fila manda su botón por aquí, con la misma acción y el mismo estado que «Subir». */}
+          <form ref={dropForm} action={action} className="hidden">
+            <CourseField course={view.course} />
+            <input ref={dropValue} type="hidden" name="do" />
+          </form>
+        </>
+      )}
       {view.structure.modules.length === 0 ? (
         <p className="text-body-s text-text-3">{text.noModules}</p>
       ) : (
         <ol className="flex flex-col gap-3">
-          {view.structure.modules.map((module) => (
-            <ModuleItem key={module.id} module={module} view={view} state={state} responses={responses} action={action} onInput={result.onInput} pending={pending} />
+          {view.structure.modules.map((module, index) => (
+            <ModuleItem
+              key={module.id}
+              module={module}
+              view={view}
+              state={state}
+              responses={responses}
+              action={action}
+              onInput={result.onInput}
+              pending={pending}
+              kit={kit}
+              position={index + 1}
+              total={view.structure.modules.length}
+            />
           ))}
         </ol>
       )}
       {view.editable && (
-        <form action={action} onInput={result.onInput} className="flex flex-col gap-2">
+        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
             key={responses.keyOf("module")}
@@ -419,6 +637,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   const result = useResult(state, pending, view.paths.self);
   // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
   const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), result.message);
+  const typing = useTyping("item", result.onInput);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.
@@ -446,7 +665,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
         {selected.title}
       </h2>
       {view.editable ? (
-        <form action={action} onInput={result.onInput} className="flex flex-col gap-6">
+        <form action={action} onInput={typing.onInput} onSubmit={typing.onSubmit} className="flex flex-col gap-6">
           <CourseField course={view.course} />
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
           <BlockResult
