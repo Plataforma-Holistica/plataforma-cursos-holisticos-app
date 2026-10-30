@@ -64,6 +64,8 @@ export interface PayoutRow {
   reachesMinimum: boolean | null;
   /** Con lo que se suelta, si está retenida. */
   unholdFingerprint: string | null;
+  /** Es la liquidación de quien lee: nadie la retiene ni la suelta (T-401). */
+  isSelf: boolean;
 }
 
 /** PA-81. `period` nulo: la base no tiene ese periodo. */
@@ -101,16 +103,16 @@ export const RELEASE_ANSWERS = [
 ] as const;
 export type ReleaseAnswer = (typeof RELEASE_ANSWERS)[number];
 /** Lo que contesta `private.hold_payout()`. */
-export const HOLD_ANSWERS = ["held", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const HOLD_ANSWERS = ["held", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type HoldAnswer = (typeof HOLD_ANSWERS)[number];
 /** Lo que contesta `private.unhold_payout()`. */
-export const UNHOLD_ANSWERS = ["released_from_hold", "not_held", "changed", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const UNHOLD_ANSWERS = ["released_from_hold", "self", "not_held", "changed", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type UnholdAnswer = (typeof UNHOLD_ANSWERS)[number];
 /** Lo que contesta `private.confirm_founder_bonus()`. */
-export const CONFIRM_ANSWERS = ["confirmed", "already_decided", "not_founder", "period_released", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const CONFIRM_ANSWERS = ["confirmed", "self", "already_decided", "not_founder", "period_released", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type ConfirmAnswer = (typeof CONFIRM_ANSWERS)[number];
 /** Lo que contesta `private.void_bonus()`; `not_found` también si no es el bono del fundador de ese periodo. */
-export const VOID_ANSWERS = ["voided", "already_void", "period_released", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const VOID_ANSWERS = ["voided", "self", "already_void", "period_released", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type VoidAnswer = (typeof VOID_ANSWERS)[number];
 
 export interface Released {

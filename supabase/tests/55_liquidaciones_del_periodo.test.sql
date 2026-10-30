@@ -11,7 +11,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
-select plan(77);
+select plan(83);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6055000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -241,6 +241,27 @@ select ok((select r::text not like '%' || pruebas.al(1)::text || '%' from antes)
 
 -- ---------------------------------------------------------------------------------------
 -- Liberar exige la huella de lo que se vio.
+
+-- Nadie actúa sobre sí (decisión de Sergio del 2026-10-29): con M3 atada a la persona de finanzas, no confirma
+-- ni anula su bono, ni retiene ni suelta su liquidación; la lectura dice cuál es la suya. Después se desata.
+select pruebas.como_dueno_sistema();
+update public.teachers set profile_id = pruebas.finanzas() where id = pruebas.id('M3');
+select pruebas.limpiar();
+select is(pruebas.o(pruebas.hace(format('private.confirm_founder_bonus(%L)', (select id from public.bonuses where period_id = 202610)))),
+  'self', 'finanzas no confirma el bono del fundador de su propio maestro');
+select is(pruebas.o(pruebas.hace(format('private.void_bonus(%L, %L)', (select id from public.bonuses where period_id = 202610), 'motivo'))),
+  'self', 'ni lo anula');
+select is(pruebas.o(pruebas.retiene('M3', 202610, 'motivo')), 'self', 'ni retiene su liquidación');
+select is(pruebas.o(pruebas.hace(format('private.unhold_payout(%L, null, %L)', pruebas.y('M3', 202610), 'x'))),
+  'self', 'ni la suelta');
+select is((select status::text from public.bonuses where period_id = 202610) || ' ' || pruebas.estado_y(pruebas.y('M3', 202610)),
+  'proposed calculated', 'el bono sigue propuesto y la liquidación, calculada');
+select ok((select bool_and(((x ->> 'is_self')::boolean) = ((x ->> 'teacher_id')::uuid = pruebas.id('M3')))
+           from jsonb_array_elements(pruebas.lee(202610) -> 'payouts') x),
+  'la lectura de PA-81 dice cuál liquidación es de quien lee');
+select pruebas.como_dueno_sistema();
+update public.teachers set profile_id = null where id = pruebas.id('M3');
+select pruebas.limpiar();
 
 create temporary table vieja as select pruebas.vista(202610) as h;
 select is(pruebas.o(pruebas.hace('private.release_payouts(202610, null)')), 'malformed', 'sin huella no se libera');

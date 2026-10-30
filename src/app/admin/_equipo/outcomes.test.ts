@@ -139,6 +139,7 @@ describe("toda respuesta de la base tiene su caso", () => {
       ["forbidden", TO_PAGE],
       ["needs_fresh_code", { kind: "failed", reason: "needs_code" }],
       ["invalid", { kind: "failed", reason: "invalid" }],
+      ["self", { kind: "failed", reason: "self" }],
       ["ineligible", { kind: "failed", reason: "ineligible" }],
       ["not_member", { kind: "failed", reason: "not_member" }],
       ["already_has", { kind: "failed", reason: "already_has" }],
