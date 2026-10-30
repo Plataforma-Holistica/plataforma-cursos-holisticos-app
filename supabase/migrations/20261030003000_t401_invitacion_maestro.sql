@@ -84,7 +84,7 @@ create function private.teacher_name_ok(p_name text) returns boolean
 language sql immutable set search_path = ''
 as $$
   select p_name is not null and pg_catalog.char_length(p_name) between 1 and 80 and p_name !~ '[[:cntrl:]]'
-     and p_name !~ '[­؀-؅؜۝܏࢐࢑࣢᠎​-‏‪-‮⁠-⁯﻿￹-￻\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'
+     and p_name !~ '[\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e007f]'
      and private.catalog_slug(p_name) <> ''
 $$;
 revoke all on function private.teacher_name_ok(text) from public;

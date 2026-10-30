@@ -7,7 +7,7 @@
 -- correo actual. Sirve una vez. Nadie actúa sobre sí: no se invita, no se reenvía ni se revoca.
 begin;
 \ir _ayuda.psql
-select plan(140);
+select plan(144);
 
 -- Contenido: k1 y k2. Configuración: cf. Personas: nora (con cuenta), suse (cuenta suspendida), tomas
 -- (alumno), vale (maestra activa), lalo (maestro suspendido), pia (pendiente de su contraseña).
@@ -267,6 +267,20 @@ insert into public.consents (profile_id, legal_document_id, origin)
   values ('a0000000-0000-0000-0000-000000000004', pruebas.texto('teacher_privacy_notice'), 'teacher_invitation');
 select pruebas.limpiar();
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000004'), 'active', 'con el aviso aceptado, activa');
+select pruebas.dueno_a_nombre_de('a0000000-0000-0000-0000-000000000005');
+insert into public.consents (profile_id, legal_document_id, origin)
+  values ('a0000000-0000-0000-0000-000000000005', pruebas.texto('teacher_privacy_notice'), 'teacher_invitation');
+insert into public.consents (profile_id, legal_document_id, action, origin)
+  values ('a0000000-0000-0000-0000-000000000005', pruebas.texto('teacher_privacy_notice'), 'withdrawn', 'account_settings');
+select pruebas.limpiar();
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'active', suspended_at = null, suspension_reason = null where id = :'lalo';
+select pruebas.limpiar();
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000005'), 'needs_notice',
+  'un aviso retirado cuenta como no aceptado');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = :'lalo';
+select pruebas.limpiar();
 select pruebas.a_nombre_de('a0000000-0000-0000-0000-000000000004');
 select is((select s.teacher_id from private.teacher_standing(null) s), :'vale'::uuid, 'el estado dice de qué maestro');
 select pruebas.limpiar();
@@ -288,9 +302,12 @@ select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', pruebas.huella(
   'con otro resguardo no se acepta');
 select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', 'nora-1'), 'needs_mailbox_proof',
   'ni con el secreto sin su huella');
-select pruebas.como_dueno();
+select pruebas.como_dueno_sistema();
+update private.teacher_invitations set created_at = clock_timestamp() - interval '2 hours'
+  where id = (pruebas.viva('nora@prueba.test')).id;
 update private.account_security set mailbox_proven_at = clock_timestamp() - interval '61 minutes'
   where profile_id = 'a0000000-0000-0000-0000-000000000001';
+select pruebas.limpiar();
 select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'needs_mailbox_proof',
   'ni con un resguardo vencido');
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'invited_unproven',
@@ -513,6 +530,9 @@ select pruebas.reclamar('a0000000-0000-0000-0000-000000000009', pruebas.huella('
 select is(pruebas.acepta('a0000000-0000-0000-0000-000000000009', pruebas.huella('rosa-3')), 'accepted', 'y rosa acepta');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.reinvite_teacher(%L)', :'rosa_m')),
   'already_teacher', 'a quien ya aceptó no se le reenvía');
+update auth.users set email = 'rosa.nueva@prueba.test' where id = 'a0000000-0000-0000-0000-000000000009';
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.reinvite_teacher(%L)', :'rosa_m')),
+  'already_teacher', 'ni aunque su cuenta ya tenga otro correo');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.reinvite_teacher(%L)', gen_random_uuid())),
   'not_found', 'reenviar a un maestro que no existe');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.reinvite_teacher(%L)', :'rosa_m')),
@@ -581,6 +601,24 @@ select throws_ok(
   format($$update public.teachers set status = 'active', profile_id = 'a0000000-0000-0000-0000-000000000004' where id = %L$$, :'vale'),
   '42501', 'public.teachers: only the publication functions write this table',
   'ni toca a un maestro que ya tiene cuenta');
+select pruebas.dueno_a_nombre_de('a0000000-0000-0000-0000-000000000004');
+select throws_ok(
+  format($$update public.teachers set status = 'active', profile_id = 'a0000000-0000-0000-0000-000000000010' where id = %L$$, :'uri_m'),
+  '42501', 'public.teachers: only the publication functions write this table',
+  'nadie ata a otra persona, aunque esa persona sí aceptó');
+select pruebas.alta('a0000000-0000-0000-0000-000000000011', 'ximena@prueba.test');
+select pruebas.como_dueno_sistema();
+insert into public.teachers (profile_id, status) values ('a0000000-0000-0000-0000-000000000011', 'invited') returning id as xim_m \gset
+insert into private.teacher_invitations (teacher_id, email, profile_id, created_at, expires_at, accepted_at, accepted_by)
+  values (:'xim_m', 'ximena@prueba.test', 'a0000000-0000-0000-0000-000000000011',
+          clock_timestamp() - interval '1 minute', clock_timestamp() + interval '1 day',
+          clock_timestamp(), 'a0000000-0000-0000-0000-000000000011');
+select pruebas.dueno_a_nombre_de('a0000000-0000-0000-0000-000000000011');
+select throws_ok(
+  format($$update public.teachers set status = 'active' where id = %L$$, :'xim_m'),
+  '42501', 'public.teachers: only the publication functions write this table',
+  'ni un maestro invitado que ya apunta a una cuenta pasa a activo así');
+select pruebas.dueno_a_nombre_de('a0000000-0000-0000-0000-000000000010');
 select lives_ok(
   format($$update public.teachers set status = 'active', profile_id = 'a0000000-0000-0000-0000-000000000010' where id = %L$$, :'uri_m'),
   'quien aceptó esa invitación, sí');
@@ -647,7 +685,8 @@ select pruebas.limpiar();
 
 select is_empty('select * from private.schema_violations()', 'en cero después de todo');
 grant select on private.teacher_invitations to app_service;
-select ok(exists (select 1 from private.schema_violations() where object_name = 'private.teacher_invitations'),
+select ok(exists (select 1 from private.schema_violations()
+                  where object_name = 'private.teacher_invitations' and problem like '%teachers table privilege for app_service'),
   've un permiso sobre las invitaciones de maestro');
 revoke select on private.teacher_invitations from app_service;
 grant execute on function private.place_teacher_invitation(uuid, text, text, uuid) to app_service;
