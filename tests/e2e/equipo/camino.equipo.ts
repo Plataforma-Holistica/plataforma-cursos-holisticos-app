@@ -1571,6 +1571,25 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await card.getByRole("button", { name: "Sí, es fraude" }).click();
     await expect(page.getByText("Alerta decidida como fraude.")).toBeVisible();
 
+    // Quien marcó el fraude no excluye por fraude (decisión de Sergio del 2026-10-30, T-401): la pantalla lo dice y
+    // no excluye nada.
+    await card.getByRole("button", { name: `Excluir Cuenta ${account}` }).click();
+    await card.getByLabel("Motivo").selectOption({ label: "Fraude" });
+    await card.getByLabel("Por qué, escrito").fill("Decidida como fraude.");
+    await card.getByRole("button", { name: "Sí, excluir" }).click();
+    await expect(page.getByText("Tú marcaste esa alerta como fraude: excluir por fraude lo hace otra persona de finanzas.")).toBeVisible();
+    expect(await exclusionsOf(flagged.id)).toEqual([]);
+    // Otra persona de finanzas la marcó: se escribe a mano, como el dueño declarado sistema. Una cuenta cualquiera
+    // hace de esa persona.
+    await ownerQuery(
+      `begin;
+       select set_config('app.actor_kind', 'system', true);
+       alter table public.anomaly_alerts disable trigger alerts_guard;
+       update public.anomaly_alerts set fraud_marked_by = '${flagged.id}' where profile_id = '${flagged.id}';
+       alter table public.anomaly_alerts enable trigger alerts_guard;
+       commit;`,
+    );
+
     await card.getByRole("button", { name: `Excluir Cuenta ${account}` }).click();
     await card.getByLabel("Motivo").selectOption({ label: "Fraude" });
     await card.getByLabel("Por qué, escrito").fill("Decidida como fraude.");
