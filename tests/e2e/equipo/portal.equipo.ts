@@ -290,6 +290,54 @@ test("a una alumna, el curso de otro y una ruta que no existe son el mismo docum
   }
 });
 
+test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar pregunta", async ({ page }) => {
+  const gus = await person();
+  await makeTeacher(gus);
+  await signIn(page, gus, "/portal/cursos/nuevo");
+  await page.getByRole("textbox", { name: "Título del curso" }).fill("Para ordenar");
+  await page.getByRole("button", { name: "Crear curso" }).click();
+  await expect(page).toHaveURL(/\/portal\/cursos\/[0-9a-f-]{36}$/);
+  for (const title of ["Inicio", "Cierre"]) {
+    await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill(title);
+    await page.getByRole("button", { name: "Agregar módulo" }).click();
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+  }
+  const inicio = page.locator("li", { has: page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }) });
+  for (const title of ["Una", "Dos", "Tres"]) {
+    await inicio.getByRole("textbox", { name: "Título de la lección nueva" }).fill(title);
+    await inicio.getByRole("button", { name: "Agregar lección" }).click();
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+  }
+  await expect(lessonsIn(page, "Inicio")).toHaveText(["Una", "Dos", "Tres"]);
+
+  // Con el teclado: Espacio toma, las flechas mueven, Espacio suelta.
+  await page.getByRole("button", { name: "Arrastrar Una" }).focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Tres", "Una"]);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Con el ratón: una lección sobre otro módulo va al final de ese módulo; un módulo sobre otro toma su lugar.
+  await page.getByRole("button", { name: "Arrastrar Tres" }).dragTo(page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
+  await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
+  await page.getByRole("button", { name: "Arrastrar Cierre" }).dragTo(page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+
+  // Salir con algo escrito pregunta; sin nada, no.
+  await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("A medias");
+  await expect(page.getByText("Cambios sin guardar")).toBeVisible();
+  await page.getByRole("link", { name: "Mis cursos" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Salir sin guardar" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Seguir editando" }).click();
+  await expect(page.getByRole("textbox", { name: "Título del módulo nuevo" })).toHaveValue("A medias");
+  await page.getByRole("link", { name: "Mis cursos" }).first().click();
+  await page.getByRole("dialog", { name: "Salir sin guardar" }).getByRole("button", { name: "Salir sin guardar" }).click();
+  await expect(page).toHaveURL("/portal/cursos");
+});
+
 // La corrida del equipo es solo de escritorio: este caso pone el ancho de un teléfono (el del Pixel 7 de la
 // corrida normal).
 test("en el teléfono, lo elegido va primero y se vuelve a la estructura", async ({ page }) => {
