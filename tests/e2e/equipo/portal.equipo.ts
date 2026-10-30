@@ -133,7 +133,8 @@ test("FL-32 con JavaScript: crea un curso, lo llena, ordena, mueve, borra, sale 
   await page.getByRole("button", { name: "Borrar lección" }).click();
   await expect(page.getByText("Se borra la lección. No se puede deshacer.")).toBeVisible();
   await page.getByRole("button", { name: "Borrar lección" }).click();
-  await expect(page).toHaveURL(new RegExp(`/portal/cursos/${course}$`));
+  // Borrada, deja los datos del curso, con su ancla: sin JavaScript el navegador no hereda la del bloque que envió.
+  await expect(page).toHaveURL(new RegExp(`/portal/cursos/${course}#bloque-editor-datos$`));
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos"]);
 
   // Salir y volver: todo quedó guardado.
