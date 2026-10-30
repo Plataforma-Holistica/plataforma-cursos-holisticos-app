@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import { COURSE_STATES, type CourseFields, type DraftCourse, type TeacherCourse } from "./drafts";
+import { COURSE_STATES, type CourseFields, type DraftChoices, type DraftCourse, type TeacherCourse } from "./drafts";
 
 // Lo que el servicio del borrador le pregunta a la base (esquema §5.2). Las lecturas reciben la
 // transacción abierta como la persona; los cambios, como el servidor. Ninguna recibe quién actúa.
@@ -17,25 +17,46 @@ const state = z.enum(COURSE_STATES);
 const count = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const instant = z.union([z.string(), z.date()]).transform((value) => (value instanceof Date ? value.toISOString() : value));
 
+const tally = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const teacherCourseRow = z.object({
   course_id: id,
   state,
   title: z.string(),
   updated_at: instant,
   content_revision: count.nullable(),
+  teacher_name: z.string().nullable(),
+  practice_name: z.string().nullable(),
+  cover_tone: z.number().int().min(1).max(8).nullable(),
+  has_draft: z.boolean(),
+  has_summary: z.boolean(),
+  practice_ready: z.boolean(),
+  level_ready: z.boolean(),
+  lessons: tally,
+  modules_with_lessons: tally,
 });
 
 /**
  * Los cursos del maestro de la sesión. La política del registro le da a Contenido todos: por eso
- * se filtra además por el maestro, explícito. El título es el del borrador, o el publicado.
+ * se filtra además por el maestro, explícito. El título es el del borrador, o el publicado. Lo que
+ * cuenta «Faltan {n} cosas» va en la misma consulta: la persona solo lee las prácticas y los niveles
+ * activos, y uno desactivado cuenta como que falta (además se pide `is_active`, explícito).
  */
 export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
   const rows = await tx.query(
     sql`select r.course_id, r.state, coalesce(d.title, p.title, '') as title,
-               coalesce(d.updated_at, r.updated_at) as updated_at, d.content_revision
+               coalesce(d.updated_at, r.updated_at) as updated_at, d.content_revision,
+               (select pr.display_name from public.profiles pr where pr.id = (select auth.uid())) as teacher_name,
+               pc.name as practice_name, pc.cover_tone,
+               d.course_id is not null as has_draft,
+               d.summary is not null as has_summary,
+               pc.id is not null as practice_ready,
+               exists (select 1 from public.levels lv where lv.id = d.level_id and lv.is_active) as level_ready,
+               (select count(*) from public.draft_lessons l where l.course_id = d.course_id) as lessons,
+               (select count(distinct l.module_id) from public.draft_lessons l where l.course_id = d.course_id) as modules_with_lessons
         from public.course_registry r
         left join public.course_drafts d on d.course_id = r.course_id
         left join public.published_courses p on p.course_id = r.course_id
+        left join public.practices pc on pc.id = d.practice_id and pc.is_active
         where r.teacher_id = (select private.current_teacher_id())
         order by coalesce(d.updated_at, r.updated_at) desc, r.course_id`,
     teacherCourseRow,
@@ -46,6 +67,18 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     title: row.title,
     updatedAt: row.updated_at,
     contentRevision: row.content_revision,
+    teacherName: row.teacher_name,
+    practiceName: row.practice_name,
+    coverTone: row.cover_tone,
+    draft: row.has_draft
+      ? {
+          hasSummary: row.has_summary,
+          practiceReady: row.practice_ready,
+          levelReady: row.level_ready,
+          lessons: row.lessons,
+          modulesWithLessons: row.modules_with_lessons,
+        }
+      : null,
   }));
 }
 
@@ -76,6 +109,7 @@ const draftRow = z.object({
   content_revision: count,
   updated_at: instant,
   modules: z.array(moduleSchema),
+  teacher_name: z.string().nullable(),
 });
 
 /**
@@ -87,6 +121,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
   const [draft] = await tx.query(
     sql`select d.course_id, r.state, d.version, d.title, d.summary, d.practice_id, d.level_id,
                d.revision, d.structure_revision, d.content_revision, d.updated_at,
+               (select pr.display_name from public.profiles pr where pr.id = (select auth.uid())) as teacher_name,
                coalesce((
                  select jsonb_agg(jsonb_build_object(
                           'id', m.id, 'title', m.title, 'position', m.position, 'revision', m.revision,
@@ -116,7 +151,32 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
     contentRevision: draft.content_revision,
     updatedAt: draft.updated_at,
     modules: draft.modules,
+    teacherName: draft.teacher_name,
   };
+}
+
+const choice = { id, name: z.string(), active: z.boolean() };
+const choicesRow = z.object({
+  practices: z.array(z.strictObject({ ...choice, tone: z.number().int().min(1).max(8) })),
+  levels: z.array(z.strictObject(choice)),
+});
+
+/**
+ * Lo que el editor ofrece: las prácticas y los niveles activos, más los elegidos aunque se hayan
+ * desactivado, en su orden. Se lee como sistema: una cuenta no lee una desactivada. Los ids elegidos
+ * salen del borrador que la persona ya leyó como ella; lo que se lee aquí son nombres del catálogo.
+ */
+export async function readDraftChoices(tx: Tx, practiceId: string | null, levelId: string | null): Promise<DraftChoices> {
+  const [row] = await tx.query(
+    sql`select
+          coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'tone', x.cover_tone, 'active', x.is_active)
+                                     order by x.position)
+                    from public.practices x where x.is_active or x.id = ${practiceId}::uuid), '[]'::jsonb) as practices,
+          coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'active', x.is_active) order by x.position)
+                    from public.levels x where x.is_active or x.id = ${levelId}::uuid), '[]'::jsonb) as levels`,
+    choicesRow,
+  );
+  return row ?? { practices: [], levels: [] };
 }
 
 const resultRow = z.object({ result: z.unknown() });

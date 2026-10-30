@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PendingAccount, SessionCheck, TeamCheck, TeamStanding, VerifiedClaims } from "@/services/account/account";
+import type { TeacherCheck, TeacherStanding } from "@/services/teachers/standing";
 
 import {
   adminPageStep,
@@ -11,6 +12,7 @@ import {
   publicPageStep,
   secondFactorPageStep,
   sessionPageStep,
+  teacherPageStep,
   visitorPageStep,
 } from "./guard-steps";
 
@@ -358,5 +360,49 @@ describe("las tres pantallas del equipo, juntas", () => {
 
   it("quien no es del equipo recibe lo mismo en las tres: que esa ruta no existe", () => {
     for (const step of Object.values(pages)) expect(step(teamCheck("none"))).toEqual({ kind: "not_found" });
+  });
+});
+
+// Las pantallas del portal del maestro (T-402; flujo de la app §6.2). La entrada es lo que contesta
+// `teacherStanding`: lo que la guarda de sesión niega, o el estado que dice la base.
+
+const TEACHER = "33333333-3333-4333-8333-333333333333";
+const teacher = (standing: TeacherStanding): TeacherCheck => ({ kind: "teacher", claims, standing });
+const teacherChecks: Record<string, TeacherCheck> = {
+  anonymous: { kind: "anonymous" },
+  incomplete: { kind: "incomplete", claims, ...pending },
+  suspended: { kind: "suspended" },
+  closeToRecover: { kind: "must_sign_out", then: "recover" },
+  closeToSignIn: { kind: "must_sign_out", then: "sign_in" },
+  unavailable: { kind: "unavailable" },
+  none: teacher({ state: "none" }),
+  active: teacher({ state: "active", teacher: { id: TEACHER } }),
+  teacherSuspended: teacher({ state: "suspended", teacher: { id: TEACHER } }),
+};
+
+describe("una pantalla del portal del maestro", () => {
+  it.each([
+    ["anonymous", { kind: "redirect", to: "/entrar?volver=%2Fportal%2Fcursos" }],
+    ["incomplete", { kind: "redirect", to: "/consentimientos?volver=%2Fportal%2Fcursos" }],
+    // La cuenta suspendida va a PA-35 antes de mirar al maestro.
+    ["suspended", { kind: "suspended" }],
+    ["closeToRecover", { kind: "redirect", to: "/sesion/cerrar" }],
+    ["closeToSignIn", { kind: "redirect", to: "/sesion/cerrar" }],
+    ["unavailable", { kind: "unavailable" }],
+    // Quien no es maestro recibe lo mismo que en una ruta que no existe.
+    ["none", { kind: "not_found" }],
+    ["active", { kind: "render", claims, teacher: { id: TEACHER, status: "active" } }],
+    // El maestro suspendido entra, en solo lectura (RF-702): lo decide la pantalla con `status`.
+    ["teacherSuspended", { kind: "render", claims, teacher: { id: TEACHER, status: "suspended" } }],
+  ] as const)("%s", (name, expected) => {
+    const found = teacherChecks[name];
+    if (!found) throw new Error(`No hay un caso llamado ${name}.`);
+    expect(teacherPageStep(found, "/portal/cursos")).toEqual(expected);
+  });
+
+  it("solo se pinta para un maestro activo o suspendido", () => {
+    for (const [name, value] of Object.entries(teacherChecks)) {
+      expect(teacherPageStep(value, "/portal/cursos").kind === "render", name).toBe(name === "active" || name === "teacherSuspended");
+    }
   });
 });

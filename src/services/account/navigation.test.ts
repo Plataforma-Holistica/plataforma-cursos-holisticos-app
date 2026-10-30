@@ -39,6 +39,11 @@ describe("qué rutas piden sesión", () => {
     ["/admin/no-existe/tampoco", true],
     ["/administrar", false],
     ["/admin.html", false],
+    // El portal del maestro, y lo que cuelgue de él (T-402).
+    ["/portal", true],
+    ["/portal/cursos", true],
+    ["/portal/cursos/c0000000-0000-4000-8000-000000000001", true],
+    ["/portales", false],
     // Las dos pantallas del segundo factor piden sesión, aunque cuelguen de la de entrar.
     ["/entrar/segundo-factor", true],
     ["/entrar/segundo-factor/configurar", true],
@@ -113,6 +118,8 @@ describe("a dónde se va después de entrar", () => {
     ["/admin", "/admin"],
     ["/admin/equipo", "/admin/equipo"],
     ["/admin/equipo?pagina=2", "/admin/equipo?pagina=2"],
+    ["/portal/cursos", "/portal/cursos"],
+    ["/portal/cursos/c0000000-0000-4000-8000-000000000001?leccion=x", "/portal/cursos/c0000000-0000-4000-8000-000000000001?leccion=x"],
   ])("un destino permitido se respeta: %s", (input, expected) => {
     expect(resolveDestination(input)).toBe(expected);
   });

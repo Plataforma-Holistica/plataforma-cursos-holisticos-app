@@ -6,3 +6,4 @@
 // del servidor. La revisión que manda es la de la base.
 
 export { DRAFT_TEXT_LIMITS, parseDraftText, type DraftTextKind, type DraftTextResult } from "@/domain/catalog/draft-text";
+export { missingItems, type DraftReadiness } from "@/domain/catalog/draft-readiness";

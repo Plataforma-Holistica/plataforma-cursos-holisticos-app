@@ -11,6 +11,7 @@ import {
 } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import { holds, type Capability } from "@/services/account/team";
+import type { TeacherCheck } from "@/services/teachers/standing";
 
 // Qué hace cada tipo de pantalla con lo que contesta la guarda de sesión (flujo de la app
 // §6.2 y §6.3). Es una tabla pura: la guarda (`checkSession`) decide quién pasa, y esto
@@ -188,6 +189,30 @@ export function adminPageStep(
     case "member":
       if (capability !== undefined && !holds(standing, capability)) return { kind: "forbidden", capability };
       return { kind: "render", claims: check.claims, capabilities: standing.capabilities };
+  }
+}
+
+// Las pantallas del portal del maestro (T-402; flujo de la app §6.2). Su entrada es lo que contesta
+// `teacherStanding`. La cuenta suspendida va a PA-35 antes de mirar al maestro; el maestro suspendido
+// entra en solo lectura (RF-702), y eso lo decide la pantalla con `status`. Quien no es maestro recibe
+// lo mismo que en una ruta que no existe.
+
+/**
+ * Una pantalla del portal del maestro.
+ * @param path La ruta que se pidió, con su consulta: es a donde se vuelve después.
+ */
+export function teacherPageStep(
+  check: TeacherCheck,
+  path: string,
+): { kind: "render"; claims: VerifiedClaims; teacher: { id: string; status: "active" | "suspended" } } | TeamDetour {
+  if (check.kind !== "teacher") return refusedStep(check, signInPath(path), consentsPath(path));
+  const { standing } = check;
+  switch (standing.state) {
+    case "none":
+      return { kind: "not_found" };
+    case "active":
+    case "suspended":
+      return { kind: "render", claims: check.claims, teacher: { id: standing.teacher.id, status: standing.state } };
   }
 }
 

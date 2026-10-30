@@ -2,6 +2,7 @@ import "server-only";
 
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import type { DraftReadiness } from "@/domain/catalog/draft-readiness";
 import { parseDraftText, type DraftTextKind } from "@/domain/catalog/draft-text";
 
 import type { SessionCheck } from "@/services/account/admission";
@@ -33,6 +34,13 @@ export interface TeacherCourse {
   updatedAt: string;
   /** La revisión de todo su borrador, la que lleva borrarlo; nula si no tiene borrador. */
   contentRevision: number | null;
+  /** El nombre de su maestro, para la portada. */
+  teacherName: string | null;
+  /** La práctica del borrador y su tono, para la portada; nulos si no tiene una activa. */
+  practiceName: string | null;
+  coverTone: number | null;
+  /** Lo que se cuenta para «Faltan {n} cosas»; nulo si no tiene borrador (los cargados por guion). */
+  draft: DraftReadiness | null;
 }
 
 export interface DraftLesson {
@@ -63,6 +71,23 @@ export interface DraftCourse {
   contentRevision: number;
   updatedAt: string;
   modules: DraftModule[];
+  /** El nombre de su maestro, para la portada. */
+  teacherName: string | null;
+}
+
+/** Una práctica o un nivel que el editor ofrece. */
+export interface CatalogChoice {
+  id: string;
+  name: string;
+  active: boolean;
+}
+/**
+ * Lo que el editor ofrece para elegir: las activas, y la elegida aunque se haya desactivado, para que
+ * guardar otro campo no la quite (el borrador la conserva hasta que su maestro elija otra).
+ */
+export interface DraftChoices {
+  practices: (CatalogChoice & { tone: number })[];
+  levels: CatalogChoice[];
 }
 
 /** Lo que contesta cada función de la base. */
@@ -121,6 +146,8 @@ export interface DraftsStore {
     to: { module: string; position: number },
   ) => Promise<MoveAnswer>;
   deleteCourse: (claims: VerifiedClaims, course: string, seen: number) => Promise<DeleteAnswer>;
+  /** Como sistema: los nombres de una práctica o un nivel desactivados no los lee una cuenta. */
+  choices: (practiceId: string | null, levelId: string | null) => Promise<DraftChoices>;
 }
 
 export interface DraftsDeps {
@@ -171,6 +198,15 @@ export function createDrafts(deps: DraftsDeps) {
   function draftCourse(claims: VerifiedClaims, course: string): Promise<DraftRead<DraftCourse | null>> {
     if (!isId(course)) return Promise.resolve({ kind: "ready", value: null });
     return read(() => deps.store.draftCourse(claims, course));
+  }
+
+  /**
+   * Lo que el editor ofrece, con lo elegido en el borrador que la persona ya leyó. Un id sin forma
+   * cuenta como «nada elegido».
+   */
+  function draftChoices(selected: { practiceId: string | null; levelId: string | null }): Promise<DraftRead<DraftChoices>> {
+    const pick = (value: string | null) => (value !== null && isId(value) ? value : null);
+    return read(() => deps.store.choices(pick(selected.practiceId), pick(selected.levelId)));
   }
 
   /**
@@ -320,6 +356,7 @@ export function createDrafts(deps: DraftsDeps) {
   return {
     teacherCourses,
     draftCourse,
+    draftChoices,
     createCourse,
     saveCourse,
     addModule,
