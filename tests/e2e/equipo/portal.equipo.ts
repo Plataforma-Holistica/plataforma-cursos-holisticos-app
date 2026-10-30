@@ -51,6 +51,12 @@ const coursesOf = async (who: Person) =>
     )
   )[0]?.count;
 
+/** Abre «Ordenar» de una lección, si está plegado. */
+async function openReorder(page: Page, lesson: string): Promise<void> {
+  const details = page.locator("details", { has: page.getByText(`Ordenar ${lesson}`, { exact: true }) });
+  if ((await details.getAttribute("open")) === null) await details.locator("summary").click();
+}
+
 /** Las lecciones de un módulo, en orden, como las pinta el editor. */
 const lessonsIn = (page: Page, module: string) =>
   page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > span > a");
@@ -132,14 +138,16 @@ test("FL-32 con JavaScript: crea un curso, lo llena, ordena, mueve, borra, sale 
   await addLesson("Inicio", "Tres");
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Una", "Dos", "Tres"]);
 
-  // Subir, mover a otro módulo y bajar un módulo.
+  // Subir, mover a otro módulo y bajar un módulo. Los controles de cada lección van plegados en «Ordenar».
+  await openReorder(page, "Dos");
   await page.getByRole("button", { name: "Subir Dos" }).click();
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Una", "Tres"]);
+  await openReorder(page, "Tres");
   await page.getByRole("combobox", { name: "Mover Tres a otro módulo" }).selectOption({ label: "Cierre" });
   await page.locator("form", { has: page.getByRole("combobox", { name: "Mover Tres a otro módulo" }) }).getByRole("button", { name: "Mover" }).click();
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
   await page.getByRole("button", { name: "Bajar Inicio" }).click();
-  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveAccessibleName("Módulo 1: Cierre");
 
   // La lección: su descripción, y borrarla con confirmación.
   await page.getByRole("link", { name: "Una", exact: true }).click();
@@ -194,6 +202,7 @@ test("FL-32 sin JavaScript: crear, un «Nuevo curso» reenviado crea uno solo, y
   const page2 = await (await page.request.get(editor)).text();
   const subir = /value="(lesson-up:[^"]+)"/.exec(page2)?.[1] ?? "";
   expect(subir).not.toBe("");
+  await openReorder(page, "Dos");
   await page.getByRole("button", { name: "Subir Dos" }).click();
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Una"]);
   const again = await postAction(page.request, editor, { ...fieldsOf(page2, subir), do: subir });
@@ -339,7 +348,7 @@ test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar
   await drag(page, page.getByRole("button", { name: "Arrastrar Tres" }), page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
   await drag(page, page.getByRole("button", { name: "Arrastrar Cierre" }), page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
-  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveAccessibleName("Módulo 1: Cierre");
 
   // Salir con algo escrito pregunta; sin nada, no.
   await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("A medias");

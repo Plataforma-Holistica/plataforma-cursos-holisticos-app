@@ -122,6 +122,69 @@ describe("PA-43 · El editor de curso", () => {
     expect(screen.getByText(/ya no está disponible/)).toBeTruthy();
   });
 
+  it("una lista sin opciones lo dice en la lista misma, con quién las da de alta", async () => {
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [], levels: [] } });
+    const { container } = render(await at());
+    const practice = screen.getByRole("combobox", { name: /Práctica/ });
+    expect(within(practice).getAllByRole("option").map((option) => option.textContent)).toEqual(["Todavía no hay prácticas para elegir"]);
+    expect(practice.getAttribute("aria-describedby")).toContain("editor-practica-hint");
+    const level = screen.getByRole("combobox", { name: /Nivel/ });
+    expect(within(level).getAllByRole("option").map((option) => option.textContent)).toEqual(["Todavía no hay niveles para elegir"]);
+    expect(screen.getAllByText(/Las da de alta el equipo de contenido/)).toHaveLength(2);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con opciones, la lista pide elegir y no lleva esa nota", async () => {
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: true }], levels: [{ id: P1, name: "Inicial", active: true }] } });
+    render(await at());
+    expect(within(screen.getByRole("combobox", { name: /Práctica/ })).getByRole("option", { name: "Elige una opción" })).toBeTruthy();
+    expect(screen.queryByText(/Las da de alta el equipo de contenido/)).toBeNull();
+  });
+
+  it("la jerarquía: los datos en sus grupos, cada módulo con su número y sus lecciones numeradas", async () => {
+    render(await at());
+    expect(screen.getByRole("group", { name: "Presentación" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Práctica y nivel" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Portada" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Presentación" })).toHaveAccessibleDescription("Lo primero que se lee del curso en el catálogo.");
+    expect(screen.getByRole("group", { name: "Práctica y nivel" })).toHaveAccessibleDescription("Con esto se encuentra el curso al explorar.");
+    expect(screen.getByRole("group", { name: "Portada" })).toHaveAccessibleDescription(/No se edita\./);
+    // Lo que se ve del enlace está en su nombre (WCAG 2.5.3): sin `aria-label`, y el número de arriba fuera y oculto.
+    const moduleLink = screen.getByRole("link", { name: "Módulo 1: Inicio" });
+    expect(moduleLink.hasAttribute("aria-label")).toBe(false);
+    expect(moduleLink.textContent).toBe("Módulo 1: Inicio");
+    expect(moduleLink.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByRole("link", { name: "Datos del curso" }).getAttribute("aria-current")).toBe("true");
+    // El número se lee junto al título: quien ve dice «la 1.2».
+    const number = screen.getByText("1.2");
+    expect(number.closest("[aria-hidden='true']")).toBeNull();
+    expect(number.nextElementSibling).toBe(screen.getByRole("link", { name: "Dos" }));
+  });
+
+  it("«Subir», «Bajar» y «Mover a» de cada lección van plegados en «Ordenar»", async () => {
+    render(await at());
+    const fold = screen.getByRole("button", { name: "Subir Dos" }).closest("details");
+    expect(fold).not.toBeNull();
+    expect(fold?.hasAttribute("open")).toBe(false);
+    expect(fold?.querySelector("summary")?.textContent).toBe("OrdenarOrdenar Dos");
+    expect(within(fold as HTMLElement).getByRole("combobox", { name: "Mover Dos a otro módulo" })).toBeTruthy();
+    // Los de un módulo no se pliegan.
+    expect(screen.getByRole("button", { name: "Bajar Inicio" }).closest("details")).toBeNull();
+  });
+
+  it("lo elegido dice de dónde es, arriba de su título", async () => {
+    const above = (place: string, title: string) => {
+      const heading = screen.getByRole("heading", { level: 2, name: title });
+      const label = within(heading.parentElement as HTMLElement).getByText(place);
+      expect(label.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    };
+    const first = render(await at({ leccion: L2 }));
+    above("Módulo 1 · Lección 2", "Dos");
+    first.unmount();
+    render(await at({ modulo: M2 }));
+    above("Módulo 2", "Cierre");
+  });
+
   it("lo elegido por la dirección: la lección, con su descripción y «Borrar lección»", async () => {
     const { container } = render(await at({ leccion: L2 }));
     expect(screen.getByRole("heading", { level: 2, name: "Dos" })).toBeTruthy();
