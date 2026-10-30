@@ -61,6 +61,7 @@ export const APPROVE_ANSWERS = [
   "needs_fresh_code",
   "not_found",
   "not_pending",
+  "self",
   "incomplete",
   "practice_inactive",
   "level_inactive",

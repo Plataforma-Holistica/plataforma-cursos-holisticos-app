@@ -282,6 +282,7 @@ export const admin = defineMessages({
     // Lo que contestó el último envío.
     approved: "Publicado. Ya aparece en el catálogo.",
     notPending: "Ese curso ya no está por revisar: alguien lo aprobó, o cambió. Esta es la cola de ahora.",
+    self: "Ese curso es tuyo como {maestro}: lo aprueba otra persona con Contenido.",
     incomplete: "A ese curso le falta su práctica o su nivel: no se puede publicar así.",
     practiceInactive: "La práctica de ese curso está desactivada. Reactívala en Prácticas y niveles para poder publicarlo.",
     levelInactive: "El nivel de ese curso está desactivado. Reactívalo en Prácticas y niveles para poder publicarlo.",

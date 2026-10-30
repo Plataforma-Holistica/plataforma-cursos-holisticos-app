@@ -48,6 +48,7 @@ describe("approveOutcome", () => {
     needs_fresh_code: { kind: "failed", reason: "needs_code" },
     not_found: { kind: "failed", reason: "not_pending" },
     not_pending: { kind: "failed", reason: "not_pending" },
+    self: { kind: "failed", reason: "self" },
     incomplete: { kind: "failed", reason: "incomplete" },
     practice_inactive: { kind: "failed", reason: "practice_inactive" },
     level_inactive: { kind: "failed", reason: "level_inactive" },
