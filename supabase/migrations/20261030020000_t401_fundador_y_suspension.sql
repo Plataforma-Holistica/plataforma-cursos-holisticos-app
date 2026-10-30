@@ -70,6 +70,8 @@ create trigger audit_changes after insert or update or delete on private.teacher
 
 -- Lo que el maestro ve de su suspensión: un texto corto, aparte del motivo interno. Lo de adentro (el motivo,
 -- quién suspendió y quién confirmó) lo lee el servidor, no el maestro.
+-- Salir de suspendido vacía también este texto (`teachers_suspension_notice_only_suspended`): toda función
+-- futura que cambie el estado de un suspendido lo pone en nulo, como `suspended_at`.
 alter table public.teachers
   add column suspension_notice text,
   add constraint teachers_suspension_notice_length check (pg_catalog.length(suspension_notice) between 1 and 300),
@@ -678,6 +680,15 @@ as $$
   from app_roles r
   where pg_catalog.has_any_column_privilege(r.rolname::name, 'public.teachers', 'INSERT, UPDATE')
      or pg_catalog.has_table_privilege(r.rolname::name, 'public.teachers', 'DELETE, TRUNCATE')
+  union all
+  -- Los dos candados de la fila del maestro se excluyen entre sí: cambiarlo y escribir a su nombre van uno
+  -- tras otro. Sin esto, un suspendido podría enviar un curso a la vez que lo suspenden.
+  select 'teachers lock changed: ' || l.name, 'private.' || l.name
+  from (values ('teacher_change_lock', '%from public.teachers t where t.id = p_teacher for no key update%'),
+               ('current_active_teacher_id', '%for share of t%')) l (name, pattern)
+  where not exists (
+    select 1 from found
+    where found.proname = l.name and pg_catalog.pg_get_functiondef(found.oid) like l.pattern)
   union all
   -- Lo de adentro de una suspensión no lo lee el maestro.
   select 'teachers suspension column readable by ' || r.rolname || ': ' || c.col, 'public.teachers'

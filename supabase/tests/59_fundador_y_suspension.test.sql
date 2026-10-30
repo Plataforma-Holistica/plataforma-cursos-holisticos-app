@@ -7,7 +7,7 @@
 -- no la propuso; y nadie actúa sobre sí, tampoco al aprobar un curso suyo.
 begin;
 \ir _ayuda.psql
-select plan(105);
+select plan(108);
 
 -- Contenido: k1, k2 y kf (que tiene además finanzas). Finanzas: f1 y f2. Maestros: m1, m2, m3 y m4 con
 -- cuenta y activos; mk1 es el maestro de k1 (alguien del equipo puede ser maestro); mi, invitado.
@@ -67,6 +67,21 @@ $$;
 create function pruebas.solicitud(p_teacher uuid) returns uuid
 language sql security definer
 as $$ select r.id from private.teacher_suspension_requests r where r.teacher_id = p_teacher order by r.proposed_at desc limit 1 $$;
+
+-- ¿Ve el vigilante esa columna de la suspensión si el maestro pudiera leerla? Concede, mira y revoca.
+create function pruebas.leible(p_col text) returns boolean
+language plpgsql
+as $$
+declare
+  v_seen boolean;
+begin
+  execute format('grant select (%I) on public.teachers to authenticated', p_col);
+  v_seen := exists (select 1 from private.schema_violations()
+                    where problem = 'teachers suspension column readable by authenticated: ' || p_col);
+  execute format('revoke select (%I) on public.teachers from authenticated', p_col);
+  return v_seen;
+end
+$$;
 
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
 
@@ -205,8 +220,10 @@ select is((select suspension_notice from public.teachers where id = :'m3'), 'Tu 
   'el maestro lee el texto que se escribió para él');
 select throws_ok(format('select suspension_reason from public.teachers where id = %L', :'m3'), '42501', null,
   'pero no el motivo interno');
-select throws_ok(format('select suspended_by, suspension_approved_by from public.teachers where id = %L', :'m3'), '42501', null,
+select throws_ok(format('select suspended_by from public.teachers where id = %L', :'m3'), '42501', null,
   'ni quién lo suspendió');
+select throws_ok(format('select suspension_approved_by from public.teachers where id = %L', :'m3'), '42501', null,
+  'ni quién lo confirmó');
 select pruebas.limpiar();
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.suspend_teacher(%L, %L, %L)', :'m3', 'otra vez', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'already_suspended', 'dos veces no');
@@ -338,6 +355,10 @@ select pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.prop
 select pruebas.solicitud(:'m4') as sol_m4b \gset
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, false, %L, null)', :'sol_m4b', 'La evidencia no alcanza')),
   'rejected', 'Contenido rechaza');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m4b', 'Con lo nuevo')),
+  'proposed', 'una alerta rechazada no se gasta');
+select pruebas.solicitud(:'m4') as sol_m4b2 \gset
+select pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.withdraw_fraud_suspension(%L)', :'sol_m4b2'));
 select pruebas.como_dueno();
 select is((select status::text from public.teachers where id = :'m4'), 'active', 'y el maestro sigue activo');
 
@@ -447,11 +468,9 @@ drop trigger audit_founder on public.teachers;
 create trigger audit_founder after update of is_founder, founder_since on public.teachers
   for each row when (old.is_founder is distinct from new.is_founder or old.founder_since is distinct from new.founder_since)
   execute function private.audit_row_change('money', 'tiebreak_rank');
-grant select (suspension_reason) on public.teachers to authenticated;
-select ok(exists (select 1 from private.schema_violations()
-                  where problem = 'teachers suspension column readable by authenticated: suspension_reason'),
-  've que el maestro podría leer el motivo interno');
-revoke select (suspension_reason) on public.teachers from authenticated;
+select ok(bool_and(v.seen), 've que el maestro podría leer cualquiera de las tres columnas internas')
+from (values ('suspension_reason'), ('suspended_by'), ('suspension_approved_by')) c (col)
+cross join lateral (select pruebas.leible(c.col) as seen) v;
 grant update (founder_since) on public.teachers to app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'teachers table writable by app_service'),
   've que el servidor podría escribir la fecha del fundador');
@@ -462,12 +481,37 @@ select ok(exists (select 1 from private.schema_violations()
   've que falta el índice de una pendiente por maestro');
 create unique index teacher_suspension_requests_one_pending_uq on private.teacher_suspension_requests (teacher_id)
   where status = 'pending';
+create or replace function private.teacher_change_lock(p_teacher uuid) returns public.teachers
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_row public.teachers;
+begin
+  select t.* into v_row from public.teachers t where t.id = p_teacher;
+  return v_row;
+end
+$$;
+select ok(exists (select 1 from private.schema_violations() where problem = 'teachers lock changed: teacher_change_lock'),
+  've el candado de los cambios al maestro quitado');
 drop index private.teacher_suspension_requests_alert_uq;
 select ok(exists (select 1 from private.schema_violations()
                   where problem = 'teachers unique index missing: teacher_suspension_requests_alert_uq'),
   've que falta el índice de una alerta por suspensión');
 create unique index teacher_suspension_requests_alert_uq on private.teacher_suspension_requests (anomaly_alert_id)
   where status in ('pending', 'confirmed');
+create or replace function private.teacher_change_lock(p_teacher uuid) returns public.teachers
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_row public.teachers;
+begin
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'teacher changes need read committed isolation' using errcode = '25000';
+  end if;
+  select t.* into v_row from public.teachers t where t.id = p_teacher for no key update;
+  return v_row;
+end
+$$;
 select is_empty('select * from private.schema_violations()', 'en cero al restaurar');
 
 select * from finish();
