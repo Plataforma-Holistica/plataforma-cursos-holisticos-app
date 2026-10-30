@@ -104,6 +104,8 @@ export const portal = defineMessages({
     moveTo: "Mover a",
     moveToNamed: "Mover {title} a otro módulo",
     move: "Mover",
+    reorder: "Ordenar",
+    reorderNamed: "Ordenar {title}",
     titleLabel: "Título del curso",
     summaryLabel: "Resumen",
     practiceLabel: "Práctica",

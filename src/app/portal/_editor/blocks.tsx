@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, GripVertical } from "lucide";
+import { ChevronDown, FileText, GripVertical } from "lucide";
 import Link from "next/link";
 import { type DragEvent, type KeyboardEvent, useActionState, useEffect, useRef, useState } from "react";
 
@@ -551,9 +551,9 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
               <li
                 key={lesson.id}
                 {...dropZone(kit, { kind: "lesson", id: lesson.id }, ["lesson"])}
-                className={cx("flex flex-col gap-2 rounded-md px-2 py-1", lesson.current && "bg-accent-subtle")}
+                className={cx("flex flex-wrap items-center gap-x-2 rounded-md px-2 py-1", lesson.current && "bg-accent-subtle")}
               >
-                <span className="flex items-center gap-2">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
                   {view.editable && (
                     <DragHandle
                       item={{ kind: "lesson", id: lesson.id, title: lesson.title, list: module.id, position: index + 1, total: module.lessons.length }}
@@ -571,26 +571,35 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
                     {lesson.title}
                   </Link>
                 </span>
-                {view.editable && (
-                  <div className="flex flex-wrap items-end gap-2">
-                    <MoveButtons
-                      up={lesson.up}
-                      down={lesson.down}
-                      upName={t(text.upNamed, { title: lesson.title })}
-                      downName={t(text.downNamed, { title: lesson.title })}
-                      action={action}
-                      course={view.course}
-                    />
-                    {lesson.move !== null && (
-                      <form action={action} className="flex items-end gap-2">
-                        <CourseField course={view.course} />
-                        <Select id={`editor-mover-${lesson.id}`} name="to" label={t(text.moveToNamed, { title: lesson.title })} options={lesson.targets} prompt={text.moveTo} />
-                        <Button type="submit" name="do" value={lesson.move} variant="secondary" size="md">
-                          {text.move}
-                        </Button>
-                      </form>
-                    )}
-                  </div>
+                {view.editable && (lesson.up !== null || lesson.down !== null || lesson.move !== null) && (
+                  // «Subir», «Bajar» y «Mover a» de cada lección, plegados: abiertos le quitaban el lugar a la lección
+                  // (observación de Sergio del 2026-10-30). Un `<details>` se abre también sin JavaScript.
+                  <details className="group ml-auto open:w-full">
+                    <summary className="flex min-h-6 cursor-pointer list-none items-center justify-end gap-1 text-body-s text-text-3 hover:text-text">
+                      <span aria-hidden="true">{text.reorder}</span>
+                      <span className="sr-only">{t(text.reorderNamed, { title: lesson.title })}</span>
+                      <Icon icon={ChevronDown} size={16} className="group-open:rotate-180" />
+                    </summary>
+                    <div className="flex flex-wrap items-end gap-2 pt-2 pb-1">
+                      <MoveButtons
+                        up={lesson.up}
+                        down={lesson.down}
+                        upName={t(text.upNamed, { title: lesson.title })}
+                        downName={t(text.downNamed, { title: lesson.title })}
+                        action={action}
+                        course={view.course}
+                      />
+                      {lesson.move !== null && (
+                        <form action={action} className="flex items-end gap-2">
+                          <CourseField course={view.course} />
+                          <Select id={`editor-mover-${lesson.id}`} name="to" label={t(text.moveToNamed, { title: lesson.title })} options={lesson.targets} prompt={text.moveTo} />
+                          <Button type="submit" name="do" value={lesson.move} variant="secondary" size="md">
+                            {text.move}
+                          </Button>
+                        </form>
+                      )}
+                    </div>
+                  </details>
                 )}
               </li>
             ))}

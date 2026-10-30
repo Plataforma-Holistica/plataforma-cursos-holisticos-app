@@ -52,6 +52,12 @@ const coursesOf = async (who: Person) =>
   )[0]?.count;
 
 /** Las lecciones de un módulo, en orden, como las pinta el editor. */
+/** Abre «Ordenar» de una lección, si está plegado. */
+async function openReorder(page: Page, lesson: string): Promise<void> {
+  const details = page.locator("details", { has: page.getByText(`Ordenar ${lesson}`, { exact: true }) });
+  if ((await details.getAttribute("open")) === null) await details.locator("summary").click();
+}
+
 const lessonsIn = (page: Page, module: string) =>
   page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > span > a");
 
@@ -132,9 +138,11 @@ test("FL-32 con JavaScript: crea un curso, lo llena, ordena, mueve, borra, sale 
   await addLesson("Inicio", "Tres");
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Una", "Dos", "Tres"]);
 
-  // Subir, mover a otro módulo y bajar un módulo.
+  // Subir, mover a otro módulo y bajar un módulo. Los controles de cada lección van plegados en «Ordenar».
+  await openReorder(page, "Dos");
   await page.getByRole("button", { name: "Subir Dos" }).click();
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Una", "Tres"]);
+  await openReorder(page, "Tres");
   await page.getByRole("combobox", { name: "Mover Tres a otro módulo" }).selectOption({ label: "Cierre" });
   await page.locator("form", { has: page.getByRole("combobox", { name: "Mover Tres a otro módulo" }) }).getByRole("button", { name: "Mover" }).click();
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
@@ -194,6 +202,7 @@ test("FL-32 sin JavaScript: crear, un «Nuevo curso» reenviado crea uno solo, y
   const page2 = await (await page.request.get(editor)).text();
   const subir = /value="(lesson-up:[^"]+)"/.exec(page2)?.[1] ?? "";
   expect(subir).not.toBe("");
+  await openReorder(page, "Dos");
   await page.getByRole("button", { name: "Subir Dos" }).click();
   await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Una"]);
   const again = await postAction(page.request, editor, { ...fieldsOf(page2, subir), do: subir });

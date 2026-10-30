@@ -715,6 +715,17 @@ que no se ve leyendo un solo archivo:
   solo con la respuesta que guardó, y un formulario que se lleva a otra pantalla lo dice con `data-leaves` (`all` o
   `detail`): el de «Cerrar sesión» del menú lo lleva. El botón «Atrás» del navegador no pregunta (decisión mía sin
   confirmar).
+- **Lo que T-402 suma al carril B** (cuarta solicitud, sin migración; observaciones de Sergio del 2026-10-30 al probar
+  la 84, y diseño aprobado por él ese día con capturas). La jerarquía visual del editor: «Datos del curso» es una fila
+  propia con ícono; cada módulo, una tarjeta con su número arriba y el título en `text-h3`; sus lecciones, sangradas
+  tras una línea y numeradas («1.2», con `aria-hidden`: el lector ya oye el lugar en la lista). El enlace del módulo
+  lleva su nombre en `aria-label` («Módulo 1: Inicio»), porque su contenido visible va en dos renglones. «Subir»,
+  «Bajar» y «Mover a» de cada lección van plegados en un `<details>` («Ordenar»), que se abre también sin JavaScript;
+  una prueba que los pulse abre antes «Ordenar» (`openReorder` en `tests/e2e/equipo/portal.equipo.ts`). Los datos del
+  curso van en tres grupos con título (`role="group"`), y lo elegido dice de dónde es arriba de su título
+  (`selected.place`). Una lista de práctica o de nivel sin opciones lo dice en la lista misma y en una nota. Una clase
+  con la palabra `basis` en `src/app/` hace fallar `tests/architecture/media.test.ts`, que la busca para que la base
+  de acceso del video no llegue a una pantalla: se usa `w-full`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
