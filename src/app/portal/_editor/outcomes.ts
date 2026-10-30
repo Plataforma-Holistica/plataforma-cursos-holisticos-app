@@ -32,6 +32,11 @@ export const editorButton = {
   lessonUp: (lesson: string, module: string, position: number) => `lesson-up:${lesson}:${module}:${position}`,
   lessonDown: (lesson: string, module: string, position: number) => `lesson-down:${lesson}:${module}:${position}`,
   lessonMove: (lesson: string, module: string, position: number) => `lesson-move:${lesson}:${module}:${position}`,
+  /** Arrastrar un módulo: del lugar que se vio a cualquier otro. */
+  moduleTo: (module: string, position: number, to: number) => `module-to:${module}:${position}:${to}`,
+  /** Arrastrar una lección: del módulo y el lugar que se vieron a cualquier lugar de cualquier módulo. */
+  lessonTo: (lesson: string, module: string, position: number, toModule: string, to: number) =>
+    `lesson-to:${lesson}:${module}:${position}:${toModule}:${to}`,
   saveModule: (module: string, revision: number) => `save-module:${module}:${revision}`,
   askDeleteModule: (module: string) => `ask-delete-module:${module}`,
   deleteModule: (module: string, revision: number) => `delete-module:${module}:${revision}`,
@@ -74,9 +79,18 @@ export function readEditorForm(form: unknown): EditorRequest {
   const pressed = form.getAll("do");
   const [only] = pressed;
   if (!ID.test(course) || pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return NONE;
-  const [verb, a, b, c, ...rest] = only.split(":");
-  if (rest.length > 0) return NONE;
+  const parts = only.split(":");
+  const [verb, a, b, c, d, e] = parts;
   const title = () => textField(form, "title");
+  // Llevar una lección a otro lugar es el único botón con cinco datos.
+  if (verb === "lesson-to") {
+    const from = countOf(c);
+    const to = countOf(e);
+    if (parts.length !== 6 || !isId(a) || !isId(b) || from === null || !isId(d) || to === null) return NONE;
+    if (b === d && from === to) return NONE;
+    return { step: "move_lesson", course, lesson: a, from: { module: b, position: from }, to: { module: d, position: to } };
+  }
+  if (parts.length > 4) return NONE;
 
   switch (verb) {
     case "cancel":
@@ -95,6 +109,11 @@ export function readEditorForm(form: unknown): EditorRequest {
     case "add-lesson": {
       const seen = countOf(b);
       return !isId(a) || seen === null || c !== undefined ? NONE : { step: "add_lesson", course, module: a, seen, title: title() };
+    }
+    case "module-to": {
+      const seen = countOf(b);
+      const to = countOf(c);
+      return !isId(a) || seen === null || to === null || seen === to ? NONE : { step: "move_module", course, module: a, seen, to };
     }
     case "module-up":
     case "module-down": {
