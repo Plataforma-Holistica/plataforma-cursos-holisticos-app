@@ -138,6 +138,8 @@ export type PayoutFailure =
   | "already_confirmed"
   | "already_void"
   | "period_released"
+  /** Es la liquidación o el bono de quien actúa (T-401): lo hace otra persona de finanzas. */
+  | "self"
   | "not_found"
   | "timed_out"
   | "unbalanced"
@@ -231,6 +233,8 @@ export function holdOutcome(result: HoldResult, period: number): PayoutOutcome {
           return failed("changed");
         case "not_holdable":
           return result.status === null ? failed("not_holdable") : failed("not_holdable", { status: result.status });
+        case "self":
+          return failed("self");
         case "not_found":
           return failed("not_found");
         case "forbidden":
@@ -267,6 +271,8 @@ export function unholdOutcome(result: UnholdResult, period: number): PayoutOutco
           return failed("not_held");
         case "changed":
           return failed("changed");
+        case "self":
+          return failed("self");
         case "not_found":
           return failed("not_found");
         case "forbidden":
@@ -298,6 +304,8 @@ export function confirmOutcome(result: ConfirmResult, period: number): PayoutOut
           return failed(result.status === "void" ? "already_void" : "already_confirmed");
         case "period_released":
           return failed("period_released");
+        case "self":
+          return failed("self");
         case "not_found":
           return failed("not_found");
         case "forbidden":
@@ -330,6 +338,8 @@ export function voidOutcome(result: VoidResult, period: number): PayoutOutcome {
           return failed("already_void");
         case "period_released":
           return failed("period_released");
+        case "self":
+          return failed("self");
         case "not_found":
           return failed("not_found");
         case "forbidden":

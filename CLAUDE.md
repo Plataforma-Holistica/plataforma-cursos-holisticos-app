@@ -363,7 +363,8 @@ que no se ve leyendo un solo archivo:
   B: una prueba que programe la gracia sin periodo falla con 23514, y `plataforma-b` trae `main` antes
   de verificar.
 - **Los números de prueba del carril A, desde el 2026-10-25** (decisión de Sergio): además de pgTAP
-  del 40 al 49 e integración del 51 al 59, el A usa pgTAP del 50 al 59 e integración del 80 al 89.
+  del 40 al 49 e integración del 51 al 59, el A usa pgTAP del 50 al 59 e integración del 80 al 89. Desde el
+  2026-10-30 (decisión de Sergio), también pgTAP del 60 al 69.
 - **Lo que T-603 suma al carril A** (primera solicitud). Las tablas `payouts`, `payout_status_events` y
   `bonuses`, los tipos `payout_status`, `bonus_kind` y `bonus_status`, la columna
   `close_run_teacher_totals.founder_bonus_cents`, las funciones `private.founder_bonus`,
@@ -623,6 +624,14 @@ que no se ve leyendo un solo archivo:
   (decisión mía sin confirmar). `teacher_roster()` es la lista de PA-65 (Contenido, sin código reciente). El
   correo de un maestro del sistema lo pone solo el dueño declarado sistema (`system_invite_teacher`).
   `db:drafts` carga además los borradores del contrato y del aviso del maestro. Usa pgTAP 58 e integración 80.
+- **Nadie actúa sobre sí, en finanzas y en el equipo** (T-401, `t401_sobre_si`; decisiones de Sergio del 2026-10-29
+  y del 2026-10-30). Toda función que actúa sobre una persona concreta contesta `self` si es quien actúa o su maestro
+  (`private.actor_owns_teacher`, sin candado): revisar alertas, excluir y revertir, retener y soltar, bonos, ajustes y
+  `grant_capability`. Excluir o revertir en un periodo en que quien actúa cobra (`private.actor_earns_in`) contesta
+  `conflict`; excluir por fraude quien marcó el fraude (`anomaly_alerts.fraud_marked_by`), `proposer`. Liberar no se
+  bloquea: PA-81 marca la fila propia (`is_self`) y el diálogo lo dice. Una función nueva que actúe sobre una persona
+  lleva la misma comprobación y se suma a la lista del área `teachers` del vigilante. Usa pgTAP 60, y la 29, la 55 y
+  la integración 46 cambiaron por la regla (una sola persona ya no marca y excluye por fraude).
 - **El fundador, la suspensión y el fraude** (T-401, tercera solicitud, `t401_fundador_y_suspension`; decisiones
   de Sergio del 2026-10-29). `set_teacher_founder(maestro, desde | nulo)` (Contenido): sin fecha atrás (`too_early`:
   antes del mes en curso o de un periodo que ya no está abierto) y fija una vez que un periodo desde su mes salió

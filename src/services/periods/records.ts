@@ -431,6 +431,7 @@ const payoutRow = z.strictObject({
   estimated: z.boolean(),
   reaches_minimum: z.boolean().nullable(),
   unhold_fingerprint: fingerprint.nullable(),
+  is_self: z.boolean(),
 });
 const payoutsSchema = z.strictObject({
   fresh_code: z.boolean(),
@@ -492,6 +493,7 @@ export function payoutsReadOf(raw: unknown): FinancePayouts | null {
       estimated: row.estimated,
       reachesMinimum: row.reaches_minimum,
       unholdFingerprint: row.unhold_fingerprint,
+      isSelf: row.is_self,
     })),
   };
 }

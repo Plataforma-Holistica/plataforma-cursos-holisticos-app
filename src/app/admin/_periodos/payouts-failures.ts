@@ -42,6 +42,7 @@ const FIXED: Record<Exclude<PayoutFailure, "previous_not_released" | "not_holdab
   already_confirmed: failures.alreadyDecided.confirmed,
   already_void: failures.alreadyDecided.void,
   period_released: failures.periodReleased,
+  self: t(failures.self),
   not_found: failures.notFound,
   timed_out: failures.timedOut,
   unbalanced: failures.unbalanced,

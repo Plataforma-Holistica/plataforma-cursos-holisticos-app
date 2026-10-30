@@ -87,7 +87,7 @@ export const INVITE_ANSWERS = [
   "invited_existing",
 ] as const;
 export const REVOKE_INVITATION_ANSWERS = ["forbidden", "needs_fresh_code", "not_found", "revoked"] as const;
-export const GRANT_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "ineligible", "not_member", "already_has", "granted"] as const;
+export const GRANT_ANSWERS = ["forbidden", "needs_fresh_code", "invalid", "self", "ineligible", "not_member", "already_has", "granted"] as const;
 export const REVOKE_ANSWERS = ["forbidden", "needs_fresh_code", "not_found", "min_config", "revoked"] as const;
 export const RESET_ANSWERS = [
   "forbidden",

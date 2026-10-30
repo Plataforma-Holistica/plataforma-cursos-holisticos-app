@@ -122,6 +122,12 @@ export type AlertsFailure =
   | "already_revoked"
   | "closed"
   | "needs_fraud_decision"
+  /** La alerta o la cuenta es de quien actúa (T-401). */
+  | "self"
+  /** Quien marcó el fraude no excluye por fraude: otra persona de finanzas. */
+  | "proposer"
+  /** Quien cobra en ese periodo no excluye ni revierte en él. */
+  | "conflict"
   | "not_found"
   | "unavailable"
   | "unknown";
@@ -208,6 +214,8 @@ export function reviewOutcome(result: AlertReviewed): AlertsOutcome {
           return { kind: "failed", reason: "needs_code" };
         case "malformed":
           return { kind: "failed", reason: "missing_note" };
+        case "self":
+          return { kind: "failed", reason: "self" };
         case "not_found":
           return { kind: "failed", reason: "not_found" };
       }
@@ -241,6 +249,8 @@ export function fraudOutcome(result: AlertReviewed): AlertsOutcome {
           return { kind: "failed", reason: "needs_code" };
         case "malformed":
           return { kind: "failed", reason: "missing_evidence" };
+        case "self":
+          return { kind: "failed", reason: "self" };
         case "not_found":
           return { kind: "failed", reason: "not_found" };
       }
@@ -268,6 +278,12 @@ export function excludeOutcome(result: AccountExcluded): AlertsOutcome {
           return { kind: "failed", reason: "closed" };
         case "needs_fraud_decision":
           return { kind: "failed", reason: "needs_fraud_decision" };
+        case "self":
+          return { kind: "failed", reason: "self" };
+        case "proposer":
+          return { kind: "failed", reason: "proposer" };
+        case "conflict":
+          return { kind: "failed", reason: "conflict" };
         // Una cuenta que no es de la alerta solo llega con un formulario armado a mano.
         case "not_related":
         case "not_found":
@@ -301,6 +317,10 @@ export function revokeOutcome(result: ExclusionRevoked): AlertsOutcome {
           return { kind: "failed", reason: "already_revoked" };
         case "outside_window":
           return { kind: "failed", reason: "closed" };
+        case "self":
+          return { kind: "failed", reason: "self" };
+        case "conflict":
+          return { kind: "failed", reason: "conflict" };
         case "not_found":
           return { kind: "failed", reason: "not_found" };
         case "malformed":

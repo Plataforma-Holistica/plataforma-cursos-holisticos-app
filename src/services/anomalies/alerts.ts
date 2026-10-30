@@ -101,7 +101,7 @@ export interface FinanceAlerts {
 }
 
 /** Lo que contesta `private.review_alert()`. */
-export const REVIEW_ANSWERS = ["reviewed", "marked_fraud", "already_reviewed", "forbidden", "needs_fresh_code", "malformed", "not_found"] as const;
+export const REVIEW_ANSWERS = ["reviewed", "marked_fraud", "already_reviewed", "self", "forbidden", "needs_fresh_code", "malformed", "not_found"] as const;
 export type ReviewAnswer = (typeof REVIEW_ANSWERS)[number];
 /** Lo que contesta `private.exclude_alert_account()`. */
 export const EXCLUDE_ANSWERS = [
@@ -110,6 +110,9 @@ export const EXCLUDE_ANSWERS = [
   "outside_window",
   "needs_fraud_decision",
   "not_related",
+  "self",
+  "proposer",
+  "conflict",
   "not_found",
   "malformed",
   "forbidden",
@@ -117,7 +120,7 @@ export const EXCLUDE_ANSWERS = [
 ] as const;
 export type ExcludeAnswer = (typeof EXCLUDE_ANSWERS)[number];
 /** Lo que contesta `private.revoke_exclusion()`. */
-export const REVOKE_ANSWERS = ["revoked", "already_revoked", "outside_window", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const REVOKE_ANSWERS = ["revoked", "already_revoked", "outside_window", "self", "conflict", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type RevokeAnswer = (typeof REVOKE_ANSWERS)[number];
 
 /**

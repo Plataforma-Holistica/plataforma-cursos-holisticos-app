@@ -30,6 +30,7 @@ const FAILURES: Record<TeamFailure, string> = {
   not_member: text.grantNotMember,
   ineligible: text.grantIneligible,
   invalid: text.invalid,
+  self: text.grantSelf,
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,

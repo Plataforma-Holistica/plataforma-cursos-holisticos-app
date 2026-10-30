@@ -159,6 +159,19 @@ describe("las alertas y las decisiones de finanzas, contra la base", () => {
         answer: "needs_fraud_decision",
       });
       expect(await service.decideFraud(jar, { alert, evidence: "Tres lecciones en diez segundos." })).toEqual({ kind: "answered", answer: "marked_fraud" });
+      // Quien marcó el fraude no excluye por fraude (decisión de Sergio del 2026-10-30, T-401): otra persona de
+      // finanzas. Aquí esa otra persona la marcó: se escribe a mano, como el dueño declarado sistema.
+      expect(await service.excludeAccount(jar, { alert, account, reasonCode: "fraud", reason: "Tres lecciones en diez segundos." })).toEqual({
+        kind: "answered",
+        answer: "proposer",
+      });
+      const marker = await claimedUser();
+      emails.push(marker.email);
+      await asSystem(owner);
+      await owner.query("alter table public.anomaly_alerts disable trigger alerts_guard");
+      await owner.query("update public.anomaly_alerts set fraud_marked_by = $2 where id = $1", [alert, marker.id]);
+      await owner.query("alter table public.anomaly_alerts enable trigger alerts_guard");
+      await asOwner(owner);
       expect(await service.excludeAccount(jar, { alert, account, reasonCode: "fraud", reason: "Tres lecciones en diez segundos." })).toEqual({
         kind: "answered",
         answer: "excluded",
