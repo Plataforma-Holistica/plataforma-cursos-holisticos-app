@@ -136,7 +136,7 @@ describe("el paso previo", () => {
 
   it("fuera de las rutas con sesión no redirige ni contesta por su cuenta", async () => {
     refresh.mockResolvedValue({ kind: "lost" });
-    const response = await proxy(request({}, "/portal/finanzas"));
+    const response = await proxy(request({}, "/legal/terminos"));
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();

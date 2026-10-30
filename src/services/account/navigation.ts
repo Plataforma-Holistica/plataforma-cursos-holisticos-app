@@ -126,6 +126,23 @@ export function explorePath({ q = null, practice = null, teacher = null, level =
 /** PA-80, el ensayo y el cierre de un periodo. */
 export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
+/** Crear un curso (T-402). */
+export const portalNewCoursePath = (): string => `${ROUTES.portalCourses}/nuevo`;
+
+/** PA-43, el editor de un curso; nulo si el id no tiene forma. Con `?modulo=` o `?leccion=`, lo elegido. */
+export function portalCoursePath(course: string, selected: { module?: string; lesson?: string } = {}): string | null {
+  if (!LESSON_ID.test(course)) return null;
+  const base = `${ROUTES.portalCourses}/${course}`;
+  if (selected.lesson !== undefined) return LESSON_ID.test(selected.lesson) ? `${base}?leccion=${selected.lesson}` : base;
+  if (selected.module !== undefined) return LESSON_ID.test(selected.module) ? `${base}?modulo=${selected.module}` : base;
+  return base;
+}
+
+/** Confirmar el borrado de un curso; nulo si el id no tiene forma. */
+export function portalDeleteCoursePath(course: string): string | null {
+  return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/borrar` : null;
+}
+
 /** PA-81, las liquidaciones de un periodo. */
 export const periodPayoutsPath = (period: number): string => `${periodPath(period)}/liquidaciones`;
 
