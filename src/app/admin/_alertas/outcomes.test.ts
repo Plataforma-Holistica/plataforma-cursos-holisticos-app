@@ -135,6 +135,7 @@ const done = (notice: string) => ({ kind: "leave", to: ROUTES.alerts, notice }) 
 
 describe("reviewOutcome", () => {
   const cases: Record<(typeof REVIEW_ANSWERS)[number], AlertsOutcome> = {
+    self: failed("self"),
     reviewed: done("alert_reviewed"),
     // Revisar no decide fraude: si la base contestara esto, ya estaba revisada.
     marked_fraud: failed("already_reviewed"),
@@ -159,6 +160,7 @@ describe("reviewOutcome", () => {
 
 describe("fraudOutcome", () => {
   const cases: Record<(typeof REVIEW_ANSWERS)[number], AlertsOutcome> = {
+    self: failed("self"),
     // Con la alerta abierta, la revisa y la decide a la vez.
     reviewed: done("fraud_decided"),
     marked_fraud: done("fraud_decided"),
@@ -183,6 +185,9 @@ describe("fraudOutcome", () => {
 
 describe("excludeOutcome", () => {
   const cases: Record<(typeof EXCLUDE_ANSWERS)[number], AlertsOutcome> = {
+    self: failed("self"),
+    proposer: failed("proposer"),
+    conflict: failed("conflict"),
     excluded: done("account_excluded"),
     already_excluded: failed("already_excluded"),
     outside_window: failed("closed"),
@@ -208,6 +213,8 @@ describe("excludeOutcome", () => {
 
 describe("revokeOutcome", () => {
   const cases: Record<(typeof REVOKE_ANSWERS)[number], AlertsOutcome> = {
+    self: failed("self"),
+    conflict: failed("conflict"),
     revoked: done("exclusion_revoked"),
     already_revoked: failed("already_revoked"),
     outside_window: failed("closed"),

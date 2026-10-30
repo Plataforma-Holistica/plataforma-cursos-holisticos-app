@@ -190,6 +190,8 @@ export interface TeamIntent {
 
 export type TeamFailure =
   | "already_has"
+  /** Nadie se da una capacidad a sí mismo (T-401). */
+  | "self"
   | "not_held"
   | "min_config"
   | "not_member"
@@ -254,6 +256,7 @@ function grantedOutcome(answer: Extract<CapabilityGranted, { kind: "answered" }>
     case "not_member":
     case "ineligible":
     case "invalid":
+    case "self":
       return { kind: "failed", reason: answer };
   }
 }

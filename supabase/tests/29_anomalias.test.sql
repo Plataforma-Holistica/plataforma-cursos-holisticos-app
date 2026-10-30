@@ -18,16 +18,22 @@ select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'beto-anomalia@prueb
 select pruebas.alta('a0000000-0000-0000-0000-000000000003', 'carla-anomalia@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000001', 'contenido-anomalia@prueba.test');
 select pruebas.alta('b0000000-0000-0000-0000-000000000002', 'finanzas-anomalia@prueba.test');
+-- Una segunda persona de finanzas: excluir por fraude lo hace alguien distinto de quien lo marcó (decisión de
+-- Sergio del 2026-10-30, T-401).
+select pruebas.alta('b0000000-0000-0000-0000-000000000003', 'finanzas2-anomalia@prueba.test');
 select pruebas.confirmar(id) from auth.users where email like '%-anomalia@prueba.test';
 select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000001', 'content');
 select pruebas.equipar('b0000000-0000-0000-0000-000000000001');
 select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000002', 'finance');
 select pruebas.equipar('b0000000-0000-0000-0000-000000000002');
+select pruebas.dar_capacidad('b0000000-0000-0000-0000-000000000003', 'finance');
+select pruebas.equipar('b0000000-0000-0000-0000-000000000003');
 
 create function pruebas.ana() returns uuid language sql immutable as $$ select 'a0000000-0000-0000-0000-000000000001'::uuid $$;
 create function pruebas.beto() returns uuid language sql immutable as $$ select 'a0000000-0000-0000-0000-000000000002'::uuid $$;
 create function pruebas.carla() returns uuid language sql immutable as $$ select 'a0000000-0000-0000-0000-000000000003'::uuid $$;
 create function pruebas.finanzas() returns uuid language sql immutable as $$ select 'b0000000-0000-0000-0000-000000000002'::uuid $$;
+create function pruebas.finanzas2() returns uuid language sql immutable as $$ select 'b0000000-0000-0000-0000-000000000003'::uuid $$;
 create function pruebas.periodo(p_months_back integer default 0) returns integer
 language sql stable as $$
   select to_char(date_trunc('month', timezone('America/Mexico_City', now())) - make_interval(months => p_months_back), 'YYYYMM')::integer
@@ -277,25 +283,26 @@ select ok((select count(*) from public.audit_log where entity_table = 'public.an
            and entity_id = (select id from r where name = 'imposible')::text) = 2, 'cada decisión queda en la auditoría');
 
 -- ---------------------------------------------------------------------------------------
--- Excluir por fraude: con la alerta decidida, del mismo periodo, y de quien la provocó.
+-- Excluir por fraude: con la alerta decidida, del mismo periodo, y de quien la provocó. Excluye la segunda
+-- persona de finanzas: quien marcó el fraude no excluye por fraude (la 60).
 
-select is(pruebas.excluye(pruebas.finanzas(), pruebas.beto(), pruebas.periodo(), (select id from r where name = 'imposible')),
+select is(pruebas.excluye(pruebas.finanzas2(), pruebas.beto(), pruebas.periodo(), (select id from r where name = 'imposible')),
   'not_related', 'no a otra cuenta que la de la alerta');
-select is(pruebas.excluye(pruebas.finanzas(), pruebas.ana(), pruebas.periodo(1), (select id from r where name = 'imposible')),
+select is(pruebas.excluye(pruebas.finanzas2(), pruebas.ana(), pruebas.periodo(1), (select id from r where name = 'imposible')),
   'needs_fraud_decision', 'ni en otro periodo que el de la alerta');
-select is(pruebas.excluye_con(pruebas.finanzas(), 'account', pruebas.ana(), pruebas.periodo(), null, 'other', null),
+select is(pruebas.excluye_con(pruebas.finanzas2(), 'account', pruebas.ana(), pruebas.periodo(), null, 'other', null),
   'excluded', 'antes, una exclusión de la cuenta por otra causa');
-select is(pruebas.excluye(pruebas.finanzas(), pruebas.ana(), pruebas.periodo(), (select id from r where name = 'imposible')),
+select is(pruebas.excluye(pruebas.finanzas2(), pruebas.ana(), pruebas.periodo(), (select id from r where name = 'imposible')),
   'excluded', 'que no impide la de fraude: a Ana, en su periodo, sí');
 select is((select anomaly_alert_id from public.consumption_exclusions where reason_code = 'fraud' and profile_id = pruebas.ana()),
   (select id from r where name = 'imposible'), 'ligada a la alerta');
 select is(pruebas.revisa(pruebas.finanzas(), (select id from r where name = 'salto'), 'Dos cuentas nuevas sostienen el salto.', true,
   'Las dos cuentas se crearon el mismo día y solo ven a esta maestra.'), 'reviewed', 'el salto de la maestra A, decidido como fraude');
-select is(pruebas.excluye(pruebas.finanzas(), pruebas.carla(), pruebas.periodo(1), (select id from r where name = 'salto')),
+select is(pruebas.excluye(pruebas.finanzas2(), pruebas.carla(), pruebas.periodo(1), (select id from r where name = 'salto')),
   'not_related', 'del salto, no a quien no vio a esa maestra');
-select is(pruebas.excluye_con(pruebas.finanzas(), 'interval', pruebas.beto(), pruebas.periodo(1), pruebas.leccion('anomalia-c', 'Uno'),
+select is(pruebas.excluye_con(pruebas.finanzas2(), 'interval', pruebas.beto(), pruebas.periodo(1), pruebas.leccion('anomalia-c', 'Uno'),
   'fraud', (select id from r where name = 'salto')), 'not_related', 'del salto, no un tramo de otro maestro');
-select is(pruebas.excluye(pruebas.finanzas(), pruebas.beto(), pruebas.periodo(1), (select id from r where name = 'salto')),
+select is(pruebas.excluye(pruebas.finanzas2(), pruebas.beto(), pruebas.periodo(1), (select id from r where name = 'salto')),
   'excluded', 'a quien sí la vio en ese periodo, sí');
 
 -- ---------------------------------------------------------------------------------------

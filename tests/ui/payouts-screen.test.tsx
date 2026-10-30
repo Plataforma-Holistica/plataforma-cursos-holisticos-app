@@ -34,6 +34,7 @@ const row = (over: Partial<PayoutRow>): PayoutRow => ({
   name: "Ana",
   payoutId: Y1,
   status: "calculated",
+  isSelf: false,
   heldFromStatus: null,
   holdReason: null,
   heldAt: null,

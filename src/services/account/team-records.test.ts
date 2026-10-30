@@ -106,7 +106,7 @@ describe("lo que contesta cada cambio al equipo", () => {
       "unavailable",
     ]);
     expect([...REVOKE_INVITATION_ANSWERS].sort()).toEqual(["forbidden", "needs_fresh_code", "not_found", "revoked"]);
-    expect([...GRANT_ANSWERS].sort()).toEqual(["already_has", "forbidden", "granted", "ineligible", "invalid", "needs_fresh_code", "not_member"]);
+    expect([...GRANT_ANSWERS].sort()).toEqual(["already_has", "forbidden", "granted", "ineligible", "invalid", "needs_fresh_code", "not_member", "self"]);
     expect([...REVOKE_ANSWERS].sort()).toEqual(["forbidden", "min_config", "needs_fresh_code", "not_found", "revoked"]);
     expect([...RESET_ANSWERS].sort()).toEqual([
       "already_sent",

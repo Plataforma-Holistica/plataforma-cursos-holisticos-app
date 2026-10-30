@@ -25,6 +25,7 @@ const row = (over: Partial<PayoutRow>): PayoutRow => ({
   name: "Maestra Uno",
   payoutId: Y1,
   status: "calculated",
+  isSelf: false,
   heldFromStatus: null,
   holdReason: null,
   heldAt: null,
@@ -79,6 +80,28 @@ describe("liberar", () => {
   it("sin el código reciente, o ya liberado, no se ofrece", () => {
     expect(payoutsView(read({ freshCode: false })).release).toEqual({ kind: "none" });
     expect(payoutsView(read({ release: null }, { payoutsReleasedAt: "2027-11-02T12:00:00Z" })).release).toEqual({ kind: "none" });
+  });
+});
+
+describe("la liquidación de quien lee (T-401)", () => {
+  it("se marca como suya, y no se retiene, no se suelta ni se decide su bono", () => {
+    const bonus = { bonusId: "e1000000-0000-4000-8000-000000000009", status: "proposed" as const, amountCents: 502, basisCents: 3350 };
+    const [mine, other] = payoutsView(
+      read({ payouts: [row({ isSelf: true, founderBonus: bonus }), row({ teacherId: T2, payoutId: Y2, name: "Maestra Dos" })] }),
+    ).rows;
+    expect(mine?.teacher).toBe("Maestra Uno (tú)");
+    expect(mine?.hold).toBeNull();
+    expect(mine?.founderBonus).toBeNull();
+    expect(other?.teacher).toBe("Maestra Dos");
+    expect(other?.hold).not.toBeNull();
+    const held = payoutsView(read({ payouts: [row({ isSelf: true, status: "on_hold", heldFromStatus: "calculated", unholdFingerprint: UNHOLD })] })).rows[0];
+    expect(held?.unhold).toBeNull();
+  });
+
+  it("liberar no se bloquea, pero el diálogo dice que incluye la suya", () => {
+    const view = payoutsView(read({ payouts: [row({ isSelf: true }), row({ teacherId: T2, payoutId: Y2 })] }));
+    expect(view.release.kind === "offered" && view.release.body).toMatch(/Incluye tu liquidación como maestro\.$/);
+    expect(payoutsView(read()).release.kind === "offered" && payoutsView(read()).release).not.toMatchObject({ body: expect.stringMatching(/Incluye/) });
   });
 });
 

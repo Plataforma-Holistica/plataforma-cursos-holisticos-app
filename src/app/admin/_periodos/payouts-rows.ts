@@ -130,9 +130,12 @@ export function payoutsView(read: Read): PayoutsView {
   const canChange = read.freshCode && period.status === "closed";
 
   const rows: PayoutViewRow[] = read.payouts.map((row) => {
-    const teacher = row.name ?? t(text.noName, { id: shortId(row.teacherId) });
+    const named = row.name ?? t(text.noName, { id: shortId(row.teacherId) });
+    const teacher = row.isSelf ? t(text.yours, { name: named }) : named;
+    // La suya no la cambia quien lee: lo hace otra persona de finanzas (T-401).
+    const mine = row.isSelf;
     const amount = (cents: number) => (row.estimated ? t(text.estimated, { amount: money(cents) }) : money(cents));
-    const holdable = canChange && row.payoutId !== null && row.status !== null && HOLDABLE.includes(row.status);
+    const holdable = canChange && !mine && row.payoutId !== null && row.status !== null && HOLDABLE.includes(row.status);
     const bonus = row.founderBonus;
     return {
       key: row.teacherId,
@@ -152,9 +155,9 @@ export function payoutsView(read: Read): PayoutsView {
         holdable && row.payoutId !== null && row.status !== null
           ? { ask: payoutsButton.askHold(row.payoutId, row.status), confirm: payoutsButton.hold(row.payoutId, row.status), status: row.status }
           : null,
-      unhold: canChange ? unholdOf(row, teacher, released) : null,
+      unhold: canChange && !mine ? unholdOf(row, named, released) : null,
       founderBonus:
-        canChange && !released && bonus !== null && bonus.status === "proposed"
+        canChange && !mine && !released && bonus !== null && bonus.status === "proposed"
           ? { id: bonus.bonusId, confirm: payoutsButton.confirmBonus(bonus.bonusId), askVoid: payoutsButton.askVoid(bonus.bonusId), void: payoutsButton.void(bonus.bonusId) }
           : null,
     };
@@ -177,7 +180,9 @@ export function payoutsView(read: Read): PayoutsView {
             ask: payoutsButton.askRelease(period.periodId, release.fingerprint),
             confirm: payoutsButton.release(period.periodId, release.fingerprint),
             title: t(text.releaseDialogTitle, { period: name }),
-            body: t(plural(reaching, text.releaseDialogBody), { count: reaching, carried: releasing.length - reaching }),
+            body:
+              t(plural(reaching, text.releaseDialogBody), { count: reaching, carried: releasing.length - reaching }) +
+              (releasing.some((row) => row.isSelf) ? " " + t(text.releaseIncludesSelf) : ""),
           };
   }
 
