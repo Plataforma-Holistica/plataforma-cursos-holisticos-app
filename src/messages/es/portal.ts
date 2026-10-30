@@ -8,7 +8,7 @@ export const portal = defineMessages({
     label: "Portal",
     menu: "Menú",
     courses: "Mis cursos",
-    platform: "Ver la {Plataforma}",
+    platform: "Ir a mi inicio",
     signOut: "Cerrar sesión",
   },
   readOnly: "Tu cuenta está en solo lectura. Sigues viendo tus números y tus pagos.",

@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
-import { messages, t } from "@/messages";
+import { messages } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
 import { cx } from "@/ui/cx";
 import { Icon } from "@/ui/icon";
@@ -41,7 +41,7 @@ function Entries({ current }: { current: PortalEntry }) {
       ))}
       <li className="mt-4 border-t border-border pt-4">
         <Link href={ROUTES.home} className="flex min-h-touch items-center rounded-md px-3 text-body text-text-2 hover:bg-surface-2 hover:text-text">
-          {t(text.platform)}
+          {text.platform}
         </Link>
       </li>
       <li>
