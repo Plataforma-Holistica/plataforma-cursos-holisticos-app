@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
-import { asServer, asUser, type Tx } from "@/adapters/supabase/db";
+import { asServer, asSystem, asUser, type Tx } from "@/adapters/supabase/db";
 import { isLockConflict } from "@/adapters/supabase/errors";
 
 import { withLockRetry } from "@/services/account/team";
@@ -29,6 +29,7 @@ import {
   askSaveCourse,
   askSaveLesson,
   createdOf,
+  readDraftChoices,
   readDraftCourse,
   readTeacherCourses,
 } from "./records";
@@ -37,8 +38,12 @@ import {
 // va como la persona; cada cambio abre su transacción como servidor, con quién actúa y con qué
 // sesión tomados de esas claims.
 
-/** `run` es `asServer` y `read` es `asUser`. Solo las pruebas pasan otros. */
-export function createDraftsStore(run: typeof asServer = asServer, read: typeof asUser = asUser): DraftsStore {
+/** `run` es `asServer`, `read` es `asUser` y `system` es `asSystem`. Solo las pruebas pasan otros. */
+export function createDraftsStore(
+  run: typeof asServer = asServer,
+  read: typeof asUser = asUser,
+  system: typeof asSystem = asSystem,
+): DraftsStore {
   /**
    * Un cambio. Toman el candado del curso (y los de las listas, al guardar los datos) y ninguno
    * escribe antes de rechazar: un choque de candados revierte la transacción entera, y se intenta
@@ -79,6 +84,7 @@ export function createDraftsStore(run: typeof asServer = asServer, read: typeof 
       answerOf(MOVE_ANSWERS, (await change(claims, "draft_move_lesson", (tx) => askMoveLesson(tx, course, lesson, seen, to))).answer),
     deleteCourse: async (claims, course, seen) =>
       answerOf(DELETE_ANSWERS, (await change(claims, "draft_delete_course", (tx) => askDeleteCourse(tx, course, seen))).answer),
+    choices: (practiceId, levelId) => system({ reason: "draft_choices" }, (tx) => readDraftChoices(tx, practiceId, levelId)),
   };
 }
 
