@@ -721,6 +721,16 @@ as $$
           'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
      or pg_catalog.has_any_column_privilege(r.rolname::name, 'private.teacher_invitations', 'SELECT, INSERT, UPDATE, REFERENCES')
   union all
+  -- «Una viva por maestro y por correo» y «se acepta una vez» viven en estos índices.
+  select 'teachers unique index missing: ' || x.name, 'private.teacher_invitations'
+  from (values ('teacher_invitations_live_teacher_uq'), ('teacher_invitations_live_email_uq'),
+               ('teacher_invitations_accepted_teacher_uq')) x (name)
+  where not exists (
+    select 1 from pg_catalog.pg_index i
+    join pg_catalog.pg_class c on c.oid = i.indexrelid
+    where i.indrelid = 'private.teacher_invitations'::regclass and c.relname = x.name
+      and i.indisunique and i.indisvalid)
+  union all
   select 'teachers audit trigger missing or disabled', 'private.teacher_invitations'
   where not exists (
     select 1 from pg_catalog.pg_trigger tg

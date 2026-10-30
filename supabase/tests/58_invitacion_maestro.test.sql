@@ -7,7 +7,7 @@
 -- correo actual. Sirve una vez. Nadie actúa sobre sí: no se invita, no se reenvía ni se revoca.
 begin;
 \ir _ayuda.psql
-select plan(144);
+select plan(148);
 
 -- Contenido: k1 y k2. Configuración: cf. Personas: nora (con cuenta), suse (cuenta suspendida), tomas
 -- (alumno), vale (maestra activa), lalo (maestro suspendido), pia (pendiente de su contraseña).
@@ -312,11 +312,27 @@ select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', pruebas.huella(
   'ni con un resguardo vencido');
 select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'invited_unproven',
   'y el estado dice lo mismo');
-select pruebas.como_dueno();
+-- La invitación de hace diez minutos: un resguardo de su misma hora está vigente, y solo falla por no
+-- ser posterior a ella.
+select pruebas.como_dueno_sistema();
+update private.teacher_invitations set created_at = clock_timestamp() - interval '10 minutes'
+  where id = (pruebas.viva('nora@prueba.test')).id;
 update private.account_security set mailbox_proven_at = (pruebas.viva('nora@prueba.test')).created_at
   where profile_id = 'a0000000-0000-0000-0000-000000000001';
+select pruebas.limpiar();
 select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'needs_mailbox_proof',
   'ni con uno de la misma hora que la invitación');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'invited_unproven',
+  'y el estado dice lo mismo');
+-- Posterior y vigente, pero probado con otro correo.
+select pruebas.como_dueno();
+update private.account_security
+  set mailbox_proven_at = clock_timestamp() - interval '1 minute', mailbox_proven_email = 'otra@prueba.test'
+  where profile_id = 'a0000000-0000-0000-0000-000000000001';
+select is(pruebas.acepta('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'needs_mailbox_proof',
+  'ni con uno probado con otro correo');
+select is(pruebas.estado('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-1')), 'invited_unproven',
+  'y el estado dice lo mismo');
 select pruebas.reclamar('a0000000-0000-0000-0000-000000000001', pruebas.huella('nora-2'));
 
 -- Los textos.
@@ -705,6 +721,12 @@ alter table public.teachers disable trigger publication_guard;
 select ok(exists (select 1 from private.schema_violations() where object_name = 'public.teachers'),
   've el guardián de los maestros apagado');
 alter table public.teachers enable trigger publication_guard;
+drop index private.teacher_invitations_live_email_uq;
+select ok(exists (select 1 from private.schema_violations()
+                  where problem = 'teachers unique index missing: teacher_invitations_live_email_uq'),
+  've que falta el índice de una viva por correo');
+create unique index teacher_invitations_live_email_uq on private.teacher_invitations (email)
+  where accepted_at is null and revoked_at is null;
 select is_empty('select * from private.schema_violations()', 'en cero al restaurar');
 
 select * from finish();
