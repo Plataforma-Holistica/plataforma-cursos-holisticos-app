@@ -32,7 +32,7 @@ function Entries({ current }: { current: PortalEntry }) {
             aria-current={current === link.href ? "page" : undefined}
             className={cx(
               "flex min-h-touch items-center rounded-md px-3 text-body text-text-2 hover:bg-surface-2 hover:text-text",
-              current === link.href && "bg-surface-2 text-text",
+              current === link.href && "border-l-2 border-accent bg-surface-2 text-text",
             )}
           >
             {link.label}
@@ -58,7 +58,7 @@ function Entries({ current }: { current: PortalEntry }) {
 /** La franja de solo lectura del maestro suspendido (diseño, `Banner` de aviso). La reusa el inicio del portal. */
 export function ReadOnlyBanner() {
   return (
-    <div role="status" className="border-b border-warning bg-warning-bg px-4 py-3 text-body text-text sm:px-8">
+    <div role="status" className="sticky top-0 z-10 border-b border-warning bg-warning-bg px-4 py-3 text-body text-text sm:px-8">
       {messages.portal.readOnly}
     </div>
   );

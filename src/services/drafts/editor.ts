@@ -7,7 +7,8 @@ import { createDrafts } from "./drafts";
 import { databaseDraftsStore } from "./store";
 
 // El borrador de los cursos, ya armado con la guarda de sesión, la base y el registro de errores.
-// Lo que importan las pantallas.
+// Lo que importan las pantallas. `draftChoices` lee como sistema y no corre ninguna guarda: los ids que
+// recibe salen siempre de un borrador que la persona ya leyó como ella (`draftCourse`).
 
 export type {
   CatalogChoice,

@@ -9,8 +9,9 @@ import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from "@
 // Un campo de texto del borrador con su contador (diseño, sección 5.3: «18 / 60»; el título del curso
 // avisa al acercarse al límite, 03 §4.1). El contador lo pinta el servidor con lo que ya trae, y con
 // JavaScript sigue lo que se escribe; el aviso de que quedan pocos se anuncia, el contador no, para no
-// hablar con cada tecla. Sin JavaScript el navegador no deja pasar del tope (`maxLength`), y la regla
-// del dominio revisa lo demás al enviar.
+// hablar con cada tecla. No lleva `maxLength`: el navegador cuenta unidades de UTF-16 y la regla del
+// dominio cuenta caracteres, así que un título con emojis se cortaba antes de su tope. El tope lo dice la
+// regla al enviar.
 
 const AREA_CLASSES =
   "min-h-32 w-full rounded-md border border-border-control bg-surface-2 px-3 py-2 text-body text-text transition-colors duration-(--duration-fast) ease-standard focus-visible:border-focus aria-invalid:border-danger read-only:text-text-2";
@@ -39,7 +40,6 @@ export function CountedField({ id, name, label, max, warnAt, defaultValue, error
     name,
     defaultValue,
     readOnly,
-    maxLength: max,
     "aria-required": optional ? undefined : true,
     "aria-invalid": error ? true : undefined,
     "aria-describedby": describedBy(counterId, error ? errorId : undefined),

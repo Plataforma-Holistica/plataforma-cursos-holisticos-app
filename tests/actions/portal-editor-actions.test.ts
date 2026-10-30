@@ -85,7 +85,7 @@ describe("los datos del curso", () => {
 
   it("le pasa al servicio lo que llegó con la revisión del botón; guardado, lo dice y vuelve a leer", async () => {
     once("saveCourse", { kind: "saved" });
-    expect(await editorAction(IDLE, save())).toEqual({ kind: "done", what: "saved", attempt: 1 });
+    expect(await editorAction(IDLE, save())).toEqual({ kind: "done", what: "saved", target: "course", attempt: 1 });
     expect(mocks.saveCourse).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, seen: 4, title: "Respirar", summary: "", practiceId: PRACTICE, levelId: null });
     expect(calls.order).toEqual(["saveCourse", "refresh"]);
   });
@@ -95,7 +95,7 @@ describe("los datos del curso", () => {
       kind: "invalid",
       problems: { title: "required" },
       values: { title: " ", summary: "", practice: PRACTICE, level: "" },
-      target: null,
+      target: "course",
       attempt: 1,
     });
     expect(mocks.saveCourse).not.toHaveBeenCalled();
@@ -106,14 +106,14 @@ describe("los datos del curso", () => {
     expect(await editorAction(IDLE, save())).toMatchObject({ kind: "invalid", problems: { practice: "practice_inactive" }, values: { title: "Respirar" } });
   });
 
-  it("si cambió en otra pestaña, lo dice, conserva lo escrito y vuelve a leer", async () => {
+  it("si cambió en otra pestaña, lo dice y vuelve a leer, sin devolver lo escrito: se pinta lo de ahora", async () => {
     once("saveCourse", { kind: "changed" });
-    expect(await editorAction(IDLE, save())).toMatchObject({ kind: "failed", reason: "changed", values: { title: "Respirar" } });
+    expect(await editorAction(IDLE, save())).toEqual({ kind: "failed", reason: "changed", values: null, target: "course", attempt: 1 });
     expect(calls.order).toEqual(["saveCourse", "refresh"]);
   });
 
-  it("«no se supo» nunca es guardado", async () => {
-    expect(await editorAction(IDLE, save())).toMatchObject({ kind: "failed", reason: "unavailable" });
+  it("«no se supo» nunca es guardado, y conserva lo escrito", async () => {
+    expect(await editorAction(IDLE, save())).toMatchObject({ kind: "failed", reason: "unavailable", values: { title: "Respirar" } });
   });
 
   it("un maestro que se suspendió vuelve a la misma pantalla, donde decide la guarda", async () => {
@@ -125,13 +125,13 @@ describe("los datos del curso", () => {
 describe("la estructura", () => {
   it("un módulo agregado se abre en el editor", async () => {
     once("addModule", { kind: "created", id: MODULE });
-    await expect(editorAction(IDLE, form([["do", editorButton.addModule(2)], ["title", "Inicio"]]))).rejects.toThrow(`redirige a ${BASE}?modulo=${MODULE}`);
+    await expect(editorAction(IDLE, form([["do", editorButton.addModule(2)], ["title", "Inicio"]]))).rejects.toThrow(`redirige a ${BASE}?modulo=${MODULE}#bloque-editor-modulo`);
     expect(mocks.addModule).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, seen: 2, title: "Inicio" });
   });
 
   it("una lección agregada se abre en el editor", async () => {
     once("addLesson", { kind: "created", id: LESSON });
-    await expect(editorAction(IDLE, form([["do", editorButton.addLesson(MODULE, 3)], ["title", "Una"]]))).rejects.toThrow(`redirige a ${BASE}?leccion=${LESSON}`);
+    await expect(editorAction(IDLE, form([["do", editorButton.addLesson(MODULE, 3)], ["title", "Una"]]))).rejects.toThrow(`redirige a ${BASE}?leccion=${LESSON}#bloque-editor-leccion`);
     expect(mocks.addLesson).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, module: MODULE, seen: 3, title: "Una" });
   });
 
@@ -142,7 +142,7 @@ describe("la estructura", () => {
 
   it("subir y mover llevan lo que se vio", async () => {
     once("moveModule", { kind: "moved" });
-    expect(await editorAction(IDLE, form([["do", editorButton.moduleUp(MODULE, 2)]]))).toEqual({ kind: "done", what: "moved", attempt: 1 });
+    expect(await editorAction(IDLE, form([["do", editorButton.moduleUp(MODULE, 2)]]))).toEqual({ kind: "done", what: "moved", target: "move", attempt: 1 });
     expect(mocks.moveModule).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, module: MODULE, seenPosition: 2, toPosition: 1 });
     once("moveLesson", { kind: "moved" });
     await editorAction(IDLE, form([["do", editorButton.lessonMove(LESSON, MODULE, 1)], ["to", moveTarget(OTHER, 4)]]));
@@ -157,12 +157,16 @@ describe("la estructura", () => {
 
 describe("un módulo o una lección", () => {
   it("preguntar antes de borrar no llama a nadie", async () => {
-    expect(await editorAction(IDLE, form([["do", editorButton.askDeleteLesson(LESSON)]]))).toEqual({ kind: "confirming", attempt: 1 });
+    expect(await editorAction(IDLE, form([["do", editorButton.askDeleteLesson(LESSON)], ["title", "Una"], ["description", "Qué."]]))).toEqual({
+      kind: "confirming",
+      values: { title: "Una", description: "Qué." },
+      attempt: 1,
+    });
     expect(calls.order).toEqual([]);
   });
 
   it("cancelar vuelve al bloque sin llamar a nadie", async () => {
-    expect(await editorAction({ kind: "confirming", attempt: 1 }, form([["do", editorButton.cancel()]]))).toEqual(IDLE);
+    expect(await editorAction({ kind: "confirming", values: {}, attempt: 1 }, form([["do", editorButton.cancel()]]))).toEqual(IDLE);
     expect(calls.order).toEqual([]);
   });
 

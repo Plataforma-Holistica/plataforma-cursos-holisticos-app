@@ -89,7 +89,7 @@ describe("PA-43 · El editor de curso", () => {
     const links = screen.getAllByRole("link", { name: "Mis cursos" });
     expect(links.length).toBe(3);
     for (const link of links) expect(link.getAttribute("href")).toBe("/portal/cursos");
-    expect(screen.getByRole("textbox", { name: "Título del curso" }).getAttribute("maxlength")).toBe("60");
+    expect(screen.getByText("8 / 60")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Guardar" }).getAttribute("value")).toBe("save-course:4");
     expect(await a11yViolations(container)).toEqual([]);
   });

@@ -11,6 +11,9 @@ import { screenAt } from "../_lib/screens";
 // propia, por lo mismo que las de administración: a quien no es maestro, toda ruta bajo `/portal` le
 // contesta lo mismo, exista o no. Una pantalla nueva entra a `_lib/screens.tsx`. No exporta `metadata`.
 
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const single = (value: string | string[] | undefined) => (typeof value === "string" ? value : null);
+
 export default async function PortalRestPage({
   params,
   searchParams,
@@ -20,7 +23,11 @@ export default async function PortalRestPage({
 }) {
   const { resto } = await params;
   const search = await searchParams;
-  const path = `${ROUTES.portal}/${resto.join("/")}`;
+  // La ruta, con lo elegido en el editor si tiene forma: es a donde se vuelve después de entrar.
+  const lesson = single(search.leccion);
+  const chosenModule = single(search.modulo);
+  const query = lesson !== null && ID.test(lesson) ? `?leccion=${lesson}` : chosenModule !== null && ID.test(chosenModule) ? `?modulo=${chosenModule}` : "";
+  const path = `${ROUTES.portal}/${resto.join("/")}${query}`;
   const screen = screenAt(resto);
 
   const step = await requireTeacher(path);

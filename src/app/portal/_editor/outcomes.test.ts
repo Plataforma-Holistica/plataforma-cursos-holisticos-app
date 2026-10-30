@@ -55,7 +55,7 @@ describe("readEditorForm", () => {
       { step: "move_lesson", course: COURSE, lesson: LESSON, from: { module: MODULE, position: 2 }, to: { module: OTHER, position: 5 } },
     ],
     ["renombrar un módulo", [["do", editorButton.saveModule(MODULE, 3)], ["title", "Cierre"]], { step: "save_module", course: COURSE, module: MODULE, seen: 3, title: "Cierre" }],
-    ["preguntar antes de borrar un módulo", [["do", editorButton.askDeleteModule(MODULE)], ["title", "x"]], { step: "ask_delete", course: COURSE }],
+    ["preguntar antes de borrar un módulo", [["do", editorButton.askDeleteModule(MODULE)], ["title", "x"]], { step: "ask_delete", course: COURSE, title: "x", description: "" }],
     ["borrar un módulo", [["do", editorButton.deleteModule(MODULE, 3)]], { step: "delete_module", course: COURSE, module: MODULE, seen: 3 }],
     [
       "guardar una lección",

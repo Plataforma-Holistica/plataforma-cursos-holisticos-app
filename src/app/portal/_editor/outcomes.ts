@@ -47,7 +47,7 @@ export const moveTarget = (module: string, position: number) => `${module}:${pos
 export type EditorRequest =
   | { step: "none" }
   | { step: "cancel"; course: string }
-  | { step: "ask_delete"; course: string }
+  | { step: "ask_delete"; course: string; title: string; description: string }
   | { step: "save_course"; course: string; seen: number; title: string; summary: string; practice: string | null; level: string | null }
   | { step: "add_module"; course: string; seen: number; title: string }
   | { step: "add_lesson"; course: string; module: string; seen: number; title: string }
@@ -130,7 +130,7 @@ export function readEditorForm(form: unknown): EditorRequest {
     }
     case "ask-delete-module":
     case "ask-delete-lesson":
-      return isId(a) && b === undefined ? { step: "ask_delete", course } : NONE;
+      return isId(a) && b === undefined ? { step: "ask_delete", course, title: title(), description: textField(form, "description") } : NONE;
     default:
       return NONE;
   }
@@ -144,9 +144,16 @@ export type Problems = Readonly<Record<string, TextProblem | "practice_inactive"
 
 export type BlockState =
   | { kind: "idle" }
-  /** Se pidió borrar: el bloque pinta la confirmación. */
-  | { kind: "confirming"; attempt: number }
-  | { kind: "done"; what: "saved" | "moved"; attempt: number }
-  /** `target`: en el bloque de la estructura, qué formulario tenía el error (`module`, o el id del módulo). */
-  | { kind: "invalid"; problems: Problems; values: Values; target: string | null; attempt: number }
-  | { kind: "failed"; reason: ChangeFailure; values: Values; target: string | null; attempt: number };
+  /**
+   * Se pidió borrar: el bloque pinta la confirmación. Trae lo escrito: React devuelve los campos del
+   * formulario que envió a su valor por omisión al terminar la acción, y ese valor tiene que ser lo escrito.
+   */
+  | { kind: "confirming"; values: Values; attempt: number }
+  /**
+   * `target` dice qué formulario contestó: `course`, `item`, `move`, `module` (agregar un módulo) o el id del
+   * módulo al que se agregaba una lección. Un campo se vuelve a armar solo con la respuesta de su formulario.
+   */
+  | { kind: "done"; what: "saved" | "moved"; target: string; attempt: number }
+  | { kind: "invalid"; problems: Problems; values: Values; target: string; attempt: number }
+  /** Con `changed` no vuelve lo escrito: se pinta lo que hay ahora, para no pisar lo que cambió otra pestaña. */
+  | { kind: "failed"; reason: ChangeFailure; values: Values | null; target: string; attempt: number };

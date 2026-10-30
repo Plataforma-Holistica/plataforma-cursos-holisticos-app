@@ -101,8 +101,8 @@ function savedLabel(updatedAt: string, now: Date): string {
   return sameDay ? t(text.savedAt, { time }) : t(text.savedOn, { date: longDate(updatedAt), time });
 }
 
-function options(list: readonly { id: string; name: string; active: boolean }[]): Option[] {
-  return list.map((item) => ({ value: item.id, label: item.active ? item.name : t(text.inactive, { name: item.name }) }));
+function options(list: readonly { id: string; name: string; active: boolean }[], inactive: typeof text.inactivePractice | typeof text.inactiveLevel): Option[] {
+  return list.map((item) => ({ value: item.id, label: item.active ? item.name : t(inactive, { name: item.name }) }));
 }
 
 export function editorView(
@@ -191,8 +191,8 @@ export function editorView(
       summary: draft.summary ?? "",
       practice: draft.practiceId ?? "",
       level: draft.levelId ?? "",
-      practices: options(choices.practices),
-      levels: options(choices.levels),
+      practices: options(choices.practices, text.inactivePractice),
+      levels: options(choices.levels, text.inactiveLevel),
       inactive: practice?.active === false || level?.active === false,
       cover: { title: draft.title, teacherName: draft.teacherName ?? "", practiceName: practice?.name ?? null, tone: practice?.tone ?? null },
       save: editorButton.saveCourse(draft.revision),

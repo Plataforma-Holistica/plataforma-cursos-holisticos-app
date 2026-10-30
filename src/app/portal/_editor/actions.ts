@@ -20,6 +20,7 @@ import {
 
 import { changeOutcome } from "../_lib/change";
 import { checkDraftText } from "../_lib/text";
+import { LESSON_ID, MODULE_ID } from "./anchors";
 import { readEditorForm, type BlockState, type EditorRequest, type Problems } from "./outcomes";
 
 // La acción del editor de curso (PA-43; T-402), la misma para todos sus bloques, cada uno con su estado.
@@ -73,11 +74,21 @@ function problemsOf(request: EditorRequest): Problems {
   return Object.fromEntries(Object.entries(found).filter((entry): entry is [string, NonNullable<(typeof entry)[1]>] => entry[1] !== null));
 }
 
-/** Qué formulario de la estructura envió, para pintar ahí su error. */
-function targetOf(request: EditorRequest): string | null {
-  if (request.step === "add_module") return "module";
-  if (request.step === "add_lesson") return request.module;
-  return null;
+/** Qué formulario envió (`BlockState`), para pintar ahí su respuesta. */
+function targetOf(request: Exclude<EditorRequest, { step: "none" | "cancel" | "ask_delete" }>): string {
+  switch (request.step) {
+    case "save_course":
+      return "course";
+    case "add_module":
+      return "module";
+    case "add_lesson":
+      return request.module;
+    case "move_module":
+    case "move_lesson":
+      return "move";
+    default:
+      return "item";
+  }
 }
 
 /** La pantalla a la que se vuelve: con lo elegido de ese formulario, si era un módulo o una lección. */
@@ -115,7 +126,7 @@ export async function editorAction(previous: BlockState, form: FormData): Promis
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
   // Preguntar antes de borrar no llama a nadie: el bloque pinta la confirmación con lo que su página leyó.
-  if (request.step === "ask_delete") return { kind: "confirming", attempt };
+  if (request.step === "ask_delete") return { kind: "confirming", values: { title: request.title, description: request.description }, attempt };
 
   const values = valuesOf(request);
   const target = targetOf(request);
@@ -128,12 +139,14 @@ export async function editorAction(previous: BlockState, form: FormData): Promis
   if (outcome.kind === "done" && (outcome.answer === "created" || outcome.answer === "deleted")) {
     const selection =
       outcome.answer === "deleted" || outcome.id === null ? {} : request.step === "add_module" ? { module: outcome.id } : { lesson: outcome.id };
-    return leaveFor(jar, { to: portalCoursePath(request.course, selection) ?? ROUTES.portalCourses, notice: null });
+    // Sin JavaScript el navegador se llevaría el ancla del bloque que envió: la de lo agregado lo deja ahí.
+    const anchor = outcome.answer === "deleted" || outcome.id === null ? "" : `#${request.step === "add_module" ? MODULE_ID : LESSON_ID}`;
+    return leaveFor(jar, { to: `${portalCoursePath(request.course, selection) ?? ROUTES.portalCourses}${anchor}`, notice: null });
   }
 
   refresh();
-  if (outcome.kind === "done") return { kind: "done", what: outcome.answer === "moved" ? "moved" : "saved", attempt };
+  if (outcome.kind === "done") return { kind: "done", what: outcome.answer === "moved" ? "moved" : "saved", target, attempt };
   if (outcome.reason === "practice_inactive") return { kind: "invalid", problems: { practice: "practice_inactive" }, values, target, attempt };
   if (outcome.reason === "level_inactive") return { kind: "invalid", problems: { level: "level_inactive" }, values, target, attempt };
-  return { kind: "failed", reason: outcome.reason, values, target, attempt };
+  return { kind: "failed", reason: outcome.reason, values: outcome.reason === "changed" ? null : values, target, attempt };
 }

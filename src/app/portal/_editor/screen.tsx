@@ -36,7 +36,8 @@ export function EditorScreen({ view }: { view: EditorView }) {
       {view.notice !== null && <InlineAlert tone="neutral">{view.notice}</InlineAlert>}
       <div className="grid gap-8 lg:grid-cols-editor">
         <div id="estructura" className={cx(chosen ? "order-2" : "order-1", "lg:order-1")}>
-          <StructureBlock view={view} />
+          {/* Con lo elegido cambia la dirección: lo que dijo el último envío no sigue en pantalla. */}
+          <StructureBlock key={view.paths.self} view={view} />
         </div>
         <div className={cx(chosen ? "order-1" : "order-2", "flex flex-col gap-4 lg:order-2")}>
           {chosen && (

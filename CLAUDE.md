@@ -671,7 +671,15 @@ que no se ve leyendo un solo archivo:
   `_lib/change.ts`, también `kind: "session"`. Usa integración 73 y, en `tests/e2e/equipo/portal.equipo.ts`, FL-32 con
   JavaScript y sin él: un maestro con cuenta no se puede borrar (`teachers.profile_id`), así que no va en la corrida
   normal. Para el A: `requireTeacher` y `teacherStanding` son el punto donde su tercera solicitud suma los estados de la
-  invitación y del aviso (`teacher_standing`), y `src/app/portal/page.tsx` (el inicio) es suyo.
+  invitación y del aviso (`teacher_standing`), y `src/app/portal/page.tsx` (el inicio) es suyo. Acordado con el A el
+  2026-10-29: hasta su tercera solicitud la guarda lee `teachers.status`, así que un maestro activo sin el aviso
+  vigente entra como activo (no pasa fuera de local: en producción no hay maestros ni textos del maestro
+  publicados), y `/portal` a secas da el 404 de Next sin pasar por la guarda aunque ya esté en `SESSION_ROUTES`.
+  Dos cosas de la revisión del diff: React 19 devuelve los campos del formulario que envió a su valor por omisión
+  al terminar la acción, así que lo escrito que debe quedarse viaja en el estado y se vuelve el valor por omisión
+  (`useResponses` en `_editor/blocks.tsx`, también al pedir confirmar un borrado); y con `changed` no vuelve lo
+  escrito, para no pisar en un segundo clic lo que cambió otra pestaña. El nombre de la portada sale de
+  `profiles.display_name`, no de `published_teachers` (decisión mía sin confirmar).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
