@@ -147,7 +147,7 @@ test("FL-32 con JavaScript: crea un curso, lo llena, ordena, mueve, borra, sale 
   await page.locator("form", { has: page.getByRole("combobox", { name: "Mover Tres a otro módulo" }) }).getByRole("button", { name: "Mover" }).click();
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
   await page.getByRole("button", { name: "Bajar Inicio" }).click();
-  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveAccessibleName("Módulo 1: Cierre");
 
   // La lección: su descripción, y borrarla con confirmación.
   await page.getByRole("link", { name: "Una", exact: true }).click();
@@ -348,7 +348,7 @@ test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar
   await drag(page, page.getByRole("button", { name: "Arrastrar Tres" }), page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
   await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
   await drag(page, page.getByRole("button", { name: "Arrastrar Cierre" }), page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
-  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveAccessibleName("Módulo 1: Cierre");
 
   // Salir con algo escrito pregunta; sin nada, no.
   await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("A medias");

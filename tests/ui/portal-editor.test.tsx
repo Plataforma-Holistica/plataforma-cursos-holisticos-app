@@ -147,7 +147,11 @@ describe("PA-43 · El editor de curso", () => {
     expect(screen.getByRole("group", { name: "Práctica y nivel" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Portada" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Presentación" }).getAttribute("aria-describedby")).toBe("editor-presentacion-nota");
-    expect(screen.getByRole("link", { name: "Módulo 1: Inicio" })).toBeTruthy();
+    // Lo que se ve del enlace está en su nombre (WCAG 2.5.3): sin `aria-label`, y el número de arriba fuera y oculto.
+    const moduleLink = screen.getByRole("link", { name: "Módulo 1: Inicio" });
+    expect(moduleLink.hasAttribute("aria-label")).toBe(false);
+    expect(moduleLink.textContent).toBe("Módulo 1: Inicio");
+    expect(moduleLink.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByRole("link", { name: "Datos del curso" }).getAttribute("aria-current")).toBe("true");
     // El número se lee junto al título: quien ve dice «la 1.2».
     const number = screen.getByText("1.2");

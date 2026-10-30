@@ -529,15 +529,16 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
       <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b border-border p-3", module.current ? "bg-accent-subtle" : "bg-surface-2")}>
         <span className="flex min-w-0 items-center gap-2">
           {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
-          <Link
-            href={module.href}
-            aria-current={module.current ? "true" : undefined}
-            aria-label={t(text.moduleLink, { label: module.label, title: module.title })}
-            className="flex min-h-touch min-w-0 flex-col justify-center text-text hover:underline"
-          >
-            <span className="text-label text-text-3 uppercase">{module.label}</span>
-            <span className="text-h3 break-words">{module.title}</span>
-          </Link>
+          {/* El número va arriba, a la vista; el enlace lo lleva en su nombre («Módulo 1: Inicio») con un texto que solo
+              oye el lector, para que su nombre contenga lo que se ve (WCAG 2.5.3). */}
+          <span className="flex min-w-0 flex-col">
+            <span aria-hidden="true" className="text-label text-text-3 uppercase">
+              {module.label}
+            </span>
+            <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center text-h3 break-words text-text hover:underline">
+              <span className="sr-only">{t(text.moduleLabel, { label: module.label })}</span> {module.title}
+            </Link>
+          </span>
         </span>
         {view.editable && (
           <MoveButtons

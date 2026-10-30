@@ -90,7 +90,7 @@ export const portal = defineMessages({
     structure: "Estructura del curso",
     courseData: "Datos del curso",
     module: "Módulo {number}",
-    moduleLink: "{label}: {title}",
+    moduleLabel: "{label}:",
     addModule: "Agregar módulo",
     addLesson: "Agregar lección",
     newModuleLabel: "Título del módulo nuevo",
