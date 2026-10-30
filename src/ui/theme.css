@@ -275,6 +275,8 @@
   --container-page: 90rem;  /* 1440 px */
   /* Un formulario y un estado de pantalla completa: 480 px. */
   --container-form: 30rem;
+  /* El editor de curso (PA-43): la estructura a 36 % y lo elegido a 64 %. */
+  --grid-template-columns-editor: 36fr 64fr;
 
   --ease-*: initial;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);

@@ -5,6 +5,7 @@ import type { VerifiedClaims } from "@/services/account/account";
 import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
 import { DeleteCourseSection } from "../_cursos/remove";
+import { EditorSection } from "../_editor/section";
 
 // Las pantallas del portal del maestro (T-402). Ninguna tiene su propia página: todas las sirve el
 // comodín (`[...resto]/page.tsx`), después de correr la guarda, por lo mismo que en administración: con
@@ -34,6 +35,7 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   if (id === undefined) return { render: ({ claims, readOnly }) => <CoursesSection claims={claims} readOnly={readOnly} /> };
   if (id === "nuevo") return page === undefined ? { render: ({ readOnly }) => <NewCourseSection readOnly={readOnly} /> } : null;
   if (!ID_SEGMENT.test(id)) return null;
+  if (page === undefined) return { render: ({ claims, readOnly, search }) => <EditorSection claims={claims} course={id} readOnly={readOnly} search={search} /> };
   if (page === "borrar") return { render: ({ claims, readOnly }) => <DeleteCourseSection claims={claims} course={id} readOnly={readOnly} /> };
   return null;
 }

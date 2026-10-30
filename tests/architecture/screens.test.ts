@@ -85,6 +85,12 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
  * cada acción hace con cada respuesta lo prueban `tests/actions/` y sus tablas.
  */
 const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
+  "src/app/portal/_editor/actions.ts": {
+    // El editor de curso (T-402, PA-43): una acción para todos sus bloques. Revisa los textos con la regla
+    // del dominio antes del servicio, que corre la guarda; la base escribe solo a nombre del maestro activo.
+    editorAction:
+      /const problems = problemsOf\(request\);[\s\S]*const outcome = changeOutcome\(await ask\(jar, request\), backOf\(request\)\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
   "src/app/portal/_cursos/actions.ts": {
     // Crear y borrar un curso (T-402): el servicio corre la guarda, y la base escribe solo a nombre del
     // maestro activo. Crear lleva el testigo del formulario; borrar, la revisión que se vio.
@@ -744,6 +750,10 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-contrasena",
       "bloque-curso-borrar",
       "bloque-curso-nuevo",
+      "bloque-editor-datos",
+      "bloque-editor-estructura",
+      "bloque-editor-leccion",
+      "bloque-editor-modulo",
       "bloque-equipo-codigo",
       "bloque-equipo-invitaciones",
       "bloque-equipo-invitar",
