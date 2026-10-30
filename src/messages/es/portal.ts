@@ -119,6 +119,7 @@ export const portal = defineMessages({
     descriptionLabel: "Descripción",
     save: "Guardar",
     saving: "Guardando…",
+    working: "Un momento…",
     saved: "Guardado.",
     added: "Agregado.",
     moved: "Movido.",

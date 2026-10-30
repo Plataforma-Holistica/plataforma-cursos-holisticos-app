@@ -63,7 +63,7 @@ describe("readEditorForm", () => {
       { step: "save_lesson", course: COURSE, lesson: LESSON, seen: 2, title: "Una", description: "Qué se hace." },
     ],
     ["borrar una lección", [["do", editorButton.deleteLesson(LESSON, 2)]], { step: "delete_lesson", course: COURSE, lesson: LESSON, seen: 2 }],
-    ["cancelar", [["do", editorButton.cancel()]], { step: "cancel", course: COURSE }],
+    ["cancelar", [["do", editorButton.cancel()], ["title", "Una"]], { step: "cancel", course: COURSE, title: "Una", description: "" }],
   ] as [string, [string, string][], unknown][])("%s", (_name, entries, expected) => {
     expect(readEditorForm(form(entries))).toEqual(expected);
   });

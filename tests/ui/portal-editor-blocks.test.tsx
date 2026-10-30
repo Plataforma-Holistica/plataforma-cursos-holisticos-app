@@ -92,8 +92,11 @@ describe("los bloques del editor", () => {
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(screen.getByText("Guardado.")).toBeTruthy());
-    await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
+    const title = screen.getByRole("textbox", { name: "Título del curso" }) as HTMLInputElement;
+    await user.type(title, " más");
     expect(screen.queryByText("Guardado.")).toBeNull();
+    expect(title.value).toBe("Respirar más");
+    expect(title).toHaveFocus();
   });
 
   it("una práctica que volvió y ya no está entre las opciones no se queda en blanco: vuelve la del borrador", async () => {
@@ -123,5 +126,28 @@ describe("los bloques del editor", () => {
     await waitFor(() => expect(question.parentElement).toHaveFocus());
     expect((screen.getByRole("textbox", { name: "Título de la lección" }) as HTMLInputElement).value).toBe("Una nueva");
     expect(screen.getByRole("button", { name: "Borrar lección" }).getAttribute("value")).toBe(`delete-lesson:${L1}:1`);
+  });
+
+  it("después de cancelar un borrado, guardar se anota: el campo muestra lo guardado y no lo de antes", async () => {
+    const echo = (kind: "confirming" | "kept") => (_previous: unknown, form: FormData) =>
+      Promise.resolve({ kind, values: { title: String(form.get("title")), description: String(form.get("description")) }, attempt: 1 });
+    actions.editorAction
+      .mockImplementationOnce(echo("confirming"))
+      .mockImplementationOnce(echo("kept"))
+      // Las tres con el mismo número de intento: la memoria de cada formulario no debe depender de él.
+      .mockResolvedValueOnce({ kind: "done", what: "saved", target: "item", attempt: 1 });
+    const { user } = show({ leccion: L1 });
+    const title = () => screen.getByRole("textbox", { name: "Título de la lección" }) as HTMLInputElement;
+    await user.type(title(), " nueva");
+    await user.click(screen.getByRole("button", { name: "Borrar lección" }));
+    await user.click(await screen.findByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull());
+    expect(title().value).toBe("Una nueva");
+    await user.clear(title());
+    await user.type(title(), "Dos");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(screen.getByText("Guardado.")).toBeTruthy());
+    // Guardado, se pinta lo leído (aquí, la vista de la prueba): nunca lo escrito antes de cancelar.
+    expect(title().value).not.toBe("Una nueva");
   });
 });

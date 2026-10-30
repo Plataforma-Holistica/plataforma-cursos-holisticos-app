@@ -60,15 +60,17 @@ interface Remembered {
  * anterior, como manda React para lo que se deriva de lo que cambió).
  */
 function useResponses(state: BlockState) {
-  const [memory, setMemory] = useState<{ last: number; byTarget: Readonly<Record<string, Remembered>> }>({ last: 0, byTarget: {} });
-  if (state.kind !== "idle" && state.attempt !== memory.last) {
+  // Se compara la respuesta misma y no su número de intento: después de «Cancelar» el número vuelve a
+  // empezar en la acción, y la respuesta siguiente no se anotaría.
+  const [memory, setMemory] = useState<{ last: BlockState; byTarget: Readonly<Record<string, Remembered>> }>({ last: IDLE, byTarget: {} });
+  if (state.kind !== "idle" && state !== memory.last) {
     const byTarget = { ...memory.byTarget };
     if (state.kind === "invalid") byTarget[state.target] = { attempt: state.attempt, values: state.values };
     if (state.kind === "failed") byTarget[state.target] = { attempt: state.attempt, values: state.values };
     if (state.kind === "done") byTarget[state.target] = { attempt: state.attempt, values: null };
     // Preguntar antes de borrar no vuelve a armar los campos: solo cambia su valor por omisión.
-    if (state.kind === "confirming") byTarget.item = { attempt: memory.byTarget.item?.attempt ?? 0, values: state.values };
-    setMemory({ last: state.attempt, byTarget });
+    if (state.kind === "confirming" || state.kind === "kept") byTarget.item = { attempt: memory.byTarget.item?.attempt ?? 0, values: state.values };
+    setMemory({ last: state, byTarget });
   }
   return {
     keyOf: (target: string) => `${target}-${memory.byTarget[target]?.attempt ?? 0}`,
@@ -76,11 +78,15 @@ function useResponses(state: BlockState) {
   };
 }
 
-/** Lo que se dice del último envío: nada mientras hay otro en camino o desde que se volvió a escribir. */
-function useResult(state: BlockState, pending: boolean) {
-  const [typedAt, setTypedAt] = useState(-1);
-  const attempt = attemptOf(state);
-  const silent = pending || typedAt === attempt;
+/**
+ * Lo que se dice del último envío: nada mientras hay otro en camino, desde que se volvió a escribir, ni
+ * después de elegir otra cosa en la estructura (la dirección `self` cambió).
+ */
+function useResult(state: BlockState, pending: boolean, self: string) {
+  const [typedFor, setTypedFor] = useState<BlockState | null>(null);
+  const [seen, setSeen] = useState<{ state: BlockState; self: string }>({ state, self });
+  if (seen.state !== state) setSeen({ state, self });
+  const silent = pending || typedFor === state || (seen.state === state && seen.self !== self);
   let message: string | null = null;
   let tone: "success" | "warning" | "danger" = "success";
   if (!silent && state.kind === "done") message = state.what === "moved" ? text.moved : text.saved;
@@ -88,7 +94,7 @@ function useResult(state: BlockState, pending: boolean) {
     message = failureText(state.reason);
     tone = "danger";
   }
-  return { message, tone, onInput: () => setTypedAt(attempt) };
+  return { message, tone, onInput: () => setTypedFor(state) };
 }
 
 function problemOf(state: BlockState, name: string, target: string): Problems[string] | null {
@@ -113,7 +119,7 @@ function chosen(value: string, options: readonly Option[], read: string): string
 export function CourseBlock({ view }: { view: EditorView }) {
   const [state, action, pending] = useActionState(editorAction, IDLE, `${view.paths.self}#${DATA_ID}`);
   const responses = useResponses(state);
-  const result = useResult(state, pending);
+  const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
   const { data } = view;
   const titleError = fieldError("courseTitle", problemOf(state, "title", "course"));
@@ -348,7 +354,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending }
 export function StructureBlock({ view }: { view: EditorView }) {
   const [state, action, pending] = useActionState(editorAction, IDLE, `${view.paths.self}#${STRUCTURE_ID}`);
   const responses = useResponses(state);
-  const result = useResult(state, pending);
+  const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
   const moduleError = fieldError("moduleTitle", problemOf(state, "title", "module"));
   const errors: FormError[] = [];
@@ -410,8 +416,9 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   const blockId = isLesson ? LESSON_ID : MODULE_ID;
   const [state, action, pending] = useActionState(editorAction, IDLE, `${view.paths.self}#${blockId}`);
   const responses = useResponses(state);
-  const result = useResult(state, pending);
-  const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
+  const result = useResult(state, pending, view.paths.self);
+  // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
+  const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), result.message);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.
@@ -442,7 +449,14 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
         <form action={action} onInput={result.onInput} className="flex flex-col gap-6">
           <CourseField course={view.course} />
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
-          <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
+          <BlockResult
+            message={result.message}
+            tone={result.tone}
+            pending={pending}
+            pendingText={state.kind === "confirming" ? text.working : text.saving}
+            answer={answer}
+            spoken={spoken}
+          />
           <div key={responses.keyOf("item")} className="flex flex-col gap-6">
             <CountedField
               id="editor-elegido-titulo"
@@ -473,10 +487,10 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
             <div ref={confirm} tabIndex={-1} className="flex flex-col gap-3 rounded-md border border-danger p-4 outline-none">
               <p className="text-body">{confirmText}</p>
               <div className="flex flex-wrap gap-3">
-                <Button type="submit" name="do" value="cancel" variant="secondary" pending={pending} loadingLabel={text.saving}>
+                <Button type="submit" name="do" value="cancel" variant="secondary">
                   {text.cancel}
                 </Button>
-                <Button type="submit" name="do" value={selected.remove} variant="danger" loading={pending} loadingLabel={text.deleting}>
+                <Button type="submit" name="do" value={selected.remove} variant="danger">
                   {deleteLabel}
                 </Button>
               </div>

@@ -46,7 +46,7 @@ export const moveTarget = (module: string, position: number) => `${module}:${pos
 
 export type EditorRequest =
   | { step: "none" }
-  | { step: "cancel"; course: string }
+  | { step: "cancel"; course: string; title: string; description: string }
   | { step: "ask_delete"; course: string; title: string; description: string }
   | { step: "save_course"; course: string; seen: number; title: string; summary: string; practice: string | null; level: string | null }
   | { step: "add_module"; course: string; seen: number; title: string }
@@ -80,7 +80,7 @@ export function readEditorForm(form: unknown): EditorRequest {
 
   switch (verb) {
     case "cancel":
-      return a === undefined ? { step: "cancel", course } : NONE;
+      return a === undefined ? { step: "cancel", course, title: title(), description: textField(form, "description") } : NONE;
     case "save-course": {
       const seen = countOf(a);
       const practice = choiceOf(form, "practice");
@@ -149,6 +149,8 @@ export type BlockState =
    * formulario que envió a su valor por omisión al terminar la acción, y ese valor tiene que ser lo escrito.
    */
   | { kind: "confirming"; values: Values; attempt: number }
+  /** Se canceló el borrado: vuelve lo escrito, también sin JavaScript. */
+  | { kind: "kept"; values: Values; attempt: number }
   /**
    * `target` dice qué formulario contestó: `course`, `item`, `move`, `module` (agregar un módulo) o el id del
    * módulo al que se agregaba una lección. Un campo se vuelve a armar solo con la respuesta de su formulario.

@@ -20,7 +20,7 @@ import {
 
 import { changeOutcome } from "../_lib/change";
 import { checkDraftText } from "../_lib/text";
-import { LESSON_ID, MODULE_ID } from "./anchors";
+import { DATA_ID, LESSON_ID, MODULE_ID } from "./anchors";
 import { readEditorForm, type BlockState, type EditorRequest, type Problems } from "./outcomes";
 
 // La acción del editor de curso (PA-43; T-402), la misma para todos sus bloques, cada uno con su estado.
@@ -123,8 +123,10 @@ function ask(jar: Awaited<ReturnType<typeof cookieJar>>, request: Exclude<Editor
 
 export async function editorAction(previous: BlockState, form: FormData): Promise<BlockState> {
   const request = readEditorForm(form);
-  if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
+  if (request.step === "none") return { kind: "idle" };
   const attempt = nextAttempt(previous);
+  // Cancelar el borrado no llama a nadie: vuelve lo escrito, que React devolvería a su valor por omisión.
+  if (request.step === "cancel") return { kind: "kept", values: { title: request.title, description: request.description }, attempt };
   // Preguntar antes de borrar no llama a nadie: el bloque pinta la confirmación con lo que su página leyó.
   if (request.step === "ask_delete") return { kind: "confirming", values: { title: request.title, description: request.description }, attempt };
 
@@ -140,7 +142,7 @@ export async function editorAction(previous: BlockState, form: FormData): Promis
     const selection =
       outcome.answer === "deleted" || outcome.id === null ? {} : request.step === "add_module" ? { module: outcome.id } : { lesson: outcome.id };
     // Sin JavaScript el navegador se llevaría el ancla del bloque que envió: la de lo agregado lo deja ahí.
-    const anchor = outcome.answer === "deleted" || outcome.id === null ? "" : `#${request.step === "add_module" ? MODULE_ID : LESSON_ID}`;
+    const anchor = `#${outcome.answer === "deleted" || outcome.id === null ? DATA_ID : request.step === "add_module" ? MODULE_ID : LESSON_ID}`;
     return leaveFor(jar, { to: `${portalCoursePath(request.course, selection) ?? ROUTES.portalCourses}${anchor}`, notice: null });
   }
 

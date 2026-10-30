@@ -165,14 +165,18 @@ describe("un módulo o una lección", () => {
     expect(calls.order).toEqual([]);
   });
 
-  it("cancelar vuelve al bloque sin llamar a nadie", async () => {
-    expect(await editorAction({ kind: "confirming", values: {}, attempt: 1 }, form([["do", editorButton.cancel()]]))).toEqual(IDLE);
+  it("cancelar no llama a nadie, y devuelve lo escrito", async () => {
+    expect(await editorAction({ kind: "confirming", values: {}, attempt: 1 }, form([["do", editorButton.cancel()], ["title", "Una nueva"]]))).toEqual({
+      kind: "kept",
+      values: { title: "Una nueva", description: "" },
+      attempt: 2,
+    });
     expect(calls.order).toEqual([]);
   });
 
   it("borrada, deja los datos del curso", async () => {
     once("deleteLesson", { kind: "deleted" });
-    await expect(editorAction(IDLE, form([["do", editorButton.deleteLesson(LESSON, 2)]]))).rejects.toThrow(`redirige a ${BASE}`);
+    await expect(editorAction(IDLE, form([["do", editorButton.deleteLesson(LESSON, 2)]]))).rejects.toThrow(`redirige a ${BASE}#bloque-editor-datos`);
     expect(mocks.deleteLesson).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, lesson: LESSON, seen: 2 });
   });
 
