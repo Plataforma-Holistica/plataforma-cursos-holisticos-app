@@ -40,6 +40,9 @@ export const NOTICES = [
   "payouts_updated",
   // Una versión de un texto legal quedó publicada (PA-89, T-110).
   "legal_published",
+  // Un curso en borrador quedó borrado (T-402), o ya no existía cuando se pidió borrarlo otra vez.
+  "course_deleted",
+  "course_gone",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

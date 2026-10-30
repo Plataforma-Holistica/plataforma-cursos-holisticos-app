@@ -43,6 +43,10 @@ export const ROUTES = {
   teachers: "/maestros",
   /** Explorar y buscar (PA-21, T-210): pide sesión (RF-304). Con filtros, `explorePath`. */
   explore: "/explorar",
+  /** El portal del maestro: lo sirve un comodín que corre `requireTeacher` (T-402). */
+  portal: "/portal",
+  /** PA-42, los cursos del maestro. Uno, `portalCoursePath`. */
+  portalCourses: "/portal/cursos",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -60,6 +64,7 @@ export const SESSION_ROUTES: readonly string[] = [
   // Con ella entra también la de configurar, que cuelga de esta.
   ROUTES.secondFactor,
   ROUTES.admin,
+  ROUTES.portal,
 ];
 
 // La lección: `/cursos/{slug}/lecciones/{id}`, exactamente esos cuatro segmentos. No va por
@@ -121,6 +126,23 @@ export function explorePath({ q = null, practice = null, teacher = null, level =
 /** PA-80, el ensayo y el cierre de un periodo. */
 export const periodClosePath = (period: number): string => `${periodPath(period)}/cierre`;
 
+/** Crear un curso (T-402). */
+export const portalNewCoursePath = (): string => `${ROUTES.portalCourses}/nuevo`;
+
+/** PA-43, el editor de un curso; nulo si el id no tiene forma. Con `?modulo=` o `?leccion=`, lo elegido. */
+export function portalCoursePath(course: string, selected: { module?: string; lesson?: string } = {}): string | null {
+  if (!LESSON_ID.test(course)) return null;
+  const base = `${ROUTES.portalCourses}/${course}`;
+  if (selected.lesson !== undefined) return LESSON_ID.test(selected.lesson) ? `${base}?leccion=${selected.lesson}` : base;
+  if (selected.module !== undefined) return LESSON_ID.test(selected.module) ? `${base}?modulo=${selected.module}` : base;
+  return base;
+}
+
+/** Confirmar el borrado de un curso; nulo si el id no tiene forma. */
+export function portalDeleteCoursePath(course: string): string | null {
+  return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/borrar` : null;
+}
+
 /** PA-81, las liquidaciones de un periodo. */
 export const periodPayoutsPath = (period: number): string => `${periodPath(period)}/liquidaciones`;
 
@@ -130,10 +152,10 @@ export const periodPayoutsPath = (period: number): string => `${periodPath(perio
  * registrarse, recuperar, completar la cuenta, las dos del segundo factor) no están: volver
  * a ellas daría vueltas.
  *
- * Administración vale con todo lo que cuelgue de ella: por eso bajo `/admin` no puede haber
- * una lectura con efectos.
+ * Administración y el portal valen con todo lo que cuelgue de ellos: por eso bajo `/admin` y
+ * `/portal` no puede haber una lectura con efectos.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore, ROUTES.portal];
 
 /** Las rutas de `SESSION_ROUTES`: la ruta exacta y lo que cuelga de ella. */
 function underSessionRoute(pathname: string): boolean {

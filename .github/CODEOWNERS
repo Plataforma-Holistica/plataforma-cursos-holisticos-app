@@ -19,8 +19,10 @@
 # lista la escribe el servidor tras la guarda, a nombre de la sesión que pasó
 /src/services/browse/      @SerchFGA @plataformaholisticadev
 /src/services/drafts/      @SerchFGA @plataformaholisticadev
+/src/services/teachers/    @SerchFGA @plataformaholisticadev
 /src/app/_catalog/         @SerchFGA @plataformaholisticadev
 /src/app/explorar/         @SerchFGA @plataformaholisticadev
+/src/app/portal/           @SerchFGA @plataformaholisticadev
 # El paso previo de cada petición: renueva la sesión y manda a entrar a quien no la trae.
 # No decide quién pasa
 /src/proxy.ts              @SerchFGA @plataformaholisticadev

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   checkSession: vi.fn(),
   teamStanding: vi.fn(),
+  teacherStanding: vi.fn(),
   cookieReader: vi.fn(),
   redirect: vi.fn((to: string): never => {
     throw new Error(`redirige a ${to}`);
@@ -15,10 +16,12 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 vi.mock("@/services/account/account", () => ({ checkSession: mocks.checkSession, teamStanding: mocks.teamStanding }));
+vi.mock("@/services/teachers/teachers", () => ({ teacherStanding: mocks.teacherStanding }));
 vi.mock("./request-context", () => ({ cookieReader: mocks.cookieReader }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 
 import type { PendingAccount, SessionCheck, TeamCheck, TeamStanding, VerifiedClaims } from "@/services/account/account";
+import type { TeacherCheck } from "@/services/teachers/standing";
 
 import {
   requireAdmin,
@@ -27,6 +30,7 @@ import {
   requireLessonSession,
   requireSecondFactor,
   requireSession,
+  requireTeacher,
   visitorOnly,
 } from "./guard";
 
@@ -247,6 +251,44 @@ describe("requireFactorSetup", () => {
   it.each<[TeamCheck]>([[{ kind: "suspended" }], [{ kind: "unavailable" }]])("%j no redirige", async (check) => {
     stands(check);
     expect(await requireFactorSetup()).toEqual({ kind: check.kind });
+    expect(mocks.notFound).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireTeacher", () => {
+  const TEACHER = "33333333-3333-4333-8333-333333333333";
+  const teaches = (check: TeacherCheck) => mocks.teacherStanding.mockResolvedValue(check);
+
+  it("le pregunta al servicio del maestro con las cookies de esta petición, y no a la guarda de sesión a secas", async () => {
+    teaches({ kind: "teacher", claims, standing: { state: "active", teacher: { id: TEACHER } } });
+    expect(await requireTeacher("/portal/cursos")).toEqual({ kind: "render", claims, teacher: { id: TEACHER, status: "active" } });
+    expect(mocks.teacherStanding).toHaveBeenCalledExactlyOnceWith(reader);
+    expect(mocks.checkSession).not.toHaveBeenCalled();
+    expect(mocks.teamStanding).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.notFound).not.toHaveBeenCalled();
+  });
+
+  it.each<[TeacherCheck, string]>([
+    [{ kind: "anonymous" }, "/entrar?volver=%2Fportal%2Fcursos"],
+    [{ kind: "incomplete", claims, ...pending }, "/consentimientos?volver=%2Fportal%2Fcursos"],
+    [{ kind: "must_sign_out", then: "sign_in" }, "/sesion/cerrar"],
+  ])("%j redirige a %s, y la página no se pinta", async (check, to) => {
+    teaches(check);
+    await expect(requireTeacher("/portal/cursos")).rejects.toThrow(`redirige a ${to}`);
+    expect(mocks.notFound).not.toHaveBeenCalled();
+  });
+
+  it("a quien no es maestro le contesta que la ruta no existe, sin redirigir", async () => {
+    teaches({ kind: "teacher", claims, standing: { state: "none" } });
+    await expect(requireTeacher("/portal/cursos")).rejects.toThrow("no existe");
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it.each<[TeacherCheck]>([[{ kind: "suspended" }], [{ kind: "unavailable" }]])("%j no redirige ni es un 404: la página pinta ese estado", async (check) => {
+    teaches(check);
+    expect(await requireTeacher("/portal/cursos")).toEqual({ kind: check.kind });
+    expect(mocks.redirect).not.toHaveBeenCalled();
     expect(mocks.notFound).not.toHaveBeenCalled();
   });
 });

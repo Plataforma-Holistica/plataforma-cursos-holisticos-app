@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { checkSession, teamStanding } from "@/services/account/account";
 import type { Capability } from "@/services/account/team";
+import { teacherStanding } from "@/services/teachers/teachers";
 
 import {
   adminPageStep,
@@ -13,6 +14,7 @@ import {
   publicPageStep,
   secondFactorPageStep,
   sessionPageStep,
+  teacherPageStep,
   visitorPageStep,
 } from "./guard-steps";
 import { cookieReader } from "./request-context";
@@ -79,6 +81,18 @@ export async function visitorOnly(): Promise<void> {
  */
 export async function requireAdmin(path: string, capability?: Capability) {
   const step = adminPageStep(await teamStanding(await cookieReader()), path, capability);
+  if (step.kind === "redirect") redirect(step.to);
+  if (step.kind === "not_found") notFound();
+  return step;
+}
+
+/**
+ * Para una pantalla del portal del maestro (T-402). Quién es maestro lo dice la base, por
+ * `teacherStanding`. A quien no lo es le contesta lo mismo que una ruta que no existe (PA-19).
+ * @param path La ruta que se pidió: es a donde se vuelve después de entrar.
+ */
+export async function requireTeacher(path: string) {
+  const step = teacherPageStep(await teacherStanding(await cookieReader()), path);
   if (step.kind === "redirect") redirect(step.to);
   if (step.kind === "not_found") notFound();
   return step;

@@ -37,6 +37,7 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
     deleteLesson: vi.fn(() => Promise.resolve("deleted" as const)),
     moveLesson: vi.fn(() => Promise.resolve("moved" as const)),
     deleteCourse: vi.fn(() => Promise.resolve("deleted" as const)),
+    choices: vi.fn(() => Promise.resolve({ practices: [], levels: [] })),
   };
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
   const service = createDrafts({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
@@ -118,6 +119,19 @@ describe("cambiar el borrador", () => {
 });
 
 describe("leer el borrador", () => {
+  it("las opciones del editor llevan lo elegido; un id sin forma cuenta como nada elegido", async () => {
+    const service = setup();
+    expect(await service.draftChoices({ practiceId: PRACTICE, levelId: "x" })).toEqual({ kind: "ready", value: { practices: [], levels: [] } });
+    expect(service.store.choices).toHaveBeenCalledExactlyOnceWith(PRACTICE, null);
+  });
+
+  it("si no se pudieron leer las opciones, «no se supo», reportado", async () => {
+    const service = setup();
+    vi.mocked(service.store.choices).mockRejectedValueOnce(new Error("se cayó"));
+    expect(await service.draftChoices({ practiceId: null, levelId: null })).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["draft_read_unavailable"]);
+  });
+
   it("lee los cursos como la persona", async () => {
     const service = setup();
     expect(await service.teacherCourses(claims)).toEqual({ kind: "ready", value: [] });

@@ -56,6 +56,7 @@ const FAILURES = {
   draft_read_unavailable: "No se pudo leer el borrador de un curso, o la lista de cursos de un maestro (T-402): su pantalla dijo «algo falló».",
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",
+  teacher_unavailable: "No se pudo leer si una cuenta es maestro (T-402): su pantalla del portal dijo «no se supo», con «Reintentar».",
   media_email_unverified: "Una cuenta que pasó la guarda pidió un video sin tener su correo verificado. No debería pasar: el registro verifica el correo. La regla siguió sin abrirle el curso abierto.",
   review_queue_unavailable: "No se pudo leer la cola de revisión: quien tiene Contenido no pudo ver los cursos por aprobar.",
   course_approval_unavailable: "Aprobar un curso se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó publicado, y a quien lo pidió se le dijo que revise la cola.",

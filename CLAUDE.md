@@ -662,6 +662,39 @@ que no se ve leyendo un solo archivo:
   `drafts` del vigilante es del B. El servicio vive en `src/services/drafts/` (las pantallas importan
   `editor.ts`), con la regla de los textos en `src/domain/catalog/draft-text.ts`. Usa pgTAP 37 e integración
   72. Para el A: nada que le toque.
+- **Lo que T-402 suma al carril B** (segunda solicitud, sin migración; decisiones de Sergio del 2026-10-29: el
+  menú del portal mínimo y «Faltan {n} cosas» con el video de cada lección). El portal del maestro: la guarda
+  `requireTeacher(ruta)` (`guard.ts`, con su tabla `teacherPageStep`), que corre los pasos de `requireSession` (la
+  cuenta suspendida va a PA-35 antes de mirar al maestro) y después le pregunta a `teacherStanding`
+  (`src/services/teachers/`, la fila propia de `teachers` leída como la persona: `active`, `suspended` o `none`; una
+  invitación o un maestro que se fue cuentan como `none`). A quien no es maestro le contesta `notFound()`; el maestro
+  suspendido entra y la pantalla lo pinta en solo lectura. **El portal lo sirve un comodín**
+  (`src/app/portal/[...resto]/page.tsx`, con la tabla `_lib/screens.tsx`), por lo mismo que administración: a quien no
+  es maestro toda ruta le contesta lo mismo, exista o no; `screens.test.ts` exige que bajo `/portal` solo valga
+  `requireTeacher`, como primer `await`, sin `Suspense` ni título, y que ninguna otra pantalla la use. El marco
+  (`_lib/frame.tsx`: el menú y la franja de solo lectura, `ReadOnlyBanner`) lo pinta cada pantalla después de su
+  guarda. Las pantallas: Mis cursos (`/portal/cursos`, PA-42, con lo que le falta a cada borrador, `missingItems` del
+  dominio), crear (`/portal/cursos/nuevo`, con el testigo que nace al pintar y que el estado devuelve: «Reintentar» no
+  crea otro), borrar con su pantalla de confirmación (`/portal/cursos/<id>/borrar`, con la revisión del contenido;
+  borrado o ya inexistente, vuelve a la lista con su aviso, `course_deleted` o `course_gone`) y el editor
+  (`/portal/cursos/<id>`, PA-43, con `?modulo=` o `?leccion=` validados como de ese curso). El editor va por bloques
+  (datos, estructura y lo elegido), todos con la misma acción (`editorAction`) y su propio estado; cada formulario
+  lleva el curso en un campo oculto y su botón dice qué se pidió con lo que se vio (`editorButton`). Lo agregado se
+  abre en el editor y lo borrado deja los datos; lo demás vuelve a leer el borrador (`refresh()`). Una práctica o un
+  nivel desactivados siguen elegidos y marcados «(desactivada)», con sus nombres leídos como sistema
+  (`draftChoices`): sin eso, guardar el título le quitaba la práctica al borrador. Lo que contesta un cambio lo traduce
+  `_lib/change.ts`, también `kind: "session"`. Usa integración 73 y, en `tests/e2e/equipo/portal.equipo.ts`, FL-32 con
+  JavaScript y sin él: un maestro con cuenta no se puede borrar (`teachers.profile_id`), así que no va en la corrida
+  normal. Para el A: `requireTeacher` y `teacherStanding` son el punto donde su tercera solicitud suma los estados de la
+  invitación y del aviso (`teacher_standing`), y `src/app/portal/page.tsx` (el inicio) es suyo. Acordado con el A el
+  2026-10-29: hasta su tercera solicitud la guarda lee `teachers.status`, así que un maestro activo sin el aviso
+  vigente entra como activo (no pasa fuera de local: en producción no hay maestros ni textos del maestro
+  publicados), y `/portal` a secas da el 404 de Next sin pasar por la guarda aunque ya esté en `SESSION_ROUTES`.
+  Dos cosas de la revisión del diff: React 19 devuelve los campos del formulario que envió a su valor por omisión
+  al terminar la acción, así que lo escrito que debe quedarse viaja en el estado y se vuelve el valor por omisión
+  (`useResponses` en `_editor/blocks.tsx`, también al pedir confirmar un borrado); y con `changed` no vuelve lo
+  escrito, para no pisar en un segundo clic lo que cambió otra pestaña. El nombre de la portada sale de
+  `profiles.display_name`, no de `published_teachers` (decisión mía sin confirmar).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
