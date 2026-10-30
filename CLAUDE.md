@@ -607,6 +607,22 @@ que no se ve leyendo un solo archivo:
   `course_registry` sin cascada, su borrador tampoco se borra), y la guarda del portal (`requireTeacher`) la
   construye el B en su segunda solicitud; el A le agrega después los estados de la invitación y del aviso del
   maestro.
+- **La invitación del maestro** (T-401, segunda solicitud, `t401_invitacion_maestro`; decisiones de Sergio
+  del 2026-10-29). `private.teacher_invitations` es privada y sin token, como `admin_invitations`: aceptar
+  pide el resguardo del buzón que deja `claim_account`, posterior a la invitación. `invite_teacher`,
+  `reinvite_teacher` y `revoke_teacher_invitation` pasan `content_change_gate()` y nunca actúan sobre el correo
+  de quien llama (`self`); invitar crea al maestro `invited` y su ficha sin listar, y sin el contrato y el aviso
+  del maestro vigentes contesta `unavailable`. `accept_teacher_invitation(ticket, contrato, aviso, ip,
+  navegador)` anota los dos consentimientos (`teacher_invitation`), ata la cuenta, activa al maestro, gasta el
+  resguardo y cierra las demás sesiones (no la que acepta). `guard_publication` gana su segundo paso, en
+  `teachers`: fuera del sistema y de Contenido, solo `invited` sin cuenta a `active` atado a quien actúa, sin
+  otro cambio y con su invitación ya aceptada. **El orden de candados:** `teacher_invitation` (consultivo),
+  la fila de la cuenta, la del maestro. `teacher_standing(ticket)` es lo que lee la guarda del portal: `none`,
+  `invited_unproven`, `invited`, `active`, `needs_notice` (le falta el aviso del maestro vigente, con la regla
+  de `gate.ts`) y `suspended`. El aviso vuelto a pedir lo exige esa guarda, no `current_active_teacher_id`
+  (decisión mía sin confirmar). `teacher_roster()` es la lista de PA-65 (Contenido, sin código reciente). El
+  correo de un maestro del sistema lo pone solo el dueño declarado sistema (`system_invite_teacher`).
+  `db:drafts` carga además los borradores del contrato y del aviso del maestro. Usa pgTAP 58 e integración 80.
 - **Lo que T-402 suma al carril B** (primera solicitud, `t402_borrador`; decisiones de Sergio del 2026-10-29:
   un borrador no impide desactivar una práctica o un nivel, el maestro borra un borrador que nunca envió, y los
   largos de 60, 500, 120 y 2 000). El borrador de un curso nuevo en tres tablas (`course_drafts`,

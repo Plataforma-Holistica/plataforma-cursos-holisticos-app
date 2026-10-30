@@ -23,12 +23,15 @@ const DRAFTS_DIR = join("supabase", "local", "legal-drafts");
 const EFFECTIVE_FROM = "2026-10-01 06:00:00+00";
 
 // Los únicos tipos que se cargan como borrador: los tres textos sin los que no se puede
-// completar un registro (RF-108). Un archivo con otro nombre es un error. Si se vuelven a
-// pedir no lo dice el guion: lo decide la base por el tipo (T-110).
+// completar un registro (RF-108), y los dos sin los que no se acepta una invitación de maestro
+// (T-401). Un archivo con otro nombre es un error. Si se vuelven a pedir no lo dice el guion: lo
+// decide la base por el tipo (T-110).
 const DRAFTS = new Map([
   ["terms.md", { docType: "terms" }],
   ["student_privacy_notice.md", { docType: "student_privacy_notice" }],
   ["course_history_consent.md", { docType: "course_history_consent" }],
+  ["teacher_agreement.md", { docType: "teacher_agreement" }],
+  ["teacher_privacy_notice.md", { docType: "teacher_privacy_notice" }],
 ]);
 
 function fail(message) {

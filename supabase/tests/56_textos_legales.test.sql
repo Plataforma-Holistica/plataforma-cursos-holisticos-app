@@ -208,7 +208,7 @@ insert into public.legal_documents (doc_type, version, title, body, effective_fr
   values ('teacher_agreement', 1, 'Contrato', 'Texto', now(), true);
 select results_eq(
   $$select doc_type::text, requires_reconsent from public.legal_documents
-    where doc_type in ('license_annex', 'teacher_agreement') order by doc_type::text$$,
+    where doc_type in ('license_annex', 'teacher_agreement') and version = 1 order by doc_type::text$$,
   $$values ('license_annex', false), ('teacher_agreement', false)$$,
   'el contrato y el anexo no se vuelven a pedir, aunque quien inserte diga que sí');
 select pruebas.como_dueno();

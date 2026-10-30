@@ -247,7 +247,7 @@ insert into public.legal_documents (doc_type, version, title, body, effective_fr
 
 select pruebas.como_dueno();
 select ok(
-  (select count(*) filter (where doc_type = 'teacher_agreement') = 1
+  (select count(*) filter (where doc_type = 'teacher_agreement' and version = 1) = 1
       and count(*) filter (where effective_from > now()) >= 1
    from public.legal_documents),
   'hay un texto de maestros y uno con vigencia futura que no deben verse');
