@@ -48,7 +48,7 @@ const QUEUE_PERMALINK = `${ROUTES.review}#${QUEUE_BLOCK_ID}`;
 
 const FAILURES: Record<ReviewFailure, string> = {
   not_pending: text.notPending,
-  self: text.self,
+  self: t(text.self),
   incomplete: text.incomplete,
   practice_inactive: text.practiceInactive,
   level_inactive: text.levelInactive,

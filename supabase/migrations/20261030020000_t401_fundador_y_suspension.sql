@@ -19,10 +19,13 @@
 --   · confirmar un fraude sobre una suspensión a mano la convierte en la de fraude, con las dos firmas y
 --     su fecha de origen;
 --   · las solicitudes son privadas, como las alertas: se leen por `fraud_suspension_queue()`;
---   · los cambios del fundador se auditan además como dinero.
+--   · los cambios del fundador se auditan además como dinero;
+--   · una alerta sirve para una sola suspensión confirmada: una vez levantada, volver a suspender por fraude
+--     pide una alerta nueva (una retirada o rechazada no la gasta);
+--   · quien propuso un fraude y quiere confirmarlo o levantarlo recibe `proposer`, no `self`.
 --
--- El candado: la fila del maestro, tomada para cambiar (`teacher_change_lock`). Escribir un curso a su
--- nombre la toma para compartir (`current_active_teacher_id`), así que suspender y escribir van uno tras
+-- El candado: la fila del maestro, tomada para cambiar sin su clave (`teacher_change_lock`, después de la
+-- puerta). Escribir un curso a su nombre la toma para compartir (`current_active_teacher_id`), así que suspender y escribir van uno tras
 -- otro; ninguna de estas funciones toma otro candado después.
 
 create type public.suspension_request_status as enum ('pending', 'confirmed', 'rejected', 'withdrawn');
@@ -52,6 +55,9 @@ comment on table private.teacher_suspension_requests is 'La propuesta de finanza
 
 create unique index teacher_suspension_requests_one_pending_uq on private.teacher_suspension_requests (teacher_id)
   where status = 'pending';
+-- Una alerta sostiene una sola propuesta viva o confirmada.
+create unique index teacher_suspension_requests_alert_uq on private.teacher_suspension_requests (anomaly_alert_id)
+  where status in ('pending', 'confirmed');
 
 alter table private.teacher_suspension_requests enable row level security;
 revoke all on private.teacher_suspension_requests from public, anon, authenticated, service_role, app_service;
@@ -67,7 +73,8 @@ create trigger audit_founder after update of is_founder, founder_since on public
 -- ---------------------------------------------------------------------------------------
 -- Piezas internas.
 
--- Toma la fila del maestro para cambiarla y la devuelve. Nula si no existe.
+-- Toma la fila del maestro para cambiarla y la devuelve. Nula si no existe. Sin tomar su clave: quien inserta
+-- una fila que apunta al maestro (una reproducción, la consolidación, el cierre) no espera.
 create function private.teacher_change_lock(p_teacher uuid) returns public.teachers
 language plpgsql security definer set search_path = ''
 as $$
@@ -77,7 +84,7 @@ begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'teacher changes need read committed isolation' using errcode = '25000';
   end if;
-  select t.* into v_row from public.teachers t where t.id = p_teacher for update;
+  select t.* into v_row from public.teachers t where t.id = p_teacher for no key update;
   return v_row;
 end
 $$;
@@ -102,11 +109,11 @@ declare
   v_month_start date;
   v_from public.period_id;
 begin
-  v_row := private.teacher_change_lock(p_teacher);
   v_gate := private.content_change_gate();
   if v_gate is not null then
     return v_gate;
   end if;
+  v_row := private.teacher_change_lock(p_teacher);
   if v_row.id is null then
     return 'not_found';
   end if;
@@ -157,11 +164,11 @@ declare
   v_row public.teachers;
   v_reason text := pg_catalog.btrim(p_reason);
 begin
-  v_row := private.teacher_change_lock(p_teacher);
   v_gate := private.content_change_gate();
   if v_gate is not null then
     return v_gate;
   end if;
+  v_row := private.teacher_change_lock(p_teacher);
   if v_row.id is null then
     return 'not_found';
   end if;
@@ -188,7 +195,8 @@ revoke all on function private.suspend_teacher(uuid, text) from public;
 grant execute on function private.suspend_teacher(uuid, text) to app_service;
 
 -- Levantar una suspensión. Una de fraude (con las dos firmas) no la levanta quien la propuso.
---   forbidden, needs_fresh_code, not_found, self, not_suspended, lifted
+--   forbidden, needs_fresh_code, not_found, self, proposer (la de fraude la propuso quien actúa), not_suspended,
+--   lifted
 create function private.lift_teacher_suspension(p_teacher uuid) returns text
 language plpgsql security definer set search_path = ''
 as $$
@@ -197,17 +205,19 @@ declare
   v_row public.teachers;
   v_actor uuid := private.actor_id();
 begin
-  v_row := private.teacher_change_lock(p_teacher);
   v_gate := private.content_change_gate();
   if v_gate is not null then
     return v_gate;
   end if;
+  v_row := private.teacher_change_lock(p_teacher);
   if v_row.id is null then
     return 'not_found';
   end if;
-  if v_row.profile_id is not distinct from v_actor
-     or (v_row.suspension_approved_by is not null and v_row.suspended_by is not distinct from v_actor) then
+  if v_row.profile_id is not distinct from v_actor then
     return 'self';
+  end if;
+  if v_row.suspension_approved_by is not null and v_row.suspended_by is not distinct from v_actor then
+    return 'proposer';
   end if;
   if v_row.status <> 'suspended' then
     return 'not_suspended';
@@ -232,6 +242,7 @@ grant execute on function private.lift_teacher_suspension(uuid) to app_service;
 --   not_active                       el maestro no está activo ni suspendido
 --   already_suspended                ya está suspendido por fraude
 --   already_pending                  ya tiene una propuesta pendiente
+--   alert_used                       esa alerta ya sostiene una suspensión confirmada: hace falta otra
 --   proposed
 create function private.propose_fraud_suspension(p_alert uuid, p_reason text) returns text
 language plpgsql security definer set search_path = ''
@@ -269,6 +280,11 @@ begin
   if exists (
       select 1 from private.teacher_suspension_requests r where r.teacher_id = v_row.id and r.status = 'pending') then
     return 'already_pending';
+  end if;
+  if exists (
+      select 1 from private.teacher_suspension_requests r
+      where r.anomaly_alert_id = v_alert.id and r.status = 'confirmed') then
+    return 'alert_used';
   end if;
   insert into private.teacher_suspension_requests (teacher_id, anomaly_alert_id, reason, proposed_by, proposed_at)
   values (v_row.id, v_alert.id, v_reason, private.actor_id(), pg_catalog.clock_timestamp());
@@ -317,7 +333,8 @@ grant execute on function private.withdraw_fraud_suspension(uuid) to app_service
 -- opcional de hasta 4 000 caracteres.
 --   forbidden, needs_fresh_code      la puerta de Contenido
 --   not_found                        no existe o ya no está pendiente
---   self                             quien decide la propuso, o es el maestro
+--   proposer                         quien decide la propuso
+--   self                             quien decide es el maestro
 --   invalid                          la nota pasa de 4 000 caracteres
 --   not_active                       el maestro ya no está activo ni suspendido (la propuesta sigue)
 --   confirmed / rejected
@@ -346,8 +363,11 @@ begin
   if v_request.id is null or v_request.status <> 'pending' or p_confirm is null then
     return 'not_found';
   end if;
-  if v_request.proposed_by = v_actor or v_row.profile_id is not distinct from v_actor then
+  if v_row.profile_id is not distinct from v_actor then
     return 'self';
+  end if;
+  if v_request.proposed_by = v_actor then
+    return 'proposer';
   end if;
   if pg_catalog.length(coalesce(v_note, '')) > 4000 then
     return 'invalid';
@@ -558,7 +578,8 @@ as $$
     values ('private.teacher_invitations'::regclass, 'teacher_invitations_live_teacher_uq'),
            ('private.teacher_invitations'::regclass, 'teacher_invitations_live_email_uq'),
            ('private.teacher_invitations'::regclass, 'teacher_invitations_accepted_teacher_uq'),
-           ('private.teacher_suspension_requests'::regclass, 'teacher_suspension_requests_one_pending_uq')),
+           ('private.teacher_suspension_requests'::regclass, 'teacher_suspension_requests_one_pending_uq'),
+           ('private.teacher_suspension_requests'::regclass, 'teacher_suspension_requests_alert_uq')),
   found as (
     select f.signature, f.definer, f.callers, p.oid, p.proname, p.prosecdef, p.proconfig, p.provolatile, p.proowner
     from teacher_functions f
@@ -623,6 +644,21 @@ as $$
     where tg.tgrelid = a.relname and tg.tgname = a.tgname
       and tg.tgenabled in ('O', 'A') and p.proname = 'audit_row_change'
       and p.pronamespace = 'private'::regnamespace)
+  union all
+  -- La auditoría del fundador, como dinero y después de cambiar esas dos columnas.
+  select 'teachers founder audit not as money after update', 'public.teachers'
+  where not exists (
+    select 1 from pg_catalog.pg_trigger tg
+    where tg.tgrelid = 'public.teachers'::regclass and tg.tgname = 'audit_founder'
+      and (tg.tgtype & 31) = 17
+      and pg_catalog.pg_get_triggerdef(tg.oid) like '%AFTER UPDATE OF is_founder, founder_since ON public.teachers%'
+      and pg_catalog.pg_get_triggerdef(tg.oid) like '%audit_row_change(''money''%')
+  union all
+  -- La marca del fundador y la suspensión mueven dinero y acceso: ningún rol de la aplicación escribe maestros.
+  select 'teachers table writable by ' || r.rolname, 'public.teachers'
+  from app_roles r
+  where pg_catalog.has_any_column_privilege(r.rolname::name, 'public.teachers', 'INSERT, UPDATE')
+     or pg_catalog.has_table_privilege(r.rolname::name, 'public.teachers', 'DELETE, TRUNCATE')
   union all
   select 'teachers trigger missing or disabled: ' || t.tgname, r.relname::text
   -- El de cada fila: por fila (1), antes (2), al insertar (4), al borrar (8) y al cambiar (16). El de

@@ -7,7 +7,7 @@
 -- no la propuso; y nadie actúa sobre sí, tampoco al aprobar un curso suyo.
 begin;
 \ir _ayuda.psql
-select plan(91);
+select plan(101);
 
 -- Contenido: k1, k2 y kf (que tiene además finanzas). Finanzas: f1 y f2. Maestros: m1, m2, m3 y m4 con
 -- cuenta y activos; mk1 es el maestro de k1 (alguien del equipo puede ser maestro); mi, invitado.
@@ -153,6 +153,8 @@ select results_eq(format('select is_founder, founder_since from public.teachers 
   $$values (false, null::date)$$, 'sin marca');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.set_teacher_founder(%L, %L)', :'mi', :'mes')),
   'set', 'a un maestro invitado también se le marca');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.set_teacher_founder(%L, %L)', :'m4', (:'mes'::date + interval '6 months')::date)),
+  'set', 'y con fecha futura');
 
 -- Un fundador de hace dos meses: su primer mes ya pasó de abierto, así que la marca queda fija.
 select pruebas.como_dueno_sistema();
@@ -208,9 +210,13 @@ select results_eq(
   $$values ('active', null::uuid, null::text, null::timestamptz)$$,
   'activo de nuevo, sin las columnas de la suspensión');
 select ok(
-  (select count(*) >= 2 from public.audit_log a
-   where a.entity_table = 'public.teachers' and a.entity_id = :'m3' and a.category = 'access'),
-  'la historia queda en la auditoría');
+  exists (select 1 from public.audit_log a
+          where a.entity_table = 'public.teachers' and a.entity_id = :'m3' and a.category = 'access'
+            and a.new_value ->> 'status' = 'suspended' and a.new_value ->> 'suspension_reason' = 'No entrega lo prometido')
+  and exists (select 1 from public.audit_log a
+              where a.entity_table = 'public.teachers' and a.entity_id = :'m3' and a.category = 'access'
+                and a.old_value ->> 'status' = 'suspended' and a.new_value ->> 'status' = 'active'),
+  'la historia queda en la auditoría: la suspensión con su motivo, y el levantamiento');
 select pruebas.como_dueno_sistema();
 update public.teachers set status = 'suspended', suspended_at = now(), suspended_by = 'c0000000-0000-0000-0000-000000000002',
                            suspension_reason = 'prueba'
@@ -297,13 +303,19 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.p
   'proposed', 'kf, con finanzas y Contenido, propone');
 select pruebas.solicitud(:'m4') as sol_m4 \gset
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m4')),
-  'self', 'y no confirma lo que propuso');
+  'proposer', 'y no confirma lo que propuso');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m4')),
   'confirmed', 'k2 confirma');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.lift_teacher_suspension(%L)', :'m4')),
-  'self', 'quien la propuso no la levanta');
+  'proposer', 'quien la propuso no la levanta');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.lift_teacher_suspension(%L)', :'m4')),
   'lifted', 'otra persona con Contenido, sí');
+
+-- Nadie propone sobre sí: kf también es maestra.
+select pruebas.maestro('c0000000-0000-0000-0000-000000000003') as mkf \gset
+select pruebas.alerta(:'mkf', true) as alerta_mkf \gset
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.propose_fraud_suspension(%L, %L)', :'alerta_mkf', 'Fraude')),
+  'self', 'nadie propone su propia suspensión');
 
 -- Rechazar.
 select pruebas.alerta(:'m4', true, 2) as alerta_m4b \gset
@@ -339,7 +351,10 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.d
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, false, null)', :'sol_mk1')),
   'rejected', 'otra persona rechaza sin nota');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m2', 'Otra')),
-  'proposed', 'una alerta ya usada sirve para proponer otra vez');
+  'alert_used', 'una alerta que ya sostuvo una suspensión confirmada no sirve otra vez');
+select pruebas.alerta(:'m2', true, 1) as alerta_m2b \gset
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m2b', 'Otra')),
+  'proposed', 'con una alerta nueva, sí');
 select pruebas.solicitud(:'m2') as sol_m2b \gset
 select pruebas.como_dueno_sistema();
 update public.teachers set status = 'left', left_at = now() where id = :'m2';
@@ -359,6 +374,11 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.a
   'self', 'quien es maestro del curso no lo aprueba');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.approve_course(%L)', :'curso_k1')),
   'incomplete', 'otra persona con Contenido sigue al resto de las comprobaciones');
+select pruebas.como_dueno_sistema();
+insert into public.course_registry (teacher_id) values (:'mk1') returning course_id as borrador_k1 \gset
+select pruebas.limpiar();
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.approve_course(%L)', :'borrador_k1')),
+  'not_pending', 'un curso suyo que no está en revisión dice eso primero');
 
 -- ---------------------------------------------------------------------------------------
 -- La lista de PA-65 dice la suspensión y si hay una propuesta pendiente.
@@ -403,6 +423,19 @@ alter table public.teachers disable trigger audit_founder;
 select ok(exists (select 1 from private.schema_violations() where problem like '%audit_founder%'),
   've la auditoría del fundador apagada');
 alter table public.teachers enable trigger audit_founder;
+drop trigger audit_founder on public.teachers;
+create trigger audit_founder after update of is_founder, founder_since on public.teachers
+  for each row execute function private.audit_row_change('access', 'tiebreak_rank');
+select ok(exists (select 1 from private.schema_violations() where problem = 'teachers founder audit not as money after update'),
+  've la auditoría del fundador como acceso en vez de dinero');
+drop trigger audit_founder on public.teachers;
+create trigger audit_founder after update of is_founder, founder_since on public.teachers
+  for each row when (old.is_founder is distinct from new.is_founder or old.founder_since is distinct from new.founder_since)
+  execute function private.audit_row_change('money', 'tiebreak_rank');
+grant update (founder_since) on public.teachers to app_service;
+select ok(exists (select 1 from private.schema_violations() where problem = 'teachers table writable by app_service'),
+  've que el servidor podría escribir la fecha del fundador');
+revoke update (founder_since) on public.teachers from app_service;
 drop index private.teacher_suspension_requests_one_pending_uq;
 select ok(exists (select 1 from private.schema_violations()
                   where problem = 'teachers unique index missing: teacher_suspension_requests_one_pending_uq'),
