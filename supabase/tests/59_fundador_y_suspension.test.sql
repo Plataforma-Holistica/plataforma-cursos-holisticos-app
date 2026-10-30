@@ -7,7 +7,7 @@
 -- no la propuso; y nadie actúa sobre sí, tampoco al aprobar un curso suyo.
 begin;
 \ir _ayuda.psql
-select plan(101);
+select plan(105);
 
 -- Contenido: k1, k2 y kf (que tiene además finanzas). Finanzas: f1 y f2. Maestros: m1, m2, m3 y m4 con
 -- cuenta y activos; mk1 es el maestro de k1 (alguien del equipo puede ser maestro); mi, invitado.
@@ -101,11 +101,11 @@ select ok(
   'las siete funciones del servidor las ejecuta solo el servidor')
 from unnest(array[
   'private.set_teacher_founder(uuid, date)',
-  'private.suspend_teacher(uuid, text)',
+  'private.suspend_teacher(uuid, text, text)',
   'private.lift_teacher_suspension(uuid)',
   'private.propose_fraud_suspension(uuid, text)',
   'private.withdraw_fraud_suspension(uuid)',
-  'private.decide_fraud_suspension(uuid, boolean, text)',
+  'private.decide_fraud_suspension(uuid, boolean, text, text)',
   'private.fraud_suspension_queue()']) as f;
 select ok(not has_function_privilege('app_service', 'private.teacher_change_lock(uuid)', 'execute'),
   'la interna no la ejecuta el servidor');
@@ -175,17 +175,21 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.s
 -- ---------------------------------------------------------------------------------------
 -- Suspender y levantar: una persona con Contenido.
 
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.suspend_teacher(%L, %L)', :'m3', 'motivo')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.suspend_teacher(%L, %L, %L)', :'m3', 'motivo', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'forbidden', 'finanzas no suspende sola');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'m3', '   ')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m3', '   ', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'invalid', 'sin motivo no');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'m3', repeat('a', 1001))),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m3', repeat('a', 1001), 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'invalid', 'ni con un motivo de más de mil caracteres');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'mk1', 'motivo')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, null)', :'m3', 'motivo')),
+  'invalid', 'sin el texto para el maestro no');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m3', 'motivo', repeat('a', 301))),
+  'invalid', 'ni con uno de más de 300 caracteres');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'mk1', 'motivo', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'self', 'nadie se suspende a sí mismo');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'mi', 'motivo')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'mi', 'motivo', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'not_active', 'a un invitado no se le suspende');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'m3', '  No entrega lo prometido ')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m3', '  No entrega lo prometido ', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'suspended', 'suspender');
 select pruebas.como_dueno();
 select results_eq(
@@ -196,7 +200,15 @@ select results_eq(
 select pruebas.a_nombre_de('a0000000-0000-0000-0000-000000000003');
 select is((select s.state from private.teacher_standing(null) s), 'suspended', 'y entra al portal en solo lectura');
 select pruebas.limpiar();
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.suspend_teacher(%L, %L)', :'m3', 'otra vez')),
+select pruebas.como_usuario('a0000000-0000-0000-0000-000000000003');
+select is((select suspension_notice from public.teachers where id = :'m3'), 'Tu cuenta de maestro está en pausa mientras revisamos un caso.',
+  'el maestro lee el texto que se escribió para él');
+select throws_ok(format('select suspension_reason from public.teachers where id = %L', :'m3'), '42501', null,
+  'pero no el motivo interno');
+select throws_ok(format('select suspended_by, suspension_approved_by from public.teachers where id = %L', :'m3'), '42501', null,
+  'ni quién lo suspendió');
+select pruebas.limpiar();
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.suspend_teacher(%L, %L, %L)', :'m3', 'otra vez', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'already_suspended', 'dos veces no');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.lift_teacher_suspension(%L)', :'m1')),
   'not_suspended', 'levantar a quien no está suspendido no');
@@ -257,11 +269,11 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000005', format('private.w
   'not_yours', 'solo quien la propuso la retira');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.withdraw_fraud_suspension(%L)', :'sol_m2')),
   'forbidden', 'y Contenido no retira');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m2')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m2', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'forbidden', 'finanzas no confirma');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.withdraw_fraud_suspension(%L)', :'sol_m2')),
   'withdrawn', 'quien la propuso la retira');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m2')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m2', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'not_found', 'una retirada ya no se confirma');
 
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m2', 'Puntos inflados')),
@@ -275,14 +287,17 @@ select ok(
 select pruebas.a_nombre_de('a0000000-0000-0000-0000-000000000005');
 select is(private.fraud_suspension_queue(), null, 'un alumno no lee la cola');
 select pruebas.limpiar();
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, %L)', :'sol_m2', repeat('a', 4001))),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, %L, %L)', :'sol_m2', repeat('a', 4001), 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'invalid', 'una nota de más de 4 000 caracteres no');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, %L)', :'sol_m2', 'Confirmado con la evidencia')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, %L, null)', :'sol_m2', 'Confirmado con la evidencia')),
+  'invalid', 'confirmar pide el texto para el maestro');
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, %L, %L)', :'sol_m2', 'Confirmado con la evidencia', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'confirmed', 'otra persona con Contenido confirma');
 select pruebas.como_dueno();
 select results_eq(
-  format($$select status::text, suspended_by, suspension_approved_by, suspension_reason from public.teachers where id = %L$$, :'m2'),
-  $$values ('suspended', 'c0000000-0000-0000-0000-000000000004'::uuid, 'c0000000-0000-0000-0000-000000000001'::uuid, 'Puntos inflados')$$,
+  format($$select status::text, suspended_by, suspension_approved_by, suspension_reason, suspension_notice from public.teachers where id = %L$$, :'m2'),
+  $$values ('suspended', 'c0000000-0000-0000-0000-000000000004'::uuid, 'c0000000-0000-0000-0000-000000000001'::uuid, 'Puntos inflados',
+            'Tu cuenta de maestro está en pausa mientras revisamos un caso.')$$,
   'suspendido con las dos firmas');
 select results_eq(
   format($$select r.status::text, r.decided_by, r.decision_note from private.teacher_suspension_requests r where r.id = %L$$, :'sol_m2'),
@@ -292,7 +307,7 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.w
   'not_found', 'una confirmada ya no se retira');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000005', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m2', 'otra')),
   'already_suspended', 'a quien ya está suspendido por fraude no se le propone otra');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.suspend_teacher(%L, %L)', :'m2', 'a mano')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.suspend_teacher(%L, %L, %L)', :'m2', 'a mano', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'already_suspended', 'ni se le suspende a mano encima');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.lift_teacher_suspension(%L)', :'m2')),
   'lifted', 'la levanta alguien con Contenido que no la propuso');
@@ -302,9 +317,9 @@ select pruebas.alerta(:'m4', true, 1) as alerta_m4 \gset
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m4', 'Puntos inflados')),
   'proposed', 'kf, con finanzas y Contenido, propone');
 select pruebas.solicitud(:'m4') as sol_m4 \gset
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m4')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m4', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'proposer', 'y no confirma lo que propuso');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m4')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m4', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'confirmed', 'k2 confirma');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.lift_teacher_suspension(%L)', :'m4')),
   'proposer', 'quien la propuso no la levanta');
@@ -321,20 +336,20 @@ select is(pruebas.pide('c0000000-0000-0000-0000-000000000003', format('private.p
 select pruebas.alerta(:'m4', true, 2) as alerta_m4b \gset
 select pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m4b', 'Otra vez'));
 select pruebas.solicitud(:'m4') as sol_m4b \gset
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, false, %L)', :'sol_m4b', 'La evidencia no alcanza')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, false, %L, null)', :'sol_m4b', 'La evidencia no alcanza')),
   'rejected', 'Contenido rechaza');
 select pruebas.como_dueno();
 select is((select status::text from public.teachers where id = :'m4'), 'active', 'y el maestro sigue activo');
 
 -- Confirmar sobre una suspensión a mano: se convierte en la de fraude, con las dos firmas.
-select pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'m4', 'a mano'));
+select pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m4', 'a mano', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.'));
 select pruebas.como_dueno();
 select suspended_at as suspendido_a_mano from public.teachers where id = :'m4' \gset
 select pruebas.alerta(:'m4', true, 3) as alerta_m4c \gset
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m4c', 'Fraude')),
   'proposed', 'a un suspendido a mano se le propone fraude');
 select pruebas.solicitud(:'m4') as sol_m4c \gset
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m4c')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m4c', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'confirmed', 'y se confirma');
 select pruebas.como_dueno();
 select results_eq(
@@ -346,9 +361,9 @@ select results_eq(
 select pruebas.alerta(:'mk1', true) as alerta_mk1 \gset
 select pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_mk1', 'Fraude'));
 select pruebas.solicitud(:'mk1') as sol_mk1 \gset
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null)', :'sol_mk1')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_mk1', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'self', 'nadie confirma una propuesta sobre sí');
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, false, null)', :'sol_mk1')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000002', format('private.decide_fraud_suspension(%L, false, null, null)', :'sol_mk1')),
   'rejected', 'otra persona rechaza sin nota');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m2', 'Otra')),
   'alert_used', 'una alerta que ya sostuvo una suspensión confirmada no sirve otra vez');
@@ -359,7 +374,7 @@ select pruebas.solicitud(:'m2') as sol_m2b \gset
 select pruebas.como_dueno_sistema();
 update public.teachers set status = 'left', left_at = now() where id = :'m2';
 select pruebas.limpiar();
-select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null)', :'sol_m2b')),
+select is(pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.decide_fraud_suspension(%L, true, null, %L)', :'sol_m2b', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.')),
   'not_active', 'a quien se fue no se le suspende');
 select is(pruebas.pide('c0000000-0000-0000-0000-000000000004', format('private.propose_fraud_suspension(%L, %L)', :'alerta_m4c', 'Otra')),
   'already_suspended', 'ni se propone sobre quien ya está suspendido por fraude');
@@ -395,7 +410,7 @@ select is(
 select is(
   (select (t ->> 'fraud_pending')::boolean from jsonb_array_elements(:'lista'::jsonb -> 'teachers') t where t ->> 'teacher_id' = :'m2'),
   true, 'y si tiene una propuesta pendiente');
-select pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L)', :'m3', 'a mano'));
+select pruebas.pide('c0000000-0000-0000-0000-000000000001', format('private.suspend_teacher(%L, %L, %L)', :'m3', 'a mano', 'Tu cuenta de maestro está en pausa mientras revisamos un caso.'));
 select pruebas.a_nombre_de('c0000000-0000-0000-0000-000000000001');
 select is(
   (select t ->> 'suspension' from jsonb_array_elements(private.teacher_roster() -> 'teachers') t where t ->> 'teacher_id' = :'m3'),
@@ -432,6 +447,11 @@ drop trigger audit_founder on public.teachers;
 create trigger audit_founder after update of is_founder, founder_since on public.teachers
   for each row when (old.is_founder is distinct from new.is_founder or old.founder_since is distinct from new.founder_since)
   execute function private.audit_row_change('money', 'tiebreak_rank');
+grant select (suspension_reason) on public.teachers to authenticated;
+select ok(exists (select 1 from private.schema_violations()
+                  where problem = 'teachers suspension column readable by authenticated: suspension_reason'),
+  've que el maestro podría leer el motivo interno');
+revoke select (suspension_reason) on public.teachers from authenticated;
 grant update (founder_since) on public.teachers to app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'teachers table writable by app_service'),
   've que el servidor podría escribir la fecha del fundador');
@@ -442,6 +462,12 @@ select ok(exists (select 1 from private.schema_violations()
   've que falta el índice de una pendiente por maestro');
 create unique index teacher_suspension_requests_one_pending_uq on private.teacher_suspension_requests (teacher_id)
   where status = 'pending';
+drop index private.teacher_suspension_requests_alert_uq;
+select ok(exists (select 1 from private.schema_violations()
+                  where problem = 'teachers unique index missing: teacher_suspension_requests_alert_uq'),
+  've que falta el índice de una alerta por suspensión');
+create unique index teacher_suspension_requests_alert_uq on private.teacher_suspension_requests (anomaly_alert_id)
+  where status in ('pending', 'confirmed');
 select is_empty('select * from private.schema_violations()', 'en cero al restaurar');
 
 select * from finish();

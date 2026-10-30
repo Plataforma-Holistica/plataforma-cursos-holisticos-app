@@ -20,6 +20,9 @@
 --     su fecha de origen;
 --   · las solicitudes son privadas, como las alertas: se leen por `fraud_suspension_queue()`;
 --   · los cambios del fundador se auditan además como dinero;
+--   · lo que el maestro ve de su suspensión es un texto corto aparte (`suspension_notice`), que escribe quien
+--     suspende o quien confirma el fraude (decisión de Sergio del 2026-10-29). El motivo interno, quién
+--     suspendió y quién confirmó ya no los lee el maestro;
 --   · una alerta sirve para una sola suspensión confirmada: una vez levantada, volver a suspender por fraude
 --     pide una alerta nueva (una retirada o rechazada no la gasta);
 --   · quien propuso un fraude y quiere confirmarlo o levantarlo recibe `proposer`, no `self`.
@@ -64,6 +67,15 @@ revoke all on private.teacher_suspension_requests from public, anon, authenticat
 
 create trigger audit_changes after insert or update or delete on private.teacher_suspension_requests
   for each row execute function private.audit_row_change('access');
+
+-- Lo que el maestro ve de su suspensión: un texto corto, aparte del motivo interno. Lo de adentro (el motivo,
+-- quién suspendió y quién confirmó) lo lee el servidor, no el maestro.
+alter table public.teachers
+  add column suspension_notice text,
+  add constraint teachers_suspension_notice_length check (pg_catalog.length(suspension_notice) between 1 and 300),
+  add constraint teachers_suspension_notice_only_suspended check (suspension_notice is null or status = 'suspended');
+revoke select (suspended_by, suspension_approved_by, suspension_reason) on public.teachers from authenticated;
+grant select (suspension_notice) on public.teachers to authenticated, app_service;
 
 -- El fundador mueve dinero: su cambio queda además como dinero.
 create trigger audit_founder after update of is_founder, founder_since on public.teachers
@@ -154,15 +166,17 @@ grant execute on function private.set_teacher_founder(uuid, date) to app_service
 -- ---------------------------------------------------------------------------------------
 -- Suspender y levantar, a mano: una persona con Contenido.
 
--- Suspender a un maestro activo, con un motivo de 1 a 1 000 caracteres.
+-- Suspender a un maestro activo, con un motivo interno de 1 a 1 000 caracteres y el texto que verá el maestro,
+-- de 1 a 300.
 --   forbidden, needs_fresh_code, not_found, self, invalid, already_suspended, not_active, suspended
-create function private.suspend_teacher(p_teacher uuid, p_reason text) returns text
+create function private.suspend_teacher(p_teacher uuid, p_reason text, p_notice text) returns text
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_gate text;
   v_row public.teachers;
   v_reason text := pg_catalog.btrim(p_reason);
+  v_notice text := pg_catalog.btrim(p_notice);
 begin
   v_gate := private.content_change_gate();
   if v_gate is not null then
@@ -175,7 +189,8 @@ begin
   if v_row.profile_id is not distinct from private.actor_id() then
     return 'self';
   end if;
-  if v_reason is null or v_reason = '' or pg_catalog.length(v_reason) > 1000 then
+  if v_reason is null or v_reason = '' or pg_catalog.length(v_reason) > 1000
+     or v_notice is null or v_notice = '' or pg_catalog.length(v_notice) > 300 then
     return 'invalid';
   end if;
   if v_row.status = 'suspended' then
@@ -186,13 +201,13 @@ begin
   end if;
   update public.teachers t
   set status = 'suspended', suspended_at = pg_catalog.clock_timestamp(), suspended_by = private.actor_id(),
-      suspension_approved_by = null, suspension_reason = v_reason
+      suspension_approved_by = null, suspension_reason = v_reason, suspension_notice = v_notice
   where t.id = p_teacher;
   return 'suspended';
 end
 $$;
-revoke all on function private.suspend_teacher(uuid, text) from public;
-grant execute on function private.suspend_teacher(uuid, text) to app_service;
+revoke all on function private.suspend_teacher(uuid, text, text) from public;
+grant execute on function private.suspend_teacher(uuid, text, text) to app_service;
 
 -- Levantar una suspensión. Una de fraude (con las dos firmas) no la levanta quien la propuso.
 --   forbidden, needs_fresh_code, not_found, self, proposer (la de fraude la propuso quien actúa), not_suspended,
@@ -223,7 +238,8 @@ begin
     return 'not_suspended';
   end if;
   update public.teachers t
-  set status = 'active', suspended_at = null, suspended_by = null, suspension_approved_by = null, suspension_reason = null
+  set status = 'active', suspended_at = null, suspended_by = null, suspension_approved_by = null, suspension_reason = null,
+      suspension_notice = null
   where t.id = p_teacher;
   return 'lifted';
 end
@@ -329,16 +345,16 @@ $$;
 revoke all on function private.withdraw_fraud_suspension(uuid) from public;
 grant execute on function private.withdraw_fraud_suspension(uuid) to app_service;
 
--- Decidir una propuesta pendiente: confirmar suspende con las dos firmas; rechazar la cierra. Nota
--- opcional de hasta 4 000 caracteres.
+-- Decidir una propuesta pendiente: confirmar suspende con las dos firmas y pide el texto que verá el maestro
+-- (de 1 a 300); rechazar la cierra. Nota interna opcional de hasta 4 000 caracteres.
 --   forbidden, needs_fresh_code      la puerta de Contenido
 --   not_found                        no existe o ya no está pendiente
 --   proposer                         quien decide la propuso
 --   self                             quien decide es el maestro
---   invalid                          la nota pasa de 4 000 caracteres
+--   invalid                          la nota pasa de 4 000 caracteres, o confirmar sin el texto del maestro
 --   not_active                       el maestro ya no está activo ni suspendido (la propuesta sigue)
 --   confirmed / rejected
-create function private.decide_fraud_suspension(p_request uuid, p_confirm boolean, p_note text) returns text
+create function private.decide_fraud_suspension(p_request uuid, p_confirm boolean, p_note text, p_notice text) returns text
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -348,6 +364,7 @@ declare
   v_row public.teachers;
   v_actor uuid := private.actor_id();
   v_note text := nullif(pg_catalog.btrim(p_note), '');
+  v_notice text := nullif(pg_catalog.btrim(p_notice), '');
   v_now timestamptz;
 begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
@@ -369,7 +386,8 @@ begin
   if v_request.proposed_by = v_actor then
     return 'proposer';
   end if;
-  if pg_catalog.length(coalesce(v_note, '')) > 4000 then
+  if pg_catalog.length(coalesce(v_note, '')) > 4000
+     or (p_confirm and (v_notice is null or pg_catalog.length(v_notice) > 300)) then
     return 'invalid';
   end if;
   v_now := pg_catalog.clock_timestamp();
@@ -380,7 +398,7 @@ begin
     -- Sobre una suspensión a mano, queda la de fraude desde que se suspendió.
     update public.teachers t
     set status = 'suspended', suspended_at = coalesce(t.suspended_at, v_now), suspended_by = v_request.proposed_by,
-        suspension_approved_by = v_actor, suspension_reason = v_request.reason
+        suspension_approved_by = v_actor, suspension_reason = v_request.reason, suspension_notice = v_notice
     where t.id = v_row.id;
   end if;
   update private.teacher_suspension_requests r
@@ -390,8 +408,8 @@ begin
   return case when p_confirm then 'confirmed' else 'rejected' end;
 end
 $$;
-revoke all on function private.decide_fraud_suspension(uuid, boolean, text) from public;
-grant execute on function private.decide_fraud_suspension(uuid, boolean, text) to app_service;
+revoke all on function private.decide_fraud_suspension(uuid, boolean, text, text) from public;
+grant execute on function private.decide_fraud_suspension(uuid, boolean, text, text) to app_service;
 
 -- Las propuestas pendientes, para PA-66: Contenido o finanzas, sin código reciente para leer; nulo para
 -- los demás. Con la alerta (su periodo y lo medido) y si es de quien lee.
@@ -467,6 +485,7 @@ begin
                            end,
              'suspended_at', t.suspended_at,
              'suspension_reason', t.suspension_reason,
+             'suspension_notice', t.suspension_notice,
              'fraud_pending', exists (
                select 1 from private.teacher_suspension_requests r where r.teacher_id = t.id and r.status = 'pending'),
              'is_self', t.profile_id is not distinct from v_actor)
@@ -565,11 +584,11 @@ as $$
            ('private.teacher_standing(text)', true, array['app_service']),
            ('private.teacher_roster()', true, array['app_service']),
            ('private.set_teacher_founder(uuid, date)', true, array['app_service']),
-           ('private.suspend_teacher(uuid, text)', true, array['app_service']),
+           ('private.suspend_teacher(uuid, text, text)', true, array['app_service']),
            ('private.lift_teacher_suspension(uuid)', true, array['app_service']),
            ('private.propose_fraud_suspension(uuid, text)', true, array['app_service']),
            ('private.withdraw_fraud_suspension(uuid)', true, array['app_service']),
-           ('private.decide_fraud_suspension(uuid, boolean, text)', true, array['app_service']),
+           ('private.decide_fraud_suspension(uuid, boolean, text, text)', true, array['app_service']),
            ('private.fraud_suspension_queue()', true, array['app_service'])),
   teacher_tables (relname) as (
     values ('private.teacher_invitations'::regclass), ('private.teacher_suspension_requests'::regclass)),
@@ -659,6 +678,12 @@ as $$
   from app_roles r
   where pg_catalog.has_any_column_privilege(r.rolname::name, 'public.teachers', 'INSERT, UPDATE')
      or pg_catalog.has_table_privilege(r.rolname::name, 'public.teachers', 'DELETE, TRUNCATE')
+  union all
+  -- Lo de adentro de una suspensión no lo lee el maestro.
+  select 'teachers suspension column readable by ' || r.rolname || ': ' || c.col, 'public.teachers'
+  from (values ('anon'), ('authenticated')) r (rolname)
+  cross join (values ('suspended_by'), ('suspension_approved_by'), ('suspension_reason')) c (col)
+  where pg_catalog.has_column_privilege(r.rolname::name, 'public.teachers', c.col, 'SELECT')
   union all
   select 'teachers trigger missing or disabled: ' || t.tgname, r.relname::text
   -- El de cada fila: por fila (1), antes (2), al insertar (4), al borrar (8) y al cambiar (16). El de
