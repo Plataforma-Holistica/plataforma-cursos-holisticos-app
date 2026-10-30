@@ -64,6 +64,13 @@ describe("readEditorForm", () => {
     ],
     ["borrar una lección", [["do", editorButton.deleteLesson(LESSON, 2)]], { step: "delete_lesson", course: COURSE, lesson: LESSON, seen: 2 }],
     ["cancelar", [["do", editorButton.cancel()], ["title", "Una"]], { step: "cancel", course: COURSE, title: "Una", description: "" }],
+    // Arrastrar (tercera solicitud): a cualquier lugar, con lo que se vio.
+    ["llevar un módulo a otro lugar", [["do", editorButton.moduleTo(MODULE, 1, 3)]], { step: "move_module", course: COURSE, module: MODULE, seen: 1, to: 3 }],
+    [
+      "llevar una lección a otro módulo",
+      [["do", editorButton.lessonTo(LESSON, MODULE, 2, OTHER, 1)]],
+      { step: "move_lesson", course: COURSE, lesson: LESSON, from: { module: MODULE, position: 2 }, to: { module: OTHER, position: 1 } },
+    ],
   ] as [string, [string, string][], unknown][])("%s", (_name, entries, expected) => {
     expect(readEditorForm(form(entries))).toEqual(expected);
   });
@@ -79,6 +86,12 @@ describe("readEditorForm", () => {
     ["subir el primero", [["do", editorButton.moduleUp(MODULE, 1)]]],
     ["mover sin destino", [["do", editorButton.lessonMove(LESSON, MODULE, 2)]]],
     ["mover a un destino sin forma", [["do", editorButton.lessonMove(LESSON, MODULE, 2)], ["to", "x:1"]]],
+    ["llevar un módulo a su mismo lugar", [["do", editorButton.moduleTo(MODULE, 2, 2)]]],
+    ["llevar un módulo al lugar cero", [["do", `module-to:${MODULE}:2:0`]]],
+    ["llevar un módulo a un lugar que no cabe en un entero", [["do", `module-to:${MODULE}:2:99999999999`]]],
+    ["llevar una lección a un módulo sin forma", [["do", `lesson-to:${LESSON}:${MODULE}:2:x:1`]]],
+    ["llevar una lección a su mismo lugar", [["do", editorButton.lessonTo(LESSON, MODULE, 2, MODULE, 2)]]],
+    ["llevar una lección con un dato de más", [["do", `${editorButton.lessonTo(LESSON, MODULE, 2, OTHER, 1)}:9`]]],
   ] as [string, [string, string][]][])("%s no es nada", (_name, entries) => {
     expect(readEditorForm(form(entries))).toEqual({ step: "none" });
   });

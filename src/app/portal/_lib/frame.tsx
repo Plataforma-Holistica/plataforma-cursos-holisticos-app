@@ -45,7 +45,8 @@ function Entries({ current }: { current: PortalEntry }) {
         </Link>
       </li>
       <li>
-        <form action={signOutAction}>
+        {/* El editor de curso pregunta antes si hay algo sin guardar (`data-leaves`). */}
+        <form action={signOutAction} data-leaves="all">
           <button type="submit" className="flex min-h-touch w-full items-center rounded-md px-3 text-left text-body text-text-2 hover:bg-surface-2 hover:text-text">
             {text.signOut}
           </button>

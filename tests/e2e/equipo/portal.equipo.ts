@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 
 import { actionFields, postAction } from "../support/actions";
 import { a11yViolations } from "../support/a11y";
@@ -34,7 +34,8 @@ async function signIn(page: Page, who: Person, path: string): Promise<void> {
   await page.getByLabel("Correo").fill(who.email);
   await page.getByLabel("Contraseña", { exact: true }).fill(who.password);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page).toHaveURL(path);
+  // Entrar es lo primero que pide la aplicación recién arrancada: puede tardar más que la espera por omisión.
+  await expect(page).toHaveURL(path, { timeout: 15_000 });
 }
 
 async function noJs(browser: Browser) {
@@ -52,7 +53,7 @@ const coursesOf = async (who: Person) =>
 
 /** Las lecciones de un módulo, en orden, como las pinta el editor. */
 const lessonsIn = (page: Page, module: string) =>
-  page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > a");
+  page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > span > a");
 
 /**
  * Los campos ocultos del formulario con acción de servidor que trae `needle`: el menú del portal tiene
@@ -63,6 +64,21 @@ function fieldsOf(html: string, needle: string): Record<string, string> {
   const position = forms.findIndex((form) => form.includes(needle));
   if (position < 0) throw new Error(`Ningún formulario trae ${needle}.`);
   return actionFields(html, position);
+}
+
+/**
+ * Arrastrar con el ratón: los eventos de arrastrar y soltar, con su `DataTransfer`, a la aplicación de verdad.
+ * El arrastre nativo de Playwright no es confiable en esta máquina (medido el 2026-10-29: a veces no llega ni un
+ * `dragstart`); que el arrastre arranca desde el asa lo midió una sonda ese día. Esto recorre los manejadores, el
+ * formulario oculto de la estructura y la base.
+ */
+async function drag(page: Page, from: Locator, to: Locator): Promise<void> {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await from.dispatchEvent("dragstart", { dataTransfer });
+  await to.dispatchEvent("dragenter", { dataTransfer });
+  await to.dispatchEvent("dragover", { dataTransfer });
+  await to.dispatchEvent("drop", { dataTransfer });
+  await from.dispatchEvent("dragend", { dataTransfer });
 }
 
 let created: { teacher: Person; course: string } | null = null;
@@ -288,6 +304,54 @@ test("a una alumna, el curso de otro y una ruta que no existe son el mismo docum
   } finally {
     await context.close();
   }
+});
+
+test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar pregunta", async ({ page }) => {
+  const gus = await person();
+  await makeTeacher(gus);
+  await signIn(page, gus, "/portal/cursos/nuevo");
+  await page.getByRole("textbox", { name: "Título del curso" }).fill("Para ordenar");
+  await page.getByRole("button", { name: "Crear curso" }).click();
+  await expect(page).toHaveURL(/\/portal\/cursos\/[0-9a-f-]{36}$/);
+  for (const title of ["Inicio", "Cierre"]) {
+    await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill(title);
+    await page.getByRole("button", { name: "Agregar módulo" }).click();
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+  }
+  const inicio = page.locator("li", { has: page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }) });
+  for (const title of ["Una", "Dos", "Tres"]) {
+    await inicio.getByRole("textbox", { name: "Título de la lección nueva" }).fill(title);
+    await inicio.getByRole("button", { name: "Agregar lección" }).click();
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+  }
+  await expect(lessonsIn(page, "Inicio")).toHaveText(["Una", "Dos", "Tres"]);
+
+  // Con el teclado: Espacio toma, las flechas mueven, Espacio suelta.
+  await page.getByRole("button", { name: "Arrastrar Una" }).focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await expect(lessonsIn(page, "Inicio")).toHaveText(["Dos", "Tres", "Una"]);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Con el ratón: una lección sobre otro módulo va al final de ese módulo; un módulo sobre otro toma su lugar.
+  await drag(page, page.getByRole("button", { name: "Arrastrar Tres" }), page.getByRole("link", { name: /^Módulo [0-9]+: Cierre$/ }));
+  await expect(lessonsIn(page, "Cierre")).toHaveText(["Tres"]);
+  await drag(page, page.getByRole("button", { name: "Arrastrar Cierre" }), page.getByRole("link", { name: /^Módulo [0-9]+: Inicio$/ }));
+  await expect(page.getByRole("link", { name: /^Módulo 1: / })).toHaveText("Módulo 1: Cierre");
+
+  // Salir con algo escrito pregunta; sin nada, no.
+  await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("A medias");
+  await expect(page.getByText("Cambios sin guardar")).toBeVisible();
+  await page.getByRole("link", { name: "Mis cursos" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Salir sin guardar" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Seguir editando" }).click();
+  await expect(page.getByRole("textbox", { name: "Título del módulo nuevo" })).toHaveValue("A medias");
+  await page.getByRole("link", { name: "Mis cursos" }).first().click();
+  await page.getByRole("dialog", { name: "Salir sin guardar" }).getByRole("button", { name: "Salir sin guardar" }).click();
+  await expect(page).toHaveURL("/portal/cursos");
 });
 
 // La corrida del equipo es solo de escritorio: este caso pone el ancho de un teléfono (el del Pixel 7 de la
