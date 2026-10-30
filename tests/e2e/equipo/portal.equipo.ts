@@ -51,13 +51,13 @@ const coursesOf = async (who: Person) =>
     )
   )[0]?.count;
 
-/** Las lecciones de un módulo, en orden, como las pinta el editor. */
 /** Abre «Ordenar» de una lección, si está plegado. */
 async function openReorder(page: Page, lesson: string): Promise<void> {
   const details = page.locator("details", { has: page.getByText(`Ordenar ${lesson}`, { exact: true }) });
   if ((await details.getAttribute("open")) === null) await details.locator("summary").click();
 }
 
+/** Las lecciones de un módulo, en orden, como las pinta el editor. */
 const lessonsIn = (page: Page, module: string) =>
   page.locator("li", { has: page.getByRole("link", { name: new RegExp(`^Módulo \\d+: ${module}$`) }) }).locator("ol > li > span > a");
 

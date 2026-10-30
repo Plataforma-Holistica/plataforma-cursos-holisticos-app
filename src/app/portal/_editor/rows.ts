@@ -28,7 +28,7 @@ export interface Option {
 export interface LessonRow {
   id: string;
   title: string;
-  /** Su número en el curso («1.2»), solo para la vista: el lector de pantalla ya oye el lugar en la lista. */
+  /** Su número en el curso («1.2»): quien ve dice «la 1.2», y el lector de pantalla lo lee junto al título. */
   number: string;
   href: string;
   current: boolean;

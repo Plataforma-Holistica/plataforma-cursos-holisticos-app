@@ -195,7 +195,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
           <CourseField course={view.course} />
           {data.inactive && <InlineAlert tone="warning">{text.inactiveNotice}</InlineAlert>}
           <div key={responses.keyOf("course")} className="flex flex-col gap-6">
-            <div role="group" aria-labelledby="editor-presentacion" className={CARD}>
+            <div role="group" aria-labelledby="editor-presentacion" aria-describedby="editor-presentacion-nota" className={CARD}>
               <GroupHeading id="editor-presentacion" title={text.presentation} hint={text.presentationHint} />
               <CountedField
                 id="editor-titulo"
@@ -220,7 +220,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
                 readOnly={pending}
               />
             </div>
-            <div role="group" aria-labelledby="editor-clasificacion" className={CARD}>
+            <div role="group" aria-labelledby="editor-clasificacion" aria-describedby="editor-clasificacion-nota" className={CARD}>
               <GroupHeading id="editor-clasificacion" title={text.classification} hint={text.classificationHint} />
               <div className="grid gap-6 sm:grid-cols-2">
                 <Select
@@ -274,7 +274,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
           </div>
         </dl>
       )}
-      <div role="group" aria-labelledby="editor-portada" className={CARD}>
+      <div role="group" aria-labelledby="editor-portada" aria-describedby="editor-portada-nota" className={CARD}>
         <GroupHeading id="editor-portada" title={text.cover} hint={text.coverHint} />
         <CourseCover
           title={data.cover.title}
@@ -291,13 +291,16 @@ export function CourseBlock({ view }: { view: EditorView }) {
 /** Un grupo de campos del bloque de la derecha: su fondo y su borde lo separan del fondo de la pantalla. */
 const CARD = "flex flex-col gap-6 rounded-md border border-border bg-surface-1 p-4 sm:p-6";
 
+/** El título y la nota de un grupo: el grupo se nombra con `id` y se describe con `${id}-nota`. */
 function GroupHeading({ id, title, hint }: { id: string; title: string; hint: string }) {
   return (
     <div className="flex flex-col gap-1">
       <h3 id={id} className="text-h3">
         {title}
       </h3>
-      <p className="text-body-s text-text-3">{hint}</p>
+      <p id={`${id}-nota`} className="text-body-s text-text-3">
+        {hint}
+      </p>
     </div>
   );
 }
@@ -307,7 +310,9 @@ function GroupHeading({ id, title, hint }: { id: string; title: string; hint: st
 //
 // La jerarquía se ve (observación de Sergio del 2026-10-30): «Datos del curso» es una fila propia con su
 // ícono; cada módulo es una tarjeta con su número arriba y su título grande; sus lecciones van adentro,
-// sangradas tras una línea, más chicas y con su número («1.2»). Lo elegido lleva el fondo del acento.
+// sangradas tras una línea, más chicas y con su número («1.2», que oye también el lector de pantalla: las
+// listas sin viñetas no siempre se anuncian como listas). Lo elegido lleva el fondo del acento, y el módulo
+// elegido además su borde.
 
 interface MoveButtonsProps {
   up: string | null;
@@ -517,7 +522,10 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
   const fieldId = `editor-leccion-nueva-${module.id}`;
   const typing = useTyping(`${STRUCTURE_KEY}leccion-${module.id}`, module.id, state, onInput, view.paths.self);
   return (
-    <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col rounded-md border border-border bg-surface-1">
+    <li
+      {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])}
+      className={cx("flex flex-col rounded-md border bg-surface-1", module.current ? "border-accent" : "border-border")}
+    >
       <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b border-border p-3", module.current ? "bg-accent-subtle" : "bg-surface-2")}>
         <span className="flex min-w-0 items-center gap-2">
           {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
@@ -553,14 +561,14 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
                 {...dropZone(kit, { kind: "lesson", id: lesson.id }, ["lesson"])}
                 className={cx("flex flex-wrap items-center gap-x-2 rounded-md px-2 py-1", lesson.current && "bg-accent-subtle")}
               >
-                <span className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="flex min-w-0 flex-auto items-center gap-2">
                   {view.editable && (
                     <DragHandle
                       item={{ kind: "lesson", id: lesson.id, title: lesson.title, list: module.id, position: index + 1, total: module.lessons.length }}
                       kit={kit}
                     />
                   )}
-                  <span aria-hidden="true" className="text-caption text-text-3 tabular-nums">
+                  <span className="text-caption text-text-3 tabular-nums">
                     {lesson.number}
                   </span>
                   <Link
@@ -575,7 +583,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
                   // «Subir», «Bajar» y «Mover a» de cada lección, plegados: abiertos le quitaban el lugar a la lección
                   // (observación de Sergio del 2026-10-30). Un `<details>` se abre también sin JavaScript.
                   <details className="group ml-auto open:w-full">
-                    <summary className="flex min-h-6 cursor-pointer list-none items-center justify-end gap-1 text-body-s text-text-3 hover:text-text">
+                    <summary className="flex min-h-touch cursor-pointer list-none items-center justify-end gap-1 text-body-s text-text-3 hover:text-text">
                       <span aria-hidden="true">{text.reorder}</span>
                       <span className="sr-only">{t(text.reorderNamed, { title: lesson.title })}</span>
                       <Icon icon={ChevronDown} size={16} className="group-open:rotate-180" />

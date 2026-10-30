@@ -146,16 +146,37 @@ describe("PA-43 · El editor de curso", () => {
     expect(screen.getByRole("group", { name: "Presentación" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Práctica y nivel" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Portada" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Presentación" }).getAttribute("aria-describedby")).toBe("editor-presentacion-nota");
     expect(screen.getByRole("link", { name: "Módulo 1: Inicio" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Datos del curso" }).getAttribute("aria-current")).toBe("true");
-    expect(screen.getByText("1.2").getAttribute("aria-hidden")).toBe("true");
+    // El número se lee junto al título: quien ve dice «la 1.2».
+    const number = screen.getByText("1.2");
+    expect(number.closest("[aria-hidden='true']")).toBeNull();
+    expect(number.nextElementSibling).toBe(screen.getByRole("link", { name: "Dos" }));
+  });
+
+  it("«Subir», «Bajar» y «Mover a» de cada lección van plegados en «Ordenar»", async () => {
+    render(await at());
+    const fold = screen.getByRole("button", { name: "Subir Dos" }).closest("details");
+    expect(fold).not.toBeNull();
+    expect(fold?.hasAttribute("open")).toBe(false);
+    expect(fold?.querySelector("summary")?.textContent).toBe("OrdenarOrdenar Dos");
+    expect(within(fold as HTMLElement).getByRole("combobox", { name: "Mover Dos a otro módulo" })).toBeTruthy();
+    // Los de un módulo no se pliegan.
+    expect(screen.getByRole("button", { name: "Bajar Inicio" }).closest("details")).toBeNull();
   });
 
   it("lo elegido dice de dónde es, arriba de su título", async () => {
-    render(await at({ leccion: L2 }));
-    expect(screen.getByText("Módulo 1 · Lección 2")).toBeTruthy();
+    const above = (place: string, title: string) => {
+      const heading = screen.getByRole("heading", { level: 2, name: title });
+      const label = within(heading.parentElement as HTMLElement).getByText(place);
+      expect(label.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    };
+    const first = render(await at({ leccion: L2 }));
+    above("Módulo 1 · Lección 2", "Dos");
+    first.unmount();
     render(await at({ modulo: M2 }));
-    expect(screen.getByRole("heading", { level: 2, name: "Cierre" })).toBeTruthy();
+    above("Módulo 2", "Cierre");
   });
 
   it("lo elegido por la dirección: la lección, con su descripción y «Borrar lección»", async () => {
