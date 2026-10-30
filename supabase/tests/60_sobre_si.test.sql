@@ -7,7 +7,7 @@
 -- marcó el fraude (`proposer`). Las liquidaciones y los bonos del fundador se prueban en la 55.
 begin;
 \ir _ayuda.psql
-select plan(32);
+select plan(33);
 
 -- f1 es de finanzas y maestra (del curso «sobre-a»); f2 y f3 son de finanzas y no son maestras; cf tiene
 -- configuración. ana y beto son alumnos.
@@ -201,7 +201,13 @@ select is(pruebas.excluye(pruebas.f2(), pruebas.ana(), 'fraud', :'imposible_ana'
   'sin quién marcó el fraude, cuenta quien revisó');
 
 -- Quién marcó el fraude no se reescribe, ni siquiera desde finanzas por fuera de la función.
+select pruebas.alerta('impossible_completion', null, pruebas.cf()) as imposible_cf \gset
 select pruebas.dueno_a_nombre_de(pruebas.f2());
+-- El control: la misma persona, por la misma vía, sí revisa una alerta abierta. Así lo que falla abajo es la regla
+-- de quién marcó, no la puerta.
+select lives_ok(format($$update public.anomaly_alerts set status = 'reviewed', review_note = 'x', reviewed_by = %L, reviewed_at = now()
+                         where id = %L$$, pruebas.f2(), :'imposible_cf'),
+  'la puerta de finanzas pasa por fuera de la función');
 select throws_ok(format('update public.anomaly_alerts set fraud_marked_by = %L where id = %L', pruebas.f2(), :'imposible_beto'),
   '42501', null, 'quién marcó el fraude queda fijo');
 select pruebas.limpiar();

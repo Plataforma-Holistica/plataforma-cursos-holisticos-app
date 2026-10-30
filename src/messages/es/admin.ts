@@ -416,7 +416,7 @@ export const admin = defineMessages({
     alreadyFraud: "Esa alerta ya estaba decidida como fraude.",
     self: "Es sobre ti, como alumno o como {maestro}: lo hace otra persona de finanzas.",
     proposer: "Tú marcaste esa alerta como fraude: excluir por fraude lo hace otra persona de finanzas.",
-    conflict: "Este mes cobras como {maestro}: excluir o revertir en este periodo lo hace otra persona de finanzas.",
+    conflict: "En ese periodo cobras como {maestro}: excluir o revertir ahí lo hace otra persona de finanzas.",
     alreadyExcluded: "Esa cuenta ya estaba excluida por ese motivo.",
     alreadyRevoked: "Esa exclusión ya estaba revertida.",
     closedNow: "El periodo de esa alerta ya no recibe latidos: no se excluye ni se revierte.",
