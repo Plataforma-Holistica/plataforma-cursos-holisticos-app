@@ -695,6 +695,26 @@ que no se ve leyendo un solo archivo:
   (`useResponses` en `_editor/blocks.tsx`, también al pedir confirmar un borrado); y con `changed` no vuelve lo
   escrito, para no pisar en un segundo clic lo que cambió otra pestaña. El nombre de la portada sale de
   `profiles.display_name`, no de `published_teachers` (decisión mía sin confirmar).
+- **Lo que T-402 suma al carril B** (tercera solicitud, sin migración). Arrastrar en la estructura del editor y el
+  aviso al salir con cambios sin guardar. **Arrastrar es propio, sin React Aria** (decisión mía sin confirmar: su
+  teclado no es el del diseño y sumaba una dependencia grande): `_editor/reorder.ts` es la tabla pura, y cada fila
+  lleva un asa (`DragHandle` en `_editor/blocks.tsx`) que solo existe con JavaScript. Con el teclado, Espacio toma la
+  fila, las flechas la mueven dentro de su lista, Espacio la suelta y Escape cancela; la fila no cambia de lugar en el
+  documento mientras se mueve (el foco se perdería): el asa dice el lugar al que va y una región viva lo anuncia. A
+  otro módulo, con el ratón o con «Mover a». Soltar manda un botón con lo que se vio (`module-to`, `lesson-to`) por un
+  formulario oculto de la estructura (`requestSubmit`), la misma acción y el mismo estado que «Subir». Los cambios sin
+  guardar los lleva `_editor/unsaved.tsx`: cada formulario marca su clave al escribir y la quita al enviar o al
+  desmontarse; con alguna, la barra dice «Cambios sin guardar», un enlace de la aplicación se detiene en la fase de
+  captura (antes que el `Link` de Next) y un diálogo pregunta, y cerrar o recargar lleva el aviso del navegador.
+  «Salir sin guardar» hace una carga completa (`window.location.assign`), sin el enrutador. Usa
+  `tests/ui/portal-editor-drag.test.tsx` y un caso más en `tests/e2e/equipo/portal.equipo.ts` (teclado, ratón y el
+  aviso). Tres cosas medidas el 2026-10-29: Chrome no empieza a arrastrar desde un `<button>`, así que el asa es un
+  `<span role="button" tabindex="0">`; el arrastre nativo de Playwright no es confiable en esta máquina, así que el
+  extremo a extremo manda los eventos de arrastrar y soltar con su `DataTransfer` (`drag()` en ese archivo); y
+  entrar justo después de `db:reset` puede quedarse en «Entrando…» mientras el Auth local arranca. Lo sucio se limpia
+  solo con la respuesta que guardó, y un formulario que se lleva a otra pantalla lo dice con `data-leaves` (`all` o
+  `detail`): el de «Cerrar sesión» del menú lo lleva. El botón «Atrás» del navegador no pregunta (decisión mía sin
+  confirmar).
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su
