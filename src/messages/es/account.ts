@@ -198,6 +198,7 @@ export const account = defineMessages({
     // PA-89. Solo se le ofrece a quien tiene configuración.
     legalTexts: "Textos legales",
     account: "Cuenta",
+    teacherInvitation: "Tienes una invitación como {maestro}: revísala",
     capabilities: {
       content: "Contenido",
       finance: "Finanzas",

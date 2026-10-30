@@ -10,7 +10,7 @@ import type { SessionCheck } from "./admission";
 import type { AccountDependencies } from "./deps";
 import * as enrolledFactors from "./enrolled-factor";
 import * as mailboxTickets from "./mailbox-ticket";
-import type { TeamState } from "./navigation";
+import type { EntryState, TeamState } from "./navigation";
 
 // Los servicios del equipo (RF-105, RF-106, RF-712; TRD §9.2, filas «Segundo factor» e
 // «Invitaciones»): en qué estado está alguien respecto al equipo, configurar el segundo
@@ -169,6 +169,8 @@ export async function withLockRetry<T>(work: () => Promise<T>, retryable: (error
 
 export interface TeamCore {
   checkSession: (reader: CookieReader) => Promise<SessionCheck>;
+  /** En qué estado está en el portal del maestro quien no es del equipo, para saber a dónde llevarla al entrar. */
+  teacherEntry?: (claims: VerifiedClaims, ticketPrint: string | null) => Promise<EntryState>;
   store: TeamStore;
   /** Solo para las pruebas: las cookies con otro sitio. */
   tickets?: Pick<typeof mailboxTickets, "readTicketPrint" | "dropTicket">;
@@ -205,12 +207,22 @@ export function createTeam(deps: Pick<AccountDependencies, "auth" | "report">, c
    * Solo sale el nombre del estado, y no autoriza nada: la pantalla a la que llegue vuelve a
    * preguntar. Nulo si no se supo, que no da nada: sigue como cualquier cuenta.
    */
-  async function standingAtEntry(claims: VerifiedClaims, reader: CookieReader): Promise<TeamState | null> {
+  async function standingAtEntry(claims: VerifiedClaims, reader: CookieReader): Promise<EntryState | null> {
+    const ticketPrint = readTicketPrint(reader);
+    let state: TeamState;
     try {
-      return (await store.standing(claims, readTicketPrint(reader))).state;
+      state = (await store.standing(claims, ticketPrint)).state;
     } catch {
       await deps.report("team_unavailable");
       return null;
+    }
+    if (state !== "none" || core.teacherEntry === undefined) return state;
+    // No es del equipo: quizá es maestro, o tiene una invitación. Si no se supo, sigue como cualquier cuenta.
+    try {
+      return await core.teacherEntry(claims, ticketPrint);
+    } catch {
+      await deps.report("teacher_unavailable");
+      return "none";
     }
   }
 

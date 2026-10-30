@@ -738,6 +738,26 @@ que no se ve leyendo un solo archivo:
   (`selected.place`). Una lista de práctica o de nivel sin opciones lo dice en la lista misma y en una nota. Una clase
   con la palabra `basis` en `src/app/` hace fallar `tests/architecture/media.test.ts`, que la busca para que la base
   de acceso del video no llegue a una pantalla: se usa `w-full`.
+- **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
+  viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
+  del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
+  como a quien no es maestro activo. Una prueba que arma un maestro activo le anota además el consentimiento del aviso
+  vigente (así quedaron la 37, la 57, las integraciones 72 y 73 y `makeTeacher` en `tests/e2e/equipo/portal.equipo.ts`).
+  `actor_owns_teacher` cuenta también al maestro de una invitación viva al correo propio; `set_teacher_founder` y
+  `suspend_teacher` contestan `self` por ahí, y `decide_fraud_suspension` contesta `proposer` también a quien marcó la
+  alerta como fraude. `teacher_roster` da `fresh_code`, para PA-65. **`requireTeacher(ruta, tipo)`** (`work` por
+  omisión, `invitation` o `notice`; tabla en `teacherPageStep`) le pregunta a `teacherStanding`, que lee
+  `private.teacher_standing(ticket)` como servidor con el resguardo del buzón; la función se nombra en un solo archivo
+  (`src/services/teachers/records.ts`, y `session-boundaries.test.ts` lo exige). Con invitación, toda ruta va a PA-40;
+  con el aviso pendiente, a PA-52 con `volver`; PA-40 y PA-52 sin nada que aceptar van a `/portal`. `/portal` es un
+  inicio mínimo que PA-41 reemplaza con T-408: si esa tarea cambia su título, cambia también la prueba de extremo a
+  extremo. Aceptar (`acceptTeacherInvitation`) y el aviso (`acceptTeacherNotice`) llevan solo los identificadores de los textos
+  mostrados; con `no_invitation`, o sin respuesta, se relee el estado antes de decir nada, y `accepted` también gasta
+  el resguardo del navegador. Qué pantalla sigue al entrar lo decide `entryDestination` con el estado del maestro: el
+  equipo manda, después `volver`, después la invitación, el aviso o `/portal`. Quien es del equipo y tiene una invitación
+  de maestro la encuentra enlazada en el inicio de administración. Usa pgTAP 61 e integración 81. Para el B: una pantalla
+  nueva del portal es `work` en `_lib/screens.tsx`, y el mock de `requireTeacher` en una prueba de página devuelve
+  `screen: "work"`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

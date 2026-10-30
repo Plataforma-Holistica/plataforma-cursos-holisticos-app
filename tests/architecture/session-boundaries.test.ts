@@ -266,6 +266,16 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     expect(store).not.toMatch(/\bas(?:User|System)\b/);
   });
 
+  it("quién es maestro lo pregunta un solo archivo, y aceptar no lleva nada que diga de qué invitación se trata", () => {
+    expect(namingInCode(/private\.teacher_standing\b/)).toEqual(["src/services/teachers/records.ts"]);
+    expect(namingInCode(/private\.accept_teacher_invitation\b/)).toEqual(["src/services/teachers/records.ts"]);
+    for (const file of ["src/app/portal/_invitacion/screen.tsx", "src/app/portal/_invitacion/outcomes.ts", "src/app/portal/_invitacion/actions.ts"]) {
+      const code = codeOf(file);
+      expect(code, file).not.toMatch(/name="(teacher|invitation|email|correo|maestro)/);
+      expect(code, file).not.toMatch(/form\.get\("(teacher|invitation|email|correo|maestro)/);
+    }
+  });
+
   it("en la aplicación nadie sustituye ese almacén", () => {
     expect(namingInCode(/\bteamStore\b/)).toEqual(["src/services/account/account.ts", "src/services/account/deps.ts"]);
     expect(namingInCode(/\bcreateTeamStore\b/)).toEqual(["src/services/account/team-store.ts"]);
@@ -275,7 +285,7 @@ describe("quién es del equipo lo decide la base, y el factor que se ata lo da d
     const account = codeOf("src/services/account/account.ts");
     expect(count(account, /\bteamStore\b/g)).toBe(3);
     expect(account).toMatch(/teamStore: databaseTeamStore,/);
-    expect(account).toMatch(/createTeam\(deps, \{ checkSession, store: deps\.teamStore \}\)/);
+    expect(account).toMatch(/createTeam\(deps, \{ checkSession, store: deps\.teamStore, teacherEntry: teacherEntryOf \}\)/);
     expect(account).toMatch(
       /createTeamAdmin\(deps, \{\s+teamStanding: team\.teamStanding,\s+giveSecondFactorCode: team\.giveSecondFactorCode,\s+store: deps\.teamStore,\s+\}\)/,
     );

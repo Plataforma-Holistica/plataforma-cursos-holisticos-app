@@ -44,6 +44,12 @@ async function teacher(owner: Client, who: Person, status: "active" | "suspended
      values ($1, $2::public.teacher_status, case when $3 then now() end, case when $3 then 'prueba' end)`,
     [who.id, status, status === "suspended"],
   );
+  // Con el aviso del maestro aceptado: sin él, la base no lo deja escribir (decisión de Sergio del 2026-10-30, T-401).
+  await owner.query("select set_config('app.actor_id', $1, true)", [who.id]);
+  await owner.query(
+    "insert into public.consents (profile_id, legal_document_id, origin) values ($1, private.current_legal_document('teacher_privacy_notice'), 'account_settings')",
+    [who.id],
+  );
   await asOwner(owner);
 }
 

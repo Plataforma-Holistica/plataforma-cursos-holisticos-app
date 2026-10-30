@@ -8,6 +8,7 @@ import {
   signInPath,
   signUpPath,
   teamDestination,
+  portalNoticePath,
 } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import { holds, type Capability } from "@/services/account/team";
@@ -197,22 +198,42 @@ export function adminPageStep(
 // entra en solo lectura (RF-702), y eso lo decide la pantalla con `status`. Quien no es maestro recibe
 // lo mismo que en una ruta que no existe.
 
+/** Qué tipo de pantalla del portal se pide: trabajar, aceptar la invitación, o el aviso vuelto a pedir. */
+export type PortalKind = "work" | "invitation" | "notice";
+
+/** Lo que se pinta: del maestro, o de la invitación. */
+export type TeacherRender =
+  | { kind: "render"; screen: "work"; claims: VerifiedClaims; teacher: { id: string; status: "active" | "suspended"; notice: string | null } }
+  | { kind: "render"; screen: "invitation"; claims: VerifiedClaims; invitation: { proven: boolean; name: string | null } }
+  | { kind: "render"; screen: "notice"; claims: VerifiedClaims };
+
 /**
- * Una pantalla del portal del maestro.
+ * Una pantalla del portal del maestro (decisiones de Sergio del 2026-10-29 y del 2026-10-30). Quien no es
+ * maestro recibe lo mismo en toda ruta, exista o no. A un invitado, toda ruta lo lleva a su invitación; a un
+ * maestro al que le falta el aviso, al aviso, y de ahí vuelve a donde iba. A un suspendido no se le pide.
  * @param path La ruta que se pidió, con su consulta: es a donde se vuelve después.
+ * @param kind El tipo de pantalla. Una ruta que no existe cuenta como de trabajo.
  */
-export function teacherPageStep(
-  check: TeacherCheck,
-  path: string,
-): { kind: "render"; claims: VerifiedClaims; teacher: { id: string; status: "active" | "suspended" } } | TeamDetour {
+export function teacherPageStep(check: TeacherCheck, path: string, kind: PortalKind = "work"): TeacherRender | TeamDetour {
   if (check.kind !== "teacher") return refusedStep(check, signInPath(path), consentsPath(path));
-  const { standing } = check;
+  const { claims, standing } = check;
   switch (standing.state) {
     case "none":
       return { kind: "not_found" };
+    case "invited":
+    case "invited_unproven":
+      return kind === "invitation"
+        ? { kind: "render", screen: "invitation", claims, invitation: { proven: standing.state === "invited", name: standing.name } }
+        : { kind: "redirect", to: ROUTES.portalInvitation };
+    case "needs_notice":
+      if (kind === "notice") return { kind: "render", screen: "notice", claims };
+      return { kind: "redirect", to: kind === "work" ? portalNoticePath(path) : ROUTES.portalNotice };
     case "active":
+      if (kind !== "work") return { kind: "redirect", to: ROUTES.portal };
+      return { kind: "render", screen: "work", claims, teacher: { id: standing.teacher.id, status: "active", notice: null } };
     case "suspended":
-      return { kind: "render", claims: check.claims, teacher: { id: standing.teacher.id, status: standing.state } };
+      if (kind !== "work") return { kind: "redirect", to: ROUTES.portal };
+      return { kind: "render", screen: "work", claims, teacher: { id: standing.teacher.id, status: "suspended", notice: standing.notice } };
   }
 }
 

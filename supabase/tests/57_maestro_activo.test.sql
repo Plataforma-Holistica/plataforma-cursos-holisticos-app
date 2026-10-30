@@ -20,6 +20,11 @@ begin
   insert into public.teachers (id, profile_id, status, suspended_at, suspension_reason)
   values (pruebas.m(p_n), p_profile, p_status,
           case when p_status = 'suspended' then now() end, case when p_status = 'suspended' then 'prueba' end);
+  -- Con el aviso del maestro aceptado: sin él, la base no lo deja escribir (decisión de Sergio del 2026-10-30).
+  perform pruebas.limpiar();
+  perform set_config('app.actor_id', p_profile::text, true);
+  insert into public.consents (profile_id, legal_document_id, origin)
+  values (p_profile, private.current_legal_document('teacher_privacy_notice'), 'account_settings');
   perform pruebas.limpiar();
 end
 $$;

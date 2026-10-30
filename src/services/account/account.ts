@@ -2,8 +2,10 @@ import "server-only";
 
 import * as adapter from "@/adapters/supabase/auth";
 import type { CookieJar, CookieOptions, CookieReader } from "@/adapters/supabase/auth-cookies";
+import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem, type Tx } from "@/adapters/supabase/db";
 import { getEnv } from "@/config/env";
+import { readTeacherStanding } from "@/services/teachers/records";
 import { parseEmail } from "@/domain/access/email";
 import {
   decideSignInAttempt,
@@ -32,6 +34,7 @@ import { dropEnrolledFactor } from "./enrolled-factor";
 import { buckets, fingerprint } from "./fingerprint";
 import { evaluateGate } from "./gate";
 import { dropTicket, MAILBOX_TICKET_MAX_AGE_LIMIT } from "./mailbox-ticket";
+import type { EntryState } from "./navigation";
 import { createManagement } from "./management";
 import { createOnboarding } from "./onboarding";
 import { proxyIsTrusted, resolveOrigin, type RequestOrigin } from "./origin";
@@ -129,6 +132,23 @@ export function forgetBrowserProofs(jar: CookieJar): void {
   dropEnrolledFactor(jar);
 }
 
+/** A dónde lleva al entrar el estado en el portal del maestro (T-401). */
+async function teacherEntryOf(claims: VerifiedClaims, ticketPrint: string | null): Promise<EntryState> {
+  const { state } = await asServer({ claims, reason: "teacher_standing" }, (tx) => readTeacherStanding(tx, ticketPrint));
+  switch (state) {
+    case "none":
+      return "none";
+    case "invited":
+    case "invited_unproven":
+      return "teacher_invited";
+    case "needs_notice":
+      return "teacher_notice";
+    case "active":
+    case "suspended":
+      return "teacher";
+  }
+}
+
 export function createAccountServices(overrides: Partial<AccountDependencies> = {}) {
   const deps: AccountDependencies = {
     auth: adapter,
@@ -178,7 +198,7 @@ export function createAccountServices(overrides: Partial<AccountDependencies> = 
 
   // `standingAtEntry` es de aquí dentro: lo usan los tres servicios que dejan a alguien
   // dentro, con claims recién verificadas. No sale con los servicios armados.
-  const { standingAtEntry, ...team } = createTeam(deps, { checkSession, store: deps.teamStore });
+  const { standingAtEntry, ...team } = createTeam(deps, { checkSession, store: deps.teamStore, teacherEntry: teacherEntryOf });
   const teamAdmin = createTeamAdmin(deps, {
     teamStanding: team.teamStanding,
     giveSecondFactorCode: team.giveSecondFactorCode,

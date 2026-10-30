@@ -47,6 +47,8 @@ export const ROUTES = {
   portal: "/portal",
   /** PA-42, los cursos del maestro. Uno, `portalCoursePath`. */
   portalCourses: "/portal/cursos",
+  portalInvitation: "/portal/invitacion",
+  portalNotice: "/portal/aviso",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -238,6 +240,17 @@ export function returnsOutsideAdmin(input: string | null | undefined): boolean {
 export type TeamState = "none" | "member" | "needs_code" | "unbound" | "invited" | "invited_unproven";
 
 /**
+ * Lo que se sabe al entrar: su estado en el equipo o, si no es del equipo, en el portal del maestro (T-401). El
+ * equipo manda: quien es las dos cosas ve su invitación de maestro desde el inicio de administración.
+ */
+export type EntryState = TeamState | "teacher_invited" | "teacher_notice" | "teacher";
+
+/** El aviso del maestro vuelto a pedir, y a dónde sigue después de aceptarlo. */
+export function portalNoticePath(returnTo: string): string {
+  return `${ROUTES.portalNotice}?${RETURN_PARAM}=${encodeURIComponent(returnTo)}`;
+}
+
+/**
  * A dónde va quien acaba de quedar dentro y sin pendientes (entrar, completar el registro,
  * completar la cuenta), según su estado en el equipo.
  *
@@ -250,7 +263,13 @@ export type TeamState = "none" | "member" | "needs_code" | "unbound" | "invited"
  *   se supo» no da nada, y se sigue como cualquier cuenta.
  * @param returnTo El destino guardado (`volver`), tal como llegó.
  */
-export function entryDestination(state: TeamState | null, returnTo: string | null | undefined): string {
+export function entryDestination(state: EntryState | null, returnTo: string | null | undefined): string {
+  if (state === "teacher_invited" || state === "teacher_notice" || state === "teacher") {
+    // Quien pidió una pantalla va a esa pantalla, y su guarda decide. Sin destino, al portal, o a lo que le falta.
+    const asked = resolveDestination(returnTo);
+    if (asked !== homeOf()) return asked;
+    return state === "teacher_invited" ? ROUTES.portalInvitation : state === "teacher_notice" ? ROUTES.portalNotice : ROUTES.portal;
+  }
   if (state === null || state === "none" || returnsOutsideAdmin(returnTo)) return resolveDestination(returnTo);
   switch (state) {
     case "invited_unproven":

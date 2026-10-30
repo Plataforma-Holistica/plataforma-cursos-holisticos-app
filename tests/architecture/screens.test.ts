@@ -85,6 +85,17 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
  * cada acción hace con cada respuesta lo prueban `tests/actions/` y sus tablas.
  */
 const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
+  "src/app/portal/_invitacion/actions.ts": {
+    // Aceptar la invitación de maestro (T-401, PA-40): el servicio corre la guarda, y la base busca la invitación
+    // por el correo de la cuenta. Del formulario solo llegan los dos textos que se mostraron.
+    acceptInvitationAction:
+      /if \(!input\.agreed \|\| !input\.noticeAgreed\) return[\s\S]*const outcome = acceptOutcome\(await acceptTeacherInvitation\(jar, input\.shown, await requestOrigin\(\)\)\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/portal/_aviso/actions.ts": {
+    // El aviso del maestro vuelto a pedir (T-401): el servicio corre la guarda y solo anota lo que sigue vigente.
+    acceptNoticeAction:
+      /if \(!input\.agreed\) return[\s\S]*const outcome = noticeOutcome\(await acceptTeacherNotice\(jar, \{ notice: input\.notice \}, await requestOrigin\(\)\), input\.returnTo\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
   "src/app/portal/_editor/actions.ts": {
     // El editor de curso (T-402, PA-43): una acción para todos sus bloques. Revisa los textos con la regla
     // del dominio antes del servicio, que corre la guarda; la base escribe solo a nombre del maestro activo.
@@ -348,6 +359,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/entrar/segundo-factor/configurar",
       "/explorar",
       "/inicio",
+      "/portal",
       "/portal/[...resto]",
     ]);
   });
@@ -509,9 +521,9 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
 
     it("el comodín corre la guarda antes de decir que una ruta no existe", () => {
       const wildcard = codeOf("src/app/portal/[...resto]/page.tsx");
-      expect(wildcard).toMatch(/const step = await requireTeacher\(path\);/);
-      expect(wildcard.indexOf("requireTeacher(path)")).toBeGreaterThan(-1);
-      expect(wildcard.indexOf("requireTeacher(path)")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
+      expect(wildcard).toMatch(/const step = await requireTeacher\(path, screen\?\.kind \?\? "work"\);/);
+      expect(wildcard.indexOf("requireTeacher(path")).toBeGreaterThan(-1);
+      expect(wildcard.indexOf("requireTeacher(path")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
       const unavailable = wildcard.indexOf('step.kind === "unavailable"');
       const suspended = wildcard.indexOf('step.kind === "suspended"');
       const rendered = wildcard.indexOf("if (screen !== null) return screen.render(");

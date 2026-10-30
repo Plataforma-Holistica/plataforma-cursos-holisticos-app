@@ -51,7 +51,7 @@ import {
   unnoteSend,
   type PairKeys,
 } from "./store";
-import type { TeamState } from "./team";
+import type { EntryState } from "./navigation";
 import { atLeast, MAIL_REQUEST_FLOOR_MS } from "./timing";
 
 // Registrarse, recuperar la contraseña y completar una cuenta (RF-101, RF-103, RF-108,
@@ -97,7 +97,7 @@ export type RegistrationCompletion =
    * La cuenta quedó completa y la persona, dentro. `team` es su estado respecto al equipo,
    * para saber a qué pantalla llevarla: nulo si le falta algo de su cuenta o si no se supo.
    */
-  | { kind: "entered"; pending: PendingAccount | null; team: TeamState | null }
+  | { kind: "entered"; pending: PendingAccount | null; team: EntryState | null }
   /** La cuenta quedó lista, pero no se pudo abrir su sesión: que entre con su contraseña. */
   | { kind: "ready_sign_in" }
   | { kind: "invalid"; fields: FieldErrors }
@@ -124,7 +124,7 @@ export type RecoveryCompletion =
 
 export type AccountCompletion =
   /** A la cuenta ya no le falta nada. `team`, como al entrar: a qué pantalla llevarla, o nulo si no se supo. */
-  | { kind: "complete"; team: TeamState | null }
+  | { kind: "complete"; team: EntryState | null }
   /** Se guardó lo que se mandó, y todavía falta algo (un texto cambió entre tanto). */
   | ({ kind: "incomplete" } & PendingAccount)
   | { kind: "invalid"; fields: FieldErrors }
@@ -142,7 +142,7 @@ export interface OnboardingCore {
    */
   admit: (entered: AuthSignIn & { ok: true }, startedText: string, userAgent: string | null) => Promise<Admission>;
   /** El estado en el equipo de quien acaba de quedar dentro, o nulo si no se supo. */
-  standingAtEntry: (claims: VerifiedClaims, reader: CookieReader) => Promise<TeamState | null>;
+  standingAtEntry: (claims: VerifiedClaims, reader: CookieReader) => Promise<EntryState | null>;
 }
 
 interface MailFlow {

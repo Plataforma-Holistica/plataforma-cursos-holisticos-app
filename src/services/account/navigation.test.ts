@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   consentsPath,
   entryDestination,
+  portalNoticePath,
   homeOf,
   isLessonPath,
   lessonPath,
@@ -300,6 +301,24 @@ describe("a dónde va quien acaba de entrar, según su estado en el equipo", () 
     ["member", "/cuenta", "/cuenta"],
   ] as const)("%s con destino %s: %s", (state, returnTo, expected) => {
     expect(entryDestination(state, returnTo)).toBe(expected);
+  });
+
+  it.each([
+    // El estado en el portal del maestro (T-401): sin destino, a lo que le falta, o al portal.
+    ["teacher_invited", null, "/portal/invitacion"],
+    ["teacher_notice", null, "/portal/aviso"],
+    ["teacher", null, "/portal"],
+    ["teacher", "//otro.example", "/portal"],
+    // Quien pidió una pantalla va a esa pantalla, y su guarda decide.
+    ["teacher", "/cuenta", "/cuenta"],
+    ["teacher_invited", "/portal/cursos", "/portal/cursos"],
+    ["teacher_notice", "/cuenta", "/cuenta"],
+  ] as const)("%s con destino %s: %s", (state, returnTo, expected) => {
+    expect(entryDestination(state, returnTo)).toBe(expected);
+  });
+
+  it("el aviso del maestro dice a dónde sigue", () => {
+    expect(portalNoticePath("/portal/cursos?leccion=1")).toBe("/portal/aviso?volver=%2Fportal%2Fcursos%3Fleccion%3D1");
   });
 
   it.each(["invited_unproven", "invited", "unbound", "needs_code", "member"] as const)(
