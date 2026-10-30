@@ -631,8 +631,12 @@ que no se ve leyendo un solo archivo:
   `propose_fraud_suspension` (finanzas, con una alerta `teacher_points_jump` decidida como fraude),
   `withdraw_fraud_suspension` (quien la propuso) y `decide_fraud_suspension` (otra persona con Contenido):
   confirmar deja `suspended_by` = quien propuso y `suspension_approved_by` = quien confirma, y esa suspensión no
-  la levanta quien la propuso. Todas toman la fila del maestro con `teacher_change_lock` (para cambiar; escribir
-  un curso la toma para compartir). Nadie actúa sobre sí, y `approve_course` contesta `self` al maestro del
+  la levanta quien la propuso (`proposer`); una alerta sostiene una sola suspensión confirmada (`alert_used`).
+  **El maestro solo lee `suspension_notice`** (1 a 300, lo escriben quien suspende o confirma; decisión de Sergio
+  del 2026-10-29): `suspension_reason`, `suspended_by` y `suspension_approved_by` no se conceden a
+  `authenticated`, y toda función que saque a alguien de `suspended` vacía también ese texto. Todas toman la fila
+  del maestro con `teacher_change_lock` (`for no key update`, después de la puerta), que excluye al `for share`
+  de `current_active_teacher_id`: el vigilante comprueba los dos. Nadie actúa sobre sí, y `approve_course` contesta `self` al maestro del
   curso (PA-67 lo dice). `fraud_suspension_queue()` es la cola de PA-66. Usa pgTAP 59.
 - **Lo que T-402 suma al carril B** (primera solicitud, `t402_borrador`; decisiones de Sergio del 2026-10-29:
   un borrador no impide desactivar una práctica o un nivel, el maestro borra un borrador que nunca envió, y los
