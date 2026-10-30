@@ -119,9 +119,24 @@ function fieldError(kind: DraftTextKind, problem: Problems[string] | null): stri
  * hizo deja lo escrito en pantalla, sin guardar. Al irse el bloque (se eligió otra cosa), lo suyo deja de
  * contar. `target` es el formulario en la respuesta (`BlockState`).
  */
-function useTyping(key: string, target: string, state: BlockState, onInput: () => void) {
+function useTyping(key: string, target: string, state: BlockState, onInput: () => void, self: string) {
   const { mark } = useUnsaved();
+  // Agregar un módulo o una lección no contesta: lleva a lo agregado (la dirección cambia). Si esta pantalla
+  // cambió después de que este formulario se envió, lo suyo se guardó: se limpia, y su campo se vuelve a armar.
+  const [sentFrom, setSentFrom] = useState<string | null>(null);
+  const [fresh, setFresh] = useState(0);
+  const [seenSelf, setSeenSelf] = useState(self);
+  if (seenSelf !== self) {
+    setSeenSelf(self);
+    if (sentFrom !== null && sentFrom !== self) {
+      setSentFrom(null);
+      setFresh((count) => count + 1);
+    }
+  }
   useEffect(() => () => mark(key, false), [key, mark]);
+  useEffect(() => {
+    if (fresh !== 0) mark(key, false);
+  }, [fresh, key, mark]);
   useEffect(() => {
     const saved = state.kind === "done" && state.target === target;
     const replaced = state.kind === "failed" && state.target === target && state.values === null;
@@ -132,7 +147,12 @@ function useTyping(key: string, target: string, state: BlockState, onInput: () =
       onInput();
       mark(key, true);
     },
-    form: { "data-unsaved-key": key },
+    form: {
+      "data-unsaved-key": key,
+      onSubmit: () => setSentFrom(self),
+    },
+    /** Para la llave del campo: cambia cuando lo agregado se guardó y la pantalla ya es otra. */
+    fresh,
   };
 }
 
@@ -149,7 +169,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
   const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
-  const typing = useTyping("datos", "course", state, result.onInput);
+  const typing = useTyping("datos", "course", state, result.onInput, view.paths.self);
   const { data } = view;
   const titleError = fieldError("courseTitle", problemOf(state, "title", "course"));
   const summaryError = fieldError("summary", problemOf(state, "summary", "course"));
@@ -342,15 +362,10 @@ function DragHandle({ item, kit }: HandleProps) {
   const picked = kit.picked !== null && kit.picked.kind === item.kind && kit.picked.id === item.id ? kit.picked : null;
   const words = (template: typeof text.grabbed | typeof text.dropped | typeof text.dragTo, position: number) => t(template, { title: item.title, position, total: item.total });
 
-  function onKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
-    // Una tecla mantenida no toma, suelta y vuelve a tomar en ráfaga.
-    if (event.repeat || kit.busy) {
-      if (event.key === " " || event.key === "Enter") event.preventDefault();
-      return;
-    }
-    if (event.key === " " || event.key === "Enter") {
-      event.preventDefault();
-      if (picked === null) {
+  /** Tomar o soltar: Espacio, Intro o un clic (un lector de pantalla en modo exploración manda clics). */
+  function toggle() {
+    if (kit.busy) return;
+    if (picked === null) {
         kit.setPicked({ kind: item.kind, id: item.id, title: item.title, list: item.list, from: item.position, current: item.position, total: item.total });
         kit.say(words(text.grabbed, item.position));
         return;
@@ -366,6 +381,17 @@ function DragHandle({ item, kit }: HandleProps) {
           : editorButton.lessonTo(item.id, item.list, picked.from, item.list, picked.current),
         { id: item.id, words: words(text.dropped, picked.current) },
       );
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
+    // Una tecla mantenida no toma, suelta y vuelve a tomar en ráfaga.
+    if (event.repeat || kit.busy) {
+      if (event.key === " " || event.key === "Enter") event.preventDefault();
+      return;
+    }
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      toggle();
       return;
     }
     if (picked === null) return;
@@ -407,6 +433,7 @@ function DragHandle({ item, kit }: HandleProps) {
         aria-disabled={kit.busy || undefined}
         aria-describedby={DRAG_HINT_ID}
         onKeyDown={onKeyDown}
+        onClick={toggle}
         onBlur={() => {
           if (picked === null) return;
           kit.setPicked(null);
@@ -460,7 +487,7 @@ interface ModuleItemProps {
 function ModuleItem({ module, view, state, responses, action, onInput, pending, kit, position, total }: ModuleItemProps) {
   const lessonError = fieldError("lessonTitle", problemOf(state, "title", module.id));
   const fieldId = `editor-leccion-nueva-${module.id}`;
-  const typing = useTyping(`${STRUCTURE_KEY}leccion-${module.id}`, module.id, state, onInput);
+  const typing = useTyping(`${STRUCTURE_KEY}leccion-${module.id}`, module.id, state, onInput, view.paths.self);
   return (
     <li {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])} className="flex flex-col gap-3 rounded-md border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -527,7 +554,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
         <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
-            key={responses.keyOf(module.id)}
+            key={`${responses.keyOf(module.id)}-${typing.fresh}`}
             id={fieldId}
             name="title"
             label={text.newLessonLabel}
@@ -552,8 +579,8 @@ export function StructureBlock({ view }: { view: EditorView }) {
   const [state, action, pending] = useActionState(editorAction, IDLE, `${view.paths.self}#${STRUCTURE_ID}`);
   const responses = useResponses(state);
   const result = useResult(state, pending, view.paths.self);
-  const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), result.message);
-  const typing = useTyping(`${STRUCTURE_KEY}modulo`, "module", state, result.onInput);
+  const { block, answer, spoken, away } = useAnswerFocus(pending, attemptOf(state), result.message);
+  const typing = useTyping(`${STRUCTURE_KEY}modulo`, "module", state, result.onInput, view.paths.self);
   const hydrated = useHydrated();
   const dropForm = useRef<HTMLFormElement>(null);
   const dropValue = useRef<HTMLInputElement>(null);
@@ -572,11 +599,15 @@ export function StructureBlock({ view }: { view: EditorView }) {
     const done = dropped.current;
     if (done === null || state.kind === "idle" || pending) return;
     dropped.current = null;
-    if (state.kind === "done" && state.target === "move") setVoice(done.words);
+    // Un fallo lo dice el bloque, que se lleva el foco a su aviso: el asa no se lo quita.
+    if (state.kind !== "done" || state.target !== "move") return;
+    setVoice(done.words);
+    // Quien se fue a otra cosa mientras se guardaba se queda donde está.
+    if (away.current) return;
     // Después de que el bloque mueva el foco a su respuesta: el asa lo recupera, para seguir con el teclado.
     const timer = window.setTimeout(() => document.querySelector<HTMLElement>(`[data-handle="${done.id}"]`)?.focus(), 0);
     return () => window.clearTimeout(timer);
-  }, [state, pending]);
+  }, [state, pending, away]);
   const kit: DragKit = {
     enabled: hydrated,
     busy: pending,
@@ -656,7 +687,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
         <form action={action} onInput={typing.onInput} {...typing.form} data-leaves="detail" className="flex flex-col gap-2">
           <CourseField course={view.course} />
           <CountedField
-            key={responses.keyOf("module")}
+            key={`${responses.keyOf("module")}-${typing.fresh}`}
             id="editor-modulo-nuevo"
             name="title"
             label={text.newModuleLabel}
@@ -688,7 +719,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   const result = useResult(state, pending, view.paths.self);
   // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
   const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), result.message);
-  const typing = useTyping("elegido", "item", state, result.onInput);
+  const typing = useTyping("elegido", "item", state, result.onInput, view.paths.self);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.

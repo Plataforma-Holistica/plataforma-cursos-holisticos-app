@@ -77,8 +77,8 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (keysNow.current.size === 0) return;
       event.preventDefault();
-      // Los navegadores que no miran `preventDefault` todavía piden este valor.
-      event.returnValue = "";
+      // Los navegadores que no miran `preventDefault` piden un valor que no esté vacío (el texto no lo muestran).
+      event.returnValue = portal.editor.leaveBody;
     };
     const onClick = (event: MouseEvent) => {
       if (keysNow.current.size === 0 || !plainClick(event)) return;
@@ -122,9 +122,12 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     const what = leaving;
     setLeaving(null);
     if (what === null) return;
-    // Lo escrito se pierde por decisión de quien sale: el aviso del navegador ya no tiene por qué saltar.
-    keysNow.current = new Set();
-    setKeys(new Set());
+    // Lo que se pierde, por decisión de quien sale: todo, o lo del bloque de la derecha si el formulario solo
+    // abre otra cosa (lo de la estructura se queda en pantalla y sigue sin guardar).
+    const detailOnly = what.kind === "form" && what.form.getAttribute("data-leaves") === "detail";
+    const kept = new Set([...keysNow.current].filter((key) => detailOnly && key.startsWith(STRUCTURE_KEY)));
+    keysNow.current = kept;
+    setKeys(kept);
     if (what.kind === "link") {
       // Una carga completa: se sale del editor de todos modos, y así no hay estado que arrastrar.
       window.location.assign(what.href);

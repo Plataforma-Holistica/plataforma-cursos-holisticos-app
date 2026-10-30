@@ -98,13 +98,39 @@ describe("arrastrar con el teclado", () => {
     expect(sent()).toHaveLength(1);
   });
 
-  it("si la base dice que cambió, no se anuncia que se soltó", async () => {
+  it("si la base dice que cambió, no se anuncia que se soltó, y el foco se queda en el aviso del fallo", async () => {
     actions.editorAction.mockResolvedValueOnce({ kind: "failed", reason: "changed", values: null, target: "move", attempt: 1 });
     const { user } = show();
     screen.getByRole("button", { name: "Arrastrar Una" }).focus();
     await user.keyboard(" {ArrowDown} ");
-    await waitFor(() => expect(screen.getByText(/Esto cambió mientras lo veías/)).toBeTruthy());
+    const failure = await screen.findByText(/Esto cambió mientras lo veías/);
     expect(voice()).not.toContain("Soltaste");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(failure.closest("[tabindex='-1']")).toHaveFocus();
+  });
+
+  it("quien se fue a otro campo mientras se guardaba se queda ahí", async () => {
+    let answer: (state: unknown) => void = () => undefined;
+    actions.editorAction.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { user } = show();
+    screen.getByRole("button", { name: "Arrastrar Una" }).focus();
+    await user.keyboard(" {ArrowDown} ");
+    const field = screen.getByRole("textbox", { name: "Título del curso" });
+    await user.click(field);
+    answer({ kind: "done", what: "moved", target: "move", attempt: 1 });
+    await waitFor(() => expect(voice()).toContain("Soltaste Una"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(field).toHaveFocus();
+  });
+
+  it("un clic en el asa también la toma y la suelta (un lector de pantalla en modo exploración manda clics)", async () => {
+    const { user } = show();
+    const handle = screen.getByRole("button", { name: "Arrastrar Una" });
+    await user.click(handle);
+    expect(handle.getAttribute("aria-pressed")).toBe("true");
+    await user.keyboard("{ArrowDown}");
+    await user.click(handle);
+    await waitFor(() => expect(sent()).toEqual([`lesson-to:${L1}:${M1}:1:${M1}:2`]));
   });
 
   it("un módulo se mueve igual, entre los módulos", async () => {
@@ -217,6 +243,32 @@ describe("cambios sin guardar", () => {
     document.removeEventListener("click", spy);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(stopped).toBe(false);
+  });
+
+  it("agregar un módulo lleva a lo agregado: lo suyo deja de estar sin guardar y el campo queda vacío", async () => {
+    actions.editorAction.mockResolvedValueOnce({ kind: "idle" });
+    const user = userEvent.setup();
+    const view = (search: Record<string, string>) => editorView(draft, choices, { readOnly: false, search, now: new Date() });
+    const { rerender } = render(<EditorScreen view={view({})} />);
+    await user.type(screen.getByRole("textbox", { name: "Título del módulo nuevo" }), "Nuevo");
+    expect(screen.getByText("Cambios sin guardar")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Agregar módulo" }));
+    await waitFor(() => expect(actions.editorAction).toHaveBeenCalled());
+    // La acción redirige a lo agregado: la misma pantalla con otra cosa elegida.
+    rerender(<EditorScreen view={view({ modulo: M2 })} />);
+    await waitFor(() => expect(screen.queryByText("Cambios sin guardar")).toBeNull());
+    expect((screen.getByRole("textbox", { name: "Título del módulo nuevo" }) as HTMLInputElement).value).toBe("");
+  });
+
+  it("agregar con algo sin guardar a la derecha pregunta, porque abrir lo agregado lo perdería", async () => {
+    actions.editorAction.mockResolvedValue({ kind: "idle" });
+    const { user } = show();
+    await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
+    await user.type(screen.getByRole("textbox", { name: "Título del módulo nuevo" }), "Nuevo");
+    await user.click(screen.getByRole("button", { name: "Agregar módulo" }));
+    expect(actions.editorAction).not.toHaveBeenCalled();
+    await user.click(within(screen.getByRole("dialog", { name: "Salir sin guardar" })).getByRole("button", { name: "Salir sin guardar" }));
+    await waitFor(() => expect(sent()).toEqual(["add-module:3"]));
   });
 
   it("sin nada escrito, salir no pregunta", async () => {
