@@ -146,7 +146,9 @@ describe("PA-43 · El editor de curso", () => {
     expect(screen.getByRole("group", { name: "Presentación" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Práctica y nivel" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Portada" })).toBeTruthy();
-    expect(screen.getByRole("group", { name: "Presentación" }).getAttribute("aria-describedby")).toBe("editor-presentacion-nota");
+    expect(screen.getByRole("group", { name: "Presentación" })).toHaveAccessibleDescription("Lo primero que se lee del curso en el catálogo.");
+    expect(screen.getByRole("group", { name: "Práctica y nivel" })).toHaveAccessibleDescription("Con esto se encuentra el curso al explorar.");
+    expect(screen.getByRole("group", { name: "Portada" })).toHaveAccessibleDescription(/No se edita\./);
     // Lo que se ve del enlace está en su nombre (WCAG 2.5.3): sin `aria-label`, y el número de arriba fuera y oculto.
     const moduleLink = screen.getByRole("link", { name: "Módulo 1: Inicio" });
     expect(moduleLink.hasAttribute("aria-label")).toBe(false);

@@ -73,7 +73,7 @@ const pairs: [string, string, number, number][] = [
   ["on-accent", "accent-strong", 13.35, AA_TEXT],
   ["text", "accent-subtle", 12.37, AA_TEXT],
   ["accent", "accent-subtle", 9.03, AA_TEXT],
-  ["text-3", "accent-subtle", 5.28, AA_TEXT], // el número de la lección y la etiqueta del módulo elegidos (PA-43)
+  ["text-3", "accent-subtle", 5.28, AA_TEXT], // en la lección y el módulo elegidos (PA-43): su número, su etiqueta y «Ordenar»
   ["success", "success-bg", 8.59, AA_TEXT],
   ["text", "success-bg", 13.91, AA_TEXT],
   ["warning", "warning-bg", 7.83, AA_TEXT],

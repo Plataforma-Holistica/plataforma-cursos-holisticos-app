@@ -526,7 +526,7 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
       {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])}
       className={cx("flex flex-col rounded-md border bg-surface-1", module.current ? "border-accent" : "border-border")}
     >
-      <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b border-border p-3", module.current ? "bg-accent-subtle" : "bg-surface-2")}>
+      <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b p-3", module.current ? "border-accent bg-accent-subtle" : "border-border bg-surface-2")}>
         <span className="flex min-w-0 items-center gap-2">
           {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
           {/* El número va arriba, a la vista; el enlace lo lleva en su nombre («Módulo 1: Inicio») con un texto que solo

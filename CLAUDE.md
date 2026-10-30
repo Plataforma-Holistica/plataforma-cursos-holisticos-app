@@ -722,7 +722,7 @@ que no se ve leyendo un solo archivo:
   anuncian como listas, y quien ve dice «la 1.2»). El módulo elegido lleva además el borde del acento. El enlace del módulo
   es su título, con «Módulo 1: » en un texto que solo oye el lector, y el número de arriba queda fuera del enlace y
   oculto al lector: con un `aria-label` sobre los dos renglones, lo visible («MÓDULO 1Inicio») no estaba en el nombre,
-  y el `axe` del extremo a extremo lo rechaza (`label-content-name-mismatch`, que el de jsdom no corre). «Subir»,
+  y el `axe` del extremo a extremo lo rechaza (`label-content-name-mismatch`; en jsdom no ve qué texto está a la vista). «Subir»,
   «Bajar» y «Mover a» de cada lección van plegados en un `<details>` («Ordenar»), que se abre también sin JavaScript;
   una prueba que los pulse abre antes «Ordenar» (`openReorder` en `tests/e2e/equipo/portal.equipo.ts`). Los datos del
   curso van en tres grupos con título y nota (`role="group"`, descritos por su nota), y lo elegido dice de dónde es arriba de su título
