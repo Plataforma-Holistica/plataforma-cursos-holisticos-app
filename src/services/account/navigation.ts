@@ -43,6 +43,10 @@ export const ROUTES = {
   teachers: "/maestros",
   /** Explorar y buscar (PA-21, T-210): pide sesión (RF-304). Con filtros, `explorePath`. */
   explore: "/explorar",
+  /** El portal del maestro: lo sirve un comodín que corre `requireTeacher` (T-402). */
+  portal: "/portal",
+  /** PA-42, los cursos del maestro. Uno, `portalCoursePath`. */
+  portalCourses: "/portal/cursos",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -60,6 +64,7 @@ export const SESSION_ROUTES: readonly string[] = [
   // Con ella entra también la de configurar, que cuelga de esta.
   ROUTES.secondFactor,
   ROUTES.admin,
+  ROUTES.portal,
 ];
 
 // La lección: `/cursos/{slug}/lecciones/{id}`, exactamente esos cuatro segmentos. No va por
@@ -130,10 +135,10 @@ export const periodPayoutsPath = (period: number): string => `${periodPath(perio
  * registrarse, recuperar, completar la cuenta, las dos del segundo factor) no están: volver
  * a ellas daría vueltas.
  *
- * Administración vale con todo lo que cuelgue de ella: por eso bajo `/admin` no puede haber
- * una lectura con efectos.
+ * Administración y el portal valen con todo lo que cuelgue de ellos: por eso bajo `/admin` y
+ * `/portal` no puede haber una lectura con efectos.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore, ROUTES.portal];
 
 /** Las rutas de `SESSION_ROUTES`: la ruta exacta y lo que cuelga de ella. */
 function underSessionRoute(pathname: string): boolean {

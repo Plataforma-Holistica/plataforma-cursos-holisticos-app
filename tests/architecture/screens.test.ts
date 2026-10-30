@@ -266,7 +266,7 @@ function actionBody(code: string, name: string): string {
 }
 
 const GUARD_IMPORT = /import \{[^}]*\} from "@\/app\/_lib\/guard";/;
-const SESSION_GUARD = /= await (requireSession|requireLessonSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup)\(/;
+const SESSION_GUARD = /= await (requireSession|requireLessonSession|requireIncompleteSession|requireAdmin|requireSecondFactor|requireFactorSetup|requireTeacher)\(/;
 const VISITOR_GUARD = /^\s*await visitorOnly\(\);$/m;
 
 /**
@@ -334,6 +334,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/entrar/segundo-factor/configurar",
       "/explorar",
       "/inicio",
+      "/portal/[...resto]",
     ]);
   });
 
@@ -464,6 +465,60 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       const others = guarded.filter((file) => teamGuardOf(routeOf(file)) === null);
       for (const file of others) {
         expect(codeOf(file), file).not.toMatch(/\b(requireAdmin|requireSecondFactor|requireFactorSetup)\(/);
+      }
+    });
+  });
+
+  // El portal del maestro (T-402): como administración, quién es maestro lo dice la base, y a quien no
+  // lo es se le contesta lo mismo que en una ruta que no existe. Por eso lo sirve un comodín.
+  describe("las pantallas del portal del maestro usan su guarda, y las sirve un comodín", () => {
+    const isPortal = (route: string) => route === "/portal" || route.startsWith("/portal/");
+    const under = sources.filter((source) => source.file.startsWith("src/app/portal/"));
+    const portalPages = guarded.filter((file) => isPortal(routeOf(file)));
+
+    it("hay pantallas del portal que revisar, y ninguna es pública", () => {
+      expect(portalPages).toContain("src/app/portal/[...resto]/page.tsx");
+      expect(PUBLIC_PAGES.filter((file) => file.startsWith("src/app/portal/"))).toEqual([]);
+    });
+
+    it.each(portalPages)("%s llama solo a la guarda del maestro, antes que a nada, sin límites de espera ni título", (file) => {
+      const code = codeOf(file);
+      const called = [...code.matchAll(/\bawait (require\w+|visitorOnly)\(/g)].map((match) => match[1]);
+      expect(called).toEqual(["requireTeacher"]);
+      expect(code).not.toMatch(/\bcheckSession\b|\bteamStanding\b|\bteacherStanding\b/);
+      const body = code.slice(code.indexOf("export default async function"));
+      const awaited = [...body.matchAll(/\bawait \(?([\w.]+)/g)].map((match) => match[1]);
+      expect(awaited.filter((name) => name !== "searchParams" && name !== "params")[0]).toBe("requireTeacher");
+      expect(code).not.toMatch(/\bSuspense\b/);
+      expect(code).not.toMatch(/export (const metadata|(async )?function generateMetadata)\b/);
+    });
+
+    it("el comodín corre la guarda antes de decir que una ruta no existe", () => {
+      const wildcard = codeOf("src/app/portal/[...resto]/page.tsx");
+      expect(wildcard).toMatch(/const step = await requireTeacher\(path\);/);
+      expect(wildcard.indexOf("requireTeacher(path)")).toBeGreaterThan(-1);
+      expect(wildcard.indexOf("requireTeacher(path)")).toBeLessThan(wildcard.lastIndexOf("notFound()"));
+      const unavailable = wildcard.indexOf('step.kind === "unavailable"');
+      const suspended = wildcard.indexOf('step.kind === "suspended"');
+      const rendered = wildcard.indexOf("if (screen !== null) return screen.render(");
+      for (const found of [unavailable, suspended, rendered]) expect(found).toBeGreaterThan(-1);
+      for (const found of [unavailable, suspended]) expect(rendered).toBeGreaterThan(found);
+      expect(wildcard.lastIndexOf("notFound()")).toBeGreaterThan(rendered);
+    });
+
+    it("no hay rutas, ni pantallas de carga, ni límites de espera, ni más páginas que el comodín y el inicio", () => {
+      expect(under.map((source) => source.file).filter((file) => /\/(route|loading|layout|template|default|error|not-found)\.tsx?$/.test(file))).toEqual([]);
+      expect(under.filter((source) => /\bSuspense\b/.test(source.code)).map((source) => source.file)).toEqual([]);
+      const pagesUnder = under.map((source) => source.file).filter((file) => /\/page(\.dev)?\.tsx?$/.test(file));
+      // El inicio (`src/app/portal/page.tsx`) lo agrega T-401 (carril A).
+      expect(pagesUnder.filter((file) => file !== "src/app/portal/page.tsx").sort()).toEqual(["src/app/portal/[...resto]/page.tsx"]);
+      const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
+      for (const folder of folders) expect(folder === "[...resto]" || folder.startsWith("_"), folder).toBe(true);
+    });
+
+    it("ninguna pantalla fuera del portal usa la guarda del maestro", () => {
+      for (const file of guarded.filter((page) => !isPortal(routeOf(page)))) {
+        expect(codeOf(file), file).not.toMatch(/\brequireTeacher\(/);
       }
     });
   });
