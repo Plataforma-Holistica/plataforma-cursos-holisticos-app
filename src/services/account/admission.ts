@@ -7,7 +7,7 @@ import type { GateResult, MissingDocument } from "@/domain/access/session-gate";
 
 import type { FailureCode } from "@/services/error-reporting/server";
 
-import type { TeamState } from "./team";
+import type { EntryState } from "./navigation";
 
 // Qué hace la aplicación con lo que decidieron la guarda y la base (TRD §9.2, filas «Freno
 // progresivo» y «Lo que entra sin pasar por el formulario»; flujo de la app §6.2).
@@ -63,7 +63,7 @@ export type SignInResult =
    * estado respecto al equipo, para saber a qué pantalla llevarla: lo pone el servicio que la
    * dejó dentro, y es nulo si le falta completar su cuenta o si no se supo. No autoriza nada.
    */
-  | { kind: "entered"; pending: PendingAccount | null; team: TeamState | null }
+  | { kind: "entered"; pending: PendingAccount | null; team: EntryState | null }
   /** Un solo mensaje, exista o no la cuenta y sea cual sea el dato que falló. */
   | { kind: "invalid_credentials" }
   /** Frenado: la pantalla dice a qué hora se puede volver a intentar. */

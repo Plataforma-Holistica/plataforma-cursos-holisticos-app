@@ -261,7 +261,7 @@ describe("requireTeacher", () => {
 
   it("le pregunta al servicio del maestro con las cookies de esta petición, y no a la guarda de sesión a secas", async () => {
     teaches({ kind: "teacher", claims, standing: { state: "active", teacher: { id: TEACHER } } });
-    expect(await requireTeacher("/portal/cursos")).toEqual({ kind: "render", claims, teacher: { id: TEACHER, status: "active" } });
+    expect(await requireTeacher("/portal/cursos")).toEqual({ kind: "render", screen: "work", claims, teacher: { id: TEACHER, status: "active", notice: null } });
     expect(mocks.teacherStanding).toHaveBeenCalledExactlyOnceWith(reader);
     expect(mocks.checkSession).not.toHaveBeenCalled();
     expect(mocks.teamStanding).not.toHaveBeenCalled();

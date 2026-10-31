@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   requireFactorSetup: vi.fn(),
   cookieReader: vi.fn(),
   sessionEmail: vi.fn(),
+  teacherStanding: vi.fn(() => Promise.resolve({ kind: "teacher", claims: {}, standing: { state: "none" } })),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
@@ -24,6 +25,7 @@ vi.mock("@/app/_lib/guard", () => ({
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader }));
 vi.mock("@/services/account/account", () => ({ sessionEmail: mocks.sessionEmail }));
+vi.mock("@/services/teachers/teachers", () => ({ teacherStanding: mocks.teacherStanding }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 vi.mock("@/app/(cuenta)/entrar/segundo-factor/actions", () => ({ giveCodeAction: vi.fn() }));
 vi.mock("@/app/(cuenta)/entrar/segundo-factor/configurar/actions", () => ({
@@ -66,6 +68,18 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["content"] });
     render(await AdminHomePage());
     expect(mocks.requireAdmin).toHaveBeenCalledExactlyOnceWith("/admin");
+  });
+
+  it.each([
+    ["invited", true],
+    ["invited_unproven", true],
+    ["none", false],
+    ["active", false],
+  ])("quien es del equipo y su estado de maestro es %s: ¿ve el enlace a su invitación? %s", async (state, shown) => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["content"] });
+    mocks.teacherStanding.mockResolvedValueOnce({ kind: "teacher", claims: {}, standing: { state } });
+    render(await AdminHomePage());
+    expect(screen.queryAllByRole("link", { name: /invitación/ }).length > 0).toBe(shown);
   });
 
   it("a quien es del equipo le dice con qué correo entró, que no tiene pendientes, y sus capacidades en palabras", async () => {

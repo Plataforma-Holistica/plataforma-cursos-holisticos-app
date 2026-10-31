@@ -22,6 +22,8 @@ export interface PortalContext {
 }
 
 export interface PortalScreen {
+  /** Qué tipo de pantalla pide a la guarda. Sin decirlo, de trabajo. */
+  kind?: "invitation" | "notice";
   render: (context: PortalContext) => ReactNode;
 }
 
@@ -31,6 +33,9 @@ const ID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 /** La pantalla que atiende lo que sigue a `/portal/`, o nulo si ahí no hay ninguna. */
 export function screenAt(rest: readonly string[]): PortalScreen | null {
   const [section, id, page, ...more] = rest;
+  // Las dos las pinta el comodín con lo que dijo la guarda: aquí solo se dice qué tipo de pantalla son.
+  if (section === "invitacion" && id === undefined) return { kind: "invitation", render: () => null };
+  if (section === "aviso" && id === undefined) return { kind: "notice", render: () => null };
   if (section !== "cursos" || more.length > 0) return null;
   if (id === undefined) return { render: ({ claims, readOnly }) => <CoursesSection claims={claims} readOnly={readOnly} /> };
   if (id === "nuevo") return page === undefined ? { render: ({ readOnly }) => <NewCourseSection readOnly={readOnly} /> } : null;

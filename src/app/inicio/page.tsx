@@ -10,6 +10,7 @@ import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { accountProfile, sessionEmail } from "@/services/account/account";
 import { coursePath, explorePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { readNotice } from "@/services/account/notice";
 import { homeShelf, myList, type ShelfCourse } from "@/services/browse/browse";
 import { continueWatching } from "@/services/progress/progress";
 import { Button } from "@/ui/button";
@@ -85,6 +86,7 @@ export default async function HomePage() {
   ]);
   const name = profile.kind === "ready" ? profile.name : null;
   const started = watching.kind === "ready" ? watching.courses : [];
+  const invitationGone = readNotice(await cookieReader()) === "teacher_invitation_gone";
 
 
   return (
@@ -95,6 +97,12 @@ export default async function HomePage() {
           <h1 className="text-h1">{name === null ? text.greetingAnonymous : t(text.greeting, { name })}</h1>
           {email !== null && <p className="text-body-s text-text-3">{t(messages.account.home.signedInAs, { email })}</p>}
         </div>
+
+        {invitationGone && (
+          <div className="px-4 sm:px-8">
+            <InlineAlert tone="warning">{text.invitationGone}</InlineAlert>
+          </div>
+        )}
 
         {shelf.kind === "unavailable" && (
           <div className="px-4 sm:px-8">

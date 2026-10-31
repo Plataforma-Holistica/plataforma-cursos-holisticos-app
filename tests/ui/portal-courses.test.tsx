@@ -79,7 +79,7 @@ beforeEach(() => {
 describe("el comodín del portal", () => {
   it("corre la guarda con la ruta pedida antes de leer nada", async () => {
     render(await at(["cursos"]));
-    expect(mocks.requireTeacher).toHaveBeenCalledExactlyOnceWith("/portal/cursos");
+    expect(mocks.requireTeacher).toHaveBeenCalledExactlyOnceWith("/portal/cursos", "work");
     expect(mocks.order).toEqual(["guarda", "cursos"]);
   });
 

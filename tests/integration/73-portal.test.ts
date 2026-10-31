@@ -45,6 +45,12 @@ async function teacher(owner: Client, who: Person, status: "active" | "suspended
      values ($1, $2::public.teacher_status, case when $3 then now() end, case when $3 then 'prueba' end)`,
     [who.id, status, status === "suspended"],
   );
+  // Con el aviso del maestro aceptado: sin él, la base no lo deja escribir (decisión de Sergio del 2026-10-30, T-401).
+  await owner.query("select set_config('app.actor_id', $1, true)", [who.id]);
+  await owner.query(
+    "insert into public.consents (profile_id, legal_document_id, origin) values ($1, private.current_legal_document('teacher_privacy_notice'), 'account_settings')",
+    [who.id],
+  );
   await asOwner(owner);
 }
 
@@ -122,9 +128,23 @@ const drafts = (owner: Client) =>
 
 const teachers = (owner: Client) =>
   createTeachers({
-    store: { standing: (claims) => asPerson(owner, claims, (tx) => readTeacherStanding(tx)) },
+    store: {
+      standing: async (claims, ticket) => {
+        await asServer(owner, claims.userId, claims.sessionId ?? randomUUID());
+        const standing = await readTeacherStanding(txOn(owner), ticket);
+        await asOwner(owner);
+        return standing;
+      },
+      texts: () => Promise.reject(new Error("Aquí no se leen los textos.")),
+      accept: () => Promise.reject(new Error("Aquí no se acepta.")),
+      acceptNotice: () => Promise.reject(new Error("Aquí no se acepta.")),
+    },
     checkSession: (reader) => testServices().checkSession(reader),
     report: () => Promise.reject(new Error("Nada debía reportarse.")),
+    readTicket: () => null,
+    dropTicket: () => undefined,
+    evidence: () => ({ address: null, userAgent: null }),
+    isLocal: () => true,
   });
 
 async function created(promise: Promise<{ kind: string; id?: string | null }>): Promise<string> {
@@ -144,7 +164,7 @@ describe("El portal del maestro, contra la base", () => {
       const ids = await owner.query<{ profile_id: string; id: string }>("select profile_id, id from public.teachers where profile_id = any($1)", [[ana.id, beto.id]]);
       const idOf = (who: Person) => ids.rows.find((row) => row.profile_id === who.id)?.id;
       expect(await service.teacherStanding(ana.jar)).toEqual({ kind: "teacher", claims: expect.anything(), standing: { state: "active", teacher: { id: idOf(ana) } } });
-      expect(await service.teacherStanding(beto.jar)).toEqual({ kind: "teacher", claims: expect.anything(), standing: { state: "suspended", teacher: { id: idOf(beto) } } });
+      expect(await service.teacherStanding(beto.jar)).toEqual({ kind: "teacher", claims: expect.anything(), standing: { state: "suspended", teacher: { id: idOf(beto) }, notice: null } });
       expect(await service.teacherStanding(caro.jar)).toEqual({ kind: "teacher", claims: expect.anything(), standing: { state: "none" } });
       expect(await service.teacherStanding(dani.jar)).toEqual({ kind: "teacher", claims: expect.anything(), standing: { state: "none" } });
     });
