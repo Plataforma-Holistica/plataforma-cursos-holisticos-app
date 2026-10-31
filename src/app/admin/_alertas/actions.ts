@@ -7,16 +7,18 @@ import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { checkCode, readGiveCodeForm } from "@/app/(cuenta)/entrar/segundo-factor/outcomes";
 import { cookieJar } from "@/app/_lib/request-context";
 import { clearNotice } from "@/services/account/notice";
-import { decideFraud, excludeAccount, giveFinanceCode, reviewAlert, revokeExclusion } from "@/services/anomalies/anomalies";
+import { decideFraud, excludeAccount, giveFinanceCode, proposeSuspension, reviewAlert, revokeExclusion, withdrawSuspension } from "@/services/anomalies/anomalies";
 
 import {
   alertsCodeOutcome,
   askedBy,
   excludeOutcome,
   fraudOutcome,
+  proposeOutcome,
   readAlertsForm,
   reviewOutcome,
   revokeOutcome,
+  withdrawOutcome,
   type AlertsOutcome,
   type AlertsState,
   type CodeState,
@@ -68,6 +70,12 @@ export async function alertsAction(previous: AlertsState, form: FormData): Promi
       break;
     case "fraud":
       outcome = fraudOutcome(await decideFraud(jar, { alert: request.alert, evidence: request.drafts.evidence }));
+      break;
+    case "propose":
+      outcome = proposeOutcome(await proposeSuspension(jar, { alert: request.alert, reason: request.drafts.reason }));
+      break;
+    case "withdraw":
+      outcome = withdrawOutcome(await withdrawSuspension(jar, { request: request.request }));
       break;
     case "exclude":
       outcome = excludeOutcome(

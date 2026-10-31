@@ -271,6 +271,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     legalAction:
       /if \(request\.step === "edit"\) return \{ kind: "composing"[\s\S]*if \(!checked\.ok\) return \{ kind: "composing"[\s\S]*if \(request\.step === "preview"\) return previewOf\([\s\S]*publishOutcome\(\s*await publishLegalVersion\(jar, \{[\s\S]*seenVersion: draft\.seen,\s*seenSha: request\.sha,[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/admin/_maestros/actions.ts": {
+    // Dar el código otra vez: el de los maestros, que comprueba lo reciente con la lectura que pide Contenido.
+    teachersCodeAction: /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*teachersCodeOutcome\(await giveTeacherCode\(jar, code\), teacher\)/,
+    // Los cambios: del formulario llega qué botón y lo escrito. Preguntar no llama a nadie. Lo prueba tests/actions.
+    teachersAction: /if \(request\.step === "ask_suspend"\) return \{ kind: "asking"[\s\S]*if \(request\.step === "ask_confirm"\) return \{ kind: "asking"[\s\S]*await cookieJar\(\)/,
+  },
   "src/app/admin/_alertas/actions.ts": {
     // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
     alertsCodeAction:
@@ -436,7 +442,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_periodos", "_practicas", "_revision", "_textos"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_maestros", "_periodos", "_practicas", "_revision", "_textos"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -465,6 +471,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(entries.map((entry) => [entry[1], entry[2]])).toEqual([
           ["equipo", "config"],
           ["practicas", "content"],
+          ["maestros", "content"],
           ["revision", "content"],
           ["alertas", "finance"],
           ["periodos", "finance"],
@@ -478,6 +485,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         expect(sections.map((source) => source.file).sort()).toEqual([
           "src/app/admin/_alertas/section.tsx",
           "src/app/admin/_equipo/section.tsx",
+          "src/app/admin/_maestros/section.tsx",
           "src/app/admin/_periodos/section.tsx",
           "src/app/admin/_practicas/section.tsx",
           "src/app/admin/_revision/section.tsx",
@@ -774,6 +782,10 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-ficha-lista",
       "bloque-liquidaciones",
       "bloque-liquidaciones-codigo",
+      "bloque-maestro-codigo",
+      "bloque-maestro-ficha",
+      "bloque-maestros-codigo",
+      "bloque-maestros-lista",
       "bloque-mi-lista",
       "bloque-nombre",
       "bloque-periodo-codigo",

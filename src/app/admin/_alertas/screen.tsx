@@ -44,13 +44,15 @@ const CODE_PERMALINK = `${ROUTES.alerts}#${CODE_BLOCK_ID}`;
 const LIST_PERMALINK = `${ROUTES.alerts}#${LIST_BLOCK_ID}`;
 
 /** Los avisos con que vuelve una decisión que salió bien (`notice.ts`). */
-export type DoneNotice = "alert_reviewed" | "fraud_decided" | "account_excluded" | "exclusion_revoked";
+export type DoneNotice = "alert_reviewed" | "fraud_decided" | "account_excluded" | "exclusion_revoked" | "fraud_proposed" | "fraud_withdrawn";
 
 const DONE: Record<DoneNotice, string> = {
   alert_reviewed: text.done.alertReviewed,
   fraud_decided: text.done.fraudDecided,
   account_excluded: text.done.accountExcluded,
   exclusion_revoked: text.done.exclusionRevoked,
+  fraud_proposed: t(text.done.fraudProposed),
+  fraud_withdrawn: text.done.fraudWithdrawn,
 };
 
 const FAILURES: Record<AlertsFailure, string> = {
@@ -64,6 +66,11 @@ const FAILURES: Record<AlertsFailure, string> = {
   already_revoked: text.alreadyRevoked,
   closed: text.closedNow,
   needs_fraud_decision: text.needsFraudDecision,
+  already_pending: text.alreadyPending,
+  already_suspended: text.alreadySuspended,
+  alert_used: text.alertUsed,
+  not_active: t(text.notActive),
+  not_yours: text.notYours,
   self: t(text.self),
   proposer: text.proposer,
   conflict: t(text.conflict),
@@ -220,6 +227,7 @@ function Alert({ alert, canChange, confirming, note, limits, answer, action, pen
   const headingId = `alertas-alerta-${alert.id}`;
   const asking = (step: Confirming["step"]) => (confirming !== null && confirming.confirming.step === step ? confirming : null);
   const askingFraud = asking("fraud");
+  const askingProposal = asking("propose");
   return (
     <li>
       <article aria-labelledby={headingId} className="flex flex-col gap-5 rounded-md border border-border p-4">
@@ -293,6 +301,46 @@ function Alert({ alert, canChange, confirming, note, limits, answer, action, pen
               <div>
                 <Button type="submit" name="do" value={alert.buttons.askFraud} variant="secondary" size="md" disabled={pending}>
                   {text.decideFraud}
+                </Button>
+              </div>
+            )}
+          </form>
+        )}
+        {alert.proposal !== null && (
+          <form action={action} noValidate className="flex flex-col gap-3">
+            <h4 className="text-body-l font-semibold">{t(text.proposalTitle)}</h4>
+            <p className="text-text-2">{alert.proposal.text}</p>
+            {canChange && alert.proposal.withdraw !== null && (
+              <div>
+                <Button type="submit" name="do" value={alert.proposal.withdraw} variant="secondary" size="md" disabled={pending}>
+                  {text.withdrawProposal}
+                </Button>
+              </div>
+            )}
+          </form>
+        )}
+        {canChange && alert.canPropose && (
+          <form action={action} noValidate className="flex flex-col gap-3">
+            <h4 className="text-body-l font-semibold">{t(text.proposalTitle)}</h4>
+            <p className="text-text-2">{text.proposalBody}</p>
+            {askingProposal !== null ? (
+              <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
+                <p className="font-semibold">{t(text.confirmProposalTitle)}</p>
+                <Textarea
+                  key={`propuesta-${askingProposal.attempt}`}
+                  id={`alertas-propuesta-${alert.id}`}
+                  label={text.proposalReasonLabel}
+                  name="reason"
+                  defaultValue={askingProposal.drafts.reason}
+                  maxLength={limits.note}
+                  error={askingProposal.problem === null ? undefined : PROBLEMS[askingProposal.problem]}
+                />
+                <Confirm value={alert.buttons.propose} label={text.confirmProposal} pending={pending} />
+              </div>
+            ) : (
+              <div>
+                <Button type="submit" name="do" value={alert.buttons.askProposal} variant="secondary" size="md" disabled={pending}>
+                  {text.askProposal}
                 </Button>
               </div>
             )}

@@ -28,6 +28,7 @@ const JUMP: FinanceAlert = {
   evidence: null,
   reviewedAt: null,
   reviewedByName: null,
+  suspension: null,
   teacherName: "Maestra Uno",
   canExclude: true,
   accounts: [
@@ -65,6 +66,7 @@ const IMPOSSIBLE: FinanceAlert = {
   evidence: "Cinco lecciones en una hora.",
   reviewedAt: "2026-10-20T18:00:00Z",
   reviewedByName: null,
+  suspension: null,
   teacherName: null,
   canExclude: false,
   accounts: [{ account: "0123456789ab", age: "under_30", share: null, halfPoints: null, halfPointsBefore: null, lessons: 5, coveredSeconds: 14_400, excluded: false }],
@@ -131,7 +133,16 @@ describe("alertsView", () => {
     expect(card?.closed).toBeNull();
     expect(card?.accountsTitle).toBe(text.accountsTitle);
     expect(card?.moreAccounts).toBe(t(text.moreAccounts.other, { count: "3" }));
-    expect(card?.buttons).toEqual({ review: alertsButton.review(ALERT), askFraud: alertsButton.askFraud(ALERT), fraud: alertsButton.fraud(ALERT) });
+    expect(card?.buttons).toEqual({
+      askProposal: alertsButton.askProposal(ALERT),
+      propose: alertsButton.propose(ALERT),
+      review: alertsButton.review(ALERT),
+      askFraud: alertsButton.askFraud(ALERT),
+      fraud: alertsButton.fraud(ALERT),
+    });
+    // Sin decidirla como fraude no se propone suspender.
+    expect(card?.canPropose).toBe(false);
+    expect(card?.proposal).toBeNull();
   });
 
   it("cada cuenta, por su huella y sus tramos; la excluida no se ofrece otra vez", () => {
@@ -274,5 +285,26 @@ describe("alertsView", () => {
 
   it("los motivos son los de la base, todos con su texto", () => {
     expect(Object.keys(REASON_LABELS)).toEqual([...EXCLUSION_REASONS]);
+  });
+});
+
+describe("proponer la suspensión (T-401)", () => {
+  const card = (extra: Partial<FinanceAlert>) => alertsView(read([{ ...JUMP, ...extra }])).alerts[0];
+  const REQUEST = "c0000000-0000-4000-8000-000000000004";
+
+  it("el salto de puntos decidido como fraude, sin propuesta, se puede proponer", () => {
+    expect(card({ isFraud: true, status: "reviewed" })?.canPropose).toBe(true);
+  });
+
+  it("con una propuesta ya no; si es de quien lee, la retira", () => {
+    const mine = card({ isFraud: true, status: "reviewed", suspension: { id: REQUEST, mine: true } });
+    expect(mine?.canPropose).toBe(false);
+    expect(mine?.proposal?.withdraw).toBe(alertsButton.withdraw(ALERT, REQUEST));
+  });
+
+  it("de otra persona, se dice y no se retira", () => {
+    const other = card({ isFraud: true, status: "reviewed", suspension: { id: REQUEST, mine: false } });
+    expect(other?.proposal?.withdraw).toBeNull();
+    expect(other?.proposal?.text).toBeTruthy();
   });
 });

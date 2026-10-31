@@ -68,6 +68,11 @@ export default async function AdminHomePage() {
       )}
       {capabilities.includes("content") && (
         <p>
+          <TextLink href={ROUTES.adminTeachers}>{t(text.admin.teachers)}</TextLink>
+        </p>
+      )}
+      {capabilities.includes("content") && (
+        <p>
           <TextLink href={ROUTES.catalog}>{text.admin.catalog}</TextLink>
         </p>
       )}

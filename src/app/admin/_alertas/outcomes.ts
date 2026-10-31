@@ -1,5 +1,5 @@
 import { ROUTES } from "@/services/account/navigation";
-import type { AccountExcluded, AlertReviewed, ExclusionRevoked, FinanceCode } from "@/services/anomalies/anomalies";
+import type { AccountExcluded, AlertReviewed, ExclusionRevoked, FinanceCode, SuspensionProposed, SuspensionWithdrawn } from "@/services/anomalies/anomalies";
 
 import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
 
@@ -23,7 +23,7 @@ export type { CodeState } from "../_lib/fresh-code";
 
 /** A esta misma página: decide su guarda. */
 const TO_PAGE: Leave = { kind: "leave", to: ROUTES.alerts, notice: null };
-const done = (notice: "alert_reviewed" | "fraud_decided" | "account_excluded" | "exclusion_revoked"): Leave => ({
+const done = (notice: "alert_reviewed" | "fraud_decided" | "account_excluded" | "exclusion_revoked" | "fraud_proposed" | "fraud_withdrawn"): Leave => ({
   kind: "leave",
   to: ROUTES.alerts,
   notice,
@@ -57,6 +57,9 @@ export type AlertsRequest =
   | { step: "review"; alert: string; drafts: Drafts }
   | { step: "ask_fraud"; alert: string; drafts: Drafts }
   | { step: "fraud"; alert: string; drafts: Drafts }
+  | { step: "ask_propose"; alert: string; drafts: Drafts }
+  | { step: "propose"; alert: string; drafts: Drafts }
+  | { step: "withdraw"; alert: string; request: string; drafts: Drafts }
   | { step: "ask_exclude"; alert: string; account: string; drafts: Drafts }
   | { step: "exclude"; alert: string; account: string; drafts: Drafts }
   | { step: "ask_revoke"; alert: string; exclusion: string; drafts: Drafts }
@@ -89,8 +92,11 @@ export function readAlertsForm(form: unknown): AlertsRequest {
     if (verb === "review") return { step: "review", alert, drafts };
     if (verb === "ask_fraud") return { step: "ask_fraud", alert, drafts };
     if (verb === "fraud") return { step: "fraud", alert, drafts };
+    if (verb === "ask_propose") return { step: "ask_propose", alert, drafts };
+    if (verb === "propose") return { step: "propose", alert, drafts };
     return { step: "none" };
   }
+  if (verb === "withdraw" && ID.test(target)) return { step: "withdraw", alert, request: target, drafts };
   if ((verb === "ask_exclude" || verb === "exclude") && ACCOUNT.test(target)) return { step: verb, alert, account: target, drafts };
   if ((verb === "ask_revoke" || verb === "revoke") && ID.test(target)) return { step: verb, alert, exclusion: target, drafts };
   return { step: "none" };
@@ -101,6 +107,9 @@ export const alertsButton = {
   review: (alert: string) => `review:${alert}`,
   askFraud: (alert: string) => `ask_fraud:${alert}`,
   fraud: (alert: string) => `fraud:${alert}`,
+  askProposal: (alert: string) => `ask_propose:${alert}`,
+  propose: (alert: string) => `propose:${alert}`,
+  withdraw: (alert: string, request: string) => `withdraw:${alert}:${request}`,
   askExclusion: (alert: string, account: string) => `ask_exclude:${alert}:${account}`,
   exclude: (alert: string, account: string) => `exclude:${alert}:${account}`,
   askRevocation: (alert: string, exclusion: string) => `ask_revoke:${alert}:${exclusion}`,
@@ -122,6 +131,13 @@ export type AlertsFailure =
   | "already_revoked"
   | "closed"
   | "needs_fraud_decision"
+  /** La suspensión por fraude ya se propuso, ya rige, o esa alerta ya la sostuvo (T-401). */
+  | "already_pending"
+  | "already_suspended"
+  | "alert_used"
+  | "not_active"
+  /** Una propuesta la retira quien la hizo. */
+  | "not_yours"
   /** La alerta o la cuenta es de quien actúa (T-401). */
   | "self"
   /** Quien marcó el fraude no excluye por fraude: otra persona de finanzas. */
@@ -135,6 +151,7 @@ export type AlertsFailure =
 /** Qué se está preguntando, y dónde: en la alerta, en la fila de una cuenta o en la de una exclusión. */
 export type Confirming =
   | { step: "fraud"; alert: string }
+  | { step: "propose"; alert: string }
   | { step: "exclude"; alert: string; account: string }
   | { step: "revoke"; alert: string; exclusion: string };
 
@@ -153,7 +170,7 @@ export type AlertsState =
   | { kind: "failed"; reason: AlertsFailure; step: DecisionStep; alert: string | null; drafts: Drafts; attempt: number };
 
 /** Los pasos que llegan al servicio. */
-export type DecisionStep = "review" | "fraud" | "exclude" | "revoke";
+export type DecisionStep = "review" | "fraud" | "propose" | "withdraw" | "exclude" | "revoke";
 
 export type AlertsOutcome = Leave | { kind: "failed"; reason: AlertsFailure };
 
@@ -168,6 +185,10 @@ export function askedBy(request: AlertsRequest): { confirming: Confirming; probl
   switch (request.step) {
     case "ask_fraud":
       return { confirming: { step: "fraud", alert: request.alert }, problem: null };
+    case "ask_propose":
+      return { confirming: { step: "propose", alert: request.alert }, problem: null };
+    case "propose":
+      return written(request.drafts.reason) ? null : { confirming: { step: "propose", alert: request.alert }, problem: "missing_reason" };
     case "ask_exclude":
       return { confirming: { step: "exclude", alert: request.alert, account: request.account }, problem: null };
     case "ask_revoke":
@@ -185,6 +206,9 @@ export function askedBy(request: AlertsRequest): { confirming: Confirming; probl
     case "none":
     case "cancel":
     case "review":
+      return null;
+    // Retirar no pregunta: se puede volver a proponer.
+    case "withdraw":
       return null;
   }
 }
@@ -299,6 +323,62 @@ export function excludeOutcome(result: AccountExcluded): AlertsOutcome {
 }
 
 /** Lo que contestó revertir una exclusión. */
+export function proposeOutcome(result: SuspensionProposed): AlertsOutcome {
+  switch (result.kind) {
+    case "refused":
+      return TO_PAGE;
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable" };
+    case "unknown":
+      return { kind: "failed", reason: "unknown" };
+    case "malformed":
+      return { kind: "failed", reason: "missing_reason" };
+    case "answered":
+      switch (result.answer) {
+        case "proposed":
+          return done("fraud_proposed");
+        case "needs_fraud_decision":
+        case "self":
+        case "already_suspended":
+        case "not_active":
+        case "already_pending":
+        case "alert_used":
+          return { kind: "failed", reason: result.answer };
+        case "invalid":
+          return { kind: "failed", reason: "missing_reason" };
+        case "forbidden":
+          return TO_PAGE;
+        case "needs_fresh_code":
+          return { kind: "failed", reason: "needs_code" };
+      }
+  }
+}
+
+export function withdrawOutcome(result: SuspensionWithdrawn): AlertsOutcome {
+  switch (result.kind) {
+    case "refused":
+      return TO_PAGE;
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable" };
+    case "unknown":
+      return { kind: "failed", reason: "unknown" };
+    case "malformed":
+      return { kind: "failed", reason: "not_found" };
+    case "answered":
+      switch (result.answer) {
+        case "withdrawn":
+          return done("fraud_withdrawn");
+        case "not_found":
+        case "not_yours":
+          return { kind: "failed", reason: result.answer };
+        case "forbidden":
+          return TO_PAGE;
+        case "needs_fresh_code":
+          return { kind: "failed", reason: "needs_code" };
+      }
+  }
+}
+
 export function revokeOutcome(result: ExclusionRevoked): AlertsOutcome {
   switch (result.kind) {
     case "refused":

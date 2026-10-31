@@ -46,6 +46,8 @@
 # Los periodos, el ensayo y el cierre desde la aplicación, y su exportación (T-605)
 /src/services/periods/     @SerchFGA @plataformaholisticadev
 /src/app/admin/_periodos/  @SerchFGA @plataformaholisticadev
+# Administrar a los maestros (T-401): la invitación, la marca de fundador y la suspensión.
+/src/app/admin/_maestros/  @SerchFGA @plataformaholisticadev
 # La medición de la cabecera de la dirección, de la que dependen el freno y los topes
 /src/app/api/origin-drill/ @SerchFGA @plataformaholisticadev
 # Los textos de las pantallas de la cuenta: entre ellos, la frase que la persona acepta

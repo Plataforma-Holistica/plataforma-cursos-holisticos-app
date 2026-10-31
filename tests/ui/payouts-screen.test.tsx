@@ -102,9 +102,9 @@ describe("PA-81, las liquidaciones del periodo", () => {
     expect(second).toHaveAccessibleName(text.confirmRelease);
     await user.click(within(dialog).getByRole("button", { name: text.confirmRelease }));
     expect(sent(actions.payoutsAction, 1)).toEqual({ do: payoutsButton.release(202710, SEEN) });
-    const box = within(await screen.findByRole("dialog")).getByRole("checkbox", { name: text.understood });
-    await waitFor(() => expect(box).toHaveFocus());
-    expect(box).toHaveAccessibleDescription(text.missingUnderstood);
+    // La casilla se arma de nuevo con la respuesta: una referencia tomada antes puede ser de la que ya se fue.
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood })).toHaveFocus());
+    expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood })).toHaveAccessibleDescription(text.missingUnderstood);
   });
 
   // Cambió con la revisión del diff: antes no se pintaba nada, y la persona pulsaba «Liberar» sin respuesta.

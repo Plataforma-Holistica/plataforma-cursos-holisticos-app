@@ -16,7 +16,7 @@ import { AlertsScreen, type DoneNotice } from "./screen";
 // a quien pasa su puerta con Finanzas. Ninguna cuenta llega con su identificador: cada una es su
 // huella en esa alerta.
 
-const DONE: readonly DoneNotice[] = ["alert_reviewed", "fraud_decided", "account_excluded", "exclusion_revoked"];
+const DONE: readonly DoneNotice[] = ["alert_reviewed", "fraud_decided", "account_excluded", "exclusion_revoked", "fraud_proposed", "fraud_withdrawn"];
 
 export async function AlertsSection({ claims }: { claims: VerifiedClaims }) {
   const reader = await cookieReader();

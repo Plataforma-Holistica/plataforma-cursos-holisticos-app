@@ -76,13 +76,17 @@ export interface AlertCard {
   canDecideFraud: boolean;
   /** Todavía no se decidió, pero la alerta sigue abierta: se dice que primero se revisa. */
   fraudWaits: boolean;
+  /** Se ofrece proponer suspender a su maestro: la alerta de su salto, decidida como fraude, sin propuesta (T-401). */
+  canPropose: boolean;
+  /** Ya hay una propuesta de esta alerta. Si es de quien lee, la retira. */
+  proposal: { text: string; withdraw: string | null } | null;
   /** El periodo ya no recibe latidos: se dice, y no se ofrece excluir ni revertir. */
   closed: string | null;
   accountsTitle: string;
   accounts: AccountRow[];
   moreAccounts: string | null;
   exclusions: ExclusionRow[];
-  buttons: { review: string; askFraud: string; fraud: string };
+  buttons: { askProposal: string; propose: string; review: string; askFraud: string; fraud: string };
 }
 
 export interface AlertsView {
@@ -272,7 +276,12 @@ function alertCard(alert: FinanceAlert): AlertCard {
     accounts: alert.accounts.map((row) => accountRow(alert, row)),
     moreAccounts: alert.moreAccounts > 0 ? t(plural(alert.moreAccounts, text.moreAccounts), { count: COUNT.format(alert.moreAccounts) }) : null,
     exclusions: alert.exclusions.map((row) => exclusionRow(alert, row)),
-    buttons: { review: alertsButton.review(alert.id), askFraud: alertsButton.askFraud(alert.id), fraud: alertsButton.fraud(alert.id) },
+    canPropose: alert.kind === "teacher_points_jump" && alert.isFraud === true && alert.suspension === null,
+    proposal:
+      alert.suspension === null
+        ? null
+        : { text: alert.suspension.mine ? text.proposalMine : text.proposalOther, withdraw: alert.suspension.mine ? alertsButton.withdraw(alert.id, alert.suspension.id) : null },
+    buttons: { askProposal: alertsButton.askProposal(alert.id), propose: alertsButton.propose(alert.id), review: alertsButton.review(alert.id), askFraud: alertsButton.askFraud(alert.id), fraud: alertsButton.fraud(alert.id) },
   };
 }
 

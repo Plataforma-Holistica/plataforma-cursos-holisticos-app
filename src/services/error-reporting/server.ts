@@ -56,6 +56,8 @@ const FAILURES = {
   draft_read_unavailable: "No se pudo leer el borrador de un curso, o la lista de cursos de un maestro (T-402): su pantalla dijo «algo falló».",
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",
+  teacher_roster_unavailable: "No se pudo leer la lista de maestros de PA-65 o PA-66 (T-401): la pantalla dice que no se supo.",
+  teacher_change_unavailable: "No se supo si un cambio a un maestro quedó (T-401): la pantalla lo dice, y nunca lo pinta como hecho.",
   teacher_unavailable: "No se pudo leer si una cuenta es maestro (T-402), o sus textos (T-401): su pantalla del portal dijo «no se supo», con «Reintentar».",
   teacher_invitation_unavailable: "Aceptar una invitación de maestro contestó que faltan el contrato o el aviso del maestro vigentes (T-401): nadie puede aceptar hasta publicarlos.",
   teacher_invitation_answer_lost: "Aceptar una invitación de maestro se quedó sin respuesta (T-401). Si la persona ya quedó como maestro, se le dijo que quedó; si no se supo, que revise.",
