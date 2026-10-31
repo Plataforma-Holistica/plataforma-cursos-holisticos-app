@@ -60,7 +60,11 @@ describe("solo la función única de medios firma", () => {
     expect(store).toMatch(/heartbeat: \(claims, beat\) => asServer\(\{ claims, reason: "playback_heartbeat" \}, \(tx\) => recordHeartbeat\(tx, beat\)\),/);
     expect(store).not.toMatch(/asSystem/);
     expect(store.match(/\basUser\(/g)).toHaveLength(1);
-    expect(store.match(/\basServer\(/g)).toHaveLength(4);
+    // Bajar un recurso (T-404): los hechos con su segunda barrera, el borrador del maestro y el freno, a nombre de quien actúa.
+    expect(store).toMatch(/resourceFacts: \(claims, resourceId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readResourceFacts\(tx, resourceId\)\),/);
+    expect(store).toMatch(/draftResourceFile: \(claims, courseId, resourceId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readDraftResourceFile\(tx, courseId, resourceId\)\),/);
+    expect(store).toMatch(/downloadHit: \(claims\) => asServer\(\{ claims, reason: "resource_download" \}, \(tx\) => recordDownloadHit\(tx\)\),/);
+    expect(store.match(/\basServer\(/g)).toHaveLength(7);
   });
 
   it("solo la función única abre y late reproducciones, y la tabla no se toca de otro modo (T-204)", () => {
@@ -114,6 +118,12 @@ describe("solo la función única de medios firma", () => {
     expect(naming(/createSignedUrl|createSignedUploadUrl|getSignedUrl/)).toEqual([]);
     // La firma de una subida vive en el adaptador, y solo la pide el módulo de medios.
     expect(naming(/object\/upload\/sign/)).toEqual(["src/adapters/supabase/storage.ts"]);
+    // La de una descarga, igual; y a quien pide no le llega por otro lado que la puerta (`grant.ts`).
+    expect(naming(/object\/sign/)).toEqual(["src/adapters/supabase/storage.ts"]);
+    expect(naming(/\.signDownload\(/).sort()).toEqual(["src/services/media/grant.ts", "src/services/media/resource-files.ts"]);
+    expect(naming(/from "\.\/resource-files"/)).toEqual(["src/services/media/media.ts"]);
+    // Las funciones de la base que sueltan la ruta y el freno se llaman en un solo archivo.
+    expect(naming(/\bresource_object\b|\bresource_draft_object\b|\bresource_download_hit\b|\bresource_facts\b/)).toEqual(["src/services/media/records.ts"]);
     expect(naming(/adapters\/supabase\/storage/)).toEqual(["src/services/media/resource-files.ts"]);
     expect(naming(/services\/media\/resource-files/)).toEqual(["src/services/drafts/editor.ts", "src/services/drafts/resources.ts"]);
     // Sin `upsert`: un segundo envío con la misma dirección no reemplaza lo que se leyó al confirmar.

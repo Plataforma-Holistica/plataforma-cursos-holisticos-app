@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import type { CourseLessonRow, MyLessonProgress } from "./course";
+import type { CourseLessonRow, CourseResourceRow, MyLessonProgress } from "./course";
 import type { ShelfCourse } from "./shelf";
 
 // Lo que el catálogo del alumno le pregunta a la base (T-210). Cada función recibe la
@@ -135,11 +135,27 @@ const detailRow = z.object({
   duration_seconds: z.number().int(),
 });
 
-/** Las lecciones vigentes del curso listado `slug`, con sus módulos vigentes y su maestro si está listado. */
+const resourceRow = z.object({ id: z.string(), title: z.string(), kind: z.enum(["pdf", "doc", "audio"]), size_bytes: z.number().int() });
+
+/** Los recursos vigentes del curso listado `slug`, los que no son de una lección. Nunca la ruta del archivo. */
+async function readCourseResources(tx: Tx, slug: string): Promise<CourseResourceRow[]> {
+  const rows = await tx.query(
+    sql`select x.id::text as id, x.title, x.kind::text as kind, x.size_bytes::integer as size_bytes
+        from public.published_resources x
+        join public.published_courses c on c.course_id = x.course_id
+        join public.course_registry r on r.course_id = x.course_id and r.state in ('published', 'changes_pending')
+        where c.slug = ${slug} and c.is_listed and x.is_current and x.lesson_id is null
+        order by x.position`,
+    resourceRow,
+  );
+  return rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
+}
+
+/** Las lecciones vigentes del curso listado `slug`, con sus módulos vigentes y su maestro si está listado, y sus recursos. */
 export async function readCourseLessons(
   tx: Tx,
   slug: string,
-): Promise<{ teacher: { slug: string; name: string; bio: string | null } | null; lessons: CourseLessonRow[] }> {
+): Promise<{ teacher: { slug: string; name: string; bio: string | null } | null; lessons: CourseLessonRow[]; resources: CourseResourceRow[] }> {
   const rows = await tx.query(
     sql`select t.slug as teacher_slug, t.display_name as teacher_name, t.bio as teacher_bio,
                m.id::text as module_id, m.title as module_title, m.position as module_position,
@@ -168,6 +184,7 @@ export async function readCourseLessons(
       lessonPosition: row.lesson_position,
       durationSeconds: row.duration_seconds,
     })),
+    resources: first === undefined ? [] : await readCourseResources(tx, slug),
   };
 }
 

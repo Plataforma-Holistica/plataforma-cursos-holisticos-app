@@ -10,6 +10,7 @@ import { getEnv } from "@/config/env";
 //     objeto, y lo que se leyó al confirmar sigue siendo lo que se sirve. Lo manda la firma, no el navegador.
 //   · Dura lo que Storage diga (2 h fijas); no se puede pedir menos, y la base lo cuenta (un pendiente vive 3 h).
 //   · Leer es por rango: nunca se bajan los 50 MB para mirar el principio de un archivo.
+//   · La dirección de descarga caduca, y lleva el nombre con que baja como adjunto (`download=`), que arma el servidor.
 //
 // Nada de lo que contesta Storage sale de aquí en un error: puede traer la ruta.
 
@@ -19,6 +20,8 @@ const TIMEOUT_MS = 10_000;
 export interface ResourceStorage {
   /** La dirección para subir a esa ruta, o nulo si no se pudo firmar. */
   signUpload: (path: string) => Promise<string | null>;
+  /** La dirección para bajar esa ruta como adjunto con ese nombre, que vive `seconds`, o nulo si no se pudo firmar. */
+  signDownload: (path: string, name: string, seconds: number) => Promise<string | null>;
   /** Los primeros `bytes`, o nulo si no se pudieron leer (no está, o Storage falló). */
   readStart: (path: string, bytes: number) => Promise<Uint8Array | null>;
   /** Los últimos `bytes`, o nulo si no se pudieron leer. */
@@ -61,6 +64,22 @@ export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
         const body: unknown = await response.json();
         const url = typeof body === "object" && body !== null && "url" in body ? body.url : null;
         return typeof url === "string" && url.startsWith("/") ? `${root()}${url}` : null;
+      } catch {
+        return null;
+      }
+    },
+    signDownload: async (path, name, seconds) => {
+      try {
+        const response = await call(`${root()}/object/sign/${BUCKET}/${path}`, {
+          method: "POST",
+          headers: authorized({ "content-type": "application/json" }),
+          body: JSON.stringify({ expiresIn: seconds }),
+        });
+        if (!response.ok) return null;
+        const body: unknown = await response.json();
+        const url = typeof body === "object" && body !== null && "signedURL" in body ? body.signedURL : null;
+        if (typeof url !== "string" || !url.startsWith("/") || !url.includes("?token=")) return null;
+        return `${root()}${url}&download=${encodeURIComponent(name)}`;
       } catch {
         return null;
       }

@@ -40,7 +40,9 @@ export function Tabs({ label, items, idPrefix }: TabsProps) {
     () => true,
     () => false,
   );
-  const [active, setActive] = useState(items[0]?.id ?? "");
+  const [chosen, setActive] = useState(items[0]?.id ?? "");
+  // La elegida puede dejar de existir con la pantalla abierta: sin esto, ningún panel se vería y el teclado no tendría a dónde entrar.
+  const active = items.some((item) => item.id === chosen) ? chosen : (items[0]?.id ?? "");
   const buttons = useRef(new Map<string, HTMLButtonElement>());
 
   if (!mounted) {

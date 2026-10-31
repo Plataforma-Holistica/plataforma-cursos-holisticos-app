@@ -10,6 +10,7 @@ import {
   MEDIA_PURPOSES,
   playbackRates,
   resolveMediaAccess,
+  resolveResourceAccess,
   watermarkText,
   type AccountRefusal,
   type MediaBasis,
@@ -27,12 +28,15 @@ import type { FailureCode } from "@/services/error-reporting/server";
 
 import type {
   BatchRecord,
+  DownloadHit,
   HeartbeatBeat,
   HeartbeatOutcome,
   LessonVideo,
   LivePlayback,
   OpenedPlayback,
   PlaybackOpening,
+  ResourceFacts,
+  ResourceFile,
   RevokeReason,
   WatchFacts,
 } from "./records";
@@ -58,8 +62,7 @@ import type {
 // y sin efectos, y si falla no queda una reproducción ocupando lugar. Con el lugar ocupado por
 // otro navegador de la misma cuenta contesta `busy` con la lista (PA-34), y se le puede pedir
 // cerrar una en el mismo paso. `playbackHeartbeat` es el latido de presencia, con la misma
-// guarda de sesión. Revisar no abre reproducción (decisión de Sergio del 2026-10-19). Lo que
-// todavía no se hace: los recursos (RF-308), que firman con esta misma regla en T-404.
+// guarda de sesión. Revisar no abre reproducción (decisión de Sergio del 2026-10-19).
 //
 // Desde T-205 el latido lleva los tramos vistos (RF-401), y `flushHeartbeats` los manda sin
 // presencia (al pausar, al irse el reproductor, al volver a abrir una lección). Si lo visto
@@ -70,6 +73,10 @@ import type {
 // Desde T-206 la base funde además lo visto en el progreso, en la misma transacción, y lo que
 // contesta del lote trae el estado de la lección: la pantalla marca «Terminada» al momento. Ver
 // dice además desde qué segundo arrancar (`startSeconds`), leído al abrir la reproducción.
+//
+// Desde T-404 firma además la descarga de un recurso (RF-308): `getResourceGrant` para lo
+// publicado, con las reglas de ver, y `getDraftResourceGrant` para lo que un maestro subió a su
+// borrador. Bajar no abre reproducción, no late y nunca cuenta para el reparto (RF-306).
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -184,12 +191,27 @@ export type ReviewGrant = Signed | Extract<Refusal, { kind: "refused" | "no_vide
 /** Lo que contesta decidir al cargar: lo mismo que ver, sin firmar nada. */
 export type LessonAccess = { kind: "allowed" } | Refusal;
 
+/** Lo que contesta pedir un recurso. La dirección caduca, y baja como adjunto. */
+export type ResourceGrant =
+  | { kind: "granted"; url: string }
+  /** No existe, o quien pide no puede ver ese curso: las dos se ven igual. */
+  | { kind: "not_found" }
+  /** Pidió de más en esta hora (`TOPE_DESCARGAS_HORA`). */
+  | { kind: "throttled" }
+  | Extract<Refusal, { kind: "refused" | "suspended" | "denied" | "unavailable" }>;
+
+/** Lo que contesta pedir lo que un maestro subió a su borrador: nunca depende de su suscripción. */
+export type DraftResourceGrant = Exclude<ResourceGrant, { kind: "denied" }>;
+
 export interface MediaStore {
   lessonVideo(claims: VerifiedClaims, lessonId: string): Promise<LessonVideo | null>;
   watchFacts(claims: VerifiedClaims, lessonId: string): Promise<WatchFacts | null>;
   playbackSpeeds(claims: VerifiedClaims): Promise<{ minimum: number; maximum: number } | null>;
   openPlayback(claims: VerifiedClaims, opening: PlaybackOpening): Promise<OpenedPlayback | null>;
   heartbeat(claims: VerifiedClaims, beat: HeartbeatBeat): Promise<HeartbeatOutcome | null>;
+  resourceFacts(claims: VerifiedClaims, resourceId: string): Promise<ResourceFacts | null>;
+  draftResourceFile(claims: VerifiedClaims, courseId: string, resourceId: string): Promise<ResourceFile | null>;
+  downloadHit(claims: VerifiedClaims): Promise<DownloadHit>;
 }
 
 export interface MediaCore {
@@ -199,6 +221,8 @@ export interface MediaCore {
   /** La llave de firma, o nulo si no está configurada. */
   signingKey: () => SigningKey | null;
   sign: (input: { playbackId: string; expiresAt: number; key: SigningKey }) => PlaybackTokens | null;
+  /** Firma la descarga de un recurso: nulo si no se pudo. */
+  files: { signDownload: (file: ResourceFile) => Promise<string | null> };
   /** Segundos desde la época. */
   now: () => number;
 }
@@ -525,5 +549,91 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     return purpose === "review" ? review(reader, lessonId) : watch(reader, lessonId, options);
   }
 
-  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats };
+  /**
+   * Lo último de bajar un recurso, con el acceso ya dado: el freno y la firma. El freno va después de
+   * decidir, para que a quien no tiene acceso no le cuente; si no se supo, no se firma (falla cerrado).
+   */
+  async function signResource(claims: VerifiedClaims, file: ResourceFile): Promise<Extract<ResourceGrant, { kind: "granted" | "throttled" | "unavailable" }>> {
+    let hit: DownloadHit;
+    try {
+      hit = await core.store.downloadHit(claims);
+    } catch {
+      hit = "unavailable";
+    }
+    if (hit === "throttled") return { kind: "throttled" };
+    const url = hit === "ok" ? await core.files.signDownload(file) : null;
+    if (url === null) {
+      await deps.report("resource_grant_unavailable");
+      return { kind: "unavailable" };
+    }
+    return { kind: "granted", url };
+  }
+
+  /** Bajar un recurso publicado (RF-308, FL-14): la guarda de sesión, los hechos, la regla, la barrera, el freno y la firma. */
+  async function getResourceGrant(reader: CookieReader, resourceId: unknown): Promise<ResourceGrant> {
+    const session = await core.checkSession(reader);
+    // La guarda ya reportó lo suyo.
+    if (session.kind === "unavailable") return { kind: "unavailable" };
+    if (session.kind === "suspended") return { kind: "suspended" };
+    if (session.kind !== "pass") return { kind: "refused" };
+    const id = idOrNull(resourceId);
+    if (id === null) return { kind: "not_found" };
+
+    let facts: ResourceFacts | null;
+    try {
+      facts = await core.store.resourceFacts(session.claims, id);
+    } catch {
+      facts = null;
+    }
+    if (facts === null) {
+      await deps.report("media_facts_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (!facts.viewer.emailVerified) await deps.report("media_email_unverified");
+
+    const account = resolveAccountAccess(facts.account, facts.now, { graceDays: facts.graceDays });
+    const access = resolveResourceAccess(facts.viewer, account, facts.resource);
+    if (!access.ok) {
+      switch (access.reason) {
+        case "not_found":
+          return { kind: "not_found" };
+        case "suspended":
+          return { kind: "suspended" };
+        case "no_access":
+          return { kind: "denied", account: access.account };
+        case "unknown":
+          await deps.report("media_facts_unavailable");
+          return { kind: "unavailable" };
+      }
+    }
+    // La regla dio acceso y la barrera no soltó el archivo: se borró de la cubeta o lo reemplazaron, o se contradicen. Manda
+    // la más estricta, y alguien lo tiene que saber.
+    if (facts.file === null) {
+      await deps.report("resource_grant_unavailable");
+      return { kind: "unavailable" };
+    }
+    return signResource(session.claims, facts.file);
+  }
+
+  /** Bajar lo que el maestro subió a su borrador (PA-43). Quién puede lo decide la base: solo lo suyo y lo confirmado. */
+  async function getDraftResourceGrant(reader: CookieReader, courseId: unknown, resourceId: unknown): Promise<DraftResourceGrant> {
+    const session = await core.checkSession(reader);
+    if (session.kind === "unavailable") return { kind: "unavailable" };
+    if (session.kind === "suspended") return { kind: "suspended" };
+    if (session.kind !== "pass") return { kind: "refused" };
+    const course = idOrNull(courseId);
+    const id = idOrNull(resourceId);
+    if (course === null || id === null) return { kind: "not_found" };
+
+    let file: ResourceFile | null;
+    try {
+      file = await core.store.draftResourceFile(session.claims, course, id);
+    } catch {
+      await deps.report("resource_grant_unavailable");
+      return { kind: "unavailable" };
+    }
+    return file === null ? { kind: "not_found" } : signResource(session.claims, file);
+  }
+
+  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant };
 }

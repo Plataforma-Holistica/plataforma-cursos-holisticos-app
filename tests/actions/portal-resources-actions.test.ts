@@ -13,10 +13,16 @@ const mocks = vi.hoisted(() => ({
     throw new Error(`sale a ${outcome.to}`);
   }),
   cookieJar: vi.fn(() => Promise.resolve({ jar: true })),
+  getDraftResourceGrant: vi.fn(),
+  redirect: vi.fn((to: string): never => {
+    throw new Error(`redirige a ${to}`);
+  }),
 }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
 vi.mock("@/app/(cuenta)/_lib/exit", () => ({ leaveFor: mocks.leaveFor }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("@/services/media/media", () => ({ getDraftResourceGrant: mocks.getDraftResourceGrant }));
 vi.mock("@/services/drafts/editor", () => ({
   beginResource: mocks.beginResource,
   confirmResource: mocks.confirmResource,
@@ -77,6 +83,50 @@ describe("la lista", () => {
   it("quien ya no puede editar vuelve a la misma pantalla, con lo elegido", async () => {
     mocks.removeResource.mockResolvedValue({ kind: "suspended" });
     await expect(resourceAction(IDLE, form({ course: COURSE, lesson: LESSON, do: `resource-remove:${RESOURCE}:4` }))).rejects.toThrow(`sale a /portal/cursos/${COURSE}?leccion=${LESSON}`);
+  });
+});
+
+// Bajar lo que subió (T-404): los dos canales de la lista del alumno, y quien ya no pasa vuelve a la misma ruta.
+describe("bajar", () => {
+  const URL = "https://storage/bajar?token=t";
+  const DOWNLOAD = { course: COURSE, lesson: LESSON, do: `resource-download:${RESOURCE}` };
+
+  it("con JavaScript la dirección vuelve en el estado, y no se vuelve a leer nada", async () => {
+    mocks.getDraftResourceGrant.mockResolvedValue({ kind: "granted", url: URL });
+    expect(await resourceAction(IDLE, form({ ...DOWNLOAD, canal: "js" }))).toEqual({ kind: "granted", url: URL, attempt: 1 });
+    expect(mocks.getDraftResourceGrant).toHaveBeenCalledExactlyOnceWith(JAR, COURSE, RESOURCE);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("sin JavaScript redirige, y la dirección no vuelve en ningún estado", async () => {
+    mocks.getDraftResourceGrant.mockResolvedValue({ kind: "granted", url: URL });
+    await expect(resourceAction(IDLE, form(DOWNLOAD))).rejects.toThrow(`redirige a ${URL}`);
+  });
+
+  it("lo que ya no está lo dice, y vuelve a leer", async () => {
+    mocks.getDraftResourceGrant.mockResolvedValue({ kind: "not_found" });
+    expect(await resourceAction(IDLE, form({ ...DOWNLOAD, canal: "js" }))).toEqual({ kind: "failed", reason: "gone", attempt: 1 });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["throttled", { kind: "download_throttled", attempt: 1 }],
+    ["unavailable", { kind: "failed", reason: "unavailable", attempt: 1 }],
+  ])("%s lo dice", async (kind, state) => {
+    mocks.getDraftResourceGrant.mockResolvedValue({ kind });
+    expect(await resourceAction(IDLE, form({ ...DOWNLOAD, canal: "js" }))).toEqual(state);
+  });
+
+  it.each(["suspended", "refused"])("con %s vuelve a la misma pantalla, donde decide la guarda", async (kind) => {
+    mocks.getDraftResourceGrant.mockResolvedValue({ kind });
+    await expect(resourceAction(IDLE, form({ ...DOWNLOAD, canal: "js" }))).rejects.toThrow(`sale a /portal/cursos/${COURSE}?leccion=${LESSON}`);
+  });
+
+  it("con algo que no es un recurso, no llama a nadie", async () => {
+    expect(await resourceAction(IDLE, form({ ...DOWNLOAD, do: "resource-download:x" }))).toEqual(IDLE);
+    expect(await resourceAction(IDLE, form({ ...DOWNLOAD, do: `resource-download:${RESOURCE}:x` }))).toEqual(IDLE);
+    expect(mocks.getDraftResourceGrant).not.toHaveBeenCalled();
   });
 });
 

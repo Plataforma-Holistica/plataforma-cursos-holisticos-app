@@ -13,6 +13,7 @@ const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 function storage(overrides: Partial<ResourceStorage> = {}): ResourceStorage {
   return {
     signUpload: vi.fn(() => Promise.resolve("https://storage/subir")),
+    signDownload: vi.fn(() => Promise.resolve("https://storage/bajar")),
     readStart: vi.fn(() => Promise.resolve(ascii("%PDF-1.7"))),
     readEnd: vi.fn(() => Promise.resolve(null)),
     remove: vi.fn(() => Promise.resolve()),
@@ -53,5 +54,18 @@ describe("el contenido de un recurso", () => {
       readEnd: () => Promise.resolve(ascii("[Content_Types].xml word/document.xml PK\x05\x06")),
     });
     await expect(createResourceFiles(adapter).contentOk("a/b/c", DOCX)).resolves.toBe(true);
+  });
+});
+
+describe("bajar un recurso", () => {
+  it("firma cinco minutos (ADR-27), con el nombre que arma el servidor del título y el tipo", async () => {
+    const adapter = storage();
+    await expect(createResourceFiles(adapter).signDownload({ path: "a/b/c", title: 'Guía "uno"', mime: PDF })).resolves.toBe("https://storage/bajar");
+    expect(adapter.signDownload).toHaveBeenCalledExactlyOnceWith("a/b/c", "Guía uno.pdf", 300);
+  });
+
+  it("si no se pudo firmar, nulo", async () => {
+    const files = createResourceFiles(storage({ signDownload: () => Promise.resolve(null) }));
+    await expect(files.signDownload({ path: "a/b/c", title: "Guía", mime: PDF })).resolves.toBeNull();
   });
 });

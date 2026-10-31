@@ -167,3 +167,20 @@ describe("BackLink", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 });
+
+// La pestaña elegida puede dejar de existir con la pantalla abierta (T-404: los recursos, si el acceso termina).
+describe("Tabs, cuando la elegida se va", () => {
+  it("vuelve a la primera, con su panel a la vista y al alcance del teclado", async () => {
+    const items = [
+      { id: "uno", label: "Uno", panel: <p>Panel uno</p> },
+      { id: "dos", label: "Dos", panel: <p>Panel dos</p> },
+    ];
+    const user = userEvent.setup();
+    const { rerender } = render(<Tabs label="Partes" idPrefix="prueba" items={items} />);
+    await user.click(screen.getByRole("tab", { name: "Dos" }));
+    rerender(<Tabs label="Partes" idPrefix="prueba" items={items.slice(0, 1)} />);
+    expect(screen.getByRole("tab", { name: "Uno" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Uno" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByText("Panel uno")).toBeVisible();
+  });
+});

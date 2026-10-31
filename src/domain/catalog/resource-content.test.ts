@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contentMatches, RESOURCE_READ, resourceTypeOf } from "./resource-content";
+import { contentMatches, RESOURCE_READ, resourceDownloadName, resourceTypeOf } from "./resource-content";
 
 const bytes = (...values: number[]) => Uint8Array.from(values);
 const ascii = (text: string) => Uint8Array.from(text, (char) => char.charCodeAt(0));
@@ -150,5 +150,52 @@ describe("contentMatches: el contenido real, por sus primeros bytes", () => {
     expect(RESOURCE_READ.tailOf(PDF)).toBe(0);
     expect(RESOURCE_READ.tailOf(MP3)).toBe(0);
     expect(RESOURCE_READ.tailOf(M4A)).toBe(0);
+  });
+});
+
+describe("resourceDownloadName: el nombre con el que baja, que arma el servidor", () => {
+  it("el título con la extensión de su tipo", () => {
+    expect(resourceDownloadName("Guía de respiración", PDF)).toBe("Guía de respiración.pdf");
+    expect(resourceDownloadName("Apuntes", DOCX)).toBe("Apuntes.docx");
+    expect(resourceDownloadName("Audio", MP3)).toBe("Audio.mp3");
+    expect(resourceDownloadName("Audio", M4A)).toBe("Audio.m4a");
+  });
+
+  it.each([
+    ["separadores de ruta", "../../etc/passwd", "etc passwd.pdf"],
+    ["separadores de Windows", String.raw`a\\b`, "a b.pdf"],
+    ["comillas y lo que rompe una cabecera", 'a"; x="b', "a x= b.pdf"],
+    ["saltos de línea", "a" + String.fromCharCode(13, 10) + "b", "a b.pdf"],
+    ["los que invierten el texto", "a" + String.fromCharCode(0x202e) + "fdp.exe", "a fdp.exe.pdf"],
+    ["los de ancho cero", "a" + String.fromCharCode(0x200b) + "b", "a b.pdf"],
+    ["puntos y espacios en las puntas", "  ..hola..  ", "hola.pdf"],
+  ])("sin %s", (_name, title, expected) => {
+    expect(resourceDownloadName(title, PDF)).toBe(expected);
+  });
+
+  it.each(["CON", "con", "NUL", "PRN", "AUX", "COM1", "LPT9"])("un nombre reservado de Windows (%s) no se usa", (title) => {
+    expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
+  });
+
+  it.each(["CON.v2", "con.final", "NUL.txt", "con .v2", "COM¹", "lpt².doc", "COM³"])("con otra extensión también (%s): Windows lo reserva igual", (title) => {
+    expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
+  });
+
+  it("uno que solo empieza igual no es reservado", () => {
+    expect(resourceDownloadName("Conciencia", PDF)).toBe("Conciencia.pdf");
+    expect(resourceDownloadName("Consulta.v2", PDF)).toBe("Consulta.v2.pdf");
+  });
+
+  it("sin nada que quede, un nombre de reserva", () => {
+    expect(resourceDownloadName("...", PDF)).toBe("recurso.pdf");
+    expect(resourceDownloadName("", PDF)).toBe("recurso.pdf");
+  });
+
+  it("con tope de largo, por caracteres", () => {
+    expect([...resourceDownloadName("😀".repeat(200), PDF)]).toHaveLength(104);
+  });
+
+  it("un tipo que no es de la lista no lleva extensión", () => {
+    expect(resourceDownloadName("Algo", "image/png")).toBe("Algo");
   });
 });
