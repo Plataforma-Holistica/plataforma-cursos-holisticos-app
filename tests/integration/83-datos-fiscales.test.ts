@@ -43,11 +43,13 @@ const CLABE = `${first17}${clabeCheckDigit(first17)}`;
 const LAST4 = CLABE.slice(-4);
 const FORM = { rfc: "GODE561231GR8", regime: "626", legalName: "Elena Gómez Díaz", clabe: CLABE, seen: 0, password: "no-se-comprueba-aqui" };
 
-async function person() {
+/** @param beforeEntering Lo que tiene que pasar antes de abrir su sesión: dar de alta un factor cierra las que haya. */
+async function person(beforeEntering?: (who: Awaited<ReturnType<typeof claimedUser>>) => Promise<void>) {
   await clearThrottle();
   const who = await claimedUser();
   emails.push(who.email);
   await completeAccountAsOwner(who.id);
+  await beforeEntering?.(who);
   const jar = memoryJar();
   const entered = await testServices().signIn(jar, who, freshOrigin());
   if (entered.kind !== "entered") throw new Error(`La persona de prueba no entró: ${entered.kind}`);
@@ -96,12 +98,14 @@ describe("comprobar la contraseña en el mismo envío", () => {
   });
 
   it("una cuenta con segundo factor también se comprueba, y se queda con el que tenía", async () => {
-    const ana = await person();
-    const factor = await secondFactorFor(ana.who);
+    let factorId = "";
+    const ana = await person(async (who) => {
+      factorId = (await secondFactorFor(who)).factorId;
+    });
     const before = await sessionsOf(ana.id);
     expect(await testServices().confirmPassword(ana.jar, ana.who.password, freshOrigin())).toEqual({ kind: "confirmed", claims: ana.claims });
     expect(await sessionsOf(ana.id)).toBe(before);
-    const factors = await ownerQuery<{ count: string }>("select count(*) from auth.mfa_factors where id = $1 and status = 'verified'", [factor.factorId]);
+    const factors = await ownerQuery<{ count: string }>("select count(*) from auth.mfa_factors where id = $1 and status = 'verified'", [factorId]);
     expect(factors[0]?.count).toBe("1");
   });
 

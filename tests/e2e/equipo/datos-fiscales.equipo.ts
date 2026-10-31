@@ -103,13 +103,20 @@ test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ 
   expect(await reads(ana)).toBe("0");
 
   await page.getByLabel("Tu contraseña").fill(ana.password);
-  // Lo que viaja en la respuesta de la acción, que `page.content()` no ve.
-  const answer = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes(PATH));
+  // Lo que viaja en la respuesta de la acción, que `page.content()` no ve. Se pasa por aquí: el navegador no guarda el cuerpo de una respuesta en flujo.
+  const answers: string[] = [];
+  await page.route(`**${PATH}`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    answers.push(await response.text());
+    return route.fulfill({ response });
+  });
   await page.getByRole("button", { name: "Ver mis datos" }).click();
-  const body = await (await answer).text();
-  expect(body).toContain(`•••• ${LAST4}`);
-  for (const plain of [RFC, NAME, CLABE, ana.password]) expect(body).not.toContain(plain);
   await expect(page.getByText(`•••• ${LAST4}`)).toBeVisible();
+  await page.unroute(`**${PATH}`);
+  expect(answers).toHaveLength(1);
+  expect(answers[0]).toContain(`•••• ${LAST4}`);
+  for (const plain of [RFC, NAME, CLABE, ana.password]) expect(answers[0]).not.toContain(plain);
   await expect(page.getByRole("heading", { name: "Tus datos guardados" })).toBeFocused();
   await expect(page.getByText("•••• 1GR8")).toBeVisible();
   await expect(page.getByText("•••• Díaz")).toBeVisible();
