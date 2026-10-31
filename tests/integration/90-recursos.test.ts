@@ -312,8 +312,8 @@ describe("quitar y borrar", () => {
       const course = await newCourse(owner, who);
       const added = await services.drafts.addModule(who.jar, { course, seen: 1, title: "Inicio" });
       if (added.kind !== "created" || !added.id) throw new Error(`Sin módulo: ${added.kind}`);
-      const module = added.id;
-      const lesson = await services.drafts.addLesson(who.jar, { course, module, seen: 1, title: "Una" });
+      const moduleId = added.id;
+      const lesson = await services.drafts.addLesson(who.jar, { course, module: moduleId, seen: 1, title: "Una" });
       if (lesson.kind !== "created" || !lesson.id) throw new Error(`Sin lección: ${lesson.kind}`);
       const lessonId = lesson.id;
 
