@@ -857,3 +857,68 @@ describe("el enlace de un correo, en todo lo que lleva una ruta", () => {
     expect(clean.exception?.values?.[0]?.value).toBe("No se pudo completar /verificar/[token]");
   });
 });
+
+describe("los datos fiscales del maestro (T-409)", () => {
+  const CLABE = "002010077777777771";
+  const KEY = `1:${"Ab3".repeat(14)}A=:0123abcd`;
+  const message = (text: string) => scrubEvent(event({ exception: { values: [{ type: "Error", value: text }] } })).exception?.values?.[0]?.value;
+  const path = (text: string) => scrubEvent(event({ transaction: text })).transaction;
+  const note = (text: string) => scrubEvent(event({ environment: text })).environment;
+
+  it.each([
+    CLABE,
+    `clabe=${CLABE}`,
+    `cafe-${CLABE}`,
+    `{"clabe":"${CLABE}"}`,
+    "002 010 0777 7777 7771",
+  ])("en un mensaje no sale la CLABE: %s", (text) => {
+    expect(message(text)).not.toMatch(/7777777771|7777 7771/);
+  });
+
+  it.each([`/pagos/clabe${CLABE}`, `/pagos/cuenta_${CLABE}`, `/pagos/${CLABE}`])("en una ruta tampoco: %s", (text) => {
+    expect(path(text)).not.toContain(CLABE);
+  });
+
+  it.each(["/pagos/002-010-07777777777-1", "/pagos/002.010.07777777777.1"])("con separadores, en una ruta tampoco: %s", (text) => {
+    expect(path(text)).toBe("/pagos/[clabe]");
+  });
+
+  it.each([`dato ${CLABE}`, "dato 002-010-07777777777-1", "dato 002 010 07777777777 1"])("en lo que anota el SDK tampoco: %s", (text) => {
+    expect(note(text)).toBe("dato [clabe]");
+  });
+
+  it("la regla no le parte su forma a un token ni a un correo: corre después de ellos", () => {
+    const hex = `${"a".repeat(19)}${CLABE}${"b".repeat(19)}`;
+    expect(message(hex)).toBe("[token]");
+    expect(message(`Bearer abc${CLABE}zzzz`)).toBe("Bearer [token]");
+    expect(message(`${CLABE}@correo.example.com`)).toBe("[correo]");
+  });
+
+  it("dieciocho dígitos que no son una CLABE, en lo que anota el SDK, se quedan: el dígito de control lo distingue", () => {
+    expect(note("id 002010077777777772")).toBe("id 002010077777777772");
+  });
+
+  it.each(["GOMA800101AB1", "goma800101ab1", "GOMA-800101-AB1", "GOMA 800101 AB1", "GOMA  800101  AB1", "GOMA.800101.AB1", "1GOMA800101AB1", "rfc_GOMA800101AB1", "ÑOMA800101AB1", "GOM800101AB1"])(
+    "en un mensaje no sale el RFC: %s",
+    (text) => {
+      expect(message(text)).toContain("[rfc]");
+      expect(message(text)).not.toMatch(/800101/);
+      expect(message(text)).not.toMatch(/Ñ\[rfc\]/);
+    },
+  );
+
+  it("en una ruta tampoco", () => {
+    expect(path("/maestros/rfc_GOMA800101AB1")).not.toContain("800101");
+  });
+
+  it.each([
+    `PII_ENCRYPTION_KEYS=${KEY},${KEY}`,
+    `PII_ENCRYPTION_KEYS: "${KEY}"`,
+    `falló con ${KEY} al abrir`,
+    // Sin la versión ni la comprobación: la llave sola.
+    `falló con ${"Ab3".repeat(14)}A= al abrir`,
+  ])("la llave no sale: %s", (text) => {
+    expect(message(text)).not.toContain("Ab3Ab3");
+    expect(note(text)).not.toContain("Ab3Ab3");
+  });
+});
