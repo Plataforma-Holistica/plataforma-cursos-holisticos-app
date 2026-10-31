@@ -7,7 +7,7 @@ import { asServer, asSystem, asUser } from "@/adapters/supabase/db";
 import { checkSession, type SessionCheck } from "@/services/account/account";
 import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
 
-import { courseDetailOf, courseStandingOf, type CourseDetail, type CourseLessonRow, type CourseStanding, type MyLessonProgress } from "./course";
+import { courseDetailOf, courseStandingOf, type CourseDetail, type CourseLessonRow, type CourseResourceRow, type CourseStanding, type MyLessonProgress } from "./course";
 import { asksForResults, exploreResultsOf, facetsOf, knownQuery, type ExploreFacets, type ExploreQuery, type ExploreResults } from "./explore";
 import {
   readCourseLessons,
@@ -41,7 +41,7 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export interface BrowseStore {
   listedCourses(): Promise<ShelfCourse[]>;
   listedTeacher(slug: string): Promise<{ slug: string; name: string; bio: string | null } | null>;
-  courseLessons(slug: string): Promise<{ teacher: CourseDetail["teacher"]; lessons: CourseLessonRow[] }>;
+  courseLessons(slug: string): Promise<{ teacher: CourseDetail["teacher"]; lessons: CourseLessonRow[]; resources: CourseResourceRow[] }>;
   /** Lo de quien trae esas claims en el curso `slug`, en una lectura: su avance y si está en su lista. */
   myCourse(claims: VerifiedClaims, slug: string): Promise<{ progress: MyLessonProgress[]; saved: boolean }>;
   /** Los slugs de los cursos listados y de los maestros listados que encuentra la búsqueda `q`. */
@@ -55,7 +55,7 @@ export interface BrowseStore {
 }
 
 export type ShelfAnswer = { kind: "ready"; shelf: HomeShelf } | { kind: "unavailable" };
-export type CourseAnswer = { kind: "found"; detail: CourseDetail } | { kind: "not_found" } | { kind: "unavailable" };
+export type CourseAnswer = { kind: "found"; detail: CourseDetail; resources: CourseResourceRow[] } | { kind: "not_found" } | { kind: "unavailable" };
 export type TeacherAnswer =
   | { kind: "found"; teacher: ShelfTeacher & { bio: string | null }; courses: ShelfCourse[] }
   | { kind: "not_found" }
@@ -144,7 +144,7 @@ export function createBrowse(deps: {
     const read = await remembered(lessons, slug, () => deps.store.courseLessons(slug));
     if (read === "unavailable") return { kind: "unavailable" };
     const detail = courseDetailOf(course, read.teacher, read.lessons);
-    return detail === null ? { kind: "not_found" } : { kind: "found", detail };
+    return detail === null ? { kind: "not_found" } : { kind: "found", detail, resources: read.resources };
   }
 
   /** La ficha del maestro `slug` (PA-03). `not_found` si no está listado o no tiene cursos listados: se ve igual (PA-19). */

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,7 @@ import { readResourceForm, checkFile, progressStep, resourceButton, titleFromFil
 import { ResourcesBlock } from "@/app/portal/_editor/resources";
 import type { ResourceRow } from "@/app/portal/_editor/rows";
 import { UnsavedProvider } from "@/app/portal/_editor/unsaved";
+import { portal } from "@/messages/es/portal";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -16,6 +17,8 @@ const actions = vi.hoisted(() => ({
   cancelResourceAction: vi.fn(),
 }));
 vi.mock("@/app/portal/_editor/resource-actions", () => actions);
+const files = vi.hoisted(() => ({ openFile: vi.fn(), openFileInFrame: vi.fn(), reloadPage: vi.fn() }));
+vi.mock("@/app/_catalog/resources/open-file", () => files);
 
 const COURSE = "c0000000-0000-4000-8000-000000000001";
 const LESSON = "e0000000-0000-4000-8000-000000000001";
@@ -151,10 +154,10 @@ describe("la lista", () => {
     expect(await screen.findByText(/Esto cambió mientras lo veías/)).toBeTruthy();
   });
 
-  it("en solo lectura se ve la lista, sin botones ni adjuntar", () => {
+  it("en solo lectura se ve la lista y se puede bajar, sin ordenar, quitar ni adjuntar", () => {
     show(ITEMS, { editable: false });
     expect(screen.getByText("Guía")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["DescargarDescargar Guía", "DescargarDescargar Audio"]);
     expect(screen.queryByLabelText("Archivo")).toBeNull();
   });
 });
@@ -459,5 +462,96 @@ describe("lo puro", () => {
     expect([0, 24, 25, 49, 50, 99, 100].map((loaded) => progressStep(loaded, 100))).toEqual([0, 0, 25, 25, 50, 75, 100]);
     expect(progressStep(5, 0)).toBe(0);
     expect(progressStep(200, 100)).toBe(100);
+  });
+});
+
+// Bajar lo que subió (T-404). En el editor el adjunto se abre en un marco oculto: la página no navega, así que el aviso de salir
+// sigue valiendo y lo escrito no corre riesgo si la respuesta no es un archivo. Lo mide tests/e2e/equipo/portal.equipo.ts.
+describe("bajar", () => {
+  const URL = "https://storage/bajar?token=t";
+
+  it("cada recurso lleva su botón, con su nombre", () => {
+    show();
+    expect(screen.getByRole("button", { name: "Descargar Guía" })).toHaveAttribute("value", resourceButton.download(R1));
+  });
+
+  it("con la dirección, la abre una vez en el marco y lo dice, sin navegar", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    expect(files.openFileInFrame.mock.calls[0]?.[0]).toBe(URL);
+    await screen.findAllByText(portal.editor.resources.downloadStarted);
+    expect(files.openFile).not.toHaveBeenCalled();
+  });
+
+  it("si lo que llegó al marco no es un archivo, dice que puede no haber empezado", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    const notAFile = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => notAFile());
+    // En una región viva que ya existía: quien se quedó donde estaba lo oye aunque el foco no se mueva.
+    const said = await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    expect(said.closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("el aviso tardío no le quita el foco a quien ya siguió trabajando", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    await screen.findAllByText(portal.editor.resources.downloadStarted);
+    const elsewhere = screen.getByRole("button", { name: "Descargar Audio" });
+    elsewhere.focus();
+    const notAFile = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => notAFile());
+    await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("un fallo que llega después de otro envío no se pierde; el siguiente envío lo quita", async () => {
+    actions.resourceAction.mockResolvedValueOnce({ kind: "granted", url: URL, attempt: 1 }).mockResolvedValueOnce({ kind: "granted", url: URL, attempt: 2 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(2));
+    const first = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => first());
+    await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    await waitFor(() => expect(screen.queryByText(portal.editor.resources.downloadMaybeMissed)).toBeNull());
+  });
+
+  it("mientras va en camino no se manda otra cosa: con dos botones, una dirección se perdería sin decir nada", async () => {
+    let finish: (state: unknown) => void = () => undefined;
+    actions.resourceAction.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    expect(actions.resourceAction).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish({ kind: "granted", url: URL, attempt: 1 });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    // React encola las acciones: si el segundo clic hubiera entrado, saldría aquí, al terminar el primero.
+    expect(actions.resourceAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("con el tope, lo dice sin abrir nada", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "download_throttled", attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await screen.findAllByText(portal.editor.resources.downloadThrottled);
+    expect(files.openFileInFrame).not.toHaveBeenCalled();
   });
 });

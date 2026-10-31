@@ -1,5 +1,7 @@
 import type { ErrorEvent } from "@sentry/nextjs";
 
+import { parseClabe } from "@/domain/fiscal/clabe";
+
 // El filtro por el que pasa todo error antes de salir hacia Sentry (TRD §9.10 y §10.5: a
 // Sentry llegan errores sin datos personales).
 //
@@ -32,7 +34,10 @@ export const SCAN_WINDOW = 4_000;
 // que una regla necesita ver entero: las credenciales de una cadena de conexión.
 const CUT_MARGIN = 450;
 
-type Rule = readonly [RegExp, string];
+type Rule = readonly [RegExp, string | ((match: string) => string)];
+
+/** Si esos 18 dígitos son una CLABE: su dígito de control deja pasar a nueve de cada diez números que no lo son. */
+const clabeMask = (digits: string): string => (parseClabe(digits.replace(/\./g, "")).ok ? "[clabe]" : digits);
 
 // Secretos, direcciones y correos. Se aplican a todo texto que sale, también a lo que
 // anota el SDK: ninguna da un falso positivo que estorbe para diagnosticar.
@@ -40,6 +45,11 @@ type Rule = readonly [RegExp, string];
 // El orden importa: lo primero le quita material a lo que sigue. Todas las repeticiones
 // tienen tope, para que un texto armado con mala intención no haga tardar al filtro.
 const SECRET_RULES: readonly Rule[] = [
+  // Las llaves de los datos fiscales (T-409): con el nombre de su variable, y sueltas, por su forma. La lista lleva comas, que la
+  // regla de abajo no cruza.
+  [/(PII_ENCRYPTION[A-Z_]{0,30})["']?\s*[=:]\s*["']?[^\s"']{1,4000}/g, "$1=[filtrado]"],
+  [/(?<![A-Za-z0-9+/])[1-9][0-9]{0,4}:[A-Za-z0-9+/]{43}=:[0-9a-f]{8}/g, "[llave]"],
+  [/(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])/g, "[llave]"],
   // Una llave privada, hasta el final del texto.
   [/-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*/g, "[llave]"],
   // El usuario y la contraseña que van antes de la arroba en una cadena de conexión. La
@@ -88,6 +98,8 @@ const SECRET_RULES: readonly Rule[] = [
     /[\p{L}\p{N}._%+-]{1,64}(?:@|%(?:25){0,3}40)[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,8}\.\p{L}{2,24}/gu,
     "[correo]",
   ],
+  // Una CLABE (T-409), aunque vaya pegada a letras o con separadores. Al final: partiría la forma de un token o de un correo.
+  [/(?<!\d)\d(?:[\s.-]?\d){17}(?!\d)/g, clabeMask],
 ];
 
 // Una fecha de seis dígitos (año, mes, día), que es lo que llevan en medio el RFC y la
@@ -101,7 +113,8 @@ const IDENTITY_RULES: readonly Rule[] = [
   [/(?<![\w:])(?:[0-9a-f]{1,4}:{1,2}){3,7}[0-9a-f]{1,4}(?![\w:])/gi, "[ip]"],
   // La CURP antes que el RFC: empieza igual.
   [new RegExp(`\\b[A-Z]{4}${DATE}[HM][A-Z]{5}[A-Z0-9]\\d\\b`, "gi"), "[curp]"],
-  [new RegExp(`\\b[A-ZÑ&]{3,4}-?${DATE}-?[A-Z0-9]{3}\\b`, "gi"), "[rfc]"],
+  // No se usa `\\b`: la Ñ no cuenta como letra para él, y el guion bajo sí (`rfc_GOMA800101AB1`).
+  [new RegExp(`(?<![A-Za-zÑñ&])[A-ZÑ&]{3,4}[-\\s.]{0,2}${DATE}[-\\s.]{0,2}[A-Z0-9]{3}(?![A-Za-zÑñ0-9])`, "gi"), "[rfc]"],
 ];
 
 // Lo que solo se busca en el mensaje de un error. En lo que anota el SDK (versiones,
@@ -132,7 +145,9 @@ const EXTRA_RULES: Record<Kind, readonly Rule[]> = {
 
 function applyRules(text: string, rules: readonly Rule[]): string {
   let clean = text;
-  for (const [pattern, replacement] of rules) clean = clean.replace(pattern, replacement);
+  for (const [pattern, replacement] of rules) {
+    clean = typeof replacement === "string" ? clean.replace(pattern, replacement) : clean.replace(pattern, replacement);
+  }
   return clean;
 }
 

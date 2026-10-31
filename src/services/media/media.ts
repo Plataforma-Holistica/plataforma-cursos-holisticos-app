@@ -7,15 +7,27 @@ import { checkSession, teamStanding } from "@/services/account/account";
 import { reportFailure } from "@/services/error-reporting/server";
 
 import { createMediaGrant } from "./grant";
+import { createResourceFiles } from "./resource-files";
 import { databaseMediaStore } from "./store";
 
 // La función única de medios, ya armada con las guardas (del equipo para revisar, de sesión
 // para ver), la base, la llave de firma de Mux y el registro de errores. Lo que importan las
 // pantallas.
 
-export type { BatchAnswer, HeartbeatAnswer, LessonAccess, LessonProgressNote, LiveElsewhere, MediaGrant, PresenceAnswer, ReviewGrant } from "./grant";
+export type {
+  BatchAnswer,
+  DraftResourceGrant,
+  HeartbeatAnswer,
+  LessonAccess,
+  LessonProgressNote,
+  LiveElsewhere,
+  MediaGrant,
+  PresenceAnswer,
+  ResourceGrant,
+  ReviewGrant,
+} from "./grant";
 
-export const { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats } = createMediaGrant(
+export const { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant } = createMediaGrant(
   { report: reportFailure },
   {
     teamStanding,
@@ -28,6 +40,7 @@ export const { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats }
         : null;
     },
     sign: signPlayback,
+    files: createResourceFiles(),
     now: () => Math.floor(Date.now() / 1000),
   },
 );

@@ -98,6 +98,7 @@ function mediaOn(owner: Client) {
       store: mediaStoreOn(owner),
       signingKey: () => KEY,
       sign: signPlayback,
+      files: { signDownload: () => Promise.resolve(null) },
       now: () => NOW,
     },
   );
@@ -289,6 +290,7 @@ describe("ver, por el almacén de la aplicación", () => {
         store: databaseMediaStore,
         signingKey: () => KEY,
         sign: signPlayback,
+        files: { signDownload: () => Promise.resolve(null) },
         now: () => NOW,
       },
     );

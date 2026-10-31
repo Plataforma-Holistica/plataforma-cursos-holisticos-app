@@ -47,6 +47,35 @@ describe("firmar una subida", () => {
   });
 });
 
+describe("firmar una descarga", () => {
+  const SIGNED = `/object/sign/course-resources/${PATH}?token=t`;
+
+  it("con la llave y por esos segundos; el nombre va en la dirección, codificado, para que baje como adjunto", async () => {
+    const { adapter, calls } = storage(() => Response.json({ signedURL: SIGNED }));
+    expect(await adapter.signDownload(PATH, "Guía de respiración & más.pdf", 300)).toBe(
+      `${ROOT}${SIGNED}&download=Gu%C3%ADa%20de%20respiraci%C3%B3n%20%26%20m%C3%A1s.pdf`,
+    );
+    expect(calls[0]?.url).toBe(`${ROOT}/object/sign/course-resources/${PATH}`);
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ expiresIn: 300 }));
+    expect(headersOf(calls[0]?.init).authorization).toBe("Bearer llave-secreta");
+  });
+
+  it.each([
+    ["Storage contesta un error", () => new Response("{}", { status: 400 })],
+    ["la respuesta no trae dirección", () => Response.json({ otra: 1 })],
+    ["la dirección no es de Storage", () => Response.json({ signedURL: "https://otro.test/x?token=t" })],
+    ["la dirección no trae su testigo", () => Response.json({ signedURL: `/object/sign/course-resources/${PATH}` })],
+    ["la respuesta no es JSON", () => new Response("<html>")],
+  ])("si %s, nulo", async (_name, respond) => {
+    expect(await storage(respond).adapter.signDownload(PATH, "a.pdf", 300)).toBeNull();
+  });
+
+  it("si no contesta, nulo", async () => {
+    expect(await storage(() => Promise.reject(new Error("sin red"))).adapter.signDownload(PATH, "a.pdf", 300)).toBeNull();
+  });
+});
+
 describe("leer por rango", () => {
   it("el principio y el final piden solo esos bytes", async () => {
     const { adapter, calls } = storage(() => new Response(new Uint8Array([1, 2]), { status: 206 }));

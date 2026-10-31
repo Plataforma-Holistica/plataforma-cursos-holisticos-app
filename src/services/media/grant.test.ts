@@ -5,7 +5,7 @@ import type { SessionCheck } from "@/services/account/admission";
 import type { Capability, TeamCheck, TeamStanding } from "@/services/account/team";
 
 import { createMediaGrant } from "./grant";
-import type { BatchRecord, HeartbeatBeat, LessonVideo, OpenedPlayback, PlaybackOpening, Presence, WatchFacts } from "./records";
+import type { BatchRecord, DownloadHit, HeartbeatBeat, LessonVideo, OpenedPlayback, PlaybackOpening, Presence, ResourceFacts, ResourceFile, WatchFacts } from "./records";
 
 // La función única de medios, con todo lo de fuera simulado: a quién se le pregunta qué, en
 // qué orden, y qué se contesta. Contra la base de verdad, en
@@ -68,6 +68,20 @@ const LIVE_SEEN = {
   startedAt: STARTED,
 };
 
+const RESOURCE = "e0000000-0000-4000-8000-000000000006";
+const COURSE = "e0000000-0000-4000-8000-000000000007";
+const FILE: ResourceFile = { path: `${TEACHER}/${COURSE}/${RESOURCE}`, mime: "application/pdf", title: "Guía" };
+const DOWNLOAD_URL = "https://storage/bajar?token=t";
+const RESOURCE_PAYING: ResourceFacts = {
+  now: DB_NOW,
+  viewer: PAYING.viewer,
+  account: PAYING.account,
+  graceDays: 0,
+  resource: { isCurrent: true, teacherId: TEACHER, courseState: "published", listed: true, isOpen: false },
+  file: FILE,
+};
+const RESOURCE_NEVER_PAID: ResourceFacts = { ...RESOURCE_PAYING, account: NEVER_PAID.account };
+
 const standingOf = (capabilities: Capability[]): TeamStanding => ({ state: "member", capabilities, factor: "f" }) as TeamStanding;
 const teamCheck = (standing: TeamStanding = standingOf(["content"])): TeamCheck => ({ kind: "team", claims, standing, inProgress: null });
 
@@ -86,6 +100,10 @@ function grantWith(
     beatFacts?: WatchFacts | null;
     /** Lo que la base contesta del lote, si la regla supo decidir; `throws`: el lote tumba la transacción. */
     recorded?: BatchRecord | "throws";
+    resourceFacts?: ResourceFacts | null | "throws";
+    draftFile?: ResourceFile | null | "throws";
+    hit?: DownloadHit | "throws";
+    downloadUrl?: string | null;
   } = {},
 ) {
   const calls: string[] = [];
@@ -103,6 +121,21 @@ function grantWith(
       teamStanding: () => (calls.push("guarda del equipo"), Promise.resolve(setup.check ?? teamCheck())),
       checkSession: () => (calls.push("guarda de sesión"), Promise.resolve(setup.session ?? { kind: "pass", claims })),
       store: {
+        resourceFacts: vi.fn((_claims: VerifiedClaims, id: string) => {
+          calls.push(`recurso ${id}`);
+          if (setup.resourceFacts === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.resourceFacts === undefined ? RESOURCE_PAYING : setup.resourceFacts);
+        }),
+        draftResourceFile: vi.fn((_claims: VerifiedClaims, course: string, id: string) => {
+          calls.push(`borrador ${course} ${id}`);
+          if (setup.draftFile === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.draftFile === undefined ? FILE : setup.draftFile);
+        }),
+        downloadHit: vi.fn(() => {
+          calls.push("freno");
+          if (setup.hit === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.hit ?? "ok");
+        }),
         lessonVideo: vi.fn((_claims: VerifiedClaims, id: string) => {
           calls.push(`lección ${id}`);
           if (setup.lesson === "throws") return Promise.reject(new Error("sin base"));
@@ -148,6 +181,12 @@ function grantWith(
       },
       signingKey: () => (setup.key === undefined ? KEY : setup.key),
       sign,
+      files: {
+        signDownload: vi.fn((file: ResourceFile) => {
+          calls.push(`firma ${file.path}`);
+          return Promise.resolve(setup.downloadUrl === undefined ? DOWNLOAD_URL : setup.downloadUrl);
+        }),
+      },
       now: () => NOW,
     },
   );
@@ -786,5 +825,139 @@ describe("el progreso (T-206, RF-307)", () => {
     });
     expect(await service.flushHeartbeats(reader, PLAYBACK, EVENTS)).toEqual({ kind: "settled", seqs: [0, 1], progress: null });
     expect(service.reported).toEqual(["progress_unavailable", "progress_unavailable"]);
+  });
+});
+
+// Bajar un recurso (RF-308; T-404): la misma puerta y las reglas de ver, sin video. Nunca abre reproducción ni latidos.
+describe("bajar un recurso", () => {
+  it("con acceso: la guarda, los hechos, el freno y la firma, en ese orden", async () => {
+    const service = grantWith();
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "granted", url: DOWNLOAD_URL });
+    expect(service.calls).toEqual(["guarda de sesión", `recurso ${RESOURCE}`, "freno", `firma ${FILE.path}`]);
+    expect(service.reported).toEqual([]);
+    // Ni reproducción ni firma de video.
+    expect(service.sign).not.toHaveBeenCalled();
+    expect(service.openings).toEqual([]);
+  });
+
+  it.each<[string, SessionCheck, string]>([
+    ["no se supo la sesión", { kind: "unavailable" }, "unavailable"],
+    ["cuenta suspendida", { kind: "suspended" }, "suspended"],
+    ["sin sesión", { kind: "anonymous" }, "refused"],
+    ["cuenta a medias", { kind: "incomplete", claims } as unknown as SessionCheck, "refused"],
+  ])("%s: no se lee nada", async (_name, session, kind) => {
+    const service = grantWith({ session });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it.each([["no es un texto", 7], ["no tiene forma", "x"], ["mayúsculas", RESOURCE.toUpperCase()], ["nulo", null]])("lo que llega %s: no llega a la base", async (_name, id) => {
+    const service = grantWith();
+    expect(await service.getResourceGrant(reader, id)).toEqual({ kind: "not_found" });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it("lo que no existe: `not_found`, sin freno ni firma", async () => {
+    const service = grantWith({ resourceFacts: { ...RESOURCE_PAYING, resource: null, file: null } });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "not_found" });
+    expect(service.calls).toEqual(["guarda de sesión", `recurso ${RESOURCE}`]);
+  });
+
+  it("sin acceso: el motivo para PA-33, sin freno ni firma, aunque la barrera soltara el archivo", async () => {
+    const service = grantWith({ resourceFacts: RESOURCE_NEVER_PAID });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "denied", account: { allowed: false, reason: "never_subscribed" } });
+    expect(service.calls).toEqual(["guarda de sesión", `recurso ${RESOURCE}`]);
+  });
+
+  it("cuenta suspendida según los hechos: `suspended`", async () => {
+    const service = grantWith({ resourceFacts: { ...RESOURCE_PAYING, viewer: { ...RESOURCE_PAYING.viewer, accountSuspended: true } } });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "suspended" });
+    expect(service.calls).not.toContain("freno");
+  });
+
+  it.each<[string, ResourceFacts | null | "throws", string]>([
+    ["los hechos no se pudieron leer", "throws", "media_facts_unavailable"],
+    ["la base no reconoce a quien actúa", null, "media_facts_unavailable"],
+    ["sin un número de gracia, con falla de cobro", { ...RESOURCE_PAYING, graceDays: Number.NaN, account: { ...RESOURCE_PAYING.account, paidThrough: DB_NOW, lastRenewalFailedAt: DB_NOW } }, "media_facts_unavailable"],
+    ["la regla dio acceso y la barrera no soltó el archivo", { ...RESOURCE_PAYING, file: null }, "resource_grant_unavailable"],
+  ])("%s: «no se supo», reportado, sin firmar", async (_name, resourceFacts, code) => {
+    const service = grantWith({ resourceFacts });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual([code]);
+    expect(service.calls.filter((call) => call.startsWith("firma"))).toEqual([]);
+    expect(service.calls).not.toContain("freno");
+  });
+
+  it("una cuenta sin el correo verificado se reporta, y la regla sigue", async () => {
+    const service = grantWith({ resourceFacts: { ...RESOURCE_PAYING, viewer: { ...RESOURCE_PAYING.viewer, emailVerified: false } } });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "granted", url: DOWNLOAD_URL });
+    expect(service.reported).toEqual(["media_email_unverified"]);
+  });
+
+  it("con el tope: `throttled`, sin firmar y sin reportar", async () => {
+    const service = grantWith({ hit: "throttled" });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "throttled" });
+    expect(service.calls).not.toContain(`firma ${FILE.path}`);
+    expect(service.reported).toEqual([]);
+  });
+
+  it.each<[string, DownloadHit | "throws"]>([
+    ["el freno no se supo", "unavailable"],
+    ["el freno se cayó", "throws"],
+  ])("%s: falla cerrado, sin firmar", async (_name, hit) => {
+    const service = grantWith({ hit });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.calls).not.toContain(`firma ${FILE.path}`);
+    expect(service.reported).toEqual(["resource_grant_unavailable"]);
+  });
+
+  it("si no se pudo firmar: «no se supo», reportado", async () => {
+    const service = grantWith({ downloadUrl: null });
+    expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["resource_grant_unavailable"]);
+  });
+});
+
+describe("bajar lo que subió a su borrador (PA-43)", () => {
+  it("el maestro: la guarda, su archivo, el freno y la firma", async () => {
+    const service = grantWith();
+    expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "granted", url: DOWNLOAD_URL });
+    expect(service.calls).toEqual(["guarda de sesión", `borrador ${COURSE} ${RESOURCE}`, "freno", `firma ${FILE.path}`]);
+  });
+
+  it.each<[string, SessionCheck, string]>([
+    ["no se supo la sesión", { kind: "unavailable" }, "unavailable"],
+    ["cuenta suspendida", { kind: "suspended" }, "suspended"],
+    ["sin sesión", { kind: "anonymous" }, "refused"],
+  ])("%s: no se lee nada", async (_name, session, kind) => {
+    const service = grantWith({ session });
+    expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it.each([
+    ["el curso", "x", RESOURCE],
+    ["el recurso", COURSE, "x"],
+  ])("%s sin forma: no llega a la base", async (_name, course, resource) => {
+    const service = grantWith();
+    expect(await service.getDraftResourceGrant(reader, course, resource)).toEqual({ kind: "not_found" });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it("lo que la base no suelta (de otro, o sin confirmar): `not_found`", async () => {
+    const service = grantWith({ draftFile: null });
+    expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "not_found" });
+    expect(service.calls).not.toContain("freno");
+  });
+
+  it("si la base se cayó: «no se supo», reportado", async () => {
+    const service = grantWith({ draftFile: "throws" });
+    expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["resource_grant_unavailable"]);
+  });
+
+  it("el mismo freno", async () => {
+    const service = grantWith({ hit: "throttled" });
+    expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "throttled" });
   });
 });

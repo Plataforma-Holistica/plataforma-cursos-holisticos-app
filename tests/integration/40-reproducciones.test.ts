@@ -87,6 +87,7 @@ function mediaOn(owner: Client) {
       store: mediaStoreOn(owner),
       signingKey: () => KEY,
       sign: signPlayback,
+      files: { signDownload: () => Promise.resolve(null) },
       now: () => NOW,
     },
   );

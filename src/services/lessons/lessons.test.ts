@@ -34,8 +34,9 @@ function lessonsWith(store: { rows?: LessonRowData[] | "throws"; open?: boolean 
   const storeLessons = vi.fn(() => (store.rows === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve(store.rows ?? [ROW])));
   const open = "open" in store ? store.open : false;
   const storeOpen = vi.fn(() => (open === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve(open ?? null)));
-  const service = createLessons({ store: { courseLessons: storeLessons, courseIsOpen: storeOpen }, report: (code) => (reported.push(code), Promise.resolve()) });
-  return { ...service, reported, storeLessons, storeOpen };
+  const storeResources = vi.fn(() => Promise.resolve([{ id: "r", title: "Guía", kind: "pdf" as const, sizeBytes: 10 }]));
+  const service = createLessons({ store: { courseLessons: storeLessons, courseIsOpen: storeOpen, lessonResources: storeResources }, report: (code) => (reported.push(code), Promise.resolve()) });
+  return { ...service, reported, storeLessons, storeOpen, storeResources };
 }
 
 describe("la página de una lección", () => {
@@ -81,7 +82,7 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
   it("lo recuerda treinta segundos por curso, también si no se supo; pasado eso, pregunta otra vez", async () => {
     let clock = 1_000;
     const storeOpen = vi.fn(() => Promise.resolve(true));
-    const service = createLessons({ store: { courseLessons: vi.fn(), courseIsOpen: storeOpen }, report: () => Promise.resolve(), now: () => clock });
+    const service = createLessons({ store: { lessonResources: vi.fn(), courseLessons: vi.fn(), courseIsOpen: storeOpen }, report: () => Promise.resolve(), now: () => clock });
     expect(await service.courseIsOpen("respirar")).toBe(true);
     clock += OPEN_MEMORY_MS - 1;
     expect(await service.courseIsOpen("respirar")).toBe(true);
@@ -94,7 +95,7 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
     expect(storeOpen).toHaveBeenCalledTimes(3);
 
     const failing = vi.fn(() => Promise.reject(new Error("sin base")));
-    const unsure = createLessons({ store: { courseLessons: vi.fn(), courseIsOpen: failing }, report: () => Promise.resolve(), now: () => clock });
+    const unsure = createLessons({ store: { lessonResources: vi.fn(), courseLessons: vi.fn(), courseIsOpen: failing }, report: () => Promise.resolve(), now: () => clock });
     expect(await unsure.courseIsOpen("respirar")).toBeNull();
     expect(await unsure.courseIsOpen("respirar")).toBeNull();
     expect(failing).toHaveBeenCalledOnce();
@@ -104,5 +105,29 @@ describe("si el curso es el abierto, para quien llega sin sesión", () => {
     const service = lessonsWith({ open: true });
     expect(await service.courseIsOpen("no/es")).toBeNull();
     expect(service.storeOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("los recursos de una lección", () => {
+  const CLAIMS = { userId: "u" } as unknown as Parameters<ReturnType<typeof createLessons>["lessonResources"]>[0];
+  const LESSON_ID = "b0000000-0000-4000-8000-000000000002";
+
+  it("se leen como la persona, y un identificador sin forma no llega a la base", async () => {
+    const service = createLessons({
+      store: { lessonResources: vi.fn(() => Promise.resolve([{ id: "r", title: "Guía", kind: "pdf" as const, sizeBytes: 10 }])), courseLessons: vi.fn(), courseIsOpen: vi.fn() },
+      report: () => Promise.resolve(),
+    });
+    await expect(service.lessonResources(CLAIMS, LESSON_ID)).resolves.toEqual([{ id: "r", title: "Guía", kind: "pdf", sizeBytes: 10 }]);
+    await expect(service.lessonResources(CLAIMS, "x")).resolves.toEqual([]);
+  });
+
+  it("si no se pudieron leer: nulo, reportado", async () => {
+    const reported: string[] = [];
+    const service = createLessons({
+      store: { lessonResources: vi.fn(() => Promise.reject(new Error("sin base"))), courseLessons: vi.fn(), courseIsOpen: vi.fn() },
+      report: (code) => (reported.push(code), Promise.resolve()),
+    });
+    await expect(service.lessonResources(CLAIMS, LESSON_ID)).resolves.toBeNull();
+    expect(reported).toEqual(["lesson_resources_unavailable"]);
   });
 });

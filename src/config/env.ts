@@ -12,6 +12,11 @@ const postgresUrl = z.url({ protocol: /^postgres(ql)?$/ });
 // sin mandar nada, y la aplicación arrancaría «con» registro de errores y sin él.
 const sentryDsn = /^https?:\/\/[0-9a-z]+@[^\s/@]+\/(?:[^\s/@]+\/)*\d+$/i;
 
+// Las llaves de los datos fiscales: `versión:base64:comprobación`, separadas por comas (T-409). Aquí solo se revisa su forma (este
+// archivo también se compila para Edge y no importa `node:crypto`); que abran lo dice el cifrado al usarlas.
+const piiKeyEntry = "[1-9][0-9]{0,4}:[A-Za-z0-9+/]{43}=:[0-9a-f]{8}";
+const piiKeys = new RegExp(`^${piiKeyEntry}(?:,${piiKeyEntry})*$`);
+
 const schema = z.object({
   APP_ENV: z.enum(["local", "staging", "production"]),
   NEXT_PUBLIC_SITE_URL: httpUrl,
@@ -40,6 +45,11 @@ const schema = z.object({
   // local que sube los videos de prueba.
   MUX_SIGNING_KEY_ID: z.string().regex(/^[A-Za-z0-9]{8,64}$/).optional(),
   MUX_SIGNING_PRIVATE_KEY: z.string().refine(looksLikePrivateKey).optional(),
+  // Las llaves con que se cifran los datos fiscales del maestro (T-409; TRD §9.7), y cuál cifra hoy. Secretas, solo en el servidor,
+  // y con una copia fuera de línea: sin la llave, lo cifrado no se vuelve a leer. Opcionales: sin ellas lo fiscal no está
+  // disponible y lo demás funciona igual. Van juntas. Antes de salir a producción son obligatorias (06 §8).
+  PII_ENCRYPTION_KEYS: z.string().regex(piiKeys).optional(),
+  PII_ENCRYPTION_ACTIVE_VERSION: z.string().regex(/^[1-9][0-9]{0,4}$/).optional(),
 });
 
 // La llave privada de firma, en PEM o en base64, como la entrega Mux. Aquí solo se revisa su
@@ -125,6 +135,19 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // se diría como «no hay video» cuando es configuración.
   if ((present.MUX_SIGNING_KEY_ID === undefined) !== (present.MUX_SIGNING_PRIVATE_KEY === undefined)) {
     failed.add(present.MUX_SIGNING_KEY_ID === undefined ? "MUX_SIGNING_KEY_ID" : "MUX_SIGNING_PRIVATE_KEY");
+  }
+  // Las llaves de los datos fiscales van juntas, y la que cifra tiene que estar en la lista.
+  if ((present.PII_ENCRYPTION_KEYS === undefined) !== (present.PII_ENCRYPTION_ACTIVE_VERSION === undefined)) {
+    failed.add(present.PII_ENCRYPTION_KEYS === undefined ? "PII_ENCRYPTION_KEYS" : "PII_ENCRYPTION_ACTIVE_VERSION");
+  } else if (result.success && present.PII_ENCRYPTION_KEYS !== undefined) {
+    // Una versión repetida es lo más probable al rotar: correr el comando sin cambiarle el número. Sin esto, arrancaría con todo lo
+    // fiscal sin llave y sin decírselo a nadie. Las versiones caben en un `smallint`.
+    const versions = present.PII_ENCRYPTION_KEYS.split(",").map((entry) => entry.split(":")[0]);
+    if (new Set(versions).size !== versions.length || versions.some((version) => Number(version) > 32_767)) {
+      failed.add("PII_ENCRYPTION_KEYS");
+    } else if (!versions.includes(present.PII_ENCRYPTION_ACTIVE_VERSION)) {
+      failed.add("PII_ENCRYPTION_ACTIVE_VERSION");
+    }
   }
   const unwelcome = forbidden.filter((name) => source[name] !== undefined && source[name] !== "");
   if (result.success && failed.size === 0 && unwelcome.length === 0) return result.data;

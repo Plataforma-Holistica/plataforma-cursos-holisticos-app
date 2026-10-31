@@ -11,7 +11,12 @@
 // Los datos viven en `supabase/local/test-courses.json`. El guion no ejecuta SQL que venga
 // de un archivo: llama a funciones fijas con los datos como parámetros. Correrlo dos veces no
 // duplica nada.
+//
+// Desde T-404 cada curso lleva además dos recursos publicados, uno del curso y otro de su primera
+// lección, con un PDF mínimo que sube a la cubeta local. Lo publicado lo escribe el sistema: el
+// camino del maestro llega con T-405.
 
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -28,6 +33,8 @@ function fail(message) {
   console.error(`db:courses: ${message}`);
   process.exit(1);
 }
+
+const TEST_PDF = Buffer.from("%PDF-1.7\nUn recurso de prueba.\n%%EOF\n", "latin1");
 
 // Lo que ya está en el entorno gana sobre el archivo: así la integración continua pasa
 // sus propios valores.
@@ -57,6 +64,15 @@ if ([...url.searchParams.keys()].length > 0) {
 // usuario y una contraseña de fábrica que ninguna base remota tiene.
 if (decodeURIComponent(url.username) !== "postgres" || decodeURIComponent(url.password) !== "postgres") {
   fail("DATABASE_URL_DIRECT debe entrar como postgres, con la contraseña de fábrica de la base local.");
+}
+// Los recursos suben a Storage: también tiene que ser el local.
+const storageRoot = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const storageKey = process.env.SUPABASE_SECRET_KEY;
+if (!storageRoot || !storageKey) fail("faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SECRET_KEY. Mira .env.example.");
+try {
+  if (!LOCAL_HOSTS.has(new URL(storageRoot).hostname)) fail("NEXT_PUBLIC_SUPABASE_URL no apunta al Storage local.");
+} catch {
+  fail("NEXT_PUBLIC_SUPABASE_URL no es una URL.");
 }
 
 /** Los datos, revisados antes de tocar la base. Lo que no tiene la forma esperada detiene todo. */
@@ -166,6 +182,28 @@ const client = new pg.Client({
   database: decodeURIComponent(url.pathname.replace(/^\//, "")),
 });
 
+/** Publica un recurso de prueba, si ese lugar no tiene ya uno: sube el objeto y lo escribe con lo que Storage guardó. */
+async function publishTestResource(courseId, teacherId, lessonId, title) {
+  const { rows: existing } = await client.query(
+    "select 1 from public.published_resources where course_id = $1::uuid and lesson_id is not distinct from $2::uuid and is_current",
+    [courseId, lessonId],
+  );
+  if (existing.length > 0) return;
+  const path = `${teacherId}/${courseId}/${randomUUID()}`;
+  const response = await fetch(`${storageRoot.replace(/\/+$/, "")}/storage/v1/object/course-resources/${path}`, {
+    method: "POST",
+    headers: { apikey: storageKey, authorization: `Bearer ${storageKey}`, "content-type": "application/pdf" },
+    body: new Uint8Array(TEST_PDF),
+  });
+  if (!response.ok) throw new Error(`Storage contestó ${response.status} al subir un recurso de prueba`);
+  await client.query(
+    `insert into public.published_resources (course_id, teacher_id, lesson_id, title, kind, mime, storage_path, object_id, object_version, size_bytes, position)
+     select $1::uuid, $2::uuid, $3::uuid, $4, 'pdf', 'application/pdf', o.name, o.id, o.version, (o.metadata ->> 'size')::bigint, 1
+       from storage.objects o where o.bucket_id = 'course-resources' and o.name = $5`,
+    [courseId, teacherId, lessonId, title, path],
+  );
+}
+
 const loaded = [];
 try {
   await client.connect();
@@ -212,6 +250,19 @@ try {
       if (stored.map((row) => row.video).join() !== expected.join()) {
         fail(`${course.slug} ya está cargado con otros videos. Para cargarlo con los de ${VIDEOS_FILE}: pnpm db:reset && pnpm db:courses.`);
       }
+    }
+    const { rows: places } = await client.query(
+      `select c.course_id::text as course, c.teacher_id::text as teacher, l.id::text as lesson
+         from public.published_courses c
+         join public.published_lessons l on l.course_id = c.course_id and l.is_current
+         join public.published_modules m on m.id = l.module_id
+        where c.slug = $1 order by m.position, l.position limit 1`,
+      [course.slug],
+    );
+    const place = places[0];
+    if (place) {
+      await publishTestResource(place.course, place.teacher, null, "Guía del curso");
+      await publishTestResource(place.course, place.teacher, place.lesson, "Apuntes de la lección");
     }
     loaded.push(`${course.slug} (${answer === "loaded" ? "cargado" : "ya estaba"})`);
   }

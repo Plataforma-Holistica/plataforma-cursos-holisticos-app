@@ -12,9 +12,11 @@ import {
   mayReview,
   playbackRates,
   resolveMediaAccess,
+  resolveResourceAccess,
   watermarkText,
   type MediaAccess,
   type MediaLesson,
+  type MediaResource,
   type MediaViewer,
 } from "./media-access";
 
@@ -443,5 +445,102 @@ describe("watermarkText: el correo de la marca de agua (RF-305; 03 §5.4)", () =
     ["con una marca de orden de bytes", "\ufeffana@correo.com"],
   ])("%s: nulo", (_what, value) => {
     expect(watermarkText(value)).toBeNull();
+  });
+});
+
+// Bajar un recurso (RF-308; T-404): las mismas reglas de ver, sin video, y nunca cuenta para el reparto.
+describe("resolveResourceAccess", () => {
+  const STUDENT: MediaViewer = { accountSuspended: false, content: false, teacherId: null, emailVerified: true };
+  const OWNER: MediaViewer = { ...STUDENT, teacherId: TEACHER };
+  const RESOURCE: MediaResource = { isCurrent: true, teacherId: TEACHER, courseState: "published", listed: true, isOpen: false };
+  const PAID: AccountAccess = { allowed: true, basis: "subscription", until: LATER };
+  const NONE: AccountAccess = { allowed: false, reason: "never_subscribed" };
+  const ENDED: AccountAccess = { allowed: false, reason: "expired", endedAt: BEFORE };
+
+  it("con acceso por la cuenta, sí", () => {
+    expect(resolveResourceAccess(STUDENT, PAID, RESOURCE)).toEqual({ ok: true });
+    expect(resolveResourceAccess(STUDENT, { allowed: true, basis: "grace", until: LATER }, RESOURCE)).toEqual({ ok: true });
+    expect(resolveResourceAccess(STUDENT, { allowed: true, basis: "courtesy", until: null }, RESOURCE)).toEqual({ ok: true });
+  });
+
+  it("con cambios pendientes sigue siendo lo publicado", () => {
+    expect(resolveResourceAccess(STUDENT, PAID, { ...RESOURCE, courseState: "changes_pending" })).toEqual({ ok: true });
+  });
+
+  it("sin acceso, el motivo de la cuenta para PA-33", () => {
+    expect(resolveResourceAccess(STUDENT, NONE, RESOURCE)).toEqual({ ok: false, reason: "no_access", account: NONE });
+    expect(resolveResourceAccess(STUDENT, ENDED, RESOURCE)).toEqual({ ok: false, reason: "no_access", account: ENDED });
+  });
+
+  it("la cuenta suspendida no baja nada, por ninguno de los dos caminos, y va antes que todo", () => {
+    expect(resolveResourceAccess({ ...STUDENT, accountSuspended: true }, PAID, RESOURCE)).toEqual({ ok: false, reason: "suspended" });
+    expect(resolveResourceAccess(STUDENT, { allowed: false, reason: "suspended" }, RESOURCE)).toEqual({ ok: false, reason: "suspended" });
+    expect(resolveResourceAccess({ ...OWNER, accountSuspended: true }, PAID, null)).toEqual({ ok: false, reason: "suspended" });
+  });
+
+  it.each<[string, MediaResource | null]>([
+    ["lo que no existe", null],
+    ["lo retirado", { ...RESOURCE, isCurrent: false }],
+    ["un curso sin listar", { ...RESOURCE, listed: false }],
+    ["un curso en borrador", { ...RESOURCE, courseState: "draft" }],
+    ["un curso en revisión", { ...RESOURCE, courseState: "in_review" }],
+    ["un curso retirado", { ...RESOURCE, courseState: "withdrawn" }],
+  ])("%s contesta igual: no dice si existe", (_name, resource) => {
+    expect(resolveResourceAccess(STUDENT, PAID, resource)).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("el maestro dueño baja lo suyo sin mirar su cuenta, también sin listar o retirado de la vista", () => {
+    expect(resolveResourceAccess(OWNER, null, RESOURCE)).toEqual({ ok: true });
+    expect(resolveResourceAccess(OWNER, NONE, { ...RESOURCE, listed: false })).toEqual({ ok: true });
+    expect(resolveResourceAccess(OWNER, NONE, { ...RESOURCE, courseState: "withdrawn" })).toEqual({ ok: true });
+  });
+
+  it("aun siendo su dueño, lo que ya no está vigente no se baja", () => {
+    expect(resolveResourceAccess(OWNER, PAID, { ...RESOURCE, isCurrent: false })).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("otro maestro es como cualquier alumno", () => {
+    const other = { ...STUDENT, teacherId: OTHER_TEACHER };
+    expect(resolveResourceAccess(other, NONE, RESOURCE)).toEqual({ ok: false, reason: "no_access", account: NONE });
+    expect(resolveResourceAccess(other, NONE, { ...RESOURCE, listed: false })).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("si no se supo la cuenta, no se supo: nunca PA-33, ni el curso abierto", () => {
+    expect(resolveResourceAccess(STUDENT, null, RESOURCE)).toEqual({ ok: false, reason: "unknown" });
+    const invalid: AccountAccess = { allowed: false, reason: "invalid_input" };
+    expect(resolveResourceAccess(STUDENT, invalid, RESOURCE)).toEqual({ ok: false, reason: "unknown" });
+    expect(resolveResourceAccess(STUDENT, invalid, { ...RESOURCE, isOpen: true })).toEqual({ ok: false, reason: "unknown" });
+  });
+
+  it("el curso abierto incluye los recursos (RF-309), con el correo verificado", () => {
+    expect(resolveResourceAccess(STUDENT, NONE, { ...RESOURCE, isOpen: true })).toEqual({ ok: true });
+    expect(resolveResourceAccess({ ...STUDENT, emailVerified: false }, NONE, { ...RESOURCE, isOpen: true })).toEqual({
+      ok: false,
+      reason: "no_access",
+      account: NONE,
+    });
+  });
+
+  it("Contenido no entra por aquí: su regla llega con T-405", () => {
+    const content = { ...STUDENT, content: true };
+    expect(resolveResourceAccess(content, NONE, RESOURCE)).toEqual({ ok: false, reason: "no_access", account: NONE });
+    expect(resolveResourceAccess(content, PAID, { ...RESOURCE, listed: false })).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("en todo lo que se puede dar, coincide con ver: las dos reglas no se separan", () => {
+    const lesson = (resource: MediaResource): MediaLesson => ({ ...resource, provider: "mux", ready: true });
+    fc.assert(
+      fc.property(
+        fc.record({ accountSuspended: fc.boolean(), content: fc.boolean(), teacherId: fc.constantFrom(null, TEACHER, OTHER_TEACHER), emailVerified: fc.boolean() }),
+        fc.constantFrom<AccountAccess | null>(PAID, NONE, ENDED, null, { allowed: false, reason: "invalid_input" }, { allowed: false, reason: "suspended" }),
+        fc.record({ isCurrent: fc.boolean(), teacherId: fc.constantFrom(TEACHER, OTHER_TEACHER), courseState: fc.constantFrom(...COURSE_STATES), listed: fc.boolean(), isOpen: fc.boolean() }),
+        (viewer, account, resource) => {
+          const watching = resolveMediaAccess("watch", viewer, account, lesson(resource));
+          const downloading = resolveResourceAccess(viewer, account, resource);
+          expect(downloading.ok).toBe(watching.ok);
+          if (!watching.ok && !downloading.ok) expect(downloading.reason).toBe(watching.reason === "no_video" ? "not_found" : watching.reason);
+        },
+      ),
+    );
   });
 });

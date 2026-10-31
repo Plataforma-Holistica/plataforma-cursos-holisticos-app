@@ -790,6 +790,29 @@ que no se ve leyendo un solo archivo:
   pantalla (decisión mía sin confirmar). El selector de archivos está en `_editor/` y no en `src/ui/`: T-403 lo saca al
   componente `FileUpload` cuando haya dos que lo usen. Usa pgTAP 70 e integración 90, contra el Storage local, y un caso en
   `tests/e2e/equipo/portal.equipo.ts` que sube de verdad.
+- **Lo que T-404 suma al carril B** (tercera solicitud, `t404_recursos_publicados`; RF-308, FL-14). El alumno baja. Lo publicado está en
+  `published_resources`, con la ruta y el objeto fuera del alcance de toda persona (permiso por columnas) y los guardianes de lo publicado: hasta
+  T-405 solo lo escribe el dueño declarado sistema (`pnpm db:courses` carga dos por curso, con un PDF mínimo en la cubeta local). **Bajar pasa por la
+  misma puerta que ver:** `getResourceGrant` (y `getDraftResourceGrant` para PA-43) en `src/services/media/grant.ts`, con la regla
+  `resolveResourceAccess` del dominio, que una propiedad exige que coincida con ver; los hechos y la segunda barrera (`private.resource_facts`,
+  `private.resource_object`) salen de la misma foto, y la barrera compara el `object_id` y la versión: un archivo reemplazado por fuera no se
+  entrega. Después de decidir, el freno (`TOPE_DESCARGAS_HORA`, por cuenta, en su propia transacción: a quien no tiene acceso no le cuenta; contesta
+  `ok`, `throttled` o `unavailable`, y falla cerrado), y al final la firma de 5 minutos. Nunca abre reproducción ni latidos. El nombre con que baja lo
+  arma el servidor (`resourceDownloadName`), y va en `download=`.
+  **Dos canales, medidos en un navegador:** con JavaScript, un `redirect` a otro origen desde una acción deja al enrutador esperando una página que
+  un adjunto no trae, así que el formulario lleva un campo `canal=js` que solo existe ya montada la pantalla, la dirección vuelve en el estado y la abre
+  `window.location.assign`, una vez por intento (`_catalog/resources/open-file.ts`); sin JavaScript la acción redirige, el navegador baja y se queda
+  donde estaba, y la dirección no viaja en ningún estado. En PA-43 el adjunto se abre en un marco oculto (`openFileInFrame`), porque ahí puede haber algo
+  sin guardar: la página no navega, no dispara `beforeunload`, y si llega algo que no es un archivo el marco dispara `load` y se dice. El alumno sigue con
+  `location.assign`: en Chrome no dispara `pagehide` y el reproductor sigue, y en el iPhone falta medirlo. La lista del alumno es
+  `_catalog/resources/resource-list.tsx`, una fila por formulario, con su estado. En PA-02 (`browse`, leída como sistema junto al temario y recordada
+  30 s) van los del curso, y el visitante los ve sin botón (FL-14, E1: al alumno sin acceso se lo dice la acción, sin preguntar antes por cada uno). En
+  PA-22 (`lessons`, leída como la persona) van los de la lección, solo con acceso, bajo «Sobre esta lección» y en teléfono en su pestaña. Si no se
+  pudieron leer se dice, y el video sigue. Textos en su propio bloque (`src/messages/es/resources.ts`); PA-33 en `_catalog/paywall.ts`, que comparte con la
+  lección. Usa pgTAP 71, integración 91 (contra el Storage local: la dirección sirve, caduca, y no sirve para otra ruta) y
+  `tests/e2e/equipo/recursos.equipo.ts`. Decisiones mías sin confirmar: un maestro suspendido baja lo suyo; título, tipo y tamaño de lo publicado son públicos
+  como el temario (la política no pide acceso, y PA-22 los muestra solo con él); el alumno con `location.assign` y el maestro con el marco. Cuánto se conserva un archivo que una versión
+  nueva retira se decide con T-405. Para el A: `published_lessons` ganó `unique (id, course_id)`, y una prueba que arme `createMediaGrant` pasa `files`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
@@ -843,6 +866,19 @@ que no se ve leyendo un solo archivo:
   por el servidor contesta nulo. `teacher_roster` da `has_tax_data`. El área `tax` del vigilante exige los permisos, los disparadores, la auditoría de quien lee, y que **toda función que
   nombre la tabla esté en su lista, por firma y esquema**: una nueva es una puerta nueva, y una vista también. El estado y la lista de PA-65 no pueden leer columnas de la tabla, y las restricciones se revisan por lo que dicen. Usa pgTAP 63. Guardar toma el candado `teacher_balance:` para la cuarta solicitud; esa carrera la prueba la integración de entonces.
   Para el B: `payee_kind` es `person` o `company`.
+- **El cifrado de los datos fiscales** (T-409, primera solicitud, sin migración; decisiones de Sergio del 2026-10-31). AES-256-GCM en la
+  aplicación, en un solo archivo (`src/services/teachers/tax-cipher.ts`): `seal` y `open` reciben el contexto de la columna (maestro, campo,
+  versión de la fila y, en la CLABE, sus últimos cuatro), que entra a los datos asociados con la versión de la llave. Lo guardado es
+  `formato | versión de la llave | vector | cifrado | etiqueta`, y `SealedField` es un tipo que solo emite ese archivo. Sin llave lanza
+  `TaxCipherUnavailable`; lo que no abre, `TaxCipherTampered`; un contexto sin forma, o una CLABE que no termina en sus últimos cuatro,
+  `TaxCipherMisuse`: nunca devuelve otra cosa, y sus errores tienen texto fijo. El régimen no pasa por aquí: va en claro (decisión de Sergio). Quién lo importa es
+  una lista cerrada en `tests/architecture/tax-cipher.test.ts`: sumar a alguien es decidir que puede ver un dato fiscal. Las llaves
+  (`PII_ENCRYPTION_KEYS`, `PII_ENCRYPTION_ACTIVE_VERSION`) son opcionales y van juntas, como las de Mux: se generan, se respaldan y se rotan como
+  dice OP-19: mal pegadas, la aplicación no arranca (`env.ts`); con la comprobación mala, arranca y lo fiscal no está disponible. Las reglas de
+  CLABE, RFC y régimen son puras, en `src/domain/fiscal/`. El filtro de Sentry saca una CLABE por su dígito de control en todo texto, también en lo
+  que anota el SDK, con separadores y al final de `SECRET_RULES`, para no partirle la forma a un token; en mensajes y rutas, un RFC con espacios,
+  puntos o guion bajo; y las llaves. Uno de cada diez números de 18 dígitos cae como CLABE: en un diagnóstico, se acepta. Una tabla del filtro puede reemplazar con una
+  función (`Rule`). Para el B: nada que le toque.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

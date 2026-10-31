@@ -1,3 +1,6 @@
+import { DOWNLOAD_CHANNEL_FIELD, DOWNLOAD_CHANNEL_JS } from "@/app/_catalog/resources/channel";
+import type { DraftResourceGrant } from "@/services/media/media";
+
 import type { ChangeFailure } from "../_lib/change";
 import { textField } from "../_lib/text";
 
@@ -23,6 +26,7 @@ export const resourceButton = {
   up: (resource: string, position: number) => `resource-move:${resource}:${position}:${position - 1}`,
   down: (resource: string, position: number) => `resource-move:${resource}:${position}:${position + 1}`,
   ask: (resource: string) => `resource-ask:${resource}`,
+  download: (resource: string) => `resource-download:${resource}`,
   remove: (resource: string, revision: number) => `resource-remove:${resource}:${revision}`,
   cancel: () => "cancel",
 } as const;
@@ -31,6 +35,7 @@ export type ResourceRequest =
   | { step: "none" }
   | { step: "cancel"; course: string; lesson: string | null }
   | { step: "ask"; course: string; lesson: string | null; resource: string }
+  | { step: "download"; course: string; lesson: string | null; resource: string; javascript: boolean }
   | { step: "move"; course: string; lesson: string | null; resource: string; seen: number; to: number }
   | { step: "remove"; course: string; lesson: string | null; resource: string; seen: number };
 
@@ -53,6 +58,8 @@ export function readResourceForm(form: unknown): ResourceRequest {
       return a === undefined ? { step: "cancel", course, lesson } : NONE;
     case "resource-ask":
       return isId(a) && b === undefined ? { step: "ask", course, lesson, resource: a } : NONE;
+    case "resource-download":
+      return isId(a) && b === undefined ? { step: "download", course, lesson, resource: a, javascript: form.get(DOWNLOAD_CHANNEL_FIELD) === DOWNLOAD_CHANNEL_JS } : NONE;
     case "resource-remove": {
       const seen = numberOf(COUNT, b);
       return isId(a) && seen !== null && c === undefined ? { step: "remove", course, lesson, resource: a, seen } : NONE;
@@ -73,7 +80,30 @@ export type ResourceState =
   | { kind: "confirming"; resource: string; attempt: number }
   | { kind: "kept"; attempt: number }
   | { kind: "done"; what: "moved" | "removed"; attempt: number }
+  /** Solo con JavaScript: la dirección de lo que se pidió bajar, que abre el navegador. */
+  | { kind: "granted"; url: string; attempt: number }
+  | { kind: "download_throttled"; attempt: number }
   | { kind: "failed"; reason: ChangeFailure; attempt: number };
+
+/**
+ * Lo que sigue a pedir bajar un recurso del borrador. Con JavaScript la dirección vuelve en el estado, y sin él la acción
+ * redirige: los dos canales de `_catalog/resources/outcomes.ts`, por lo mismo. Quien ya no pasa vuelve a la misma ruta.
+ */
+export function draftDownloadOutcome(grant: DraftResourceGrant, javascript: boolean, attempt: number): ResourceState | { kind: "redirect"; url: string } | { kind: "leave" } {
+  switch (grant.kind) {
+    case "granted":
+      return javascript ? { kind: "granted", url: grant.url, attempt } : { kind: "redirect", url: grant.url };
+    case "throttled":
+      return { kind: "download_throttled", attempt };
+    case "not_found":
+      return { kind: "failed", reason: "gone", attempt };
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable", attempt };
+    case "suspended":
+    case "refused":
+      return { kind: "leave" };
+  }
+}
 
 /** Por qué no se pudo adjuntar un archivo. Cada una tiene su texto en el catálogo. */
 export type UploadProblem =
