@@ -1,10 +1,11 @@
-import { longDate } from "@/app/_lib/dates";
+import { longDate, longDay } from "@/app/_lib/dates";
 import { admin } from "@/messages/es/admin";
 import { t } from "@/messages/format";
 import { adminTeacherPath } from "@/services/account/navigation";
 import type { FraudRequest, TeacherRoster, TeacherRow } from "@/services/teachers/teacher-admin";
 import { teacherVersion } from "@/services/teachers/version";
 
+import { percentText, periodText } from "../_alertas/rows";
 import { teachersButton } from "./outcomes";
 
 // Lo que las pantallas de los maestros pintan, ya en palabras desde la página. Decide qué se ofrece: la base vuelve a
@@ -72,7 +73,7 @@ function requestView(request: FraudRequest): RequestView {
     title: nameOf(request.name),
     reason: request.reason,
     proposed: t(text.fraud.proposedOn, { date: longDate(request.proposedAt) }),
-    metric: t(text.fraud.metric, { metric: String(request.metric), threshold: String(request.threshold) }),
+    metric: t(text.fraud.metric, { period: periodText(request.period), metric: percentText(request.metric), threshold: percentText(request.threshold) }),
   };
 }
 
@@ -89,7 +90,7 @@ export function rosterView(roster: TeacherRoster): RosterView {
         href: adminTeacherPath(row.id),
         email: row.email,
         status: STATUS[row.status],
-        founder: row.founderSince === null ? null : t(text.founderSince, { date: longDate(row.founderSince) }),
+        founder: row.founderSince === null ? null : t(text.founderSince, { date: longDay(row.founderSince) }),
         invitation: invitationText(row),
         isSelf: row.isSelf,
         // Una revocada se puede reenviar, pero no volver a revocar.
@@ -108,7 +109,7 @@ export interface TeacherView {
   status: { label: string; tone: Tone };
   isSelf: boolean;
   founder: { since: string | null; label: string | null; save: string; clear: string | null } | null;
-  suspension: { kind: string; since: string | null; reason: string | null; notice: string | null } | null;
+  suspension: { fraud: boolean; kind: string; since: string | null; reason: string | null; notice: string | null } | null;
   suspend: { ask: string; confirm: string } | null;
   lift: string | null;
   request: (RequestView & { ask: string | null; confirm: string | null; reject: string | null; blocked: string | null }) | null;
@@ -123,13 +124,11 @@ export function teacherView(roster: TeacherRoster, id: string): TeacherView | nu
   const blocked =
     request === null
       ? null
-      : request.aboutSelf
-        ? text.fraud.aboutSelf
-        : request.proposedBySelf
-          ? text.fraud.proposedBySelf
-          : request.markedBySelf
-            ? text.fraud.markedBySelf
-            : null;
+      : request.proposedBySelf
+        ? text.fraud.proposedBySelf
+        : request.markedBySelf
+          ? text.fraud.markedBySelf
+          : null;
   const mayDecide = request !== null && blocked === null && !row.isSelf;
   return {
     canChange: roster.freshCode,
@@ -142,7 +141,7 @@ export function teacherView(roster: TeacherRoster, id: string): TeacherView | nu
       ? null
       : {
           since: row.founderSince,
-          label: row.founderSince === null ? null : t(text.founderSince, { date: longDate(row.founderSince) }),
+          label: row.founderSince === null ? null : t(text.founderSince, { date: longDay(row.founderSince) }),
           save: teachersButton.founder(row.id, seen),
           clear: row.founderSince === null ? null : teachersButton.clearFounder(row.id, seen),
         },
@@ -150,6 +149,7 @@ export function teacherView(roster: TeacherRoster, id: string): TeacherView | nu
       row.status !== "suspended"
         ? null
         : {
+            fraud: row.suspension === "fraud",
             kind: row.suspension === "fraud" ? text.suspension.fraud : text.suspension.manual,
             since: row.suspendedAt === null ? null : longDate(row.suspendedAt),
             reason: row.suspensionReason,
@@ -168,4 +168,27 @@ export function teacherView(roster: TeacherRoster, id: string): TeacherView | nu
             reject: mayDecide ? teachersButton.reject(row.id, seen, request.id) : null,
           },
   };
+}
+
+export type TeacherDone = "teacher_founder_saved" | "teacher_suspended" | "teacher_lifted" | "teacher_fraud_confirmed" | "teacher_fraud_rejected";
+
+/**
+ * El aviso con el que se llega, si se puede decir en esta ficha. Viaja en una cookie que no dice de quién habla: quien suspende a
+ * un maestro y abre a otro antes de que venza no debe leer que este está suspendido. Lo que el estado permite comprobar se comprueba;
+ * guardar la fecha y rechazar una propuesta no afirman nada de la ficha que se tiene delante.
+ */
+export function acceptedTeacherNotice(view: TeacherView, notice: string | null): TeacherDone | null {
+  switch (notice) {
+    case "teacher_suspended":
+      return view.suspension !== null ? notice : null;
+    case "teacher_lifted":
+      return view.suspension === null ? notice : null;
+    case "teacher_fraud_confirmed":
+      return view.suspension?.fraud === true ? notice : null;
+    case "teacher_founder_saved":
+    case "teacher_fraud_rejected":
+      return notice;
+    default:
+      return null;
+  }
 }

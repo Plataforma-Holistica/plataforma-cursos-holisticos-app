@@ -56,7 +56,7 @@ const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;
 const TEACHER = "b0000000-0000-4000-8000-000000000002";
 const REQUEST = "c0000000-0000-4000-8000-000000000004";
-const SEEN = "active.-.accepted.-.0";
+const SEEN = "active.-.accepted.-.0.0.0";
 const PAGE = `/admin/maestros/${TEACHER}`;
 
 function form(fields: Record<string, string>): FormData {
@@ -93,6 +93,17 @@ describe("lo que no llega al servicio", () => {
       teacher: null,
       problems: ["name", "email"],
       drafts: { name: "", email: "sin-arroba" },
+      attempt: 1,
+    });
+    noServiceCalled();
+  });
+
+  it("«Seguir revisando» no llama a nadie, y conserva lo escrito", async () => {
+    expect(await teachersAction(IDLE, form({ do: teachersButton.cancel("suspend", TEACHER), reason: "Motivo", notice: "Aviso" }))).toEqual({
+      kind: "editing",
+      form: "suspend",
+      teacher: TEACHER,
+      drafts: { reason: "Motivo", notice: "Aviso" },
       attempt: 1,
     });
     noServiceCalled();
@@ -210,18 +221,28 @@ describe("lo que no salió", () => {
 
 describe("dar el código", () => {
   it("sin forma no llega al servicio", async () => {
-    expect(await teachersCodeAction(IDLE, form({ code: "12" }))).toMatchObject({ kind: "invalid" });
+    expect(await teachersCodeAction(null, IDLE, form({ code: "12" }))).toMatchObject({ kind: "invalid" });
     expect(mocks.giveTeacherCode).not.toHaveBeenCalled();
   });
 
   it("verificado, a la lista: recargar no lo reenvía", async () => {
     once("giveTeacherCode", { kind: "verified" });
-    await expect(teachersCodeAction(IDLE, form({ code: "123456" }))).rejects.toThrow("redirige a /admin/maestros");
+    await expect(teachersCodeAction(null, IDLE, form({ code: "123456" }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
     expect(mocks.giveTeacherCode).toHaveBeenCalledExactlyOnceWith(jar, "123456");
+  });
+
+  it("dado desde una ficha, vuelve a esa ficha", async () => {
+    once("giveTeacherCode", { kind: "verified" });
+    await expect(teachersCodeAction(TEACHER, IDLE, form({ code: "123456" }))).rejects.toThrow(`redirige a ${PAGE}`);
+  });
+
+  it("un maestro sin forma no arma una dirección: a la lista", async () => {
+    once("giveTeacherCode", { kind: "verified" });
+    await expect(teachersCodeAction("//otro.example", IDLE, form({ code: "123456" }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
   });
 
   it("equivocado se dice", async () => {
     once("giveTeacherCode", { kind: "wrong_code" });
-    expect(await teachersCodeAction(IDLE, form({ code: "123456" }))).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    expect(await teachersCodeAction(null, IDLE, form({ code: "123456" }))).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
   });
 });

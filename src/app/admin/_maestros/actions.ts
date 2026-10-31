@@ -39,15 +39,18 @@ import {
 // la guarda, y la base vuelve a comprobar que quien pide tenga Contenido y un código reciente. Aquí se lee qué se pidió, se
 // llama al servicio y se traduce su respuesta con la tabla de la pantalla.
 
-/** Dar el código otra vez. Un código sin forma no llega al servicio. Verificado, se redirige: recargar no lo reenvía. */
-export async function teachersCodeAction(previous: CodeState, form: FormData): Promise<CodeState> {
+/**
+ * Dar el código otra vez, desde la lista o desde una ficha (`teacher`): se vuelve a la propia página. Un código sin forma no
+ * llega al servicio. Verificado, se redirige: recargar no lo reenvía.
+ */
+export async function teachersCodeAction(teacher: unknown, previous: CodeState, form: FormData): Promise<CodeState> {
   const { code } = readGiveCodeForm(form);
   const attempt = nextAttempt(previous);
   const problem = checkCode(code);
   if (problem) return { kind: "invalid", problem, attempt };
 
   const jar = await cookieJar();
-  const outcome = teachersCodeOutcome(await giveTeacherCode(jar, code));
+  const outcome = teachersCodeOutcome(await giveTeacherCode(jar, code), teacher);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   return { kind: "failed", reason: outcome.reason, attempt };
 }
@@ -58,8 +61,9 @@ export async function teachersCodeAction(previous: CodeState, form: FormData): P
  */
 export async function teachersAction(previous: TeachersState, form: FormData): Promise<TeachersState> {
   const request = readTeachersForm(form);
-  if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
+  if (request.step === "none") return { kind: "idle" };
   const attempt = nextAttempt(previous);
+  if (request.step === "cancel") return { kind: "editing", form: request.form, teacher: request.teacher, drafts: request.drafts, attempt };
   const teacher = request.step === "invite" ? null : request.teacher;
   const problems = problemsOf(request);
   if (problems.length > 0) return { kind: "invalid", step: request.step, teacher, problems, drafts: request.drafts, attempt };

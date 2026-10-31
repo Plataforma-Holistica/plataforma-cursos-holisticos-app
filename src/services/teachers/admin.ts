@@ -47,7 +47,7 @@ export interface TeacherRow {
   isSelf: boolean;
 }
 
-/** Una suspensión por fraude que finanzas propuso y falta confirmar (RN-17). */
+/** Una suspensión por fraude que finanzas propuso y falta confirmar (RN-17). La base no le lista a nadie la que es sobre sí. */
 export interface FraudRequest {
   id: string;
   teacherId: string;
@@ -56,7 +56,6 @@ export interface FraudRequest {
   proposedAt: string;
   proposedBySelf: boolean;
   markedBySelf: boolean;
-  aboutSelf: boolean;
   period: number;
   metric: number;
   threshold: number;
@@ -142,7 +141,8 @@ function idOf(value: unknown): string | null {
 /** Un texto ya sin espacios a los lados, de 1 al tope, o nulo. */
 function textOf(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
+  // El navegador manda cada salto de línea como dos caracteres, y su `maxLength` lo contó como uno.
+  const trimmed = value.replace(/\r\n/g, "\n").trim();
   return trimmed === "" || trimmed.length > max ? null : trimmed;
 }
 
@@ -267,10 +267,10 @@ export function createTeacherAdmin(deps: { report: (code: FailureCode) => Promis
     input: { teacher: unknown; seen: unknown; request: unknown; confirm: boolean; note: unknown; notice: unknown },
   ): Promise<TeacherChange<DecideAnswer>> {
     const request = idOf(input.request);
-    const note = input.note === "" || input.note === null ? null : textOf(input.note, FRAUD_NOTE_MAX);
+    const blank = input.note === null || (typeof input.note === "string" && input.note.trim() === "");
+    const note = blank ? null : textOf(input.note, FRAUD_NOTE_MAX);
     const notice = input.confirm ? textOf(input.notice, SUSPENSION_NOTICE_MAX) : null;
-    const written = input.note === "" || input.note === null || note !== null;
-    if (request === null || !written || (input.confirm && notice === null)) {
+    if (request === null || (!blank && note === null) || (input.confirm && notice === null)) {
       const admitted = await admit(jar);
       return admitted.ok ? { kind: "malformed" } : admitted.result;
     }

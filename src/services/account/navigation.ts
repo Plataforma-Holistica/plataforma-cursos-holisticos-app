@@ -248,13 +248,13 @@ export type TeamState = "none" | "member" | "needs_code" | "unbound" | "invited"
 export type EntryState = TeamState | "teacher_invited" | "teacher_notice" | "teacher";
 
 /** El aviso del maestro vuelto a pedir, y a dónde sigue después de aceptarlo. */
+export function portalNoticePath(returnTo: string): string {
+  return `${ROUTES.portalNotice}?${RETURN_PARAM}=${encodeURIComponent(returnTo)}`;
+}
+
 /** PA-66, la ficha de un maestro. */
 export function adminTeacherPath(teacher: string): string {
   return `${ROUTES.adminTeachers}/${teacher}`;
-}
-
-export function portalNoticePath(returnTo: string): string {
-  return `${ROUTES.portalNotice}?${RETURN_PARAM}=${encodeURIComponent(returnTo)}`;
 }
 
 /**

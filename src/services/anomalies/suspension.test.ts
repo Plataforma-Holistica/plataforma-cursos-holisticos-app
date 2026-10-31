@@ -97,7 +97,6 @@ describe("la propuesta de cada alerta", () => {
       proposed_at: "2026-10-30",
       proposed_by_self: true,
       marked_by_self: false,
-      about_self: false,
       alert_period: 202610,
       alert_metric: 1,
       alert_threshold: 1,

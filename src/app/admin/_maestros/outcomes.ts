@@ -1,5 +1,5 @@
 import { parseEmail } from "@/services/account/field-rules";
-import { ROUTES } from "@/services/account/navigation";
+import { adminTeacherPath, ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import type {
   DecideAnswer,
@@ -33,9 +33,9 @@ import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-co
 export type { CodeState } from "../_lib/fresh-code";
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const SEEN = /^[a-z_]+\.[0-9-]+\.[a-z]+\.[a-z-]+\.[01]$/;
+const SEEN = /^[a-z_]+\.[0-9-]+\.[a-z]+\.[a-z-]+\.[01]\.\d+\.\d+$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_INTENT = 160;
+const MAX_INTENT = 220;
 /** Lo que se lee de un campo de texto: un poco más que el tope mayor, para que la regla lo rechace y no lo corte. */
 const MAX_TEXT_READ = 4_100;
 
@@ -58,7 +58,7 @@ interface OnTeacher {
 }
 export type TeachersRequest =
   | { step: "none" }
-  | { step: "cancel" }
+  | { step: "cancel"; form: "suspend" | "fraud"; teacher: string; drafts: Drafts }
   | { step: "invite"; drafts: Drafts }
   | ({ step: "reinvite" | "revoke" | "lift" | "clear_founder" | "founder" | "ask_suspend" | "suspend" } & OnTeacher)
   | ({ step: "ask_confirm" | "confirm" | "reject"; request: string } & OnTeacher);
@@ -66,8 +66,12 @@ export type TeachersRequest =
 const SIMPLE = ["reinvite", "revoke", "lift", "clear_founder", "founder", "ask_suspend", "suspend"] as const;
 const WITH_REQUEST = ["ask_confirm", "confirm", "reject"] as const;
 
+/** Los formularios de PA-66. Lo escrito y el número de intento son de uno solo. */
+export type TeacherForm = "founder" | "suspend" | "fraud";
+
 /** Lo que cada botón manda. Solo esto se lee de vuelta. */
 export const teachersButton = {
+  cancel: (form: "suspend" | "fraud", teacher: string) => `cancel:${form}:${teacher}`,
   reinvite: (teacher: string, seen: string) => `reinvite:${teacher}:${seen}`,
   revoke: (teacher: string, seen: string) => `revoke:${teacher}:${seen}`,
   lift: (teacher: string, seen: string) => `lift:${teacher}:${seen}`,
@@ -108,8 +112,12 @@ export function readTeachersForm(form: unknown): TeachersRequest {
   const pressed = form.getAll("do");
   const [only] = pressed;
   if (pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return { step: "none" };
-  if (only === "cancel") return { step: "cancel" };
   if (only === "invite") return { step: "invite", drafts: { name: textOf(form, "name"), email: textOf(form, "email") } };
+  if (only.startsWith("cancel:")) {
+    const [, which, teacher, ...more] = only.split(":");
+    if ((which !== "suspend" && which !== "fraud") || teacher === undefined || !ID.test(teacher) || more.length > 0) return { step: "none" };
+    return { step: "cancel", form: which, teacher, drafts: draftsFor(form, which === "suspend" ? "suspend" : "confirm") };
+  }
   const [verb, teacher, seen, request, ...rest] = only.split(":");
   if (rest.length > 0 || teacher === undefined || seen === undefined || !ID.test(teacher) || !SEEN.test(seen)) return { step: "none" };
   const simple = SIMPLE.find((each) => each === verb);
@@ -121,7 +129,9 @@ export function readTeachersForm(form: unknown): TeachersRequest {
   return { step: "none" };
 }
 
-const missing = (value: string | undefined, max: number) => (value ?? "").trim() === "" || (value ?? "").trim().length > max;
+/** Como lo va a leer el servicio: un salto de línea es uno, aunque el navegador lo mande como dos. */
+const clean = (value: string | undefined) => (value ?? "").replace(/\r\n/g, "\n").trim();
+const missing = (value: string | undefined, max: number) => clean(value) === "" || clean(value).length > max;
 
 function isDay(value: string | undefined): boolean {
   if (value === undefined || !DAY.test(value)) return false;
@@ -148,10 +158,14 @@ export function problemsOf(request: TeachersRequest): Field[] {
       return problems;
     }
     case "ask_confirm":
-    case "confirm":
-      return missing(request.drafts.notice, LIMITS.notice) ? ["notice"] : [];
+    case "confirm": {
+      const problems: Field[] = [];
+      if (missing(request.drafts.notice, LIMITS.notice)) problems.push("notice");
+      if (clean(request.drafts.note).length > LIMITS.note) problems.push("note");
+      return problems;
+    }
     case "reject":
-      return (request.drafts.note ?? "").trim().length > LIMITS.note ? ["note"] : [];
+      return clean(request.drafts.note).length > LIMITS.note ? ["note"] : [];
     default:
       return [];
   }
@@ -169,6 +183,7 @@ export type TeachersFailure =
   | "ineligible"
   | "already_invited"
   | "already_teacher"
+  | "unchanged"
   | "too_early"
   | "locked"
   | "already_suspended"
@@ -183,14 +198,43 @@ export type TeachersState =
   | { kind: "idle" }
   | { kind: "invalid"; step: string; teacher: string | null; problems: Field[]; drafts: Drafts; attempt: number }
   | { kind: "asking"; ask: "suspend" | "confirm"; teacher: string; drafts: Drafts; attempt: number }
+  /** «Seguir revisando»: se cierra la pregunta, y lo escrito se queda. Se escribe antes de preguntar. */
+  | { kind: "editing"; form: "suspend" | "fraud"; teacher: string; drafts: Drafts; attempt: number }
   | { kind: "failed"; reason: TeachersFailure; step: string; teacher: string | null; drafts: Drafts; attempt: number };
 
 const failed = (reason: TeachersFailure): TeachersOutcome => ({ kind: "failed", reason });
 const leave = (to: string, notice: Notice | null): TeachersOutcome => ({ kind: "leave", to, notice });
 
-/** Lo que dar el código contestó: la tabla compartida, con la página de la lista. */
-export function teachersCodeOutcome(result: TeacherCode): CodeOutcome {
-  return givenCodeOutcome(result, ROUTES.adminTeachers);
+/** De cuál formulario de PA-66 es lo que el estado trae. */
+export function formOfState(state: TeachersState): TeacherForm | null {
+  switch (state.kind) {
+    case "idle":
+      return null;
+    case "asking":
+      return state.ask === "suspend" ? "suspend" : "fraud";
+    case "editing":
+      return state.form;
+    default:
+      switch (state.step) {
+        case "founder":
+        case "clear_founder":
+          return "founder";
+        case "ask_suspend":
+        case "suspend":
+          return "suspend";
+        case "ask_confirm":
+        case "confirm":
+        case "reject":
+          return "fraud";
+        default:
+          return null;
+      }
+  }
+}
+
+/** Lo que dar el código contestó: la tabla compartida, con la página desde la que se dio. Lo que no es un maestro, la lista. */
+export function teachersCodeOutcome(result: TeacherCode, teacher: unknown): CodeOutcome {
+  return givenCodeOutcome(result, typeof teacher === "string" && ID.test(teacher) ? adminTeacherPath(teacher) : ROUTES.adminTeachers);
 }
 
 type Result<Answer> = TeacherChange<Answer> | TeacherInvited;
@@ -250,7 +294,7 @@ export function founderOutcome(result: TeacherChange<FounderAnswer>, page: strin
   return settle<FounderAnswer>(result, page, {
     not_found: failed("not_found"),
     self: failed("self"),
-    unchanged: leave(page, null),
+    unchanged: failed("unchanged"),
     too_early: failed("too_early"),
     locked: failed("locked"),
     set: done,

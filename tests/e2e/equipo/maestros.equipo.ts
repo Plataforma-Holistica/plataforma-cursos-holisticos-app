@@ -194,7 +194,7 @@ test("FL-46 y FL-30: invita, la persona se registra y acepta, se le marca fundad
   await expect(page.getByText("Suspensión levantada.")).toBeVisible();
 });
 
-test("sin JavaScript también se invita, se revoca y se suspende", async ({ browser }) => {
+test("sin JavaScript también se invita, se revoca, se suspende y se levanta", async ({ browser }) => {
   const maestra = testEmail();
   await inContext(
     browser,
@@ -209,6 +209,38 @@ test("sin JavaScript también se invita, se revoca y se suspende", async ({ brow
       await page.getByLabel("Fundador desde").fill(`${new Date().getUTCFullYear() + 2}-01-01`);
       await page.getByRole("button", { name: "Guardar la fecha" }).click();
       await expect(page.getByText("Guardado.")).toBeVisible();
+    },
+    false,
+  );
+
+  // Un maestro activo: suspender en dos pasos, sin JavaScript, con «Seguir revisando» en medio.
+  const activa = testEmail();
+  const teacher = await inContext(browser, async (page) => {
+    await enterAdmin(page, primera, LIST);
+    await invite(page, "Luz Sinjs", activa);
+    return teacherOf(activa);
+  });
+  await inContext(browser, async (other) => {
+    await register(other, activa);
+    await other.getByLabel("He leído y acepto el contrato.").check();
+    await other.getByLabel("He leído y acepto el aviso de privacidad.").check();
+    await other.getByRole("button", { name: "Aceptar y entrar" }).click();
+    await expect(other).toHaveURL("/portal");
+  });
+  await inContext(
+    browser,
+    async (page) => {
+      await enterAdmin(page, segunda, `${LIST}/${teacher}`);
+      await page.getByLabel("Motivo interno").fill("Motivo sin JavaScript");
+      await page.getByLabel(/^Lo que lee/).fill("Aviso sin JavaScript");
+      await page.getByRole("button", { name: "Suspender", exact: true }).click();
+      await page.getByRole("button", { name: "Seguir revisando" }).click();
+      await expect(page.getByLabel("Motivo interno")).toHaveValue("Motivo sin JavaScript");
+      await page.getByRole("button", { name: "Suspender", exact: true }).click();
+      await page.getByRole("button", { name: "Sí, suspender" }).click();
+      await expect(page.getByText("Motivo interno: Motivo sin JavaScript")).toBeVisible();
+      await page.getByRole("button", { name: "Levantar la suspensión" }).click();
+      await expect(page.getByText("Suspensión levantada.")).toBeVisible();
     },
     false,
   );

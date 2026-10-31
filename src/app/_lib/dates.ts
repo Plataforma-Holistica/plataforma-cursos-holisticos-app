@@ -27,6 +27,14 @@ export function longDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? "" : LONG_DATE.format(date);
 }
 
+/**
+ * «1 de noviembre de 2026» de un día del calendario (AAAA-MM-DD). Un día no es un momento: `longDate` lo leería como
+ * medianoche en UTC y, en la zona del producto, diría el día anterior. Al mediodía queda en el mismo día en cualquier zona.
+ */
+export function longDay(day: string): string {
+  return longDate(`${day}T12:00:00Z`);
+}
+
 /** La hora de un momento: en la zona que se pida o, sin zona, en la del navegador. */
 export function clockTime(iso: string, timeZone?: string): string {
   const date = new Date(iso);

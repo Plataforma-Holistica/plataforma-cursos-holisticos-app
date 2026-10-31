@@ -10,7 +10,7 @@ const text = admin.teachers;
 export const FAILURES: Record<TeachersFailure, string> = {
   needs_code: text.failures.needsCode,
   invalid: text.failures.invalid,
-  self: t(text.failures.self),
+  self: text.failures.self,
   changed: text.failures.changed,
   not_found: t(text.failures.notFound),
   unavailable: text.failures.unavailable,
@@ -19,6 +19,7 @@ export const FAILURES: Record<TeachersFailure, string> = {
   ineligible: text.failures.ineligible,
   already_invited: t(text.failures.alreadyInvited),
   already_teacher: t(text.failures.alreadyTeacher),
+  unchanged: text.failures.unchanged,
   too_early: text.failures.tooEarly,
   locked: text.failures.locked,
   already_suspended: text.failures.alreadySuspended,

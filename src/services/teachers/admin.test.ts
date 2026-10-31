@@ -43,8 +43,7 @@ const ROSTER: TeacherRoster = {
       proposedAt: "2026-10-30T00:00:00Z",
       proposedBySelf: false,
       markedBySelf: false,
-      aboutSelf: false,
-      period: 202610,
+          period: 202610,
       metric: 500,
       threshold: 300,
     },
@@ -186,6 +185,22 @@ describe("lo que no tiene forma no llega a la base", () => {
     expect(admin.calls).toEqual([]);
   });
 
+  it("una nota de solo espacios cuenta como vacía", async () => {
+    const admin = adminWith({ answer: "rejected" });
+    expect(await admin.decideTeacherFraud(jar, { teacher: TEACHER, seen: SEEN, request: REQUEST, confirm: false, note: "   ", notice: null })).toEqual({
+      kind: "answered",
+      answer: "rejected",
+    });
+    expect(admin.calls.at(-1)).toBe(`decide ${REQUEST} false null null`);
+  });
+
+  it("un salto de línea cuenta como uno, y llega a la base como uno", async () => {
+    const admin = adminWith({ answer: "suspended" });
+    const notice = `${"n".repeat(149)}\r\n${"n".repeat(150)}`;
+    expect(await admin.suspendTeacher(jar, { teacher: TEACHER, seen: SEEN, reason: "r", notice })).toEqual({ kind: "answered", answer: "suspended" });
+    expect(admin.store.suspend.mock.lastCall?.[3]).toBe(`${"n".repeat(149)}\n${"n".repeat(150)}`);
+  });
+
   it("una nota desmedida al decidir no llega", async () => {
     const admin = adminWith();
     expect(await admin.decideTeacherFraud(jar, { teacher: TEACHER, seen: SEEN, request: REQUEST, confirm: false, note: "n".repeat(4_001), notice: null })).toEqual({
@@ -204,6 +219,9 @@ describe("lo que se vio de un maestro", () => {
       { ...ROW, invitation: "expired" as const },
       { ...ROW, suspension: "fraud" as const },
       { ...ROW, fraudPending: true },
+      // Levantar y volver a suspender, o revocar y reenviar, ya no es lo que se vio.
+      { ...ROW, suspendedAt: "2026-10-30T12:00:00Z" },
+      { ...ROW, expiresAt: "2026-11-30T12:00:00Z" },
     ].map(teacherVersion);
     expect(new Set(versions).size).toBe(versions.length);
     for (const version of versions) expect(version).not.toContain(":");

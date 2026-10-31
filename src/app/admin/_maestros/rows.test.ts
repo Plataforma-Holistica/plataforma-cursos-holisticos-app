@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { teacherVersion, type FraudRequest, type TeacherRoster, type TeacherRow } from "@/services/teachers/admin";
 
 import { teachersButton } from "./outcomes";
-import { rosterView, teacherView } from "./rows";
+import { acceptedTeacherNotice, rosterView, teacherView } from "./rows";
 
 const TEACHER = "b0000000-0000-4000-8000-000000000002";
 const REQUEST = "c0000000-0000-4000-8000-000000000004";
@@ -31,7 +31,6 @@ const FRAUD: FraudRequest = {
   proposedAt: "2026-10-30T12:00:00Z",
   proposedBySelf: false,
   markedBySelf: false,
-  aboutSelf: false,
   period: 202610,
   metric: 500,
   threshold: 300,
@@ -132,12 +131,49 @@ describe("PA-66: la ficha", () => {
   it.each([
     ["quien la propuso", { proposedBySelf: true }],
     ["quien marcó la alerta", { markedBySelf: true }],
-    ["el maestro mismo", { aboutSelf: true }],
   ])("a %s no se le ofrece decidir, y la pantalla dice por qué", (_who, extra) => {
     const view = teacherView(rosterOf({ ...ROW, fraudPending: true }, [{ ...FRAUD, ...extra }]), TEACHER);
     expect(view?.request?.blocked).not.toBeNull();
     expect(view?.request?.ask).toBeNull();
     expect(view?.request?.confirm).toBeNull();
     expect(view?.request?.reject).toBeNull();
+  });
+});
+
+describe("lo que se dice de una ficha", () => {
+  it("el día del fundador no se mueve con la zona horaria", () => {
+    const row = { ...ROW, founderSince: "2026-11-01" };
+    expect(teacherView(rosterOf(row), TEACHER)?.founder?.label).toContain("1 de noviembre de 2026");
+    expect(rosterView(rosterOf(row)).rows[0]?.founder).toContain("1 de noviembre de 2026");
+  });
+
+  it("la alerta se dice como en PA-68: en porcentaje y con su periodo", () => {
+    const view = teacherView(rosterOf({ ...ROW, fraudPending: true }, [FRAUD]), TEACHER);
+    expect(view?.request?.metric).toContain("5%");
+    expect(view?.request?.metric).toContain("3%");
+    expect(view?.request?.metric).toContain("octubre de 2026");
+  });
+});
+
+describe("el aviso con el que se llega solo se pinta si esta ficha es de lo que habla (no dice de quién)", () => {
+  const active = teacherView(rosterOf(ROW), TEACHER);
+  const suspended = teacherView(rosterOf({ ...ROW, status: "suspended", suspension: "manual" }), TEACHER);
+  const fraud = teacherView(rosterOf({ ...ROW, status: "suspended", suspension: "fraud" }), TEACHER);
+  if (active === null || suspended === null || fraud === null) throw new Error("Sin ficha.");
+
+  it.each([
+    ["teacher_suspended", active, null],
+    ["teacher_suspended", suspended, "teacher_suspended"],
+    ["teacher_lifted", suspended, null],
+    ["teacher_lifted", active, "teacher_lifted"],
+    ["teacher_fraud_confirmed", suspended, null],
+    ["teacher_fraud_confirmed", active, null],
+    ["teacher_fraud_confirmed", fraud, "teacher_fraud_confirmed"],
+    ["teacher_founder_saved", active, "teacher_founder_saved"],
+    ["teacher_fraud_rejected", active, "teacher_fraud_rejected"],
+    ["otro_aviso", active, null],
+    [null, active, null],
+  ] as const)("%s", (notice, view, expected) => {
+    expect(acceptedTeacherNotice(view, notice)).toBe(expected);
   });
 });

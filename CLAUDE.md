@@ -774,7 +774,12 @@ que no se ve leyendo un solo archivo:
   alertas. Usa pgTAP 62, integración 82 y `tests/e2e/equipo/maestros.equipo.ts`; sus tres casos van en serie y crean su
   propio equipo con `db:admins`. Si una prueba de página monta el comodín de administración, simula también
   `@/services/teachers/teacher-admin`. Una consulta de este servicio no se llama como una del equipo: `session-boundaries`
-  busca `askInvite` y `askRevoke` por nombre en todo `src/`.
+  busca `askInvite` y `askRevoke` por nombre en todo `src/`. **Sobre sí, solo lo del maestro** (decisión de Sergio del
+  2026-10-30): `fraud_suspension_queue` no le lista a nadie la propuesta sobre sí, y `teacher_roster` no le da su motivo
+  interno, su clase de suspensión ni si hay una propuesta; lo exige el vigilante. PA-66 tiene tres formularios y un estado:
+  lo escrito y el intento solo le tocan al que envió (`formOfState`). Un aviso de lo hecho no dice de qué maestro habla:
+  se pinta si la ficha lo confirma (`acceptedTeacherNotice`). Un día (`founder_since`) se escribe con `longDay`, no con
+  `longDate`, que lo movería al día anterior.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

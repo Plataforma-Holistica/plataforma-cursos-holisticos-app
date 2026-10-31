@@ -354,7 +354,7 @@ export const admin = defineMessages({
     failures: {
       needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite el cambio.",
       invalid: "No pudimos hacerlo con esos datos. Revísalos e intenta de nuevo.",
-      self: "No puedes hacerlo sobre ti: eres {el_maestro} de esta ficha. Pídeselo a otra persona con Contenido.",
+      self: "No puedes hacerlo sobre ti. Pídeselo a otra persona con Contenido.",
       changed: "La ficha cambió mientras la veías. Revísala de nuevo antes de repetirlo.",
       notFound: "Ya no encontramos eso. Revisa la lista de {maestros}.",
       unavailable: "No pudimos hacerlo ahora. Intenta de nuevo en un momento.",
@@ -363,6 +363,7 @@ export const admin = defineMessages({
       ineligible: "Ese correo es de una cuenta que no puede aceptar: está suspendida, o entra con otro proveedor.",
       alreadyInvited: "Ese correo ya tiene una invitación de {maestro}. Reenvíala desde la lista.",
       alreadyTeacher: "Ese correo ya es de {un_maestro}. No se mandó nada.",
+      unchanged: "Ya estaba así: no cambió nada.",
       tooEarly: "La fecha no puede ser anterior al mes en curso, ni a un periodo que ya no está abierto.",
       locked: "Ya no se puede cambiar: un periodo desde esa fecha ya salió de abierto. Avisa a finanzas.",
       alreadySuspended: "Ya estaba suspendido.",
@@ -408,8 +409,7 @@ export const admin = defineMessages({
     suspension: { manual: "En solo lectura", fraud: "En solo lectura, por fraude" },
     fraud: {
       proposedOn: "Propuesta el {date}.",
-      metric: "La alerta: {metric} contra un umbral de {threshold}.",
-      aboutSelf: "Esta propuesta es sobre ti: la decide otra persona con Contenido.",
+      metric: "La alerta, de {period}: subió {metric}, con un umbral de {threshold}.",
       proposedBySelf: "Tú la propusiste: la decide otra persona con Contenido.",
       markedBySelf: "Tú marcaste esa alerta como fraude: la decide otra persona con Contenido.",
     },

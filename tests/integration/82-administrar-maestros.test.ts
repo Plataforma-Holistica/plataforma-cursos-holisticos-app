@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { asServer as runAsServer, Tx } from "@/adapters/supabase/db";
 import type { VerifiedClaims } from "@/services/account/account";
+import { LIMITS } from "@/app/admin/_maestros/outcomes";
+import { FRAUD_NOTE_MAX, SUSPENSION_NOTICE_MAX, SUSPENSION_REASON_MAX, TEACHER_NAME_MAX } from "@/services/teachers/admin";
 import { createTeacherAdminStore } from "@/services/teachers/admin-store";
 import { teacherVersion } from "@/services/teachers/version";
 
@@ -185,6 +187,22 @@ describe("el almacén contra la base", () => {
       expect(await store.decide(claimsOf(content), pending.id, false, "Sin caso", null)).toBe("rejected");
       const after = await store.roster(claimsOf(content));
       expect(after?.teachers.find((each) => each.id === teacher)).toMatchObject({ status: "active", fraudPending: false });
+    });
+  });
+
+  it("los topes de la pantalla y del servicio son los de la base", async () => {
+    await reverted(async (owner) => {
+      await bothActing(owner);
+      const store = storeOn(owner);
+      const who = claimsOf(content);
+      const teacher = await activeTeacher(owner);
+      expect(await store.suspend(who, teacher, "r", "n".repeat(SUSPENSION_NOTICE_MAX + 1))).toBe("invalid");
+      expect(await store.suspend(who, teacher, "r".repeat(SUSPENSION_REASON_MAX + 1), "n")).toBe("invalid");
+      expect(await store.invite(who, "x".repeat(TEACHER_NAME_MAX + 1), `it-largo-${Date.now()}@prueba.test`)).toBe("invalid");
+      expect(await store.invite(who, "x".repeat(TEACHER_NAME_MAX), `it-justo-${Date.now()}@prueba.test`)).toBe("invited_new");
+      expect(await store.suspend(who, teacher, "r".repeat(SUSPENSION_REASON_MAX), "n".repeat(SUSPENSION_NOTICE_MAX))).toBe("suspended");
+      // Los de la pantalla son los mismos.
+      expect(LIMITS).toEqual({ name: TEACHER_NAME_MAX, reason: SUSPENSION_REASON_MAX, notice: SUSPENSION_NOTICE_MAX, note: FRAUD_NOTE_MAX });
     });
   });
 

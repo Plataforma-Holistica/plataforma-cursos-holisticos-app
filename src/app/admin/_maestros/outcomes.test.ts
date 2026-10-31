@@ -25,7 +25,7 @@ import {
 
 const TEACHER = "b0000000-0000-4000-8000-000000000002";
 const REQUEST = "c0000000-0000-4000-8000-000000000004";
-const SEEN = "active.-.accepted.-.0";
+const SEEN = "active.-.accepted.-.0.0.0";
 const PAGE = `/admin/maestros/${TEACHER}`;
 
 function form(fields: Record<string, string>): FormData {
@@ -35,6 +35,12 @@ function form(fields: Record<string, string>): FormData {
 }
 
 describe("lo que llega", () => {
+  it("una versión de verdad pasa, con cualquier estado", () => {
+    for (const seen of ["left.-.none.-.0.0.0", "suspended.2026-11-01.revoked.fraud.1.1793491200000.1790000000000", "invited.-.pending.-.0.1793491200000.0"]) {
+      expect(readTeachersForm(form({ do: teachersButton.lift(TEACHER, seen) }))).toMatchObject({ step: "lift", seen });
+    }
+  });
+
   it("lo que no es un formulario, sin intención o con dos, cuenta como vacío", () => {
     expect(readTeachersForm("nada")).toEqual({ step: "none" });
     expect(readTeachersForm(form({}))).toEqual({ step: "none" });
@@ -56,8 +62,21 @@ describe("lo que llega", () => {
     expect(readTeachersForm(form({ do: value }))).toEqual({ step: "none" });
   });
 
-  it("cancelar", () => {
-    expect(readTeachersForm(form({ do: "cancel" }))).toEqual({ step: "cancel" });
+  it("«Seguir revisando» dice de qué formulario, y lleva lo escrito: se escribe antes de preguntar", () => {
+    expect(readTeachersForm(form({ do: teachersButton.cancel("suspend", TEACHER), reason: "Motivo", notice: "Aviso" }))).toEqual({
+      step: "cancel",
+      form: "suspend",
+      teacher: TEACHER,
+      drafts: { reason: "Motivo", notice: "Aviso" },
+    });
+    expect(readTeachersForm(form({ do: teachersButton.cancel("fraud", TEACHER), note: "Nota", notice: "Aviso" }))).toEqual({
+      step: "cancel",
+      form: "fraud",
+      teacher: TEACHER,
+      drafts: { note: "Nota", notice: "Aviso" },
+    });
+    expect(readTeachersForm(form({ do: "cancel" }))).toEqual({ step: "none" });
+    expect(readTeachersForm(form({ do: `cancel:otro:${TEACHER}` }))).toEqual({ step: "none" });
   });
 
   it("invitar: el nombre y el correo, tal como llegaron", () => {
@@ -137,6 +156,15 @@ describe("lo que falta se dice sin llamar a nadie", () => {
     expect(problemsOf({ step: "suspend", teacher: TEACHER, seen: SEEN, drafts })).toEqual(expected);
   });
 
+  it("una nota desmedida se dice también al confirmar, y una de solo espacios cuenta como vacía", () => {
+    expect(problemsOf({ step: "confirm", teacher: TEACHER, seen: SEEN, request: REQUEST, drafts: { notice: "n", note: "x".repeat(4_001) } })).toEqual(["note"]);
+    expect(problemsOf({ step: "reject", teacher: TEACHER, seen: SEEN, request: REQUEST, drafts: { note: "   " } })).toEqual([]);
+  });
+
+  it("un salto de línea cuenta como uno: el navegador lo manda como dos, y el campo lo contó como uno", () => {
+    expect(problemsOf({ step: "suspend", teacher: TEACHER, seen: SEEN, drafts: { reason: "r", notice: `${"n".repeat(149)}\r\n${"n".repeat(150)}` } })).toEqual([]);
+  });
+
   it("confirmar pide el texto para el maestro; rechazar no", () => {
     expect(problemsOf({ step: "confirm", teacher: TEACHER, seen: SEEN, request: REQUEST, drafts: { notice: " " } })).toEqual(["notice"]);
     expect(problemsOf({ step: "reject", teacher: TEACHER, seen: SEEN, request: REQUEST, drafts: {} })).toEqual([]);
@@ -184,7 +212,7 @@ describe("cada respuesta de la base tiene su caso", () => {
   it.each([
     ["set", { kind: "leave", to: PAGE, notice: "teacher_founder_saved" }],
     ["cleared", { kind: "leave", to: PAGE, notice: "teacher_founder_saved" }],
-    ["unchanged", { kind: "leave", to: PAGE, notice: null }],
+    ["unchanged", { kind: "failed", reason: "unchanged" }],
     ["too_early", { kind: "failed", reason: "too_early" }],
     ["locked", { kind: "failed", reason: "locked" }],
     ["self", { kind: "failed", reason: "self" }],

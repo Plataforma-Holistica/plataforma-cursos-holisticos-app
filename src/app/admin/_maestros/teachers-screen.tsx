@@ -46,7 +46,7 @@ const DONE: Record<TeachersDone, string> = {
 };
 
 export function TeachersScreen({ view, done = null }: { view: RosterView; done?: TeachersDone | null }) {
-  const [code, codeAction, codePending] = useActionState(teachersCodeAction, CODE_IDLE, `${ROUTES.adminTeachers}#${CODE_BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(teachersCodeAction.bind(null, null), CODE_IDLE, `${ROUTES.adminTeachers}#${CODE_BLOCK_ID}`);
   const [state, send, pending] = useActionState(teachersAction, IDLE, `${ROUTES.adminTeachers}#${LIST_BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
 
@@ -67,7 +67,10 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
   const tone = failure !== null && (failure.reason === "unavailable" || failure.reason === "unknown") ? "danger" : "warning";
 
   const invalid = state.kind === "invalid" && state.step === "invite" ? state : null;
-  const drafts = state.kind !== "idle" && state.teacher === null ? state.drafts : {};
+  // Lo escrito y el intento solo son de invitar si fue invitar lo que se envió: una fila que falla no borra lo que se escribía.
+  const inviting = (state.kind === "invalid" || state.kind === "failed") && state.step === "invite" ? state : null;
+  const drafts = inviting?.drafts ?? {};
+  const round = inviting?.attempt ?? 0;
   const nameError = invalid?.problems.includes("name") === true ? text.invite.nameProblem : undefined;
   const emailError = invalid?.problems.includes("email") === true ? text.invite.emailProblem : undefined;
   const errors: FormError[] = [
@@ -132,18 +135,19 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
           <form action={send} noValidate className="flex flex-col gap-4 rounded-md border border-border p-4">
             <h3 className="text-h3">{t(text.invite.title)}</h3>
             <p className="text-body-s text-text-2">{text.invite.body}</p>
-            <FormErrorSummary errors={errors} attempt={attempt} />
+            <FormErrorSummary errors={errors} attempt={round} />
             <TextField
-              key={`nombre-${attempt}`}
+              key={`nombre-${round}`}
               id={INVITE_NAME_ID}
               label={text.invite.name}
               name="name"
               autoComplete="off"
               defaultValue={drafts.name}
+              readOnly={pending}
               error={nameError}
             />
             <TextField
-              key={`correo-${attempt}`}
+              key={`correo-${round}`}
               id={INVITE_EMAIL_ID}
               label={text.invite.email}
               name="email"
@@ -151,6 +155,7 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
               inputMode="email"
               autoComplete="off"
               defaultValue={drafts.email}
+              readOnly={pending}
               hint={text.invite.emailHint}
               error={emailError}
             />
