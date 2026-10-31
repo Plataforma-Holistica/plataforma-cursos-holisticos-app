@@ -103,7 +103,8 @@ from (values
   ('VIGENCIA_CODIGO_RECIENTE_MINUTOS', '15',            'proposed'),
   ('VIGENCIA_PRUEBA_BUZON_MINUTOS', '60',               'proposed'),
   ('TOLERANCIA_CONCILIACION_PCT', '500',                'proposed'),
-  ('RECURSO_TAMANO_MAX',        '52428800',             'proposed')
+  ('RECURSO_TAMANO_MAX',        '52428800',             'proposed'),
+  ('RECURSOS_POR_LUGAR_MAX',    '10',                   'proposed')
 ) as v (key, value, status)
 join public.parameter_definitions d on d.key = v.key
 on conflict (key, effective_from) where canceled_at is null do nothing;

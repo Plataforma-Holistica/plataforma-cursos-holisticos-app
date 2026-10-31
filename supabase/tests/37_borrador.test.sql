@@ -378,13 +378,15 @@ grant execute on function private.draft_text_ok(text, integer, boolean) to app_s
 select pruebas.a_nombre_de(pruebas.p(1));
 select throws_ok(format('insert into public.draft_lessons (course_id, teacher_id, module_id, title, position) values (%L, %L, %L, %L, 9)',
   pruebas.id('ana'), pruebas.m(1), pruebas.id('m2'), 'Directo'), '42501', null, 'con permiso concedido, el guardián no deja escribir');
-select throws_ok(format('delete from public.draft_modules where course_id = %L', pruebas.id('ana')), '42501', null,
+-- Sin `where`: con él, el servidor necesitaría además leer esa columna, y el 42501 saldría de los permisos.
+select throws_ok('delete from public.draft_modules', '42501', 'public.draft_modules: only the draft functions write this table',
   'ni borrar');
 select pruebas.como_dueno();
 revoke insert on public.draft_lessons from app_service;
 revoke delete on public.draft_modules from app_service;
 revoke execute on function private.draft_text_ok(text, integer, boolean) from app_service;
-select throws_ok('truncate public.draft_lessons', '42501', null, 'ni el dueño vacía la tabla');
+-- Con la tabla que la nombra desde T-404: sola, la clave foránea la detendría antes que el guardián.
+select throws_ok('truncate public.draft_lessons, public.draft_resources', '42501', 'public.draft_lessons: drafts are not truncated', 'ni el dueño vacía la tabla');
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar un borrador que nunca se envió.
