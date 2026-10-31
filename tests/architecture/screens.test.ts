@@ -273,7 +273,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   },
   "src/app/admin/_maestros/actions.ts": {
     // Dar el código otra vez: el de los maestros, que comprueba lo reciente con la lectura que pide Contenido.
-    teachersCodeAction: /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*teachersCodeOutcome\(await giveTeacherCode\(jar, code\)\)/,
+    teachersCodeAction: /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*teachersCodeOutcome\(await giveTeacherCode\(jar, code\), teacher\)/,
     // Los cambios: del formulario llega qué botón y lo escrito. Preguntar no llama a nadie. Lo prueba tests/actions.
     teachersAction: /if \(request\.step === "ask_suspend"\) return \{ kind: "asking"[\s\S]*if \(request\.step === "ask_confirm"\) return \{ kind: "asking"[\s\S]*await cookieJar\(\)/,
   },

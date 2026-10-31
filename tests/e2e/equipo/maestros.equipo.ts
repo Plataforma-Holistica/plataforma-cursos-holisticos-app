@@ -169,7 +169,7 @@ test("FL-46 y FL-30: invita, la persona se registra y acepta, se le marca fundad
 
   // Suspender pide lo que lee y el motivo, y pregunta antes.
   await page.getByRole("button", { name: "Suspender", exact: true }).click();
-  await expect(page.getByText(/Escribe el motivo/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Escribe el motivo/ })).toBeVisible();
   await page.getByLabel("Motivo interno").fill("Motivo interno de la prueba");
   await page.getByLabel(/^Lo que lee/).fill("Tu cuenta está en pausa.");
   await page.getByRole("button", { name: "Suspender", exact: true }).click();

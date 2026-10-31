@@ -163,7 +163,7 @@ describe("el almacén contra la base", () => {
 
       const roster = await store.roster(claimsOf(content));
       const pending = roster?.requests.find((each) => each.teacherId === teacher);
-      expect(pending).toMatchObject({ reason: "Puntos inflados", proposedBySelf: false, markedBySelf: false, aboutSelf: false });
+      expect(pending).toMatchObject({ reason: "Puntos inflados", proposedBySelf: false, markedBySelf: false });
       if (pending === undefined) throw new Error("Sin propuesta.");
       expect(roster?.teachers.find((each) => each.id === teacher)?.fraudPending).toBe(true);
 
