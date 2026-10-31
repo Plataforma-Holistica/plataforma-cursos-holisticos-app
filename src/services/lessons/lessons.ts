@@ -6,7 +6,7 @@ import { asSystem, asUser } from "@/adapters/supabase/db";
 import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
 
 import { lessonPageOf, type LessonPage, type LessonRowData } from "./page";
-import { readCourseIsOpen, readCourseLessons } from "./records";
+import { readCourseIsOpen, readCourseLessons, readLessonResources, type LessonResourceRow } from "./records";
 
 // La página de una lección (PA-22, T-203): lo que se pinta alrededor del reproductor. Si la
 // cuenta puede ver el video no se decide aquí: lo dice la función única de medios
@@ -25,6 +25,8 @@ export interface LessonStore {
   courseLessons(claims: VerifiedClaims, slug: string): Promise<LessonRowData[]>;
   /** Si el curso listado es el abierto, o nulo si no existe o no está listado. */
   courseIsOpen(slug: string): Promise<boolean | null>;
+  /** Los recursos vigentes de la lección, leídos como la persona (T-404). */
+  lessonResources(claims: VerifiedClaims, lessonId: string): Promise<LessonResourceRow[]>;
 }
 
 /** Cuánto se recuerda si un curso es abierto: es un dato público, y la página la puede pedir cualquiera. */
@@ -78,13 +80,28 @@ export function createLessons(deps: { store: LessonStore; report: (code: Failure
     return value;
   }
 
-  return { lessonPage, courseIsOpen };
+  /**
+   * Los recursos de una lección (T-404), para quien ya tiene acceso a ella. Nulo si no se pudieron leer: se reporta, y la
+   * pantalla lo dice sin tumbar el video.
+   */
+  async function lessonResources(claims: VerifiedClaims, lessonId: string): Promise<LessonResourceRow[] | null> {
+    if (!ID.test(lessonId)) return [];
+    try {
+      return await deps.store.lessonResources(claims, lessonId);
+    } catch {
+      await deps.report("lesson_resources_unavailable");
+      return null;
+    }
+  }
+
+  return { lessonPage, courseIsOpen, lessonResources };
 }
 
 /** Las lecturas de verdad: la página como la persona, y lo abierto como sistema (sin sesión no hay persona). */
 export const databaseLessonStore: LessonStore = {
   courseLessons: (claims, slug) => asUser(claims, (tx) => readCourseLessons(tx, slug)),
   courseIsOpen: (slug) => asSystem({ reason: "lesson_visitor" }, (tx) => readCourseIsOpen(tx, slug)),
+  lessonResources: (claims, lessonId) => asUser(claims, (tx) => readLessonResources(tx, lessonId)),
 };
 
-export const { lessonPage, courseIsOpen } = createLessons({ store: databaseLessonStore, report: reportFailure });
+export const { lessonPage, courseIsOpen, lessonResources } = createLessons({ store: databaseLessonStore, report: reportFailure });

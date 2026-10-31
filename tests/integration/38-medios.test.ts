@@ -96,6 +96,7 @@ function mediaOn(owner: Client) {
       store: mediaStoreOn(owner),
       signingKey: () => KEY,
       sign: signPlayback,
+      files: { signDownload: () => Promise.resolve(null) },
       now: () => NOW,
     },
   );
@@ -160,6 +161,7 @@ describe("la función única de medios, contra la base", () => {
         store: mediaStoreOn(null as never),
         signingKey: () => KEY,
         sign: signPlayback,
+        files: { signDownload: () => Promise.resolve(null) },
         now: () => NOW,
       },
     );

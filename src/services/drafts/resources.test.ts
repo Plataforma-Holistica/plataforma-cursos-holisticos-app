@@ -34,6 +34,7 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
   };
   const files: ResourceFiles = {
     signUpload: vi.fn(() => Promise.resolve("https://storage/subir")),
+    signDownload: vi.fn(() => Promise.resolve("https://storage/bajar")),
     contentOk: vi.fn(() => Promise.resolve(true)),
     remove: vi.fn(() => Promise.resolve()),
   };

@@ -1,11 +1,12 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readResourceForm, checkFile, progressStep, resourceButton, titleFromFile } from "@/app/portal/_editor/resource-outcomes";
 import { ResourcesBlock } from "@/app/portal/_editor/resources";
 import type { ResourceRow } from "@/app/portal/_editor/rows";
-import { UnsavedProvider } from "@/app/portal/_editor/unsaved";
+import { UnsavedProvider, useUnsaved } from "@/app/portal/_editor/unsaved";
+import { portal } from "@/messages/es/portal";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -16,6 +17,8 @@ const actions = vi.hoisted(() => ({
   cancelResourceAction: vi.fn(),
 }));
 vi.mock("@/app/portal/_editor/resource-actions", () => actions);
+const files = vi.hoisted(() => ({ openFile: vi.fn(), reloadPage: vi.fn() }));
+vi.mock("@/app/_catalog/resources/open-file", () => files);
 
 const COURSE = "c0000000-0000-4000-8000-000000000001";
 const LESSON = "e0000000-0000-4000-8000-000000000001";
@@ -151,10 +154,10 @@ describe("la lista", () => {
     expect(await screen.findByText(/Esto cambió mientras lo veías/)).toBeTruthy();
   });
 
-  it("en solo lectura se ve la lista, sin botones ni adjuntar", () => {
+  it("en solo lectura se ve la lista y se puede bajar, sin ordenar, quitar ni adjuntar", () => {
     show(ITEMS, { editable: false });
     expect(screen.getByText("Guía")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["DescargarDescargar Guía", "DescargarDescargar Audio"]);
     expect(screen.queryByLabelText("Archivo")).toBeNull();
   });
 });
@@ -459,5 +462,59 @@ describe("lo puro", () => {
     expect([0, 24, 25, 49, 50, 99, 100].map((loaded) => progressStep(loaded, 100))).toEqual([0, 0, 25, 25, 50, 75, 100]);
     expect(progressStep(5, 0)).toBe(0);
     expect(progressStep(200, 100)).toBe(100);
+  });
+});
+
+// Bajar lo que subió (T-404). Abrir un adjunto dispara el aviso del navegador aunque la página no se va: con algo sin guardar
+// preguntaría «¿salir?» sin motivo. Cómo se comporta un navegador de verdad lo mide tests/e2e/equipo/recursos.equipo.ts.
+describe("bajar", () => {
+  const URL = "https://storage/bajar?token=t";
+  const unload = () => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it("cada recurso lleva su botón, con su nombre", () => {
+    show();
+    expect(screen.getByRole("button", { name: "Descargar Guía" })).toHaveAttribute("value", resourceButton.download(R1));
+  });
+
+  it("con la dirección, la abre una vez, lo dice y no dispara el aviso de salir; después el aviso vuelve a valer", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const seen: boolean[] = [];
+    files.openFile.mockImplementation(() => seen.push(unload()));
+    const user = userEvent.setup();
+    let mark: (key: string, dirty: boolean) => void = () => undefined;
+    function Marker() {
+      ({ mark } = useUnsaved());
+      return null;
+    }
+    render(
+      <UnsavedProvider>
+        <Marker />
+        <ResourcesBlock course={COURSE} lesson={LESSON} items={ITEMS} editable self={`/portal/cursos/${COURSE}`} limits={LIMITS} />
+      </UnsavedProvider>,
+    );
+    // Algo sin guardar en la pantalla: el aviso se dispararía.
+    await act(async () => {
+      mark("otro-formulario", true);
+      await Promise.resolve();
+    });
+    expect(unload()).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFile).toHaveBeenCalledExactlyOnceWith(URL));
+    await screen.findAllByText(portal.editor.resources.downloadStarted);
+    expect(seen).toEqual([false]);
+    await waitFor(() => expect(unload()).toBe(true), { timeout: 2000 });
+  });
+
+  it("con el tope, lo dice sin abrir nada", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "download_throttled", attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await screen.findAllByText(portal.editor.resources.downloadThrottled);
+    expect(files.openFile).not.toHaveBeenCalled();
   });
 });

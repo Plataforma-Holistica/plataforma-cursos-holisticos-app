@@ -117,6 +117,10 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     deleteCourseAction:
       /const outcome = deleteOutcome\(await deleteCourse\(jar, \{ course: request\.course, seen: request\.seen \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/_catalog/resources/actions.ts": {
+    // Bajar un recurso (T-404): del formulario solo qué recurso y si hay JavaScript; la puerta de medios corre la guarda y firma.
+    downloadResourceAction: /const request = readDownloadForm\(form\);[\s\S]*downloadOutcome\(await getResourceGrant\(await cookieJar\(\), request\.resource\), request\.javascript, nextAttempt\(previous\)\)/,
+  },
   "src/app/_catalog/my-list/actions.ts": {
     // Mi lista (T-210): del formulario solo qué botón y qué curso; el servicio corre la guarda y
     // escribe a nombre de esa sesión. A qué pantalla se vuelve lo ata cada acción.
@@ -788,6 +792,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-equipo-personas",
       "bloque-equipo-restablecer",
       "bloque-ficha-lista",
+      "bloque-ficha-recursos",
       "bloque-liquidaciones",
       "bloque-liquidaciones-codigo",
       "bloque-maestro-codigo",

@@ -1,15 +1,17 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { cookieJar } from "@/app/_lib/request-context";
 import { portalCoursePath, ROUTES } from "@/services/account/navigation";
 import { beginResource, confirmResource, moveResource, removeResource } from "@/services/drafts/editor";
+import { getDraftResourceGrant } from "@/services/media/media";
 
 import { changeOutcome } from "../_lib/change";
-import { readResourceForm, type BeginStep, type ConfirmStep, type ResourceState, type UploadProblem } from "./resource-outcomes";
+import { draftDownloadOutcome, readResourceForm, type BeginStep, type ConfirmStep, type ResourceState, type UploadProblem } from "./resource-outcomes";
 
 // Las acciones de los recursos en el editor de curso (PA-43; T-404). No deciden quién puede: el servicio corre la
 // guarda y la base escribe solo a nombre del maestro activo.
@@ -24,7 +26,7 @@ const fieldsOf = (input: unknown): Record<string, unknown> => (typeof input === 
 const lessonOf = (value: unknown): string | null => (value === null || value === undefined ? null : textOf(value));
 const backOf = (course: string, lesson: string | null) => portalCoursePath(course, lesson === null ? {} : { lesson }) ?? ROUTES.portalCourses;
 
-/** La lista: mover y quitar. Del estado anterior solo se lee el número de intento. */
+/** La lista: mover, quitar y bajar. Del estado anterior solo se lee el número de intento. */
 export async function resourceAction(previous: ResourceState, form: FormData): Promise<ResourceState> {
   const request = readResourceForm(form);
   if (request.step === "none") return { kind: "idle" };
@@ -35,6 +37,14 @@ export async function resourceAction(previous: ResourceState, form: FormData): P
 
   const jar = await cookieJar();
   const { course, resource } = request;
+  if (request.step === "download") {
+    const outcome = draftDownloadOutcome(await getDraftResourceGrant(jar, course, resource), request.javascript, attempt);
+    if (outcome.kind === "redirect") redirect(outcome.url);
+    if (outcome.kind === "leave") return leaveFor(jar, { to: backOf(course, request.lesson), notice: null });
+    // Lo que ya no está se va de la lista.
+    if (outcome.kind === "failed") refresh();
+    return outcome;
+  }
   const result =
     request.step === "move"
       ? await moveResource(jar, { course, resource, seenPosition: request.seen, toPosition: request.to })

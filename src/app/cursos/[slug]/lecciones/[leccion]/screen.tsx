@@ -7,13 +7,17 @@ import { PASSWORD_BLOCK_ID } from "@/app/(cuenta)/cuenta/password-block";
 import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps, WatchSignal } from "@/app/_video/player";
+import { downloadResourceAction } from "@/app/_catalog/resources/actions";
+import { ResourceList, type ResourceItem } from "@/app/_catalog/resources/resource-list";
 import { lesson as text } from "@/messages/es/lesson";
+import { resources as resourceText } from "@/messages/es/resources";
 import { plural, t } from "@/messages/format";
-import { ROUTES } from "@/services/account/navigation";
+import { lessonPath, ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
+import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
 import { ProgressBar } from "@/ui/progress-bar";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -23,7 +27,7 @@ import { TextLink } from "@/ui/text-link";
 import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuilder } from "@/services/media/watch-rules";
 
 import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
-import type { BusyRow, Denial, HeartbeatReply, InitialState, ProgressNote, WatchAnswer } from "./outcomes";
+import { paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
 import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
@@ -74,6 +78,8 @@ export interface SyllabusEntry {
 }
 
 export interface LessonScreenProps {
+  /** Los recursos de la lección, ya en palabras. Vacío sin ninguno o sin acceso; nulo si no se pudieron leer. */
+  resources: ResourceItem[] | null;
   slug: string;
   lessonId: string;
   heading: string;
@@ -200,13 +206,6 @@ function isRedirect(error: unknown): boolean {
 }
 
 /** El título de PA-33 y su frase, por motivo. */
-function paywallCopy(denial: Denial): [string, string] {
-  const copy = text.denied;
-  if (denial.reason === "never_subscribed") return [copy.neverSubscribed, copy.neverSubscribedText];
-  if (denial.reason === "refunded") return [copy.refunded, copy.refundedText];
-  return [t(copy.ended, { date: denial.date }), denial.reason === "expired" ? copy.expiredText : copy.graceEndedText];
-}
-
 /** Lo que se le dice a quien no ve el lugar del reproductor, cuando cambia. */
 function announcementOf(video: VideoState): string {
   switch (video.kind) {
@@ -293,7 +292,7 @@ function Paywall({ denial }: { denial: Denial }) {
   );
 }
 
-export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, progress, initial, captions }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, progress, initial, captions, resources }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
   const [captionsOn, setCaptionsOn] = useState(captions);
@@ -555,6 +554,15 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
       <p>{about}</p>
     </div>
   );
+  // Los recursos de esta lección (T-404). Si no se pudieron leer se dice, y el video sigue. Van dos veces, como el temario: en
+  // escritorio bajo «Sobre esta lección», y en teléfono en su pestaña. Sin ninguno, no hay ni bloque ni pestaña.
+  const hasResources = resources === null || resources.length > 0;
+  const resourcesPanel =
+    resources === null ? (
+      <InlineAlert tone="warning">{resourceText.lessonUnavailable}</InlineAlert>
+    ) : (
+      <ResourceList items={resources} canDownload action={downloadResourceAction} permalink={lessonPath(slug, lessonId) ?? ROUTES.home} />
+    );
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-6 px-4 py-6 outline-none">
@@ -672,6 +680,12 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
               {text.about}
             </h2>
             {aboutPanel}
+            {hasResources && (
+              <>
+                <h3 className="text-h3">{resourceText.lessonTitle}</h3>
+                {resourcesPanel}
+              </>
+            )}
           </section>
           <div className="lg:hidden">
             <Tabs
@@ -680,6 +694,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
               items={[
                 { id: "temario", label: text.syllabus, panel: syllabus("pestana-modulo", "h2"), hasFocusableContent: true },
                 { id: "sobre", label: text.about, panel: aboutPanel },
+                ...(hasResources ? [{ id: "recursos", label: resourceText.tab, panel: resourcesPanel, hasFocusableContent: true }] : []),
               ]}
             />
           </div>

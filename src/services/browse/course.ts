@@ -17,6 +17,14 @@ export interface CourseLessonRow {
   durationSeconds: number;
 }
 
+/** Un recurso vigente del curso (T-404): lo que cualquiera ve. La ruta del archivo nunca sale de la puerta de medios. */
+export interface CourseResourceRow {
+  id: string;
+  title: string;
+  kind: "pdf" | "doc" | "audio";
+  sizeBytes: number;
+}
+
 export interface CourseDetail {
   course: ShelfCourse;
   teacher: { slug: string; name: string; bio: string | null } | null;

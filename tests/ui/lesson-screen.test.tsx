@@ -20,6 +20,7 @@ vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/watch-queue", async (original) 
 });
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+vi.mock("@/app/_catalog/resources/actions", () => ({ downloadResourceAction: vi.fn() }));
 vi.mock("@/app/_video/player", () => ({
   Player: (props: {
     watermark?: string;
@@ -88,6 +89,7 @@ const GRANT = {
 const ROW = { sessionId: OTHER, browser: "chrome", system: "windows", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" };
 
 const PROPS: LessonScreenProps = {
+  resources: [],
   slug: "respirar",
   lessonId: LESSON,
   heading: "Lección 2 · Respirar acostado",
@@ -1083,5 +1085,29 @@ describe("el progreso, con lo que trae la página y lo que llega después (T-206
     });
     expect(screen.getAllByRole("link", { name: "Lección 2, Respirar acostado, 7 min, terminada", hidden: true })).toHaveLength(2);
     expect(screen.queryByText("Esta lección ya cuenta como terminada.")).toBeNull();
+  });
+});
+
+// Los recursos de la lección (RF-308; T-404): en escritorio bajo «Sobre esta lección», en teléfono en su pestaña.
+describe("los recursos de la lección", () => {
+  const GUIDE = { id: "f0000000-0000-4000-8000-000000000001", title: "Guía", detail: "PDF, 2 MB" };
+
+  it("con alguno: la lista con su botón, y su pestaña", () => {
+    show({ resources: [GUIDE] });
+    expect(screen.getByRole("heading", { name: "Recursos de esta lección" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Descargar Guía" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
+  });
+
+  it("sin ninguno: ni bloque ni pestaña", () => {
+    show({ resources: [] });
+    expect(screen.queryByRole("heading", { name: "Recursos de esta lección" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Recursos" })).toBeNull();
+  });
+
+  it("si no se pudieron leer, se dice, y el resto de la página sigue", () => {
+    show({ resources: null });
+    expect(screen.getAllByText("No pudimos leer los recursos de esta lección. Recarga la página para intentar de nuevo.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
   });
 });

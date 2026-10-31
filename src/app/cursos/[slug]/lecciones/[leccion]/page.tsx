@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
+import { resourceItems } from "@/app/_catalog/resources/words";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireLessonSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { captionsChoice } from "@/services/account/account";
 import { lessonPath } from "@/services/account/navigation";
-import { courseIsOpen, lessonPage, type LessonEntry } from "@/services/lessons/lessons";
+import { courseIsOpen, lessonPage, lessonResources, type LessonEntry } from "@/services/lessons/lessons";
 import { lessonAccess } from "@/services/media/media";
 
 import { initialOf } from "./outcomes";
@@ -21,7 +22,8 @@ import { LessonScreen, type SyllabusEntry } from "./screen";
 // desde el primer momento, también sin JavaScript. La dirección del video la pide el
 // reproductor después, con su acción (RF-305). A la vez lee si la cuenta dejó los subtítulos
 // encendidos (RF-310); si no se supo, arrancan apagados. El temario trae el estado de cada lección
-// para quien mira (T-206); el segundo donde arranca el video lo trae la concesión.
+// para quien mira (T-206); el segundo donde arranca el video lo trae la concesión. Los recursos de
+// la lección se leen solo con acceso (T-404): sin él, PA-33 no los muestra.
 
 const text = messages.lesson;
 
@@ -46,6 +48,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
   if (initial.kind === "reload") redirect(path);
+  const resources = initial.kind === "ready" ? await lessonResources(session.claims, page.lesson.id) : [];
 
   const entry = (lesson: LessonEntry): SyllabusEntry => ({
     id: lesson.id,
@@ -70,6 +73,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
       progress={page.progress}
       initial={initial}
       captions={captions.kind === "ready" && captions.on}
+      resources={resources === null ? null : resourceItems(resources)}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { longDate } from "@/app/_lib/dates";
+import { denialOf, paywallCopy, type Denial } from "@/app/_catalog/paywall";
 import type { BatchAnswer, HeartbeatAnswer, LessonAccess, LiveElsewhere, MediaGrant, PresenceAnswer } from "@/services/media/media";
 
 // La tabla de la página de una lección (PA-22, T-203): lo que contesta la función única de
@@ -10,25 +10,7 @@ import type { BatchAnswer, HeartbeatAnswer, LessonAccess, LiveElsewhere, MediaGr
 // cuánto latir, el lugar ocupado en otro navegador (PA-34) y lo que contesta el latido; desde
 // T-205, qué pasó con los tramos vistos que llevaba.
 
-type AccountRefusal = Extract<MediaGrant, { kind: "denied" }>["account"];
-
-/** El motivo de PA-33, con la fecha ya en palabras, en la zona del producto. */
-export type Denial = { reason: "never_subscribed" } | { reason: "expired" | "grace_ended" | "refunded"; date: string };
-
-/**
- * El motivo de PA-33, o nulo si es una cuenta suspendida: viene en el tipo del rechazo, pero
- * es PA-35, y la regla nunca la contesta así (la suspensión va antes).
- */
-export function denialOf(account: AccountRefusal): Denial | null {
-  switch (account.reason) {
-    case "never_subscribed":
-      return { reason: "never_subscribed" };
-    case "suspended":
-      return null;
-    default:
-      return { reason: account.reason, date: longDate(account.endedAt.toISOString()) };
-  }
-}
+export { denialOf, paywallCopy, type Denial };
 
 /** Lo que la página pinta al cargar, en el lugar del reproductor. */
 export type InitialState =

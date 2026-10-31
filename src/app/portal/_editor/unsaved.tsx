@@ -2,6 +2,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
+import { openFile } from "@/app/_catalog/resources/open-file";
 import { portal } from "@/messages/es/portal";
 import { Button } from "@/ui/button";
 import { Dialog } from "@/ui/dialog";
@@ -19,7 +20,8 @@ import { Dialog } from "@/ui/dialog";
 //     formulario, y «Salir sin guardar» lo envía. Lo dice su `data-leaves`: `all` («Cerrar sesión») pierde
 //     todo; `detail` (agregar un módulo o una lección, que abre lo agregado) pierde lo del bloque de la
 //     derecha, no lo de la estructura.
-//   · Cerrar la pestaña, recargar o ir a otra dirección: el aviso del navegador (`beforeunload`).
+//   · Cerrar la pestaña, recargar o ir a otra dirección: el aviso del navegador (`beforeunload`). Abrir un adjunto
+//     también lo dispara aunque la página no se va: por eso bajar un recurso pasa por `openFile`, que se salta ese aviso.
 //   · Límite conocido (decisión mía sin confirmar): el botón «Atrás» del navegador es navegación de Next y no
 //     pregunta.
 //
@@ -35,9 +37,11 @@ interface Unsaved {
   /** Confirmar un recurso sube la revisión de su lección: guardar mientras tanto contestaría «cambió». */
   uploading: boolean;
   mark: (key: string, dirty: boolean) => void;
+  /** Abre la dirección de un adjunto sin el aviso del navegador: lo escrito no se pierde. */
+  openFile: (url: string) => void;
 }
 
-const UnsavedContext = createContext<Unsaved>({ dirty: false, uploading: false, mark: () => undefined });
+const UnsavedContext = createContext<Unsaved>({ dirty: false, uploading: false, mark: () => undefined, openFile });
 
 export function useUnsaved(): Unsaved {
   return useContext(UnsavedContext);
@@ -55,6 +59,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
   const dirty = keys.size > 0;
   const keysNow = useRef(keys);
   const passing = useRef<HTMLFormElement | null>(null);
+  const openingFile = useRef(false);
 
   const mark = useCallback((key: string, value: boolean) => {
     setKeys((current) => {
@@ -79,7 +84,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     };
 
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (keysNow.current.size === 0) return;
+      if (keysNow.current.size === 0 || openingFile.current) return;
       event.preventDefault();
       // Los navegadores que no miran `preventDefault` piden un valor que no esté vacío (el texto no lo muestran).
       event.returnValue = portal.editor.leaveBody;
@@ -122,7 +127,15 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const uploading = keys.has(UPLOAD_KEY);
-  const value = useMemo(() => ({ dirty, uploading, mark }), [dirty, uploading, mark]);
+  // El aviso lo dispara el navegador al empezar a navegar: un segundo alcanza, y después vuelve a valer para irse de verdad.
+  const openFileHere = useCallback((url: string) => {
+    openingFile.current = true;
+    openFile(url);
+    window.setTimeout(() => {
+      openingFile.current = false;
+    }, 1000);
+  }, []);
+  const value = useMemo(() => ({ dirty, uploading, mark, openFile: openFileHere }), [dirty, uploading, mark, openFileHere]);
   const go = () => {
     const what = leaving;
     setLeaving(null);

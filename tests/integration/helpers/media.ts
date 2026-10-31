@@ -3,7 +3,16 @@ import type { Client } from "pg";
 import { readVerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import type { MediaStore } from "@/services/media/grant";
-import { openPlayback, readLessonVideo, readPlaybackSpeeds, readWatchFacts, recordHeartbeat } from "@/services/media/records";
+import {
+  openPlayback,
+  readDraftResourceFile,
+  readLessonVideo,
+  readPlaybackSpeeds,
+  readResourceFacts,
+  readWatchFacts,
+  recordDownloadHit,
+  recordHeartbeat,
+} from "@/services/media/records";
 
 import { asOwner, asServer } from "./team";
 
@@ -59,6 +68,30 @@ export function mediaStoreOn(owner: Client): MediaStore {
       await asServer(owner, claims.userId, claims.sessionId ?? "");
       try {
         return await recordHeartbeat(tx, beat);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    resourceFacts: async (claims, resourceId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await readResourceFacts(tx, resourceId);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    draftResourceFile: async (claims, courseId, resourceId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await readDraftResourceFile(tx, courseId, resourceId);
+      } finally {
+        await asOwner(owner);
+      }
+    },
+    downloadHit: async (claims) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await recordDownloadHit(tx);
       } finally {
         await asOwner(owner);
       }
