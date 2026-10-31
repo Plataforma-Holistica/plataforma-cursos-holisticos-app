@@ -68,9 +68,10 @@ create table public.withholding_rules (
   issues_withholding_certificate boolean not null default false,
   effective_from date not null,
   effective_to date,
-  note text,
+  note text not null,                         -- la referencia a la respuesta escrita
   created_by uuid references public.profiles (id),
   created_at timestamptz not null default now(),
+  constraint withholding_rules_note_written check (pg_catalog.btrim(note) <> ''),
   constraint withholding_rules_uq unique (tax_regime_code, payee_kind, effective_from),
   constraint withholding_rules_regime_known check (private.tax_regime_ok(tax_regime_code, payee_kind)),
   constraint withholding_rules_rates_fraction check (
@@ -81,7 +82,35 @@ comment on table public.withholding_rules is 'RETENCIONES_FISCALES. Sin filas ha
 alter table public.withholding_rules enable row level security;
 revoke all on public.withholding_rules from public, anon, authenticated, service_role, app_service;
 create trigger audit_changes after insert or update or delete on public.withholding_rules
-  for each row execute function private.audit_row_change('money');
+  for each row execute function private.audit_row_change('config');
+
+-- Una regla no cambia: con ella se pudo haber liberado, y la liquidación guarda cuál usó. Solo se le pone fin, una vez, y dos no rigen a la vez: el
+-- cálculo no sabría cuál usar. `effective_to` no cuenta: la siguiente empieza ese día.
+create function private.guard_withholding_rule() returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'withholding rules are not deleted' using errcode = '42501';
+  end if;
+  if tg_op = 'UPDATE' and (
+      old.effective_to is not null or new.effective_to is null
+      or (pg_catalog.to_jsonb(new) - 'effective_to') is distinct from (pg_catalog.to_jsonb(old) - 'effective_to')) then
+    raise exception 'a withholding rule only gets its end, once' using errcode = '42501';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('withholding_rule:' || new.tax_regime_code || ':' || new.payee_kind, 0));
+  if exists (
+      select 1 from public.withholding_rules r
+      where r.id <> new.id and r.tax_regime_code = new.tax_regime_code and r.payee_kind = new.payee_kind
+        and pg_catalog.daterange(r.effective_from, r.effective_to, '[)') && pg_catalog.daterange(new.effective_from, new.effective_to, '[)')) then
+    raise exception 'withholding rules overlap' using errcode = '23514';
+  end if;
+  return new;
+end
+$$;
+revoke all on function private.guard_withholding_rule() from public;
+create trigger withholding_rules_guard before insert or update or delete on public.withholding_rules
+  for each row execute function private.guard_withholding_rule();
 
 -- ---------------------------------------------------------------------------------------
 -- Guardar. El identificador y la versión entran a los datos asociados de lo cifrado: la aplicación los conoce antes de cifrar, así que
@@ -132,7 +161,7 @@ $$;
 revoke all on function private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer) from public;
 grant execute on function private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer) to app_service;
 
--- Lo cifrado de una fila, para que lo abra la aplicación, con lo que hace falta para abrirlo.
+-- Lo cifrado de una fila, para que lo abra la aplicación, con lo que hace falta para abrirlo. En una sola línea: `encode` parte el base64 cada 76 caracteres.
 create function private.tax_profile_payload(p private.teacher_tax_profiles) returns jsonb
 language sql stable set search_path = ''
 as $$
@@ -141,11 +170,11 @@ as $$
     'teacher_id', p.teacher_id,
     'version', p.version,
     'key_version', p.key_version,
-    'rfc', pg_catalog.encode(p.rfc_enc, 'base64'),
-    'legal_name', pg_catalog.encode(p.legal_name_enc, 'base64'),
+    'rfc', pg_catalog.translate(pg_catalog.encode(p.rfc_enc, 'base64'), E'\n', ''),
+    'legal_name', pg_catalog.translate(pg_catalog.encode(p.legal_name_enc, 'base64'), E'\n', ''),
     'tax_regime_code', p.tax_regime_code,
     'payee_kind', p.payee_kind,
-    'clabe', pg_catalog.encode(p.clabe_enc, 'base64'),
+    'clabe', pg_catalog.translate(pg_catalog.encode(p.clabe_enc, 'base64'), E'\n', ''),
     'clabe_last4', p.clabe_last4,
     'updated_at', p.created_at)
 $$;
@@ -155,7 +184,9 @@ revoke all on function private.tax_profile_payload(private.teacher_tax_profiles)
 create function private.actor_teacher_id() returns uuid
 language sql stable security definer set search_path = ''
 as $$
-  select t.id from public.teachers t where t.profile_id = private.actor_id() and t.status in ('active', 'suspended')
+  select t.id from public.teachers t
+  join public.profiles p on p.id = t.profile_id
+  where t.profile_id = private.actor_id() and t.status in ('active', 'suspended') and p.status = 'active'
 $$;
 revoke all on function private.actor_teacher_id() from public;
 
@@ -194,8 +225,8 @@ begin
   if p.id is null then
     return '{"outcome": "no_profile"}'::jsonb;
   end if;
-  insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, reason, request_id)
-  values (private.actor_id(), 'user', 'privacy', 'tax_profile.read', 'private.teacher_tax_profiles', p.id::text,
+  insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, new_value, reason, request_id)
+  values (private.actor_id(), 'user', 'privacy', 'tax_profile.read', 'private.teacher_tax_profiles', p.id::text, pg_catalog.jsonb_build_object('teacher_id', p.teacher_id),
           nullif(pg_catalog.current_setting('app.reason', true), ''),
           nullif(pg_catalog.current_setting('app.request_id', true), ''));
   return private.tax_profile_payload(p);
@@ -229,8 +260,8 @@ begin
   if p.id is null then
     return '{"outcome": "no_profile"}'::jsonb;
   end if;
-  insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, reason, request_id)
-  values (private.actor_id(), 'user', 'privacy', 'tax_profile.read', 'private.teacher_tax_profiles', p.id::text,
+  insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, new_value, reason, request_id)
+  values (private.actor_id(), 'user', 'privacy', 'tax_profile.read', 'private.teacher_tax_profiles', p.id::text, pg_catalog.jsonb_build_object('teacher_id', p.teacher_id, 'payout_id', p_payout),
           nullif(pg_catalog.current_setting('app.reason', true), ''),
           nullif(pg_catalog.current_setting('app.request_id', true), ''));
   return private.tax_profile_payload(p);
@@ -306,7 +337,13 @@ as $$
     values ('tax_profile_save', 'private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)', false),
            ('tax_profile_state', 'private.tax_profile_state()', false),
            ('tax_profile_mine', 'private.tax_profile_mine()', true),
-           ('tax_profile_for_payout', 'private.tax_profile_for_payout(uuid)', true))
+           ('tax_profile_for_payout', 'private.tax_profile_for_payout(uuid)', true)),
+  -- Las que nombran la tabla sin leer lo cifrado: la lista de PA-65 solo dice si hay una fila, y el vigilante la vigila.
+  tax_known (oid) as (
+    select pg_catalog.to_regprocedure(f.signature)::oid from tax_functions f
+    union all
+    select pg_catalog.to_regprocedure(k.signature)::oid
+    from (values ('private.teacher_roster()'), ('private.schema_violations_tax()'), ('private.schema_violations_ledgers()')) k (signature))
   -- Ningún rol de la aplicación toca la tabla, ni por columna: una lectura directa no quedaría en la auditoría.
   select 'tax table privilege for ' || r.rolname, 'private.teacher_tax_profiles'
   from app_roles r
@@ -315,7 +352,7 @@ as $$
   union all
   select 'tax table privilege for ' || r.rolname, 'public.withholding_rules'
   from app_roles r
-  where pg_catalog.has_table_privilege(r.rolname::name, 'public.withholding_rules'::regclass, 'insert, update, delete, truncate, references, trigger')
+  where pg_catalog.has_table_privilege(r.rolname::name, 'public.withholding_rules'::regclass, 'select, insert, update, delete, truncate, references, trigger')
   union all
   -- Toda función nombrada existe, es del dueño y solo la ejecuta el servidor.
   select 'tax function missing or wrong: ' || f.signature, f.name
@@ -325,6 +362,7 @@ as $$
      or not pg_catalog.has_function_privilege('app_service', f.signature, 'execute')
      or pg_catalog.has_function_privilege('authenticated', f.signature, 'execute')
      or pg_catalog.has_function_privilege('anon', f.signature, 'execute')
+     or pg_catalog.has_function_privilege('service_role', f.signature, 'execute')
   union all
   -- Quien lee lo cifrado, audita.
   select 'tax read without audit: ' || f.signature, f.name
@@ -339,15 +377,26 @@ as $$
   select 'tax save without the balance lock', 'tax_profile_save'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)')) like '%teacher_balance:%', false)
   union all
-  -- Toda otra función que nombre la tabla es una puerta nueva: se agrega a la lista, con su auditoría, o no existe.
+  -- El estado y la lista de PA-65 no leen lo que hay en la tabla: no quedan en la auditoría.
+  select 'tax data out of its doors: ' || d.name, d.name
+  from (values ('tax_profile_state', 'private.tax_profile_state()'), ('teacher_roster', 'private.teacher_roster()')) d (name, signature)
+  where coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(d.signature)), '') ~ '(rfc_enc|legal_name_enc|clabe_enc|clabe_last4|tax_regime_code|payee_kind)'
+  union all
+  -- Toda otra función que nombre la tabla es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
   select 'tax function not in the list', p.proname::text
   from pg_catalog.pg_proc p
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private')
-    and p.prosrc like '%teacher_tax_profiles%'
-    and p.proname::text not in (select f.name from tax_functions f)
-    -- Solo dice si existe una fila, y el vigilante la nombra para vigilarla.
-    and p.proname not in ('teacher_roster', 'schema_violations_tax', 'schema_violations_ledgers')
+    and coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '') like '%teacher_tax_profiles%'
+    and p.oid not in (select k.oid from tax_known k where k.oid is not null)
+  union all
+  -- Una vista corre como su dueño: saltaría los permisos y la auditoría.
+  select 'tax table read by a view', c.relname::text
+  from pg_catalog.pg_depend d
+  join pg_catalog.pg_rewrite w on w.oid = d.objid
+  join pg_catalog.pg_class c on c.oid = w.ev_class
+  where d.classid = 'pg_catalog.pg_rewrite'::regclass and d.refclassid = 'pg_catalog.pg_class'::regclass
+    and d.refobjid = 'private.teacher_tax_profiles'::regclass
   union all
   -- Los disparadores: de solo inserción, y la auditoría sin lo que hay en la tabla.
   select 'tax table trigger missing: ' || t.name, 'private.teacher_tax_profiles'
@@ -358,10 +407,27 @@ as $$
     where tg.tgrelid = 'private.teacher_tax_profiles'::regclass and tg.tgname = t.name
       and tg.tgenabled in ('O', 'A') and pg_catalog.pg_get_triggerdef(tg.oid) like t.pattern)
   union all
-  -- La forma de lo cifrado: sin esto, una CLABE en claro entra.
-  select 'tax table constraint missing: ' || c.name, 'private.teacher_tax_profiles'
-  from (values ('teacher_tax_profiles_rfc_sealed'), ('teacher_tax_profiles_legal_name_sealed'), ('teacher_tax_profiles_clabe_sealed')) c (name)
+  select 'tax rules trigger missing: ' || t.name, 'public.withholding_rules'
+  from (values ('audit_changes', '%audit_row_change%'), ('withholding_rules_guard', '%guard_withholding_rule%')) t (name, pattern)
   where not exists (
-    select 1 from pg_catalog.pg_constraint k where k.conrelid = 'private.teacher_tax_profiles'::regclass and k.conname = c.name)
+    select 1 from pg_catalog.pg_trigger tg
+    where tg.tgrelid = 'public.withholding_rules'::regclass and tg.tgname = t.name
+      and tg.tgenabled in ('O', 'A') and pg_catalog.pg_get_triggerdef(tg.oid) like t.pattern)
+  union all
+  -- Toda columna cifrada queda fuera de la auditoría.
+  select 'tax column not redacted in the audit: ' || a.attname, 'private.teacher_tax_profiles'
+  from pg_catalog.pg_attribute a
+  where a.attrelid = 'private.teacher_tax_profiles'::regclass and a.attnum > 0 and not a.attisdropped and a.attname like '%\_enc'
+    and not coalesce((select pg_catalog.pg_get_triggerdef(tg.oid) like '%' || a.attname || '%' from pg_catalog.pg_trigger tg
+                      where tg.tgrelid = 'private.teacher_tax_profiles'::regclass and tg.tgname = 'audit_changes'), false)
+  union all
+  -- La forma de lo cifrado se revisa por lo que dice, no por su nombre. Sin los últimos cuatro, la CLABE entera cabría en claro.
+  select 'tax table constraint missing: ' || c.name, 'private.teacher_tax_profiles'
+  from (values ('teacher_tax_profiles_rfc_sealed', '%get_byte(rfc_enc%'), ('teacher_tax_profiles_legal_name_sealed', '%get_byte(legal_name_enc%'),
+               ('teacher_tax_profiles_clabe_sealed', '%octet_length(clabe_enc) = 49%'), ('teacher_tax_profiles_last4_form', '%[0-9]{4}%')) c (name, pattern)
+  where not exists (
+    select 1 from pg_catalog.pg_constraint k
+    where k.conrelid = 'private.teacher_tax_profiles'::regclass and k.conname = c.name and k.convalidated
+      and pg_catalog.pg_get_constraintdef(k.oid) like c.pattern)
 $$;
 revoke all on function private.schema_violations_tax() from public;

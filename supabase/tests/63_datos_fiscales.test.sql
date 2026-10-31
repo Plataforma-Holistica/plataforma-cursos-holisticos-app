@@ -3,7 +3,7 @@
 -- una liquidación, nunca por un maestro; nadie actúa sobre sí. La base no ve el texto: revisa la forma de lo cifrado, y una CLABE en claro no entra.
 begin;
 \ir _ayuda.psql
-select plan(71);
+select plan(108);
 
 -- mara y susi son maestras (susi, suspendida); nita, maestra sin el aviso; alu, alumna; f1, finanzas; k1, Contenido; fm, finanzas y maestra.
 select pruebas.alta('a6300000-0000-0000-0000-000000000001', 'mara-63@prueba.test');
@@ -172,10 +172,46 @@ select is(private.tax_profile_mine() ->> 'clabe_last4', '7771', 'con los último
 select is(decode(private.tax_profile_mine() ->> 'clabe', 'base64'), pruebas.sellado(18), 'y lo cifrado, en base64: quien abre es la aplicación');
 select pruebas.limpiar();
 
+select is(pruebas.guarda(pruebas.mara(), :'mara_m', 3, p_nombre => pruebas.sellado(300)), 'saved', 'una razón social larga');
+select pruebas.a_nombre_de(pruebas.mara());
+select ok(private.tax_profile_mine() ->> 'legal_name' !~ '\s', 'lo cifrado va en una sola línea: un base64 con saltos no siempre se lee');
+select pruebas.limpiar();
+select is(pruebas.pide(pruebas.alu(), 'private.tax_profile_state() ->> $$outcome$$'), 'not_teacher', 'el estado, a una alumna, tampoco le dice nada');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'left', left_at = now() where id = :'nita_m';
+select pruebas.limpiar();
+select is(pruebas.pide(pruebas.nita(), 'private.tax_profile_mine() ->> $$outcome$$'), 'not_teacher', 'quien ya se fue no lee');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'active', left_at = null where id = :'nita_m';
+select pruebas.limpiar();
 select is(pruebas.pide(pruebas.alu(), 'private.tax_profile_mine() ->> $$outcome$$'), 'not_teacher', 'a una alumna, nada');
 select is(pruebas.lecturas(pruebas.alu()), 0::bigint, 'y no hay lectura que auditar');
 select is(pruebas.pide(pruebas.susi(), 'private.tax_profile_mine() ->> $$outcome$$'), 'no_profile', 'una suspendida lee, si tiene: está en solo lectura');
 select is(pruebas.lecturas(pruebas.susi()), 0::bigint, 'sin nada que leer, sin lectura');
+-- Una suspendida con datos sí los lee, aunque no los cambie.
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'active', suspended_at = null, suspension_reason = null where id = :'susi_m';
+select pruebas.limpiar();
+select is(pruebas.guarda(pruebas.susi(), :'susi_m'), 'saved', 'guarda mientras está activa');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = :'susi_m';
+select pruebas.limpiar();
+select is(pruebas.pide(pruebas.susi(), 'private.tax_profile_mine() ->> $$outcome$$'), 'ok', 'suspendida, los lee');
+select is(pruebas.lecturas(pruebas.susi()), 1::bigint, 'y queda en la auditoría');
+select is(pruebas.guarda(pruebas.susi(), :'susi_m', 1), 'suspended', 'pero no los cambia');
+-- Con la cuenta suspendida, no: la guarda ya la detiene, y la base no se fía de eso.
+select pruebas.como_dueno_sistema();
+select pruebas.limpiar();
+select pruebas.suspender(pruebas.susi());
+select pruebas.limpiar();
+select is(pruebas.pide(pruebas.susi(), 'private.tax_profile_mine() ->> $$outcome$$'), 'not_teacher', 'una cuenta suspendida no lee');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.susi();
+select pruebas.limpiar();
+select is(pruebas.lecturas(pruebas.susi()), 1::bigint, 'sin lectura de más');
+select is((select a.category::text from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.mara() limit 1), 'privacy', 'la lectura es de la categoría de privacidad');
+select is((select a.new_value ->> 'teacher_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.mara() limit 1), :'mara_m', 'dice de qué maestro');
+select is((select a.new_value - 'teacher_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.mara() limit 1), '{}'::jsonb, 'y nada del dato');
 
 -- ---------------------------------------------------------------------------------------
 -- Finanzas lee por una liquidación, nunca por un maestro.
@@ -191,6 +227,9 @@ select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) 
 select is(pruebas.lecturas(pruebas.f1()), 0::bigint, 'nada de eso es una lectura');
 select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$clabe_last4$$', :'pago_mara')), '7771', 'finanzas, por su liquidación, sí');
 select is(pruebas.lecturas(pruebas.f1()), 1::bigint, 'y queda en la auditoría');
+select is((select a.new_value ->> 'payout_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), :'pago_mara', 'con la liquidación por la que se leyó: es la condición de RF-510');
+select is((select a.new_value ->> 'teacher_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), :'mara_m', 'y de qué maestro');
+select isnt((select a.entity_id from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), null, 'y qué fila');
 select is(pruebas.pide(pruebas.fm(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_fm')), 'self', 'nadie sobre sí: lo suyo se lee por su pantalla');
 select is(pruebas.lecturas(pruebas.fm()), 0::bigint, 'sin lectura');
 
@@ -206,13 +245,29 @@ select is((pruebas.fila(pruebas.k1(), :'nita_m') ->> 'has_tax_data')::boolean, f
 select is((select count(*) from public.withholding_rules), 0::bigint, 'no hay reglas');
 select ok(not has_table_privilege('app_service', 'public.withholding_rules', 'insert, update, delete'), 'el servidor no las escribe');
 select pruebas.como_dueno_sistema();
-select lives_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from)
-  values ('612', 'person', 0.16, 0.10, 0.106667, '2027-01-01')$$, 'caben dos tercios de 16 %');
+select lives_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('612', 'person', 0.16, 0.10, 0.106667, '2027-01-01', 'Respuesta del contador')$$, 'caben dos tercios de 16 %');
+select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('612', 'person', 1.5, 0, 0, '2028-01-01', 'x')$$, '23514', null, 'una tasa de más de 1 no');
+select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('601', 'person', 0, 0, 0, '2028-01-01', 'x')$$, '23514', null, 'un régimen de otro tipo de persona no');
 select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from)
-  values ('612', 'person', 1.5, 0, 0, '2028-01-01')$$, '23514', null, 'una tasa de más de 1 no');
-select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from)
-  values ('601', 'person', 0, 0, 0, '2028-01-01')$$, '23514', null, 'un régimen de otro tipo de persona no');
+  values ('606', 'person', 0, 0, 0, '2028-01-01')$$, '23502', null, 'sin decir de qué respuesta sale, no');
+select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('606', 'person', 0, 0, 0, '2028-01-01', '  ')$$, '23514', null, 'ni en blanco');
+-- Dos reglas vigentes a la vez dejarían al cálculo sin saber cuál usar.
+select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('612', 'person', 0, 0, 0, '2028-01-01', 'x')$$, '23514', null, 'una regla encimada con otra sin fin no');
+select lives_ok($$update public.withholding_rules set effective_to = '2028-01-01' where tax_regime_code = '612'$$, 'se cierra la vigente, una vez');
+select lives_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+  values ('612', 'person', 0, 0, 0, '2028-01-01', 'x')$$, 'y la siguiente empieza ese día: el fin no cuenta');
+select throws_ok($$insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, effective_to, note)
+  values ('612', 'person', 0, 0, 0, '2027-06-01', '2027-07-01', 'x')$$, '23514', null, 'ni una en medio de otra');
+select throws_ok($$update public.withholding_rules set vat_rate = 0 where effective_from = '2027-01-01'$$, '42501', null, 'una tasa no se cambia: con ella se pudo haber liberado');
+select throws_ok($$update public.withholding_rules set effective_to = '2027-06-01' where effective_from = '2027-01-01'$$, '42501', null, 'ni el fin ya puesto');
+select throws_ok($$delete from public.withholding_rules where effective_from = '2027-01-01'$$, '42501', null, 'ni se borra');
 select pruebas.limpiar();
+select is((select count(*) from public.audit_log a where a.action = 'withholding_rules.insert' and a.category = 'config'), 2::bigint, 'y quedan en la auditoría, como los demás parámetros');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante.
@@ -235,6 +290,39 @@ create function private.tax_otra_lectura() returns bigint
 language sql security definer set search_path = ''
 as $$ select count(*) from private.teacher_tax_profiles $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'tax_otra_lectura'), 've una función nueva que nombra la tabla');
+drop function private.tax_otra_lectura();
+-- Una con el mismo nombre y otra firma, u otro esquema, tampoco es de la lista.
+create function public.tax_profile_mine() returns bigint language sql as $$ select count(*) from private.teacher_tax_profiles $$;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'tax_profile_mine'), 've el mismo nombre en otro esquema');
+drop function public.tax_profile_mine();
+create function private.tax_profile_for_payout(p_payout uuid, p_otro text) returns bigint language sql as $$ select count(*) from private.teacher_tax_profiles $$;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'tax_profile_for_payout'), 've el mismo nombre con otra firma');
+drop function private.tax_profile_for_payout(uuid, text);
+-- Una vista corre como su dueño: saltaría los permisos y la auditoría.
+create view private.tax_por_atras as select * from private.teacher_tax_profiles;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax table read by a view' and object_name = 'tax_por_atras'), 've una vista sobre la tabla');
+drop view private.tax_por_atras;
+-- El estado y la lista no leen lo cifrado.
+create or replace function private.tax_profile_state() returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$ begin return (select pg_catalog.jsonb_build_object('x', x.clabe_enc) from private.teacher_tax_profiles x limit 1); end $$;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax data out of its doors: tax_profile_state'), 've al estado leer lo cifrado');
+-- Las restricciones se revisan por lo que dicen, no por su nombre.
+alter table private.teacher_tax_profiles drop constraint teacher_tax_profiles_clabe_sealed;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax table constraint missing: teacher_tax_profiles_clabe_sealed'), 've sin la forma de la CLABE');
+alter table private.teacher_tax_profiles add constraint teacher_tax_profiles_clabe_sealed check (true) not valid;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax table constraint missing: teacher_tax_profiles_clabe_sealed'), 've una forma vacía con el mismo nombre');
+alter table private.teacher_tax_profiles drop constraint teacher_tax_profiles_last4_form;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax table constraint missing: teacher_tax_profiles_last4_form'), 've sin la de los últimos cuatro: sin ella, la CLABE entera cabría en claro');
+-- Una columna cifrada nueva tiene que quedar fuera de la auditoría.
+alter table private.teacher_tax_profiles add column otra_enc bytea;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax column not redacted in the audit: otra_enc'), 've una columna cifrada que entraría a la auditoría');
+alter table private.teacher_tax_profiles disable trigger audit_changes;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax table trigger missing: audit_changes'), 've la auditoría apagada');
+alter table public.withholding_rules disable trigger audit_changes;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax rules trigger missing: audit_changes'), 've la auditoría de las reglas apagada');
+grant execute on function private.tax_profile_state() to service_role;
+select ok(exists (select 1 from private.schema_violations() where problem like 'tax function missing or wrong: private.tax_profile_state%'), 've una función de más roles');
 
 select * from finish();
 rollback;

@@ -836,12 +836,12 @@ que no se ve leyendo un solo archivo:
   inserción, **sin ningún permiso para la aplicación, ni de leer**: una lectura directa no quedaría en la auditoría. Se entra por cuatro funciones: `tax_profile_save`
   (guarda lo suyo, con el maestro y la versión vista, porque entran a los datos asociados de lo cifrado: contesta `changed`, y `invalid` si lo cifrado no tiene forma),
   `tax_profile_state` (si hay y qué versión, sin lo cifrado: no es una lectura), `tax_profile_mine` (lo suyo, también suspendido) y `tax_profile_for_payout` (finanzas, por una
-  liquidación y nunca por un maestro, con su puerta, y `self` sobre sí). Las dos que leen escriben `tax_profile.read` en la misma transacción antes de devolver, y devuelven lo
-  cifrado en base64: **lo abre la aplicación, ya confirmada la transacción**. El régimen y el tipo de persona van en claro, y la auditoría deja fuera lo cifrado, los últimos
+  liquidación y nunca por un maestro, con su puerta, y `self` sobre sí). Las dos que leen escriben `tax_profile.read` en la misma transacción antes de devolver, con el maestro y, la de finanzas, la liquidación por la que se leyó, y devuelven lo
+  cifrado en base64, en una sola línea: **lo abre la aplicación, ya confirmada la transacción**. El régimen y el tipo de persona van en claro, y la auditoría deja fuera lo cifrado, los últimos
   cuatro y el régimen, porque configuración la lee. La base no ve el texto y sí su forma: encabezado, versión de la llave y largo exacto de la CLABE. `withholding_rules` nace sin filas, con
-  fracciones (`numeric(8,6)`) y sin permisos. `private.actor_teacher_id()` es el maestro de quien actúa, también por el servidor: `current_teacher_id()` mira la sesión de Auth, y
+  fracciones (`numeric(8,6)`), sin permisos y con su nota obligatoria; su guardián no deja que dos rijan a la vez ni que cambie una: solo se le pone fin, una vez, y ese día no cuenta. `private.actor_teacher_id()` es el maestro de quien actúa, también por el servidor: `current_teacher_id()` mira la sesión de Auth, y
   por el servidor contesta nulo. `teacher_roster` da `has_tax_data`. El área `tax` del vigilante exige los permisos, los disparadores, la auditoría de quien lee, y que **toda función que
-  nombre la tabla esté en su lista**: una nueva es una puerta nueva. Usa pgTAP 63. Guardar toma el candado `teacher_balance:` para la cuarta solicitud; esa carrera la prueba la integración de entonces.
+  nombre la tabla esté en su lista, por firma y esquema**: una nueva es una puerta nueva, y una vista también. El estado y la lista de PA-65 no pueden leer columnas de la tabla, y las restricciones se revisan por lo que dicen. Usa pgTAP 63. Guardar toma el candado `teacher_balance:` para la cuarta solicitud; esa carrera la prueba la integración de entonces.
   Para el B: `payee_kind` es `person` o `company`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
