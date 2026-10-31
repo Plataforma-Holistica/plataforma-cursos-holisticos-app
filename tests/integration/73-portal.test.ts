@@ -116,7 +116,7 @@ async function asSystemFor<T>(owner: Client, read: (tx: Tx) => Promise<T>): Prom
 }
 
 const drafts = (owner: Client) =>
-  createDrafts({
+  createDrafts({ afterDelete: () => Promise.resolve(),
     store: createDraftsStore(
       (actor, work) => asServerFor(owner, actor.claims, work),
       (claims, work) => asPerson(owner, claims, work),

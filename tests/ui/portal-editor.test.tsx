@@ -48,6 +48,7 @@ const draft = {
   contentRevision: 9,
   updatedAt: new Date().toISOString(),
   teacherName: "Ana Ruiz",
+  resources: [],
   modules: [
     {
       id: M1,
@@ -77,7 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   teaches("active");
   mocks.draftCourse.mockResolvedValue({ kind: "ready", value: draft });
-  mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: false }], levels: [] } });
+  mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: false }], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 } } });
 });
 
 describe("PA-43 · El editor de curso", () => {
@@ -123,7 +124,7 @@ describe("PA-43 · El editor de curso", () => {
   });
 
   it("una lista sin opciones lo dice en la lista misma, con quién las da de alta", async () => {
-    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [], levels: [] } });
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 } } });
     const { container } = render(await at());
     const practice = screen.getByRole("combobox", { name: /Práctica/ });
     expect(within(practice).getAllByRole("option").map((option) => option.textContent)).toEqual(["Todavía no hay prácticas para elegir"]);
@@ -135,7 +136,7 @@ describe("PA-43 · El editor de curso", () => {
   });
 
   it("con opciones, la lista pide elegir y no lleva esa nota", async () => {
-    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: true }], levels: [{ id: P1, name: "Inicial", active: true }] } });
+    mocks.draftChoices.mockResolvedValue({ kind: "ready", value: { practices: [{ id: P1, name: "Respiración", tone: 3, active: true }], levels: [{ id: P1, name: "Inicial", active: true }], resourceLimits: { maxBytes: 52428800, perPlace: 10 } } });
     render(await at());
     expect(within(screen.getByRole("combobox", { name: /Práctica/ })).getByRole("option", { name: "Elige una opción" })).toBeTruthy();
     expect(screen.queryByText(/Las da de alta el equipo de contenido/)).toBeNull();

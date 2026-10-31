@@ -35,6 +35,7 @@ const draft: DraftCourse = {
   contentRevision: 9,
   updatedAt: new Date().toISOString(),
   teacherName: "Ana Ruiz",
+  resources: [],
   modules: [
     {
       id: M1,
@@ -50,7 +51,7 @@ const draft: DraftCourse = {
     { id: M2, title: "Cierre", position: 2, revision: 1, lessons: [] },
   ],
 };
-const choices: DraftChoices = { practices: [], levels: [] };
+const choices: DraftChoices = { practices: [], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 } };
 
 const show = (readOnly = false) => ({
   user: userEvent.setup(),

@@ -6,6 +6,7 @@ import type { CourseState, DraftChoices, DraftCourse } from "@/services/drafts/e
 import type { StatusTone } from "@/ui/status-badge";
 
 import { editorButton, moveTarget } from "./outcomes";
+import { resourceButton } from "./resource-outcomes";
 
 // Lo que el editor de curso pinta (PA-43; T-402), ya en palabras y con los valores de sus botones. Lo arma
 // la página con lo que leyó: el navegador no decide qué se ofrece.
@@ -39,6 +40,17 @@ export interface LessonRow {
   targets: Option[];
 }
 
+/** Un recurso de la lista: lo que se ve y los valores de sus botones. */
+export interface ResourceRow {
+  id: string;
+  title: string;
+  /** «PDF, 2 MB». */
+  detail: string;
+  revision: number;
+  up: string | null;
+  down: string | null;
+}
+
 export interface ModuleRow {
   id: string;
   title: string;
@@ -54,7 +66,7 @@ export interface ModuleRow {
 export type Selected =
   | { kind: "course" }
   | { kind: "module"; id: string; title: string; place: string; lessons: number; save: string; askDelete: string; remove: string }
-  | { kind: "lesson"; id: string; title: string; place: string; description: string | null; save: string; askDelete: string; remove: string };
+  | { kind: "lesson"; id: string; title: string; place: string; description: string | null; save: string; askDelete: string; remove: string; resources: ResourceRow[] };
 
 export interface EditorView {
   course: string;
@@ -77,7 +89,9 @@ export interface EditorView {
     inactive: boolean;
     cover: { title: string; teacherName: string; practiceName: string | null; tone: number | null };
     save: string;
+    resources: ResourceRow[];
   };
+  resourceLimits: { maxBytes: number | null; maxText: string; perPlace: number | null };
   structure: { addModule: string; modules: ModuleRow[] };
   selected: Selected;
 }
@@ -101,6 +115,30 @@ function savedLabel(updatedAt: string, now: Date): string {
   const time = clockTime(updatedAt, PRODUCT_TIME_ZONE);
   const sameDay = productDay(new Date(updatedAt)) === productDay(now);
   return sameDay ? t(text.savedAt, { time }) : t(text.savedOn, { date: longDate(updatedAt), time });
+}
+
+const MEGA = 1024 * 1024;
+const KILO = 1024;
+
+/** El tamaño en palabras: en MB desde 1 MB, con un decimal si hace falta, y en KB lo demás. */
+function sizeText(bytes: number): string {
+  if (bytes >= MEGA) return t(text.resources.sizeMb, { size: String(Math.round((bytes / MEGA) * 10) / 10) });
+  return t(text.resources.sizeKb, { size: String(Math.max(1, Math.round(bytes / KILO))) });
+}
+
+const KIND_WORDS = { pdf: text.resources.kindPdf, doc: text.resources.kindDoc, audio: text.resources.kindAudio } as const;
+
+/** Los recursos de un lugar (una lección, o nulo: el curso), en orden. El primero no sube y el último no baja. */
+function resourceRows(draft: DraftCourse, lesson: string | null): ResourceRow[] {
+  const here = draft.resources.filter((resource) => resource.lessonId === lesson).sort((a, b) => a.position - b.position);
+  return here.map((resource, index) => ({
+    id: resource.id,
+    title: resource.title,
+    detail: t(text.resources.detail, { kind: KIND_WORDS[resource.kind], size: sizeText(resource.sizeBytes) }),
+    revision: resource.revision,
+    up: index > 0 ? resourceButton.up(resource.id, resource.position) : null,
+    down: index < here.length - 1 ? resourceButton.down(resource.id, resource.position) : null,
+  }));
 }
 
 function options(list: readonly { id: string; name: string; active: boolean }[], inactive: typeof text.inactivePractice | typeof text.inactiveLevel): Option[] {
@@ -135,6 +173,7 @@ export function editorView(
       save: editorButton.saveLesson(lesson.id, lesson.revision),
       askDelete: editorButton.askDeleteLesson(lesson.id),
       remove: editorButton.deleteLesson(lesson.id, lesson.revision),
+      resources: resourceRows(draft, lesson.id),
     };
     self = link({ lesson: lesson.id });
   } else if (moduleHit !== undefined) {
@@ -202,6 +241,12 @@ export function editorView(
       inactive: practice?.active === false || level?.active === false,
       cover: { title: draft.title, teacherName: draft.teacherName ?? "", practiceName: practice?.name ?? null, tone: practice?.tone ?? null },
       save: editorButton.saveCourse(draft.revision),
+      resources: resourceRows(draft, null),
+    },
+    resourceLimits: {
+      maxBytes: choices.resourceLimits.maxBytes,
+      maxText: choices.resourceLimits.maxBytes === null ? "" : sizeText(choices.resourceLimits.maxBytes),
+      perPlace: choices.resourceLimits.perPlace,
     },
     structure: { addModule: editorButton.addModule(draft.structureRevision), modules },
     selected,

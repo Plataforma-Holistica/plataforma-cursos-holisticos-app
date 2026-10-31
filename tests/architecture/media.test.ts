@@ -110,8 +110,14 @@ describe("solo la función única de medios firma", () => {
     );
   });
 
-  it("nadie firma un archivo por fuera: los recursos (RF-308) pasarán por la misma función", () => {
+  it("nadie firma un archivo por fuera: los recursos (T-404) pasan por el módulo de medios", () => {
     expect(naming(/createSignedUrl|createSignedUploadUrl|getSignedUrl/)).toEqual([]);
+    // La firma de una subida vive en el adaptador, y solo la pide el módulo de medios.
+    expect(naming(/object\/upload\/sign/)).toEqual(["src/adapters/supabase/storage.ts"]);
+    expect(naming(/adapters\/supabase\/storage/)).toEqual(["src/services/media/resource-files.ts"]);
+    expect(naming(/services\/media\/resource-files/)).toEqual(["src/services/drafts/editor.ts", "src/services/drafts/resources.ts"]);
+    // Sin `upsert`: un segundo envío con la misma dirección no reemplaza lo que se leyó al confirmar.
+    expect(readFileSync(join(src, "adapters/supabase/storage.ts"), "utf8")).not.toMatch(/x-upsert|upsert:\s*true/);
   });
 
   it("ver pasa por la guarda de sesión; revisar, por la del equipo", () => {

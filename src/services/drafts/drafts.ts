@@ -57,6 +57,18 @@ export interface DraftModule {
   revision: number;
   lessons: DraftLesson[];
 }
+/** Un recurso listo del borrador. Lo pendiente no se pinta, y la ruta nunca sale de la base. */
+export interface DraftResource {
+  id: string;
+  /** Nula: es del curso. */
+  lessonId: string | null;
+  title: string;
+  kind: "pdf" | "doc" | "audio";
+  sizeBytes: number;
+  position: number;
+  revision: number;
+}
+
 export interface DraftCourse {
   id: string;
   state: CourseState;
@@ -71,6 +83,7 @@ export interface DraftCourse {
   contentRevision: number;
   updatedAt: string;
   modules: DraftModule[];
+  resources: DraftResource[];
   /** El nombre de su maestro, para la portada. */
   teacherName: string | null;
 }
@@ -88,6 +101,8 @@ export interface CatalogChoice {
 export interface DraftChoices {
   practices: (CatalogChoice & { tone: number })[];
   levels: CatalogChoice[];
+  /** Los topes de los recursos, para decirlos y revisar antes de subir. Nulos si el parámetro no tiene valor. */
+  resourceLimits: { maxBytes: number | null; perPlace: number | null };
 }
 
 /** Lo que contesta cada función de la base. */
@@ -152,6 +167,8 @@ export interface DraftsStore {
 
 export interface DraftsDeps {
   store: DraftsStore;
+  /** Después de borrar una lección, un módulo o el curso: sus recursos se fueron, y sus archivos sobran. */
+  afterDelete: (claims: VerifiedClaims, course: string) => Promise<void>;
   checkSession: (reader: CookieReader) => Promise<SessionCheck>;
   report: (code: FailureCode) => Promise<void>;
 }
@@ -283,9 +300,11 @@ export function createDrafts(deps: DraftsDeps) {
 
   function deleteModule(reader: CookieReader, input: { course: string; module: string; seen: number }) {
     const formed = isId(input.course) && isId(input.module) && isCount(input.seen);
-    return change<DeleteAnswer>(reader, formed, async (claims) => ({
-      kind: await deps.store.deleteModule(claims, input.course, input.module, input.seen),
-    }));
+    return change<DeleteAnswer>(reader, formed, async (claims) => {
+      const kind = await deps.store.deleteModule(claims, input.course, input.module, input.seen);
+      if (kind === "deleted") await deps.afterDelete(claims, input.course);
+      return { kind };
+    });
   }
 
   function moveModule(reader: CookieReader, input: { course: string; module: string; seenPosition: number; toPosition: number }) {
@@ -321,9 +340,11 @@ export function createDrafts(deps: DraftsDeps) {
 
   function deleteLesson(reader: CookieReader, input: { course: string; lesson: string; seen: number }) {
     const formed = isId(input.course) && isId(input.lesson) && isCount(input.seen);
-    return change<DeleteAnswer>(reader, formed, async (claims) => ({
-      kind: await deps.store.deleteLesson(claims, input.course, input.lesson, input.seen),
-    }));
+    return change<DeleteAnswer>(reader, formed, async (claims) => {
+      const kind = await deps.store.deleteLesson(claims, input.course, input.lesson, input.seen);
+      if (kind === "deleted") await deps.afterDelete(claims, input.course);
+      return { kind };
+    });
   }
 
   function moveLesson(
@@ -348,9 +369,11 @@ export function createDrafts(deps: DraftsDeps) {
    */
   function deleteCourse(reader: CookieReader, input: { course: string; seen: number }) {
     const formed = isId(input.course) && isCount(input.seen);
-    return change<DeleteAnswer>(reader, formed, async (claims) => ({
-      kind: await deps.store.deleteCourse(claims, input.course, input.seen),
-    }));
+    return change<DeleteAnswer>(reader, formed, async (claims) => {
+      const kind = await deps.store.deleteCourse(claims, input.course, input.seen);
+      if (kind === "deleted") await deps.afterDelete(claims, input.course);
+      return { kind };
+    });
   }
 
   return {

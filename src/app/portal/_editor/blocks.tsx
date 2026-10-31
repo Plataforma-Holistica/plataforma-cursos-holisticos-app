@@ -20,9 +20,10 @@ import { Select } from "@/ui/select";
 import { CountedField } from "../_lib/counted-field";
 import { failureText, problemText } from "../_lib/words";
 import { editorAction } from "./actions";
-import { DATA_ID, LESSON_ID, MODULE_ID, STRUCTURE_ID } from "./anchors";
+import { DATA_ID, LESSON_ID, MODULE_ID, RESOURCES_ID, STRUCTURE_ID } from "./anchors";
 import { editorButton, type BlockState, type Problems, type Values } from "./outcomes";
 import { dropButton, stepTo, type Dragged } from "./reorder";
+import { ResourcesBlock } from "./resources";
 import type { EditorView, ModuleRow, Option, Selected } from "./rows";
 import { STRUCTURE_KEY, useUnsaved } from "./unsaved";
 
@@ -284,6 +285,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
           className="w-full max-w-md rounded-sm"
         />
       </div>
+      <ResourcesBlock course={view.course} lesson={null} items={data.resources} editable={view.editable} self={view.paths.self} limits={view.resourceLimits} />
     </section>
   );
 }
@@ -717,6 +719,9 @@ export function StructureBlock({ view }: { view: EditorView }) {
         <Icon icon={FileText} />
         {text.courseData}
       </Link>
+      <Link href={`${view.paths.base}#${RESOURCES_ID}`} className="min-h-touch content-center px-3 text-body-s text-text-2 hover:text-text hover:underline">
+        {t(text.resources.link, { count: String(view.data.resources.length) })}
+      </Link>
       <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
       <BlockResult message={result.message} tone={result.tone} pending={pending} pendingText={text.saving} answer={answer} spoken={spoken} />
       {view.editable && hydrated && (
@@ -892,6 +897,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
       ) : (
         isLesson && <p className="whitespace-pre-line text-text-2">{selected.description}</p>
       )}
+      {isLesson && <ResourcesBlock course={view.course} lesson={selected.id} items={selected.resources} editable={view.editable} self={view.paths.self} limits={view.resourceLimits} />}
     </section>
   );
 }

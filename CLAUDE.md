@@ -65,6 +65,7 @@ pnpm media:check  # contra Mux: con una dirección firmada vigente sirve el vide
 pnpm media:captions-test [<archivo>]   # le agrega a un video de prueba de Mux la pista de subtítulos escrita a mano
 pnpm db:student [<correo@prueba.test>]   # publica el curso de prueba y deja una alumna con suscripción, para ver la lección desde otro aparato de la red
 pnpm db:rollup [--completo]   # corre ahora, en la base local, la consolidación de cada noche (T-207) e imprime las corridas y el consolidado del mes
+pnpm storage:repaso [--ver]   # el repaso de los recursos en local: se lleva los pendientes vencidos y borra de la cubeta lo que ninguna fila nombra
 pnpm team:handoff   # imprime un código para dictar y su huella, para la emergencia. No toca ninguna base
 pnpm db:migration <nombre>   # crea una migración vacía en supabase/migrations/
 pnpm db:orden    # que las migraciones de esta rama van después de las de main, y que no toca ninguna de main (la integración continua lo corre también)
@@ -766,6 +767,26 @@ que no se ve leyendo un solo archivo:
   prueba:** vaciar `draft_lessons` sola ahora lo detiene la clave foránea (0A000) antes que el guardián, así que vacía las
   dos tablas juntas. Una política sobre `storage.objects` y apagar su seguridad por fila no se pueden provocar en pgTAP: la tabla es de
   `supabase_storage_admin`.
+- **Lo que T-404 suma al carril B** (segunda solicitud, `t404_archivo_del_recurso`). El maestro adjunta, ordena y quita
+  recursos en el editor (`_editor/resources.tsx`, con su propia acción y su estado: `resource-actions.ts` y
+  `resource-outcomes.ts`). Adjuntar son tres pasos y pide JavaScript: `beginResourceAction` (la base reserva la fila y se
+  firma la ruta que ella contestó), el navegador sube con un `PUT` (`XMLHttpRequest`, por el avance; el tipo lo fija el
+  servidor por la extensión, `resourceTypeOf`, no el navegador) y `confirmResourceAction`. La lista funciona sin
+  JavaScript. El adaptador es `src/adapters/supabase/storage.ts`: habla con la API de Storage con la llave secreta y
+  firma sin `upsert` (medido: un segundo envío con la misma dirección falla y no cambia la versión, y la dirección no sirve
+  para otra ruta). Solo lo llama `src/services/media/resource-files.ts`, y las pruebas de arquitectura lo exigen. El
+  contenido real lo mira `src/domain/catalog/resource-content.ts` por los primeros bytes (y el final de un Word: el
+  directorio del ZIP, sin abrirlo); `false` solo si se leyeron bytes y no corresponden, y cualquier error de lectura manda
+  nulo. Nadie de la aplicación lee `storage_path`: el servidor la pide con `private.resource_file(curso, recurso)`, solo
+  del maestro activo dueño. Lo que sobra se borra después de quitar, de un rechazo o de borrar una lección, un módulo o el
+  curso (`cleanUp`, `afterDelete` en `createDrafts`), y una falla ahí no tumba lo que ya se hizo: se reporta
+  (`resource_cleanup_failed`), y lo alcanza el repaso (`pnpm storage:repaso` en local; en producción, el manual). Si no se
+  pudo firmar o la subida no llegó, se cancela la fila, que ocuparía lugar 3 h. Mientras un archivo sube, salir pregunta
+  (la clave `recurso-subiendo` de `unsaved.tsx`). Los recursos del curso van al final de «Datos del curso», y la estructura
+  enlaza a ese bloque (decisión mía sin confirmar: el diseño pedía su panel). Renombrar existe en la base y no tiene
+  pantalla (decisión mía sin confirmar). El selector de archivos está en `_editor/` y no en `src/ui/`: T-403 lo saca al
+  componente `FileUpload` cuando haya dos que lo usen. Usa pgTAP 70 e integración 90, contra el Storage local, y un caso en
+  `tests/e2e/equipo/portal.equipo.ts` que sube de verdad.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
