@@ -6,6 +6,7 @@ import { messages, t } from "@/messages";
 import { sessionEmail } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { CAPABILITIES } from "@/services/account/team";
+import { teacherStanding } from "@/services/teachers/teachers";
 import { Button } from "@/ui/button";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
@@ -31,7 +32,11 @@ export default async function AdminHomePage() {
   // pide una, a quien no la tenga se le dice cuál (PA-88).
   if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;
 
-  const email = await sessionEmail(await cookieReader());
+  const reader = await cookieReader();
+  const email = await sessionEmail(reader);
+  // Una comodidad, como los demás enlaces: quién acepta lo decide la guarda de esa pantalla.
+  const teacher = await teacherStanding(reader);
+  const invited = teacher.kind === "teacher" && (teacher.standing.state === "invited" || teacher.standing.state === "invited_unproven");
   // En el orden de siempre, y solo las que el catálogo sabe nombrar.
   const capabilities = CAPABILITIES.filter((capability) => step.capabilities.includes(capability));
 
@@ -79,6 +84,11 @@ export default async function AdminHomePage() {
       {capabilities.includes("finance") && (
         <p>
           <TextLink href={ROUTES.periods}>{text.admin.periods}</TextLink>
+        </p>
+      )}
+      {invited && (
+        <p>
+          <TextLink href={ROUTES.portalInvitation}>{t(text.admin.teacherInvitation)}</TextLink>
         </p>
       )}
       <p>

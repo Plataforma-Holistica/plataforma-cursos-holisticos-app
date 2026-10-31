@@ -53,6 +53,7 @@ interface Setup {
   verify?: unknown;
   remove?: "removed" | "unknown";
   signOut?: "closed" | "unknown";
+  teacherEntry?: (claims: VerifiedClaims, ticketPrint: string | null) => Promise<"none" | "teacher_invited" | "teacher_notice" | "teacher">;
 }
 
 function teamWith(setup: Setup = {}) {
@@ -100,7 +101,7 @@ function teamWith(setup: Setup = {}) {
         return Promise.resolve();
       },
     },
-    { checkSession: () => Promise.resolve(setup.check ?? { kind: "pass", claims }), store, tickets, factors },
+    { checkSession: () => Promise.resolve(setup.check ?? { kind: "pass", claims }), store, tickets, factors, teacherEntry: setup.teacherEntry },
   );
   return { ...team, calls, reported, auth, store };
 }
@@ -240,6 +241,34 @@ describe("el estado de quien acaba de quedar dentro", () => {
     const team = teamWith({ standing: "throws" });
     expect(await team.standingAtEntry(claims, browser())).toBeNull();
     expect(team.reported).toEqual(["team_unavailable"]);
+  });
+
+  it("quien no es del equipo: se le pregunta por su estado de maestro, con las claims y el resguardo", async () => {
+    const teacherEntry = vi.fn(() => Promise.resolve("teacher_notice" as const));
+    const team = teamWith({ standing: { state: "none" }, teacherEntry });
+    expect(await team.standingAtEntry(claims, browser())).toBe("teacher_notice");
+    expect(teacherEntry).toHaveBeenCalledExactlyOnceWith(claims, sha256(TICKET));
+  });
+
+  it("el equipo manda: a quien es del equipo no se le pregunta por el maestro", async () => {
+    const teacherEntry = vi.fn(() => Promise.resolve("teacher" as const));
+    const team = teamWith({ standing: MEMBER, teacherEntry });
+    expect(await team.standingAtEntry(raised, browser())).toBe("member");
+    expect(teacherEntry).not.toHaveBeenCalled();
+  });
+
+  it("si no se supo del equipo, tampoco se pregunta por el maestro", async () => {
+    const teacherEntry = vi.fn(() => Promise.resolve("teacher" as const));
+    const team = teamWith({ standing: "throws", teacherEntry });
+    expect(await team.standingAtEntry(claims, browser())).toBeNull();
+    expect(teacherEntry).not.toHaveBeenCalled();
+  });
+
+  it("si no se supo del maestro, sigue como cualquier cuenta y queda dicho", async () => {
+    const teacherEntry = vi.fn(() => Promise.reject(new Error("sin base")));
+    const team = teamWith({ standing: { state: "none" }, teacherEntry });
+    expect(await team.standingAtEntry(claims, browser())).toBe("none");
+    expect(team.reported).toEqual(["teacher_unavailable"]);
   });
 });
 

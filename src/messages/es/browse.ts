@@ -20,6 +20,7 @@ export const browse = defineMessages({
   home: {
     pageTitle: "Inicio",
     greeting: "Hola, {name}",
+    invitationGone: "Esa invitación ya no sirve. Pide que te manden otra.",
     greetingAnonymous: "Hola",
     continueTitle: "Continuar viendo",
     startersTitle: "Para empezar",

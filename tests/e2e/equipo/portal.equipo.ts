@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Locator, type Page } from "@playwright
 
 import { actionFields, postAction } from "../support/actions";
 import { a11yViolations } from "../support/a11y";
-import { clearCounters, ownerQuery, person, SESSION_COOKIE, type Person } from "../support/stack";
+import { clearCounters, lastMailTo, ownerQuery, person, SESSION_COOKIE, tokenHashIn, type Person } from "../support/stack";
 
 // El portal del maestro (T-402, segunda solicitud), de extremo a extremo: FL-32 (crear un curso, sus
 // datos, módulos y lecciones, ordenar, mover, borrar, salir y volver) con JavaScript y sin él, los
@@ -20,12 +20,20 @@ const PRACTICE = "Respiración portal e2e";
 const LEVEL = "Inicial portal e2e";
 
 /** Hace maestra a esa persona, como el dueño de la base declarado sistema. */
-async function makeTeacher(who: Person, status: "active" | "suspended" = "active"): Promise<void> {
+async function makeTeacher(who: Person, status: "active" | "suspended" = "active", noticeAccepted = true): Promise<void> {
   await ownerQuery(
     `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
      insert into public.teachers (profile_id, status, suspended_at, suspension_reason)
      select $1, $2::public.teacher_status, case when $3 then now() end, case when $3 then 'prueba' end from declared`,
     [who.id, status, status === "suspended"],
+  );
+  // Con el aviso del maestro aceptado: sin él, el portal lo manda a aceptarlo (decisión de Sergio del 2026-10-30, T-401).
+  if (!noticeAccepted) return;
+  await ownerQuery(
+    `with declared as materialized (select set_config('app.actor_id', $1::text, true) as done)
+     insert into public.consents (profile_id, legal_document_id, origin)
+     select $1::uuid, private.current_legal_document('teacher_privacy_notice'), 'account_settings' from declared`,
+    [who.id],
   );
 }
 
@@ -382,5 +390,201 @@ test("en el teléfono, lo elegido va primero y se vuelve a la estructura", async
   await expect(page.getByRole("heading", { level: 2, name: "Una" })).toBeInViewport();
   await page.getByRole("link", { name: "Volver a la estructura" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Estructura del curso" })).toBeInViewport();
+  expect(await a11yViolations(page)).toEqual([]);
+});
+
+// La invitación del maestro (T-401, PA-40, FL-30): sin correo propio ni enlace con token. Quien invita le avisa por
+// fuera; la persona prueba su buzón recuperando su contraseña en ese navegador, entra, y acepta el contrato y el aviso.
+
+const NEW_PASSWORD = "Una-contraseña-nueva-del-maestro-9";
+
+/** Un maestro cargado por el sistema, con su invitación al correo de esa persona, como el dueño de la base. */
+async function inviteTeacher(who: Person): Promise<void> {
+  const slug = `invitada-${who.id.slice(0, 8)}`;
+  const [row] = await ownerQuery<{ id: string }>(
+    `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+     select private.system_add_teacher('Maestra Invitada', $1, null)::text as id from declared`,
+    [slug],
+  );
+  const [answered] = await ownerQuery<{ answer: string }>(
+    `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+     select private.system_invite_teacher($1::uuid, $2) as answer from declared`,
+    [row?.id, who.email],
+  );
+  expect(answered?.answer).toBe("invited_existing");
+}
+
+async function enter(page: Page, email: string, password: string): Promise<void> {
+  await page.goto("/entrar");
+  await page.getByLabel("Correo").fill(email);
+  await page.getByLabel("Contraseña", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Entrar" }).click();
+}
+
+/** Recupera la contraseña en este navegador: deja el resguardo del buzón. */
+async function recoverHere(page: Page, email: string): Promise<void> {
+  await page.goto("/recuperar");
+  await page.getByLabel("Correo").fill(email);
+  await page.getByRole("button", { name: "Mandarme el enlace" }).click();
+  await expect(page.getByText(/Si ese correo tiene cuenta, te mandamos un enlace\./)).toBeVisible();
+  await page.goto(`/recuperar/${tokenHashIn(await lastMailTo(email), "recuperar")}`);
+  await page.getByLabel("Contraseña nueva").fill(NEW_PASSWORD);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL("/entrar");
+}
+
+const consentsOf = async (who: Person) =>
+  (
+    await ownerQuery<{ type: string }>(
+      `select d.doc_type::text as type from public.consents c join public.legal_documents d on d.id = c.legal_document_id
+       where c.profile_id = $1 and d.doc_type in ('teacher_agreement', 'teacher_privacy_notice') order by 1`,
+      [who.id],
+    )
+  ).map((row) => row.type);
+
+test("invitada con cuenta: se le pide probar su buzón, recupera su contraseña, acepta los dos textos y llega al portal", async ({ page }) => {
+  const ana = await person();
+  await inviteTeacher(ana);
+
+  await enter(page, ana.email, ana.password);
+  await expect(page).toHaveURL("/portal/invitacion");
+  await expect(page.getByRole("heading", { level: 1, name: "Confirma tu correo para seguir" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Aceptar y entrar" })).toHaveCount(0);
+  expect(await a11yViolations(page)).toEqual([]);
+  // A una invitada, toda ruta del portal la lleva a su invitación. Y no queda encerrada.
+  await page.goto("/portal/cursos");
+  await expect(page).toHaveURL("/portal/invitacion");
+  await page.getByRole("link", { name: "Ir a mi inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+
+  await recoverHere(page, ana.email);
+  await enter(page, ana.email, NEW_PASSWORD);
+  await expect(page).toHaveURL("/portal/invitacion");
+  await expect(page.getByRole("heading", { level: 1, name: "Maestra Invitada, te invitamos a dar clases" })).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Sin marcar no acepta, y lo dice junto a cada casilla.
+  await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+  await expect(page.getByRole("link", { name: "Falta aceptar el contrato." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Falta aceptar el aviso de privacidad." })).toBeVisible();
+  expect(await consentsOf(ana)).toEqual([]);
+
+  await page.getByLabel("He leído y acepto el contrato.").check();
+  await page.getByLabel("He leído y acepto el aviso de privacidad.").check();
+  await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+  await expect(page).toHaveURL("/portal");
+  await expect(page.getByText(/Ya eres /)).toBeVisible();
+  expect(await consentsOf(ana)).toEqual(["teacher_agreement", "teacher_privacy_notice"]);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Sirvió una vez: ya no hay invitación que ver.
+  await page.goto("/portal/invitacion");
+  await expect(page).toHaveURL("/portal");
+  await page.getByRole("link", { name: "Ir a mis cursos" }).click();
+  await expect(page).toHaveURL("/portal/cursos");
+});
+
+test("sin JavaScript también se acepta", async ({ browser }) => {
+  const beto = await person();
+  await inviteTeacher(beto);
+  const { context, page } = await noJs(browser);
+  try {
+    await recoverHere(page, beto.email);
+    await enter(page, beto.email, NEW_PASSWORD);
+    await expect(page).toHaveURL("/portal/invitacion");
+    await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+    await expect(page.getByRole("link", { name: "Falta aceptar el contrato." })).toBeVisible();
+    await page.getByLabel("He leído y acepto el contrato.").check();
+    await page.getByLabel("He leído y acepto el aviso de privacidad.").check();
+    await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+    await expect(page).toHaveURL("/portal");
+    expect(await consentsOf(beto)).toEqual(["teacher_agreement", "teacher_privacy_notice"]);
+  } finally {
+    await context.close();
+  }
+});
+
+for (const withJs of [true, false]) {
+  test(`si la invitación se va con la pantalla abierta, lo dice su inicio y no anota nada (${withJs ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const gala = await person();
+    await inviteTeacher(gala);
+    const { context, page } = withJs ? await (async () => { const context = await browser.newContext(); return { context, page: await context.newPage() }; })() : await noJs(browser);
+    try {
+      await recoverHere(page, gala.email);
+      await enter(page, gala.email, NEW_PASSWORD);
+      await expect(page).toHaveURL("/portal/invitacion");
+      await page.getByLabel("He leído y acepto el contrato.").check();
+      await page.getByLabel("He leído y acepto el aviso de privacidad.").check();
+      await ownerQuery(
+        `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+         update private.teacher_invitations set revoked_at = now() from declared where email = lower($1)`,
+        [gala.email],
+      );
+      await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+      await expect(page).toHaveURL("/inicio");
+      await expect(page.getByText(/Esa invitación ya no sirve/)).toBeVisible();
+      expect(await consentsOf(gala)).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test("la prueba del buzón hecha en otro navegador no sirve", async ({ page, browser }) => {
+  const caro = await person();
+  await inviteTeacher(caro);
+  const other = await browser.newContext();
+  try {
+    await recoverHere(await other.newPage(), caro.email);
+  } finally {
+    await other.close();
+  }
+  await enter(page, caro.email, NEW_PASSWORD);
+  await expect(page).toHaveURL("/portal/invitacion");
+  await expect(page.getByRole("heading", { level: 1, name: "Confirma tu correo para seguir" })).toBeVisible();
+});
+
+test("a una alumna, la invitación le contesta lo mismo que una ruta que no existe", async ({ page }) => {
+  const dani = await person();
+  await signIn(page, dani, "/inicio");
+  const invitation = await page.goto("/portal/invitacion");
+  const missing = await page.goto("/portal/esto-no-existe");
+  expect(invitation?.status()).toBe(404);
+  expect(missing?.status()).toBe(404);
+  expect((await page.goto("/portal/aviso"))?.status()).toBe(404);
+  expect((await page.goto("/portal"))?.status()).toBe(404);
+});
+
+test("un maestro al que le falta el aviso va al aviso desde cualquier ruta, lo acepta y vuelve a donde iba", async ({ page }) => {
+  const eli = await person();
+  await makeTeacher(eli, "active", false);
+  await enter(page, eli.email, eli.password);
+  await expect(page).toHaveURL("/portal/aviso");
+  await page.goto("/portal/cursos");
+  await expect(page).toHaveURL("/portal/aviso?volver=%2Fportal%2Fcursos");
+  await expect(page.getByRole("heading", { level: 1, name: "Actualizamos el aviso de privacidad" })).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+  await page.getByRole("button", { name: "Aceptar" }).click();
+  await expect(page.getByRole("link", { name: "Falta aceptar el aviso de privacidad." })).toBeVisible();
+  await page.getByLabel("He leído y acepto el aviso de privacidad.").check();
+  await page.getByRole("button", { name: "Aceptar" }).click();
+  await expect(page).toHaveURL("/portal/cursos");
+  expect(await consentsOf(eli)).toEqual(["teacher_privacy_notice"]);
+});
+
+test("un maestro suspendido ve en su portal el texto escrito para él, nunca el motivo interno, y no se le pide el aviso", async ({ page }) => {
+  const fer = await person();
+  await makeTeacher(fer, "suspended", false);
+  await ownerQuery(
+    `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+     update public.teachers set suspension_reason = 'Motivo interno de la prueba', suspension_notice = 'Tu cuenta está en pausa mientras revisamos un caso.'
+     from declared where profile_id = $1`,
+    [fer.id],
+  );
+  await enter(page, fer.email, fer.password);
+  await expect(page).toHaveURL("/portal");
+  await expect(page.getByText("Tu cuenta está en pausa mientras revisamos un caso.")).toBeVisible();
+  await expect(page.getByText("Motivo interno de la prueba")).toHaveCount(0);
+  expect(await page.content()).not.toContain("Motivo interno de la prueba");
   expect(await a11yViolations(page)).toEqual([]);
 });

@@ -14,6 +14,7 @@ import {
   publicPageStep,
   secondFactorPageStep,
   sessionPageStep,
+  type PortalKind,
   teacherPageStep,
   visitorPageStep,
 } from "./guard-steps";
@@ -90,9 +91,10 @@ export async function requireAdmin(path: string, capability?: Capability) {
  * Para una pantalla del portal del maestro (T-402). Quién es maestro lo dice la base, por
  * `teacherStanding`. A quien no lo es le contesta lo mismo que una ruta que no existe (PA-19).
  * @param path La ruta que se pidió: es a donde se vuelve después de entrar.
+ * @param kind El tipo de pantalla que se pide.
  */
-export async function requireTeacher(path: string) {
-  const step = teacherPageStep(await teacherStanding(await cookieReader()), path);
+export async function requireTeacher(path: string, kind: PortalKind = "work") {
+  const step = teacherPageStep(await teacherStanding(await cookieReader()), path, kind);
   if (step.kind === "redirect") redirect(step.to);
   if (step.kind === "not_found") notFound();
   return step;

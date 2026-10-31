@@ -377,7 +377,10 @@ const teacherChecks: Record<string, TeacherCheck> = {
   unavailable: { kind: "unavailable" },
   none: teacher({ state: "none" }),
   active: teacher({ state: "active", teacher: { id: TEACHER } }),
-  teacherSuspended: teacher({ state: "suspended", teacher: { id: TEACHER } }),
+  teacherSuspended: teacher({ state: "suspended", teacher: { id: TEACHER }, notice: "En pausa." }),
+  invited: teacher({ state: "invited", name: "Nora" }),
+  unproven: teacher({ state: "invited_unproven", name: null }),
+  needsNotice: teacher({ state: "needs_notice", teacher: { id: TEACHER } }),
 };
 
 describe("una pantalla del portal del maestro", () => {
@@ -391,16 +394,51 @@ describe("una pantalla del portal del maestro", () => {
     ["unavailable", { kind: "unavailable" }],
     // Quien no es maestro recibe lo mismo que en una ruta que no existe.
     ["none", { kind: "not_found" }],
-    ["active", { kind: "render", claims, teacher: { id: TEACHER, status: "active" } }],
+    ["active", { kind: "render", screen: "work", claims, teacher: { id: TEACHER, status: "active", notice: null } }],
     // El maestro suspendido entra, en solo lectura (RF-702): lo decide la pantalla con `status`.
-    ["teacherSuspended", { kind: "render", claims, teacher: { id: TEACHER, status: "suspended" } }],
+    ["teacherSuspended", { kind: "render", screen: "work", claims, teacher: { id: TEACHER, status: "suspended", notice: "En pausa." } }],
+    // A un invitado, toda ruta lo lleva a su invitación; a quien le falta el aviso, al aviso, y de ahí vuelve.
+    ["invited", { kind: "redirect", to: "/portal/invitacion" }],
+    ["unproven", { kind: "redirect", to: "/portal/invitacion" }],
+    ["needsNotice", { kind: "redirect", to: "/portal/aviso?volver=%2Fportal%2Fcursos" }],
   ] as const)("%s", (name, expected) => {
     const found = teacherChecks[name];
     if (!found) throw new Error(`No hay un caso llamado ${name}.`);
     expect(teacherPageStep(found, "/portal/cursos")).toEqual(expected);
   });
 
-  it("solo se pinta para un maestro activo o suspendido", () => {
+  describe("la invitación (PA-40)", () => {
+    it.each([
+      ["none", { kind: "not_found" }],
+      ["invited", { kind: "render", screen: "invitation", claims, invitation: { proven: true, name: "Nora" } }],
+      ["unproven", { kind: "render", screen: "invitation", claims, invitation: { proven: false, name: null } }],
+      ["needsNotice", { kind: "redirect", to: "/portal/aviso" }],
+      ["active", { kind: "redirect", to: "/portal" }],
+      ["teacherSuspended", { kind: "redirect", to: "/portal" }],
+    ] as const)("%s", (name, expected) => {
+      const found = teacherChecks[name];
+      if (!found) throw new Error(`No hay un caso llamado ${name}.`);
+      expect(teacherPageStep(found, "/portal/invitacion", "invitation")).toEqual(expected);
+    });
+  });
+
+  describe("el aviso vuelto a pedir", () => {
+    it.each([
+      ["none", { kind: "not_found" }],
+      ["invited", { kind: "redirect", to: "/portal/invitacion" }],
+      ["unproven", { kind: "redirect", to: "/portal/invitacion" }],
+      ["needsNotice", { kind: "render", screen: "notice", claims }],
+      ["active", { kind: "redirect", to: "/portal" }],
+      // A un suspendido no se le pide (decisión de Sergio del 2026-10-30).
+      ["teacherSuspended", { kind: "redirect", to: "/portal" }],
+    ] as const)("%s", (name, expected) => {
+      const found = teacherChecks[name];
+      if (!found) throw new Error(`No hay un caso llamado ${name}.`);
+      expect(teacherPageStep(found, "/portal/aviso", "notice")).toEqual(expected);
+    });
+  });
+
+  it("solo se pinta una pantalla de trabajo para un maestro activo o suspendido", () => {
     for (const [name, value] of Object.entries(teacherChecks)) {
       expect(teacherPageStep(value, "/portal/cursos").kind === "render", name).toBe(name === "active" || name === "teacherSuspended");
     }
