@@ -73,24 +73,28 @@ async function asServerFor<T>(owner: Client, claims: VerifiedClaims, write: (tx:
 
 const noReport = () => Promise.reject(new Error("Nada debía reportarse."));
 
-const servicesOn = (owner: Client) => ({
-  drafts: createDrafts({
-    afterDelete: () => Promise.resolve(),
-    store: createDraftsStore(
-      (actor, work) => asServerFor(owner, actor.claims, work),
-      () => Promise.reject(new Error("Aquí no se lee como la persona.")),
-      () => Promise.reject(new Error("Aquí no se lee como sistema.")),
-    ),
-    checkSession: (reader) => testServices().checkSession(reader),
-    report: noReport,
-  }),
-  resources: createDraftResources({
+const servicesOn = (owner: Client) => {
+  const resources = createDraftResources({
     store: createResourcesStore((actor, work) => asServerFor(owner, actor.claims, work)),
     files: createResourceFiles(storage),
     checkSession: (reader) => testServices().checkSession(reader),
     report: noReport,
-  }),
-});
+  });
+  return {
+    resources,
+    // Con lo mismo que arma `editor.ts`: borrar se lleva los objetos.
+    drafts: createDrafts({
+      afterDelete: resources.cleanUp,
+      store: createDraftsStore(
+        (actor, work) => asServerFor(owner, actor.claims, work),
+        () => Promise.reject(new Error("Aquí no se lee como la persona.")),
+        () => Promise.reject(new Error("Aquí no se lee como sistema.")),
+      ),
+      checkSession: (reader) => testServices().checkSession(reader),
+      report: noReport,
+    }),
+  };
+};
 
 async function newCourse(owner: Client, who: Person): Promise<string> {
   const created = await servicesOn(owner).drafts.createCourse(who.jar, { token: crypto.randomUUID(), title: "Con recursos" });
@@ -174,6 +178,23 @@ describe("subir un recurso de verdad", () => {
     });
   });
 
+  it("tampoco si el navegador pide reemplazar: lo manda la firma, no su cabecera", async () => {
+    const who = await person();
+    await reverted(async (owner) => {
+      await teacher(owner, who);
+      const course = await newCourse(owner, who);
+      const started = await begin(owner, who, course);
+      expect((await put(started.url, PDF_BYTES, started.mime)).ok).toBe(true);
+      const response = await fetch(started.url, {
+        method: "PUT",
+        headers: { "content-type": started.mime, "x-upsert": "true" },
+        body: new Uint8Array(ascii("%PDF-1.7\notra cosa")),
+      });
+      expect(response.ok).toBe(false);
+      expect(Buffer.from((await storage.readStart(started.path, PDF_BYTES.length)) ?? []).equals(PDF_BYTES)).toBe(true);
+    });
+  });
+
   it("la dirección no sirve para otra ruta", async () => {
     const who = await person();
     await reverted(async (owner) => {
@@ -242,6 +263,30 @@ describe("lo que no es lo que dice", () => {
       expect(await servicesOn(owner).resources.confirmResource(who.jar, { course, resource: second.resource })).toEqual({ kind: "rejected", reason: "content" });
     });
   });
+
+  it("un Word más chico que lo que se pide leer de su final también se lee", async () => {
+    const who = await person();
+    const small = Buffer.concat([ascii("PK\x03\x04"), ascii("[Content_Types].xml"), ascii("word/document.xml"), ascii("PK\x05\x06"), Buffer.alloc(18)]);
+    await reverted(async (owner) => {
+      await teacher(owner, who);
+      const course = await newCourse(owner, who);
+      const started = await begin(owner, who, course, "chico.docx", small.length);
+      expect((await put(started.url, small, started.mime)).ok).toBe(true);
+      expect(await servicesOn(owner).resources.confirmResource(who.jar, { course, resource: started.resource })).toEqual({ kind: "ready" });
+    });
+  });
+
+  it("un archivo de 0 bytes se rechaza por su tamaño: no se puede leer, y ya se sabe que no sirve", async () => {
+    const who = await person();
+    await reverted(async (owner) => {
+      await teacher(owner, who);
+      const course = await newCourse(owner, who);
+      const started = await begin(owner, who, course);
+      expect((await put(started.url, Buffer.alloc(0), started.mime)).ok).toBe(true);
+      expect(await servicesOn(owner).resources.confirmResource(who.jar, { course, resource: started.resource })).toEqual({ kind: "rejected", reason: "size" });
+      expect(await stateOf(owner, started.resource)).toBeNull();
+    });
+  });
 });
 
 describe("quitar y borrar", () => {
@@ -255,6 +300,41 @@ describe("quitar y borrar", () => {
       await servicesOn(owner).resources.confirmResource(who.jar, { course, resource: started.resource });
       expect(await servicesOn(owner).resources.removeResource(who.jar, { course, resource: started.resource, seen: 1 })).toEqual({ kind: "deleted" });
       expect(await stateOf(owner, started.resource)).toBeNull();
+      expect(await storage.readStart(started.path, 4)).toBeNull();
+    });
+  });
+
+  it("borrar una lección o el curso se lleva también los objetos", async () => {
+    const who = await person();
+    await reverted(async (owner) => {
+      await teacher(owner, who);
+      const services = servicesOn(owner);
+      const course = await newCourse(owner, who);
+      const added = await services.drafts.addModule(who.jar, { course, seen: 1, title: "Inicio" });
+      if (added.kind !== "created" || !added.id) throw new Error(`Sin módulo: ${added.kind}`);
+      const module = added.id;
+      const lesson = await services.drafts.addLesson(who.jar, { course, module, seen: 1, title: "Una" });
+      if (lesson.kind !== "created" || !lesson.id) throw new Error(`Sin lección: ${lesson.kind}`);
+      const lessonId = lesson.id;
+
+      const inLesson = await services.resources.beginResource(who.jar, { course, lesson: lessonId, title: "De la lección", fileName: "a.pdf", size: PDF_BYTES.length });
+      if (inLesson.kind !== "started") throw new Error(`No empezó: ${inLesson.kind}`);
+      const lessonPath = await pathOf(owner, inLesson.resource);
+      if (lessonPath === null) throw new Error("Sin ruta.");
+      uploaded.push(lessonPath);
+      expect((await put(inLesson.url, PDF_BYTES, inLesson.mime)).ok).toBe(true);
+      await services.resources.confirmResource(who.jar, { course, resource: inLesson.resource });
+      expect(await storage.readStart(lessonPath, 4)).not.toBeNull();
+
+      const revision = (await owner.query<{ revision: string }>("select revision from public.draft_lessons where id = $1", [lessonId])).rows[0]?.revision;
+      expect(await services.drafts.deleteLesson(who.jar, { course, lesson: lessonId, seen: Number(revision) })).toEqual({ kind: "deleted" });
+      expect(await storage.readStart(lessonPath, 4)).toBeNull();
+
+      const started = await begin(owner, who, course);
+      expect((await put(started.url, PDF_BYTES, started.mime)).ok).toBe(true);
+      await services.resources.confirmResource(who.jar, { course, resource: started.resource });
+      const content = (await owner.query<{ content_revision: string }>("select content_revision from public.course_drafts where course_id = $1", [course])).rows[0]?.content_revision;
+      expect(await services.drafts.deleteCourse(who.jar, { course, seen: Number(content) })).toEqual({ kind: "deleted" });
       expect(await storage.readStart(started.path, 4)).toBeNull();
     });
   });

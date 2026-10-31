@@ -97,8 +97,9 @@ export function createDraftsStore(
 
 export const databaseDraftsStore = createDraftsStore();
 
-// Los recursos (T-404). Las respuestas se validan ya confirmada la transacción: `rejected` y `expired` borran la
-// fila, y validar adentro y lanzar la devolvería, para confirmarse otra vez.
+// Los recursos (T-404). Que la respuesta sea de la lista se revisa ya confirmada la transacción: `rejected` y
+// `expired` borran la fila, y lanzar adentro la devolvería, para confirmarse otra vez. Su forma se revisa adentro:
+// una respuesta sin forma es que la función cambió, y ahí revertir es lo seguro.
 export function createResourcesStore(run: typeof asServer = asServer): ResourcesStore {
   function change<Result>(claims: VerifiedClaims, reason: string, work: (tx: Tx) => Promise<Result>): Promise<Result> {
     return withLockRetry(() => run({ claims, reason }, work), isLockConflict);

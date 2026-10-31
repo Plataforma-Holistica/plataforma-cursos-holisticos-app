@@ -4,7 +4,7 @@
 // después de que su fila se fue.
 //
 //   pnpm storage:repaso            # dice qué sobra y lo borra
-//   pnpm storage:repaso --ver      # solo dice cuántos sobran (los vencidos sí se barren: la función los borra)
+//   pnpm storage:repaso --ver      # solo dice cuántos sobran, y no toca nada: lo que barre se revierte
 //
 // Solo corre contra la pila local, como los demás guiones. En producción lo hace quien opera, con los pasos del
 // manual (`../planeacion/08-manual-operacion.md`). De un error imprime solo el código, y nunca una llave ni una ruta.
@@ -60,7 +60,9 @@ const client = new pg.Client({
 let paths;
 try {
   await client.connect();
+  await client.query("begin");
   paths = (await client.query("select path from private.resource_sweep()")).rows.map((row) => row.path);
+  await client.query(onlyLook ? "rollback" : "commit");
 } catch (error) {
   fail(`no se pudo leer la base (${codeOf(error)}).`);
 } finally {

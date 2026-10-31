@@ -804,6 +804,9 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
   const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), result.message);
   const typing = useTyping("elegido", "item", state, result.onInput, view.paths.self);
+  // Confirmar un recurso sube la revisión de la lección: guardar a la vez contestaría «cambió», y lo escrito no vuelve.
+  const { uploading } = useUnsaved();
+  const [heldSave, setHeldSave] = useState(false);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.
@@ -834,9 +837,28 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
         </h2>
       </div>
       {view.editable ? (
-        <form action={action} onInput={typing.onInput} {...typing.form} className="flex flex-col gap-6">
+        <form
+          action={action}
+          onInput={typing.onInput}
+          {...typing.form}
+          onSubmit={(event) => {
+            if (uploading) {
+              event.preventDefault();
+              setHeldSave(true);
+              return;
+            }
+            setHeldSave(false);
+            typing.form.onSubmit();
+          }}
+          className="flex flex-col gap-6"
+        >
           <CourseField course={view.course} />
           <FormErrorSummary errors={errors} attempt={attemptOf(state)} />
+          {heldSave && uploading && (
+            <InlineAlert tone="warning" live>
+              {text.resources.waitUpload}
+            </InlineAlert>
+          )}
           <BlockResult
             message={result.message}
             tone={result.tone}

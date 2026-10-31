@@ -79,7 +79,7 @@ export type ResourceState =
 export type UploadProblem =
   | "fileType"
   | "fileSize"
-  | "noTitle"
+  | "noFile"
   | "tooMany"
   | "throttled"
   | "rejectedType"
@@ -108,6 +108,7 @@ export function checkFile(file: { size: number }, allowed: boolean, maxBytes: nu
 /** El título por omisión: el nombre del archivo sin su extensión, en lo que cabe. */
 export function titleFromFile(name: string): string {
   return name
+    .replace(/[\p{C}]/gu, "")
     .replace(/\.[^.]+$/, "")
     .trim()
     .slice(0, TITLE_MAX)

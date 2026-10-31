@@ -106,13 +106,34 @@ describe("la lista", () => {
     const user = userEvent.setup();
     show();
     await user.click(screen.getByRole("button", { name: "Quitar Guía" }));
-    await screen.findByText(/¿Quitar «Guía»\?/);
+    const asked = await screen.findByText(/¿Quitar «Guía»\?/);
+    // El botón pulsado se fue con la pregunta: ella toma el foco.
+    await waitFor(() => expect(asked.closest("[tabindex='-1']")).toHaveFocus());
     const confirm = screen.getAllByRole("button", { name: "Quitar" });
     expect(confirm).toHaveLength(1);
     expect(confirm[0]?.getAttribute("value")).toBe(`resource-remove:${R1}:4`);
     expect(screen.getByRole("button", { name: "Cancelar" })).toBeTruthy();
     // Mientras se pregunta, no se ofrece mover: Enter enviaría el primer botón del formulario.
     expect(screen.queryByRole("button", { name: "Subir Audio" })).toBeNull();
+  });
+
+  it("cancelar devuelve el foco al bloque", async () => {
+    actions.resourceAction.mockResolvedValueOnce({ kind: "confirming", resource: R1, attempt: 1 }).mockResolvedValueOnce({ kind: "kept", attempt: 2 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Quitar Guía" }));
+    await user.click(await screen.findByRole("button", { name: "Cancelar" }));
+    await screen.findByRole("button", { name: "Quitar Guía" });
+    await waitFor(() => expect(screen.getByRole("region", { name: "Recursos de esta lección" })).toHaveFocus());
+  });
+
+  it("si lo que se preguntaba ya no está, vuelven los botones", async () => {
+    actions.resourceAction.mockResolvedValueOnce({ kind: "confirming", resource: "f0000000-0000-4000-8000-0000000000ff", attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Quitar Guía" }));
+    await waitFor(() => expect(actions.resourceAction).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "Bajar Guía" })).toBeTruthy();
   });
 
   it("lo que falló se dice en el bloque", async () => {
@@ -196,8 +217,77 @@ describe("adjuntar", () => {
     await user.upload(screen.getByLabelText("Archivo"), pdf());
     await user.clear(screen.getByRole("textbox", { name: "Título del recurso" }));
     await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
-    expect(await screen.findByText("Escribe el título del recurso.")).toBeTruthy();
+    const field = screen.getByRole("textbox", { name: "Título del recurso" });
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(actions.beginResourceAction).not.toHaveBeenCalled();
+  });
+
+  it("un título que no pasa la regla se dice en su campo, sin llamar a nadie", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.upload(screen.getByLabelText("Archivo"), pdf());
+    const field = screen.getByRole("textbox", { name: "Título del recurso" });
+    await user.clear(field);
+    await user.type(field, "a".repeat(121));
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(actions.beginResourceAction).not.toHaveBeenCalled();
+  });
+
+  it("adjuntar sin archivo lo dice, en una región viva", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Elige un archivo para adjuntar.");
+  });
+
+  it("elegir archivo no pisa el título que ya se escribió", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.type(screen.getByRole("textbox", { name: "Título del recurso" }), "Mi título");
+    await user.upload(screen.getByLabelText("Archivo"), pdf("otro-nombre.pdf"));
+    expect((screen.getByRole("textbox", { name: "Título del recurso" }) as HTMLInputElement).value).toBe("Mi título");
+  });
+
+  it("si confirmar no se pudo saber, «Reintentar» solo confirma: no sube otra vez", async () => {
+    actions.confirmResourceAction.mockResolvedValueOnce({ kind: "problem", problem: "unavailable" });
+    const user = userEvent.setup();
+    show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    const request = FakeRequest.last as FakeRequest;
+    request.respond(200);
+    await user.click(await screen.findByRole("button", { name: "Reintentar" }));
+    await screen.findByText("Listo: el recurso quedó adjunto.");
+    expect(actions.beginResourceAction).toHaveBeenCalledOnce();
+    expect(FakeRequest.last).toBe(request);
+    expect(actions.confirmResourceAction).toHaveBeenCalledTimes(2);
+    expect(actions.cancelResourceAction).not.toHaveBeenCalled();
+  });
+
+  it("elegir otro archivo en lugar de reintentar cancela la fila que quedó", async () => {
+    actions.confirmResourceAction.mockResolvedValueOnce({ kind: "problem", problem: "unavailable" });
+    const user = userEvent.setup();
+    show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    (FakeRequest.last as FakeRequest).respond(200);
+    await screen.findByRole("button", { name: "Reintentar" });
+    await user.upload(screen.getByLabelText("Archivo"), pdf("otro.pdf"));
+    expect(actions.cancelResourceAction).toHaveBeenCalledExactlyOnceWith({ course: COURSE, resource: R1 });
+    expect(screen.getByRole("button", { name: "Adjuntar recurso" })).toBeTruthy();
+  });
+
+  it("mientras sube, el botón no pierde el foco y un segundo envío no empieza otra subida", async () => {
+    const user = userEvent.setup();
+    show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    const button = screen.getByRole("button", { name: "Un momento…" });
+    expect(button).not.toBeDisabled();
+    await user.click(button);
+    expect(actions.beginResourceAction).toHaveBeenCalledOnce();
   });
 
   it("lo que contesta la base al empezar se dice, y no se sube nada", async () => {
@@ -227,13 +317,14 @@ describe("adjuntar", () => {
     await attach(user);
     await waitFor(() => expect(FakeRequest.last).not.toBeNull());
     (FakeRequest.last as FakeRequest).respond(200);
-    expect(await screen.findByText(/no es lo que dice su nombre/)).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/no es lo que dice su nombre.*conviértelo a MP3/);
   });
 
   it("con el lugar lleno no se ofrece", () => {
     show([...ITEMS, row("f0000000-0000-4000-8000-000000000003", "Otra", null, null)]);
     expect(screen.getByText(/ya no caben más recursos/)).toBeTruthy();
-    expect(screen.queryByLabelText("Archivo")).toBeNull();
+    // Se queda montado y oculto: dice «Listo» del que acaba de llenar el lugar.
+    expect(screen.getByRole("form", { name: "Adjuntar recurso" }).closest(".hidden")).not.toBeNull();
   });
 
   it("el formulario de adjuntar nombra lo que hace", () => {

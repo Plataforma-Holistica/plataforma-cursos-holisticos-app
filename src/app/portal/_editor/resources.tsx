@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { type FormEvent, useActionState, useEffect, useRef, useState } from "react";
 
 import { useHydrated } from "@/app/(cuenta)/_lib/hooks";
@@ -12,24 +13,30 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { ProgressBar } from "@/ui/progress-bar";
 
 import { CountedField } from "../_lib/counted-field";
-import { failureText } from "../_lib/words";
+import { checkDraftText } from "../_lib/text";
+import { failureText, problemText } from "../_lib/words";
 import { RESOURCES_ID } from "./anchors";
 import { beginResourceAction, cancelResourceAction, confirmResourceAction, resourceAction } from "./resource-actions";
 import { checkFile, progressStep, resourceButton, titleFromFile, type ResourceState, type UploadProblem } from "./resource-outcomes";
 import type { ResourceRow } from "./rows";
-import { useUnsaved } from "./unsaved";
+import { UPLOAD_KEY, useUnsaved } from "./unsaved";
 
 // Los recursos de una lección o del curso, en el editor (PA-43; T-404). La lista va por su formulario y su propio
 // estado, y funciona sin JavaScript. Adjuntar no: el archivo sube del navegador a la cubeta, porque Vercel corta todo
 // envío a una función en 4.5 MB, así que sin JavaScript se dice y no se ofrece.
 //
 //   · Mientras un archivo sube, salir pregunta: la barra dice «Cambios sin guardar» y el aviso del navegador salta.
-//   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento.
+//   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 //   · Lo que se revisa aquí antes de subir (tipo y tamaño) es comodidad: lo que manda es la base y la cubeta.
+//   · Si la subida llegó y confirmar no se pudo saber, se reintenta solo confirmar: subir otra vez gastaría otra fila,
+//     otro objeto y otro cupo del freno. Si se elige otro archivo, se cancela la fila que quedó.
+//   · El botón no se deshabilita mientras sube: perdería el foco, y un rechazo no tendría a quién decírselo. El aviso
+//     del problema es una región viva, y un problema del título lleva el foco a su campo.
 
 const text = portal.editor.resources;
 const IDLE: ResourceState = { kind: "idle" };
-const UPLOAD_KEY = "recurso-subiendo";
+/** Una subida colgada no deja la pantalla ocupada para siempre: 50 MB caben de sobra en este tiempo. */
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 const attemptOf = (state: ResourceState) => (state.kind === "idle" ? 0 : state.attempt);
 
@@ -38,70 +45,120 @@ function putFile(url: string, file: File, mime: string, onProgress: (loaded: num
   return new Promise((resolve) => {
     const request = new XMLHttpRequest();
     request.open("PUT", url);
+    request.timeout = UPLOAD_TIMEOUT_MS;
     request.setRequestHeader("content-type", mime);
     request.upload.onprogress = (event) => onProgress(event.loaded, event.total);
     request.onload = () => resolve(request.status >= 200 && request.status < 300);
     request.onerror = () => resolve(false);
     request.onabort = () => resolve(false);
+    request.ontimeout = () => resolve(false);
     request.send(file);
   });
 }
 
-type Upload = { phase: "idle" } | { phase: "sending"; percent: number } | { phase: "finishing" };
+type Upload = { phase: "idle" } | { phase: "sending"; loaded: number; total: number } | { phase: "finishing" };
 
-function AttachForm({ course, lesson, maxBytes, maxText, full }: { course: string; lesson: string | null; maxBytes: number | null; maxText: string; full: boolean }) {
+interface AttachProps {
+  course: string;
+  lesson: string | null;
+  maxBytes: number | null;
+  maxText: string;
+}
+
+function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
   const { mark } = useUnsaved();
   const [upload, setUpload] = useState<Upload>({ phase: "idle" });
   const [problem, setProblem] = useState<UploadProblem | null>(null);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [title, setTitle] = useState("");
   const [picked, setPicked] = useState(0);
+  // La subida que llegó y que falta confirmar: «Reintentar» solo confirma.
+  const [waiting, setWaiting] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const titleField = useRef<HTMLDivElement>(null);
+  const place = lesson ?? "curso";
   const busy = upload.phase !== "idle";
   useEffect(() => () => mark(UPLOAD_KEY, false), [mark]);
 
   function onPick() {
     const file = input.current?.files?.[0];
+    if (waiting !== null) {
+      void cancelResourceAction({ course, resource: waiting });
+      setWaiting(null);
+    }
     setDone(false);
+    setTitleError(null);
     setProblem(file === undefined ? null : checkFile(file, resourceTypeOf(file.name) !== null, maxBytes));
-    setTitle(file === undefined ? "" : titleFromFile(file.name));
+    // Lo que ya se escribió no se pisa: el nombre del archivo solo llena un título vacío.
+    const typed = titleField.current?.querySelector("input")?.value.trim() ?? "";
+    setTitle(typed !== "" && typed !== title ? typed : file === undefined ? "" : titleFromFile(file.name));
     setPicked((count) => count + 1);
+  }
+
+  async function finish(resource: string) {
+    setUpload({ phase: "finishing" });
+    const confirmed = await confirmResourceAction({ course, lesson, resource });
+    if (confirmed.kind === "problem") {
+      // Lo que no se supo se puede intentar otra vez; lo demás ya no tiene fila.
+      setWaiting(confirmed.problem === "unavailable" ? resource : null);
+      setProblem(confirmed.problem);
+      return;
+    }
+    setWaiting(null);
+    setDone(true);
+    setTitle("");
+    setPicked((count) => count + 1);
+    if (input.current !== null) input.current.value = "";
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     const file = input.current?.files?.[0];
-    const typed = String(new FormData(event.currentTarget).get("resource-title") ?? "").trim();
-    if (busy || file === undefined) return;
-    const checked = checkFile(file, resourceTypeOf(file.name) !== null, maxBytes) ?? (typed === "" ? "noTitle" : null);
-    setProblem(checked);
+    const typed = String(new FormData(event.currentTarget).get("resource-title") ?? "");
     setDone(false);
-    if (checked !== null) return;
-    setUpload({ phase: "sending", percent: 0 });
+    setProblem(null);
+    setTitleError(null);
+    setUpload({ phase: "finishing" });
     mark(UPLOAD_KEY, true);
     try {
+      if (waiting !== null) {
+        await finish(waiting);
+        return;
+      }
+      if (file === undefined) {
+        setProblem("noFile");
+        return;
+      }
+      const checked = checkFile(file, resourceTypeOf(file.name) !== null, maxBytes);
+      if (checked !== null) {
+        setProblem(checked);
+        return;
+      }
+      const titleProblem = checkDraftText("lessonTitle", typed);
+      if (titleProblem !== null) {
+        setTitleError(problemText("lessonTitle", titleProblem));
+        titleField.current?.querySelector("input")?.focus();
+        return;
+      }
+      setUpload({ phase: "sending", loaded: 0, total: file.size });
       const begun = await beginResourceAction({ course, lesson, title: typed, fileName: file.name, size: file.size });
       if (begun.kind === "problem") {
         setProblem(begun.problem);
         return;
       }
-      const sent = await putFile(begun.url, file, begun.mime, (loaded, total) => setUpload({ phase: "sending", percent: progressStep(loaded, total) }));
+      const sent = await putFile(begun.url, file, begun.mime, (loaded, total) => setUpload({ phase: "sending", loaded, total }));
       if (!sent) {
         await cancelResourceAction({ course, resource: begun.resource });
         setProblem("unavailable");
         return;
       }
-      setUpload({ phase: "finishing" });
-      const confirmed = await confirmResourceAction({ course, lesson, resource: begun.resource });
-      if (confirmed.kind === "problem") {
-        setProblem(confirmed.problem);
-        return;
-      }
-      setDone(true);
-      setTitle("");
-      setPicked((count) => count + 1);
-      if (input.current !== null) input.current.value = "";
-    } catch {
+      setWaiting(begun.resource);
+      await finish(begun.resource);
+    } catch (error) {
+      // Una acción que redirige llega aquí como una falla, y no lo es: la navegación sigue.
+      unstable_rethrow(error);
       setProblem("unavailable");
     } finally {
       setUpload({ phase: "idle" });
@@ -109,49 +166,60 @@ function AttachForm({ course, lesson, maxBytes, maxText, full }: { course: strin
     }
   }
 
-  if (full) return <p className="text-body-s text-text-3">{text.full}</p>;
+  const step = upload.phase === "sending" ? progressStep(upload.loaded, upload.total) : 0;
   return (
     <form onSubmit={(event) => void onSubmit(event)} className="flex flex-col gap-3" aria-label={text.attach}>
       <input type="hidden" name="course" value={course} />
       <div className="flex flex-col gap-2">
-        <label htmlFor={`recurso-archivo-${lesson ?? "curso"}`} className="text-label">
+        <label htmlFor={`recurso-archivo-${place}`} className="text-label">
           {text.fileLabel}
         </label>
         <input
           ref={input}
-          id={`recurso-archivo-${lesson ?? "curso"}`}
+          id={`recurso-archivo-${place}`}
           type="file"
           accept={RESOURCE_EXTENSIONS.join(",")}
           onChange={onPick}
-          disabled={busy}
-          aria-describedby={`recurso-nota-${lesson ?? "curso"}`}
+          aria-describedby={`recurso-nota-${place}`}
           className="min-h-touch text-body-s text-text-2"
         />
-        <p id={`recurso-nota-${lesson ?? "curso"}`} className="text-caption text-text-3">
-          {t(text.fileHint, { max: maxText })}
+        <p id={`recurso-nota-${place}`} className="text-caption text-text-3">
+          {maxText === "" ? text.fileHintNoLimit : t(text.fileHint, { max: maxText })}
         </p>
       </div>
-      <CountedField
-        key={picked}
-        id={`recurso-titulo-${lesson ?? "curso"}`}
-        name="resource-title"
-        label={text.titleLabel}
-        max={DRAFT_TEXT_LIMITS.lessonTitle}
-        warnAt={108}
-        defaultValue={title}
-        error={problem === "noTitle" ? text.problems.noTitle : null}
-        readOnly={busy}
-      />
-      {upload.phase === "sending" && <ProgressBar value={upload.percent} max={100} label={text.progressLabel} text={t(text.progress, { percent: upload.percent })} />}
+      <div ref={titleField}>
+        <CountedField
+          key={picked}
+          id={`recurso-titulo-${place}`}
+          name="resource-title"
+          label={text.titleLabel}
+          max={DRAFT_TEXT_LIMITS.lessonTitle}
+          warnAt={108}
+          defaultValue={title}
+          error={titleError}
+          readOnly={busy}
+        />
+      </div>
+      {upload.phase === "sending" && <ProgressBar value={upload.loaded} max={upload.total} label={text.progressLabel} text="" />}
       {/* Existe desde antes: una región que nace con su texto no siempre se anuncia. */}
       <p role="status" className="text-body-s text-text-2">
-        {upload.phase === "sending" ? t(text.progress, { percent: upload.percent }) : upload.phase === "finishing" ? text.finishing : done ? text.attached : null}
+        {upload.phase === "sending" ? t(text.progress, { percent: String(step) }) : upload.phase === "finishing" ? text.finishing : done ? text.attached : null}
       </p>
-      {problem !== null && problem !== "noTitle" && <InlineAlert tone="danger">{text.problems[problem]}</InlineAlert>}
+      {problem !== null && (
+        <InlineAlert tone="danger" live>
+          {text.problems[problem]}
+        </InlineAlert>
+      )}
       <div>
-        <Button type="submit" variant="secondary" disabled={busy}>
-          {text.attach}
-        </Button>
+        {busy ? (
+          <Button type="submit" variant="secondary" pending loadingLabel={text.working}>
+            {text.attach}
+          </Button>
+        ) : (
+          <Button type="submit" variant="secondary">
+            {waiting !== null ? text.retry : text.attach}
+          </Button>
+        )}
       </div>
     </form>
   );
@@ -173,7 +241,16 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
   let message: string | null = null;
   if (!pending && state.kind === "done") message = state.what === "moved" ? text.moved : text.removed;
   if (!pending && state.kind === "failed") message = failureText(state.reason);
-  const { block, answer, spoken } = useAnswerFocus(pending, attemptOf(state), message);
+  // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
+  const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), message);
+  const question = useRef<HTMLDivElement>(null);
+  // Se pregunta solo por lo que sigue en la lista: si otra pestaña ya lo quitó, se ofrecen los botones de siempre.
+  const asking = state.kind === "confirming" && items.some((item) => item.id === state.resource) ? state.resource : null;
+  const askingAttempt = asking !== null && state.kind === "confirming" ? state.attempt : 0;
+  // La pregunta toma el foco: el botón «Quitar» que se pulsó se fue con ella.
+  useEffect(() => {
+    if (askingAttempt !== 0) question.current?.focus();
+  }, [askingAttempt]);
   const full = limits.perPlace !== null && items.length >= limits.perPlace;
 
   return (
@@ -202,7 +279,7 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
                     <span className="block break-words text-text">{item.title}</span>
                     <span className="block text-caption text-text-3">{item.detail}</span>
                   </span>
-                  {editable && state.kind !== "confirming" && (
+                  {editable && asking === null && (
                     <span className="flex flex-wrap gap-2">
                       {item.up !== null && (
                         <Button type="submit" name="do" value={item.up} variant="secondary" size="md">
@@ -223,8 +300,8 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
                     </span>
                   )}
                 </div>
-                {editable && state.kind === "confirming" && state.resource === item.id && (
-                  <div className="flex flex-col gap-3 rounded-md border border-danger p-3">
+                {editable && asking === item.id && (
+                  <div ref={question} tabIndex={-1} className="flex flex-col gap-3 rounded-md border border-danger p-3 outline-none">
                     <p className="text-body">{t(text.confirmRemove, { title: item.title })}</p>
                     <div className="flex flex-wrap gap-3">
                       <Button type="submit" name="do" value={resourceButton.cancel()} variant="secondary" size="md">
@@ -243,7 +320,13 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
       )}
       {editable &&
         (hydrated ? (
-          <AttachForm course={course} lesson={lesson} maxBytes={limits.maxBytes} maxText={limits.maxText} full={full} />
+          <>
+            {full && <p className="text-body-s text-text-3">{text.full}</p>}
+            {/* Lleno se queda montado, oculto: dice «Listo» del que acaba de llenar el lugar, y no se pierde el foco. */}
+            <div className={full ? "hidden" : undefined}>
+              <AttachForm course={course} lesson={lesson} maxBytes={limits.maxBytes} maxText={limits.maxText} />
+            </div>
+          </>
         ) : (
           <p className="text-body-s text-text-3">{text.needsJavascript}</p>
         ))}

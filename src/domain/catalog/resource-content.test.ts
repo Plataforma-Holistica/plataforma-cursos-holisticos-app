@@ -62,7 +62,15 @@ describe("contentMatches: el contenido real, por sus primeros bytes", () => {
 
   describe("MP3", () => {
     it("con etiqueta ID3", () => {
-      expect(contentMatches(MP3, ascii("ID3\x04\x00"), null)).toBe(true);
+      expect(contentMatches(MP3, join(ascii("ID3"), bytes(4, 0, 0, 0, 0, 0, 0x10, 0)), null)).toBe(true);
+    });
+    it.each([
+      ["versión inválida", join(ascii("ID3"), bytes(0xff, 0, 0, 0, 0, 0, 0, 0))],
+      ["tamaño con el bit alto", join(ascii("ID3"), bytes(4, 0, 0, 0x80, 0, 0, 0, 0))],
+      ["solo las tres letras", ascii("ID3 y lo que sea, un texto cualquiera")],
+      ["cortada", ascii("ID3")],
+    ])("una etiqueta ID3 falsa: %s, no", (_name, head) => {
+      expect(contentMatches(MP3, head, null)).toBe(false);
     });
     it("con una cabecera MPEG capa III completa", () => {
       // MPEG-1, capa III, 128 kbps, 44.1 kHz.
@@ -112,6 +120,12 @@ describe("contentMatches: el contenido real, por sus primeros bytes", () => {
       ["que no empieza como ZIP", ascii("%PDF-1.7"), word],
     ])("%s, no", (_name, head, tail) => {
       expect(contentMatches(DOCX, head, tail)).toBe(false);
+    });
+    it("los nombres no distinguen mayúsculas: las macros tampoco se esconden así", () => {
+      expect(contentMatches(DOCX, ZIP_START, zipEnd("[Content_Types].xml", "word/document.xml", "word/VBAPROJECT.BIN"))).toBe(false);
+    });
+    it("Word en la web guarda a veces otro nombre", () => {
+      expect(contentMatches(DOCX, ZIP_START, zipEnd("[Content_Types].xml", "word/document2.xml"))).toBe(true);
     });
     it("sin leer el final no se puede decir que sí", () => {
       expect(contentMatches(DOCX, ZIP_START, null)).toBe(false);

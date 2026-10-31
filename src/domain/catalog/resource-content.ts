@@ -83,12 +83,24 @@ function isAudioMp4(head: Uint8Array): boolean {
 }
 
 // Un Word es un ZIP: se lee su directorio, al final del archivo, sin abrir nada. Debe traer las piezas de un
-// documento y no las macros.
+// documento y no las macros. Los nombres de un ZIP de Office no distinguen mayúsculas, y Word en la web guarda a
+// veces `word/document2.xml`. Un Word con cientos de partes puede tener su directorio más atrás de lo que se lee, y
+// se rechaza: es raro, y dice que lo vuelva a intentar en otro formato.
 function isWord(head: Uint8Array, tail: Uint8Array | null): boolean {
   if (tail === null || !startsWith(head, "PK\x03\x04")) return false;
-  return (
-    includes(tail, "PK\x05\x06") && includes(tail, "[Content_Types].xml") && includes(tail, "word/document.xml") && !includes(tail, "vbaProject.bin")
-  );
+  if (!includes(tail, "PK\x05\x06")) return false;
+  const names = String.fromCharCode(...tail).toLowerCase();
+  return names.includes("[content_types].xml") && /word\/document[0-9]*\.xml/.test(names) && !names.includes("vbaproject.bin");
+}
+
+// La etiqueta ID3v2: su versión es de la 2 a la 4, y los cuatro bytes de su tamaño tienen el bit alto apagado. Sin
+// esto, cualquier archivo que empezara con esas tres letras pasaría por un MP3.
+function isId3(head: Uint8Array): boolean {
+  if (!startsWith(head, "ID3") || head.length < 10) return false;
+  const major = head[3] ?? 0;
+  const minor = head[4] ?? 0xff;
+  if (major < 2 || major > 4 || minor === 0xff) return false;
+  return head.subarray(6, 10).every((byte) => byte < 0x80);
 }
 
 /** Si lo leído es de ese tipo. `tail` es el final del archivo, y solo lo pide un Word (`RESOURCE_READ`). */
@@ -97,7 +109,7 @@ export function contentMatches(mime: string, head: Uint8Array, tail: Uint8Array 
     case PDF:
       return startsWith(head, "%PDF-");
     case MP3:
-      return startsWith(head, "ID3") || isMpegLayer3(head);
+      return isId3(head) || isMpegLayer3(head);
     case M4A:
       return isAudioMp4(head);
     case DOCX:
