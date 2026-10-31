@@ -289,6 +289,10 @@ describe("las llaves de los datos fiscales (T-409)", () => {
     ["una llave sin forma", { PII_ENCRYPTION_KEYS: "1:corta:0123abcd", PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
     ["sin comprobación", { PII_ENCRYPTION_KEYS: `1:${"A".repeat(43)}=`, PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
     ["una versión sin forma", { PII_ENCRYPTION_KEYS: KEY, PII_ENCRYPTION_ACTIVE_VERSION: "uno" }, "PII_ENCRYPTION_ACTIVE_VERSION: tiene un valor inválido"],
+    // Lo más probable al rotar: correr el comando tal cual, con la misma versión. Dejaría todo lo fiscal sin llave.
+    ["una versión repetida", { PII_ENCRYPTION_KEYS: `${KEY},${KEY}`, PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
+    ["una versión que no cabe", { PII_ENCRYPTION_KEYS: `32768:${"A".repeat(43)}=:0123abcd`, PII_ENCRYPTION_ACTIVE_VERSION: "32768" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
+    ["pegada con un espacio", { PII_ENCRYPTION_KEYS: `${KEY}, ${OTHER}`, PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
   ])("%s", (_name, extra, problem) => {
     expect(problemsOf({ ...valid, ...extra })).toEqual([problem]);
   });

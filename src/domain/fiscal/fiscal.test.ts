@@ -35,6 +35,8 @@ describe("CLABE", () => {
     ["٠٠٢٠١٠٠٧٧٧٧٧٧٧٧٧٧١", "length"],
     ["002010077777777772", "check_digit"],
     ["102010077777777771", "check_digit"],
+    // Su dígito de control cuadra, pero no es de nadie.
+    ["000000000000000000", "check_digit"],
   ])("%j no vale: %s", (input, reason) => {
     expect(parseClabe(input)).toEqual({ ok: false, reason });
   });
@@ -88,6 +90,18 @@ describe("RFC", () => {
     expect(parseRfc("GOMA720229AB1").ok).toBe(true);
     expect(parseRfc("GOMA240229AB1").ok).toBe(true);
     expect(parseRfc("GOMA250229AB1").ok).toBe(false);
+  });
+
+  it.each(["gßa800101ab1", "ſoma800101ab1", "ıoma800101ab1", "ﬁma800101ab1", "ﬀa800101ab1", "ＧＯＭＡ800101AB1"])(
+    "un carácter que al pasar a mayúsculas se vuelve otro no entra: %s",
+    (input) => {
+      expect(parseRfc(input)).toEqual({ ok: false, reason: "form" });
+    },
+  );
+
+  it("la Ñ descompuesta, como sale al copiar de un PDF, es una Ñ", () => {
+    expect(parseRfc("N\u0303OMA800101AB1")).toEqual({ ok: true, rfc: "ÑOMA800101AB1", kind: "person" });
+    expect(parseRfc("ñoma800101ab1")).toEqual({ ok: true, rfc: "ÑOMA800101AB1", kind: "person" });
   });
 
   it.each(["XAXX010101000", "XEXX010101000"])("el genérico %s no es el de nadie", (input) => {

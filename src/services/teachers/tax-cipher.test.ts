@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { createTaxCipher, TaxCipherTampered, TaxCipherUnavailable, type SealedField, type TaxFieldContext } from "./tax-cipher";
+import { createTaxCipher, TaxCipherMisuse, TaxCipherTampered, TaxCipherUnavailable, type SealedField, type TaxFieldContext } from "./tax-cipher";
 
 // El cifrado de los datos fiscales (RF-510; 05 §10; T-409). Una columna cifrada no se copia a otro maestro, a otro campo ni a otra
 // versión de la fila sin que falle al abrirla, y lo que no se puede abrir nunca devuelve otra cosa.
@@ -134,7 +134,7 @@ describe("sin llave no se cifra", () => {
     ["una llave de otro largo", `1:${randomBytes(16).toString("base64")}:00000000`, "1"],
     ["la comprobación no coincide (mal pegada)", `1:${randomBytes(32).toString("base64")}:00000000`, "1"],
     ["versión repetida", `${K1},${keyEntry(1)}`, "1"],
-    ["versión fuera de rango", keyEntry(70_000), "70000"],
+    ["versión fuera de rango", keyEntry(32_768), "32768"],
     ["sin forma", "esto-no-es-una-llave", "1"],
   ])("%s: contesta que no se puede, nunca guarda en claro", (_name, keys, active) => {
     const broken = cipherWith(keys, active);
@@ -155,6 +155,52 @@ describe("sin llave no se cifra", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(TaxCipherUnavailable);
       expect(String(error)).not.toContain(entry);
+    }
+  });
+});
+
+describe("un contexto sin forma no se usa", () => {
+  const CLABE = "002010077777777771";
+  const sealedClabe = cipher.seal(clabeContext, CLABE);
+
+  it.each([
+    ["un maestro en mayúsculas", { ...context, teacher: TEACHER.toUpperCase() }],
+    ["un maestro con el separador", { ...context, teacher: `${TEACHER}|clabe` }],
+    ["una versión que no es un número", { ...context, rowVersion: Number.NaN }],
+    ["una versión de cero", { ...context, rowVersion: 0 }],
+    ["una versión con decimales", { ...context, rowVersion: 1.5 }],
+    ["una versión que no cabe en la columna", { ...context, rowVersion: 32_768 }],
+    ["unos últimos cuatro sin forma", { ...clabeContext, last4: "x|clabe|1|1|y" }],
+    ["unos últimos cuatro cortos", { ...clabeContext, last4: "771" }],
+  ] as [string, TaxFieldContext][])("%s", (_name, bad) => {
+    expect(() => cipher.seal(bad, CLABE)).toThrow(TaxCipherMisuse);
+    expect(() => cipher.open(bad, sealedClabe)).toThrow(TaxCipherMisuse);
+  });
+
+  it("dos contextos distintos nunca dan lo mismo: lo sellado con uno no abre con el otro", () => {
+    const sealed = cipher.seal({ teacher: TEACHER, field: "rfc", rowVersion: 1 }, "GOMA800101AB1");
+    expect(() => cipher.open({ teacher: TEACHER, field: "rfc", rowVersion: 11 }, sealed)).toThrow(TaxCipherTampered);
+  });
+
+  it("una CLABE que no termina en sus últimos cuatro no se cifra: la pantalla diría una cuenta y el pago iría a otra", () => {
+    expect(() => cipher.seal({ ...clabeContext, last4: "0000" }, CLABE)).toThrow(TaxCipherMisuse);
+  });
+
+  it.each(["", "123", "00201007777777777a", `${CLABE}0`])("lo que no mide 18 dígitos no se cifra como CLABE: %j", (text) => {
+    expect(() => cipher.seal(clabeContext, text)).toThrow(TaxCipherMisuse);
+  });
+
+  it("un texto vacío no se cifra", () => {
+    expect(() => cipher.seal(context, "")).toThrow(TaxCipherMisuse);
+  });
+
+  it("el error no trae el dato", () => {
+    try {
+      cipher.seal({ ...clabeContext, last4: "0000" }, CLABE);
+      throw new Error("cifró");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TaxCipherMisuse);
+      expect(String(error)).not.toContain(CLABE);
     }
   });
 });

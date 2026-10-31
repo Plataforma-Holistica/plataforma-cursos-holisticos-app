@@ -139,12 +139,15 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // Las llaves de los datos fiscales van juntas, y la que cifra tiene que estar en la lista.
   if ((present.PII_ENCRYPTION_KEYS === undefined) !== (present.PII_ENCRYPTION_ACTIVE_VERSION === undefined)) {
     failed.add(present.PII_ENCRYPTION_KEYS === undefined ? "PII_ENCRYPTION_KEYS" : "PII_ENCRYPTION_ACTIVE_VERSION");
-  } else if (
-    result.success &&
-    present.PII_ENCRYPTION_KEYS !== undefined &&
-    !present.PII_ENCRYPTION_KEYS.split(",").some((entry) => entry.split(":")[0] === present.PII_ENCRYPTION_ACTIVE_VERSION)
-  ) {
-    failed.add("PII_ENCRYPTION_ACTIVE_VERSION");
+  } else if (result.success && present.PII_ENCRYPTION_KEYS !== undefined) {
+    // Una versión repetida es lo más probable al rotar: correr el comando sin cambiarle el número. Sin esto, arrancaría con todo lo
+    // fiscal sin llave y sin decírselo a nadie. Las versiones caben en un `smallint`.
+    const versions = present.PII_ENCRYPTION_KEYS.split(",").map((entry) => entry.split(":")[0]);
+    if (new Set(versions).size !== versions.length || versions.some((version) => Number(version) > 32_767)) {
+      failed.add("PII_ENCRYPTION_KEYS");
+    } else if (!versions.includes(present.PII_ENCRYPTION_ACTIVE_VERSION)) {
+      failed.add("PII_ENCRYPTION_ACTIVE_VERSION");
+    }
   }
   const unwelcome = forbidden.filter((name) => source[name] !== undefined && source[name] !== "");
   if (result.success && failed.size === 0 && unwelcome.length === 0) return result.data;

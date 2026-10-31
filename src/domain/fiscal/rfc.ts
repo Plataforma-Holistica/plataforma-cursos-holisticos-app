@@ -21,8 +21,12 @@ function dateExists(year: number, month: number, day: number): boolean {
 
 /** Un RFC, en mayúsculas y sin los espacios y guiones con que se copia. */
 export function parseRfc(input: string): RfcResult {
-  const rfc = input.replace(/[\s-]/g, "").toUpperCase();
-  if (rfc === "") return { ok: false, reason: "empty" };
+  // NFC, para que la Ñ descompuesta que sale de un PDF sea una Ñ. Y solo letras del RFC antes de pasar a mayúsculas: `toUpperCase`
+  // vuelve otra cosa algunos caracteres (ß, ſ, ı y las ligaduras), y aceptaría un RFC que nadie escribió.
+  const written = input.normalize("NFC").replace(/[\s-]/g, "");
+  if (written === "") return { ok: false, reason: "empty" };
+  if (!/^[A-Za-zÑñ&0-9]+$/.test(written)) return { ok: false, reason: "form" };
+  const rfc = written.toUpperCase();
   if (GENERIC.has(rfc)) return { ok: false, reason: "generic" };
   const person = PERSON.exec(rfc);
   const match = person ?? COMPANY.exec(rfc);

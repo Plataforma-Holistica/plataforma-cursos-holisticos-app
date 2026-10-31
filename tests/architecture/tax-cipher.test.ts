@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { posix, reachableFrom, sourceFiles, src } from "./sources";
+import { posix, reachableFrom, resolveLocal, sourceFiles, specifiersIn, src } from "./sources";
 
 // El cifrado de los datos fiscales (RF-510; 05 §10; T-409). Un solo archivo cifra y descifra, y quién lo usa es una lista
 // cerrada: cada descifrado es un dato personal que sale, y tiene que quedar en la auditoría antes (T-409, segunda y tercera
@@ -24,14 +24,30 @@ describe("los datos fiscales se cifran en un solo lugar", () => {
   it("AES-GCM se usa solo en el archivo del cifrado", () => {
     expect(naming(/\bcreate(?:De)?[Cc]ipheriv\b/)).toEqual([CIPHER]);
     expect(naming(/aes-256-gcm/i)).toEqual([CIPHER]);
+    expect(naming(/AES-GCM|crypto\.subtle/)).toEqual([]);
   });
 
   it("las llaves se nombran solo en la configuración y en el cifrado", () => {
     expect(naming(/\bPII_ENCRYPTION_(?:KEYS|ACTIVE_VERSION)\b/)).toEqual(["src/config/env.ts", CIPHER]);
   });
 
-  it("quien usa el cifrado es una lista cerrada", () => {
-    expect(naming(/teachers\/tax-cipher"|\.\/tax-cipher"/)).toEqual(USERS);
+  it("quien usa el cifrado es una lista cerrada: se resuelven las importaciones, se escriban como se escriban", () => {
+    const importers = sourceFiles(src)
+      .filter((path) => !/\.test\.tsx?$/.test(path))
+      .filter((path) => specifiersIn(readFileSync(path, "utf8")).some((specifier) => {
+        const resolved = specifier === undefined ? null : resolveLocal(path, specifier);
+        return resolved !== null && posix(resolved) === CIPHER;
+      }))
+      .map(posix)
+      .sort();
+    expect(importers).toEqual([...USERS].sort());
+  });
+
+  it("nadie de la lista lo reexporta: sería otra puerta", () => {
+    for (const file of USERS) {
+      const code = sources.find((source) => source.file === file)?.text ?? "";
+      expect(code, file).not.toMatch(/export[^;]*from\s+["'`][^"'`]*tax-cipher/);
+    }
   });
 
   it("el cifrado no se alcanza desde el paso previo", () => {

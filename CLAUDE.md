@@ -836,11 +836,14 @@ que no se ve leyendo un solo archivo:
   aplicación, en un solo archivo (`src/services/teachers/tax-cipher.ts`): `seal` y `open` reciben el contexto de la columna (maestro, campo,
   versión de la fila y, en la CLABE, sus últimos cuatro), que entra a los datos asociados con la versión de la llave. Lo guardado es
   `formato | versión de la llave | vector | cifrado | etiqueta`, y `SealedField` es un tipo que solo emite ese archivo. Sin llave lanza
-  `TaxCipherUnavailable`; lo que no abre, `TaxCipherTampered`: nunca devuelve otra cosa, y sus errores tienen texto fijo. Quién lo importa es
+  `TaxCipherUnavailable`; lo que no abre, `TaxCipherTampered`; un contexto sin forma, o una CLABE que no termina en sus últimos cuatro,
+  `TaxCipherMisuse`: nunca devuelve otra cosa, y sus errores tienen texto fijo. El régimen no pasa por aquí: va en claro (decisión de Sergio). Quién lo importa es
   una lista cerrada en `tests/architecture/tax-cipher.test.ts`: sumar a alguien es decidir que puede ver un dato fiscal. Las llaves
   (`PII_ENCRYPTION_KEYS`, `PII_ENCRYPTION_ACTIVE_VERSION`) son opcionales y van juntas, como las de Mux: se generan, se respaldan y se rotan como
-  dice OP-19. Las reglas de CLABE, RFC y régimen son puras, en `src/domain/fiscal/`. El filtro de Sentry saca una CLABE por su dígito de control en
-  todo texto, también en lo que anota el SDK, un RFC con espacios o guion bajo, y las llaves. Una tabla del filtro puede reemplazar con una
+  dice OP-19: mal pegadas, la aplicación no arranca (`env.ts`); con la comprobación mala, arranca y lo fiscal no está disponible. Las reglas de
+  CLABE, RFC y régimen son puras, en `src/domain/fiscal/`. El filtro de Sentry saca una CLABE por su dígito de control en todo texto, también en lo
+  que anota el SDK, con separadores y al final de `SECRET_RULES`, para no partirle la forma a un token; en mensajes y rutas, un RFC con espacios,
+  puntos o guion bajo; y las llaves. Uno de cada diez números de 18 dígitos cae como CLABE: en un diagnóstico, se acepta. Una tabla del filtro puede reemplazar con una
   función (`Rule`). Para el B: nada que le toque.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas

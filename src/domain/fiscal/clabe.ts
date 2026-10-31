@@ -24,6 +24,7 @@ export function parseClabe(input: string): ClabeResult {
   const clabe = input.replace(/[\s-]/g, "");
   if (clabe === "") return { ok: false, reason: "empty" };
   if (!/^[0-9]{18}$/.test(clabe)) return { ok: false, reason: "length" };
-  if (clabeCheckDigit(clabe.slice(0, 17)) !== Number(clabe[17])) return { ok: false, reason: "check_digit" };
+  // Dieciocho ceros cuadran con su dígito de control, y no son de nadie.
+  if (clabeCheckDigit(clabe.slice(0, 17)) !== Number(clabe[17]) || /^0+$/.test(clabe)) return { ok: false, reason: "check_digit" };
   return { ok: true, clabe, last4: clabe.slice(-4) };
 }

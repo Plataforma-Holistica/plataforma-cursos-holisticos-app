@@ -879,15 +879,26 @@ describe("los datos fiscales del maestro (T-409)", () => {
     expect(path(text)).not.toContain(CLABE);
   });
 
-  it("en lo que anota el SDK tampoco", () => {
-    expect(note(`dato ${CLABE}`)).not.toContain(CLABE);
+  it.each(["/pagos/002-010-07777777777-1", "/pagos/002.010.07777777777.1"])("con separadores, en una ruta tampoco: %s", (text) => {
+    expect(path(text)).toBe("/pagos/[clabe]");
+  });
+
+  it.each([`dato ${CLABE}`, "dato 002-010-07777777777-1", "dato 002 010 07777777777 1"])("en lo que anota el SDK tampoco: %s", (text) => {
+    expect(note(text)).toBe("dato [clabe]");
+  });
+
+  it("la regla no le parte su forma a un token ni a un correo: corre después de ellos", () => {
+    const hex = `${"a".repeat(19)}${CLABE}${"b".repeat(19)}`;
+    expect(message(hex)).toBe("[token]");
+    expect(message(`Bearer abc${CLABE}zzzz`)).toBe("Bearer [token]");
+    expect(message(`${CLABE}@correo.example.com`)).toBe("[correo]");
   });
 
   it("dieciocho dígitos que no son una CLABE, en lo que anota el SDK, se quedan: el dígito de control lo distingue", () => {
     expect(note("id 002010077777777772")).toBe("id 002010077777777772");
   });
 
-  it.each(["GOMA800101AB1", "goma800101ab1", "GOMA-800101-AB1", "GOMA 800101 AB1", "rfc_GOMA800101AB1", "ÑOMA800101AB1", "GOM800101AB1"])(
+  it.each(["GOMA800101AB1", "goma800101ab1", "GOMA-800101-AB1", "GOMA 800101 AB1", "GOMA  800101  AB1", "GOMA.800101.AB1", "1GOMA800101AB1", "rfc_GOMA800101AB1", "ÑOMA800101AB1", "GOM800101AB1"])(
     "en un mensaje no sale el RFC: %s",
     (text) => {
       expect(message(text)).toContain("[rfc]");
@@ -904,6 +915,8 @@ describe("los datos fiscales del maestro (T-409)", () => {
     `PII_ENCRYPTION_KEYS=${KEY},${KEY}`,
     `PII_ENCRYPTION_KEYS: "${KEY}"`,
     `falló con ${KEY} al abrir`,
+    // Sin la versión ni la comprobación: la llave sola.
+    `falló con ${"Ab3".repeat(14)}A= al abrir`,
   ])("la llave no sale: %s", (text) => {
     expect(message(text)).not.toContain("Ab3Ab3");
     expect(note(text)).not.toContain("Ab3Ab3");
