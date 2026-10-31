@@ -73,12 +73,6 @@ export async function readCourseLessons(tx: Tx, slug: string): Promise<LessonRow
 
 const openRow = z.object({ is_open: z.boolean() });
 
-/**
- * Si el curso `slug` es el abierto (RF-309), o nulo si no existe o no está listado. Lo dice el
- * registro del curso, como en la función única de medios (`private.media_facts`): la copia de
- * lo publicado no manda. Solo eso sale de aquí: lo usa la guarda para saber a dónde mandar a
- * quien llega sin sesión.
- */
 /** Un recurso vigente de una lección (T-404). La ruta del archivo no la lee ninguna persona: la suelta la puerta de medios. */
 export interface LessonResourceRow {
   id: string;
@@ -101,6 +95,12 @@ export async function readLessonResources(tx: Tx, lessonId: string): Promise<Les
   return rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
 }
 
+/**
+ * Si el curso `slug` es el abierto (RF-309), o nulo si no existe o no está listado. Lo dice el
+ * registro del curso, como en la función única de medios (`private.media_facts`): la copia de
+ * lo publicado no manda. Solo eso sale de aquí: lo usa la guarda para saber a dónde mandar a
+ * quien llega sin sesión.
+ */
 export async function readCourseIsOpen(tx: Tx, slug: string): Promise<boolean | null> {
   const [row] = await tx.query(
     sql`select r.is_open

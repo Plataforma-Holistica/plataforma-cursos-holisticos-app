@@ -118,7 +118,6 @@ function savedLabel(updatedAt: string, now: Date): string {
   return sameDay ? t(text.savedAt, { time }) : t(text.savedOn, { date: longDate(updatedAt), time });
 }
 
-
 /** Los recursos de un lugar (una lección, o nulo: el curso), en orden. El primero no sube y el último no baja. */
 function resourceRows(draft: DraftCourse, lesson: string | null): ResourceRow[] {
   const here = draft.resources.filter((resource) => resource.lessonId === lesson).sort((a, b) => a.position - b.position);

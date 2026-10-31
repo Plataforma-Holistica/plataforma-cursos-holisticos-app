@@ -4,7 +4,7 @@
 -- (`resource_object`, hermana de `lesson_playback`) y su freno. Las reglas del área `resources` se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(76);
+select plan(89);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7100000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -211,6 +211,30 @@ select ok(pruebas.barrera(pruebas.p(3), pruebas.recurso(4)) is not null, 'tambi�
 select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(3)), null, 'de uno sin listar, no');
 select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(5)), null, 'de uno retirado, no');
 select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(8)), null, 'de una lección retirada, no');
+-- Listado y en un estado que no se ve: lo decide el estado, no la lista.
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'withdrawn', withdrawn_at = now(), withdrawal_reason = 'prueba' where course_id = pruebas.curso(1);
+select pruebas.limpiar();
+select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(1)), null, 'de un curso listado pero retirado, no');
+select is(pruebas.hechos(pruebas.p(3), pruebas.recurso(1)) -> 'resource' ->> 'course_state', 'withdrawn', 'y los hechos dicen el estado');
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'in_review', withdrawn_at = null, withdrawal_reason = null where course_id = pruebas.curso(1);
+select pruebas.limpiar();
+select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(1)), null, 'de un curso listado pero en revisión, no');
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'published' where course_id = pruebas.curso(1);
+select pruebas.limpiar();
+-- Un recurso retirado no sale por ningún lado, ni a su maestra. T-405 será quien los escriba.
+select pruebas.publicar(9, 1, null, 3);
+select pruebas.como_dueno_sistema();
+update public.published_resources set is_current = false, retired_at = now() where id = pruebas.recurso(9);
+select pruebas.limpiar();
+select is(pruebas.barrera(pruebas.p(3), pruebas.recurso(9)), null, 'de un recurso retirado, no');
+select is(pruebas.barrera(pruebas.p(1), pruebas.recurso(9)), null, 'ni a su maestra');
+select is(pruebas.hechos(pruebas.p(3), pruebas.recurso(9)) -> 'resource' ->> 'is_current', 'false', 'y los hechos lo dicen');
+select pruebas.como_visitante();
+select is((select count(*)::int from public.published_resources where id = pruebas.recurso(9)), 0, 'y no se enumera');
+select pruebas.limpiar();
 select is(pruebas.barrera(pruebas.p(3), gen_random_uuid()), null, 'de lo que no existe, no');
 select is(pruebas.barrera(null, pruebas.recurso(1)), null, 'sin nadie que actúe, no');
 select ok(pruebas.barrera(pruebas.p(1), pruebas.recurso(3)) is not null, 'a su maestra, de uno sin listar, sí');
@@ -322,6 +346,11 @@ alter table public.business_parameters disable trigger user;
 update public.business_parameters set canceled_at = now() where key = 'TOPE_DESCARGAS_HORA' and canceled_at is null;
 select is(pruebas.golpe(pruebas.p(3)), 'unavailable', 'sin el parámetro, tampoco: nunca pasa sin tope');
 update public.business_parameters set canceled_at = null where key = 'TOPE_DESCARGAS_HORA' and canceled_at = now();
+-- Con un tope sin sentido, tampoco: la primera descarga de cada hora se colaría, porque insertar no compara.
+update public.business_parameters set value = '0' where key = 'TOPE_DESCARGAS_HORA' and canceled_at is null;
+select is(pruebas.golpe(pruebas.p(3)), 'unavailable', 'con el tope en 0, no pasa');
+select is((select count(*)::int from private.rate_limit_counters where bucket = 'resource_download:' || pruebas.p(3)), 0, 'y no cuenta');
+update public.business_parameters set value = '60' where key = 'TOPE_DESCARGAS_HORA' and canceled_at is null;
 alter table public.business_parameters enable trigger user;
 
 -- ---------------------------------------------------------------------------------------
@@ -364,6 +393,22 @@ alter table public.published_resources enable row level security;
 grant execute on function private.resource_object(uuid) to authenticated;
 select ok('resource function executable by authenticated' = any(pruebas.vigila()), 'la barrera en manos de la persona se nota');
 revoke execute on function private.resource_object(uuid) from authenticated;
+create policy abierta on public.published_resources for select to anon using (true);
+select ok('published resource policy not allowed' = any(pruebas.vigila()), 'una política de más se nota');
+drop policy abierta on public.published_resources;
+alter policy published_resources_public_select on public.published_resources using (true);
+select ok('published resource policy not allowed' = any(pruebas.vigila()), 'una política abierta se nota');
+alter policy published_resources_public_select on public.published_resources using (
+  is_current
+  and (lesson_id is null or exists (select 1 from public.published_lessons l where l.id = published_resources.lesson_id and l.is_current))
+  and exists (select 1 from public.published_courses c where c.course_id = published_resources.course_id and c.is_listed));
+drop policy published_resources_teacher_select on public.published_resources;
+select ok('published resource table without policy' = any(pruebas.vigila()), 'que falte una se nota');
+create policy published_resources_teacher_select on public.published_resources
+  for select to authenticated using (teacher_id = (select private.current_teacher_id()));
+alter table public.published_resources drop constraint published_resources_path_ok;
+select ok('resource table without constraint published_resources_path_ok' = any(pruebas.vigila()), 'la regla de la ruta se nota');
+alter table public.published_resources add constraint published_resources_path_ok check (starts_with(storage_path, teacher_id::text || '/' || course_id::text || '/'));
 select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
 
 select * from finish();

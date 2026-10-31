@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readResourceForm, checkFile, progressStep, resourceButton, titleFromFile } from "@/app/portal/_editor/resource-outcomes";
 import { ResourcesBlock } from "@/app/portal/_editor/resources";
 import type { ResourceRow } from "@/app/portal/_editor/rows";
-import { UnsavedProvider, useUnsaved } from "@/app/portal/_editor/unsaved";
+import { UnsavedProvider } from "@/app/portal/_editor/unsaved";
 import { portal } from "@/messages/es/portal";
 
 import { a11yViolations } from "../setup/a11y";
@@ -17,7 +17,7 @@ const actions = vi.hoisted(() => ({
   cancelResourceAction: vi.fn(),
 }));
 vi.mock("@/app/portal/_editor/resource-actions", () => actions);
-const files = vi.hoisted(() => ({ openFile: vi.fn(), reloadPage: vi.fn() }));
+const files = vi.hoisted(() => ({ openFile: vi.fn(), openFileInFrame: vi.fn(), reloadPage: vi.fn() }));
 vi.mock("@/app/_catalog/resources/open-file", () => files);
 
 const COURSE = "c0000000-0000-4000-8000-000000000001";
@@ -465,48 +465,51 @@ describe("lo puro", () => {
   });
 });
 
-// Bajar lo que subió (T-404). Abrir un adjunto dispara el aviso del navegador aunque la página no se va: con algo sin guardar
-// preguntaría «¿salir?» sin motivo. Cómo se comporta un navegador de verdad lo mide tests/e2e/equipo/recursos.equipo.ts.
+// Bajar lo que subió (T-404). En el editor el adjunto se abre en un marco oculto: la página no navega, así que el aviso de salir
+// sigue valiendo y lo escrito no corre riesgo si la respuesta no es un archivo. Lo mide tests/e2e/equipo/portal.equipo.ts.
 describe("bajar", () => {
   const URL = "https://storage/bajar?token=t";
-  const unload = () => {
-    const event = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(event);
-    return event.defaultPrevented;
-  };
 
   it("cada recurso lleva su botón, con su nombre", () => {
     show();
     expect(screen.getByRole("button", { name: "Descargar Guía" })).toHaveAttribute("value", resourceButton.download(R1));
   });
 
-  it("con la dirección, la abre una vez, lo dice y no dispara el aviso de salir; después el aviso vuelve a valer", async () => {
+  it("con la dirección, la abre una vez en el marco y lo dice, sin navegar", async () => {
     actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
-    const seen: boolean[] = [];
-    files.openFile.mockImplementation(() => seen.push(unload()));
     const user = userEvent.setup();
-    let mark: (key: string, dirty: boolean) => void = () => undefined;
-    function Marker() {
-      ({ mark } = useUnsaved());
-      return null;
-    }
-    render(
-      <UnsavedProvider>
-        <Marker />
-        <ResourcesBlock course={COURSE} lesson={LESSON} items={ITEMS} editable self={`/portal/cursos/${COURSE}`} limits={LIMITS} />
-      </UnsavedProvider>,
-    );
-    // Algo sin guardar en la pantalla: el aviso se dispararía.
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    expect(files.openFileInFrame.mock.calls[0]?.[0]).toBe(URL);
+    await screen.findAllByText(portal.editor.resources.downloadStarted);
+    expect(files.openFile).not.toHaveBeenCalled();
+  });
+
+  it("si lo que llegó al marco no es un archivo, dice que puede no haber empezado", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    const notAFile = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => notAFile());
+    await screen.findAllByText(portal.editor.resources.downloadMaybeMissed);
+  });
+
+  it("mientras va en camino no se manda otra cosa: con dos botones, una dirección se perdería sin decir nada", async () => {
+    let finish: (state: unknown) => void = () => undefined;
+    actions.resourceAction.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    expect(actions.resourceAction).toHaveBeenCalledTimes(1);
     await act(async () => {
-      mark("otro-formulario", true);
+      finish({ kind: "granted", url: URL, attempt: 1 });
       await Promise.resolve();
     });
-    expect(unload()).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
-    await waitFor(() => expect(files.openFile).toHaveBeenCalledExactlyOnceWith(URL));
-    await screen.findAllByText(portal.editor.resources.downloadStarted);
-    expect(seen).toEqual([false]);
-    await waitFor(() => expect(unload()).toBe(true), { timeout: 2000 });
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
   });
 
   it("con el tope, lo dice sin abrir nada", async () => {
@@ -515,6 +518,6 @@ describe("bajar", () => {
     show();
     await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
     await screen.findAllByText(portal.editor.resources.downloadThrottled);
-    expect(files.openFile).not.toHaveBeenCalled();
+    expect(files.openFileInFrame).not.toHaveBeenCalled();
   });
 });

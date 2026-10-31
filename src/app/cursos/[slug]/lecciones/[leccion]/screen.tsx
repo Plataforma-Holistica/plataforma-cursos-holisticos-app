@@ -205,7 +205,6 @@ function isRedirect(error: unknown): boolean {
   return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
 }
 
-/** El título de PA-33 y su frase, por motivo. */
 /** Lo que se le dice a quien no ve el lugar del reproductor, cuando cambia. */
 function announcementOf(video: VideoState): string {
   switch (video.kind) {
@@ -555,8 +554,9 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     </div>
   );
   // Los recursos de esta lección (T-404). Si no se pudieron leer se dice, y el video sigue. Van dos veces, como el temario: en
-  // escritorio bajo «Sobre esta lección», y en teléfono en su pestaña. Sin ninguno, no hay ni bloque ni pestaña.
-  const hasResources = resources === null || resources.length > 0;
+  // escritorio bajo «Sobre esta lección», y en teléfono en su pestaña. Sin ninguno, no hay ni bloque ni pestaña; con PA-33 en el
+  // lugar del reproductor tampoco, también si el acceso terminó con la página abierta.
+  const hasResources = video.kind !== "denied" && (resources === null || resources.length > 0);
   const resourcesPanel =
     resources === null ? (
       <InlineAlert tone="warning">{resourceText.lessonUnavailable}</InlineAlert>
@@ -694,7 +694,7 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
               items={[
                 { id: "temario", label: text.syllabus, panel: syllabus("pestana-modulo", "h2"), hasFocusableContent: true },
                 { id: "sobre", label: text.about, panel: aboutPanel },
-                ...(hasResources ? [{ id: "recursos", label: resourceText.tab, panel: resourcesPanel, hasFocusableContent: true }] : []),
+                ...(hasResources ? [{ id: "recursos", label: resourceText.tab, panel: resourcesPanel, hasFocusableContent: resources !== null }] : []),
               ]}
             />
           </div>

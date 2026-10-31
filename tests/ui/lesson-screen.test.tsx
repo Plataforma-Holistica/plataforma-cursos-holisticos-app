@@ -1110,4 +1110,11 @@ describe("los recursos de la lección", () => {
     expect(screen.getAllByText("No pudimos leer los recursos de esta lección. Recarga la página para intentar de nuevo.").length).toBeGreaterThan(0);
     expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
   });
+
+  it("con PA-33 en el lugar del reproductor, no se muestran (también si el acceso terminó con la página abierta)", () => {
+    show({ resources: [GUIDE], initial: { kind: "denied", denial: { reason: "never_subscribed" } } });
+    expect(screen.queryByRole("heading", { name: "Recursos de esta lección" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Recursos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Guía" })).toBeNull();
+  });
 });

@@ -802,14 +802,16 @@ que no se ve leyendo un solo archivo:
   **Dos canales, medidos en un navegador:** con JavaScript, un `redirect` a otro origen desde una acción deja al enrutador esperando una página que
   un adjunto no trae, así que el formulario lleva un campo `canal=js` que solo existe ya montada la pantalla, la dirección vuelve en el estado y la abre
   `window.location.assign`, una vez por intento (`_catalog/resources/open-file.ts`); sin JavaScript la acción redirige, el navegador baja y se queda
-  donde estaba, y la dirección no viaja en ningún estado. Abrir un adjunto dispara `beforeunload` aunque la página no se va: en PA-43 pasa por
-  `useUnsaved().openFile`, que se salta ese aviso un segundo. No dispara `pagehide`: el reproductor sigue. La lista del alumno es
+  donde estaba, y la dirección no viaja en ningún estado. En PA-43 el adjunto se abre en un marco oculto (`openFileInFrame`), porque ahí puede haber algo
+  sin guardar: la página no navega, no dispara `beforeunload`, y si llega algo que no es un archivo el marco dispara `load` y se dice. El alumno sigue con
+  `location.assign`: en Chrome no dispara `pagehide` y el reproductor sigue, y en el iPhone falta medirlo. La lista del alumno es
   `_catalog/resources/resource-list.tsx`, una fila por formulario, con su estado. En PA-02 (`browse`, leída como sistema junto al temario y recordada
   30 s) van los del curso, y el visitante los ve sin botón (FL-14, E1: al alumno sin acceso se lo dice la acción, sin preguntar antes por cada uno). En
   PA-22 (`lessons`, leída como la persona) van los de la lección, solo con acceso, bajo «Sobre esta lección» y en teléfono en su pestaña. Si no se
   pudieron leer se dice, y el video sigue. Textos en su propio bloque (`src/messages/es/resources.ts`); PA-33 en `_catalog/paywall.ts`, que comparte con la
   lección. Usa pgTAP 71, integración 91 (contra el Storage local: la dirección sirve, caduca, y no sirve para otra ruta) y
-  `tests/e2e/equipo/recursos.equipo.ts`. Un maestro suspendido baja lo suyo (decisión mía sin confirmar). Cuánto se conserva un archivo que una versión
+  `tests/e2e/equipo/recursos.equipo.ts`. Decisiones mías sin confirmar: un maestro suspendido baja lo suyo; título, tipo y tamaño de lo publicado son públicos
+  como el temario (la política no pide acceso, y PA-22 los muestra solo con él); el alumno con `location.assign` y el maestro con el marco. Cuánto se conserva un archivo que una versión
   nueva retira se decide con T-405. Para el A: `published_lessons` ganó `unique (id, course_id)`, y una prueba que arme `createMediaGrant` pasa `files`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso

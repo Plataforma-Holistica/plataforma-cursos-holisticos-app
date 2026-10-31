@@ -244,8 +244,8 @@ describe("bajar lo publicado", () => {
   });
 });
 
-describe("lo que cualquiera lee de lo publicado", () => {
-  it("la ficha lista los recursos del curso y la lección los suyos; ninguna lectura trae la ruta", async () => {
+describe("las lecturas de la ficha y de la lección", () => {
+  it("con el rol con que corren: la ficha lista los del curso y la lección los suyos, sin la ruta; los permisos por columna lo exigen", async () => {
     const { readCourseLessons } = await import("@/services/browse/records");
     const { readLessonResources } = await import("@/services/lessons/records");
     await reverted(async (owner) => {
@@ -256,7 +256,10 @@ describe("lo que cualquiera lee de lo publicado", () => {
         execute: async () => 0,
       } as never;
       const slug = (await owner.query<{ slug: string }>("select slug from public.published_courses where course_id = $1", [course])).rows[0]?.slug ?? "";
+      // Como en `databaseBrowseStore`: la ficha se lee como el servidor, que tampoco tiene permiso sobre la ruta.
+      await owner.query("select set_config('role', 'app_service', true)");
       const read = await readCourseLessons(tx, slug);
+      await asOwner(owner);
       expect(read.resources).toEqual([{ id: resource, title: "Guía de respiración", kind: "pdf", sizeBytes: PDF_BYTES.length }]);
       expect(JSON.stringify(read)).not.toContain(path);
 
@@ -271,10 +274,15 @@ describe("lo que cualquiera lee de lo publicado", () => {
         [course, teacher, lesson, PDF_MIME, lessonPath],
       );
       await asOwner(owner);
+      // Como en `databaseLessonStore`: la lección se lee como la persona.
+      await owner.query("select set_config('role', 'authenticated', true)");
       const rows = await readLessonResources(tx, lesson);
+      await asOwner(owner);
       expect(rows.map((row) => row.title)).toEqual(["De la lección"]);
       // Lo de la lección no se cuela en la ficha.
+      await owner.query("select set_config('role', 'app_service', true)");
       expect((await readCourseLessons(tx, slug)).resources.map((row) => row.title)).toEqual(["Guía de respiración"]);
+      await asOwner(owner);
     });
   });
 });

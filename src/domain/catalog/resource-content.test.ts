@@ -177,6 +177,15 @@ describe("resourceDownloadName: el nombre con el que baja, que arma el servidor"
     expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
   });
 
+  it.each(["CON.v2", "con.final", "NUL.txt"])("con otra extensión también (%s): Windows lo reserva igual", (title) => {
+    expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
+  });
+
+  it("uno que solo empieza igual no es reservado", () => {
+    expect(resourceDownloadName("Conciencia", PDF)).toBe("Conciencia.pdf");
+    expect(resourceDownloadName("Consulta.v2", PDF)).toBe("Consulta.v2.pdf");
+  });
+
   it("sin nada que quede, un nombre de reserva", () => {
     expect(resourceDownloadName("...", PDF)).toBe("recurso.pdf");
     expect(resourceDownloadName("", PDF)).toBe("recurso.pdf");

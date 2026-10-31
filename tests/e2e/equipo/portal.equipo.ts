@@ -401,8 +401,8 @@ test("los recursos: se sube de verdad a la cubeta, se rechaza lo disfrazado, y q
   expect(await objects()).toHaveLength(1);
   expect(await a11yViolations(page)).toEqual([]);
 
-  // Bajar lo que subió, con algo sin guardar en la pantalla: el navegador no pregunta si salir, lo escrito se queda y la
-  // descarga llega con el nombre que armó el servidor. Un adjunto dispara `beforeunload` aunque la página no se va.
+  // Bajar lo que subió, con algo sin guardar en la pantalla: se abre en un marco oculto, así que la página no navega, el
+  // navegador no pregunta si salir, lo escrito se queda y la descarga llega con el nombre que armó el servidor.
   const dialogs: string[] = [];
   const noteDialog = (dialog: Dialog) => {
     dialogs.push(dialog.type());
@@ -418,6 +418,14 @@ test("los recursos: se sube de verdad a la cubeta, se rechaza lo disfrazado, y q
   await expect(block.getByText("Tu descarga empezó.").first()).toBeAttached();
   await expect(lessonTitle).toHaveValue("Una, sin guardar");
   expect(dialogs).toEqual([]);
+  // Si Storage no contesta con el archivo, la página tampoco se va: lo escrito sigue ahí, y se dice.
+  await page.route("**/object/sign/**", (route) => route.fulfill({ status: 400, contentType: "application/json", body: '{"error":"x"}' }));
+  await block.getByRole("button", { name: "Descargar Guía de respiración" }).click();
+  await expect(block.getByText("Si la descarga no empezó, vuelve a intentarlo.").first()).toBeVisible();
+  await expect(lessonTitle).toHaveValue("Una, sin guardar");
+  expect(new URL(page.url()).pathname).toMatch(/^\/portal\/cursos\//);
+  expect(dialogs).toEqual([]);
+  await page.unroute("**/object/sign/**");
   page.off("dialog", noteDialog);
   await lessonTitle.fill("Una");
   await page.getByRole("button", { name: "Guardar", exact: true }).click();

@@ -56,7 +56,8 @@ alter table public.published_resources enable row level security;
 -- Sin la ruta ni el objeto. También el servidor, que lee la lista como sistema para la ficha pública.
 grant select (id, course_id, teacher_id, lesson_id, title, kind, size_bytes, position, is_current)
   on public.published_resources to anon, authenticated, app_service;
--- La lección también vigente: un recurso de una lección retirada no se enumera.
+-- La lección también vigente: un recurso de una lección retirada no se enumera. Título, tipo y tamaño son públicos como el
+-- temario: PA-22 los muestra solo con acceso, pero no son lo que se paga (decisión mía sin confirmar). El archivo no sale de aquí.
 create policy published_resources_public_select on public.published_resources
   for select to anon, authenticated
   using (is_current
@@ -144,8 +145,9 @@ $$;
 revoke all on function private.resource_draft_object(uuid, uuid) from public;
 grant execute on function private.resource_draft_object(uuid, uuid) to app_service;
 
--- El freno de descargas. Se llama con el acceso ya dado, en su propia transacción. Falla cerrado: sin quien actúe o sin el
--- parámetro no pasa, y lo dice distinto de `throttled`. Una sola sentencia: con el tope, no toca la fila ni contesta nada.
+-- El freno de descargas. Se llama con el acceso ya dado, en su propia transacción. Falla cerrado: sin quien actúe, o sin el
+-- parámetro o con uno sin sentido (insertar no compara: con 0 se colaría la primera de cada hora), no pasa, y lo dice distinto
+-- de `throttled`. Una sola sentencia: con el tope, no toca la fila ni contesta nada.
 create function private.resource_download_hit() returns text
 language plpgsql security definer set search_path = ''
 as $$
@@ -154,7 +156,7 @@ declare
   v_cap integer := (private.parameter_value('TOPE_DESCARGAS_HORA'))::integer;
   v_hits integer;
 begin
-  if v_actor is null or v_cap is null then
+  if v_actor is null or v_cap is null or v_cap < 1 then
     return 'unavailable';
   end if;
   insert into private.rate_limit_counters as c (bucket, window_start, hits)
@@ -303,8 +305,12 @@ as $$
       ('public.draft_resources', 'draft_resources_state_ok', 'CHECK ((((state = ''pending''::public.resource_state) AND ("position" IS NULL) AND (object_id IS NULL) AND (object_version IS NULL)) OR ((state = ''ready''::public.resource_state) AND ("position" IS NOT NULL) AND (object_id IS NOT NULL) AND (object_version IS NOT NULL))))'),
       ('public.draft_lessons', 'draft_lessons_id_course_uq', 'UNIQUE (id, course_id)'),
       ('public.published_lessons', 'published_lessons_id_course_uq', 'UNIQUE (id, course_id)'),
+      ('public.published_resources', 'published_resources_course_fk',
+       'FOREIGN KEY (course_id, teacher_id) REFERENCES public.published_courses(course_id, teacher_id)'),
       ('public.published_resources', 'published_resources_lesson_fk',
        'FOREIGN KEY (lesson_id, course_id) REFERENCES public.published_lessons(id, course_id)'),
+      ('public.published_resources', 'published_resources_path_ok',
+       'CHECK (starts_with(storage_path, ((((teacher_id)::text || ''/''::text) || (course_id)::text) || ''/''::text)))'),
       ('public.published_resources', 'published_resources_mime_ok', 'CHECK (private.resource_mime_ok(kind, mime))'),
       ('public.published_resources', 'published_resources_title_ok', 'CHECK (private.draft_text_ok(title, 120, false))')
     ) as c (table_name, name, definition)
@@ -328,6 +334,27 @@ as $$
   union all
   select 'published resource table without row level security', 'public.published_resources'
   from pg_catalog.pg_class c where c.oid = 'public.published_resources'::regclass and not c.relrowsecurity
+  union all
+  -- Sus tres políticas, y solo esas, con su definición entera: una abierta dejaría ver lo que la regla niega.
+  select 'published resource policy not allowed', p.polname::text
+  from pg_catalog.pg_policy p
+  where p.polrelid = 'public.published_resources'::regclass
+    and not exists (
+      select 1 from (values
+          ('published_resources_public_select', array['anon'::regrole, 'authenticated'::regrole],
+           '(is_current AND ((lesson_id IS NULL) OR (EXISTS ( SELECT 1 FROM public.published_lessons l WHERE ((l.id = published_resources.lesson_id) AND l.is_current)))) AND (EXISTS ( SELECT 1 FROM public.published_courses c WHERE ((c.course_id = published_resources.course_id) AND c.is_listed))))'),
+          ('published_resources_teacher_select', array['authenticated'::regrole],
+           '(teacher_id = ( SELECT private.current_teacher_id() AS current_teacher_id))'),
+          ('published_resources_content_select', array['authenticated'::regrole],
+           '( SELECT private.has_capability(''content''::public.capability) AS has_capability)')
+        ) as a (name, roles, expression)
+      where a.name = p.polname and p.polcmd = 'r' and p.polpermissive
+        and p.polroles::regrole[] @> a.roles and p.polroles::regrole[] <@ a.roles
+        and pg_catalog.regexp_replace(pg_catalog.pg_get_expr(p.polqual, p.polrelid), '\s+', ' ', 'g') = a.expression)
+  union all
+  select 'published resource table without policy', a.name
+  from (values ('published_resources_public_select'), ('published_resources_teacher_select'), ('published_resources_content_select')) as a (name)
+  where not exists (select 1 from pg_catalog.pg_policy p where p.polrelid = 'public.published_resources'::regclass and p.polname = a.name)
   union all
   select 'published resource table without guard', g.name
   from (values ('publication_guard', 31), ('publication_no_truncate', 34)) as g (name, kind)

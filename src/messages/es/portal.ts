@@ -153,6 +153,7 @@ export const portal = defineMessages({
       download: "Descargar",
       downloadNamed: "Descargar {title}",
       downloadStarted: "Tu descarga empezó.",
+      downloadMaybeMissed: "Si la descarga no empezó, vuelve a intentarlo.",
       downloadThrottled: "Pediste muchas descargas en poco tiempo. Vuelve a intentarlo en un rato.",
       confirmRemove: "¿Quitar «{title}»? El archivo se borra y no se puede recuperar.",
       full: "Aquí ya no caben más recursos. Quita uno para adjuntar otro.",

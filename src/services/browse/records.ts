@@ -135,7 +135,6 @@ const detailRow = z.object({
   duration_seconds: z.number().int(),
 });
 
-/** Las lecciones vigentes del curso listado `slug`, con sus módulos vigentes y su maestro si está listado. */
 const resourceRow = z.object({ id: z.string(), title: z.string(), kind: z.enum(["pdf", "doc", "audio"]), size_bytes: z.number().int() });
 
 /** Los recursos vigentes del curso listado `slug`, los que no son de una lección. Nunca la ruta del archivo. */
@@ -152,6 +151,7 @@ async function readCourseResources(tx: Tx, slug: string): Promise<CourseResource
   return rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
 }
 
+/** Las lecciones vigentes del curso listado `slug`, con sus módulos vigentes y su maestro si está listado, y sus recursos. */
 export async function readCourseLessons(
   tx: Tx,
   slug: string,
