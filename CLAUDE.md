@@ -832,6 +832,17 @@ que no se ve leyendo un solo archivo:
   lo escrito y el intento solo le tocan al que envió (`formOfState`). Un aviso de lo hecho no dice de qué maestro habla:
   se pinta si la ficha lo confirma (`acceptedTeacherNotice`). Un día (`founder_since`) se escribe con `longDay`, no con
   `longDate`, que lo movería al día anterior.
+- **Los datos fiscales en la base** (T-409, segunda solicitud, `t409_datos_fiscales`; decisiones de Sergio del 2026-10-31). `private.teacher_tax_profiles`, de solo
+  inserción, **sin ningún permiso para la aplicación, ni de leer**: una lectura directa no quedaría en la auditoría. Se entra por cuatro funciones: `tax_profile_save`
+  (guarda lo suyo, con el maestro y la versión vista, porque entran a los datos asociados de lo cifrado: contesta `changed`, y `invalid` si lo cifrado no tiene forma),
+  `tax_profile_state` (si hay y qué versión, sin lo cifrado: no es una lectura), `tax_profile_mine` (lo suyo, también suspendido) y `tax_profile_for_payout` (finanzas, por una
+  liquidación y nunca por un maestro, con su puerta, y `self` sobre sí). Las dos que leen escriben `tax_profile.read` en la misma transacción antes de devolver, y devuelven lo
+  cifrado en base64: **lo abre la aplicación, ya confirmada la transacción**. El régimen y el tipo de persona van en claro, y la auditoría deja fuera lo cifrado, los últimos
+  cuatro y el régimen, porque configuración la lee. La base no ve el texto y sí su forma: encabezado, versión de la llave y largo exacto de la CLABE. `withholding_rules` nace sin filas, con
+  fracciones (`numeric(8,6)`) y sin permisos. `private.actor_teacher_id()` es el maestro de quien actúa, también por el servidor: `current_teacher_id()` mira la sesión de Auth, y
+  por el servidor contesta nulo. `teacher_roster` da `has_tax_data`. El área `tax` del vigilante exige los permisos, los disparadores, la auditoría de quien lee, y que **toda función que
+  nombre la tabla esté en su lista**: una nueva es una puerta nueva. Usa pgTAP 63. Guardar toma el candado `teacher_balance:` para la cuarta solicitud; esa carrera la prueba la integración de entonces.
+  Para el B: `payee_kind` es `person` o `company`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

@@ -33,6 +33,7 @@ const rosterSchema = z.strictObject({
       suspension_reason: z.string().nullable(),
       suspension_notice: z.string().nullable(),
       fraud_pending: z.boolean(),
+      has_tax_data: z.boolean(),
       is_self: z.boolean(),
     }),
   ),
@@ -77,6 +78,7 @@ export function rosterOf(rawRoster: unknown, rawQueue: unknown): TeacherRoster |
       suspensionNotice: row.suspension_notice,
       fraudPending: row.fraud_pending,
       isSelf: row.is_self,
+      hasTaxData: row.has_tax_data,
     })),
     requests: queue.requests.map((row) => ({
       id: row.request_id,

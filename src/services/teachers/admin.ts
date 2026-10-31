@@ -45,6 +45,8 @@ export interface TeacherRow {
   fraudPending: boolean;
   /** Es el maestro de quien lee: la pantalla no le ofrece actuar sobre sí. */
   isSelf: boolean;
+  /** Ya capturó sus datos fiscales. Contenido lo sabe para pedírselos, y no los ve. */
+  hasTaxData: boolean;
 }
 
 /** Una suspensión por fraude que finanzas propuso y falta confirmar (RN-17). La base no le lista a nadie la que es sobre sí. */
