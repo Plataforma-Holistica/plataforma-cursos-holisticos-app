@@ -738,6 +738,34 @@ que no se ve leyendo un solo archivo:
   (`selected.place`). Una lista de práctica o de nivel sin opciones lo dice en la lista misma y en una nota. Una clase
   con la palabra `basis` en `src/app/` hace fallar `tests/architecture/media.test.ts`, que la busca para que la base
   de acceso del video no llegue a una pantalla: se usa `w-full`.
+- **Lo que T-404 suma al carril B** (primera solicitud, `t404_recursos`; decisiones de Sergio del 2026-10-30: PDF,
+  `.docx`, MP3 y M4A; un archivo se borra al momento y un repaso de quien opera limpia lo que se escape; se acepta por
+  ahora el riesgo de archivos con código o macros). Los números de prueba del B desde ese día: pgTAP del 70 al 79 e
+  integración del 90 al 99. Vercel corta todo envío a una función en 4.5 MB, así que **un recurso sube del navegador a
+  la cubeta** `course-resources` con una dirección firmada, y lo que la base guarda es `draft_resources`, que nace antes
+  que el objeto y con la ruta que pone ella (`<maestro>/<curso>/<recurso>`). De ahí salen tres reglas. Un objeto que
+  ninguna fila nombra sobra, tenga la edad que tenga: no hay cola de borrado, sino `private.resource_unused_objects(curso)`
+  (por curso, para el servidor, al quitar algo o borrar la lección, el módulo o el curso) y `private.resource_sweep()`
+  (toda la cubeta; se lleva los pendientes vencidos; no es de la aplicación). Confirmar
+  (`resource_confirm(curso, recurso, contenido_ok)`) compara lo que Storage guardó en `storage.objects`, no lo que dijo el
+  navegador; un rechazo borra la fila en la misma transacción, así que no se puede volver a confirmar aunque la dirección
+  siga viva. El tipo y el tamaño se deciden aunque el contenido no se haya podido leer (`false` solo si se leyeron bytes
+  y no corresponden, porque destruye la fila); lo que no se supo (el contenido nulo, o el parámetro sin valor) contesta
+  `unavailable` y la fila se queda, y sin objeto contesta `not_uploaded`, que gana. `object_id` y `object_version`
+  recuerdan qué objeto se confirmó: un reemplazo por `upsert` conserva el id y cambia la versión, así que la firma de
+  subida va con `upsert: false`, y la descarga compara la versión. Toma la fila (`for update`): el repaso no toma el
+  candado del curso. Y un pendiente vive 3 h, porque la dirección de subida dura 2 h
+  fijas (Storage no deja pedir menos). `place_id` es la lección o el curso: la lista por lugar, con la posición única y
+  diferible como las de módulos y lecciones (`nulls not distinct` no hizo falta). Las funciones `resource_*` siguen el
+  protocolo del borrador (la fila del maestro activo, después `draft_open`), y cambiar la lista sube la revisión de la
+  lección, la del módulo y `content_revision`: borrar lleva lo que se vio. Reusan `guard_draft` y `draft_text_ok`. El área
+  `resources` del vigilante es del B: exige la cubeta privada, sus cuatro tipos exactos, el tope igual a
+  `RECURSO_TAMANO_MAX` y **ninguna política sobre `storage.objects`**. `draft_lessons` ganó `unique (id, course_id)`.
+  Parámetro nuevo: `RECURSOS_POR_LUGAR_MAX` (10; decisión mía sin confirmar). El freno es de 20 subidas por hora por
+  maestro, contado al aceptar, en `rate_limit_counters` (`resource_upload:<maestro>`). Usa pgTAP 70. **La 37 cambió una
+  prueba:** vaciar `draft_lessons` sola ahora lo detiene la clave foránea (0A000) antes que el guardián, así que vacía las
+  dos tablas juntas. Una política sobre `storage.objects` y apagar su seguridad por fila no se pueden provocar en pgTAP: la tabla es de
+  `supabase_storage_admin`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
