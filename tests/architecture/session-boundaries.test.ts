@@ -85,9 +85,9 @@ describe("lo que el paso previo termina cargando", () => {
 describe("la llave secreta de Supabase", () => {
   const sources = sourceFiles(src).map((path) => ({ file: posix(path), text: readFileSync(path, "utf8") }));
 
-  it("solo se nombra en la configuración y en los clientes de Auth", () => {
+  it("solo se nombra en la configuración, en los clientes de Auth y en el adaptador de Storage", () => {
     const naming = sources.filter((source) => source.text.includes("SUPABASE_SECRET_KEY")).map((source) => source.file);
-    expect(naming.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/config/env.ts"]);
+    expect(naming.sort()).toEqual(["src/adapters/supabase/auth-client.ts", "src/adapters/supabase/storage.ts", "src/config/env.ts"]);
   });
 
   it("la API de administración solo se usa en cuatro funciones del adaptador", () => {

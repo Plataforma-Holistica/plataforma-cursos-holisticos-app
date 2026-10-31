@@ -56,6 +56,8 @@ const FAILURES = {
   draft_read_unavailable: "No se pudo leer el borrador de un curso, o la lista de cursos de un maestro (T-402): su pantalla dijo «algo falló».",
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",
+  resource_upload_unavailable: "No se pudo firmar la subida de un recurso de un curso (T-404): la fila se canceló.",
+  resource_cleanup_failed: "No se pudieron borrar de la cubeta los archivos que ya no usa un curso (T-404): los alcanza el repaso.",
   teacher_roster_unavailable: "No se pudo leer la lista de maestros de PA-65 o PA-66 (T-401): la pantalla dice que no se supo.",
   teacher_change_unavailable: "No se supo si un cambio a un maestro quedó (T-401): la pantalla lo dice, y nunca lo pinta como hecho.",
   teacher_unavailable: "No se pudo leer si una cuenta es maestro (T-402), o sus textos (T-401): su pantalla del portal dijo «no se supo», con «Reintentar».",

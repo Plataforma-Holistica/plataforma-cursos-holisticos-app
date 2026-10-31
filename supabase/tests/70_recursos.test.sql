@@ -5,7 +5,7 @@
 -- sobra. Las reglas del área `resources` del vigilante, del carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(167);
+select plan(175);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -182,6 +182,19 @@ select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'M4A', 'm4a', 'audio', 'audio/mp4'), 'started', 'un M4A');
 
 -- ---------------------------------------------------------------------------------------
+-- La ruta de un recurso, para que el servidor lea sus primeros bytes: solo la de lo suyo.
+
+select is(pruebas.rj(pruebas.p(1), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('guia'))) ->> 'path',
+  pruebas.ruta(pruebas.id('guia')), 'su maestra pide la ruta de lo suyo');
+select is(pruebas.rj(pruebas.p(1), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('guia'))) ->> 'mime',
+  'application/pdf', 'y su tipo');
+select is(pruebas.r(pruebas.p(2), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('guia'))), 'not_found', 'otro maestro, no');
+select is(pruebas.r(pruebas.p(1), format('private.resource_file(%L, %L)', pruebas.id('curso'), gen_random_uuid())), 'not_found', 'uno que no existe, no');
+select is(pruebas.r(pruebas.p(4), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('guia'))), 'not_teacher', 'quien no es maestro, no');
+select is(pruebas.rj(pruebas.p(2), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('guia'))) ->> 'path', null, 'y a ellos no les sale la ruta');
+select is(has_function_privilege('authenticated', 'private.resource_file(uuid, uuid)', 'EXECUTE'), false, 'la persona no la llama');
+
+-- ---------------------------------------------------------------------------------------
 -- Confirmar: compara lo que Storage guardó, que es lo que se va a servir.
 
 select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('guia'))),
@@ -348,6 +361,7 @@ select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 2, %L)
 
 -- Mi curso con un recurso ajeno: `draft_open` deja pasar, y lo detiene el filtro por curso.
 select is(pruebas.listo(pruebas.p(2), pruebas.id('beto'), null, 'De Beto listo', 'beto_r'), 'ready', 'Beto tiene uno listo');
+select is(pruebas.r(pruebas.p(1), format('private.resource_file(%L, %L)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'Ana no pide su ruta desde su curso');
 select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'Ana no lo confirma desde su curso');
 select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('beto_r'), 'Mío')), 'not_found', 'ni lo renombra');
 select is(pruebas.r(pruebas.p(1), format('private.resource_move(%L, %L, 1, 1)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'ni lo mueve');

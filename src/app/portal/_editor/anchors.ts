@@ -5,3 +5,4 @@ export const DATA_ID = "bloque-editor-datos";
 export const STRUCTURE_ID = "bloque-editor-estructura";
 export const MODULE_ID = "bloque-editor-modulo";
 export const LESSON_ID = "bloque-editor-leccion";
+export const RESOURCES_ID = "bloque-editor-recursos";

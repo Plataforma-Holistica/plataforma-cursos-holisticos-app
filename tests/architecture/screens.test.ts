@@ -102,6 +102,13 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     editorAction:
       /const problems = problemsOf\(request\);[\s\S]*const outcome = changeOutcome\(await ask\(jar, request\), backOf\(request\)\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/portal/_editor/resource-actions.ts": {
+    // Los recursos (T-404): el servicio corre la guarda, y la base escribe solo a nombre del maestro activo.
+    resourceAction: /const request = readResourceForm\(form\);[\s\S]*const outcome = changeOutcome\(result, backOf\(course, request\.lesson\)\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+    beginResourceAction: /const result = await beginResource\(jar, /,
+    confirmResourceAction: /const result = await confirmResource\(jar, /,
+    cancelResourceAction: /await removeResource\(jar, \{ course: textOf\(fields\.course\), resource: textOf\(fields\.resource\), seen: 1 \}\);/,
+  },
   "src/app/portal/_cursos/actions.ts": {
     // Crear y borrar un curso (T-402): el servicio corre la guarda, y la base escribe solo a nombre del
     // maestro activo. Crear lleva el testigo del formulario; borrar, la revisión que se vio.
@@ -774,6 +781,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-editor-estructura",
       "bloque-editor-leccion",
       "bloque-editor-modulo",
+      "bloque-editor-recursos",
       "bloque-equipo-codigo",
       "bloque-equipo-invitaciones",
       "bloque-equipo-invitar",

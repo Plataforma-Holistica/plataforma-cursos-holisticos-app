@@ -27,13 +27,17 @@ import { Dialog } from "@/ui/dialog";
 
 /** Las claves de la estructura empiezan así: ir a otra cosa de ella no las pierde. */
 export const STRUCTURE_KEY = "estructura:";
+/** La clave de un archivo que está subiendo: salir lo perdería. */
+export const UPLOAD_KEY = "recurso-subiendo";
 
 interface Unsaved {
   dirty: boolean;
+  /** Confirmar un recurso sube la revisión de su lección: guardar mientras tanto contestaría «cambió». */
+  uploading: boolean;
   mark: (key: string, dirty: boolean) => void;
 }
 
-const UnsavedContext = createContext<Unsaved>({ dirty: false, mark: () => undefined });
+const UnsavedContext = createContext<Unsaved>({ dirty: false, uploading: false, mark: () => undefined });
 
 export function useUnsaved(): Unsaved {
   return useContext(UnsavedContext);
@@ -117,7 +121,8 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const value = useMemo(() => ({ dirty, mark }), [dirty, mark]);
+  const uploading = keys.has(UPLOAD_KEY);
+  const value = useMemo(() => ({ dirty, uploading, mark }), [dirty, uploading, mark]);
   const go = () => {
     const what = leaving;
     setLeaving(null);

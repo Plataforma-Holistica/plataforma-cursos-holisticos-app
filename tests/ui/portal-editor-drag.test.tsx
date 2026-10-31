@@ -35,6 +35,7 @@ const draft: DraftCourse = {
   contentRevision: 9,
   updatedAt: new Date().toISOString(),
   teacherName: "Ana Ruiz",
+  resources: [],
   modules: [
     {
       id: M1,
@@ -50,7 +51,7 @@ const draft: DraftCourse = {
     { id: M2, title: "Cierre", position: 2, revision: 1, lessons: [] },
   ],
 };
-const choices: DraftChoices = { practices: [], levels: [] };
+const choices: DraftChoices = { practices: [], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 } };
 
 const show = (readOnly = false) => ({
   user: userEvent.setup(),
@@ -64,6 +65,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   actions.editorAction.mockResolvedValue({ kind: "done", what: "moved", target: "move", attempt: 1 });
 });
+
+vi.mock("@/app/portal/_editor/resource-actions", () => ({
+  resourceAction: vi.fn(() => Promise.resolve({ kind: "idle" })),
+  // Nunca contesta: el archivo sigue subiendo.
+  beginResourceAction: vi.fn(() => new Promise(() => undefined)),
+  confirmResourceAction: vi.fn(),
+  cancelResourceAction: vi.fn(),
+}));
 
 describe("arrastrar con el teclado", () => {
   it("Espacio toma la lección, las flechas la mueven, Espacio la suelta: manda el lugar que se vio y el nuevo", async () => {
@@ -165,6 +174,20 @@ describe("arrastrar con el teclado", () => {
 });
 
 describe("cambios sin guardar", () => {
+  it("mientras un archivo sube, guardar la lección espera: confirmar sube su revisión, y con «cambió» lo escrito no vuelve", async () => {
+    const user = userEvent.setup();
+    render(<EditorScreen view={editorView(draft, choices, { readOnly: false, search: { leccion: L1 }, now: new Date() })} />);
+    await user.upload(screen.getByLabelText("Archivo"), new File(["%PDF-"], "guia.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    await screen.findByText("Cambios sin guardar");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText("Espera a que termine de subir el archivo para guardar.")).toBeTruthy();
+    expect(actions.editorAction).not.toHaveBeenCalled();
+    // Pedir borrar no llama a ningún servicio: no tiene por qué esperar.
+    await user.click(screen.getByRole("button", { name: "Borrar lección" }));
+    await waitFor(() => expect(actions.editorAction).toHaveBeenCalledOnce());
+  });
+
   const assign = vi.fn();
   const original = window.location;
   beforeEach(() => {

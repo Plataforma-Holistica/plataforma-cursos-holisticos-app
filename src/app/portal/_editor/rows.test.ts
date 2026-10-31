@@ -29,6 +29,7 @@ const draft: DraftCourse = {
   contentRevision: 9,
   updatedAt: "2026-10-29T18:05:00.000Z",
   teacherName: "Ana Ruiz",
+  resources: [],
   modules: [
     {
       id: M1,
@@ -49,6 +50,7 @@ const choices: DraftChoices = {
     { id: P2, name: "Yoga", tone: 5, active: true },
   ],
   levels: [{ id: LV, name: "Inicial", active: true }],
+  resourceLimits: { maxBytes: 52428800, perPlace: 10 },
 };
 const NOW = new Date("2026-10-29T20:00:00.000Z");
 const view = (search: Record<string, string> = {}, readOnly = false, changes: Partial<DraftCourse> = {}) =>
@@ -94,6 +96,7 @@ describe("editorView", () => {
       save: `save-lesson:${L2}:2`,
       askDelete: `ask-delete-lesson:${L2}`,
       remove: `delete-lesson:${L2}:2`,
+      resources: [],
     });
     expect(view({ modulo: M1 }).selected).toMatchObject({ kind: "module", id: M1, place: "Módulo 1", lessons: 2, save: `save-module:${M1}:5`, remove: `delete-module:${M1}:5` });
     expect(view({ leccion: L3 }).selected).toMatchObject({ kind: "lesson", place: "Módulo 2 · Lección 1" });
@@ -102,6 +105,38 @@ describe("editorView", () => {
     expect(view({ modulo: L1 }).selected).toEqual({ kind: "course" });
     expect(view({ leccion: L1 }).paths.self).toBe(`/portal/cursos/${COURSE}?leccion=${L1}`);
     expect(view().paths.self).toBe(`/portal/cursos/${COURSE}`);
+  });
+
+  it("los recursos: cada lugar su lista, en orden, con lo que son y su tamaño en palabras", () => {
+    const resource = (id: string, lessonId: string | null, position: number, kind: "pdf" | "doc" | "audio", sizeBytes: number) => ({
+      id,
+      lessonId,
+      title: id,
+      kind,
+      sizeBytes,
+      position,
+      revision: 3,
+    });
+    const resources = [
+      resource("b", L1, 2, "audio", 512 * 1024),
+      resource("a", L1, 1, "pdf", 2 * 1024 * 1024),
+      resource("c", null, 1, "doc", 1536 * 1024),
+      resource("d", null, 2, "pdf", 10),
+    ];
+    const lesson = view({ leccion: L1 }, false, { resources }).selected;
+    if (lesson.kind !== "lesson") throw new Error("Debía ser la lección.");
+    expect(lesson.resources.map((row) => [row.id, row.detail])).toEqual([
+      ["a", "PDF, 2 MB"],
+      ["b", "Audio, 512 KB"],
+    ]);
+    expect(lesson.resources[0]).toMatchObject({ up: null, down: "resource-move:a:1:2", revision: 3 });
+    expect(lesson.resources[1]).toMatchObject({ up: "resource-move:b:2:1", down: null });
+    const { data, resourceLimits } = view({}, false, { resources });
+    expect(data.resources.map((row) => [row.id, row.detail])).toEqual([
+      ["c", "Word, 1.5 MB"],
+      ["d", "PDF, 1 KB"],
+    ]);
+    expect(resourceLimits).toEqual({ maxBytes: 52428800, maxText: "50 MB", perPlace: 10 });
   });
 
   it("en solo lectura no se ofrece nada que cambie", () => {

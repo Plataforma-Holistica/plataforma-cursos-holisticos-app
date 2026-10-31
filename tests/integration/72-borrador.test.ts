@@ -83,7 +83,7 @@ async function asServerFor<T>(owner: Client, claims: VerifiedClaims, write: (tx:
  * reintento, sobre esa transacción en vez de abrir otra.
  */
 const drafts = (owner: Client) =>
-  createDrafts({
+  createDrafts({ afterDelete: () => Promise.resolve(),
     store: createDraftsStore(
       (actor, work) => asServerFor(owner, actor.claims, work),
       (claims, work) => asPerson(owner, claims, work),

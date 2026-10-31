@@ -96,6 +96,15 @@ const moduleSchema = z.strictObject({
   revision: count,
   lessons: z.array(lessonSchema),
 });
+const resourceSchema = z.strictObject({
+  id,
+  lessonId: id.nullable(),
+  title: z.string(),
+  kind: z.enum(["pdf", "doc", "audio"]),
+  sizeBytes: z.number().int().min(1),
+  position: z.number().int().min(1),
+  revision: count,
+});
 const draftRow = z.object({
   course_id: id,
   state,
@@ -109,6 +118,7 @@ const draftRow = z.object({
   content_revision: count,
   updated_at: instant,
   modules: z.array(moduleSchema),
+  resources: z.array(resourceSchema),
   teacher_name: z.string().nullable(),
 });
 
@@ -131,7 +141,13 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
                                      'position', l.position, 'revision', l.revision) order by l.position)
                             from public.draft_lessons l where l.module_id = m.id), '[]'::jsonb))
                         order by m.position)
-                 from public.draft_modules m where m.course_id = d.course_id), '[]'::jsonb) as modules
+                 from public.draft_modules m where m.course_id = d.course_id), '[]'::jsonb) as modules,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                          'id', x.id, 'lessonId', x.lesson_id, 'title', x.title, 'kind', x.kind,
+                          'sizeBytes', x.size_bytes, 'position', x.position, 'revision', x.revision)
+                        order by x.place_id, x.position)
+                 from public.draft_resources x where x.course_id = d.course_id and x.state = 'ready'), '[]'::jsonb) as resources
         from public.course_drafts d
         join public.course_registry r on r.course_id = d.course_id
         where d.course_id = ${course}::uuid and d.teacher_id = (select private.current_teacher_id())`,
@@ -151,6 +167,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
     contentRevision: draft.content_revision,
     updatedAt: draft.updated_at,
     modules: draft.modules,
+    resources: draft.resources,
     teacherName: draft.teacher_name,
   };
 }
@@ -159,6 +176,8 @@ const choice = { id, name: z.string(), active: z.boolean() };
 const choicesRow = z.object({
   practices: z.array(z.strictObject({ ...choice, tone: z.number().int().min(1).max(8) })),
   levels: z.array(z.strictObject(choice)),
+  max_bytes: z.coerce.number().int().nullable(),
+  per_place: z.coerce.number().int().nullable(),
 });
 
 /**
@@ -173,10 +192,13 @@ export async function readDraftChoices(tx: Tx, practiceId: string | null, levelI
                                      order by x.position)
                     from public.practices x where x.is_active or x.id = ${practiceId}::uuid), '[]'::jsonb) as practices,
           coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'active', x.is_active) order by x.position)
-                    from public.levels x where x.is_active or x.id = ${levelId}::uuid), '[]'::jsonb) as levels`,
+                    from public.levels x where x.is_active or x.id = ${levelId}::uuid), '[]'::jsonb) as levels,
+          (private.parameter_value('RECURSO_TAMANO_MAX'))::bigint as max_bytes,
+          (private.parameter_value('RECURSOS_POR_LUGAR_MAX'))::integer as per_place`,
     choicesRow,
   );
-  return row ?? { practices: [], levels: [] };
+  if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } };
+  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place } };
 }
 
 const resultRow = z.object({ result: z.unknown() });
@@ -259,4 +281,47 @@ export function createdOf<Answer extends string>(known: readonly Answer[], raw: 
   const answer = answerOf(known, raw.answer);
   if (answer === "created" && raw.id === null) throw new Error("La base contestó sin el id que esa respuesta trae.");
   return { answer, id: answer === "created" ? raw.id : null };
+}
+
+// ---------------------------------------------------------------------------------------
+// Los recursos (T-404). La ruta sale de la base y no va a ningún registro.
+
+const resourceResultSchema = z.strictObject({
+  answer: z.string(),
+  resource: id.optional(),
+  path: z.string().optional(),
+  mime: z.string().optional(),
+  reason: z.string().optional(),
+});
+export type ResourceResult = z.infer<typeof resourceResultSchema>;
+
+async function askResource(tx: Tx, query: ReturnType<typeof sql>): Promise<ResourceResult> {
+  const [row] = await tx.query(query, resultRow);
+  return resourceResultSchema.parse(row?.result ?? null);
+}
+
+export const askResourceBegin = (tx: Tx, input: { course: string; lesson: string | null; title: string; kind: string; mime: string; size: number }) =>
+  askResource(
+    tx,
+    sql`select private.resource_begin(${input.course}::uuid, ${input.lesson}::uuid, ${input.title}::text, ${input.kind}::text,
+                                      ${input.mime}::text, ${input.size}::bigint) as result`,
+  );
+
+export const askResourceFile = (tx: Tx, input: { course: string; resource: string }) =>
+  askResource(tx, sql`select private.resource_file(${input.course}::uuid, ${input.resource}::uuid) as result`);
+
+export const askResourceConfirm = (tx: Tx, input: { course: string; resource: string; contentOk: boolean | null }) =>
+  askResource(tx, sql`select private.resource_confirm(${input.course}::uuid, ${input.resource}::uuid, ${input.contentOk}::boolean) as result`);
+
+export const askResourceMove = (tx: Tx, input: { course: string; resource: string; seenPosition: number; toPosition: number }) =>
+  askResource(tx, sql`select private.resource_move(${input.course}::uuid, ${input.resource}::uuid, ${input.seenPosition}::integer, ${input.toPosition}::integer) as result`);
+
+export const askResourceRemove = (tx: Tx, input: { course: string; resource: string; seen: number }) =>
+  askResource(tx, sql`select private.resource_remove(${input.course}::uuid, ${input.resource}::uuid, ${input.seen}::bigint) as result`);
+
+const unusedRow = z.object({ path: z.string() });
+
+export async function readUnusedResources(tx: Tx, course: string): Promise<string[]> {
+  const rows = await tx.query(sql`select u.path from private.resource_unused_objects(${course}::uuid) u`, unusedRow);
+  return rows.map((row) => row.path);
 }

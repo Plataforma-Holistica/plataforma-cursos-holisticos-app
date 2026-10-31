@@ -373,6 +373,53 @@ test("arrastrar: con el teclado y con el ratón; y salir con cambios sin guardar
 
 // La corrida del equipo es solo de escritorio: este caso pone el ancho de un teléfono (el del Pixel 7 de la
 // corrida normal).
+test("los recursos: se sube de verdad a la cubeta, se rechaza lo disfrazado, y quitar lo borra", async ({ page }) => {
+  const rut = await person();
+  await makeTeacher(rut);
+  await signIn(page, rut, "/portal/cursos/nuevo");
+  await page.getByRole("textbox", { name: "Título del curso" }).fill("Con recursos");
+  await page.getByRole("button", { name: "Crear curso" }).click();
+  await expect(page).toHaveURL(/\/portal\/cursos\/[0-9a-f-]{36}$/);
+  await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("Inicio");
+  await page.getByRole("button", { name: "Agregar módulo" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Inicio" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Título de la lección nueva" }).fill("Una");
+  await page.getByRole("button", { name: "Agregar lección" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Una" })).toBeVisible();
+
+  const block = page.getByRole("region", { name: "Recursos de esta lección" });
+  await expect(block.getByText("Todavía no hay recursos aquí.")).toBeVisible();
+
+  // Un PDF de verdad: sube directo a la cubeta, y el título por omisión sale del nombre.
+  await block.getByLabel("Archivo").setInputFiles({ name: "Guía de respiración.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.7\nun pdf\n%%EOF\n") });
+  await expect(block.getByRole("textbox", { name: "Título del recurso" })).toHaveValue("Guía de respiración");
+  await block.getByRole("button", { name: "Adjuntar recurso" }).click();
+  await expect(block.getByText("Listo: el recurso quedó adjunto.")).toBeVisible({ timeout: 15_000 });
+  await expect(block.getByText("Guía de respiración", { exact: true })).toBeVisible();
+  await expect(block.getByText("PDF, 1 KB", { exact: true })).toBeVisible();
+  const objects = () => ownerQuery<{ name: string }>("select name from storage.objects where bucket_id = 'course-resources' and name like $1", [`%${page.url().split("/cursos/")[1]?.split("?")[0]}%`]);
+  expect(await objects()).toHaveLength(1);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Un ejecutable con nombre de PDF: se rechaza por su contenido, y no se queda ni la fila ni el objeto.
+  await block.getByLabel("Archivo").setInputFiles({ name: "disfrazado.pdf", mimeType: "application/pdf", buffer: Buffer.from("MZ esto es un ejecutable") });
+  await block.getByRole("button", { name: "Adjuntar recurso" }).click();
+  await expect(block.getByText(/no es lo que dice su nombre/)).toBeVisible({ timeout: 15_000 });
+  await expect(block.getByText("disfrazado", { exact: true })).toHaveCount(0);
+  await expect.poll(objects).toHaveLength(1);
+
+  // Un tipo que no se admite ni siquiera empieza.
+  await block.getByLabel("Archivo").setInputFiles({ name: "programa.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ") });
+  await expect(block.getByText(/Ese tipo de archivo no se admite/)).toBeVisible();
+
+  // Quitar pregunta, y se lleva el objeto.
+  await block.getByRole("button", { name: "Quitar Guía de respiración" }).click();
+  await block.getByRole("button", { name: "Quitar", exact: true }).click();
+  await expect(block.getByText("Listo: se quitó.")).toBeVisible({ timeout: 15_000 });
+  await expect(block.getByText("Todavía no hay recursos aquí.")).toBeVisible();
+  await expect.poll(objects).toHaveLength(0);
+});
+
 test("en el teléfono, lo elegido va primero y se vuelve a la estructura", async ({ page }) => {
   await page.setViewportSize({ width: 412, height: 915 });
   const fer = await person();

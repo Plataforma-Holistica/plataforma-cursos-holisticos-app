@@ -20,6 +20,11 @@ import {
   askAddLesson,
   askAddModule,
   askCreate,
+  askResourceBegin,
+  askResourceConfirm,
+  askResourceFile,
+  askResourceMove,
+  askResourceRemove,
   askDeleteCourse,
   askDeleteLesson,
   askDeleteModule,
@@ -32,7 +37,9 @@ import {
   readDraftChoices,
   readDraftCourse,
   readTeacherCourses,
+  readUnusedResources,
 } from "./records";
+import { BEGIN_ANSWERS, CONFIRM_ANSWERS, FILE_ANSWERS, MOVE_ANSWERS as RESOURCE_MOVE_ANSWERS, REJECT_REASONS, REMOVE_ANSWERS, type ResourcesStore } from "./resources";
 
 // Lo que el servicio del borrador le pregunta a la base, a nombre de las claims que verificó. Leer
 // va como la persona; cada cambio abre su transacción como servidor, con quién actúa y con qué
@@ -89,3 +96,34 @@ export function createDraftsStore(
 }
 
 export const databaseDraftsStore = createDraftsStore();
+
+// Los recursos (T-404). Que la respuesta sea de la lista se revisa ya confirmada la transacción: `rejected` y
+// `expired` borran la fila, y lanzar adentro la devolvería, para confirmarse otra vez. Su forma se revisa adentro:
+// una respuesta sin forma es que la función cambió, y ahí revertir es lo seguro.
+export function createResourcesStore(run: typeof asServer = asServer): ResourcesStore {
+  function change<Result>(claims: VerifiedClaims, reason: string, work: (tx: Tx) => Promise<Result>): Promise<Result> {
+    return withLockRetry(() => run({ claims, reason }, work), isLockConflict);
+  }
+  return {
+    begin: async (claims, input) => {
+      const result = await change(claims, "resource_begin", (tx) => askResourceBegin(tx, input));
+      return { answer: answerOf(BEGIN_ANSWERS, result.answer), resource: result.resource ?? null, path: result.path ?? null };
+    },
+    file: async (claims, input) => {
+      const result = await change(claims, "resource_file", (tx) => askResourceFile(tx, input));
+      return { answer: answerOf(FILE_ANSWERS, result.answer), path: result.path ?? null, mime: result.mime ?? null };
+    },
+    confirm: async (claims, input) => {
+      const result = await change(claims, "resource_confirm", (tx) => askResourceConfirm(tx, input));
+      return {
+        answer: answerOf(CONFIRM_ANSWERS, result.answer),
+        reason: result.reason === undefined ? null : answerOf(REJECT_REASONS, result.reason),
+      };
+    },
+    move: async (claims, input) => answerOf(RESOURCE_MOVE_ANSWERS, (await change(claims, "resource_move", (tx) => askResourceMove(tx, input))).answer),
+    remove: async (claims, input) => answerOf(REMOVE_ANSWERS, (await change(claims, "resource_remove", (tx) => askResourceRemove(tx, input))).answer),
+    unused: (claims, course) => run({ claims, reason: "resource_unused" }, (tx) => readUnusedResources(tx, course)),
+  };
+}
+
+export const databaseResourcesStore = createResourcesStore();

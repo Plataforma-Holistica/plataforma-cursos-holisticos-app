@@ -37,12 +37,31 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
     deleteLesson: vi.fn(() => Promise.resolve("deleted" as const)),
     moveLesson: vi.fn(() => Promise.resolve("moved" as const)),
     deleteCourse: vi.fn(() => Promise.resolve("deleted" as const)),
-    choices: vi.fn(() => Promise.resolve({ practices: [], levels: [] })),
+    choices: vi.fn(() => Promise.resolve({ practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } })),
   };
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
-  const service = createDrafts({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
-  return { ...service, store, checkSession, reported };
+  const afterDelete = vi.fn(() => Promise.resolve());
+  const service = createDrafts({ store, afterDelete, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
+  return { ...service, store, afterDelete, checkSession, reported };
 }
+
+describe("borrar deja archivos que sobran", () => {
+  it("borrar una lección, un módulo o el curso los limpia, a nombre de la sesión", async () => {
+    const service = setup();
+    await service.deleteLesson(reader, { course: COURSE, lesson: LESSON, seen: 1 });
+    await service.deleteModule(reader, { course: COURSE, module: MODULE, seen: 1 });
+    await service.deleteCourse(reader, { course: COURSE, seen: 1 });
+    expect(service.afterDelete).toHaveBeenCalledTimes(3);
+    expect(service.afterDelete).toHaveBeenCalledWith(claims, COURSE);
+  });
+
+  it("si la base no borró nada, no se limpia", async () => {
+    const service = setup();
+    vi.mocked(service.store.deleteLesson).mockResolvedValue("changed");
+    await service.deleteLesson(reader, { course: COURSE, lesson: LESSON, seen: 1 });
+    expect(service.afterDelete).not.toHaveBeenCalled();
+  });
+});
 
 describe("cambiar el borrador", () => {
   it("crea con el título ya revisado y a nombre de la sesión que pasó", async () => {
@@ -121,7 +140,10 @@ describe("cambiar el borrador", () => {
 describe("leer el borrador", () => {
   it("las opciones del editor llevan lo elegido; un id sin forma cuenta como nada elegido", async () => {
     const service = setup();
-    expect(await service.draftChoices({ practiceId: PRACTICE, levelId: "x" })).toEqual({ kind: "ready", value: { practices: [], levels: [] } });
+    expect(await service.draftChoices({ practiceId: PRACTICE, levelId: "x" })).toEqual({
+      kind: "ready",
+      value: { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } },
+    });
     expect(service.store.choices).toHaveBeenCalledExactlyOnceWith(PRACTICE, null);
   });
 
