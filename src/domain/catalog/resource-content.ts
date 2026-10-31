@@ -43,6 +43,26 @@ export function resourceTypeOf(fileName: string): ResourceType | null {
 // El final de un ZIP: su marca de fin (22 bytes) más el comentario más largo que admite.
 const TAIL_BYTES = 65_557;
 
+const EXTENSION_OF: Readonly<Record<string, string>> = { [PDF]: "pdf", [DOCX]: "docx", [MP3]: "mp3", [M4A]: "m4a" };
+const NAME_MAX = 100;
+// Lo que no sirve en un nombre de archivo o rompe una cabecera: separadores, comillas, los caracteres de control y los que
+// no se ven o invierten el texto, que harían que el nombre se viera distinto de lo que es.
+const NOT_IN_A_NAME = /[\\/:*?"<>|;\p{C}]+/gu;
+// Los que Windows no deja crear, con cualquier extensión.
+const RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+
+/** El nombre con el que baja un recurso: lo arma el servidor con el título, y la extensión sale del tipo. */
+export function resourceDownloadName(title: string, mime: string): string {
+  const clean = title
+    .replace(NOT_IN_A_NAME, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.]+|[\s.]+$/g, "");
+  const cut = [...clean].slice(0, NAME_MAX).join("").trim();
+  const name = cut === "" || RESERVED.test(cut) ? "recurso" : cut;
+  const extension = Object.hasOwn(EXTENSION_OF, mime) ? EXTENSION_OF[mime] : undefined;
+  return extension === undefined ? name : `${name}.${extension}`;
+}
+
 /** Lo que el servidor le pide leer a Storage: el principio de todo archivo, y el final solo de un Word. */
 export const RESOURCE_READ = {
   head: 16,
