@@ -374,7 +374,8 @@ select pruebas.como_dueno();
 revoke insert on public.draft_lessons from app_service;
 revoke delete on public.draft_modules from app_service;
 revoke execute on function private.draft_text_ok(text, integer, boolean) from app_service;
-select throws_ok('truncate public.draft_lessons', '42501', null, 'ni el dueño vacía la tabla');
+-- Con la tabla que la nombra desde T-404: sola, la clave foránea la detendría antes que el guardián.
+select throws_ok('truncate public.draft_lessons, public.draft_resources', '42501', null, 'ni el dueño vacía la tabla');
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar un borrador que nunca se envió.
