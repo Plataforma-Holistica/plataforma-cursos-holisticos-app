@@ -5,6 +5,7 @@ import type { Capability } from "@/services/account/team";
 
 import { AlertsSection } from "../_alertas/section";
 import { TeamSection } from "../_equipo/section";
+import { TeacherSection, TeachersSection } from "../_maestros/section";
 import { CloseSection, PayoutsSection, PeriodSection, PeriodsSection } from "../_periodos/section";
 import { CatalogSection } from "../_practicas/section";
 import { ReviewSection } from "../_revision/section";
@@ -37,6 +38,8 @@ const SECTIONS: Record<string, AdminSection> = {
   equipo: { capability: "config", render: (claims) => <TeamSection claims={claims} /> },
   // PA-67, las prácticas y los niveles del catálogo.
   practicas: { capability: "content", render: (claims) => <CatalogSection claims={claims} /> },
+  // PA-65, los maestros (T-401). La ficha de uno, abajo.
+  maestros: { capability: "content", render: (claims) => <TeachersSection claims={claims} /> },
   // PA-61 y PA-62 mínimas, los cursos por revisar: verlos, reproducirlos y aprobarlos.
   revision: { capability: "content", render: (claims) => <ReviewSection claims={claims} /> },
   // PA-68 mínima, las alertas de anomalía: revisarlas, decidir fraude, excluir y revertir.
@@ -65,6 +68,12 @@ export function periodAt(segment: string | undefined): number | null {
  * la guarda: aquí solo la forma.
  */
 const DEEPER: Record<string, (deeper: readonly string[]) => AdminSection | null> = {
+  // PA-66, la ficha de un maestro.
+  maestros: (deeper) => {
+    const [segment, ...more] = deeper;
+    if (segment === undefined || !ID_SEGMENT.test(segment) || more.length > 0) return null;
+    return { capability: "content", render: (claims) => <TeacherSection claims={claims} id={segment} /> };
+  },
   periodos: (deeper) => {
     const [segment, page, ...more] = deeper;
     const period = periodAt(segment);

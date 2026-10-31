@@ -31,6 +31,9 @@ export const NOTICES = [
   "fraud_decided",
   "account_excluded",
   "exclusion_revoked",
+  // Finanzas propuso o retiró la suspensión de un maestro por fraude (PA-68, T-401).
+  "fraud_proposed",
+  "fraud_withdrawn",
   // Las decisiones de finanzas sobre un periodo (T-605): el panel y el cierre lo dicen al volver a pintarse.
   "rollup_requested",
   "period_rehearsed",
@@ -45,6 +48,15 @@ export const NOTICES = [
   "teacher_notice_accepted",
   // La invitación de maestro ya no servía al aceptarla: lo dice el inicio, porque PA-40 ya contesta 404.
   "teacher_invitation_gone",
+  // Un cambio a un maestro quedó hecho (PA-65 y PA-66, T-401).
+  "teacher_invited",
+  "teacher_reinvited",
+  "teacher_invitation_revoked",
+  "teacher_founder_saved",
+  "teacher_suspended",
+  "teacher_lifted",
+  "teacher_fraud_confirmed",
+  "teacher_fraud_rejected",
   // Un curso en borrador quedó borrado (T-402), o ya no existía cuando se pidió borrarlo otra vez.
   "course_deleted",
   "course_gone",

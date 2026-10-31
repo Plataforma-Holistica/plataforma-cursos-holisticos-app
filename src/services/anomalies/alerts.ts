@@ -84,6 +84,8 @@ export interface FinanceAlert {
   reviewedAt: string | null;
   reviewedByName: string | null;
   teacherName: string | null;
+  /** La suspensión por fraude que salió de esta alerta y falta confirmar, y si la propuso quien lee. */
+  suspension: { id: string; mine: boolean } | null;
   /** El periodo todavía recibe latidos: se puede excluir y revertir. */
   canExclude: boolean;
   accounts: AlertAccount[];
@@ -123,6 +125,24 @@ export type ExcludeAnswer = (typeof EXCLUDE_ANSWERS)[number];
 export const REVOKE_ANSWERS = ["revoked", "already_revoked", "outside_window", "self", "conflict", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type RevokeAnswer = (typeof REVOKE_ANSWERS)[number];
 
+/** Lo que contesta `private.propose_fraud_suspension()` (T-401, RN-17). */
+export const PROPOSE_ANSWERS = [
+  "proposed",
+  "needs_fraud_decision",
+  "invalid",
+  "self",
+  "already_suspended",
+  "not_active",
+  "already_pending",
+  "alert_used",
+  "forbidden",
+  "needs_fresh_code",
+] as const;
+export type ProposeAnswer = (typeof PROPOSE_ANSWERS)[number];
+/** Lo que contesta `private.withdraw_fraud_suspension()`. */
+export const WITHDRAW_ANSWERS = ["withdrawn", "not_found", "not_yours", "forbidden", "needs_fresh_code"] as const;
+export type WithdrawAnswer = (typeof WITHDRAW_ANSWERS)[number];
+
 /**
  * Lo que este servicio le pregunta a la base, a nombre de las claims que se le pasan. La lectura
  * es nula cuando quien actúa no pasa la puerta del equipo con finanzas. Las decisiones lanzan si
@@ -133,6 +153,8 @@ export interface AnomalyStore {
   review(claims: VerifiedClaims, alertId: string, note: string | null, isFraud: boolean | null, evidence: string | null): Promise<ReviewAnswer>;
   exclude(claims: VerifiedClaims, alertId: string, account: string, reasonCode: ExclusionReason, reason: string): Promise<ExcludeAnswer>;
   revoke(claims: VerifiedClaims, exclusionId: string, reason: string): Promise<RevokeAnswer>;
+  propose(claims: VerifiedClaims, alertId: string, reason: string): Promise<ProposeAnswer>;
+  withdraw(claims: VerifiedClaims, requestId: string): Promise<WithdrawAnswer>;
 }
 
 type Refused = { kind: "refused" };
@@ -144,6 +166,8 @@ export type AlertsRead = { kind: "alerts"; alerts: FinanceAlerts } | Unavailable
 export type AlertReviewed = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: ReviewAnswer };
 export type AccountExcluded = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: ExcludeAnswer };
 export type ExclusionRevoked = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: RevokeAnswer };
+export type SuspensionProposed = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: ProposeAnswer };
+export type SuspensionWithdrawn = Refused | Unavailable | Unknown | Malformed | { kind: "answered"; answer: WithdrawAnswer };
 /** Dar el código otra vez para que las decisiones pasen su puerta (el bloque «Tu código»). */
 export type FinanceCode =
   | Refused
@@ -237,6 +261,27 @@ export function createAnomalyAlerts(deps: { report: (code: FailureCode) => Promi
     return result.ok ? { kind: "answered", answer: result.answer } : result.result;
   }
 
+  /** Proponer suspender al maestro de una alerta decidida como fraude: otra persona con Contenido la confirma (RN-17). */
+  async function proposeSuspension(reader: CookieReader, input: { alert: unknown; reason: unknown }): Promise<SuspensionProposed> {
+    const admitted = await admit(reader);
+    if (!admitted.ok) return admitted.result;
+    const alert = idOf(input.alert);
+    const reason = textOf(input.reason, NOTE_MAX);
+    if (alert === null || reason === null) return { kind: "malformed" };
+    const result = await decide(() => store.propose(admitted.claims, alert, reason));
+    return result.ok ? { kind: "answered", answer: result.answer } : result.result;
+  }
+
+  /** Retirar una propuesta: solo quien la hizo, y la base lo dice. */
+  async function withdrawSuspension(reader: CookieReader, input: { request: unknown }): Promise<SuspensionWithdrawn> {
+    const admitted = await admit(reader);
+    if (!admitted.ok) return admitted.result;
+    const request = idOf(input.request);
+    if (request === null) return { kind: "malformed" };
+    const result = await decide(() => store.withdraw(admitted.claims, request));
+    return result.ok ? { kind: "answered", answer: result.answer } : result.result;
+  }
+
   /** Excluir del reparto el consumo de una cuenta de una alerta, en el periodo de la alerta. */
   async function excludeAccount(
     reader: CookieReader,
@@ -301,5 +346,5 @@ export function createAnomalyAlerts(deps: { report: (code: FailureCode) => Promi
     return { kind: "not_available" };
   }
 
-  return { anomalyAlerts, reviewAlert, decideFraud, excludeAccount, revokeExclusion, giveFinanceCode };
+  return { anomalyAlerts, reviewAlert, decideFraud, proposeSuspension, withdrawSuspension, excludeAccount, revokeExclusion, giveFinanceCode };
 }

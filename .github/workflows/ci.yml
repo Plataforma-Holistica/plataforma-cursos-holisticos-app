@@ -21,7 +21,8 @@ jobs:
     # Con el navegador y el extremo a extremo, una corrida completa pasa de los 20 minutos de antes,
     # y con el camino del equipo va en 28 a 29 (octubre de 2026): una instalación lenta del navegador
     # en el runner (una vez tardó casi 10 minutos) la cortaba en 30.
-    timeout-minutes: 40
+    # En 40 se cortó la 89 (2026-10-30), en el último caso del camino del equipo: la corrida ya pasa de 40.
+    timeout-minutes: 50
     steps:
       # Cada acción va por el identificador exacto de su commit, no por su etiqueta: una
       # etiqueta se puede mover a otro código sin que aquí cambie nada. Dependabot propone

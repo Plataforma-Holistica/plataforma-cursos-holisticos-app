@@ -20,7 +20,7 @@ export interface Finance {
   factorId: string;
   sessionId: string;
   /** La capacidad con que actúa: finanzas, salvo en PA-89 (T-110), que pide configuración. */
-  capability: "finance" | "config";
+  capability: "finance" | "config" | "content";
 }
 
 /** Una conexión del dueño, que no espera más de 20 s un candado. */

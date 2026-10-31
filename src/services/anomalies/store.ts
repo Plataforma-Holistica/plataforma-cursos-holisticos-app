@@ -6,7 +6,19 @@ import { isLockConflict } from "@/adapters/supabase/errors";
 import { withLockRetry } from "@/services/account/team";
 
 import type { AnomalyStore } from "./alerts";
-import { askAlertExclusion, askAlertReview, askExclusionRevocation, excludeAnswerOf, readFinanceAlerts, reviewAnswerOf, revokeAnswerOf } from "./records";
+import {
+  askAlertExclusion,
+  askAlertReview,
+  askExclusionRevocation,
+  askSuspensionProposal,
+  askSuspensionWithdrawal,
+  excludeAnswerOf,
+  proposeAnswerOf,
+  readFinanceAlerts,
+  reviewAnswerOf,
+  withdrawAnswerOf,
+  revokeAnswerOf
+} from "./records";
 
 // Lo que el servicio de las alertas le pregunta a la base, a nombre de las claims que verificó:
 // cada pregunta abre su transacción como servidor, con quién actúa y con qué sesión tomados de
@@ -26,6 +38,15 @@ export function createAnomalyStore(run: typeof asServer = asServer): AnomalyStor
     exclude: async (claims, alertId, account, reasonCode, reason) =>
       excludeAnswerOf(
         await withLockRetry(() => run({ claims, reason: "consumption_exclusion" }, (tx) => askAlertExclusion(tx, alertId, account, reasonCode, reason)), isLockConflict),
+      ),
+    // Las dos toman la fila del maestro, o la de la propuesta, y no escriben antes de rechazar.
+    propose: async (claims, alertId, reason) =>
+      proposeAnswerOf(
+        await withLockRetry(() => run({ claims, reason: "fraud_suspension_propose" }, (tx) => askSuspensionProposal(tx, alertId, reason)), isLockConflict),
+      ),
+    withdraw: async (claims, requestId) =>
+      withdrawAnswerOf(
+        await withLockRetry(() => run({ claims, reason: "fraud_suspension_withdraw" }, (tx) => askSuspensionWithdrawal(tx, requestId)), isLockConflict),
       ),
     revoke: async (claims, exclusionId, reason) =>
       revokeAnswerOf(
