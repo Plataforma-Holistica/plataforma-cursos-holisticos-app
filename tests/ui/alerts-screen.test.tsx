@@ -43,6 +43,7 @@ const JUMP: FinanceAlert = {
   evidence: null,
   reviewedAt: null,
   reviewedByName: null,
+  suspension: null,
   teacherName: "Maestra Uno",
   canExclude: true,
   accounts: [

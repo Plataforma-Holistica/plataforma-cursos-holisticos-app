@@ -30,6 +30,8 @@ export const ROUTES = {
   review: "/admin/revision",
   /** PA-68 mínima, las alertas de anomalía: cuelga de administración y pide finanzas. */
   alerts: "/admin/alertas",
+  /** PA-65, los maestros: cuelga de administración y pide Contenido. La ficha de uno, PA-66, con `adminTeacherPath`. */
+  adminTeachers: "/admin/maestros",
   /** PA-78, los periodos: cuelga de administración y pide finanzas. El panel de uno y su cierre, `periodPath`. */
   periods: "/admin/periodos",
   /** PA-89, los textos legales: cuelga de administración y pide configuración. Una versión, `legalVersionPath`. */
@@ -246,6 +248,11 @@ export type TeamState = "none" | "member" | "needs_code" | "unbound" | "invited"
 export type EntryState = TeamState | "teacher_invited" | "teacher_notice" | "teacher";
 
 /** El aviso del maestro vuelto a pedir, y a dónde sigue después de aceptarlo. */
+/** PA-66, la ficha de un maestro. */
+export function adminTeacherPath(teacher: string): string {
+  return `${ROUTES.adminTeachers}/${teacher}`;
+}
+
 export function portalNoticePath(returnTo: string): string {
   return `${ROUTES.portalNotice}?${RETURN_PARAM}=${encodeURIComponent(returnTo)}`;
 }

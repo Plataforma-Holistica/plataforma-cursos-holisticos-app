@@ -19,6 +19,7 @@ vi.mock("@/app/_lib/guard", () => ({ requireAdmin: mocks.requireAdmin }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: vi.fn() }));
 vi.mock("@/services/account/account", () => ({ teamRoster: vi.fn() }));
 vi.mock("@/services/catalog/catalog", () => ({ catalogLists: mocks.catalogLists }));
+vi.mock("@/services/teachers/teacher-admin", () => ({ teacherRoster: vi.fn() }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 vi.mock("@/app/admin/_equipo/actions", () => ({
   freshCodeAction: vi.fn(),

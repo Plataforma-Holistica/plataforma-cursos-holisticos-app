@@ -36,6 +36,8 @@ function serviceWith(
     return Promise.resolve((setup.answer ?? "reviewed") as never);
   };
   const store: AnomalyStore = {
+    propose: vi.fn(() => Promise.resolve("proposed" as const)),
+    withdraw: vi.fn(() => Promise.resolve("withdrawn" as const)),
     alerts: vi.fn(() => {
       calls.push("alertas");
       if (setup.alerts === "throws") return Promise.reject(new Error("sin base"));

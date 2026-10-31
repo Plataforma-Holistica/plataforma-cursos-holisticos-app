@@ -762,6 +762,19 @@ que no se ve leyendo un solo archivo:
   de maestro la encuentra enlazada en el inicio de administración. Usa pgTAP 61 e integración 81. Para el B: una pantalla
   nueva del portal es `work` en `_lib/screens.tsx`, y el mock de `requireTeacher` en una prueba de página devuelve
   `screen: "work"`.
+- **Contenido administra a los maestros** (T-401, última solicitud, `t401_cola_con_alerta`; PA-65 y PA-66, y proponer
+  desde PA-68). El servicio vive en `src/services/teachers/admin*.ts` (lo importan las pantallas por `teacher-admin.ts`;
+  el portal importa `teachers.ts`) y la pantalla en `src/app/admin/_maestros/`, servida por el comodín (`/admin/maestros`, y
+  la ficha por `DEEPER`). Cada cambio a un maestro lleva lo que se vio de él (`teacherVersion`, en `version.ts`, sin nada
+  del servidor): el servicio relee la lista y contesta `changed` si ya no es eso; si no pudo releer, no intenta. Una acción
+  sola (`teachersAction`) atiende las dos pantallas, y el botón dice el paso, el maestro, lo visto y la propuesta. Suspender y
+  confirmar un fraude preguntan antes sin llamar a nadie, con lo escrito en el estado. Invitar no manda correo. La cola
+  `fraud_suspension_queue` da `alert_id`, y `readFinanceAlerts` la lee en la misma consulta que las alertas: una alerta trae
+  `suspension` (`{ id, mine }`). Proponer y retirar son `proposeSuspension` y `withdrawSuspension`, del servicio de las
+  alertas. Usa pgTAP 62, integración 82 y `tests/e2e/equipo/maestros.equipo.ts`; sus tres casos van en serie y crean su
+  propio equipo con `db:admins`. Si una prueba de página monta el comodín de administración, simula también
+  `@/services/teachers/teacher-admin`. Una consulta de este servicio no se llama como una del equipo: `session-boundaries`
+  busca `askInvite` y `askRevoke` por nombre en todo `src/`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

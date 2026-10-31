@@ -20,6 +20,7 @@ import {
   type ReviewAnswer,
   type RevokeAnswer,
 } from "./alerts";
+import { PROPOSE_ANSWERS, WITHDRAW_ANSWERS, type ProposeAnswer, type WithdrawAnswer } from "./alerts";
 
 // Lo que el servicio de las alertas le pregunta a la base (05 §5.4; T-208): la lectura de PA-68 y
 // las tres decisiones. Cada función recibe la transacción ya abierta como servidor; ninguna recibe
@@ -108,6 +109,7 @@ export function alertsOf(raw: unknown): FinanceAlerts | null {
       reviewedAt: alert.reviewed_at,
       reviewedByName: alert.reviewed_by_name,
       teacherName: alert.teacher_name,
+      suspension: null,
       canExclude: alert.can_exclude,
       accounts: alert.accounts.map((each) => ({
         account: each.account,
@@ -146,13 +148,53 @@ export const reviewAnswerOf = (raw: unknown): ReviewAnswer => answerIn(REVIEW_AN
 export const excludeAnswerOf = (raw: unknown): ExcludeAnswer => answerIn(EXCLUDE_ANSWERS, raw);
 export const revokeAnswerOf = (raw: unknown): RevokeAnswer => answerIn(REVOKE_ANSWERS, raw);
 
-const alertsRow = z.object({ alerts: z.unknown() });
+const alertsRow = z.object({ alerts: z.unknown(), queue: z.unknown() });
 const outcomeRow = z.object({ outcome: z.string().nullable() });
 
 export async function readFinanceAlerts(tx: Tx): Promise<FinanceAlerts | null> {
-  const [row] = await tx.query(sql`select private.finance_alerts() as alerts`, alertsRow);
+  // En una sola consulta: una foto. La cola es de T-401, y dice qué propuesta salió de cada alerta.
+  const [row] = await tx.query(sql`select private.finance_alerts() as alerts, private.fraud_suspension_queue() as queue`, alertsRow);
   if (!row) throw new Error("La base no contestó las alertas.");
-  return alertsOf(row.alerts);
+  const read = alertsOf(row.alerts);
+  if (read === null) return null;
+  const suspensions = suspensionsOf(row.queue ?? null);
+  return { ...read, alerts: read.alerts.map((alert) => ({ ...alert, suspension: suspensions.get(alert.id) ?? null })) };
+}
+
+const queueSchema = z.object({
+  requests: z.array(z.object({ request_id: z.string().regex(ID), alert_id: z.string().regex(ID), proposed_by_self: z.boolean() })),
+});
+
+/** La propuesta pendiente de cada alerta, de lo que contestó `private.fraud_suspension_queue()`. Otra forma lanza. */
+export function suspensionsOf(raw: unknown): Map<string, { id: string; mine: boolean }> {
+  if (raw === null) return new Map();
+  return new Map(queueSchema.parse(raw).requests.map((row) => [row.alert_id, { id: row.request_id, mine: row.proposed_by_self }]));
+}
+
+/** Propone la suspensión (`private.propose_fraud_suspension()`). Devuelve lo que contestó, sin juzgarlo. */
+export async function askSuspensionProposal(tx: Tx, alertId: string, reason: string): Promise<unknown> {
+  const [row] = await tx.query(sql`select private.propose_fraud_suspension(${alertId}::uuid, ${reason}::text) as outcome`, outcomeRow);
+  return row?.outcome ?? null;
+}
+
+/** La retira (`private.withdraw_fraud_suspension()`). */
+export async function askSuspensionWithdrawal(tx: Tx, requestId: string): Promise<unknown> {
+  const [row] = await tx.query(sql`select private.withdraw_fraud_suspension(${requestId}::uuid) as outcome`, outcomeRow);
+  return row?.outcome ?? null;
+}
+
+/** Lo que contestó proponer, si está en su lista. Otra cosa lanza: «no se supo». */
+export function proposeAnswerOf(answer: unknown): ProposeAnswer {
+  const known = PROPOSE_ANSWERS.find((each) => each === answer);
+  if (known === undefined) throw new Error("Proponer contestó algo fuera de su lista.");
+  return known;
+}
+
+/** Lo que contestó retirar, si está en su lista. Otra cosa lanza: «no se supo». */
+export function withdrawAnswerOf(answer: unknown): WithdrawAnswer {
+  const known = WITHDRAW_ANSWERS.find((each) => each === answer);
+  if (known === undefined) throw new Error("Retirar contestó algo fuera de su lista.");
+  return known;
 }
 
 /** Revisa, o decide fraude (`private.review_alert()`). Devuelve lo que contestó, sin juzgarlo. */

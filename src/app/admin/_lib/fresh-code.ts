@@ -5,6 +5,7 @@ import type { FinanceCode } from "@/services/anomalies/anomalies";
 import type { CatalogCode } from "@/services/catalog/catalog";
 import type { LegalCode } from "@/services/legal/legal-admin";
 import type { PeriodsCode } from "@/services/periods/periods";
+import type { TeacherCode } from "@/services/teachers/teacher-admin";
 
 // «Tu código» en las secciones de administración que cambian algo con un código reciente:
 // el equipo (PA-86) y las prácticas y los niveles (PA-67). Cada sección tiene su propio
@@ -33,7 +34,7 @@ export type CodeOutcome = Leave | { kind: "failed"; reason: "wrong_code" | "unav
  * quien la guarda no dejó, se va a esa misma página: decide su guarda, y recargar no reenvía
  * un código.
  */
-export function givenCodeOutcome(result: FreshCode | CatalogCode | FinanceCode | PeriodsCode | LegalCode, page: string): CodeOutcome {
+export function givenCodeOutcome(result: FreshCode | CatalogCode | FinanceCode | PeriodsCode | LegalCode | TeacherCode, page: string): CodeOutcome {
   const toPage: Leave = { kind: "leave", to: page, notice: null };
   switch (result.kind) {
     case "verified":

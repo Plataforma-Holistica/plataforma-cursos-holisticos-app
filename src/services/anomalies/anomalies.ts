@@ -27,10 +27,12 @@ export type {
   ReviewAnswer,
   RevokeAnswer,
   ShareTier,
+  SuspensionProposed,
+  SuspensionWithdrawn,
 } from "./alerts";
 export { EXCLUDE_ANSWERS, EXCLUSION_REASONS, NOTE_MAX, REASON_MAX, REVIEW_ANSWERS, REVOKE_ANSWERS } from "./alerts";
 
-export const { anomalyAlerts, reviewAlert, decideFraud, excludeAccount, revokeExclusion, giveFinanceCode } = createAnomalyAlerts(
+export const { anomalyAlerts, reviewAlert, decideFraud, proposeSuspension, withdrawSuspension, excludeAccount, revokeExclusion, giveFinanceCode } = createAnomalyAlerts(
   { report: reportFailure },
   { teamStanding, giveSecondFactorCode, store: databaseAnomalyStore },
 );

@@ -189,6 +189,7 @@ export const account = defineMessages({
     team: "Equipo de administración",
     // PA-67. Solo se le ofrece a quien tiene Contenido.
     catalog: "Prácticas y niveles",
+    teachers: "{Maestros}",
     // PA-61. Solo se le ofrece a quien tiene Contenido.
     review: "Cursos por revisar",
     // PA-68. Solo se le ofrece a quien tiene finanzas.
