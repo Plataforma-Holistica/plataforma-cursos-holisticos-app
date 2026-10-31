@@ -103,8 +103,12 @@ const pressAndDownload = async (page: Page, name: string) => {
 };
 
 test("el visitante ve la lista, sin descarga, y la invitación a entrar", async ({ page }) => {
-  await page.goto(COURSE_URL);
-  await expect(page.getByRole("heading", { name: "Recursos del curso" })).toBeVisible();
+  // Lo público se recuerda 30 segundos (`CATALOG_MEMORY_MS`): si otra prueba ya leyó el catálogo, este curso todavía no está
+  // en lo listado. Lo que dice cada aserción no cambia: solo se espera a que el curso exista para la ficha.
+  await expect(async () => {
+    await page.goto(COURSE_URL);
+    await expect(page.getByRole("heading", { name: "Recursos del curso" })).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 45_000, intervals: [2_000] });
   await expect(page.getByText("Guía del curso")).toBeVisible();
   await expect(page.getByRole("button", { name: /Descargar/ })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Entra a tu cuenta para descargarlos." })).toBeVisible();
