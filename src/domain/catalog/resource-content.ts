@@ -40,11 +40,13 @@ export function resourceTypeOf(fileName: string): ResourceType | null {
   return BY_EXTENSION[extension] ?? null;
 }
 
+// El final de un ZIP: su marca de fin (22 bytes) más el comentario más largo que admite.
+const TAIL_BYTES = 65_557;
+
 /** Lo que el servidor le pide leer a Storage: el principio de todo archivo, y el final solo de un Word. */
 export const RESOURCE_READ = {
   head: 16,
-  // El final de un ZIP: su marca de fin (22 bytes) más el comentario más largo que admite.
-  tailOf: (mime: string): number => (mime === DOCX ? 65_557 : 0),
+  tailOf: (mime: string): number => (mime === DOCX ? TAIL_BYTES : 0),
 } as const;
 
 function startsWith(data: Uint8Array, text: string, at = 0): boolean {
@@ -85,11 +87,12 @@ function isAudioMp4(head: Uint8Array): boolean {
 // Un Word es un ZIP: se lee su directorio, al final del archivo, sin abrir nada. Debe traer las piezas de un
 // documento y no las macros. Los nombres de un ZIP de Office no distinguen mayúsculas, y Word en la web guarda a
 // veces `word/document2.xml`. Un Word con cientos de partes puede tener su directorio más atrás de lo que se lee, y
-// se rechaza: es raro, y dice que lo vuelva a intentar en otro formato.
+// se rechaza: es raro. Se mira solo el final que se pidió: si Storage ignorara el rango, aquí llegarían 50 MB.
 function isWord(head: Uint8Array, tail: Uint8Array | null): boolean {
   if (tail === null || !startsWith(head, "PK\x03\x04")) return false;
-  if (!includes(tail, "PK\x05\x06")) return false;
-  const names = String.fromCharCode(...tail).toLowerCase();
+  const end = tail.subarray(-TAIL_BYTES);
+  if (!includes(end, "PK\x05\x06")) return false;
+  const names = new TextDecoder("latin1").decode(end).toLowerCase();
   return names.includes("[content_types].xml") && /word\/document[0-9]*\.xml/.test(names) && !names.includes("vbaproject.bin");
 }
 

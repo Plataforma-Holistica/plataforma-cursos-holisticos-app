@@ -66,6 +66,8 @@ describe("contentMatches: el contenido real, por sus primeros bytes", () => {
     });
     it.each([
       ["versión inválida", join(ascii("ID3"), bytes(0xff, 0, 0, 0, 0, 0, 0, 0))],
+      ["versión anterior a la 2", join(ascii("ID3"), bytes(1, 0, 0, 0, 0, 0, 0, 0))],
+      ["revisión inválida", join(ascii("ID3"), bytes(4, 0xff, 0, 0, 0, 0, 0, 0))],
       ["tamaño con el bit alto", join(ascii("ID3"), bytes(4, 0, 0, 0x80, 0, 0, 0, 0))],
       ["solo las tres letras", ascii("ID3 y lo que sea, un texto cualquiera")],
       ["cortada", ascii("ID3")],
@@ -126,6 +128,11 @@ describe("contentMatches: el contenido real, por sus primeros bytes", () => {
     });
     it("Word en la web guarda a veces otro nombre", () => {
       expect(contentMatches(DOCX, ZIP_START, zipEnd("[Content_Types].xml", "word/document2.xml"))).toBe(true);
+    });
+    it("si llega más de lo que se pidió, se mira solo el final: 50 MB no tumban el proceso", () => {
+      const huge = new Uint8Array(50 * 1024 * 1024);
+      expect(contentMatches(DOCX, ZIP_START, join(huge, zipEnd("[Content_Types].xml", "word/document.xml")))).toBe(true);
+      expect(contentMatches(DOCX, ZIP_START, join(zipEnd("[Content_Types].xml", "word/document.xml"), huge))).toBe(false);
     });
     it("sin leer el final no se puede decir que sí", () => {
       expect(contentMatches(DOCX, ZIP_START, null)).toBe(false);

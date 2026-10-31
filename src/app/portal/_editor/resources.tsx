@@ -41,9 +41,10 @@ const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 const attemptOf = (state: ResourceState) => (state.kind === "idle" ? 0 : state.attempt);
 
 /** Sube el archivo a la dirección firmada, con su avance. El tipo es el que fijó el servidor. */
-function putFile(url: string, file: File, mime: string, onProgress: (loaded: number, total: number) => void): Promise<boolean> {
+function putFile(url: string, file: File, mime: string, started: (request: XMLHttpRequest) => void, onProgress: (loaded: number, total: number) => void): Promise<boolean> {
   return new Promise((resolve) => {
     const request = new XMLHttpRequest();
+    started(request);
     request.open("PUT", url);
     request.timeout = UPLOAD_TIMEOUT_MS;
     request.setRequestHeader("content-type", mime);
@@ -63,9 +64,11 @@ interface AttachProps {
   lesson: string | null;
   maxBytes: number | null;
   maxText: string;
+  /** El lugar está lleno: el formulario se queda, para que el «Listo» del último y su foco no se vayan. */
+  full: boolean;
 }
 
-function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
+function AttachForm({ course, lesson, maxBytes, maxText, full }: AttachProps) {
   const { mark } = useUnsaved();
   const [upload, setUpload] = useState<Upload>({ phase: "idle" });
   const [problem, setProblem] = useState<UploadProblem | null>(null);
@@ -73,26 +76,54 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
   const [done, setDone] = useState(false);
   const [title, setTitle] = useState("");
   const [picked, setPicked] = useState(0);
+  // Cuenta los intentos: el aviso se vuelve a armar, y el mismo problema dos veces se anuncia dos veces.
+  const [attempt, setAttempt] = useState(0);
+  // Cuenta los errores del título: el foco llega al campo cuando su error ya está pintado.
+  const [titleFailed, setTitleFailed] = useState(0);
+  // El último título que puso el nombre de un archivo: lo demás lo escribió la persona, y no se pisa.
+  const autoTitle = useRef("");
+  const sending = useRef<XMLHttpRequest | null>(null);
   // La subida que llegó y que falta confirmar: «Reintentar» solo confirma.
   const [waiting, setWaiting] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const titleField = useRef<HTMLDivElement>(null);
   const place = lesson ?? "curso";
   const busy = upload.phase !== "idle";
-  useEffect(() => () => mark(UPLOAD_KEY, false), [mark]);
+  // Mientras sube, y mientras falte confirmar lo que ya subió, salir lo perdería.
+  useEffect(() => {
+    mark(UPLOAD_KEY, busy || waiting !== null);
+  }, [busy, waiting, mark]);
+  useEffect(
+    () => () => {
+      mark(UPLOAD_KEY, false);
+      // Salir sin guardar: la subida no sigue sola, y su fila se cancela con lo que contesta `putFile`.
+      sending.current?.abort();
+    },
+    [mark],
+  );
+  useEffect(() => {
+    if (titleFailed !== 0) titleField.current?.querySelector("input")?.focus();
+  }, [titleFailed]);
 
   function onPick() {
+    // Un selector que ya estaba abierto puede entregar el archivo durante una subida: no se toca nada.
+    if (busy) return;
     const file = input.current?.files?.[0];
     if (waiting !== null) {
-      void cancelResourceAction({ course, resource: waiting });
+      void cancelResourceAction({ course, resource: waiting }).catch(() => undefined);
       setWaiting(null);
     }
     setDone(false);
     setTitleError(null);
+    setAttempt((count) => count + 1);
     setProblem(file === undefined ? null : checkFile(file, resourceTypeOf(file.name) !== null, maxBytes));
-    // Lo que ya se escribió no se pisa: el nombre del archivo solo llena un título vacío.
     const typed = titleField.current?.querySelector("input")?.value.trim() ?? "";
-    setTitle(typed !== "" && typed !== title ? typed : file === undefined ? "" : titleFromFile(file.name));
+    if (typed !== "" && typed !== autoTitle.current) {
+      setTitle(typed);
+    } else {
+      autoTitle.current = file === undefined ? "" : titleFromFile(file.name);
+      setTitle(autoTitle.current);
+    }
     setPicked((count) => count + 1);
   }
 
@@ -100,13 +131,14 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
     setUpload({ phase: "finishing" });
     const confirmed = await confirmResourceAction({ course, lesson, resource });
     if (confirmed.kind === "problem") {
-      // Lo que no se supo se puede intentar otra vez; lo demás ya no tiene fila.
-      setWaiting(confirmed.problem === "unavailable" ? resource : null);
+      // Lo que no se supo, o lo que todavía no aparece, se puede intentar otra vez; lo demás ya no tiene fila.
+      setWaiting(confirmed.problem === "unavailable" || confirmed.problem === "notUploaded" ? resource : null);
       setProblem(confirmed.problem);
       return;
     }
     setWaiting(null);
     setDone(true);
+    autoTitle.current = "";
     setTitle("");
     setPicked((count) => count + 1);
     if (input.current !== null) input.current.value = "";
@@ -120,8 +152,12 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
     setDone(false);
     setProblem(null);
     setTitleError(null);
+    setAttempt((count) => count + 1);
+    if (waiting === null && full) {
+      setProblem("tooMany");
+      return;
+    }
     setUpload({ phase: "finishing" });
-    mark(UPLOAD_KEY, true);
     try {
       if (waiting !== null) {
         await finish(waiting);
@@ -139,7 +175,7 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
       const titleProblem = checkDraftText("lessonTitle", typed);
       if (titleProblem !== null) {
         setTitleError(problemText("lessonTitle", titleProblem));
-        titleField.current?.querySelector("input")?.focus();
+        setTitleFailed((count) => count + 1);
         return;
       }
       setUpload({ phase: "sending", loaded: 0, total: file.size });
@@ -148,7 +184,16 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
         setProblem(begun.problem);
         return;
       }
-      const sent = await putFile(begun.url, file, begun.mime, (loaded, total) => setUpload({ phase: "sending", loaded, total }));
+      const sent = await putFile(
+        begun.url,
+        file,
+        begun.mime,
+        (request) => {
+          sending.current = request;
+        },
+        (loaded, total) => setUpload({ phase: "sending", loaded, total }),
+      );
+      sending.current = null;
       if (!sent) {
         await cancelResourceAction({ course, resource: begun.resource });
         setProblem("unavailable");
@@ -162,11 +207,11 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
       setProblem("unavailable");
     } finally {
       setUpload({ phase: "idle" });
-      mark(UPLOAD_KEY, false);
     }
   }
 
   const step = upload.phase === "sending" ? progressStep(upload.loaded, upload.total) : 0;
+  const exact = upload.phase === "sending" && upload.total > 0 ? Math.floor((Math.min(upload.loaded, upload.total) / upload.total) * 100) : 0;
   return (
     <form onSubmit={(event) => void onSubmit(event)} className="flex flex-col gap-3" aria-label={text.attach}>
       <input type="hidden" name="course" value={course} />
@@ -180,6 +225,7 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
           type="file"
           accept={RESOURCE_EXTENSIONS.join(",")}
           onChange={onPick}
+          disabled={busy || full}
           aria-describedby={`recurso-nota-${place}`}
           className="min-h-touch text-body-s text-text-2"
         />
@@ -197,29 +243,23 @@ function AttachForm({ course, lesson, maxBytes, maxText }: AttachProps) {
           warnAt={108}
           defaultValue={title}
           error={titleError}
-          readOnly={busy}
+          readOnly={busy || waiting !== null}
         />
       </div>
-      {upload.phase === "sending" && <ProgressBar value={upload.loaded} max={upload.total} label={text.progressLabel} text="" />}
-      {/* Existe desde antes: una región que nace con su texto no siempre se anuncia. */}
+      {upload.phase === "sending" && <ProgressBar value={upload.loaded} max={upload.total} label={text.progressLabel} text={t(text.progress, { percent: String(exact) })} />}
+      {/* Existe desde antes: una región que nace con su texto no siempre se anuncia. El avance, en pasos y sin verse: la barra ya lo dice. */}
       <p role="status" className="text-body-s text-text-2">
-        {upload.phase === "sending" ? t(text.progress, { percent: String(step) }) : upload.phase === "finishing" ? text.finishing : done ? text.attached : null}
+        {upload.phase === "sending" ? <span className="sr-only">{t(text.progress, { percent: String(step) })}</span> : upload.phase === "finishing" ? text.finishing : done ? text.attached : null}
       </p>
       {problem !== null && (
-        <InlineAlert tone="danger" live>
+        <InlineAlert key={attempt} tone="danger" live>
           {text.problems[problem]}
         </InlineAlert>
       )}
       <div>
-        {busy ? (
-          <Button type="submit" variant="secondary" pending loadingLabel={text.working}>
-            {text.attach}
-          </Button>
-        ) : (
-          <Button type="submit" variant="secondary">
-            {waiting !== null ? text.retry : text.attach}
-          </Button>
-        )}
+        <Button type="submit" variant="secondary" pending={busy} loadingLabel={text.working}>
+          {waiting !== null ? text.retry : text.attach}
+        </Button>
       </div>
     </form>
   );
@@ -241,16 +281,18 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
   let message: string | null = null;
   if (!pending && state.kind === "done") message = state.what === "moved" ? text.moved : text.removed;
   if (!pending && state.kind === "failed") message = failureText(state.reason);
-  // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque.
-  const { block, answer, spoken } = useAnswerFocus(pending, state.kind === "kept" ? 0 : attemptOf(state), message);
-  const question = useRef<HTMLDivElement>(null);
   // Se pregunta solo por lo que sigue en la lista: si otra pestaña ya lo quitó, se ofrecen los botones de siempre.
   const asking = state.kind === "confirming" && items.some((item) => item.id === state.resource) ? state.resource : null;
+  // Cancelar quita la pregunta y el botón pulsado con ella: como intento 0, el foco vuelve al bloque. Lo mismo si lo
+  // que se preguntaba ya no está.
+  const toBlock = state.kind === "kept" || (state.kind === "confirming" && asking === null);
+  const { block, answer, spoken, away } = useAnswerFocus(pending, toBlock ? 0 : attemptOf(state), message);
+  const question = useRef<HTMLDivElement>(null);
   const askingAttempt = asking !== null && state.kind === "confirming" ? state.attempt : 0;
-  // La pregunta toma el foco: el botón «Quitar» que se pulsó se fue con ella.
+  // La pregunta toma el foco: el botón «Quitar» que se pulsó se fue con ella. A quien se fue a otra cosa no se lo quita.
   useEffect(() => {
-    if (askingAttempt !== 0) question.current?.focus();
-  }, [askingAttempt]);
+    if (askingAttempt !== 0 && !away.current) question.current?.focus();
+  }, [askingAttempt, away]);
   const full = limits.perPlace !== null && items.length >= limits.perPlace;
 
   return (
@@ -322,10 +364,7 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
         (hydrated ? (
           <>
             {full && <p className="text-body-s text-text-3">{text.full}</p>}
-            {/* Lleno se queda montado, oculto: dice «Listo» del que acaba de llenar el lugar, y no se pierde el foco. */}
-            <div className={full ? "hidden" : undefined}>
-              <AttachForm course={course} lesson={lesson} maxBytes={limits.maxBytes} maxText={limits.maxText} />
-            </div>
+            <AttachForm course={course} lesson={lesson} maxBytes={limits.maxBytes} maxText={limits.maxText} full={full} />
           </>
         ) : (
           <p className="text-body-s text-text-3">{text.needsJavascript}</p>

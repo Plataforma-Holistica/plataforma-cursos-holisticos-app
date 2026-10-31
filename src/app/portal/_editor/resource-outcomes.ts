@@ -105,14 +105,14 @@ export function checkFile(file: { size: number }, allowed: boolean, maxBytes: nu
   return null;
 }
 
-/** El título por omisión: el nombre del archivo sin su extensión, en lo que cabe. */
+/** El título por omisión: el nombre del archivo sin su extensión y sin lo que no se ve, en lo que cabe. */
 export function titleFromFile(name: string): string {
-  return name
+  // Por caracteres y no por unidades: un emoji cortado a la mitad la regla del título no lo admite.
+  const clean = name
     .replace(/[\p{C}]/gu, "")
     .replace(/\.[^.]+$/, "")
-    .trim()
-    .slice(0, TITLE_MAX)
     .trim();
+  return [...clean].slice(0, TITLE_MAX).join("").trim();
 }
 
 /** Para quien lee en voz alta: el avance se anuncia cada 25 %. */

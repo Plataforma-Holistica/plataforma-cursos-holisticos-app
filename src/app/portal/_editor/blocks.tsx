@@ -807,6 +807,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   // Confirmar un recurso sube la revisión de la lección: guardar a la vez contestaría «cambió», y lo escrito no vuelve.
   const { uploading } = useUnsaved();
   const [heldSave, setHeldSave] = useState(false);
+  if (heldSave && !uploading) setHeldSave(false);
   const confirm = useRef<HTMLDivElement>(null);
   const confirming = state.kind === "confirming" ? state.attempt : 0;
   // La pregunta toma el foco: el botón «Borrar» que se pulsó se fue con ella.
@@ -842,7 +843,9 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
           onInput={typing.onInput}
           {...typing.form}
           onSubmit={(event) => {
-            if (uploading) {
+            // Solo «Guardar»: pedir borrar y cancelar no llaman a ningún servicio. Enter envía con el primer botón, que es él.
+            const pressed = (event.nativeEvent as SubmitEvent).submitter;
+            if (uploading && pressed instanceof HTMLButtonElement && pressed.value === selected.save) {
               event.preventDefault();
               setHeldSave(true);
               return;

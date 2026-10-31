@@ -45,6 +45,9 @@ class FakeRequest {
   body: unknown = null;
   status = 0;
   upload: { onprogress: ((event: { loaded: number; total: number }) => void) | null } = { onprogress: null };
+  timeout = 0;
+  aborted = false;
+  ontimeout: (() => void) | null = null;
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
@@ -60,6 +63,10 @@ class FakeRequest {
   }
   send(body: unknown) {
     this.body = body;
+  }
+  abort() {
+    this.aborted = true;
+    this.onabort?.();
   }
   respond(status: number) {
     this.status = status;
@@ -196,7 +203,7 @@ describe("adjuntar", () => {
     expect(screen.getAllByText("Subiendo: 25 %").length).toBeGreaterThan(0);
     request.respond(200);
     await screen.findByText("Listo: el recurso quedó adjunto.");
-    expect(leaving()).toBe(false);
+    await waitFor(() => expect(leaving()).toBe(false));
   });
 
   it.each([
@@ -242,12 +249,70 @@ describe("adjuntar", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Elige un archivo para adjuntar.");
   });
 
-  it("elegir archivo no pisa el título que ya se escribió", async () => {
+  it("elegir archivo no pisa el título que ya se escribió, tampoco al elegir otro", async () => {
     const user = userEvent.setup();
     show();
     await user.type(screen.getByRole("textbox", { name: "Título del recurso" }), "Mi título");
-    await user.upload(screen.getByLabelText("Archivo"), pdf("otro-nombre.pdf"));
+    await user.upload(screen.getByLabelText("Archivo"), pdf("uno.pdf"));
+    await user.upload(screen.getByLabelText("Archivo"), pdf("dos.pdf"));
     expect((screen.getByRole("textbox", { name: "Título del recurso" }) as HTMLInputElement).value).toBe("Mi título");
+  });
+
+  it("el título que puso un archivo sí cambia al elegir otro", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.upload(screen.getByLabelText("Archivo"), pdf("uno.pdf"));
+    await user.upload(screen.getByLabelText("Archivo"), pdf("dos.pdf"));
+    expect((screen.getByRole("textbox", { name: "Título del recurso" }) as HTMLInputElement).value).toBe("dos");
+  });
+
+  it("mientras sube no se puede elegir otro archivo: no se toca la fila en camino", async () => {
+    const user = userEvent.setup();
+    show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    expect((screen.getByLabelText("Archivo") as HTMLInputElement).disabled).toBe(true);
+    (FakeRequest.last as FakeRequest).respond(200);
+    await screen.findByText("Listo: el recurso quedó adjunto.");
+    expect(actions.cancelResourceAction).not.toHaveBeenCalled();
+  });
+
+  it("salir mientras sube corta la subida y cancela su fila", async () => {
+    const user = userEvent.setup();
+    const view = show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    view.unmount();
+    expect((FakeRequest.last as FakeRequest).aborted).toBe(true);
+    await waitFor(() => expect(actions.cancelResourceAction).toHaveBeenCalledExactlyOnceWith({ course: COURSE, resource: R1 }));
+  });
+
+  it("si confirmar lanza, se queda «Reintentar»", async () => {
+    actions.confirmResourceAction.mockRejectedValueOnce(new Error("sin red"));
+    const user = userEvent.setup();
+    show();
+    await attach(user);
+    await waitFor(() => expect(FakeRequest.last).not.toBeNull());
+    (FakeRequest.last as FakeRequest).respond(200);
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Título del recurso" }) as HTMLInputElement).readOnly).toBe(true);
+  });
+
+  it("el mismo problema dos veces se anuncia dos veces: el aviso se vuelve a armar", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    const first = await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    await waitFor(() => expect(screen.getByRole("alert")).not.toBe(first));
+  });
+
+  it("con el lugar lleno, adjuntar no empieza nada", async () => {
+    const user = userEvent.setup();
+    show([...ITEMS, row("f0000000-0000-4000-8000-000000000003", "Otra", null, null)]);
+    await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("ya no caben más recursos");
+    expect(actions.beginResourceAction).not.toHaveBeenCalled();
   });
 
   it("si confirmar no se pudo saber, «Reintentar» solo confirma: no sube otra vez", async () => {
@@ -286,6 +351,7 @@ describe("adjuntar", () => {
     await waitFor(() => expect(FakeRequest.last).not.toBeNull());
     const button = screen.getByRole("button", { name: "Un momento…" });
     expect(button).not.toBeDisabled();
+    expect(button).toHaveFocus();
     await user.click(button);
     expect(actions.beginResourceAction).toHaveBeenCalledOnce();
   });
@@ -323,8 +389,8 @@ describe("adjuntar", () => {
   it("con el lugar lleno no se ofrece", () => {
     show([...ITEMS, row("f0000000-0000-4000-8000-000000000003", "Otra", null, null)]);
     expect(screen.getByText(/ya no caben más recursos/)).toBeTruthy();
-    // Se queda montado y oculto: dice «Listo» del que acaba de llenar el lugar.
-    expect(screen.getByRole("form", { name: "Adjuntar recurso" }).closest(".hidden")).not.toBeNull();
+    // Se queda a la vista, sin dejar elegir: el «Listo» del que acaba de llenar el lugar y su foco no se van.
+    expect((screen.getByLabelText("Archivo") as HTMLInputElement).disabled).toBe(true);
   });
 
   it("el formulario de adjuntar nombra lo que hace", () => {
@@ -385,6 +451,8 @@ describe("lo puro", () => {
     expect(titleFromFile("guia.final.pdf")).toBe("guia.final");
     expect(titleFromFile(`${"a".repeat(200)}.pdf`)).toHaveLength(120);
     expect(titleFromFile("sin-extension")).toBe("sin-extension");
+    expect(titleFromFile("gu\u200bía.pdf")).toBe("guía");
+    expect([...titleFromFile(`${"😀".repeat(200)}.pdf`)]).toHaveLength(120);
   });
 
   it("el avance va de 25 en 25", () => {

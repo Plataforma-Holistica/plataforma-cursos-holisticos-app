@@ -781,8 +781,11 @@ que no se ve leyendo un solo archivo:
   del maestro activo dueño. Lo que sobra se borra después de quitar, de un rechazo o de borrar una lección, un módulo o el
   curso (`cleanUp`, `afterDelete` en `createDrafts`), y una falla ahí no tumba lo que ya se hizo: se reporta
   (`resource_cleanup_failed`), y lo alcanza el repaso (`pnpm storage:repaso` en local; en producción, el manual). Si no se
-  pudo firmar o la subida no llegó, se cancela la fila, que ocuparía lugar 3 h. Mientras un archivo sube, salir pregunta
-  (la clave `recurso-subiendo` de `unsaved.tsx`). Los recursos del curso van al final de «Datos del curso», y la estructura
+  pudo firmar o la subida no llegó, se cancela la fila, que ocuparía lugar 3 h. Si la subida llegó y confirmar no se pudo
+  saber, «Reintentar» solo confirma, y elegir otro archivo cancela la que quedó. Mientras un archivo sube, o falta confirmarlo,
+  salir pregunta (`UPLOAD_KEY` de `unsaved.tsx`), el selector no acepta otro archivo, y «Guardar» de la lección espera:
+  confirmar sube la revisión de la lección, y con `changed` lo escrito no vuelve. Decisión de Sergio del 2026-10-30: un M4A con
+  marca que también usa un video (`mp42`, `isom`) se rechaza, y el mensaje dice que lo convierta a MP3. Los recursos del curso van al final de «Datos del curso», y la estructura
   enlaza a ese bloque (decisión mía sin confirmar: el diseño pedía su panel). Renombrar existe en la base y no tiene
   pantalla (decisión mía sin confirmar). El selector de archivos está en `_editor/` y no en `src/ui/`: T-403 lo saca al
   componente `FileUpload` cuando haya dos que lo usen. Usa pgTAP 70 e integración 90, contra el Storage local, y un caso en

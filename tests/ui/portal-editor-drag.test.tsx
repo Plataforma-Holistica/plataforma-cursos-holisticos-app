@@ -183,6 +183,9 @@ describe("cambios sin guardar", () => {
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByText("Espera a que termine de subir el archivo para guardar.")).toBeTruthy();
     expect(actions.editorAction).not.toHaveBeenCalled();
+    // Pedir borrar no llama a ningún servicio: no tiene por qué esperar.
+    await user.click(screen.getByRole("button", { name: "Borrar lección" }));
+    await waitFor(() => expect(actions.editorAction).toHaveBeenCalledOnce());
   });
 
   const assign = vi.fn();

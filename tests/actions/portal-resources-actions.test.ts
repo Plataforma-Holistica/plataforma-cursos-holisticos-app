@@ -157,6 +157,22 @@ describe("confirmar", () => {
     expect(await confirmResourceAction(CONFIRM)).toEqual({ kind: "problem", problem });
   });
 
+  it.each(["suspended", "not_teacher", "not_editable"])("con %s vuelve a la misma pantalla", async (kind) => {
+    mocks.confirmResource.mockResolvedValue({ kind });
+    await expect(confirmResourceAction(CONFIRM)).rejects.toThrow(`sale a /portal/cursos/${COURSE}?leccion=${LESSON}`);
+  });
+
+  it("sin sesión va a entrar", async () => {
+    mocks.confirmResource.mockResolvedValue({ kind: "session", check: { kind: "anonymous" } });
+    await expect(confirmResourceAction(CONFIRM)).rejects.toThrow(/sale a \/entrar/);
+  });
+
+  it("si ya no está, vuelve a leer: la lista pudo cambiar", async () => {
+    mocks.confirmResource.mockResolvedValue({ kind: "not_found" });
+    await confirmResourceAction(CONFIRM);
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  });
+
   it("con nulo no lanza", async () => {
     mocks.confirmResource.mockResolvedValue({ kind: "invalid" });
     expect(await confirmResourceAction(null as never)).toEqual({ kind: "problem", problem: "unavailable" });
