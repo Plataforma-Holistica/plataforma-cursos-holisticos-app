@@ -5,7 +5,7 @@
 -- sobra. Las reglas del área `resources` del vigilante, del carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(106);
+select plan(158);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -55,8 +55,8 @@ as $$ select storage_path from public.draft_resources where id = p_resource $$;
 -- Lo que deja Storage al terminar una subida.
 create function pruebas.objeto(p_path text, p_size bigint, p_mime text) returns uuid
 language sql as $$
-  insert into storage.objects (bucket_id, name, metadata)
-  values ('course-resources', p_path, jsonb_build_object('size', p_size, 'mimetype', p_mime))
+  insert into storage.objects (bucket_id, name, version, metadata)
+  values ('course-resources', p_path, gen_random_uuid()::text, jsonb_build_object('size', p_size, 'mimetype', p_mime))
   returning id
 $$;
 create function pruebas.empezar(p_id uuid, p_course uuid, p_lesson uuid, p_title text, p_k text,
@@ -188,7 +188,10 @@ select is((select row(state, position, size_bytes)::text from public.draft_resou
   row('ready'::public.resource_state, 1, 2048::bigint)::text, 'queda lista, primera, con el tamaño de verdad');
 select is((select object_id from public.draft_resources where id = pruebas.id('guia')),
   (select id from storage.objects where bucket_id = 'course-resources' and name = pruebas.ruta(pruebas.id('guia'))),
-  'y recuerda qué objeto es: un reemplazo se notará');
+  'y recuerda qué objeto es');
+select is((select object_version from public.draft_resources where id = pruebas.id('guia')),
+  (select version from storage.objects where bucket_id = 'course-resources' and name = pruebas.ruta(pruebas.id('guia'))),
+  'y su versión: un reemplazo conserva el id y cambia esta');
 select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('guia'))),
   'ready', 'confirmar otra vez no cambia nada');
 select is((select position from public.draft_resources where id = pruebas.id('guia')), 1, 'ni su lugar');
@@ -212,6 +215,35 @@ select pruebas.objeto(pruebas.ruta(pruebas.id('m4a')), 1000, 'audio/mp4');
 select is(pruebas.rj(pruebas.p(1), format('private.resource_confirm(%L, %L, false)', pruebas.id('curso'), pruebas.id('m4a'))) ->> 'reason',
   'content', 'si el contenido no es lo que dice, se rechaza');
 select is((select count(*)::int from public.draft_resources where id = pruebas.id('m4a')), 0, 'y la fila se fue');
+
+-- Un tamaño que no es un entero no tumba la función: cuenta como que no cabe.
+select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Raro', 'raro');
+insert into storage.objects (bucket_id, name, version, metadata)
+values ('course-resources', pruebas.ruta(pruebas.id('raro')), 'v1', '{"size": "abc", "mimetype": "application/pdf"}');
+select is(pruebas.rj(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('raro'))) ->> 'reason',
+  'size', 'un tamaño raro se rechaza');
+
+-- Lo que no se supo no se rechaza: la fila se queda para intentarlo otra vez.
+select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Dudosa', 'dudosa');
+select pruebas.objeto(pruebas.ruta(pruebas.id('dudosa')), 1000, 'application/pdf');
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, null)', pruebas.id('curso'), pruebas.id('dudosa'))),
+  'unavailable', 'si no se pudo leer el contenido, no se supo');
+select is((select state from public.draft_resources where id = pruebas.id('dudosa')), 'pending'::public.resource_state, 'y la fila sigue');
+select pruebas.como_dueno();
+alter table public.business_parameters disable trigger user;
+update public.business_parameters set canceled_at = now() where key = 'RECURSO_TAMANO_MAX' and canceled_at is null;
+select pruebas.limpiar();
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('dudosa'))),
+  'unavailable', 'sin el parámetro, tampoco se supo');
+select is((select state from public.draft_resources where id = pruebas.id('dudosa')), 'pending'::public.resource_state, 'y la fila sigue');
+select is(pruebas.r(pruebas.p(1), format('private.resource_begin(%L, null, %L, %L, %L, 10)', pruebas.id('curso'), 'Mal', 'pdf', 'application/pdf')),
+  'unavailable', 'y sin el parámetro no se empieza');
+select pruebas.como_dueno();
+update public.business_parameters set canceled_at = null where key = 'RECURSO_TAMANO_MAX' and canceled_at is not null;
+alter table public.business_parameters enable trigger user;
+select pruebas.limpiar();
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('dudosa'))),
+  'ready', 'cuando se sabe, se confirma');
 
 -- Un pendiente que pasó de su vida (la dirección dura 2 h, más un margen): ya no se confirma.
 select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Tarde', 'tarde');
@@ -240,8 +272,8 @@ end
 $$;
 grant execute on function pruebas.sobran(uuid, uuid) to anon, authenticated, app_service;
 
-select is(cardinality(pruebas.sobran(pruebas.p(1), pruebas.id('curso'))), 4,
-  'sobran los cuatro objetos de lo rechazado y lo vencido');
+select is(cardinality(pruebas.sobran(pruebas.p(1), pruebas.id('curso'))), 5,
+  'sobran los cinco objetos de lo rechazado y lo vencido');
 select ok(not pruebas.ruta(pruebas.id('guia')) = any(pruebas.sobran(pruebas.p(1), pruebas.id('curso'))),
   'un objeto que una fila nombra nunca sobra');
 select is(cardinality(pruebas.sobran(pruebas.p(2), pruebas.id('curso'))), 0, 'a otro maestro no se le dicen');
@@ -255,7 +287,9 @@ select pruebas.limpiar();
 
 select is(pruebas.listo(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Segunda', 'segunda'), 'ready', 'una segunda');
 select is(pruebas.listo(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Tercera', 'tercera'), 'ready', 'una tercera');
-select is(pruebas.titulos(pruebas.id('leccion')), array['Guía', 'Segunda', 'Tercera'], 'en el orden en que se confirmaron');
+select is(pruebas.titulos(pruebas.id('leccion')), array['Guía', 'Dudosa', 'Segunda', 'Tercera'], 'en el orden en que se confirmaron');
+select is(pruebas.r(pruebas.p(1), format('private.resource_remove(%L, %L, 1)', pruebas.id('curso'), pruebas.id('dudosa'))), 'deleted', 'quitar una del medio');
+select is(pruebas.titulos(pruebas.id('leccion')), array['Guía', 'Segunda', 'Tercera'], 'la lista se cierra');
 select is(pruebas.listo(pruebas.p(1), pruebas.id('curso'), null, 'Del curso lista', 'curso1'), 'ready', 'una del curso');
 select is((select position from public.draft_resources where id = pruebas.id('curso1')), 1,
   'los del curso llevan su propia lista');
@@ -271,6 +305,25 @@ select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 1, %L)
 select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('curso1'), 'Otro')), 'changed',
   'con la revisión de antes contesta que cambió');
 select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 2, %L)', pruebas.id('curso'), pruebas.id('curso1'), '')), 'invalid', 'sin título, no');
+
+-- Mi curso con un recurso ajeno: `draft_open` deja pasar, y lo detiene el filtro por curso.
+select is(pruebas.listo(pruebas.p(2), pruebas.id('beto'), null, 'De Beto listo', 'beto_r'), 'ready', 'Beto tiene uno listo');
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'Ana no lo confirma desde su curso');
+select is(pruebas.r(pruebas.p(1), format('private.resource_rename(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('beto_r'), 'Mío')), 'not_found', 'ni lo renombra');
+select is(pruebas.r(pruebas.p(1), format('private.resource_move(%L, %L, 1, 1)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'ni lo mueve');
+select is(pruebas.r(pruebas.p(1), format('private.resource_remove(%L, %L, 1)', pruebas.id('curso'), pruebas.id('beto_r'))), 'not_found', 'ni lo quita');
+select is((select row(title, revision)::text from public.draft_resources where id = pruebas.id('beto_r')),
+  row('De Beto listo', 1::bigint)::text, 'y sigue igual');
+select is(pruebas.r(pruebas.p(2), format('private.resource_rename(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('curso1'), 'Mío')), 'not_found', 'Beto no renombra desde el curso de Ana');
+select is(pruebas.r(pruebas.p(2), format('private.resource_remove(%L, %L, 2)', pruebas.id('curso'), pruebas.id('curso1'))), 'not_found', 'ni quita');
+
+-- Un pendiente no se mueve (no está en la lista), y quitarlo no cambia lo que se vio.
+select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('leccion'), 'Cancelada', 'cancelada');
+select is(pruebas.r(pruebas.p(1), format('private.resource_move(%L, %L, 1, 1)', pruebas.id('curso'), pruebas.id('cancelada'))), 'not_found', 'un pendiente no se mueve');
+create temporary table sin_tocar on commit drop as select pruebas.contenido(pruebas.id('curso')) as contenido;
+grant select on sin_tocar to anon, authenticated, app_service;
+select is(pruebas.r(pruebas.p(1), format('private.resource_remove(%L, %L, 1)', pruebas.id('curso'), pruebas.id('cancelada'))), 'deleted', 'quitar un pendiente es cancelarlo');
+select is(pruebas.contenido(pruebas.id('curso')), (select contenido from sin_tocar), 'sin subir revisiones: no estaba a la vista');
 
 -- Las revisiones: borrar una lección o el curso lleva lo que se vio.
 create temporary table antes on commit drop as
@@ -305,11 +358,22 @@ select is(pruebas.r(pruebas.p(2), format('private.resource_begin(%L, null, %L, %
   'started', 'cada lugar lleva su cuenta');
 
 -- El freno: 20 subidas por hora por maestro, contadas al aceptar (TRD, límites).
+create function pruebas.golpes(p_n integer) returns integer language sql stable
+as $$ select hits from private.rate_limit_counters where bucket = 'resource_upload:' || pruebas.m(p_n) $$;
+grant execute on function pruebas.golpes(integer) to anon, authenticated, app_service;
+create temporary table golpes_antes on commit drop as select pruebas.golpes(2) as hits;
+select is(pruebas.r(pruebas.p(2), format('private.resource_begin(%L, null, %L, %L, %L, 0)', pruebas.id('beto'), 'Mal', 'pdf', 'application/pdf')),
+  'invalid', 'un rechazo');
+select is(pruebas.golpes(2), (select hits from golpes_antes), 'no cuenta: solo lo aceptado');
 select pruebas.como_dueno();
-update private.rate_limit_counters set hits = 20 where bucket = 'resource_upload:' || pruebas.m(2);
+update private.rate_limit_counters set hits = 19 where bucket = 'resource_upload:' || pruebas.m(2);
 select pruebas.limpiar();
+select is(pruebas.r(pruebas.p(2), format('private.resource_begin(%L, null, %L, %L, %L, 10)', pruebas.id('beto'), 'La 20', 'pdf', 'application/pdf')),
+  'started', 'la subida 20 de la hora, sí');
+select is(pruebas.golpes(2), 20, 'y cuenta');
 select is(pruebas.r(pruebas.p(2), format('private.resource_begin(%L, null, %L, %L, %L, 10)', pruebas.id('beto'), 'Frenado', 'pdf', 'application/pdf')),
-  'throttled', 'con 20 subidas en la hora, se frena');
+  'throttled', 'la 21, no');
+select is(pruebas.golpes(2), 20, 'y no cuenta');
 select is((select count(*)::int from public.draft_resources where title = 'Frenado'), 0, 'y no deja fila');
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), null, 'Otra maestra', 'otra'), 'started', 'a otra maestra no le toca');
 
@@ -332,21 +396,44 @@ select throws_ok('select storage_path from public.draft_resources', '42501', nul
 select throws_ok('select object_id from public.draft_resources', '42501', null, 'ni qué objeto es');
 select throws_ok($$update public.draft_resources set title = 'x'$$, '42501', null, 'y no escribe directo');
 select throws_ok($$select private.resource_begin(null, null, 'x', 'pdf', 'application/pdf', 1)$$, '42501', null, 'ni llama a las funciones');
+select throws_ok('select object_version from public.draft_resources', '42501', null, 'ni lee la versión');
 select pruebas.como_usuario(pruebas.p(2));
 select is((select count(*)::int from public.draft_resources where id = pruebas.id('guia')), 0, 'otro maestro no lo ve');
 select pruebas.como_visitante();
 select throws_ok('select id from public.draft_resources', '42501', null, 'el visitante tampoco');
 select pruebas.limpiar();
 
--- El maestro suspendido no sube ni confirma.
+-- Aunque se le conceda el permiso, el guardián no la deja escribir.
+grant delete on public.draft_resources to app_service;
+select pruebas.a_nombre_de(pruebas.p(1));
+select throws_ok(format('delete from public.draft_resources where course_id = %L', pruebas.id('curso')), '42501', null,
+  'con permiso concedido, el guardián no deja borrar');
+select pruebas.limpiar();
+revoke delete on public.draft_resources from app_service;
+
+-- El maestro suspendido no sube ni confirma, pero sí se le dice lo que sobra.
 select pruebas.empezar(pruebas.p(3), pruebas.id('caro'), null, 'De Caro', 'dc');
 select pruebas.objeto(pruebas.ruta(pruebas.id('dc')), 1000, 'application/pdf');
+select pruebas.empezar(pruebas.p(3), pruebas.id('caro'), null, 'Rechazada', 'caro_mal');
+select pruebas.objeto(pruebas.ruta(pruebas.id('caro_mal')), 1000, 'audio/mpeg');
+select pruebas.r(pruebas.p(3), format('private.resource_confirm(%L, %L, true)', pruebas.id('caro'), pruebas.id('caro_mal')));
 select pruebas.como_dueno_sistema();
 update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = pruebas.m(3);
 select pruebas.limpiar();
 select is(pruebas.r(pruebas.p(3), format('private.resource_confirm(%L, %L, true)', pruebas.id('caro'), pruebas.id('dc'))), 'suspended', 'suspendido no confirma');
 select is(pruebas.r(pruebas.p(3), format('private.resource_begin(%L, null, %L, %L, %L, 10)', pruebas.id('caro'), 'x', 'pdf', 'application/pdf')), 'suspended', 'ni empieza');
 select is(pruebas.r(pruebas.p(3), format('private.resource_remove(%L, %L, 1)', pruebas.id('caro'), pruebas.id('dc'))), 'suspended', 'ni quita');
+select is(cardinality(pruebas.sobran(pruebas.p(3), pruebas.id('caro'))), 1, 'lo que sobra sí se le dice: limpiar no le da nada');
+
+-- Un curso que ya no está en borrador no se toca.
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'in_review' where course_id = pruebas.id('beto');
+select pruebas.limpiar();
+select is(pruebas.r(pruebas.p(2), format('private.resource_begin(%L, null, %L, %L, %L, 10)', pruebas.id('beto'), 'x', 'pdf', 'application/pdf')), 'not_editable', 'no se sube a uno en revisión');
+select is(pruebas.r(pruebas.p(2), format('private.resource_remove(%L, %L, 1)', pruebas.id('beto'), pruebas.id('beto_r'))), 'not_editable', 'ni se quita');
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'draft' where course_id = pruebas.id('beto');
+select pruebas.limpiar();
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar la lección o el curso se lleva las filas; sus objetos quedan como sobrantes.
@@ -355,6 +442,17 @@ select is(pruebas.r(pruebas.p(1), format('private.draft_delete_lesson(%L, %L, %s
                                          (select revision from public.draft_lessons where id = pruebas.id('leccion')))), 'deleted', 'borrar la lección');
 select is((select count(*)::int from public.draft_resources where lesson_id = pruebas.id('leccion')), 0, 'se lleva sus recursos');
 select ok(pruebas.sobran(pruebas.p(1), pruebas.id('curso')) @> array[pruebas.m(1) || '/' || pruebas.id('curso') || '/' || pruebas.id('guia')],
+  'y su objeto sobra');
+
+-- Borrar el módulo y borrar el curso, también: el prefijo sigue diciendo lo que sobra, aunque el curso se haya ido.
+select pruebas.r(pruebas.p(2), format('private.draft_add_module(%L, %s, %L)', pruebas.id('beto'),
+  (select structure_revision from public.course_drafts where course_id = pruebas.id('beto')), 'Otro'), 'modulo2');
+select pruebas.r(pruebas.p(2), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('beto'), pruebas.id('modulo2'), 'Otra'), 'leccion2');
+select pruebas.listo(pruebas.p(2), pruebas.id('beto'), pruebas.id('leccion2'), 'En el módulo', 'en_modulo');
+select is(pruebas.r(pruebas.p(2), format('private.draft_delete_module(%L, %L, %s)', pruebas.id('beto'), pruebas.id('modulo2'),
+                                         (select revision from public.draft_modules where id = pruebas.id('modulo2')))), 'deleted', 'borrar el módulo');
+select is((select count(*)::int from public.draft_resources where lesson_id = pruebas.id('leccion2')), 0, 'se lleva los recursos de sus lecciones');
+select ok(pruebas.sobran(pruebas.p(2), pruebas.id('beto')) @> array[pruebas.m(2) || '/' || pruebas.id('beto') || '/' || pruebas.id('en_modulo')],
   'y su objeto sobra');
 
 -- ---------------------------------------------------------------------------------------
@@ -377,6 +475,12 @@ select pruebas.como_usuario(pruebas.p(1));
 select throws_ok('select * from private.resource_sweep()', '42501', null, 'no es de la aplicación');
 select pruebas.limpiar();
 select is(has_function_privilege('app_service', 'private.resource_sweep()', 'EXECUTE'), false, 'ni del servidor');
+
+-- Borrar el curso entero (al final: las reglas de abajo no lo necesitan).
+select is(pruebas.r(pruebas.p(1), format('private.draft_delete_course(%L, %s)', pruebas.id('curso'), pruebas.contenido(pruebas.id('curso')))), 'deleted', 'borrar el curso');
+select is((select count(*)::int from public.draft_resources where course_id = pruebas.id('curso')), 0, 'se lleva sus recursos');
+select ok(pruebas.sobran(pruebas.p(1), pruebas.id('curso')) @> array[pruebas.m(1) || '/' || pruebas.id('curso') || '/' || pruebas.id('curso1')],
+  'y sus objetos sobran, aunque el curso ya no exista');
 
 -- ---------------------------------------------------------------------------------------
 -- Las reglas del vigilante se provocan.
@@ -404,7 +508,56 @@ grant execute on function private.resource_sweep() to app_service;
 select ok('resource function executable by app_service' = any(pruebas.vigila()), 'el repaso en manos del servidor se nota');
 revoke execute on function private.resource_sweep() from app_service;
 
+-- Una política sobre `storage.objects`, o apagar su seguridad por fila, no se pueden provocar aquí: la
+-- tabla es de `supabase_storage_admin`, y `postgres` no lo es. Arriba se comprueba que no hay ninguna.
+
+grant insert on public.draft_resources to authenticated;
+select ok('resource table writable by authenticated' = any(pruebas.vigila()), 've un permiso de escritura para la persona');
+revoke insert on public.draft_resources from authenticated;
+grant select (title) on public.draft_resources to anon;
+select ok('resource table readable by anon' = any(pruebas.vigila()), 've que el visitante la lee');
+revoke select (title) on public.draft_resources from anon;
+grant select (object_version) on public.draft_resources to authenticated;
+select ok('resource path readable by authenticated' = any(pruebas.vigila()), 've la versión del objeto a la vista');
+revoke select (object_version) on public.draft_resources from authenticated;
+alter table public.draft_resources disable row level security;
+select ok('resource table without row level security' = any(pruebas.vigila()), 've la seguridad por fila apagada');
+alter table public.draft_resources enable row level security;
+create policy recursos_de_todos on public.draft_resources for select to authenticated using (true);
+select ok('resource policy other than teacher read' = any(pruebas.vigila()), 've una política de más');
+drop policy recursos_de_todos on public.draft_resources;
+drop policy draft_resources_teacher_select on public.draft_resources;
+select ok('resource table without its teacher read policy' = any(pruebas.vigila()), 've que falta la suya');
+create policy draft_resources_teacher_select on public.draft_resources
+  for select to authenticated using (teacher_id = (select private.current_teacher_id()));
+alter table public.draft_resources disable trigger draft_resources_guard;
+select ok('resource table without guard' = any(pruebas.vigila()), 've un guardián apagado');
+alter table public.draft_resources enable trigger draft_resources_guard;
+create trigger ajeno before insert on public.draft_resources for each row execute function private.guard_draft();
+select ok('resource table with a foreign trigger' = any(pruebas.vigila()), 've un disparador ajeno');
+drop trigger ajeno on public.draft_resources;
+alter table public.draft_resources drop constraint draft_resources_mime_ok;
+select ok('resource table without constraint draft_resources_mime_ok' = any(pruebas.vigila()), 've que falta una restricción');
+alter table public.draft_resources add constraint draft_resources_mime_ok check (true);
+select ok('resource table without constraint draft_resources_mime_ok' = any(pruebas.vigila()), 'y que no basta una con su nombre que no revisa nada');
+alter table public.draft_resources drop constraint draft_resources_mime_ok;
+alter table public.draft_resources add constraint draft_resources_mime_ok check (private.resource_mime_ok(kind, mime));
+create function private.resource_extra() returns integer language sql as 'select 1';
+select ok('resource function not in the watchdog area' = any(pruebas.vigila()), 've una función que el área no conoce');
+drop function private.resource_extra();
+alter function private.resource_remove(uuid, uuid, bigint) security invoker;
+select ok('resource function not security definer' = any(pruebas.vigila()), 've una que dejó de ser security definer');
+alter function private.resource_remove(uuid, uuid, bigint) security definer;
+alter function private.resource_touch(uuid, uuid) reset search_path;
+select ok('resource function without fixed search_path' = any(pruebas.vigila()), 've una sin el search_path fijo');
+alter function private.resource_touch(uuid, uuid) set search_path = '';
+revoke execute on function private.resource_confirm(uuid, uuid, boolean) from app_service;
+select ok('resource function not executable by app_service' = any(pruebas.vigila()), 've que el servidor ya no ejecuta una');
+grant execute on function private.resource_confirm(uuid, uuid, boolean) to app_service;
+
 select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
+drop function private.resource_rename(uuid, uuid, bigint, text);
+select ok('resource function missing' = any(pruebas.vigila()), 've una función que falta');
 
 select * from finish();
 rollback;

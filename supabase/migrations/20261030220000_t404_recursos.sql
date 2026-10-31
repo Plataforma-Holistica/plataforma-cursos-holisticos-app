@@ -11,7 +11,10 @@
 --     nunca borra lo que los alumnos siguen bajando.
 --   · Confirmar compara lo que Storage guardó (`storage.objects`), que es lo que se va a servir, y no lo
 --     que dijo el navegador. Lo rechazado borra su fila en la misma transacción: no hay cómo volver a
---     confirmarlo, aunque la dirección de subida siga viva.
+--     confirmarlo, aunque la dirección de subida siga viva. Un «no se supo» (no se pudieron leer los
+--     primeros bytes, o falta el parámetro) no rechaza: contesta `unavailable` y la fila se queda.
+--   · La fila recuerda qué objeto confirmó, con su `id` y su `version`: un reemplazo por `upsert` conserva
+--     el `id` y cambia la versión; borrar y volver a subir cambia los dos.
 --   · La dirección de subida dura 2 h fijas (Storage no deja pedir menos): un pendiente vive 3 h.
 --
 -- Decisiones de Sergio del 2026-10-30: PDF, Word (.docx), MP3 y M4A; un archivo se borra al momento, más
@@ -47,6 +50,7 @@ as $$
            when 'pdf' then p_mime = 'application/pdf'
            when 'doc' then p_mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
            when 'audio' then p_mime in ('audio/mpeg', 'audio/mp4')
+           else false
          end
 $$;
 revoke all on function private.resource_mime_ok(public.resource_kind, text) from public;
@@ -71,7 +75,8 @@ create table public.draft_resources (
   size_bytes bigint not null,                      -- el declarado, y al confirmar el de verdad
   state public.resource_state not null default 'pending',
   position integer,                                -- dentro de su lugar, desde 1; un pendiente no tiene
-  object_id uuid,                                  -- el objeto de Storage al confirmar: un reemplazo se nota
+  object_id uuid,                                  -- el objeto de Storage al confirmar
+  object_version text,                             -- y su versión: un `upsert` conserva el id y cambia esta
   revision bigint not null default 1,              -- sube al renombrarlo
   created_at timestamptz not null default now(),
   constraint draft_resources_course_fk foreign key (course_id, teacher_id)
@@ -86,8 +91,8 @@ create table public.draft_resources (
   constraint draft_resources_mime_ok check (private.resource_mime_ok(kind, mime)),
   constraint draft_resources_size_positive check (size_bytes > 0),
   constraint draft_resources_state_ok check (
-    (state = 'pending' and position is null and object_id is null)
-    or (state = 'ready' and position is not null and object_id is not null))
+    (state = 'pending' and position is null and object_id is null and object_version is null)
+    or (state = 'ready' and position is not null and object_id is not null and object_version is not null))
 );
 comment on table public.draft_resources is 'Los recursos del borrador de un curso (RF-605, T-404). Los escriben solo las funciones private.resource_*; su maestro los lee, sin la ruta del archivo.';
 create index draft_resources_course_idx on public.draft_resources (course_id, teacher_id);
@@ -106,7 +111,8 @@ create trigger draft_resources_no_truncate before truncate on public.draft_resou
 
 -- ---------------------------------------------------------------------------------------
 -- Las funciones del servidor. Ninguna recibe quién actúa: es el maestro activo de private.actor_id().
--- Ninguna escribe antes de rechazar. Contestan {answer}:
+-- Ninguna escribe antes de rechazar, salvo confirmar: `rejected` y `expired` borran la fila, y eso es lo
+-- que los vuelve definitivos (quien llama valida la respuesta ya confirmada). Contestan {answer}:
 --   started, ready, rejected, expired, not_uploaded, saved, moved, deleted, changed, invalid, too_large,
 --   too_many, throttled, unavailable, not_found, not_editable, suspended, not_teacher
 
@@ -189,8 +195,9 @@ begin
 end
 $$;
 
--- Confirmar: `p_content_ok` es lo que el servidor leyó en los primeros bytes del objeto. Lo demás lo
--- mira aquí, en lo que Storage guardó. Lo rechazado se va con su fila, y su objeto queda como sobrante.
+-- Confirmar: `p_content_ok` es lo que el servidor leyó en los primeros bytes del objeto, y nulo si no lo
+-- pudo leer. Lo demás lo mira aquí, en lo que Storage guardó. Lo rechazado se va con su fila, y su objeto
+-- queda como sobrante. Lo que no se supo no se rechaza: la fila se queda, para intentarlo otra vez.
 create function private.resource_confirm(p_course uuid, p_resource uuid, p_content_ok boolean) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -199,6 +206,8 @@ declare
   v_answer text;
   v_row public.draft_resources;
   v_object uuid;
+  v_version text;
+  v_size_text text;
   v_size bigint;
   v_mime text;
   v_reason text;
@@ -222,25 +231,34 @@ begin
     delete from public.draft_resources where id = p_resource;
     return pg_catalog.jsonb_build_object('answer', 'expired');
   end if;
-  select o.id, (o.metadata ->> 'size')::bigint, o.metadata ->> 'mimetype' into v_object, v_size, v_mime
+  select o.id, o.version, o.metadata ->> 'size', o.metadata ->> 'mimetype' into v_object, v_version, v_size_text, v_mime
   from storage.objects o where o.bucket_id = 'course-resources' and o.name = v_row.storage_path;
-  if v_object is null then
+  if v_object is null or v_version is null then
     return pg_catalog.jsonb_build_object('answer', 'not_uploaded');
   end if;
+  if v_max is null or p_content_ok is null then
+    return pg_catalog.jsonb_build_object('answer', 'unavailable');
+  end if;
+  -- Un tamaño que no es un entero cuenta como que no cabe; un `::bigint` a secas lanzaría.
+  v_size := case when v_size_text ~ '^[0-9]{1,18}$' then v_size_text::bigint end;
   v_reason := case
     when v_mime is distinct from v_row.mime then 'type'
-    when v_size is null or v_size < 1 or v_max is null or v_size > v_max then 'size'
-    when p_content_ok is not true then 'content'
+    when v_size is null or v_size < 1 or v_size > v_max then 'size'
+    when not p_content_ok then 'content'
   end;
   if v_reason is not null then
     delete from public.draft_resources where id = p_resource;
     return pg_catalog.jsonb_build_object('answer', 'rejected', 'reason', v_reason);
   end if;
   update public.draft_resources
-     set state = 'ready', object_id = v_object, size_bytes = v_size,
+     set state = 'ready', object_id = v_object, object_version = v_version, size_bytes = v_size,
          position = (select coalesce(max(r.position), 0) + 1 from public.draft_resources r
                      where r.place_id = v_row.place_id and r.state = 'ready')
    where id = p_resource;
+  -- El repaso no toma el candado del curso: pudo llevársela si estaba al filo de vencer.
+  if not found then
+    return pg_catalog.jsonb_build_object('answer', 'not_found');
+  end if;
   perform private.resource_touch(p_course, v_row.lesson_id);
   return pg_catalog.jsonb_build_object('answer', 'ready');
 end
@@ -440,9 +458,13 @@ as $$
   select 'resource bucket limit differs from the parameter', 'course-resources' from bucket b
   where b.file_size_limit is distinct from (private.parameter_value('RECURSO_TAMANO_MAX'))::bigint
   union all
-  -- A los objetos no se llega por una política: solo el servidor firma.
+  -- A los objetos no se llega por una política: solo el servidor firma. «Ninguna política» solo protege
+  -- con la seguridad por fila prendida.
   select 'storage object policy', p.polname::text
   from pg_catalog.pg_policy p where p.polrelid = 'storage.objects'::regclass
+  union all
+  select 'storage objects without row level security', 'storage.objects'
+  from pg_catalog.pg_class c where c.oid = 'storage.objects'::regclass and not c.relrowsecurity
   union all
   -- La tabla: la lee su maestro, sin la ruta ni el objeto; no la escribe nadie de la aplicación.
   select 'resource table writable by ' || r.rolname, 'public.draft_resources'
@@ -459,6 +481,7 @@ as $$
   from app_roles r
   where pg_catalog.has_column_privilege(r.rolname::name, 'public.draft_resources', 'storage_path', 'SELECT')
      or pg_catalog.has_column_privilege(r.rolname::name, 'public.draft_resources', 'object_id', 'SELECT')
+     or pg_catalog.has_column_privilege(r.rolname::name, 'public.draft_resources', 'object_version', 'SELECT')
   union all
   select 'resource table without row level security', 'public.draft_resources'
   from pg_catalog.pg_class c where c.oid = 'public.draft_resources'::regclass and not c.relrowsecurity
@@ -498,6 +521,9 @@ as $$
       ('public.draft_resources', 'draft_resources_position_uq', 'UNIQUE (place_id, "position") DEFERRABLE'),
       ('public.draft_resources', 'draft_resources_title_ok', 'CHECK (private.draft_text_ok(title, 120, false))'),
       ('public.draft_resources', 'draft_resources_mime_ok', 'CHECK (private.resource_mime_ok(kind, mime))'),
+      ('public.draft_resources', 'draft_resources_position_positive', 'CHECK (("position" >= 1))'),
+      ('public.draft_resources', 'draft_resources_size_positive', 'CHECK ((size_bytes > 0))'),
+      ('public.draft_resources', 'draft_resources_state_ok', 'CHECK ((((state = ''pending''::public.resource_state) AND ("position" IS NULL) AND (object_id IS NULL) AND (object_version IS NULL)) OR ((state = ''ready''::public.resource_state) AND ("position" IS NOT NULL) AND (object_id IS NOT NULL) AND (object_version IS NOT NULL))))'),
       ('public.draft_lessons', 'draft_lessons_id_course_uq', 'UNIQUE (id, course_id)')
     ) as c (table_name, name, definition)
   where not exists (
