@@ -124,6 +124,11 @@ describe("capturar", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("lleva la versión que tiene a la vista", () => {
+    const { container } = render(<TaxCapture seen={7} changing />);
+    expect(container.querySelector<HTMLInputElement>('input[name="seen"]')?.value).toBe("7");
+  });
+
   it("todos los regímenes del catálogo están en la lista, y solo esos", () => {
     render(<TaxCapture seen={0} changing={false} />);
     const select = screen.getByRole<HTMLSelectElement>("combobox", { name: /Régimen fiscal/ });
