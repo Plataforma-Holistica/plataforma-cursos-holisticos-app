@@ -56,6 +56,7 @@ function storeOn(owner: Client): LessonStore {
   const tx = txOn(owner);
   return {
     courseLessons: (claims, slug) => asPerson(owner, claims, (each) => readCourseLessons(each, slug)),
+    lessonResources: () => Promise.resolve([]),
     courseIsOpen: async (slug) => {
       await asOwner(owner);
       return readCourseIsOpen(tx, slug);

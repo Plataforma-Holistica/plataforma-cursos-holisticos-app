@@ -6,13 +6,13 @@ import type { Tx } from "@/adapters/supabase/db";
 import { DatabaseError } from "@/adapters/supabase/errors";
 import { sql } from "@/adapters/supabase/sql";
 import type { AccountFacts } from "@/domain/access/account-access";
-import { COURSE_STATES, type MediaBasis, type MediaLesson, type MediaViewer } from "@/domain/access/media-access";
+import { COURSE_STATES, type MediaBasis, type MediaLesson, type MediaResource, type MediaViewer } from "@/domain/access/media-access";
 import type { AccessCount, HeartbeatEvent } from "@/domain/consumption/heartbeat";
 
 // Lo que la función única de medios le pregunta a la base: la lección con su video para
 // revisar, los hechos para ver, y las velocidades; desde T-204, abrir la reproducción y su
-// latido de presencia; y desde T-205, los tramos vistos. Cada función recibe la transacción
-// ya abierta.
+// latido de presencia; desde T-205, los tramos vistos; y desde T-404, bajar un recurso. Cada
+// función recibe la transacción ya abierta.
 
 /** La lección y su video, como los necesita la regla. El playback id sale de aquí, nunca de quien pide. */
 export interface LessonVideo extends MediaLesson {
@@ -80,23 +80,25 @@ export interface WatchFacts {
 }
 
 const instant = z.string().transform((value) => new Date(value));
+const subscriptionRow = z
+  .object({
+    paid_through: instant.nullable(),
+    failed_at: instant.nullable(),
+    ended_at: instant.nullable(),
+    refunded: z.boolean(),
+    grace_days: z.unknown(),
+  })
+  .strict()
+  .nullable();
+const courtesyRow = z.array(z.object({ from: instant, until: instant.nullable() }).strict());
 const factsRow = z
   .object({
     now: instant,
     viewer: z
       .object({ suspended: z.boolean(), email_verified: z.boolean(), teacher_id: z.string().nullable(), email: z.string().nullable() })
       .strict(),
-    subscription: z
-      .object({
-        paid_through: instant.nullable(),
-        failed_at: instant.nullable(),
-        ended_at: instant.nullable(),
-        refunded: z.boolean(),
-        grace_days: z.unknown(),
-      })
-      .strict()
-      .nullable(),
-    courtesy: z.array(z.object({ from: instant, until: instant.nullable() }).strict()),
+    subscription: subscriptionRow,
+    courtesy: courtesyRow,
     lesson: z
       .object({
         is_current: z.boolean(),
@@ -116,10 +118,27 @@ const factsRow = z
 const watchRow = z.object({ facts: factsRow.nullable(), playback_id: z.string().nullable() });
 
 /**
- * Nulo si la base no reconoce a quien actúa. Lo que no tenga la forma lanza: es «no se supo».
  * Sin falla, la gracia no se usa y va en 0; con falla y sin un número (el parámetro no
  * existía a esa hora), va `NaN`, y la regla de la cuenta lo contesta como «no se supo».
  */
+function graceDaysOf(subscription: z.infer<typeof subscriptionRow>): number {
+  if (subscription === null || subscription.failed_at === null) return 0;
+  return typeof subscription.grace_days === "number" ? subscription.grace_days : Number.NaN;
+}
+
+/** Los hechos de la cuenta, como los pide su regla (RN-01). */
+function accountOf(suspended: boolean, subscription: z.infer<typeof subscriptionRow>, courtesy: z.infer<typeof courtesyRow>): AccountFacts {
+  return {
+    suspended,
+    paidThrough: subscription?.paid_through ?? null,
+    lastRenewalFailedAt: subscription?.failed_at ?? null,
+    endedAt: subscription?.ended_at ?? null,
+    refunded: subscription?.refunded ?? false,
+    courtesy,
+  };
+}
+
+/** Nulo si la base no reconoce a quien actúa. Lo que no tenga la forma lanza: es «no se supo». */
 export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | null> {
   const [row] = await tx.query(
     sql`select private.media_facts(${id}::uuid) as facts, private.lesson_playback(${id}::uuid) as playback_id`,
@@ -127,13 +146,6 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
   );
   const facts = row?.facts;
   if (!facts) return null;
-  const subscription = facts.subscription;
-  const graceDays =
-    subscription === null || subscription.failed_at === null
-      ? 0
-      : typeof subscription.grace_days === "number"
-        ? subscription.grace_days
-        : Number.NaN;
   const lesson = facts.lesson;
   return {
     now: facts.now,
@@ -143,15 +155,8 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
       teacherId: facts.viewer.teacher_id,
       emailVerified: facts.viewer.email_verified,
     },
-    account: {
-      suspended: facts.viewer.suspended,
-      paidThrough: subscription?.paid_through ?? null,
-      lastRenewalFailedAt: subscription?.failed_at ?? null,
-      endedAt: subscription?.ended_at ?? null,
-      refunded: subscription?.refunded ?? false,
-      courtesy: facts.courtesy,
-    },
-    graceDays,
+    account: accountOf(facts.viewer.suspended, facts.subscription, facts.courtesy),
+    graceDays: graceDaysOf(facts.subscription),
     email: facts.viewer.email,
     lesson:
       lesson === null
@@ -168,6 +173,83 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
           },
     playbackId: row.playback_id,
   };
+}
+
+/** Lo que hace falta para firmar la descarga de un recurso (T-404). Nunca sale del servicio: trae la ruta. */
+export interface ResourceFile {
+  path: string;
+  mime: string;
+  title: string;
+}
+
+/** Para bajar un recurso: los hechos de quien actúa y del recurso, con el archivo que suelta la segunda barrera. */
+export interface ResourceFacts {
+  now: Date;
+  viewer: MediaViewer;
+  account: AccountFacts;
+  graceDays: number;
+  resource: MediaResource | null;
+  file: ResourceFile | null;
+}
+
+const fileRow = z.object({ path: z.string(), mime: z.string(), title: z.string() }).strict();
+const resourceFactsRow = z
+  .object({
+    now: instant,
+    viewer: z.object({ suspended: z.boolean(), email_verified: z.boolean(), teacher_id: z.string().nullable() }).strict(),
+    subscription: subscriptionRow,
+    courtesy: courtesyRow,
+    resource: z
+      .object({ is_current: z.boolean(), teacher_id: z.string(), course_state: z.enum(COURSE_STATES), listed: z.boolean(), is_open: z.boolean() })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+const resourceRow = z.object({ facts: resourceFactsRow.nullable(), file: fileRow.nullable() });
+
+/**
+ * Los hechos (`private.resource_facts`) y la segunda barrera (`private.resource_object`) en la misma foto, como al ver. Nulo
+ * si la base no reconoce a quien actúa. Lo que no tenga la forma lanza: es «no se supo».
+ */
+export async function readResourceFacts(tx: Tx, id: string): Promise<ResourceFacts | null> {
+  const [row] = await tx.query(sql`select private.resource_facts(${id}::uuid) as facts, private.resource_object(${id}::uuid) as file`, resourceRow);
+  const facts = row?.facts;
+  if (!facts) return null;
+  const resource = facts.resource;
+  return {
+    now: facts.now,
+    viewer: {
+      accountSuspended: facts.viewer.suspended,
+      content: false,
+      teacherId: facts.viewer.teacher_id,
+      emailVerified: facts.viewer.email_verified,
+    },
+    account: accountOf(facts.viewer.suspended, facts.subscription, facts.courtesy),
+    graceDays: graceDaysOf(facts.subscription),
+    resource:
+      resource === null
+        ? null
+        : { isCurrent: resource.is_current, teacherId: resource.teacher_id, courseState: resource.course_state, listed: resource.listed, isOpen: resource.is_open },
+    file: row.file,
+  };
+}
+
+/** Lo que un maestro subió a su borrador: solo el suyo y solo lo confirmado. Nulo si no. */
+export async function readDraftResourceFile(tx: Tx, courseId: string, resourceId: string): Promise<ResourceFile | null> {
+  const [row] = await tx.query(
+    sql`select private.resource_draft_object(${courseId}::uuid, ${resourceId}::uuid) as file`,
+    z.object({ file: fileRow.nullable() }),
+  );
+  return row?.file ?? null;
+}
+
+const DOWNLOAD_HITS = ["ok", "throttled", "unavailable"] as const;
+export type DownloadHit = (typeof DOWNLOAD_HITS)[number];
+
+/** Cuenta una descarga en el freno de la cuenta. Va con el acceso ya dado, y en su propia transacción. */
+export async function recordDownloadHit(tx: Tx): Promise<DownloadHit> {
+  const [row] = await tx.query(sql`select private.resource_download_hit() as answer`, z.object({ answer: z.enum(DOWNLOAD_HITS) }));
+  return row?.answer ?? "unavailable";
 }
 
 const speedsRow = z.object({ minimum: z.unknown(), maximum: z.unknown() });

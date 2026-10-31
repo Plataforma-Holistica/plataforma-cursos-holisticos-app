@@ -3,13 +3,16 @@ import { notFound } from "next/navigation";
 
 import { courseListAction } from "@/app/_catalog/my-list/actions";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
+import { downloadResourceAction } from "@/app/_catalog/resources/actions";
+import { ResourceList } from "@/app/_catalog/resources/resource-list";
+import { resourceItems } from "@/app/_catalog/resources/words";
 import { StudentNav } from "@/app/_catalog/nav";
 import { courseDuration, lessonMinutes } from "@/app/_catalog/format";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, plural, t } from "@/messages";
-import { coursePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { coursePath, lessonPath, ROUTES, signInPath, teacherPath } from "@/services/account/navigation";
 import { coursePage, courseStanding } from "@/services/browse/browse";
 import { lessonAccess } from "@/services/media/media";
 import { BackLink } from "@/ui/back-link";
@@ -32,8 +35,12 @@ import { primaryAction, type PrimaryAction, type Viewer } from "./outcomes";
 //
 // Se pinta en el servidor en cada visita (decisión mía sin confirmar, 2026-10-27): lo estático
 // con regeneración, la descripción y la imagen para compartir quedan para T-606. La pestaña sí
-// lleva el título del curso. Recursos y constancia no se pintan hasta que existan (T-404,
-// T-504). El deslinde (RF-809; T-507) va al pie, sea quien sea el que mira.
+// lleva el título del curso. La constancia no se pinta hasta que exista (T-504). El deslinde
+// (RF-809; T-507) va al pie, sea quien sea el que mira.
+//
+// Los recursos del curso (RF-308; T-404): cualquiera los ve listados, y solo el alumno lleva el
+// botón; a uno sin acceso se lo dice la puerta de medios al pedir (FL-14, E1). No se le pregunta
+// antes por cada uno. Si no se sabe quién mira, la lista va sin botón ni invitación.
 //
 // «Guardar en mi lista» (RF-311) va junto al botón principal, solo para el alumno, y solo si se
 // supo si ya lo tiene guardado (se lee con su avance). Al visitante no se le ofrece (decisión de
@@ -43,6 +50,8 @@ const text = messages.browse.course;
 
 /** El botón de Mi lista: el ancla a la que vuelve su formulario sin JavaScript. */
 const MY_LIST_ID = "bloque-ficha-lista";
+/** Los recursos: el ancla a la que vuelve su formulario sin JavaScript. */
+const RESOURCES_ID = "bloque-ficha-recursos";
 
 /** El título del curso en la pestaña. La lectura es la misma de la página, y se recuerda. */
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -67,6 +76,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
   if (found.kind === "not_found") notFound();
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={coursePath(slug) ?? ROUTES.landing} withSession={viewer.kind === "student"} />;
   const { detail } = found;
+  const resources = resourceItems(found.resources);
   const { course } = detail;
 
   let who: Viewer = viewer.kind === "unknown" ? { kind: "unknown" } : { kind: "visitor" };
@@ -180,15 +190,31 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
             </section>
           </div>
 
-          {detail.teacher !== null && (
-            <aside aria-labelledby="sobre-maestro" className="flex flex-col gap-3 md:col-span-5">
-              <h2 id="sobre-maestro" className="text-h3">
-                {t(text.about, { name: detail.teacher.name })}
-              </h2>
-              {detail.teacher.bio !== null && <p className="line-clamp-4 text-body text-text-2">{detail.teacher.bio}</p>}
-              {teacherHref !== null && <TextLink href={teacherHref}>{t(text.seeTeacher, { name: detail.teacher.name })}</TextLink>}
-            </aside>
-          )}
+          <div className="flex flex-col gap-8 md:col-span-5">
+            {detail.teacher !== null && (
+              <aside aria-labelledby="sobre-maestro" className="flex flex-col gap-3">
+                <h2 id="sobre-maestro" className="text-h3">
+                  {t(text.about, { name: detail.teacher.name })}
+                </h2>
+                {detail.teacher.bio !== null && <p className="line-clamp-4 text-body text-text-2">{detail.teacher.bio}</p>}
+                {teacherHref !== null && <TextLink href={teacherHref}>{t(text.seeTeacher, { name: detail.teacher.name })}</TextLink>}
+              </aside>
+            )}
+            {resources.length > 0 && (
+              <section id={RESOURCES_ID} aria-labelledby="recursos-titulo" className="flex flex-col gap-3">
+                <h2 id="recursos-titulo" className="text-h3">
+                  {messages.resources.courseTitle}
+                </h2>
+                <ResourceList
+                  items={resources}
+                  canDownload={who.kind === "student"}
+                  action={downloadResourceAction}
+                  permalink={`${coursePath(course.slug) ?? ROUTES.home}#${RESOURCES_ID}`}
+                />
+                {who.kind === "visitor" && <TextLink href={signInPath(coursePath(course.slug) ?? ROUTES.home)}>{messages.resources.signIn}</TextLink>}
+              </section>
+            )}
+          </div>
         </div>
         <Disclaimer />
       </main>

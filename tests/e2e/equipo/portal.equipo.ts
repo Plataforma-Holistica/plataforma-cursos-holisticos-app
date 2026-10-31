@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Dialog, type Locator, type Page } from "@playwright/test";
 
 import { actionFields, postAction } from "../support/actions";
 import { a11yViolations } from "../support/a11y";
@@ -400,6 +400,36 @@ test("los recursos: se sube de verdad a la cubeta, se rechaza lo disfrazado, y q
   const objects = () => ownerQuery<{ name: string }>("select name from storage.objects where bucket_id = 'course-resources' and name like $1", [`%${page.url().split("/cursos/")[1]?.split("?")[0]}%`]);
   expect(await objects()).toHaveLength(1);
   expect(await a11yViolations(page)).toEqual([]);
+
+  // Bajar lo que subió, con algo sin guardar en la pantalla: se abre en un marco oculto, así que la página no navega, el
+  // navegador no pregunta si salir, lo escrito se queda y la descarga llega con el nombre que armó el servidor.
+  const dialogs: string[] = [];
+  const noteDialog = (dialog: Dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.dismiss();
+  };
+  page.on("dialog", noteDialog);
+  const lessonTitle = page.getByRole("textbox", { name: "Título de la lección", exact: true });
+  await lessonTitle.fill("Una, sin guardar");
+  const downloading = page.waitForEvent("download");
+  await block.getByRole("button", { name: "Descargar Guía de respiración" }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("Guía de respiración.pdf");
+  await expect(block.getByText("Tu descarga empezó.").first()).toBeAttached();
+  await expect(lessonTitle).toHaveValue("Una, sin guardar");
+  expect(dialogs).toEqual([]);
+  // Si Storage no contesta con el archivo, la página tampoco se va: lo escrito sigue ahí, y se dice.
+  await page.route("**/object/sign/**", (route) => route.fulfill({ status: 400, contentType: "application/json", body: '{"error":"x"}' }));
+  await block.getByRole("button", { name: "Descargar Guía de respiración" }).click();
+  await expect(block.getByText("Si la descarga no empezó, vuelve a intentarlo.").first()).toBeVisible();
+  await expect(lessonTitle).toHaveValue("Una, sin guardar");
+  expect(new URL(page.url()).pathname).toMatch(/^\/portal\/cursos\//);
+  expect(dialogs).toEqual([]);
+  await page.unroute("**/object/sign/**");
+  page.off("dialog", noteDialog);
+  await lessonTitle.fill("Una");
+  await page.getByRole("button", { name: "Guardar", exact: true }).click();
+  await expect(page.getByText("Cambios sin guardar")).toHaveCount(0);
 
   // Un ejecutable con nombre de PDF: se rechaza por su contenido, y no se queda ni la fila ni el objeto.
   await block.getByLabel("Archivo").setInputFiles({ name: "disfrazado.pdf", mimeType: "application/pdf", buffer: Buffer.from("MZ esto es un ejecutable") });

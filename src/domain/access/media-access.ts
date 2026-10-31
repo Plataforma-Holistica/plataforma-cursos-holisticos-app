@@ -102,6 +102,28 @@ function playable(lesson: MediaLesson): boolean {
   return lesson.isCurrent && lesson.provider === "mux" && lesson.ready;
 }
 
+/** Un curso que quien no es su dueño puede ver: publicado y listado. Con cambios pendientes sigue siéndolo. */
+function publiclyVisible(course: { listed: boolean; courseState: CourseState }): boolean {
+  return course.listed && (course.courseState === "published" || course.courseState === "changes_pending");
+}
+
+type ByAccount =
+  | { ok: true; basis: AccessBasis | "open_course"; until: Date | null }
+  | { ok: false; reason: "unknown" }
+  | { ok: false; reason: "no_access"; account: AccountRefusal };
+
+/**
+ * Lo que decide la cuenta, una vez que el curso se puede ver: los pasos 5 a 9 de arriba. Lo comparten ver y bajar un
+ * recurso, para que no se separen.
+ */
+function byAccount(viewer: MediaViewer, account: AccountAccess | null, isOpen: boolean): ByAccount {
+  if (account === null) return { ok: false, reason: "unknown" };
+  if (account.allowed) return { ok: true, basis: account.basis, until: account.until };
+  if (account.reason === "invalid_input") return { ok: false, reason: "unknown" };
+  if (isOpen && viewer.emailVerified) return { ok: true, basis: "open_course", until: null };
+  return { ok: false, reason: "no_access", account };
+}
+
 const granted = (basis: MediaBasis, until: Date | null): MediaAccess => ({
   ok: true,
   basis,
@@ -126,16 +148,47 @@ export function resolveMediaAccess(
   }
   // La lección siempre tiene maestro: quien no lo es (nulo) nunca es su dueño.
   const owner = lesson !== null && lesson.teacherId === viewer.teacherId;
-  const visible =
-    lesson !== null && (owner || (lesson.listed && (lesson.courseState === "published" || lesson.courseState === "changes_pending")));
+  const visible = lesson !== null && (owner || publiclyVisible(lesson));
   if (!visible || !playable(lesson)) return { ok: false, reason: "no_video" };
   if (owner) return granted("owner_preview", null);
 
-  if (account === null) return { ok: false, reason: "unknown" };
-  if (account.allowed) return granted(account.basis, account.until);
-  if (account.reason === "invalid_input") return { ok: false, reason: "unknown" };
-  if (lesson.isOpen && viewer.emailVerified) return granted("open_course", null);
-  return { ok: false, reason: "no_access", account };
+  const decided = byAccount(viewer, account, lesson.isOpen);
+  return decided.ok ? granted(decided.basis, decided.until) : decided;
+}
+
+/** Lo que la base dice de un recurso publicado (T-404), o nulo si no existe. */
+export interface MediaResource {
+  /** Él y su lección, si tiene: uno de una lección retirada ya no se baja. */
+  isCurrent: boolean;
+  teacherId: string;
+  courseState: CourseState;
+  listed: boolean;
+  isOpen: boolean;
+}
+
+export type ResourceAccess =
+  | { ok: true }
+  /** No existe, o quien pide no puede ver ese curso: las dos se ven igual. */
+  | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "suspended" }
+  | { ok: false; reason: "unknown" }
+  | { ok: false; reason: "no_access"; account: AccountRefusal };
+
+/**
+ * Quién baja un recurso (RF-308, RF-306): las reglas de ver, en el mismo orden, sin video. Bajar nunca cuenta para el
+ * reparto, así que no hay base que devolver. Contenido no entra por aquí: su regla llega con T-405, cuando haya qué revisar.
+ */
+export function resolveResourceAccess(viewer: MediaViewer, account: AccountAccess | null, resource: MediaResource | null): ResourceAccess {
+  if (viewer.accountSuspended || (account !== null && !account.allowed && account.reason === "suspended")) {
+    return { ok: false, reason: "suspended" };
+  }
+  if (resource === null || !resource.isCurrent) return { ok: false, reason: "not_found" };
+  const owner = resource.teacherId === viewer.teacherId;
+  if (!owner && !publiclyVisible(resource)) return { ok: false, reason: "not_found" };
+  if (owner) return { ok: true };
+
+  const decided = byAccount(viewer, account, resource.isOpen);
+  return decided.ok ? { ok: true } : decided;
 }
 
 /** El margen de ADR-27 sobre lo que dura la lección a la velocidad mínima. */

@@ -61,7 +61,7 @@ function browseWith(fake: Fake = {}) {
     listedTeacher: vi.fn(() => answer(fake.teacher === undefined ? TEACHER : fake.teacher)),
     courseLessons: vi.fn(() => {
       const lessons = fake.lessons ?? [LESSON];
-      return lessons === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve({ teacher: TEACHER, lessons });
+      return lessons === "throws" ? Promise.reject(new Error("sin base")) : Promise.resolve({ resources: [], teacher: TEACHER, lessons });
     }),
     myCourse: vi.fn(() => Promise.resolve({ progress: [], saved: false })),
     search: vi.fn(() => answer(fake.search ?? { courses: ["respirar"], teachers: ["ana-robles"] })),

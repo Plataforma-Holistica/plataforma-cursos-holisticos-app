@@ -20,6 +20,7 @@ vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/watch-queue", async (original) 
 });
 
 const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+vi.mock("@/app/_catalog/resources/actions", () => ({ downloadResourceAction: vi.fn() }));
 vi.mock("@/app/_video/player", () => ({
   Player: (props: {
     watermark?: string;
@@ -88,6 +89,7 @@ const GRANT = {
 const ROW = { sessionId: OTHER, browser: "chrome", system: "windows", lesson: "Respirar", course: "Yoga suave", since: "2026-10-19T01:40:00.000Z" };
 
 const PROPS: LessonScreenProps = {
+  resources: [],
   slug: "respirar",
   lessonId: LESSON,
   heading: "Lección 2 · Respirar acostado",
@@ -1083,5 +1085,48 @@ describe("el progreso, con lo que trae la página y lo que llega después (T-206
     });
     expect(screen.getAllByRole("link", { name: "Lección 2, Respirar acostado, 7 min, terminada", hidden: true })).toHaveLength(2);
     expect(screen.queryByText("Esta lección ya cuenta como terminada.")).toBeNull();
+  });
+});
+
+// Los recursos de la lección (RF-308; T-404): en escritorio bajo «Sobre esta lección», en teléfono en su pestaña.
+describe("los recursos de la lección", () => {
+  const GUIDE = { id: "f0000000-0000-4000-8000-000000000001", title: "Guía", detail: "PDF, 2 MB" };
+
+  it("con alguno: la lista con su botón, y su pestaña", () => {
+    show({ resources: [GUIDE] });
+    expect(screen.getByRole("heading", { name: "Recursos de esta lección" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Descargar Guía" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
+  });
+
+  it("sin ninguno: ni bloque ni pestaña", () => {
+    show({ resources: [] });
+    expect(screen.queryByRole("heading", { name: "Recursos de esta lección" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Recursos" })).toBeNull();
+  });
+
+  it("si no se pudieron leer, se dice, y el resto de la página sigue", () => {
+    show({ resources: null });
+    expect(screen.getAllByText("No pudimos leer los recursos de esta lección. Recarga la página para intentar de nuevo.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
+  });
+
+  it("si el acceso termina con la página abierta, se van; y quien estaba en su pestaña no se queda sin ninguna", async () => {
+    actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+    const user = userEvent.setup();
+    show({ resources: [GUIDE] });
+    await user.click(screen.getByRole("tab", { name: "Recursos" }));
+    expect(screen.getByRole("tab", { name: "Recursos" })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+
+    await screen.findByText("Esta lección pide una suscripción");
+    expect(screen.queryByRole("heading", { name: "Recursos de esta lección" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Recursos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Descargar Guía" })).toBeNull();
+    // Una sigue seleccionada, con su panel a la vista y al alcance del teclado.
+    const selected = screen.getByRole("tab", { selected: true });
+    expect(selected).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tabpanel", { name: selected.textContent })).toBeVisible();
   });
 });

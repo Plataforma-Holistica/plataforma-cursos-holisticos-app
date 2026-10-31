@@ -1,3 +1,4 @@
+import { resourceDetail, sizeText } from "@/app/_catalog/resources/words";
 import { clockTime, longDate, PRODUCT_TIME_ZONE, productDay } from "@/app/_lib/dates";
 import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
@@ -117,24 +118,13 @@ function savedLabel(updatedAt: string, now: Date): string {
   return sameDay ? t(text.savedAt, { time }) : t(text.savedOn, { date: longDate(updatedAt), time });
 }
 
-const MEGA = 1024 * 1024;
-const KILO = 1024;
-
-/** El tamaño en palabras: en MB desde 1 MB, con un decimal si hace falta, y en KB lo demás. */
-function sizeText(bytes: number): string {
-  if (bytes >= MEGA) return t(text.resources.sizeMb, { size: String(Math.round((bytes / MEGA) * 10) / 10) });
-  return t(text.resources.sizeKb, { size: String(Math.max(1, Math.round(bytes / KILO))) });
-}
-
-const KIND_WORDS = { pdf: text.resources.kindPdf, doc: text.resources.kindDoc, audio: text.resources.kindAudio } as const;
-
 /** Los recursos de un lugar (una lección, o nulo: el curso), en orden. El primero no sube y el último no baja. */
 function resourceRows(draft: DraftCourse, lesson: string | null): ResourceRow[] {
   const here = draft.resources.filter((resource) => resource.lessonId === lesson).sort((a, b) => a.position - b.position);
   return here.map((resource, index) => ({
     id: resource.id,
     title: resource.title,
-    detail: t(text.resources.detail, { kind: KIND_WORDS[resource.kind], size: sizeText(resource.sizeBytes) }),
+    detail: resourceDetail(resource.kind, resource.sizeBytes),
     revision: resource.revision,
     up: index > 0 ? resourceButton.up(resource.id, resource.position) : null,
     down: index < here.length - 1 ? resourceButton.down(resource.id, resource.position) : null,

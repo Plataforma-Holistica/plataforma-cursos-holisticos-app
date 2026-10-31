@@ -70,10 +70,56 @@ const lesson = (id: string) => `/cursos/respirar/lecciones/${id}`;
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cookieReader.mockResolvedValue({ get: () => undefined });
-  mocks.coursePage.mockResolvedValue({ kind: "found", detail: detail() });
+  mocks.coursePage.mockResolvedValue({ kind: "found", resources: [], detail: detail() });
 });
 
 describe("la ficha de un curso (PA-02)", () => {
+  // Los recursos del curso (RF-308; T-404): cualquiera los ve listados; descargar, solo el alumno.
+  describe("los recursos", () => {
+    const WITH = { kind: "found", resources: [{ id: "f0000000-0000-4000-8000-000000000001", title: "Guía", kind: "pdf", sizeBytes: 2 * 1024 * 1024 }], detail: detail() };
+    const student = () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "student", claims: { userId: "u" } });
+      mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+      mocks.courseStanding.mockResolvedValue({ kind: "unavailable" });
+    };
+
+    it("al visitante, listados sin descarga, y lo invita a entrar y volver a esta ficha", async () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+      mocks.coursePage.mockResolvedValue(WITH);
+      const { container } = render(await CourseRoute(params("respirar")));
+      expect(screen.getByRole("heading", { name: "Recursos del curso" })).toBeVisible();
+      expect(screen.getByText("Guía")).toBeVisible();
+      expect(screen.getByText("PDF, 2 MB")).toBeVisible();
+      expect(screen.queryByRole("button", { name: /Descargar/ })).toBeNull();
+      expect(screen.getByRole("link", { name: "Entra a tu cuenta para descargarlos." })).toHaveAttribute("href", "/entrar?volver=%2Fcursos%2Frespirar");
+      expect(await a11yViolations(container)).toEqual([]);
+    });
+
+    it("al alumno, con su botón; si tiene acceso lo dice la puerta de medios al pedir", async () => {
+      student();
+      mocks.coursePage.mockResolvedValue(WITH);
+      render(await CourseRoute(params("respirar")));
+      expect(screen.getByRole("button", { name: "Descargar Guía" })).toBeVisible();
+      expect(screen.queryByRole("link", { name: "Entra a tu cuenta para descargarlos." })).toBeNull();
+    });
+
+    it("si no se sabe quién mira, listados, sin botón ni invitación", async () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "unknown" });
+      mocks.coursePage.mockResolvedValue(WITH);
+      render(await CourseRoute(params("respirar")));
+      expect(screen.getByText("Guía")).toBeVisible();
+      expect(screen.queryByRole("button", { name: /Descargar/ })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Entra a tu cuenta para descargarlos." })).toBeNull();
+    });
+
+    it("sin ninguno, no hay bloque", async () => {
+      mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+      mocks.coursePage.mockResolvedValue({ ...WITH, resources: [] });
+      render(await CourseRoute(params("respirar")));
+      expect(screen.queryByRole("heading", { name: "Recursos del curso" })).toBeNull();
+    });
+  });
+
   it("al visitante: todo el curso, y «Suscribirme para verlo» lleva a registrarse; no se le pregunta nada más a nadie", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
     const { container } = render(await CourseRoute(params("respirar")));
@@ -97,7 +143,7 @@ describe("la ficha de un curso (PA-02)", () => {
 
   it("al visitante del curso abierto: «Verlo sin costo» y el aviso", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
-    mocks.coursePage.mockResolvedValue({ kind: "found", detail: detail({ isOpen: true }) });
+    mocks.coursePage.mockResolvedValue({ kind: "found", resources: [], detail: detail({ isOpen: true }) });
     render(await CourseRoute(params("respirar")));
     expect(screen.getByRole("link", { name: "Verlo sin costo" })).toBeVisible();
     expect(screen.getByText("Este es el curso abierto: lo puedes ver sin suscripción, con tu cuenta.")).toBeVisible();

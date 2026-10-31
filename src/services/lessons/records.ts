@@ -73,6 +73,28 @@ export async function readCourseLessons(tx: Tx, slug: string): Promise<LessonRow
 
 const openRow = z.object({ is_open: z.boolean() });
 
+/** Un recurso vigente de una lección (T-404). La ruta del archivo no la lee ninguna persona: la suelta la puerta de medios. */
+export interface LessonResourceRow {
+  id: string;
+  title: string;
+  kind: "pdf" | "doc" | "audio";
+  sizeBytes: number;
+}
+
+const resourceRow = z.object({ id: z.string(), title: z.string(), kind: z.enum(["pdf", "doc", "audio"]), size_bytes: z.number().int() });
+
+/** Se lee como la persona: la política solo le deja ver los de una lección vigente de un curso listado, o de los suyos. */
+export async function readLessonResources(tx: Tx, lessonId: string): Promise<LessonResourceRow[]> {
+  const rows = await tx.query(
+    sql`select x.id::text as id, x.title, x.kind::text as kind, x.size_bytes::integer as size_bytes
+        from public.published_resources x
+        where x.lesson_id = ${lessonId}::uuid and x.is_current
+        order by x.position`,
+    resourceRow,
+  );
+  return rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
+}
+
 /**
  * Si el curso `slug` es el abierto (RF-309), o nulo si no existe o no está listado. Lo dice el
  * registro del curso, como en la función única de medios (`private.media_facts`): la copia de
