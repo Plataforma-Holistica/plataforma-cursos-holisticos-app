@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
-import type { SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
+import type { PasswordProof, SignInResult as AuthSignIn } from "@/adapters/supabase/auth";
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asUser } from "@/adapters/supabase/db";
@@ -123,6 +123,24 @@ export type PasswordChange =
   | { kind: "signed_out"; password: "changed" | "unknown" }
   | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
   | { kind: "unavailable" };
+
+/** Lo que contesta comprobar la contraseña de quien pide, en el mismo envío. */
+export type PasswordConfirmation =
+  | { kind: "confirmed"; claims: VerifiedClaims }
+  | { kind: "wrong" }
+  | { kind: "throttled"; retryAt: Date }
+  | { kind: "capped" }
+  | { kind: "unavailable" }
+  | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> };
+
+/** Los pasos que comparten cambiar la contraseña y comprobarla. `stale`: era la suya, pero la cuenta dejó de pasar a media operación. */
+type OwnPassword =
+  | { kind: "proven"; proof: PasswordProof & { ok: true }; email: string; from: ReturnType<typeof resolveOrigin> }
+  | { kind: "wrong" }
+  | { kind: "stale" }
+  | { kind: "capped" }
+  | { kind: "unavailable" }
+  | { kind: "throttled"; retryAt: Date };
 
 /** Lo que estos servicios usan de los de entrada. */
 export interface ManagementCore {
@@ -346,6 +364,84 @@ export function createManagement(
   }
 
   /**
+   * Los pasos 2 a 4 de abajo, que comparten cambiar la contraseña y quien la pide en el mismo envío: el freno de intentos, la entrada con
+   * esa contraseña, de esa misma cuenta, y anotarla como cualquier otra. Si no contesta `proven`, la sesión de la comprobación ya se cerró.
+   */
+  async function proveOwnPassword(jar: CookieJar, userId: string, password: string, origin: RequestOrigin): Promise<OwnPassword> {
+    // El correo con el que se entra es el de la sesión que pasó la guarda. No llega de fuera.
+    const read = await auth.readSession(jar);
+    const email = read.kind === "session" ? parseEmail(read.email ?? "") : null;
+    if (email === null || !email.ok) {
+      await deps.report("account_unavailable");
+      return { kind: "unavailable" };
+    }
+
+    // Que la dirección no se conozca fuera de local ya lo reporta cada entrada (`signIn`): aquí
+    // no se repite. Desconocida, va al cubo compartido y el par no queda de confianza.
+    const from = resolveOrigin(origin, deps.proxyTrusted());
+    const keys: PairKeys = { account: fingerprint("account", email.email), ip: from.ip };
+    let opened: OpenedAttempt;
+    try {
+      opened = await core.openAttempt(keys);
+    } catch {
+      await deps.report("throttle_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (!opened.decision.proceed) {
+      const refusal = refusalOf(opened.decision);
+      if (refusal.report) await deps.report(refusal.report);
+      if (refusal.result.kind === "throttled") return { kind: "throttled", retryAt: refusal.result.retryAt };
+      return refusal.result.kind === "capped" ? { kind: "capped" } : { kind: "unavailable" };
+    }
+
+    const proof = await auth.provePassword(email.email, password);
+    let admission: Admission;
+    if (!proof.ok) admission = authRefusal(proof.reason);
+    // La entrada tiene que ser de la cuenta de la sesión que pide: con otra, no acertó.
+    else if (proof.claims.userId !== userId) admission = authRefusal("invalid_credentials");
+    else admission = await core.admit(proof, opened.startedText, from.userAgent);
+    if (admission.report) await deps.report(admission.report);
+    try {
+      await core.settleAttempt(keys, opened, admission.outcome, from.known);
+    } catch {
+      await deps.report("sign_in_settle_failed");
+    }
+
+    // Entrar con algo pendiente no alcanza: la guarda pidió una cuenta a la que no le falta nada.
+    const whole = admission.result.kind === "entered" && admission.result.pending === null;
+    if (!proof.ok || !admission.admit || !whole) {
+      if (proof.ok) await expectClosed(auth.discardProof(proof.proven));
+      if (admission.result.kind === "invalid_credentials") return { kind: "wrong" };
+      if (admission.result.kind === "unavailable") return { kind: "unavailable" };
+      // La contraseña era la suya, pero la cuenta dejó de pasar a media operación (se
+      // suspendió, se le prendió la marca, cambió un texto): se contesta lo que la guarda
+      // dice ahora.
+      return { kind: "stale" };
+    }
+    return { kind: "proven", proof, email: email.email, from };
+  }
+
+  /**
+   * ¿Es de verdad quien tiene la sesión? Para lo que se pide con la contraseña en el mismo envío (PA-48, RNF-08), sin ningún estado de «ya
+   * la dio». Corre la guarda, y deja una entrada en el freno como cualquier otra. La sesión de la comprobación no llega a ningún navegador
+   * y se cierra aquí; una cuenta con segundo factor también pasa, porque aquí no se le pide nada a Auth con esa sesión.
+   */
+  async function confirmPassword(jar: CookieJar, password: string, origin: RequestOrigin): Promise<PasswordConfirmation> {
+    const check = await core.checkSession(jar);
+    if (check.kind !== "pass") return { kind: "session", check };
+    // Más larga de lo que la Plataforma deja fijar: no es la contraseña de nadie, y no hace falta mandársela a Auth para saberlo.
+    if (utf8.encode(password).length > PASSWORD_MAX_BYTES) return { kind: "wrong" };
+    const attempt = await proveOwnPassword(jar, check.claims.userId, password, origin);
+    if (attempt.kind === "proven") {
+      await expectClosed(auth.discardProof(attempt.proof.proven));
+      return { kind: "confirmed", claims: check.claims };
+    }
+    if (attempt.kind !== "stale") return attempt;
+    const now = await core.checkSession(jar);
+    return now.kind === "pass" ? { kind: "unavailable" } : { kind: "session", check: now };
+  }
+
+  /**
    * Cambiar la contraseña (FL-27, paso 3). El orden es la regla, y no se cambia sin leer el
    * TRD §9.2, fila «Cambio de contraseña desde la cuenta»:
    *
@@ -388,56 +484,11 @@ export function createManagement(
     // falta mandársela a Auth para saberlo.
     if (utf8.encode(input.current).length > PASSWORD_MAX_BYTES) return { kind: "invalid", fields: { current: "mismatch" } };
 
-    // El correo con el que se entra es el de la sesión que pasó la guarda. No llega de fuera.
-    const read = await auth.readSession(jar);
-    const email = read.kind === "session" ? parseEmail(read.email ?? "") : null;
-    if (email === null || !email.ok) {
-      await deps.report("account_unavailable");
-      return { kind: "unavailable" };
-    }
-
-    // Que la dirección no se conozca fuera de local ya lo reporta cada entrada (`signIn`): aquí
-    // no se repite. Desconocida, va al cubo compartido y el par no queda de confianza.
-    const from = resolveOrigin(origin, deps.proxyTrusted());
-    const keys: PairKeys = { account: fingerprint("account", email.email), ip: from.ip };
-    let opened: OpenedAttempt;
-    try {
-      opened = await core.openAttempt(keys);
-    } catch {
-      await deps.report("throttle_unavailable");
-      return { kind: "unavailable" };
-    }
-    if (!opened.decision.proceed) {
-      const refusal = refusalOf(opened.decision);
-      if (refusal.report) await deps.report(refusal.report);
-      if (refusal.result.kind === "throttled") return { kind: "throttled", retryAt: refusal.result.retryAt };
-      return refusal.result.kind === "capped" ? { kind: "capped" } : { kind: "unavailable" };
-    }
-
-    const proof = await auth.provePassword(email.email, input.current);
-    let admission: Admission;
-    if (!proof.ok) admission = authRefusal(proof.reason);
-    // La entrada tiene que ser de la cuenta de la sesión que pide: con otra, no acertó.
-    else if (proof.claims.userId !== check.claims.userId) admission = authRefusal("invalid_credentials");
-    else admission = await core.admit(proof, opened.startedText, from.userAgent);
-    if (admission.report) await deps.report(admission.report);
-    try {
-      await core.settleAttempt(keys, opened, admission.outcome, from.known);
-    } catch {
-      await deps.report("sign_in_settle_failed");
-    }
-
-    // Entrar con algo pendiente no alcanza: la guarda pidió una cuenta a la que no le falta nada.
-    const whole = admission.result.kind === "entered" && admission.result.pending === null;
-    if (!proof.ok || !admission.admit || !whole) {
-      if (proof.ok) await expectClosed(auth.discardProof(proof.proven));
-      if (admission.result.kind === "invalid_credentials") return { kind: "invalid", fields: { current: "mismatch" } };
-      if (admission.result.kind === "unavailable") return { kind: "unavailable" };
-      // La contraseña era la suya, pero la cuenta dejó de pasar a media operación (se
-      // suspendió, se le prendió la marca, cambió un texto): se contesta lo que la guarda
-      // dice ahora.
-      return refusedNow(jar);
-    }
+    const attempt = await proveOwnPassword(jar, check.claims.userId, input.current, origin);
+    if (attempt.kind === "throttled" || attempt.kind === "capped" || attempt.kind === "unavailable") return attempt;
+    if (attempt.kind === "wrong") return { kind: "invalid", fields: { current: "mismatch" } };
+    if (attempt.kind === "stale") return refusedNow(jar);
+    const { proof, from, email } = attempt;
 
     const saved = await auth.changeProvenPassword(proof.proven, input.next);
     if (saved === "same_password" || saved === "weak_password") {
@@ -466,7 +517,7 @@ export function createManagement(
     // La entrada con la contraseña nueva. Su cookie no llega al navegador hasta que la
     // guarda dejó entrar y la sesión quedó anotada.
     const staging = stagingJar();
-    const entered = await auth.signIn(staging, email.email, input.next);
+    const entered = await auth.signIn(staging, email, input.next);
     const admitted = entered.ok ? await core.admit(entered, startedText, from.userAgent) : null;
     let failure = admitted?.report ?? null;
     if (admitted?.admit === true) {
@@ -531,5 +582,6 @@ export function createManagement(
     closeOtherSessions,
     accountSecondFactor,
     changePassword,
+    confirmPassword,
   };
 }

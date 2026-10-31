@@ -304,6 +304,7 @@ export const admin = defineMessages({
     codeNotAvailable: "Tu código es correcto, pero por ahora no se puede cambiar a {los_maestros}. Avisa a quien opera la base.",
     noName: "Sin nombre",
     founderSince: "Fundador desde el {date}",
+    taxData: { yes: "Capturados", missing: "Faltan" },
     status: { invited: "Invitado", active: "Activo", suspended: "En solo lectura", left: "Ya no está" },
     invitation: {
       pending: "Pendiente",
@@ -333,6 +334,7 @@ export const admin = defineMessages({
       email: "Correo",
       status: "Estado",
       founder: "Fundador",
+      taxData: "Datos fiscales",
       invitation: "Invitación",
       self: "Eres tú",
       noEmail: "Sin correo",

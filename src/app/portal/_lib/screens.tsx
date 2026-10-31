@@ -6,6 +6,7 @@ import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
 import { DeleteCourseSection } from "../_cursos/remove";
 import { EditorSection } from "../_editor/section";
+import { TaxDataSection } from "../_fiscal/section";
 
 // Las pantallas del portal del maestro (T-402). Ninguna tiene su propia página: todas las sirve el
 // comodín (`[...resto]/page.tsx`), después de correr la guarda, por lo mismo que en administración: con
@@ -36,6 +37,9 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   // Las dos las pinta el comodín con lo que dijo la guarda: aquí solo se dice qué tipo de pantalla son.
   if (section === "invitacion" && id === undefined) return { kind: "invitation", render: () => null };
   if (section === "aviso" && id === undefined) return { kind: "notice", render: () => null };
+  if (section === "datos-fiscales") {
+    return id === undefined ? { render: ({ claims, readOnly, search }) => <TaxDataSection claims={claims} readOnly={readOnly} search={search} /> } : null;
+  }
   if (section !== "cursos" || more.length > 0) return null;
   if (id === undefined) return { render: ({ claims, readOnly }) => <CoursesSection claims={claims} readOnly={readOnly} /> };
   if (id === "nuevo") return page === undefined ? { render: ({ readOnly }) => <NewCourseSection readOnly={readOnly} /> } : null;

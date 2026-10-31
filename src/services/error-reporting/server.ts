@@ -91,6 +91,9 @@ const FAILURES = {
   legal_documents_unavailable: "No se pudieron leer los textos legales para PA-89, o una de sus versiones: quien tiene configuración no pudo verlos ni publicar.",
   legal_change_unavailable:
     "Publicar una versión de un texto legal desde PA-89 se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó publicada, y la pantalla vuelve a leer los textos. También sale cuando alguien dio bien su código y aun así publicar no pasaría (falta VIGENCIA_CODIGO_RECIENTE_MINUTOS), o cuando la base dice que falta ZONA_HORARIA_PERIODO.",
+  tax_cipher_unavailable: "No hay llave para los datos fiscales, o está mal: ningún maestro puede ver ni guardar los suyos, y finanzas no puede leerlos (OP-19).",
+  tax_profile_unavailable: "No se pudieron leer o guardar los datos fiscales de un maestro: se le dijo que no se supo.",
+  tax_profile_unreadable: "Los datos fiscales guardados de un maestro no abren: otra llave o algo manipulado. Se le dijo que no se pudieron leer; hay que revisarlo (OP-19).",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
   password_change_incomplete: "Una contraseña se cambió desde la cuenta y la aplicación no pudo fechar el cambio: una entrada hecha antes con la contraseña vieja podría quedar reconocida.",

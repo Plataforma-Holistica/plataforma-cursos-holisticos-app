@@ -471,6 +471,7 @@ export const {
   closeOtherSessions,
   accountSecondFactor,
   changePassword,
+  confirmPassword,
   teamStanding,
   startSecondFactor,
   confirmSecondFactor,

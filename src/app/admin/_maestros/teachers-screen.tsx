@@ -175,6 +175,7 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
               { key: "email", header: text.list.email },
               { key: "status", header: text.list.status },
               { key: "founder", header: text.list.founder },
+              { key: "taxData", header: text.list.taxData },
               { key: "invitation", header: text.list.invitation },
             ]}
             rows={view.rows.map((row) => ({
@@ -189,6 +190,7 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
                 email: row.email ?? text.list.noEmail,
                 status: <StatusBadge tone={row.status.tone}>{row.status.label}</StatusBadge>,
                 founder: row.founder ?? text.list.notFounder,
+                taxData: row.taxData,
                 invitation: <InvitationCell row={row} canChange={view.canChange} pending={pending} />,
               },
             }))}

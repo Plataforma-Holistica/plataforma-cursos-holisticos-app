@@ -48,6 +48,8 @@ export const NOTICES = [
   "teacher_notice_accepted",
   // La invitación de maestro ya no servía al aceptarla: lo dice el inicio, porque PA-40 ya contesta 404.
   "teacher_invitation_gone",
+  // Los datos fiscales del maestro quedaron guardados (PA-48, T-409).
+  "tax_data_saved",
   // Un cambio a un maestro quedó hecho (PA-65 y PA-66, T-401).
   "teacher_invited",
   "teacher_reinvited",
