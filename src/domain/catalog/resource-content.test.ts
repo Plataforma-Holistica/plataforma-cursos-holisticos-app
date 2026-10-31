@@ -177,7 +177,7 @@ describe("resourceDownloadName: el nombre con el que baja, que arma el servidor"
     expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
   });
 
-  it.each(["CON.v2", "con.final", "NUL.txt"])("con otra extensión también (%s): Windows lo reserva igual", (title) => {
+  it.each(["CON.v2", "con.final", "NUL.txt", "con .v2", "COM¹", "lpt².doc", "COM³"])("con otra extensión también (%s): Windows lo reserva igual", (title) => {
     expect(resourceDownloadName(title, PDF)).toBe("recurso.pdf");
   });
 

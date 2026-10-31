@@ -494,7 +494,39 @@ describe("bajar", () => {
     await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
     const notAFile = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
     act(() => notAFile());
-    await screen.findAllByText(portal.editor.resources.downloadMaybeMissed);
+    // En una región viva que ya existía: quien se quedó donde estaba lo oye aunque el foco no se mueva.
+    const said = await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    expect(said.closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("el aviso tardío no le quita el foco a quien ya siguió trabajando", async () => {
+    actions.resourceAction.mockResolvedValue({ kind: "granted", url: URL, attempt: 1 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    await screen.findAllByText(portal.editor.resources.downloadStarted);
+    const elsewhere = screen.getByRole("button", { name: "Descargar Audio" });
+    elsewhere.focus();
+    const notAFile = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => notAFile());
+    await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("un fallo que llega después de otro envío no se pierde; el siguiente envío lo quita", async () => {
+    actions.resourceAction.mockResolvedValueOnce({ kind: "granted", url: URL, attempt: 1 }).mockResolvedValueOnce({ kind: "granted", url: URL, attempt: 2 });
+    const user = userEvent.setup();
+    show();
+    await user.click(screen.getByRole("button", { name: "Descargar Guía" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(2));
+    const first = files.openFileInFrame.mock.calls[0]?.[1] as () => void;
+    act(() => first());
+    await screen.findByText(portal.editor.resources.downloadMaybeMissed);
+    await user.click(screen.getByRole("button", { name: "Descargar Audio" }));
+    await waitFor(() => expect(screen.queryByText(portal.editor.resources.downloadMaybeMissed)).toBeNull());
   });
 
   it("mientras va en camino no se manda otra cosa: con dos botones, una dirección se perdería sin decir nada", async () => {
@@ -510,6 +542,8 @@ describe("bajar", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(files.openFileInFrame).toHaveBeenCalledTimes(1));
+    // React encola las acciones: si el segundo clic hubiera entrado, saldría aquí, al terminar el primero.
+    expect(actions.resourceAction).toHaveBeenCalledTimes(1);
   });
 
   it("con el tope, lo dice sin abrir nada", async () => {

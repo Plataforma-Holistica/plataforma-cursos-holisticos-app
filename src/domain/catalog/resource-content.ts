@@ -49,7 +49,7 @@ const NAME_MAX = 100;
 // no se ven o invierten el texto, que harían que el nombre se viera distinto de lo que es.
 const NOT_IN_A_NAME = /[\\/:*?"<>|;\p{C}]+/gu;
 // Los que Windows no deja crear, con cualquier extensión.
-const RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i;
+const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])\s*(\.|$)/i;
 
 /** El nombre con el que baja un recurso: lo arma el servidor con el título, y la extensión sale del tipo. */
 export function resourceDownloadName(title: string, mime: string): string {

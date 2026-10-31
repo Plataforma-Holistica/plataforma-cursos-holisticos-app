@@ -312,6 +312,9 @@ as $$
       ('public.published_resources', 'published_resources_path_ok',
        'CHECK (starts_with(storage_path, ((((teacher_id)::text || ''/''::text) || (course_id)::text) || ''/''::text)))'),
       ('public.published_resources', 'published_resources_mime_ok', 'CHECK (private.resource_mime_ok(kind, mime))'),
+      ('public.published_resources', 'published_resources_position_positive', 'CHECK (("position" >= 1))'),
+      ('public.published_resources', 'published_resources_size_positive', 'CHECK ((size_bytes > 0))'),
+      ('public.published_resources', 'published_resources_retired_consistent', 'CHECK ((is_current = (retired_at IS NULL)))'),
       ('public.published_resources', 'published_resources_title_ok', 'CHECK (private.draft_text_ok(title, 120, false))')
     ) as c (table_name, name, definition)
   where not exists (

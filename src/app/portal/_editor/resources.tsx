@@ -281,21 +281,20 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
   const [state, action, pending] = useActionState(resourceAction, IDLE, `${self}#${RESOURCES_ID}`);
   const hydrated = useHydrated();
   const opened = useRef(0);
-  // Qué intento de bajar no trajo un archivo. Lo dice el marco, después de contestar.
-  const [missed, setMissed] = useState(0);
+  // Si algo de lo que se pidió bajar no trajo un archivo. Lo dice el marco, después de contestar, y hasta el siguiente envío.
+  const [missedFile, setMissedFile] = useState(false);
   // Una vez por intento: la respuesta vieja sigue en el estado mientras la pantalla se vuelve a pintar. En un marco oculto: aquí
   // puede haber algo sin guardar, y la página no debe irse si Storage no contesta con el archivo.
   useEffect(() => {
     if (state.kind !== "granted" || state.attempt === opened.current) return;
     const { attempt, url } = state;
     opened.current = attempt;
-    openFileInFrame(url, () => setMissed(attempt));
+    openFileInFrame(url, () => setMissedFile(true));
   }, [state]);
-  const missedFile = state.kind === "granted" && missed === state.attempt;
   let message: string | null = null;
   if (!pending && state.kind === "done") message = state.what === "moved" ? text.moved : text.removed;
   if (!pending && state.kind === "failed") message = failureText(state.reason);
-  if (!pending && state.kind === "granted") message = missedFile ? text.downloadMaybeMissed : text.downloadStarted;
+  if (!pending && state.kind === "granted") message = text.downloadStarted;
   if (!pending && state.kind === "download_throttled") message = text.downloadThrottled;
   // Se pregunta solo por lo que sigue en la lista: si otra pestaña ya lo quitó, se ofrecen los botones de siempre.
   const asking = state.kind === "confirming" && items.some((item) => item.id === state.resource) ? state.resource : null;
@@ -322,7 +321,9 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
       <h3 id="editor-recursos-titulo" className="text-h3">
         {lesson === null ? text.courseTitle : text.lessonTitle}
       </h3>
-      <BlockResult message={message} tone={state.kind === "failed" || state.kind === "download_throttled" || missedFile ? "danger" : "success"} pending={pending} pendingText={portal.editor.working} answer={answer} spoken={spoken} />
+      <BlockResult message={message} tone={state.kind === "failed" || state.kind === "download_throttled" ? "danger" : "success"} pending={pending} pendingText={portal.editor.working} answer={answer} spoken={spoken} />
+      {/* Llega después de contestar, cuando la persona pudo seguir con otra cosa: una región que ya existía, sin mover el foco. */}
+      <div role="status">{missedFile && <InlineAlert tone="warning">{text.downloadMaybeMissed}</InlineAlert>}</div>
       {items.length === 0 ? (
         <p className="text-body-s text-text-3">{text.none}</p>
       ) : (
@@ -331,6 +332,7 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
           onSubmit={(event) => {
             // Con un envío en camino, la respuesta de otro taparía la primera: una dirección se perdería sin decir nada.
             if (pending) event.preventDefault();
+            else setMissedFile(false);
           }}
         >
           <input type="hidden" name="course" value={course} />

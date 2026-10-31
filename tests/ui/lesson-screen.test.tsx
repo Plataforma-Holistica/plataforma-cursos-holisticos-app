@@ -1111,10 +1111,22 @@ describe("los recursos de la lección", () => {
     expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
   });
 
-  it("con PA-33 en el lugar del reproductor, no se muestran (también si el acceso terminó con la página abierta)", () => {
-    show({ resources: [GUIDE], initial: { kind: "denied", denial: { reason: "never_subscribed" } } });
+  it("si el acceso termina con la página abierta, se van; y quien estaba en su pestaña no se queda sin ninguna", async () => {
+    actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+    const user = userEvent.setup();
+    show({ resources: [GUIDE] });
+    await user.click(screen.getByRole("tab", { name: "Recursos" }));
+    expect(screen.getByRole("tab", { name: "Recursos" })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+
+    await screen.findByText("Esta lección pide una suscripción");
     expect(screen.queryByRole("heading", { name: "Recursos de esta lección" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Recursos" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descargar Guía" })).toBeNull();
+    // Una sigue seleccionada, con su panel a la vista y al alcance del teclado.
+    const selected = screen.getByRole("tab", { selected: true });
+    expect(selected).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tabpanel", { name: selected.textContent })).toBeVisible();
   });
 });

@@ -4,7 +4,7 @@
 -- (`resource_object`, hermana de `lesson_playback`) y su freno. Las reglas del área `resources` se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(89);
+select plan(91);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7100000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -402,6 +402,9 @@ alter policy published_resources_public_select on public.published_resources usi
   is_current
   and (lesson_id is null or exists (select 1 from public.published_lessons l where l.id = published_resources.lesson_id and l.is_current))
   and exists (select 1 from public.published_courses c where c.course_id = published_resources.course_id and c.is_listed));
+alter policy published_resources_content_select on public.published_resources to anon;
+select ok('published resource policy not allowed' = any(pruebas.vigila()), 'una política con otros roles se nota');
+alter policy published_resources_content_select on public.published_resources to authenticated;
 drop policy published_resources_teacher_select on public.published_resources;
 select ok('published resource table without policy' = any(pruebas.vigila()), 'que falte una se nota');
 create policy published_resources_teacher_select on public.published_resources
@@ -409,6 +412,9 @@ create policy published_resources_teacher_select on public.published_resources
 alter table public.published_resources drop constraint published_resources_path_ok;
 select ok('resource table without constraint published_resources_path_ok' = any(pruebas.vigila()), 'la regla de la ruta se nota');
 alter table public.published_resources add constraint published_resources_path_ok check (starts_with(storage_path, teacher_id::text || '/' || course_id::text || '/'));
+alter table public.published_resources drop constraint published_resources_retired_consistent;
+select ok('resource table without constraint published_resources_retired_consistent' = any(pruebas.vigila()), 'lo vigente y lo retirado, también');
+alter table public.published_resources add constraint published_resources_retired_consistent check (is_current = (retired_at is null));
 select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
 
 select * from finish();
