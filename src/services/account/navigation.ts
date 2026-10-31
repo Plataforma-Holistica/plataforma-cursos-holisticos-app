@@ -266,8 +266,8 @@ export function portalNoticePath(returnTo: string): string {
 export function entryDestination(state: EntryState | null, returnTo: string | null | undefined): string {
   if (state === "teacher_invited" || state === "teacher_notice" || state === "teacher") {
     // Quien pidió una pantalla va a esa pantalla, y su guarda decide. Sin destino, al portal, o a lo que le falta.
-    const asked = resolveDestination(returnTo);
-    if (asked !== homeOf()) return asked;
+    const asked = resolveReturnPath(returnTo, RETURN_DESTINATIONS);
+    if (asked.kind === "path") return asked.path;
     return state === "teacher_invited" ? ROUTES.portalInvitation : state === "teacher_notice" ? ROUTES.portalNotice : ROUTES.portal;
   }
   if (state === null || state === "none" || returnsOutsideAdmin(returnTo)) return resolveDestination(returnTo);

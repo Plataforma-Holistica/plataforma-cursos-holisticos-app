@@ -313,6 +313,9 @@ describe("a dónde va quien acaba de entrar, según su estado en el equipo", () 
     ["teacher", "/cuenta", "/cuenta"],
     ["teacher_invited", "/portal/cursos", "/portal/cursos"],
     ["teacher_notice", "/cuenta", "/cuenta"],
+    // También si pidió su inicio de alumno: pedirlo no es lo mismo que no pedir nada.
+    ["teacher", "/inicio", "/inicio"],
+    ["teacher_invited", "/inicio", "/inicio"],
   ] as const)("%s con destino %s: %s", (state, returnTo, expected) => {
     expect(entryDestination(state, returnTo)).toBe(expected);
   });

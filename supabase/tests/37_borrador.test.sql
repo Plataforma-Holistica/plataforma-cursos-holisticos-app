@@ -21,6 +21,11 @@ begin
   values (pruebas.m(p_n), pruebas.p(p_n), p_status,
           case when p_status = 'suspended' then now() end, case when p_status = 'suspended' then 'prueba' end);
   -- Con el aviso del maestro aceptado: sin él, la base no lo deja escribir (decisión de Sergio del 2026-10-30).
+  -- Una base sin los borradores legales no lo trae: lo pone la prueba.
+  if private.current_legal_document('teacher_privacy_notice') is null then
+    insert into public.legal_documents (doc_type, version, title, body, effective_from)
+    values ('teacher_privacy_notice', 1, 'Aviso', 'Texto del aviso', now());
+  end if;
   perform pruebas.limpiar();
   perform set_config('app.actor_id', pruebas.p(p_n)::text, true);
   insert into public.consents (profile_id, legal_document_id, origin)

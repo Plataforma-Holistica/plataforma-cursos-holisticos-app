@@ -21,7 +21,6 @@ const IDLE: InvitationState = { kind: "idle" };
 
 const FAILURES: Record<InvitationFailure, { tone: "warning" | "danger"; message: string }> = {
   changed: { tone: "warning", message: text.changed },
-  gone: { tone: "danger", message: text.gone },
   unavailable: { tone: "danger", message: text.noTexts },
   unknown: { tone: "danger", message: text.unknown },
 };

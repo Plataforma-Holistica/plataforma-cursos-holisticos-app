@@ -21,11 +21,9 @@ export const portal = defineMessages({
     suspendedTitle: "Tu cuenta de {maestro} está en solo lectura",
     accepted: "Ya eres {maestro} en {Plataforma}.",
     noticeAccepted: "Anotamos que aceptaste el aviso.",
-    retry: "Reintentar",
   },
   // PA-40, aceptar la invitación (T-401). No hay enlace con token: quien entra con el correo invitado la ve aquí.
   invitation: {
-    pageTitle: "Tu invitación",
     title: "Te invitamos a dar clases",
     titleNamed: "{name}, te invitamos a dar clases",
     intro: "Lee el contrato y el aviso de privacidad. Al aceptarlos quedas como {maestro} en {Plataforma}.",
@@ -40,13 +38,11 @@ export const portal = defineMessages({
     proofBody: "Para aceptar, recupera tu contraseña con este correo, en este navegador, y vuelve a entrar. Así sabemos que el correo es tuyo.",
     proofAction: "Recuperar mi contraseña",
     changed: "El contrato o el aviso cambiaron mientras los leías. Léelos otra vez, ya actualizados.",
-    gone: "Esta invitación ya no sirve. Pide que te manden otra.",
     noTexts: "Todavía no podemos mostrarte el contrato. Inténtalo de nuevo en un rato.",
     unknown: "No supimos si tu aceptación quedó. Vuelve a entrar para revisarlo.",
   },
   // El aviso de privacidad del maestro, vuelto a pedir (T-401).
   notice: {
-    pageTitle: "Aviso de privacidad",
     title: "Actualizamos el aviso de privacidad",
     intro: "Para seguir usando tu portal, lee el aviso y acéptalo.",
     version: "Versión {version}, vigente desde el {date}.",

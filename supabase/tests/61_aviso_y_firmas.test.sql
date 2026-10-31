@@ -2,11 +2,11 @@
 -- (decisiones de Sergio del 2026-10-30).
 --
 -- Con el aviso de privacidad del maestro pendiente, la base no deja escribir a su nombre: una pestaña abierta no
--- sigue guardando. El maestro de una invitación viva al correo propio cuenta como propio, aunque todavía no tenga
--- cuenta atada. Y una suspensión por fraude no la confirma quien la propuso ni quien marcó la alerta como fraude.
+-- sigue guardando. El maestro de una invitación al correo propio cuenta como propio, aunque todavía no tenga
+-- cuenta atada y aunque la hayan revocado. Y una suspensión por fraude no la confirma quien la propuso ni quien marcó la alerta como fraude.
 begin;
 \ir _ayuda.psql
-select plan(27);
+select plan(34);
 
 -- k1 y k2 tienen Contenido; kf, Contenido y finanzas; f1, finanzas; cf, configuración; mara es maestra.
 select pruebas.alta('c6100000-0000-0000-0000-000000000001', 'k1-61@prueba.test');
@@ -106,6 +106,8 @@ select pruebas.limpiar();
 -- El aviso al escribir.
 
 select is(pruebas.activo(pruebas.mara()), null, 'sin haber aceptado el aviso, no es maestra activa para escribir');
+select is(pruebas.pide(pruebas.mara(), format('private.draft_create(%L, %L)::text', gen_random_uuid(), 'Respirar'))::jsonb ->> 'answer', 'suspended',
+  'y una pestaña abierta no sigue guardando: el borrador no se crea');
 select pruebas.dueno_a_nombre_de(pruebas.mara());
 select throws_ok(format($$insert into public.course_registry (teacher_id) values (%L)$$, :'mara_m'), '42501', null,
   'y la base no deja dar de alta un borrador a su nombre');
@@ -144,13 +146,16 @@ select is(pruebas.pide(pruebas.k2(), format('private.suspend_teacher(%L, %L, %L)
 select is((pruebas.fila(pruebas.k2(), :'k2_m') ->> 'is_self')::boolean, true, 'y la lista le dice a k2 que es el suyo');
 select is((pruebas.fila(pruebas.k1(), :'k2_m') ->> 'is_self')::boolean, false, 'a k1, no');
 select pruebas.dueno_a_nombre_de(pruebas.k2());
-select is(private.actor_owns_teacher(:'k2_m'), true, 'el ayudante cuenta la invitación viva');
+select is(private.actor_owns_teacher(:'k2_m'), true, 'el ayudante cuenta la invitación');
 select pruebas.limpiar();
 select is(pruebas.pide(pruebas.k1(), format('private.set_teacher_founder(%L, %L)', :'k2_m', :'mes')), 'set', 'k1 sí lo marca');
 select is(pruebas.pide(pruebas.k1(), format('private.revoke_teacher_invitation(%L)', :'k2_m')), 'revoked', 'k1 revoca');
-select is((pruebas.fila(pruebas.k2(), :'k2_m') ->> 'is_self')::boolean, false, 'revocada, ya no es suyo');
-select is(pruebas.pide(pruebas.k2(), format('private.set_teacher_founder(%L, null)', :'k2_m')), 'cleared',
-  'y k2 ya puede actuar sobre ese maestro');
+-- Si no, k2 se marcaría fundador con la invitación revocada, y quien la reenvía le dejaría la marca al aceptar.
+select is((pruebas.fila(pruebas.k2(), :'k2_m') ->> 'is_self')::boolean, true, 'revocada, sigue siendo suyo: el correo de un maestro no cambia');
+select is(pruebas.pide(pruebas.k2(), format('private.set_teacher_founder(%L, %L)', :'k2_m', :'mes')), 'self',
+  'y k2 tampoco se marca fundador con la invitación revocada');
+select is(pruebas.pide(pruebas.k1(), format('private.set_teacher_founder(%L, null)', :'k2_m')), 'cleared',
+  'k1 sí le quita la marca');
 -- Un maestro sin cuenta ni invitación no es de nadie.
 select pruebas.dueno_a_nombre_de(pruebas.k2());
 select is(private.actor_owns_teacher(gen_random_uuid()), false, 'un maestro que no existe, no');
@@ -175,8 +180,18 @@ select is(pruebas.pide(pruebas.kf(), format('private.review_alert(%L, %L, true, 
 select is(pruebas.pide(pruebas.f1(), format('private.propose_fraud_suspension(%L, %L)', :'alerta', 'Puntos inflados')), 'proposed',
   'f1 propone');
 select pruebas.solicitud(:'mara_m') as solicitud \gset
+select is(pruebas.pide(pruebas.kf(), 'private.fraud_suspension_queue()::text')::jsonb -> 'requests' -> 0 ->> 'marked_by_self', 'true',
+  'la cola le dice a quien marcó el fraude que fue quien lo marcó');
+select is(pruebas.pide(pruebas.k1(), 'private.fraud_suspension_queue()::text')::jsonb -> 'requests' -> 0 ->> 'marked_by_self', 'false',
+  'a otra persona, no');
 select is(pruebas.pide(pruebas.kf(), format('private.decide_fraud_suspension(%L, true, null, %L)', :'solicitud', 'aviso')), 'proposer',
   'quien marcó el fraude no confirma, aunque tenga Contenido');
+-- Una alerta decidida antes de que existiera la marca: quien la revisó es quien la decidió.
+set local session_replication_role = replica;
+update public.anomaly_alerts set fraud_marked_by = null where id = :'alerta';
+set local session_replication_role = origin;
+select is(pruebas.pide(pruebas.kf(), format('private.decide_fraud_suspension(%L, true, null, %L)', :'solicitud', 'aviso')), 'proposer',
+  'sin la marca, cuenta quien la revisó');
 select is(pruebas.pide(pruebas.k1(), format('private.decide_fraud_suspension(%L, true, null, %L)', :'solicitud', 'aviso')), 'confirmed',
   'otra persona con Contenido, sí');
 
@@ -190,6 +205,18 @@ as $$ begin return 'set'; end $$;
 select ok(exists (select 1 from private.schema_violations()
                   where problem = 'teachers self rule missing: private.set_teacher_founder(uuid, date)'),
   've al fundador sin su comprobación');
+create or replace function private.current_active_teacher_id() returns uuid
+language sql volatile security definer set search_path = ''
+as $$ select t.id from public.teachers t where t.profile_id = private.actor_id() for share of t $$;
+select ok(exists (select 1 from private.schema_violations()
+                  where problem = 'teachers self rule missing: private.current_active_teacher_id()'),
+  've al maestro activo sin el aviso');
+create or replace function private.decide_fraud_suspension(p_request uuid, p_confirm boolean, p_note text, p_notice text) returns text
+language plpgsql security definer set search_path = ''
+as $$ begin return 'confirmed'; end $$;
+select ok(exists (select 1 from private.schema_violations()
+                  where problem = 'teachers self rule missing: private.decide_fraud_suspension(uuid, boolean, text, text)'),
+  've a confirmar el fraude sin mirar quién lo marcó');
 
 select * from finish();
 rollback;

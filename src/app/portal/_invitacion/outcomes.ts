@@ -25,7 +25,7 @@ export function readInvitationForm(form: FormData): InvitationForm {
   };
 }
 
-export type InvitationFailure = "changed" | "gone" | "unavailable" | "unknown";
+export type InvitationFailure = "changed" | "unavailable" | "unknown";
 
 export type InvitationState =
   | { kind: "idle" }
@@ -49,7 +49,9 @@ export function acceptOutcome(result: InvitationAccepted): InvitationOutcome {
         case "anonymous":
           return { kind: "leave", to: ROUTES.portalInvitation, notice: null };
         case "must_sign_out":
-          return { kind: "leave", to: ROUTES.signIn, notice: null, closeSession: true };
+          return result.check.then === "recover"
+            ? { kind: "leave", to: ROUTES.recover, notice: "choose_password", closeSession: true }
+            : { kind: "leave", to: ROUTES.signIn, notice: null, closeSession: true };
         case "suspended":
           return { kind: "suspended" };
         case "unavailable":
@@ -67,9 +69,10 @@ export function acceptOutcome(result: InvitationAccepted): InvitationOutcome {
           return { kind: "repaint", reason: null };
         case "already_teacher":
           return { kind: "leave", to: ROUTES.portal, notice: null };
+        // La guarda ya contesta 404 a quien no tiene invitación: volver a pintar no diría nada. Lo dice su inicio.
         case "no_invitation":
         case "inviter_lost_content":
-          return { kind: "repaint", reason: "gone" };
+          return { kind: "leave", to: ROUTES.home, notice: "teacher_invitation_gone" };
         case "unavailable":
           return { kind: "repaint", reason: "unavailable" };
         case "ineligible":

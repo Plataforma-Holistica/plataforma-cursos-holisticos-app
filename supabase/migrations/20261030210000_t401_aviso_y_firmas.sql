@@ -2,9 +2,11 @@
 -- (decisiones de Sergio del 2026-10-30; hallazgos de la revisión del diseño de las pantallas).
 --   · Con el aviso de privacidad del maestro pendiente, la base no deja escribir a su nombre: una pestaña abierta no
 --     sigue guardando. A un suspendido nunca se le pide (ya no llega aquí) y al levantarlo se le pide.
---   · El maestro de una invitación viva al correo propio cuenta como propio, aunque todavía no tenga cuenta atada:
---     nadie se marca fundador antes de aceptar. La lista de PA-65 lo dice en `is_self`.
+--   · El maestro de una invitación al correo propio cuenta como propio, aunque todavía no tenga cuenta atada y
+--     aunque la hayan revocado: nadie se marca fundador antes de aceptar, ni entre que se la revocan y se la reenvían.
+--     La lista de PA-65 lo dice en `is_self`.
 --   · Una suspensión por fraude no la confirma quien marcó la alerta como fraude, ni quien la propuso (`proposer`).
+--     La cola de PA-66 dice quién la marcó (`marked_by_self`), para no ofrecerle confirmar.
 --   · La lista de PA-65 dice si el código es reciente (`fresh_code`), como las de prácticas y de revisión.
 
 -- ---------------------------------------------------------------------------------------
@@ -22,8 +24,8 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------------------
--- ¿Es ese maestro el de quien actúa? Su cuenta atada, o una invitación viva a su correo (caducada o no: reenviarla
--- la revive).
+-- ¿Es ese maestro el de quien actúa? Su cuenta atada, o una invitación a su correo en cualquier estado: caducada o
+-- revocada, reenviarla la revive, porque el correo de un maestro se fija con la primera.
 
 create or replace function private.actor_owns_teacher(p_teacher uuid) returns boolean
 language sql stable security definer set search_path = ''
@@ -32,7 +34,7 @@ as $$
      and (exists (select 1 from public.teachers t where t.id = p_teacher and t.profile_id = private.actor_id())
           or exists (select 1 from private.teacher_invitations i
                      join auth.users u on u.id = private.actor_id() and pg_catalog.lower(u.email) = i.email
-                     where i.teacher_id = p_teacher and i.accepted_at is null and i.revoked_at is null))
+                     where i.teacher_id = p_teacher))
 $$;
 
 -- ---------------------------------------------------------------------------------------
@@ -239,6 +241,41 @@ end
 $$;
 
 -- ---------------------------------------------------------------------------------------
+-- La cola de PA-66, con quién marcó la alerta. Lo demás, como en t401_fundador_y_suspension.
+
+create or replace function private.fraud_suspension_queue() returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  v_actor uuid := private.actor_id();
+begin
+  if v_actor is null or not (private.actor_has_capability('content') or private.actor_has_capability('finance')) then
+    return null;
+  end if;
+  return pg_catalog.jsonb_build_object('requests', coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+             'request_id', r.id,
+             'teacher_id', r.teacher_id,
+             'display_name', p.display_name,
+             'teacher_status', t.status,
+             'reason', r.reason,
+             'proposed_at', r.proposed_at,
+             'proposed_by_self', r.proposed_by = v_actor,
+             'marked_by_self', coalesce(a.fraud_marked_by, a.reviewed_by) is not distinct from v_actor,
+             'about_self', t.profile_id is not distinct from v_actor,
+             'alert_period', a.period_id,
+             'alert_metric', a.metric_value,
+             'alert_threshold', a.threshold_value)
+           order by r.proposed_at, r.id)
+    from private.teacher_suspension_requests r
+    join public.teachers t on t.id = r.teacher_id
+    left join public.published_teachers p on p.teacher_id = r.teacher_id
+    join public.anomaly_alerts a on a.id = r.anomaly_alert_id
+    where r.status = 'pending'), '[]'::jsonb));
+end
+$$;
+
+-- ---------------------------------------------------------------------------------------
 -- El área `teachers` del vigilante: suma estas comprobaciones.
 
 create or replace function private.schema_violations_teachers()
@@ -385,7 +422,8 @@ as $$
                ('private.grant_capability(uuid, public.capability)', '%p_profile = private.actor_id()%'),
                ('private.set_teacher_founder(uuid, date)', '%actor_owns_teacher(p_teacher)%'),
                ('private.suspend_teacher(uuid, text, text)', '%actor_owns_teacher(p_teacher)%'),
-               ('private.current_active_teacher_id()', '%teacher_notice_pending%')) s (signature, pattern)
+               ('private.current_active_teacher_id()', '%teacher_notice_pending%'),
+               ('private.decide_fraud_suspension(uuid, boolean, text, text)', '%fraud_marked_by%')) s (signature, pattern)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(s.signature)) like s.pattern, false)
   union all
   -- Lo de adentro de una suspensión no lo lee el maestro.

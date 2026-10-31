@@ -1,4 +1,4 @@
-import { resolveDestination, RETURN_PARAM, ROUTES } from "@/services/account/navigation";
+import { portalNoticePath, resolveDestination, RETURN_PARAM, ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import type { NoticeAccepted } from "@/services/teachers/standing";
 
@@ -29,6 +29,12 @@ export function noticeDestination(returnTo: string): string {
   return to === ROUTES.portal || to.startsWith(`${ROUTES.portal}/`) ? to : ROUTES.portal;
 }
 
+/** «Reintentar» cuando no se pudo leer el texto: sin perder a dónde iba. */
+export function noticeRetryHref(returnTo: string): string {
+  const to = noticeDestination(returnTo);
+  return to === ROUTES.portal ? ROUTES.portalNotice : portalNoticePath(to);
+}
+
 export type NoticeFailure = "changed" | "unknown";
 
 export type NoticeState = { kind: "idle" } | { kind: "missing"; attempt: number } | { kind: "failed"; reason: NoticeFailure; attempt: number };
@@ -39,8 +45,11 @@ export type NoticeOutcome =
 
 export function noticeOutcome(result: NoticeAccepted, returnTo: string): NoticeOutcome {
   switch (result.kind) {
-    case "accepted":
-      return { kind: "leave", to: noticeDestination(returnTo), notice: "teacher_notice_accepted" };
+    // Solo el inicio del portal lee el aviso: en otra pantalla se quedaría esperando a la siguiente vez que se abra.
+    case "accepted": {
+      const to = noticeDestination(returnTo);
+      return { kind: "leave", to, notice: to === ROUTES.portal ? "teacher_notice_accepted" : null };
+    }
     case "changed":
       return { kind: "repaint", reason: "changed" };
     case "unknown":
@@ -51,7 +60,9 @@ export function noticeOutcome(result: NoticeAccepted, returnTo: string): NoticeO
     case "refused":
       switch (result.check.kind) {
         case "must_sign_out":
-          return { kind: "leave", to: ROUTES.signIn, notice: null, closeSession: true };
+          return result.check.then === "recover"
+            ? { kind: "leave", to: ROUTES.recover, notice: "choose_password", closeSession: true }
+            : { kind: "leave", to: ROUTES.signIn, notice: null, closeSession: true };
         case "unavailable":
           return { kind: "repaint", reason: "unknown" };
         default:

@@ -3,12 +3,13 @@ import { longDate } from "@/app/_lib/dates";
 import { LegalBody } from "@/app/_lib/legal-body";
 import { messages, t } from "@/messages";
 import type { VerifiedClaims } from "@/services/account/account";
-import { RETURN_PARAM, ROUTES } from "@/services/account/navigation";
+import { RETURN_PARAM } from "@/services/account/navigation";
 import { legalBlocks } from "@/services/legal/blocks";
 import { teacherTexts } from "@/services/teachers/teachers";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
+import { noticeRetryHref } from "./outcomes";
 import { NoticeForm } from "./screen";
 
 // El aviso de privacidad del maestro, vuelto a pedir (`/portal/aviso`; T-401). Lo sirve el comodín, solo a un
@@ -27,7 +28,7 @@ export async function NoticeSection({
   const raw = search[RETURN_PARAM];
   const returnTo = typeof raw === "string" ? raw : "";
   const texts = await teacherTexts(claims);
-  if (texts === null) return <UnavailableScreen retryHref={ROUTES.portalNotice} withSession />;
+  if (texts === null) return <UnavailableScreen retryHref={noticeRetryHref(returnTo)} withSession />;
   const { notice } = texts;
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">

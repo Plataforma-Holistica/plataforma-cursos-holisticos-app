@@ -43,6 +43,8 @@ export const NOTICES = [
   // La invitación de maestro quedó aceptada, o el aviso del maestro vuelto a pedir (T-401): el portal lo dice.
   "teacher_accepted",
   "teacher_notice_accepted",
+  // La invitación de maestro ya no servía al aceptarla: lo dice el inicio, porque PA-40 ya contesta 404.
+  "teacher_invitation_gone",
   // Un curso en borrador quedó borrado (T-402), o ya no existía cuando se pidió borrarlo otra vez.
   "course_deleted",
   "course_gone",

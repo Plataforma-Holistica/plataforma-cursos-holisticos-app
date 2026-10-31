@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { noticeDestination, noticeOutcome, readNoticeForm } from "./outcomes";
+import { noticeDestination, noticeOutcome, noticeRetryHref, readNoticeForm } from "./outcomes";
 
 const NOTICE = "c0000000-0000-4000-8000-000000000002";
 
@@ -35,8 +35,29 @@ describe("a dónde sigue después de aceptar", () => {
 });
 
 describe("lo que hace con cada respuesta", () => {
-  it("anotado: a donde iba, con su aviso", () => {
-    expect(noticeOutcome({ kind: "accepted" }, "/portal/cursos")).toEqual({ kind: "leave", to: "/portal/cursos", notice: "teacher_notice_accepted" });
+  it("anotado: a donde iba, sin un aviso que esa pantalla no lee", () => {
+    expect(noticeOutcome({ kind: "accepted" }, "/portal/cursos")).toEqual({ kind: "leave", to: "/portal/cursos", notice: null });
+  });
+
+  it.each(["", "/portal", "/admin"])("anotado sin ir a otra pantalla del portal (%s): al inicio del portal, con su aviso", (returnTo) => {
+    expect(noticeOutcome({ kind: "accepted" }, returnTo)).toEqual({ kind: "leave", to: "/portal", notice: "teacher_notice_accepted" });
+  });
+
+  it("una cuenta a la que le toca elegir contraseña va a recuperarla", () => {
+    expect(noticeOutcome({ kind: "refused", check: { kind: "must_sign_out", then: "recover" } }, "")).toEqual({
+      kind: "leave",
+      to: "/recuperar",
+      notice: "choose_password",
+      closeSession: true,
+    });
+  });
+
+  it.each([
+    ["/portal/cursos", "/portal/aviso?volver=%2Fportal%2Fcursos"],
+    ["/admin", "/portal/aviso"],
+    ["", "/portal/aviso"],
+  ])("«Reintentar» con destino %s conserva a dónde iba: %s", (returnTo, expected) => {
+    expect(noticeRetryHref(returnTo)).toBe(expected);
   });
 
   it("el texto cambió: se vuelve a mostrar", () => {

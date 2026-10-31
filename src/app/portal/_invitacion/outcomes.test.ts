@@ -49,9 +49,10 @@ describe("lo que PA-40 hace con cada respuesta", () => {
     // La página vuelve a preguntar la guarda, y pinta «prueba tu correo».
     ["needs_mailbox_proof", { kind: "repaint", reason: null }],
     ["already_teacher", { kind: "leave", to: "/portal", notice: null }],
-    ["no_invitation", { kind: "repaint", reason: "gone" }],
+    // La página ya contesta 404 a quien no tiene invitación: lo dice su inicio.
+    ["no_invitation", { kind: "leave", to: "/inicio", notice: "teacher_invitation_gone" }],
     // No se dice por qué: quien invitó ya no puede, y eso no es de quien acepta.
-    ["inviter_lost_content", { kind: "repaint", reason: "gone" }],
+    ["inviter_lost_content", { kind: "leave", to: "/inicio", notice: "teacher_invitation_gone" }],
     ["unavailable", { kind: "repaint", reason: "unavailable" }],
     ["ineligible", { kind: "repaint", reason: "unavailable" }],
   ] as const)("%s", (answer, expected) => {
@@ -68,6 +69,7 @@ describe("lo que PA-40 hace con cada respuesta", () => {
   it.each([
     [{ kind: "anonymous" as const }, { kind: "leave", to: "/portal/invitacion", notice: null }],
     [{ kind: "must_sign_out" as const, then: "sign_in" as const }, { kind: "leave", to: "/entrar", notice: null, closeSession: true }],
+    [{ kind: "must_sign_out" as const, then: "recover" as const }, { kind: "leave", to: "/recuperar", notice: "choose_password", closeSession: true }],
     [{ kind: "suspended" as const }, { kind: "suspended" }],
     [{ kind: "unavailable" as const }, { kind: "repaint", reason: "unavailable" }],
   ])("lo que la guarda no dejó pasar: %j", (check, expected) => {

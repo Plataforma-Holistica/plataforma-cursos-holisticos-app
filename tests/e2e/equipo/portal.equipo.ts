@@ -504,6 +504,32 @@ test("sin JavaScript también se acepta", async ({ browser }) => {
   }
 });
 
+for (const withJs of [true, false]) {
+  test(`si la invitación se va con la pantalla abierta, lo dice su inicio y no anota nada (${withJs ? "con" : "sin"} JavaScript)`, async ({ browser }) => {
+    const gala = await person();
+    await inviteTeacher(gala);
+    const { context, page } = withJs ? await (async () => { const context = await browser.newContext(); return { context, page: await context.newPage() }; })() : await noJs(browser);
+    try {
+      await recoverHere(page, gala.email);
+      await enter(page, gala.email, NEW_PASSWORD);
+      await expect(page).toHaveURL("/portal/invitacion");
+      await page.getByLabel("He leído y acepto el contrato.").check();
+      await page.getByLabel("He leído y acepto el aviso de privacidad.").check();
+      await ownerQuery(
+        `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+         update private.teacher_invitations set revoked_at = now() from declared where email = lower($1)`,
+        [gala.email],
+      );
+      await page.getByRole("button", { name: "Aceptar y entrar" }).click();
+      await expect(page).toHaveURL("/inicio");
+      await expect(page.getByText(/Esa invitación ya no sirve/)).toBeVisible();
+      expect(await consentsOf(gala)).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 test("la prueba del buzón hecha en otro navegador no sirve", async ({ page, browser }) => {
   const caro = await person();
   await inviteTeacher(caro);
