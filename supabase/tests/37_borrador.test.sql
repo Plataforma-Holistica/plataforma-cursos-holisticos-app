@@ -368,7 +368,8 @@ grant execute on function private.draft_text_ok(text, integer, boolean) to app_s
 select pruebas.a_nombre_de(pruebas.p(1));
 select throws_ok(format('insert into public.draft_lessons (course_id, teacher_id, module_id, title, position) values (%L, %L, %L, %L, 9)',
   pruebas.id('ana'), pruebas.m(1), pruebas.id('m2'), 'Directo'), '42501', null, 'con permiso concedido, el guardián no deja escribir');
-select throws_ok(format('delete from public.draft_modules where course_id = %L', pruebas.id('ana')), '42501', null,
+-- Sin `where`: con él, el servidor necesitaría además leer esa columna, y el 42501 saldría de los permisos.
+select throws_ok('delete from public.draft_modules', '42501', 'public.draft_modules: only the draft functions write this table',
   'ni borrar');
 select pruebas.como_dueno();
 revoke insert on public.draft_lessons from app_service;

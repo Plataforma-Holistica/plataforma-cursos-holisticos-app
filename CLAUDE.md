@@ -749,9 +749,12 @@ que no se ve leyendo un solo archivo:
   (toda la cubeta; se lleva los pendientes vencidos; no es de la aplicación). Confirmar
   (`resource_confirm(curso, recurso, contenido_ok)`) compara lo que Storage guardó en `storage.objects`, no lo que dijo el
   navegador; un rechazo borra la fila en la misma transacción, así que no se puede volver a confirmar aunque la dirección
-  siga viva; lo que no se supo (el contenido sin leer, nulo, o el parámetro sin valor) contesta `unavailable` y la fila se
-  queda. `object_id` y `object_version` recuerdan qué objeto se confirmó: un reemplazo por `upsert` conserva el id y cambia
-  la versión, así que la firma de subida va con `upsert: false`. Y un pendiente vive 3 h, porque la dirección de subida dura 2 h
+  siga viva. El tipo y el tamaño se deciden aunque el contenido no se haya podido leer (`false` solo si se leyeron bytes
+  y no corresponden, porque destruye la fila); lo que no se supo (el contenido nulo, o el parámetro sin valor) contesta
+  `unavailable` y la fila se queda, y sin objeto contesta `not_uploaded`, que gana. `object_id` y `object_version`
+  recuerdan qué objeto se confirmó: un reemplazo por `upsert` conserva el id y cambia la versión, así que la firma de
+  subida va con `upsert: false`, y la descarga compara la versión. Toma la fila (`for update`): el repaso no toma el
+  candado del curso. Y un pendiente vive 3 h, porque la dirección de subida dura 2 h
   fijas (Storage no deja pedir menos). `place_id` es la lección o el curso: la lista por lugar, con la posición única y
   diferible como las de módulos y lecciones (`nulls not distinct` no hizo falta). Las funciones `resource_*` siguen el
   protocolo del borrador (la fila del maestro activo, después `draft_open`), y cambiar la lista sube la revisión de la

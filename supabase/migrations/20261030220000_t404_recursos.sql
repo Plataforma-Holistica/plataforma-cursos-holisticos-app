@@ -71,7 +71,7 @@ create table public.draft_resources (
   title text not null,
   kind public.resource_kind not null,
   mime text not null,
-  storage_path text not null,                      -- la pone la base; nunca sale a la persona
+  storage_path text not null,                      -- la pone la base; solo viaja en la dirección de subida, que es suya
   size_bytes bigint not null,                      -- el declarado, y al confirmar el de verdad
   state public.resource_state not null default 'pending',
   position integer,                                -- dentro de su lugar, desde 1; un pendiente no tiene
@@ -196,8 +196,10 @@ end
 $$;
 
 -- Confirmar: `p_content_ok` es lo que el servidor leyó en los primeros bytes del objeto, y nulo si no lo
--- pudo leer. Lo demás lo mira aquí, en lo que Storage guardó. Lo rechazado se va con su fila, y su objeto
--- queda como sobrante. Lo que no se supo no se rechaza: la fila se queda, para intentarlo otra vez.
+-- pudo leer. Lo demás lo mira aquí, en lo que Storage guardó: el tipo y el tamaño se deciden aunque el
+-- contenido no se haya podido leer (un archivo de 0 bytes no se puede leer, y ya se sabe que no sirve). Lo
+-- rechazado se va con su fila, y su objeto queda como sobrante. Lo que no se supo no se rechaza: la fila
+-- se queda, para intentarlo otra vez. Toma la fila: el repaso no toma el candado del curso.
 create function private.resource_confirm(p_course uuid, p_resource uuid, p_content_ok boolean) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -220,7 +222,7 @@ begin
   if v_answer is not null then
     return pg_catalog.jsonb_build_object('answer', v_answer);
   end if;
-  select * into v_row from public.draft_resources where id = p_resource and course_id = p_course;
+  select * into v_row from public.draft_resources where id = p_resource and course_id = p_course for update;
   if v_row.id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
@@ -236,16 +238,18 @@ begin
   if v_object is null or v_version is null then
     return pg_catalog.jsonb_build_object('answer', 'not_uploaded');
   end if;
-  if v_max is null or p_content_ok is null then
-    return pg_catalog.jsonb_build_object('answer', 'unavailable');
-  end if;
   -- Un tamaño que no es un entero cuenta como que no cabe; un `::bigint` a secas lanzaría.
   v_size := case when v_size_text ~ '^[0-9]{1,18}$' then v_size_text::bigint end;
   v_reason := case
     when v_mime is distinct from v_row.mime then 'type'
     when v_size is null or v_size < 1 or v_size > v_max then 'size'
-    when not p_content_ok then 'content'
   end;
+  if v_reason is null and (v_max is null or p_content_ok is null) then
+    return pg_catalog.jsonb_build_object('answer', 'unavailable');
+  end if;
+  if v_reason is null and not p_content_ok then
+    v_reason := 'content';
+  end if;
   if v_reason is not null then
     delete from public.draft_resources where id = p_resource;
     return pg_catalog.jsonb_build_object('answer', 'rejected', 'reason', v_reason);
@@ -255,10 +259,6 @@ begin
          position = (select coalesce(max(r.position), 0) + 1 from public.draft_resources r
                      where r.place_id = v_row.place_id and r.state = 'ready')
    where id = p_resource;
-  -- El repaso no toma el candado del curso: pudo llevársela si estaba al filo de vencer.
-  if not found then
-    return pg_catalog.jsonb_build_object('answer', 'not_found');
-  end if;
   perform private.resource_touch(p_course, v_row.lesson_id);
   return pg_catalog.jsonb_build_object('answer', 'ready');
 end
