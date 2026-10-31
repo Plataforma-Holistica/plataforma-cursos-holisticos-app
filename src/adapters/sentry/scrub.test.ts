@@ -857,3 +857,55 @@ describe("el enlace de un correo, en todo lo que lleva una ruta", () => {
     expect(clean.exception?.values?.[0]?.value).toBe("No se pudo completar /verificar/[token]");
   });
 });
+
+describe("los datos fiscales del maestro (T-409)", () => {
+  const CLABE = "002010077777777771";
+  const KEY = `1:${"Ab3".repeat(14)}A=:0123abcd`;
+  const message = (text: string) => scrubEvent(event({ exception: { values: [{ type: "Error", value: text }] } })).exception?.values?.[0]?.value;
+  const path = (text: string) => scrubEvent(event({ transaction: text })).transaction;
+  const note = (text: string) => scrubEvent(event({ environment: text })).environment;
+
+  it.each([
+    CLABE,
+    `clabe=${CLABE}`,
+    `cafe-${CLABE}`,
+    `{"clabe":"${CLABE}"}`,
+    "002 010 0777 7777 7771",
+  ])("en un mensaje no sale la CLABE: %s", (text) => {
+    expect(message(text)).not.toMatch(/7777777771|7777 7771/);
+  });
+
+  it.each([`/pagos/clabe${CLABE}`, `/pagos/cuenta_${CLABE}`, `/pagos/${CLABE}`])("en una ruta tampoco: %s", (text) => {
+    expect(path(text)).not.toContain(CLABE);
+  });
+
+  it("en lo que anota el SDK tampoco", () => {
+    expect(note(`dato ${CLABE}`)).not.toContain(CLABE);
+  });
+
+  it("dieciocho dígitos que no son una CLABE, en lo que anota el SDK, se quedan: el dígito de control lo distingue", () => {
+    expect(note("id 002010077777777772")).toBe("id 002010077777777772");
+  });
+
+  it.each(["GOMA800101AB1", "goma800101ab1", "GOMA-800101-AB1", "GOMA 800101 AB1", "rfc_GOMA800101AB1", "ÑOMA800101AB1", "GOM800101AB1"])(
+    "en un mensaje no sale el RFC: %s",
+    (text) => {
+      expect(message(text)).toContain("[rfc]");
+      expect(message(text)).not.toMatch(/800101/);
+      expect(message(text)).not.toMatch(/Ñ\[rfc\]/);
+    },
+  );
+
+  it("en una ruta tampoco", () => {
+    expect(path("/maestros/rfc_GOMA800101AB1")).not.toContain("800101");
+  });
+
+  it.each([
+    `PII_ENCRYPTION_KEYS=${KEY},${KEY}`,
+    `PII_ENCRYPTION_KEYS: "${KEY}"`,
+    `falló con ${KEY} al abrir`,
+  ])("la llave no sale: %s", (text) => {
+    expect(message(text)).not.toContain("Ab3Ab3");
+    expect(note(text)).not.toContain("Ab3Ab3");
+  });
+});

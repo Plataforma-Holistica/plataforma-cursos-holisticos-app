@@ -832,6 +832,16 @@ que no se ve leyendo un solo archivo:
   lo escrito y el intento solo le tocan al que envió (`formOfState`). Un aviso de lo hecho no dice de qué maestro habla:
   se pinta si la ficha lo confirma (`acceptedTeacherNotice`). Un día (`founder_since`) se escribe con `longDay`, no con
   `longDate`, que lo movería al día anterior.
+- **El cifrado de los datos fiscales** (T-409, primera solicitud, sin migración; decisiones de Sergio del 2026-10-31). AES-256-GCM en la
+  aplicación, en un solo archivo (`src/services/teachers/tax-cipher.ts`): `seal` y `open` reciben el contexto de la columna (maestro, campo,
+  versión de la fila y, en la CLABE, sus últimos cuatro), que entra a los datos asociados con la versión de la llave. Lo guardado es
+  `formato | versión de la llave | vector | cifrado | etiqueta`, y `SealedField` es un tipo que solo emite ese archivo. Sin llave lanza
+  `TaxCipherUnavailable`; lo que no abre, `TaxCipherTampered`: nunca devuelve otra cosa, y sus errores tienen texto fijo. Quién lo importa es
+  una lista cerrada en `tests/architecture/tax-cipher.test.ts`: sumar a alguien es decidir que puede ver un dato fiscal. Las llaves
+  (`PII_ENCRYPTION_KEYS`, `PII_ENCRYPTION_ACTIVE_VERSION`) son opcionales y van juntas, como las de Mux: se generan, se respaldan y se rotan como
+  dice OP-19. Las reglas de CLABE, RFC y régimen son puras, en `src/domain/fiscal/`. El filtro de Sentry saca una CLABE por su dígito de control en
+  todo texto, también en lo que anota el SDK, un RFC con espacios o guion bajo, y las llaves. Una tabla del filtro puede reemplazar con una
+  función (`Rule`). Para el B: nada que le toque.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

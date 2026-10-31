@@ -269,3 +269,32 @@ describe("parseEnv", () => {
     throw new Error("parseEnv aceptó un entorno que debía rechazar");
   });
 });
+
+describe("las llaves de los datos fiscales (T-409)", () => {
+  const KEY = `1:${"A".repeat(43)}=:0123abcd`;
+  const OTHER = `2:${"B".repeat(43)}=:0123abcd`;
+
+  it("son opcionales: sin ellas la aplicación arranca", () => {
+    expect(parseEnv(valid).PII_ENCRYPTION_KEYS).toBeUndefined();
+  });
+
+  it("con la lista y la activa, valen", () => {
+    expect(parseEnv({ ...valid, PII_ENCRYPTION_KEYS: `${KEY},${OTHER}`, PII_ENCRYPTION_ACTIVE_VERSION: "2" })).toMatchObject({ PII_ENCRYPTION_ACTIVE_VERSION: "2" });
+  });
+
+  it.each([
+    ["la lista sin la activa", { PII_ENCRYPTION_KEYS: KEY }, "PII_ENCRYPTION_ACTIVE_VERSION: falta"],
+    ["la activa sin la lista", { PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: falta"],
+    ["la activa no está en la lista", { PII_ENCRYPTION_KEYS: KEY, PII_ENCRYPTION_ACTIVE_VERSION: "2" }, "PII_ENCRYPTION_ACTIVE_VERSION: tiene un valor inválido"],
+    ["una llave sin forma", { PII_ENCRYPTION_KEYS: "1:corta:0123abcd", PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
+    ["sin comprobación", { PII_ENCRYPTION_KEYS: `1:${"A".repeat(43)}=`, PII_ENCRYPTION_ACTIVE_VERSION: "1" }, "PII_ENCRYPTION_KEYS: tiene un valor inválido"],
+    ["una versión sin forma", { PII_ENCRYPTION_KEYS: KEY, PII_ENCRYPTION_ACTIVE_VERSION: "uno" }, "PII_ENCRYPTION_ACTIVE_VERSION: tiene un valor inválido"],
+  ])("%s", (_name, extra, problem) => {
+    expect(problemsOf({ ...valid, ...extra })).toEqual([problem]);
+  });
+
+  it("el error no trae el valor de la llave", () => {
+    const secret = "1:secreto-que-no-debe-salir:0123abcd";
+    expect(problemsOf({ ...valid, PII_ENCRYPTION_KEYS: secret, PII_ENCRYPTION_ACTIVE_VERSION: "1" }).join(" ")).not.toContain("secreto");
+  });
+});
