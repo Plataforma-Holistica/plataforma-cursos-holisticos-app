@@ -51,6 +51,36 @@ describe("ver lo guardado", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("el botón pulsado desaparece con el formulario: el foco va al título de lo mostrado, para que un lector de pantalla se entere", async () => {
+    answersReveal({ kind: "revealed", data: { rfc: "•••• 1GR8", legalName: "•••• Díaz", regime: "626", clabe: "•••• 7771", date: "31 de octubre de 2026" }, attempt: 1 });
+    render(<TaxReveal canChange />);
+    await userEvent.type(screen.getByLabelText(text.password), "la-de-ella");
+    await userEvent.click(screen.getByRole("button", { name: text.reveal.submit }));
+    const title = await screen.findByRole("heading", { name: text.reveal.title });
+    expect(document.activeElement).toBe(title);
+  });
+
+  it("a quien se fue a otra cosa mientras esperaba no se le quita el foco", async () => {
+    let answer: (state: RevealState) => void = () => undefined;
+    actions.revealTaxDataAction.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    render(
+      <>
+        <TaxReveal canChange />
+        <button type="button">otra cosa</button>
+      </>,
+    );
+    await userEvent.type(screen.getByLabelText(text.password), "la-de-ella");
+    await userEvent.click(screen.getByRole("button", { name: text.reveal.submit }));
+    const other = screen.getByRole("button", { name: "otra cosa" });
+    other.focus();
+    await act(async () => {
+      answer({ kind: "revealed", data: { rfc: "•••• 1GR8", legalName: "•••• Díaz", regime: "626", clabe: "•••• 7771", date: "31 de octubre de 2026" }, attempt: 1 });
+      await Promise.resolve();
+    });
+    await screen.findByRole("heading", { name: text.reveal.title });
+    expect(document.activeElement).toBe(other);
+  });
+
   it("un maestro suspendido ve lo suyo y no se le ofrece cambiarlo", async () => {
     answersReveal({ kind: "revealed", data: { rfc: "•••• 1GR8", legalName: "•••• Díaz", regime: "626", clabe: "•••• 7771", date: "31 de octubre de 2026" }, attempt: 1 });
     render(<TaxReveal canChange={false} />);
@@ -137,13 +167,20 @@ describe("capturar", () => {
     expect(screen.getByLabelText<HTMLInputElement>(text.password).value).toBe("");
   });
 
-  it("la versión que ya no es vigente se dice, y lo escrito no se pierde", async () => {
-    answersSave({ kind: "failed", reason: "changed", attempt: 1 });
+  it("una respuesta que no guardó deja lo escrito", async () => {
+    answersSave({ kind: "failed", reason: "unavailable", attempt: 1 });
     render(<TaxCapture seen={1} changing />);
     await userEvent.type(screen.getByRole("textbox", { name: /RFC/ }), "GODE561231GR8");
     await userEvent.type(screen.getByLabelText(text.password), "x");
     await userEvent.click(screen.getByRole("button", { name: text.capture.submit }));
-    expect(await screen.findByText(text.failed.changed)).toBeTruthy();
+    expect(await screen.findByText(text.failed.unavailable)).toBeTruthy();
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: /RFC/ }).value).toBe("GODE561231GR8");
+  });
+
+  it("le da al gestor de contraseñas el correo como usuario: si no, tomaría la CLABE, que es el texto de antes", () => {
+    const { container } = render(<TaxCapture seen={0} changing={false} email="ana@prueba.test" />);
+    const username = container.querySelector<HTMLInputElement>('input[autocomplete="username"]');
+    expect(username?.value).toBe("ana@prueba.test");
+    expect(username?.hidden).toBe(true);
   });
 });

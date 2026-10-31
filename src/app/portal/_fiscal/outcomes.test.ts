@@ -87,26 +87,25 @@ describe("guardar", () => {
   it("lo que no pasó se dice por campo", () => {
     expect(saveOutcome({ kind: "invalid", problems: { clabe: "length" } }, 1)).toEqual({
       kind: "repaint",
-      refresh: false,
       state: { kind: "invalid", problems: { clabe: "length" }, attempt: 1 },
     });
   });
 
-  it.each([
-    ["changed", true],
-    ["suspended", true],
-    ["wrong_password", false],
-    ["capped", false],
-    ["unavailable", false],
-    ["off", false],
-  ] as const)("%s se dice en el bloque, y la página se vuelve a pedir si cambió lo que pinta", (kind, refresh) => {
-    expect(saveOutcome({ kind } as never, 1)).toEqual({ kind: "repaint", refresh, state: { kind: "failed", reason: kind, attempt: 1 } });
+  it.each(["wrong_password", "capped", "unavailable", "off"] as const)("%s se dice en el bloque", (kind) => {
+    expect(saveOutcome({ kind } as never, 1)).toEqual({ kind: "repaint", state: { kind: "failed", reason: kind, attempt: 1 } });
+  });
+
+  it("si cambiaron en otra ventana va a cambiar con la versión de ahora, y lo dice: en una primera captura, volver a pintar se llevaría el formulario y el aviso", () => {
+    expect(saveOutcome({ kind: "changed" }, 1)).toEqual({ kind: "leave", to: `${ROUTES.portalTaxData}?cambiar=1`, notice: "tax_data_changed" });
+  });
+
+  it("si quedó suspendido vuelve a la pantalla, que lo dice con su franja", () => {
+    expect(saveOutcome({ kind: "suspended" }, 1)).toEqual({ kind: "leave", to: ROUTES.portalTaxData, notice: null });
   });
 
   it("el freno lleva su hora", () => {
     expect(saveOutcome({ kind: "throttled", retryAt: new Date(AT) }, 1)).toEqual({
       kind: "repaint",
-      refresh: false,
       state: { kind: "throttled", retryAt: AT, attempt: 1 },
     });
   });

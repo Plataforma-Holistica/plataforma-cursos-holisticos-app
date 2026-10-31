@@ -3,17 +3,20 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { createAuth } from "@/adapters/supabase/auth";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { clabeCheckDigit } from "@/domain/fiscal/clabe";
 import { acceptsPayee, TAX_REGIMES } from "@/domain/fiscal/regime";
+import type { SessionCheck } from "@/services/account/admission";
+import { createManagement } from "@/services/account/management";
 import { readTeacherStanding } from "@/services/teachers/records";
 import { createTaxCipher } from "@/services/teachers/tax-cipher";
 import { createTaxProfile, type TaxStore } from "@/services/teachers/tax-profile";
 import { askTaxForPayout, askTaxMine, askTaxSave, askTaxState } from "@/services/teachers/tax-records";
 
-import { claimedUser, clearThrottle, freshOrigin, testServices } from "./helpers/account";
-import { memoryJar } from "./helpers/auth";
+import { claimedUser, clearThrottle, freshOrigin, keysOf, pairOf, testServices } from "./helpers/account";
+import { memoryJar, secondFactorFor } from "./helpers/auth";
 import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -87,7 +90,59 @@ describe("comprobar la contraseña en el mismo envío", () => {
 
   it("una contraseña desmedida no llega a Auth ni cuenta", async () => {
     const ana = await person();
-    expect(await testServices().confirmPassword(ana.jar, "x".repeat(200), freshOrigin())).toEqual({ kind: "wrong" });
+    const origin = freshOrigin();
+    expect(await testServices().confirmPassword(ana.jar, "x".repeat(200), origin)).toEqual({ kind: "wrong" });
+    expect(await pairOf(keysOf(ana.who.email, origin))).toBeNull();
+  });
+
+  it("una cuenta con segundo factor también se comprueba, y se queda con el que tenía", async () => {
+    const ana = await person();
+    const factor = await secondFactorFor(ana.who);
+    const before = await sessionsOf(ana.id);
+    expect(await testServices().confirmPassword(ana.jar, ana.who.password, freshOrigin())).toEqual({ kind: "confirmed", claims: ana.claims });
+    expect(await sessionsOf(ana.id)).toBe(before);
+    const factors = await ownerQuery<{ count: string }>("select count(*) from auth.mfa_factors where id = $1 and status = 'verified'", [factor.factorId]);
+    expect(factors[0]?.count).toBe("1");
+  });
+
+  // La contraseña era la suya, y la cuenta dejó de pasar a media operación: la entrada no se admite.
+  function staleManagement(checks: SessionCheck[]) {
+    const reported: string[] = [];
+    const management = createManagement(
+      {
+        auth: createAuth(),
+        proxyTrusted: () => true,
+        isLocal: () => true,
+        report: (code: string) => {
+          reported.push(code);
+          return Promise.resolve();
+        },
+      } as never,
+      {
+        checkSession: () => Promise.resolve(checks.shift() as SessionCheck),
+        openAttempt: () => Promise.resolve({ decision: { proceed: true }, startedText: "2026-10-31T00:00:00Z" } as never),
+        admit: () => Promise.resolve({ admit: false, report: null, outcome: "success", result: { kind: "suspended" } } as never),
+        settleAttempt: () => Promise.resolve(),
+      },
+    );
+    return { management, reported };
+  }
+
+  it("si la cuenta dejó de pasar a media operación, contesta lo que la guarda dice ahora, y cierra la comprobación", async () => {
+    const ana = await person();
+    const before = await sessionsOf(ana.id);
+    const pass = { kind: "pass", claims: ana.claims } as SessionCheck;
+    const now: SessionCheck = { kind: "unavailable" };
+    const { management } = staleManagement([pass, now]);
+    expect(await management.confirmPassword(ana.jar, ana.who.password, freshOrigin())).toEqual({ kind: "session", check: now });
+    expect(await sessionsOf(ana.id)).toBe(before);
+  });
+
+  it("si la guarda insiste en que pasa, es «no se supo», y no un sí", async () => {
+    const ana = await person();
+    const pass = { kind: "pass", claims: ana.claims } as SessionCheck;
+    const { management } = staleManagement([pass, pass]);
+    expect(await management.confirmPassword(ana.jar, ana.who.password, freshOrigin())).toEqual({ kind: "unavailable" });
   });
 
   it("sin sesión contesta lo que dice la guarda", async () => {

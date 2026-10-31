@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useActionState, useState } from "react";
+import { type FormEvent, useActionState, useEffect, useRef, useState } from "react";
 
 import { ThrottledAlert } from "@/app/(cuenta)/_lib/throttled-alert";
 import { portal } from "@/messages/es/portal";
@@ -26,6 +26,7 @@ const REVEAL_IDLE: RevealState = { kind: "idle" };
 const SAVE_IDLE: SaveState = { kind: "idle" };
 const REVEAL_PASSWORD_ID = "fiscal-ver-contrasena";
 const SAVE_PASSWORD_ID = "fiscal-guardar-contrasena";
+const CHANGE_PATH = `${ROUTES.portalTaxData}?cambiar=1`;
 const FIELD_IDS: Record<TaxFormField, string> = { rfc: "fiscal-rfc", regime: "fiscal-regimen", legalName: "fiscal-razon-social", clabe: "fiscal-clabe" };
 const REGIME_OPTIONS = TAX_REGIMES.map(({ code }) => ({ value: code, label: t(text.fields.regimeOption, { code, name: text.regimes[code] }) }));
 
@@ -46,45 +47,55 @@ const FAILED: Record<Exclude<RevealFailure | SaveFailure, "wrong_password">, str
   unavailable: text.failed.unavailable,
   off: text.failed.off,
   no_profile: text.failed.noProfile,
-  changed: text.failed.changed,
-  suspended: text.failed.suspended,
 };
+
+/**
+ * Lo mostrado. El botón pulsado desaparece con el formulario y el foco cae al documento: lo toma el título, para que un lector de pantalla se entere. A
+ * quien se fue a otra cosa mientras esperaba no se lo quita.
+ */
+function Revealed({ data, canChange }: { data: Extract<RevealState, { kind: "revealed" }>["data"]; canChange: boolean }) {
+  const title = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (document.activeElement === null || document.activeElement === document.body) title.current?.focus();
+  }, []);
+  return (
+    <section className="flex flex-col gap-6">
+      <h2 ref={title} tabIndex={-1} className="text-h3">
+        {text.reveal.title}
+      </h2>
+      <dl className="flex flex-col gap-3">
+        {[
+          [text.fields.rfc, data.rfc],
+          [text.fields.regime, regimeLabel(data.regime)],
+          [text.fields.legalName, data.legalName],
+          [text.fields.clabe, data.clabe],
+        ].map(([label, value]) => (
+          <div key={label} className="flex flex-col gap-1">
+            <dt className="text-body-s text-text-2">{label}</dt>
+            <dd className="break-words text-body">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-small text-text-2">{t(text.lastChange, { date: data.date })}</p>
+      <p className="flex flex-wrap gap-4">
+        {/* Enlaces de verdad, sin el enrutador: con una carga completa no queda nada de esta respuesta. */}
+        <a href={ROUTES.portalTaxData} className="underline">
+          {text.reveal.hide}
+        </a>
+        {canChange && (
+          <a href={CHANGE_PATH} className="underline">
+            {text.change}
+          </a>
+        )}
+      </p>
+    </section>
+  );
+}
 
 export function TaxReveal({ canChange }: { canChange: boolean }) {
   const [state, action, pending] = useActionState(revealTaxDataAction, REVEAL_IDLE, ROUTES.portalTaxData);
 
-  if (state.kind === "revealed") {
-    const { data } = state;
-    return (
-      <section className="flex flex-col gap-6">
-        <dl className="flex flex-col gap-3">
-          {[
-            [text.fields.rfc, data.rfc],
-            [text.fields.regime, regimeLabel(data.regime)],
-            [text.fields.legalName, data.legalName],
-            [text.fields.clabe, data.clabe],
-          ].map(([label, value]) => (
-            <div key={label} className="flex flex-col gap-1">
-              <dt className="text-body-s text-text-2">{label}</dt>
-              <dd className="break-words text-body">{value}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="text-small text-text-2">{t(text.lastChange, { date: data.date })}</p>
-        <p className="flex flex-wrap gap-4">
-          {/* Enlaces de verdad, sin el enrutador: con una carga completa no queda nada de esta respuesta. */}
-          <a href={ROUTES.portalTaxData} className="underline">
-            {text.reveal.hide}
-          </a>
-          {canChange && (
-            <a href={`${ROUTES.portalTaxData}?cambiar=1`} className="underline">
-              {text.change}
-            </a>
-          )}
-        </p>
-      </section>
-    );
-  }
+  if (state.kind === "revealed") return <Revealed data={state.data} canChange={canChange} />;
 
   const failure = state.kind === "failed" && state.reason !== "wrong_password" ? state.reason : null;
   const wrong = state.kind === "failed" && state.reason === "wrong_password";
@@ -105,7 +116,7 @@ export function TaxReveal({ canChange }: { canChange: boolean }) {
           {text.reveal.submit}
         </Button>
         {canChange && (
-          <a href={`${ROUTES.portalTaxData}?cambiar=1`} className="underline">
+          <a href={CHANGE_PATH} className="underline">
             {text.change}
           </a>
         )}
@@ -117,8 +128,9 @@ export function TaxReveal({ canChange }: { canChange: boolean }) {
 const NO_DRAFT = { rfc: "", regime: "", legal_name: "", clabe: "" };
 type Draft = typeof NO_DRAFT;
 
-export function TaxCapture({ seen, changing }: { seen: number; changing: boolean }) {
-  const [state, action, pending] = useActionState(saveTaxDataAction, SAVE_IDLE, ROUTES.portalTaxData);
+export function TaxCapture({ seen, changing, email = null }: { seen: number; changing: boolean; email?: string | null }) {
+  // Sin JavaScript se vuelve a esta dirección: sin `cambiar`, la pantalla pintaría el otro bloque, y el error no tendría quién lo dijera.
+  const [state, action, pending] = useActionState(saveTaxDataAction, SAVE_IDLE, changing ? CHANGE_PATH : ROUTES.portalTaxData);
   // Lo escrito, en el navegador: React devuelve el formulario a sus valores por omisión al terminar la acción, y aquí ninguna respuesta lo trae.
   const [draft, setDraft] = useState<Draft>(NO_DRAFT);
   const attempt = state.kind === "idle" ? 0 : state.attempt;
@@ -147,11 +159,13 @@ export function TaxCapture({ seen, changing }: { seen: number; changing: boolean
       <FormErrorSummary errors={errors} attempt={attempt} />
       {state.kind === "throttled" && <ThrottledAlert key={attempt} retryAt={state.retryAt} />}
       {failure !== null && (
-        <InlineAlert key={attempt} tone={failure === "changed" ? "warning" : "danger"} live>
+        <InlineAlert key={attempt} tone="danger" live>
           {FAILED[failure]}
         </InlineAlert>
       )}
       <input type="hidden" name="seen" value={seen} />
+      {/* Para el gestor de contraseñas: sin un usuario, tomaría como tal el texto anterior a la contraseña, que aquí es la CLABE. No se lee. */}
+      {email !== null && <input type="text" name="username" autoComplete="username" value={email} readOnly hidden />}
       <TextField id={FIELD_IDS.rfc} label={text.fields.rfc} name="rfc" autoComplete="off" defaultValue={draft.rfc} error={message("rfc")} />
       {/* Con su llave: una lista no toma otro valor por omisión después de montarse, y sin esto volvería a «Elige». */}
       <Select key={`regime-${attempt}`} id={FIELD_IDS.regime} label={text.fields.regime} name="regime" options={REGIME_OPTIONS} prompt={text.fields.regimePrompt} defaultValue={draft.regime} error={message("regime")} />

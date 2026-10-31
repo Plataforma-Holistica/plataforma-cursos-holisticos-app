@@ -1,6 +1,6 @@
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
-import type { VerifiedClaims } from "@/services/account/account";
+import { sessionEmail, type VerifiedClaims } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { readNotice } from "@/services/account/notice";
 import { taxDataReady, taxProfileState } from "@/services/teachers/tax-data";
@@ -23,7 +23,9 @@ export async function TaxDataSection({
   readOnly: boolean;
   search: Readonly<Record<string, string | string[] | undefined>>;
 }) {
-  const notice = readNotice(await cookieReader());
+  const reader = await cookieReader();
+  const notice = readNotice(reader);
+  const email = await sessionEmail(reader);
   const ready = await taxDataReady();
   const state = ready ? await taxProfileState(claims) : null;
   const wantsChange = search.cambiar === "1" && !readOnly;
@@ -33,10 +35,11 @@ export async function TaxDataSection({
       <h1 className="text-h1">{text.title}</h1>
       <p className="text-text-2">{text.who}</p>
       {notice === "tax_data_saved" && !wantsChange && <InlineAlert tone="success">{text.saved}</InlineAlert>}
+      {notice === "tax_data_changed" && wantsChange && <InlineAlert tone="warning">{text.changedElsewhere}</InlineAlert>}
       {!ready && <InlineAlert tone="warning">{text.off}</InlineAlert>}
       {ready && state === null && <InlineAlert tone="danger">{text.unavailable}</InlineAlert>}
-      {state !== null && state.version === 0 && (readOnly ? <p className="text-text-2">{text.readOnlyEmpty}</p> : <TaxCapture seen={0} changing={false} />)}
-      {state !== null && state.version > 0 && wantsChange && <TaxCapture seen={state.version} changing />}
+      {state !== null && state.version === 0 && (readOnly ? <p className="text-text-2">{text.readOnlyEmpty}</p> : <TaxCapture seen={0} changing={false} email={email} />)}
+      {state !== null && state.version > 0 && wantsChange && <TaxCapture seen={state.version} changing email={email} />}
       {state !== null && state.version > 0 && !wantsChange && (
         <TaxReveal canChange={!readOnly} />
       )}

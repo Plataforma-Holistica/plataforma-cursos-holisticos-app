@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
     saveTaxProfile: logged("saveTaxProfile", unknown),
     leaveNotice: logged("leaveNotice", () => undefined),
     signOut: logged("signOut", () => Promise.resolve()),
-    refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
       calls.order.push("redirect");
       throw new Error(`redirige a ${to}`);
@@ -32,7 +31,6 @@ vi.mock("@/services/teachers/tax-data", () => ({ revealTaxProfile: mocks.revealT
 vi.mock("@/services/account/account", () => ({ signOut: mocks.signOut, forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
-vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
 import { revealTaxDataAction, saveTaxDataAction } from "@/app/portal/_fiscal/actions";
 
@@ -90,9 +88,10 @@ describe("guardar", () => {
     expect(mocks.saveTaxProfile).toHaveBeenCalledWith(jar, { rfc: "GODE561231GR8", regime: "626", legalName: "Elena", clabe: CLABE, seen: 2, password: "la-de-ella" }, origin);
   });
 
-  it("sin una versión vista con forma no llama a nadie: dice que cambió y vuelve a pedir la página", async () => {
-    await expect(saveTaxDataAction(IDLE, form({ ...FIELDS, seen: "x" }))).resolves.toEqual({ kind: "failed", reason: "changed", attempt: 1 });
-    expect(calls.order).toEqual(["refresh"]);
+  it("sin una versión vista con forma no llama al servicio: va a cambiar con la de ahora", async () => {
+    await expect(saveTaxDataAction(IDLE, form({ ...FIELDS, seen: "x" }))).rejects.toThrow("redirige a /portal/datos-fiscales?cambiar=1");
+    expect(calls.order).toEqual(["leaveNotice", "redirect"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "tax_data_changed");
   });
 
   it("guardado, deja el aviso y redirige", async () => {
@@ -102,14 +101,15 @@ describe("guardar", () => {
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "tax_data_saved");
   });
 
-  it("una versión que ya no es vuelve a pedir la página, para llevar la de ahora", async () => {
+  it("una versión que ya no es va a cambiar con la de ahora, con su aviso", async () => {
     once("saveTaxProfile", { kind: "changed" });
-    await expect(saveTaxDataAction(IDLE, form(FIELDS))).resolves.toEqual({ kind: "failed", reason: "changed", attempt: 1 });
-    expect(calls.order).toEqual(["saveTaxProfile", "refresh"]);
+    await expect(saveTaxDataAction(IDLE, form(FIELDS))).rejects.toThrow("redirige a /portal/datos-fiscales?cambiar=1");
+    expect(calls.order).toEqual(["saveTaxProfile", "leaveNotice", "redirect"]);
+    expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "tax_data_changed");
   });
 
   it("ninguna respuesta trae lo escrito", async () => {
-    for (const answer of [{ kind: "invalid", problems: { clabe: "length" } }, { kind: "wrong_password" }, { kind: "changed" }, { kind: "unavailable" }, { kind: "throttled", retryAt: new Date() }]) {
+    for (const answer of [{ kind: "invalid", problems: { clabe: "length" } }, { kind: "wrong_password" }, { kind: "unavailable" }, { kind: "throttled", retryAt: new Date() }]) {
       once("saveTaxProfile", answer);
       const text = JSON.stringify(await saveTaxDataAction(IDLE, form(FIELDS)));
       for (const plain of [FIELDS.rfc, FIELDS.legal_name, CLABE, FIELDS.password]) expect(text).not.toContain(plain);

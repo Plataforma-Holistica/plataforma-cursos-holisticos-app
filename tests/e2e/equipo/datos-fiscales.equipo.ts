@@ -103,8 +103,14 @@ test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ 
   expect(await reads(ana)).toBe("0");
 
   await page.getByLabel("Tu contraseña").fill(ana.password);
+  // Lo que viaja en la respuesta de la acción, que `page.content()` no ve.
+  const answer = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes(PATH));
   await page.getByRole("button", { name: "Ver mis datos" }).click();
+  const body = await (await answer).text();
+  expect(body).toContain(`•••• ${LAST4}`);
+  for (const plain of [RFC, NAME, CLABE, ana.password]) expect(body).not.toContain(plain);
   await expect(page.getByText(`•••• ${LAST4}`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tus datos guardados" })).toBeFocused();
   await expect(page.getByText("•••• 1GR8")).toBeVisible();
   await expect(page.getByText("•••• Díaz")).toBeVisible();
   await expect(page.getByText(/Régimen Simplificado de Confianza/)).toBeVisible();
@@ -157,9 +163,39 @@ test("FL-31 sin JavaScript: captura y ve, y el documento nunca trae el dato ente
 
     await page.getByRole("link", { name: "Ocultar" }).click();
     await expect(page.getByText(`•••• ${LAST4}`)).toHaveCount(0);
+
+    // Al cambiar, un error se dice en la misma pantalla: el envío vuelve a la dirección con `cambiar`.
+    await page.getByRole("link", { name: "Cambiar" }).click();
+    await capture(page, ana.password, "123");
+    await expect(page).toHaveURL(`${PATH}?cambiar=1`);
+    await expect(page.getByText("La CLABE tiene 18 dígitos").first()).toBeVisible();
+    for (const plain of [RFC, NAME, ana.password]) expect(await page.content()).not.toContain(plain);
+    await capture(page, "no-es-la-suya");
+    await expect(page.getByText("Esa no es tu contraseña").first()).toBeVisible();
+    for (const plain of [RFC, NAME, CLABE, "no-es-la-suya"]) expect(await page.content()).not.toContain(plain);
   } finally {
     await context.close();
   }
+});
+
+test("dos ventanas en la primera captura: la segunda no pisa, y dice qué pasó", async ({ page, context }) => {
+  const ana = await person();
+  await makeTeacher(ana);
+  await signIn(page, ana, PATH);
+  const other = await context.newPage();
+  await other.goto(PATH);
+
+  await capture(page, ana.password);
+  await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
+
+  await capture(other, ana.password);
+  await expect(other).toHaveURL(`${PATH}?cambiar=1`);
+  await expect(other.getByText("Tus datos cambiaron en otra ventana.")).toBeVisible();
+  const rows = await ownerQuery<{ version: number }>(
+    `select x.version from private.teacher_tax_profiles x join public.teachers t on t.id = x.teacher_id where t.profile_id = $1`,
+    [ana.id],
+  );
+  expect(rows.map((row) => row.version)).toEqual([1]);
 });
 
 test("reenviar el formulario de ver con la contraseña equivocada no deja lectura", async ({ browser }) => {

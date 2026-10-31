@@ -17,6 +17,7 @@ export const portal = defineMessages({
     title: "Datos fiscales y bancarios",
     who: "Solo tú y el equipo de finanzas ven estos datos.",
     saved: "Tus datos quedaron guardados.",
+    changedElsewhere: "Tus datos cambiaron en otra ventana. Lo que escribiste aquí no se guardó: si quieres cambiarlos, vuelve a escribirlos.",
     lastChange: "Último cambio: {date}.",
     change: "Cambiar",
     off: "Por ahora no podemos mostrar ni guardar estos datos. Ya lo sabemos; intenta más tarde.",
@@ -27,6 +28,7 @@ export const portal = defineMessages({
       intro: "Confirma tu contraseña para ver tus datos. Se muestran ocultos en parte.",
       submit: "Ver mis datos",
       submitting: "Comprobando…",
+      title: "Tus datos guardados",
       hide: "Ocultar",
     },
     capture: {
@@ -76,8 +78,6 @@ export const portal = defineMessages({
       unavailable: "No se pudo completar. No se guardó ni se mostró nada. Intenta de nuevo.",
       off: "Por ahora no podemos mostrar ni guardar estos datos. Ya lo sabemos; intenta más tarde.",
       noProfile: "Todavía no tienes datos guardados.",
-      changed: "Tus datos cambiaron en otra ventana. Revisa lo que escribiste y vuelve a guardar.",
-      suspended: "Tu cuenta está en solo lectura: no se guardó nada.",
     },
     // `c_RegimenFiscal` del catálogo del SAT, con sus nombres (`src/domain/fiscal/regime.ts` tiene las claves).
     regimes: {

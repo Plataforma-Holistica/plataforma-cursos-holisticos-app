@@ -52,7 +52,7 @@ export type RevealState =
   | { kind: "failed"; reason: RevealFailure; attempt: number }
   | { kind: "throttled"; retryAt: string; attempt: number };
 
-export type SaveFailure = "wrong_password" | "capped" | "unavailable" | "off" | "changed" | "suspended";
+export type SaveFailure = "wrong_password" | "capped" | "unavailable" | "off";
 
 export type SaveState =
   | { kind: "idle" }
@@ -96,24 +96,29 @@ export function revealOutcome(result: TaxReveal, attempt: number): Leave | { kin
   }
 }
 
-export function saveOutcome(result: TaxSave, attempt: number): Leave | { kind: "repaint"; refresh: boolean; state: SaveState } {
-  const failed = (reason: SaveFailure, refresh = false) => ({ kind: "repaint", refresh, state: { kind: "failed", reason, attempt } }) as const;
+/** A dónde va un formulario cuya versión vista ya no es: a cambiar con la de ahora, con el aviso. Lo escrito no vuelve: pisaría sin saberlo. */
+export const changedElsewhere: Leave = { kind: "leave", to: `${ROUTES.portalTaxData}?cambiar=1`, notice: "tax_data_changed" };
+
+export function saveOutcome(result: TaxSave, attempt: number): Leave | { kind: "repaint"; state: SaveState } {
+  const failed = (reason: SaveFailure) => ({ kind: "repaint", state: { kind: "failed", reason, attempt } }) as const;
   switch (result.kind) {
     // Sin ningún dato en la respuesta, y sin un formulario que reenviar al recargar.
     case "saved":
       return { kind: "leave", to: ROUTES.portalTaxData, notice: "tax_data_saved" };
     case "invalid":
-      return { kind: "repaint", refresh: false, state: { kind: "invalid", problems: result.problems, attempt } };
+      return { kind: "repaint", state: { kind: "invalid", problems: result.problems, attempt } };
     case "throttled":
-      return { kind: "repaint", refresh: false, state: { kind: "throttled", retryAt: result.retryAt.toISOString(), attempt } };
+      return { kind: "repaint", state: { kind: "throttled", retryAt: result.retryAt.toISOString(), attempt } };
     case "not_teacher":
       return { kind: "leave", to: ROUTES.portal, notice: null };
     case "session":
       return leaveFor(result.check) ?? failed("unavailable");
-    // La página lleva la versión vista, y la franja de solo lectura: las dos cambiaron.
+    // En una primera captura, ya con datos, la pantalla pinta otra cosa: un aviso en este bloque no lo vería nadie.
     case "changed":
+      return changedElsewhere;
+    // Lo dice la franja de solo lectura.
     case "suspended":
-      return failed(result.kind, true);
+      return { kind: "leave", to: ROUTES.portalTaxData, notice: null };
     default:
       return failed(result.kind);
   }
