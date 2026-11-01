@@ -10,11 +10,16 @@
 --
 -- Por qué es así:
 --   · Cada video cuesta dinero. Crear en Mux se reclama bajo candado de fila (`video_claim`): dos pestañas o un reintento no pagan dos
---     veces. Los topes se cuentan ahí, y no al empezar: el costo depende de la duración, que recién se sabe al confirmar.
+--     veces. Los topes se cuentan ahí, y no al empezar: el costo depende de la duración, que recién se sabe al confirmar. Lo gastado en el
+--     mes vive en `private.video_usage`, que sobrevive a una caída; `rate_limit_counters` no, y solo sirve para contar una hora. Una cabecera
+--     puede mentir: al asentar manda lo que midió Mux, se cobra la diferencia, y lo que pasa del tope no se vuelve lista.
 --   · Un archivo que tardó horas no se pierde por una falla de Mux: `uploaded` espera y se reintenta. Un `creating` vencido avisa
---     (`retry`), para buscar en Mux por `passthrough` antes de crear otro.
+--     (`retry`), también después de una falla de Mux, que pudo haberlo creado: hay que buscar por `passthrough` antes de crear otro.
 --   · Mux no tiene una lista que se pueda consultar como `storage.objects`: lo que una fila deja de nombrar, también por cascada, va a
---     `private.video_trash`. Lo que `video_assets` nombra nunca sale de ahí como borrable: T-405 compartirá ruta y asset con lo publicado.
+--     `private.video_trash`, y un asset que sobra también (`video_created`). Lo que `video_assets` nombra nunca sale de ahí como borrable: T-405
+--     compartirá ruta y asset con lo publicado. La vacía su maestro al abrir el editor, y lo que no alcance, el repaso de quien opera
+--     (`video_sweep`), que ve todos los cursos.
+--   · Lo que quedó listo con el curso en revisión no se pierde: de vuelta en borrador se promueve (`video_promote`), porque ya se pagó.
 --   · Asentar lo que dice Mux (`video_settle`) no pasa por `draft_open` ni sube revisiones: el curso puede estar en revisión y el maestro
 --     suspendido, y a quien está escribiendo no se le debe contestar «cambió». Solo cambia de vigente con el curso en `draft`: lo que se
 --     revisa es lo que se publica.
@@ -105,6 +110,17 @@ create trigger draft_videos_guard before insert or update or delete on public.dr
 create trigger draft_videos_no_truncate before truncate on public.draft_videos
   for each statement execute function private.guard_draft();
 
+-- Lo gastado por maestro y mes: dinero, no un freno de una hora. El mes es el de la zona de los periodos.
+create table private.video_usage (
+  teacher_id uuid not null,
+  month date not null,
+  minutes integer not null default 0,
+  primary key (teacher_id, month),
+  constraint video_usage_minutes_ok check (minutes >= 0)
+);
+alter table private.video_usage enable row level security;
+revoke all on private.video_usage from public;
+
 -- La papelera. Nadie de la aplicación la lee: pasa por `video_trash_due`.
 create table private.video_trash (
   id bigint generated always as identity primary key,
@@ -156,7 +172,27 @@ as $$
 $$;
 revoke all on function private.video_owned(uuid) from public;
 
--- Empezar: reserva la fila y la ruta. El mismo archivo con una subida a medias la reanuda. Uno con error lo reemplaza.
+-- Si hay una lista que no es la vigente y el curso está en borrador, pasa a ser la vigente. Ya se pagó: no se pierde.
+create function private.video_promote(p_lesson uuid) returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_video uuid;
+begin
+  select v.id into v_video
+  from public.draft_videos v join public.course_registry r on r.course_id = v.course_id
+  where v.lesson_id = p_lesson and not v.is_current and v.state = 'ready' and r.state = 'draft'
+  for update of v;
+  if v_video is not null then
+    delete from public.draft_videos where lesson_id = p_lesson and is_current;
+    update public.draft_videos set is_current = true where id = v_video;
+  end if;
+end
+$$;
+revoke all on function private.video_promote(uuid) from public;
+
+-- Empezar: reserva la fila y la ruta. El mismo archivo con una subida a medias la reanuda. Uno con error lo reemplaza, y una lista no se
+-- pierde: se promueve. El mismo tope por hora, sin otra cifra: cada subida es espacio pagado aunque nunca llegue a Mux.
 create function private.video_begin(p_course uuid, p_lesson uuid, p_file_name text, p_mime text, p_size bigint) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -204,9 +240,13 @@ begin
   if v_other.id is not null and v_other.state in ('uploaded', 'creating', 'processing') then
     return pg_catalog.jsonb_build_object('answer', 'busy');
   end if;
+  if v_other.state = 'ready' then
+    perform private.video_promote(p_lesson);
+    v_other := null;
+  end if;
   insert into private.rate_limit_counters as c (bucket, window_start, hits)
   values ('video_begin:' || v_teacher, pg_catalog.date_trunc('hour', now()), 1)
-  on conflict (bucket, window_start) do update set hits = c.hits + 1 where c.hits < v_cap * 3
+  on conflict (bucket, window_start) do update set hits = c.hits + 1 where c.hits < v_cap
   returning c.hits into v_hits;
   if v_hits is null then
     return pg_catalog.jsonb_build_object('answer', 'throttled');
@@ -315,7 +355,8 @@ begin
 end
 $$;
 
--- Reclamar: el paso que gasta. Bajo candado de fila, y aquí se cuentan los topes, una sola vez por video.
+-- Reclamar: el paso que gasta. Bajo candado de fila, y aquí se cuentan los topes, una sola vez por video. `claim` identifica este reclamo:
+-- una sesión vieja no revierte el de otra. `retry` avisa que Mux pudo haberlo creado: hay que buscar antes de crear.
 create function private.video_claim(p_course uuid, p_video uuid, p_provider text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -326,9 +367,10 @@ declare
   v_cap integer := (private.parameter_value('VIDEOS_POR_HORA_MAX'))::integer;
   v_minutes_cap integer := (private.parameter_value('VIDEO_MINUTOS_MES_MAX'))::integer;
   v_open boolean := (private.parameter_value('VIDEO_SUBIDA_ABIERTA'))::boolean;
+  v_month date := pg_catalog.date_trunc('month', now() at time zone private.period_zone())::date;
   v_minutes integer;
+  v_used integer;
   v_hits integer;
-  v_retry boolean := false;
 begin
   if v_teacher is null then
     return private.draft_refusal();
@@ -344,11 +386,8 @@ begin
   if v_row.state in ('processing', 'ready', 'errored') then
     return pg_catalog.jsonb_build_object('answer', 'done');
   end if;
-  if v_row.state = 'creating' then
-    if v_row.claimed_at > now() - interval '5 minutes' then
-      return pg_catalog.jsonb_build_object('answer', 'busy');
-    end if;
-    v_retry := true;
+  if v_row.state = 'creating' and v_row.claimed_at > now() - interval '5 minutes' then
+    return pg_catalog.jsonb_build_object('answer', 'busy');
   end if;
   if p_provider is null or p_provider not in ('mux', 'test')
      or (p_provider = 'test' and not exists (select 1 from private.local_flags where flag = 'video_test')) then
@@ -360,35 +399,37 @@ begin
   if not v_open then
     return pg_catalog.jsonb_build_object('answer', 'closed');
   end if;
-  -- Primero los minutos, que no se pueden devolver si la hora dice que no: se comprueba la hora antes de escribir nada.
-  if not v_retry and v_row.claimed_at is null then
-    if (select c.hits from private.rate_limit_counters c
-        where c.bucket = 'video_claim:' || v_teacher and c.window_start = pg_catalog.date_trunc('hour', now())) >= v_cap then
-      return pg_catalog.jsonb_build_object('answer', 'throttled');
-    end if;
+  if v_row.claimed_at is null then
     v_minutes := pg_catalog.ceil(v_row.read_seconds / 60.0)::integer;
     -- Insertar no compara: un solo video que no cabe se detiene antes. Con el tope, una sola sentencia que no toca la fila.
     if v_minutes > v_minutes_cap then
       return pg_catalog.jsonb_build_object('answer', 'over_minutes');
     end if;
-    insert into private.rate_limit_counters as c (bucket, window_start, hits)
-    values ('video_minutes:' || v_teacher, pg_catalog.date_trunc('month', now()), v_minutes)
-    on conflict (bucket, window_start) do update set hits = c.hits + v_minutes where c.hits + v_minutes <= v_minutes_cap
-    returning c.hits into v_hits;
-    if v_hits is null then
+    insert into private.video_usage as u (teacher_id, month, minutes)
+    values (v_teacher, v_month, v_minutes)
+    on conflict (teacher_id, month) do update set minutes = u.minutes + v_minutes where u.minutes + v_minutes <= v_minutes_cap
+    returning u.minutes into v_used;
+    if v_used is null then
       return pg_catalog.jsonb_build_object('answer', 'over_minutes');
     end if;
     insert into private.rate_limit_counters as c (bucket, window_start, hits)
     values ('video_claim:' || v_teacher, pg_catalog.date_trunc('hour', now()), 1)
-    on conflict (bucket, window_start) do update set hits = c.hits + 1;
+    on conflict (bucket, window_start) do update set hits = c.hits + 1 where c.hits < v_cap
+    returning c.hits into v_hits;
+    if v_hits is null then
+      update private.video_usage set minutes = minutes - v_minutes where teacher_id = v_teacher and month = v_month;
+      return pg_catalog.jsonb_build_object('answer', 'throttled');
+    end if;
   end if;
   update public.draft_videos set state = 'creating', claimed_at = now(), provider = p_provider where id = p_video;
-  return pg_catalog.jsonb_build_object('answer', 'claimed', 'path', v_row.storage_path, 'mime', v_row.mime, 'retry', v_retry);
+  return pg_catalog.jsonb_build_object('answer', 'claimed', 'path', v_row.storage_path, 'mime', v_row.mime,
+                                       'retry', v_row.claimed_at is not null, 'claim', extract(epoch from now())::text);
 end
 $$;
 
--- Mux no creó el asset: vuelve a `uploaded`. Sigue reclamado (`claimed_at`), para no contar otra vez sus topes.
-create function private.video_create_failed(p_video uuid) returns jsonb
+-- Mux contestó que no: vuelve a `uploaded`, para reintentar. Sigue reclamado (`claimed_at`): sus topes no se cuentan otra vez, y el siguiente
+-- reclamo avisa que hay que buscar antes de crear, porque un 5xx o un corte no dicen que no lo haya creado.
+create function private.video_create_failed(p_video uuid, p_claim text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -397,29 +438,39 @@ begin
   if v_row.id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
-  update public.draft_videos set state = 'uploaded' where id = p_video and state = 'creating';
-  return pg_catalog.jsonb_build_object('answer', 'uploaded');
+  update public.draft_videos set state = 'uploaded'
+   where id = p_video and state = 'creating' and extract(epoch from claimed_at)::text = p_claim;
+  return pg_catalog.jsonb_build_object('answer', case when found then 'uploaded' else 'stale' end);
 end
 $$;
 
--- Anotar el asset. `gone` y `mismatch` le dicen al servidor que el que acaba de crear sobra: lo borra.
+-- Anotar el asset. Uno que sobra (`gone`, si la fila se fue mientras tanto; `mismatch`, si ya tiene otro) queda en la papelera en esta misma
+-- transacción: nada pagado se queda sin nombre, aunque el servidor falle después.
 create function private.video_created(p_video uuid, p_asset text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_row public.draft_videos := private.video_owned(p_video);
+  v_seen public.draft_videos := private.video_owned(p_video);
+  v_row public.draft_videos;
 begin
-  if v_row.id is null then
+  if v_seen.id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
   if p_asset is null or p_asset = '' then
     return pg_catalog.jsonb_build_object('answer', 'invalid');
   end if;
   select * into v_row from public.draft_videos where id = p_video for update;
-  if v_row.provider_asset_id is not null then
-    return pg_catalog.jsonb_build_object('answer', case when v_row.provider_asset_id = p_asset then 'processing' else 'mismatch' end);
+  if v_row.id is null then
+    insert into private.video_trash (teacher_id, course_id, provider, provider_asset_id)
+    values (v_seen.teacher_id, v_seen.course_id, v_seen.provider, p_asset);
+    return pg_catalog.jsonb_build_object('answer', 'gone');
   end if;
-  if v_row.state <> 'creating' then
+  if v_row.provider_asset_id = p_asset then
+    return pg_catalog.jsonb_build_object('answer', 'processing');
+  end if;
+  if v_row.provider_asset_id is not null or v_row.state <> 'creating' then
+    insert into private.video_trash (teacher_id, course_id, provider, provider_asset_id)
+    values (v_row.teacher_id, v_row.course_id, v_row.provider, p_asset);
     return pg_catalog.jsonb_build_object('answer', 'mismatch');
   end if;
   update public.draft_videos set state = 'processing', provider_asset_id = p_asset, checked_at = null where id = p_video;
@@ -428,16 +479,17 @@ end
 $$;
 
 -- Asentar lo que dijo Mux. Solo estados terminales, para que una respuesta vieja no pise; sin `draft_open` ni revisiones. Lo llama quien
--- lee el editor, o quien revisa. Se vuelve la vigente solo con el curso en borrador.
+-- lee el editor, o quien revisa. Se vuelve la vigente solo con el curso en borrador. Lo que midió Mux manda: se cobra lo que la cabecera no
+-- declaró, y lo que pasa del tope queda con error.
 create function private.video_settle(p_video uuid, p_state text, p_playback text, p_seconds integer, p_captions boolean, p_error text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_row public.draft_videos := private.video_owned(p_video);
-  v_content boolean := (select private.has_capability('content'::public.capability));
-  v_state public.course_state;
+  v_max_seconds integer := (private.parameter_value('VIDEO_DURACION_MAX'))::integer;
+  v_extra integer;
 begin
-  if v_row.id is null and not v_content then
+  if v_row.id is null and not private.actor_has_capability('content'::public.capability) then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
   select * into v_row from public.draft_videos where id = p_video for update;
@@ -452,6 +504,7 @@ begin
     if v_row.state = 'ready' and coalesce(p_captions, false) and not v_row.captions_ready then
       update public.draft_videos set captions_ready = true where id = p_video;
     end if;
+    perform private.video_promote(v_row.lesson_id);
     return pg_catalog.jsonb_build_object('answer', v_row.state);
   end if;
   if v_row.state <> 'processing' then
@@ -461,22 +514,27 @@ begin
     update public.draft_videos set state = 'errored', error_code = left(coalesce(p_error, 'unknown'), 100), settled_at = now(), checked_at = now() where id = p_video;
     return pg_catalog.jsonb_build_object('answer', 'errored');
   end if;
+  v_extra := pg_catalog.ceil(p_seconds / 60.0)::integer - pg_catalog.ceil(v_row.read_seconds / 60.0)::integer;
+  if v_extra > 0 then
+    update private.video_usage set minutes = minutes + v_extra
+     where teacher_id = v_row.teacher_id and month = pg_catalog.date_trunc('month', now() at time zone private.period_zone())::date;
+  end if;
+  if v_max_seconds is null or p_seconds > v_max_seconds then
+    update public.draft_videos set state = 'errored', error_code = 'too_long', duration_seconds = p_seconds, settled_at = now(), checked_at = now() where id = p_video;
+    return pg_catalog.jsonb_build_object('answer', 'errored');
+  end if;
   update public.draft_videos
      set state = 'ready', provider_playback_id = p_playback, duration_seconds = p_seconds,
          captions_ready = coalesce(p_captions, false), settled_at = now(), checked_at = now()
    where id = p_video;
-  select r.state into v_state from public.course_registry r where r.course_id = v_row.course_id;
-  if v_state = 'draft' then
-    -- Dos filas no vigentes no caben en el índice, y una vigente tampoco: primero se va la anterior.
-    delete from public.draft_videos where lesson_id = v_row.lesson_id and is_current;
-    update public.draft_videos set is_current = true where id = p_video;
-  end if;
+  perform private.video_promote(v_row.lesson_id);
   return pg_catalog.jsonb_build_object('answer', 'ready');
 end
 $$;
 
--- Lo que toca preguntarle a Mux o reintentar en un curso, y lo marca: una pestaña de más no multiplica las llamadas. Lo ve el maestro dueño
--- activo, o quien tiene Contenido. Los subtítulos se preguntan aparte, porque Mux los termina después de `ready`.
+-- Lo que toca preguntarle a Mux, reintentar o promover en un curso, y lo marca: una pestaña de más no multiplica las llamadas. Lo ve el maestro
+-- dueño activo; quien tiene Contenido, solo lo que hay que preguntarle a Mux, porque no reclama. Los subtítulos se preguntan aparte, porque Mux
+-- los termina después de `ready`.
 create function private.video_due(p_course uuid) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -484,16 +542,20 @@ declare
   v_owner boolean := exists (
     select 1 from public.course_drafts d join public.teachers t on t.id = d.teacher_id
     where d.course_id = p_course and t.profile_id = private.actor_id() and t.status = 'active');
+  v_draft boolean := exists (select 1 from public.course_registry r where r.course_id = p_course and r.state = 'draft');
   v_result jsonb;
 begin
-  if not v_owner and not (select private.has_capability('content'::public.capability)) then
+  if not v_owner and not private.actor_has_capability('content'::public.capability) then
     return '[]'::jsonb;
   end if;
   with due as (
     update public.draft_videos v set checked_at = now()
      where v.course_id = p_course
-       and (v.state in ('uploaded', 'processing')
-            or (v.state = 'ready' and not v.captions_ready and v.settled_at > now() - interval '6 hours'))
+       and (v.state = 'processing'
+            or (v.state = 'ready' and not v.captions_ready and v.settled_at > now() - interval '6 hours')
+            or (v_owner and v.state = 'uploaded')
+            or (v_owner and v.state = 'creating' and v.claimed_at <= now() - interval '5 minutes')
+            or (v_owner and v_draft and v.state = 'ready' and not v.is_current))
        and (v.checked_at is null or v.checked_at <= now() - interval '10 seconds')
     returning v.id, v.state, v.provider, v.provider_asset_id)
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('video', due.id, 'state', due.state, 'provider', due.provider, 'asset', due.provider_asset_id)), '[]'::jsonb)
@@ -509,6 +571,7 @@ as $$
 declare
   v_teacher uuid := private.current_active_teacher_id();
   v_answer text;
+  v_lesson uuid;
 begin
   if v_teacher is null then
     return private.draft_refusal();
@@ -517,10 +580,12 @@ begin
   if v_answer is not null then
     return pg_catalog.jsonb_build_object('answer', v_answer);
   end if;
-  if not exists (select 1 from public.draft_videos where id = p_video and course_id = p_course) then
+  select lesson_id into v_lesson from public.draft_videos where id = p_video and course_id = p_course;
+  if v_lesson is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
   delete from public.draft_videos where id = p_video;
+  perform private.video_promote(v_lesson);
   perform private.video_touch(p_course);
   return pg_catalog.jsonb_build_object('answer', 'deleted');
 end
@@ -558,7 +623,7 @@ begin
 end
 $$;
 
--- Para ver lo que subió: su maestro (también suspendido) o Contenido. La vigente, o la lista de un curso que ya no está en borrador.
+-- Para ver lo que subió: su maestro (también suspendido) o Contenido. La vigente: lo que se revisa es lo que se publica.
 create function private.video_preview(p_course uuid, p_lesson uuid) returns jsonb
 language plpgsql stable security definer set search_path = ''
 as $$
@@ -568,7 +633,7 @@ declare
     select 1 from public.course_drafts d join public.teachers t on t.id = d.teacher_id
     where d.course_id = p_course and t.profile_id = private.actor_id() and t.status in ('active', 'suspended'));
 begin
-  if not v_owner and not (select private.has_capability('content'::public.capability)) then
+  if not v_owner and not private.actor_has_capability('content'::public.capability) then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
   select * into v_row from public.draft_videos where lesson_id = p_lesson and course_id = p_course and is_current;
@@ -585,21 +650,30 @@ language sql security definer set search_path = ''
 as $$
   delete from public.draft_videos v
    where (v.state = 'uploading' and v.created_at <= now() - interval '48 hours')
+      or (v.state = 'uploaded' and v.created_at <= now() - interval '7 days')
       or (v.state = 'errored' and v.settled_at <= now() - interval '7 days')
 $$;
 revoke all on function private.video_expire() from public;
 select cron.schedule('video_expire', '23 * * * *', 'select private.video_expire()');
 
--- El repaso, de quien opera: lo que sobra en la cubeta, y lo que la papelera no alcanzó. La aplicación no lo llama.
-create function private.video_sweep() returns table (path text)
+-- El repaso, de quien opera: lo que la papelera tiene, de cualquier curso y aunque el maestro ya no vuelva, y lo que sobra en la cubeta (`trash_id`
+-- nulo). Lo que lo publicado nombra sale de la papelera sin tocar nada. La aplicación no lo llama.
+create function private.video_sweep() returns table (path text, asset text, provider text, trash_id bigint)
 language plpgsql security definer set search_path = ''
 as $$
 begin
   perform private.video_expire();
+  delete from private.video_trash x
+   where exists (select 1 from public.video_assets a
+                 where (x.provider_asset_id is not null and a.provider_asset_id = x.provider_asset_id)
+                    or (x.storage_path is not null and a.original_path = x.storage_path));
   return query
-    select o.name from storage.objects o
+    select x.storage_path, x.provider_asset_id, x.provider, x.id from private.video_trash x
+    union all
+    select o.name, null::text, null::text, null::bigint from storage.objects o
     where o.bucket_id = 'video-originals'
       and not exists (select 1 from public.draft_videos v where v.storage_path = o.name)
+      and not exists (select 1 from private.video_trash x where x.storage_path = o.name)
       and not exists (select 1 from public.video_assets a where a.original_path = o.name);
 end
 $$;
@@ -613,7 +687,7 @@ begin
     'private.video_file(uuid, uuid)',
     'private.video_confirm(uuid, uuid, boolean, integer)',
     'private.video_claim(uuid, uuid, text)',
-    'private.video_create_failed(uuid)',
+    'private.video_create_failed(uuid, text)',
     'private.video_created(uuid, text)',
     'private.video_settle(uuid, text, text, integer, boolean, text)',
     'private.video_due(uuid)',
@@ -642,7 +716,7 @@ as $$
            ('private.video_file(uuid, uuid)', true),
            ('private.video_confirm(uuid, uuid, boolean, integer)', true),
            ('private.video_claim(uuid, uuid, text)', true),
-           ('private.video_create_failed(uuid)', true),
+           ('private.video_create_failed(uuid, text)', true),
            ('private.video_created(uuid, text)', true),
            ('private.video_settle(uuid, text, text, integer, boolean, text)', true),
            ('private.video_due(uuid)', true),
@@ -654,6 +728,7 @@ as $$
            ('private.video_sweep()', false),
            ('private.video_touch(uuid)', false),
            ('private.video_owned(uuid)', false),
+           ('private.video_promote(uuid)', false),
            ('private.video_to_trash()', false)),
   found as (
     select f.signature, f.server, p.oid, p.prosecdef, p.proconfig
@@ -720,16 +795,24 @@ as $$
   from (values
       ('draft_videos_course_fk', 'FOREIGN KEY (course_id, teacher_id) REFERENCES public.course_drafts(course_id, teacher_id) ON DELETE CASCADE'),
       ('draft_videos_lesson_fk', 'FOREIGN KEY (lesson_id, course_id) REFERENCES public.draft_lessons(id, course_id) ON DELETE CASCADE'),
-      ('draft_videos_path_uq', 'UNIQUE (storage_path)')
+      ('draft_videos_path_uq', 'UNIQUE (storage_path)'),
+      ('draft_videos_current_is_ready', 'CHECK (((NOT is_current) OR (state = ''ready''::public.draft_video_state)))'),
+      ('draft_videos_provider_known', 'CHECK ((provider = ANY (ARRAY[''mux''::text, ''test''::text])))'),
+      ('draft_videos_confirmed', 'CHECK (((state = ''uploading''::public.draft_video_state) OR ((object_id IS NOT NULL) AND (object_version IS NOT NULL) AND (read_seconds > 0))))'),
+      ('draft_videos_ready_is_complete', 'CHECK (((state <> ''ready''::public.draft_video_state) OR ((provider_asset_id IS NOT NULL) AND (provider_playback_id IS NOT NULL) AND (duration_seconds > 0))))')
     ) as c (name, definition)
   where not exists (
     select 1 from pg_catalog.pg_constraint k
     where k.conrelid = 'public.draft_videos'::regclass and k.conname = c.name and k.convalidated
       and pg_catalog.pg_get_constraintdef(k.oid) = c.definition)
   union all
-  select 'video index missing', i.name
-  from (values ('public.draft_videos_current_uq'), ('public.draft_videos_other_uq'), ('public.draft_videos_asset_uq')) as i (name)
-  where pg_catalog.to_regclass(i.name) is null
+  select 'video index differs ' || i.name, 'public.draft_videos'
+  from (values
+      ('public.draft_videos_current_uq', 'CREATE UNIQUE INDEX draft_videos_current_uq ON public.draft_videos USING btree (lesson_id) WHERE is_current'),
+      ('public.draft_videos_other_uq', 'CREATE UNIQUE INDEX draft_videos_other_uq ON public.draft_videos USING btree (lesson_id) WHERE (NOT is_current)'),
+      ('public.draft_videos_asset_uq', 'CREATE UNIQUE INDEX draft_videos_asset_uq ON public.draft_videos USING btree (provider, provider_asset_id) WHERE (provider_asset_id IS NOT NULL)')
+    ) as i (name, definition)
+  where pg_catalog.to_regclass(i.name) is null or pg_catalog.pg_get_indexdef(pg_catalog.to_regclass(i.name)) is distinct from i.definition
   union all
   select 'video trash readable by ' || r.rolname, 'private.video_trash'
   from app_roles r
@@ -739,8 +822,12 @@ as $$
   from app_roles r
   where pg_catalog.has_table_privilege(r.rolname::name, 'private.local_flags', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
   union all
+  select 'video usage readable by ' || r.rolname, 'private.video_usage'
+  from app_roles r
+  where pg_catalog.has_table_privilege(r.rolname::name, 'private.video_usage', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+  union all
   select 'video job not scheduled', 'video_expire'
-  where not exists (select 1 from cron.job j where j.jobname = 'video_expire' and j.active)
+  where not exists (select 1 from cron.job j where j.jobname = 'video_expire' and j.active and j.command = 'select private.video_expire()')
   union all
   select 'video function missing', f.signature from found f where f.oid is null
   union all
@@ -761,5 +848,9 @@ as $$
   select 'video function not security definer', f.signature
   from found f
   where f.oid is not null and f.signature <> 'private.video_to_trash()' and not f.prosecdef
+  union all
+  select 'video function without search path', f.signature
+  from found f
+  where f.oid is not null and not coalesce(f.proconfig, '{}') @> array['search_path=""']
 $$;
 revoke all on function private.schema_violations_videos() from public;

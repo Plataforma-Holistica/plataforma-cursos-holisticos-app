@@ -5,7 +5,7 @@
 -- que lo publicado nombra se borra. Las reglas del área `videos` del vigilante, del carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(141);
+select plan(190);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7200000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -95,6 +95,13 @@ begin
   perform pruebas.creado(p_id, pruebas.id(p_k), p_asset);
 end
 $$;
+-- Mux falló: con el reclamo que tiene la fila.
+create function pruebas.fallo(p_id uuid, p_video uuid) returns text
+language sql as $$
+  select pruebas.r(p_id, format('private.video_create_failed(%L, %L)', p_video, (select extract(epoch from claimed_at)::text from public.draft_videos where id = p_video)))
+$$;
+create function pruebas.usado(p_n integer) returns integer language sql stable
+as $$ select minutes from private.video_usage where teacher_id = pruebas.m(p_n) $$;
 create function pruebas.basura() returns text[] language sql stable
 as $$ select coalesce(array_agg(provider_asset_id order by provider_asset_id), '{}') from private.video_trash where provider_asset_id is not null $$;
 create function pruebas.parametro(p_key text, p_value jsonb) returns void
@@ -117,6 +124,8 @@ grant insert, update on pruebas.ids to anon, authenticated, app_service;
 select pruebas.alta(pruebas.p(n), 'videos-' || n || '@prueba.test') from generate_series(1, 5) n;
 select pruebas.confirmar(pruebas.p(n)) from generate_series(1, 5) n;
 select pruebas.maestro(1), pruebas.maestro(2), pruebas.maestro(3);
+select pruebas.dar_capacidad(pruebas.p(5), 'content');
+select pruebas.equipar(pruebas.p(5));
 
 select pruebas.r(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Respirar'), 'curso');
 select pruebas.r(pruebas.p(2), format('private.draft_create(%L, %L)', gen_random_uuid(), 'De Beto'), 'beto');
@@ -128,8 +137,10 @@ select pruebas.r(pruebas.p(1), format('private.draft_add_lesson(%L, %L, 3, %L)',
 select pruebas.r(pruebas.p(1), format('private.draft_add_lesson(%L, %L, 4, %L)', pruebas.id('curso'), pruebas.id('modulo'), 'Cuatro'), 'l4');
 select pruebas.r(pruebas.p(2), format('private.draft_add_module(%L, 1, %L)', pruebas.id('beto'), 'De Beto'), 'modulo_beto');
 select pruebas.r(pruebas.p(2), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('beto'), pruebas.id('modulo_beto'), 'De Beto'), 'lb');
+select pruebas.r(pruebas.p(2), format('private.draft_add_lesson(%L, %L, 2, %L)', pruebas.id('beto'), pruebas.id('modulo_beto'), 'Falsa'), 'lb2');
 select pruebas.r(pruebas.p(3), format('private.draft_add_module(%L, 1, %L)', pruebas.id('caro'), 'De Caro'), 'modulo_caro');
 select pruebas.r(pruebas.p(3), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('caro'), pruebas.id('modulo_caro'), 'De Caro'), 'lc');
+select pruebas.r(pruebas.p(3), format('private.draft_add_lesson(%L, %L, 2, %L)', pruebas.id('caro'), pruebas.id('modulo_caro'), 'Segunda'), 'lc2');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante, la cubeta y los parámetros.
@@ -165,6 +176,9 @@ select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), '
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'x', 'clase.mp4', 0), 'invalid', 'un tamaño sin sentido');
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'x', E'cla\nse.mp4'), 'invalid', 'un nombre con un salto de línea');
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'x', 'clase.mp4', 5368709121), 'too_large', 'más que el tope');
+update private.rate_limit_counters set hits = 10 where bucket = 'video_begin:' || pruebas.m(1);
+select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'x'), 'throttled', 'con diez empezados en la hora, no: los mismos diez, sin otra cifra');
+delete from private.rate_limit_counters where bucket = 'video_begin:' || pruebas.m(1);
 select pruebas.parametro('VIDEO_SUBIDA_ABIERTA', 'false');
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'x'), 'closed', 'con el interruptor cerrado no empieza');
 select pruebas.parametro('VIDEO_SUBIDA_ABIERTA', 'true');
@@ -210,6 +224,18 @@ select is(pruebas.rechazo('l2', 1000, 'video/mp4', false, null), 'rejected:conte
 select is(pruebas.rechazo('l2', 1000, 'video/mp4', true, null), 'rejected:duration', 'sin duración legible: el tope de minutos no serviría');
 select is(pruebas.rechazo('l2', 1000, 'video/mp4', true, 7201), 'rejected:too_long', 'más de 2 h');
 select is(pruebas.rechazo('l2', 1000, 'video/mp4', true, 0), 'rejected:duration', 'una duración de 0');
+delete from private.rate_limit_counters where bucket = 'video_begin:' || pruebas.m(1);
+-- Vencida: confirmar la lleva, y empezar otra vez deja empezar.
+select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'vieja');
+update public.draft_videos set created_at = now() - interval '49 hours' where id = pruebas.id('vieja');
+select is(pruebas.r(pruebas.p(1), format('private.video_file(%L, %L)', pruebas.id('curso'), pruebas.id('vieja'))), 'not_found', 'una subida vencida ya no se renueva');
+select is(pruebas.r(pruebas.p(1), format('private.video_confirm(%L, %L, true, 60)', pruebas.id('curso'), pruebas.id('vieja'))), 'expired', 'ni se confirma');
+select is((pruebas.fila(pruebas.id('vieja'))).id, null::uuid, 'y su fila se va');
+select pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'vieja2');
+update public.draft_videos set created_at = now() - interval '49 hours' where id = pruebas.id('vieja2');
+select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), 'nueva'), 'started', 'empezar sobre una vencida la reemplaza');
+select pruebas.r(pruebas.p(1), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('nueva')));
+delete from private.rate_limit_counters where bucket = 'video_begin:' || pruebas.m(1);
 
 -- ---------------------------------------------------------------------------------------
 -- Reclamar: sin doble cobro, y los topes aquí.
@@ -217,18 +243,24 @@ select is(pruebas.rechazo('l2', 1000, 'video/mp4', true, 0), 'rejected:duration'
 select is(pruebas.rj(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'mux')) ->> 'answer', 'claimed', 'el primero reclama');
 select is(pruebas.estado(pruebas.id('v1')), 'creating', 'y queda creando');
 select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v1')), 'busy', 'el segundo no: no hay doble cobro');
-select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L)', pruebas.id('v1'))), 'uploaded', 'si Mux falla, vuelve a subido: el archivo no se pierde');
+select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('v1'), 'otro-reclamo')), 'stale', 'con un reclamo que ya no es, no revierte el de nadie');
+select is(pruebas.estado(pruebas.id('v1')), 'creating', 'sigue creando');
+select is(pruebas.fallo(pruebas.p(2), pruebas.id('v1')), 'not_found', 'otro maestro tampoco');
+select is(pruebas.fallo(pruebas.p(1), pruebas.id('v1')), 'uploaded', 'si Mux falla, vuelve a subido: el archivo no se pierde');
 select is(pruebas.estado(pruebas.id('v1')), 'uploaded', 'y se puede reintentar');
-select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v1')), 'claimed', 'reclama otra vez');
+select is(pruebas.rj(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'mux')) ->> 'retry', 'true', 'el reintento avisa: Mux pudo haberlo creado antes de fallar, y hay que buscar antes de crear');
 select is((select hits::int from private.rate_limit_counters where bucket = 'video_claim:' || pruebas.m(1)), 1, 'reintentar no gasta el cupo otra vez');
-select is((select hits::int from private.rate_limit_counters where bucket = 'video_minutes:' || pruebas.m(1)), 10, 'ni los minutos: 600 s son 10');
+select is(pruebas.usado(1), 10, 'ni los minutos: 600 s son 10');
 update public.draft_videos set claimed_at = now() - interval '6 minutes' where id = pruebas.id('v1');
 select is(pruebas.rj(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'mux')) ->> 'retry', 'true', 'un reclamo vencido se retoma, y avisa: hay que buscar en Mux antes de crear');
 select is(pruebas.creado(pruebas.p(2), pruebas.id('v1'), 'AssetOtro'), 'not_found', 'otro maestro no le pone asset');
+select ok(not 'AssetOtro' = any(pruebas.basura()), 'ni llena la papelera de otro');
 select is(pruebas.creado(pruebas.p(1), pruebas.id('v1'), 'Asset1'), 'processing', 'con el asset, procesando');
 select is((pruebas.fila(pruebas.id('v1'))).provider_asset_id, 'Asset1', 'anotado');
 select is(pruebas.creado(pruebas.p(1), pruebas.id('v1'), 'Asset1'), 'processing', 'el mismo otra vez, sin cambio');
-select is(pruebas.creado(pruebas.p(1), pruebas.id('v1'), 'AssetDos'), 'mismatch', 'otro asset no lo pisa: el servidor debe borrar el que sobra');
+select is(pruebas.usado(1), 10, 'retomar un reclamo vencido tampoco cuenta otra vez');
+select is(pruebas.creado(pruebas.p(1), pruebas.id('v1'), 'AssetDos'), 'mismatch', 'otro asset no lo pisa');
+select ok('AssetDos' = any(pruebas.basura()), 'y el que sobra queda en la papelera: nada pagado se queda sin nombre');
 select is(pruebas.r(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'test')), 'done', 'lo ya creado no se reclama');
 
 -- `test` solo con la marca que pone el guion local. En producción nadie la pone.
@@ -248,12 +280,14 @@ select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l2'), '
 update private.rate_limit_counters set hits = 10 where bucket = 'video_claim:' || pruebas.m(1);
 select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v2')), 'throttled', 'con diez en la hora, no');
 select is(pruebas.estado(pruebas.id('v2')), 'uploaded', 'y queda subido, sin perderse');
+select is(pruebas.usado(1), 10, 'sin gastar sus minutos');
+select is((pruebas.fila(pruebas.id('v2'))).claimed_at, null::timestamptz, 'y sin quedar reclamado: el siguiente intento cuenta');
 update private.rate_limit_counters set hits = 1 where bucket = 'video_claim:' || pruebas.m(1);
-update private.rate_limit_counters set hits = 1495 where bucket = 'video_minutes:' || pruebas.m(1);
+update private.video_usage set minutes = 1495 where teacher_id = pruebas.m(1);
 select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v2')), 'over_minutes', 'si no caben sus minutos en el mes, no');
-select is((select hits::int from private.rate_limit_counters where bucket = 'video_minutes:' || pruebas.m(1)), 1495, 'y lo gastado sigue como estaba');
+select is(pruebas.usado(1), 1495, 'y lo gastado sigue como estaba');
 select pruebas.parametro('VIDEO_MINUTOS_MES_MAX', '5');
-delete from private.rate_limit_counters where bucket = 'video_minutes:' || pruebas.m(1);
+delete from private.video_usage where teacher_id = pruebas.m(1);
 select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v2')), 'over_minutes', 'un solo video que no cabe, tampoco');
 select pruebas.parametro('VIDEO_MINUTOS_MES_MAX', '1500');
 select is((select hits::int from private.rate_limit_counters where bucket = 'video_claim:' || pruebas.m(1)), 1, 'y no gasta la hora');
@@ -262,6 +296,7 @@ select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v2')),
 select pruebas.parametro('VIDEO_SUBIDA_ABIERTA', 'true');
 select is(pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('v2')), 'claimed', 'abierto, sí');
 select pruebas.creado(pruebas.p(1), pruebas.id('v2'), 'Asset2');
+select is((select relpersistence::text from pg_catalog.pg_class where oid = 'private.video_usage'::regclass), 'p', 'lo gastado en el mes no se pierde con una caída: no es un contador de una hora');
 
 -- ---------------------------------------------------------------------------------------
 -- Asentar lo que dijo Mux: solo estados terminales, sin revisiones.
@@ -272,6 +307,7 @@ as $$ select (select revision from public.draft_lessons where id = p_lesson)::te
 create temporary table antes on commit drop as select pruebas.revisiones(pruebas.id('l1')) as r;
 select is(pruebas.asentar(pruebas.p(2), pruebas.id('v1'), 'ready'), 'not_found', 'otro maestro no asienta');
 select is(pruebas.asentar(pruebas.p(4), pruebas.id('v1'), 'ready'), 'not_found', 'una alumna tampoco');
+select is(pruebas.rj(pruebas.p(5), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1'), 'state', 'processing')), true, 'Contenido sí sabe qué preguntar: revisa');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'processing'), 'invalid', 'solo lo terminal');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready', null, 600), 'invalid', 'listo sin playback, no');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready'), 'ready', 'listo');
@@ -304,7 +340,10 @@ select pruebas.limpiar();
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1c'), 'ready', 'Play1c'), 'ready', 'con el curso en revisión, asentar funciona');
 select is((pruebas.fila(pruebas.id('v1c'))).is_current, false, 'pero no se vuelve la vigente');
 select is((pruebas.fila(pruebas.id('v1b'))).is_current, true, 'sigue la de antes');
-select is(pruebas.rj(pruebas.p(5), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))) ->> 'answer', 'not_found', 'sin Contenido no la ve');
+select is(pruebas.rj(pruebas.p(4), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))) ->> 'answer', 'not_found', 'sin Contenido no la ve');
+select is(pruebas.rj(pruebas.p(5), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))) ->> 'playback', 'Play1b', 'quien revisa ve la vigente');
+select is(pruebas.r(pruebas.p(5), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('v1b'))), 'not_teacher', 'y no quita');
+select is(pruebas.r(pruebas.p(5), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1b'), 'mux')), 'not_teacher', 'ni gasta');
 select pruebas.como_dueno_sistema();
 update public.course_registry set state = 'draft' where course_id = pruebas.id('curso');
 select pruebas.limpiar();
@@ -315,6 +354,28 @@ select pruebas.limpiar();
 select is(pruebas.rj(pruebas.p(1), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))) ->> 'playback', 'Play1b', 'su maestra ve la vigente');
 select is(pruebas.r(pruebas.p(2), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))), 'not_found', 'otro maestro no');
 select is(pruebas.r(pruebas.p(1), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l4'))), 'not_found', 'sin video lista, nada');
+
+-- Lo que quedó listo con el curso en revisión. De vuelta en borrador, no se pierde lo que se pagó: se promueve.
+-- Con sus subtítulos listos, para que lo único que la pida sea que falta promoverla.
+update public.draft_videos set checked_at = null, captions_ready = true where id = pruebas.id('v1c');
+select ok(pruebas.rj(pruebas.p(1), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1c'), 'state', 'ready')), 'en borrador otra vez, toca asentarla');
+select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1c'), 'ready', 'Play1c'), 'ready', 'asentar otra vez');
+select is((pruebas.fila(pruebas.id('v1c'))).is_current, true, 'la promueve');
+select is((pruebas.fila(pruebas.id('v1b'))).id, null::uuid, 'y la anterior se va');
+select is(pruebas.rj(pruebas.p(1), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('l1'))) ->> 'playback', 'Play1c', 'y se ve la nueva');
+-- Empezar otro sobre una así no la borra en silencio: se promueve primero.
+select pruebas.procesando(pruebas.p(1), pruebas.id('curso'), pruebas.id('l4'), 'v4', 'Asset4');
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'in_review' where course_id = pruebas.id('curso');
+select pruebas.limpiar();
+select pruebas.asentar(pruebas.p(1), pruebas.id('v4'), 'ready', 'Play4');
+select pruebas.como_dueno_sistema();
+update public.course_registry set state = 'draft' where course_id = pruebas.id('curso');
+select pruebas.limpiar();
+select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l4'), 'v4b', 'otra.mp4'), 'started', 'empezar otro sobre una lista que no es la vigente');
+select is((pruebas.fila(pruebas.id('v4'))).is_current, true, 'no la borra: la promueve');
+select is(pruebas.r(pruebas.p(1), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('v4b'))), 'deleted', 'cancelar');
+-- Una cabecera que declara menos de lo que dura: lo decide lo que mide Mux.
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que hay que preguntarle a Mux, con límite por fila.
@@ -334,19 +395,42 @@ select is((pruebas.fila(pruebas.id('v3'))).checked_at, null::timestamptz, 'y no 
 -- ---------------------------------------------------------------------------------------
 -- Con error, quitar, y la papelera.
 
-select pruebas.asentar(pruebas.p(1), pruebas.id('v3'), 'errored', null, null, false, 'invalid_input');
+select is(pruebas.asentar(pruebas.p(5), pruebas.id('v3'), 'errored', null, null, false, 'invalid_input'), 'errored', 'quien revisa también asienta lo que dijo Mux');
 select is((pruebas.fila(pruebas.id('v3'))).error_code, 'invalid_input', 'el error queda con su causa');
 select is(pruebas.empezar(pruebas.p(1), pruebas.id('curso'), pruebas.id('l3'), 'v3b', 'otro.mp4'), 'started', 'subir otro se lleva el que falló');
 select is((pruebas.fila(pruebas.id('v3'))).id, null::uuid, 'su fila se va');
 select ok('Asset3' = any(pruebas.basura()), 'y su asset, a la papelera');
 
 select is(pruebas.r(pruebas.p(2), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('v3b'))), 'not_found', 'otro maestro no quita');
+select is(pruebas.r(pruebas.p(1), format('private.video_remove(%L, %L)', pruebas.id('curso'), gen_random_uuid())), 'not_found', 'lo que no existe no se quita');
 select is(pruebas.r(pruebas.p(1), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('v3b'))), 'deleted', 'su maestra quita o cancela');
 select is((select count(*)::int from private.video_trash where storage_path like '%' || pruebas.id('v3b')), 1, 'y la ruta va a la papelera');
 
 -- La cascada también: borrar una lección no deja sin nombre lo que se paga.
 select is(pruebas.r(pruebas.p(1), format('private.draft_delete_lesson(%L, %L, %s)', pruebas.id('curso'), pruebas.id('l2'), (select revision from public.draft_lessons where id = pruebas.id('l2')))), 'deleted', 'borrar una lección con video');
 select ok('Asset2' = any(pruebas.basura()), 'manda su asset a la papelera');
+
+-- La cascada por módulo y por curso, también.
+select pruebas.r(pruebas.p(3), format('private.draft_add_module(%L, 2, %L)', pruebas.id('caro'), 'Otro'), 'modulo_caro2');
+select pruebas.r(pruebas.p(3), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('caro'), pruebas.id('modulo_caro2'), 'Ahí'), 'lc3');
+select pruebas.procesando(pruebas.p(3), pruebas.id('caro'), pruebas.id('lc3'), 'vc3', 'AssetModulo');
+select is(pruebas.r(pruebas.p(3), format('private.draft_delete_module(%L, %L, %s)', pruebas.id('caro'), pruebas.id('modulo_caro2'), (select revision from public.draft_modules where id = pruebas.id('modulo_caro2')))), 'deleted', 'borrar un módulo con video');
+select ok('AssetModulo' = any(pruebas.basura()), 'manda su asset a la papelera');
+select pruebas.r(pruebas.p(2), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Se va'), 'seva');
+select pruebas.r(pruebas.p(2), format('private.draft_add_module(%L, 1, %L)', pruebas.id('seva'), 'Uno'), 'modulo_seva');
+select pruebas.r(pruebas.p(2), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('seva'), pruebas.id('modulo_seva'), 'Una'), 'lseva');
+select pruebas.procesando(pruebas.p(2), pruebas.id('seva'), pruebas.id('lseva'), 'vseva', 'AssetCurso');
+select is(pruebas.r(pruebas.p(2), format('private.draft_delete_course(%L, %s)', pruebas.id('seva'), (select content_revision from public.course_drafts where course_id = pruebas.id('seva')))), 'deleted', 'borrar el curso con video, que ya no se detiene por él');
+select ok('AssetCurso' = any(pruebas.basura()), 'y su asset, a la papelera, aunque el curso ya no exista');
+
+-- Una cabecera que declara menos de lo que dura: lo decide lo que mide Mux, y se le cobra.
+select pruebas.procesando(pruebas.p(2), pruebas.id('beto'), pruebas.id('lb2'), 'falso', 'AssetFalso');
+select is(pruebas.usado(2), 30, 'lo declarado: tres videos de 600 s');
+select is(pruebas.asentar(pruebas.p(2), pruebas.id('falso'), 'ready', 'PlayFalso', 36000), 'errored', 'pasa de 2 h según Mux: no se vuelve lista');
+select is((pruebas.fila(pruebas.id('falso'))).error_code, 'too_long', 'con su causa');
+select is((pruebas.fila(pruebas.id('falso'))).is_current, false, 'ni vigente');
+select is(pruebas.usado(2), 620, 'y cuenta lo que de verdad duró: el tope no se evade con una cabecera falsa');
+select pruebas.parametro('VIDEO_MINUTOS_MES_MAX', '1500');
 
 -- Vaciar la papelera: solo lo suyo. Nada que lo publicado nombre sale de ahí como borrable.
 select ok((select bool_or(e ->> 'asset' = 'Asset1') from jsonb_array_elements(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', pruebas.id('curso')))) e), 'su maestra ve qué borrar');
@@ -375,6 +459,10 @@ select pruebas.limpiar();
 select is(pruebas.empezar(pruebas.p(3), pruebas.id('caro'), pruebas.id('lc'), 'x'), 'suspended', 'no empieza');
 select is(pruebas.r(pruebas.p(3), format('private.video_remove(%L, %L)', pruebas.id('caro'), pruebas.id('vc'))), 'suspended', 'ni quita');
 select is(pruebas.rj(pruebas.p(3), format('private.video_due(%L)', pruebas.id('caro'))), '[]'::jsonb, 'nada que preguntar');
+select is(pruebas.r(pruebas.p(3), format('private.video_confirm(%L, %L, true, 60)', pruebas.id('caro'), pruebas.id('vc'))), 'suspended', 'ni confirma');
+select is(pruebas.r(pruebas.p(3), format('private.video_claim(%L, %L, %L)', pruebas.id('caro'), pruebas.id('vc'), 'mux')), 'suspended', 'ni gasta');
+select is(pruebas.r(pruebas.p(3), format('private.video_file(%L, %L)', pruebas.id('caro'), pruebas.id('vc'))), 'suspended', 'ni renueva su subida');
+select ok(pruebas.rj(pruebas.p(3), format('private.video_trash_due(%L)', pruebas.id('caro'))) is not null, 'limpiar sí: no le da nada');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que se vence.
@@ -386,7 +474,20 @@ select is(pruebas.empezar(pruebas.p(2), pruebas.id('beto'), pruebas.id('lb'), 'v
 update public.draft_videos set created_at = now() - interval '49 hours' where id = pruebas.id('vx');
 select private.video_expire();
 select is((pruebas.fila(pruebas.id('vx'))).id, null::uuid, 'una subida sin terminar a las 48 h, también');
-select ok(exists (select 1 from cron.job where jobname = 'video_expire' and active), 'lo corre un trabajo programado');
+select pruebas.empezar(pruebas.p(2), pruebas.id('beto'), pruebas.id('lb'), 'vy', 'clase.mp4');
+select pruebas.objeto((pruebas.fila(pruebas.id('vy'))).storage_path);
+select pruebas.r(pruebas.p(2), format('private.video_confirm(%L, %L, true, 60)', pruebas.id('beto'), pruebas.id('vy')));
+update public.draft_videos set created_at = now() - interval '8 days' where id = pruebas.id('vy');
+select private.video_expire();
+select is((pruebas.fila(pruebas.id('vy'))).id, null::uuid, 'subido y sin crearse en 7 días, también: no se queda cobrando');
+select ok(exists (select 1 from cron.job where jobname = 'video_expire' and active and command = 'select private.video_expire()'), 'lo corre un trabajo programado');
+
+-- El repaso de quien opera: lo que la papelera tiene, de cualquier curso, y lo que sobra en la cubeta.
+select ok(exists (select 1 from private.video_sweep() x where x.asset = 'AssetCurso' and x.trash_id is not null), 'el repaso alcanza la papelera de un curso que ya no existe');
+select pruebas.objeto(pruebas.m(1) || '/' || pruebas.id('curso') || '/sin-fila');
+select ok(exists (select 1 from private.video_sweep() x where x.path = pruebas.m(1) || '/' || pruebas.id('curso') || '/sin-fila' and x.trash_id is null), 'y lo que sobra en la cubeta');
+insert into private.video_trash (teacher_id, course_id, provider_asset_id) values (pruebas.m(1), pruebas.id('curso'), 'AssetPublicado');
+select ok(not exists (select 1 from private.video_sweep() x where x.asset = 'AssetPublicado'), 'sin lo que lo publicado nombra');
 
 -- ---------------------------------------------------------------------------------------
 -- Quién lee y quién escribe.
@@ -432,6 +533,18 @@ revoke execute on function private.video_claim(uuid, uuid, text) from authentica
 grant select on private.video_trash to app_service;
 select ok('video trash readable by app_service' = any(pruebas.vigila()), 'la papelera a la vista se nota');
 revoke select on private.video_trash from app_service;
+grant select on private.video_usage to app_service;
+select ok('video usage readable by app_service' = any(pruebas.vigila()), 'lo gastado a la vista se nota');
+revoke select on private.video_usage from app_service;
+drop index public.draft_videos_other_uq;
+select ok('video index differs public.draft_videos_other_uq' = any(pruebas.vigila()), 'sin el índice de una en camino, se nota');
+create unique index draft_videos_other_uq on public.draft_videos (lesson_id) where not is_current;
+alter table public.draft_videos drop constraint draft_videos_current_is_ready;
+select ok('video table without constraint draft_videos_current_is_ready' = any(pruebas.vigila()), 'que una vigente no esté lista, también');
+alter table public.draft_videos add constraint draft_videos_current_is_ready check (not is_current or state = 'ready');
+alter function private.video_claim(uuid, uuid, text) reset search_path;
+select ok('video function without search path' = any(pruebas.vigila()), 'una función sin su camino de búsqueda se nota');
+alter function private.video_claim(uuid, uuid, text) set search_path = '';
 select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
 
 select * from finish();
