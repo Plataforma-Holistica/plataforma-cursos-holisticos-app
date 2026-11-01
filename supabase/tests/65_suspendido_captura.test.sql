@@ -70,11 +70,11 @@ select pruebas.como_dueno();
 
 -- Quien ya se fue, o quien solo tiene una invitación con cuenta, no guarda.
 select pruebas.como_dueno_sistema();
-update public.teachers set status = 'left' where id = :'rosa_m';
+update public.teachers set status = 'left', left_at = now(), suspended_at = null, suspension_reason = null where id = :'rosa_m';
 select pruebas.como_dueno();
 select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'not_teacher', 'quien ya se fue no guarda');
 select pruebas.como_dueno_sistema();
-update public.teachers set status = 'invited', suspended_at = null, suspension_reason = null where id = :'rosa_m';
+update public.teachers set status = 'invited', left_at = null where id = :'rosa_m';
 select pruebas.como_dueno();
 select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'not_teacher', 'quien solo tiene una invitación, tampoco');
 
