@@ -115,7 +115,7 @@ export const RELEASE_ANSWERS = [
 ] as const;
 export type ReleaseAnswer = (typeof RELEASE_ANSWERS)[number];
 /** Lo que contesta `private.hold_payout()`. */
-export const HOLD_ANSWERS = ["held", "has_tax_data", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const HOLD_ANSWERS = ["held", "has_tax_data", "under_investigation", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type HoldAnswer = (typeof HOLD_ANSWERS)[number];
 /** Lo que contesta `private.unhold_payout()`. */
 export const UNHOLD_ANSWERS = ["released_from_hold", "self", "not_held", "changed", "tax_data_missing", "withholding_rules_missing", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;

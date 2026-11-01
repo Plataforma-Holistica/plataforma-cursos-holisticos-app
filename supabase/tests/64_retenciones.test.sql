@@ -5,7 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
-select plan(119);
+select plan(143);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -420,9 +420,9 @@ select is((select array[vat_cents, income_tax_withheld_cents, vat_withheld_cents
 select is((select withholding_rule_id is null and withholding_profile_version is null and net_cents = subtotal_cents from public.payouts where id = pruebas.y('M3', 202610)), true, 'y sin regla');
 select is((select status::text from public.payouts where id = pruebas.y('M2', 202610)), 'on_hold', 'M2 sigue retenida');
 select is((pruebas.fila81('M1', 202610) ->> 'net_cents')::bigint, (select net_cents from public.payouts where id = pruebas.y('M1', 202610)), 'PA-81 lee lo liberado');
-select is((select count(*)::integer from public.audit_log a where a.entity_table like '%payouts' and (a.new_value ? 'withholding_rule_id' or a.old_value ? 'withholding_rule_id')), 0,
-  'la auditoría no dice con qué regla: configuración la lee, y la regla dice el régimen');
-select ok((select count(*) > 0 from public.audit_log a where a.entity_table like '%payouts' and a.new_value ->> 'status' = 'awaiting_invoice' and a.new_value ? 'net_cents'), 'y sí las cifras');
+select is((select count(*)::integer from public.audit_log a where a.entity_table like '%payouts' and (a.new_value ?| array['withholding_rule_id', 'vat_cents', 'income_tax_withheld_cents', 'vat_withheld_cents', 'net_cents'] or a.old_value ?| array['withholding_rule_id', 'vat_cents', 'income_tax_withheld_cents', 'vat_withheld_cents', 'net_cents'])), 0,
+  'la auditoría no dice con qué regla ni con qué impuestos: configuración la lee, y de las reglas saldría el régimen');
+select ok((select count(*) > 0 from public.audit_log a where a.entity_table like '%payouts' and a.new_value ->> 'status' = 'awaiting_invoice' and a.new_value ? 'subtotal_cents'), 'y sí el bruto y el estado');
 set constraints payouts_released immediate;
 set constraints payouts_released deferred;
 
@@ -453,6 +453,7 @@ select is((select hold_kind from public.payouts where id = pruebas.y('M2', 20261
 select throws_matching($$select pruebas.purga_y_deshace('select 1')$$, 'contestó on_hold', 'y esa sí detiene la purga');
 select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', pruebas.y('M2', 202610), 'Otra vez.', 'on_hold'))), 'already_held', 'una investigación ya no cambia');
 select throws_ok($$select pruebas.a_mano(format('update public.payouts set hold_kind = %L where id = %L', 'tax_data', pruebas.y('M2', 202610)))$$, '23514', null, 'ni vuelve a ser por datos');
+select is((select held_by from public.payouts where id = pruebas.y('M2', 202610)), pruebas.finanzas(), 'quien la pasó a investigación queda escrito');
 create temporary table vista_m2 as select private.unhold_preview(pruebas.y('M2', 202610)) ->> 'fingerprint' as huella;
 select pruebas.perfil('M2', '605', 'person');
 select isnt(private.unhold_preview(pruebas.y('M2', 202610)) ->> 'fingerprint', (select huella from vista_m2), 'capturar sus datos cambia lo que se ve');
@@ -482,7 +483,90 @@ select pruebas.como_dueno();
 select is(pruebas.y('M3', 202611), null, 'M3 no tiene liquidación en noviembre');
 select is(pruebas.o(pruebas.libera(202611)), 'tax_data_missing', 'su saldo llega al mínimo, y no tiene datos');
 select isnt(pruebas.y('M3', 202611), null, 'ya tiene liquidación');
-select is(pruebas.retiene('M3', 202611), 'held', 'y se puede retener');
+
+-- De punta a punta: se retiene por datos, captura, se suelta y se libera.
+select is(pruebas.o(pruebas.retiene_por_datos('M3', 202611)), 'held', 'se retiene por datos');
+select is((select array[hold_kind, held_from_status::text] from public.payouts where id = pruebas.y('M3', 202611)), array['tax_data', 'calculated'], 'y se ve por qué');
+select is(pruebas.o(pruebas.libera(202611)), 'released', 'y se libera a los demás');
+select is(pruebas.o(pruebas.suelta('M3', 202611)), 'tax_data_missing', 'soltarla sigue pidiendo sus datos');
+select pruebas.perfil('M3', '605', 'person');
+select is(pruebas.o(pruebas.suelta('M3', 202611)), 'withholding_rules_missing', 'y su regla');
+select pruebas.perfil('M3', '612', 'person');
+select is(pruebas.o(pruebas.suelta('M3', 202611)), 'released_from_hold', 'con los dos, sale');
+select is((select array[status::text, coalesce(hold_kind, 'sin tipo')] from public.payouts where id = pruebas.y('M3', 202611)), array['awaiting_invoice', 'sin tipo'], 'en espera de factura, y ya sin tipo');
+select is(pruebas.o(pruebas.retiene_por_datos('M3', 202611, 'awaiting_invoice')), 'not_holdable', 'una ya liberada no se retiene por datos');
+
+-- Quien se investiga no entra por aquí: esta retención no detiene la purga, y se borraría la evidencia (decisión de Sergio del 2026-11-01). Diciembre, con M4 y un bono.
+select pruebas.en_cierre(202612);
+select is(pruebas.o(pruebas.cierra(202612)), 'closed', 'diciembre se cierra');
+select pruebas.parametro('PAGO_MINIMO', '1', 202612);
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+delete from private.teacher_tax_profiles where teacher_id = pruebas.id('M4');
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.hace(format($c$private.capture_bonus(%L, 'discretionary', 500, 202612, 'Bono de la prueba.')$c$, pruebas.id('M4')))), 'captured', 'M4 con un bono');
+select is(pruebas.o(pruebas.libera(202612)), 'tax_data_missing', 'M4 llega por su bono y no tiene datos');
+-- El periodo cerrado congela las alertas: se escribe en réplica lo que en la vida real ya estaba, o se escribió a tiempo.
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+insert into public.anomaly_alerts (period_id, kind, teacher_id, metric_value, threshold_value) values (202612, 'teacher_points_jump', pruebas.id('M4'), 1, 1);
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'under_investigation', 'con una alerta abierta, no');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.anomaly_alerts set status = 'reviewed', reviewed_at = now(), reviewed_by = pruebas.finanzas(), is_fraud = false, review_note = 'No era.' where teacher_id = pruebas.id('M4') and period_id = 202612;
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'revisada y sin fraude, sí');
+select is(pruebas.o(pruebas.suelta('M4', 202612)), 'released_from_hold', 'y se suelta');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.anomaly_alerts set is_fraud = true, evidence = 'Prueba.' where teacher_id = pruebas.id('M4') and period_id = 202612;
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'under_investigation', 'decidida como fraude, no');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.anomaly_alerts set is_fraud = false where teacher_id = pruebas.id('M4') and period_id = 202612;
+update public.teachers set suspension_approved_by = pruebas.contenido(), status = 'suspended', suspended_at = now(), suspension_reason = 'prueba', profile_id = pruebas.al(4) where id = pruebas.id('M4');
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'under_investigation', 'con el fraude confirmado, tampoco');
+-- La puerta y «sobre sí».
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.teachers set suspension_approved_by = null, status = 'active', suspended_at = null, suspension_reason = null, profile_id = pruebas.finanzas() where id = pruebas.id('M4');
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'self', 'nadie retiene lo suyo');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.teachers set profile_id = pruebas.al(4) where id = pruebas.id('M4');
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.hace(format('private.hold_payout_for_tax_data(%L, %L)', pruebas.y('M4', 202612), 'calculated'), pruebas.contenido())), 'forbidden', 'sin finanzas, no');
+select pruebas.sin_codigo(pruebas.finanzas());
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'needs_fresh_code', 'sin código reciente, no');
+select pruebas.equipar(pruebas.finanzas());
+-- Y una alerta que nace después de retener detiene la purga.
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'retenida por datos');
+create function pruebas.purga_diciembre(p_sql text) returns void language plpgsql as $f$
+declare
+  v text;
+begin
+  perform pruebas.como_dueno_sistema();
+  execute p_sql;
+  alter table public.payout_periods disable trigger payout_periods_guard;
+  update public.payout_periods set closed_at = now() - interval '4000 days' where period_id = 202612;
+  alter table public.payout_periods enable trigger payout_periods_guard;
+  v := private.purge_watch_partition(202612);
+  raise exception 'la purga contestó %', v using errcode = 'P0002';
+end
+$f$;
+select throws_matching($$select pruebas.purga_diciembre('select 1')$$, 'contestó (purged|no_partition|progress_pending)', 'sin nada que investigar, no detiene la purga');
+select throws_matching($$select pruebas.purga_diciembre('set local session_replication_role = replica; delete from public.anomaly_alerts where teacher_id = pruebas.id(''M4''); insert into public.anomaly_alerts (period_id, kind, teacher_id, metric_value, threshold_value) values (202612, ''teacher_points_jump'', pruebas.id(''M4''), 2, 1); set local session_replication_role = origin')$$, 'contestó on_hold', 'con una alerta que nació después, sí');
 
 -- ---------------------------------------------------------------------------------------
 -- Las puertas.
@@ -495,6 +579,14 @@ select ok(not has_function_privilege('app_service', 'private.tax_profile_fiscal(
 alter function private.tax_profile_fiscal(uuid, integer) security definer;
 select is((select count(*)::integer from private.schema_violations_tax() where problem = 'tax_profile_fiscal reachable'), 1, 'el vigilante ve si lo fiscal en claro se abre');
 alter function private.tax_profile_fiscal(uuid, integer) security invoker;
+drop trigger audit_changes on public.payouts;
+create trigger audit_changes after insert or update on public.payouts for each row execute function private.audit_row_change('money');
+select is((select count(*)::integer from private.schema_violations_tax() where problem like 'payouts audit%'), 1, 'y si la auditoría vuelve a decir los impuestos');
+drop trigger audit_changes on public.payouts;
+create trigger audit_changes after insert or update on public.payouts for each row execute function private.audit_row_change('money', 'withholding_rule_id', 'vat_cents', 'income_tax_withheld_cents', 'vat_withheld_cents', 'net_cents');
+alter function private.hold_payout_for_tax_data(uuid, text) rename to hold_payout_for_tax_data_otra;
+select ok((select count(*) > 0 from private.schema_violations_teachers() where problem like 'teachers self rule missing%hold_payout_for_tax_data%'), 'el vigilante exige «sobre sí» en retener por datos');
+alter function private.hold_payout_for_tax_data_otra(uuid, text) rename to hold_payout_for_tax_data;
 alter table public.withholding_rules drop constraint withholding_rules_something_left;
 select is((select count(*)::integer from private.schema_violations_tax() where problem like 'tax constraint missing%'), 1, 'y si falta lo que garantiza un neto positivo');
 select ok(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure) !~ '_enc', 'lo fiscal en claro no toca lo cifrado');

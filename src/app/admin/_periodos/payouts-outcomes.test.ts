@@ -158,6 +158,8 @@ describe("liberar", () => {
     expect(readPayoutsForm(form)).toEqual({ step: "hold_for_tax", payout: "d1000000-0000-4000-8000-000000000001", status: "calculated" });
     expect(holdOutcome({ kind: "answered", answer: "has_tax_data", status: null }, PERIOD)).toEqual(failed("has_tax_data"));
     expect(payoutFailureText("has_tax_data").length).toBeGreaterThan(0);
+    expect(holdOutcome({ kind: "answered", answer: "under_investigation", status: null }, PERIOD)).toEqual(failed("under_investigation"));
+    expect(payoutFailureText("under_investigation")).toContain("motivo");
   });
 
   it("soltar sin datos o sin regla se dice por separado: la liquidación sigue retenida", () => {

@@ -217,6 +217,21 @@ describe("los impuestos en la tabla (T-409)", () => {
     expect(total([paying, unknown])).toBe(admin.periods.payouts.noTaxYet);
   });
 
+  it("en el total no entra una retenida, aunque no tenga neto", () => {
+    const paying = row({ teacherId: "b0000000-0000-4000-8000-000000000011", reachesMinimum: true, netCents: 9534 });
+    const held = row({ teacherId: "b0000000-0000-4000-8000-000000000012", reachesMinimum: true, status: "on_hold", netCents: null });
+    const heldWithNet = row({ teacherId: "b0000000-0000-4000-8000-000000000013", reachesMinimum: true, status: "on_hold", netCents: 500 });
+    const total = payoutsView(read({ payouts: [paying, held, heldWithNet] })).totals.net;
+    expect(total).toContain("95.34");
+  });
+
+  it("una retenida por datos que ya los capturó lo dice: el motivo escrito ya no es cierto", () => {
+    const held = { status: "on_hold", holdKind: "tax_data", holdReason: "Faltan sus datos fiscales o la regla de su régimen.", heldFromStatus: "calculated" } as const;
+    expect(viewOf({ ...held, hasTaxData: true, taxState: null })?.holdReason).toBe(admin.periods.payouts.heldForTaxReady);
+    expect(viewOf({ ...held, hasTaxData: false, taxState: null })?.holdReason).toContain("Faltan");
+    expect(viewOf({ ...held, hasTaxData: true, taxState: "no_rule" })?.holdReason).toContain("Faltan");
+  });
+
   it("se ofrece retener por datos a una calculada a la que le falta algo, y a una ya retenida por datos, pasar a investigación", () => {
     const noData = viewOf({ status: "calculated", taxState: "no_data", payoutId: "d1000000-0000-4000-8000-000000000001" });
     expect(noData?.holdForTax).toBe(payoutsButton.holdForTax("d1000000-0000-4000-8000-000000000001", "calculated"));

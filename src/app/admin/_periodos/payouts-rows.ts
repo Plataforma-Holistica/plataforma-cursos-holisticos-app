@@ -162,7 +162,13 @@ export function payoutsView(read: Read): PayoutsView {
       net: row.netCents === null ? text.noTaxYet : amount(row.netCents),
       taxNote: row.taxState === "no_data" ? text.taxNoData : row.taxState === "no_rule" ? text.taxNoRule : !row.hasTaxData && row.status === "on_hold" && row.reachesMinimum === true ? text.taxNoData : null,
       minimum: minimumOf(row),
-      holdReason: row.status === "on_hold" && row.holdReason !== null ? t(text.heldBecause, { reason: row.holdReason }) : null,
+      // El motivo de una retención por datos lo pone la base: cuando ya los capturó, ya no es cierto.
+      holdReason:
+        row.status === "on_hold" && row.holdKind === "tax_data" && row.taxState !== "no_data" && row.taxState !== "no_rule" && row.hasTaxData
+          ? text.heldForTaxReady
+          : row.status === "on_hold" && row.holdReason !== null
+            ? t(text.heldBecause, { reason: row.holdReason })
+            : null,
       hold:
         holdable && row.payoutId !== null && row.status !== null
           ? { ask: payoutsButton.askHold(row.payoutId, row.status), confirm: payoutsButton.hold(row.payoutId, row.status), status: row.status }
@@ -233,8 +239,10 @@ export function payoutsView(read: Read): PayoutsView {
       adjustments: sum((row) => row.adjustmentsCents),
       balance: sum((row) => row.balanceCents),
       subtotal: sum((row) => row.subtotalCents),
-      // Lo que se transfiere: una acumulada no. Si falta alguno, no hay total que decir.
-      net: read.payouts.some((row) => row.reachesMinimum === true && row.netCents === null) ? text.noTaxYet : sum((row) => (row.reachesMinimum === true ? (row.netCents ?? 0) : 0)),
+      // Lo que se transfiere: una acumulada no, y una retenida todavía no. Si falta alguno, no hay total que decir.
+      net: read.payouts.some((row) => row.reachesMinimum === true && row.status !== "on_hold" && row.netCents === null)
+        ? text.noTaxYet
+        : sum((row) => (row.reachesMinimum === true && row.status !== "on_hold" ? (row.netCents ?? 0) : 0)),
     },
     filters,
   };

@@ -132,6 +132,7 @@ export type PayoutFailure =
   | "needs_code"
   | "tax_data_missing"
   | "has_tax_data"
+  | "under_investigation"
   | "rules_missing"
   /** Soltarla la liberaría ahí mismo, y le falta lo mismo. */
   | "unhold_no_data"
@@ -242,6 +243,8 @@ export function holdOutcome(result: HoldResult, period: number): PayoutOutcome {
           return updated(period);
         case "has_tax_data":
           return failed("has_tax_data");
+        case "under_investigation":
+          return failed("under_investigation");
         case "already_held":
           return failed("already_held");
         case "changed":

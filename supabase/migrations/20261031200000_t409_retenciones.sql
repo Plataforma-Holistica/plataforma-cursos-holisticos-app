@@ -15,10 +15,11 @@ alter table public.payouts
 comment on column public.payouts.withholding_rule_id is 'La regla con que se calcularon los impuestos al liberar. Nula si no llegó al mínimo.';
 comment on column public.payouts.withholding_profile_version is 'La versión de los datos fiscales con que se calcularon. Con qué se pagó es otra cosa: T-604.';
 
--- Configuración lee la auditoría, y ahí está cada regla con su régimen: el identificador de la regla, junto al maestro, le diría el régimen de cada uno.
+-- Configuración lee la auditoría, y ahí está cada regla con su régimen y sus tasas: el identificador de la regla, o la tasa que sale de dividir, le dirían el régimen de
+-- cada maestro (decisión de Sergio del 2026-11-01). Esas cifras viven en la liquidación, y el guardián no deja cambiarlas después de liberar: el bruto y el estado se quedan.
 drop trigger audit_changes on public.payouts;
 create trigger audit_changes after insert or update on public.payouts
-  for each row execute function private.audit_row_change('money', 'withholding_rule_id');
+  for each row execute function private.audit_row_change('money', 'withholding_rule_id', 'vat_cents', 'income_tax_withheld_cents', 'vat_withheld_cents', 'net_cents');
 
 -- Por qué está retenida (decisión de Sergio del 2026-11-01): solo una investigación detiene la purga de los latidos. Una retención porque faltan los datos
 -- fiscales no: los latidos de todos los alumnos del mes se quedarían sin plazo por lo que no capture un maestro.
@@ -512,7 +513,9 @@ begin
   -- Una retención por datos pasa a investigación si aparece otra causa: esa sí detiene la purga. Solo en ese sentido.
   if old.status = 'on_hold' and new.status = 'on_hold' then
     if old.hold_kind = 'tax_data' and new.hold_kind = 'investigation' and new.held_from_status is not distinct from old.held_from_status
-       and new.held_at is not distinct from old.held_at and new.held_by is not distinct from old.held_by and private.actor_id() is not null then
+       and private.actor_id() is not null then
+      new.held_at := pg_catalog.now();
+      new.held_by := private.actor_id();
       return new;
     end if;
     raise exception '%.%: payout % stays on hold as it is', tg_table_schema, tg_table_name, old.id using errcode = '23514';
@@ -738,7 +741,7 @@ as $$
            ('purge_playback_sessions', false, false, true), ('release_preview', false, false, true),
            ('unhold_preview', false, false, true), ('finance_payouts', true, true, true),
            ('compute_withholdings', false, false, true), ('payout_tax_row', false, false, true), ('release_day', false, false, true),
-           ('hold_payout_for_tax_data', true, true, true),
+           ('hold_payout_for_tax_data', true, true, true), ('payout_under_investigation', false, false, true),
            ('raw_retention', false, false, false)),
   found as (
     select f.name, f.definer, f.server, f.fixed_path, p.oid, p.prosecdef, p.proconfig
@@ -818,6 +821,177 @@ as $$
                       and j.command = 'call private.raw_retention()')
 $$;
 
+create or replace function private.schema_violations_teachers()
+returns table (problem text, object_name text)
+language sql stable set search_path = ''
+as $$
+  with app_roles (rolname) as (
+    values ('anon'), ('authenticated'), ('service_role'), ('app_service')),
+  teacher_functions (signature, definer, callers) as (
+    values ('private.current_active_teacher_id()', true, array[]::text[]),
+           -- Un disparador: no se mira quién lo ejecuta (no hace nada fuera de su tabla), sí que no sea definer.
+           ('private.guard_publication()', false, null::text[]),
+           ('private.teacher_invitation_lock()', true, array[]::text[]),
+           ('private.teacher_name_ok(text)', false, array[]::text[]),
+           ('private.teacher_notice_pending(uuid)', true, array[]::text[]),
+           ('private.place_teacher_invitation(uuid, text, text, uuid)', true, array[]::text[]),
+           ('private.teacher_inviter_ok(uuid)', true, array[]::text[]),
+           ('private.system_invite_teacher(uuid, text)', false, array[]::text[]),
+           ('private.teacher_change_lock(uuid)', true, array[]::text[]),
+           ('private.actor_owns_teacher(uuid)', true, array[]::text[]),
+           ('private.actor_earns_in(public.period_id[])', true, array[]::text[]),
+           ('private.invite_teacher(text, text)', true, array['app_service']),
+           ('private.reinvite_teacher(uuid)', true, array['app_service']),
+           ('private.revoke_teacher_invitation(uuid)', true, array['app_service']),
+           ('private.accept_teacher_invitation(text, uuid, uuid, inet, text)', true, array['app_service']),
+           ('private.teacher_standing(text)', true, array['app_service']),
+           ('private.teacher_roster()', true, array['app_service']),
+           ('private.set_teacher_founder(uuid, date)', true, array['app_service']),
+           ('private.suspend_teacher(uuid, text, text)', true, array['app_service']),
+           ('private.lift_teacher_suspension(uuid)', true, array['app_service']),
+           ('private.propose_fraud_suspension(uuid, text)', true, array['app_service']),
+           ('private.withdraw_fraud_suspension(uuid)', true, array['app_service']),
+           ('private.decide_fraud_suspension(uuid, boolean, text, text)', true, array['app_service']),
+           ('private.fraud_suspension_queue()', true, array['app_service'])),
+  teacher_tables (relname) as (
+    values ('private.teacher_invitations'::regclass), ('private.teacher_suspension_requests'::regclass)),
+  -- «Una viva por maestro y por correo», «se acepta una vez» y «una pendiente por maestro».
+  teacher_indexes (relname, name) as (
+    values ('private.teacher_invitations'::regclass, 'teacher_invitations_live_teacher_uq'),
+           ('private.teacher_invitations'::regclass, 'teacher_invitations_live_email_uq'),
+           ('private.teacher_invitations'::regclass, 'teacher_invitations_accepted_teacher_uq'),
+           ('private.teacher_suspension_requests'::regclass, 'teacher_suspension_requests_one_pending_uq'),
+           ('private.teacher_suspension_requests'::regclass, 'teacher_suspension_requests_alert_uq')),
+  found as (
+    select f.signature, f.definer, f.callers, p.oid, p.proname, p.prosecdef, p.proconfig, p.provolatile, p.proowner
+    from teacher_functions f
+    join pg_catalog.pg_proc p on p.oid = pg_catalog.to_regprocedure(f.signature))
+  select 'teachers function missing', f.signature
+  from teacher_functions f
+  where not exists (select 1 from found where found.signature = f.signature)
+  union all
+  select 'teachers function executable by ' || r.rolname, found.oid::regprocedure::text
+  from app_roles r cross join found
+  where found.callers is not null
+    and pg_catalog.has_function_privilege(r.rolname::name, found.oid, 'EXECUTE')
+    and not r.rolname = any (found.callers)
+  union all
+  select 'teachers function not executable by ' || c, found.oid::regprocedure::text
+  from found cross join unnest(found.callers) c
+  where not pg_catalog.has_function_privilege(c::name, found.oid, 'EXECUTE')
+  union all
+  select 'teachers function security definer or without fixed search_path', found.oid::regprocedure::text
+  from found
+  where (found.prosecdef and not found.definer)
+     or not coalesce(found.proconfig, '{}') @> array['search_path=""']
+  union all
+  select 'teachers function not security definer', found.oid::regprocedure::text
+  from found
+  where found.definer and not found.prosecdef
+  union all
+  -- Toman la fila del maestro: una función estable no puede.
+  select 'teachers function not volatile', found.oid::regprocedure::text
+  from found
+  where found.proname in ('current_active_teacher_id', 'teacher_change_lock') and found.provolatile <> 'v'
+  union all
+  select 'teachers function not owned by the table owner', found.oid::regprocedure::text
+  from found
+  where found.definer
+    and found.proowner <> (select c.relowner from pg_catalog.pg_class c where c.oid = 'public.teachers'::regclass)
+  union all
+  -- Las tablas privadas: con seguridad de filas, sin permisos para la aplicación y con su auditoría.
+  select 'teachers table without row level security', x.relname::text
+  from teacher_tables x join pg_catalog.pg_class c on c.oid = x.relname
+  where not c.relrowsecurity
+  union all
+  select 'teachers table privilege for ' || r.rolname, x.relname::text
+  from teacher_tables x cross join app_roles r
+  where pg_catalog.has_table_privilege(r.rolname::name, x.relname, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+     or pg_catalog.has_any_column_privilege(r.rolname::name, x.relname, 'SELECT, INSERT, UPDATE, REFERENCES')
+  union all
+  select 'teachers unique index missing: ' || x.name, x.relname::text
+  from teacher_indexes x
+  where not exists (
+    select 1 from pg_catalog.pg_index i
+    join pg_catalog.pg_class c on c.oid = i.indexrelid
+    where i.indrelid = x.relname and c.relname = x.name and i.indisunique and i.indisvalid)
+  union all
+  select 'teachers audit trigger missing or disabled: ' || a.tgname, a.relname::text
+  from (values ('private.teacher_invitations'::regclass, 'audit_changes'),
+               ('private.teacher_suspension_requests'::regclass, 'audit_changes'),
+               ('public.teachers'::regclass, 'audit_founder')) a (relname, tgname)
+  where not exists (
+    select 1 from pg_catalog.pg_trigger tg
+    join pg_catalog.pg_proc p on p.oid = tg.tgfoid
+    where tg.tgrelid = a.relname and tg.tgname = a.tgname
+      and tg.tgenabled in ('O', 'A') and p.proname = 'audit_row_change'
+      and p.pronamespace = 'private'::regnamespace)
+  union all
+  -- La auditoría del fundador, como dinero y después de cambiar esas dos columnas.
+  select 'teachers founder audit not as money after update', 'public.teachers'
+  where not exists (
+    select 1 from pg_catalog.pg_trigger tg
+    where tg.tgrelid = 'public.teachers'::regclass and tg.tgname = 'audit_founder'
+      and (tg.tgtype & 31) = 17
+      and pg_catalog.pg_get_triggerdef(tg.oid) like '%AFTER UPDATE OF is_founder, founder_since ON public.teachers%'
+      and pg_catalog.pg_get_triggerdef(tg.oid) like '%audit_row_change(''money''%')
+  union all
+  -- La marca del fundador y la suspensión mueven dinero y acceso: ningún rol de la aplicación escribe maestros.
+  select 'teachers table writable by ' || r.rolname, 'public.teachers'
+  from app_roles r
+  where pg_catalog.has_any_column_privilege(r.rolname::name, 'public.teachers', 'INSERT, UPDATE')
+     or pg_catalog.has_table_privilege(r.rolname::name, 'public.teachers', 'DELETE, TRUNCATE')
+  union all
+  -- Los dos candados de la fila del maestro se excluyen entre sí: cambiarlo y escribir a su nombre van uno
+  -- tras otro. Sin esto, un suspendido podría enviar un curso a la vez que lo suspenden.
+  select 'teachers lock changed: ' || l.name, 'private.' || l.name
+  from (values ('teacher_change_lock', '%from public.teachers t where t.id = p_teacher for no key update%'),
+               ('current_active_teacher_id', '%for share of t%')) l (name, pattern)
+  where not exists (
+    select 1 from found
+    where found.proname = l.name and pg_catalog.pg_get_functiondef(found.oid) like l.pattern)
+  union all
+  -- Nadie actúa sobre sí: cada función de finanzas y del equipo que actúa sobre una persona nombra su comprobación.
+  select 'teachers self rule missing: ' || s.signature, s.signature
+  from (values ('private.review_alert(uuid, text, boolean, text)', '%actor_owns_teacher(v_row.teacher_id)%'),
+               ('private.exclude_consumption(public.exclusion_scope, public.period_id, uuid, uuid, uuid, integer, integer, text, text, uuid)', '%actor_earns_in(v_periods)%'),
+               ('private.revoke_exclusion(uuid, text)', '%actor_earns_in(array[v_row.period_id])%'),
+               ('private.hold_payout(uuid, text, text, uuid)', '%actor_owns_teacher(y.teacher_id)%'),
+               ('private.unhold_payout(uuid, text, text)', '%actor_owns_teacher(y.teacher_id)%'),
+               ('private.hold_payout_for_tax_data(uuid, text)', '%actor_owns_teacher(y.teacher_id)%'),
+               ('private.capture_bonus(uuid, text, bigint, public.period_id, text)', '%actor_owns_teacher(p_teacher)%'),
+               ('private.capture_adjustment(uuid, public.period_id, bigint, text, uuid)', '%actor_owns_teacher(p_teacher)%'),
+               ('private.confirm_founder_bonus(uuid)', '%actor_owns_teacher(b.teacher_id)%'),
+               ('private.void_bonus(uuid, text)', '%actor_owns_teacher(b.teacher_id)%'),
+               ('private.grant_capability(uuid, public.capability)', '%p_profile = private.actor_id()%'),
+               ('private.set_teacher_founder(uuid, date)', '%actor_owns_teacher(p_teacher)%'),
+               ('private.suspend_teacher(uuid, text, text)', '%actor_owns_teacher(p_teacher)%'),
+               ('private.current_active_teacher_id()', '%teacher_notice_pending%'),
+               ('private.decide_fraud_suspension(uuid, boolean, text, text)', '%fraud_marked_by%'),
+               ('private.fraud_suspension_queue()', '%not private.actor_owns_teacher(t.id)%'),
+               ('private.teacher_roster()', '%when private.actor_owns_teacher(t.id) then null else t.suspension_reason%')) s (signature, pattern)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(s.signature)) like s.pattern, false)
+  union all
+  -- Lo de adentro de una suspensión no lo lee el maestro.
+  select 'teachers suspension column readable by ' || r.rolname || ': ' || c.col, 'public.teachers'
+  from (values ('anon'), ('authenticated')) r (rolname)
+  cross join (values ('suspended_by'), ('suspension_approved_by'), ('suspension_reason')) c (col)
+  where pg_catalog.has_column_privilege(r.rolname::name, 'public.teachers', c.col, 'SELECT')
+  union all
+  select 'teachers trigger missing or disabled: ' || t.tgname, r.relname::text
+  -- El de cada fila: por fila (1), antes (2), al insertar (4), al borrar (8) y al cambiar (16). El de
+  -- vaciar: por sentencia (sin el 1), antes (2) y al vaciar (32).
+  from (values ('public.course_registry'::regclass), ('public.teachers'::regclass)) r (relname)
+  cross join (values ('publication_guard', 31, 31), ('publication_no_truncate', 35, 34)) t (tgname, mask, bits)
+  where not exists (
+    select 1 from pg_catalog.pg_trigger tg
+    join pg_catalog.pg_proc p on p.oid = tg.tgfoid
+    join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+    where tg.tgrelid = r.relname and tg.tgname = t.tgname
+      and tg.tgenabled in ('O', 'A') and n.nspname = 'private' and p.proname = 'guard_publication'
+      and (tg.tgtype & t.mask) = t.bits)
+$$;
+
 create or replace function private.schema_violations_tax()
 returns table (problem text, object_name text)
 language sql stable set search_path = ''
@@ -893,13 +1067,13 @@ as $$
   -- Lo que garantiza que el neto sea positivo, y que regla y versión vayan juntas.
   select 'tax constraint missing: ' || c.name, c.name
   from (values ('withholding_rules_something_left', 'public.withholding_rules'), ('payouts_withholding_together', 'public.payouts'),
-               ('payouts_hold_kind_when_held', 'public.payouts')) c (name, table_name)
+               ('payouts_hold_kind_when_held', 'public.payouts'), ('payouts_hold_kind_known', 'public.payouts')) c (name, table_name)
   where not exists (select 1 from pg_catalog.pg_constraint k where k.conname = c.name and k.conrelid = c.table_name::regclass and k.convalidated)
   union all
-  -- La auditoría de las liquidaciones no dice con qué regla: configuración la lee, y la regla dice el régimen.
+  -- La auditoría de las liquidaciones no dice con qué regla ni con qué impuestos: configuración la lee, y las reglas dicen el régimen.
   select 'payouts audit names the withholding rule', 'public.payouts'
   where not exists (select 1 from pg_catalog.pg_trigger tg where tg.tgrelid = 'public.payouts'::regclass and tg.tgname = 'audit_changes'
-                      and pg_catalog.pg_get_triggerdef(tg.oid) like '%withholding_rule_id%')
+                      and pg_catalog.pg_get_triggerdef(tg.oid) like '%withholding_rule_id%vat_cents%income_tax_withheld_cents%vat_withheld_cents%net_cents%')
   union all
   -- Toda otra función que nombre la tabla es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
   select 'tax function not in the list', p.proname::text
@@ -1002,6 +1176,18 @@ begin
 end
 $$;
 
+-- ¿Hay algo que investigar de ese maestro en ese mes? Una alerta suya abierta o decidida como fraude, o su fraude confirmado. Una retención por datos no se le aplica,
+-- y no deja correr la purga aunque la alerta nazca después.
+create function private.payout_under_investigation(p_teacher uuid, p_period public.period_id) returns boolean
+language sql stable set search_path = ''
+as $$
+  select exists (select 1 from public.anomaly_alerts a
+                 where a.teacher_id = p_teacher and a.period_id = p_period and (a.status = 'open' or a.is_fraud is true))
+      or exists (select 1 from public.teachers t where t.id = p_teacher and t.suspension_approved_by is not null)
+$$;
+revoke all on function private.payout_under_investigation(uuid, public.period_id) from public;
+
+
 -- Retener porque le faltan sus datos o la regla de su régimen, para liberar a los demás. Sin motivo que escribir, y no detiene la purga de los latidos. Solo una
 -- calculada, y solo si de verdad le falta: si no, sería una manera de retener sin detener la purga.
 create function private.hold_payout_for_tax_data(p_payout uuid, p_seen text) returns jsonb
@@ -1011,6 +1197,7 @@ declare
   v_gate text;
   v_period public.period_id;
   y public.payouts;
+  v_state text;
 begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'holds run in read committed' using errcode = '25000';
@@ -1042,7 +1229,15 @@ begin
   if y.status <> 'calculated' then
     return pg_catalog.jsonb_build_object('outcome', 'not_holdable', 'status', y.status);
   end if;
-  if private.payout_tax_row(y.teacher_id, 1, 0) ->> 'tax_state' = 'ready' then
+  -- Esta retención no detiene la purga: con una alerta abierta o un fraude, finanzas retiene con su motivo (decisión de Sergio del 2026-11-01).
+  if private.payout_under_investigation(y.teacher_id, y.period_id) then
+    return '{"outcome": "under_investigation"}'::jsonb;
+  end if;
+  -- Lo mismo que le pediría liberar: quien no llega al mínimo tampoco la necesita.
+  select x.value #>> '{tax,tax_state}' into v_state
+  from pg_catalog.jsonb_array_elements(private.release_preview(y.period_id) -> 'rows') x
+  where (x.value ->> 'payout_id')::uuid = y.id;
+  if v_state is null or v_state not in ('no_data', 'no_rule') then
     return '{"outcome": "has_tax_data"}'::jsonb;
   end if;
   update public.payouts x set status = 'on_hold', hold_kind = 'tax_data', hold_reason = 'Faltan sus datos fiscales o la regla de su régimen.'
@@ -1081,8 +1276,9 @@ begin
   end if;
   -- Ya en retención, la fila del periodo, sin esperarla: retener toma la misma.
   perform 1 from public.payout_periods p where p.period_id = p_period for no key update nowait;
-  -- Solo lo que se investiga detiene la purga: una retención porque faltan datos dejaría sin plazo los latidos de todos.
-  if exists (select 1 from public.payouts y where y.period_id = p_period and y.status = 'on_hold' and y.hold_kind <> 'tax_data') then
+  -- Solo lo que se investiga detiene la purga: una retención porque faltan datos dejaría sin plazo los latidos de todos. Si nació una alerta después de retenerla, se investiga.
+  if exists (select 1 from public.payouts y where y.period_id = p_period and y.status = 'on_hold'
+             and (y.hold_kind is distinct from 'tax_data' or private.payout_under_investigation(y.teacher_id, y.period_id))) then
     return 'on_hold';
   end if;
   if pg_catalog.to_regclass('public.' || pg_catalog.quote_ident(v_name)) is null then
