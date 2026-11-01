@@ -396,7 +396,9 @@ const dueList = z.array(
     current: z.boolean(),
   }),
 );
-const trashList = z.array(z.strictObject({ id: z.number().int(), provider: z.string().nullable(), asset: z.string().nullable(), path: z.string().nullable() }));
+const trashList = z.array(
+  z.strictObject({ id: z.number().int(), provider: z.string().nullable(), asset: z.string().nullable(), path: z.string().nullable(), video: id.nullable(), since: z.number().int().nullable() }),
+);
 
 export async function askVideoDue(tx: Tx, course: string) {
   const [row] = await tx.query(sql`select private.video_due(${course}::uuid) as result`, resultRow);

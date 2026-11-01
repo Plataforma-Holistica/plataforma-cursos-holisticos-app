@@ -102,7 +102,8 @@ export function VideoUploadsProvider({ course, lessons, checkEverySeconds, child
     checking.current = true;
     try {
       const answer = await checkVideosAction({ course });
-      setBlocked(answer.blocked);
+      // Una pasada solo habla de lo que le tocó: lo que no le tocó sigue como estaba. Un video que ya avanzó deja de decirlo solo (`VideoBlock`).
+      setBlocked((current) => ({ ...current, ...answer.blocked }));
     } catch (error) {
       unstable_rethrow(error);
     } finally {

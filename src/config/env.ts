@@ -71,10 +71,12 @@ function looksLikePrivateKey(value: string): boolean {
   }
 }
 
-/** Si esa dirección es de esta máquina: Mux baja el video de ahí, y no llegaría. */
-function isThisMachine(url: string | undefined): boolean {
-  if (url === undefined || !URL.canParse(url)) return false;
-  return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
+// Direcciones que no se alcanzan desde fuera: esta máquina, su red y Docker.
+const notReachable = /^(localhost|\[::1\]|0\.0\.0\.0|127\.[0-9.]+|10\.[0-9.]+|192\.168\.[0-9.]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9.]+|[^.]+\.local|[^.]+\.internal|host\.docker\.internal)$/;
+
+/** Si Mux no alcanzaría esa dirección: baja el video de ahí, y cada video se cobraría como error. */
+function isUnreachable(url: string | undefined): boolean {
+  return url !== undefined && URL.canParse(url) && notReachable.test(new URL(url).hostname);
 }
 
 // El nombre de un servidor y nada más: sin protocolo, sin ruta, sin usuario.
@@ -155,7 +157,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if (present.VIDEO_PROVIDER === "mux") {
     if (present.MUX_TOKEN_ID === undefined) failed.add("MUX_TOKEN_ID");
     if (present.MUX_TOKEN_SECRET === undefined) failed.add("MUX_TOKEN_SECRET");
-    if (isThisMachine(present.NEXT_PUBLIC_SUPABASE_URL)) failed.add("VIDEO_PROVIDER");
+    if (isUnreachable(present.NEXT_PUBLIC_SUPABASE_URL)) failed.add("VIDEO_PROVIDER");
   }
   // Las llaves de los datos fiscales van juntas, y la que cifra tiene que estar en la lista.
   if ((present.PII_ENCRYPTION_KEYS === undefined) !== (present.PII_ENCRYPTION_ACTIVE_VERSION === undefined)) {

@@ -10,14 +10,18 @@ import { getEnv } from "@/config/env";
 //     un error solo se lee su tipo, y solo si tiene forma de tipo.
 //   · Nada lanza. Quien llama decide qué hacer con «no se supo», que nunca se confunde con «no está»: buscar que no pudo terminar da nulo,
 //     porque con «no está» se crearía otro y se pagaría dos veces.
+//   · Crear distingue un rechazo de lo que no se sabe. Un 4xx dice que no lo creó. Un 5xx o un corte no dicen nada, y abortar no cancela allá: quien
+//     llama espera antes de buscar, porque un asset recién creado puede tardar en aparecer en la lista.
 //   · `GET /assets` no filtra por `passthrough`, trae los más nuevos primero (medido) y por eso buscar se detiene al pasar de cuando
-//     nació la fila, con una hora de margen por los relojes. Un 404 es que ya no está; un id que no reconoce contesta 400 (medido), y
-//     eso no dice que se haya ido.
+//     nació la fila, con una hora de margen por los relojes. Va por cursor (medido): con páginas, borrar uno a media búsqueda se saltaría otro.
+//     Un 404 es que ya no está; un id que no reconoce contesta 400 (medido), y eso no dice que se haya ido.
 
 const ROOT = "https://api.mux.com/video/v1/assets";
 const TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 100;
 const MAX_PAGES = 50;
+/** Buscar corre mientras la pantalla espera, y las demás acciones del editor esperan detrás. */
+const SEARCH_BUDGET_MS = 20_000;
 const CLOCK_MARGIN_SECONDS = 3600;
 const ERROR_TYPE = /^[a-z_]{1,60}$/;
 
@@ -33,8 +37,8 @@ export interface ProviderAsset {
 }
 
 export interface VideoProvider {
-  /** El id del asset creado, o nulo si no se supo: un corte no dice que no lo haya creado. */
-  create: (input: { url: string; passthrough: string }) => Promise<string | null>;
+  /** El id del asset creado, `rejected` si dijo que no, o nulo si no se supo: un corte no dice que no lo haya creado. */
+  create: (input: { url: string; passthrough: string }) => Promise<string | "rejected" | null>;
   /** Lo que dice del asset, `gone` si ya no está, o nulo si no se supo. `declared` son los segundos que leyó el servidor: Mux no los usa. */
   read: (asset: string, declared?: number | null) => Promise<ProviderAsset | "gone" | null>;
   /** Los assets con ese `passthrough`, del más nuevo al más viejo, o nulo si no se pudo terminar de buscar. */
@@ -63,7 +67,7 @@ function assetOf(data: unknown): ProviderAsset | null {
   };
 }
 
-export function createMuxAssets(base: typeof fetch = fetch): VideoProvider {
+export function createMuxAssets(base: typeof fetch = fetch, now: () => number = Date.now): VideoProvider {
   const call = (url: string, init: RequestInit = {}) => {
     const { MUX_TOKEN_ID, MUX_TOKEN_SECRET } = getEnv();
     const authorization = `Basic ${Buffer.from(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`).toString("base64")}`;
@@ -85,6 +89,7 @@ export function createMuxAssets(base: typeof fetch = fetch): VideoProvider {
             passthrough,
           }),
         });
+        if (response.status >= 400 && response.status < 500) return "rejected";
         if (!response.ok) return null;
         const data = await dataOf(response);
         return isRecord(data) && typeof data.id === "string" ? data.id : null;
@@ -103,19 +108,23 @@ export function createMuxAssets(base: typeof fetch = fetch): VideoProvider {
     },
     findByPassthrough: async (passthrough, since) => {
       const found: string[] = [];
+      const started = now();
+      let cursor: unknown = null;
       try {
-        for (let page = 1; page <= MAX_PAGES; page += 1) {
-          const response = await call(`${ROOT}?limit=${PAGE_SIZE}&page=${page}`);
+        for (let page = 1; page <= MAX_PAGES && now() - started < SEARCH_BUDGET_MS; page += 1) {
+          const response = await call(`${ROOT}?limit=${PAGE_SIZE}${typeof cursor === "string" ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
           if (!response.ok) return null;
-          const data = await dataOf(response);
-          if (!Array.isArray(data)) return null;
-          for (const each of data) {
+          const body: unknown = await response.json();
+          const data: unknown = isRecord(body) ? body.data : undefined;
+          if (!isRecord(body) || !Array.isArray(data)) return null;
+          for (const each of data as unknown[]) {
             if (!isRecord(each) || typeof each.id !== "string") return null;
             if (each.passthrough === passthrough) found.push(each.id);
           }
-          const last: unknown = data.at(-1);
+          const last: unknown = (data as unknown[]).at(-1);
           const reachedBirth = isRecord(last) && Number(last.created_at) < since - CLOCK_MARGIN_SECONDS;
-          if (data.length < PAGE_SIZE || reachedBirth) return found;
+          cursor = body.next_cursor;
+          if (typeof cursor !== "string" || reachedBirth) return found;
         }
         return null;
       } catch {

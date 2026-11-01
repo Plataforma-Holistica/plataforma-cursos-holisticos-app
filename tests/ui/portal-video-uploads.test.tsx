@@ -519,11 +519,27 @@ describe("preguntar por lo que ya llegó", () => {
     ["throttled", /en poco tiempo/],
     ["over_minutes", /tope de minutos/],
     ["closed", /en pausa/],
+    ["failing", /no hemos podido procesarlo/],
   ])("dice por qué un video recibido no se procesa (%s), sin decir que se perdió", async (kind, text) => {
     actions.checkVideosAction.mockResolvedValue({ blocked: { [VIDEO]: kind } });
     render(<Screen row={RECEIVED} />);
     expect(await screen.findByText(text)).toBeTruthy();
     expect(screen.getByText(/Tu video está guardado/)).toBeTruthy();
+  });
+
+  it("una pasada que no habla de este video no le quita el aviso: solo cambia si le tocó", async () => {
+    vi.useFakeTimers();
+    actions.checkVideosAction.mockResolvedValueOnce({ blocked: { [VIDEO]: "closed" } });
+    render(<Screen row={RECEIVED} every={15} />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/en pausa/)).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/en pausa/)).toBeTruthy();
+    actions.checkVideosAction.mockResolvedValueOnce({ blocked: { [VIDEO]: "throttled" } });
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(screen.getByText(/en poco tiempo/)).toBeTruthy();
+    expect(screen.queryByText(/en pausa/)).toBeNull();
   });
 
   it("lo que le pasa a otro video, o a uno que ya no está recibido, no se dice aquí", async () => {

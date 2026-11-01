@@ -25,7 +25,7 @@ import { useVideoUploads } from "./video-uploads";
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 
 const text = portal.editor.videos;
-const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed };
+const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed, failing: text.blocked.failing };
 const percentOf = (loaded: number, total: number) => (total > 0 ? Math.floor((Math.min(loaded, total) / total) * 100) : 0);
 
 interface Props {

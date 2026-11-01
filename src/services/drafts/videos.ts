@@ -22,13 +22,17 @@ import type { VideoProvider, VideoProviderName, VideoProviders } from "@/service
 // (`video_due`, que limita por fila) y al proveedor cómo va. Cada video cuesta dinero, y de ahí el orden al crear:
 //
 //   · Primero se reclama: la base toma la fila y cuenta los topes, una sola vez por video. Dos pestañas no pagan dos veces.
-//   · Un reintento busca antes de crear (`retry`), porque un 5xx o un corte no dicen que Mux no lo haya creado. Si la búsqueda no pudo
-//     terminar, no se crea: la fila vuelve a `uploaded` y se intenta después. El archivo no se pierde, y solo se pierde tiempo.
+//   · Un reintento busca antes de crear (`retry`). Si la búsqueda no pudo terminar, no se crea: la fila vuelve a `uploaded` y se intenta
+//     después. El archivo no se pierde, y solo se pierde tiempo.
+//   · Si Mux dijo que no (un 4xx), la fila vuelve a `uploaded` y se le dice a quien mira. Si no se supo (un 5xx, un corte), se queda en `creating`:
+//     pudo haberlo creado, y un asset recién creado puede no aparecer todavía en la lista. A los 5 minutos el reclamo vence y el reintento lo busca.
+//     Igual si el servidor muere entre crear y anotar.
 //   · Lo que se encontró de más se anota también: la base se queda con uno y manda los otros a la papelera en la misma transacción.
-//   · Si el servidor muere entre crear y anotar, el reclamo se vence a los 5 minutos y el reintento lo encuentra.
+//   · Lo que sale de la papelera reclamado y sin asset se busca antes de sacarlo: si no, quitar un video después de una respuesta perdida dejaría
+//     un asset pagado que nada nombra. La base no lo da hasta 5 minutos después, por lo mismo que un reintento espera.
 //
-// A Mux se le lee sin tener nada tomado, y solo se escriben estados terminales: una respuesta vieja no pisa. Si no contesta, no se insiste
-// en esta pasada: con 10 videos, serían 10 esperas por cada pregunta del editor.
+// A Mux se le lee sin tener nada tomado, y solo se escriben estados terminales: una respuesta vieja no pisa. Las acciones de una pantalla van en
+// fila, y mientras esto corre «Guardar» espera: por eso cada pasada tiene un presupuesto de tiempo, y lo que no alcance queda para la siguiente.
 
 const OPEN = ["not_found", "not_editable", "suspended", "not_teacher"] as const;
 export const VIDEO_BEGIN_ANSWERS = ["started", "resumed", "pending", "busy", "closed", "throttled", "too_large", "invalid", "unavailable", ...OPEN] as const;
@@ -68,6 +72,10 @@ export interface TrashedVideo {
   provider: string | null;
   asset: string | null;
   path: string | null;
+  /** El `passthrough`, si hay que buscar. */
+  video: string | null;
+  /** Desde cuándo buscar: la fila se fue reclamada y sin asset, y Mux pudo haberlo creado. */
+  since: number | null;
 }
 
 export interface VideosStore {
@@ -102,6 +110,8 @@ export interface DraftVideosDeps {
   providers: VideoProviders;
   checkSession: (reader: CookieReader) => Promise<SessionCheck>;
   report: (code: FailureCode) => Promise<void>;
+  /** El reloj del presupuesto de cada pasada. */
+  now?: () => number;
 }
 
 type Refused = { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> } | { kind: "unknown" } | { kind: "invalid" };
@@ -113,7 +123,7 @@ export type VideoBeginResult =
 export type VideoRenewResult = { kind: "renewed"; token: string } | { kind: Exclude<VideoFileAnswer, "ok"> } | Refused;
 export type VideoConfirmResult = { kind: "rejected"; reason: VideoRejectReason | null } | { kind: Exclude<VideoConfirmAnswer, "rejected"> } | Refused;
 /** Por qué un video recibido no se está procesando, si quien lo subió puede saberlo. */
-export type VideoBlocked = "throttled" | "over_minutes" | "closed";
+export type VideoBlocked = "throttled" | "over_minutes" | "closed" | "failing";
 export type VideoCheckResult = { kind: "checked"; changed: boolean; blocked: Record<string, VideoBlocked> } | Refused;
 
 interface VideoPass {
@@ -123,9 +133,15 @@ interface VideoPass {
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const isId = (value: string) => ID.test(value);
-const isBlocked = (answer: VideoClaimAnswer): answer is VideoBlocked => answer === "throttled" || answer === "over_minutes" || answer === "closed";
+/** Lo que una pasada puede tardar, por etapa. Una llamada a Mux espera hasta 10 s, y buscar hasta 20. */
+const PASS_BUDGET_MS = 15_000;
+/** La base da un renglón a la vez: lo que da cuenta como intentado, y solo debe contar lo que de verdad se intenta. */
+const TRASH_TURNS = 100;
+const isBlocked = (answer: VideoClaimAnswer): answer is Exclude<VideoBlocked, "failing"> => answer === "throttled" || answer === "over_minutes" || answer === "closed";
 
 export function createDraftVideos(deps: DraftVideosDeps) {
+  const now = deps.now ?? Date.now;
+
   /** Corre la guarda y escribe a nombre de la sesión que pasó. Lo que no tiene forma no llega a nadie. */
   async function guarded<Result>(reader: CookieReader, wellFormed: boolean, work: (claims: VerifiedClaims) => Promise<Result>): Promise<Result | Refused> {
     if (!wellFormed) return { kind: "invalid" };
@@ -196,23 +212,45 @@ export function createDraftVideos(deps: DraftVideosDeps) {
     });
   }
 
+  /** Saca un renglón de la papelera. Falso si algo falló, y entonces se queda. */
+  async function emptyOne(claims: VerifiedClaims, course: string, item: TrashedVideo): Promise<boolean> {
+    const provider = deps.providers.of(item.provider);
+    const search = item.since !== null && item.video !== null ? { video: item.video, since: item.since } : null;
+    const assets = item.asset === null ? [] : [item.asset];
+    if (search !== null || assets.length > 0) {
+      // Sin llaves no se puede: el archivo se queda con él, para no perder el rastro de lo que se paga.
+      if (provider === null) return true;
+      if (search !== null) {
+        const found = await provider.findByPassthrough(search.video, search.since);
+        if (found === null) return false;
+        assets.push(...found);
+      }
+      for (const asset of assets) {
+        if (!(await provider.remove(asset))) return false;
+      }
+    }
+    try {
+      if (item.path !== null) await deps.files.remove([item.path]);
+      await deps.store.trashDone(claims, { course, id: item.id });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Vacía la papelera de ese curso. Una falla no tumba lo que ya se hizo: lo que no salió se queda en ella, y se reintenta. */
   async function cleanUp(claims: VerifiedClaims, course: string): Promise<void> {
+    const deadline = now() + PASS_BUDGET_MS;
+    const tried = new Set<number>();
     let failed = false;
     try {
-      for (const item of await deps.store.trashDue(claims, course)) {
-        const provider = deps.providers.of(item.provider);
-        // Sin llaves no se puede borrar el asset: el archivo se queda con él, para no perder el rastro de lo que se paga.
-        if (item.asset !== null && provider === null) continue;
-        if (item.asset !== null && provider !== null && !(await provider.remove(item.asset))) {
-          failed = true;
-          continue;
-        }
-        try {
-          if (item.path !== null) await deps.files.remove([item.path]);
-          await deps.store.trashDone(claims, { course, id: item.id });
-        } catch {
-          failed = true;
+      for (let turn = 0; turn < TRASH_TURNS && now() < deadline; turn += 1) {
+        const items = (await deps.store.trashDue(claims, course)).filter((item) => !tried.has(item.id));
+        if (items.length === 0) break;
+        for (const item of items) {
+          if (now() >= deadline) break;
+          tried.add(item.id);
+          if (!(await emptyOne(claims, course, item))) failed = true;
         }
       }
     } catch {
@@ -221,42 +259,46 @@ export function createDraftVideos(deps: DraftVideosDeps) {
     if (failed) await deps.report("video_cleanup_failed");
   }
 
-  /** Crea en el proveedor lo reclamado. Falso si no contestó. */
-  async function createAsset(claims: VerifiedClaims, course: string, video: string, name: VideoProviderName, provider: VideoProvider, pass: VideoPass): Promise<boolean> {
+  /** Crea en el proveedor lo reclamado. */
+  async function createAsset(claims: VerifiedClaims, course: string, video: string, name: VideoProviderName, provider: VideoProvider, pass: VideoPass): Promise<void> {
     const claim = await deps.store.claim(claims, { course, video, provider: name });
     if (isBlocked(claim.answer)) pass.blocked[video] = claim.answer;
-    if (claim.answer !== "claimed") return true;
+    if (claim.answer !== "claimed") return;
     if (claim.path === null || claim.claim === null || claim.since === null) throw new Error("claimed without its facts");
     pass.changed = true;
-    const giveUp = async (code: FailureCode) => {
+    const back = async (code: FailureCode, failing: boolean) => {
       if (claim.claim !== null) await deps.store.createFailed(claims, { video, claim: claim.claim });
+      if (failing) pass.blocked[video] = "failing";
       await deps.report(code);
-      return false;
     };
     let assets: string[] = [];
     if (claim.retry) {
       const found = await provider.findByPassthrough(video, claim.since);
-      if (found === null) return giveUp("video_provider_unavailable");
+      if (found === null) return back("video_provider_unavailable", false);
       assets = found;
     }
     if (assets.length === 0) {
       const url = await deps.files.signForProvider(claim.path);
-      if (url === null) return giveUp("video_original_unavailable");
+      if (url === null) return back("video_original_unavailable", true);
       const asset = await provider.create({ url, passthrough: video });
-      if (asset === null) return giveUp("video_provider_unavailable");
+      if (asset === "rejected") return back("video_provider_unavailable", true);
+      if (asset === null) {
+        // Pudo haberlo creado: se queda reclamado, y el reintento lo busca cuando venza.
+        await deps.report("video_provider_unavailable");
+        return;
+      }
       assets = [asset];
     }
     for (const asset of assets) await deps.store.created(claims, { course, video, provider: name, asset });
-    return true;
   }
 
-  /** Asienta lo que dice el proveedor. Falso si no contestó. */
-  async function settleAsset(claims: VerifiedClaims, row: DueVideo, provider: VideoProvider, pass: VideoPass): Promise<boolean> {
-    if (row.asset === null) return true;
+  /** Asienta lo que dice el proveedor. */
+  async function settleAsset(claims: VerifiedClaims, row: DueVideo, provider: VideoProvider, pass: VideoPass): Promise<void> {
+    if (row.asset === null) return;
     const read = await provider.read(row.asset, row.seconds);
     if (read === null) {
       await deps.report("video_provider_unavailable");
-      return false;
+      return;
     }
     const failed = (error: string) => ({ video: row.video, state: "errored" as const, playback: null, seconds: null, captions: false, error });
     const finish = async (input: Parameters<VideosStore["settle"]>[1]) => {
@@ -265,28 +307,27 @@ export function createDraftVideos(deps: DraftVideosDeps) {
     };
     if (read === "gone") {
       if (row.state === "processing") await finish(failed("provider_gone"));
-      return true;
+      return;
     }
     if (read.state === "errored") {
       if (row.state === "processing") await finish(failed(read.error ?? "unknown"));
-      return true;
+      return;
     }
-    if (read.state !== "ready") return true;
+    if (read.state !== "ready") return;
     if (read.playback === null) {
       if (row.state === "processing") {
         await deps.report("video_provider_unavailable");
         await finish(failed("not_signed"));
       }
-      return true;
+      return;
     }
     if (read.seconds === null) {
       if (row.state === "processing") await deps.report("video_provider_unavailable");
-      return true;
+      return;
     }
     // Una vigente sin subtítulos todavía no tiene nada nuevo que anotar.
-    if (row.state === "ready" && row.current && !read.captions) return true;
+    if (row.state === "ready" && row.current && !read.captions) return;
     await finish({ video: row.video, state: "ready", playback: read.playback, seconds: read.seconds, captions: read.captions, error: null });
-    return true;
   }
 
   /** Lo que el editor pregunta al cargar y mientras haya algo en camino. */
@@ -294,12 +335,15 @@ export function createDraftVideos(deps: DraftVideosDeps) {
     return guarded<VideoCheckResult>(reader, isId(input.course), async (claims) => {
       const pass: VideoPass = { changed: false, blocked: {} };
       const active = deps.providers.active();
+      const deadline = now() + PASS_BUDGET_MS;
       for (const row of await deps.store.due(claims, input.course)) {
+        // Lo que no alcance vuelve a tocar en la siguiente pregunta: `video_due` limita por fila, y no por pasada.
+        if (now() >= deadline) break;
         const creates = row.state === "uploaded" || row.state === "creating";
         const provider = deps.providers.of(creates ? active : row.provider);
         if (provider === null) continue;
-        const answered = creates && active !== null ? await createAsset(claims, input.course, row.video, active, provider, pass) : await settleAsset(claims, row, provider, pass);
-        if (!answered) break;
+        if (creates && active !== null) await createAsset(claims, input.course, row.video, active, provider, pass);
+        else await settleAsset(claims, row, provider, pass);
       }
       await cleanUp(claims, input.course);
       return { kind: "checked", changed: pass.changed, blocked: pass.blocked };

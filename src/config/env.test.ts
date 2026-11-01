@@ -326,8 +326,14 @@ describe("el proveedor de los videos del borrador (T-403)", () => {
   });
 
   it("Mux no se prende contra una base de esta máquina: no la alcanza, y cada video se cobraría como error", () => {
-    for (const url of ["http://127.0.0.1:54321", "http://localhost:54321", "http://[::1]:54321"]) {
+    for (const url of ["http://127.0.0.1:54321", "http://localhost:54321", "http://[::1]:54321", "http://0.0.0.0:54321", "http://192.168.1.10:54321", "http://10.0.0.2:54321", "http://172.20.0.1:54321", "http://host.docker.internal:54321", "http://kong.local:54321"]) {
       expect(problemsOf({ ...valid, ...tokens, NEXT_PUBLIC_SUPABASE_URL: url, VIDEO_PROVIDER: "mux" })).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
+    }
+  });
+
+  it("una dirección que se parece a una privada, y no lo es, no se confunde", () => {
+    for (const url of ["https://172.32.0.1", "https://192.169.0.1", "https://proyecto.supabase.co", "https://10.supabase.co"]) {
+      expect(parseEnv({ ...valid, ...tokens, NEXT_PUBLIC_SUPABASE_URL: url, VIDEO_PROVIDER: "mux" }).VIDEO_PROVIDER).toBe("mux");
     }
   });
 

@@ -14,6 +14,7 @@ import { createVideoProviders, type ProviderAsset, type VideoProvider } from "@/
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
+import { connect, waitBehind } from "./helpers/finance";
 import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users";
 
@@ -235,20 +236,26 @@ describe("crear en el proveedor", () => {
     });
   });
 
-  it("una falla de Mux no pierde el archivo, y el reintento busca antes de crear", async () => {
+  it("una respuesta ambigua de Mux no reintenta hasta que el reclamo venza: pudo haberlo creado, y todavía no aparecer en la lista", async () => {
     await reverted(async (owner) => {
       const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)) });
       const { who, where, videos, reported } = await start(owner, mux);
       const { video } = await received(owner, who, videos, where);
 
       await videos.checkVideos(who.jar, { course: where.course });
-      expect(await rowOf(owner, video)).toMatchObject({ state: "uploaded", provider_asset_id: null });
+      expect(await rowOf(owner, video)).toMatchObject({ state: "creating", provider_asset_id: null });
       expect(reported).toEqual(["video_provider_unavailable"]);
       expect(await usedMinutes(owner, who)).toBe(2);
 
-      // Mux sí lo había creado: se anota el que hay, sin crear otro ni cobrar otra vez.
-      mux.findByPassthrough.mockResolvedValue(["YA-CREADO"]);
+      // Otra pestaña, una recarga: nada que hacer todavía. La lista aún no lo trae, y sin esto se crearía el segundo.
       await again(owner, video);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.findByPassthrough).not.toHaveBeenCalled();
+      expect(mux.create).toHaveBeenCalledTimes(1);
+
+      // Vencido el reclamo, ya aparece: se anota el que hay, sin crear otro ni cobrar otra vez.
+      mux.findByPassthrough.mockResolvedValue(["YA-CREADO"]);
+      await expireClaim(owner, video);
       await videos.checkVideos(who.jar, { course: where.course });
       expect(mux.findByPassthrough).toHaveBeenCalledWith(video, expect.any(Number));
       expect(mux.create).toHaveBeenCalledTimes(1);
@@ -257,9 +264,24 @@ describe("crear en el proveedor", () => {
     });
   });
 
+  it("un rechazo de Mux vuelve a recibido y se dice, y lo que se reintenta se busca igual", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve("rejected")) });
+      const { who, where, videos } = await start(owner, mux);
+      const { video } = await received(owner, who, videos, where);
+      expect(await videos.checkVideos(who.jar, { course: where.course })).toEqual({ kind: "checked", changed: true, blocked: { [video]: "failing" } });
+      expect(await rowOf(owner, video)).toMatchObject({ state: "uploaded" });
+      await again(owner, video);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.findByPassthrough).toHaveBeenCalledTimes(1);
+      expect(mux.create).toHaveBeenCalledTimes(2);
+      expect(await usedMinutes(owner, who)).toBe(2);
+    });
+  });
+
   it("si no se puede buscar, no se crea otro", async () => {
     await reverted(async (owner) => {
-      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)), findByPassthrough: vi.fn<VideoProvider["findByPassthrough"]>(() => Promise.resolve(null)) });
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve("rejected")), findByPassthrough: vi.fn<VideoProvider["findByPassthrough"]>(() => Promise.resolve(null)) });
       const { who, where, videos } = await start(owner, mux);
       const { video } = await received(owner, who, videos, where);
       await videos.checkVideos(who.jar, { course: where.course });
@@ -292,7 +314,7 @@ describe("crear en el proveedor", () => {
 
   it("dos con el mismo passthrough: se queda con uno y borra el otro en la misma pasada", async () => {
     await reverted(async (owner) => {
-      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)) });
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve("rejected")) });
       const { who, where, videos } = await start(owner, mux);
       const { video } = await received(owner, who, videos, where);
       await videos.checkVideos(who.jar, { course: where.course });
@@ -346,6 +368,35 @@ describe("crear en el proveedor", () => {
       expect(await none.checkVideos(who.jar, { course: where.course })).toEqual({ kind: "checked", changed: false, blocked: {} });
       expect(await rowOf(owner, video)).toMatchObject({ state: "uploaded" });
       expect(await usedMinutes(owner, who)).toBe(0);
+    });
+  });
+});
+
+describe("el tope de lo que está en camino", () => {
+  it("abrir un curso asienta lo que el mismo maestro tiene procesándose en otro: si no, diez videos de un curso que ya no se abre detendrían a todos", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux();
+      const { who, where, videos, drafts } = await start(owner, mux);
+      const { video } = await received(owner, who, videos, where);
+      await videos.checkVideos(who.jar, { course: where.course });
+      const other = await newLesson(owner, who, drafts);
+
+      mux.read.mockResolvedValue(READY);
+      await again(owner, video);
+      expect(await videos.checkVideos(who.jar, { course: other.course })).toEqual({ kind: "checked", changed: true, blocked: {} });
+      expect(await rowOf(owner, video)).toMatchObject({ state: "ready", is_current: true });
+    });
+  });
+
+  it("lo recibido de otro curso no se crea desde aquí: eso gasta, y lo decide su propio editor", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux();
+      const { who, where, videos, drafts } = await start(owner, mux);
+      const { video } = await received(owner, who, videos, where);
+      const other = await newLesson(owner, who, drafts);
+      await videos.checkVideos(who.jar, { course: other.course });
+      expect(mux.create).not.toHaveBeenCalled();
+      expect(await rowOf(owner, video)).toMatchObject({ state: "uploaded" });
     });
   });
 });
@@ -428,6 +479,84 @@ describe("la papelera", () => {
     });
   });
 
+  it("quitar después de una respuesta perdida busca el asset y lo borra: si no, quedaría pagado y sin nombre", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)), findByPassthrough: vi.fn<VideoProvider["findByPassthrough"]>(() => Promise.resolve(["PERDIDO"])) });
+      const { who, where, videos, removed } = await start(owner, mux);
+      const { video, path } = await received(owner, who, videos, where);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(await rowOf(owner, video)).toMatchObject({ state: "creating", provider_asset_id: null });
+
+      expect(await videos.removeVideo(who.jar, { course: where.course, video })).toEqual({ kind: "deleted" });
+      await owner.query("update private.video_trash set created_at = now() - interval '6 minutes' where course_id = $1", [where.course]);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.findByPassthrough).toHaveBeenCalledWith(video, expect.any(Number));
+      expect(mux.remove).toHaveBeenCalledExactlyOnceWith("PERDIDO");
+      expect(removed).toEqual([path]);
+      expect(await trashCount(owner, where.course)).toBe(0);
+    });
+  });
+
+  it("lo que se fue reclamado espera antes de buscar: un asset recién creado puede no aparecer todavía en la lista", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)) });
+      const { who, where, videos, removed } = await start(owner, mux);
+      const { video, path } = await received(owner, who, videos, where);
+      await videos.checkVideos(who.jar, { course: where.course });
+      await videos.removeVideo(who.jar, { course: where.course, video });
+      expect(mux.findByPassthrough).not.toHaveBeenCalled();
+      expect(removed).toEqual([]);
+      expect(await trashCount(owner, where.course)).toBe(1);
+
+      await owner.query("update private.video_trash set created_at = now() - interval '6 minutes' where course_id = $1", [where.course]);
+      mux.findByPassthrough.mockResolvedValue(["TARDE"]);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.remove).toHaveBeenCalledExactlyOnceWith("TARDE");
+      expect(removed).toEqual([path]);
+      expect(await trashCount(owner, where.course)).toBe(0);
+    });
+  });
+
+  it("si no se pudo buscar, el renglón y el archivo se quedan, y sale cuando sí", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux({ create: vi.fn<VideoProvider["create"]>(() => Promise.resolve(null)), findByPassthrough: vi.fn<VideoProvider["findByPassthrough"]>(() => Promise.resolve(null)) });
+      const { who, where, videos, removed } = await start(owner, mux);
+      const { video, path } = await received(owner, who, videos, where);
+      await videos.checkVideos(who.jar, { course: where.course });
+      await videos.removeVideo(who.jar, { course: where.course, video });
+      expect(removed).toEqual([]);
+      expect(await trashCount(owner, where.course)).toBe(1);
+
+      await owner.query("update private.video_trash set created_at = now() - interval '6 minutes' where course_id = $1", [where.course]);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.findByPassthrough).toHaveBeenCalled();
+      expect(removed).toEqual([]);
+      expect(await trashCount(owner, where.course)).toBe(1);
+
+      mux.findByPassthrough.mockResolvedValue(["PERDIDO"]);
+      await videos.checkVideos(who.jar, { course: where.course });
+      expect(mux.remove).toHaveBeenCalledExactlyOnceWith("PERDIDO");
+      expect(removed).toEqual([path]);
+      expect(await trashCount(owner, where.course)).toBe(0);
+    });
+  });
+
+  it("vacía más de 20 de una vez, y lo que no sale no detiene a lo demás", async () => {
+    await reverted(async (owner) => {
+      const mux = fakeMux({ remove: vi.fn<VideoProvider["remove"]>((asset) => Promise.resolve(asset !== "TERCO-0" && asset !== "TERCO-1")) });
+      const { who, where, videos } = await start(owner, mux);
+      const teacherId = (await owner.query<{ id: string }>("select id from public.teachers where profile_id = $1", [who.id])).rows[0]?.id;
+      const names = [...Array.from({ length: 2 }, (_, i) => `TERCO-${i}`), ...Array.from({ length: 23 }, (_, i) => `ASSET-${i}`)];
+      for (const asset of names) {
+        await owner.query("insert into private.video_trash (teacher_id, course_id, provider, provider_asset_id) values ($1, $2, 'mux', $3)", [teacherId, where.course, asset]);
+      }
+      await videos.cleanUp(who.claims, where.course);
+      expect(mux.remove).toHaveBeenCalledTimes(25);
+      const left = await owner.query<{ provider_asset_id: string }>("select provider_asset_id from private.video_trash where course_id = $1 order by provider_asset_id", [where.course]);
+      expect(left.rows.map((each) => each.provider_asset_id)).toEqual(["TERCO-0", "TERCO-1"]);
+    });
+  });
+
   it("si Mux no lo borró se queda, sin tocar el archivo, y sale cuando sí", async () => {
     await reverted(async (owner) => {
       const mux = fakeMux({ remove: vi.fn<VideoProvider["remove"]>(() => Promise.resolve(false)) });
@@ -478,6 +607,69 @@ describe("la papelera", () => {
       expect(await trashCount(owner, where.course)).toBe(1);
     });
   });
+});
+
+describe("dos reclamos a la vez, con dos conexiones de verdad", () => {
+  it("el segundo espera al primero, y al entrar ve que ya no le toca: un solo cobro", async () => {
+    const owner = await connect();
+    const first = await connect();
+    const second = await connect();
+    const who = await person();
+    const mux = fakeMux();
+    let course: string | null = null;
+    try {
+      await owner.query("grant app_service to postgres with set true, inherit false");
+      await owner.query("begin");
+      await teacher(owner, who);
+      const { drafts, videos } = arrange(owner, mux);
+      const where = await newLesson(owner, who, drafts);
+      course = where.course;
+      const { video } = await received(owner, who, videos, where);
+      await owner.query("commit");
+
+      const { claims: verified } = readVerifiedClaims(who.claims);
+      const claim = (client: Client) => client.query<{ result: { answer: string } }>("select private.video_claim($1::uuid, $2::uuid, 'mux') as result", [where.course, video]);
+      await first.query("begin");
+      await asServer(first, verified.userId, verified.sessionId ?? "");
+      expect((await claim(first)).rows[0]?.result.answer).toBe("claimed");
+      await second.query("begin");
+      await asServer(second, verified.userId, verified.sessionId ?? "");
+      const waiting = claim(second);
+      await waitBehind(owner, first, 1);
+      await first.query("reset role");
+      await first.query("commit");
+      expect((await waiting).rows[0]?.result.answer).toBe("busy");
+      await second.query("reset role");
+      await second.query("commit");
+      expect(await usedMinutes(owner, who)).toBe(2);
+    } finally {
+      for (const client of [first, second]) {
+        await client.query("rollback").catch(() => undefined);
+        await client.end();
+      }
+      // Lo que esta prueba confirmó, con las guardias apagadas. La auditoría se queda.
+      await owner.query("rollback").catch(() => undefined);
+      try {
+        await owner.query("begin");
+        await owner.query("set local session_replication_role = replica");
+        await owner.query("delete from storage.objects where bucket_id = 'video-originals' and name in (select storage_path from public.draft_videos where course_id = $1)", [course]);
+        await owner.query("delete from public.draft_videos where course_id = $1", [course]);
+        await owner.query("delete from public.draft_lessons where course_id = $1", [course]);
+        await owner.query("delete from public.draft_modules where course_id = $1", [course]);
+        await owner.query("delete from public.course_drafts where course_id = $1", [course]);
+        await owner.query("delete from public.course_registry where course_id = $1", [course]);
+        await owner.query("delete from private.video_usage where teacher_id in (select id from public.teachers where profile_id = $1)", [who.id]);
+        await owner.query("delete from private.rate_limit_counters where bucket like 'video\\_%' or bucket like 'video%'");
+        await owner.query("delete from public.teachers where profile_id = $1", [who.id]);
+        await owner.query("delete from public.consents where profile_id = $1", [who.id]);
+        await owner.query("commit");
+      } finally {
+        await owner.query("rollback").catch(() => undefined);
+        await owner.query("revoke app_service from postgres");
+        await owner.end();
+      }
+    }
+  }, 60_000);
 });
 
 describe("la dirección que se le da a Mux", () => {

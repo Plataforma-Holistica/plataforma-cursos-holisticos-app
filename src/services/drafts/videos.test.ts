@@ -225,6 +225,7 @@ describe("checkVideos", () => {
     signed?: string | null;
     trash?: TrashedVideo[];
     filesRemove?: () => Promise<void>;
+    now?: () => number;
   } = {}) {
     const provider = options.provider ?? mux();
     const store: VideosStore = {
@@ -251,6 +252,7 @@ describe("checkVideos", () => {
       providers: { active: () => (options.active === undefined ? "mux" : options.active), of },
       checkSession: vi.fn(() => Promise.resolve({ kind: "pass", claims })) as never,
       report,
+      ...(options.now === undefined ? {} : { now: options.now }),
     });
     return { service, store, provider, signForProvider, filesRemove, report, of };
   }
@@ -335,20 +337,37 @@ describe("checkVideos", () => {
       expect(store.createFailed).not.toHaveBeenCalled();
     });
 
-    it("si Mux no contesta, la fila vuelve a `uploaded` con su reclamo: el archivo no se pierde", async () => {
-      const { service, store, report } = arrange({ due: [row()], provider: mux({ create: vi.fn(() => Promise.resolve(null)) }) });
-      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: {} });
+    it("si Mux dijo que no, la fila vuelve a `uploaded` y se dice: el archivo no se pierde", async () => {
+      const { service, store, report } = arrange({ due: [row()], provider: mux({ create: vi.fn(() => Promise.resolve("rejected" as const)) }) });
+      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: { [VIDEO]: "failing" } });
       expect(store.createFailed).toHaveBeenCalledWith(claims, { video: VIDEO, claim: CLAIMED.claim });
       expect(store.created).not.toHaveBeenCalled();
       expect(report).toHaveBeenCalledWith("video_provider_unavailable");
     });
 
-    it("si no se pudo firmar tampoco se llama a Mux", async () => {
+    it("si no se supo, se queda reclamada: Mux pudo haberlo creado, y un reintento ya podría no encontrarlo todavía", async () => {
+      const { service, store, report } = arrange({ due: [row()], provider: mux({ create: vi.fn(() => Promise.resolve(null)) }) });
+      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: {} });
+      expect(store.createFailed).not.toHaveBeenCalled();
+      expect(store.created).not.toHaveBeenCalled();
+      expect(report).toHaveBeenCalledWith("video_provider_unavailable");
+    });
+
+    it("si no se pudo firmar tampoco se llama a Mux, y se dice", async () => {
       const { service, store, provider, report } = arrange({ due: [row()], signed: null });
-      await check(service);
+      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: { [VIDEO]: "failing" } });
       expect(provider.create).not.toHaveBeenCalled();
       expect(store.createFailed).toHaveBeenCalledWith(claims, { video: VIDEO, claim: CLAIMED.claim });
       expect(report).toHaveBeenCalledWith("video_original_unavailable");
+    });
+
+    it("un video que Mux rechaza no detiene a los demás", async () => {
+      const other = row({ video: LESSON });
+      const create = vi.fn<VideoProvider["create"]>().mockResolvedValueOnce("rejected").mockResolvedValueOnce(ASSET);
+      const { service, store } = arrange({ due: [row(), other], provider: mux({ create }) });
+      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: { [VIDEO]: "failing" } });
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(store.created).toHaveBeenCalledWith(claims, { course: COURSE, video: LESSON, provider: "mux", asset: ASSET });
     });
 
     it("un reintento busca antes de crear, desde cuando nació la fila: un 5xx no dice que no lo haya creado", async () => {
@@ -396,7 +415,7 @@ describe("checkVideos", () => {
         due: [row()],
         store: {
           created: vi.fn(() => Promise.resolve("gone" as const)),
-          trashDue: vi.fn(() => Promise.resolve([{ id: 7, provider: "mux", asset: ASSET, path: null }])),
+          trashDue: vi.fn(() => Promise.resolve([{ id: 7, provider: "mux", asset: ASSET, path: null, video: null, since: null }])),
         },
       });
       await check(service);
@@ -459,13 +478,25 @@ describe("checkVideos", () => {
       expect(report).toHaveBeenCalledWith("video_provider_unavailable");
     });
 
-    it("si no se supo no escribe, y no sigue preguntándole a Mux en esta pasada", async () => {
+    it("si no se supo no escribe, y una fila que falla no detiene a las demás", async () => {
       const other = row({ state: "processing", asset: "OTRO", video: LESSON });
       const { service, store, provider, report } = arrange({ due: [processing, other], provider: mux({ read: vi.fn(() => Promise.resolve(null)) }) });
       expect(await check(service)).toEqual(quiet);
-      expect(provider.read).toHaveBeenCalledTimes(1);
+      expect(provider.read).toHaveBeenCalledTimes(2);
       expect(store.settle).not.toHaveBeenCalled();
       expect(report).toHaveBeenCalledWith("video_provider_unavailable");
+    });
+
+    it("cada pasada tiene su presupuesto: las acciones del editor esperan detrás, y lo que no alcanzó queda para la siguiente", async () => {
+      let clock = 0;
+      const read = vi.fn<VideoProvider["read"]>(() => {
+        clock += 10_000;
+        return Promise.resolve(null);
+      });
+      const rows = [processing, row({ state: "processing", asset: "B" }), row({ state: "processing", asset: "C" }), row({ state: "processing", asset: "D" })];
+      const { service } = arrange({ due: rows, provider: mux({ read }), now: () => clock });
+      await check(service);
+      expect(read).toHaveBeenCalledTimes(2);
     });
 
     it("una respuesta que la base no toma no cuenta como cambio", async () => {
@@ -514,7 +545,8 @@ describe("checkVideos", () => {
   });
 
   describe("la papelera", () => {
-    const item = { id: 7, provider: "mux", asset: ASSET, path: PATH };
+    const item: TrashedVideo = { id: 7, provider: "mux", asset: ASSET, path: PATH, video: null, since: null };
+    const lost: TrashedVideo = { id: 9, provider: "mux", asset: null, path: PATH, video: VIDEO, since: SINCE };
 
     it("borra el asset y el archivo, y solo entonces la quita", async () => {
       const order: string[] = [];
@@ -533,11 +565,11 @@ describe("checkVideos", () => {
     });
 
     it("lo que no tiene asset no le pregunta al proveedor, y lo que no tiene archivo no toca la cubeta", async () => {
-      const onlyFile = arrange({ trash: [{ id: 1, provider: "mux", asset: null, path: PATH }] });
+      const onlyFile = arrange({ trash: [{ ...item, id: 1, asset: null }] });
       await check(onlyFile.service);
       expect(onlyFile.provider.remove).not.toHaveBeenCalled();
       expect(onlyFile.filesRemove).toHaveBeenCalledWith([PATH]);
-      const onlyAsset = arrange({ trash: [{ id: 2, provider: "mux", asset: ASSET, path: null }] });
+      const onlyAsset = arrange({ trash: [{ ...item, id: 2, path: null }] });
       await check(onlyAsset.service);
       expect(onlyAsset.filesRemove).not.toHaveBeenCalled();
       expect(onlyAsset.store.trashDone).toHaveBeenCalledTimes(1);
@@ -545,7 +577,7 @@ describe("checkVideos", () => {
 
     it("si Mux no lo borró, no toca el archivo y no sale de la papelera: se reintenta, y cualquier otra sigue", async () => {
       const { service, store, filesRemove, report } = arrange({
-        trash: [item, { id: 8, provider: "mux", asset: null, path: "otra" }],
+        trash: [item, { ...item, id: 8, asset: null, path: "otra" }],
         provider: mux({ remove: vi.fn(() => Promise.resolve(false)) }),
       });
       expect(await check(service)).toEqual(quiet);
@@ -554,6 +586,68 @@ describe("checkVideos", () => {
       expect(store.trashDone).toHaveBeenCalledTimes(1);
       expect(store.trashDone).toHaveBeenCalledWith(claims, { course: COURSE, id: 8 });
       expect(report).toHaveBeenCalledWith("video_cleanup_failed");
+    });
+
+    it("lo que se fue reclamado y sin asset se busca antes de sacarlo: Mux pudo haberlo creado", async () => {
+      const { service, provider, store, filesRemove } = arrange({ trash: [lost], provider: mux({ findByPassthrough: vi.fn(() => Promise.resolve(["UNO", "OTRO"])) }) });
+      await check(service);
+      expect(provider.findByPassthrough).toHaveBeenCalledWith(VIDEO, SINCE);
+      expect(provider.remove).toHaveBeenCalledWith("UNO");
+      expect(provider.remove).toHaveBeenCalledWith("OTRO");
+      expect(filesRemove).toHaveBeenCalledWith([PATH]);
+      expect(store.trashDone).toHaveBeenCalledWith(claims, { course: COURSE, id: 9 });
+    });
+
+    it("si no apareció nada también sale; lo que un `POST` en vuelo cree después lo atrapa `video_created`", async () => {
+      const { service, provider, store } = arrange({ trash: [lost] });
+      await check(service);
+      expect(provider.remove).not.toHaveBeenCalled();
+      expect(store.trashDone).toHaveBeenCalledTimes(1);
+    });
+
+    it("si no se pudo buscar se queda, con su archivo: es el único rastro", async () => {
+      const { service, store, filesRemove, report } = arrange({ trash: [lost], provider: mux({ findByPassthrough: vi.fn(() => Promise.resolve(null)) }) });
+      await check(service);
+      expect(filesRemove).not.toHaveBeenCalled();
+      expect(store.trashDone).not.toHaveBeenCalled();
+      expect(report).toHaveBeenCalledWith("video_cleanup_failed");
+    });
+
+    it("sin llaves tampoco se busca ni se saca", async () => {
+      const { service, store, filesRemove } = arrange({ trash: [{ ...lost, provider: "otro" }] });
+      await check(service);
+      expect(filesRemove).not.toHaveBeenCalled();
+      expect(store.trashDone).not.toHaveBeenCalled();
+    });
+
+    it("recorre más de una tanda, y no repite en la misma pasada lo que falló", async () => {
+      const first = Array.from({ length: 20 }, (_, i) => ({ ...item, id: i + 100, asset: `A${i}`, path: null }));
+      const second = [{ ...item, id: 200, asset: "ULTIMO", path: null }];
+      const trashDue = vi.fn<VideosStore["trashDue"]>().mockResolvedValueOnce(first).mockResolvedValueOnce(second).mockResolvedValue(first);
+      const { service, provider } = arrange({ store: { trashDue } });
+      await check(service);
+      expect(provider.remove).toHaveBeenCalledTimes(21);
+      expect(trashDue).toHaveBeenCalledTimes(3);
+    });
+
+    it("tiene presupuesto y tope de tandas", async () => {
+      let clock = 0;
+      const remove = vi.fn<VideoProvider["remove"]>(() => {
+        clock += 10_000;
+        return Promise.resolve(false);
+      });
+      const { service } = arrange({ trash: [item, { ...item, id: 8 }, { ...item, id: 9 }], provider: mux({ remove }), now: () => clock });
+      await check(service);
+      expect(remove).toHaveBeenCalledTimes(2);
+
+      let id = 0;
+      const trashDue = vi.fn<VideosStore["trashDue"]>(() => {
+        id += 1;
+        return Promise.resolve([{ ...item, id, path: null }]);
+      });
+      const endless = arrange({ store: { trashDue } });
+      await check(endless.service);
+      expect(trashDue).toHaveBeenCalledTimes(100);
     });
 
     it("si la cubeta falló, tampoco sale", async () => {

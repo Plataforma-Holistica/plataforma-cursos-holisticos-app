@@ -158,9 +158,10 @@ export const portal = defineMessages({
       confirmCancel: "¿Cancelar la subida de «{file}»? Lo que ya subió se pierde.",
       confirmRemove: "¿Quitar «{file}»? El archivo se borra y no se puede recuperar.",
       blocked: {
-        throttled: "Tu video está guardado. Mandaste muchos videos en poco tiempo, y lo procesamos en cuanto se pueda.",
-        overMinutes: "Tu video está guardado, pero llegaste al tope de minutos de video de este mes. Se procesa solo cuando empiece el siguiente. Lo que no se procesa en unos días se borra: escríbenos si no puede esperar.",
-        closed: "Tu video está guardado. El procesamiento de videos está en pausa por ahora, y sigue solo cuando se reactive.",
+        throttled: "Tu video está guardado. Mandaste muchos videos en poco tiempo: lo procesamos cuando se pueda, con este editor abierto. Un video sin procesar se borra a los 7 días de empezar a subirlo.",
+        overMinutes: "Tu video está guardado, pero llegaste al tope de minutos de video de este mes. Un video sin procesar se borra a los 7 días de empezar a subirlo, aunque el mes no haya terminado: escríbenos si no puede esperar.",
+        closed: "Tu video está guardado. El procesamiento de videos está en pausa por ahora. Un video sin procesar se borra a los 7 días de empezar a subirlo.",
+        failing: "Tu video está guardado, pero no hemos podido procesarlo. Lo volvemos a intentar mientras tengas abierto este editor. Un video sin procesar se borra a los 7 días de empezar a subirlo: escríbenos si sigue así.",
       },
       states: {
         uploaded: "Recibido, {size}. Falta procesarlo.",

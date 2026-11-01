@@ -58,10 +58,19 @@ describe("create", () => {
   });
 
   it("todo lo que no sea un id creado es nulo, sin lanzar: un corte no dice que no lo haya creado, y eso lo decide quien llama", async () => {
-    for (const answer of [json({ error: { type: "invalid_parameters", messages: [SIGNED] } }, 400), json({}, 401), json({}, 429), json({}, 500), json({ data: {} }, 201), json({ data: { id: 7 } }, 201), new Error("corte")]) {
+    for (const answer of [json({}, 500), json({}, 502), json({ data: {} }, 201), json({ data: { id: 7 } }, 201), new Error("corte")]) {
       expect(await createMuxAssets(fetchOf(answer)).create({ url: SIGNED, passthrough: VIDEO })).toBeNull();
     }
     expect(await createMuxAssets(fetchOf(new Response("no es json", { status: 201 }))).create({ url: SIGNED, passthrough: VIDEO })).toBeNull();
+  });
+});
+
+describe("create, cuando Mux dice que no", () => {
+  it("un 4xx es un rechazo: no lo creó, y se puede reintentar sin esperar", async () => {
+    for (const status of [400, 401, 403, 422, 429]) {
+      const answer = json({ error: { type: "invalid_parameters", messages: [SIGNED] } }, status);
+      expect(await createMuxAssets(fetchOf(answer)).create({ url: SIGNED, passthrough: VIDEO })).toBe("rejected");
+    }
   });
 });
 
@@ -135,14 +144,14 @@ describe("read", () => {
 describe("findByPassthrough", () => {
   const SINCE = 1_793_000_000;
   const row = (id: string, createdAt: number, passthrough: string | undefined = "otro") => ({ id, created_at: String(createdAt), passthrough });
-  const page = (rows: unknown[]) => json({ data: rows });
+  const page = (rows: unknown[], cursor: string | null = null) => json({ data: rows, next_cursor: cursor });
   const full = (createdAt: number, extra: unknown[] = []) => [...extra, ...Array.from({ length: 100 - extra.length }, (_, i) => row(`relleno-${i}`, createdAt))];
 
-  it("recorre las páginas, del más nuevo al más viejo, y encuentra el suyo", async () => {
-    const fake = fetchOf(page(full(SINCE + 100)), page([row("OTRO", SINCE + 50), row("SUYO", SINCE + 40, VIDEO)]));
+  it("recorre con el cursor, del más nuevo al más viejo, y encuentra el suyo", async () => {
+    const fake = fetchOf(page(full(SINCE + 100), "A/B+C"), page([row("OTRO", SINCE + 50), row("SUYO", SINCE + 40, VIDEO)]));
     expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toEqual(["SUYO"]);
-    expect(sent(fake, 0)[0]).toBe("https://api.mux.com/video/v1/assets?limit=100&page=1");
-    expect(sent(fake, 1)[0]).toBe("https://api.mux.com/video/v1/assets?limit=100&page=2");
+    expect(sent(fake, 0)[0]).toBe("https://api.mux.com/video/v1/assets?limit=100");
+    expect(sent(fake, 1)[0]).toBe("https://api.mux.com/video/v1/assets?limit=100&cursor=A%2FB%2BC");
     expect(sent(fake, 0)[1].headers).toMatchObject({ authorization: AUTH });
   });
 
@@ -155,39 +164,53 @@ describe("findByPassthrough", () => {
     expect(await createMuxAssets(fetchOf(page([]))).findByPassthrough(VIDEO, SINCE)).toEqual([]);
   });
 
+  it("sin cursor se acabó: mirar más sería pedirle a Mux lo que no tiene", async () => {
+    const fake = fetchOf(page(full(SINCE + 100)));
+    expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toEqual([]);
+    expect(fake).toHaveBeenCalledTimes(1);
+  });
+
   it("deja de pedir al pasar de cuando nació la fila, con una hora de margen por los relojes", async () => {
-    const fake = fetchOf(page(full(SINCE - 3601)));
+    const fake = fetchOf(page(full(SINCE - 3601), "SIGUE"));
     expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toEqual([]);
     expect(fake).toHaveBeenCalledTimes(1);
 
-    const inside = fetchOf(page(full(SINCE - 3599)), page([]));
+    const inside = fetchOf(page(full(SINCE - 3599), "SIGUE"), page([]));
     expect(await createMuxAssets(inside).findByPassthrough(VIDEO, SINCE)).toEqual([]);
     expect(inside).toHaveBeenCalledTimes(2);
   });
 
   it("si no se pudo terminar de buscar es nulo, nunca «no está»: con «no está» se crearía otro y se pagaría dos veces", async () => {
-    for (const answer of [json({}, 500), json({}, 429), json({ data: "no" }), json({ data: [{ id: 1 }] }), new Error("corte")]) {
+    for (const answer of [json({}, 500), json({}, 429), json({ data: "no" }), json([]), json({ data: [{ id: 1 }] }), new Error("corte")]) {
       expect(await createMuxAssets(fetchOf(answer)).findByPassthrough(VIDEO, SINCE)).toBeNull();
     }
-    expect(await createMuxAssets(fetchOf(page(full(SINCE + 100)), json({}, 500))).findByPassthrough(VIDEO, SINCE)).toBeNull();
+    expect(await createMuxAssets(fetchOf(page(full(SINCE + 100), "SIGUE"), json({}, 500))).findByPassthrough(VIDEO, SINCE)).toBeNull();
   });
 
   it("también lo que encontró antes de fallar es nulo: pudo haber otro más adelante", async () => {
-    const fake = fetchOf(page(full(SINCE + 100, [row("SUYO", SINCE + 100, VIDEO)])), json({}, 500));
+    const fake = fetchOf(page(full(SINCE + 100, [row("SUYO", SINCE + 100, VIDEO)]), "SIGUE"), json({}, 500));
     expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toBeNull();
   });
 
   it("un asset sin fecha legible no detiene la búsqueda", async () => {
     const odd = { id: "RARO", created_at: "ayer" };
-    const fake = fetchOf(page([...full(SINCE + 100).slice(1), odd]), page([]));
+    const fake = fetchOf(page([...full(SINCE + 100).slice(1), odd], "SIGUE"), page([]));
     expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toEqual([]);
     expect(fake).toHaveBeenCalledTimes(2);
   });
 
-  it("tiene tope: pasado el tope no se supo, y no se sigue pidiendo sin fin", async () => {
-    const fake = vi.fn(() => Promise.resolve(page(full(SINCE + 100)))) as unknown as typeof fetch & ReturnType<typeof vi.fn>;
-    expect(await createMuxAssets(fake).findByPassthrough(VIDEO, SINCE)).toBeNull();
-    expect(fake).toHaveBeenCalledTimes(50);
+  it("tiene tope de páginas y de tiempo: pasado cualquiera de los dos no se supo", async () => {
+    const endless = vi.fn(() => Promise.resolve(page(full(SINCE + 100), "SIGUE"))) as unknown as typeof fetch & ReturnType<typeof vi.fn>;
+    expect(await createMuxAssets(endless).findByPassthrough(VIDEO, SINCE)).toBeNull();
+    expect(endless).toHaveBeenCalledTimes(50);
+
+    let clock = 0;
+    const slow = vi.fn(() => {
+      clock += 8_000;
+      return Promise.resolve(page(full(SINCE + 100), "SIGUE"));
+    }) as unknown as typeof fetch & ReturnType<typeof vi.fn>;
+    expect(await createMuxAssets(slow, () => clock).findByPassthrough(VIDEO, SINCE)).toBeNull();
+    expect(slow).toHaveBeenCalledTimes(3);
   });
 });
 
