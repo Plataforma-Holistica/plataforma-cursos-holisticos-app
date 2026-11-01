@@ -224,7 +224,21 @@ test("reenviar el formulario de ver con la contraseña equivocada no deja lectur
   }
 });
 
-test("un maestro suspendido ve lo suyo y no lo cambia", async ({ page }) => {
+test("un maestro suspendido sin fraude cambia sus datos: una baja debe poder cobrar", async ({ page }) => {
+  const ana = await person();
+  await makeTeacher(ana);
+  await ownerQuery(
+    `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
+     update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where profile_id = $1 and exists (select 1 from declared)`,
+    [ana.id],
+  );
+  await signIn(page, ana, PATH);
+  await capture(page, ana.password);
+  await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Cambiar" })).toBeVisible();
+});
+
+test("un maestro suspendido por fraude ve lo suyo y no lo cambia", async ({ page }) => {
   const ana = await person();
   await makeTeacher(ana);
   await signIn(page, ana, PATH);
@@ -232,7 +246,7 @@ test("un maestro suspendido ve lo suyo y no lo cambia", async ({ page }) => {
   await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
   await ownerQuery(
     `with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)
-     update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where profile_id = $1 and exists (select 1 from declared)`,
+     update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba', suspension_approved_by = $1 where profile_id = $1 and exists (select 1 from declared)`,
     [ana.id],
   );
 

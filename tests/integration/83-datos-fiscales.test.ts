@@ -233,7 +233,7 @@ describe("lo fiscal, contra la base", () => {
     await reverted(async (owner) => {
       const id = await teacher(owner, ana);
       const service = serviceOn(owner)(ana);
-      expect(await service.taxProfileState(ana.claims)).toEqual({ version: 0, updatedAt: null });
+      expect(await service.taxProfileState(ana.claims)).toEqual({ version: 0, updatedAt: null, canSave: true });
       expect(await service.saveTaxProfile(jar, FORM, freshOrigin())).toEqual({ kind: "saved" });
 
       const { rows } = await owner.query<{ version: number; rfc: Buffer; legal: Buffer; clabe: Buffer; last4: string; regime: string; payee: string; key_version: number; created_by: string }>(
@@ -300,7 +300,7 @@ describe("lo fiscal, contra la base", () => {
     });
   });
 
-  it("un maestro suspendido ve lo suyo y no lo cambia (FL-31, A2)", async () => {
+  it("un maestro suspendido sin fraude los cambia, y por fraude no, aunque los siga viendo (FL-31, A2)", async () => {
     const ana = await person();
     await reverted(async (owner) => {
       const id = await teacher(owner, ana);
@@ -309,7 +309,13 @@ describe("lo fiscal, contra la base", () => {
       await asSystem(owner);
       await owner.query("update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = $1", [id]);
       await asOwner(owner);
-      expect(await service.saveTaxProfile(jar, { ...FORM, seen: 1 }, freshOrigin())).toEqual({ kind: "suspended" });
+      expect((await service.taxProfileState(ana.claims))?.canSave).toBe(true);
+      expect(await service.saveTaxProfile(jar, { ...FORM, seen: 1 }, freshOrigin())).toEqual({ kind: "saved" });
+      await asSystem(owner);
+      await owner.query("update public.teachers set suspension_approved_by = $2 where id = $1", [id, ana.id]);
+      await asOwner(owner);
+      expect((await service.taxProfileState(ana.claims))?.canSave).toBe(false);
+      expect(await service.saveTaxProfile(jar, { ...FORM, seen: 2 }, freshOrigin())).toEqual({ kind: "suspended" });
       expect(await service.revealTaxProfile(jar, "x", freshOrigin())).toMatchObject({ kind: "revealed" });
     });
   });

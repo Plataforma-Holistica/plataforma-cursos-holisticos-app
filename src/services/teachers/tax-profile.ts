@@ -50,9 +50,16 @@ export type TaxSaveAnswer = "saved" | "changed" | "invalid" | "not_teacher" | "s
 export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "no_profile" | "not_teacher" };
 export type TaxPayoutAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" };
 
+export interface TaxProfileState {
+  version: number;
+  updatedAt: string | null;
+  /** Falso solo con el fraude confirmado: un suspendido por otra causa sí los captura (decisión de Sergio del 2026-11-01). */
+  canSave: boolean;
+}
+
 export interface TaxStore {
-  /** Si ya los capturó y qué versión tiene, sin lo cifrado. Nulo si no es maestro. */
-  state: (claims: VerifiedClaims) => Promise<{ version: number; updatedAt: string | null } | null>;
+  /** Si ya los capturó, qué versión tiene y si puede guardar, sin lo cifrado. Nulo si no es maestro. */
+  state: (claims: VerifiedClaims) => Promise<TaxProfileState | null>;
   mine: (claims: VerifiedClaims) => Promise<TaxReadAnswer>;
   save: (claims: VerifiedClaims, row: TaxProfileSeal) => Promise<TaxSaveAnswer>;
   forPayout: (claims: VerifiedClaims, payout: string) => Promise<TaxPayoutAnswer>;
@@ -127,7 +134,7 @@ export function createTaxProfile(deps: TaxProfileDeps) {
   }
 
   /** Si ya los capturó y qué versión tiene, para la pantalla que ya pasó la guarda. Nulo si no se supo. */
-  async function taxProfileState(claims: VerifiedClaims): Promise<{ version: number; updatedAt: string | null } | null> {
+  async function taxProfileState(claims: VerifiedClaims): Promise<TaxProfileState | null> {
     try {
       return await store.state(claims);
     } catch {
@@ -182,8 +189,8 @@ export function createTaxProfile(deps: TaxProfileDeps) {
     let answer: TaxSaveAnswer;
     try {
       const standing = await deps.standing(proof.claims);
-      if (standing.state === "suspended") return { kind: "suspended" };
-      if (standing.state !== "active") return { kind: "not_teacher" };
+      // El suspendido llega a la base: ella sabe si fue por fraude, y el servicio no lo lee.
+      if (standing.state !== "active" && standing.state !== "suspended") return { kind: "not_teacher" };
       const { value } = form;
       const at = { teacher: standing.teacher.id, rowVersion: input.seen + 1 };
       answer = await store.save(proof.claims, {

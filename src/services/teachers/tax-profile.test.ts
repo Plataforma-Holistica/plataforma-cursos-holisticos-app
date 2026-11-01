@@ -53,7 +53,7 @@ function sealedRow(cipher: ReturnType<typeof workingCipher>): TaxProfileRow {
 
 function service(cipher: TaxProfileDeps["cipher"]) {
   const store: TaxStore = {
-    state: () => Promise.resolve({ version: 3, updatedAt: AT }),
+    state: () => Promise.resolve({ version: 3, updatedAt: AT, canSave: true }),
     mine: () => {
       order.push("mine");
       return Promise.resolve(stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored });
@@ -122,6 +122,14 @@ describe("guardar", () => {
     expect(cipher.open({ teacher: TEACHER, rowVersion: 5, field: "clabe", last4: CLABE.slice(-4) }, row.clabe)).toBe(CLABE);
   });
 
+  it("un suspendido llega a la base, y ella decide: sin fraude guarda (decisión de Sergio del 2026-11-01)", async () => {
+    standing = { state: "suspended", teacher: { id: TEACHER }, notice: null };
+    expect(await service(workingCipher()).saveTaxProfile(jar, FORM, origin)).toEqual({ kind: "saved" });
+    expect(order).toEqual(["confirm", "standing", "save"]);
+    saveAnswer = "suspended";
+    expect(await service(workingCipher()).saveTaxProfile(jar, FORM, origin)).toEqual({ kind: "suspended" });
+  });
+
   it("a la base no le llega nada en claro", async () => {
     await service(workingCipher()).saveTaxProfile(jar, FORM, origin);
     for (const value of [saved!.rfc, saved!.legalName, saved!.clabe]) {
@@ -143,7 +151,6 @@ describe("guardar", () => {
   });
 
   it.each<[string, Awaited<ReturnType<TaxProfileDeps["standing"]>>, object]>([
-    ["suspendido", { state: "suspended", teacher: { id: TEACHER }, notice: null }, { kind: "suspended" }],
     ["con el aviso pendiente", { state: "needs_notice", teacher: { id: TEACHER } }, { kind: "not_teacher" }],
     ["que no es maestro", { state: "none" }, { kind: "not_teacher" }],
   ])("un maestro %s no llega a guardar", async (_name, answer, expected) => {

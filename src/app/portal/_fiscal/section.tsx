@@ -28,7 +28,9 @@ export async function TaxDataSection({
   const email = await sessionEmail(reader);
   const ready = await taxDataReady();
   const state = ready ? await taxProfileState(claims) : null;
-  const wantsChange = search.cambiar === "1" && !readOnly;
+  // La franja de solo lectura es del portal. Estos datos los cambia también un suspendido, salvo por fraude: lo dice la base.
+  const canSave = state?.canSave === true;
+  const wantsChange = search.cambiar === "1" && canSave;
 
   return (
     <PortalFrame current={ROUTES.portalTaxData} readOnly={readOnly}>
@@ -38,10 +40,10 @@ export async function TaxDataSection({
       {notice === "tax_data_changed" && wantsChange && <InlineAlert tone="warning">{text.changedElsewhere}</InlineAlert>}
       {!ready && <InlineAlert tone="warning">{text.off}</InlineAlert>}
       {ready && state === null && <InlineAlert tone="danger">{text.unavailable}</InlineAlert>}
-      {state !== null && state.version === 0 && (readOnly ? <p className="text-text-2">{text.readOnlyEmpty}</p> : <TaxCapture seen={0} changing={false} email={email} />)}
+      {state !== null && state.version === 0 && (canSave ? <TaxCapture seen={0} changing={false} email={email} /> : <p className="text-text-2">{text.readOnlyEmpty}</p>)}
       {state !== null && state.version > 0 && wantsChange && <TaxCapture seen={state.version} changing email={email} />}
       {state !== null && state.version > 0 && !wantsChange && (
-        <TaxReveal canChange={!readOnly} />
+        <TaxReveal canChange={canSave} />
       )}
     </PortalFrame>
   );
