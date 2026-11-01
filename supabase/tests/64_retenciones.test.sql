@@ -5,7 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
-select plan(143);
+select plan(145);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -400,7 +400,7 @@ begin
 end
 $f$;
 select throws_like(format($$select pruebas.libera_con(%L)$$, jsonb_build_object('subtotal_cents', -1, 'tax_state', 'ready')), '%what was compared%', 'con otro bruto, no');
-select throws_like(format($$select pruebas.libera_con(%L)$$, jsonb_build_object('subtotal_cents', (private.release_preview(202610) -> 'rows' -> 0 -> 'tax' ->> 'subtotal_cents')::bigint, 'tax_state', 'no_data')), '%what was compared%', 'sin el estado que se comparó, no');
+select throws_like(format($$select pruebas.libera_con(%L)$$, jsonb_build_object('subtotal_cents', (pruebas.fila81('M1', 202610) ->> 'subtotal_cents')::bigint, 'tax_state', 'no_data')), '%what was compared%', 'sin el estado que se comparó, no');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
@@ -448,6 +448,11 @@ begin
 end
 $f$;
 select throws_matching($$select pruebas.purga_y_deshace('select 1')$$, 'contestó (purged|no_partition|progress_pending)', 'una retención por datos no detiene la purga');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.payouts set held_by = pruebas.contenido() where id = pruebas.y('M2', 202610);
+set local session_replication_role = origin;
+select pruebas.como_dueno();
 select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', pruebas.y('M2', 202610), 'Se investiga.', 'on_hold'))), 'held', 'si aparece otra causa, pasa a investigación');
 select is((select hold_kind from public.payouts where id = pruebas.y('M2', 202610)), 'investigation', 'con su tipo');
 select throws_matching($$select pruebas.purga_y_deshace('select 1')$$, 'contestó on_hold', 'y esa sí detiene la purga');
@@ -519,7 +524,12 @@ set local session_replication_role = replica;
 update public.anomaly_alerts set status = 'reviewed', reviewed_at = now(), reviewed_by = pruebas.finanzas(), is_fraud = false, review_note = 'No era.' where teacher_id = pruebas.id('M4') and period_id = 202612;
 set local session_replication_role = origin;
 select pruebas.como_dueno();
-select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'revisada y sin fraude, sí');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+insert into public.anomaly_alerts (period_id, kind, teacher_id, metric_value, threshold_value) values (202611, 'teacher_points_jump', pruebas.id('M4'), 1, 1);
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'revisada y sin fraude, sí, aunque tenga una abierta de otro mes');
 select is(pruebas.o(pruebas.suelta('M4', 202612)), 'released_from_hold', 'y se suelta');
 select pruebas.como_dueno_sistema();
 set local session_replication_role = replica;
@@ -550,6 +560,10 @@ select is(pruebas.o(pruebas.hace(format('private.hold_payout_for_tax_data(%L, %L
 select pruebas.sin_codigo(pruebas.finanzas());
 select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'needs_fresh_code', 'sin código reciente, no');
 select pruebas.equipar(pruebas.finanzas());
+-- Con datos y sin regla de su régimen, también.
+select pruebas.perfil('M4', '607', 'person');
+select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'se retiene también si lo que falta es la regla');
+select is(pruebas.o(pruebas.suelta('M4', 202612)), 'released_from_hold', 'y se suelta');
 -- Y una alerta que nace después de retener detiene la purga.
 select is(pruebas.o(pruebas.retiene_por_datos('M4', 202612)), 'held', 'retenida por datos');
 create function pruebas.purga_diciembre(p_sql text) returns void language plpgsql as $f$
