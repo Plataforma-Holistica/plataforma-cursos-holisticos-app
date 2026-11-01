@@ -17,6 +17,8 @@ export const portal = defineMessages({
     title: "Datos fiscales y bancarios",
     who: "Solo tú y el equipo de finanzas ven estos datos.",
     saved: "Tus datos quedaron guardados.",
+    locked: "Tu cuenta ya no puede cambiar estos datos: no se guardó nada. Si necesitas corregirlos, escríbenos.",
+    stillEditable: "Aunque tu cuenta esté en solo lectura, estos datos sí los puedes capturar y cambiar: de ellos depende tu pago.",
     changedElsewhere: "Tus datos cambiaron en otra ventana. Lo que escribiste aquí no se guardó: si quieres cambiarlos, vuelve a escribirlos.",
     lastChange: "Último cambio: {date}.",
     change: "Cambiar",
