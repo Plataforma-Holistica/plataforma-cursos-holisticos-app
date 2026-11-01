@@ -107,6 +107,8 @@ afterAll(async () => {
     await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 203708", [OURS]);
     await owner.query("delete from private.teacher_tax_profiles where teacher_id = $1", [teacher]);
     await owner.query("delete from public.withholding_rules where note = 'regla en 0 de las pruebas'");
+    // Lo demás de la auditoría se queda, como en la 58; este renglón no: las pruebas de base cuentan los de las reglas.
+    await owner.query("delete from public.audit_log where action = 'withholding_rules.insert'");
     await owner.query("delete from public.teachers where id = $1", [teacher]);
     await owner.query("set local session_replication_role = origin");
     await owner.query("commit");
