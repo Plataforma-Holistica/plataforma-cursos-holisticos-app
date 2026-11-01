@@ -820,13 +820,15 @@ que no se ve leyendo un solo archivo:
   dinero:** crear en Mux se reclama bajo candado de fila (`video_claim`), así que dos pestañas o un reintento no pagan dos veces, y los topes se cuentan ahí una
   sola vez por video (`claimed_at`); lo gastado en el mes vive en `private.video_usage`, porque `rate_limit_counters` no sobrevive a una caída. Si Mux falla
   (`video_create_failed`, con el `claim` que contestó reclamar), vuelve a `uploaded`: un archivo que tardó horas no se pierde. Un reintento y un `creating` de más de 5 minutos
-  contestan `retry`, y hay que buscar en Mux por `passthrough` antes de crear otro, porque un 5xx no dice que no lo haya creado. Un asset que sobra (`gone`, `mismatch`) queda en
-  la papelera en la misma transacción. Asentar (`video_settle`) no pasa por `draft_open` ni sube revisiones, solo acepta estados terminales (una respuesta vieja no pisa), y lo que
-  mide Mux manda sobre la cabecera: se cobra la diferencia, y lo que pasa de `VIDEO_DURACION_MAX` queda con error (`too_long`). Se vuelve la vigente solo con el curso en `draft`, y lo
+  contestan `retry`, y hay que buscar en Mux por `passthrough` antes de crear otro, porque un 5xx no dice que no lo haya creado. Con tantos sin asentar como el tope por hora no se
+  reclama otro: lo declarado solo se corrige si alguien asienta. Un asset que sobra (`gone`, `mismatch`) queda en la papelera en la misma transacción, y por eso `video_created` recibe
+  el curso: sin fila no hay de dónde sacarlo. La papelera guarda el `video_id`, para buscar por `passthrough` lo que no tiene asset. Asentar (`video_settle`) no pasa por `draft_open` ni sube revisiones, solo acepta estados terminales (una respuesta vieja no pisa), y lo que
+  mide Mux manda sobre la cabecera: se cobra la diferencia, también si el mes no tiene fila, y lo que pasa de `VIDEO_DURACION_MAX` queda con error (`too_long`) y su asset va a la papelera ya. Se vuelve la vigente solo con el curso en `draft`, y lo
   que quedó listo en revisión se promueve al volver (`video_promote`). Contenido llega por `private.actor_has_capability`, no por `has_capability`, que mira el token y con `asServer`
   siempre da falso (la primera revisión lo encontró). `video_due` dice qué preguntarle a Mux, con 10 s
   por fila. **Lo que una fila deja de nombrar, también por cascada, va a `private.video_trash`**, porque Mux no tiene una lista como `storage.objects`; lo que
-  `video_assets` nombra sale de ahí sin tocar nada. La vacía su maestro al abrir el editor, y lo que no alcance, `private.video_sweep()`, de quien opera. `pg_cron` corre `video_expire`
+  `video_assets` nombra sale de ahí sin tocar nada. La vacía su maestro al abrir el editor, y lo que no alcance, `private.video_sweep()`, de quien opera, que además dice lo que sobra en la cubeta (`orphan`) y lo que lleva más de un día
+  creándose o procesándose (`stuck`), que sigue nombrado y se decide a mano. `pg_cron` corre `video_expire`
   (subida sin terminar a las 48 h; subido sin crearse y con error, a los 7 días). El proveedor `test` solo entra
   con la fila de `private.local_flags` que pone `db:login`: en producción nadie la pone. El tope global de Storage en `supabase/config.toml` subió a 5 GiB (manda el
   menor entre ese y el de la cubeta), y para que el Auth y Storage locales lo tomen hay que `db:stop` y `db:start`. Medido contra el Storage local: por
