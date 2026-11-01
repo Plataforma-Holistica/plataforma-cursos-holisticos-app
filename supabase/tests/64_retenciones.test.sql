@@ -5,7 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
-select plan(115);
+select plan(119);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -342,6 +342,7 @@ select pruebas.como_dueno_sistema();
 
 -- El día que rige: el último de una regla ya no cuenta, el primero sí, y es el día en la zona de los periodos.
 select is(private.release_day(), (now() at time zone 'America/Mexico_City')::date, 'el día es el de la zona de los periodos, no el de UTC');
+select ok(pg_get_functiondef('private.release_day()'::regprocedure) like '%private.period_zone()%', 'y lo saca del parámetro: fuera del día 1 los dos coinciden casi todo el día');
 select pruebas.regla('616', 'person', 0, 0, 0, private.release_day());
 select pruebas.perfil('M4', '616', 'person');
 select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'ready', 'una regla rige desde su primer día');
@@ -374,6 +375,8 @@ select throws_ok($$select pruebas.descuadra(202610, format($s$
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set vat_cents = vat_cents + 1, net_cents = net_cents + 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'un centavo de más de IVA');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set income_tax_withheld_cents = income_tax_withheld_cents + 1, net_cents = net_cents - 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'de ISR');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set vat_withheld_cents = vat_withheld_cents - 1, net_cents = net_cents + 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'de IVA retenido');
+-- Con el neto compensado: la restricción de la tabla no lo ve, y cada columna se revisa contra su regla. Quitar una sola de esas tres revisiones no cambia nada, porque otra lo atrapa o la tabla exige que el neto cuadre.
+select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set vat_cents = vat_cents + 1, income_tax_withheld_cents = income_tax_withheld_cents + 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'el IVA y el ISR movidos sin que cambie el neto');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_rule_id = (select id from public.withholding_rules where tax_regime_code = %L), vat_cents = 0, income_tax_withheld_cents = 0, vat_withheld_cents = 0, net_cents = subtotal_cents where id = %L', '605', pruebas.y('M1', 202610)))$$, '23514', null, 'con una regla de otro régimen, que además no rige ese día');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_profile_version = 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'con una versión de sus datos que tenía otro régimen');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_profile_version = 99 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'con una versión que no existe');
@@ -385,7 +388,20 @@ select throws_ok($$select pruebas.descuadra(202610, $s$update public.withholding
 -- El guardián.
 select throws_like($$select pruebas.a_mano(format('update public.payouts set status = %L, released_at = now(), released_by = private.actor_id() where id = %L', 'awaiting_invoice', pruebas.y('M1', 202610)))$$, '%with its withholding rule%', 'a mano, en espera de factura sin regla no pasa: lo detiene el guardián');
 select throws_ok($$select pruebas.a_mano(format('update public.payouts set withholding_rule_id = (select id from regla) where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'la regla no se escribe fuera de liberar');
-select throws_ok($$select pruebas.a_mano(format('update public.payouts set status = %L, vat_cents = 1, net_cents = subtotal_cents + 1 where id = %L', 'carried_forward', pruebas.y('M1', 202610)))$$, '23514', null, 'acumulada con impuestos, tampoco');
+select throws_like($$select pruebas.a_mano(format('update public.payouts set status = %L, vat_cents = 1, net_cents = subtotal_cents + 1 where id = %L', 'carried_forward', pruebas.y('M1', 202610)))$$, '%carried forward without taxes%', 'acumulada con impuestos, tampoco: lo detiene el guardián');
+-- Liberar escribe lo que se comparó: si no es eso, no sigue.
+create function pruebas.libera_con(p_tax jsonb) returns text language plpgsql as $f$
+declare
+  v text;
+begin
+  perform pruebas.como_finanzas();
+  v := private.release_payout(pruebas.y('M1', 202610), 10000, p_tax)::text;
+  raise exception 'liberó: %', v using errcode = 'P0002';
+end
+$f$;
+select throws_like(format($$select pruebas.libera_con(%L)$$, jsonb_build_object('subtotal_cents', -1, 'tax_state', 'ready')), '%what was compared%', 'con otro bruto, no');
+select throws_like(format($$select pruebas.libera_con(%L)$$, jsonb_build_object('subtotal_cents', (private.release_preview(202610) -> 'rows' -> 0 -> 'tax' ->> 'subtotal_cents')::bigint, 'tax_state', 'no_data')), '%what was compared%', 'sin el estado que se comparó, no');
+select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
 -- Liberar. Noviembre se cierra antes: así M3 acumula después de ese cierre, y en noviembre llega solo por su saldo, sin liquidación.
