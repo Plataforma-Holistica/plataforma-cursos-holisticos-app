@@ -497,8 +497,6 @@ select is(
 
 -- Lo atrasado cuenta en su mes: una reproducción revocada antes de que empezara este mes
 -- guarda en el mes anterior, y su consecutivo ya no entra en este.
--- Rehacer la base entre las 00:00 y las 06:00 UTC del día 1 crea las particiones desde el mes en UTC, que ya es el siguiente: falta la del mes anterior en México.
-select private.create_watch_partition(to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer);
 insert into r values ('mes', pruebas.abre(pruebas.computadora()));
 update public.playback_sessions
 set live_seconds = 600, last_heartbeat_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours',
