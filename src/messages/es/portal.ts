@@ -157,6 +157,11 @@ export const portal = defineMessages({
       keepUploading: "Seguir con la subida",
       confirmCancel: "¿Cancelar la subida de «{file}»? Lo que ya subió se pierde.",
       confirmRemove: "¿Quitar «{file}»? El archivo se borra y no se puede recuperar.",
+      blocked: {
+        throttled: "Tu video está guardado. Mandaste muchos videos en poco tiempo, y lo procesamos en cuanto se pueda.",
+        overMinutes: "Tu video está guardado, pero llegaste al tope de minutos de video de este mes. Se procesa solo cuando empiece el siguiente. Lo que no se procesa en unos días se borra: escríbenos si no puede esperar.",
+        closed: "Tu video está guardado. El procesamiento de videos está en pausa por ahora, y sigue solo cuando se reactive.",
+      },
       states: {
         uploaded: "Recibido, {size}. Falta procesarlo.",
         creating: "Procesando, {size}.",

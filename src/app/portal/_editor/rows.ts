@@ -102,6 +102,8 @@ export interface EditorView {
   };
   resourceLimits: { maxBytes: number | null; maxText: string; perPlace: number | null };
   videoLimits: { maxBytes: number | null; maxText: string };
+  /** Cada cuánto preguntar por los videos, o nulo si ninguno está en camino. */
+  checkVideosEvery: number | null;
   lessonIds: string[];
   structure: { addModule: string; modules: ModuleRow[] };
   selected: Selected;
@@ -143,6 +145,12 @@ function resourceRows(draft: DraftCourse, lesson: string | null): ResourceRow[] 
 
 function options(list: readonly { id: string; name: string; active: boolean }[], inactive: typeof text.inactivePractice | typeof text.inactiveLevel): Option[] {
   return list.map((item) => ({ value: item.id, label: item.active ? item.name : t(inactive, { name: item.name }) }));
+}
+
+/** Lo que el proveedor está haciendo se pregunta seguido; que lleguen los subtítulos, o que se libere un tope, puede tardar. */
+function checkVideosEvery(videos: readonly DraftVideo[]): number | null {
+  if (videos.some((video) => video.state === "creating" || video.state === "processing")) return 15;
+  return videos.some((video) => video.state === "uploaded" || (video.state === "ready" && !video.captionsReady)) ? 60 : null;
 }
 
 function videoRow(draft: DraftCourse, lesson: string): VideoRow | null {
@@ -259,6 +267,7 @@ export function editorView(
       maxBytes: choices.videoMaxBytes,
       maxText: choices.videoMaxBytes === null ? "" : sizeText(choices.videoMaxBytes),
     },
+    checkVideosEvery: checkVideosEvery(draft.videos),
     lessonIds: draft.modules.flatMap((module) => module.lessons.map((lesson) => lesson.id)),
     structure: { addModule: editorButton.addModule(draft.structureRevision), modules },
     selected,

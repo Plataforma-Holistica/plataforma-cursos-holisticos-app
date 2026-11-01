@@ -79,6 +79,8 @@ export default defineConfig({
       SENTRY_DSN: "",
       MUX_SIGNING_KEY_ID: "LlaveDeExtremoAExtremo",
       MUX_SIGNING_PRIVATE_KEY: Buffer.from(TEST_SIGNING_KEY).toString("base64"),
+      // Los videos de un borrador no salen de la máquina (T-403): el token de Mux que haya en .env.local no se usa aquí.
+      VIDEO_PROVIDER: "test",
     },
   },
 });

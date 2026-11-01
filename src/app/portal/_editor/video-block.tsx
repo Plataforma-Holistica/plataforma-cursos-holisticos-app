@@ -17,7 +17,7 @@ import { checkVideoFile, type VideoProblem } from "./video-outcomes";
 import { useVideoUploads } from "./video-uploads";
 
 // El video de una lección en PA-43 (T-403; RF-604, FL-33). Lo que está subiendo vive arriba (`video-uploads.tsx`), y lo que ya llegó,
-// en la base. Procesar y ver llegan con las solicitudes que siguen: por ahora la historia termina en «Recibido».
+// en la base. Procesar lo mueve `video-uploads.tsx`, preguntando; verlo llega con la solicitud que sigue.
 //
 //   · Pausar y Reanudar son el mismo botón: el foco se queda en él.
 //   · Cancelar y quitar preguntan antes: una subida puede llevar horas. Seguir devuelve el foco al botón que preguntó.
@@ -25,6 +25,7 @@ import { useVideoUploads } from "./video-uploads";
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 
 const text = portal.editor.videos;
+const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed };
 const percentOf = (loaded: number, total: number) => (total > 0 ? Math.floor((Math.min(loaded, total) / total) * 100) : 0);
 
 interface Props {
@@ -55,7 +56,7 @@ function VideoQuestion({ question, stay, go, onStay, onGo }: { question: string;
 
 export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) {
   const hydrated = useHydrated();
-  const { uploads, notices, start, pause, resume, retryConfirm, remove } = useVideoUploads();
+  const { uploads, notices, blocked, start, pause, resume, retryConfirm, remove } = useVideoUploads();
   const [localProblem, setLocalProblem] = useState<{ problem: VideoProblem; attempt: number } | null>(null);
   const [asking, setAsking] = useState(false);
   const upload = uploads.get(lesson);
@@ -93,6 +94,7 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
   const received = upload === undefined && row !== null && row.state !== "uploading";
   const canPick = editable && upload === undefined && !received;
   const fileName = upload?.fileName ?? row?.fileName ?? "";
+  const held = row?.state === "uploaded" ? blocked[row.id] : undefined;
 
   return (
     <section ref={section} tabIndex={-1} aria-labelledby={`video-${lesson}`} className="flex flex-col gap-3 outline-none">
@@ -107,6 +109,11 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
           <p className="text-body break-words">{row.fileName}</p>
           <p className="text-body-s text-text-2">{t(text.states[row.state], { size: row.size })}</p>
         </div>
+      )}
+      {received && held !== undefined && (
+        <InlineAlert tone="warning" live>
+          {BLOCKED[held]}
+        </InlineAlert>
       )}
 
       {canPick && !hydrated && <p className="text-body-s text-text-2">{text.needsJavascript}</p>}

@@ -77,6 +77,7 @@ export interface DraftVideo {
   isCurrent: boolean;
   fileName: string;
   sizeBytes: number;
+  captionsReady: boolean;
 }
 
 export interface DraftCourse {

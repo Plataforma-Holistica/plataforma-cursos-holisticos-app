@@ -5,7 +5,7 @@
 -- que lo publicado nombra se borra. Las reglas del área `videos` del vigilante, del carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(214);
+select plan(215);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7200000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -245,6 +245,7 @@ delete from private.rate_limit_counters where bucket = 'video_begin:' || pruebas
 create temporary table reclamo on commit drop as
   select pruebas.rj(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'mux')) as v;
 select is((select v ->> 'answer' from reclamo), 'claimed', 'el primero reclama');
+select is((select v ->> 'since' from reclamo), (select extract(epoch from created_at)::bigint::text from public.draft_videos where id = pruebas.id('v1')), 'y dice cuándo nació la fila: ningún asset suyo es más viejo');
 select is((select v ->> 'claim' from reclamo), (select extract(epoch from claimed_at)::text from public.draft_videos where id = pruebas.id('v1')), 'y contesta qué reclamo es');
 update public.draft_videos set claimed_at = claimed_at + interval '1 second' where id = pruebas.id('v1');
 select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('v1'), (select v ->> 'claim' from reclamo))), 'stale', 'un reclamo viejo no revierte uno nuevo');
@@ -335,7 +336,7 @@ as $$ select (select revision from public.draft_lessons where id = p_lesson)::te
 create temporary table antes on commit drop as select pruebas.revisiones(pruebas.id('l1')) as r;
 select is(pruebas.asentar(pruebas.p(2), pruebas.id('v1'), 'ready'), 'not_found', 'otro maestro no asienta');
 select is(pruebas.asentar(pruebas.p(4), pruebas.id('v1'), 'ready'), 'not_found', 'una alumna tampoco');
-select is(pruebas.rj(pruebas.p(5), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1'), 'state', 'processing')), true, 'Contenido sí sabe qué preguntar: revisa');
+select is(pruebas.rj(pruebas.p(5), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1'), 'state', 'processing', 'seconds', 600, 'current', false)), true, 'Contenido sí sabe qué preguntar: revisa, con los segundos leídos y si es la vigente');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'processing'), 'invalid', 'solo lo terminal');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready', null, 600), 'invalid', 'listo sin playback, no');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready'), 'ready', 'listo');

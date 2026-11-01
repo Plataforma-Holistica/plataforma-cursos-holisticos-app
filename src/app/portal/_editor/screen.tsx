@@ -28,7 +28,7 @@ export function EditorScreen({ view }: { view: EditorView }) {
   const chosen = view.selected.kind !== "course";
   return (
     <UnsavedProvider>
-      <VideoUploadsProvider course={view.course} lessons={view.lessonIds}>
+      <VideoUploadsProvider course={view.course} lessons={view.lessonIds} checkEverySeconds={view.checkVideosEvery}>
         <div className="flex flex-col gap-3 border-b border-border pb-4">
           <BackLink href={ROUTES.portalCourses}>{text.back}</BackLink>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

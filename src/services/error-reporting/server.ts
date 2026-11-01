@@ -57,6 +57,9 @@ const FAILURES = {
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",
   video_upload_unavailable: "No se pudo firmar la subida de un video de lección (T-403): quien subía tiene que reintentar.",
+  video_provider_unavailable: "Mux no contestó, o contestó algo que no se esperaba, al crear o al leer el video de una lección (T-403): la fila sigue como estaba y se reintenta cuando el editor vuelve a preguntar.",
+  video_original_unavailable: "No se pudo firmar la dirección de la que Mux baja el original de un video (T-403): la fila vuelve a recibido y se reintenta.",
+  video_cleanup_failed: "No se pudo vaciar del todo la papelera de los videos de un curso (T-403): lo que falta sigue en ella, y se reintenta al abrir el editor o con el repaso de quien opera.",
   resource_upload_unavailable: "No se pudo firmar la subida de un recurso de un curso (T-404): la fila se canceló.",
   resource_grant_unavailable: "No se pudo firmar la descarga de un recurso (T-404): el freno o Storage no contestaron, o la regla dio acceso y el archivo ya no está en la cubeta.",
   lesson_resources_unavailable: "No se pudieron leer los recursos de una lección (T-404): su página lo dijo, y el video siguió.",

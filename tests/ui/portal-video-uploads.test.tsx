@@ -12,6 +12,7 @@ const actions = vi.hoisted(() => ({
   renewVideoAction: vi.fn(),
   confirmVideoAction: vi.fn(),
   removeVideoAction: vi.fn(),
+  checkVideosAction: vi.fn(),
 }));
 vi.mock("@/app/portal/_editor/video-actions", () => actions);
 
@@ -67,12 +68,12 @@ const file = new File(["contenido"], "clase.mp4", { type: "video/mp4" });
 const GO = { kind: "go", target: { video: VIDEO, path: "p", mime: "video/mp4", bucket: "b", endpoint: "http://x" }, token: "firma-1", resumed: false };
 const MINUTE = 60_000;
 
-function Screen({ lessons = [L1, L2], row = null }: { lessons?: string[]; row?: Parameters<typeof VideoBlock>[0]["row"] }) {
+function Screen({ lessons = [L1, L2], row = null, every = null }: { lessons?: string[]; row?: Parameters<typeof VideoBlock>[0]["row"]; every?: number | null }) {
   return (
     <UnsavedProvider>
       <SavedStatus saved="Guardado hace poco" />
       <Link href="/portal/cursos">Mis cursos</Link>
-      <VideoUploadsProvider course={COURSE} lessons={lessons}>
+      <VideoUploadsProvider course={COURSE} lessons={lessons} checkEverySeconds={every}>
         <VideoBlock lesson={L1} row={row} editable maxBytes={1000} maxText="1 KB" />
       </VideoUploadsProvider>
     </UnsavedProvider>
@@ -106,6 +107,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   FakeUpload.made = [];
   FakeUpload.failNext = false;
+  actions.checkVideosAction.mockResolvedValue({ blocked: {} });
   actions.beginVideoAction.mockResolvedValue(GO);
   actions.confirmVideoAction.mockResolvedValue({ kind: "uploaded" });
   actions.removeVideoAction.mockResolvedValue({ kind: "removed" });
@@ -437,5 +439,102 @@ describe("dos pestañas", () => {
     act(() => lastUpload().options.onSuccess());
     await screen.findByText("Listo: recibimos tu video.");
     await waitFor(() => expect(released).toBe(true));
+  });
+});
+
+describe("preguntar por lo que ya llegó", () => {
+  const RECEIVED = { id: VIDEO, state: "uploaded" as const, fileName: "clase.mp4", size: "1 KB" };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("pregunta al cargar, una vez, aunque no haya nada en camino", async () => {
+    render(<Screen />);
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalledWith({ course: COURSE }));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("pregunta en cuanto se confirma: el video no espera al siguiente turno", async () => {
+    const user = userEvent.setup();
+    actions.confirmVideoAction.mockResolvedValue({ kind: "uploaded" });
+    render(<Screen />);
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalledTimes(1));
+    await pick(user);
+    act(() => lastUpload().options.onSuccess());
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalledTimes(2));
+  });
+
+  it("con algo en camino pregunta cada tanto; sin nada, no", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<Screen every={null} />);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(1);
+    rerender(<Screen every={15} />);
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(3);
+    rerender(<Screen every={null} />);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(3);
+  });
+
+  it("con la pantalla oculta no pregunta", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    render(<Screen every={15} />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(1);
+    visibility.mockReturnValue("visible");
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(2);
+    visibility.mockRestore();
+  });
+
+  it("una pregunta a la vez: si la anterior no ha contestado, no se apila otra", async () => {
+    vi.useFakeTimers();
+    let answer: (value: unknown) => void = () => undefined;
+    actions.checkVideosAction.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    render(<Screen every={15} />);
+    await act(() => vi.advanceTimersByTimeAsync(45_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(1);
+    await act(async () => answer({ blocked: {} }));
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("una falla al preguntar no dice nada: es algo que nadie pidió, y se vuelve a preguntar", async () => {
+    vi.useFakeTimers();
+    actions.checkVideosAction.mockRejectedValueOnce(new Error("sin red"));
+    render(<Screen every={15} />);
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    expect(actions.checkVideosAction).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    ["throttled", /en poco tiempo/],
+    ["over_minutes", /tope de minutos/],
+    ["closed", /en pausa/],
+  ])("dice por qué un video recibido no se procesa (%s), sin decir que se perdió", async (kind, text) => {
+    actions.checkVideosAction.mockResolvedValue({ blocked: { [VIDEO]: kind } });
+    render(<Screen row={RECEIVED} />);
+    expect(await screen.findByText(text)).toBeTruthy();
+    expect(screen.getByText(/Tu video está guardado/)).toBeTruthy();
+  });
+
+  it("lo que le pasa a otro video, o a uno que ya no está recibido, no se dice aquí", async () => {
+    actions.checkVideosAction.mockResolvedValue({ blocked: { otro: "closed" } });
+    const { unmount } = render(<Screen row={RECEIVED} />);
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalled());
+    expect(screen.queryByText(/Tu video está guardado/)).toBeNull();
+    unmount();
+    actions.checkVideosAction.mockResolvedValue({ blocked: { [VIDEO]: "closed" } });
+    render(<Screen row={{ ...RECEIVED, state: "processing" }} />);
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Tu video está guardado/)).toBeNull();
   });
 });

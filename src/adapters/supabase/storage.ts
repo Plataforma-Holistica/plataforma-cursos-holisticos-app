@@ -49,6 +49,8 @@ export interface VideoStorage {
   readRange: (path: string, start: number, length: number) => Promise<{ bytes: Uint8Array; total: number } | null>;
   /** Borra esos objetos. Que no estén no es una falla. Lanza si Storage no contestó bien. */
   remove: (paths: readonly string[]) => Promise<void>;
+  /** La dirección para bajar esa ruta, que vive `seconds`, o nulo si no se pudo firmar. */
+  signRead: (path: string, seconds: number) => Promise<string | null>;
 }
 
 export function createVideoStorage(base: Fetch = fetch): VideoStorage {
@@ -105,6 +107,21 @@ export function createVideoStorage(base: Fetch = fetch): VideoStorage {
         body: JSON.stringify({ prefixes: paths }),
       });
       if (!response.ok) throw new Error(`storage remove: ${response.status}`);
+    },
+    signRead: async (path, seconds) => {
+      try {
+        const response = await call(`${root()}/object/sign/${VIDEO_BUCKET}/${path}`, {
+          method: "POST",
+          headers: authorized({ "content-type": "application/json" }),
+          body: JSON.stringify({ expiresIn: seconds }),
+        });
+        if (!response.ok) return null;
+        const body: unknown = await response.json();
+        const url = typeof body === "object" && body !== null && "signedURL" in body ? body.signedURL : null;
+        return typeof url === "string" && url.startsWith("/") && url.includes("?token=") ? `${root()}${url}` : null;
+      } catch {
+        return null;
+      }
     },
   };
 }

@@ -6,8 +6,8 @@ import type { Upload } from "tus-js-client";
 
 import { isObjectAlreadyThere, videoTusOptions, type VideoTarget } from "./tus-upload";
 import { VIDEO_KEY, useUnsaved } from "./unsaved";
-import { beginVideoAction, confirmVideoAction, removeVideoAction, renewVideoAction } from "./video-actions";
-import { canRetryConfirm, type VideoProblem } from "./video-outcomes";
+import { beginVideoAction, checkVideosAction, confirmVideoAction, removeVideoAction, renewVideoAction } from "./video-actions";
+import { canRetryConfirm, type VideoBlockedKind, type VideoProblem } from "./video-outcomes";
 
 // Las subidas de video de un curso en el editor (PA-43; T-403). Viven por encima del detalle: se puede cambiar de lección en el mismo
 // curso y la subida sigue (decisión de Sergio del 2026-10-31). Salir del editor pregunta, y al volver se elige el mismo archivo: lo que
@@ -20,6 +20,8 @@ import { canRetryConfirm, type VideoProblem } from "./video-outcomes";
 //   · Una lección borrada se lleva su subida: no se gasta más subiendo lo que ya no tiene fila.
 //   · Lo que dispara una subida cancelada o pausada llega tarde: cada evento mira que la suya siga siendo la vigente de esa lección, y
 //     una subida solo arranca si no está corriendo (un doble clic en «Reanudar» arrancaría dos).
+//   · Lo que ya llegó se pregunta al cargar, al terminar de confirmar y cada tanto mientras haya algo en camino y la pantalla se vea: sin webhook, es
+//     lo único que lo mueve (T-403, tercera solicitud). Una pregunta a la vez. El servidor limita por fila, y cuánto esperar lo dice la página.
 
 const RENEW_AFTER_MS = 90 * 60 * 1000;
 
@@ -50,6 +52,8 @@ interface Live {
 interface VideoUploads {
   uploads: ReadonlyMap<string, LessonUpload>;
   notices: ReadonlyMap<string, LessonNotice>;
+  /** Por qué un video recibido no se está procesando, por video. */
+  blocked: Readonly<Record<string, VideoBlockedKind>>;
   start: (lesson: string, file: File) => void;
   pause: (lesson: string) => void;
   resume: (lesson: string) => void;
@@ -84,12 +88,27 @@ function withVideoLock(video: string, work: (release: () => void) => void): Prom
   });
 }
 
-export function VideoUploadsProvider({ course, lessons, children }: { course: string; lessons: readonly string[]; children: ReactNode }) {
+export function VideoUploadsProvider({ course, lessons, checkEverySeconds, children }: { course: string; lessons: readonly string[]; checkEverySeconds: number | null; children: ReactNode }) {
   const { mark } = useUnsaved();
   const [uploads, setUploads] = useState<ReadonlyMap<string, LessonUpload>>(new Map());
   const [notices, setNotices] = useState<ReadonlyMap<string, LessonNotice>>(new Map());
+  const [blocked, setBlocked] = useState<Readonly<Record<string, VideoBlockedKind>>>({});
   const live = useRef(new Map<string, Live>());
   const attempts = useRef(0);
+  const checking = useRef(false);
+
+  const check = useCallback(async () => {
+    if (checking.current) return;
+    checking.current = true;
+    try {
+      const answer = await checkVideosAction({ course });
+      setBlocked(answer.blocked);
+    } catch (error) {
+      unstable_rethrow(error);
+    } finally {
+      checking.current = false;
+    }
+  }, [course]);
 
   const setUpload = useCallback((lesson: string, value: LessonUpload | null) => {
     setUploads((current) => {
@@ -127,6 +146,7 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
         if (answer.kind === "uploaded") {
           forget(lesson);
           notify(lesson, { done: true });
+          void check();
           return;
         }
         if (fallback !== undefined && answer.problem === "notUploaded") {
@@ -146,7 +166,7 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
         notify(lesson, { problem: "unavailable" });
       }
     },
-    [course, forget, notify, setUpload],
+    [check, course, forget, notify, setUpload],
   );
 
   const send = useCallback(
@@ -332,6 +352,18 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
     [course, forget, notify, setUpload],
   );
 
+  useEffect(() => {
+    const first = setTimeout(() => void check(), 0);
+    return () => clearTimeout(first);
+  }, [check]);
+  useEffect(() => {
+    if (checkEverySeconds === null) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void check();
+    }, checkEverySeconds * 1000);
+    return () => clearInterval(timer);
+  }, [check, checkEverySeconds]);
+
   // Mientras algo sube o falta confirmarlo, salir lo perdería. Cambiar de lección no.
   const busy = uploads.size > 0;
   useEffect(() => {
@@ -361,6 +393,6 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
     };
   }, [mark]);
 
-  const value = useMemo(() => ({ uploads, notices, start, pause, resume, retryConfirm, remove }), [uploads, notices, start, pause, resume, retryConfirm, remove]);
+  const value = useMemo(() => ({ uploads, notices, blocked, start, pause, resume, retryConfirm, remove }), [uploads, notices, blocked, start, pause, resume, retryConfirm, remove]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

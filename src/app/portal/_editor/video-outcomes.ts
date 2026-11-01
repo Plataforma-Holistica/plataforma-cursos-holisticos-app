@@ -27,6 +27,9 @@ export type VideoBeginStep =
 export type VideoRenewStep = { kind: "renewed"; token: string } | { kind: "problem"; problem: VideoProblem };
 export type VideoConfirmStep = { kind: "uploaded" } | { kind: "problem"; problem: VideoProblem };
 export type VideoRemoveStep = { kind: "removed" } | { kind: "problem"; problem: VideoProblem };
+/** Por qué un video recibido no se está procesando. */
+export type VideoBlockedKind = "throttled" | "over_minutes" | "closed";
+export type VideoCheckStep = { blocked: Record<string, VideoBlockedKind> };
 
 export const VIDEO_BEGIN_PROBLEMS: Readonly<Record<string, VideoProblem>> = {
   busy: "busy",

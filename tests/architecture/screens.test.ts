@@ -115,6 +115,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     renewVideoAction: /const result = await renewVideoUpload\(jar, /,
     confirmVideoAction: /const result = await confirmVideo\(jar, /,
     removeVideoAction: /const result = await removeVideo\(jar, /,
+    checkVideosAction: /const result = await checkVideos\(jar, /,
   },
   "src/app/portal/_cursos/actions.ts": {
     // Crear y borrar un curso (T-402): el servicio corre la guarda, y la base escribe solo a nombre del

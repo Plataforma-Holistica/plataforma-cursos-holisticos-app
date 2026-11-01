@@ -5,6 +5,7 @@ import { reportFailure } from "@/services/error-reporting/server";
 
 import { createResourceFiles } from "@/services/media/resource-files";
 import { createVideoFiles } from "@/services/media/video-files";
+import { createVideoProviders } from "@/services/media/video-provider";
 
 import { createDrafts } from "./drafts";
 import { createDraftResources } from "./resources";
@@ -33,8 +34,8 @@ export { DRAFT_TEXT_LIMITS, missingItems, parseDraftText } from "./field-rules";
 
 const resources = createDraftResources({ store: databaseResourcesStore, files: createResourceFiles(), checkSession, report: reportFailure });
 export const { beginResource, confirmResource, removeResource, moveResource } = resources;
-const videos = createDraftVideos({ store: databaseVideosStore, files: createVideoFiles(), checkSession, report: reportFailure });
-export const { beginVideo, renewVideoUpload, confirmVideo, removeVideo } = videos;
+const videos = createDraftVideos({ store: databaseVideosStore, files: createVideoFiles(), providers: createVideoProviders(), checkSession, report: reportFailure });
+export const { beginVideo, renewVideoUpload, confirmVideo, removeVideo, checkVideos } = videos;
 
 export const {
   teacherCourses,
@@ -51,4 +52,12 @@ export const {
   deleteLesson,
   moveLesson,
   deleteCourse,
-} = createDrafts({ store: databaseDraftsStore, afterDelete: resources.cleanUp, checkSession, report: reportFailure });
+} = createDrafts({
+  store: databaseDraftsStore,
+  afterDelete: async (claims, course) => {
+    await resources.cleanUp(claims, course);
+    await videos.cleanUp(claims, course);
+  },
+  checkSession,
+  report: reportFailure,
+});
