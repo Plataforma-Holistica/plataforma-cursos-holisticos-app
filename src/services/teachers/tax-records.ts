@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import type { TaxPayoutAnswer, TaxProfileRow, TaxProfileSeal, TaxReadAnswer, TaxSaveAnswer } from "./tax-profile";
+import type { TaxPayoutAnswer, TaxProfileRow, TaxProfileSeal, TaxProfileState, TaxReadAnswer, TaxSaveAnswer } from "./tax-profile";
 
 // Lo que el servicio de los datos fiscales le pregunta a la base, como el servidor y a nombre de la persona. Las cuatro funciones de
 // `t409_datos_fiscales` se nombran solo aquí. Lo cifrado viaja en base64, en una sola línea, y se abre con la transacción ya confirmada.
@@ -46,15 +46,15 @@ function rowOf(answer: z.infer<typeof payload>): TaxProfileRow {
 const answerRow = z.object({ answer: z.unknown() });
 
 const stateAnswer = z.union([
-  z.object({ outcome: z.literal("ok"), version: z.number().int().min(0), updated_at: z.string().nullable() }).strict(),
+  z.object({ outcome: z.literal("ok"), version: z.number().int().min(0), updated_at: z.string().nullable(), can_save: z.boolean() }).strict(),
   z.object({ outcome: z.literal("not_teacher") }).strict(),
 ]);
 
-export async function askTaxState(tx: Tx): Promise<{ version: number; updatedAt: string | null } | null> {
+export async function askTaxState(tx: Tx): Promise<TaxProfileState | null> {
   const rows = await tx.query(sql`select private.tax_profile_state() as answer`, answerRow);
   const answer = stateAnswer.parse(rows[0]?.answer);
   if (answer.outcome === "not_teacher") return null;
-  return { version: answer.version, updatedAt: answer.updated_at === null ? null : new Date(answer.updated_at).toISOString() };
+  return { version: answer.version, updatedAt: answer.updated_at === null ? null : new Date(answer.updated_at).toISOString(), canSave: answer.can_save };
 }
 
 const saveAnswer = z.enum(["saved", "changed", "invalid", "not_teacher", "suspended", "needs_notice"]);
