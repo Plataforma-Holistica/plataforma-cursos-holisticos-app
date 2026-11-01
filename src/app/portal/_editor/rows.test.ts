@@ -30,6 +30,7 @@ const draft: DraftCourse = {
   updatedAt: "2026-10-29T18:05:00.000Z",
   teacherName: "Ana Ruiz",
   resources: [],
+  videos: [],
   modules: [
     {
       id: M1,
@@ -51,6 +52,7 @@ const choices: DraftChoices = {
   ],
   levels: [{ id: LV, name: "Inicial", active: true }],
   resourceLimits: { maxBytes: 52428800, perPlace: 10 },
+  videoMaxBytes: 5368709120,
 };
 const NOW = new Date("2026-10-29T20:00:00.000Z");
 const view = (search: Record<string, string> = {}, readOnly = false, changes: Partial<DraftCourse> = {}) =>
@@ -97,6 +99,7 @@ describe("editorView", () => {
       askDelete: `ask-delete-lesson:${L2}`,
       remove: `delete-lesson:${L2}:2`,
       resources: [],
+      video: null,
     });
     expect(view({ modulo: M1 }).selected).toMatchObject({ kind: "module", id: M1, place: "Módulo 1", lessons: 2, save: `save-module:${M1}:5`, remove: `delete-module:${M1}:5` });
     expect(view({ leccion: L3 }).selected).toMatchObject({ kind: "lesson", place: "Módulo 2 · Lección 1" });

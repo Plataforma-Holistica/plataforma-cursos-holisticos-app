@@ -13,6 +13,7 @@ import { FullScreenState } from "@/ui/full-screen-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
+import { FileUpload } from "@/ui/file-upload";
 import { ProgressBar } from "@/ui/progress-bar";
 
 // Los estados de una fila, como los da el servicio: una prop de estado no es texto.
@@ -229,6 +230,7 @@ export default function SamplePage() {
               label: "Temario",
               panel: (
                 <div className="flex flex-col gap-3">
+                  <FileUpload label="Elige el video" hint="MP4 o MOV, hasta 5 GB." accept=".mp4,.mov" onFile={() => undefined} />
                   <ProgressBar value={1} max={4} label="Avance del curso" text="1 de 4 lecciones" />
                   <div className="flex flex-col">
                     <LessonRow href="/muestra" number={1} title="Soltar los hombros" duration="5 min" state={COMPLETED} />

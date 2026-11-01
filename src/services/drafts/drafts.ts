@@ -69,6 +69,16 @@ export interface DraftResource {
   revision: number;
 }
 
+/** Un video del borrador. La ruta nunca sale de la base. */
+export interface DraftVideo {
+  id: string;
+  lessonId: string;
+  state: "uploading" | "uploaded" | "creating" | "processing" | "ready" | "errored";
+  isCurrent: boolean;
+  fileName: string;
+  sizeBytes: number;
+}
+
 export interface DraftCourse {
   id: string;
   state: CourseState;
@@ -84,6 +94,7 @@ export interface DraftCourse {
   updatedAt: string;
   modules: DraftModule[];
   resources: DraftResource[];
+  videos: DraftVideo[];
   /** El nombre de su maestro, para la portada. */
   teacherName: string | null;
 }
@@ -103,6 +114,8 @@ export interface DraftChoices {
   levels: CatalogChoice[];
   /** Los topes de los recursos, para decirlos y revisar antes de subir. Nulos si el parámetro no tiene valor. */
   resourceLimits: { maxBytes: number | null; perPlace: number | null };
+  /** El tope de un video, para decirlo y revisar antes de subir. Nulo si el parámetro no tiene valor. */
+  videoMaxBytes: number | null;
 }
 
 /** Lo que contesta cada función de la base. */

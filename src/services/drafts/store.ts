@@ -38,7 +38,12 @@ import {
   readDraftCourse,
   readTeacherCourses,
   readUnusedResources,
+  askVideoBegin,
+  askVideoConfirm,
+  askVideoFile,
+  askVideoRemove,
 } from "./records";
+import { VIDEO_BEGIN_ANSWERS, VIDEO_CONFIRM_ANSWERS, VIDEO_FILE_ANSWERS, VIDEO_REJECT_REASONS, VIDEO_REMOVE_ANSWERS, type VideosStore } from "./videos";
 import { BEGIN_ANSWERS, CONFIRM_ANSWERS, FILE_ANSWERS, MOVE_ANSWERS as RESOURCE_MOVE_ANSWERS, REJECT_REASONS, REMOVE_ANSWERS, type ResourcesStore } from "./resources";
 
 // Lo que el servicio del borrador le pregunta a la base, a nombre de las claims que verificó. Leer
@@ -127,3 +132,30 @@ export function createResourcesStore(run: typeof asServer = asServer): Resources
 }
 
 export const databaseResourcesStore = createResourcesStore();
+
+// Los videos (T-403), con la misma regla: un rechazo borra la fila, así que la respuesta se revisa ya confirmada la transacción.
+export function createVideosStore(run: typeof asServer = asServer): VideosStore {
+  function change<Result>(claims: VerifiedClaims, reason: string, work: (tx: Tx) => Promise<Result>): Promise<Result> {
+    return withLockRetry(() => run({ claims, reason }, work), isLockConflict);
+  }
+  return {
+    begin: async (claims, input) => {
+      const result = await change(claims, "video_begin", (tx) => askVideoBegin(tx, input));
+      return { answer: answerOf(VIDEO_BEGIN_ANSWERS, result.answer), video: result.video ?? null, path: result.path ?? null, fileName: result.file_name ?? null };
+    },
+    file: async (claims, input) => {
+      const result = await change(claims, "video_file", (tx) => askVideoFile(tx, input));
+      return { answer: answerOf(VIDEO_FILE_ANSWERS, result.answer), path: result.path ?? null, mime: result.mime ?? null };
+    },
+    confirm: async (claims, input) => {
+      const result = await change(claims, "video_confirm", (tx) => askVideoConfirm(tx, input));
+      return {
+        answer: answerOf(VIDEO_CONFIRM_ANSWERS, result.answer),
+        reason: result.reason === undefined ? null : answerOf(VIDEO_REJECT_REASONS, result.reason),
+      };
+    },
+    remove: async (claims, input) => answerOf(VIDEO_REMOVE_ANSWERS, (await change(claims, "video_remove", (tx) => askVideoRemove(tx, input))).answer),
+  };
+}
+
+export const databaseVideosStore = createVideosStore();
