@@ -36,6 +36,7 @@ const ROW: TeacherRow = {
   suspensionNotice: null,
   fraudPending: false,
   isSelf: false,
+  hasTaxData: false,
 };
 const FRAUD: FraudRequest = {
   id: REQUEST,
