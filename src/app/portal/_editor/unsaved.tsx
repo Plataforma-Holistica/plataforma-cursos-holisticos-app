@@ -37,13 +37,15 @@ export const VIDEO_KEY = "video-subiendo";
 const stays = (key: string) => key.startsWith(STRUCTURE_KEY) || key === VIDEO_KEY;
 
 interface Unsaved {
+  /** Algo escrito sin guardar. Un video que sube no lo es: nada se pierde, se detiene. */
   dirty: boolean;
+  videoUploading: boolean;
   /** Confirmar un recurso sube la revisión de su lección: guardar mientras tanto contestaría «cambió». */
   uploading: boolean;
   mark: (key: string, dirty: boolean) => void;
 }
 
-const UnsavedContext = createContext<Unsaved>({ dirty: false, uploading: false, mark: () => undefined });
+const UnsavedContext = createContext<Unsaved>({ dirty: false, videoUploading: false, uploading: false, mark: () => undefined });
 
 export function useUnsaved(): Unsaved {
   return useContext(UnsavedContext);
@@ -58,7 +60,8 @@ function plainClick(event: MouseEvent): boolean {
 export function UnsavedProvider({ children }: { children: ReactNode }) {
   const [keys, setKeys] = useState<ReadonlySet<string>>(new Set());
   const [leaving, setLeaving] = useState<Leaving | null>(null);
-  const dirty = keys.size > 0;
+  const videoUploading = keys.has(VIDEO_KEY);
+  const dirty = keys.size > (videoUploading ? 1 : 0);
   const keysNow = useRef(keys);
   const passing = useRef<HTMLFormElement | null>(null);
 
@@ -128,7 +131,9 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const uploading = keys.has(UPLOAD_KEY);
-  const value = useMemo(() => ({ dirty, uploading, mark }), [dirty, uploading, mark]);
+  const value = useMemo(() => ({ dirty, videoUploading, uploading, mark }), [dirty, videoUploading, uploading, mark]);
+  // Quien solo tiene un video subiendo no pierde nada escrito: se le dice lo que pasa. Con los dos, se le dicen los dos.
+  const onlyVideo = videoUploading && !dirty;
   const go = () => {
     const what = leaving;
     setLeaving(null);
@@ -153,7 +158,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
       {children}
       {leaving !== null && (
         <Dialog
-          title={portal.editor.leaveTitle}
+          title={onlyVideo ? portal.editor.leaveVideoTitle : portal.editor.leaveTitle}
           cancel={
             <Button type="button" variant="secondary" onClick={() => setLeaving(null)}>
               {portal.editor.leaveStay}
@@ -161,19 +166,19 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
           }
           confirm={
             <Button type="button" variant="danger" onClick={go}>
-              {portal.editor.leaveGo}
+              {onlyVideo ? portal.editor.leaveVideoGo : portal.editor.leaveGo}
             </Button>
           }
         >
-          {portal.editor.leaveBody}
+          {onlyVideo ? portal.editor.leaveVideoBody : videoUploading ? `${portal.editor.leaveBody} ${portal.editor.leaveVideoBody}` : portal.editor.leaveBody}
         </Dialog>
       )}
     </UnsavedContext.Provider>
   );
 }
 
-/** Lo que dice la barra: «Cambios sin guardar» con algo escrito y sin guardar; si no, la hora del último guardado. */
+/** Lo que dice la barra: «Cambios sin guardar» con algo escrito y sin guardar; si no, que sube un video; si no, la hora del último guardado. */
 export function SavedStatus({ saved }: { saved: string }) {
-  const { dirty } = useUnsaved();
-  return <p className="text-body-s text-text-2">{dirty ? portal.editor.unsaved : saved}</p>;
+  const { dirty, videoUploading } = useUnsaved();
+  return <p className="text-body-s text-text-2">{dirty ? portal.editor.unsaved : videoUploading ? portal.editor.uploadingVideo : saved}</p>;
 }

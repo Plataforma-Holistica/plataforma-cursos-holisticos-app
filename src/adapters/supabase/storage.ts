@@ -79,9 +79,18 @@ export function createVideoStorage(base: Fetch = fetch): VideoStorage {
     readRange: async (path, start, length) => {
       try {
         const response = await call(`${root()}/object/${VIDEO_BUCKET}/${path}`, { method: "GET", headers: authorized({ range: `bytes=${start}-${start + length - 1}` }) });
-        if (response.status !== 206 && response.status !== 200) return null;
+        if (response.status === 200) {
+          // Sin rango viene el archivo entero. Solo se lee si dice que cabe: no se bajan 5 GB a la memoria para mirar 16 bytes.
+          const declared = Number(response.headers.get("content-length") ?? "NaN");
+          if (start !== 0 || !Number.isSafeInteger(declared) || declared > length) {
+            await response.body?.cancel();
+            return null;
+          }
+          const whole = new Uint8Array(await response.arrayBuffer());
+          return { bytes: whole, total: whole.length };
+        }
+        if (response.status !== 206) return null;
         const bytes = new Uint8Array(await response.arrayBuffer());
-        if (response.status === 200) return { bytes: bytes.subarray(0, length), total: bytes.length };
         const total = CONTENT_RANGE_TOTAL.exec(response.headers.get("content-range") ?? "")?.[1];
         return total === undefined ? null : { bytes, total: Number(total) };
       } catch {

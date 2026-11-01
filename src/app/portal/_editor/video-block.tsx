@@ -20,7 +20,8 @@ import { useVideoUploads } from "./video-uploads";
 // en la base. Procesar y ver llegan con las solicitudes que siguen: por ahora la historia termina en «Recibido».
 //
 //   · Pausar y Reanudar son el mismo botón: el foco se queda en él.
-//   · Cancelar y quitar preguntan antes: una subida puede llevar horas.
+//   · Cancelar y quitar preguntan antes: una subida puede llevar horas. Seguir devuelve el foco al botón que preguntó.
+//   · Un botón que se va con el foco puesto (terminó de subir) lo deja en el bloque, y solo si no se fue a otra cosa.
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 
 const text = portal.editor.videos;
@@ -59,6 +60,20 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
   const [asking, setAsking] = useState(false);
   const upload = uploads.get(lesson);
   const notice = notices.get(lesson);
+  const section = useRef<HTMLElement>(null);
+  const buttons = useRef<HTMLDivElement>(null);
+  const wasAsking = useRef(false);
+  const hadUpload = useRef(false);
+  const hasUpload = upload !== undefined;
+  useEffect(() => {
+    // El último de la fila es el que preguntó. Si se fue con la respuesta, el foco queda en el bloque.
+    if (wasAsking.current && !asking) (buttons.current?.querySelector<HTMLElement>("button:last-child") ?? section.current)?.focus();
+    wasAsking.current = asking;
+  }, [asking]);
+  useEffect(() => {
+    if (hadUpload.current && !hasUpload && document.activeElement === document.body) section.current?.focus();
+    hadUpload.current = hasUpload;
+  }, [hasUpload]);
 
   function onFile(file: File) {
     const problem = checkVideoFile(file, videoMimeOf(file.name) !== null, maxBytes);
@@ -80,7 +95,7 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
   const fileName = upload?.fileName ?? row?.fileName ?? "";
 
   return (
-    <section aria-labelledby={`video-${lesson}`} className="flex flex-col gap-3">
+    <section ref={section} tabIndex={-1} aria-labelledby={`video-${lesson}`} className="flex flex-col gap-3 outline-none">
       <h3 id={`video-${lesson}`} className="text-h3">
         {text.title}
       </h3>
@@ -109,10 +124,15 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
         <div className="flex flex-col gap-2">
           <p className="text-body-s break-words text-text-2">{fileName}</p>
           <ProgressBar value={moving.loaded} max={moving.total} label={text.progressLabel} text={t(moving.phase === "paused" ? text.paused : text.progress, { percent: String(percent) })} />
-          {moving.phase === "cut" && <InlineAlert tone="warning">{text.cut}</InlineAlert>}
+          {moving.phase === "cut" && (
+            <InlineAlert tone="warning" live>
+              {text.cut}
+            </InlineAlert>
+          )}
         </div>
       )}
       {upload?.phase === "checking" && <p className="text-body-s text-text-2">{text.checking}</p>}
+      {upload?.phase === "removing" && <p className="text-body-s text-text-2">{text.removing}</p>}
 
       {/* Existe desde antes: una región que nace con su texto no siempre se anuncia. El avance, en pasos y sin verse: la barra ya lo dice. */}
       <p role="status" className="text-body-s text-text-2">
@@ -148,7 +168,7 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
       ) : (
         editable &&
         video !== null && (
-          <div className="flex flex-wrap gap-3">
+          <div ref={buttons} className="flex flex-wrap gap-3">
             {moving !== null && (
               <Button type="button" variant="secondary" onClick={() => (moving.phase === "sending" ? pause(lesson) : resume(lesson))}>
                 {moving.phase === "sending" ? text.pause : text.resume}
@@ -159,7 +179,7 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
                 {text.retry}
               </Button>
             )}
-            {upload?.phase !== "checking" && upload?.phase !== "starting" && (
+            {upload?.phase !== "checking" && upload?.phase !== "starting" && upload?.phase !== "removing" && (
               <Button type="button" variant="danger" onClick={() => setAsking(true)}>
                 {received ? text.remove : text.cancel}
               </Button>

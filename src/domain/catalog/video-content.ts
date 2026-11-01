@@ -130,7 +130,6 @@ export async function readVideoFacts(read: RangeReader, mime: string): Promise<V
   const mvhd = await find("mvhd", moov.content, moov.end);
   if (mvhd === undefined) return unknown;
   if (mvhd === null) return isVideo(null);
-  if (reads >= MAX_READS) return isVideo(null);
   const body = await read(mvhd.content, Math.min(MVHD_BYTES, mvhd.end - mvhd.content));
   if (body === null) return unknown;
   return isVideo(secondsOf(body.bytes));

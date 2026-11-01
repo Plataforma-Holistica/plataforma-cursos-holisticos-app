@@ -157,7 +157,7 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
   await video.getByLabel("Elige el video").setInputFiles(fileOf("clase-corte.mp4", 125));
   await expect.poll(gate.held, { timeout: 15_000 }).toBe(1);
   await expect(video.getByText(/Subiendo: \d+ %/).first()).toBeVisible();
-  await expect(page.getByText("Cambios sin guardar")).toBeVisible();
+  await expect(page.getByText("Subiendo un video")).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
 
   // Otra lección: no pregunta, la subida sigue, y ahí se puede guardar.
@@ -175,7 +175,7 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
 
   // Salir del editor sí pregunta.
   await page.getByRole("link", { name: "Mis cursos" }).first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("dialog")).toContainText("La subida se detiene.");
   await page.getByRole("button", { name: "Seguir editando" }).click();
   await lessonLink(page, "Corte").click();
   await expect(video.getByText(/Subiendo: \d+ %/).first()).toBeVisible();
@@ -196,7 +196,7 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
 
   await expect(video.getByText("clase-corte.mp4", { exact: true })).toBeVisible();
   await expect(video.getByText(/Recibido, 13 MB\. Falta procesarlo\./)).toBeVisible();
-  await expect(page.getByText("Cambios sin guardar")).toHaveCount(0);
+  await expect(page.getByText("Subiendo un video")).toHaveCount(0);
   const [row] = await rowsOf("Corte");
   expect(row).toMatchObject({ state: "uploaded", file_name: "clase-corte.mp4", read_seconds: 125 });
   expect(await objectsAt(row?.storage_path ?? "")).toHaveLength(1);
@@ -233,7 +233,7 @@ test("pausar y seguir, con el foco en el mismo botón", async ({ page }) => {
   await expect(video.getByLabel("Elige el video")).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => rowsOf("Cancelar")).toEqual([]);
   await page.unroute(VIDEOS);
-  await expect(page.getByText("Cambios sin guardar")).toHaveCount(0);
+  await expect(page.getByText("Subiendo un video")).toHaveCount(0);
 });
 
 test("recargar a media subida: pide el mismo archivo, otro no, y sigue donde iba", async ({ page }) => {

@@ -18,6 +18,8 @@ import { canRetryConfirm, type VideoProblem } from "./video-outcomes";
 //   · Si al reanudar el archivo ya estaba completo (se perdió la respuesta de confirmar), confirma primero: sin eso se volverían a
 //     subir hasta 5 GB para que Storage los rechazara al final.
 //   · Una lección borrada se lleva su subida: no se gasta más subiendo lo que ya no tiene fila.
+//   · Lo que dispara una subida cancelada o pausada llega tarde: cada evento mira que la suya siga siendo la vigente de esa lección, y
+//     una subida solo arranca si no está corriendo (un doble clic en «Reanudar» arrancaría dos).
 
 const RENEW_AFTER_MS = 90 * 60 * 1000;
 
@@ -25,6 +27,8 @@ export type LessonUpload =
   | { phase: "starting"; fileName: string }
   | { phase: "sending" | "paused" | "cut"; video: string; fileName: string; loaded: number; total: number }
   | { phase: "checking"; video: string; fileName: string }
+  /** Quitando: hasta que la base conteste no se ofrece elegir, porque reanudaría una fila que se está borrando. */
+  | { phase: "removing"; video: string; fileName: string }
   /** Confirmar no se pudo saber: se reintenta solo eso. */
   | { phase: "unchecked"; video: string; fileName: string };
 
@@ -32,7 +36,11 @@ export type LessonNotice = { problem: VideoProblem; attempt: number } | { pendin
 
 interface Live {
   video: string;
+  file: File;
+  target: VideoTarget;
   upload: Upload | null;
+  /** Si le toca correr: falso en pausa o después de un corte. */
+  running: boolean;
   token: string;
   tokenAt: number;
   /** Suelta el candado entre pestañas. */
@@ -146,11 +154,13 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
       const { Upload: TusUpload } = await import("tus-js-client");
       const { video } = target;
       const fileName = file.name;
+      const current = () => live.current.get(lesson) === entry;
       const upload = new TusUpload(
         file,
         videoTusOptions(target, {
           token: async () => {
-            if (Date.now() - entry.tokenAt < RENEW_AFTER_MS) return entry.token;
+            // La de una subida ya cancelada no pide otra: lo que manda es su último «borrar», y si falla no importa.
+            if (!current() || Date.now() - entry.tokenAt < RENEW_AFTER_MS) return entry.token;
             const renewed = await renewVideoAction({ course, lesson, video });
             if (renewed.kind !== "renewed") {
               if (renewed.problem === "gone") {
@@ -164,9 +174,15 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
             entry.tokenAt = Date.now();
             return entry.token;
           },
-          onProgress: (loaded, total) => setUpload(lesson, { phase: "sending", video, fileName, loaded, total }),
-          onSuccess: () => void confirm(lesson, video, fileName),
+          onProgress: (loaded, total) => {
+            if (current() && entry.running) setUpload(lesson, { phase: "sending", video, fileName, loaded, total });
+          },
+          onSuccess: () => {
+            if (current()) void confirm(lesson, video, fileName);
+          },
           onError: (error) => {
+            if (!current()) return;
+            entry.running = false;
             if (isObjectAlreadyThere(error)) {
               void confirm(lesson, video, fileName);
               return;
@@ -183,13 +199,27 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
         }),
       );
       entry.upload = upload;
+      entry.running = true;
       setUpload(lesson, { phase: "sending", video, fileName, loaded: 0, total: file.size });
       const previous = await upload.findPreviousUploads().catch(() => []);
       const last = previous[0];
       if (last !== undefined) upload.resumeFromPreviousUpload(last);
-      upload.start();
+      // Se pudo pausar o cancelar mientras buscaba por dónde iba.
+      if (current() && entry.running) upload.start();
     },
     [confirm, course, forget, notify, setUpload],
+  );
+
+  /** Arma la subida; si ni eso pudo (no cargó la biblioteca), queda como un corte y «Reanudar» vuelve a armarla. */
+  const run = useCallback(
+    (lesson: string, entry: Live) => {
+      void send(lesson, entry.file, entry.target, entry).catch(() => {
+        entry.running = false;
+        entry.upload = null;
+        if (live.current.get(lesson) === entry) setUpload(lesson, { phase: "cut", video: entry.video, fileName: entry.file.name, loaded: 0, total: entry.file.size });
+      });
+    },
+    [send, setUpload],
   );
 
   const start = useCallback(
@@ -212,9 +242,9 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
           }
           const { target, token, resumed } = begun;
           const locked = await withVideoLock(target.video, (release) => {
-            const entry: Live = { video: target.video, upload: null, token, tokenAt: Date.now(), release };
+            const entry: Live = { video: target.video, file, target, upload: null, running: false, token, tokenAt: Date.now(), release };
             live.current.set(lesson, entry);
-            const go = () => void send(lesson, file, target, entry).catch(() => setUpload(lesson, { phase: "cut", video: target.video, fileName: file.name, loaded: 0, total: file.size }));
+            const go = () => run(lesson, entry);
             if (resumed) void confirm(lesson, target.video, file.name, go);
             else go();
           });
@@ -229,13 +259,14 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
         }
       })();
     },
-    [confirm, course, notify, send, setUpload],
+    [confirm, course, notify, run, setUpload],
   );
 
   const pause = useCallback(
     (lesson: string) => {
       const entry = live.current.get(lesson);
       if (entry?.upload == null) return;
+      entry.running = false;
       void entry.upload.abort();
       setUploads((current) => {
         const now = current.get(lesson);
@@ -248,10 +279,15 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
 
   const resume = useCallback((lesson: string) => {
     const entry = live.current.get(lesson);
-    if (entry?.upload == null) return;
+    if (entry === undefined || entry.running) return;
     // Si lo que la cortó fue la firma, reanudar pide otra.
     entry.tokenAt = 0;
-    entry.upload.start();
+    if (entry.upload === null) {
+      run(lesson, entry);
+    } else {
+      entry.running = true;
+      entry.upload.start();
+    }
     setUploads((current) => {
       const now = current.get(lesson);
       if (now?.phase !== "paused" && now?.phase !== "cut") return current;
@@ -263,7 +299,7 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
       next.delete(lesson);
       return next;
     });
-  }, []);
+  }, [run]);
 
   const retryConfirm = useCallback(
     (lesson: string) => {
@@ -280,6 +316,7 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
       if (entry?.upload != null) void entry.upload.abort(true).catch(() => undefined);
       forget(lesson);
       notify(lesson, null);
+      setUpload(lesson, { phase: "removing", video, fileName: entry?.file.name ?? "" });
       void (async () => {
         try {
           const answer = await removeVideoAction({ course, lesson, video });
@@ -287,10 +324,12 @@ export function VideoUploadsProvider({ course, lessons, children }: { course: st
         } catch (error) {
           unstable_rethrow(error);
           notify(lesson, { problem: "unavailable" });
+        } finally {
+          setUpload(lesson, null);
         }
       })();
     },
-    [course, forget, notify],
+    [course, forget, notify, setUpload],
   );
 
   // Mientras algo sube o falta confirmarlo, salir lo perdería. Cambiar de lección no.
