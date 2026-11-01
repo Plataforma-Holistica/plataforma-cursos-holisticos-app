@@ -99,8 +99,8 @@ describe("guardar", () => {
     expect(saveOutcome({ kind: "changed" }, 1)).toEqual({ kind: "leave", to: `${ROUTES.portalTaxData}?cambiar=1`, notice: "tax_data_changed" });
   });
 
-  it("si quedó suspendido vuelve a la pantalla, que lo dice con su franja", () => {
-    expect(saveOutcome({ kind: "suspended" }, 1)).toEqual({ kind: "leave", to: ROUTES.portalTaxData, notice: null });
+  it("si ya no puede guardar vuelve a la pantalla y lo dice: la franja ya estaba ahí, y no basta", () => {
+    expect(saveOutcome({ kind: "suspended" }, 1)).toEqual({ kind: "leave", to: ROUTES.portalTaxData, notice: "tax_data_locked" });
   });
 
   it("el freno lleva su hora", () => {

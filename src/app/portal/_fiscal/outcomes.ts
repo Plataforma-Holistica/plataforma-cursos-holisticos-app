@@ -116,9 +116,9 @@ export function saveOutcome(result: TaxSave, attempt: number): Leave | { kind: "
     // En una primera captura, ya con datos, la pantalla pinta otra cosa: un aviso en este bloque no lo vería nadie.
     case "changed":
       return changedElsewhere;
-    // Lo dice la franja de solo lectura.
+    // La franja ya estaba: sin este aviso, parecería que no pasó nada. No dice por qué: de eso le avisa el equipo.
     case "suspended":
-      return { kind: "leave", to: ROUTES.portalTaxData, notice: null };
+      return { kind: "leave", to: ROUTES.portalTaxData, notice: "tax_data_locked" };
     default:
       return failed(result.kind);
   }

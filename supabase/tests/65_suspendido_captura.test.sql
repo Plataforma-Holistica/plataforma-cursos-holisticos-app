@@ -2,7 +2,7 @@
 -- sus pagos, y sin datos no se le paga; una baja es una suspensión (OP-06), y si su CLABE cierra no tendría cómo corregirla. Con el fraude confirmado sigue en solo lectura.
 begin;
 \ir _ayuda.psql
-select plan(14);
+select plan(20);
 
 create function pruebas.rosa() returns uuid language sql immutable as $$ select 'a6500000-0000-0000-0000-000000000001'::uuid $$;
 create function pruebas.ines() returns uuid language sql immutable as $$ select 'a6500000-0000-0000-0000-000000000002'::uuid $$;
@@ -64,8 +64,37 @@ select pruebas.suspender(pruebas.rosa());
 select pruebas.como_dueno();
 select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'not_teacher', 'con la cuenta suspendida no guarda');
 
--- Guardar a nombre de una suspendida toma su fila, para ir uno tras otro con quien la cambia.
-select ok(pg_get_functiondef('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)'::regprocedure) like '%for share%', 'toma la fila del maestro');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.rosa();
+select pruebas.como_dueno();
+
+-- Quien ya se fue, o quien solo tiene una invitación con cuenta, no guarda.
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'left', left_at = now(), suspended_at = null, suspension_reason = null where id = :'rosa_m';
+select pruebas.como_dueno();
+select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'not_teacher', 'quien ya se fue no guarda');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'invited', left_at = null where id = :'rosa_m';
+select pruebas.como_dueno();
+select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'not_teacher', 'quien solo tiene una invitación, tampoco');
+
+-- Con el camino de verdad: suspender no fija nada, confirmar el fraude la detiene, y levantarla la deja seguir.
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'baja' where id = :'rosa_m';
+select pruebas.como_dueno();
+select is(pruebas.estado(pruebas.rosa()) ->> 'can_save', 'true', 'una suspensión a mano deja guardar');
+select pruebas.como_dueno_sistema();
+update public.teachers set suspension_approved_by = pruebas.k1() where id = :'rosa_m';
+select pruebas.como_dueno();
+select is(pruebas.guarda(pruebas.rosa(), :'rosa_m', 2), 'suspended', 'confirmado el fraude, no');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'active', suspended_at = null, suspension_reason = null, suspension_approved_by = null where id = :'rosa_m';
+select pruebas.como_dueno();
+select is(pruebas.estado(pruebas.rosa()) ->> 'can_save', 'true', 'levantada, vuelve a poder');
+select ok(not (select s from (select pruebas.guarda(pruebas.rosa(), :'rosa_m', 2) = 'suspended' as s) x), 'y no contesta que está suspendida');
+
+-- Guardar a nombre de una suspendida toma su fila, para ir uno tras otro con quien la cambia. La carrera, en la integración 83.
+select ok(pg_get_functiondef('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)'::regprocedure) like '%for share of t%', 'toma la fila del maestro');
 select is((select count(*)::integer from private.schema_violations_tax()), 0, 'el área fiscal, en orden');
 
 select * from finish();

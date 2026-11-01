@@ -17,6 +17,7 @@ import { askTaxForPayout, askTaxMine, askTaxSave, askTaxState } from "@/services
 
 import { claimedUser, clearThrottle, freshOrigin, keysOf, pairOf, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor } from "./helpers/auth";
+import { connect, waitBehind } from "./helpers/finance";
 import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
@@ -212,6 +213,47 @@ const reads = async (owner: Client, teacherId: string) =>
   (await owner.query<{ count: string }>("select count(*) from public.audit_log where action = 'tax_profile.read' and new_value ->> 'teacher_id' = $1", [teacherId])).rows[0]?.count;
 
 const jar = memoryJar();
+
+describe("guardar mientras se confirma un fraude, de verdad", () => {
+  it("guardar espera a la confirmación, y como ya es fraude, contesta que no", async () => {
+    const ana = await person();
+    const seal = (length: number) => Buffer.from(`010001${"ab".repeat(12 + length + 16)}`, "hex");
+    const owner = await connect();
+    const confirmer = await connect();
+    const saver = await connect();
+    let id = "";
+    try {
+      await owner.query("grant app_service to postgres with set true, inherit false");
+      await owner.query("begin");
+      await owner.query("select set_config('app.actor_kind', 'system', true)");
+      id = (await owner.query<{ id: string }>("insert into public.teachers (profile_id, status, suspended_at, suspension_reason) values ($1, 'suspended', now(), 'prueba') returning id::text", [ana.id])).rows[0]!.id;
+      await owner.query("commit");
+
+      await confirmer.query("begin");
+      await confirmer.query("select set_config('app.actor_kind', 'system', true)");
+      await confirmer.query("update public.teachers set suspension_approved_by = $2 where id = $1", [id, ana.id]);
+      await saver.query("begin");
+      await asServer(saver, ana.id, ana.claims.sessionId ?? randomUUID());
+      const waiting = saver.query<{ answer: string }>(
+        "select private.tax_profile_save($1, 0, $2, $3, '612', 'person', $4, '7771', 1) as answer",
+        [id, seal(13), seal(20), seal(18)],
+      );
+      await waitBehind(owner, confirmer, 1);
+      await confirmer.query("commit");
+      expect((await waiting).rows[0]?.answer).toBe("suspended");
+      await saver.query("rollback");
+    } finally {
+      await confirmer.query("rollback").catch(() => undefined);
+      await saver.query("rollback").catch(() => undefined);
+      await owner.query("begin");
+      await owner.query("set local session_replication_role = replica");
+      if (id !== "") await owner.query("delete from public.teachers where id = $1", [id]);
+      await owner.query("commit");
+      await owner.query("revoke app_service from postgres");
+      await Promise.all([owner.end(), confirmer.end(), saver.end()]);
+    }
+  });
+});
 
 describe("el catálogo de regímenes", () => {
   it("la base y la aplicación aceptan lo mismo, clave por clave y por tipo de persona", async () => {
