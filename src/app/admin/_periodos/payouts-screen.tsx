@@ -28,7 +28,7 @@ import type { PayoutFilter, PayoutsView, PayoutViewRow } from "./payouts-rows";
 
 // PA-81 · Las liquidaciones de un periodo: llevarlas de calculadas a liberadas, retener la que se investiga y
 // decidir el bono de fundador (RF-505, RF-506, RF-508, RN-12, RN-17; FL-51). Mínima con T-605 (decisión de
-// Sergio del 2026-10-27): sin retenciones, neto ni factura, que llegan con T-409 y T-604.
+// Sergio del 2026-10-27): con retenciones y neto desde T-409, y sin factura, que llega con T-604.
 //
 // Todo funciona sin JavaScript, salvo el filtro por estado, que es una ayuda y sin JavaScript no se pinta: se
 // ven todas. La tabla y liberar son un solo formulario con un solo estado: cada botón dice su paso con `do`.
@@ -190,6 +190,9 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
                 { key: "adjustments", header: text.columns.adjustments, numeric: true },
                 { key: "balance", header: text.columns.balance, numeric: true },
                 { key: "subtotal", header: text.columns.subtotal, numeric: true },
+                { key: "vat", header: text.columns.vat, numeric: true },
+                { key: "withheld", header: text.columns.withheld, numeric: true },
+                { key: "net", header: text.columns.net, numeric: true },
                 ...(view.canChange ? [{ key: "actions", header: text.columns.actions }] : []),
               ]}
               rows={shown.map((row) => ({
@@ -200,6 +203,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
                     <span className="flex flex-col gap-1">
                       <StatusBadge tone={row.tone}>{row.status}</StatusBadge>
                       {row.holdReason !== null && <span className="text-body-s text-text-2">{row.holdReason}</span>}
+                      {row.taxNote !== null && <span className="text-body-s text-text-2">{row.taxNote}</span>}
                     </span>
                   ),
                   pool: row.pool,
@@ -213,6 +217,9 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
                       {row.minimum !== null && <span className="text-body-s text-text-2">{row.minimum}</span>}
                     </span>
                   ),
+                  vat: row.vat,
+                  withheld: row.withheld,
+                  net: row.net,
                   actions: <RowActions row={row} asking={asking} pending={pending} />,
                 },
               }))}
@@ -225,6 +232,9 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
                 adjustments: view.totals.adjustments,
                 balance: view.totals.balance,
                 subtotal: view.totals.subtotal,
+                vat: "",
+                withheld: "",
+                net: view.totals.net,
                 ...(view.canChange ? { actions: "" } : {}),
               }}
               empty={view.rows.length === 0 ? text.empty : text.emptyFiltered}

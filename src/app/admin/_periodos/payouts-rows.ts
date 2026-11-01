@@ -50,6 +50,11 @@ export interface PayoutViewRow {
   adjustments: string;
   balance: string;
   subtotal: string;
+  vat: string;
+  withheld: string;
+  net: string;
+  /** Lo que detiene liberarla, en palabras: sin datos o sin regla. */
+  taxNote: string | null;
   /** Si llega al mínimo, en palabras; nulo si no se sabe. */
   minimum: string | null;
   holdReason: string | null;
@@ -81,7 +86,7 @@ export interface PayoutsView {
     | { kind: "waits"; text: string }
     | { kind: "offered"; seen: string; ask: string; confirm: string; title: string; body: string };
   rows: PayoutViewRow[];
-  totals: { pool: string; bonuses: string; adjustments: string; balance: string; subtotal: string };
+  totals: { pool: string; bonuses: string; adjustments: string; balance: string; subtotal: string; net: string };
   /** Todas, y un botón por estado con su cuenta; solo con JavaScript. */
   filters: { key: PayoutFilter | "all"; label: string }[];
 }
@@ -149,6 +154,10 @@ export function payoutsView(read: Read): PayoutsView {
       adjustments: money(row.adjustmentsCents),
       balance: money(row.balanceCents),
       subtotal: amount(row.subtotalCents),
+      vat: row.vatCents === null ? text.noTaxYet : amount(row.vatCents),
+      withheld: row.incomeTaxWithheldCents === null || row.vatWithheldCents === null ? text.noTaxYet : amount(row.incomeTaxWithheldCents + row.vatWithheldCents),
+      net: row.netCents === null ? text.noTaxYet : amount(row.netCents),
+      taxNote: row.taxState === "no_data" ? text.taxNoData : row.taxState === "no_rule" ? text.taxNoRule : !row.hasTaxData && row.status === "on_hold" ? text.taxNoData : null,
       minimum: minimumOf(row),
       holdReason: row.status === "on_hold" && row.holdReason !== null ? t(text.heldBecause, { reason: row.holdReason }) : null,
       hold:
@@ -217,6 +226,7 @@ export function payoutsView(read: Read): PayoutsView {
       adjustments: sum((row) => row.adjustmentsCents),
       balance: sum((row) => row.balanceCents),
       subtotal: sum((row) => row.subtotalCents),
+      net: sum((row) => row.netCents ?? 0),
     },
     filters,
   };

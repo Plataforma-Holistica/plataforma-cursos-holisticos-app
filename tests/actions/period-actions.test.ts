@@ -283,8 +283,8 @@ describe("payoutsAction (PA-81)", () => {
       detail: { period: 202709 },
       attempt: 1,
     });
-    once("releasePayouts", Promise.resolve({ kind: "not_enabled" }));
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "not_enabled", attempt: 1 });
+    once("releasePayouts", Promise.resolve({ kind: "answered", answer: "tax_data_missing", blockingPeriod: null, periodStatus: null, teachers: [] }));
+    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "tax_data_missing", attempt: 1 });
     expect(calls.order).toEqual(["releasePayouts", "refresh", "releasePayouts", "refresh"]);
   });
 

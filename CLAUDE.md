@@ -892,6 +892,13 @@ que no se ve leyendo un solo archivo:
   PA-65 dice «Capturados» o «Faltan». `playwright.config.ts` inventa una llave en cada corrida. Usa integración 83 (el catálogo de regímenes de la base contra el de la aplicación, también) y
   `tests/e2e/equipo/datos-fiscales.equipo.ts`: como un maestro con cuenta no se borra, correr ese archivo otra vez pide antes `pnpm db:reset`. Medido el 2026-10-31: justo después de entrar, el
   enrutador todavía termina la acción y puede soltar un clic en un enlace; el extremo a extremo reintenta ese clic. Para el B: una pantalla nueva que pida la contraseña en el mismo envío usa `confirmPassword`.
+- **Las retenciones al liberar** (T-409, cuarta solicitud, `t409_retenciones`; decisiones de Sergio del 2026-10-31). **El freno de producción ya no está en el código** (se quitó `releaseEnabled`, y con él `not_enabled`): sin una
+  regla vigente, `release_payouts` contesta `withholding_rules_missing`, y sin los datos de alguien, `tax_data_missing`, las dos con `teachers`. Finanzas retiene a quien no tiene datos y libera a los demás; al soltar se calcula con lo vigente, y
+  `unhold_payout` contesta lo mismo sin soltar. Quien no llega al mínimo no necesita nada, y el mínimo se mide contra el bruto. **`release_payout` cambió de firma:** `release_payout(p_payout, p_minimum, p_tax)` escribe lo que se comparó, sin otra
+  consulta. `private.payout_tax_row` dice el estado y los montos (`not_needed`, `ready`, `no_data`, `no_rule`), entra a `release_preview` y a `unhold_preview` y por eso a sus huellas; `compute_withholdings` es pura (el IVA se redondea y lo retenido va hacia
+  abajo); `tax_profile_fiscal` es la única puerta del dinero a la tabla, sin nada cifrado. `assert_payout_released` recalcula con la regla y la versión escritas (`withholding_rule_id`, `withholding_profile_version`). Las reglas se cargan como dice OP-20. PA-81
+  suma IVA, retenciones y neto. Usa pgTAP 64 e integración 84. **Para el B y toda prueba que libere:** quien llega al mínimo necesita regla y datos. `supabase/tests/_con_datos_fiscales.psql`, después de `_ayuda.psql`, carga una regla en 0 y le da datos a todo
+  maestro que nazca: con ella las cifras del PRD no cambian. Una regla no se borra sin apagar sus disparadores.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

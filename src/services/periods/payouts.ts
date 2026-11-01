@@ -18,10 +18,9 @@ import { periodOf, type PeriodStatus } from "./panel";
 //   · Liberar y soltar llevan la huella de lo que se vio, y retener el estado en que se vio: la base no hace
 //     nada distinto de lo que la persona tenía delante (`preview_changed`, `changed`). Decisión de Sergio del
 //     2026-10-28, por la revisión independiente del diseño.
-//   · **En producción no se libera hasta T-409** (decisión de Sergio del 2026-10-28): sin CLABE ni retenciones,
-//     liberar le diría a un maestro que facture un monto que no es el que se transfiere. Con `APP_ENV`
-//     `production` liberar contesta `not_enabled` sin preguntarle a la base. Soltar solo libera en un periodo
-//     ya liberado, y en producción no hay ninguno. T-409 quita el freno.
+//   · **El freno de producción es de la base** (decisión de Sergio del 2026-10-31, T-409): sin una regla de retención
+//     vigente, liberar contesta `withholding_rules_missing`, y sin los datos de alguien, `tax_data_missing`. Cuando
+//     conteste el contador se cargan filas, sin despliegue.
 //   · Anular es solo del bono del fundador hasta PA-83: el servicio lo busca entre los del periodo antes de
 //     anularlo (`void_bonus` anula cualquiera).
 
@@ -60,6 +59,15 @@ export interface PayoutRow {
   subtotalCents: number;
   /** El bruto es lo que liberar (o soltar) escribiría, no lo escrito. */
   estimated: boolean;
+  /** Sin liberar: si le toca pagar impuestos y con qué. Nulo si ya se liberó, o si está retenida: se calcula al soltar. */
+  taxState: "not_needed" | "ready" | "no_data" | "no_rule" | null;
+  /** Si ya capturó sus datos fiscales, sin verlos. */
+  hasTaxData: boolean;
+  /** Nulos mientras no se puedan saber (sin datos, sin regla, o retenida sin liberar). */
+  vatCents: number | null;
+  incomeTaxWithheldCents: number | null;
+  vatWithheldCents: number | null;
+  netCents: number | null;
   /** Si llega a `PAGO_MINIMO`; nulo si el periodo no tiene un mínimo que sirva. */
   reachesMinimum: boolean | null;
   /** Con lo que se suelta, si está retenida. */
@@ -96,6 +104,8 @@ export const RELEASE_ANSWERS = [
   "previous_not_released",
   "founder_bonuses_pending",
   "no_minimum",
+  "withholding_rules_missing",
+  "tax_data_missing",
   "preview_changed",
   "malformed",
   "forbidden",
@@ -106,7 +116,7 @@ export type ReleaseAnswer = (typeof RELEASE_ANSWERS)[number];
 export const HOLD_ANSWERS = ["held", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type HoldAnswer = (typeof HOLD_ANSWERS)[number];
 /** Lo que contesta `private.unhold_payout()`. */
-export const UNHOLD_ANSWERS = ["released_from_hold", "self", "not_held", "changed", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const UNHOLD_ANSWERS = ["released_from_hold", "self", "not_held", "changed", "tax_data_missing", "withholding_rules_missing", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type UnholdAnswer = (typeof UNHOLD_ANSWERS)[number];
 /** Lo que contesta `private.confirm_founder_bonus()`. */
 export const CONFIRM_ANSWERS = ["confirmed", "self", "already_decided", "not_founder", "period_released", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
@@ -121,6 +131,8 @@ export interface Released {
   blockingPeriod: number | null;
   /** Con `released`: `paid` si todo quedó acumulado. */
   periodStatus: PeriodStatus | null;
+  /** Con `withholding_rules_missing` y `tax_data_missing`, a quién detiene. */
+  teachers: string[];
 }
 export interface HoldDecided {
   answer: HoldAnswer;
@@ -175,7 +187,6 @@ export type ReleaseResult =
   | Unavailable
   | Unknown
   | Malformed
-  | { kind: "not_enabled" }
   | { kind: "timed_out" }
   | { kind: "unbalanced" }
   | ({ kind: "answered" } & Released);
@@ -204,7 +215,7 @@ export interface PayoutsCore {
   store: PayoutStore;
 }
 
-export function createPayoutsPanel(deps: { report: (code: FailureCode) => Promise<void>; releaseEnabled: () => boolean }, core: PayoutsCore) {
+export function createPayoutsPanel(deps: { report: (code: FailureCode) => Promise<void> }, core: PayoutsCore) {
   const { store } = core;
 
   async function admit(reader: CookieReader): Promise<{ ok: true; claims: VerifiedClaims } | { ok: false; result: Refused | Unavailable }> {
@@ -263,7 +274,6 @@ export function createPayoutsPanel(deps: { report: (code: FailureCode) => Promis
     const period = periodOf(input.period);
     const seen = fingerprintOf(input.seen);
     if (period === null || seen === null) return { kind: "malformed" };
-    if (!deps.releaseEnabled()) return { kind: "not_enabled" };
     const result = await decide(() => store.release(admitted.claims, period, seen));
     return result.ok ? { kind: "answered", ...result.answer } : result.result;
   }

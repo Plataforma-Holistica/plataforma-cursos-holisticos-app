@@ -11,6 +11,7 @@
 -- ronda se deshace al terminar (con una excepción atrapada); lo que se mide vive en variables.
 begin;
 \ir _ayuda.psql
+\ir _con_datos_fiscales.psql
 select plan(7);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable

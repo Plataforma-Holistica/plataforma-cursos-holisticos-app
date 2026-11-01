@@ -124,7 +124,11 @@ export const payoutsButton = {
 
 export type PayoutFailure =
   | "needs_code"
-  | "not_enabled"
+  | "tax_data_missing"
+  | "rules_missing"
+  /** Soltarla la liberaría ahí mismo, y le falta lo mismo. */
+  | "unhold_no_data"
+  | "unhold_no_rule"
   | "preview_changed"
   | "changed"
   | "already_released"
@@ -177,8 +181,6 @@ export function releaseOutcome(result: ReleaseResult, period: number): PayoutOut
       return toPage(period);
     case "unavailable":
       return failed("unavailable");
-    case "not_enabled":
-      return failed("not_enabled");
     case "timed_out":
       return failed("timed_out");
     case "unbalanced":
@@ -201,6 +203,10 @@ export function releaseOutcome(result: ReleaseResult, period: number): PayoutOut
           return failed("founder_pending");
         case "no_minimum":
           return failed("no_minimum");
+        case "tax_data_missing":
+          return failed("tax_data_missing");
+        case "withholding_rules_missing":
+          return failed("rules_missing");
         case "preview_changed":
           return failed("preview_changed");
         case "forbidden":
@@ -265,6 +271,10 @@ export function unholdOutcome(result: UnholdResult, period: number): PayoutOutco
       return failed("unknown");
     case "answered":
       switch (result.answer) {
+        case "tax_data_missing":
+          return failed("unhold_no_data");
+        case "withholding_rules_missing":
+          return failed("unhold_no_rule");
         case "released_from_hold":
           return updated(period);
         case "not_held":

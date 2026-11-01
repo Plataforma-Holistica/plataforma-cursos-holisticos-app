@@ -3,7 +3,6 @@ import "server-only";
 import { giveSecondFactorCode, teamStanding } from "@/services/account/account";
 import { reportFailure } from "@/services/error-reporting/server";
 
-import { getEnv } from "@/config/env";
 
 import { createPeriodsPanel } from "./panel";
 import { createPayoutsPanel } from "./payouts";
@@ -66,6 +65,6 @@ export type {
 export { BONUS_STATUSES, CONFIRM_ANSWERS, HOLD_ANSWERS, PAYOUT_STATUSES, RELEASE_ANSWERS, UNHOLD_ANSWERS, VOID_ANSWERS } from "./payouts";
 
 export const { financePayouts, releasePayouts, holdPayout, unholdPayout, confirmFounderBonus, voidFounderBonus } = createPayoutsPanel(
-  { report: reportFailure, releaseEnabled: () => getEnv().APP_ENV !== "production" },
+  { report: reportFailure },
   { teamStanding, store: databasePayoutStore },
 );

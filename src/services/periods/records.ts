@@ -429,6 +429,12 @@ const payoutRow = z.strictObject({
   balance_cents: cents,
   subtotal_cents: cents,
   estimated: z.boolean(),
+  tax_state: z.enum(["not_needed", "ready", "no_data", "no_rule"]).nullable(),
+  has_tax_data: z.boolean(),
+  vat_cents: cents.nullable(),
+  income_tax_withheld_cents: cents.nullable(),
+  vat_withheld_cents: cents.nullable(),
+  net_cents: cents.nullable(),
   reaches_minimum: z.boolean().nullable(),
   unhold_fingerprint: fingerprint.nullable(),
   is_self: z.boolean(),
@@ -491,6 +497,12 @@ export function payoutsReadOf(raw: unknown): FinancePayouts | null {
       balanceCents: row.balance_cents,
       subtotalCents: row.subtotal_cents,
       estimated: row.estimated,
+      taxState: row.tax_state,
+      hasTaxData: row.has_tax_data,
+      vatCents: row.vat_cents,
+      incomeTaxWithheldCents: row.income_tax_withheld_cents,
+      vatWithheldCents: row.vat_withheld_cents,
+      netCents: row.net_cents,
       reachesMinimum: row.reaches_minimum,
       unholdFingerprint: row.unhold_fingerprint,
       isSelf: row.is_self,
@@ -499,7 +511,7 @@ export function payoutsReadOf(raw: unknown): FinancePayouts | null {
 }
 
 const answered = z.looseObject({ outcome: z.string() });
-const releasedSchema = z.looseObject({ period: z.number().int().optional(), period_status: status.optional() });
+const releasedSchema = z.looseObject({ teachers: z.array(id).optional(), period: z.number().int().optional(), period_status: status.optional() });
 const heldSchema = z.looseObject({ status: payoutStatus.optional() });
 const unheldSchema = z.looseObject({ to: payoutStatus.optional() });
 const decidedSchema = z.looseObject({ status: z.enum(BONUS_STATUSES).optional() });
@@ -512,6 +524,7 @@ export function releasedOf(raw: unknown): Released {
     answer,
     blockingPeriod: answer === "previous_not_released" ? (extra.period ?? null) : null,
     periodStatus: answer === "released" ? (extra.period_status ?? null) : null,
+    teachers: answer === "withholding_rules_missing" || answer === "tax_data_missing" ? (extra.teachers ?? []) : [],
   };
 }
 export function heldOf(raw: unknown): HoldDecided {

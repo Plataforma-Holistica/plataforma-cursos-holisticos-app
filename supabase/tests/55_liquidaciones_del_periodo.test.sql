@@ -11,6 +11,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
+\ir _con_datos_fiscales.psql
 select plan(83);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable

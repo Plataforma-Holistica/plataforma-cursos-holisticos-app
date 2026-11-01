@@ -8,6 +8,7 @@
 -- Usa los meses de 2032, que ninguna otra prueba usa, con sus propias particiones.
 begin;
 \ir _ayuda.psql
+\ir _con_datos_fiscales.psql
 select plan(29);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable

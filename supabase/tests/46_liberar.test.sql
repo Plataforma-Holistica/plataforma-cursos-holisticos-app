@@ -14,6 +14,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
+\ir _con_datos_fiscales.psql
 select plan(129);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -549,7 +550,7 @@ select is(pruebas.liq(202702),
 select is((select count(*)::integer from public.teacher_balance_entries where payout_id = pruebas.y('M2', 202702) and kind = 'carried_forward'),
   0, 'sin renglón acumulado de 0');
 select pruebas.como_finanzas();
-select is(private.release_payout(pruebas.y('M1', 202702), 0)::text, 'awaiting_invoice', 'una liquidación liberada no se vuelve a liberar');
+select is(private.release_payout(pruebas.y('M1', 202702), 0, null)::text, 'awaiting_invoice', 'una liquidación liberada no se vuelve a liberar');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------

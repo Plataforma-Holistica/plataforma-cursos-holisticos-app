@@ -632,6 +632,18 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
       await client.query("rollback");
       await client.query("begin");
       await actAs(client, finance);
+      // Desde T-409 quien llega al mínimo necesita regla y datos. Una regla en 0: lo que se mide es liberar, no la tasa.
+      await client.query("set local session_replication_role = replica");
+      await client.query(
+        `insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+         values ('612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de la prueba de escala')`,
+      );
+      await client.query(
+        `insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version)
+         select t.id, 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person', decode('010001' || repeat('ab', 46), 'hex'), '7771', 1
+         from public.teachers t`,
+      );
+      await client.query("set local session_replication_role = origin");
       const release = await timed(`select private.release_payouts($1, ${SEEN}) as r`);
       expect(release.r.outcome).toBe("released");
       await retire(client, finance);

@@ -30,7 +30,10 @@ export const PAYOUT_STATUS_TEXT: Record<PayoutStatus, string> = {
 
 const FIXED: Record<Exclude<PayoutFailure, "previous_not_released" | "not_holdable">, string> = {
   needs_code: failures.needsCode,
-  not_enabled: failures.notEnabled,
+  tax_data_missing: failures.taxDataMissing,
+  rules_missing: failures.rulesMissing,
+  unhold_no_data: failures.unholdNoData,
+  unhold_no_rule: failures.unholdNoRule,
   preview_changed: failures.previewChanged,
   changed: failures.changed,
   already_released: failures.alreadyReleased,
