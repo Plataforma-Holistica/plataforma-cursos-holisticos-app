@@ -868,6 +868,10 @@ as $$
   select 'tax save without the balance lock', 'tax_profile_save'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)')) like '%teacher_balance:%', false)
   union all
+  -- Y la fila del maestro, para ir uno tras otro con quien confirma un fraude: un candado que se mueva de sentencia dejaría escribir después de confirmado.
+  select 'tax save without the teacher row', 'tax_profile_save'
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)')) like '%from public.teachers t join public.profiles p on p.id = t.profile_id%for share of t%', false)
+  union all
   -- El estado y la lista de PA-65 no leen lo que hay en la tabla: no quedan en la auditoría.
   select 'tax data out of its doors: ' || d.name, d.name
   from (values ('tax_profile_state', 'private.tax_profile_state()'), ('teacher_roster', 'private.teacher_roster()')) d (name, signature)
