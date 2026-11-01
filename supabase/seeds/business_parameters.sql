@@ -105,7 +105,12 @@ from (values
   ('TOLERANCIA_CONCILIACION_PCT', '500',                'proposed'),
   ('RECURSO_TAMANO_MAX',        '52428800',             'proposed'),
   ('RECURSOS_POR_LUGAR_MAX',    '10',                   'proposed'),
-  ('TOPE_DESCARGAS_HORA',       '60',                   'proposed')
+  ('TOPE_DESCARGAS_HORA',       '60',                   'proposed'),
+  ('VIDEO_TAMANO_MAX',          '5368709120',           'decided'),
+  ('VIDEO_DURACION_MAX',        '7200',                 'decided'),
+  ('VIDEOS_POR_HORA_MAX',       '10',                   'decided'),
+  ('VIDEO_MINUTOS_MES_MAX',     '1500',                 'decided'),
+  ('VIDEO_SUBIDA_ABIERTA',      'true',                 'decided')
 ) as v (key, value, status)
 join public.parameter_definitions d on d.key = v.key
 on conflict (key, effective_from) where canceled_at is null do nothing;

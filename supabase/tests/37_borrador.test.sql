@@ -386,7 +386,7 @@ revoke insert on public.draft_lessons from app_service;
 revoke delete on public.draft_modules from app_service;
 revoke execute on function private.draft_text_ok(text, integer, boolean) from app_service;
 -- Con la tabla que la nombra desde T-404: sola, la clave foránea la detendría antes que el guardián.
-select throws_ok('truncate public.draft_lessons, public.draft_resources', '42501', 'public.draft_lessons: drafts are not truncated', 'ni el dueño vacía la tabla');
+select throws_ok('truncate public.draft_lessons, public.draft_resources, public.draft_videos', '42501', 'public.draft_lessons: drafts are not truncated', 'ni el dueño vacía la tabla');
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar un borrador que nunca se envió.
