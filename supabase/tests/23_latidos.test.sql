@@ -497,26 +497,28 @@ select is(
 
 -- Lo atrasado cuenta en su mes: una reproducción revocada antes de que empezara este mes
 -- guarda en el mes anterior, y su consecutivo ya no entra en este.
+-- Rehacer la base entre las 00:00 y las 06:00 UTC del día 1 crea las particiones desde el mes en UTC, que ya es el siguiente: falta la del mes anterior en México.
+select private.create_watch_partition(to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer);
 insert into r values ('mes', pruebas.abre(pruebas.computadora()));
 update public.playback_sessions
-set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interval '7 hours',
-    revoked_at = date_trunc('month', now()) - interval '7 hours', revoke_reason = 'replaced',
-    started_at = date_trunc('month', now()) - interval '8 hours'
+set live_seconds = 600, last_heartbeat_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours',
+    revoked_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours', revoke_reason = 'replaced',
+    started_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '8 hours'
 where id = (select id from r where name = 'mes');
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'mes'), jsonb_build_array(pruebas.tramo(0, 0, 30))) -> 'accepted',
   '[0]'::jsonb, 'lo atrasado de otro mes entra');
 select is(
   (select period_id::integer from pruebas.latidos((select id from r where name = 'mes'))),
-  pruebas.periodo(date_trunc('month', now()) - interval '7 hours'), 'en el mes de su tope, no en el de llegada');
+  pruebas.periodo(timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours'), 'en el mes de su tope, no en el de llegada');
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'mes'), jsonb_build_array(pruebas.tramo(0, 0, 30))) -> 'duplicate',
   '[0]'::jsonb, 'y reenviado no entra otra vez, aunque la clave del libro no lo atraparía en otro mes');
 insert into r values ('vieja', pruebas.abre(pruebas.computadora()));
 update public.playback_sessions
-set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interval '40 days',
-    revoked_at = date_trunc('month', now()) - interval '40 days', revoke_reason = 'replaced',
-    started_at = date_trunc('month', now()) - interval '41 days'
+set live_seconds = 600, last_heartbeat_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '40 days',
+    revoked_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '40 days', revoke_reason = 'replaced',
+    started_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '41 days'
 where id = (select id from r where name = 'vieja');
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'vieja'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
@@ -524,14 +526,14 @@ select is(
 -- Con el mes anterior en cierre (T-601), su atrasado ya no entra: contesta como un mes viejo.
 insert into r values ('cierre', pruebas.abre(pruebas.computadora()));
 update public.playback_sessions
-set live_seconds = 600, last_heartbeat_at = date_trunc('month', now()) - interval '7 hours',
-    revoked_at = date_trunc('month', now()) - interval '7 hours', revoke_reason = 'replaced',
-    started_at = date_trunc('month', now()) - interval '8 hours'
+set live_seconds = 600, last_heartbeat_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours',
+    revoked_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours', revoke_reason = 'replaced',
+    started_at = timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '8 hours'
 where id = (select id from r where name = 'cierre');
 select pruebas.como_dueno_sistema();
 alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set status = 'closing', entered_closing_at = now()
-where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+where period_id = pruebas.periodo(timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours');
 alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 select is(
   pruebas.registra(pruebas.ana(), pruebas.computadora(), (select id from r where name = 'cierre'), jsonb_build_array(pruebas.tramo(0, 0, 30))),
@@ -540,7 +542,7 @@ select is((select count(*)::integer from pruebas.latidos((select id from r where
 select pruebas.como_dueno_sistema();
 alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced;
 update public.payout_periods set status = 'open', entered_closing_at = null
-where period_id = pruebas.periodo(date_trunc('month', now()) - interval '7 hours');
+where period_id = pruebas.periodo(timezone('America/Mexico_City', date_trunc('month', timezone('America/Mexico_City', now()))) - interval '7 hours');
 alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced;
 
 -- ---------------------------------------------------------------------------------------
