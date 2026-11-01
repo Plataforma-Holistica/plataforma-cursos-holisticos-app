@@ -813,6 +813,27 @@ que no se ve leyendo un solo archivo:
   `tests/e2e/equipo/recursos.equipo.ts`. Decisiones mías sin confirmar: un maestro suspendido baja lo suyo; título, tipo y tamaño de lo publicado son públicos
   como el temario (la política no pide acceso, y PA-22 los muestra solo con él); el alumno con `location.assign` y el maestro con el marco. Cuánto se conserva un archivo que una versión
   nueva retira se decide con T-405. Para el A: `published_lessons` ganó `unique (id, course_id)`, y una prueba que arme `createMediaGrant` pasa `files`.
+- **Lo que T-403 suma al carril B** (primera solicitud, `t403_video_borrador`; RF-604, FL-33; decisiones de Sergio del 2026-10-31: el video
+  sube primero a Supabase y Mux descarga de ahí, porque Mux no guarda el archivo exacto; 5 GB y 2 h por video, 10 por hora y 1 500 minutos al mes por
+  maestro, más un interruptor; basic en 1080p; subtítulos automáticos). La base de los videos del borrador. `draft_videos` y no `video_assets`, que es de lo
+  publicado; su id será el `video_assets.id` al publicar. Estados: `uploading`, `uploaded`, `creating`, `processing`, `ready`, `errored`. **Cada video cuesta
+  dinero:** crear en Mux se reclama bajo candado de fila (`video_claim`), así que dos pestañas o un reintento no pagan dos veces, y los topes se cuentan ahí una
+  sola vez por video (`claimed_at`); lo gastado en el mes vive en `private.video_usage`, porque `rate_limit_counters` no sobrevive a una caída. Si Mux falla
+  (`video_create_failed`, con el `claim` que contestó reclamar), vuelve a `uploaded`: un archivo que tardó horas no se pierde. Un reintento y un `creating` de más de 5 minutos
+  contestan `retry`, y hay que buscar en Mux por `passthrough` antes de crear otro, porque un 5xx no dice que no lo haya creado. Con tantos sin asentar como el tope por hora no se
+  reclama otro: lo declarado solo se corrige si alguien asienta. Un asset que sobra (`gone`, `mismatch`) queda en la papelera en la misma transacción, y por eso `video_created` recibe
+  el curso: sin fila no hay de dónde sacarlo. La papelera guarda el `video_id`, para buscar por `passthrough` lo que no tiene asset. Asentar (`video_settle`) no pasa por `draft_open` ni sube revisiones, solo acepta estados terminales (una respuesta vieja no pisa), y lo que
+  mide Mux manda sobre la cabecera: se cobra la diferencia, también si el mes no tiene fila, y lo que pasa de `VIDEO_DURACION_MAX` queda con error (`too_long`) y su asset va a la papelera ya. Se vuelve la vigente solo con el curso en `draft`, y lo
+  que quedó listo en revisión se promueve al volver (`video_promote`). Contenido llega por `private.actor_has_capability`, no por `has_capability`, que mira el token y con `asServer`
+  siempre da falso (la primera revisión lo encontró). `video_due` dice qué preguntarle a Mux, con 10 s
+  por fila. **Lo que una fila deja de nombrar, también por cascada, va a `private.video_trash`**, porque Mux no tiene una lista como `storage.objects`; lo que
+  `video_assets` nombra sale de ahí sin tocar nada. La vacía su maestro al abrir el editor, y lo que no alcance, `private.video_sweep()`, de quien opera, que además dice lo que sobra en la cubeta (`orphan`) y lo que lleva más de un día
+  creándose o procesándose (`stuck`), que sigue nombrado y se decide a mano. `pg_cron` corre `video_expire`
+  (subida sin terminar a las 48 h; subido sin crearse y con error, a los 7 días). El proveedor `test` solo entra
+  con la fila de `private.local_flags` que pone `db:login`: en producción nadie la pone. El tope global de Storage en `supabase/config.toml` subió a 5 GiB (manda el
+  menor entre ese y el de la cubeta), y para que el Auth y Storage locales lo tomen hay que `db:stop` y `db:start`. Medido contra el Storage local: por
+  `/storage/v1/upload/resumable/sign` basta `x-signature`, sin `apikey`; se valida en cada petición; un token renovado de la misma ruta sirve, y el de otra no; `HEAD` da el
+  avance; a medias no hay objeto; y con `upsert` falso no se puede reemplazar lo confirmado (409). Usa pgTAP 72. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
