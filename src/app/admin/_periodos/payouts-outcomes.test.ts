@@ -152,6 +152,14 @@ describe("liberar", () => {
     }
   });
 
+  it("retener por datos: el botón se lee, y a quien ya los tiene se le dice", () => {
+    const form = new FormData();
+    form.set("do", payoutsButton.holdForTax("d1000000-0000-4000-8000-000000000001", "calculated"));
+    expect(readPayoutsForm(form)).toEqual({ step: "hold_for_tax", payout: "d1000000-0000-4000-8000-000000000001", status: "calculated" });
+    expect(holdOutcome({ kind: "answered", answer: "has_tax_data", status: null }, PERIOD)).toEqual(failed("has_tax_data"));
+    expect(payoutFailureText("has_tax_data").length).toBeGreaterThan(0);
+  });
+
   it("soltar sin datos o sin regla se dice por separado: la liquidación sigue retenida", () => {
     expect(unholdOutcome({ kind: "answered", answer: "tax_data_missing", to: null }, PERIOD)).toEqual(failed("unhold_no_data"));
     expect(unholdOutcome({ kind: "answered", answer: "withholding_rules_missing", to: null }, PERIOD)).toEqual(failed("unhold_no_rule"));

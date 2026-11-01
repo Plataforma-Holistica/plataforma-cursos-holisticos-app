@@ -389,6 +389,11 @@ function RowActions({ row, asking, pending }: RowActionsProps) {
           </Button>
         </>
       )}
+      {row.holdForTax !== null && (
+        <Button type="submit" variant="secondary" name="do" value={row.holdForTax} disabled={pending}>
+          {text.holdForTax}
+        </Button>
+      )}
       {row.hold !== null && (
         <Button type="submit" variant="secondary" name="do" value={row.hold.ask} disabled={pending}>
           {text.hold}

@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     downloadExport: logged("downloadExport", unavailable),
     releasePayouts: logged("releasePayouts", unavailable),
     holdPayout: logged("holdPayout", unavailable),
+    holdPayoutForTaxData: logged("holdPayoutForTaxData", unavailable),
     unholdPayout: logged("unholdPayout", unavailable),
     confirmFounderBonus: logged("confirmFounderBonus", unavailable),
     voidFounderBonus: logged("voidFounderBonus", unavailable),
@@ -47,6 +48,7 @@ vi.mock("@/services/periods/periods", () => ({
   downloadExport: mocks.downloadExport,
   releasePayouts: mocks.releasePayouts,
   holdPayout: mocks.holdPayout,
+  holdPayoutForTaxData: mocks.holdPayoutForTaxData,
   unholdPayout: mocks.unholdPayout,
   confirmFounderBonus: mocks.confirmFounderBonus,
   voidFounderBonus: mocks.voidFounderBonus,
@@ -273,6 +275,12 @@ describe("payoutsAction (PA-81)", () => {
     await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.void(BONUS), { reason: "No aplica." }))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.voidFounderBonus).toHaveBeenCalledWith(jar, { period: PERIOD, bonus: BONUS, reason: "No aplica." });
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "payouts_updated");
+  });
+
+  it("retener por datos no pide motivo: le pasa al servicio la liquidación y el estado que se vio", async () => {
+    once("holdPayoutForTaxData", Promise.resolve({ kind: "answered", answer: "has_tax_data", status: null }));
+    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.holdForTax(PAYOUT, "calculated")))).toEqual({ kind: "failed", reason: "has_tax_data", attempt: 1 });
+    expect(mocks.holdPayoutForTaxData).toHaveBeenCalledWith(jar, { payout: PAYOUT, seen: "calculated" });
   });
 
   it("lo que no sale bien se dice con su detalle, y la página se vuelve a pedir", async () => {

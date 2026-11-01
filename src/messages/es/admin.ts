@@ -728,6 +728,7 @@ export const admin = defineMessages({
         "Para liberar, retener, soltar o decidir el bono de fundador hace falta un código reciente de tu aplicación de códigos. Mientras tanto puedes ver las liquidaciones.",
       notClosed: "Este periodo todavía no se cierra: las liquidaciones nacen al cerrar.",
       noTaxYet: "Por saber",
+      holdForTax: "Retener por datos fiscales",
       taxNoData: "Le faltan sus datos fiscales.",
       taxNoRule: "Falta la regla de su régimen.",
       goToClose: "Ir al ensayo y cierre",
@@ -822,7 +823,8 @@ export const admin = defineMessages({
       failures: {
         needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página.",
         taxDataMissing: "A quienes están marcados en la tabla les faltan sus datos fiscales. Retenlos para liberar a los demás, y suéltalos cuando los capturen.",
-        rulesMissing: "Todavía no hay una regla de retención para quienes están marcados en la tabla: la carga quien opera la base, con la respuesta del contador. Hasta entonces no se libera.",
+        rulesMissing: "Todavía no hay una regla de retención para quienes están marcados en la tabla: la carga quien opera la base, con la respuesta del contador. Hasta entonces no se libera mientras alguien llegue al mínimo sin estar retenido.",
+        hasTaxData: "Ya tiene sus datos y la regla de su régimen: no hace falta retenerla por eso. Si hay otra causa, escribe el motivo.",
         unholdNoData: "Faltan sus datos fiscales: sigue retenida hasta que los capture.",
         unholdNoRule: "Todavía no hay una regla de retención para su régimen: sigue retenida.",
         previewChanged: "Las cifras cambiaron desde que abriste la página. Revisa la tabla de ahora antes de liberar.",

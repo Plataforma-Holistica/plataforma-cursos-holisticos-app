@@ -61,6 +61,8 @@ export interface PayoutRow {
   estimated: boolean;
   /** Sin liberar: si le toca pagar impuestos y con qué. Nulo si ya se liberó, o si está retenida: se calcula al soltar. */
   taxState: "not_needed" | "ready" | "no_data" | "no_rule" | null;
+  /** Por qué está retenida. `tax_data` no detiene la purga de los latidos, y se le puede pasar a una investigación. */
+  holdKind: "investigation" | "tax_data" | null;
   /** Si ya capturó sus datos fiscales, sin verlos. */
   hasTaxData: boolean;
   /** Nulos mientras no se puedan saber (sin datos, sin regla, o retenida sin liberar). */
@@ -113,7 +115,7 @@ export const RELEASE_ANSWERS = [
 ] as const;
 export type ReleaseAnswer = (typeof RELEASE_ANSWERS)[number];
 /** Lo que contesta `private.hold_payout()`. */
-export const HOLD_ANSWERS = ["held", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
+export const HOLD_ANSWERS = ["held", "has_tax_data", "self", "already_held", "changed", "not_holdable", "no_alert", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
 export type HoldAnswer = (typeof HOLD_ANSWERS)[number];
 /** Lo que contesta `private.unhold_payout()`. */
 export const UNHOLD_ANSWERS = ["released_from_hold", "self", "not_held", "changed", "tax_data_missing", "withholding_rules_missing", "not_found", "malformed", "forbidden", "needs_fresh_code"] as const;
@@ -170,6 +172,8 @@ export interface PayoutStore {
   payouts(claims: VerifiedClaims, period: number): Promise<FinancePayouts | null>;
   release(claims: VerifiedClaims, period: number, seen: string): Promise<Released>;
   hold(claims: VerifiedClaims, payout: string, reason: string, seen: PayoutStatus): Promise<HoldDecided>;
+  /** Retener porque le faltan sus datos o su regla. La base comprueba que de verdad le falten. */
+  holdForTax(claims: VerifiedClaims, payout: string, seen: PayoutStatus): Promise<HoldDecided>;
   unhold(claims: VerifiedClaims, payout: string, note: string | null, seen: string): Promise<UnholdDecided>;
   confirmFounder(claims: VerifiedClaims, bonus: string): Promise<ConfirmDecided>;
   /** Anula el bono si es el del fundador de ese periodo; si no, `not_found` sin anular nada. */
@@ -291,6 +295,18 @@ export function createPayoutsPanel(deps: { report: (code: FailureCode) => Promis
     return result.ok ? { kind: "answered", ...result.answer } : { kind: "unknown" };
   }
 
+  /** Retener porque faltan sus datos o su regla, para liberar a los demás (decisión de Sergio del 2026-10-31). Sin motivo que escribir: lo pone la base. */
+  async function holdPayoutForTaxData(reader: CookieReader, input: { payout: unknown; seen: unknown }): Promise<HoldResult> {
+    const admitted = await admit(reader);
+    if (!admitted.ok) return admitted.result;
+    const payout = idOf(input.payout);
+    const seen = statusOf(input.seen);
+    if (payout === null || seen === null) return { kind: "malformed" };
+    const result = await decide(() => store.holdForTax(admitted.claims, payout, seen));
+    // Retener no libera: no vence ni descuadra.
+    return result.ok ? { kind: "answered", ...result.answer } : { kind: "unknown" };
+  }
+
   /** Soltar una retenida con la huella de lo que se vio: si estaba calculada en un mes liberado, se libera ahí mismo. */
   async function unholdPayout(reader: CookieReader, input: { payout: unknown; note: unknown; seen: unknown }): Promise<UnholdResult> {
     const admitted = await admit(reader);
@@ -326,5 +342,5 @@ export function createPayoutsPanel(deps: { report: (code: FailureCode) => Promis
     return result.ok ? { kind: "answered", answer: result.answer } : { kind: "unknown" };
   }
 
-  return { financePayouts, releasePayouts, holdPayout, unholdPayout, confirmFounderBonus, voidFounderBonus };
+  return { financePayouts, releasePayouts, holdPayout, holdPayoutForTaxData, unholdPayout, confirmFounderBonus, voidFounderBonus };
 }

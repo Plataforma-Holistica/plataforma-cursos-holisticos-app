@@ -15,6 +15,19 @@ alter table public.payouts
 comment on column public.payouts.withholding_rule_id is 'La regla con que se calcularon los impuestos al liberar. Nula si no llegó al mínimo.';
 comment on column public.payouts.withholding_profile_version is 'La versión de los datos fiscales con que se calcularon. Con qué se pagó es otra cosa: T-604.';
 
+-- Configuración lee la auditoría, y ahí está cada regla con su régimen: el identificador de la regla, junto al maestro, le diría el régimen de cada uno.
+drop trigger audit_changes on public.payouts;
+create trigger audit_changes after insert or update on public.payouts
+  for each row execute function private.audit_row_change('money', 'withholding_rule_id');
+
+-- Por qué está retenida (decisión de Sergio del 2026-11-01): solo una investigación detiene la purga de los latidos. Una retención porque faltan los datos
+-- fiscales no: los latidos de todos los alumnos del mes se quedarían sin plazo por lo que no capture un maestro.
+alter table public.payouts
+  add column hold_kind text,
+  add constraint payouts_hold_kind_known check (hold_kind in ('investigation', 'tax_data')),
+  add constraint payouts_hold_kind_when_held check ((status = 'on_hold') = (hold_kind is not null));
+comment on column public.payouts.hold_kind is 'Por qué está retenida. tax_data no detiene la purga de los latidos.';
+
 -- Una regla que retiene todo dejaría el neto en 0, y una liquidación en espera de factura lo exige positivo.
 alter table public.withholding_rules
   add constraint withholding_rules_something_left check (income_tax_withholding_rate + vat_withholding_rate < 1);
@@ -263,8 +276,9 @@ begin
     return '{"outcome": "preview_changed"}'::jsonb;
   end if;
 
-  -- El freno: sin ninguna regla vigente, o sin la de alguien, detiene todo; sin los datos de alguien, finanzas lo retiene y libera a los demás. Quien no
-  -- tiene liquidación todavía (llega por su saldo) se queda con una, para que se pueda retener.
+  -- El freno detiene a quien cobraría (decisión de Sergio del 2026-11-01): sin ninguna regla vigente, o sin la de alguien, no sigue si alguien llega al mínimo; sin
+  -- los datos de alguien, finanzas lo retiene y libera a los demás. Si nadie llega, o todos los que llegan están retenidos, se libera: no sale dinero. Quien no tiene
+  -- liquidación todavía (llega por su saldo) se queda con una, para que se pueda retener.
   select coalesce(pg_catalog.array_agg((x.value ->> 'teacher_id')::uuid) filter (where x.value #>> '{tax,tax_state}' = 'no_data'), '{}'),
          coalesce(pg_catalog.array_agg((x.value ->> 'teacher_id')::uuid) filter (where x.value #>> '{tax,tax_state}' = 'no_rule'), '{}')
   into v_no_data, v_no_rule
@@ -427,7 +441,7 @@ begin
     if new.pool_cents < 0 or new.adjustments_cents <> 0 or new.balance_applied_cents <> 0 or new.vat_cents <> 0
        or new.subtotal_cents <> new.pool_cents or new.net_cents <> new.pool_cents
        or pg_catalog.num_nonnulls(new.released_at, new.released_by, new.held_from_status, new.held_at, new.held_by,
-                                  new.hold_reason, new.anomaly_alert_id, new.withholding_rule_id, new.withholding_profile_version) > 0 then
+                                  new.hold_reason, new.anomaly_alert_id, new.withholding_rule_id, new.withholding_profile_version, new.hold_kind) > 0 then
       raise exception '%.%: a payout is born calculated, with its share of the pool and nothing else', tg_table_schema, tg_table_name
         using errcode = '23514';
     end if;
@@ -495,11 +509,21 @@ begin
       using errcode = '23514';
   end if;
 
+  -- Una retención por datos pasa a investigación si aparece otra causa: esa sí detiene la purga. Solo en ese sentido.
+  if old.status = 'on_hold' and new.status = 'on_hold' then
+    if old.hold_kind = 'tax_data' and new.hold_kind = 'investigation' and new.held_from_status is not distinct from old.held_from_status
+       and new.held_at is not distinct from old.held_at and new.held_by is not distinct from old.held_by and private.actor_id() is not null then
+      return new;
+    end if;
+    raise exception '%.%: payout % stays on hold as it is', tg_table_schema, tg_table_name, old.id using errcode = '23514';
+  end if;
+
   -- Retener (RN-17).
   if new.status = 'on_hold' and old.status in ('calculated', 'awaiting_invoice', 'invoice_in_review', 'invoice_rejected', 'ready_to_pay') then
     if private.actor_id() is null then
       raise exception '%.%: payout % is held by someone', tg_table_schema, tg_table_name, old.id using errcode = '23514';
     end if;
+    new.hold_kind := coalesce(new.hold_kind, 'investigation');
     new.held_from_status := old.status;
     new.held_at := pg_catalog.now();
     new.held_by := private.actor_id();
@@ -508,6 +532,7 @@ begin
 
   -- Soltar: vuelve al estado en que estaba.
   if old.status = 'on_hold' and new.status = old.held_from_status then
+    new.hold_kind := null;
     new.held_from_status := null;
     new.held_at := null;
     new.held_by := null;
@@ -653,7 +678,7 @@ begin
                'released_at', z.released_at, 'pool_cents', z.pool_cents, 'founder_bonus', z.founder_bonus,
                'manual_bonuses_cents', z.manual_bonuses_cents, 'adjustments_cents', z.adjustments_cents,
                'balance_cents', z.balance_cents, 'subtotal_cents', z.subtotal_cents, 'estimated', z.released_at is null,
-               'tax_state', z.tax_state, 'has_tax_data', exists (select 1 from private.tax_profile_fiscal(z.teacher_id)),
+               'tax_state', z.tax_state, 'has_tax_data', exists (select 1 from private.tax_profile_fiscal(z.teacher_id)), 'hold_kind', z.hold_kind,
                'vat_cents', z.vat_cents, 'income_tax_withheld_cents', z.income_tax_withheld_cents,
                'vat_withheld_cents', z.vat_withheld_cents, 'net_cents', z.net_cents,
                'reaches_minimum', case when v_minimum is not null then z.subtotal_cents >= v_minimum and z.subtotal_cents > 0 end,
@@ -674,7 +699,9 @@ begin
                  as balance_cents,
                case when y.released_at is not null then y.subtotal_cents else (r ->> 'subtotal_cents')::bigint end
                  as subtotal_cents,
-               r #>> '{tax,tax_state}' as tax_state,
+               -- Una retenida en un mes ya liberado se calcula al soltar: lo que le falta se dice igual.
+               coalesce(r #>> '{tax,tax_state}', case when y.status = 'on_hold' then private.unhold_preview(y.id) #>> '{tax,tax_state}' end) as tax_state,
+               y.hold_kind,
                case when y.released_at is not null then y.vat_cents else (r #>> '{tax,vat_cents}')::bigint end as vat_cents,
                case when y.released_at is not null then y.income_tax_withheld_cents else (r #>> '{tax,income_tax_withheld_cents}')::bigint end
                  as income_tax_withheld_cents,
@@ -711,6 +738,7 @@ as $$
            ('purge_playback_sessions', false, false, true), ('release_preview', false, false, true),
            ('unhold_preview', false, false, true), ('finance_payouts', true, true, true),
            ('compute_withholdings', false, false, true), ('payout_tax_row', false, false, true), ('release_day', false, false, true),
+           ('hold_payout_for_tax_data', true, true, true),
            ('raw_retention', false, false, false)),
   found as (
     select f.name, f.definer, f.server, f.fixed_path, p.oid, p.prosecdef, p.proconfig
@@ -849,6 +877,26 @@ as $$
   select 'tax data out of its doors: tax_profile_fiscal', 'tax_profile_fiscal'
   where coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_fiscal(uuid, integer)')), '') ~ '(rfc_enc|legal_name_enc|clabe_enc|clabe_last4)'
   union all
+  -- Y no es de nadie más que del dueño: sin auditoría, entregaría el régimen de cada maestro.
+  select 'tax_profile_fiscal reachable', 'tax_profile_fiscal'
+  where pg_catalog.to_regprocedure('private.tax_profile_fiscal(uuid, integer)') is null
+     or (select p.prosecdef from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('private.tax_profile_fiscal(uuid, integer)'))
+     or pg_catalog.has_function_privilege('app_service', 'private.tax_profile_fiscal(uuid, integer)', 'execute')
+     or pg_catalog.has_function_privilege('authenticated', 'private.tax_profile_fiscal(uuid, integer)', 'execute')
+     or pg_catalog.has_function_privilege('anon', 'private.tax_profile_fiscal(uuid, integer)', 'execute')
+     or pg_catalog.has_function_privilege('service_role', 'private.tax_profile_fiscal(uuid, integer)', 'execute')
+  union all
+  -- Lo que garantiza que el neto sea positivo, y que regla y versión vayan juntas.
+  select 'tax constraint missing: ' || c.name, c.name
+  from (values ('withholding_rules_something_left', 'public.withholding_rules'), ('payouts_withholding_together', 'public.payouts'),
+               ('payouts_hold_kind_when_held', 'public.payouts')) c (name, table_name)
+  where not exists (select 1 from pg_catalog.pg_constraint k where k.conname = c.name and k.conrelid = c.table_name::regclass and k.convalidated)
+  union all
+  -- La auditoría de las liquidaciones no dice con qué regla: configuración la lee, y la regla dice el régimen.
+  select 'payouts audit names the withholding rule', 'public.payouts'
+  where not exists (select 1 from pg_catalog.pg_trigger tg where tg.tgrelid = 'public.payouts'::regclass and tg.tgname = 'audit_changes'
+                      and pg_catalog.pg_get_triggerdef(tg.oid) like '%withholding_rule_id%')
+  union all
   -- Toda otra función que nombre la tabla es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
   select 'tax function not in the list', p.proname::text
   from pg_catalog.pg_proc p
@@ -896,4 +944,156 @@ as $$
     select 1 from pg_catalog.pg_constraint k
     where k.conrelid = 'private.teacher_tax_profiles'::regclass and k.conname = c.name and k.convalidated
       and pg_catalog.pg_get_constraintdef(k.oid) like c.pattern)
+$$;
+
+create or replace function private.hold_payout(p_payout uuid, p_reason text, p_seen text, p_alert uuid default null) returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare
+  v_gate text;
+  v_period public.period_id;
+  y public.payouts;
+begin
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'holds run in read committed' using errcode = '25000';
+  end if;
+  v_gate := private.finance_change_gate();
+  if v_gate is not null then
+    return pg_catalog.jsonb_build_object('outcome', v_gate);
+  end if;
+  if p_payout is null or pg_catalog.btrim(coalesce(p_reason, '')) = '' or pg_catalog.char_length(p_reason) > 2000
+     or p_seen is null then
+    return '{"outcome": "malformed"}'::jsonb;
+  end if;
+  select x.period_id into v_period from public.payouts x where x.id = p_payout;
+  if not found then
+    return '{"outcome": "not_found"}'::jsonb;
+  end if;
+  perform 1 from public.payout_periods p where p.period_id = v_period for share;
+  select * into y from public.payouts x where x.id = p_payout for update;
+  if private.actor_owns_teacher(y.teacher_id) then
+    return '{"outcome": "self"}'::jsonb;
+  end if;
+  if p_alert is not null and not exists (select 1 from public.anomaly_alerts a where a.id = p_alert) then
+    return '{"outcome": "no_alert"}'::jsonb;
+  end if;
+  if y.status = 'on_hold' then
+    -- Retenida porque faltan datos, y ahora hay otra causa: se investiga, y eso sí detiene la purga.
+    if y.hold_kind = 'tax_data' and p_seen = 'on_hold' then
+      update public.payouts x set hold_kind = 'investigation', hold_reason = pg_catalog.btrim(p_reason), anomaly_alert_id = p_alert
+      where x.id = p_payout;
+      return pg_catalog.jsonb_build_object('outcome', 'held', 'from', y.held_from_status);
+    end if;
+    return '{"outcome": "already_held"}'::jsonb;
+  end if;
+  if y.status::text <> p_seen then
+    return pg_catalog.jsonb_build_object('outcome', 'changed', 'status', y.status);
+  end if;
+  if y.status in ('carried_forward', 'paid', 'payment_returned') then
+    return pg_catalog.jsonb_build_object('outcome', 'not_holdable', 'status', y.status);
+  end if;
+  update public.payouts x set status = 'on_hold', hold_reason = pg_catalog.btrim(p_reason), anomaly_alert_id = p_alert
+  where x.id = p_payout;
+  return pg_catalog.jsonb_build_object('outcome', 'held', 'from', y.status);
+end
+$$;
+
+-- Retener porque le faltan sus datos o la regla de su régimen, para liberar a los demás. Sin motivo que escribir, y no detiene la purga de los latidos. Solo una
+-- calculada, y solo si de verdad le falta: si no, sería una manera de retener sin detener la purga.
+create function private.hold_payout_for_tax_data(p_payout uuid, p_seen text) returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare
+  v_gate text;
+  v_period public.period_id;
+  y public.payouts;
+begin
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'holds run in read committed' using errcode = '25000';
+  end if;
+  v_gate := private.finance_change_gate();
+  if v_gate is not null then
+    return pg_catalog.jsonb_build_object('outcome', v_gate);
+  end if;
+  if p_payout is null or p_seen is null then
+    return '{"outcome": "malformed"}'::jsonb;
+  end if;
+  select x.period_id into v_period from public.payouts x where x.id = p_payout;
+  if not found then
+    return '{"outcome": "not_found"}'::jsonb;
+  end if;
+  perform 1 from public.payout_periods p where p.period_id = v_period for share;
+  select * into y from public.payouts x where x.id = p_payout for update;
+  if private.actor_owns_teacher(y.teacher_id) then
+    return '{"outcome": "self"}'::jsonb;
+  end if;
+  -- El candado del saldo: guardar sus datos toma el mismo.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('teacher_balance:' || y.teacher_id::text, 0));
+  if y.status = 'on_hold' then
+    return '{"outcome": "already_held"}'::jsonb;
+  end if;
+  if y.status::text <> p_seen then
+    return pg_catalog.jsonb_build_object('outcome', 'changed', 'status', y.status);
+  end if;
+  if y.status <> 'calculated' then
+    return pg_catalog.jsonb_build_object('outcome', 'not_holdable', 'status', y.status);
+  end if;
+  if private.payout_tax_row(y.teacher_id, 1, 0) ->> 'tax_state' = 'ready' then
+    return '{"outcome": "has_tax_data"}'::jsonb;
+  end if;
+  update public.payouts x set status = 'on_hold', hold_kind = 'tax_data', hold_reason = 'Faltan sus datos fiscales o la regla de su régimen.'
+  where x.id = p_payout;
+  return pg_catalog.jsonb_build_object('outcome', 'held', 'from', y.status);
+end
+$$;
+revoke all on function private.hold_payout_for_tax_data(uuid, text) from public;
+grant execute on function private.hold_payout_for_tax_data(uuid, text) to app_service;
+
+
+create or replace function private.purge_watch_partition(p_period public.period_id) returns text
+language plpgsql volatile set search_path = ''
+as $$
+declare
+  v_days integer;
+  v_period public.payout_periods;
+  v_name text := 'watch_events_' || p_period::text;
+  v_window interval;
+  v_lock text;
+begin
+  begin
+    v_days := (private.parameter_value('RETENCION_LATIDOS') #>> '{}')::integer;
+  exception when others then
+    v_days := null;
+  end;
+  if v_days is null or v_days < 0 then
+    return 'no_retention';
+  end if;
+  select * into v_period from public.payout_periods p where p.period_id = p_period;
+  if not found or v_period.status not in ('closed', 'paid') then
+    return 'not_closed';
+  end if;
+  if v_period.closed_at > pg_catalog.now() - pg_catalog.make_interval(days => v_days) then
+    return 'within_retention';
+  end if;
+  -- Ya en retención, la fila del periodo, sin esperarla: retener toma la misma.
+  perform 1 from public.payout_periods p where p.period_id = p_period for no key update nowait;
+  -- Solo lo que se investiga detiene la purga: una retención porque faltan datos dejaría sin plazo los latidos de todos.
+  if exists (select 1 from public.payouts y where y.period_id = p_period and y.status = 'on_hold' and y.hold_kind <> 'tax_data') then
+    return 'on_hold';
+  end if;
+  if pg_catalog.to_regclass('public.' || pg_catalog.quote_ident(v_name)) is null then
+    return 'no_partition';
+  end if;
+  v_window := pg_catalog.make_interval(secs => 3 * (private.playback_limits()).heartbeat_seconds);
+  if exists (select 1 from private.progress_rebuilds r
+             join public.playback_sessions s on s.profile_id = r.profile_id and s.lesson_id = r.lesson_id
+             where s.started_at < v_period.ends_at and s.last_heartbeat_at + v_window >= v_period.starts_at) then
+    return 'progress_pending';
+  end if;
+  v_lock := pg_catalog.current_setting('lock_timeout');
+  perform pg_catalog.set_config('lock_timeout', '2s', true);
+  execute pg_catalog.format('drop table public.%I', v_name);
+  perform pg_catalog.set_config('lock_timeout', v_lock, true);
+  return 'purged';
+end
 $$;

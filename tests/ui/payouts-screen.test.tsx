@@ -48,6 +48,7 @@ const row = (over: Partial<PayoutRow>): PayoutRow => ({
   estimated: true,
   taxState: "not_needed",
   hasTaxData: true,
+  holdKind: null,
   vatCents: 0,
   incomeTaxWithheldCents: 0,
   vatWithheldCents: 0,

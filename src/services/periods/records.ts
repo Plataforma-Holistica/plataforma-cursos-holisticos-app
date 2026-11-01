@@ -430,6 +430,7 @@ const payoutRow = z.strictObject({
   subtotal_cents: cents,
   estimated: z.boolean(),
   tax_state: z.enum(["not_needed", "ready", "no_data", "no_rule"]).nullable(),
+  hold_kind: z.enum(["investigation", "tax_data"]).nullable(),
   has_tax_data: z.boolean(),
   vat_cents: cents.nullable(),
   income_tax_withheld_cents: cents.nullable(),
@@ -498,6 +499,7 @@ export function payoutsReadOf(raw: unknown): FinancePayouts | null {
       subtotalCents: row.subtotal_cents,
       estimated: row.estimated,
       taxState: row.tax_state,
+      holdKind: row.hold_kind,
       hasTaxData: row.has_tax_data,
       vatCents: row.vat_cents,
       incomeTaxWithheldCents: row.income_tax_withheld_cents,
@@ -553,6 +555,11 @@ export async function askRelease(tx: Tx, periodId: number, seen: string): Promis
 /** Retiene (`private.hold_payout()`) con el estado que se vio. Sin alerta: PA-81 no la enlaza todavía. */
 export async function askHold(tx: Tx, payoutId: string, reason: string, seen: string): Promise<unknown> {
   return readData(tx, sql`select private.hold_payout(${payoutId}::uuid, ${reason}::text, ${seen}::text) as data`);
+}
+
+/** Retiene porque faltan sus datos o su regla (`private.hold_payout_for_tax_data()`), con el estado que se vio. */
+export async function askHoldForTax(tx: Tx, payoutId: string, seen: string): Promise<unknown> {
+  return readData(tx, sql`select private.hold_payout_for_tax_data(${payoutId}::uuid, ${seen}::text) as data`);
 }
 
 /** Suelta (`private.unhold_payout()`) con la huella de lo que se vio; si se libera ahí mismo, se comprueba al confirmar. */

@@ -12,6 +12,10 @@
 begin;
 \ir _ayuda.psql
 \ir _con_datos_fiscales.psql
+-- Aquí, con tasas de verdad: las rondas también escriben impuestos, y la comprobación al confirmar los recalcula.
+set local session_replication_role = replica;
+update public.withholding_rules set vat_rate = 0.16, income_tax_withholding_rate = 0.10, vat_withholding_rate = 0.106667 where note = 'regla en 0 de las pruebas';
+set local session_replication_role = origin;
 select plan(7);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable

@@ -110,9 +110,9 @@ select is(private.purge_watch_partition(203201), 'within_retention', 'un segundo
 select pruebas.cerrado(203201, now() - interval '90 days');
 set local session_replication_role = replica;
 insert into public.payouts (id, period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents,
-                            held_from_status, held_at, held_by, hold_reason)
+                            held_from_status, held_at, held_by, hold_reason, hold_kind)
 select 'e6060000-0000-0000-0000-000000000001', 203201, teacher_id, gen_random_uuid(), 'on_hold', 100, 100, 100,
-       'calculated', now(), pruebas.al(1), 'Se investiga.'
+       'calculated', now(), pruebas.al(1), 'Se investiga.', 'investigation'
 from public.published_courses where slug = 'purga-m1';
 set local session_replication_role = origin;
 select is(private.purge_watch_partition(203201), 'on_hold', 'con una liquidación retenida, no: el crudo es la evidencia');

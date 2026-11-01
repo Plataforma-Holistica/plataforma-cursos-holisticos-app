@@ -48,6 +48,7 @@ export type PayoutsRequest =
   | { step: "release"; period: number; seen: string; understood: boolean }
   | { step: "ask_hold"; payout: string; status: PayoutStatus }
   | { step: "hold"; payout: string; status: PayoutStatus; reason: string }
+  | { step: "hold_for_tax"; payout: string; status: PayoutStatus }
   | { step: "ask_unhold"; payout: string; seen: string }
   /** `releases`: soltarla la libera ahí mismo, y pide la casilla. Lo dice el botón, que arma la página. */
   | { step: "unhold"; payout: string; seen: string; releases: boolean; note: string; understood: boolean }
@@ -86,6 +87,10 @@ export function readPayoutsForm(form: unknown): PayoutsRequest {
       if (!ID.test(target) || status === undefined) return { step: "none" };
       return verb === "ask_hold" ? { step: verb, payout: target, status } : { step: verb, payout: target, status, reason: textOf(form, "reason") };
     }
+    case "hold_for_tax": {
+      const status = STATUSES.find((each) => each === shown);
+      return ID.test(target) && status !== undefined ? { step: verb, payout: target, status } : { step: "none" };
+    }
     case "ask_unhold":
     case "unhold":
     case "unhold_release": {
@@ -111,6 +116,7 @@ export const payoutsButton = {
   release: (period: number, seen: string) => `release:${period}:${seen}`,
   askHold: (payout: string, status: PayoutStatus) => `ask_hold:${payout}:${status}`,
   hold: (payout: string, status: PayoutStatus) => `hold:${payout}:${status}`,
+  holdForTax: (payout: string, status: PayoutStatus) => `hold_for_tax:${payout}:${status}`,
   askUnhold: (payout: string, seen: string) => `ask_unhold:${payout}:${seen}`,
   unhold: (payout: string, seen: string, releases: boolean) => `${releases ? "unhold_release" : "unhold"}:${payout}:${seen}`,
   confirmBonus: (bonus: string) => `confirm_bonus:${bonus}`,
@@ -125,6 +131,7 @@ export const payoutsButton = {
 export type PayoutFailure =
   | "needs_code"
   | "tax_data_missing"
+  | "has_tax_data"
   | "rules_missing"
   /** Soltarla la liberaría ahí mismo, y le falta lo mismo. */
   | "unhold_no_data"
@@ -233,6 +240,8 @@ export function holdOutcome(result: HoldResult, period: number): PayoutOutcome {
       switch (result.answer) {
         case "held":
           return updated(period);
+        case "has_tax_data":
+          return failed("has_tax_data");
         case "already_held":
           return failed("already_held");
         case "changed":

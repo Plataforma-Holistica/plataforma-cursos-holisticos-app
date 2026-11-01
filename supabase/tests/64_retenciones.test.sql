@@ -5,7 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
-select plan(86);
+select plan(115);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -290,6 +290,19 @@ select is(pruebas.ids(pruebas.libera(202610)), array['M1', 'M2'], 'y dice a qui�
 select is((select payouts_released_at from public.payout_periods where period_id = 202610), null, 'el periodo sigue sin liberar');
 select is((select count(*)::integer from public.payouts where period_id = 202610 and status <> 'calculated'), 0, 'ninguna liquidación se movió');
 
+-- El freno detiene a quien cobraría (decisión de Sergio del 2026-11-01): si todos los que llegan están retenidos, se libera, sin que salga dinero. Se deshace.
+create function pruebas.libera_y_deshace(p_sql text) returns void language plpgsql as $f$
+declare
+  v jsonb;
+begin
+  execute p_sql;
+  v := pruebas.libera(202610);
+  raise exception 'liberar contestó %', v ->> 'outcome' using errcode = 'P0002';
+end
+$f$;
+select throws_like($$select pruebas.libera_y_deshace('select pruebas.retiene(''M1'', 202610), pruebas.retiene(''M2'', 202610)')$$, '%contestó released%', 'sin reglas y con los que llegan retenidos, se libera');
+select throws_like($$select pruebas.libera_y_deshace('select pruebas.parametro(''PAGO_MINIMO'', ''999999999'', 202610), pruebas.como_dueno()')$$, '%contestó released%', 'sin reglas y sin nadie que llegue al mínimo, también');
+
 -- Con datos, y con una regla de su régimen que todavía no rige.
 select pruebas.perfil('M1', '605', 'person');
 select is(pruebas.o(pruebas.libera(202610)), 'withholding_rules_missing', 'una regla que empieza después no sirve');
@@ -312,16 +325,56 @@ select is(pruebas.fila81('M1', 202610) ->> 'vat_cents', round((pruebas.fila81('M
 select is(pruebas.fila81('M2', 202610) ->> 'tax_state', 'no_data', 'M2 no');
 select is(pruebas.fila81('M2', 202610) ->> 'net_cents', null, 'y sin neto: no se puede saber');
 select is(pruebas.fila81('M3', 202610) ->> 'tax_state', 'not_needed', 'M3 no llega al mínimo: no necesita nada');
-select is(pruebas.retiene('M2', 202610), 'held', 'finanzas retiene a M2');
+create function pruebas.retiene_por_datos(p_et text, p_period integer, p_seen text default 'calculated') returns jsonb language sql as $$
+  select pruebas.hace(format('private.hold_payout_for_tax_data(%L, %L)', pruebas.y(p_et, p_period), p_seen));
+$$;
+select is(pruebas.o(pruebas.retiene_por_datos('M1', 202610)), 'has_tax_data', 'quien tiene sus datos y su regla no se retiene por eso');
+select is(pruebas.o(pruebas.retiene_por_datos('M2', 202610, 'on_hold')), 'changed', 'con otro estado a la vista, no');
+select is(pruebas.o(pruebas.retiene_por_datos('M2', 202610)), 'held', 'finanzas retiene a M2 porque le faltan sus datos');
+select is((select hold_kind from public.payouts where id = pruebas.y('M2', 202610)), 'tax_data', 'y queda dicho por qué');
+select is((select btrim(hold_reason) <> '' from public.payouts where id = pruebas.y('M2', 202610)), true, 'con su motivo');
+select is(pruebas.o(pruebas.retiene_por_datos('M2', 202610, 'on_hold')), 'already_held', 'ya está');
+select is(pruebas.o(pruebas.hace(format('private.hold_payout_for_tax_data(%L, %L)', '00000000-0000-4000-8000-000000000009', 'calculated'))), 'not_found', 'una que no existe');
+-- Una investigación es la que detiene la purga, y una retención por datos pasa a ella.
+select is((select hold_kind from public.payouts where id = pruebas.y('M1', 202610)), null, 'sin retener no hay tipo');
+select throws_ok($$select pruebas.a_mano(format('update public.payouts set hold_kind = %L where id = %L', 'investigation', pruebas.y('M1', 202610)))$$, '23514', null, 'el tipo no se pone sin retener');
+select pruebas.como_dueno_sistema();
+
+-- El día que rige: el último de una regla ya no cuenta, el primero sí, y es el día en la zona de los periodos.
+select is(private.release_day(), (now() at time zone 'America/Mexico_City')::date, 'el día es el de la zona de los periodos, no el de UTC');
+select pruebas.regla('616', 'person', 0, 0, 0, private.release_day());
+select pruebas.perfil('M4', '616', 'person');
+select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'ready', 'una regla rige desde su primer día');
+select pruebas.como_dueno_sistema();
+update public.withholding_rules set effective_to = private.release_day() + 1 where tax_regime_code = '616';
+select pruebas.como_dueno();
+select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'ready', 'y hasta el día antes de su fin');
+select pruebas.como_dueno_sistema();
+set local session_replication_role = replica;
+update public.withholding_rules set effective_from = private.release_day() - 5, effective_to = private.release_day() where tax_regime_code = '616';
+set local session_replication_role = origin;
+select pruebas.como_dueno();
+select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'no_rule', 'el día de su fin ya no cuenta');
+-- El tipo de persona: el 626 es de los dos.
+select pruebas.regla('626', 'company', 0, 0, 0);
+select pruebas.perfil('M4', '626', 'person');
+select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'no_rule', 'la regla de una persona moral no le sirve a una física con el mismo régimen');
+select pruebas.regla('626', 'person', 0, 0, 0);
+select is(private.payout_tax_row(pruebas.id('M4'), 10000, 1) ->> 'tax_state', 'ready', 'la suya sí');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo liberado se comprueba al confirmar. Cada caso libera, rompe algo y se deshace.
 
 select throws_ok($$select pruebas.descuadra(202610, null)$$, 'P0002', null, 'sin tocar nada, cuadra');
+select throws_ok($$select pruebas.descuadra(202610, format($s$
+  insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version, created_by)
+  values (%L, 9, pruebas.sellado(13), pruebas.sellado(20), '626', 'person', pruebas.sellado(18), '7771', 1, pruebas.finanzas());
+  update public.payouts set withholding_rule_id = (select id from public.withholding_rules where tax_regime_code = '626' and payee_kind = 'company'), withholding_profile_version = 9,
+    vat_cents = 0, income_tax_withheld_cents = 0, vat_withheld_cents = 0, net_cents = subtotal_cents where id = %L$s$, pruebas.id('M1'), pruebas.y('M1', 202610)))$$, '23514', null, 'con la regla del mismo régimen y de otro tipo de persona');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set vat_cents = vat_cents + 1, net_cents = net_cents + 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'un centavo de más de IVA');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set income_tax_withheld_cents = income_tax_withheld_cents + 1, net_cents = net_cents - 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'de ISR');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set vat_withheld_cents = vat_withheld_cents - 1, net_cents = net_cents + 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'de IVA retenido');
-select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_rule_id = (select id from public.withholding_rules where tax_regime_code = %L), vat_cents = 0, income_tax_withheld_cents = 0, vat_withheld_cents = 0, net_cents = subtotal_cents where id = %L', '605', pruebas.y('M1', 202610)))$$, '23514', null, 'con una regla de otro régimen');
+select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_rule_id = (select id from public.withholding_rules where tax_regime_code = %L), vat_cents = 0, income_tax_withheld_cents = 0, vat_withheld_cents = 0, net_cents = subtotal_cents where id = %L', '605', pruebas.y('M1', 202610)))$$, '23514', null, 'con una regla de otro régimen, que además no rige ese día');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_profile_version = 1 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'con una versión de sus datos que tenía otro régimen');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_profile_version = 99 where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'con una versión que no existe');
 select throws_ok($$select pruebas.descuadra(202610, format('update public.payouts set withholding_rule_id = null, withholding_profile_version = null where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'en espera de factura sin regla');
@@ -330,7 +383,7 @@ select throws_ok($$select pruebas.descuadra(202610, format('update public.payout
 select throws_ok($$select pruebas.descuadra(202610, $s$update public.withholding_rules set effective_from = '2090-06-01' where tax_regime_code = '612'$s$)$$, '23514', null, 'con una regla que no regía ese día');
 
 -- El guardián.
-select throws_ok($$select pruebas.a_mano(format('update public.payouts set status = %L, released_at = now(), released_by = private.actor_id() where id = %L', 'awaiting_invoice', pruebas.y('M1', 202610)))$$, '23514', null, 'a mano, en espera de factura sin regla no pasa');
+select throws_like($$select pruebas.a_mano(format('update public.payouts set status = %L, released_at = now(), released_by = private.actor_id() where id = %L', 'awaiting_invoice', pruebas.y('M1', 202610)))$$, '%with its withholding rule%', 'a mano, en espera de factura sin regla no pasa: lo detiene el guardián');
 select throws_ok($$select pruebas.a_mano(format('update public.payouts set withholding_rule_id = (select id from regla) where id = %L', pruebas.y('M1', 202610)))$$, '23514', null, 'la regla no se escribe fuera de liberar');
 select throws_ok($$select pruebas.a_mano(format('update public.payouts set status = %L, vat_cents = 1, net_cents = subtotal_cents + 1 where id = %L', 'carried_forward', pruebas.y('M1', 202610)))$$, '23514', null, 'acumulada con impuestos, tampoco');
 
@@ -351,6 +404,9 @@ select is((select array[vat_cents, income_tax_withheld_cents, vat_withheld_cents
 select is((select withholding_rule_id is null and withholding_profile_version is null and net_cents = subtotal_cents from public.payouts where id = pruebas.y('M3', 202610)), true, 'y sin regla');
 select is((select status::text from public.payouts where id = pruebas.y('M2', 202610)), 'on_hold', 'M2 sigue retenida');
 select is((pruebas.fila81('M1', 202610) ->> 'net_cents')::bigint, (select net_cents from public.payouts where id = pruebas.y('M1', 202610)), 'PA-81 lee lo liberado');
+select is((select count(*)::integer from public.audit_log a where a.entity_table like '%payouts' and (a.new_value ? 'withholding_rule_id' or a.old_value ? 'withholding_rule_id')), 0,
+  'la auditoría no dice con qué regla: configuración la lee, y la regla dice el régimen');
+select ok((select count(*) > 0 from public.audit_log a where a.entity_table like '%payouts' and a.new_value ->> 'status' = 'awaiting_invoice' and a.new_value ? 'net_cents'), 'y sí las cifras');
 set constraints payouts_released immediate;
 set constraints payouts_released deferred;
 
@@ -359,6 +415,28 @@ set constraints payouts_released deferred;
 
 select is(pruebas.o(pruebas.suelta('M2', 202610)), 'tax_data_missing', 'sin datos no se suelta');
 select is(pruebas.estado_y(pruebas.y('M2', 202610)), 'on_hold', 'y sigue retenida');
+select is(pruebas.fila81('M2', 202610) ->> 'tax_state', 'no_data', 'PA-81 lo dice en su fila, también ya liberado el mes');
+select is(pruebas.fila81('M2', 202610) ->> 'hold_kind', 'tax_data', 'y por qué está retenida');
+-- La purga: una retención por datos no la detiene, y una investigación sí. Con el mes pasado de plazo; se deshace.
+create function pruebas.purga_y_deshace(p_sql text) returns void language plpgsql as $f$
+declare
+  v text;
+begin
+  execute p_sql;
+  perform pruebas.como_dueno_sistema();
+  alter table public.payout_periods disable trigger payout_periods_guard;
+  update public.payout_periods set closed_at = now() - interval '4000 days' where period_id = 202610;
+  alter table public.payout_periods enable trigger payout_periods_guard;
+  v := private.purge_watch_partition(202610);
+  raise exception 'la purga contestó %', v using errcode = 'P0002';
+end
+$f$;
+select throws_matching($$select pruebas.purga_y_deshace('select 1')$$, 'contestó (purged|no_partition|progress_pending)', 'una retención por datos no detiene la purga');
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', pruebas.y('M2', 202610), 'Se investiga.', 'on_hold'))), 'held', 'si aparece otra causa, pasa a investigación');
+select is((select hold_kind from public.payouts where id = pruebas.y('M2', 202610)), 'investigation', 'con su tipo');
+select throws_matching($$select pruebas.purga_y_deshace('select 1')$$, 'contestó on_hold', 'y esa sí detiene la purga');
+select is(pruebas.o(pruebas.hace(format('private.hold_payout(%L, %L, %L)', pruebas.y('M2', 202610), 'Otra vez.', 'on_hold'))), 'already_held', 'una investigación ya no cambia');
+select throws_ok($$select pruebas.a_mano(format('update public.payouts set hold_kind = %L where id = %L', 'tax_data', pruebas.y('M2', 202610)))$$, '23514', null, 'ni vuelve a ser por datos');
 create temporary table vista_m2 as select private.unhold_preview(pruebas.y('M2', 202610)) ->> 'fingerprint' as huella;
 select pruebas.perfil('M2', '605', 'person');
 select isnt(private.unhold_preview(pruebas.y('M2', 202610)) ->> 'fingerprint', (select huella from vista_m2), 'capturar sus datos cambia lo que se ve');
@@ -398,6 +476,11 @@ select is((select count(*)::integer from private.schema_violations_tax()), 0, 'e
 select ok(not has_function_privilege('app_service', 'private.compute_withholdings(bigint, numeric, numeric, numeric)', 'execute'), 'la aplicación no llama al cálculo');
 select ok(not has_function_privilege('app_service', 'private.payout_tax_row(uuid, bigint, bigint)', 'execute'), 'ni a la fila de impuestos');
 select ok(not has_function_privilege('app_service', 'private.tax_profile_fiscal(uuid, integer)', 'execute'), 'ni a lo fiscal en claro');
+alter function private.tax_profile_fiscal(uuid, integer) security definer;
+select is((select count(*)::integer from private.schema_violations_tax() where problem = 'tax_profile_fiscal reachable'), 1, 'el vigilante ve si lo fiscal en claro se abre');
+alter function private.tax_profile_fiscal(uuid, integer) security invoker;
+alter table public.withholding_rules drop constraint withholding_rules_something_left;
+select is((select count(*)::integer from private.schema_violations_tax() where problem like 'tax constraint missing%'), 1, 'y si falta lo que garantiza un neto positivo');
 select ok(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure) !~ '_enc', 'lo fiscal en claro no toca lo cifrado');
 select ok(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure) !~ 'clabe', 'ni los últimos cuatro');
 select is((select count(*)::integer from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'private' and p.proname = 'release_payout'), 1, 'liberar una liquidación tiene una sola firma');

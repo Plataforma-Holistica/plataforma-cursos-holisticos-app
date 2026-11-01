@@ -64,7 +64,7 @@ export type {
 } from "./payouts";
 export { BONUS_STATUSES, CONFIRM_ANSWERS, HOLD_ANSWERS, PAYOUT_STATUSES, RELEASE_ANSWERS, UNHOLD_ANSWERS, VOID_ANSWERS } from "./payouts";
 
-export const { financePayouts, releasePayouts, holdPayout, unholdPayout, confirmFounderBonus, voidFounderBonus } = createPayoutsPanel(
+export const { financePayouts, releasePayouts, holdPayout, holdPayoutForTaxData, unholdPayout, confirmFounderBonus, voidFounderBonus } = createPayoutsPanel(
   { report: reportFailure },
   { teamStanding, store: databasePayoutStore },
 );

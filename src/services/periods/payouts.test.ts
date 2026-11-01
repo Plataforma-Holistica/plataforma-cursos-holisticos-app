@@ -55,6 +55,10 @@ function serviceWith(
       calls.push(`soltar ${payout.slice(0, 4)} ${note === null ? "sin nota" : `«${note}»`} ${seen.slice(0, 4)}`);
       return answer({ answer: "released_from_hold" as const, to: "awaiting_invoice" as const });
     }),
+    holdForTax: vi.fn((_claims, payout: string, seen: string) => {
+      calls.push(`retener por datos ${payout.slice(0, 4)} ${seen}`);
+      return answer({ answer: "held" as const, status: null });
+    }),
     confirmFounder: vi.fn((_claims, bonus: string) => {
       calls.push(`confirmar ${bonus.slice(0, 4)}`);
       return answer({ answer: "confirmed" as const, status: null });
@@ -171,6 +175,18 @@ describe("liberar", () => {
   it.each(["withholding_rules_missing", "tax_data_missing"] as const)("%s llega tal cual, con a quién detiene", async (answer) => {
     const { service } = serviceWith({ released: { answer, blockingPeriod: null, periodStatus: null, teachers: [TEACHER] } });
     expect(await service.releasePayouts(reader, { period: 202710, seen: SEEN })).toEqual({ kind: "answered", answer, blockingPeriod: null, periodStatus: null, teachers: [TEACHER] });
+  });
+
+  it("retener por datos: la guarda primero, lo sin forma no llega, y la base decide si de verdad le falta", async () => {
+    const { service, calls } = serviceWith();
+    expect(await service.holdPayoutForTaxData(reader, { payout: "x", seen: "calculated" })).toEqual({ kind: "malformed" });
+    expect(calls).toEqual(["guarda"]);
+    const held = serviceWith();
+    expect(await held.service.holdPayoutForTaxData(reader, { payout: PAYOUT, seen: "calculated" })).toMatchObject({ kind: "answered", answer: "held" });
+    expect(held.calls).toEqual(["guarda", `retener por datos ${PAYOUT.slice(0, 4)} calculated`]);
+    const content = serviceWith({ check: teamCheck(standingOf(["content"])) });
+    expect(await content.service.holdPayoutForTaxData(reader, { payout: PAYOUT, seen: "calculated" })).toEqual({ kind: "refused" });
+    expect(content.calls).toEqual(["guarda"]);
   });
 
   it("el tope de tiempo y lo que no cuadra al confirmar se dicen por su nombre, con su propio reporte", async () => {

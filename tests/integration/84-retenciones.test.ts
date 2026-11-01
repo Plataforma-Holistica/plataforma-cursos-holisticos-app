@@ -15,7 +15,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./he
 // antes las filas abiertas desde el arranque, cierra sus meses de verdad y al terminar quita lo suyo con las guardias apagadas; la auditoría se queda.
 
 const FIRST = 204201;
-const OURS = [204201, 204202];
+const OURS = [204201, 204202, 204203];
 const AMOUNT = 100_000;
 
 let owner: Client;
@@ -122,7 +122,7 @@ afterAll(async () => {
     await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
-    await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 204203", [OURS]);
+    await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 204204", [OURS]);
     await owner.query("delete from private.teacher_tax_profiles where teacher_id = $1", [teacher]);
     await owner.query("delete from public.withholding_rules where id = $1", [rule]);
     await owner.query("delete from public.consents where profile_id = $1", [person.id]);
@@ -143,7 +143,12 @@ describe("guardar los datos y liberar, de verdad", () => {
   it("sin datos, liberar lo dice y no escribe nada más que la liquidación vacía", async () => {
     const answer = await asFinance(finance, (client) => outcomeOf(client, "release_payouts", FIRST));
     expect(answer).toMatchObject({ outcome: "tax_data_missing", teachers: [teacher] });
-    expect((await payoutOf(FIRST))?.status).toBe("calculated");
+    const payout = await payoutOf(FIRST);
+    expect(payout).toMatchObject({ status: "calculated", vat: "0", income: "0", vat_withheld: "0", version: null, rule: null });
+    const period = await owner.query<{ released: Date | null }>("select payouts_released_at as released from public.payout_periods where period_id = $1", [FIRST]);
+    expect(period.rows[0]?.released).toBeNull();
+    const entries = await owner.query("select 1 from public.teacher_balance_entries where teacher_id = $1", [teacher]);
+    expect(entries.rowCount).toBe(0);
   });
 
   it("guardar mientras se ve: liberar espera su candado, y como la vista cambió, no libera", async () => {
@@ -194,9 +199,44 @@ describe("guardar los datos y liberar, de verdad", () => {
     expect(paid).toMatchObject({ status: "awaiting_invoice", version: 1, rule, subtotal: String(AMOUNT), vat: "16000", income: "10000", vat_withheld: "10666", net: "95334" });
   });
 
-  it("el mes siguiente ya usa la versión nueva", async () => {
+  it("se retiene antes de liberar su mes", async () => {
+    const third = OURS[2]!;
+    const payout = (await owner.query<{ id: string }>("select id::text from public.payouts where period_id = $1 and teacher_id = $2", [third, teacher])).rows[0]?.id;
+    const held = await asFinance(finance, (client) => call(client, "private.hold_payout($1, 'Se investiga.', 'calculated')", [payout]));
+    expect(held).toMatchObject({ outcome: "held" });
+  });
+
+  it("el mes siguiente usa la versión nueva, y guardar mientras se suelta: soltar espera su candado, y como la vista cambió, no suelta", async () => {
     const released = await asFinance(finance, (client) => outcomeOf(client, "release_payouts", OURS[1]));
     expect(released).toMatchObject({ outcome: "released" });
     expect((await payoutOf(OURS[1]!))?.version).toBe(2);
+
+    // Retenida antes de liberar, su mes se libera sin ella, y al soltarla se libera ahí mismo: con lo que rija entonces.
+    const third = OURS[2]!;
+    expect(await asFinance(finance, (client) => outcomeOf(client, "release_payouts", third))).toMatchObject({ outcome: "released" });
+    const payout = (await owner.query<{ id: string }>("select id::text from public.payouts where period_id = $1 and teacher_id = $2", [third, teacher])).rows[0]!.id;
+    const fingerprint = async () => (await owner.query<{ f: string }>("select private.unhold_preview($1) ->> 'fingerprint' as f", [payout])).rows[0]!.f;
+    const seen = await fingerprint();
+    const saver = await connect();
+    const unholder = await connect();
+    try {
+      await saver.query("begin");
+      expect(await save(saver, 2)).toBe("saved");
+      await unholder.query("begin");
+      await actAs(unholder, finance);
+      const waiting = call(unholder, "private.unhold_payout($1, null, $2)", [payout, seen]);
+      await waitBehind(owner, saver, 1);
+      await saver.query("commit");
+      expect(await waiting).toMatchObject({ outcome: "changed" });
+      await retire(unholder, finance);
+      await unholder.query("rollback");
+    } finally {
+      await saver.query("rollback").catch(() => undefined);
+      await unholder.query("rollback").catch(() => undefined);
+      await saver.end();
+      await unholder.end();
+    }
+    expect(await asFinance(finance, async (client) => call(client, "private.unhold_payout($1, null, $2)", [payout, await fingerprint()]))).toMatchObject({ outcome: "released_from_hold", to: "awaiting_invoice" });
+    expect((await payoutOf(third))?.version).toBe(3);
   });
 });

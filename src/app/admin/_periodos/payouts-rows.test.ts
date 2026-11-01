@@ -40,6 +40,7 @@ const row = (over: Partial<PayoutRow>): PayoutRow => ({
   estimated: true,
   taxState: "not_needed",
   hasTaxData: true,
+  holdKind: null,
   vatCents: 0,
   incomeTaxWithheldCents: 0,
   vatWithheldCents: 0,
@@ -196,8 +197,34 @@ describe("los impuestos en la tabla (T-409)", () => {
     expect(viewOf({ taxState: "no_rule", vatCents: null, incomeTaxWithheldCents: null, vatWithheldCents: null, netCents: null })?.taxNote).toBe(admin.periods.payouts.taxNoRule);
   });
 
-  it("una retenida sin datos también lo dice: al soltarla se le va a pedir", () => {
-    expect(viewOf({ status: "on_hold", taxState: null, hasTaxData: false, vatCents: null, incomeTaxWithheldCents: null, vatWithheldCents: null, netCents: null })?.taxNote).toBe(admin.periods.payouts.taxNoData);
+  it("una retenida sin datos también lo dice, si llega al mínimo: al soltarla se le va a pedir", () => {
+    const held = { status: "on_hold", taxState: null, hasTaxData: false, vatCents: null, incomeTaxWithheldCents: null, vatWithheldCents: null, netCents: null } as const;
+    expect(viewOf({ ...held, reachesMinimum: true })?.taxNote).toBe(admin.periods.payouts.taxNoData);
+    expect(viewOf({ ...held, reachesMinimum: false })?.taxNote).toBeNull();
+  });
+
+  it("una retenida con datos y sin regla también lo dice: es lo que le va a contestar soltarla", () => {
+    expect(viewOf({ status: "on_hold", taxState: "no_rule", hasTaxData: true, vatCents: null, incomeTaxWithheldCents: null, vatWithheldCents: null, netCents: null, reachesMinimum: true })?.taxNote).toBe(admin.periods.payouts.taxNoRule);
+  });
+
+  it("el total del neto es lo que se transfiere: sin las acumuladas, y si falta alguno no se suma", () => {
+    const paying = row({ teacherId: "b0000000-0000-4000-8000-000000000011", reachesMinimum: true, netCents: 9534 });
+    const carried = row({ teacherId: "b0000000-0000-4000-8000-000000000012", reachesMinimum: false, netCents: 3852 });
+    const unknown = row({ teacherId: "b0000000-0000-4000-8000-000000000013", reachesMinimum: true, netCents: null });
+    const total = (payouts: PayoutRow[]) => payoutsView(read({ payouts })).totals.net;
+    expect(total([paying, carried])).toContain("95.34");
+    expect(total([paying, carried])).not.toContain("134");
+    expect(total([paying, unknown])).toBe(admin.periods.payouts.noTaxYet);
+  });
+
+  it("se ofrece retener por datos a una calculada a la que le falta algo, y a una ya retenida por datos, pasar a investigación", () => {
+    const noData = viewOf({ status: "calculated", taxState: "no_data", payoutId: "d1000000-0000-4000-8000-000000000001" });
+    expect(noData?.holdForTax).toBe(payoutsButton.holdForTax("d1000000-0000-4000-8000-000000000001", "calculated"));
+    expect(viewOf({ status: "calculated", taxState: "ready", payoutId: "d1000000-0000-4000-8000-000000000001" })?.holdForTax).toBeNull();
+    expect(viewOf({ status: "calculated", taxState: "no_data", payoutId: null })?.holdForTax).toBeNull();
+    const heldForTax = viewOf({ status: "on_hold", holdKind: "tax_data", heldFromStatus: "calculated", payoutId: "d1000000-0000-4000-8000-000000000001" });
+    expect(heldForTax?.hold?.status).toBe("on_hold");
+    expect(viewOf({ status: "on_hold", holdKind: "investigation", heldFromStatus: "calculated", payoutId: "d1000000-0000-4000-8000-000000000001" })?.hold).toBeNull();
   });
 
   it("lo retenido se suma, y quien está al día no lleva nota", () => {
