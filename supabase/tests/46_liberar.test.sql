@@ -509,7 +509,8 @@ select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payou
   'ni un renglón de otro maestro en una liquidación por liberar');
 select pruebas.como_dueno();
 select throws_like($$select pruebas.a_mano($s$update public.payouts set status = 'awaiting_invoice', bonuses_cents = 1000,
-                     balance_applied_cents = 9999, subtotal_cents = 10999, net_cents = 10999 where id = pruebas.y('M4', 202701)$s$)$$,
+                     balance_applied_cents = 9999, subtotal_cents = 10999, net_cents = 10999, withholding_profile_version = 1,
+                     withholding_rule_id = (select id from public.withholding_rules where note = 'regla en 0 de las pruebas') where id = pruebas.y('M4', 202701)$s$)$$,
   '%released outside the release of its period%',
   'una liberación a mano, sin liberar el periodo, no se guarda: la comprobación corre aunque la sentencia no nombre released_at');
 select throws_ok($$select pruebas.descuadra(202701, null)$$, 'P0002', 'cuadra', 'una liberación sin tocar cuadra');

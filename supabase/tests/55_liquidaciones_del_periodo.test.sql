@@ -370,7 +370,9 @@ select is(pruebas.o(pruebas.suelta('M1', 202610)), 'released_from_hold', '(se su
 select is((private.unhold_preview(pruebas.y('M3', 202610)) - 'fingerprint'),
   jsonb_build_object('payout_id', pruebas.y('M3', 202610), 'status', 'on_hold', 'held_from_status', 'calculated', 'releases', true,
                      'pool_cents', 3350, 'bonuses_cents', 502, 'adjustments_cents', 0, 'balance_cents', 0, 'subtotal_cents', 3852,
-                     'reaches_minimum', false),
+                     'reaches_minimum', false,
+                     'tax', jsonb_build_object('tax_state', 'not_needed', 'subtotal_cents', 3852, 'profile_version', null, 'rule_id', null, 'vat_cents', 0,
+                                               'income_tax_withheld_cents', 0, 'vat_withheld_cents', 0, 'net_cents', 3852)),
   'soltar a M3 la liberaría con su bono, debajo del mínimo');
 select is(pruebas.suelta('M3', 202610), '{"outcome": "released_from_hold", "to": "carried_forward", "period_status": "closed"}'::jsonb,
   'se suelta y se acumula');

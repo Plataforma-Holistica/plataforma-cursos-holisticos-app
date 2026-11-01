@@ -8,6 +8,7 @@ import {
   connect,
   financePerson,
   outcomeOf,
+  zeroWithholding,
   retire,
   waitBehind,
   type Finance,
@@ -59,6 +60,7 @@ beforeAll(async () => {
   await owner.query("begin");
   await owner.query("select set_config('app.actor_kind', 'system', true)");
   teacher = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;
+  await zeroWithholding(owner, teacher, financeA.person.id);
   for (const period of OURS) await owner.query("select private.open_period($1)", [period]);
   await owner.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
   await owner.query(
@@ -103,6 +105,8 @@ afterAll(async () => {
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 203708", [OURS]);
+    await owner.query("delete from private.teacher_tax_profiles where teacher_id = $1", [teacher]);
+    await owner.query("delete from public.withholding_rules where note = 'regla en 0 de las pruebas'");
     await owner.query("delete from public.teachers where id = $1", [teacher]);
     await owner.query("set local session_replication_role = origin");
     await owner.query("commit");

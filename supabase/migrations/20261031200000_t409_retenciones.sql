@@ -842,9 +842,12 @@ as $$
   union all
   -- El estado y la lista de PA-65 no leen lo que hay en la tabla: no quedan en la auditoría.
   select 'tax data out of its doors: ' || d.name, d.name
-  from (values ('tax_profile_state', 'private.tax_profile_state()'), ('teacher_roster', 'private.teacher_roster()'),
-               ('tax_profile_fiscal', 'private.tax_profile_fiscal(uuid, integer)')) d (name, signature)
+  from (values ('tax_profile_state', 'private.tax_profile_state()'), ('teacher_roster', 'private.teacher_roster()')) d (name, signature)
   where coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(d.signature)), '') ~ '(rfc_enc|legal_name_enc|clabe_enc|clabe_last4|tax_regime_code|payee_kind)'
+  union all
+  -- Lo fiscal en claro lee el régimen y el tipo de persona, porque el dinero los necesita; lo cifrado y los últimos cuatro, no.
+  select 'tax data out of its doors: tax_profile_fiscal', 'tax_profile_fiscal'
+  where coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_fiscal(uuid, integer)')), '') ~ '(rfc_enc|legal_name_enc|clabe_enc|clabe_last4)'
   union all
   -- Toda otra función que nombre la tabla es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
   select 'tax function not in the list', p.proname::text

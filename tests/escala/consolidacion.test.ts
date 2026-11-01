@@ -639,8 +639,9 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
          values ('612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de la prueba de escala')`,
       );
       await client.query(
-        `insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version)
-         select t.id, 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person', decode('010001' || repeat('ab', 46), 'hex'), '7771', 1
+        `insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version, created_by)
+         select t.id, 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person', decode('010001' || repeat('ab', 46), 'hex'), '7771', 1,
+                (select p.id from public.profiles p limit 1)
          from public.teachers t`,
       );
       await client.query("set local session_replication_role = origin");

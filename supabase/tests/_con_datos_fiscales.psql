@@ -1,13 +1,15 @@
 -- Para las pruebas de liberar que no tratan de impuestos (T-409): una regla en 0, y todo maestro nace con sus datos fiscales. Con eso las cifras de esas pruebas
 -- siguen siendo las del PRD: una regla en 0 las conserva. Lo que hacen las retenciones se prueba en `64_retenciones`. Va después de `_ayuda.psql`, y como todo
 -- en una prueba de base, se revierte al terminar.
+select pruebas.alta('f15ca100-0000-4000-8000-000000000001'::uuid, 'datos-fiscales@prueba.test');
+select pruebas.como_dueno_sistema();
 insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
 values ('612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de las pruebas');
 
 create function pruebas.datos_fiscales_al_nacer() returns trigger language plpgsql security definer as $$
 begin
-  insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version)
-  select new.id, 1, x.sealed13, x.sealed20, '612', 'person', x.sealed18, '7771', 1
+  insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version, created_by)
+  select new.id, 1, x.sealed13, x.sealed20, '612', 'person', x.sealed18, '7771', 1, 'f15ca100-0000-4000-8000-000000000001'::uuid
   from (select decode('010001' || repeat('ab', 12 + 13 + 16), 'hex') as sealed13,
                decode('010001' || repeat('ab', 12 + 20 + 16), 'hex') as sealed20,
                decode('010001' || repeat('ab', 12 + 18 + 16), 'hex') as sealed18) x;
@@ -16,3 +18,4 @@ end
 $$;
 create trigger pruebas_datos_fiscales after insert on public.teachers
   for each row execute function pruebas.datos_fiscales_al_nacer();
+select pruebas.como_dueno();

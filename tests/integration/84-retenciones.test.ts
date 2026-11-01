@@ -73,6 +73,8 @@ beforeAll(async () => {
   if (check.kind !== "pass" || !check.claims.sessionId) throw new Error(`La guarda no la dejó pasar: ${check.kind}`);
   person = { id: who.id, sessionId: check.claims.sessionId };
 
+  // Guardar corre como el servidor en una transacción que se confirma: `reverted` no sirve aquí. Se quita al terminar.
+  await owner.query("grant app_service to postgres with set true, inherit false");
   await owner.query("begin");
   await owner.query("select set_config('app.actor_kind', 'system', true)");
   teacher = (await owner.query<{ id: string }>("insert into public.teachers (profile_id, status) values ($1, 'active') returning id::text", [who.id])).rows[0]!.id;
@@ -131,6 +133,7 @@ afterAll(async () => {
     await owner.query("rollback");
     throw error;
   }
+  await owner.query("revoke app_service from postgres");
   await ownerQuery("delete from private.second_factor_attempts");
   await deleteTestUsersByEmail(emails);
   await owner.end();

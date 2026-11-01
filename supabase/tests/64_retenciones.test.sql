@@ -197,19 +197,21 @@ create function pruebas.sellado(p_largo integer) returns bytea language sql immu
 as $$ select decode('01' || lpad(to_hex(1), 4, '0') || repeat('ab', 12 + p_largo + 16), 'hex') $$;
 create function pruebas.perfil(p_et text, p_regimen text default '612', p_tipo text default 'person') returns void language plpgsql as $$
 begin
-  perform pruebas.como_dueno();
-  insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version)
+  perform pruebas.como_dueno_sistema();
+  insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version, created_by)
   select pruebas.id(p_et), coalesce((select max(version) from private.teacher_tax_profiles where teacher_id = pruebas.id(p_et)), 0) + 1,
-         pruebas.sellado(13), pruebas.sellado(20), p_regimen, p_tipo, pruebas.sellado(18), '7771', 1;
+         pruebas.sellado(13), pruebas.sellado(20), p_regimen, p_tipo, pruebas.sellado(18), '7771', 1, pruebas.finanzas();
+  perform pruebas.como_dueno();
 end
 $$;
 create function pruebas.regla(p_regimen text, p_tipo text, p_iva numeric, p_isr numeric, p_iva_ret numeric, p_desde date default '2020-01-01') returns uuid language plpgsql as $$
 declare
   v uuid;
 begin
-  perform pruebas.como_dueno();
+  perform pruebas.como_dueno_sistema();
   insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
   values (p_regimen, p_tipo, p_iva, p_isr, p_iva_ret, p_desde, 'prueba') returning id into v;
+  perform pruebas.como_dueno();
   return v;
 end
 $$;
@@ -306,7 +308,7 @@ select is(pruebas.o(pruebas.hace(format('private.release_payouts(202610, %L)', (
 select is(pruebas.o(pruebas.libera(202610)), 'tax_data_missing', 'hay regla y a M2 le faltan los datos');
 select is(pruebas.ids(pruebas.libera(202610)), array['M2'], 'dice a quién');
 select is(pruebas.fila81('M1', 202610) ->> 'tax_state', 'ready', 'M1 está listo');
-select is(pruebas.fila81('M1', 202610) ->> 'vat_cents', (round((select subtotal_cents from public.payouts where id = pruebas.y('M1', 202610)) * 0)::bigint + round(((private.release_preview(202610) -> 'rows') -> 0 ->> 'subtotal_cents')::numeric * 0.16)::bigint)::text, 'y PA-81 ya estima su IVA');
+select is(pruebas.fila81('M1', 202610) ->> 'vat_cents', round((pruebas.fila81('M1', 202610) ->> 'subtotal_cents')::numeric * 0.16)::bigint::text, 'y PA-81 ya estima su IVA');
 select is(pruebas.fila81('M2', 202610) ->> 'tax_state', 'no_data', 'M2 no');
 select is(pruebas.fila81('M2', 202610) ->> 'net_cents', null, 'y sin neto: no se puede saber');
 select is(pruebas.fila81('M3', 202610) ->> 'tax_state', 'not_needed', 'M3 no llega al mínimo: no necesita nada');
@@ -333,8 +335,10 @@ select throws_ok($$select pruebas.a_mano(format('update public.payouts set withh
 select throws_ok($$select pruebas.a_mano(format('update public.payouts set status = %L, vat_cents = 1, net_cents = subtotal_cents + 1 where id = %L', 'carried_forward', pruebas.y('M1', 202610)))$$, '23514', null, 'acumulada con impuestos, tampoco');
 
 -- ---------------------------------------------------------------------------------------
--- Liberar.
+-- Liberar. Noviembre se cierra antes: así M3 acumula después de ese cierre, y en noviembre llega solo por su saldo, sin liquidación.
 
+select pruebas.en_cierre(202611);
+select is(pruebas.o(pruebas.cierra(202611)), 'closed', 'noviembre se cierra');
 select is(pruebas.o(pruebas.libera(202610)), 'released', 'con M2 retenida, se libera');
 select is((select status::text from public.payouts where id = pruebas.y('M1', 202610)), 'awaiting_invoice', 'M1, en espera de factura');
 select ok((select vat_cents = round(subtotal_cents * 0.16)::bigint and income_tax_withheld_cents = floor(subtotal_cents * 0.10)::bigint
@@ -363,7 +367,7 @@ select is(pruebas.o(pruebas.suelta('M2', 202610)), 'withholding_rules_missing', 
 select is(pruebas.estado_y(pruebas.y('M2', 202610)), 'on_hold', 'y sigue retenida');
 select pruebas.perfil('M2', '612', 'person');
 select is(pruebas.o(pruebas.suelta('M2', 202610)), 'released_from_hold', 'con los datos de ahora, sale');
-select is((select array[status::text, withholding_profile_version::text] from public.payouts where id = pruebas.y('M2', 202610)), array['awaiting_invoice', '3'], 'en espera de factura, con su versión vigente');
+select is((select array[status::text, withholding_profile_version::text] from public.payouts where id = pruebas.y('M2', 202610)), array['awaiting_invoice', '2'], 'en espera de factura, con su versión vigente');
 select ok((select vat_cents = round(subtotal_cents * 0.16)::bigint and vat_cents > 0 from public.payouts where id = pruebas.y('M2', 202610)), 'y con sus impuestos');
 set constraints payouts_released immediate;
 set constraints payouts_released deferred;
@@ -379,8 +383,6 @@ select is((select net_cents from public.payouts where id = pruebas.y('M2', 20261
 -- ---------------------------------------------------------------------------------------
 -- Quien llega por su saldo no tiene liquidación: para poder retenerlo, liberar se la deja lista.
 
-select pruebas.en_cierre(202611);
-select is(pruebas.o(pruebas.cierra(202611)), 'closed', 'noviembre se cierra');
 select pruebas.parametro('PAGO_MINIMO', '1', 202611);
 select pruebas.como_dueno();
 select is(pruebas.y('M3', 202611), null, 'M3 no tiene liquidación en noviembre');
@@ -396,8 +398,8 @@ select is((select count(*)::integer from private.schema_violations_tax()), 0, 'e
 select ok(not has_function_privilege('app_service', 'private.compute_withholdings(bigint, numeric, numeric, numeric)', 'execute'), 'la aplicación no llama al cálculo');
 select ok(not has_function_privilege('app_service', 'private.payout_tax_row(uuid, bigint, bigint)', 'execute'), 'ni a la fila de impuestos');
 select ok(not has_function_privilege('app_service', 'private.tax_profile_fiscal(uuid, integer)', 'execute'), 'ni a lo fiscal en claro');
-select unlike(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure), '%\_enc%', 'lo fiscal en claro no toca lo cifrado');
-select unlike(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure), '%clabe%', 'ni los últimos cuatro');
+select ok(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure) !~ '_enc', 'lo fiscal en claro no toca lo cifrado');
+select ok(pg_get_functiondef('private.tax_profile_fiscal(uuid, integer)'::regprocedure) !~ 'clabe', 'ni los últimos cuatro');
 select is((select count(*)::integer from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'private' and p.proname = 'release_payout'), 1, 'liberar una liquidación tiene una sola firma');
 
 select * from finish();
