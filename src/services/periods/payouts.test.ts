@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Capability, TeamCheck, TeamStanding } from "@/services/account/team";
 
-import { createPayoutsPanel, PayoutFailure, type FinancePayouts, type PayoutStore } from "./payouts";
+import { createPayoutsPanel, PayoutFailure, type FinancePayouts, type PayoutStore, type Released } from "./payouts";
 
 // Las liquidaciones del periodo (PA-81), con todo lo de fuera simulado: a quién se le pregunta qué, en qué
 // orden, qué no llega a la base y qué se decide con cada respuesta. Contra la base de verdad, en
@@ -12,6 +12,7 @@ import { createPayoutsPanel, PayoutFailure, type FinancePayouts, type PayoutStor
 const ME = "a0000000-0000-4000-8000-000000000001";
 const BOUND = "fa000000-0000-4000-8000-0000000000b0";
 const PAYOUT = "d1000000-0000-4000-8000-000000000001";
+const TEACHER = "b0000000-0000-4000-8000-000000000002";
 const BONUS = "e1000000-0000-4000-8000-000000000001";
 const SEEN = "ab".repeat(32);
 const claims = { userId: ME, aal: "aal2", sessionId: "5e000000-0000-4000-8000-000000000001", issuedAt: 0 } as VerifiedClaims;
@@ -25,7 +26,7 @@ function serviceWith(
     check?: TeamCheck | TeamCheck[];
     payouts?: FinancePayouts | null | "throws";
     fail?: "throws" | PayoutFailure;
-    releaseEnabled?: boolean;
+    released?: Released;
   } = {},
 ) {
   const calls: string[] = [];
@@ -44,7 +45,7 @@ function serviceWith(
     }),
     release: vi.fn((_claims, period: number, seen: string) => {
       calls.push(`liberar ${period} ${seen.slice(0, 4)}`);
-      return answer({ answer: "released" as const, blockingPeriod: null, periodStatus: "closed" as const });
+      return answer(setup.released ?? { answer: "released" as const, blockingPeriod: null, periodStatus: "closed" as const, teachers: [] });
     }),
     hold: vi.fn((_claims, payout: string, reason: string, seen: string) => {
       calls.push(`retener ${payout.slice(0, 4)} «${reason}» ${seen}`);
@@ -53,6 +54,10 @@ function serviceWith(
     unhold: vi.fn((_claims, payout: string, note: string | null, seen: string) => {
       calls.push(`soltar ${payout.slice(0, 4)} ${note === null ? "sin nota" : `«${note}»`} ${seen.slice(0, 4)}`);
       return answer({ answer: "released_from_hold" as const, to: "awaiting_invoice" as const });
+    }),
+    holdForTax: vi.fn((_claims, payout: string, seen: string) => {
+      calls.push(`retener por datos ${payout.slice(0, 4)} ${seen}`);
+      return answer({ answer: "held" as const, status: null });
     }),
     confirmFounder: vi.fn((_claims, bonus: string) => {
       calls.push(`confirmar ${bonus.slice(0, 4)}`);
@@ -68,7 +73,6 @@ function serviceWith(
       report: async (code) => {
         reported.push(code);
       },
-      releaseEnabled: () => setup.releaseEnabled ?? true,
     },
     {
       teamStanding: vi.fn(async () => {
@@ -152,6 +156,7 @@ describe("liberar", () => {
       answer: "released",
       blockingPeriod: null,
       periodStatus: "closed",
+      teachers: [],
     });
     expect(calls).toEqual(["guarda", "liberar 202710 abab"]);
   });
@@ -167,16 +172,21 @@ describe("liberar", () => {
     expect(calls).toEqual(["guarda"]);
   });
 
-  it("en producción no se libera hasta T-409, y no se le pregunta a la base", async () => {
-    const { service, calls, reported } = serviceWith({ releaseEnabled: false });
-    expect(await service.releasePayouts(reader, { period: 202710, seen: SEEN })).toEqual({ kind: "not_enabled" });
-    expect(calls).toEqual(["guarda"]);
-    expect(reported).toEqual([]);
+  it.each(["withholding_rules_missing", "tax_data_missing"] as const)("%s llega tal cual, con a quién detiene", async (answer) => {
+    const { service } = serviceWith({ released: { answer, blockingPeriod: null, periodStatus: null, teachers: [TEACHER] } });
+    expect(await service.releasePayouts(reader, { period: 202710, seen: SEEN })).toEqual({ kind: "answered", answer, blockingPeriod: null, periodStatus: null, teachers: [TEACHER] });
   });
 
-  it("el freno no le dice nada a quien no tiene finanzas", async () => {
-    const { service } = serviceWith({ releaseEnabled: false, check: teamCheck(standingOf(["content"])) });
-    expect(await service.releasePayouts(reader, { period: 202710, seen: SEEN })).toEqual({ kind: "refused" });
+  it("retener por datos: la guarda primero, lo sin forma no llega, y la base decide si de verdad le falta", async () => {
+    const { service, calls } = serviceWith();
+    expect(await service.holdPayoutForTaxData(reader, { payout: "x", seen: "calculated" })).toEqual({ kind: "malformed" });
+    expect(calls).toEqual(["guarda"]);
+    const held = serviceWith();
+    expect(await held.service.holdPayoutForTaxData(reader, { payout: PAYOUT, seen: "calculated" })).toMatchObject({ kind: "answered", answer: "held" });
+    expect(held.calls).toEqual(["guarda", `retener por datos ${PAYOUT.slice(0, 4)} calculated`]);
+    const content = serviceWith({ check: teamCheck(standingOf(["content"])) });
+    expect(await content.service.holdPayoutForTaxData(reader, { payout: PAYOUT, seen: "calculated" })).toEqual({ kind: "refused" });
+    expect(content.calls).toEqual(["guarda"]);
   });
 
   it("el tope de tiempo y lo que no cuadra al confirmar se dicen por su nombre, con su propio reporte", async () => {

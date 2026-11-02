@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     downloadExport: logged("downloadExport", unavailable),
     releasePayouts: logged("releasePayouts", unavailable),
     holdPayout: logged("holdPayout", unavailable),
+    holdPayoutForTaxData: logged("holdPayoutForTaxData", unavailable),
     unholdPayout: logged("unholdPayout", unavailable),
     confirmFounderBonus: logged("confirmFounderBonus", unavailable),
     voidFounderBonus: logged("voidFounderBonus", unavailable),
@@ -47,6 +48,7 @@ vi.mock("@/services/periods/periods", () => ({
   downloadExport: mocks.downloadExport,
   releasePayouts: mocks.releasePayouts,
   holdPayout: mocks.holdPayout,
+  holdPayoutForTaxData: mocks.holdPayoutForTaxData,
   unholdPayout: mocks.unholdPayout,
   confirmFounderBonus: mocks.confirmFounderBonus,
   voidFounderBonus: mocks.voidFounderBonus,
@@ -275,6 +277,12 @@ describe("payoutsAction (PA-81)", () => {
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "payouts_updated");
   });
 
+  it("retener por datos no pide motivo: le pasa al servicio la liquidación y el estado que se vio", async () => {
+    once("holdPayoutForTaxData", Promise.resolve({ kind: "answered", answer: "has_tax_data", status: null }));
+    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.holdForTax(PAYOUT, "calculated")))).toEqual({ kind: "failed", reason: "has_tax_data", attempt: 1 });
+    expect(mocks.holdPayoutForTaxData).toHaveBeenCalledWith(jar, { payout: PAYOUT, seen: "calculated" });
+  });
+
   it("lo que no sale bien se dice con su detalle, y la página se vuelve a pedir", async () => {
     once("releasePayouts", Promise.resolve({ kind: "answered", answer: "previous_not_released", blockingPeriod: 202709, periodStatus: null }));
     expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({
@@ -283,8 +291,8 @@ describe("payoutsAction (PA-81)", () => {
       detail: { period: 202709 },
       attempt: 1,
     });
-    once("releasePayouts", Promise.resolve({ kind: "not_enabled" }));
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "not_enabled", attempt: 1 });
+    once("releasePayouts", Promise.resolve({ kind: "answered", answer: "tax_data_missing", blockingPeriod: null, periodStatus: null, teachers: [] }));
+    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "tax_data_missing", attempt: 1 });
     expect(calls.order).toEqual(["releasePayouts", "refresh", "releasePayouts", "refresh"]);
   });
 

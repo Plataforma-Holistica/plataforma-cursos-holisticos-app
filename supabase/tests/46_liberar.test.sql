@@ -14,6 +14,7 @@
 -- confirmar; `pruebas.hace()` la adelanta.
 begin;
 \ir _ayuda.psql
+\ir _con_datos_fiscales.psql
 select plan(129);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -508,7 +509,8 @@ select throws_ok($$insert into public.teacher_balance_entries (teacher_id, payou
   'ni un renglón de otro maestro en una liquidación por liberar');
 select pruebas.como_dueno();
 select throws_like($$select pruebas.a_mano($s$update public.payouts set status = 'awaiting_invoice', bonuses_cents = 1000,
-                     balance_applied_cents = 9999, subtotal_cents = 10999, net_cents = 10999 where id = pruebas.y('M4', 202701)$s$)$$,
+                     balance_applied_cents = 9999, subtotal_cents = 10999, net_cents = 10999, withholding_profile_version = 1,
+                     withholding_rule_id = (select id from public.withholding_rules where note = 'regla en 0 de las pruebas') where id = pruebas.y('M4', 202701)$s$)$$,
   '%released outside the release of its period%',
   'una liberación a mano, sin liberar el periodo, no se guarda: la comprobación corre aunque la sentencia no nombre released_at');
 select throws_ok($$select pruebas.descuadra(202701, null)$$, 'P0002', 'cuadra', 'una liberación sin tocar cuadra');
@@ -549,7 +551,7 @@ select is(pruebas.liq(202702),
 select is((select count(*)::integer from public.teacher_balance_entries where payout_id = pruebas.y('M2', 202702) and kind = 'carried_forward'),
   0, 'sin renglón acumulado de 0');
 select pruebas.como_finanzas();
-select is(private.release_payout(pruebas.y('M1', 202702), 0)::text, 'awaiting_invoice', 'una liquidación liberada no se vuelve a liberar');
+select is(private.release_payout(pruebas.y('M1', 202702), 0, null)::text, 'awaiting_invoice', 'una liquidación liberada no se vuelve a liberar');
 select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------

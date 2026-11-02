@@ -80,9 +80,9 @@ describe("los periodos pasan por las funciones de la base", () => {
     }
   });
 
-  it("el freno de producción se revisa antes de liberar, y lo arma periods.ts con APP_ENV", () => {
-    expect(bodyOf("releasePayouts", payouts)).toMatch(/if \(!deps\.releaseEnabled\(\)\) return \{ kind: "not_enabled" \};\n {4}const result = await decide\(\(\) => store\.release\(/);
-    expect(codeOf("src/services/periods/periods.ts")).toMatch(/releaseEnabled: \(\) => getEnv\(\)\.APP_ENV !== "production"/);
+  it("el freno de producción ya no está en la aplicación: lo detiene la falta de reglas, en la base (T-409)", () => {
+    expect(payouts).not.toMatch(/releaseEnabled|not_enabled/);
+    expect(codeOf("src/services/periods/periods.ts")).not.toMatch(/releaseEnabled|APP_ENV/);
   });
 
   it("la guarda pide finanzas, y cada decisión la corre antes que cualquier otra cosa", () => {

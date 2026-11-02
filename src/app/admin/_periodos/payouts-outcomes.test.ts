@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import { CONFIRM_ANSWERS, HOLD_ANSWERS, PAYOUT_STATUSES, RELEASE_ANSWERS, UNHOLD_ANSWERS, VOID_ANSWERS } from "@/services/periods/periods";
 
-import { payoutFailureText } from "./payouts-failures";
+import { payoutFailureText, payoutToneOf } from "./payouts-failures";
 import {
   confirmOutcome,
   holdOutcome,
@@ -113,13 +113,13 @@ describe("el periodo atado a la acción", () => {
 describe("liberar", () => {
   it("cada respuesta de la base tiene su caso", () => {
     for (const answer of RELEASE_ANSWERS) {
-      const outcome = releaseOutcome({ kind: "answered", answer, blockingPeriod: 202709, periodStatus: "closed" }, PERIOD);
+      const outcome = releaseOutcome({ kind: "answered", answer, blockingPeriod: 202709, periodStatus: "closed", teachers: [] }, PERIOD);
       expect(outcome.kind, answer).toMatch(/^(leave|failed)$/);
     }
   });
 
   it("liberado vuelve a la página con su aviso", () => {
-    expect(releaseOutcome({ kind: "answered", answer: "released", blockingPeriod: null, periodStatus: "paid" }, PERIOD)).toEqual({
+    expect(releaseOutcome({ kind: "answered", answer: "released", blockingPeriod: null, periodStatus: "paid", teachers: [] }, PERIOD)).toEqual({
       kind: "leave",
       to: periodPayoutsPath(PERIOD),
       notice: "payouts_released",
@@ -127,8 +127,8 @@ describe("liberar", () => {
   });
 
   it("lo que cambió desde que se vio, y el periodo que falta liberar, se dicen", () => {
-    expect(releaseOutcome({ kind: "answered", answer: "preview_changed", blockingPeriod: null, periodStatus: null }, PERIOD)).toEqual(failed("preview_changed"));
-    expect(releaseOutcome({ kind: "answered", answer: "previous_not_released", blockingPeriod: 202709, periodStatus: null }, PERIOD)).toEqual({
+    expect(releaseOutcome({ kind: "answered", answer: "preview_changed", blockingPeriod: null, periodStatus: null, teachers: [] }, PERIOD)).toEqual(failed("preview_changed"));
+    expect(releaseOutcome({ kind: "answered", answer: "previous_not_released", blockingPeriod: 202709, periodStatus: null, teachers: [] }, PERIOD)).toEqual({
       kind: "failed",
       reason: "previous_not_released",
       detail: { period: 202709 },
@@ -138,12 +138,36 @@ describe("liberar", () => {
 
   it("sin finanzas, a la página, donde decide su guarda; sin código reciente, se pide", () => {
     expect(releaseOutcome({ kind: "refused" }, PERIOD)).toEqual(PAGE);
-    expect(releaseOutcome({ kind: "answered", answer: "forbidden", blockingPeriod: null, periodStatus: null }, PERIOD)).toEqual(PAGE);
-    expect(releaseOutcome({ kind: "answered", answer: "needs_fresh_code", blockingPeriod: null, periodStatus: null }, PERIOD)).toEqual(failed("needs_code"));
+    expect(releaseOutcome({ kind: "answered", answer: "forbidden", blockingPeriod: null, periodStatus: null, teachers: [] }, PERIOD)).toEqual(PAGE);
+    expect(releaseOutcome({ kind: "answered", answer: "needs_fresh_code", blockingPeriod: null, periodStatus: null, teachers: [] }, PERIOD)).toEqual(failed("needs_code"));
   });
 
-  it("el freno de producción, el tope de tiempo y lo que no cuadra se dicen por su nombre; no se supo nunca es hecho", () => {
-    expect(releaseOutcome({ kind: "not_enabled" }, PERIOD)).toEqual(failed("not_enabled"));
+  it("el freno de producción: sin reglas, y sin los datos de alguien, se dice; no es una falla de la Plataforma", () => {
+    const answer = (name: "withholding_rules_missing" | "tax_data_missing") => ({ kind: "answered" as const, answer: name, blockingPeriod: null, periodStatus: null, teachers: ["b0000000-0000-4000-8000-000000000002"] });
+    expect(releaseOutcome(answer("withholding_rules_missing"), PERIOD)).toEqual(failed("rules_missing"));
+    expect(releaseOutcome(answer("tax_data_missing"), PERIOD)).toEqual(failed("tax_data_missing"));
+    for (const reason of ["rules_missing", "tax_data_missing", "unhold_no_data", "unhold_no_rule"] as const) {
+      expect(payoutToneOf(reason), reason).toBe("warning");
+      expect(payoutFailureText(reason).length, reason).toBeGreaterThan(0);
+    }
+  });
+
+  it("retener por datos: el botón se lee, y a quien ya los tiene se le dice", () => {
+    const form = new FormData();
+    form.set("do", payoutsButton.holdForTax("d1000000-0000-4000-8000-000000000001", "calculated"));
+    expect(readPayoutsForm(form)).toEqual({ step: "hold_for_tax", payout: "d1000000-0000-4000-8000-000000000001", status: "calculated" });
+    expect(holdOutcome({ kind: "answered", answer: "has_tax_data", status: null }, PERIOD)).toEqual(failed("has_tax_data"));
+    expect(payoutFailureText("has_tax_data").length).toBeGreaterThan(0);
+    expect(holdOutcome({ kind: "answered", answer: "under_investigation", status: null }, PERIOD)).toEqual(failed("under_investigation"));
+    expect(payoutFailureText("under_investigation")).toContain("motivo");
+  });
+
+  it("soltar sin datos o sin regla se dice por separado: la liquidación sigue retenida", () => {
+    expect(unholdOutcome({ kind: "answered", answer: "tax_data_missing", to: null }, PERIOD)).toEqual(failed("unhold_no_data"));
+    expect(unholdOutcome({ kind: "answered", answer: "withholding_rules_missing", to: null }, PERIOD)).toEqual(failed("unhold_no_rule"));
+  });
+
+  it("el tope de tiempo y lo que no cuadra se dicen por su nombre; no se supo nunca es hecho", () => {
     expect(releaseOutcome({ kind: "timed_out" }, PERIOD)).toEqual(failed("timed_out"));
     expect(releaseOutcome({ kind: "unbalanced" }, PERIOD)).toEqual(failed("unbalanced"));
     expect(releaseOutcome({ kind: "unknown" }, PERIOD)).toEqual(failed("unknown"));
