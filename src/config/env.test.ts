@@ -302,3 +302,51 @@ describe("las llaves de los datos fiscales (T-409)", () => {
     expect(problemsOf({ ...valid, PII_ENCRYPTION_KEYS: secret, PII_ENCRYPTION_ACTIVE_VERSION: "1" }).join(" ")).not.toContain("secreto");
   });
 });
+
+describe("el proveedor de los videos del borrador (T-403)", () => {
+  const tokens = { MUX_TOKEN_ID: "identificador-de-prueba", MUX_TOKEN_SECRET: "secreto-de-prueba" };
+  const hosted = { ...valid, NEXT_PUBLIC_SUPABASE_URL: "https://proyecto.supabase.co" };
+
+  it("son opcionales: sin proveedor, un video llega hasta «Recibido» y lo demás funciona", () => {
+    expect(parseEnv(valid)).not.toHaveProperty("VIDEO_PROVIDER");
+  });
+
+  it("las llaves sueltas no prenden nada: el guion de los videos de prueba las usa en .env.local, y una base local no se alcanza desde Mux", () => {
+    expect(parseEnv({ ...valid, ...tokens }).VIDEO_PROVIDER).toBeUndefined();
+  });
+
+  it("el token de Mux va completo o no va", () => {
+    expect(problemsOf({ ...valid, MUX_TOKEN_ID: tokens.MUX_TOKEN_ID })).toEqual(["MUX_TOKEN_SECRET: falta"]);
+    expect(problemsOf({ ...valid, MUX_TOKEN_SECRET: tokens.MUX_TOKEN_SECRET })).toEqual(["MUX_TOKEN_ID: falta"]);
+  });
+
+  it("Mux pide sus llaves", () => {
+    expect(parseEnv({ ...hosted, ...tokens, VIDEO_PROVIDER: "mux" }).VIDEO_PROVIDER).toBe("mux");
+    expect(problemsOf({ ...hosted, VIDEO_PROVIDER: "mux" })).toEqual(["MUX_TOKEN_ID: falta", "MUX_TOKEN_SECRET: falta"]);
+  });
+
+  it("Mux no se prende contra una base de esta máquina: no la alcanza, y cada video se cobraría como error", () => {
+    for (const url of ["http://127.0.0.1:54321", "http://localhost:54321", "http://[::1]:54321", "http://0.0.0.0:54321", "http://192.168.1.10:54321", "http://10.0.0.2:54321", "http://172.20.0.1:54321", "http://host.docker.internal:54321", "http://kong.local:54321"]) {
+      expect(problemsOf({ ...valid, ...tokens, NEXT_PUBLIC_SUPABASE_URL: url, VIDEO_PROVIDER: "mux" })).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
+    }
+  });
+
+  it("una dirección que se parece a una privada, y no lo es, no se confunde", () => {
+    for (const url of ["https://172.32.0.1", "https://192.169.0.1", "https://proyecto.supabase.co", "https://10.supabase.co"]) {
+      expect(parseEnv({ ...valid, ...tokens, NEXT_PUBLIC_SUPABASE_URL: url, VIDEO_PROVIDER: "mux" }).VIDEO_PROVIDER).toBe("mux");
+    }
+  });
+
+  it("el proveedor de prueba solo en local", () => {
+    expect(parseEnv({ ...valid, VIDEO_PROVIDER: "test" }).VIDEO_PROVIDER).toBe("test");
+    for (const APP_ENV of ["staging", "production"]) {
+      const outside = { ...hosted, APP_ENV, SENTRY_DSN: "https://llave@sentry.example/1", VIDEO_PROVIDER: "test" };
+      expect(problemsOf(outside)).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
+    }
+  });
+
+  it("otro nombre no se admite, y vacío cuenta como ausente", () => {
+    expect(problemsOf({ ...valid, VIDEO_PROVIDER: "otro" })).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
+    expect(parseEnv({ ...valid, VIDEO_PROVIDER: "" })).not.toHaveProperty("VIDEO_PROVIDER");
+  });
+});

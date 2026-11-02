@@ -112,6 +112,7 @@ const videoSchema = z.strictObject({
   isCurrent: z.boolean(),
   fileName: z.string(),
   sizeBytes: z.number().int().min(1),
+  captionsReady: z.boolean(),
 });
 const draftRow = z.object({
   course_id: id,
@@ -160,7 +161,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
                coalesce((
                  select jsonb_agg(jsonb_build_object(
                           'id', v.id, 'lessonId', v.lesson_id, 'state', v.state, 'isCurrent', v.is_current,
-                          'fileName', v.file_name, 'sizeBytes', v.size_bytes)
+                          'fileName', v.file_name, 'sizeBytes', v.size_bytes, 'captionsReady', v.captions_ready)
                         order by v.created_at)
                  from public.draft_videos v where v.course_id = d.course_id), '[]'::jsonb) as videos
         from public.course_drafts d
@@ -347,6 +348,9 @@ const videoResultSchema = z.strictObject({
   mime: z.string().optional(),
   file_name: z.string().optional(),
   reason: z.string().optional(),
+  claim: z.string().optional(),
+  retry: z.boolean().optional(),
+  since: z.number().int().optional(),
 });
 export type VideoResult = z.infer<typeof videoResultSchema>;
 
@@ -366,6 +370,45 @@ export const askVideoConfirm = (tx: Tx, input: { course: string; video: string; 
 
 export const askVideoRemove = (tx: Tx, input: { course: string; video: string }) =>
   askVideo(tx, sql`select private.video_remove(${input.course}::uuid, ${input.video}::uuid) as result`);
+
+export const askVideoClaim = (tx: Tx, input: { course: string; video: string; provider: string }) =>
+  askVideo(tx, sql`select private.video_claim(${input.course}::uuid, ${input.video}::uuid, ${input.provider}::text) as result`);
+
+export const askVideoCreateFailed = (tx: Tx, input: { video: string; claim: string }) =>
+  askVideo(tx, sql`select private.video_create_failed(${input.video}::uuid, ${input.claim}::text) as result`);
+
+export const askVideoCreated = (tx: Tx, input: { course: string; video: string; provider: string; asset: string }) =>
+  askVideo(tx, sql`select private.video_created(${input.course}::uuid, ${input.video}::uuid, ${input.provider}::text, ${input.asset}::text) as result`);
+
+export const askVideoSettle = (tx: Tx, input: { video: string; state: string; playback: string | null; seconds: number | null; captions: boolean; error: string | null }) =>
+  askVideo(tx, sql`select private.video_settle(${input.video}::uuid, ${input.state}::text, ${input.playback}::text, ${input.seconds}::integer, ${input.captions}::boolean, ${input.error}::text) as result`);
+
+export const askVideoTrashDone = (tx: Tx, input: { course: string; id: number }) =>
+  askVideo(tx, sql`select private.video_trash_done(${input.course}::uuid, ${input.id}::bigint) as result`);
+
+const dueList = z.array(
+  z.strictObject({
+    video: id,
+    state: z.enum(["uploading", "uploaded", "creating", "processing", "ready", "errored"]),
+    provider: z.string(),
+    asset: z.string().nullable(),
+    seconds: z.number().int().nullable(),
+    current: z.boolean(),
+  }),
+);
+const trashList = z.array(
+  z.strictObject({ id: z.number().int(), provider: z.string().nullable(), asset: z.string().nullable(), path: z.string().nullable(), video: id.nullable(), since: z.number().int().nullable() }),
+);
+
+export async function askVideoDue(tx: Tx, course: string) {
+  const [row] = await tx.query(sql`select private.video_due(${course}::uuid) as result`, resultRow);
+  return dueList.parse(row?.result ?? null);
+}
+
+export async function askVideoTrashDue(tx: Tx, course: string) {
+  const [row] = await tx.query(sql`select private.video_trash_due(${course}::uuid) as result`, resultRow);
+  return trashList.parse(row?.result ?? null);
+}
 
 const unusedRow = z.object({ path: z.string() });
 

@@ -41,10 +41,16 @@ const schema = z.object({
   VERCEL_BRANCH_URL: z.string().optional(),
   // La llave con que se firman las direcciones de los videos de Mux (T-108; TRD §7.2 y
   // §9.4). Secreta, solo en el servidor. Opcionales: sin ellas no hay video, y lo demás
-  // funciona igual. Van juntas. El token de la API de Mux no va aquí: solo lo usa el guion
-  // local que sube los videos de prueba.
+  // funciona igual. Van juntas.
   MUX_SIGNING_KEY_ID: z.string().regex(/^[A-Za-z0-9]{8,64}$/).optional(),
   MUX_SIGNING_PRIVATE_KEY: z.string().refine(looksLikePrivateKey).optional(),
+  // El token de la API de Mux, con el que se crean y se borran los videos de un borrador (T-403). Secreto, solo en el servidor, y va
+  // junto. Solo no prende nada: en `.env.local` lo usan los guiones de los videos de prueba.
+  MUX_TOKEN_ID: z.string().optional(),
+  MUX_TOKEN_SECRET: z.string().optional(),
+  // Quién procesa los videos de un borrador (T-403). Sin ella, un video llega hasta «Recibido». Cada video en Mux cuesta dinero, y por
+  // eso se pide por nombre: `test` no llama a nadie y solo vale en local; `mux`, solo con una base que Mux pueda alcanzar.
+  VIDEO_PROVIDER: z.enum(["mux", "test"]).optional(),
   // Las llaves con que se cifran los datos fiscales del maestro (T-409; TRD §9.7), y cuál cifra hoy. Secretas, solo en el servidor,
   // y con una copia fuera de línea: sin la llave, lo cifrado no se vuelve a leer. Opcionales: sin ellas lo fiscal no está
   // disponible y lo demás funciona igual. Van juntas. Antes de salir a producción son obligatorias (06 §8).
@@ -63,6 +69,14 @@ function looksLikePrivateKey(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+// Direcciones que no se alcanzan desde fuera: esta máquina, su red y Docker.
+const notReachable = /^(localhost|\[::1\]|0\.0\.0\.0|127\.[0-9.]+|10\.[0-9.]+|192\.168\.[0-9.]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9.]+|[^.]+\.local|[^.]+\.internal|host\.docker\.internal)$/;
+
+/** Si Mux no alcanzaría esa dirección: baja el video de ahí, y cada video se cobraría como error. */
+function isUnreachable(url: string | undefined): boolean {
+  return url !== undefined && URL.canParse(url) && notReachable.test(new URL(url).hostname);
 }
 
 // El nombre de un servidor y nada más: sin protocolo, sin ruta, sin usuario.
@@ -135,6 +149,15 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // se diría como «no hay video» cuando es configuración.
   if ((present.MUX_SIGNING_KEY_ID === undefined) !== (present.MUX_SIGNING_PRIVATE_KEY === undefined)) {
     failed.add(present.MUX_SIGNING_KEY_ID === undefined ? "MUX_SIGNING_KEY_ID" : "MUX_SIGNING_PRIVATE_KEY");
+  }
+  if ((present.MUX_TOKEN_ID === undefined) !== (present.MUX_TOKEN_SECRET === undefined)) {
+    failed.add(present.MUX_TOKEN_ID === undefined ? "MUX_TOKEN_ID" : "MUX_TOKEN_SECRET");
+  }
+  if (present.VIDEO_PROVIDER === "test" && present.APP_ENV !== "local") failed.add("VIDEO_PROVIDER");
+  if (present.VIDEO_PROVIDER === "mux") {
+    if (present.MUX_TOKEN_ID === undefined) failed.add("MUX_TOKEN_ID");
+    if (present.MUX_TOKEN_SECRET === undefined) failed.add("MUX_TOKEN_SECRET");
+    if (isUnreachable(present.NEXT_PUBLIC_SUPABASE_URL)) failed.add("VIDEO_PROVIDER");
   }
   // Las llaves de los datos fiscales van juntas, y la que cifra tiene que estar en la lista.
   if ((present.PII_ENCRYPTION_KEYS === undefined) !== (present.PII_ENCRYPTION_ACTIVE_VERSION === undefined)) {

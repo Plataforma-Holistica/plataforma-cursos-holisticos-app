@@ -5,7 +5,7 @@ import { refresh } from "next/cache";
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { cookieJar } from "@/app/_lib/request-context";
 import { portalCoursePath, ROUTES } from "@/services/account/navigation";
-import { beginVideo, confirmVideo, removeVideo, renewVideoUpload } from "@/services/drafts/editor";
+import { beginVideo, checkVideos, confirmVideo, removeVideo, renewVideoUpload } from "@/services/drafts/editor";
 
 import { changeOutcome } from "../_lib/change";
 import {
@@ -13,6 +13,7 @@ import {
   VIDEO_CONFIRM_PROBLEMS,
   VIDEO_REJECTED,
   type VideoBeginStep,
+  type VideoCheckStep,
   type VideoConfirmStep,
   type VideoRemoveStep,
   type VideoRenewStep,
@@ -95,6 +96,18 @@ export async function confirmVideoAction(input: { course: string; lesson: string
   if (LEAVES.includes(result.kind)) return leaveFor(jar, { to: backOf(course, lesson), notice: null });
   if (result.kind === "not_found" || result.kind === "expired") refresh();
   return { kind: "problem", problem: VIDEO_CONFIRM_PROBLEMS[result.kind] ?? "unavailable" };
+}
+
+/**
+ * Lo que el editor pregunta solo, al cargar y mientras haya algo en camino: procesa lo recibido y asienta lo que diga el proveedor. Nadie pidió
+ * esto, así que nunca saca a nadie de la pantalla: una sesión vencida la dirá lo siguiente que la persona haga, con lo que estaba escribiendo a salvo.
+ */
+export async function checkVideosAction(input: { course: string }): Promise<VideoCheckStep> {
+  const jar = await cookieJar();
+  const result = await checkVideos(jar, { course: textOf(fieldsOf(input).course) });
+  if (result.kind !== "checked") return { blocked: {} };
+  if (result.changed) refresh();
+  return { blocked: result.blocked };
 }
 
 /** Cancelar una subida o quitar un video que nunca se publicó. */

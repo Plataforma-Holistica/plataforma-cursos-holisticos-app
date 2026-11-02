@@ -104,8 +104,8 @@ async function hold(page: Page, free: number) {
 }
 
 const rowsOf = (lessonTitle: string) =>
-  ownerQuery<{ state: string; file_name: string; read_seconds: number | null; storage_path: string }>(
-    `select v.state, v.file_name, v.read_seconds, v.storage_path from public.draft_videos v join public.draft_lessons l on l.id = v.lesson_id where l.title = $1`,
+  ownerQuery<{ state: string; is_current: boolean; provider: string; file_name: string; read_seconds: number | null; duration_seconds: number | null; captions_ready: boolean; storage_path: string }>(
+    `select v.state, v.is_current, v.provider, v.file_name, v.read_seconds, v.duration_seconds, v.captions_ready, v.storage_path from public.draft_videos v join public.draft_lessons l on l.id = v.lesson_id where l.title = $1`,
     [lessonTitle],
   );
 const objectsAt = (path: string) => ownerQuery("select name from storage.objects where bucket_id = 'video-originals' and name = $1", [path]);
@@ -195,17 +195,18 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
   await page.unroute(VIDEOS);
 
   await expect(video.getByText("clase-corte.mp4", { exact: true })).toBeVisible();
-  await expect(video.getByText(/Recibido, 13 MB\. Falta procesarlo\./)).toBeVisible();
+  // Sin que nadie toque nada: el editor pregunta, se crea en el proveedor de prueba y queda listo (T-403, tercera solicitud).
+  await expect(video.getByText(/Listo, 13 MB\./)).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText("Subiendo un video")).toHaveCount(0);
   const [row] = await rowsOf("Corte");
-  expect(row).toMatchObject({ state: "uploaded", file_name: "clase-corte.mp4", read_seconds: 125 });
+  expect(row).toMatchObject({ state: "ready", is_current: true, provider: "test", file_name: "clase-corte.mp4", read_seconds: 125, duration_seconds: 125, captions_ready: true });
   expect(await objectsAt(row?.storage_path ?? "")).toHaveLength(1);
   expect(dialogs).toEqual([]);
   expect(await a11yViolations(page)).toEqual([]);
 
   // Ya recibido no se ofrece otro sin quitarlo, y sigue ahí al recargar.
   await page.reload();
-  await expect(video.getByText(/Recibido, 13 MB/)).toBeVisible();
+  await expect(video.getByText(/Listo, 13 MB/)).toBeVisible();
   await expect(video.getByLabel(/Elige/)).toHaveCount(0);
 });
 
@@ -268,7 +269,7 @@ test("recargar a media subida: pide el mismo archivo, otro no, y sigue donde iba
   await expect(video.getByText("Listo: recibimos tu video.")).toBeVisible({ timeout: 30_000 });
   expect(after.offsets[0]).toBeGreaterThanOrEqual(6 * MB);
   await page.unroute(VIDEOS);
-  expect(await rowsOf("Recarga")).toMatchObject([{ state: "uploaded", read_seconds: 90 }]);
+  expect(await rowsOf("Recarga")).toMatchObject([{ read_seconds: 90 }]);
 });
 
 test("el mismo video en dos pestañas: una sube, la otra lo dice y no toca nada", async ({ page, context }) => {
@@ -289,14 +290,17 @@ test("el mismo video en dos pestañas: una sube, la otra lo dice y no toca nada"
   await gate.open();
   await expect(video.getByText("Listo: recibimos tu video.")).toBeVisible({ timeout: 30_000 });
   await page.unroute(VIDEOS);
-  expect(await rowsOf("Pestañas")).toMatchObject([{ state: "uploaded", read_seconds: 45 }]);
+  expect(await rowsOf("Pestañas")).toMatchObject([{ read_seconds: 45 }]);
 
-  // Quitar lo recibido pregunta, y vuelve a poder elegir.
+  // Quitar lo recibido pregunta, y vuelve a poder elegir. El archivo se va con la papelera, sin esperar a nadie.
+  const [kept] = await rowsOf("Pestañas");
   await video.getByRole("button", { name: "Quitar video" }).click();
   await expect(video.getByText(/¿Quitar «clase-pestanas\.mp4»\?/)).toBeVisible();
   await video.getByRole("button", { name: "Quitar video" }).last().click();
   await expect(video.getByLabel("Elige el video")).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => rowsOf("Pestañas")).toEqual([]);
+  await expect.poll(() => objectsAt(kept?.storage_path ?? "")).toEqual([]);
+  expect(await ownerQuery("select id from private.video_trash where storage_path = $1", [kept?.storage_path ?? ""])).toEqual([]);
 });
 
 test("lo que no es un video se rechaza por su contenido, sin que quede nada", async ({ page }) => {

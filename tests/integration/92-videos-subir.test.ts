@@ -81,6 +81,7 @@ const servicesOn = (owner: Client) => ({
   videos: createDraftVideos({
     store: createVideosStore((actor, work) => asServerFor(owner, actor.claims, work)),
     files: createVideoFiles(storage),
+    providers: { active: () => null, of: () => null },
     checkSession: (reader) => testServices().checkSession(reader),
     report: noReport,
   }),
@@ -278,6 +279,7 @@ describe("subir un video de verdad", () => {
       const broken = createDraftVideos({
         store: createVideosStore((actor, work) => asServerFor(owner, actor.claims, work)),
         files: createVideoFiles(createVideoStorage(() => Promise.reject(new Error("caída")))),
+        providers: { active: () => null, of: () => null },
         checkSession: (reader) => testServices().checkSession(reader),
         report: noReport,
       });
@@ -294,7 +296,7 @@ describe("subir un video de verdad", () => {
     ["dice 0 segundos", Buffer.concat([ftyp, atom("moov", mvhd(1000, 0))]), "clase.mp4", undefined, "duration"],
     ["pasa de 2 horas", videoOf(2 * 3600 + 1), "clase.mp4", undefined, "too_long"],
     ["se subió con otro tipo que el que fijó el servidor", videoOf(30), "clase.mp4", MOV, "type"],
-  ])("se rechaza y se va la fila, con su ruta a la papelera: %s", async (_name, file, fileName, mime, reason) => {
+  ])("se rechaza, se va la fila, y su archivo con ella: %s", async (_name, file, fileName, mime, reason) => {
     const who = await person();
     await reverted(async (owner) => {
       await teacher(owner, who);
@@ -303,8 +305,10 @@ describe("subir un video de verdad", () => {
       expect((await send(go, file, mime === undefined ? {} : { mime })).result).toBe("done");
       expect(await servicesOn(owner).videos.confirmVideo(who.jar, { course: where.course, video: go.video })).toEqual({ kind: "rejected", reason });
       expect(await rowOf(owner, go.video)).toBeNull();
+      // La papelera se vacía en el acto (T-403, tercera solicitud): no se queda ocupando hasta 5 GB de algo que nadie va a ver.
       const trash = await owner.query<{ storage_path: string }>("select storage_path from private.video_trash where video_id = $1", [go.video]);
-      expect(trash.rows).toEqual([{ storage_path: go.path }]);
+      expect(trash.rows).toEqual([]);
+      expect(await storage.readRange(go.path, 0, 16)).toBeNull();
     });
   }, 60_000);
 

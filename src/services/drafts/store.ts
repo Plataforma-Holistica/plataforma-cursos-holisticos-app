@@ -39,11 +39,30 @@ import {
   readTeacherCourses,
   readUnusedResources,
   askVideoBegin,
+  askVideoClaim,
   askVideoConfirm,
+  askVideoCreated,
+  askVideoCreateFailed,
+  askVideoDue,
   askVideoFile,
   askVideoRemove,
+  askVideoSettle,
+  askVideoTrashDone,
+  askVideoTrashDue,
 } from "./records";
-import { VIDEO_BEGIN_ANSWERS, VIDEO_CONFIRM_ANSWERS, VIDEO_FILE_ANSWERS, VIDEO_REJECT_REASONS, VIDEO_REMOVE_ANSWERS, type VideosStore } from "./videos";
+import {
+  VIDEO_BEGIN_ANSWERS,
+  VIDEO_CLAIM_ANSWERS,
+  VIDEO_CONFIRM_ANSWERS,
+  VIDEO_CREATE_FAILED_ANSWERS,
+  VIDEO_CREATED_ANSWERS,
+  VIDEO_FILE_ANSWERS,
+  VIDEO_REJECT_REASONS,
+  VIDEO_REMOVE_ANSWERS,
+  VIDEO_SETTLE_ANSWERS,
+  VIDEO_TRASH_DONE_ANSWERS,
+  type VideosStore,
+} from "./videos";
 import { BEGIN_ANSWERS, CONFIRM_ANSWERS, FILE_ANSWERS, MOVE_ANSWERS as RESOURCE_MOVE_ANSWERS, REJECT_REASONS, REMOVE_ANSWERS, type ResourcesStore } from "./resources";
 
 // Lo que el servicio del borrador le pregunta a la base, a nombre de las claims que verificó. Leer
@@ -155,6 +174,16 @@ export function createVideosStore(run: typeof asServer = asServer): VideosStore 
       };
     },
     remove: async (claims, input) => answerOf(VIDEO_REMOVE_ANSWERS, (await change(claims, "video_remove", (tx) => askVideoRemove(tx, input))).answer),
+    due: (claims, course) => change(claims, "video_due", (tx) => askVideoDue(tx, course)),
+    claim: async (claims, input) => {
+      const result = await change(claims, "video_claim", (tx) => askVideoClaim(tx, input));
+      return { answer: answerOf(VIDEO_CLAIM_ANSWERS, result.answer), path: result.path ?? null, claim: result.claim ?? null, retry: result.retry === true, since: result.since ?? null };
+    },
+    createFailed: async (claims, input) => answerOf(VIDEO_CREATE_FAILED_ANSWERS, (await change(claims, "video_create_failed", (tx) => askVideoCreateFailed(tx, input))).answer),
+    created: async (claims, input) => answerOf(VIDEO_CREATED_ANSWERS, (await change(claims, "video_created", (tx) => askVideoCreated(tx, input))).answer),
+    settle: async (claims, input) => answerOf(VIDEO_SETTLE_ANSWERS, (await change(claims, "video_settle", (tx) => askVideoSettle(tx, input))).answer),
+    trashDue: (claims, course) => change(claims, "video_trash_due", (tx) => askVideoTrashDue(tx, course)),
+    trashDone: async (claims, input) => answerOf(VIDEO_TRASH_DONE_ANSWERS, (await change(claims, "video_trash_done", (tx) => askVideoTrashDone(tx, input))).answer),
   };
 }
 
