@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   renewVideoUpload: vi.fn(),
   confirmVideo: vi.fn(),
   removeVideo: vi.fn(),
+  checkVideos: vi.fn(),
   refresh: vi.fn(),
   leaveFor: vi.fn((_jar: unknown, outcome: { to: string }) => {
     throw new Error(`sale a ${outcome.to}`);
@@ -22,9 +23,10 @@ vi.mock("@/services/drafts/editor", () => ({
   renewVideoUpload: mocks.renewVideoUpload,
   confirmVideo: mocks.confirmVideo,
   removeVideo: mocks.removeVideo,
+  checkVideos: mocks.checkVideos,
 }));
 
-const { beginVideoAction, confirmVideoAction, removeVideoAction, renewVideoAction } = await import("@/app/portal/_editor/video-actions");
+const { beginVideoAction, checkVideosAction, confirmVideoAction, removeVideoAction, renewVideoAction } = await import("@/app/portal/_editor/video-actions");
 
 const COURSE = "c0000000-0000-4000-8000-000000000001";
 const LESSON = "e0000000-0000-4000-8000-000000000001";
@@ -160,5 +162,37 @@ describe("removeVideoAction", () => {
   it.each(["suspended", "not_teacher", "not_editable"])("%s vuelve a la misma ruta", async (kind) => {
     mocks.removeVideo.mockResolvedValue({ kind });
     await expect(removeVideoAction(ONE)).rejects.toThrow(`sale a ${BACK}`);
+  });
+});
+
+describe("checkVideosAction", () => {
+  it("le pasa al servicio el curso, y contesta lo que está detenido", async () => {
+    mocks.checkVideos.mockResolvedValue({ kind: "checked", changed: false, blocked: { [VIDEO]: "over_minutes" } });
+    expect(await checkVideosAction({ course: COURSE })).toEqual({ blocked: { [VIDEO]: "over_minutes" } });
+    expect(mocks.checkVideos).toHaveBeenCalledWith(JAR, { course: COURSE });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("si algo cambió, vuelve a pedir la página", async () => {
+    mocks.checkVideos.mockResolvedValue({ kind: "checked", changed: true, blocked: {} });
+    await checkVideosAction({ course: COURSE });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("nadie pidió esto: con cualquier otra respuesta se queda callada y no saca a nadie", async () => {
+    for (const result of [{ kind: "session", check: { kind: "signed_out" } }, { kind: "unknown" }, { kind: "invalid" }]) {
+      mocks.checkVideos.mockResolvedValue(result);
+      expect(await checkVideosAction({ course: COURSE })).toEqual({ blocked: {} });
+    }
+    expect(mocks.leaveFor).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("lo que llega lo arma quien pide", async () => {
+    mocks.checkVideos.mockResolvedValue({ kind: "invalid" });
+    await checkVideosAction(null as never);
+    await checkVideosAction({ course: 7 } as never);
+    expect(mocks.checkVideos).toHaveBeenCalledWith(JAR, { course: "" });
+    expect(mocks.checkVideos).toHaveBeenCalledTimes(2);
   });
 });

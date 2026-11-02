@@ -18,9 +18,16 @@ const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(sour
 
 describe("solo la función única de medios firma", () => {
   it("la firma de Mux se importa en un solo archivo: el que arma la función única", () => {
-    expect(naming(/adapters\/mux\b/)).toEqual(["src/services/media/grant.ts", "src/services/media/media.ts"]);
+    expect(naming(/adapters\/mux\/sign/)).toEqual(["src/services/media/grant.ts", "src/services/media/media.ts"]);
     // grant.ts solo importa sus tipos.
     expect(readFileSync(join(src, "services/media/grant.ts"), "utf8")).toMatch(/^import type \{[^}]*\} from "@\/adapters\/mux\/sign";$/m);
+  });
+
+  it("crear, leer y borrar en Mux, y el token con que se hace, viven en un solo camino (T-403): cada llamada cuesta dinero", () => {
+    expect(naming(/adapters\/mux\/assets/)).toEqual(["src/services/media/video-provider.ts"]);
+    expect(naming(/createVideoProviders/)).toEqual(["src/services/drafts/editor.ts", "src/services/media/video-provider.ts"]);
+    expect(naming(/MUX_TOKEN_(ID|SECRET)/)).toEqual(["src/adapters/mux/assets.ts", "src/config/env.ts", "src/services/media/video-provider.ts"]);
+    expect(naming(/api\.mux\.com/)).toEqual(["src/adapters/mux/assets.ts"]);
   });
 
   it("signPlayback se llama solo al armarla", () => {

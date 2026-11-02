@@ -147,3 +147,29 @@ describe("editorView", () => {
     expect(view({}, false, { state: "in_review" })).toMatchObject({ editable: false, notice: "No se puede editar mientras está en revisión." });
   });
 });
+
+describe("cada cuánto preguntar por los videos", () => {
+  const video = (state: DraftCourse["videos"][number]["state"], captionsReady = false): DraftCourse["videos"][number] => ({
+    id: "f0000000-0000-4000-8000-000000000001",
+    lessonId: "e0000000-0000-4000-8000-000000000001",
+    state,
+    isCurrent: state === "ready",
+    fileName: "clase.mp4",
+    sizeBytes: 1000,
+    captionsReady,
+  });
+
+  it.each([
+    [[], null],
+    [[video("uploading")], null],
+    [[video("errored")], null],
+    [[video("ready", true)], null],
+    [[video("ready")], 60],
+    [[video("uploaded")], 60],
+    [[video("creating")], 15],
+    [[video("processing")], 15],
+    [[video("ready"), video("processing")], 15],
+  ])("con %j, cada %s", (videos, every) => {
+    expect(view({}, false, { videos }).checkVideosEvery).toBe(every);
+  });
+});
