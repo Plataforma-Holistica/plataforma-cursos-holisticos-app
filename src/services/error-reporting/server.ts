@@ -56,6 +56,7 @@ const FAILURES = {
   draft_read_unavailable: "No se pudo leer el borrador de un curso, o la lista de cursos de un maestro (T-402): su pantalla dijo «algo falló».",
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",
+  video_upload_unavailable: "No se pudo firmar la subida de un video de lección (T-403): quien subía tiene que reintentar.",
   resource_upload_unavailable: "No se pudo firmar la subida de un recurso de un curso (T-404): la fila se canceló.",
   resource_grant_unavailable: "No se pudo firmar la descarga de un recurso (T-404): el freno o Storage no contestaron, o la regla dio acceso y el archivo ya no está en la cubeta.",
   lesson_resources_unavailable: "No se pudieron leer los recursos de una lección (T-404): su página lo dijo, y el video siguió.",

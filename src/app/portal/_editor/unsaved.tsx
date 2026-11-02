@@ -19,6 +19,8 @@ import { Dialog } from "@/ui/dialog";
 //     formulario, y «Salir sin guardar» lo envía. Lo dice su `data-leaves`: `all` («Cerrar sesión») pierde
 //     todo; `detail` (agregar un módulo o una lección, que abre lo agregado) pierde lo del bloque de la
 //     derecha, no lo de la estructura.
+//   · Un video que sube sigue al cambiar de lección o de módulo (T-403): su clave pregunta solo al salir del editor, y no
+//     detiene «Guardar», porque confirmarlo no sube la revisión de la lección.
 //   · Cerrar la pestaña, recargar o ir a otra dirección: el aviso del navegador (`beforeunload`).
 //   · Límite conocido (decisión mía sin confirmar): el botón «Atrás» del navegador es navegación de Next y no
 //     pregunta.
@@ -29,15 +31,21 @@ import { Dialog } from "@/ui/dialog";
 export const STRUCTURE_KEY = "estructura:";
 /** La clave de un archivo que está subiendo: salir lo perdería. */
 export const UPLOAD_KEY = "recurso-subiendo";
+/** La clave de un video que sube: vive arriba del detalle, así que solo se pierde al salir del editor. */
+export const VIDEO_KEY = "video-subiendo";
+/** Lo que ir a otra cosa del mismo curso no pierde: la estructura no se desmonta, y las subidas de video tampoco. */
+const stays = (key: string) => key.startsWith(STRUCTURE_KEY) || key === VIDEO_KEY;
 
 interface Unsaved {
+  /** Algo escrito sin guardar. Un video que sube no lo es: nada se pierde, se detiene. */
   dirty: boolean;
+  videoUploading: boolean;
   /** Confirmar un recurso sube la revisión de su lección: guardar mientras tanto contestaría «cambió». */
   uploading: boolean;
   mark: (key: string, dirty: boolean) => void;
 }
 
-const UnsavedContext = createContext<Unsaved>({ dirty: false, uploading: false, mark: () => undefined });
+const UnsavedContext = createContext<Unsaved>({ dirty: false, videoUploading: false, uploading: false, mark: () => undefined });
 
 export function useUnsaved(): Unsaved {
   return useContext(UnsavedContext);
@@ -52,7 +60,8 @@ function plainClick(event: MouseEvent): boolean {
 export function UnsavedProvider({ children }: { children: ReactNode }) {
   const [keys, setKeys] = useState<ReadonlySet<string>>(new Set());
   const [leaving, setLeaving] = useState<Leaving | null>(null);
-  const dirty = keys.size > 0;
+  const videoUploading = keys.has(VIDEO_KEY);
+  const dirty = keys.size > (videoUploading ? 1 : 0);
   const keysNow = useRef(keys);
   const passing = useRef<HTMLFormElement | null>(null);
 
@@ -75,7 +84,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     const loses = (form: HTMLFormElement) => {
       const own = form.getAttribute("data-unsaved-key");
       const detailOnly = form.getAttribute("data-leaves") === "detail";
-      return [...keysNow.current].some((key) => key !== own && !(detailOnly && key.startsWith(STRUCTURE_KEY)));
+      return [...keysNow.current].some((key) => key !== own && !(detailOnly && stays(key)));
     };
 
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -93,8 +102,8 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
       const samePage = to.pathname === window.location.pathname;
       // Un ancla de la misma pantalla («Volver a la estructura») no sale.
       if (samePage && to.search === window.location.search && to.hash !== "") return;
-      // Otra cosa de la estructura, con lo único sin guardar en la estructura: se queda.
-      if (samePage && [...keysNow.current].every((key) => key.startsWith(STRUCTURE_KEY))) return;
+      // Otra cosa de la estructura, con lo único sin guardar en la estructura o subiendo: se queda.
+      if (samePage && [...keysNow.current].every(stays)) return;
       event.preventDefault();
       event.stopPropagation();
       setLeaving({ kind: "link", href: link.href });
@@ -122,7 +131,9 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const uploading = keys.has(UPLOAD_KEY);
-  const value = useMemo(() => ({ dirty, uploading, mark }), [dirty, uploading, mark]);
+  const value = useMemo(() => ({ dirty, videoUploading, uploading, mark }), [dirty, videoUploading, uploading, mark]);
+  // Quien solo tiene un video subiendo no pierde nada escrito: se le dice lo que pasa. Con los dos, se le dicen los dos.
+  const onlyVideo = videoUploading && !dirty;
   const go = () => {
     const what = leaving;
     setLeaving(null);
@@ -130,7 +141,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
     // Lo que se pierde, por decisión de quien sale: todo, o lo del bloque de la derecha si el formulario solo
     // abre otra cosa (lo de la estructura se queda en pantalla y sigue sin guardar).
     const detailOnly = what.kind === "form" && what.form.getAttribute("data-leaves") === "detail";
-    const kept = new Set([...keysNow.current].filter((key) => detailOnly && key.startsWith(STRUCTURE_KEY)));
+    const kept = new Set([...keysNow.current].filter((key) => detailOnly && stays(key)));
     keysNow.current = kept;
     setKeys(kept);
     if (what.kind === "link") {
@@ -147,7 +158,7 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
       {children}
       {leaving !== null && (
         <Dialog
-          title={portal.editor.leaveTitle}
+          title={onlyVideo ? portal.editor.leaveVideoTitle : portal.editor.leaveTitle}
           cancel={
             <Button type="button" variant="secondary" onClick={() => setLeaving(null)}>
               {portal.editor.leaveStay}
@@ -155,19 +166,19 @@ export function UnsavedProvider({ children }: { children: ReactNode }) {
           }
           confirm={
             <Button type="button" variant="danger" onClick={go}>
-              {portal.editor.leaveGo}
+              {onlyVideo ? portal.editor.leaveVideoGo : portal.editor.leaveGo}
             </Button>
           }
         >
-          {portal.editor.leaveBody}
+          {onlyVideo ? portal.editor.leaveVideoBody : videoUploading ? `${portal.editor.leaveBody} ${portal.editor.leaveVideoBody}` : portal.editor.leaveBody}
         </Dialog>
       )}
     </UnsavedContext.Provider>
   );
 }
 
-/** Lo que dice la barra: «Cambios sin guardar» con algo escrito y sin guardar; si no, la hora del último guardado. */
+/** Lo que dice la barra: «Cambios sin guardar» con algo escrito y sin guardar; si no, que sube un video; si no, la hora del último guardado. */
 export function SavedStatus({ saved }: { saved: string }) {
-  const { dirty } = useUnsaved();
-  return <p className="text-body-s text-text-2">{dirty ? portal.editor.unsaved : saved}</p>;
+  const { dirty, videoUploading } = useUnsaved();
+  return <p className="text-body-s text-text-2">{dirty ? portal.editor.unsaved : videoUploading ? portal.editor.uploadingVideo : saved}</p>;
 }

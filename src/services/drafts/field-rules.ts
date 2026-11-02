@@ -8,3 +8,4 @@
 export { DRAFT_TEXT_LIMITS, parseDraftText, type DraftTextKind, type DraftTextResult } from "@/domain/catalog/draft-text";
 export { missingItems, type DraftReadiness } from "@/domain/catalog/draft-readiness";
 export { RESOURCE_EXTENSIONS, resourceTypeOf, type ResourceKind } from "@/domain/catalog/resource-content";
+export { VIDEO_EXTENSIONS, videoMimeOf } from "@/domain/catalog/video-content";

@@ -11,6 +11,7 @@ export const resources = defineMessages({
   kindDoc: "Word",
   kindAudio: "Audio",
   sizeKb: "{size} KB",
+  sizeGb: "{size} GB",
   sizeMb: "{size} MB",
   detail: "{kind}, {size}",
   download: "Descargar",
