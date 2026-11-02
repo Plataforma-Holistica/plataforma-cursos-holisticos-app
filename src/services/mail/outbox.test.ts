@@ -76,6 +76,21 @@ describe("mandar lo que toca", () => {
     expect(report).toHaveBeenCalledWith("mail_unavailable");
   });
 
+  it("si no se puede saber quién manda, lo reporta y no lanza", async () => {
+    const report = vi.fn(() => Promise.resolve());
+    const outbox = createMailOutbox({
+      store: { claim: vi.fn(), sent: vi.fn(), rejected: vi.fn(), health: vi.fn() },
+      sender: () => {
+        throw new Error("sin configuración");
+      },
+      from: () => "a@b.test",
+      site: () => "https://x.test",
+      report,
+    });
+    await expect(outbox.dispatchMail(COPY)).resolves.toBeUndefined();
+    expect(report).toHaveBeenCalledWith("mail_unavailable");
+  });
+
   it("si salió y no se pudo anotar, lo reporta y sigue con los demás", async () => {
     const second = { ...ROW, id: "2" };
     const sent = vi.fn<MailStore["sent"]>().mockRejectedValueOnce(new Error("corte")).mockResolvedValue(undefined);

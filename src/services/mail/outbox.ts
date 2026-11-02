@@ -60,10 +60,11 @@ export function createMailOutbox(deps: MailOutboxDeps) {
 
   /** Manda lo que toca. Corre detrás de la respuesta de quien lo pidió, y en el barrido. */
   async function dispatchMail(copy: MailCopy): Promise<void> {
-    const send = deps.sender();
-    if (send === null) return;
+    let send: MailSender | null;
     let rows: ClaimedMail[];
     try {
+      send = deps.sender();
+      if (send === null) return;
       rows = await store.claim(BATCH);
     } catch {
       await report("mail_unavailable");

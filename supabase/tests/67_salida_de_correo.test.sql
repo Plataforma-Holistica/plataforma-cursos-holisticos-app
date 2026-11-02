@@ -3,7 +3,7 @@
 -- intentos. La aplicación no toca la tabla: entra por `mail_claim`, `mail_sent`, `mail_rejected` y `mail_health`.
 begin;
 \ir _ayuda.psql
-select plan(88);
+select plan(110);
 
 select pruebas.alta('a6700000-0000-0000-0000-000000000001', 'mara-67@prueba.test');
 select pruebas.alta('c6700000-0000-0000-0000-000000000001', 'f1-67@prueba.test');
@@ -199,7 +199,7 @@ select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_notice_pending', 'volv
 -- Si salió, gana.
 select pruebas.correo_en(:'m', 'failed_at = now()');
 select is(private.mail_sent((pruebas.aviso(:'m')).id), true, 'un envío que llega tarde gana sobre el fallo');
-select isnt(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'y ya no está anulada');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_waiting', 'y ya no está anulada: espera desde ese envío');
 -- La misma CLABE, con el correo ya corregido: aviso nuevo, al correo de ahora, y espera nueva.
 select pruebas.correo_en(:'m', 'sent_at = null, failed_at = now()');
 select pruebas.como_dueno_sistema();
@@ -216,8 +216,64 @@ select pruebas.como_dueno();
 select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '6661'), 'saved', 'un correo con forma rara no impide guardar');
 select is((pruebas.aviso(:'m')).recipient, 'dos@arrobas@prueba.test', 'y el aviso se intenta');
 select pruebas.como_dueno_sistema();
+update auth.users set email = '' where id = pruebas.mara();
+select pruebas.como_dueno();
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '5551'), 'saved', 'tampoco un correo vacío');
+select is((pruebas.aviso(:'m')).id, null, 'sin correo no hay aviso');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_notice_pending', 'y no se abre');
+select pruebas.como_dueno_sistema();
 update auth.users set email = 'mara-67@prueba.test' where id = pruebas.mara();
 select pruebas.como_dueno();
+
+-- Lo enviado no muere: ni con las dos marcas, que no deberían existir juntas, ni por un rechazo que llega tarde.
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '4441'), 'saved', 'otra CLABE');
+select pruebas.correo_en(:'m', 'sent_at = now(), failed_at = now()');
+select is(private.tax_clabe_notice_failed(:'m', (pruebas.ultima(:'m')).clabe_changed_at), false, 'con las dos marcas cuenta como enviada');
+select pruebas.correo_en(:'m', 'failed_at = null');
+select is(private.mail_rejected((pruebas.aviso(:'m')).id, (pruebas.aviso(:'m')).attempts), false, 'un rechazo sobre lo enviado no cuenta');
+select is((pruebas.aviso(:'m')).failed_at, null, 'y no la anula');
+
+-- La CLABE reemplazada queda atrás: su aviso fallido no se vuelve a intentar, no cuenta como cuenta sin abrir, y si sale tarde no abre la nueva.
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '3331'), 'saved', 'otra CLABE');
+select pruebas.correo_en(:'m', 'failed_at = now()');
+select (pruebas.aviso(:'m')).id as aviso_viejo \gset
+select is((private.mail_health() ->> 'failed')::int, 1, 'mientras nadie la reemplaza, el fallo se dice');
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), false, '3331'), 'saved', 'la vuelve a escribir');
+select is((select recipient from private.mail_outbox where id = :'aviso_viejo'), null, 'el aviso viejo se queda sin dirección');
+select is((pruebas.aviso(:'m')).recipient, 'mara-67@prueba.test', 'el nuevo la conserva');
+select is((private.mail_health() ->> 'failed')::int, 0, 'y ya no hay falsa alarma');
+select is(private.mail_sent(:'aviso_viejo'), true, 'el aviso viejo sale tarde');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_notice_pending', 'y no abre la CLABE nueva');
+-- Un aviso que todavía se está intentando conserva su dirección: el maestro tiene derecho a enterarse de ese cambio.
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '2221'), 'saved', 'otra CLABE');
+select (pruebas.aviso(:'m')).id as aviso_vivo \gset
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '2222'), 'saved', 'y otra encima, con el aviso sin salir');
+select is((select recipient from private.mail_outbox where id = :'aviso_vivo'), 'mara-67@prueba.test', 'el aviso pendiente conserva su dirección');
+
+-- Volver a intentar no revive lo que anuló una contraseña.
+select pruebas.correo_en(:'m', 'failed_at = now()');
+set local session_replication_role = replica;
+insert into private.account_password_changes (profile_id, changed_at) values (pruebas.mara(), clock_timestamp());
+set local session_replication_role = origin;
+update private.mail_outbox set failed_at = null, attempts = 0 where idempotency_key = (pruebas.aviso(:'m')).idempotency_key;
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'una contraseña cambiada la sigue anulando');
+set local session_replication_role = replica;
+delete from private.account_password_changes where profile_id = pruebas.mara();
+set local session_replication_role = origin;
+
+-- Con el aviso fallido, el maestro tampoco nota una propuesta. Y al reescribirla, la propuesta la sigue deteniendo.
+select pruebas.correo_en(:'m', 'failed_at = now()');
+create temporary table fallido_sin_propuesta on commit drop as select pruebas.estado() as respuesta;
+grant select on fallido_sin_propuesta to anon, authenticated, app_service;
+set local session_replication_role = replica;
+insert into private.teacher_suspension_requests (teacher_id, anomaly_alert_id, reason, proposed_by, proposed_at) values (:'m', gen_random_uuid(), 'prueba', pruebas.f1(), now());
+set local session_replication_role = origin;
+select is(pruebas.estado(), (select respuesta from fallido_sin_propuesta), 'con el aviso fallido recibe exactamente lo mismo que sin propuesta');
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), false, '3331'), 'saved', 'la vuelve a escribir');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_held', 'y la propuesta la detiene');
+set local session_replication_role = replica;
+delete from private.teacher_suspension_requests where teacher_id = :'m';
+set local session_replication_role = origin;
 
 -- ---------------------------------------------------------------------------------------
 -- Reclamar: por tiempo y por intentos, sin que dos tomen el mismo.

@@ -75,7 +75,7 @@ begin
   if not (pg_catalog.isfinite(new.clabe_changed_at) and pg_catalog.isfinite(new.clabe_effective_from)) then
     return null;
   end if;
-  select t.profile_id, pg_catalog.lower(u.email) into v_profile, v_email
+  select t.profile_id, nullif(pg_catalog.lower(u.email), '') into v_profile, v_email
   from public.teachers t join auth.users u on u.id = t.profile_id
   where t.id = new.teacher_id;
   if v_email is null then
@@ -85,6 +85,9 @@ begin
   values (private.clabe_notice_key(new.teacher_id, new.clabe_changed_at), 'CO-27', v_profile, v_email,
           pg_catalog.jsonb_build_object('hours', (extract(epoch from new.clabe_effective_from - new.clabe_changed_at) / 3600)::integer))
   on conflict (idempotency_key) do nothing;
+  -- Lo que ya se dejó de intentar y esta CLABE reemplaza queda atrás: sin dirección no se puede volver a intentar por error, y deja de contar como una cuenta sin abrir.
+  update private.mail_outbox m set recipient = null, params = '{}'::jsonb
+  where m.profile_id = v_profile and m.template = 'CO-27' and m.sent_at is null and m.failed_at is not null and m.recipient is not null;
   return null;
 end
 $$;
