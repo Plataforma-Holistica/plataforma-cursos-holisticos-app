@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { admin } from "@/messages/es/admin";
 import { teacherVersion, type FraudRequest, type TeacherRoster, type TeacherRow } from "@/services/teachers/admin";
 
 import { teachersButton } from "./outcomes";
@@ -176,5 +177,13 @@ describe("el aviso con el que se llega solo se pinta si esta ficha es de lo que 
     [null, active, null],
   ] as const)("%s", (notice, view, expected) => {
     expect(acceptedTeacherNotice(view, notice)).toBe(expected);
+  });
+});
+
+describe("los datos fiscales en la lista (HO-25)", () => {
+  it("dice si ya los capturó, sin nada de ellos", () => {
+    const row = (hasTaxData: boolean) => rosterView({ freshCode: true, requests: [], teachers: [{ ...ROW, hasTaxData }] }).rows[0];
+    expect(row(true)?.taxData).toBe(admin.teachers.taxData.yes);
+    expect(row(false)?.taxData).toBe(admin.teachers.taxData.missing);
   });
 });
