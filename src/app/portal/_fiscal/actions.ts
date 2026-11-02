@@ -2,6 +2,7 @@
 
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
+import { sendQueuedMail } from "@/app/_lib/mail-requests";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
 import { revealTaxProfile, saveTaxProfile } from "@/services/teachers/tax-data";
 
@@ -26,7 +27,10 @@ export async function saveTaxDataAction(previous: SaveState, form: FormData): Pr
   // Solo con un formulario armado a mano.
   if (input.seen === null) return leaveFor(jar, changedElsewhere);
 
-  const outcome = saveOutcome(await saveTaxProfile(jar, { ...input, seen: input.seen }, await requestOrigin()), attempt);
+  const saved = await saveTaxProfile(jar, { ...input, seen: input.seen }, await requestOrigin());
+  // El aviso de CLABE ya está en la salida, en la misma transacción. De que salga cuenta la espera.
+  if (saved.kind === "saved") await sendQueuedMail();
+  const outcome = saveOutcome(saved, attempt);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   return outcome.state;
 }

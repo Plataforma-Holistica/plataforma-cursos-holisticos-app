@@ -43,6 +43,7 @@ export async function TaxDataSection({
       {notice === "tax_data_locked" && !canSave && <InlineAlert tone="warning">{text.locked}</InlineAlert>}
       {readOnly && canSave && <p className="text-text-2">{text.stillEditable}</p>}
       {state?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(state.clabeWaitsUntil)}</InlineAlert>}
+      {state?.clabeNoticePending === true && <InlineAlert tone="warning">{text.clabeNoticePending}</InlineAlert>}
       {state?.clabeRecapture === true && canSave && !wantsChange && (
         <InlineAlert tone="warning">
           {text.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{text.clabeRecaptureLink}</TextLink>

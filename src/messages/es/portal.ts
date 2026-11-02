@@ -22,6 +22,7 @@ export const portal = defineMessages({
     changedElsewhere: "Tus datos cambiaron en otra ventana. Lo que escribiste aquí no se guardó: si quieres cambiarlos, vuelve a escribirlos.",
     lastChange: "Último cambio: {date}.",
     clabeWaiting: "Tu CLABE nueva rige a partir del {date} a las {time}, hora del centro de México. Antes de eso no te podemos pagar. Si tú no la cambiaste, cambia tu contraseña de inmediato: eso anula este cambio.",
+    clabeNoticePending: "Te estamos mandando un correo para avisarte de tu CLABE nueva. Su espera empieza a contar cuando ese correo salga, y antes de que termine no te podemos pagar. Si tú no la cambiaste, cambia tu contraseña de inmediato: eso anula este cambio.",
     clabeRecapture: "Tu último cambio de CLABE quedó anulado. Vuelve a escribirla para que te podamos pagar.",
     clabeRecaptureLink: "Escribir mi CLABE",
     change: "Cambiar",

@@ -53,7 +53,7 @@ export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "
 export type TaxPayoutAnswer =
   | { outcome: "ok"; row: TaxProfileRow }
   | { outcome: "clabe_waiting"; until: string }
-  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" };
+  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" };
 
 export interface TaxProfileState {
   version: number;
@@ -62,6 +62,8 @@ export interface TaxProfileState {
   canSave: boolean;
   /** Desde cuándo rige una CLABE que todavía espera (decisión de Sergio del 2026-11-01). Con una propuesta de fraude pendiente dice lo mismo que sin ella. */
   clabeWaitsUntil: string | null;
+  /** Falta que salga el correo de aviso: la espera todavía no empieza, y no hay fecha que decir. */
+  clabeNoticePending: boolean;
   /** El último cambio de CLABE quedó anulado, y hay que volver a escribirla. */
   clabeRecapture: boolean;
 }
@@ -115,7 +117,7 @@ export type TaxSave = Proof | { kind: "saved" | "off" | "changed" | "suspended" 
 export type TaxPayoutRead =
   | { kind: "ok"; data: OpenTaxProfile }
   | { kind: "clabe_waiting"; until: string }
-  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "off" | "unavailable" }
+  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "off" | "unavailable" }
   | { kind: "session"; check: Refused };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

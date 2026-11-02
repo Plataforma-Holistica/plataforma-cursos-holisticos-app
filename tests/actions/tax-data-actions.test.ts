@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
   return {
     revealTaxProfile: logged("revealTaxProfile", unknown),
     saveTaxProfile: logged("saveTaxProfile", unknown),
+    sendQueuedMail: logged("sendQueuedMail", () => Promise.resolve()),
     leaveNotice: logged("leaveNotice", () => undefined),
     signOut: logged("signOut", () => Promise.resolve()),
     redirect: vi.fn((to: string): never => {
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar, requestOrigin: mocks.requestOrigin }));
+vi.mock("@/app/_lib/mail-requests", () => ({ sendQueuedMail: mocks.sendQueuedMail }));
 vi.mock("@/services/teachers/tax-data", () => ({ revealTaxProfile: mocks.revealTaxProfile, saveTaxProfile: mocks.saveTaxProfile }));
 vi.mock("@/services/account/account", () => ({ signOut: mocks.signOut, forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
@@ -97,8 +99,16 @@ describe("guardar", () => {
   it("guardado, deja el aviso y redirige", async () => {
     once("saveTaxProfile", { kind: "saved" });
     await expect(saveTaxDataAction(IDLE, form(FIELDS))).rejects.toThrow("redirige a /portal/datos-fiscales");
-    expect(calls.order).toEqual(["saveTaxProfile", "leaveNotice", "redirect"]);
+    expect(calls.order).toEqual(["saveTaxProfile", "sendQueuedMail", "leaveNotice", "redirect"]);
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "tax_data_saved");
+  });
+
+  it("lo que no se guardó no manda nada", async () => {
+    for (const answer of [{ kind: "changed" }, { kind: "wrong_password" }, { kind: "unavailable" }]) {
+      once("saveTaxProfile", answer);
+      await saveTaxDataAction(IDLE, form(FIELDS)).catch(() => undefined);
+    }
+    expect(mocks.sendQueuedMail).not.toHaveBeenCalled();
   });
 
   it("una versión que ya no es va a cambiar con la de ahora, con su aviso", async () => {

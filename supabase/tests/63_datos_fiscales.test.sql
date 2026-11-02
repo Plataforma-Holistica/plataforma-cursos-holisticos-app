@@ -159,7 +159,7 @@ select ok((select count(*) from public.audit_log a where a.action = 'teacher_tax
 
 select pruebas.a_nombre_de(pruebas.mara());
 select is(private.tax_profile_state() ->> 'version', '3', 'el estado dice qué versión hay');
-select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at' - 'can_save' - 'clabe_waits_until' - 'clabe_recapture', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
+select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at' - 'can_save' - 'clabe_waits_until' - 'clabe_notice_pending' - 'clabe_recapture', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
 select pruebas.limpiar();
 select is(pruebas.lecturas(pruebas.mara()), 0::bigint, 'el estado no es una lectura');
 
