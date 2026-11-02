@@ -26,7 +26,9 @@ import { useVideoUploads } from "./video-uploads";
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 //   · Con un video listo se ofrece reemplazarlo, y con uno que falló, subir otro: la base deja empezar en los dos casos. Con uno en camino, no: se perdería lo que tardó horas.
 //   · Lo recibido dice la fecha en que se borra, también sin JavaScript. Cuando algo lo detuvo, la dice el aviso de por qué, sin repetirla.
-//   · Mientras pregunta si quitar no se ofrece elegir, y mientras se prepara una subida no hay qué quitar: su fila todavía no existe, y la que hay es la vigente.
+//   · La pregunta de cancelar o quitar es de un video, y no del bloque: si ese video se va con ella abierta (se rechazó, venció, otra pestaña), la pregunta se va con él.
+//     Si no, en el mismo lugar pasaría a preguntar por la vigente, a un clic de borrarla. Mientras pregunta no se ofrece elegir.
+//   · Mientras se prepara una subida no hay qué quitar: su fila todavía no existe, y la que hay es la vigente.
 
 const text = portal.editor.videos;
 const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed, failing: text.blocked.failing };
@@ -63,8 +65,10 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
   const hydrated = useHydrated();
   const { uploads, notices, blocked, start, pause, resume, retryConfirm, remove } = useVideoUploads();
   const [localProblem, setLocalProblem] = useState<{ problem: VideoProblem; attempt: number } | null>(null);
-  const [asking, setAsking] = useState(false);
+  const [askingFor, setAskingFor] = useState<string | null>(null);
   const upload = uploads.get(lesson);
+  const video = upload === undefined ? (row?.id ?? null) : "video" in upload ? upload.video : null;
+  const asking = askingFor !== null && askingFor === video;
   const notice = notices.get(lesson);
   const section = useRef<HTMLElement>(null);
   const buttons = useRef<HTMLDivElement>(null);
@@ -100,7 +104,6 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
     start(lesson, file);
   }
 
-  const video = upload === undefined ? (row?.id ?? null) : "video" in upload ? upload.video : null;
   const moving = upload !== undefined && (upload.phase === "sending" || upload.phase === "paused" || upload.phase === "cut") ? upload : null;
   const percent = moving === null ? 0 : percentOf(moving.loaded, moving.total);
   const step = moving === null ? 0 : progressStep(moving.loaded, moving.total);
@@ -188,9 +191,9 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
           question={received ? t(text.confirmRemove, { file: fileName }) : t(text.confirmCancel, { file: fileName })}
           stay={received ? text.keep : text.keepUploading}
           go={received ? text.remove : text.cancel}
-          onStay={() => setAsking(false)}
+          onStay={() => setAskingFor(null)}
           onGo={() => {
-            setAsking(false);
+            setAskingFor(null);
             remove(lesson, video);
           }}
         />
@@ -209,7 +212,7 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
               </Button>
             )}
             {upload?.phase !== "checking" && upload?.phase !== "starting" && upload?.phase !== "removing" && (
-              <Button type="button" variant="danger" onClick={() => setAsking(true)}>
+              <Button type="button" variant="danger" onClick={() => setAskingFor(video)}>
                 {received ? text.remove : text.cancel}
               </Button>
             )}

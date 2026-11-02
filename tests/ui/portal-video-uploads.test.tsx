@@ -676,15 +676,39 @@ describe("lo que sigue de un video recibido", () => {
     expect(screen.getByLabelText("Elige otro video para reemplazar este")).toBeTruthy();
   });
 
-  it("mientras se prepara la subida del reemplazo no hay nada que borrar: la fila todavía no existe", async () => {
+  it("la pregunta es de un video: si el nuevo se rechaza con ella abierta, no pasa a quitar el vigente", async () => {
     quiet();
     const user = userEvent.setup();
-    actions.beginVideoAction.mockReturnValue(new Promise(() => undefined));
-    render(<Screen row={READY} />);
+    actions.beginVideoAction.mockResolvedValue(GO);
+    actions.confirmVideoAction.mockResolvedValue({ kind: "problem", problem: "rejectedContent" });
+    const { rerender } = render(<Screen row={READY} />);
     await user.upload(screen.getByLabelText("Elige otro video para reemplazar este"), new File(["x"], "nuevo.mp4"));
-    expect(screen.getByText("Preparando la subida…")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Quitar video|Cancelar subida/ })).toBeNull();
+    await screen.findByRole("button", { name: "Pausar" });
+    rerender(<Screen row={{ ...ROW, id: VIDEO, state: "uploading", fileName: "nuevo.mp4", currentId: "vigente" }} />);
+    await user.click(screen.getByRole("button", { name: "Cancelar subida" }));
+    expect(screen.getByText(/¿Cancelar la subida de «nuevo\.mp4»\?/)).toBeTruthy();
+
+    act(() => lastUpload().options.onSuccess());
+    await screen.findByText(/no es un MP4 o un MOV/);
+    rerender(<Screen row={{ ...READY, id: "vigente", currentId: "vigente" }} />);
+
+    expect(screen.queryByText(/¿Quitar/)).toBeNull();
+    expect(screen.queryByText(/¿Cancelar/)).toBeNull();
+    expect(screen.getByLabelText("Elige otro video para reemplazar este")).toBeTruthy();
     expect(actions.removeVideoAction).not.toHaveBeenCalled();
+  });
+
+  it("si el primer video se rechaza con la pregunta abierta, se puede elegir otro", async () => {
+    quiet();
+    const user = userEvent.setup();
+    actions.beginVideoAction.mockResolvedValue(GO);
+    actions.confirmVideoAction.mockResolvedValue({ kind: "problem", problem: "rejectedContent" });
+    render(<Screen />);
+    await pick(user);
+    await user.click(screen.getByRole("button", { name: "Cancelar subida" }));
+    act(() => lastUpload().options.onSuccess());
+    await screen.findByText(/no es un MP4 o un MOV/);
+    expect(screen.getByLabelText("Elige el video")).toBeTruthy();
   });
 
   it("procesando dice que está tardando en cuanto pasa la hora, sin recargar", async () => {
@@ -706,6 +730,18 @@ describe("lo que sigue de un video recibido", () => {
     await screen.findByText(/Reproductor de Play/);
     rerender(<Screen row={{ ...READY, id: "otra", state: "processing", fileName: "nuevo.mp4", replacing: { fileName: "clase.mp4", duration: "20 min 0 s" } }} />);
     expect(screen.getByText(/Reproductor de Play/)).toBeTruthy();
+  });
+
+  it("la vista previa se cierra cuando cambia la vigente: lo que veía ya se va a borrar", async () => {
+    quiet();
+    const user = userEvent.setup();
+    actions.videoPreviewAction.mockResolvedValue(GRANT);
+    const { rerender } = render(<Screen row={READY} />);
+    await user.click(screen.getByRole("button", { name: "Ver" }));
+    await screen.findByText(/Reproductor de Play/);
+    rerender(<Screen row={{ ...READY, id: "otra", currentId: "otra", fileName: "nuevo.mp4" }} />);
+    expect(screen.queryByText(/Reproductor de Play/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Ver" })).toBeTruthy();
   });
 
   it("«Ver» pide la dirección al pulsar, y dice que no genera puntos", async () => {

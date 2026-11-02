@@ -3,7 +3,7 @@
 -- sus 7 días desde que empezó a subirse. La fecha es una sola columna: la que la pantalla dice es la que `video_expire` cumple.
 begin;
 \ir _ayuda.psql
-select plan(36);
+select plan(40);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7300000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -105,6 +105,8 @@ select pruebas.reclamar('malo');
 select pruebas.r(pruebas.p(1), format('private.video_created(%L, %L, %L, %L)', pruebas.id('curso'), pruebas.id('malo'), 'mux', 'AssetMalo'));
 select pruebas.r(pruebas.p(1), format('private.video_settle(%L, %L, null, null, false, %L)', pruebas.id('malo'), 'errored', 'invalid_input'));
 select is((pruebas.fila(pruebas.id('malo'))).deletes_at, (pruebas.fila(pruebas.id('malo'))).settled_at + interval '7 days', 'con error: 7 días desde que falló');
+update public.draft_videos set created_at = now() - interval '3 days' where id = pruebas.id('malo');
+select is((pruebas.fila(pruebas.id('malo'))).deletes_at, now() + interval '7 days', 'desde que falló, y no desde que empezó a subirse');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que detiene el tope de minutos se guarda hasta 7 días después de que empiece el mes siguiente.
@@ -151,7 +153,7 @@ select is((pruebas.fila(pruebas.id('hora'))).id, null::uuid, 'pasados 7 días, l
 select is((pruebas.fila(pruebas.id('tope'))).id, pruebas.id('tope'), 'y lo que el tope detuvo se queda');
 select ok(exists (select 1 from private.video_trash where video_id = pruebas.id('hora')), 'lo que se va deja su archivo en la papelera');
 
--- Mux rechaza en el mes nuevo: la fila vuelve a recibido con su fecha, y no con una que ya pasó.
+-- Mux rechaza en el mes nuevo: la fila vuelve a recibido con la fecha que tenía.
 update private.video_usage set minutes = 0 where teacher_id = pruebas.m(1);
 select is((pruebas.reclamar('tope')) ->> 'answer', 'claimed', 'en el mes nuevo se procesa');
 select pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('tope'), (select extract(epoch from claimed_at)::text from public.draft_videos where id = pruebas.id('tope'))));
@@ -170,7 +172,23 @@ select pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pru
 select is((pruebas.fila(pruebas.id('pasajero'))).deletes_at, now() + interval '7 days', 'si Mux falla después de 20 días, tiene 7 días desde ahora');
 select private.video_expire();
 select is((pruebas.fila(pruebas.id('pasajero'))).state::text, 'uploaded', 'y no se borra a la hora siguiente');
-select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('pasajero'), '1')), 'stale', 'un reclamo que ya no es el vigente no mueve nada');
+
+-- Con su fecha todavía por delante, una falla no la mueve: la regla sigue siendo la que se dijo.
+select pruebas.recibido('l8', 'apenas');
+select pruebas.reclamar('apenas');
+update public.draft_videos set created_at = now() - interval '3 days' where id = pruebas.id('apenas');
+select pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('apenas'), (select extract(epoch from claimed_at)::text from public.draft_videos where id = pruebas.id('apenas'))));
+select is((pruebas.fila(pruebas.id('apenas'))).deletes_at, now() + interval '4 days', 'si le quedan días, sigue con su fecha');
+update public.draft_videos set hold_until = now() + interval '20 days' where id = pruebas.id('apenas');
+select pruebas.reclamar('apenas');
+select pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('apenas'), (select extract(epoch from claimed_at)::text from public.draft_videos where id = pruebas.id('apenas'))));
+select is((pruebas.fila(pruebas.id('apenas'))).hold_until, now() + interval '20 days', 'y lo que un tope le dio no se acorta');
+
+-- Un reclamo que ya no es el vigente no escribe nada, aunque la fila se esté creando.
+select pruebas.reclamar('apenas');
+update public.draft_videos set created_at = now() - interval '30 days', hold_until = null where id = pruebas.id('apenas');
+select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('apenas'), '1')), 'stale', 'un reclamo viejo contesta que ya no es el vigente');
+select is((pruebas.fila(pruebas.id('apenas'))).hold_until, null::timestamptz, 'y no le da plazo');
 
 -- ---------------------------------------------------------------------------------------
 -- El repaso espera lo mismo que la papelera: un asset recién creado puede no aparecer todavía en la lista de Mux.

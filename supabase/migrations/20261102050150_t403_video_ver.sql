@@ -5,8 +5,9 @@
 --
 --   · `deletes_at` es una columna calculada, y la lee `video_expire` igual que la pantalla: lo que se dice es lo que se cumple. Los días se suman en UTC porque una columna
 --     calculada no admite la suma que depende de la zona de la sesión.
---   · Lo que vuelve de un reclamo tiene 7 días desde ese momento (`video_create_failed`): mientras se creaba no corría ningún plazo, y sin esto reaparecería con una fecha
---     vencida y se borraría a la hora siguiente. Una falla de Mux no debe costarle el archivo a nadie, y ya se le cobraron sus minutos. La misma cifra, sin otra.
+--   · Lo que vuelve de un reclamo con su fecha ya vencida tiene 7 días desde ese momento (`video_create_failed`): mientras se creaba no corría ningún plazo, y sin esto
+--     se borraría a la hora siguiente. Una falla de Mux no debe costarle el archivo a nadie, y ya se le cobraron sus minutos. Si le quedan días, sigue con su fecha: la regla es
+--     la que se dijo, y Mux caído no debe mover cada día lo que la pantalla promete.
 --   · Si en el mes siguiente sigue sin caber, el reclamo vuelve a mover la fecha. Eso solo pasa con el editor abierto.
 --   · `video_claim` contesta `held` solo cuando la fecha cambió: es lo que le dice a la pantalla que vuelva a leer, sin pedir la página cada minuto.
 --   · `claimed_at` se le da a su maestro para decir «está tardando», sin otra columna.
@@ -124,7 +125,9 @@ begin
   if v_row.id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
-  update public.draft_videos set state = 'uploaded', hold_until = greatest(hold_until, now() + interval '7 days')
+  update public.draft_videos
+     set state = 'uploaded',
+         hold_until = case when greatest(created_at + interval '7 days', hold_until) <= now() then now() + interval '7 days' else hold_until end
    where id = p_video and state = 'creating' and extract(epoch from claimed_at)::text = p_claim;
   return pg_catalog.jsonb_build_object('answer', case when found then 'uploaded' else 'stale' end);
 end
