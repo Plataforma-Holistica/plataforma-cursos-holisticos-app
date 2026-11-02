@@ -124,7 +124,7 @@ test.beforeAll(async () => {
   await makeTeacher(teacher);
 });
 
-test("preparar: un curso con cuatro lecciones", async ({ page }) => {
+test("preparar: un curso con cinco lecciones", async ({ page }) => {
   await signIn(page, teacher, "/portal/cursos");
   await page.getByRole("link", { name: "Crear mi primer curso" }).click();
   await page.getByRole("textbox", { name: "Título del curso" }).fill("Con videos");
@@ -134,7 +134,7 @@ test("preparar: un curso con cuatro lecciones", async ({ page }) => {
   await page.getByRole("textbox", { name: "Título del módulo nuevo" }).fill("Inicio");
   await page.getByRole("button", { name: "Agregar módulo" }).click();
   await expect(page).toHaveURL(/\?modulo=/);
-  for (const title of ["Corte", "Recarga", "Pestañas", "Cancelar"]) {
+  for (const title of ["Corte", "Recarga", "Pestañas", "Cancelar", "Tope"]) {
     await page.getByRole("textbox", { name: "Título de la lección nueva" }).first().fill(title);
     await page.getByRole("button", { name: "Agregar lección" }).first().click();
     await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
@@ -196,7 +196,7 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
 
   await expect(video.getByText("clase-corte.mp4", { exact: true })).toBeVisible();
   // Sin que nadie toque nada: el editor pregunta, se crea en el proveedor de prueba y queda listo (T-403, tercera solicitud).
-  await expect(video.getByText(/Listo, 13 MB\./)).toBeVisible({ timeout: 45_000 });
+  await expect(video.getByText(/Listo, 2 min 5 s, 13 MB\./)).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText("Subiendo un video")).toHaveCount(0);
   const [row] = await rowsOf("Corte");
   expect(row).toMatchObject({ state: "ready", is_current: true, provider: "test", file_name: "clase-corte.mp4", read_seconds: 125, duration_seconds: 125, captions_ready: true });
@@ -204,10 +204,16 @@ test("sube mientras se cambia de lección y se guarda; se corta la red y se rean
   expect(dialogs).toEqual([]);
   expect(await a11yViolations(page)).toEqual([]);
 
-  // Ya recibido no se ofrece otro sin quitarlo, y sigue ahí al recargar.
+  // Sigue ahí al recargar, con su duración y lo que se puede hacer con él (T-403, cuarta solicitud).
   await page.reload();
-  await expect(video.getByText(/Listo, 13 MB/)).toBeVisible();
-  await expect(video.getByLabel(/Elige/)).toHaveCount(0);
+  await expect(video.getByText(/Listo, 2 min 5 s, 13 MB/)).toBeVisible();
+  await expect(video.getByLabel("Elige otro video para reemplazar este")).toBeVisible();
+  // Dura menos de lo acordado: lo dice, sin bloquear.
+  await expect(video.getByText(/Esta lección dura 2 min 5 s\. Lo acordado es de 15 a 25 minutos\. Puedes enviarla: la revisión decide\./)).toBeVisible();
+  // El proveedor de prueba no tiene qué reproducir, y lo dice: la dirección firmada la prueba la integración 94.
+  await video.getByRole("button", { name: "Ver" }).click();
+  await expect(video.getByText("Este video todavía no se puede ver.")).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
 });
 
 test("pausar y seguir, con el foco en el mismo botón", async ({ page }) => {
@@ -301,6 +307,72 @@ test("el mismo video en dos pestañas: una sube, la otra lo dice y no toca nada"
   await expect.poll(() => rowsOf("Pestañas")).toEqual([]);
   await expect.poll(() => objectsAt(kept?.storage_path ?? "")).toEqual([]);
   expect(await ownerQuery("select id from private.video_trash where storage_path = $1", [kept?.storage_path ?? ""])).toEqual([]);
+});
+
+test("reemplazar: la lección sigue con el de antes hasta que el nuevo está listo", async ({ page }) => {
+  await signIn(page, teacher, editor);
+  await lessonLink(page, "Corte").click();
+  const video = block(page);
+  const [before] = await rowsOf("Corte");
+  await video.getByLabel("Elige otro video para reemplazar este").setInputFiles(fileOf("reemplazo.mp4", 1200));
+  await expect(video.getByText(/Mientras tanto, la lección sigue con «clase-corte\.mp4», 2 min 5 s\./)).toBeVisible({ timeout: 30_000 });
+  expect((await rowsOf("Corte")).filter((row) => row.is_current)).toMatchObject([{ file_name: "clase-corte.mp4" }]);
+  await expect(video.getByText("reemplazo.mp4", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(video.getByText(/Listo, 20 min 0 s, 13 MB\./)).toBeVisible({ timeout: 60_000 });
+  await expect(video.getByText(/Mientras tanto, la lección sigue/)).toHaveCount(0);
+  // Dura lo acordado: ya no avisa.
+  await expect(video.getByText(/Esta lección dura/)).toHaveCount(0);
+  const rows = await rowsOf("Corte");
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ state: "ready", is_current: true, file_name: "reemplazo.mp4" });
+  // Lo de antes ya no se usa, y se va de la cubeta al preguntar otra vez.
+  await expect.poll(() => objectsAt(before?.storage_path ?? ""), { timeout: 90_000 }).toHaveLength(0);
+});
+
+test("con el tope de minutos: dice el día, que es el 8 del mes siguiente; sin JavaScript también", async ({ page, browser }) => {
+  await ownerQuery(
+    `insert into private.video_usage (teacher_id, month, minutes)
+     select t.id, date_trunc('month', now() at time zone private.period_zone())::date, 1500 from public.teachers t join public.profiles p on p.id = t.profile_id where p.id = $1
+     on conflict (teacher_id, month) do update set minutes = 1500`,
+    [teacher.id],
+  );
+  await signIn(page, teacher, editor);
+  await lessonLink(page, "Tope").click();
+  const video = block(page);
+  await video.getByLabel("Elige el video").setInputFiles(fileOf("con-tope.mp4", 300));
+  const zone = "America/Mexico_City";
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit" }).format(new Date());
+  const [year, month] = today.split("-").map(Number);
+  const nextEighth = new Date(Date.UTC(month === 12 ? (year ?? 0) + 1 : (year ?? 0), month === 12 ? 0 : (month ?? 1), 8, 12));
+  const day = new Intl.DateTimeFormat("es-MX", { dateStyle: "long", timeZone: "UTC" }).format(nextEighth);
+  const notice = video.getByText(/llegaste al tope de minutos/);
+  await expect(notice).toBeVisible({ timeout: 90_000 });
+  await expect(notice).toContainText(`se borra el ${day}`, { timeout: 90_000 });
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Sin JavaScript nadie pregunta, y aun así se dice el día.
+  const context = await browser.newContext({ javaScriptEnabled: false, baseURL: page.url().split("/portal")[0] });
+  const plain = await context.newPage();
+  await plain.goto("/entrar");
+  await plain.getByLabel("Correo").fill(teacher.email);
+  await plain.getByLabel("Contraseña", { exact: true }).fill(teacher.password);
+  await plain.getByRole("button", { name: "Entrar" }).click();
+  await plain.waitForURL((url) => !url.pathname.startsWith("/entrar"));
+  await plain.goto(page.url());
+  await expect(plain.getByText(`Si no se procesa, se borra el ${day}.`)).toBeVisible();
+  await expect(plain.getByRole("button", { name: "Ver" })).toHaveCount(0);
+  await context.close();
+  await ownerQuery(
+    `update private.video_usage u set minutes = 0 from public.teachers t where t.id = u.teacher_id and t.profile_id = $1`,
+    [teacher.id],
+  );
+});
+
+test("«Faltan» ya no cuenta lo que tiene un video listo", async ({ page }) => {
+  await signIn(page, teacher, "/portal/cursos");
+  // Sin resumen, práctica ni nivel, y con cinco lecciones sin video serían ocho. Cuánto da exacto lo prueba la integración 94.
+  await expect(page.getByText(/Faltan \d cosas para enviarlo/)).toBeVisible();
+  await expect(page.getByText("Faltan 8 cosas para enviarlo")).toHaveCount(0);
 });
 
 test("lo que no es un video se rechaza por su contenido, sin que quede nada", async ({ page }) => {

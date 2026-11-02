@@ -121,6 +121,8 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     confirmVideoAction: /const result = await confirmVideo\(jar, /,
     removeVideoAction: /const result = await removeVideo\(jar, /,
     checkVideosAction: /const result = await checkVideos\(jar, /,
+    // La vista previa (T-403): firma solo la función única de medios, que corre la guarda.
+    videoPreviewAction: /const grant = await getDraftVideoGrant\(jar, course, lesson\);/,
   },
   "src/app/portal/_cursos/actions.ts": {
     // Crear y borrar un curso (T-402): el servicio corre la guarda, y la base escribe solo a nombre del

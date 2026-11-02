@@ -177,7 +177,7 @@ export function createVideosStore(run: typeof asServer = asServer): VideosStore 
     due: (claims, course) => change(claims, "video_due", (tx) => askVideoDue(tx, course)),
     claim: async (claims, input) => {
       const result = await change(claims, "video_claim", (tx) => askVideoClaim(tx, input));
-      return { answer: answerOf(VIDEO_CLAIM_ANSWERS, result.answer), path: result.path ?? null, claim: result.claim ?? null, retry: result.retry === true, since: result.since ?? null };
+      return { answer: answerOf(VIDEO_CLAIM_ANSWERS, result.answer), path: result.path ?? null, claim: result.claim ?? null, retry: result.retry === true, since: result.since ?? null, held: result.held === true };
     },
     createFailed: async (claims, input) => answerOf(VIDEO_CREATE_FAILED_ANSWERS, (await change(claims, "video_create_failed", (tx) => askVideoCreateFailed(tx, input))).answer),
     created: async (claims, input) => answerOf(VIDEO_CREATED_ANSWERS, (await change(claims, "video_created", (tx) => askVideoCreated(tx, input))).answer),

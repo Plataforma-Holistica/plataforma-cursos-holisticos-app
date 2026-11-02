@@ -923,7 +923,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
       ) : (
         isLesson && <p className="whitespace-pre-line text-text-2">{selected.description}</p>
       )}
-      {isLesson && <VideoBlock lesson={selected.id} row={selected.video} editable={view.editable} maxBytes={view.videoLimits.maxBytes} maxText={view.videoLimits.maxText} />}
+      {isLesson && <VideoBlock course={view.course} lesson={selected.id} row={selected.video} editable={view.editable} maxBytes={view.videoLimits.maxBytes} maxText={view.videoLimits.maxText} />}
       {isLesson && <ResourcesBlock course={view.course} lesson={selected.id} items={selected.resources} editable={view.editable} self={view.paths.self} limits={view.resourceLimits} />}
     </section>
   );

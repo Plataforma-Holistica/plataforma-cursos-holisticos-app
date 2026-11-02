@@ -31,6 +31,7 @@
     "db:student": "node scripts/db-turno.mjs exigir --base && node scripts/db-student.mjs",
     "db:rollup": "node scripts/db-turno.mjs exigir --base && node scripts/db-rollup.mjs",
     "storage:repaso": "node scripts/db-turno.mjs exigir --base && node scripts/storage-repaso.mjs",
+    "video:repaso": "node scripts/db-turno.mjs exigir --base && node scripts/video-repaso.mjs",
     "media:upload-test": "node scripts/media-upload-test.mjs",
     "media:check": "node scripts/media-check.mjs",
     "media:captions-test": "node scripts/media-captions-test.mjs",

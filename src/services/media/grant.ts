@@ -29,6 +29,7 @@ import type { FailureCode } from "@/services/error-reporting/server";
 import type {
   BatchRecord,
   DownloadHit,
+  DraftVideoFacts,
   HeartbeatBeat,
   HeartbeatOutcome,
   LessonVideo,
@@ -77,6 +78,8 @@ import type {
 // Desde T-404 firma además la descarga de un recurso (RF-308): `getResourceGrant` para lo
 // publicado, con las reglas de ver, y `getDraftResourceGrant` para lo que un maestro subió a su
 // borrador. Bajar no abre reproducción, no late y nunca cuenta para el reparto (RF-306).
+//
+// Desde T-403 firma además la vista previa de un video del borrador (`getDraftVideoGrant`), con las mismas tres cosas: sin reproducción, sin latidos y sin puntos.
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -203,6 +206,9 @@ export type ResourceGrant =
 /** Lo que contesta pedir lo que un maestro subió a su borrador: nunca depende de su suscripción. */
 export type DraftResourceGrant = Exclude<ResourceGrant, { kind: "denied" }>;
 
+/** Lo que contesta la vista previa de un video del borrador (PA-43): con su marca, sin reproducción ni latidos. */
+export type DraftVideoGrant = (Signed & { watermark: string }) | Extract<Refusal, { kind: "refused" | "suspended" | "no_video" | "unavailable" }>;
+
 export interface MediaStore {
   lessonVideo(claims: VerifiedClaims, lessonId: string): Promise<LessonVideo | null>;
   watchFacts(claims: VerifiedClaims, lessonId: string): Promise<WatchFacts | null>;
@@ -212,6 +218,7 @@ export interface MediaStore {
   resourceFacts(claims: VerifiedClaims, resourceId: string): Promise<ResourceFacts | null>;
   draftResourceFile(claims: VerifiedClaims, courseId: string, resourceId: string): Promise<ResourceFile | null>;
   downloadHit(claims: VerifiedClaims): Promise<DownloadHit>;
+  draftVideo(claims: VerifiedClaims, courseId: string, lessonId: string): Promise<DraftVideoFacts | null>;
 }
 
 export interface MediaCore {
@@ -635,5 +642,35 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     return file === null ? { kind: "not_found" } : signResource(session.claims, file);
   }
 
-  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant };
+  /**
+   * Ver lo que un maestro subió a su borrador (PA-43; FL-33, paso 4). Quién puede lo decide la base: su maestro, también suspendido, y Contenido. No abre reproducción ni late: nunca
+   * genera puntos (RF-306). Lo del proveedor de prueba no tiene qué reproducir.
+   */
+  async function getDraftVideoGrant(reader: CookieReader, courseId: unknown, lessonId: unknown): Promise<DraftVideoGrant> {
+    const session = await core.checkSession(reader);
+    if (session.kind === "unavailable") return { kind: "unavailable" };
+    if (session.kind === "suspended") return { kind: "suspended" };
+    if (session.kind !== "pass") return { kind: "refused" };
+    const course = idOrNull(courseId);
+    const lesson = idOrNull(lessonId);
+    if (course === null || lesson === null) return { kind: "no_video" };
+
+    let facts: DraftVideoFacts | null;
+    try {
+      facts = await core.store.draftVideo(session.claims, course, lesson);
+    } catch {
+      await deps.report("media_facts_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (facts === null || facts.provider !== "mux") return { kind: "no_video" };
+    const watermark = watermarkText(facts.email);
+    if (watermark === null) {
+      await deps.report("media_watermark_unavailable");
+      return { kind: "unavailable" };
+    }
+    const signed = await signFor(session.claims, { playbackId: facts.playbackId, durationSeconds: facts.durationSeconds });
+    return signed.kind === "granted" ? { ...signed, watermark } : signed;
+  }
+
+  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant, getDraftVideoGrant };
 }

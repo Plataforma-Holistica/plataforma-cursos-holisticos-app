@@ -70,6 +70,20 @@ export interface VideoRow {
   state: DraftVideo["state"];
   fileName: string;
   size: string;
+  /** Lo que dura, si ya se midió. */
+  duration: string;
+  /** El día en que se borra si sigue así: solo lo que todavía no está listo. */
+  deletesOn: string | null;
+  /** Cuánto falta para decir que está tardando, o nulo si no se está procesando. Creándose no: cada reintento renueva el reclamo, y el aviso aparecería y se iría. */
+  slowInMs: number | null;
+  /** Por qué falló, si se sabe y le sirve a quien lo subió. */
+  tooLong: boolean;
+  /** La vigente, que es la que se puede ver: la lección sigue con ella mientras la nueva no esté lista. */
+  currentId: string | null;
+  /** La vigente, mientras otro la va a reemplazar. */
+  replacing: { fileName: string; duration: string } | null;
+  /** El aviso de duración de la vigente, que no bloquea. */
+  tolerance: string | null;
 }
 
 export type Selected =
@@ -147,16 +161,48 @@ function options(list: readonly { id: string; name: string; active: boolean }[],
   return list.map((item) => ({ value: item.id, label: item.active ? item.name : t(inactive, { name: item.name }) }));
 }
 
+/** Procesar suele tomar minutos. Pasado esto se dice que está tardando (decisión mía sin confirmar). */
+const SLOW_AFTER_MS = 60 * 60 * 1_000;
+
 /** Lo que el proveedor está haciendo se pregunta seguido; que lleguen los subtítulos, o que se libere un tope, puede tardar. */
 function checkVideosEvery(videos: readonly DraftVideo[]): number | null {
   if (videos.some((video) => video.state === "creating" || video.state === "processing")) return 15;
   return videos.some((video) => video.state === "uploaded" || (video.state === "ready" && !video.captionsReady)) ? 60 : null;
 }
 
-function videoRow(draft: DraftCourse, lesson: string): VideoRow | null {
+/** «1 h 20 min», «20 min 34 s». */
+function lengthText(seconds: number | null): string {
+  if (seconds === null) return "";
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const rest = seconds % 60;
+  if (hours > 0) return t(text.videos.length.hours, { hours, minutes });
+  return minutes > 0 ? t(text.videos.length.minutes, { minutes, seconds: rest }) : t(text.videos.length.seconds, { seconds: rest });
+}
+
+function videoRow(draft: DraftCourse, lesson: string, tolerance: DraftChoices["lessonTolerance"], now: Date): VideoRow | null {
   const here = draft.videos.filter((video) => video.lessonId === lesson);
-  const shown = here.find((video) => !video.isCurrent) ?? here[0];
-  return shown === undefined ? null : { id: shown.id, state: shown.state, fileName: shown.fileName, size: sizeText(shown.sizeBytes) };
+  const current = here.find((video) => video.isCurrent);
+  const shown = here.find((video) => !video.isCurrent) ?? current;
+  if (shown === undefined) return null;
+  const claimed = shown.state === "processing" && shown.claimedAt !== null ? new Date(shown.claimedAt).getTime() : null;
+  const outside =
+    current?.seconds !== null && current?.seconds !== undefined && tolerance !== null && (current.seconds < tolerance.minSeconds || current.seconds > tolerance.maxSeconds);
+  return {
+    id: shown.id,
+    state: shown.state,
+    fileName: shown.fileName,
+    size: sizeText(shown.sizeBytes),
+    duration: lengthText(shown.seconds),
+    deletesOn: shown.deletesAt === null ? null : longDate(shown.deletesAt),
+    slowInMs: claimed === null ? null : Math.max(0, claimed + SLOW_AFTER_MS - now.getTime()),
+    tooLong: shown.errorCode === "too_long",
+    currentId: current?.id ?? null,
+    replacing: current === undefined || current === shown ? null : { fileName: current.fileName, duration: lengthText(current.seconds) },
+    tolerance: outside
+      ? t(text.videos.tolerance, { duration: lengthText(current.seconds), min: Math.round(tolerance.minSeconds / 60), max: Math.round(tolerance.maxSeconds / 60) })
+      : null,
+  };
 }
 
 export function editorView(
@@ -188,7 +234,7 @@ export function editorView(
       askDelete: editorButton.askDeleteLesson(lesson.id),
       remove: editorButton.deleteLesson(lesson.id, lesson.revision),
       resources: resourceRows(draft, lesson.id),
-      video: videoRow(draft, lesson.id),
+      video: videoRow(draft, lesson.id, choices.lessonTolerance, context.now),
     };
     self = link({ lesson: lesson.id });
   } else if (moduleHit !== undefined) {

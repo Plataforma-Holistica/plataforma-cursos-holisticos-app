@@ -234,6 +234,13 @@ export async function readResourceFacts(tx: Tx, id: string): Promise<ResourceFac
   };
 }
 
+export interface DraftVideoFacts {
+  playbackId: string;
+  provider: string;
+  durationSeconds: number;
+  email: string | null;
+}
+
 /** Lo que un maestro subió a su borrador: solo el suyo y solo lo confirmado. Nulo si no. */
 export async function readDraftResourceFile(tx: Tx, courseId: string, resourceId: string): Promise<ResourceFile | null> {
   const [row] = await tx.query(
@@ -241,6 +248,22 @@ export async function readDraftResourceFile(tx: Tx, courseId: string, resourceId
     z.object({ file: fileRow.nullable() }),
   );
   return row?.file ?? null;
+}
+
+const draftVideoAnswer = z.object({
+  answer: z.string(),
+  playback: z.string().nullish(),
+  provider: z.string().nullish(),
+  seconds: z.number().int().nullish(),
+  email: z.string().nullish(),
+});
+
+/** Un video del borrador, si quien pide lo puede ver. La base decide: nunca sale de aquí lo que no es la vigente de esa lección. */
+export async function readDraftVideo(tx: Tx, courseId: string, lessonId: string): Promise<DraftVideoFacts | null> {
+  const [row] = await tx.query(sql`select private.video_preview(${courseId}::uuid, ${lessonId}::uuid) as result`, z.object({ result: draftVideoAnswer }));
+  const facts = row?.result;
+  if (facts?.answer !== "ok" || !facts.playback || !facts.provider || !facts.seconds) return null;
+  return { playbackId: facts.playback, provider: facts.provider, durationSeconds: facts.seconds, email: facts.email ?? null };
 }
 
 const DOWNLOAD_HITS = ["ok", "throttled", "unavailable"] as const;

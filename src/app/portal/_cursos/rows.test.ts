@@ -18,7 +18,7 @@ const draft: TeacherCourse = {
   teacherName: "Ana Ruiz",
   practiceName: "Respiración",
   coverTone: 3,
-  draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, modulesWithLessons: 1 },
+  draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
 };
 const published: TeacherCourse = {
   id: PUBLISHED,
@@ -49,9 +49,9 @@ describe("courseRows", () => {
   });
 
   it("en singular, y listo para enviar cuando no falta nada", () => {
-    const one = courseRows([{ ...draft, draft: { hasSummary: true, practiceReady: true, levelReady: false, lessons: 0, modulesWithLessons: 1 } }], false);
+    const one = courseRows([{ ...draft, draft: { hasSummary: true, practiceReady: true, levelReady: false, lessons: 0, lessonsWithoutVideo: 0, modulesWithLessons: 1 } }], false);
     expect(one[0]?.detail).toBe("Falta 1 cosa para enviarlo");
-    const none = courseRows([{ ...draft, draft: { hasSummary: true, practiceReady: true, levelReady: true, lessons: 0, modulesWithLessons: 1 } }], false);
+    const none = courseRows([{ ...draft, draft: { hasSummary: true, practiceReady: true, levelReady: true, lessons: 0, lessonsWithoutVideo: 0, modulesWithLessons: 1 } }], false);
     expect(none[0]?.detail).toBe("Listo para enviar");
   });
 

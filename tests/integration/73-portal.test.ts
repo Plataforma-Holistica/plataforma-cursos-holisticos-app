@@ -187,7 +187,7 @@ describe("El portal del maestro, contra la base", () => {
             teacherName: "Ana Ruiz",
             practiceName: null,
             coverTone: null,
-            draft: { hasSummary: false, practiceReady: false, levelReady: false, lessons: 0, modulesWithLessons: 0 },
+            draft: { hasSummary: false, practiceReady: false, levelReady: false, lessons: 0, lessonsWithoutVideo: 0, modulesWithLessons: 0 },
           }),
         ],
       });
@@ -202,7 +202,7 @@ describe("El portal del maestro, contra la base", () => {
       expect(full.kind === "ready" && full.value[0]).toMatchObject({
         practiceName: expect.stringMatching(/^Respiración /),
         coverTone: 3,
-        draft: { hasSummary: true, practiceReady: true, levelReady: true, lessons: 2, modulesWithLessons: 1 },
+        draft: { hasSummary: true, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
       });
 
       await deactivate(owner, practice);

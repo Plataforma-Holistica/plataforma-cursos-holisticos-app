@@ -12,23 +12,30 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { ProgressBar } from "@/ui/progress-bar";
 
 import { progressStep } from "./resource-outcomes";
+import { VideoPreview } from "./video-preview";
 import type { VideoRow } from "./rows";
 import { checkVideoFile, type VideoProblem } from "./video-outcomes";
 import { useVideoUploads } from "./video-uploads";
 
 // El video de una lección en PA-43 (T-403; RF-604, FL-33). Lo que está subiendo vive arriba (`video-uploads.tsx`), y lo que ya llegó,
-// en la base. Procesar lo mueve `video-uploads.tsx`, preguntando; verlo llega con la solicitud que sigue.
+// en la base. Procesar lo mueve `video-uploads.tsx`, preguntando.
 //
 //   · Pausar y Reanudar son el mismo botón: el foco se queda en él.
 //   · Cancelar y quitar preguntan antes: una subida puede llevar horas. Seguir devuelve el foco al botón que preguntó.
 //   · Un botón que se va con el foco puesto (terminó de subir) lo deja en el bloque, y solo si no se fue a otra cosa.
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
+//   · Con un video listo se ofrece reemplazarlo, y con uno que falló, subir otro: la base deja empezar en los dos casos. Con uno en camino, no: se perdería lo que tardó horas.
+//   · Lo recibido dice la fecha en que se borra, también sin JavaScript. Cuando algo lo detuvo, la dice el aviso de por qué, sin repetirla.
+//   · La pregunta de cancelar o quitar es de un video, y no del bloque: si ese video se va con ella abierta (se rechazó, venció, otra pestaña), la pregunta se va con él.
+//     Si no, en el mismo lugar pasaría a preguntar por la vigente, a un clic de borrarla. Mientras pregunta no se ofrece elegir.
+//   · Mientras se prepara una subida no hay qué quitar: su fila todavía no existe, y la que hay es la vigente.
 
 const text = portal.editor.videos;
 const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed, failing: text.blocked.failing };
 const percentOf = (loaded: number, total: number) => (total > 0 ? Math.floor((Math.min(loaded, total) / total) * 100) : 0);
 
 interface Props {
+  course: string;
   lesson: string;
   row: VideoRow | null;
   editable: boolean;
@@ -54,18 +61,29 @@ function VideoQuestion({ question, stay, go, onStay, onGo }: { question: string;
   );
 }
 
-export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) {
+export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }: Props) {
   const hydrated = useHydrated();
   const { uploads, notices, blocked, start, pause, resume, retryConfirm, remove } = useVideoUploads();
   const [localProblem, setLocalProblem] = useState<{ problem: VideoProblem; attempt: number } | null>(null);
-  const [asking, setAsking] = useState(false);
+  const [askingFor, setAskingFor] = useState<string | null>(null);
   const upload = uploads.get(lesson);
+  const video = upload === undefined ? (row?.id ?? null) : "video" in upload ? upload.video : null;
+  const asking = askingFor !== null && askingFor === video;
   const notice = notices.get(lesson);
   const section = useRef<HTMLElement>(null);
   const buttons = useRef<HTMLDivElement>(null);
   const wasAsking = useRef(false);
   const hadUpload = useRef(false);
   const hasUpload = upload !== undefined;
+  const [lateFor, setLateFor] = useState<string | null>(null);
+  const slowId = row?.slowInMs == null ? null : row.id;
+  const slowInMs = row?.slowInMs ?? 0;
+  useEffect(() => {
+    // Lo pinta el servidor, pero la página no se vuelve a pedir si nada cambia: quien espera con la pantalla abierta también debe enterarse.
+    if (slowId === null) return;
+    const timer = setTimeout(() => setLateFor(slowId), slowInMs);
+    return () => clearTimeout(timer);
+  }, [slowId, slowInMs]);
   useEffect(() => {
     // El último de la fila es el que preguntó. Si se fue con la respuesta, el foco queda en el bloque.
     if (wasAsking.current && !asking) (buttons.current?.querySelector<HTMLElement>("button:last-child") ?? section.current)?.focus();
@@ -86,13 +104,13 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
     start(lesson, file);
   }
 
-  const video = upload !== undefined && "video" in upload ? upload.video : (row?.id ?? null);
   const moving = upload !== undefined && (upload.phase === "sending" || upload.phase === "paused" || upload.phase === "cut") ? upload : null;
   const percent = moving === null ? 0 : percentOf(moving.loaded, moving.total);
   const step = moving === null ? 0 : progressStep(moving.loaded, moving.total);
   // Lo que se quita ya llegó; lo que se cancela, todavía no.
   const received = upload === undefined && row !== null && row.state !== "uploading";
-  const canPick = editable && upload === undefined && !received;
+  const canPick = editable && !asking && upload === undefined && (!received || row.state === "ready" || row.state === "errored");
+  const pickLabel = row?.state === "uploading" ? text.pickSame : row?.state === "ready" ? text.replace : row?.state === "errored" ? text.pickOther : text.pick;
   const fileName = upload?.fileName ?? row?.fileName ?? "";
   const held = row?.state === "uploaded" ? blocked[row.id] : undefined;
 
@@ -107,19 +125,26 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
       {received && (
         <div className="flex flex-col gap-1">
           <p className="text-body break-words">{row.fileName}</p>
-          <p className="text-body-s text-text-2">{t(text.states[row.state], { size: row.size })}</p>
+          <p className="text-body-s text-text-2">{t(text.states[row.state], { size: row.size, duration: row.duration })}</p>
+          {row.tooLong && <p className="text-body-s text-text-2">{text.tooLong}</p>}
+          {row.state === "uploaded" && held === undefined && row.deletesOn !== null && <p className="text-body-s text-text-2">{t(text.deletesOn, { date: row.deletesOn })}</p>}
+          {row.state === "errored" && row.deletesOn !== null && <p className="text-body-s text-text-2">{t(text.erroredDeletesOn, { date: row.deletesOn })}</p>}
         </div>
       )}
       {received && held !== undefined && (
         <InlineAlert tone="warning" live>
-          {BLOCKED[held]}
+          {t(BLOCKED[held], { date: row.deletesOn ?? "" })}
         </InlineAlert>
       )}
+      {received && (row.slowInMs === 0 || (row.slowInMs !== null && lateFor === row.id)) && <InlineAlert tone="neutral">{text.slow}</InlineAlert>}
+      {row?.replacing != null && <p className="text-body-s break-words text-text-2">{t(text.replacing, { file: row.replacing.fileName, duration: row.replacing.duration })}</p>}
+      {row?.tolerance != null && <InlineAlert tone="warning">{row.tolerance}</InlineAlert>}
+      {row?.currentId != null && hydrated && <VideoPreview key={row.currentId} course={course} lesson={lesson} />}
 
       {canPick && !hydrated && <p className="text-body-s text-text-2">{text.needsJavascript}</p>}
       {canPick && hydrated && (
         <FileUpload
-          label={row?.state === "uploading" ? text.pickSame : text.pick}
+          label={pickLabel}
           hint={maxText === "" ? text.hintNoLimit : t(text.hint, { max: maxText })}
           accept={VIDEO_EXTENSIONS.join(",")}
           onFile={onFile}
@@ -166,9 +191,9 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
           question={received ? t(text.confirmRemove, { file: fileName }) : t(text.confirmCancel, { file: fileName })}
           stay={received ? text.keep : text.keepUploading}
           go={received ? text.remove : text.cancel}
-          onStay={() => setAsking(false)}
+          onStay={() => setAskingFor(null)}
           onGo={() => {
-            setAsking(false);
+            setAskingFor(null);
             remove(lesson, video);
           }}
         />
@@ -187,7 +212,7 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
               </Button>
             )}
             {upload?.phase !== "checking" && upload?.phase !== "starting" && upload?.phase !== "removing" && (
-              <Button type="button" variant="danger" onClick={() => setAsking(true)}>
+              <Button type="button" variant="danger" onClick={() => setAskingFor(video)}>
                 {received ? text.remove : text.cancel}
               </Button>
             )}

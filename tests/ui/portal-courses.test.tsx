@@ -48,7 +48,7 @@ const course = {
   teacherName: "Ana Ruiz",
   practiceName: "Respiración",
   coverTone: 3,
-  draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, modulesWithLessons: 1 },
+  draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
 };
 
 /** Lo que pinta el comodín en esa ruta, ya resuelta la sección del servidor. */

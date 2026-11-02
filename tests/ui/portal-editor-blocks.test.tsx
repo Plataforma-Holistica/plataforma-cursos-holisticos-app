@@ -46,7 +46,7 @@ const choices: DraftChoices = {
     { id: P1, name: "Respiración", tone: 3, active: true },
     { id: P2, name: "Yoga", tone: 5, active: true },
   ],
-  levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 }, videoMaxBytes: 5368709120 };
+  levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 }, videoMaxBytes: 5368709120, lessonTolerance: null };
 
 const show = (search: Record<string, string> = {}, changes: Partial<DraftCourse> = {}) => ({
   user: userEvent.setup(),

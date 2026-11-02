@@ -5,7 +5,7 @@ import type { SessionCheck } from "@/services/account/admission";
 import type { Capability, TeamCheck, TeamStanding } from "@/services/account/team";
 
 import { createMediaGrant } from "./grant";
-import type { BatchRecord, DownloadHit, HeartbeatBeat, LessonVideo, OpenedPlayback, PlaybackOpening, Presence, ResourceFacts, ResourceFile, WatchFacts } from "./records";
+import type { BatchRecord, DownloadHit, DraftVideoFacts, HeartbeatBeat, LessonVideo, OpenedPlayback, PlaybackOpening, Presence, ResourceFacts, ResourceFile, WatchFacts } from "./records";
 
 // La función única de medios, con todo lo de fuera simulado: a quién se le pregunta qué, en
 // qué orden, y qué se contesta. Contra la base de verdad, en
@@ -70,6 +70,7 @@ const LIVE_SEEN = {
 
 const RESOURCE = "e0000000-0000-4000-8000-000000000006";
 const COURSE = "e0000000-0000-4000-8000-000000000007";
+const DRAFT_VIDEO: DraftVideoFacts = { playbackId: "PlayBorrador", provider: "mux", durationSeconds: 1200, email: "maestra@prueba.test" };
 const FILE: ResourceFile = { path: `${TEACHER}/${COURSE}/${RESOURCE}`, mime: "application/pdf", title: "Guía" };
 const DOWNLOAD_URL = "https://storage/bajar?token=t";
 const RESOURCE_PAYING: ResourceFacts = {
@@ -102,6 +103,7 @@ function grantWith(
     recorded?: BatchRecord | "throws";
     resourceFacts?: ResourceFacts | null | "throws";
     draftFile?: ResourceFile | null | "throws";
+  draftVideo?: DraftVideoFacts | null | "throws";
     hit?: DownloadHit | "throws";
     downloadUrl?: string | null;
   } = {},
@@ -130,6 +132,11 @@ function grantWith(
           calls.push(`borrador ${course} ${id}`);
           if (setup.draftFile === "throws") return Promise.reject(new Error("sin base"));
           return Promise.resolve(setup.draftFile === undefined ? FILE : setup.draftFile);
+        }),
+        draftVideo: vi.fn((_claims: VerifiedClaims, course: string, lesson: string) => {
+          calls.push(`video del borrador ${course} ${lesson}`);
+          if (setup.draftVideo === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.draftVideo === undefined ? DRAFT_VIDEO : setup.draftVideo);
         }),
         downloadHit: vi.fn(() => {
           calls.push("freno");
@@ -915,6 +922,60 @@ describe("bajar un recurso", () => {
     const service = grantWith({ downloadUrl: null });
     expect(await service.getResourceGrant(reader, RESOURCE)).toEqual({ kind: "unavailable" });
     expect(service.reported).toEqual(["resource_grant_unavailable"]);
+  });
+});
+
+describe("ver lo que subió a su borrador (PA-43)", () => {
+  it("su maestro: la guarda, el video y la firma, con su marca y sin abrir reproducción", async () => {
+    const service = grantWith();
+    const answer = await service.getDraftVideoGrant(reader, COURSE, RESOURCE);
+    expect(answer).toMatchObject({ kind: "granted", playbackId: "PlayBorrador", watermark: "maestra@prueba.test" });
+    expect(service.calls.slice(0, 2)).toEqual(["guarda de sesión", `video del borrador ${COURSE} ${RESOURCE}`]);
+    expect(service.calls.join()).not.toMatch(/reproducción|latido/);
+    expect(answer).not.toHaveProperty("playbackSessionId");
+    expect(answer).not.toHaveProperty("countsForPayout");
+  });
+
+  it.each<[string, SessionCheck, string]>([
+    ["no se supo la sesión", { kind: "unavailable" }, "unavailable"],
+    ["cuenta suspendida", { kind: "suspended" }, "suspended"],
+    ["sin sesión", { kind: "anonymous" }, "refused"],
+  ])("%s: no se pregunta por el video", async (_name, session, kind) => {
+    const service = grantWith({ session });
+    expect(await service.getDraftVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it.each<[string, unknown, unknown]>([
+    ["el curso sin forma", "nada", RESOURCE],
+    ["la lección sin forma", COURSE, 7],
+  ])("%s no llega a la base", async (_name, course, lesson) => {
+    const service = grantWith();
+    expect(await service.getDraftVideoGrant(reader, course, lesson)).toEqual({ kind: "no_video" });
+    expect(service.calls).toEqual(["guarda de sesión"]);
+  });
+
+  it("lo que la base no suelta se ve igual que lo que no existe", async () => {
+    const service = grantWith({ draftVideo: null });
+    expect(await service.getDraftVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "no_video" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("lo del proveedor de prueba no tiene qué reproducir", async () => {
+    const service = grantWith({ draftVideo: { ...DRAFT_VIDEO, provider: "test" } });
+    expect(await service.getDraftVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "no_video" });
+  });
+
+  it("sin marca no hay video", async () => {
+    const service = grantWith({ draftVideo: { ...DRAFT_VIDEO, email: null } });
+    expect(await service.getDraftVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["media_watermark_unavailable"]);
+  });
+
+  it("si no se supo, se dice y se reporta", async () => {
+    const service = grantWith({ draftVideo: "throws" });
+    expect(await service.getDraftVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["media_facts_unavailable"]);
   });
 });
 

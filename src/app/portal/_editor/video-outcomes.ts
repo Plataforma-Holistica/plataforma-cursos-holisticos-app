@@ -31,6 +31,12 @@ export type VideoRemoveStep = { kind: "removed" } | { kind: "problem"; problem: 
 export type VideoBlockedKind = "throttled" | "over_minutes" | "closed" | "failing";
 export type VideoCheckStep = { blocked: Record<string, VideoBlockedKind> };
 
+/** Lo que contesta pedir la vista previa. La caducidad no viaja: el reproductor pide otra dirección cuando Mux le dice que la suya caducó. */
+export type VideoPreviewStep =
+  | { kind: "granted"; playbackId: string; tokens: { playback: string; thumbnail: string; storyboard: string }; speeds: number[]; watermark: string }
+  | { kind: "no_video" }
+  | { kind: "unavailable" };
+
 export const VIDEO_BEGIN_PROBLEMS: Readonly<Record<string, VideoProblem>> = {
   busy: "busy",
   closed: "closed",
