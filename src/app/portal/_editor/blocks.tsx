@@ -23,6 +23,7 @@ import { editorAction } from "./actions";
 import { DATA_ID, LESSON_ID, MODULE_ID, RESOURCES_ID, STRUCTURE_ID } from "./anchors";
 import { editorButton, type BlockState, type Problems, type Values } from "./outcomes";
 import { dropButton, stepTo, type Dragged } from "./reorder";
+import { VideoBlock } from "./video-block";
 import { ResourcesBlock } from "./resources";
 import type { EditorView, ModuleRow, Option, Selected } from "./rows";
 import { STRUCTURE_KEY, useUnsaved } from "./unsaved";
@@ -922,6 +923,7 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
       ) : (
         isLesson && <p className="whitespace-pre-line text-text-2">{selected.description}</p>
       )}
+      {isLesson && <VideoBlock lesson={selected.id} row={selected.video} editable={view.editable} maxBytes={view.videoLimits.maxBytes} maxText={view.videoLimits.maxText} />}
       {isLesson && <ResourcesBlock course={view.course} lesson={selected.id} items={selected.resources} editable={view.editable} self={view.paths.self} limits={view.resourceLimits} />}
     </section>
   );

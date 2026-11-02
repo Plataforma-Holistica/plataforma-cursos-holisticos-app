@@ -124,7 +124,7 @@ describe("solo la función única de medios firma", () => {
     expect(naming(/from "\.\/resource-files"/)).toEqual(["src/services/media/media.ts"]);
     // Las funciones de la base que sueltan la ruta y el freno se llaman en un solo archivo.
     expect(naming(/\bresource_object\b|\bresource_draft_object\b|\bresource_download_hit\b|\bresource_facts\b/)).toEqual(["src/services/media/records.ts"]);
-    expect(naming(/adapters\/supabase\/storage/)).toEqual(["src/services/media/resource-files.ts"]);
+    expect(naming(/adapters\/supabase\/storage/)).toEqual(["src/services/media/resource-files.ts", "src/services/media/video-files.ts"]);
     expect(naming(/services\/media\/resource-files/)).toEqual(["src/services/drafts/editor.ts", "src/services/drafts/resources.ts"]);
     // Sin `upsert`: un segundo envío con la misma dirección no reemplaza lo que se leyó al confirmar.
     expect(readFileSync(join(src, "adapters/supabase/storage.ts"), "utf8")).not.toMatch(/x-upsert|upsert:\s*true/);

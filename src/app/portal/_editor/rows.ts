@@ -3,7 +3,7 @@ import { clockTime, longDate, PRODUCT_TIME_ZONE, productDay } from "@/app/_lib/d
 import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
 import { portalCoursePath, ROUTES } from "@/services/account/navigation";
-import type { CourseState, DraftChoices, DraftCourse } from "@/services/drafts/editor";
+import type { CourseState, DraftChoices, DraftCourse, DraftVideo } from "@/services/drafts/editor";
 import type { StatusTone } from "@/ui/status-badge";
 
 import { editorButton, moveTarget } from "./outcomes";
@@ -64,10 +64,18 @@ export interface ModuleRow {
   lessons: LessonRow[];
 }
 
+/** El video de una lección: lo que está en camino, y si no, el vigente. */
+export interface VideoRow {
+  id: string;
+  state: DraftVideo["state"];
+  fileName: string;
+  size: string;
+}
+
 export type Selected =
   | { kind: "course" }
   | { kind: "module"; id: string; title: string; place: string; lessons: number; save: string; askDelete: string; remove: string }
-  | { kind: "lesson"; id: string; title: string; place: string; description: string | null; save: string; askDelete: string; remove: string; resources: ResourceRow[] };
+  | { kind: "lesson"; id: string; title: string; place: string; description: string | null; save: string; askDelete: string; remove: string; resources: ResourceRow[]; video: VideoRow | null };
 
 export interface EditorView {
   course: string;
@@ -93,6 +101,8 @@ export interface EditorView {
     resources: ResourceRow[];
   };
   resourceLimits: { maxBytes: number | null; maxText: string; perPlace: number | null };
+  videoLimits: { maxBytes: number | null; maxText: string };
+  lessonIds: string[];
   structure: { addModule: string; modules: ModuleRow[] };
   selected: Selected;
 }
@@ -135,6 +145,12 @@ function options(list: readonly { id: string; name: string; active: boolean }[],
   return list.map((item) => ({ value: item.id, label: item.active ? item.name : t(inactive, { name: item.name }) }));
 }
 
+function videoRow(draft: DraftCourse, lesson: string): VideoRow | null {
+  const here = draft.videos.filter((video) => video.lessonId === lesson);
+  const shown = here.find((video) => !video.isCurrent) ?? here[0];
+  return shown === undefined ? null : { id: shown.id, state: shown.state, fileName: shown.fileName, size: sizeText(shown.sizeBytes) };
+}
+
 export function editorView(
   draft: DraftCourse,
   choices: DraftChoices,
@@ -164,6 +180,7 @@ export function editorView(
       askDelete: editorButton.askDeleteLesson(lesson.id),
       remove: editorButton.deleteLesson(lesson.id, lesson.revision),
       resources: resourceRows(draft, lesson.id),
+      video: videoRow(draft, lesson.id),
     };
     self = link({ lesson: lesson.id });
   } else if (moduleHit !== undefined) {
@@ -238,6 +255,11 @@ export function editorView(
       maxText: choices.resourceLimits.maxBytes === null ? "" : sizeText(choices.resourceLimits.maxBytes),
       perPlace: choices.resourceLimits.perPlace,
     },
+    videoLimits: {
+      maxBytes: choices.videoMaxBytes,
+      maxText: choices.videoMaxBytes === null ? "" : sizeText(choices.videoMaxBytes),
+    },
+    lessonIds: draft.modules.flatMap((module) => module.lessons.map((lesson) => lesson.id)),
     structure: { addModule: editorButton.addModule(draft.structureRevision), modules },
     selected,
   };
