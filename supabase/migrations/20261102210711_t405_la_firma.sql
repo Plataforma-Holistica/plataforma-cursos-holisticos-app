@@ -11,8 +11,10 @@
 --
 -- Por qué es así:
 --   · `course_id` no tiene clave foránea al registro: la prueba sobrevive a borrar el curso. `teacher_id` y las personas sí la tienen.
---   · Una sola lista de lo que falta (`course_readiness`), para PA-42, PA-44 y enviar. Cuenta lo que no está listo aunque haya una vigente: RF-606 no deja enviar con algo
---     procesando o con error, también un reemplazo. Y un reemplazo ya listo sin promover: lo que se envía es lo que se ve.
+--   · Una sola lista de lo que falta (`course_readiness`), para PA-44 y enviar, y para PA-42 desde la tercera solicitud. Cuenta lo que no está listo aunque haya una vigente: RF-606
+--     no deja enviar con algo procesando o con error, también un reemplazo. Y un reemplazo ya listo sin promover: lo que se envía es lo que se ve. Un recurso pendiente vencido no
+--     cuenta (la regla de `resource_begin`): el editor no lista los pendientes y su repaso lo corre una persona, así que el maestro no tendría cómo salir.
+--   · Lo que se vio lleva también el número de envío: un formulario que llega tarde, con la misma huella, ya devuelto el curso, no firma otra vez sin un acto nuevo del maestro.
 --   · La huella es de la forma canónica de la fotografía sin `captions_ready`. Unos subtítulos que terminan después no piden firmar otra vez. `content_revision` no sirve como «lo que
 --     se vio»: promover un video no la sube.
 --   · Los candados: la fila del maestro, las dos listas (las mismas de desactivar), el curso, y la fila del registro `for update`. Lo que se lee, se lee después, en otra sentencia:
@@ -45,7 +47,7 @@ create table public.course_reviews (
   constraint course_reviews_hash_length check (octet_length(content_sha256) = 32),
   constraint course_reviews_result_consistent check (
     (result = 'pending') = (reviewed_at is null) and (result = 'pending') = (reviewed_by is null)),
-  constraint course_reviews_rejection_has_reason check (result <> 'rejected' or reason is not null)
+  constraint course_reviews_rejection_has_reason check (result <> 'rejected' or (reason is not null and btrim(reason) <> ''))
 );
 comment on table public.course_reviews is 'Cada envío a revisión: la fotografía de lo que se envió, su huella y el resultado (RF-606, RF-607, T-405). Solo se inserta, y solo cambia una vez, de pendiente a decidido. Nadie de la aplicación la lee de frente.';
 -- Un curso no puede tener dos envíos pendientes a la vez.
@@ -172,9 +174,10 @@ as $$
     left join public.draft_videos o on o.lesson_id = l.id and not o.is_current
     where l.course_id = p_course and (c.id is null or o.id is not null)
     union all
-    select 7, 0, 0, pg_catalog.jsonb_build_object('what', 'resource_pending', 'resource', r.id, 'lesson', r.lesson_id, 'title', r.title)
+    -- Lo pendiente que sigue vivo, con lo que pide quitarlo. Lo vencido ya no cuenta, aunque el repaso no haya pasado.
+    select 7, 0, 0, pg_catalog.jsonb_build_object('what', 'resource_pending', 'resource', r.id, 'lesson', r.lesson_id, 'title', r.title, 'revision', r.revision)
     from public.draft_resources r
-    where r.course_id = p_course and r.state = 'pending'
+    where r.course_id = p_course and r.state = 'pending' and r.created_at > now() - interval '3 hours'
   ) as x
 $$;
 revoke all on function private.course_readiness(uuid) from public;
@@ -287,12 +290,13 @@ begin
       'id', v_annex.id, 'version', v_annex.version, 'title', v_annex.title, 'body', v_annex.body, 'effective_from', v_annex.effective_from),
     'term_years', v_term,
     'statement', private.course_statement(v_annex.version, v_title, v_version, v_term),
+    'submission_no', coalesce((select pg_catalog.max(c.submission_no) from public.course_reviews c where c.course_id = p_course), 0) + 1,
     'content_sha256', pg_catalog.encode(private.course_snapshot_hash(private.course_snapshot(p_course)), 'hex'));
 end
 $$;
 
 -- Enviar: lleva lo que se vio. Con lo mismo, un doble envío contesta `submitted` sin firmar otra vez. Quien llama da la dirección y el navegador; la sesión y su nivel los lee la base.
-create function private.course_submit(p_course uuid, p_annex uuid, p_seen_hash text, p_term integer, p_ip inet, p_user_agent text) returns jsonb
+create function private.course_submit(p_course uuid, p_annex uuid, p_seen_hash text, p_term integer, p_submission integer, p_ip inet, p_user_agent text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -307,12 +311,13 @@ declare
   v_snapshot jsonb;
   v_hash bytea;
   v_statement text;
+  v_next integer;
   v_review uuid;
 begin
   if v_teacher is null then
     return private.draft_refusal();
   end if;
-  if p_course is null or p_annex is null or p_seen_hash is null or p_term is null then
+  if p_course is null or p_annex is null or p_seen_hash is null or p_term is null or p_submission is null then
     return pg_catalog.jsonb_build_object('answer', 'invalid');
   end if;
   perform private.catalog_lock('practices');
@@ -328,7 +333,7 @@ begin
         select 1 from public.course_reviews c
         join public.licenses l on l.course_review_id = c.id
         where c.course_id = p_course and c.result = 'pending' and pg_catalog.encode(c.content_sha256, 'hex') = p_seen_hash
-          and l.legal_document_id = p_annex and l.term_years = p_term) then
+          and l.legal_document_id = p_annex and l.term_years = p_term and c.submission_no = p_submission) then
       return pg_catalog.jsonb_build_object('answer', 'submitted');
     end if;
     return pg_catalog.jsonb_build_object('answer', 'not_editable');
@@ -349,7 +354,8 @@ begin
   end if;
   v_snapshot := private.course_snapshot(p_course);
   v_hash := private.course_snapshot_hash(v_snapshot);
-  if v_annex.id <> p_annex or v_term <> p_term or pg_catalog.encode(v_hash, 'hex') <> p_seen_hash then
+  v_next := coalesce((select pg_catalog.max(c.submission_no) from public.course_reviews c where c.course_id = p_course), 0) + 1;
+  if v_annex.id <> p_annex or v_term <> p_term or pg_catalog.encode(v_hash, 'hex') <> p_seen_hash or v_next <> p_submission then
     return pg_catalog.jsonb_build_object('answer', 'changed');
   end if;
   if p_ip is null and not exists (select 1 from private.local_flags f where f.flag = 'legal_drafts') then
@@ -357,9 +363,7 @@ begin
   end if;
   v_statement := private.course_statement(v_annex.version, v_draft.title, v_draft.version, v_term);
   insert into public.course_reviews (course_id, teacher_id, submission_no, is_revision, course_version, content_snapshot, content_sha256, submitted_by)
-  values (p_course, v_teacher,
-          coalesce((select pg_catalog.max(c.submission_no) from public.course_reviews c where c.course_id = p_course), 0) + 1,
-          false, v_draft.version, v_snapshot, v_hash, v_actor)
+  values (p_course, v_teacher, v_next, false, v_draft.version, v_snapshot, v_hash, v_actor)
   returning id into v_review;
   insert into public.licenses (course_review_id, course_id, teacher_id, legal_document_id, term_years, accepted_statement, accepted_statement_sha256,
                                accepted_by, ip, user_agent, session_id, aal)
@@ -372,9 +376,9 @@ end
 $$;
 
 revoke all on function private.course_submit_preview(uuid) from public;
-revoke all on function private.course_submit(uuid, uuid, text, integer, inet, text) from public;
+revoke all on function private.course_submit(uuid, uuid, text, integer, integer, inet, text) from public;
 grant execute on function private.course_submit_preview(uuid) to app_service;
-grant execute on function private.course_submit(uuid, uuid, text, integer, inet, text) to app_service;
+grant execute on function private.course_submit(uuid, uuid, text, integer, integer, inet, text) to app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar un curso rechazado se lleva el curso, y su envío y su licencia se quedan: no tienen clave foránea al registro. Lo que se publicó alguna vez contesta `not_editable`, antes
@@ -527,7 +531,7 @@ as $$
     values ('public.course_reviews', 'course_reviews'), ('public.licenses', 'licenses')),
   submission_functions (signature, server) as (
     values ('private.course_submit_preview(uuid)', true),
-           ('private.course_submit(uuid, uuid, text, integer, inet, text)', true),
+           ('private.course_submit(uuid, uuid, text, integer, integer, inet, text)', true),
            ('private.course_annex()', false),
            ('private.course_readiness(uuid)', false),
            ('private.course_snapshot(uuid)', false),
@@ -560,20 +564,21 @@ as $$
   join pg_catalog.pg_constraint k on k.conrelid = t.table_name::regclass and k.contype = 'f'
   where k.confrelid in ('public.course_registry'::regclass, 'public.course_drafts'::regclass)
   union all
-  -- Sus disparadores, con su función y prendidos. El tipo es la suma de fila (1), antes (2), insertar (4), borrar (8), cambiar (16) y vaciar (32).
+  -- Sus disparadores, con su función, sus argumentos y prendidos: de los argumentos depende que el origen y la fotografía no pasen a la auditoría, y qué se puede vaciar de una
+  -- licencia. El tipo es la suma de fila (1), antes (2), insertar (4), borrar (8), cambiar (16) y vaciar (32).
   select 'evidence table without trigger ' || g.name, g.table_name
   from (values
       ('public.course_reviews', 'course_reviews_guard', 'private.guard_course_review()', 27),
       ('public.course_reviews', 'ledger_no_truncate', 'private.reject_mutation()', 34),
-      ('public.course_reviews', 'audit_changes', 'private.audit_row_change()', 21),
-      ('public.licenses', 'licenses_guard', 'private.allow_only_redaction()', 27),
+      ('public.course_reviews', 'audit_changes', 'private.audit_row_change(''content'', ''content_snapshot'')', 21),
+      ('public.licenses', 'licenses_guard', 'private.allow_only_redaction(''ip'', ''user_agent'')', 27),
       ('public.licenses', 'ledger_no_truncate', 'private.reject_mutation()', 34),
-      ('public.licenses', 'audit_changes', 'private.audit_row_change()', 21)
-    ) as g (table_name, name, func, kind)
+      ('public.licenses', 'audit_changes', 'private.audit_row_change(''content'', ''ip'', ''user_agent'', ''session_id'', ''aal'')', 21)
+    ) as g (table_name, name, call, kind)
   where not exists (
     select 1 from pg_catalog.pg_trigger tg
-    where tg.tgrelid = g.table_name::regclass and tg.tgname = g.name
-      and tg.tgfoid = g.func::regprocedure and tg.tgtype = g.kind and tg.tgenabled in ('O', 'A'))
+    where tg.tgrelid = g.table_name::regclass and tg.tgname = g.name and tg.tgtype = g.kind and tg.tgenabled in ('O', 'A')
+      and pg_catalog.pg_get_triggerdef(tg.oid) like '%EXECUTE FUNCTION ' || g.call)
   union all
   select 'evidence table with a foreign trigger', t.table_name
   from evidence_tables t
@@ -584,7 +589,7 @@ as $$
   select 'evidence table without constraint ' || c.name, c.table_name
   from (values
       ('public.course_reviews', 'course_reviews_hash_length', 'CHECK ((octet_length(content_sha256) = 32))'),
-      ('public.course_reviews', 'course_reviews_rejection_has_reason', 'CHECK (((result <> ''rejected''::public.review_result) OR (reason IS NOT NULL)))'),
+      ('public.course_reviews', 'course_reviews_rejection_has_reason', 'CHECK (((result <> ''rejected''::public.review_result) OR ((reason IS NOT NULL) AND (btrim(reason) <> ''''::text))))'),
       ('public.course_reviews', 'course_reviews_submission_uq', 'UNIQUE (course_id, submission_no)'),
       ('public.licenses', 'licenses_course_review_id_key', 'UNIQUE (course_review_id)'),
       ('public.licenses', 'licenses_statement_hash_length', 'CHECK ((octet_length(accepted_statement_sha256) = 32))')

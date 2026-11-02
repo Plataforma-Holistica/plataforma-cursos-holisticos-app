@@ -23,7 +23,7 @@ const session = randomUUID();
 const emails: string[] = [];
 const courses: string[] = [];
 
-type Answer = { answer: string; missing?: { what: string }[]; annex?: { id: string }; content_sha256?: string; term_years?: number };
+type Answer = { answer: string; missing?: { what: string }[]; annex?: { id: string }; content_sha256?: string; term_years?: number; submission_no?: number };
 
 async function inTx<T>(client: Client, work: () => Promise<T>): Promise<T> {
   await client.query("begin");
@@ -82,7 +82,7 @@ async function insertVideo(course: string, lesson: string, state: "ready" | "pro
 }
 
 const submit = (client: Client, course: string, preview: Answer) =>
-  call(client, "private.course_submit($1, $2, $3, $4, $5::inet, $6)", [course, preview.annex!.id, preview.content_sha256, preview.term_years, "203.0.113.7", "Navegador de prueba"]);
+  call(client, "private.course_submit($1, $2, $3, $4, $5, $6::inet, $7)", [course, preview.annex!.id, preview.content_sha256, preview.term_years, preview.submission_no, "203.0.113.7", "Navegador de prueba"]);
 
 const evidence = async (course: string) =>
   (await owner.query<{ reviews: number; licenses: number; state: string }>(
@@ -231,6 +231,8 @@ describe("una práctica que se desactiva mientras se envía", () => {
 
   it("si enviar va primero, quien desactiva espera y ya lo ve en uso", async () => {
     const { course, preview } = await readyCourse();
+    // Los otros casos dejan cursos en revisión con esta práctica: cuenta el de este caso, no los de antes.
+    const before = (await owner.query<{ n: number }>("select private.catalog_in_use('practices', $1) as n", [practice])).rows[0]!.n;
     await withTwo(async (first, second) => {
       await asTeacher(first);
       expect((await submit(first, course, preview)).answer).toBe("submitted");
@@ -240,7 +242,7 @@ describe("una práctica que se desactiva mientras se envía", () => {
       await first.query("commit");
       await waiting;
       const used = await second.query<{ n: number }>("select private.catalog_in_use('practices', $1) as n", [practice]);
-      expect(used.rows[0]?.n).toBeGreaterThanOrEqual(1);
+      expect(used.rows[0]?.n).toBe(before + 1);
     });
     expect((await evidence(course)).state).toBe("in_review");
   });
