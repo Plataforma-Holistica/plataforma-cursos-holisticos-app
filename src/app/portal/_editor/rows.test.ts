@@ -30,6 +30,7 @@ const draft: DraftCourse = {
   updatedAt: "2026-10-29T18:05:00.000Z",
   teacherName: "Ana Ruiz",
   resources: [],
+  videos: [],
   modules: [
     {
       id: M1,
@@ -51,6 +52,7 @@ const choices: DraftChoices = {
   ],
   levels: [{ id: LV, name: "Inicial", active: true }],
   resourceLimits: { maxBytes: 52428800, perPlace: 10 },
+  videoMaxBytes: 5368709120,
 };
 const NOW = new Date("2026-10-29T20:00:00.000Z");
 const view = (search: Record<string, string> = {}, readOnly = false, changes: Partial<DraftCourse> = {}) =>
@@ -97,6 +99,7 @@ describe("editorView", () => {
       askDelete: `ask-delete-lesson:${L2}`,
       remove: `delete-lesson:${L2}:2`,
       resources: [],
+      video: null,
     });
     expect(view({ modulo: M1 }).selected).toMatchObject({ kind: "module", id: M1, place: "Módulo 1", lessons: 2, save: `save-module:${M1}:5`, remove: `delete-module:${M1}:5` });
     expect(view({ leccion: L3 }).selected).toMatchObject({ kind: "lesson", place: "Módulo 2 · Lección 1" });
@@ -142,5 +145,31 @@ describe("editorView", () => {
   it("en solo lectura no se ofrece nada que cambie", () => {
     expect(view({}, true).editable).toBe(false);
     expect(view({}, false, { state: "in_review" })).toMatchObject({ editable: false, notice: "No se puede editar mientras está en revisión." });
+  });
+});
+
+describe("cada cuánto preguntar por los videos", () => {
+  const video = (state: DraftCourse["videos"][number]["state"], captionsReady = false): DraftCourse["videos"][number] => ({
+    id: "f0000000-0000-4000-8000-000000000001",
+    lessonId: "e0000000-0000-4000-8000-000000000001",
+    state,
+    isCurrent: state === "ready",
+    fileName: "clase.mp4",
+    sizeBytes: 1000,
+    captionsReady,
+  });
+
+  it.each([
+    [[], null],
+    [[video("uploading")], null],
+    [[video("errored")], null],
+    [[video("ready", true)], null],
+    [[video("ready")], 60],
+    [[video("uploaded")], 60],
+    [[video("creating")], 15],
+    [[video("processing")], 15],
+    [[video("ready"), video("processing")], 15],
+  ])("con %j, cada %s", (videos, every) => {
+    expect(view({}, false, { videos }).checkVideosEvery).toBe(every);
   });
 });

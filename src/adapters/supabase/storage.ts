@@ -32,6 +32,100 @@ export interface ResourceStorage {
 
 type Fetch = typeof fetch;
 
+// Los videos del borrador (T-403). La misma llave, con lo que cambia un archivo de hasta 5 GB:
+//
+//   · Sube por TUS, del navegador a `/upload/resumable/sign`, con el token de la firma en `x-signature` y sin ninguna llave (medido
+//     contra el Storage local). La firma es sin `upsert`: lo confirmado no se reemplaza (409). Dura 2 h y se valida en cada petición,
+//     así que una subida larga pide otra.
+//   · Se lee por rangos, y cada lectura dice cuánto mide el archivo.
+
+const VIDEO_BUCKET = "video-originals";
+const CONTENT_RANGE_TOTAL = /^bytes [0-9]+-[0-9]+\/([0-9]+)$/;
+
+export interface VideoStorage {
+  /** A dónde subir y con qué firma, o nulo si no se pudo firmar. */
+  signUpload: (path: string) => Promise<{ endpoint: string; token: string } | null>;
+  /** Esos bytes y cuánto mide el archivo, o nulo si no se pudieron leer (no está, o Storage falló). */
+  readRange: (path: string, start: number, length: number) => Promise<{ bytes: Uint8Array; total: number } | null>;
+  /** Borra esos objetos. Que no estén no es una falla. Lanza si Storage no contestó bien. */
+  remove: (paths: readonly string[]) => Promise<void>;
+  /** La dirección para bajar esa ruta, que vive `seconds`, o nulo si no se pudo firmar. */
+  signRead: (path: string, seconds: number) => Promise<string | null>;
+}
+
+export function createVideoStorage(base: Fetch = fetch): VideoStorage {
+  const root = () => `${getEnv().NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1`;
+  const authorized = (extra: Record<string, string> = {}) => {
+    const key = getEnv().SUPABASE_SECRET_KEY;
+    return { apikey: key, authorization: `Bearer ${key}`, ...extra };
+  };
+  const call = (url: string, init: RequestInit) => base(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  return {
+    signUpload: async (path) => {
+      try {
+        const response = await call(`${root()}/object/upload/sign/${VIDEO_BUCKET}/${path}`, {
+          method: "POST",
+          headers: authorized({ "content-type": "application/json" }),
+          body: "{}",
+        });
+        if (!response.ok) return null;
+        const body: unknown = await response.json();
+        const url = typeof body === "object" && body !== null && "url" in body ? body.url : null;
+        if (typeof url !== "string") return null;
+        const token = new URL(url, "http://storage.invalid").searchParams.get("token");
+        return token === null || token === "" ? null : { endpoint: `${root()}/upload/resumable/sign`, token };
+      } catch {
+        return null;
+      }
+    },
+    readRange: async (path, start, length) => {
+      try {
+        const response = await call(`${root()}/object/${VIDEO_BUCKET}/${path}`, { method: "GET", headers: authorized({ range: `bytes=${start}-${start + length - 1}` }) });
+        if (response.status === 200) {
+          // Sin rango viene el archivo entero. Solo se lee si dice que cabe: no se bajan 5 GB a la memoria para mirar 16 bytes.
+          const declared = Number(response.headers.get("content-length") ?? "NaN");
+          if (start !== 0 || !Number.isSafeInteger(declared) || declared > length) {
+            await response.body?.cancel();
+            return null;
+          }
+          const whole = new Uint8Array(await response.arrayBuffer());
+          return { bytes: whole, total: whole.length };
+        }
+        if (response.status !== 206) return null;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const total = CONTENT_RANGE_TOTAL.exec(response.headers.get("content-range") ?? "")?.[1];
+        return total === undefined ? null : { bytes, total: Number(total) };
+      } catch {
+        return null;
+      }
+    },
+    remove: async (paths) => {
+      if (paths.length === 0) return;
+      const response = await call(`${root()}/object/${VIDEO_BUCKET}`, {
+        method: "DELETE",
+        headers: authorized({ "content-type": "application/json" }),
+        body: JSON.stringify({ prefixes: paths }),
+      });
+      if (!response.ok) throw new Error(`storage remove: ${response.status}`);
+    },
+    signRead: async (path, seconds) => {
+      try {
+        const response = await call(`${root()}/object/sign/${VIDEO_BUCKET}/${path}`, {
+          method: "POST",
+          headers: authorized({ "content-type": "application/json" }),
+          body: JSON.stringify({ expiresIn: seconds }),
+        });
+        if (!response.ok) return null;
+        const body: unknown = await response.json();
+        const url = typeof body === "object" && body !== null && "signedURL" in body ? body.signedURL : null;
+        return typeof url === "string" && url.startsWith("/") && url.includes("?token=") ? `${root()}${url}` : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
   const root = () => `${getEnv().NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1`;
   const authorized = (extra: Record<string, string> = {}) => {

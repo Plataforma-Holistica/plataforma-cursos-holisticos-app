@@ -105,6 +105,15 @@ const resourceSchema = z.strictObject({
   position: z.number().int().min(1),
   revision: count,
 });
+const videoSchema = z.strictObject({
+  id,
+  lessonId: id,
+  state: z.enum(["uploading", "uploaded", "creating", "processing", "ready", "errored"]),
+  isCurrent: z.boolean(),
+  fileName: z.string(),
+  sizeBytes: z.number().int().min(1),
+  captionsReady: z.boolean(),
+});
 const draftRow = z.object({
   course_id: id,
   state,
@@ -119,6 +128,7 @@ const draftRow = z.object({
   updated_at: instant,
   modules: z.array(moduleSchema),
   resources: z.array(resourceSchema),
+  videos: z.array(videoSchema),
   teacher_name: z.string().nullable(),
 });
 
@@ -147,7 +157,13 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
                           'id', x.id, 'lessonId', x.lesson_id, 'title', x.title, 'kind', x.kind,
                           'sizeBytes', x.size_bytes, 'position', x.position, 'revision', x.revision)
                         order by x.place_id, x.position)
-                 from public.draft_resources x where x.course_id = d.course_id and x.state = 'ready'), '[]'::jsonb) as resources
+                 from public.draft_resources x where x.course_id = d.course_id and x.state = 'ready'), '[]'::jsonb) as resources,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                          'id', v.id, 'lessonId', v.lesson_id, 'state', v.state, 'isCurrent', v.is_current,
+                          'fileName', v.file_name, 'sizeBytes', v.size_bytes, 'captionsReady', v.captions_ready)
+                        order by v.created_at)
+                 from public.draft_videos v where v.course_id = d.course_id), '[]'::jsonb) as videos
         from public.course_drafts d
         join public.course_registry r on r.course_id = d.course_id
         where d.course_id = ${course}::uuid and d.teacher_id = (select private.current_teacher_id())`,
@@ -168,6 +184,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
     updatedAt: draft.updated_at,
     modules: draft.modules,
     resources: draft.resources,
+    videos: draft.videos,
     teacherName: draft.teacher_name,
   };
 }
@@ -178,6 +195,7 @@ const choicesRow = z.object({
   levels: z.array(z.strictObject(choice)),
   max_bytes: z.coerce.number().int().nullable(),
   per_place: z.coerce.number().int().nullable(),
+  video_max_bytes: z.coerce.number().int().nullable(),
 });
 
 /**
@@ -194,11 +212,12 @@ export async function readDraftChoices(tx: Tx, practiceId: string | null, levelI
           coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'active', x.is_active) order by x.position)
                     from public.levels x where x.is_active or x.id = ${levelId}::uuid), '[]'::jsonb) as levels,
           (private.parameter_value('RECURSO_TAMANO_MAX'))::bigint as max_bytes,
-          (private.parameter_value('RECURSOS_POR_LUGAR_MAX'))::integer as per_place`,
+          (private.parameter_value('RECURSOS_POR_LUGAR_MAX'))::integer as per_place,
+          (private.parameter_value('VIDEO_TAMANO_MAX'))::bigint as video_max_bytes`,
     choicesRow,
   );
-  if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } };
-  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place } };
+  if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null };
+  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place }, videoMaxBytes: row.video_max_bytes };
 }
 
 const resultRow = z.object({ result: z.unknown() });
@@ -318,6 +337,78 @@ export const askResourceMove = (tx: Tx, input: { course: string; resource: strin
 
 export const askResourceRemove = (tx: Tx, input: { course: string; resource: string; seen: number }) =>
   askResource(tx, sql`select private.resource_remove(${input.course}::uuid, ${input.resource}::uuid, ${input.seen}::bigint) as result`);
+
+// ---------------------------------------------------------------------------------------
+// Los videos (T-403). La ruta sale de la base y no va a ningún registro.
+
+const videoResultSchema = z.strictObject({
+  answer: z.string(),
+  video: id.optional(),
+  path: z.string().optional(),
+  mime: z.string().optional(),
+  file_name: z.string().optional(),
+  reason: z.string().optional(),
+  claim: z.string().optional(),
+  retry: z.boolean().optional(),
+  since: z.number().int().optional(),
+});
+export type VideoResult = z.infer<typeof videoResultSchema>;
+
+async function askVideo(tx: Tx, query: ReturnType<typeof sql>): Promise<VideoResult> {
+  const [row] = await tx.query(query, resultRow);
+  return videoResultSchema.parse(row?.result ?? null);
+}
+
+export const askVideoBegin = (tx: Tx, input: { course: string; lesson: string; fileName: string; mime: string; size: number }) =>
+  askVideo(tx, sql`select private.video_begin(${input.course}::uuid, ${input.lesson}::uuid, ${input.fileName}::text, ${input.mime}::text, ${input.size}::bigint) as result`);
+
+export const askVideoFile = (tx: Tx, input: { course: string; video: string }) =>
+  askVideo(tx, sql`select private.video_file(${input.course}::uuid, ${input.video}::uuid) as result`);
+
+export const askVideoConfirm = (tx: Tx, input: { course: string; video: string; contentOk: boolean | null; seconds: number | null }) =>
+  askVideo(tx, sql`select private.video_confirm(${input.course}::uuid, ${input.video}::uuid, ${input.contentOk}::boolean, ${input.seconds}::integer) as result`);
+
+export const askVideoRemove = (tx: Tx, input: { course: string; video: string }) =>
+  askVideo(tx, sql`select private.video_remove(${input.course}::uuid, ${input.video}::uuid) as result`);
+
+export const askVideoClaim = (tx: Tx, input: { course: string; video: string; provider: string }) =>
+  askVideo(tx, sql`select private.video_claim(${input.course}::uuid, ${input.video}::uuid, ${input.provider}::text) as result`);
+
+export const askVideoCreateFailed = (tx: Tx, input: { video: string; claim: string }) =>
+  askVideo(tx, sql`select private.video_create_failed(${input.video}::uuid, ${input.claim}::text) as result`);
+
+export const askVideoCreated = (tx: Tx, input: { course: string; video: string; provider: string; asset: string }) =>
+  askVideo(tx, sql`select private.video_created(${input.course}::uuid, ${input.video}::uuid, ${input.provider}::text, ${input.asset}::text) as result`);
+
+export const askVideoSettle = (tx: Tx, input: { video: string; state: string; playback: string | null; seconds: number | null; captions: boolean; error: string | null }) =>
+  askVideo(tx, sql`select private.video_settle(${input.video}::uuid, ${input.state}::text, ${input.playback}::text, ${input.seconds}::integer, ${input.captions}::boolean, ${input.error}::text) as result`);
+
+export const askVideoTrashDone = (tx: Tx, input: { course: string; id: number }) =>
+  askVideo(tx, sql`select private.video_trash_done(${input.course}::uuid, ${input.id}::bigint) as result`);
+
+const dueList = z.array(
+  z.strictObject({
+    video: id,
+    state: z.enum(["uploading", "uploaded", "creating", "processing", "ready", "errored"]),
+    provider: z.string(),
+    asset: z.string().nullable(),
+    seconds: z.number().int().nullable(),
+    current: z.boolean(),
+  }),
+);
+const trashList = z.array(
+  z.strictObject({ id: z.number().int(), provider: z.string().nullable(), asset: z.string().nullable(), path: z.string().nullable(), video: id.nullable(), since: z.number().int().nullable() }),
+);
+
+export async function askVideoDue(tx: Tx, course: string) {
+  const [row] = await tx.query(sql`select private.video_due(${course}::uuid) as result`, resultRow);
+  return dueList.parse(row?.result ?? null);
+}
+
+export async function askVideoTrashDue(tx: Tx, course: string) {
+  const [row] = await tx.query(sql`select private.video_trash_due(${course}::uuid) as result`, resultRow);
+  return trashList.parse(row?.result ?? null);
+}
 
 const unusedRow = z.object({ path: z.string() });
 

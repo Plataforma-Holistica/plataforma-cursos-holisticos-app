@@ -37,7 +37,7 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
     deleteLesson: vi.fn(() => Promise.resolve("deleted" as const)),
     moveLesson: vi.fn(() => Promise.resolve("moved" as const)),
     deleteCourse: vi.fn(() => Promise.resolve("deleted" as const)),
-    choices: vi.fn(() => Promise.resolve({ practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } })),
+    choices: vi.fn(() => Promise.resolve({ practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null })),
   };
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
   const afterDelete = vi.fn(() => Promise.resolve());
@@ -142,7 +142,7 @@ describe("leer el borrador", () => {
     const service = setup();
     expect(await service.draftChoices({ practiceId: PRACTICE, levelId: "x" })).toEqual({
       kind: "ready",
-      value: { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null } },
+      value: { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null },
     });
     expect(service.store.choices).toHaveBeenCalledExactlyOnceWith(PRACTICE, null);
   });

@@ -5,7 +5,7 @@
 -- que lo publicado nombra se borra. Las reglas del área `videos` del vigilante, del carril B, se provocan aquí.
 begin;
 \ir _ayuda.psql
-select plan(214);
+select plan(227);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7200000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -30,6 +30,21 @@ $$;
 create table pruebas.ids (k text primary key, v uuid not null);
 create function pruebas.id(p_k text) returns uuid language sql stable
 as $$ select v from pruebas.ids where k = p_k $$;
+-- La papelera da un renglón a la vez, el que lleva más sin intentarse: esto pide hasta que se repite.
+create function pruebas.papelera(p_id uuid, p_course uuid) returns jsonb
+language plpgsql as $$
+declare
+  v_all jsonb := '[]'::jsonb;
+  v_one jsonb;
+begin
+  for i in 1..60 loop
+    v_one := pruebas.rj(p_id, format('private.video_trash_due(%L)', p_course));
+    exit when v_one = '[]'::jsonb or v_all @> v_one;
+    v_all := v_all || v_one;
+  end loop;
+  return v_all;
+end
+$$;
 create function pruebas.rj(p_id uuid, p_call text) returns jsonb
 language plpgsql as $$
 declare
@@ -245,6 +260,7 @@ delete from private.rate_limit_counters where bucket = 'video_begin:' || pruebas
 create temporary table reclamo on commit drop as
   select pruebas.rj(pruebas.p(1), format('private.video_claim(%L, %L, %L)', pruebas.id('curso'), pruebas.id('v1'), 'mux')) as v;
 select is((select v ->> 'answer' from reclamo), 'claimed', 'el primero reclama');
+select is((select v ->> 'since' from reclamo), (select extract(epoch from created_at)::bigint::text from public.draft_videos where id = pruebas.id('v1')), 'y dice cuándo nació la fila: ningún asset suyo es más viejo');
 select is((select v ->> 'claim' from reclamo), (select extract(epoch from claimed_at)::text from public.draft_videos where id = pruebas.id('v1')), 'y contesta qué reclamo es');
 update public.draft_videos set claimed_at = claimed_at + interval '1 second' where id = pruebas.id('v1');
 select is(pruebas.r(pruebas.p(1), format('private.video_create_failed(%L, %L)', pruebas.id('v1'), (select v ->> 'claim' from reclamo))), 'stale', 'un reclamo viejo no revierte uno nuevo');
@@ -297,6 +313,15 @@ select pruebas.confirmar_video(pruebas.p(1), pruebas.id('curso'), pruebas.id('ca
 select pruebas.reclamar(pruebas.p(1), pruebas.id('curso'), pruebas.id('cancelado'));
 select pruebas.r(pruebas.p(1), format('private.video_remove(%L, %L)', pruebas.id('curso'), pruebas.id('cancelado')));
 select is((select count(*)::int from private.video_trash where video_id = pruebas.id('cancelado') and provider_asset_id is null), 1, 'una fila que se va con su reclamo deja el id, para buscar por passthrough');
+select ok((select claimed_since is not null from private.video_trash where video_id = pruebas.id('cancelado')), 'y desde cuándo buscar');
+select ok(not pruebas.papelera(pruebas.p(1), pruebas.id('curso')) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('cancelado'))), 'recién anotada espera: un asset recién creado puede no aparecer todavía en la lista de Mux');
+select is((select tried_at from private.video_trash where video_id = pruebas.id('cancelado')), null, 'y lo que no se dio no cuenta como intentado');
+update private.video_trash set created_at = now() - interval '4 minutes' where video_id = pruebas.id('cancelado');
+select ok(not pruebas.papelera(pruebas.p(1), pruebas.id('curso')) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('cancelado'))), 'a los 4 minutos, todavía no');
+update private.video_trash set created_at = now() - interval '6 minutes' where video_id = pruebas.id('cancelado');
+select ok(pruebas.papelera(pruebas.p(1), pruebas.id('curso')) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('cancelado'))), 'y el servidor recibe el id, para buscar antes de sacarla');
+select ok((select tried_at is not null from private.video_trash where video_id = pruebas.id('cancelado')), 'lo que se intentó se anota: lo que no sale no detiene a lo demás');
+select is((select claimed_since from private.video_trash where video_id = pruebas.id('subido') limit 1), null, 'una que nunca se reclamó no tiene nada que buscar');
 select is(pruebas.creado(pruebas.p(4), pruebas.id('cancelado'), 'AssetAjeno', pruebas.id('curso')), 'not_found', 'quien no es maestro no llena nada');
 select is(pruebas.creado(pruebas.p(1), pruebas.id('cancelado'), 'AssetSeva', pruebas.id('curso')), 'gone', 'llega después: se dice');
 select ok('AssetSeva' = any(pruebas.basura()), 'y el asset queda con nombre');
@@ -335,7 +360,7 @@ as $$ select (select revision from public.draft_lessons where id = p_lesson)::te
 create temporary table antes on commit drop as select pruebas.revisiones(pruebas.id('l1')) as r;
 select is(pruebas.asentar(pruebas.p(2), pruebas.id('v1'), 'ready'), 'not_found', 'otro maestro no asienta');
 select is(pruebas.asentar(pruebas.p(4), pruebas.id('v1'), 'ready'), 'not_found', 'una alumna tampoco');
-select is(pruebas.rj(pruebas.p(5), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1'), 'state', 'processing')), true, 'Contenido sí sabe qué preguntar: revisa');
+select is(pruebas.rj(pruebas.p(5), format('private.video_due(%L)', pruebas.id('curso'))) @> jsonb_build_array(jsonb_build_object('video', pruebas.id('v1'), 'state', 'processing', 'seconds', 600, 'current', false)), true, 'Contenido sí sabe qué preguntar: revisa, con los segundos leídos y si es la vigente');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'processing'), 'invalid', 'solo lo terminal');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready', null, 600), 'invalid', 'listo sin playback, no');
 select is(pruebas.asentar(pruebas.p(1), pruebas.id('v1'), 'ready'), 'ready', 'listo');
@@ -504,7 +529,7 @@ select ok(pruebas.rj(pruebas.p(2), format('private.video_due(%L)', pruebas.id('b
 select pruebas.r(pruebas.p(2), format('private.video_remove(%L, %L)', pruebas.id('beto'), pruebas.id('subido')));
 
 -- Vaciar la papelera: solo lo suyo. Nada que lo publicado nombre sale de ahí como borrable.
-select ok((select bool_or(e ->> 'asset' = 'Asset1') from jsonb_array_elements(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', pruebas.id('curso')))) e), 'su maestra ve qué borrar');
+select ok((select bool_or(e ->> 'asset' = 'Asset1') from jsonb_array_elements(pruebas.papelera(pruebas.p(1), pruebas.id('curso'))) e), 'su maestra ve qué borrar');
 select is(pruebas.rj(pruebas.p(2), format('private.video_trash_due(%L)', pruebas.id('curso'))), '[]'::jsonb, 'otra no');
 insert into private.video_trash (teacher_id, course_id, provider_asset_id, storage_path) values (pruebas.m(1), pruebas.id('curso'), 'AssetPublicado', 'x/y/z');
 select pruebas.como_dueno_sistema();
@@ -515,10 +540,19 @@ alter table public.video_assets enable trigger user;
 select pruebas.limpiar();
 select is(pruebas.rj(pruebas.p(2), format('private.video_trash_due(%L)', pruebas.id('curso'))), '[]'::jsonb, 'otro maestro no ve esa papelera');
 select is((select count(*)::int from private.video_trash where provider_asset_id = 'AssetPublicado'), 1, 'ni la toca');
-select ok(not coalesce((select bool_or(e ->> 'asset' = 'AssetPublicado') from jsonb_array_elements(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', pruebas.id('curso')))) e), false), 'lo que lo publicado nombra no se borra');
+select ok(not coalesce((select bool_or(e ->> 'asset' = 'AssetPublicado') from jsonb_array_elements(pruebas.papelera(pruebas.p(1), pruebas.id('curso'))) e), false), 'lo que lo publicado nombra no se borra');
 select is((select count(*)::int from private.video_trash where provider_asset_id = 'AssetPublicado'), 0, 'y sale de la papelera sin tocar nada');
 select is(pruebas.r(pruebas.p(1), format('private.video_trash_done(%L, %s)', pruebas.id('curso'), (select id from private.video_trash where provider_asset_id = 'Asset1'))), 'done', 'borrado, se anota');
 select is((select count(*)::int from private.video_trash where provider_asset_id = 'Asset1'), 0, 'y se va');
+-- Da uno a la vez, y solo ese cuenta como intentado: un renglón que se lleva toda la pasada no detiene a los demás en la siguiente.
+insert into private.video_trash (teacher_id, course_id, provider, provider_asset_id)
+select pruebas.m(1), 'a7200000-0000-0000-0099-000000000001', 'mux', x from unnest(array['Rota1', 'Rota2', 'Rota3']) x;
+select is(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', 'a7200000-0000-0000-0099-000000000001'::uuid)) -> 0 ->> 'asset', 'Rota1', 'da el primero');
+select is((select count(*)::int from private.video_trash where course_id = 'a7200000-0000-0000-0099-000000000001' and tried_at is not null), 1, 'y solo ese cuenta como intentado');
+select is(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', 'a7200000-0000-0000-0099-000000000001'::uuid)) -> 0 ->> 'asset', 'Rota2', 'la siguiente vez, otro');
+select is(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', 'a7200000-0000-0000-0099-000000000001'::uuid)) -> 0 ->> 'asset', 'Rota3', 'y otro');
+select is(pruebas.rj(pruebas.p(1), format('private.video_trash_due(%L)', 'a7200000-0000-0000-0099-000000000001'::uuid)) -> 0 ->> 'asset', 'Rota1', 'y después vuelve al que lleva más sin intentarse');
+delete from private.video_trash where course_id = 'a7200000-0000-0000-0099-000000000001';
 
 -- ---------------------------------------------------------------------------------------
 -- Una maestra suspendida.
@@ -533,7 +567,7 @@ select is(pruebas.rj(pruebas.p(3), format('private.video_due(%L)', pruebas.id('c
 select is(pruebas.r(pruebas.p(3), format('private.video_confirm(%L, %L, true, 60)', pruebas.id('caro'), pruebas.id('vc'))), 'suspended', 'ni confirma');
 select is(pruebas.r(pruebas.p(3), format('private.video_claim(%L, %L, %L)', pruebas.id('caro'), pruebas.id('vc'), 'mux')), 'suspended', 'ni gasta');
 select is(pruebas.r(pruebas.p(3), format('private.video_file(%L, %L)', pruebas.id('caro'), pruebas.id('vc'))), 'suspended', 'ni renueva su subida');
-select ok((select bool_or(e ->> 'asset' = 'AssetModulo') from jsonb_array_elements(pruebas.rj(pruebas.p(3), format('private.video_trash_due(%L)', pruebas.id('caro')))) e), 'limpiar sí: no le da nada');
+select ok((select bool_or(e ->> 'asset' = 'AssetModulo') from jsonb_array_elements(pruebas.papelera(pruebas.p(3), pruebas.id('caro'))) e), 'limpiar sí: no le da nada');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que se vence.

@@ -114,6 +114,14 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     confirmResourceAction: /const result = await confirmResource\(jar, /,
     cancelResourceAction: /await removeResource\(jar, \{ course: textOf\(fields\.course\), resource: textOf\(fields\.resource\), seen: 1 \}\);/,
   },
+  "src/app/portal/_editor/video-actions.ts": {
+    // El video de una lección (T-403): el servicio corre la guarda, y la base escribe solo a nombre del maestro activo.
+    beginVideoAction: /const result = await beginVideo\(jar, /,
+    renewVideoAction: /const result = await renewVideoUpload\(jar, /,
+    confirmVideoAction: /const result = await confirmVideo\(jar, /,
+    removeVideoAction: /const result = await removeVideo\(jar, /,
+    checkVideosAction: /const result = await checkVideos\(jar, /,
+  },
   "src/app/portal/_cursos/actions.ts": {
     // Crear y borrar un curso (T-402): el servicio corre la guarda, y la base escribe solo a nombre del
     // maestro activo. Crear lleva el testigo del formulario; borrar, la revisión que se vio.

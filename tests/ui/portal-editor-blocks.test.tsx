@@ -35,6 +35,7 @@ const draft: DraftCourse = {
   updatedAt: new Date().toISOString(),
   teacherName: "Ana Ruiz",
   resources: [],
+  videos: [],
   modules: [
     { id: M1, title: "Inicio", position: 1, revision: 5, lessons: [{ id: L1, title: "Una", description: null, position: 1, revision: 1 }] },
     { id: M2, title: "Cierre", position: 2, revision: 1, lessons: [] },
@@ -45,7 +46,7 @@ const choices: DraftChoices = {
     { id: P1, name: "Respiración", tone: 3, active: true },
     { id: P2, name: "Yoga", tone: 5, active: true },
   ],
-  levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 } };
+  levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 }, videoMaxBytes: 5368709120 };
 
 const show = (search: Record<string, string> = {}, changes: Partial<DraftCourse> = {}) => ({
   user: userEvent.setup(),
