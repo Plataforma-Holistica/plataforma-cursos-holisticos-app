@@ -13,6 +13,8 @@
 begin;
 \ir _ayuda.psql
 select plan(65);
+-- Rehacer la base entre las 00:00 y las 06:00 UTC del día 1 crea las particiones desde el mes en UTC, que ya es el siguiente: falta la del mes anterior en México.
+select private.create_watch_partition(to_char(date_trunc('month', timezone('America/Mexico_City', now())) - interval '1 month', 'YYYYMM')::integer);
 
 -- El mes anterior, abierto (T-601): sus latidos atrasados entran hasta su día de cierre, y así esta
 -- prueba no depende de qué día del mes corre. Sin el guardián, que no deja volver a abierto.
