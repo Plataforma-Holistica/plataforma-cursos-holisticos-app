@@ -14,6 +14,7 @@ import {
   downloadExport,
   givePeriodsCode,
   holdPayout,
+  holdPayoutForTaxData,
   rehearse,
   releasePayouts,
   requestRollup,
@@ -159,6 +160,9 @@ export async function payoutsAction(target: unknown, previous: PayoutsState, for
     case "hold":
       if (request.reason === "") return { kind: "asking", ask: { what: "hold", payout: request.payout, status: request.status }, missing: "reason", attempt };
       outcome = holdOutcome(await holdPayout(jar, { payout: request.payout, reason: request.reason, seen: request.status }), period);
+      break;
+    case "hold_for_tax":
+      outcome = holdOutcome(await holdPayoutForTaxData(jar, { payout: request.payout, seen: request.status }), period);
       break;
     case "ask_unhold":
       return { kind: "asking", ask: { what: "unhold", payout: request.payout, seen: request.seen }, missing: null, attempt };

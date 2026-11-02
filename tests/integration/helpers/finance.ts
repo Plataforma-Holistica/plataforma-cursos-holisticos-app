@@ -100,6 +100,22 @@ export async function retire(client: Client, finance: Finance): Promise<void> {
   await client.query("set local session_replication_role = origin");
 }
 
+/**
+ * Una regla en 0 y los datos fiscales de un maestro, para las pruebas de liberar que no tratan de impuestos (T-409): con ellos las cifras no cambian. Dentro de una
+ * transacción del dueño declarado sistema; la regla se quita al terminar, con `session_replication_role = replica`.
+ */
+export async function zeroWithholding(client: Client, teacher: string, by: string): Promise<void> {
+  await client.query(
+    `insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+     values ('612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de las pruebas')`,
+  );
+  await client.query(
+    `insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version, created_by)
+     values ($1, 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person', decode('010001' || repeat('ab', 46), 'hex'), '7771', 1, $2)`,
+    [teacher, by],
+  );
+}
+
 /** La respuesta de una función de finanzas del periodo: cerrar lleva el ensayo mostrado y liberar la huella vista. */
 export const outcomeOf = async (client: Client, call: string, arg: unknown) =>
   (await client.query<{ r: Record<string, unknown> }>(`select private.${call}(${SEEN_BY[call] ?? "$1"}) as r`, [arg])).rows[0]!.r;

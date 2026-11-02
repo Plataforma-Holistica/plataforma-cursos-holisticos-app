@@ -143,11 +143,11 @@ function periodsOn(owner: Client) {
   return { ...panel, reported, services };
 }
 
-function payoutsOn(owner: Client, releaseEnabled = true) {
+function payoutsOn(owner: Client) {
   const services = testServices({ teamStore: teamStoreOn(owner) });
   const reported: string[] = [];
   const panel = createPayoutsPanel(
-    { report: (code) => (reported.push(code), Promise.resolve()), releaseEnabled: () => releaseEnabled },
+    { report: (code) => (reported.push(code), Promise.resolve()) },
     { teamStanding: services.teamStanding, store: payoutStoreOn(owner) },
   );
   return { ...panel, reported };
@@ -269,10 +269,8 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
         to: "calculated",
       });
 
-      // Liberar: retener y soltar dejan la misma vista, así que la huella de antes sirve; una inventada, no. El
-      // freno de producción no le pregunta a la base.
+      // Liberar: retener y soltar dejan la misma vista, así que la huella de antes sirve; una inventada, no.
       expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: "ab".repeat(32) })).toMatchObject({ kind: "answered", answer: "preview_changed" });
-      expect(await payoutsOn(owner, false).releasePayouts(jar, { period: PERIOD, seen: read.payouts.release!.fingerprint })).toEqual({ kind: "not_enabled" });
       expect(await payouts.releasePayouts(jar, { period: PERIOD, seen: read.payouts.release!.fingerprint })).toMatchObject({ kind: "answered", answer: "released" });
       const released = await payouts.financePayouts(jar, claims, PERIOD);
       if (released.kind !== "payouts" || released.payouts.period === null) throw new Error("No leyó las liquidaciones.");

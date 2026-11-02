@@ -125,7 +125,7 @@ const SEEN = "ab".repeat(32);
 describe("las liquidaciones (PA-81)", () => {
   it("cada decisión abre su transacción a nombre de las claims, con su motivo", async () => {
     const release = payoutRunnerWith({ outcome: "released", period_status: "paid" });
-    expect(await release.store.release(claims, 202710, SEEN)).toEqual({ answer: "released", blockingPeriod: null, periodStatus: "paid" });
+    expect(await release.store.release(claims, 202710, SEEN)).toEqual({ answer: "released", blockingPeriod: null, teachers: [], periodStatus: "paid" });
     expect(release.opened).toEqual([{ claims, reason: "payouts_release" }]);
     const hold = payoutRunnerWith({ outcome: "changed", status: "awaiting_invoice" });
     expect(await hold.store.hold(claims, PAYOUT, "Se revisa.", "calculated")).toEqual({ answer: "changed", status: "awaiting_invoice" });
@@ -143,6 +143,7 @@ describe("las liquidaciones (PA-81)", () => {
       answer: "previous_not_released",
       blockingPeriod: 202709,
       periodStatus: null,
+      teachers: [],
     });
   });
 

@@ -15,6 +15,7 @@ import {
   askRehearsal,
   askRelease,
   askRollup,
+  askHoldForTax,
   askUnhold,
   askVoidFounder,
   closeAnswerOf,
@@ -99,6 +100,8 @@ export function createPayoutStore(run: typeof asServer = asServer): PayoutStore 
     },
     hold: async (claims, payout, reason, seen) =>
       heldOf(await retried(() => run({ claims, reason: "payout_hold" }, (tx) => askHold(tx, payout, reason, seen)))),
+    holdForTax: async (claims, payout, seen) =>
+      heldOf(await retried(() => run({ claims, reason: "payout_hold_for_tax" }, (tx) => askHoldForTax(tx, payout, seen)))),
     unhold: async (claims, payout, note, seen) => {
       try {
         return unheldOf(await retried(() => run({ claims, reason: "payout_unhold" }, (tx) => askUnhold(tx, payout, note, seen))));
