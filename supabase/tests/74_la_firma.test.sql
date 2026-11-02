@@ -562,10 +562,13 @@ alter function private.course_readiness(uuid) set search_path = '';
 alter function private.course_statement(integer, text, integer, integer) rename to course_statement_otra;
 select ok('submission function missing' = any(pruebas.vigila()), 'una función que falta se nota');
 alter function private.course_statement_otra(integer, text, integer, integer) rename to course_statement;
+select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
+
+-- Va al último, como en la 56: devolverle la función a su dueño pediría ser el nuevo. Lo deshace el rollback del final, con el permiso de crear en el esquema que pide el dueño nuevo.
+grant app_service to postgres;
+grant create on schema private to app_service;
 alter function private.course_annex() owner to app_service;
 select ok('submission function not owned by the table owner' = any(pruebas.vigila()), 'una función de otro dueño se nota');
-alter function private.course_annex() owner to postgres;
-select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
 
 select * from finish();
 rollback;
