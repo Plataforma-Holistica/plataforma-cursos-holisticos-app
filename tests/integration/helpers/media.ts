@@ -6,6 +6,7 @@ import type { MediaStore } from "@/services/media/grant";
 import {
   openPlayback,
   readDraftResourceFile,
+  readDraftVideo,
   readLessonVideo,
   readPlaybackSpeeds,
   readResourceFacts,
@@ -29,6 +30,14 @@ export function mediaStoreOn(owner: Client): MediaStore {
     execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
   };
   return {
+    draftVideo: async (claims, courseId, lessonId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await readDraftVideo(tx, courseId, lessonId);
+      } finally {
+        await asOwner(owner);
+      }
+    },
     lessonVideo: async (claims, lessonId) => {
       await asOwner(owner);
       await owner.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [

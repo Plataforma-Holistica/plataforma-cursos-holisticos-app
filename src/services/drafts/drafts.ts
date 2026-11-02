@@ -78,6 +78,13 @@ export interface DraftVideo {
   fileName: string;
   sizeBytes: number;
   captionsReady: boolean;
+  /** Lo que midió el proveedor. */
+  seconds: number | null;
+  errorCode: string | null;
+  /** Desde cuándo se está procesando. */
+  claimedAt: string | null;
+  /** Cuándo se borra si sigue así: solo lo que todavía no está listo. */
+  deletesAt: string | null;
 }
 
 export interface DraftCourse {
@@ -117,6 +124,8 @@ export interface DraftChoices {
   resourceLimits: { maxBytes: number | null; perPlace: number | null };
   /** El tope de un video, para decirlo y revisar antes de subir. Nulo si el parámetro no tiene valor. */
   videoMaxBytes: number | null;
+  /** Lo acordado para una lección (`TOLERANCIA_LECCION`). Avisa y no bloquea. Nulo si el parámetro no tiene valor. */
+  lessonTolerance: { minSeconds: number; maxSeconds: number } | null;
 }
 
 /** Lo que contesta cada función de la base. */

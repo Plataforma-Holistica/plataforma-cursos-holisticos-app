@@ -6,6 +6,7 @@ import type { MediaStore } from "./grant";
 import {
   openPlayback,
   readDraftResourceFile,
+  readDraftVideo,
   readLessonVideo,
   readPlaybackSpeeds,
   readResourceFacts,
@@ -39,4 +40,5 @@ export const databaseMediaStore: MediaStore = {
   resourceFacts: (claims, resourceId) => asServer({ claims, reason: "media_grant" }, (tx) => readResourceFacts(tx, resourceId)),
   draftResourceFile: (claims, courseId, resourceId) => asServer({ claims, reason: "media_grant" }, (tx) => readDraftResourceFile(tx, courseId, resourceId)),
   downloadHit: (claims) => asServer({ claims, reason: "resource_download" }, (tx) => recordDownloadHit(tx)),
+  draftVideo: (claims, courseId, lessonId) => asServer({ claims, reason: "media_grant" }, (tx) => readDraftVideo(tx, courseId, lessonId)),
 };

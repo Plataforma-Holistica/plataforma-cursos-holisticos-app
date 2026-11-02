@@ -52,7 +52,7 @@ const draft: DraftCourse = {
     { id: M2, title: "Cierre", position: 2, revision: 1, lessons: [] },
   ],
 };
-const choices: DraftChoices = { practices: [], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 }, videoMaxBytes: 5368709120 };
+const choices: DraftChoices = { practices: [], levels: [], resourceLimits: { maxBytes: 52428800, perPlace: 10 }, videoMaxBytes: 5368709120, lessonTolerance: null };
 
 const show = (readOnly = false) => ({
   user: userEvent.setup(),

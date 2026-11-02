@@ -46,6 +46,7 @@ const draft: DraftCourse = {
   ],
 };
 const choices: DraftChoices = {
+  lessonTolerance: { minSeconds: 900, maxSeconds: 1500 },
   practices: [
     { id: P1, name: "Respiración", tone: 3, active: false },
     { id: P2, name: "Yoga", tone: 5, active: true },
@@ -157,6 +158,10 @@ describe("cada cuánto preguntar por los videos", () => {
     fileName: "clase.mp4",
     sizeBytes: 1000,
     captionsReady,
+    seconds: null,
+    errorCode: null,
+    claimedAt: null,
+    deletesAt: null,
   });
 
   it.each([
@@ -171,5 +176,89 @@ describe("cada cuánto preguntar por los videos", () => {
     [[video("ready"), video("processing")], 15],
   ])("con %j, cada %s", (videos, every) => {
     expect(view({}, false, { videos }).checkVideosEvery).toBe(every);
+  });
+});
+
+describe("el video de una lección", () => {
+  const LESSON = "e0000000-0000-4000-8000-000000000001";
+  const NOW = "2026-11-10T18:00:00.000Z";
+  const video = (fields: Partial<DraftCourse["videos"][number]>): DraftCourse["videos"][number] => ({
+    id: "f0000000-0000-4000-8000-000000000001",
+    lessonId: LESSON,
+    state: "uploaded",
+    isCurrent: false,
+    fileName: "clase.mp4",
+    sizeBytes: 1000,
+    captionsReady: false,
+    seconds: null,
+    errorCode: null,
+    claimedAt: null,
+    deletesAt: null,
+    ...fields,
+  });
+  const ready = (seconds: number, fields: Partial<DraftCourse["videos"][number]> = {}) => video({ id: "f0000000-0000-4000-8000-000000000002", state: "ready", isCurrent: true, fileName: "vigente.mp4", seconds, ...fields });
+  const rowOf = (videos: DraftCourse["videos"], tolerance: DraftChoices["lessonTolerance"] = choices.lessonTolerance) => {
+    const lessons = [{ id: LESSON, title: "Una", description: null, position: 1, revision: 1 }];
+    const course = { ...draft, videos, modules: [{ ...draft.modules[0]!, lessons }] };
+    const shown = editorView(course, { ...choices, lessonTolerance: tolerance }, { readOnly: false, search: { leccion: LESSON }, now: new Date(NOW) }).selected;
+    if (shown.kind !== "lesson") throw new Error("no es una lección");
+    return shown.video;
+  };
+
+  it("sin video, nada", () => {
+    expect(rowOf([])).toBeNull();
+  });
+
+  it("dice el día en que se borra, en la zona del producto", () => {
+    // A las 02:00 UTC del 18 todavía es el 17 en la Ciudad de México.
+    expect(rowOf([video({ deletesAt: "2026-11-18T02:00:00.000Z" })])?.deletesOn).toBe("17 de noviembre de 2026");
+    expect(rowOf([ready(1200)])?.deletesOn).toBeNull();
+  });
+
+  it("está tardando solo si lleva más de una hora, y solo si se está procesando", () => {
+    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(true);
+    expect(rowOf([video({ state: "creating", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(true);
+    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T17:01:00.000Z" })])?.slow).toBe(false);
+    expect(rowOf([video({ state: "uploaded", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(false);
+    expect(rowOf([ready(1200, { claimedAt: "2026-11-10T10:00:00.000Z" })])?.slow).toBe(false);
+  });
+
+  it.each<[string, number, string]>([
+    ["una hora o más", 4_920, "1 h 22 min"],
+    ["minutos", 1_234, "20 min 34 s"],
+    ["menos de un minuto", 45, "45 s"],
+  ])("la duración: %s", (_name, seconds, text) => {
+    expect(rowOf([ready(seconds)])?.duration).toBe(text);
+  });
+
+  it.each<[string, number, boolean]>([
+    ["justo en el mínimo", 900, false],
+    ["justo en el máximo", 1500, false],
+    ["un segundo menos", 899, true],
+    ["un segundo más", 1501, true],
+  ])("el aviso de duración: %s", (_name, seconds, warns) => {
+    const tolerance = rowOf([ready(seconds)])?.tolerance ?? null;
+    expect(tolerance !== null).toBe(warns);
+    if (warns) expect(tolerance).toMatch(/Lo acordado es de 15 a 25 minutos\. Puedes enviarla: la revisión decide\./);
+  });
+
+  it("sin el parámetro no se avisa: no se sabe qué se acordó", () => {
+    expect(rowOf([ready(60)], null)?.tolerance).toBeNull();
+  });
+
+  it("al reemplazar se ve lo que viene, y la lección sigue con la vigente", () => {
+    const row = rowOf([ready(1200), video({ state: "processing", fileName: "nuevo.mp4" })]);
+    expect(row).toMatchObject({ fileName: "nuevo.mp4", state: "processing", canWatch: true, replacing: { fileName: "vigente.mp4", duration: "20 min 0 s" } });
+    expect(rowOf([ready(1200)])).toMatchObject({ replacing: null, canWatch: true });
+    expect(rowOf([video({})])).toMatchObject({ replacing: null, canWatch: false });
+  });
+
+  it("el aviso de duración es de la vigente, aunque otro la vaya a reemplazar", () => {
+    expect(rowOf([ready(60), video({ state: "processing" })])?.tolerance).toMatch(/Esta lección dura 1 min 0 s/);
+  });
+
+  it("de un error solo se distingue lo que le sirve a quien lo subió", () => {
+    expect(rowOf([video({ state: "errored", errorCode: "too_long" })])?.tooLong).toBe(true);
+    expect(rowOf([video({ state: "errored", errorCode: "invalid_input" })])?.tooLong).toBe(false);
   });
 });

@@ -334,6 +334,9 @@ describe("crear en el proveedor", () => {
       const { video } = await received(owner, who, videos, where);
 
       await setParameter(owner, "VIDEO_MINUTOS_MES_MAX", "1");
+      // La primera vez movió la fecha en que se borra, y la pantalla tiene que leerla. La segunda ya no hay nada nuevo.
+      expect(await videos.checkVideos(who.jar, { course: where.course })).toEqual({ kind: "checked", changed: true, blocked: { [video]: "over_minutes" } });
+      await again(owner, video);
       expect(await videos.checkVideos(who.jar, { course: where.course })).toEqual({ kind: "checked", changed: false, blocked: { [video]: "over_minutes" } });
       await setParameter(owner, "VIDEO_MINUTOS_MES_MAX", "1500");
 

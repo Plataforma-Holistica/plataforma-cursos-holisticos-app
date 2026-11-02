@@ -12,23 +12,27 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { ProgressBar } from "@/ui/progress-bar";
 
 import { progressStep } from "./resource-outcomes";
+import { VideoPreview } from "./video-preview";
 import type { VideoRow } from "./rows";
 import { checkVideoFile, type VideoProblem } from "./video-outcomes";
 import { useVideoUploads } from "./video-uploads";
 
 // El video de una lección en PA-43 (T-403; RF-604, FL-33). Lo que está subiendo vive arriba (`video-uploads.tsx`), y lo que ya llegó,
-// en la base. Procesar lo mueve `video-uploads.tsx`, preguntando; verlo llega con la solicitud que sigue.
+// en la base. Procesar lo mueve `video-uploads.tsx`, preguntando.
 //
 //   · Pausar y Reanudar son el mismo botón: el foco se queda en él.
 //   · Cancelar y quitar preguntan antes: una subida puede llevar horas. Seguir devuelve el foco al botón que preguntó.
 //   · Un botón que se va con el foco puesto (terminó de subir) lo deja en el bloque, y solo si no se fue a otra cosa.
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
+//   · Con un video listo se ofrece reemplazarlo, y con uno que falló, subir otro: la base deja empezar en los dos casos. Con uno en camino, no: se perdería lo que tardó horas.
+//   · La fecha en que se borra se dice siempre, también sin JavaScript. Cuando algo lo detuvo, la dice el aviso de por qué, sin repetirla.
 
 const text = portal.editor.videos;
 const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed, failing: text.blocked.failing };
 const percentOf = (loaded: number, total: number) => (total > 0 ? Math.floor((Math.min(loaded, total) / total) * 100) : 0);
 
 interface Props {
+  course: string;
   lesson: string;
   row: VideoRow | null;
   editable: boolean;
@@ -54,7 +58,7 @@ function VideoQuestion({ question, stay, go, onStay, onGo }: { question: string;
   );
 }
 
-export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) {
+export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }: Props) {
   const hydrated = useHydrated();
   const { uploads, notices, blocked, start, pause, resume, retryConfirm, remove } = useVideoUploads();
   const [localProblem, setLocalProblem] = useState<{ problem: VideoProblem; attempt: number } | null>(null);
@@ -92,7 +96,8 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
   const step = moving === null ? 0 : progressStep(moving.loaded, moving.total);
   // Lo que se quita ya llegó; lo que se cancela, todavía no.
   const received = upload === undefined && row !== null && row.state !== "uploading";
-  const canPick = editable && upload === undefined && !received;
+  const canPick = editable && upload === undefined && (!received || row.state === "ready" || row.state === "errored");
+  const pickLabel = row?.state === "uploading" ? text.pickSame : row?.state === "ready" ? text.replace : row?.state === "errored" ? text.pickOther : text.pick;
   const fileName = upload?.fileName ?? row?.fileName ?? "";
   const held = row?.state === "uploaded" ? blocked[row.id] : undefined;
 
@@ -107,19 +112,26 @@ export function VideoBlock({ lesson, row, editable, maxBytes, maxText }: Props) 
       {received && (
         <div className="flex flex-col gap-1">
           <p className="text-body break-words">{row.fileName}</p>
-          <p className="text-body-s text-text-2">{t(text.states[row.state], { size: row.size })}</p>
+          <p className="text-body-s text-text-2">{t(text.states[row.state], { size: row.size, duration: row.duration })}</p>
+          {row.tooLong && <p className="text-body-s text-text-2">{text.tooLong}</p>}
+          {row.state === "uploaded" && held === undefined && row.deletesOn !== null && <p className="text-body-s text-text-2">{t(text.deletesOn, { date: row.deletesOn })}</p>}
+          {row.state === "errored" && row.deletesOn !== null && <p className="text-body-s text-text-2">{t(text.erroredDeletesOn, { date: row.deletesOn })}</p>}
         </div>
       )}
       {received && held !== undefined && (
         <InlineAlert tone="warning" live>
-          {BLOCKED[held]}
+          {t(BLOCKED[held], { date: row.deletesOn ?? "" })}
         </InlineAlert>
       )}
+      {received && row.slow && <InlineAlert tone="neutral">{text.slow}</InlineAlert>}
+      {row?.replacing != null && <p className="text-body-s break-words text-text-2">{t(text.replacing, { file: row.replacing.fileName, duration: row.replacing.duration })}</p>}
+      {row?.tolerance != null && <InlineAlert tone="warning">{row.tolerance}</InlineAlert>}
+      {row?.canWatch === true && hydrated && <VideoPreview key={row.fileName} course={course} lesson={lesson} />}
 
       {canPick && !hydrated && <p className="text-body-s text-text-2">{text.needsJavascript}</p>}
       {canPick && hydrated && (
         <FileUpload
-          label={row?.state === "uploading" ? text.pickSame : text.pick}
+          label={pickLabel}
           hint={maxText === "" ? text.hintNoLimit : t(text.hint, { max: maxText })}
           accept={VIDEO_EXTENSIONS.join(",")}
           onFile={onFile}

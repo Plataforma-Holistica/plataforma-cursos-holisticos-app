@@ -71,7 +71,9 @@ describe("solo la función única de medios firma", () => {
     expect(store).toMatch(/resourceFacts: \(claims, resourceId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readResourceFacts\(tx, resourceId\)\),/);
     expect(store).toMatch(/draftResourceFile: \(claims, courseId, resourceId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readDraftResourceFile\(tx, courseId, resourceId\)\),/);
     expect(store).toMatch(/downloadHit: \(claims\) => asServer\(\{ claims, reason: "resource_download" \}, \(tx\) => recordDownloadHit\(tx\)\),/);
-    expect(store.match(/\basServer\(/g)).toHaveLength(7);
+    // La vista previa del borrador (T-403), a nombre de quien actúa: quién puede lo decide `video_preview`.
+    expect(store).toMatch(/draftVideo: \(claims, courseId, lessonId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readDraftVideo\(tx, courseId, lessonId\)\),/);
+    expect(store.match(/\basServer\(/g)).toHaveLength(8);
   });
 
   it("solo la función única abre y late reproducciones, y la tabla no se toca de otro modo (T-204)", () => {
@@ -151,8 +153,8 @@ describe("solo la función única de medios firma", () => {
 
   it("decidir al cargar no firma: solo revisar y ver llegan a la firma", () => {
     const grant = withoutComments(readFileSync(join(src, "services/media/grant.ts"), "utf8"));
-    // La definición y sus dos llamadas, una en cada camino que firma.
-    expect(grant.match(/\bsignFor\(/g)).toHaveLength(3);
+    // La definición y sus tres llamadas, una en cada camino que firma: revisar, ver y la vista previa del borrador.
+    expect(grant.match(/\bsignFor\(/g)).toHaveLength(4);
     expect(grant.match(/\bcore\.sign\(/g)).toHaveLength(1);
     const body = (name: string) => grant.slice(grant.indexOf(`async function ${name}(`)).split(/\n {2}(?:async )?function /)[0] ?? "";
     // Ni directo ni a través de los caminos que firman.
@@ -190,7 +192,7 @@ describe("solo la función única de medios firma", () => {
     expect(naming(/mux-player-react\/lazy|mux-player-react\/dist\/lazy/)).toEqual([]);
     // Solo las pantallas con video nombran al reproductor, y lo cargan con `next/dynamic`, sin
     // servidor. De él importan en estático solo tipos, que no viajan.
-    const screens = ["src/app/admin/_revision/screen.tsx", "src/app/cursos/[slug]/lecciones/[leccion]/screen.tsx"];
+    const screens = ["src/app/admin/_revision/screen.tsx", "src/app/cursos/[slug]/lecciones/[leccion]/screen.tsx", "src/app/portal/_editor/video-preview.tsx"];
     expect(naming(/["'][^"']*_video\/player["']|["']\.\/player["']/)).toEqual(screens);
     for (const file of screens) {
       const screen = readFileSync(join(src, "..", file), "utf8");

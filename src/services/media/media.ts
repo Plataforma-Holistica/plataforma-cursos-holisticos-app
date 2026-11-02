@@ -27,7 +27,7 @@ export type {
   ReviewGrant,
 } from "./grant";
 
-export const { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant } = createMediaGrant(
+export const { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant, getDraftVideoGrant } = createMediaGrant(
   { report: reportFailure },
   {
     teamStanding,

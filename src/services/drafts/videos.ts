@@ -93,7 +93,7 @@ export interface VideosStore {
   claim: (
     claims: VerifiedClaims,
     input: { course: string; video: string; provider: VideoProviderName },
-  ) => Promise<{ answer: VideoClaimAnswer; path: string | null; claim: string | null; retry: boolean; since: number | null }>;
+  ) => Promise<{ answer: VideoClaimAnswer; path: string | null; claim: string | null; retry: boolean; since: number | null; held?: boolean }>;
   createFailed: (claims: VerifiedClaims, input: { video: string; claim: string }) => Promise<VideoCreateFailedAnswer>;
   created: (claims: VerifiedClaims, input: { course: string; video: string; provider: VideoProviderName; asset: string }) => Promise<VideoCreatedAnswer>;
   settle: (
@@ -263,6 +263,8 @@ export function createDraftVideos(deps: DraftVideosDeps) {
   async function createAsset(claims: VerifiedClaims, course: string, video: string, name: VideoProviderName, provider: VideoProvider, pass: VideoPass): Promise<void> {
     const claim = await deps.store.claim(claims, { course, video, provider: name });
     if (isBlocked(claim.answer)) pass.blocked[video] = claim.answer;
+    // Un tope de minutos movió la fecha en que se borra: la pantalla la dice, y tiene que volver a leerla.
+    if (claim.held) pass.changed = true;
     if (claim.answer !== "claimed") return;
     if (claim.path === null || claim.claim === null || claim.since === null) throw new Error("claimed without its facts");
     pass.changed = true;

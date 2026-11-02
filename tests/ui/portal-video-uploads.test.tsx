@@ -13,8 +13,25 @@ const actions = vi.hoisted(() => ({
   confirmVideoAction: vi.fn(),
   removeVideoAction: vi.fn(),
   checkVideosAction: vi.fn(),
+  videoPreviewAction: vi.fn(),
 }));
 vi.mock("@/app/portal/_editor/video-actions", () => actions);
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function FakePlayer({ playbackId, watermark, startTime, onExpired, onFailed }: { playbackId: string; watermark: string; startTime: number; onExpired: (at: number) => void; onFailed: () => void }) {
+      return (
+        <div>
+          <p>{`Reproductor de ${playbackId}, con la marca ${watermark}, desde ${startTime}`}</p>
+          <button type="button" onClick={() => onExpired(42)}>
+            Caducó
+          </button>
+          <button type="button" onClick={onFailed}>
+            Falló
+          </button>
+        </div>
+      );
+    },
+}));
 
 const tus = vi.hoisted(() => {
   interface Options {
@@ -68,13 +85,27 @@ const file = new File(["contenido"], "clase.mp4", { type: "video/mp4" });
 const GO = { kind: "go", target: { video: VIDEO, path: "p", mime: "video/mp4", bucket: "b", endpoint: "http://x" }, token: "firma-1", resumed: false };
 const MINUTE = 60_000;
 
+const ROW = {
+  id: VIDEO,
+  state: "uploaded" as const,
+  fileName: "clase.mp4",
+  size: "1 KB",
+  duration: "",
+  deletesOn: null,
+  slow: false,
+  tooLong: false,
+  canWatch: false,
+  replacing: null,
+  tolerance: null,
+};
+
 function Screen({ lessons = [L1, L2], row = null, every = null }: { lessons?: string[]; row?: Parameters<typeof VideoBlock>[0]["row"]; every?: number | null }) {
   return (
     <UnsavedProvider>
       <SavedStatus saved="Guardado hace poco" />
       <Link href="/portal/cursos">Mis cursos</Link>
       <VideoUploadsProvider course={COURSE} lessons={lessons} checkEverySeconds={every}>
-        <VideoBlock lesson={L1} row={row} editable maxBytes={1000} maxText="1 KB" />
+        <VideoBlock course={COURSE} lesson={L1} row={row} editable maxBytes={1000} maxText="1 KB" />
       </VideoUploadsProvider>
     </UnsavedProvider>
   );
@@ -346,7 +377,7 @@ describe("cancelar", () => {
     const user = userEvent.setup();
     let finish: (value: unknown) => void = () => undefined;
     actions.removeVideoAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    render(<Screen row={{ id: VIDEO, state: "uploading", fileName: "clase.mp4", size: "1 KB" }} />);
+    render(<Screen row={{ ...ROW, state: "uploading" }} />);
     await user.click(screen.getByRole("button", { name: "Cancelar subida" }));
     await user.click(screen.getAllByRole("button", { name: "Cancelar subida" }).at(-1) as HTMLElement);
     expect(screen.queryByLabelText(/Elige/)).not.toBeInTheDocument();
@@ -443,7 +474,7 @@ describe("dos pestañas", () => {
 });
 
 describe("preguntar por lo que ya llegó", () => {
-  const RECEIVED = { id: VIDEO, state: "uploaded" as const, fileName: "clase.mp4", size: "1 KB" };
+  const RECEIVED = { ...ROW, state: "uploaded" as const, deletesOn: "17 de noviembre de 2026" };
 
   afterEach(() => {
     vi.useRealTimers();
@@ -542,6 +573,28 @@ describe("preguntar por lo que ya llegó", () => {
     expect(screen.queryByText(/en pausa/)).toBeNull();
   });
 
+  it("sin que nada lo detenga, dice el día en que se borra", async () => {
+    actions.checkVideosAction.mockResolvedValue({ blocked: {} });
+    render(<Screen row={RECEIVED} />);
+    expect(screen.getByText("Si no se procesa, se borra el 17 de noviembre de 2026.")).toBeTruthy();
+    await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalled());
+  });
+
+  it.each(["throttled", "over_minutes", "closed", "failing"] as const)("con %s, el aviso dice ese día, sin repetirlo", async (kind) => {
+    actions.checkVideosAction.mockResolvedValue({ blocked: { [VIDEO]: kind } });
+    render(<Screen row={RECEIVED} />);
+    expect(await screen.findByText(/se borra el 17 de noviembre de 2026/)).toBeTruthy();
+    expect(screen.queryByText("Si no se procesa, se borra el 17 de noviembre de 2026.")).toBeNull();
+    expect(screen.queryByText(/7 días/)).toBeNull();
+    expect(screen.queryByText(/\{date\}/)).toBeNull();
+  });
+
+  it("el tope de minutos dice que se procesa a partir del mes siguiente, sin prometer que solo", async () => {
+    actions.checkVideosAction.mockResolvedValue({ blocked: { [VIDEO]: "over_minutes" } });
+    render(<Screen row={RECEIVED} />);
+    expect(await screen.findByText(/Lo procesamos a partir del mes siguiente, con este editor abierto/)).toBeTruthy();
+  });
+
   it("lo que le pasa a otro video, o a uno que ya no está recibido, no se dice aquí", async () => {
     actions.checkVideosAction.mockResolvedValue({ blocked: { otro: "closed" } });
     const { unmount } = render(<Screen row={RECEIVED} />);
@@ -552,5 +605,112 @@ describe("preguntar por lo que ya llegó", () => {
     render(<Screen row={{ ...RECEIVED, state: "processing" }} />);
     await waitFor(() => expect(actions.checkVideosAction).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/Tu video está guardado/)).toBeNull();
+  });
+});
+
+describe("lo que sigue de un video recibido", () => {
+  const READY = { ...ROW, state: "ready" as const, duration: "20 min 0 s", canWatch: true };
+  const quiet = () => actions.checkVideosAction.mockResolvedValue({ blocked: {} });
+  const GRANT = { kind: "granted", playbackId: "Play", tokens: { playback: "p", thumbnail: "t", storyboard: "s" }, speeds: [1], watermark: "maestra@prueba.test" };
+
+  it("procesando no se ofrece elegir otro: se perdería lo que tardó horas", () => {
+    quiet();
+    render(<Screen row={{ ...ROW, state: "processing" }} />);
+    expect(screen.getByText("Procesando, 1 KB.")).toBeTruthy();
+    expect(screen.queryByLabelText(/Elige/)).toBeNull();
+  });
+
+  it("recibido, tampoco", () => {
+    quiet();
+    render(<Screen row={ROW} />);
+    expect(screen.queryByLabelText(/Elige/)).toBeNull();
+  });
+
+  it("listo dice cuánto dura y ofrece verlo y reemplazarlo", () => {
+    quiet();
+    render(<Screen row={READY} />);
+    expect(screen.getByText("Listo, 20 min 0 s, 1 KB.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ver" })).toBeTruthy();
+    expect(screen.getByLabelText("Elige otro video para reemplazar este")).toBeTruthy();
+  });
+
+  it("con error dice la causa y ofrece subir otro, con el día en que se borra", () => {
+    quiet();
+    render(<Screen row={{ ...ROW, state: "errored", tooLong: true, deletesOn: "17 de noviembre de 2026" }} />);
+    expect(screen.getByText(/No se pudo procesar este archivo/)).toBeTruthy();
+    expect(screen.getByText(/pasa de la duración máxima/)).toBeTruthy();
+    expect(screen.getByText("Este archivo se borra el 17 de noviembre de 2026.")).toBeTruthy();
+    expect(screen.getByLabelText("Elige otro video")).toBeTruthy();
+  });
+
+  it("mientras otro la reemplaza, dice con qué sigue la lección, y lo que se ve es la vigente", () => {
+    quiet();
+    render(<Screen row={{ ...ROW, state: "processing", fileName: "nuevo.mp4", canWatch: true, replacing: { fileName: "vigente.mp4", duration: "20 min 0 s" } }} />);
+    expect(screen.getByText("Mientras tanto, la lección sigue con «vigente.mp4», 20 min 0 s.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ver" })).toBeTruthy();
+    expect(screen.queryByLabelText(/Elige/)).toBeNull();
+  });
+
+  it("dice que está tardando, y el aviso de duración, sin bloquear", () => {
+    quiet();
+    const { unmount } = render(<Screen row={{ ...ROW, state: "processing", slow: true }} />);
+    expect(screen.getByText(/Está tardando más de lo normal/)).toBeTruthy();
+    unmount();
+    render(<Screen row={{ ...READY, tolerance: "Esta lección dura 1 min 0 s." }} />);
+    expect(screen.getByText("Esta lección dura 1 min 0 s.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ver" })).toBeTruthy();
+  });
+
+  it("«Ver» pide la dirección al pulsar, y dice que no genera puntos", async () => {
+    quiet();
+    const user = userEvent.setup();
+    actions.videoPreviewAction.mockResolvedValue(GRANT);
+    render(<Screen row={READY} />);
+    expect(actions.videoPreviewAction).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Ver" }));
+    expect(actions.videoPreviewAction).toHaveBeenCalledWith({ course: COURSE, lesson: L1 });
+    expect(await screen.findByText("Reproductor de Play, con la marca maestra@prueba.test, desde 0")).toBeTruthy();
+    expect(screen.getByText("Vista previa. No genera puntos.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Dejar de ver" }));
+    expect(screen.queryByText(/Reproductor de/)).toBeNull();
+  });
+
+  it("si la dirección caduca pide otra una vez, en el segundo en que iba; la segunda vez, lo dice", async () => {
+    quiet();
+    const user = userEvent.setup();
+    actions.videoPreviewAction.mockResolvedValue(GRANT);
+    render(<Screen row={READY} />);
+    await user.click(screen.getByRole("button", { name: "Ver" }));
+    await user.click(await screen.findByRole("button", { name: "Caducó" }));
+    expect(await screen.findByText(/desde 42/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Caducó" }));
+    expect(await screen.findByText(/No pudimos abrir el video/)).toBeTruthy();
+    expect(actions.videoPreviewAction).toHaveBeenCalledTimes(2);
+  });
+
+  it.each<[string, { kind: string }, RegExp]>([
+    ["sin qué reproducir", { kind: "no_video" }, /todavía no se puede ver/],
+    ["no se supo", { kind: "unavailable" }, /No pudimos abrir el video/],
+  ])("%s: lo dice, y se puede volver a intentar", async (_name, answer, words) => {
+    quiet();
+    const user = userEvent.setup();
+    actions.videoPreviewAction.mockResolvedValue(answer);
+    render(<Screen row={READY} />);
+    await user.click(screen.getByRole("button", { name: "Ver" }));
+    expect(await screen.findByText(words)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ver" })).toBeTruthy();
+    expect(screen.queryByText("Vista previa. No genera puntos.")).toBeNull();
+  });
+
+  it("lo que llega después de cerrar no abre nada", async () => {
+    quiet();
+    const user = userEvent.setup();
+    let finish: (value: unknown) => void = () => undefined;
+    actions.videoPreviewAction.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    render(<Screen row={READY} />);
+    await user.click(screen.getByRole("button", { name: "Ver" }));
+    await user.click(screen.getByRole("button", { name: "Dejar de ver" }));
+    await act(async () => finish(GRANT));
+    expect(screen.queryByText(/Reproductor de/)).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   confirmVideo: vi.fn(),
   removeVideo: vi.fn(),
   checkVideos: vi.fn(),
+  getDraftVideoGrant: vi.fn(),
   refresh: vi.fn(),
   leaveFor: vi.fn((_jar: unknown, outcome: { to: string }) => {
     throw new Error(`sale a ${outcome.to}`);
@@ -26,7 +27,9 @@ vi.mock("@/services/drafts/editor", () => ({
   checkVideos: mocks.checkVideos,
 }));
 
-const { beginVideoAction, checkVideosAction, confirmVideoAction, removeVideoAction, renewVideoAction } = await import("@/app/portal/_editor/video-actions");
+vi.mock("@/services/media/media", () => ({ getDraftVideoGrant: mocks.getDraftVideoGrant }));
+
+const { beginVideoAction, checkVideosAction, confirmVideoAction, removeVideoAction, renewVideoAction, videoPreviewAction } = await import("@/app/portal/_editor/video-actions");
 
 const COURSE = "c0000000-0000-4000-8000-000000000001";
 const LESSON = "e0000000-0000-4000-8000-000000000001";
@@ -194,5 +197,38 @@ describe("checkVideosAction", () => {
     await checkVideosAction({ course: 7 } as never);
     expect(mocks.checkVideos).toHaveBeenCalledWith(JAR, { course: "" });
     expect(mocks.checkVideos).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("videoPreviewAction", () => {
+  const WATCH = { course: COURSE, lesson: LESSON };
+  const SIGNED = { kind: "granted", playbackId: "Play", tokens: { video: "v", thumbnail: "t", storyboard: "s" }, expiresAt: 9, speeds: [1], watermark: "maestra@prueba.test" };
+
+  it("contesta lo que el reproductor necesita, con el nombre que él usa, y sin la caducidad", async () => {
+    mocks.getDraftVideoGrant.mockResolvedValue(SIGNED);
+    expect(await videoPreviewAction(WATCH)).toEqual({
+      kind: "granted",
+      playbackId: "Play",
+      tokens: { playback: "v", thumbnail: "t", storyboard: "s" },
+      speeds: [1],
+      watermark: "maestra@prueba.test",
+    });
+    expect(mocks.getDraftVideoGrant).toHaveBeenCalledWith(JAR, COURSE, LESSON);
+  });
+
+  it("lo que no tiene forma cuenta como vacío", async () => {
+    mocks.getDraftVideoGrant.mockResolvedValue({ kind: "no_video" });
+    expect(await videoPreviewAction("nada" as never)).toEqual({ kind: "no_video" });
+    expect(mocks.getDraftVideoGrant).toHaveBeenCalledWith(JAR, "", "");
+  });
+
+  it.each(["refused", "suspended"])("con %s vuelve a la página, donde decide la guarda", async (kind) => {
+    mocks.getDraftVideoGrant.mockResolvedValue({ kind });
+    await expect(videoPreviewAction(WATCH)).rejects.toThrow(`sale a ${BACK}`);
+  });
+
+  it.each(["no_video", "unavailable"])("%s se contesta", async (kind) => {
+    mocks.getDraftVideoGrant.mockResolvedValue({ kind });
+    expect(await videoPreviewAction(WATCH)).toEqual({ kind });
   });
 });

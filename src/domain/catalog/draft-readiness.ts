@@ -9,13 +9,15 @@ export interface DraftReadiness {
   practiceReady: boolean;
   /** Elegido y activo. */
   levelReady: boolean;
-  /** Las lecciones del borrador. Hasta T-403 ninguna tiene video, así que todas cuentan. */
+  /** Las lecciones del borrador. */
   lessons: number;
+  /** Las lecciones sin un video listo: lo que se está subiendo, procesando o tiene error todavía no cuenta. */
+  lessonsWithoutVideo: number;
   modulesWithLessons: number;
 }
 
 /** Cuántas cosas faltan. Cero es «Listo para enviar». */
 export function missingItems(readiness: DraftReadiness): number {
   const flags = [readiness.hasSummary, readiness.practiceReady, readiness.levelReady, readiness.modulesWithLessons > 0];
-  return flags.filter((done) => !done).length + readiness.lessons;
+  return flags.filter((done) => !done).length + readiness.lessonsWithoutVideo;
 }

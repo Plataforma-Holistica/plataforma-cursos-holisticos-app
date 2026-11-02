@@ -327,6 +327,14 @@ describe("checkVideos", () => {
       expect(store.createFailed).not.toHaveBeenCalled();
     });
 
+    it("un tope que movió la fecha en que se borra pide volver a leer la pantalla", async () => {
+      const { service } = arrange({
+        due: [row()],
+        store: { claim: vi.fn(() => Promise.resolve({ answer: "over_minutes" as const, path: null, claim: null, retry: false, since: null, held: true })) },
+      });
+      expect(await check(service)).toEqual({ kind: "checked", changed: true, blocked: { [VIDEO]: "over_minutes" } });
+    });
+
     it.each(["busy", "done", "not_found", "invalid", "unavailable", "not_editable", "suspended", "not_teacher"] as const)("con %s no se gasta nada y no se dice nada", async (answer) => {
       const { service, provider, store } = arrange({
         due: [row()],

@@ -6,6 +6,7 @@ import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { cookieJar } from "@/app/_lib/request-context";
 import { portalCoursePath, ROUTES } from "@/services/account/navigation";
 import { beginVideo, checkVideos, confirmVideo, removeVideo, renewVideoUpload } from "@/services/drafts/editor";
+import { getDraftVideoGrant } from "@/services/media/media";
 
 import { changeOutcome } from "../_lib/change";
 import {
@@ -15,6 +16,7 @@ import {
   type VideoBeginStep,
   type VideoCheckStep,
   type VideoConfirmStep,
+  type VideoPreviewStep,
   type VideoRemoveStep,
   type VideoRenewStep,
 } from "./video-outcomes";
@@ -108,6 +110,36 @@ export async function checkVideosAction(input: { course: string }): Promise<Vide
   if (result.kind !== "checked") return { blocked: {} };
   if (result.changed) refresh();
   return { blocked: result.blocked };
+}
+
+/**
+ * La dirección firmada de la vista previa, para el reproductor. La pide el navegador al pulsar «Ver», y nunca va en el HTML (RF-305). Firma solo la función única de medios, que corre
+ * la guarda: a quien no la pasa se le manda a esta misma página, donde decide la suya.
+ */
+export async function videoPreviewAction(input: { course: string; lesson: string }): Promise<VideoPreviewStep> {
+  const fields = fieldsOf(input);
+  const course = textOf(fields.course);
+  const lesson = textOf(fields.lesson);
+  const jar = await cookieJar();
+  const grant = await getDraftVideoGrant(jar, course, lesson);
+  switch (grant.kind) {
+    case "granted":
+      // `getDraftVideoGrant` llama `video` al token del video; Mux Player lo llama `playback`.
+      return {
+        kind: "granted",
+        playbackId: grant.playbackId,
+        tokens: { playback: grant.tokens.video, thumbnail: grant.tokens.thumbnail, storyboard: grant.tokens.storyboard },
+        speeds: grant.speeds,
+        watermark: grant.watermark,
+      };
+    case "refused":
+    case "suspended":
+      return leaveFor(jar, { to: backOf(course, lesson), notice: null });
+    case "no_video":
+      return { kind: "no_video" };
+    case "unavailable":
+      return { kind: "unavailable" };
+  }
 }
 
 /** Cancelar una subida o quitar un video que nunca se publicó. */

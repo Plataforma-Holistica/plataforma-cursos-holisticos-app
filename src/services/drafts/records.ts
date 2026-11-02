@@ -32,6 +32,7 @@ const teacherCourseRow = z.object({
   practice_ready: z.boolean(),
   level_ready: z.boolean(),
   lessons: tally,
+  lessons_without_video: tally,
   modules_with_lessons: tally,
 });
 
@@ -52,6 +53,8 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
                pc.id is not null as practice_ready,
                exists (select 1 from public.levels lv where lv.id = d.level_id and lv.is_active) as level_ready,
                (select count(*) from public.draft_lessons l where l.course_id = d.course_id) as lessons,
+               (select count(*) from public.draft_lessons l where l.course_id = d.course_id
+                  and not exists (select 1 from public.draft_videos v where v.lesson_id = l.id and v.is_current)) as lessons_without_video,
                (select count(distinct l.module_id) from public.draft_lessons l where l.course_id = d.course_id) as modules_with_lessons
         from public.course_registry r
         left join public.course_drafts d on d.course_id = r.course_id
@@ -76,6 +79,7 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
           practiceReady: row.practice_ready,
           levelReady: row.level_ready,
           lessons: row.lessons,
+          lessonsWithoutVideo: row.lessons_without_video,
           modulesWithLessons: row.modules_with_lessons,
         }
       : null,
@@ -113,6 +117,10 @@ const videoSchema = z.strictObject({
   fileName: z.string(),
   sizeBytes: z.number().int().min(1),
   captionsReady: z.boolean(),
+  seconds: z.number().int().min(1).nullable(),
+  errorCode: z.string().nullable(),
+  claimedAt: instant.nullable(),
+  deletesAt: instant.nullable(),
 });
 const draftRow = z.object({
   course_id: id,
@@ -161,7 +169,8 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
                coalesce((
                  select jsonb_agg(jsonb_build_object(
                           'id', v.id, 'lessonId', v.lesson_id, 'state', v.state, 'isCurrent', v.is_current,
-                          'fileName', v.file_name, 'sizeBytes', v.size_bytes, 'captionsReady', v.captions_ready)
+                          'fileName', v.file_name, 'sizeBytes', v.size_bytes, 'captionsReady', v.captions_ready, 'seconds', v.duration_seconds,
+                          'errorCode', v.error_code, 'claimedAt', v.claimed_at, 'deletesAt', v.deletes_at)
                         order by v.created_at)
                  from public.draft_videos v where v.course_id = d.course_id), '[]'::jsonb) as videos
         from public.course_drafts d
@@ -196,6 +205,7 @@ const choicesRow = z.object({
   max_bytes: z.coerce.number().int().nullable(),
   per_place: z.coerce.number().int().nullable(),
   video_max_bytes: z.coerce.number().int().nullable(),
+  tolerance: z.object({ min_seconds: z.number().int().min(1), max_seconds: z.number().int().min(1) }).nullable(),
 });
 
 /**
@@ -213,11 +223,12 @@ export async function readDraftChoices(tx: Tx, practiceId: string | null, levelI
                     from public.levels x where x.is_active or x.id = ${levelId}::uuid), '[]'::jsonb) as levels,
           (private.parameter_value('RECURSO_TAMANO_MAX'))::bigint as max_bytes,
           (private.parameter_value('RECURSOS_POR_LUGAR_MAX'))::integer as per_place,
-          (private.parameter_value('VIDEO_TAMANO_MAX'))::bigint as video_max_bytes`,
+          (private.parameter_value('VIDEO_TAMANO_MAX'))::bigint as video_max_bytes,
+          private.parameter_value('TOLERANCIA_LECCION') as tolerance`,
     choicesRow,
   );
-  if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null };
-  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place }, videoMaxBytes: row.video_max_bytes };
+  if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null, lessonTolerance: null };
+  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place }, videoMaxBytes: row.video_max_bytes, lessonTolerance: row.tolerance === null ? null : { minSeconds: row.tolerance.min_seconds, maxSeconds: row.tolerance.max_seconds } };
 }
 
 const resultRow = z.object({ result: z.unknown() });
@@ -351,6 +362,7 @@ const videoResultSchema = z.strictObject({
   claim: z.string().optional(),
   retry: z.boolean().optional(),
   since: z.number().int().optional(),
+  held: z.boolean().optional(),
 });
 export type VideoResult = z.infer<typeof videoResultSchema>;
 
