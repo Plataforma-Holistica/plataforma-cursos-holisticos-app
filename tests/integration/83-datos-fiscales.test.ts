@@ -275,7 +275,7 @@ describe("lo fiscal, contra la base", () => {
     await reverted(async (owner) => {
       const id = await teacher(owner, ana);
       const service = serviceOn(owner)(ana);
-      expect(await service.taxProfileState(ana.claims)).toEqual({ version: 0, updatedAt: null, canSave: true });
+      expect(await service.taxProfileState(ana.claims)).toEqual({ version: 0, updatedAt: null, canSave: true, clabeWaitsUntil: null, clabeRecapture: false });
       expect(await service.saveTaxProfile(jar, FORM, freshOrigin())).toEqual({ kind: "saved" });
 
       const { rows } = await owner.query<{ version: number; rfc: Buffer; legal: Buffer; clabe: Buffer; last4: string; regime: string; payee: string; key_version: number; created_by: string }>(
@@ -390,6 +390,7 @@ describe("lo fiscal, contra la base", () => {
           rfc: cipher.seal({ ...at, field: "rfc" }, FORM.rfc),
           legalName: cipher.seal({ ...at, field: "legal_name" }, FORM.legalName),
           clabe: cipher.seal({ ...at, field: "clabe", last4: LAST4 }, CLABE),
+          clabeChanged: true,
         }),
       );
       expect(answer).toBe("changed");

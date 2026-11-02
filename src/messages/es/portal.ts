@@ -21,6 +21,9 @@ export const portal = defineMessages({
     stillEditable: "Aunque tu cuenta esté en solo lectura, estos datos sí los puedes capturar y cambiar: de ellos depende tu pago.",
     changedElsewhere: "Tus datos cambiaron en otra ventana. Lo que escribiste aquí no se guardó: si quieres cambiarlos, vuelve a escribirlos.",
     lastChange: "Último cambio: {date}.",
+    clabeWaiting: "Tu CLABE nueva rige a partir del {date} a las {time}, hora del centro de México. Antes de eso no te podemos pagar. Si tú no la cambiaste, cambia tu contraseña de inmediato: eso anula este cambio.",
+    clabeRecapture: "Tu último cambio de CLABE quedó anulado. Vuelve a escribirla para que te podamos pagar.",
+    clabeRecaptureLink: "Escribir mi CLABE",
     change: "Cambiar",
     off: "Por ahora no podemos mostrar ni guardar estos datos. Ya lo sabemos; intenta más tarde.",
     unavailable: "No pudimos saber si ya capturaste tus datos. Intenta de nuevo.",
@@ -35,7 +38,7 @@ export const portal = defineMessages({
     },
     capture: {
       intro: "Sin estos datos no se te puede pagar.",
-      appliesTo: "Aplica a los pagos que todavía no se hacen.",
+      clabeWait: "Una CLABE nueva no rige de inmediato: al guardarla te decimos desde cuándo, y hasta entonces no te podemos pagar. Cambiar los demás datos no la detiene.",
       passwordHint: "Por seguridad, la pedimos cada vez que guardas estos datos.",
       submit: "Guardar",
       submitting: "Guardando…",
