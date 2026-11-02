@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import { defineConfig, devices } from "@playwright/test";
@@ -36,6 +36,9 @@ const TEAM_RUN = process.env.E2E_EQUIPO === "1";
 // llave de verdad de quien desarrolla. Mux nunca la acepta: las pruebas no salen a Mux (cortan
 // toda petición que no sea a la aplicación).
 const TEST_SIGNING_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+
+// La llave de los datos fiscales (T-409), inventada en cada corrida: lo que se cifra aquí no sobrevive a la base rehecha.
+const TEST_TAX_KEY = randomBytes(32);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -81,6 +84,8 @@ export default defineConfig({
       MUX_SIGNING_PRIVATE_KEY: Buffer.from(TEST_SIGNING_KEY).toString("base64"),
       // Los videos de un borrador no salen de la máquina (T-403): el token de Mux que haya en .env.local no se usa aquí.
       VIDEO_PROVIDER: "test",
+      PII_ENCRYPTION_KEYS: `1:${TEST_TAX_KEY.toString("base64")}:${createHash("sha256").update(TEST_TAX_KEY).digest("hex").slice(0, 8)}`,
+      PII_ENCRYPTION_ACTIVE_VERSION: "1",
     },
   },
 });

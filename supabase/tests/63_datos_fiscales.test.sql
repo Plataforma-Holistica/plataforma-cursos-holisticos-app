@@ -71,7 +71,8 @@ delete from public.legal_documents where doc_type = 'teacher_privacy_notice';
 alter table public.legal_documents enable trigger ledger_no_update_delete;
 insert into public.legal_documents (doc_type, version, title, body, effective_from) values ('teacher_privacy_notice', 1, 'Aviso', 'Texto', now());
 insert into public.teachers (profile_id, status) values (pruebas.mara(), 'active') returning id as mara_m \gset
-insert into public.teachers (profile_id, status, suspended_at, suspension_reason) values (pruebas.susi(), 'suspended', now(), 'prueba') returning id as susi_m \gset
+-- Susi está suspendida por fraude: esa sí queda en solo lectura. Una suspensión que no es por fraude, en `65_suspendido_captura`.
+insert into public.teachers (profile_id, status, suspended_at, suspension_reason, suspension_approved_by) values (pruebas.susi(), 'suspended', now(), 'prueba', pruebas.k1()) returning id as susi_m \gset
 insert into public.teachers (profile_id, status) values (pruebas.nita(), 'active') returning id as nita_m \gset
 insert into public.teachers (profile_id, status) values (pruebas.fm(), 'active') returning id as fm_m \gset
 select pruebas.limpiar();
@@ -116,7 +117,7 @@ select is((select created_by from private.teacher_tax_profiles where teacher_id 
 select is(pruebas.guarda(pruebas.mara(), :'mara_m', 0), 'changed', 'con lo visto de antes: otra pestaña ya guardó');
 select is(pruebas.guarda(pruebas.mara(), :'nita_m', 1), 'changed', 'otro maestro: el identificador entra a los datos asociados, y no sería el suyo');
 select is(pruebas.guarda(pruebas.alu(), :'mara_m'), 'not_teacher', 'una alumna no');
-select is(pruebas.guarda(pruebas.susi(), :'susi_m'), 'suspended', 'una suspendida no cambia sus datos');
+select is(pruebas.guarda(pruebas.susi(), :'susi_m'), 'suspended', 'una suspendida por fraude no cambia sus datos');
 select is(pruebas.guarda(pruebas.nita(), :'nita_m'), 'needs_notice', 'sin el aviso aceptado, tampoco');
 select is(pruebas.guarda(pruebas.mara(), :'mara_m', 1), 'saved', 'con la versión vista, sí, y agrega otra');
 select is((select max(version)::int from private.teacher_tax_profiles where teacher_id = :'mara_m'), 2, 'no reescribe: es de solo inserción');
@@ -158,7 +159,7 @@ select ok((select count(*) from public.audit_log a where a.action = 'teacher_tax
 
 select pruebas.a_nombre_de(pruebas.mara());
 select is(private.tax_profile_state() ->> 'version', '3', 'el estado dice qué versión hay');
-select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
+select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at' - 'can_save', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
 select pruebas.limpiar();
 select is(pruebas.lecturas(pruebas.mara()), 0::bigint, 'el estado no es una lectura');
 
@@ -190,11 +191,11 @@ select is(pruebas.pide(pruebas.susi(), 'private.tax_profile_mine() ->> $$outcome
 select is(pruebas.lecturas(pruebas.susi()), 0::bigint, 'sin nada que leer, sin lectura');
 -- Una suspendida con datos sí los lee, aunque no los cambie.
 select pruebas.como_dueno_sistema();
-update public.teachers set status = 'active', suspended_at = null, suspension_reason = null where id = :'susi_m';
+update public.teachers set status = 'active', suspended_at = null, suspension_reason = null, suspension_approved_by = null where id = :'susi_m';
 select pruebas.limpiar();
 select is(pruebas.guarda(pruebas.susi(), :'susi_m'), 'saved', 'guarda mientras está activa');
 select pruebas.como_dueno_sistema();
-update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba' where id = :'susi_m';
+update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'prueba', suspension_approved_by = pruebas.k1() where id = :'susi_m';
 select pruebas.limpiar();
 select is(pruebas.pide(pruebas.susi(), 'private.tax_profile_mine() ->> $$outcome$$'), 'ok', 'suspendida, los lee');
 select is(pruebas.lecturas(pruebas.susi()), 1::bigint, 'y queda en la auditoría');

@@ -18,7 +18,7 @@ const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(sour
 const CIPHER = "src/services/teachers/tax-cipher.ts";
 
 /** Quién usa el cifrado. Una entrada nueva aquí es decidir que ese código puede ver un dato fiscal. */
-const USERS: readonly string[] = [];
+const USERS: readonly string[] = ["src/services/teachers/tax-data.ts", "src/services/teachers/tax-profile.ts"];
 
 describe("los datos fiscales se cifran en un solo lugar", () => {
   it("AES-GCM se usa solo en el archivo del cifrado", () => {

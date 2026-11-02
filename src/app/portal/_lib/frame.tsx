@@ -18,11 +18,12 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 const text = messages.portal.nav;
 
-export type PortalEntry = typeof ROUTES.portal | typeof ROUTES.portalCourses;
+export type PortalEntry = typeof ROUTES.portal | typeof ROUTES.portalCourses | typeof ROUTES.portalTaxData;
 
 const LINKS = [
   { href: ROUTES.portal, label: text.home },
   { href: ROUTES.portalCourses, label: text.courses },
+  { href: ROUTES.portalTaxData, label: text.taxData },
 ] as const;
 
 function Entries({ current }: { current: PortalEntry }) {

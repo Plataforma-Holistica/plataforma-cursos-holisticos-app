@@ -28,6 +28,8 @@ export interface RosterRowView {
   href: string;
   email: string | null;
   status: { label: string; tone: Tone };
+  /** Si ya capturó sus datos fiscales, sin verlos (HO-25). */
+  taxData: string;
   founder: string | null;
   invitation: string | null;
   isSelf: boolean;
@@ -92,6 +94,7 @@ export function rosterView(roster: TeacherRoster): RosterView {
         status: STATUS[row.status],
         founder: row.founderSince === null ? null : t(text.founderSince, { date: longDay(row.founderSince) }),
         invitation: invitationText(row),
+        taxData: row.hasTaxData ? text.taxData.yes : text.taxData.missing,
         isSelf: row.isSelf,
         // Una revocada se puede reenviar, pero no volver a revocar.
         reinvite: open && row.invitation !== "none" ? teachersButton.reinvite(row.id, seen) : null,

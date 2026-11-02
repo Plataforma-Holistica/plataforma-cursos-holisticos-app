@@ -911,6 +911,19 @@ que no se ve leyendo un solo archivo:
   que anota el SDK, con separadores y al final de `SECRET_RULES`, para no partirle la forma a un token; en mensajes y rutas, un RFC con espacios,
   puntos o guion bajo; y las llaves. Uno de cada diez números de 18 dígitos cae como CLABE: en un diagnóstico, se acepta. Una tabla del filtro puede reemplazar con una
   función (`Rule`). Para el B: nada que le toque.
+- **El maestro captura sus datos fiscales** (T-409, tercera solicitud; PA-48, `/portal/datos-fiscales`; plan aprobado por Sergio el 2026-10-31). La pantalla vive en
+  `src/app/portal/_fiscal/`, el servicio en `src/services/teachers/tax-profile.ts` (armado en `tax-data.ts`, que es lo que importan las pantallas), sus consultas en `tax-records.ts`, y la
+  regla del formulario en `src/domain/fiscal/tax-form.ts` (el tipo de persona no se pregunta: lo dice el RFC). **La contraseña va en el mismo envío, sin un estado de «ya la dio»:**
+  `confirmPassword` (de los servicios de la cuenta, en `management.ts`) corre la guarda, el mismo freno que entrar y una entrada de esa misma cuenta, que anota y cierra ahí mismo; comparte
+  sus pasos con cambiar la contraseña (`proveOwnPassword`). Lo escrito se revisa antes, para que un error de forma no cuente como intento. **Ninguna respuesta lleva lo escrito:** con
+  JavaScript se queda en el navegador (el estado `draft`, que se vuelve el valor por omisión, porque React devuelve el formulario a él al terminar la acción), y sin él se vuelve a
+  escribir; lo guardado redirige con un aviso. **Ver no entrega nada entero:** lo enmascara el servidor (`maskTail`, cuatro caracteres, y un dato de cuatro o menos no se muestra), y con lo
+  oculto a la vista el bloque no pinta ningún formulario ligado a esa acción, porque sin JavaScript React mandaría el estado dentro de él; «Ocultar» y «Cambiar» son enlaces de carga completa. Antes de la
+  contraseña no se pinta nada, ni la fecha. «Cambiar» vuelve a pedir todo. Un maestro suspendido, **salvo por fraude**, captura y cambia sus datos (decisión de Sergio del 2026-11-01; `t409_suspendido_captura`): RF-702 dice que sus pagos siguen, y una baja es una suspensión. Lo dice la base (`can_save` en `tax_profile_state`, y `tax_profile_save`); con `suspension_approved_by` ve y no cambia. Eso sí le deja notar al maestro que su suspensión es por fraude (`can_save` falso): es inevitable con esta regla, y no revela el motivo interno, quién propuso ni una propuesta pendiente. Sin llave, la pantalla lo dice y lo reporta (`tax_cipher_unavailable`),
+  y lo que no abre también (`tax_profile_unreadable`). `taxProfileForPayout` es la lectura de finanzas, por una liquidación: sin pantalla, lista para T-604. El inicio del portal avisa si faltan, y
+  PA-65 dice «Capturados» o «Faltan». `playwright.config.ts` inventa una llave en cada corrida. Usa integración 83 (el catálogo de regímenes de la base contra el de la aplicación, también) y
+  `tests/e2e/equipo/datos-fiscales.equipo.ts`: como un maestro con cuenta no se borra, correr ese archivo otra vez pide antes `pnpm db:reset`. Medido el 2026-10-31: justo después de entrar, el
+  enrutador todavía termina la acción y puede soltar un clic en un enlace; el extremo a extremo reintenta ese clic. Para el B: una pantalla nueva que pida la contraseña en el mismo envío usa `confirmPassword`.
 - **Archivos que tocan los dos.** En este archivo solo se agregan párrafos y viñetas, sin
   reacomodar los que hay: resuelve quien fusiona segundo, sin tocar el texto del otro. Las listas
   de `supabase/tests/01_estructura.test.sql` no se tocan: cada carril prueba sus tablas en su

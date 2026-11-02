@@ -4,6 +4,7 @@ import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
 import { readNotice } from "@/services/account/notice";
+import { taxProfileState } from "@/services/teachers/tax-data";
 import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
@@ -24,6 +25,8 @@ export default async function PortalHomePage() {
 
   const notice = readNotice(await cookieReader());
   const suspended = step.teacher.status === "suspended";
+  // FL-31, E2: sin ellos no se le puede pagar. «No se supo» no se dice como que faltan. Se le dice también a un suspendido, salvo por fraude.
+  const taxData = await taxProfileState(step.claims);
   return (
     <PortalFrame current={ROUTES.portal} readOnly={suspended}>
       <h1 className="text-h1">{text.title}</h1>
@@ -34,6 +37,11 @@ export default async function PortalHomePage() {
           <h2 className="text-h3">{t(text.suspendedTitle)}</h2>
           <p className="text-text-2">{step.teacher.notice}</p>
         </section>
+      )}
+      {taxData?.version === 0 && taxData.canSave && (
+        <InlineAlert tone="warning">
+          {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
+        </InlineAlert>
       )}
       <p className="text-text-2">{text.intro}</p>
       <p>
