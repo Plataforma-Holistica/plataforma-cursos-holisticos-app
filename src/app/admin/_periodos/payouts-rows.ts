@@ -50,11 +50,18 @@ export interface PayoutViewRow {
   adjustments: string;
   balance: string;
   subtotal: string;
+  vat: string;
+  withheld: string;
+  net: string;
+  /** Lo que detiene liberarla, en palabras: sin datos o sin regla. */
+  taxNote: string | null;
   /** Si llega al mínimo, en palabras; nulo si no se sabe. */
   minimum: string | null;
   holdReason: string | null;
   /** Retener: el valor del primer paso y el de confirmar, con el estado que se vio. */
   hold: { ask: string; confirm: string; status: PayoutStatus } | null;
+  /** Retener porque le falta algo: el valor del botón. Nulo si no se ofrece. */
+  holdForTax: string | null;
   /** Soltar: con la huella de la fila; `releases` si la libera ahí mismo (pide la casilla). */
   unhold: { ask: string; confirm: string; seen: string; releases: boolean; title: string; body: string } | null;
   /** El bono del fundador propuesto: confirmarlo, o anularlo con su motivo. */
@@ -81,7 +88,7 @@ export interface PayoutsView {
     | { kind: "waits"; text: string }
     | { kind: "offered"; seen: string; ask: string; confirm: string; title: string; body: string };
   rows: PayoutViewRow[];
-  totals: { pool: string; bonuses: string; adjustments: string; balance: string; subtotal: string };
+  totals: { pool: string; bonuses: string; adjustments: string; balance: string; subtotal: string; net: string };
   /** Todas, y un botón por estado con su cuenta; solo con JavaScript. */
   filters: { key: PayoutFilter | "all"; label: string }[];
 }
@@ -135,7 +142,8 @@ export function payoutsView(read: Read): PayoutsView {
     // La suya no la cambia quien lee: lo hace otra persona de finanzas (T-401).
     const mine = row.isSelf;
     const amount = (cents: number) => (row.estimated ? t(text.estimated, { amount: money(cents) }) : money(cents));
-    const holdable = canChange && !mine && row.payoutId !== null && row.status !== null && HOLDABLE.includes(row.status);
+    // Una retenida por datos también: si aparece otra causa pasa a investigación, y eso sí detiene la purga.
+    const holdable = canChange && !mine && row.payoutId !== null && row.status !== null && (HOLDABLE.includes(row.status) || row.holdKind === "tax_data");
     const bonus = row.founderBonus;
     return {
       key: row.teacherId,
@@ -149,11 +157,25 @@ export function payoutsView(read: Read): PayoutsView {
       adjustments: money(row.adjustmentsCents),
       balance: money(row.balanceCents),
       subtotal: amount(row.subtotalCents),
+      vat: row.vatCents === null ? text.noTaxYet : amount(row.vatCents),
+      withheld: row.incomeTaxWithheldCents === null || row.vatWithheldCents === null ? text.noTaxYet : amount(row.incomeTaxWithheldCents + row.vatWithheldCents),
+      net: row.netCents === null ? text.noTaxYet : amount(row.netCents),
+      taxNote: row.taxState === "no_data" ? text.taxNoData : row.taxState === "no_rule" ? text.taxNoRule : !row.hasTaxData && row.status === "on_hold" && row.reachesMinimum === true ? text.taxNoData : null,
       minimum: minimumOf(row),
-      holdReason: row.status === "on_hold" && row.holdReason !== null ? t(text.heldBecause, { reason: row.holdReason }) : null,
+      // El motivo de una retención por datos lo pone la base: cuando ya los capturó, ya no es cierto.
+      holdReason:
+        row.status === "on_hold" && row.holdKind === "tax_data" && row.taxState !== "no_data" && row.taxState !== "no_rule" && row.hasTaxData
+          ? text.heldForTaxReady
+          : row.status === "on_hold" && row.holdReason !== null
+            ? t(text.heldBecause, { reason: row.holdReason })
+            : null,
       hold:
         holdable && row.payoutId !== null && row.status !== null
           ? { ask: payoutsButton.askHold(row.payoutId, row.status), confirm: payoutsButton.hold(row.payoutId, row.status), status: row.status }
+          : null,
+      holdForTax:
+        canChange && !mine && row.payoutId !== null && row.status === "calculated" && (row.taxState === "no_data" || row.taxState === "no_rule")
+          ? payoutsButton.holdForTax(row.payoutId, row.status)
           : null,
       unhold: canChange && !mine ? unholdOf(row, named, released) : null,
       founderBonus:
@@ -217,6 +239,10 @@ export function payoutsView(read: Read): PayoutsView {
       adjustments: sum((row) => row.adjustmentsCents),
       balance: sum((row) => row.balanceCents),
       subtotal: sum((row) => row.subtotalCents),
+      // Lo que se transfiere: una acumulada no, y una retenida todavía no. Si falta alguno, no hay total que decir.
+      net: read.payouts.some((row) => row.reachesMinimum === true && row.status !== "on_hold" && row.netCents === null)
+        ? text.noTaxYet
+        : sum((row) => (row.reachesMinimum === true && row.status !== "on_hold" ? (row.netCents ?? 0) : 0)),
     },
     filters,
   };
