@@ -34,13 +34,12 @@ describe("la salida de correo", () => {
   });
 
   it("la llave de Resend no se lee fuera de la salida de correo y la configuración", () => {
-    expect(naming(/RESEND_API_KEY/)).toEqual(["src/config/env.ts", "src/services/mail/mail.ts"]);
+    expect(naming(/RESEND_API_KEY/)).toEqual(["src/config/env.ts", "src/services/mail/mail.ts", "src/services/mail/outbox.ts"]);
   });
 
-  it("en local manda el buzón, y lo decide antes de mirar la llave", () => {
-    const text = readFileSync(join(ROOT, "src/services/mail/mail.ts"), "utf8");
-    expect(text.indexOf('env.APP_ENV === "local"')).toBeGreaterThan(-1);
-    expect(text.indexOf('env.APP_ENV === "local"')).toBeLessThan(text.indexOf("env.RESEND_API_KEY"));
+  it("quién manda lo decide una sola función", () => {
+    expect(naming(/createResendSender\(|createMailpitSender\(/).filter((file) => !file.startsWith("src/adapters/"))).toEqual(["src/services/mail/mail.ts"]);
+    expect(readFileSync(join(ROOT, "src/services/mail/mail.ts"), "utf8")).toContain("pickSender(env)");
   });
 
   it("el barrido está programado", () => {

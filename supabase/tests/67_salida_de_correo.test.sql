@@ -3,7 +3,7 @@
 -- intentos. La aplicación no toca la tabla: entra por `mail_claim`, `mail_sent`, `mail_rejected` y `mail_health`.
 begin;
 \ir _ayuda.psql
-select plan(71);
+select plan(88);
 
 select pruebas.alta('a6700000-0000-0000-0000-000000000001', 'mara-67@prueba.test');
 select pruebas.alta('c6700000-0000-0000-0000-000000000001', 'f1-67@prueba.test');
@@ -28,6 +28,8 @@ end
 $$;
 create function pruebas.ultima(p_teacher uuid) returns private.teacher_tax_profiles language sql security definer
 as $$ select x from private.teacher_tax_profiles x where x.teacher_id = p_teacher order by x.version desc limit 1 $$;
+create function pruebas.vista(p_teacher uuid) returns integer language sql security definer
+as $$ select coalesce(max(x.version), 0)::integer from private.teacher_tax_profiles x where x.teacher_id = p_teacher $$;
 create function pruebas.finanzas(p_pago uuid) returns jsonb language plpgsql as $$
 begin
   return pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L)', p_pago))::jsonb;
@@ -169,6 +171,54 @@ select is(private.tax_clabe_standing(:'m', '-infinity', '-infinity'), 'in_force'
 select is(private.tax_clabe_effective(:'m', 'infinity', 'infinity'), 'infinity'::timestamptz, 'una fila sin fechas no rige nunca');
 select is(private.tax_clabe_standing(:'m', 'infinity', 'infinity'), 'waiting', 'y no se confunde con la falta del aviso');
 
+-- Con el aviso pendiente, el maestro tampoco nota una propuesta de fraude.
+select pruebas.correo_en(:'m', 'sent_at = null');
+create temporary table pendiente_sin_propuesta on commit drop as select pruebas.estado() as respuesta;
+grant select on pendiente_sin_propuesta to anon, authenticated, app_service;
+select is((select respuesta ->> 'clabe_notice_pending' from pendiente_sin_propuesta), 'true', 'el aviso está pendiente');
+set local session_replication_role = replica;
+insert into private.teacher_suspension_requests (teacher_id, anomaly_alert_id, reason, proposed_by, proposed_at) values (:'m', gen_random_uuid(), 'prueba', pruebas.f1(), now());
+set local session_replication_role = origin;
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_held', 'finanzas la ve detenida');
+select is(pruebas.estado(), (select respuesta from pendiente_sin_propuesta), 'y el maestro recibe exactamente lo mismo que sin propuesta');
+set local session_replication_role = replica;
+delete from private.teacher_suspension_requests where teacher_id = :'m';
+set local session_replication_role = origin;
+
+-- ---------------------------------------------------------------------------------------
+-- Un aviso que ya no va a salir anula esa CLABE, y se vuelve a escribir. Sin eso no tendría salida: la misma CLABE hereda sus fechas y su llave.
+
+select pruebas.correo_en(:'m', 'failed_at = now()');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'finanzas ve que hay que escribirla otra vez');
+select is(pruebas.estado() ->> 'clabe_recapture', 'true', 'y el maestro también');
+select is(pruebas.estado() ->> 'clabe_notice_pending', 'false', 'ya no dice que se lo estamos mandando');
+select is(pruebas.estado() ->> 'clabe_waits_until', null, 'ni una fecha');
+-- Quien opera lo intenta de nuevo (OP-22): el guardián lo deja, y vuelve a estar pendiente.
+update private.mail_outbox set failed_at = null, attempts = 0 where idempotency_key = (pruebas.aviso(:'m')).idempotency_key;
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_notice_pending', 'volver a intentar lo deja pendiente otra vez');
+-- Si salió, gana.
+select pruebas.correo_en(:'m', 'failed_at = now()');
+select is(private.mail_sent((pruebas.aviso(:'m')).id), true, 'un envío que llega tarde gana sobre el fallo');
+select isnt(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'y ya no está anulada');
+-- La misma CLABE, con el correo ya corregido: aviso nuevo, al correo de ahora, y espera nueva.
+select pruebas.correo_en(:'m', 'sent_at = null, failed_at = now()');
+select pruebas.como_dueno_sistema();
+update auth.users set email = 'Mara-Corregido-67@prueba.test' where id = pruebas.mara();
+select pruebas.como_dueno();
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), false, '8881'), 'saved', 'vuelve a escribir la misma CLABE');
+select cmp_ok((pruebas.ultima(:'m')).clabe_changed_at, '>', now() - interval '1 second', 'no hereda lo anulado: empieza de nuevo');
+select is((pruebas.aviso(:'m')).recipient, 'mara-corregido-67@prueba.test', 'su aviso va al correo de ahora');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_notice_pending', 'y espera a que salga');
+-- Un correo que Auth acepta y que parece raro no impide guardar: si no sirve, lo dice el proveedor.
+select pruebas.como_dueno_sistema();
+update auth.users set email = 'dos@arrobas@prueba.test' where id = pruebas.mara();
+select pruebas.como_dueno();
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), true, '6661'), 'saved', 'un correo con forma rara no impide guardar');
+select is((pruebas.aviso(:'m')).recipient, 'dos@arrobas@prueba.test', 'y el aviso se intenta');
+select pruebas.como_dueno_sistema();
+update auth.users set email = 'mara-67@prueba.test' where id = pruebas.mara();
+select pruebas.como_dueno();
+
 -- ---------------------------------------------------------------------------------------
 -- Reclamar: por tiempo y por intentos, sin que dos tomen el mismo.
 
@@ -260,6 +310,9 @@ alter table private.teacher_tax_profiles enable trigger clabe_notice_queue;
 grant execute on function private.tax_clabe_effective(uuid, timestamptz, timestamptz) to app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'mail helper reachable: tax_clabe_effective'), 've la fecha al alcance de la aplicación');
 revoke execute on function private.tax_clabe_effective(uuid, timestamptz, timestamptz) from app_service;
+grant execute on function private.tax_clabe_notice_failed(uuid, timestamptz) to app_service;
+select ok(exists (select 1 from private.schema_violations() where problem = 'mail helper reachable: tax_clabe_notice_failed'), 've el fallo del aviso al alcance de la aplicación');
+revoke execute on function private.tax_clabe_notice_failed(uuid, timestamptz) from app_service;
 create or replace function private.tax_clabe_standing(p_teacher uuid, p_changed timestamptz, p_effective timestamptz) returns text
 language sql stable set search_path = '' as $$ select 'in_force'::text $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'clabe standing without the notice'), 've una regla que no mira el aviso');

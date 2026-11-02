@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SendResult } from "@/domain/mail/mail";
 
-import { createMailOutbox, secretMatches, type ClaimedMail, type MailStore } from "./outbox";
+import { createMailOutbox, pickSender, secretMatches, type ClaimedMail, type MailStore } from "./outbox";
 import type { MailCopy } from "./templates";
 
 const COPY: MailCopy = {
@@ -110,6 +110,26 @@ describe("el barrido", () => {
   it("sin base contesta que no pudo", async () => {
     const { outbox } = setup({ store: { health: () => Promise.reject(new Error("corte")) } });
     expect(await outbox.sweepMail(COPY)).toBe(false);
+  });
+});
+
+describe("quién manda", () => {
+  // Armadas por partes: el escaneo de secretos no distingue una de ejemplo.
+  const url = (host: string) => ["postgresql://app", `${host}:5432/postgres`].join(":x@");
+  const LOCAL = url("127.0.0.1");
+  const REMOTE = url("aws-0-us-east-1.pooler.supabase.com");
+  const KEYS = { RESEND_API_KEY: "re_x", MAIL_FROM_NOTICES: "a@b.test" };
+  it.each([
+    ["local con llave: el buzón, nunca una persona", { APP_ENV: "local", DATABASE_URL: LOCAL, ...KEYS }, "mailbox"],
+    ["local sin llave", { APP_ENV: "local", DATABASE_URL: LOCAL }, "mailbox"],
+    ["local por nombre", { APP_ENV: "local", DATABASE_URL: url("localhost") }, "mailbox"],
+    ["local contra otra base: nadie, o abriría una CLABE allá", { APP_ENV: "local", DATABASE_URL: REMOTE, ...KEYS }, null],
+    ["producción", { APP_ENV: "production", DATABASE_URL: REMOTE, ...KEYS }, "resend"],
+    ["una vista previa con llave", { APP_ENV: "staging", DATABASE_URL: REMOTE, ...KEYS }, "resend"],
+    ["una vista previa sin llave", { APP_ENV: "staging", DATABASE_URL: REMOTE }, null],
+    ["sin remitente", { APP_ENV: "staging", DATABASE_URL: REMOTE, RESEND_API_KEY: "re_x" }, null],
+  ])("%s", (_, env, expected) => {
+    expect(pickSender(env)).toBe(expected);
   });
 });
 

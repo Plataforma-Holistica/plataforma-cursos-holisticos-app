@@ -95,6 +95,15 @@ export function createMailOutbox(deps: MailOutboxDeps) {
   return { dispatchMail, sweepMail };
 }
 
+/**
+ * Quién manda. En local, el buzón, aunque `.env` traiga una llave de Resend: un desarrollo nunca le escribe a nadie. Y solo contra una base de esta máquina: si no, se anotaría como enviado un
+ * aviso que nadie recibió, y eso abriría una CLABE en esa otra base. Fuera de local, Resend; sin llave o sin remitente, nadie.
+ */
+export function pickSender(env: { APP_ENV: string; DATABASE_URL: string; RESEND_API_KEY?: string | undefined; MAIL_FROM_NOTICES?: string | undefined }): "mailbox" | "resend" | null {
+  if (env.APP_ENV === "local") return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(env.DATABASE_URL).hostname) ? "mailbox" : null;
+  return env.RESEND_API_KEY === undefined || env.MAIL_FROM_NOTICES === undefined ? null : "resend";
+}
+
 const digest = (value: string) => createHash("sha256").update(value).digest();
 
 /** Si lo que llegó es la llave del barrido. Sin llave configurada nadie pasa. Se comparan huellas, en tiempo constante y del mismo largo. */

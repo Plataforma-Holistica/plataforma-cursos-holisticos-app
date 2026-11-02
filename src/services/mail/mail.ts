@@ -7,7 +7,7 @@ import { getEnv } from "@/config/env";
 import type { MailSender } from "@/domain/mail/mail";
 import { reportFailure } from "@/services/error-reporting/server";
 
-import { createMailOutbox, secretMatches } from "./outbox";
+import { createMailOutbox, pickSender, secretMatches } from "./outbox";
 import { askMailClaim, askMailHealth, askMailRejected, askMailSent } from "./records";
 
 // La salida de correo, ya armada: lo que importan las pantallas y la ruta del barrido. En local va siempre al buzón local, aunque haya una llave de Resend en `.env`: un desarrollo nunca le
@@ -18,9 +18,9 @@ const LOCAL_FROM = "Plataforma <avisos@plataforma.local>";
 
 function sender(): MailSender | null {
   const env = getEnv();
-  if (env.APP_ENV === "local") return createMailpitSender({ url: env.MAILPIT_URL ?? LOCAL_MAILBOX });
-  if (env.RESEND_API_KEY === undefined || env.MAIL_FROM_NOTICES === undefined) return null;
-  return createResendSender({ apiKey: env.RESEND_API_KEY });
+  const who = pickSender(env);
+  if (who === "mailbox") return createMailpitSender({ url: env.MAILPIT_URL ?? LOCAL_MAILBOX });
+  return who === "resend" && env.RESEND_API_KEY !== undefined ? createResendSender({ apiKey: env.RESEND_API_KEY }) : null;
 }
 
 export const { dispatchMail, sweepMail } = createMailOutbox({

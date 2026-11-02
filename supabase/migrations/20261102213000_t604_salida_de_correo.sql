@@ -3,7 +3,8 @@
 -- aceptable. Las direcciones se quitan a los 30 días. La aplicación no toca la tabla: entra por cuatro funciones.
 --
 -- Decisiones mías sin confirmar: la fecha sale de lo que ya se guardó (la espera es `clabe_effective_from - clabe_changed_at`, así que cambiar el parámetro no mueve nada), diez intentos con diez minutos
--- entre uno y otro, 30 días para quitar las direcciones, y un maestro sin cuenta no deja aviso: esa CLABE no se abre. CO-13, CO-14 y CO-15 usarán esta misma tabla y nunca detienen nada.
+-- como mínimo entre uno y otro, 30 días para quitar las direcciones, y un maestro sin cuenta no deja aviso: esa CLABE no se abre. CO-13, CO-14 y CO-15 usarán esta misma tabla y nunca detienen nada.
+-- Un aviso que ya no va a salir anula esa CLABE: se vuelve a escribir, con espera nueva y un aviso nuevo al correo de ese momento. Sin eso no tendría salida, porque la misma CLABE hereda sus fechas y su llave.
 
 create table private.mail_outbox (
   id uuid primary key default gen_random_uuid(),
@@ -21,7 +22,8 @@ create table private.mail_outbox (
   constraint mail_outbox_key_length check (char_length(idempotency_key) between 1 and 256),
   constraint mail_outbox_template_known check (template in ('CO-27')),
   constraint mail_outbox_attempts_positive check (attempts >= 0),
-  constraint mail_outbox_recipient_clean check (recipient is null or recipient = lower(recipient) and recipient ~ '^[^[:space:]@]+@[^[:space:]@]+$')
+  -- Sin revisar la forma: este insert corre dentro de `tax_profile_save`, y un correo raro no debe impedir guardar. Si no sirve, lo dice el proveedor.
+  constraint mail_outbox_recipient_clean check (recipient is null or (recipient = lower(recipient) and recipient <> ''))
 );
 comment on table private.mail_outbox is 'Lo que sale por correo propio. De ella depende que una CLABE rija (`tax_clabe_effective`). Sin cuerpo: se arma al enviar.';
 alter table private.mail_outbox enable row level security;
@@ -104,12 +106,26 @@ as $$
 $$;
 revoke all on function private.tax_clabe_effective(uuid, timestamptz, timestamptz) from public;
 
+-- Si el aviso de esa CLABE ya no va a salir. Quien opera puede volver a intentarlo (OP-22), y salir gana sobre todo.
+create function private.tax_clabe_notice_failed(p_teacher uuid, p_changed timestamptz) returns boolean
+language sql stable set search_path = ''
+as $$
+  select case
+    when not pg_catalog.isfinite(p_changed) then false
+    else exists (
+      select 1 from private.mail_outbox m
+      where m.idempotency_key = private.clabe_notice_key(p_teacher, p_changed) and m.sent_at is null and m.failed_at is not null)
+  end
+$$;
+revoke all on function private.tax_clabe_notice_failed(uuid, timestamptz) from public;
+
 -- La única definición de si una CLABE rige (`t409_espera_clabe`), ahora con la fecha de verdad: sin aviso, una contraseña o una propuesta siguen contando, porque la espera ni ha empezado.
 create or replace function private.tax_clabe_standing(p_teacher uuid, p_changed timestamptz, p_effective timestamptz) returns text
 language sql stable set search_path = ''
 as $$
   with e as (select private.tax_clabe_effective(p_teacher, p_changed, p_effective) as at)
   select case
+    when private.tax_clabe_notice_failed(p_teacher, p_changed) then 'dead'
     when exists (
         select 1 from private.teacher_suspension_requests r
         where r.teacher_id = p_teacher and r.status = 'confirmed' and r.decided_at > p_changed and r.proposed_at < e.at)
@@ -296,6 +312,7 @@ as $$
   helpers (name, signature) as (
     values ('clabe_notice_key', 'private.clabe_notice_key(uuid, timestamptz)'), ('queue_clabe_notice', 'private.queue_clabe_notice()'),
            ('tax_clabe_effective', 'private.tax_clabe_effective(uuid, timestamptz, timestamptz)'), ('mail_purge', 'private.mail_purge()'),
+           ('tax_clabe_notice_failed', 'private.tax_clabe_notice_failed(uuid, timestamptz)'),
            ('guard_mail_outbox', 'private.guard_mail_outbox()'))
   select 'mail table privilege for ' || r.rolname, 'private.mail_outbox'
   from app_roles r
@@ -334,7 +351,7 @@ as $$
       and tg.tgenabled in ('O', 'A') and pg_catalog.pg_get_triggerdef(tg.oid) like t.pattern)
   union all
   select 'clabe standing without the notice', 'tax_clabe_standing'
-  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_clabe_standing(uuid, timestamptz, timestamptz)')) like '%tax_clabe_effective%notice_pending%', false)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_clabe_standing(uuid, timestamptz, timestamptz)')) like '%tax_clabe_effective%tax_clabe_notice_failed%notice_pending%', false)
   union all
   select 'finance read without the notice', 'tax_profile_for_payout'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_for_payout(uuid)')) like '%tax_clabe_standing%clabe_notice_pending%audit_log%', false)
