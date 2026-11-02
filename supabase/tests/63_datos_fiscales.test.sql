@@ -159,7 +159,7 @@ select ok((select count(*) from public.audit_log a where a.action = 'teacher_tax
 
 select pruebas.a_nombre_de(pruebas.mara());
 select is(private.tax_profile_state() ->> 'version', '3', 'el estado dice qué versión hay');
-select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at' - 'can_save', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
+select is(private.tax_profile_state() - 'version' - 'outcome' - 'updated_at' - 'can_save' - 'clabe_waits_until' - 'clabe_recapture', '{}'::jsonb, 'y nada más: no trae ni lo cifrado ni los últimos cuatro');
 select pruebas.limpiar();
 select is(pruebas.lecturas(pruebas.mara()), 0::bigint, 'el estado no es una lectura');
 
@@ -226,6 +226,10 @@ select pruebas.equipar(pruebas.f1());
 select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', gen_random_uuid())), 'not_found', 'una liquidación que no existe');
 select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_nita')), 'no_profile', 'un maestro sin datos');
 select is(pruebas.lecturas(pruebas.f1()), 0::bigint, 'nada de eso es una lectura');
+-- Con la espera ya cumplida: la espera se prueba en `66_espera_clabe`.
+set local session_replication_role = replica;
+update private.teacher_tax_profiles set clabe_changed_at = '-infinity', clabe_effective_from = '-infinity' where teacher_id = :'mara_m';
+set local session_replication_role = origin;
 select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$clabe_last4$$', :'pago_mara')), '7771', 'finanzas, por su liquidación, sí');
 select is(pruebas.lecturas(pruebas.f1()), 1::bigint, 'y queda en la auditoría');
 select is((select a.new_value ->> 'payout_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), :'pago_mara', 'con la liquidación por la que se leyó: es la condición de RF-510');
@@ -282,7 +286,7 @@ language plpgsql volatile security definer set search_path = ''
 as $$ begin return (select to_jsonb(p) from private.teacher_tax_profiles p limit 1); end $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax read without audit: private.tax_profile_mine()'), 've una lectura sin auditoría');
 create or replace function private.tax_profile_save(
-  p_teacher uuid, p_seen_version integer, p_rfc bytea, p_legal_name bytea, p_regime text, p_payee text, p_clabe bytea, p_last4 text, p_key_version integer)
+  p_teacher uuid, p_seen_version integer, p_rfc bytea, p_legal_name bytea, p_regime text, p_payee text, p_clabe bytea, p_last4 text, p_key_version integer, p_clabe_changed boolean default true)
 returns text
 language plpgsql volatile security definer set search_path = ''
 as $$ begin return 'saved'; end $$;

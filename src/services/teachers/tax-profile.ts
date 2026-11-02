@@ -44,17 +44,26 @@ export interface TaxProfileSeal {
   rfc: SealedField;
   legalName: SealedField;
   clabe: SealedField;
+  /** Si la CLABE escrita es otra que la vigente: la base no las puede comparar. Cierto también si lo vigente no abrió. */
+  clabeChanged: boolean;
 }
 
 export type TaxSaveAnswer = "saved" | "changed" | "invalid" | "not_teacher" | "suspended" | "needs_notice";
 export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "no_profile" | "not_teacher" };
-export type TaxPayoutAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" };
+export type TaxPayoutAnswer =
+  | { outcome: "ok"; row: TaxProfileRow }
+  | { outcome: "clabe_waiting"; until: string }
+  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" };
 
 export interface TaxProfileState {
   version: number;
   updatedAt: string | null;
   /** Falso solo con el fraude confirmado: un suspendido por otra causa sí los captura (decisión de Sergio del 2026-11-01). */
   canSave: boolean;
+  /** Desde cuándo rige una CLABE que todavía espera (decisión de Sergio del 2026-11-01). Con una propuesta de fraude pendiente dice lo mismo que sin ella. */
+  clabeWaitsUntil: string | null;
+  /** El último cambio de CLABE quedó anulado, y hay que volver a escribirla. */
+  clabeRecapture: boolean;
 }
 
 export interface TaxStore {
@@ -105,7 +114,8 @@ export type TaxReveal = Proof | { kind: "revealed"; data: MaskedTaxProfile } | {
 export type TaxSave = Proof | { kind: "saved" | "off" | "changed" | "suspended" | "not_teacher" } | { kind: "invalid"; problems: TaxFormProblems };
 export type TaxPayoutRead =
   | { kind: "ok"; data: OpenTaxProfile }
-  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "off" | "unavailable" }
+  | { kind: "clabe_waiting"; until: string }
+  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "off" | "unavailable" }
   | { kind: "session"; check: Refused };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -131,6 +141,22 @@ export function createTaxProfile(deps: TaxProfileDeps) {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Si la CLABE escrita es otra que la vigente: lo cifrado no se repite, así que hay que abrirla. Esa lectura queda en la auditoría, como cualquiera. Falla cerrado: lo que no
+   * abre cuenta como cambio, y empieza la espera. Se compara lo abierto, así que rotar la llave no reinicia nada.
+   */
+  async function clabeDiffers(claims: VerifiedClaims, seen: number, clabe: string): Promise<boolean> {
+    if (seen === 0) return true;
+    const current = await store.mine(claims);
+    if (current.outcome !== "ok" || current.row.version !== seen) return true;
+    const open = openRow(current.row);
+    if (open === null) {
+      await report("tax_profile_unreadable");
+      return true;
+    }
+    return open.clabe !== clabe;
   }
 
   /** Si ya los capturó y qué versión tiene, para la pantalla que ya pasó la guarda. Nulo si no se supo. */
@@ -193,6 +219,7 @@ export function createTaxProfile(deps: TaxProfileDeps) {
       if (standing.state !== "active" && standing.state !== "suspended") return { kind: "not_teacher" };
       const { value } = form;
       const at = { teacher: standing.teacher.id, rowVersion: input.seen + 1 };
+      const clabeChanged = await clabeDiffers(proof.claims, input.seen, value.clabe);
       answer = await store.save(proof.claims, {
         teacher: standing.teacher.id,
         seen: input.seen,
@@ -203,6 +230,7 @@ export function createTaxProfile(deps: TaxProfileDeps) {
         rfc: cipher.seal({ ...at, field: "rfc" }, value.rfc),
         legalName: cipher.seal({ ...at, field: "legal_name" }, value.legalName),
         clabe: cipher.seal({ ...at, field: "clabe", last4: value.last4 }, value.clabe),
+        clabeChanged,
       });
     } catch {
       await report("tax_profile_unavailable");
@@ -236,6 +264,7 @@ export function createTaxProfile(deps: TaxProfileDeps) {
       await report("tax_profile_unavailable");
       return { kind: "unavailable" };
     }
+    if (answer.outcome === "clabe_waiting") return { kind: "clabe_waiting", until: answer.until };
     if (answer.outcome !== "ok") return { kind: answer.outcome };
     const open = openRow(answer.row);
     if (open === null) {
