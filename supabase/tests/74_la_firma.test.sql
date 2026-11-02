@@ -3,7 +3,7 @@
 -- pasa a revisión. Todavía nadie puede llegar a enviar desde la aplicación: lo comprueba `tests/architecture/submit.test.ts`. Pasa con los borradores legales cargados y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(140);
+select plan(155);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -181,8 +181,8 @@ select is(pruebas.falta(), '{}'::text[], 'uno vencido ya no impide nada, aunque 
 select pruebas.como_dueno();
 update public.draft_resources set created_at = now() - interval '3 hours' + interval '1 minute' where id = 'a7400000-0000-0000-0003-000000000001';
 select is(pruebas.falta(), array['resource_pending'], 'a un minuto de vencer, sigue contando: todavía se puede confirmar');
-select pruebas.como_dueno();
-delete from public.draft_resources where id = 'a7400000-0000-0000-0003-000000000001';
+select is(pruebas.r(pruebas.p(1), format('private.resource_remove(%L, %L, %s)', pruebas.id('curso'), 'a7400000-0000-0000-0003-000000000001', pruebas.vista(pruebas.p(1)) -> 'missing' -> 0 ->> 'revision')), 'deleted',
+  'y con la revisión de la línea, el maestro lo puede quitar');
 insert into public.draft_resources (id, course_id, teacher_id, lesson_id, title, kind, mime, storage_path, size_bytes, state, position, object_id, object_version)
 values ('a7400000-0000-0000-0003-000000000002', pruebas.id('curso'), pruebas.m(1), pruebas.id('l1'), 'Guía', 'pdf', 'application/pdf', 'rec/2', 10, 'ready', 1, gen_random_uuid(), 'v1');
 select is(pruebas.falta(), '{}'::text[], 'uno listo, no');
@@ -275,6 +275,13 @@ select is(private.catalog_in_use('practices', 'a7400000-0000-0000-0002-000000000
 -- ---------------------------------------------------------------------------------------
 -- Enviar.
 
+-- Un pendiente vencido presente al enviar: ni cambia la huella ni entra a la fotografía.
+select pruebas.vista(pruebas.p(1)) ->> 'content_sha256' as huellaprevia \gset
+select pruebas.como_dueno();
+insert into public.draft_resources (id, course_id, teacher_id, lesson_id, title, kind, mime, storage_path, size_bytes, created_at)
+values ('a7400000-0000-0000-0003-000000000003', pruebas.id('curso'), pruebas.m(1), pruebas.id('l1'), 'Vencido', 'pdf', 'application/pdf', 'rec/vencido', 10, now() - interval '4 hours');
+select is(pruebas.vista(pruebas.p(1)) ->> 'content_sha256', :'huellaprevia', 'un pendiente vencido no cambia la huella');
+
 insert into auth.sessions (id, user_id, aal, created_at, updated_at) values (pruebas.sesion(pruebas.p(1)), pruebas.p(1), 'aal1', now(), now());
 select pruebas.vista(pruebas.p(1)) ->> 'content_sha256' as huella2 \gset
 select pruebas.vista(pruebas.p(1)) ->> 'statement' as frase \gset
@@ -290,6 +297,8 @@ select is((select (content_snapshot ->> 'format')::integer from public.course_re
 select is((select jsonb_array_length(content_snapshot -> 'modules' -> 0 -> 'lessons') from public.course_reviews where course_id = pruebas.id('curso')), 3, 'lleva las lecciones');
 select ok((select content_snapshot -> 'modules' -> 0 -> 'lessons' -> 0 -> 'video' ? 'provider_asset_id' from public.course_reviews where course_id = pruebas.id('curso')), 'y su video con el asset');
 select is((select content_snapshot -> 'modules' -> 0 -> 'lessons' -> 0 -> 'resources' -> 0 ->> 'storage_path' from public.course_reviews where course_id = pruebas.id('curso')), 'rec/2', 'y sus recursos, como pide el 07');
+select ok((select content_snapshot::text !~ 'rec/vencido' from public.course_reviews where course_id = pruebas.id('curso')), 'un pendiente vencido no entra a la fotografía');
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), 'a7400000-0000-0000-0003-000000000003')), 'not_editable', 'y confirmarlo en revisión no se puede');
 select ok((select content_snapshot -> 'captions_ready' ? :'segundo' from public.course_reviews where course_id = pruebas.id('curso')), 'los subtítulos van en la fotografía, fuera de la huella');
 select results_eq(
   $$select l.course_id, l.teacher_id, l.legal_document_id, l.term_years, l.accepted_by, l.ip::text, l.user_agent, l.session_id, l.aal, l.accepted_statement
@@ -383,6 +392,12 @@ select throws_ok(format($$update public.course_reviews set result = 'rejected', 
   '23514', null, 'un rechazo sin motivo no se guarda (RF-607)');
 select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = '   ', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'ni con un motivo en blanco');
+select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = E'\n\t', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+  '23514', null, 'ni con solo saltos de línea y tabuladores');
+select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = U&'\00A0\3000', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+  '23514', null, 'ni con espacios que no se ven');
+select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = U&'\200B', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+  '23514', null, 'ni con un carácter de ancho cero');
 select lives_ok(format($$update public.course_reviews set result = 'approved', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('sinfirma')),
   'de pendiente a decidido, sí');
 select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = 'Otra' where course_id = %L$$, pruebas.id('sinfirma')),
@@ -420,6 +435,8 @@ select pruebas.como_dueno_sistema();
 update public.course_reviews set result = 'rejected', reviewed_by = pruebas.p(1), reviewed_at = now(), reason = 'Falta audio' where course_id = pruebas.id('curso');
 update public.course_registry set state = 'draft', updated_at = now() where course_id = pruebas.id('curso');
 select pruebas.como_dueno();
+select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), 'a7400000-0000-0000-0003-000000000003')), 'expired', 'ya devuelto, contesta que venció');
+select is(pruebas.vista(pruebas.p(1)) ->> 'content_sha256', :'huella2', 'y la huella sigue igual');
 -- Un reenvío tardío del mismo formulario, con la misma huella, no firma otra vez sin que el maestro lo vea: lleva el número de envío que vio.
 select is(pruebas.enviar(p_annex => :'anexo1', p_hash => :'huella2', p_term => (private.parameter_value('LICENCIA_ANIOS'))::integer, p_submission => 1) ->> 'answer', 'changed',
   'un formulario de antes de la devolución no firma otra vez');
@@ -498,6 +515,17 @@ create trigger licenses_guard before update or delete on public.licenses for eac
 select ok('evidence table without trigger licenses_guard' = any(pruebas.vigila()), 'un guardián que deja vaciar el plazo se nota');
 drop trigger licenses_guard on public.licenses;
 create trigger licenses_guard before update or delete on public.licenses for each row execute function private.allow_only_redaction('ip', 'user_agent');
+-- Con el mismo nombre, la misma función y el mismo tipo, pero neutralizado.
+drop trigger licenses_guard on public.licenses;
+create trigger licenses_guard before update of ip or delete on public.licenses for each row execute function private.allow_only_redaction('ip', 'user_agent');
+select ok('evidence table without trigger licenses_guard' = any(pruebas.vigila()), 'un guardián que solo mira una columna se nota');
+drop trigger licenses_guard on public.licenses;
+create trigger licenses_guard before update or delete on public.licenses for each row execute function private.allow_only_redaction('ip', 'user_agent');
+drop trigger audit_changes on public.licenses;
+create trigger audit_changes after insert or update on public.licenses for each row when (false) execute function private.audit_row_change('content', 'ip', 'user_agent', 'session_id', 'aal');
+select ok('evidence table without trigger audit_changes' = any(pruebas.vigila()), 'una auditoría que nunca corre se nota');
+drop trigger audit_changes on public.licenses;
+create trigger audit_changes after insert or update on public.licenses for each row execute function private.audit_row_change('content', 'ip', 'user_agent', 'session_id', 'aal');
 alter table public.course_reviews disable trigger course_reviews_guard;
 select ok('evidence table without trigger course_reviews_guard' = any(pruebas.vigila()), 'sin el guardián del envío, se nota');
 alter table public.course_reviews enable trigger course_reviews_guard;
@@ -506,9 +534,15 @@ select ok('evidence table with a foreign trigger' = any(pruebas.vigila()), 'un d
 drop trigger ajeno on public.licenses;
 alter table public.course_reviews drop constraint course_reviews_rejection_has_reason;
 select ok('evidence table without constraint course_reviews_rejection_has_reason' = any(pruebas.vigila()), 'un rechazo sin motivo se nota');
-alter table public.course_reviews add constraint course_reviews_rejection_has_reason check (result <> 'rejected' or (reason is not null and btrim(reason) <> ''));
+alter table public.course_reviews add constraint course_reviews_rejection_has_reason check (result <> 'rejected' or private.draft_text_ok(reason, 2000, true));
 drop index public.course_reviews_one_pending_uq;
 select ok('evidence index missing' = any(pruebas.vigila()), 'dos envíos pendientes a la vez se notan');
+create unique index course_reviews_one_pending_uq on public.course_reviews (id) where result = 'pending';
+select ok('evidence index missing' = any(pruebas.vigila()), 'con el mismo nombre sobre otra columna, también');
+drop index public.course_reviews_one_pending_uq;
+create unique index course_reviews_one_pending_uq on public.course_reviews (course_id) where result = 'approved';
+select ok('evidence index missing' = any(pruebas.vigila()), 'y sobre otros envíos, también');
+drop index public.course_reviews_one_pending_uq;
 create unique index course_reviews_one_pending_uq on public.course_reviews (course_id) where result = 'pending';
 create function private.course_submit_otra() returns void language sql set search_path = '' as $$ select 1 $$;
 select ok('submission function not in the watchdog area' = any(pruebas.vigila()), 'una función nueva de enviar se nota');
@@ -525,6 +559,12 @@ alter function private.course_submit_preview(uuid) security definer;
 alter function private.course_readiness(uuid) reset search_path;
 select ok('submission function without fixed search_path' = any(pruebas.vigila()), 'una función sin su camino de búsqueda se nota');
 alter function private.course_readiness(uuid) set search_path = '';
+alter function private.course_statement(integer, text, integer, integer) rename to course_statement_otra;
+select ok('submission function missing' = any(pruebas.vigila()), 'una función que falta se nota');
+alter function private.course_statement_otra(integer, text, integer, integer) rename to course_statement;
+alter function private.course_annex() owner to app_service;
+select ok('submission function not owned by the table owner' = any(pruebas.vigila()), 'una función de otro dueño se nota');
+alter function private.course_annex() owner to postgres;
 select is(pruebas.vigila(), '{}', 'y al deshacerlo queda limpia');
 
 select * from finish();

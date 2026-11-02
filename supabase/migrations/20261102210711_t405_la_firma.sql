@@ -47,7 +47,8 @@ create table public.course_reviews (
   constraint course_reviews_hash_length check (octet_length(content_sha256) = 32),
   constraint course_reviews_result_consistent check (
     (result = 'pending') = (reviewed_at is null) and (result = 'pending') = (reviewed_by is null)),
-  constraint course_reviews_rejection_has_reason check (result <> 'rejected' or (reason is not null and btrim(reason) <> ''))
+  -- La misma regla de los textos del borrador: `btrim` no ve saltos de línea, ni espacios que no son ASCII. Nulo no pasa.
+  constraint course_reviews_rejection_has_reason check (result <> 'rejected' or private.draft_text_ok(reason, 2000, true))
 );
 comment on table public.course_reviews is 'Cada envío a revisión: la fotografía de lo que se envió, su huella y el resultado (RF-606, RF-607, T-405). Solo se inserta, y solo cambia una vez, de pendiente a decidido. Nadie de la aplicación la lee de frente.';
 -- Un curso no puede tener dos envíos pendientes a la vez.
@@ -182,7 +183,7 @@ as $$
 $$;
 revoke all on function private.course_readiness(uuid) from public;
 
--- Los recursos de un lugar en la fotografía: de una lección, o del curso con lección nula. Solo los listos: un pendiente impide enviar.
+-- Los recursos de un lugar en la fotografía: de una lección, o del curso con lección nula. Solo los listos: un pendiente vivo impide enviar, y uno vencido no es parte del curso.
 create function private.course_snapshot_resources(p_course uuid, p_lesson uuid) returns jsonb
 language sql stable security definer set search_path = ''
 as $$
@@ -564,21 +565,21 @@ as $$
   join pg_catalog.pg_constraint k on k.conrelid = t.table_name::regclass and k.contype = 'f'
   where k.confrelid in ('public.course_registry'::regclass, 'public.course_drafts'::regclass)
   union all
-  -- Sus disparadores, con su función, sus argumentos y prendidos: de los argumentos depende que el origen y la fotografía no pasen a la auditoría, y qué se puede vaciar de una
-  -- licencia. El tipo es la suma de fila (1), antes (2), insertar (4), borrar (8), cambiar (16) y vaciar (32).
+  -- Sus disparadores, prendidos y con la definición entera: de los argumentos depende que el origen y la fotografía no pasen a la auditoría y qué se puede vaciar de una licencia,
+  -- y un `when` o un `update of` los neutralizarían con el mismo nombre y la misma función.
   select 'evidence table without trigger ' || g.name, g.table_name
   from (values
-      ('public.course_reviews', 'course_reviews_guard', 'private.guard_course_review()', 27),
-      ('public.course_reviews', 'ledger_no_truncate', 'private.reject_mutation()', 34),
-      ('public.course_reviews', 'audit_changes', 'private.audit_row_change(''content'', ''content_snapshot'')', 21),
-      ('public.licenses', 'licenses_guard', 'private.allow_only_redaction(''ip'', ''user_agent'')', 27),
-      ('public.licenses', 'ledger_no_truncate', 'private.reject_mutation()', 34),
-      ('public.licenses', 'audit_changes', 'private.audit_row_change(''content'', ''ip'', ''user_agent'', ''session_id'', ''aal'')', 21)
-    ) as g (table_name, name, call, kind)
+      ('public.course_reviews', 'course_reviews_guard', 'BEFORE DELETE OR UPDATE ON public.course_reviews FOR EACH ROW EXECUTE FUNCTION private.guard_course_review()'),
+      ('public.course_reviews', 'ledger_no_truncate', 'BEFORE TRUNCATE ON public.course_reviews FOR EACH STATEMENT EXECUTE FUNCTION private.reject_mutation()'),
+      ('public.course_reviews', 'audit_changes', 'AFTER INSERT OR UPDATE ON public.course_reviews FOR EACH ROW EXECUTE FUNCTION private.audit_row_change(''content'', ''content_snapshot'')'),
+      ('public.licenses', 'licenses_guard', 'BEFORE DELETE OR UPDATE ON public.licenses FOR EACH ROW EXECUTE FUNCTION private.allow_only_redaction(''ip'', ''user_agent'')'),
+      ('public.licenses', 'ledger_no_truncate', 'BEFORE TRUNCATE ON public.licenses FOR EACH STATEMENT EXECUTE FUNCTION private.reject_mutation()'),
+      ('public.licenses', 'audit_changes', 'AFTER INSERT OR UPDATE ON public.licenses FOR EACH ROW EXECUTE FUNCTION private.audit_row_change(''content'', ''ip'', ''user_agent'', ''session_id'', ''aal'')')
+    ) as g (table_name, name, definition)
   where not exists (
     select 1 from pg_catalog.pg_trigger tg
-    where tg.tgrelid = g.table_name::regclass and tg.tgname = g.name and tg.tgtype = g.kind and tg.tgenabled in ('O', 'A')
-      and pg_catalog.pg_get_triggerdef(tg.oid) like '%EXECUTE FUNCTION ' || g.call)
+    where tg.tgrelid = g.table_name::regclass and tg.tgname = g.name and tg.tgenabled in ('O', 'A')
+      and pg_catalog.pg_get_triggerdef(tg.oid) = 'CREATE TRIGGER ' || g.name || ' ' || g.definition)
   union all
   select 'evidence table with a foreign trigger', t.table_name
   from evidence_tables t
@@ -589,7 +590,7 @@ as $$
   select 'evidence table without constraint ' || c.name, c.table_name
   from (values
       ('public.course_reviews', 'course_reviews_hash_length', 'CHECK ((octet_length(content_sha256) = 32))'),
-      ('public.course_reviews', 'course_reviews_rejection_has_reason', 'CHECK (((result <> ''rejected''::public.review_result) OR ((reason IS NOT NULL) AND (btrim(reason) <> ''''::text))))'),
+      ('public.course_reviews', 'course_reviews_rejection_has_reason', 'CHECK (((result <> ''rejected''::public.review_result) OR private.draft_text_ok(reason, 2000, true)))'),
       ('public.course_reviews', 'course_reviews_submission_uq', 'UNIQUE (course_id, submission_no)'),
       ('public.licenses', 'licenses_course_review_id_key', 'UNIQUE (course_review_id)'),
       ('public.licenses', 'licenses_statement_hash_length', 'CHECK ((octet_length(accepted_statement_sha256) = 32))')
@@ -599,10 +600,12 @@ as $$
     where k.conrelid = c.table_name::regclass and k.conname = c.name and k.convalidated
       and pg_catalog.pg_get_constraintdef(k.oid) = c.definition)
   union all
+  -- Entero: con el mismo nombre sobre otra columna, o sobre otros envíos, dos pendientes ya no chocarían.
   select 'evidence index missing', 'public.course_reviews_one_pending_uq'
   where not exists (
     select 1 from pg_catalog.pg_indexes i
-    where i.schemaname = 'public' and i.indexname = 'course_reviews_one_pending_uq' and i.indexdef like 'CREATE UNIQUE INDEX%')
+    where i.schemaname = 'public' and i.indexname = 'course_reviews_one_pending_uq'
+      and i.indexdef = 'CREATE UNIQUE INDEX course_reviews_one_pending_uq ON public.course_reviews USING btree (course_id) WHERE (result = ''pending''::public.review_result)')
   union all
   select 'submission function missing', f.signature
   from found f where f.oid is null
