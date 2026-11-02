@@ -23,8 +23,8 @@ const DRAFTS_DIR = join("supabase", "local", "legal-drafts");
 const EFFECTIVE_FROM = "2026-10-01 06:00:00+00";
 
 // Los únicos tipos que se cargan como borrador: los tres textos sin los que no se puede
-// completar un registro (RF-108), y los dos sin los que no se acepta una invitación de maestro
-// (T-401). Un archivo con otro nombre es un error. Si se vuelven a pedir no lo dice el guion: lo
+// completar un registro (RF-108), los dos sin los que no se acepta una invitación de maestro
+// (T-401) y el anexo sin el que no se envía un curso (T-405). Un archivo con otro nombre es un error. Si se vuelven a pedir no lo dice el guion: lo
 // decide la base por el tipo (T-110).
 const DRAFTS = new Map([
   ["terms.md", { docType: "terms" }],
@@ -32,6 +32,7 @@ const DRAFTS = new Map([
   ["course_history_consent.md", { docType: "course_history_consent" }],
   ["teacher_agreement.md", { docType: "teacher_agreement" }],
   ["teacher_privacy_notice.md", { docType: "teacher_privacy_notice" }],
+  ["license_annex.md", { docType: "license_annex" }],
 ]);
 
 function fail(message) {
@@ -113,6 +114,8 @@ try {
       [draft.docType, draft.title, draft.body, EFFECTIVE_FROM],
     );
   }
+  // La versión 0 del anexo solo se firma con esta marca (T-405): en producción nadie la pone.
+  await client.query("insert into private.local_flags (flag) values ('legal_drafts') on conflict do nothing");
   // Un texto legal no se edita. Si el archivo cambió después de cargarse, la base conserva
   // el anterior: se avisa, en vez de dejar creer que el cambio entró.
   const stored = await client.query(
