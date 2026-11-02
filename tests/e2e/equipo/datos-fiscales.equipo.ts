@@ -89,6 +89,8 @@ test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ 
 
   await capture(page, ana.password);
   await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
+  // La primera captura también espera, y se dice en la pantalla y en el inicio del portal: es lo que hoy le avisa de un cambio que no hizo.
+  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
   expect(await reads(ana)).toBe("0");
   // Ni el documento ni la dirección traen lo escrito.
   const saved = await page.content();
@@ -126,10 +128,10 @@ test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ 
   for (const plain of [RFC, NAME, CLABE]) expect(shown).not.toContain(plain);
   expect(await a11yViolations(page)).toEqual([]);
 
-  // Cambiar vuelve a pedir el dato completo, y dice a qué pagos aplica.
+  // Cambiar vuelve a pedir el dato completo, y avisa de la espera.
   await page.getByRole("link", { name: "Cambiar" }).click();
   await expect(page).toHaveURL(`${PATH}?cambiar=1`);
-  await expect(page.getByText("Aplica a los pagos que todavía no se hacen.")).toBeVisible();
+  await expect(page.getByText("Una CLABE nueva no rige de inmediato")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "RFC" })).toHaveValue("");
   // El aviso de lo guardado antes dura 60 segundos en su cookie, y mientras se captura de nuevo no se dice.
   await expect(page.getByText("Tus datos quedaron guardados.")).toHaveCount(0);
@@ -236,6 +238,30 @@ test("un maestro suspendido sin fraude cambia sus datos: una baja debe poder cob
   await capture(page, ana.password);
   await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Cambiar" })).toBeVisible();
+});
+
+test("la espera de la CLABE se dice sin pedir la contraseña, en la pantalla y en el inicio, y si se anuló pide escribirla otra vez", async ({ page }) => {
+  const ana = await person();
+  await makeTeacher(ana);
+  await signIn(page, ana, PATH);
+  await capture(page, ana.password);
+  await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
+  await expect(page.getByText(/Tu CLABE nueva rige a partir del .* hora del centro de México/)).toBeVisible();
+  await page.goto("/portal");
+  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Dentro de la espera cambió su contraseña: queda anulada, también en el inicio.
+  await ownerQuery("update private.account_security set password_changed_at = clock_timestamp() where profile_id = $1", [ana.id]);
+  await page.goto("/portal");
+  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toHaveCount(0);
+  await expect(page.getByText("Tu último cambio de CLABE quedó anulado.")).toBeVisible();
+  await page.getByRole("link", { name: "Escribir mi CLABE" }).click();
+  await expect(page).toHaveURL(`${PATH}?cambiar=1`);
+  await capture(page, ana.password);
+  await expect(page).toHaveURL(PATH);
+  await expect(page.getByText("Tu último cambio de CLABE quedó anulado.")).toHaveCount(0);
+  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
 });
 
 test("un maestro suspendido por fraude ve lo suyo y no lo cambia", async ({ page }) => {

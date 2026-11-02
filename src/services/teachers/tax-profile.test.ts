@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { clabeCheckDigit } from "@/domain/fiscal/clabe";
 
 import { createTaxCipher } from "./tax-cipher";
-import { createTaxProfile, type PasswordCheck, type TaxProfileDeps, type TaxProfileRow, type TaxStore } from "./tax-profile";
+import { createTaxProfile, type PasswordCheck, type TaxPayoutAnswer, type TaxProfileDeps, type TaxProfileRow, type TaxStore } from "./tax-profile";
 
 // El servicio de los datos fiscales, con el cifrado de verdad y lo demás simulado: en qué orden pregunta, qué hace con cada respuesta,
 // y que nada en claro salga de aquí. La base y Auth, en tests/integration/83-datos-fiscales.test.ts.
@@ -34,6 +34,7 @@ let saved: Parameters<TaxStore["save"]>[1] | null;
 let saveAnswer: Awaited<ReturnType<TaxStore["save"]>>;
 let stored: TaxProfileRow | null;
 let reports: string[];
+let payoutAnswer: TaxPayoutAnswer | null;
 let standing: Awaited<ReturnType<TaxProfileDeps["standing"]>>;
 
 function sealedRow(cipher: ReturnType<typeof workingCipher>): TaxProfileRow {
@@ -53,7 +54,7 @@ function sealedRow(cipher: ReturnType<typeof workingCipher>): TaxProfileRow {
 
 function service(cipher: TaxProfileDeps["cipher"]) {
   const store: TaxStore = {
-    state: () => Promise.resolve({ version: 3, updatedAt: AT, canSave: true }),
+    state: () => Promise.resolve({ version: 3, updatedAt: AT, canSave: true, clabeWaitsUntil: null, clabeRecapture: false }),
     mine: () => {
       order.push("mine");
       return Promise.resolve(stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored });
@@ -65,7 +66,7 @@ function service(cipher: TaxProfileDeps["cipher"]) {
     },
     forPayout: (_claims, payout) => {
       order.push(`forPayout:${payout}`);
-      return Promise.resolve(stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored });
+      return Promise.resolve(payoutAnswer ?? (stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored }));
     },
   };
   return createTaxProfile({
@@ -94,6 +95,7 @@ beforeEach(() => {
   saveAnswer = "saved";
   stored = null;
   reports = [];
+  payoutAnswer = null;
   standing = { state: "active", teacher: { id: TEACHER } };
 });
 
@@ -113,7 +115,7 @@ describe("guardar", () => {
   it("en orden: la contraseña, quién es, y guarda cifrado con la versión que sigue a la vista", async () => {
     const cipher = workingCipher();
     expect(await service(cipher).saveTaxProfile(jar, { ...FORM, seen: 4 }, origin)).toEqual({ kind: "saved" });
-    expect(order).toEqual(["confirm", "standing", "save"]);
+    expect(order).toEqual(["confirm", "standing", "mine", "save"]);
     expect(saved).not.toBeNull();
     const row = saved!;
     expect(row).toMatchObject({ teacher: TEACHER, seen: 4, regime: "626", payee: "person", last4: CLABE.slice(-4), keyVersion: 1 });
@@ -193,6 +195,51 @@ describe("guardar", () => {
   });
 });
 
+describe("si la CLABE cambió", () => {
+  it("la primera captura no tiene con qué comparar: cuenta como cambio, y no lee nada", async () => {
+    await service(workingCipher()).saveTaxProfile(jar, FORM, origin);
+    expect(saved?.clabeChanged).toBe(true);
+    expect(order).not.toContain("mine");
+  });
+
+  it("la misma cuenta no es un cambio, y se abre antes de guardar", async () => {
+    const cipher = workingCipher();
+    stored = sealedRow(cipher);
+    await service(cipher).saveTaxProfile(jar, { ...FORM, seen: 3 }, origin);
+    expect(saved?.clabeChanged).toBe(false);
+    expect(order.indexOf("mine")).toBeLessThan(order.indexOf("save"));
+    expect(reports).toEqual([]);
+  });
+
+  it("otra cuenta, sí", async () => {
+    const cipher = workingCipher();
+    stored = sealedRow(cipher);
+    const first17 = "01218000987654321";
+    await service(cipher).saveTaxProfile(jar, { ...FORM, clabe: `${first17}${clabeCheckDigit(first17)}`, seen: 3 }, origin);
+    expect(saved?.clabeChanged).toBe(true);
+  });
+
+  it("lo vigente que no abre cuenta como cambio, y se reporta", async () => {
+    const cipher = workingCipher();
+    stored = sealedRow(createTaxCipher(() => ({ keys: keyEntry(), active: "1" })));
+    expect(await service(cipher).saveTaxProfile(jar, { ...FORM, seen: 3 }, origin)).toEqual({ kind: "saved" });
+    expect(saved?.clabeChanged).toBe(true);
+    expect(reports).toEqual(["tax_profile_unreadable"]);
+  });
+
+  it("si lo vigente ya no es lo que se vio, cuenta como cambio: la base contesta que cambió", async () => {
+    const cipher = workingCipher();
+    stored = sealedRow(cipher);
+    await service(cipher).saveTaxProfile(jar, { ...FORM, seen: 2 }, origin);
+    expect(saved?.clabeChanged).toBe(true);
+  });
+
+  it("sin datos, también", async () => {
+    await service(workingCipher()).saveTaxProfile(jar, { ...FORM, seen: 3 }, origin);
+    expect(saved?.clabeChanged).toBe(true);
+  });
+});
+
 describe("ver lo guardado", () => {
   it("pide la contraseña, lee y devuelve solo los últimos cuatro", async () => {
     const cipher = workingCipher();
@@ -258,5 +305,15 @@ describe("finanzas lee por una liquidación", () => {
       data: { rfc: RFC, legalName: NAME, regime: "626", payee: "person", clabe: CLABE, version: 3, updatedAt: AT },
     });
     expect(order).toEqual([`forPayout:${PAYOUT}`]);
+  });
+
+  it("mientras la CLABE espera, solo desde cuándo rige", async () => {
+    payoutAnswer = { outcome: "clabe_waiting", until: AT };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "clabe_waiting", until: AT });
+  });
+
+  it.each(["clabe_held", "clabe_recapture"] as const)("con %s, nada", async (outcome) => {
+    payoutAnswer = { outcome };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: outcome });
   });
 });
