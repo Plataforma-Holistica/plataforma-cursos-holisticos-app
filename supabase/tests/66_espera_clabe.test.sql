@@ -3,7 +3,7 @@
 -- cambiada o un fraude confirmado dentro de la espera la anulan, para siempre; con una propuesta de fraude pendiente no madura, sin que el maestro lo note.
 begin;
 \ir _ayuda.psql
-select plan(79);
+select plan(90);
 
 select pruebas.alta('a6600000-0000-0000-0000-000000000001', 'mara-66@prueba.test');
 select pruebas.alta('c6600000-0000-0000-0000-000000000001', 'f1-66@prueba.test');
@@ -67,6 +67,8 @@ create function pruebas.contrasena(p_cuando timestamptz) returns void language s
   insert into private.account_security (profile_id, password_changed_at) values (pruebas.mara(), p_cuando)
   on conflict (profile_id) do update set password_changed_at = excluded.password_changed_at
 $$;
+create function pruebas.sin_contrasenas() returns void language sql security definer
+as $$ delete from private.account_password_changes where profile_id = pruebas.mara() $$;
 -- Una propuesta de fraude, en el estado que diga la prueba, sin pasar por sus puertas: esas se prueban en la 59.
 create function pruebas.propuesta(p_teacher uuid, p_estado public.suspension_request_status, p_propuesta timestamptz, p_decidida timestamptz default null) returns uuid language plpgsql as $$
 declare
@@ -211,6 +213,15 @@ select pruebas.contrasena(now() - interval '1 hour');
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'dentro de la espera, la anula');
 select is(pruebas.estado() ->> 'clabe_recapture', 'true', 'el maestro ve que hay que volver a escribirla');
 select is(pruebas.estado() ->> 'clabe_waits_until', null, 'y ya no una fecha');
+-- Lo anulado no revive: la cuenta guarda solo su último cambio, y el historial, todos.
+select pruebas.sin_contrasenas();
+select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
+select pruebas.contrasena(now() - interval '50 hours');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'cambiada durante la espera, ya pasada la fecha sigue anulada');
+select pruebas.contrasena(now() - interval '1 hour');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'y otra contraseña, pasada la fecha, no la revive');
+select is(pruebas.estado() ->> 'clabe_recapture', 'true', 'el maestro sigue viendo que hay que volver a escribirla');
+select pruebas.sin_contrasenas();
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
 select pruebas.contrasena(now() - interval '1 hour');
 select is(pruebas.finanzas(:'pago') ->> 'version', '11', 'cambiada después de que rigió, no importa');
@@ -226,29 +237,30 @@ select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'recuperar
 -- ---------------------------------------------------------------------------------------
 -- Un fraude confirmado dentro de la espera la anula para siempre.
 
-select pruebas.contrasena(now() - interval '1 year');
+select pruebas.sin_contrasenas();
 select pruebas.mueve(:'m', now() - interval '10 hours', now() + interval '62 hours');
 select pruebas.propuesta(:'m', 'confirmed', now() - interval '6 hours', now() - interval '5 hours');
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'confirmado dentro de la espera, la anula');
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '1 hour');
-select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'también si la fecha ya pasó: nunca madura, ni al levantarse la suspensión');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'también si la fecha ya pasó: nunca madura, esté o no suspendido');
 -- Detenida por una propuesta, y decidida ya pasada la fecha: nunca rigió. Confirmarla no la deja regir.
 select pruebas.sin_propuestas();
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
 select pruebas.propuesta(:'m', 'confirmed', now() - interval '90 hours', now() - interval '1 hour');
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'propuesta durante la espera y confirmada después de la fecha: la anula');
--- La contraseña cambiada mientras seguía detenida la anula, aunque ya pasara la fecha.
+-- Y con el maestro sin suspensión, escribir la misma CLABE no hereda lo que el fraude anuló.
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), false, '4321'), 'saved', 'escribe la misma CLABE');
+select cmp_ok((pruebas.ultima(:'m')).clabe_changed_at, '>', now() - interval '1 second', 'no hereda lo que el fraude anuló');
+-- Una contraseña cambiada pasada la fecha no anula, aunque siguiera detenida: anular ahí le delataría la propuesta al maestro.
 select pruebas.sin_propuestas();
+select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
 select pruebas.propuesta(:'m', 'rejected', now() - interval '90 hours', now() - interval '1 hour');
 select pruebas.contrasena(now() - interval '5 hours');
-select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'contraseña cambiada mientras seguía detenida, aunque luego se rechace la propuesta');
-select pruebas.contrasena(now() - interval '30 minutes');
-select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'cambiada después de rechazarla, ya regía: no importa');
+select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'contraseña cambiada pasada la fecha, con la propuesta luego rechazada: rige');
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'pending', now() - interval '90 hours');
-select pruebas.contrasena(now() - interval '5 hours');
-select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'con la propuesta aún pendiente, también');
-select pruebas.contrasena(now() - interval '1 year');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_held', 'con la propuesta pendiente, sigue detenida');
+select pruebas.sin_contrasenas();
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'confirmed', now() - interval '6 hours', now() - interval '5 hours');
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
@@ -269,7 +281,21 @@ select is(pruebas.finanzas(:'pago') - 'outcome', '{}'::jsonb, 'sin más datos');
 select is(pruebas.estado(), (select respuesta from sin_propuesta), 'el maestro recibe exactamente lo mismo que sin propuesta');
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '1 minute');
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_held', 'aunque la fecha pase');
-select is(pruebas.estado() ->> 'clabe_waits_until', null, 'y el maestro ve lo de cualquier CLABE que ya llegó a su fecha');
+select is(pruebas.estado() ->> 'clabe_waits_until', null, 'y el maestro ya no ve fecha');
+-- Pasada la fecha tampoco lo nota, ni cambiando la contraseña para ver qué pasa, ni volviendo a guardar.
+select pruebas.sin_propuestas();
+create temporary table sin_propuesta_pasada on commit drop as select pruebas.estado() as respuesta;
+grant select on sin_propuesta_pasada to anon, authenticated, app_service;
+select pruebas.propuesta(:'m', 'pending', now() - interval '90 hours');
+select is(pruebas.estado(), (select respuesta from sin_propuesta_pasada), 'pasada la fecha, recibe exactamente lo mismo que sin propuesta');
+select pruebas.contrasena(now() - interval '10 seconds');
+select is(pruebas.estado(), (select respuesta from sin_propuesta_pasada), 'también después de cambiar su contraseña');
+select is(pruebas.guarda(:'m', pruebas.vista(:'m'), false, '4321'), 'saved', 'vuelve a guardar la misma CLABE');
+select is((pruebas.ultima(:'m')).clabe_effective_from, now() - interval '1 minute', 'y no le aparece una espera nueva');
+select pruebas.sin_contrasenas();
+select pruebas.sin_propuestas();
+select pruebas.propuesta(:'m', 'withdrawn', now() - interval '90 hours', now() - interval '30 seconds');
+select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'retirada ya pasada la fecha: rige');
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'pending', now());
 select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'propuesta cuando ya regía: sigue');
@@ -291,7 +317,7 @@ select pruebas.como_dueno();
 select is((pruebas.ultima(:'m')).clabe_effective_from, 'infinity'::timestamptz, 'una fila escrita sin sus fechas no rige nunca');
 select pruebas.mueve(:'m', '-infinity', '-infinity');
 select is(pruebas.finanzas(:'pago') ->> 'version', '50', 'una de antes de esta regla, sí');
-select throws_ok(format($$update private.teacher_tax_profiles set clabe_changed_at = now(), clabe_effective_from = now() - interval '1 day' where teacher_id = %L$$, :'m'), null, null, 'el libro no admite cambiar la fecha');
+select throws_ok(format($$update private.teacher_tax_profiles set clabe_changed_at = now(), clabe_effective_from = now() - interval '1 day' where teacher_id = %L$$, :'m'), '42501', null, 'el libro no admite cambiar la fecha');
 set local session_replication_role = replica;
 select throws_ok(format($$update private.teacher_tax_profiles set clabe_changed_at = now(), clabe_effective_from = now() - interval '1 day' where teacher_id = %L$$, :'m'), '23514', null, 'y no puede regir antes de cambiar');
 set local session_replication_role = origin;
@@ -325,6 +351,13 @@ returns text
 language plpgsql volatile security definer set search_path = ''
 as $$ begin return 'saved'; end $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax save without the clabe wait'), 've guardar sin la espera');
+
+alter table private.account_security disable trigger password_change_log;
+select ok(exists (select 1 from private.schema_violations() where problem = 'password change log missing'), 've el historial de contraseñas apagado');
+alter table private.account_security enable trigger password_change_log;
+grant select on private.account_password_changes to app_service;
+select ok(exists (select 1 from private.schema_violations() where problem = 'password change log reachable'), 've el historial al alcance de la aplicación');
+revoke select on private.account_password_changes from app_service;
 
 select * from finish();
 rollback;

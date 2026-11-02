@@ -34,8 +34,34 @@ end
 $$;
 revoke all on function private.tax_clabe_wait() from public;
 
--- La única definición de si una CLABE rige. `dead` no vuelve: se captura otra vez. No nombra la tabla: recibe las fechas de la fila que se pregunta. Una propuesta hecha antes de
--- la fecha alarga la espera hasta que se decida: confirmada, la anula aunque ya pasara la fecha, y una contraseña cambiada mientras tanto, también.
+-- `account_security` guarda solo el último cambio de contraseña: con eso, un segundo cambio pasada la fecha revivía una CLABE anulada. Este historial es de solo inserción, lo
+-- escribe el disparador venga de donde venga el cambio, y ningún rol de la aplicación lo toca.
+create table private.account_password_changes (
+  profile_id uuid not null references public.profiles (id) on delete cascade,
+  changed_at timestamptz not null,
+  primary key (profile_id, changed_at)
+);
+comment on table private.account_password_changes is 'Cada cambio de contraseña de una cuenta. De él depende que una CLABE anulada siga anulada (`tax_clabe_standing`).';
+alter table private.account_password_changes enable row level security;
+revoke all on table private.account_password_changes from public;
+insert into private.account_password_changes (profile_id, changed_at) select s.profile_id, s.password_changed_at from private.account_security s;
+
+create function private.log_password_change() returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  insert into private.account_password_changes (profile_id, changed_at) values (new.profile_id, new.password_changed_at)
+  on conflict (profile_id, changed_at) do nothing;
+  return null;
+end
+$$;
+revoke all on function private.log_password_change() from public;
+create trigger password_change_log after insert or update of password_changed_at on private.account_security
+  for each row execute function private.log_password_change();
+
+-- La única definición de si una CLABE rige. `dead` no vuelve: se captura otra vez. No nombra la tabla: recibe las fechas de la fila que se pregunta. Un fraude confirmado la anula si
+-- la propuesta se hizo antes de la fecha, aunque se confirme después. Una contraseña la anula solo si cambió antes de la fecha: pasada la fecha, con la CLABE aún detenida, anularla le
+-- delataría al maestro la propuesta.
 create function private.tax_clabe_standing(p_teacher uuid, p_changed timestamptz, p_effective timestamptz) returns text
 language sql stable set search_path = ''
 as $$
@@ -44,12 +70,8 @@ as $$
         select 1 from private.teacher_suspension_requests r
         where r.teacher_id = p_teacher and r.status = 'confirmed' and r.decided_at > p_changed and r.proposed_at < p_effective)
       or exists (
-        select 1 from public.teachers t join private.account_security s on s.profile_id = t.profile_id
-        where t.id = p_teacher and s.password_changed_at > p_changed and (
-          s.password_changed_at < p_effective
-          or exists (
-            select 1 from private.teacher_suspension_requests r
-            where r.teacher_id = p_teacher and r.proposed_at < p_effective and (r.status = 'pending' or r.decided_at > s.password_changed_at)))) then 'dead'
+        select 1 from public.teachers t join private.account_password_changes c on c.profile_id = t.profile_id
+        where t.id = p_teacher and c.changed_at > p_changed and c.changed_at < p_effective) then 'dead'
     when exists (
         select 1 from private.teacher_suspension_requests r
         where r.teacher_id = p_teacher and r.status = 'pending' and r.proposed_at < p_effective) then 'held'
@@ -255,6 +277,16 @@ as $$
      or pg_catalog.has_function_privilege('authenticated', k.signature, 'execute')
      or pg_catalog.has_function_privilege('anon', k.signature, 'execute')
      or pg_catalog.has_function_privilege('service_role', k.signature, 'execute')
+  union all
+  select 'password change log missing', 'private.account_security'
+  where not exists (
+    select 1 from pg_catalog.pg_trigger tg
+    where tg.tgrelid = 'private.account_security'::regclass and tg.tgname = 'password_change_log' and tg.tgenabled in ('O', 'A')
+      and tg.tgfoid = 'private.log_password_change()'::regprocedure)
+  union all
+  select 'password change log reachable', 'private.account_password_changes'
+  from app_roles r
+  where pg_catalog.has_table_privilege(r.rolname::name, 'private.account_password_changes'::regclass, 'select, insert, update, delete, truncate, references, trigger')
   union all
   select 'tax save without the balance lock', 'tax_profile_save'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer, boolean)')) like '%teacher_balance:%', false)
