@@ -138,12 +138,13 @@ describe("capturar", () => {
     expect(values).not.toContain("999");
   });
 
-  it("al cambiar dice a qué pagos aplica y ofrece volver; al capturar por primera vez, no", () => {
+  it("avisa de la espera también al capturar por primera vez, y solo al cambiar ofrece volver", () => {
     const first = render(<TaxCapture seen={0} changing={false} />);
-    expect(screen.queryByText(text.capture.appliesTo)).toBeNull();
+    expect(screen.getByText(text.capture.clabeWait)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: text.capture.cancel })).toBeNull();
     first.unmount();
     render(<TaxCapture seen={2} changing />);
-    expect(screen.getByText(text.capture.appliesTo)).toBeTruthy();
+    expect(screen.getByText(text.capture.clabeWait)).toBeTruthy();
     expect(screen.getByRole("link", { name: text.capture.cancel }).getAttribute("href")).toBe("/portal/datos-fiscales");
   });
 

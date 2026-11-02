@@ -46,7 +46,16 @@ function rowOf(answer: z.infer<typeof payload>): TaxProfileRow {
 const answerRow = z.object({ answer: z.unknown() });
 
 const stateAnswer = z.union([
-  z.object({ outcome: z.literal("ok"), version: z.number().int().min(0), updated_at: z.string().nullable(), can_save: z.boolean() }).strict(),
+  z
+    .object({
+      outcome: z.literal("ok"),
+      version: z.number().int().min(0),
+      updated_at: z.string().nullable(),
+      can_save: z.boolean(),
+      clabe_waits_until: z.string().nullable(),
+      clabe_recapture: z.boolean(),
+    })
+    .strict(),
   z.object({ outcome: z.literal("not_teacher") }).strict(),
 ]);
 
@@ -54,7 +63,13 @@ export async function askTaxState(tx: Tx): Promise<TaxProfileState | null> {
   const rows = await tx.query(sql`select private.tax_profile_state() as answer`, answerRow);
   const answer = stateAnswer.parse(rows[0]?.answer);
   if (answer.outcome === "not_teacher") return null;
-  return { version: answer.version, updatedAt: answer.updated_at === null ? null : new Date(answer.updated_at).toISOString(), canSave: answer.can_save };
+  return {
+    version: answer.version,
+    updatedAt: answer.updated_at === null ? null : new Date(answer.updated_at).toISOString(),
+    canSave: answer.can_save,
+    clabeWaitsUntil: answer.clabe_waits_until === null ? null : new Date(answer.clabe_waits_until).toISOString(),
+    clabeRecapture: answer.clabe_recapture,
+  };
 }
 
 const saveAnswer = z.enum(["saved", "changed", "invalid", "not_teacher", "suspended", "needs_notice"]);
@@ -62,7 +77,7 @@ const saveAnswer = z.enum(["saved", "changed", "invalid", "not_teacher", "suspen
 export async function askTaxSave(tx: Tx, row: TaxProfileSeal): Promise<TaxSaveAnswer> {
   const rows = await tx.query(
     sql`select private.tax_profile_save(${row.teacher}::uuid, ${row.seen}::integer, ${row.rfc}::bytea, ${row.legalName}::bytea, ${row.regime}, ${row.payee},
-                                         ${row.clabe}::bytea, ${row.last4}, ${row.keyVersion}::integer) as answer`,
+                                         ${row.clabe}::bytea, ${row.last4}, ${row.keyVersion}::integer, ${row.clabeChanged}::boolean) as answer`,
     answerRow,
   );
   return saveAnswer.parse(rows[0]?.answer);
@@ -76,10 +91,16 @@ export async function askTaxMine(tx: Tx): Promise<TaxReadAnswer> {
   return answer.outcome === "ok" ? { outcome: "ok", row: rowOf(answer) } : { outcome: answer.outcome };
 }
 
-const payoutAnswer = z.union([payload, z.object({ outcome: z.enum(["forbidden", "needs_fresh_code", "not_found", "self", "no_profile"]) }).strict()]);
+const payoutAnswer = z.union([
+  payload,
+  z.object({ outcome: z.literal("clabe_waiting"), until: z.string() }).strict(),
+  z.object({ outcome: z.enum(["forbidden", "needs_fresh_code", "not_found", "self", "no_profile", "clabe_held", "clabe_recapture"]) }).strict(),
+]);
 
 export async function askTaxForPayout(tx: Tx, payout: string): Promise<TaxPayoutAnswer> {
   const rows = await tx.query(sql`select private.tax_profile_for_payout(${payout}::uuid) as answer`, answerRow);
   const answer = payoutAnswer.parse(rows[0]?.answer);
-  return answer.outcome === "ok" ? { outcome: "ok", row: rowOf(answer) } : { outcome: answer.outcome };
+  if (answer.outcome === "ok") return { outcome: "ok", row: rowOf(answer) };
+  if (answer.outcome === "clabe_waiting") return { outcome: "clabe_waiting", until: new Date(answer.until).toISOString() };
+  return { outcome: answer.outcome };
 }

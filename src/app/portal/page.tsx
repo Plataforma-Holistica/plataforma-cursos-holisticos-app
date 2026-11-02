@@ -8,6 +8,7 @@ import { taxProfileState } from "@/services/teachers/tax-data";
 import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
+import { clabeWaitingText } from "./_fiscal/clabe-wait";
 import { PortalFrame } from "./_lib/frame";
 
 // El inicio del portal del maestro (`/portal`, T-401), en su versión mínima: el panel con cifras llega con
@@ -41,6 +42,12 @@ export default async function PortalHomePage() {
       {taxData?.version === 0 && taxData.canSave && (
         <InlineAlert tone="warning">
           {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
+        </InlineAlert>
+      )}
+      {taxData?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(taxData.clabeWaitsUntil)}</InlineAlert>}
+      {taxData?.clabeRecapture === true && taxData.canSave && (
+        <InlineAlert tone="warning">
+          {messages.portal.taxData.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{messages.portal.taxData.clabeRecaptureLink}</TextLink>
         </InlineAlert>
       )}
       <p className="text-text-2">{text.intro}</p>

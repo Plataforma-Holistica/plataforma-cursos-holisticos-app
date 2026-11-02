@@ -94,7 +94,7 @@ select is(pruebas.estado(pruebas.rosa()) ->> 'can_save', 'true', 'levantada, vue
 select ok(not (select s from (select pruebas.guarda(pruebas.rosa(), :'rosa_m', 2) = 'suspended' as s) x), 'y no contesta que está suspendida');
 
 -- Guardar a nombre de una suspendida toma su fila, para ir uno tras otro con quien la cambia. La carrera, en la integración 83.
-select ok(pg_get_functiondef('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer)'::regprocedure) like '%for share of t%', 'toma la fila del maestro');
+select ok(pg_get_functiondef('private.tax_profile_save(uuid, integer, bytea, bytea, text, text, bytea, text, integer, boolean)'::regprocedure) like '%for share of t%', 'toma la fila del maestro');
 select is((select count(*)::integer from private.schema_violations_tax()), 0, 'el área fiscal, en orden');
 
 select * from finish();

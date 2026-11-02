@@ -155,7 +155,7 @@ export function TaxCapture({ seen, changing, email = null }: { seen: number; cha
   return (
     <form action={action} onChange={remember} noValidate autoComplete="off" className="flex flex-col gap-6">
       <p className="text-text-2">{text.capture.intro}</p>
-      {changing && <InlineAlert tone="warning">{text.capture.appliesTo}</InlineAlert>}
+      <InlineAlert tone="warning">{text.capture.clabeWait}</InlineAlert>
       <FormErrorSummary errors={errors} attempt={attempt} />
       {state.kind === "throttled" && <ThrottledAlert key={attempt} retryAt={state.retryAt} />}
       {failure !== null && (
