@@ -51,6 +51,8 @@ export const ROUTES = {
   portalCourses: "/portal/cursos",
   portalInvitation: "/portal/invitacion",
   portalNotice: "/portal/aviso",
+  /** PA-48, los datos fiscales y bancarios (T-409). */
+  portalTaxData: "/portal/datos-fiscales",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */

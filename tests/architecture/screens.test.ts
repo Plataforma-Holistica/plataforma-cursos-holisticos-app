@@ -96,6 +96,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     acceptNoticeAction:
       /if \(!input\.agreed\) return[\s\S]*const outcome = noticeOutcome\(await acceptTeacherNotice\(jar, \{ notice: input\.notice \}, await requestOrigin\(\)\), input\.returnTo\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/portal/_fiscal/actions.ts": {
+    // PA-48 (T-409): el servicio corre la guarda y comprueba la contraseña del mismo envío. Del formulario no sale de quién son los datos.
+    revealTaxDataAction: /const \{ password \} = readRevealForm\(form\)[\s\S]*revealOutcome\(await revealTaxProfile\(jar, password, await requestOrigin\(\)\), attempt\)/,
+    saveTaxDataAction: /const input = readTaxForm\(form\)[\s\S]*saveOutcome\(await saveTaxProfile\(jar, \{ \.\.\.input, seen: input\.seen \}, await requestOrigin\(\)\), attempt\)/,
+  },
   "src/app/portal/_editor/actions.ts": {
     // El editor de curso (T-402, PA-43): una acción para todos sus bloques. Revisa los textos con la regla
     // del dominio antes del servicio, que corre la guarda; la base escribe solo a nombre del maestro activo.
