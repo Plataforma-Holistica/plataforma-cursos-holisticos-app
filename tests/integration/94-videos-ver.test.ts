@@ -238,6 +238,17 @@ describe("lo que el editor lee", () => {
     });
   });
 
+  it("si el parámetro trae otra forma se queda sin aviso, y el editor sigue: el aviso no bloquea nada", async () => {
+    await reverted(async (owner) => {
+      await owner.query("alter table public.business_parameters disable trigger user");
+      await owner.query("update public.business_parameters set value = '\"otra cosa\"'::jsonb where key = 'TOLERANCIA_LECCION' and canceled_at is null");
+      await owner.query("alter table public.business_parameters enable trigger user");
+      const choices = await readDraftChoices(txOn(owner), null, null);
+      expect(choices.lessonTolerance).toBeNull();
+      expect(choices.videoMaxBytes).toBeGreaterThan(0);
+    });
+  });
+
   it("«Faltan» cuenta cada lección sin un video listo: lo que se procesa o tiene error, todavía no", async () => {
     await reverted(async (owner) => {
       const who = await person();
@@ -249,6 +260,8 @@ describe("lo que el editor lee", () => {
 
       expect(await mine()).toMatchObject({ lessons: 3, lessonsWithoutVideo: 3 });
       const uploaded = await received(owner, who, videos, course, first);
+      expect(await mine()).toMatchObject({ lessons: 3, lessonsWithoutVideo: 3 });
+      await owner.query("update public.draft_videos set state = 'processing', claimed_at = now(), provider_asset_id = 'AssetUno' where id = $1", [uploaded]);
       expect(await mine()).toMatchObject({ lessons: 3, lessonsWithoutVideo: 3 });
       await owner.query("update public.draft_videos set state = 'errored', error_code = 'x', settled_at = now() where id = $1", [uploaded]);
       expect(await mine()).toMatchObject({ lessonsWithoutVideo: 3 });

@@ -215,12 +215,15 @@ describe("el video de una lección", () => {
     expect(rowOf([ready(1200)])?.deletesOn).toBeNull();
   });
 
-  it("está tardando solo si lleva más de una hora, y solo si se está procesando", () => {
-    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(true);
-    expect(rowOf([video({ state: "creating", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(true);
-    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T17:01:00.000Z" })])?.slow).toBe(false);
-    expect(rowOf([video({ state: "uploaded", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slow).toBe(false);
-    expect(rowOf([ready(1200, { claimedAt: "2026-11-10T10:00:00.000Z" })])?.slow).toBe(false);
+  it("está tardando pasada una hora de procesarse: dice cuánto falta, y nunca menos de cero", () => {
+    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slowInMs).toBe(0);
+    expect(rowOf([video({ state: "processing", claimedAt: "2026-11-10T17:01:00.000Z" })])?.slowInMs).toBe(60_000);
+  });
+
+  it("creándose no: cada reintento renueva el reclamo, y el aviso aparecería y se iría", () => {
+    expect(rowOf([video({ state: "creating", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slowInMs).toBeNull();
+    expect(rowOf([video({ state: "uploaded", claimedAt: "2026-11-10T16:59:00.000Z" })])?.slowInMs).toBeNull();
+    expect(rowOf([ready(1200, { claimedAt: "2026-11-10T10:00:00.000Z" })])?.slowInMs).toBeNull();
   });
 
   it.each<[string, number, string]>([
@@ -248,9 +251,9 @@ describe("el video de una lección", () => {
 
   it("al reemplazar se ve lo que viene, y la lección sigue con la vigente", () => {
     const row = rowOf([ready(1200), video({ state: "processing", fileName: "nuevo.mp4" })]);
-    expect(row).toMatchObject({ fileName: "nuevo.mp4", state: "processing", canWatch: true, replacing: { fileName: "vigente.mp4", duration: "20 min 0 s" } });
-    expect(rowOf([ready(1200)])).toMatchObject({ replacing: null, canWatch: true });
-    expect(rowOf([video({})])).toMatchObject({ replacing: null, canWatch: false });
+    expect(row).toMatchObject({ fileName: "nuevo.mp4", state: "processing", currentId: "f0000000-0000-4000-8000-000000000002", replacing: { fileName: "vigente.mp4", duration: "20 min 0 s" } });
+    expect(rowOf([ready(1200)])).toMatchObject({ replacing: null, currentId: "f0000000-0000-4000-8000-000000000002" });
+    expect(rowOf([video({})])).toMatchObject({ replacing: null, currentId: null });
   });
 
   it("el aviso de duración es de la vigente, aunque otro la vaya a reemplazar", () => {

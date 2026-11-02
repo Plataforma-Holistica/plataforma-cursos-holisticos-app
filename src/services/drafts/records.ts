@@ -198,6 +198,13 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
   };
 }
 
+const toleranceValue = z.object({ min_seconds: z.number().int().min(1), max_seconds: z.number().int().min(1) });
+/** El parámetro, si tiene la forma esperada: es un aviso que no bloquea nada, y mal escrito no debe tumbar el editor. */
+function toleranceOf(value: unknown): DraftChoices["lessonTolerance"] {
+  const parsed = toleranceValue.safeParse(value);
+  return parsed.success ? { minSeconds: parsed.data.min_seconds, maxSeconds: parsed.data.max_seconds } : null;
+}
+
 const choice = { id, name: z.string(), active: z.boolean() };
 const choicesRow = z.object({
   practices: z.array(z.strictObject({ ...choice, tone: z.number().int().min(1).max(8) })),
@@ -205,7 +212,7 @@ const choicesRow = z.object({
   max_bytes: z.coerce.number().int().nullable(),
   per_place: z.coerce.number().int().nullable(),
   video_max_bytes: z.coerce.number().int().nullable(),
-  tolerance: z.object({ min_seconds: z.number().int().min(1), max_seconds: z.number().int().min(1) }).nullable(),
+  tolerance: z.unknown(),
 });
 
 /**
@@ -228,7 +235,7 @@ export async function readDraftChoices(tx: Tx, practiceId: string | null, levelI
     choicesRow,
   );
   if (!row) return { practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null, lessonTolerance: null };
-  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place }, videoMaxBytes: row.video_max_bytes, lessonTolerance: row.tolerance === null ? null : { minSeconds: row.tolerance.min_seconds, maxSeconds: row.tolerance.max_seconds } };
+  return { practices: row.practices, levels: row.levels, resourceLimits: { maxBytes: row.max_bytes, perPlace: row.per_place }, videoMaxBytes: row.video_max_bytes, lessonTolerance: toleranceOf(row.tolerance) };
 }
 
 const resultRow = z.object({ result: z.unknown() });

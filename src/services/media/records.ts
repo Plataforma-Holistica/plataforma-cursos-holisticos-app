@@ -234,7 +234,6 @@ export async function readResourceFacts(tx: Tx, id: string): Promise<ResourceFac
   };
 }
 
-/** Lo que un maestro subió a su borrador: solo el suyo y solo lo confirmado. Nulo si no. */
 export interface DraftVideoFacts {
   playbackId: string;
   provider: string;
@@ -242,6 +241,7 @@ export interface DraftVideoFacts {
   email: string | null;
 }
 
+/** Lo que un maestro subió a su borrador: solo el suyo y solo lo confirmado. Nulo si no. */
 export async function readDraftResourceFile(tx: Tx, courseId: string, resourceId: string): Promise<ResourceFile | null> {
   const [row] = await tx.query(
     sql`select private.resource_draft_object(${courseId}::uuid, ${resourceId}::uuid) as file`,

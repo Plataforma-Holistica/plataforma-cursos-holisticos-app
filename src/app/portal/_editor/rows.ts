@@ -74,12 +74,12 @@ export interface VideoRow {
   duration: string;
   /** El día en que se borra si sigue así: solo lo que todavía no está listo. */
   deletesOn: string | null;
-  /** Lleva más de lo normal procesándose. */
-  slow: boolean;
+  /** Cuánto falta para decir que está tardando, o nulo si no se está procesando. Creándose no: cada reintento renueva el reclamo, y el aviso aparecería y se iría. */
+  slowInMs: number | null;
   /** Por qué falló, si se sabe y le sirve a quien lo subió. */
   tooLong: boolean;
-  /** Hay una vigente que se puede ver: la lección sigue con ella mientras la nueva no esté lista. */
-  canWatch: boolean;
+  /** La vigente, que es la que se puede ver: la lección sigue con ella mientras la nueva no esté lista. */
+  currentId: string | null;
   /** La vigente, mientras otro la va a reemplazar. */
   replacing: { fileName: string; duration: string } | null;
   /** El aviso de duración de la vigente, que no bloquea. */
@@ -185,8 +185,7 @@ function videoRow(draft: DraftCourse, lesson: string, tolerance: DraftChoices["l
   const current = here.find((video) => video.isCurrent);
   const shown = here.find((video) => !video.isCurrent) ?? current;
   if (shown === undefined) return null;
-  const moving = shown.state === "creating" || shown.state === "processing";
-  const claimed = shown.claimedAt === null ? null : new Date(shown.claimedAt).getTime();
+  const claimed = shown.state === "processing" && shown.claimedAt !== null ? new Date(shown.claimedAt).getTime() : null;
   const outside =
     current?.seconds !== null && current?.seconds !== undefined && tolerance !== null && (current.seconds < tolerance.minSeconds || current.seconds > tolerance.maxSeconds);
   return {
@@ -196,9 +195,9 @@ function videoRow(draft: DraftCourse, lesson: string, tolerance: DraftChoices["l
     size: sizeText(shown.sizeBytes),
     duration: lengthText(shown.seconds),
     deletesOn: shown.deletesAt === null ? null : longDate(shown.deletesAt),
-    slow: moving && claimed !== null && now.getTime() - claimed > SLOW_AFTER_MS,
+    slowInMs: claimed === null ? null : Math.max(0, claimed + SLOW_AFTER_MS - now.getTime()),
     tooLong: shown.errorCode === "too_long",
-    canWatch: current !== undefined,
+    currentId: current?.id ?? null,
     replacing: current === undefined || current === shown ? null : { fileName: current.fileName, duration: lengthText(current.seconds) },
     tolerance: outside
       ? t(text.videos.tolerance, { duration: lengthText(current.seconds), min: Math.round(tolerance.minSeconds / 60), max: Math.round(tolerance.maxSeconds / 60) })

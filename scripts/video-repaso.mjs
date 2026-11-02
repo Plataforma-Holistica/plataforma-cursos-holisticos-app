@@ -19,6 +19,8 @@ const MUX = "https://api.mux.com/video/v1/assets";
 /** Lo mismo que el adaptador: el renglón pudo nacer antes que el asset por el reloj de cualquiera de los dos. */
 const MARGIN_SECONDS = 3_600;
 const PAGE = 100;
+const MAX_PAGES = 200;
+const TIMEOUT_MS = 20_000;
 
 function fail(message) {
   console.error(`video:repaso: ${message}`);
@@ -68,9 +70,9 @@ const client = new pg.Client({
 async function findByPassthrough(video, since) {
   const found = [];
   let cursor = null;
-  for (;;) {
+  for (let page = 0; page < MAX_PAGES; page += 1) {
     const url = `${MUX}?limit=${PAGE}${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`;
-    const response = await fetch(url, { headers: muxHeaders }).catch(() => null);
+    const response = await fetch(url, { headers: muxHeaders, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
     if (!response?.ok) return null;
     const body = await response.json().catch(() => null);
     if (!Array.isArray(body?.data)) return null;
@@ -82,11 +84,12 @@ async function findByPassthrough(video, since) {
     if (past || !body.next_cursor) return found;
     cursor = body.next_cursor;
   }
+  return null;
 }
 
 /** Si Mux ya no lo tiene. Un 404 cuenta como borrado. */
 async function removeAsset(asset) {
-  const response = await fetch(`${MUX}/${encodeURIComponent(asset)}`, { method: "DELETE", headers: muxHeaders }).catch(() => null);
+  const response = await fetch(`${MUX}/${encodeURIComponent(asset)}`, { method: "DELETE", headers: muxHeaders, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
   return response !== null && (response.ok || response.status === 404);
 }
 
@@ -96,6 +99,7 @@ async function removeObjects(paths) {
     method: "DELETE",
     headers: { apikey: secret, authorization: `Bearer ${secret}`, "content-type": "application/json" },
     body: JSON.stringify({ prefixes: paths }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
   return response?.ok === true;
 }

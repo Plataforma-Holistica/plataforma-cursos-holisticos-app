@@ -5,8 +5,8 @@
 --
 --   · `deletes_at` es una columna calculada, y la lee `video_expire` igual que la pantalla: lo que se dice es lo que se cumple. Los días se suman en UTC porque una columna
 --     calculada no admite la suma que depende de la zona de la sesión.
---   · `minutes_hold_until` no se limpia al reclamar: si Mux rechaza un video ya en el mes nuevo, vuelve a recibido, y sin eso su fecha ya habría pasado y se borraría en la
---     siguiente hora. Un rechazo pasajero no debe costarle el archivo.
+--   · Lo que vuelve de un reclamo tiene 7 días desde ese momento (`video_create_failed`): mientras se creaba no corría ningún plazo, y sin esto reaparecería con una fecha
+--     vencida y se borraría a la hora siguiente. Una falla de Mux no debe costarle el archivo a nadie, y ya se le cobraron sus minutos. La misma cifra, sin otra.
 --   · Si en el mes siguiente sigue sin caber, el reclamo vuelve a mover la fecha. Eso solo pasa con el editor abierto.
 --   · `video_claim` contesta `held` solo cuando la fecha cambió: es lo que le dice a la pantalla que vuelva a leer, sin pedir la página cada minuto.
 --   · `claimed_at` se le da a su maestro para decir «está tardando», sin otra columna.
@@ -15,11 +15,11 @@
 --     sacar el renglón sin encontrarlo lo dejaría pagado y sin nombre.
 
 alter table public.draft_videos
-  add column minutes_hold_until timestamptz,       -- lo detuvo el tope de minutos: se guarda hasta aquí
+  add column hold_until timestamptz,               -- lo detuvo el tope de minutos, o volvió de un reclamo: se guarda hasta aquí
   add column deletes_at timestamptz generated always as (
     case state
       when 'uploading'::public.draft_video_state then (created_at at time zone 'UTC' + interval '48 hours') at time zone 'UTC'
-      when 'uploaded'::public.draft_video_state then greatest((created_at at time zone 'UTC' + interval '7 days') at time zone 'UTC', minutes_hold_until)
+      when 'uploaded'::public.draft_video_state then greatest((created_at at time zone 'UTC' + interval '7 days') at time zone 'UTC', hold_until)
       when 'errored'::public.draft_video_state then (settled_at at time zone 'UTC' + interval '7 days') at time zone 'UTC'
     end
   ) stored;
@@ -93,8 +93,8 @@ begin
     end if;
     if v_used is null then
       v_until := (v_month + interval '1 month 7 days') at time zone private.period_zone();
-      if v_row.minutes_hold_until is distinct from v_until then
-        update public.draft_videos set minutes_hold_until = v_until where id = p_video;
+      if v_row.hold_until is distinct from v_until then
+        update public.draft_videos set hold_until = v_until where id = p_video;
         return pg_catalog.jsonb_build_object('answer', 'over_minutes', 'held', true);
       end if;
       return pg_catalog.jsonb_build_object('answer', 'over_minutes');
@@ -112,6 +112,21 @@ begin
   return pg_catalog.jsonb_build_object('answer', 'claimed', 'path', v_row.storage_path, 'mime', v_row.mime,
                                        'retry', v_row.claimed_at is not null, 'claim', extract(epoch from now())::text,
                                        'since', extract(epoch from v_row.created_at)::bigint);
+end
+$$;
+
+create or replace function private.video_create_failed(p_video uuid, p_claim text) returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_row public.draft_videos := private.video_owned(p_video);
+begin
+  if v_row.id is null then
+    return pg_catalog.jsonb_build_object('answer', 'not_found');
+  end if;
+  update public.draft_videos set state = 'uploaded', hold_until = greatest(hold_until, now() + interval '7 days')
+   where id = p_video and state = 'creating' and extract(epoch from claimed_at)::text = p_claim;
+  return pg_catalog.jsonb_build_object('answer', case when found then 'uploaded' else 'stale' end);
 end
 $$;
 

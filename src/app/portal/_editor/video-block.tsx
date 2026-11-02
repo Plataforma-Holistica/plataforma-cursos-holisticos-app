@@ -25,7 +25,8 @@ import { useVideoUploads } from "./video-uploads";
 //   · Un botón que se va con el foco puesto (terminó de subir) lo deja en el bloque, y solo si no se fue a otra cosa.
 //   · El avance se anuncia cada 25 % (diseño, `FileUpload`), y no con cada evento; la barra sí va exacta.
 //   · Con un video listo se ofrece reemplazarlo, y con uno que falló, subir otro: la base deja empezar en los dos casos. Con uno en camino, no: se perdería lo que tardó horas.
-//   · La fecha en que se borra se dice siempre, también sin JavaScript. Cuando algo lo detuvo, la dice el aviso de por qué, sin repetirla.
+//   · Lo recibido dice la fecha en que se borra, también sin JavaScript. Cuando algo lo detuvo, la dice el aviso de por qué, sin repetirla.
+//   · Mientras pregunta si quitar no se ofrece elegir, y mientras se prepara una subida no hay qué quitar: su fila todavía no existe, y la que hay es la vigente.
 
 const text = portal.editor.videos;
 const BLOCKED = { throttled: text.blocked.throttled, over_minutes: text.blocked.overMinutes, closed: text.blocked.closed, failing: text.blocked.failing };
@@ -70,6 +71,15 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
   const wasAsking = useRef(false);
   const hadUpload = useRef(false);
   const hasUpload = upload !== undefined;
+  const [lateFor, setLateFor] = useState<string | null>(null);
+  const slowId = row?.slowInMs == null ? null : row.id;
+  const slowInMs = row?.slowInMs ?? 0;
+  useEffect(() => {
+    // Lo pinta el servidor, pero la página no se vuelve a pedir si nada cambia: quien espera con la pantalla abierta también debe enterarse.
+    if (slowId === null) return;
+    const timer = setTimeout(() => setLateFor(slowId), slowInMs);
+    return () => clearTimeout(timer);
+  }, [slowId, slowInMs]);
   useEffect(() => {
     // El último de la fila es el que preguntó. Si se fue con la respuesta, el foco queda en el bloque.
     if (wasAsking.current && !asking) (buttons.current?.querySelector<HTMLElement>("button:last-child") ?? section.current)?.focus();
@@ -90,13 +100,13 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
     start(lesson, file);
   }
 
-  const video = upload !== undefined && "video" in upload ? upload.video : (row?.id ?? null);
+  const video = upload === undefined ? (row?.id ?? null) : "video" in upload ? upload.video : null;
   const moving = upload !== undefined && (upload.phase === "sending" || upload.phase === "paused" || upload.phase === "cut") ? upload : null;
   const percent = moving === null ? 0 : percentOf(moving.loaded, moving.total);
   const step = moving === null ? 0 : progressStep(moving.loaded, moving.total);
   // Lo que se quita ya llegó; lo que se cancela, todavía no.
   const received = upload === undefined && row !== null && row.state !== "uploading";
-  const canPick = editable && upload === undefined && (!received || row.state === "ready" || row.state === "errored");
+  const canPick = editable && !asking && upload === undefined && (!received || row.state === "ready" || row.state === "errored");
   const pickLabel = row?.state === "uploading" ? text.pickSame : row?.state === "ready" ? text.replace : row?.state === "errored" ? text.pickOther : text.pick;
   const fileName = upload?.fileName ?? row?.fileName ?? "";
   const held = row?.state === "uploaded" ? blocked[row.id] : undefined;
@@ -123,10 +133,10 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
           {t(BLOCKED[held], { date: row.deletesOn ?? "" })}
         </InlineAlert>
       )}
-      {received && row.slow && <InlineAlert tone="neutral">{text.slow}</InlineAlert>}
+      {received && (row.slowInMs === 0 || (row.slowInMs !== null && lateFor === row.id)) && <InlineAlert tone="neutral">{text.slow}</InlineAlert>}
       {row?.replacing != null && <p className="text-body-s break-words text-text-2">{t(text.replacing, { file: row.replacing.fileName, duration: row.replacing.duration })}</p>}
       {row?.tolerance != null && <InlineAlert tone="warning">{row.tolerance}</InlineAlert>}
-      {row?.canWatch === true && hydrated && <VideoPreview key={row.fileName} course={course} lesson={lesson} />}
+      {row?.currentId != null && hydrated && <VideoPreview key={row.currentId} course={course} lesson={lesson} />}
 
       {canPick && !hydrated && <p className="text-body-s text-text-2">{text.needsJavascript}</p>}
       {canPick && hydrated && (

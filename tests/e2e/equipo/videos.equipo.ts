@@ -315,6 +315,8 @@ test("reemplazar: la lección sigue con el de antes hasta que el nuevo está lis
   const video = block(page);
   const [before] = await rowsOf("Corte");
   await video.getByLabel("Elige otro video para reemplazar este").setInputFiles(fileOf("reemplazo.mp4", 1200));
+  await expect(video.getByText(/Mientras tanto, la lección sigue con «clase-corte\.mp4», 2 min 5 s\./)).toBeVisible({ timeout: 30_000 });
+  expect((await rowsOf("Corte")).filter((row) => row.is_current)).toMatchObject([{ file_name: "clase-corte.mp4" }]);
   await expect(video.getByText("reemplazo.mp4", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
   await expect(video.getByText(/Listo, 20 min 0 s, 13 MB\./)).toBeVisible({ timeout: 60_000 });
   await expect(video.getByText(/Mientras tanto, la lección sigue/)).toHaveCount(0);
@@ -366,16 +368,11 @@ test("con el tope de minutos: dice el día, que es el 8 del mes siguiente; sin J
   );
 });
 
-test("«Faltan» cuenta lo que no tiene un video listo", async ({ page }) => {
+test("«Faltan» ya no cuenta lo que tiene un video listo", async ({ page }) => {
   await signIn(page, teacher, "/portal/cursos");
-  // Resumen, práctica y nivel, y cada lección sin un video listo: «Corte» ya lo tiene.
-  const missing = 3 + (await ownerQuery<{ n: number }>(
-    `select count(*)::int as n from public.draft_lessons l join public.course_drafts d on d.course_id = l.course_id join public.teachers t on t.id = d.teacher_id
-     where t.profile_id = $1 and not exists (select 1 from public.draft_videos v where v.lesson_id = l.id and v.is_current)`,
-    [teacher.id],
-  ))[0]!.n;
-  await expect(page.getByText(`Faltan ${missing} cosas para enviarlo`)).toBeVisible();
-  expect(missing).toBeLessThan(3 + 5);
+  // Sin resumen, práctica ni nivel, y con cinco lecciones sin video serían ocho. Cuánto da exacto lo prueba la integración 94.
+  await expect(page.getByText(/Faltan \d cosas para enviarlo/)).toBeVisible();
+  await expect(page.getByText("Faltan 8 cosas para enviarlo")).toHaveCount(0);
 });
 
 test("lo que no es un video se rechaza por su contenido, sin que quede nada", async ({ page }) => {
