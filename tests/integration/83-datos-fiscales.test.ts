@@ -310,7 +310,7 @@ describe("lo fiscal, contra la base", () => {
     });
   });
 
-  it("guardar no se cuenta como una lectura, ni preguntar si los hay", async () => {
+  it("la primera captura no se cuenta como una lectura, ni preguntar si los hay", async () => {
     const ana = await person();
     await reverted(async (owner) => {
       const id = await teacher(owner, ana);

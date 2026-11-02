@@ -154,6 +154,9 @@ describe("el servicio dice si la CLABE cambió", () => {
       expect(after?.version).toBe(2);
       expect(after?.effective).toEqual(before?.effective);
       expect((await service.taxProfileState(ana.claims))?.clabeWaitsUntil).toBeNull();
+      // Para comparar se abrió lo vigente: esa lectura es de verdad, y queda en la auditoría.
+      const { rows } = await owner.query<{ count: string }>("select count(*) from public.audit_log where action = 'tax_profile.read' and new_value ->> 'teacher_id' = $1", [id]);
+      expect(rows[0]?.count).toBe("1");
     });
     expect(reported).toEqual([]);
   });

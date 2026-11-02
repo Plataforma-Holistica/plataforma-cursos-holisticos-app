@@ -105,7 +105,7 @@ from (values
   ('TOLERANCIA_CONCILIACION_PCT', '500',                'proposed'),
   ('RECURSO_TAMANO_MAX',        '52428800',             'proposed'),
   ('RECURSOS_POR_LUGAR_MAX',    '10',                   'proposed'),
-  ('ESPERA_CLABE_HORAS',        '72',                   'proposed'),
+  ('ESPERA_CLABE_HORAS',        '72',                   'decided'),
   ('TOPE_DESCARGAS_HORA',       '60',                   'proposed'),
   ('VIDEO_TAMANO_MAX',          '5368709120',           'decided'),
   ('VIDEO_DURACION_MAX',        '7200',                 'decided'),

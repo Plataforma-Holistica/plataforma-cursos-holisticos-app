@@ -34,17 +34,22 @@ end
 $$;
 revoke all on function private.tax_clabe_wait() from public;
 
--- La única definición de si una CLABE rige. `dead` no vuelve: se captura otra vez. No nombra la tabla: recibe las fechas de la fila que se pregunta.
+-- La única definición de si una CLABE rige. `dead` no vuelve: se captura otra vez. No nombra la tabla: recibe las fechas de la fila que se pregunta. Una propuesta hecha antes de
+-- la fecha alarga la espera hasta que se decida: confirmada, la anula aunque ya pasara la fecha, y una contraseña cambiada mientras tanto, también.
 create function private.tax_clabe_standing(p_teacher uuid, p_changed timestamptz, p_effective timestamptz) returns text
 language sql stable set search_path = ''
 as $$
   select case
     when exists (
         select 1 from private.teacher_suspension_requests r
-        where r.teacher_id = p_teacher and r.status = 'confirmed' and r.decided_at > p_changed and r.decided_at < p_effective)
+        where r.teacher_id = p_teacher and r.status = 'confirmed' and r.decided_at > p_changed and r.proposed_at < p_effective)
       or exists (
         select 1 from public.teachers t join private.account_security s on s.profile_id = t.profile_id
-        where t.id = p_teacher and s.password_changed_at > p_changed and s.password_changed_at < p_effective) then 'dead'
+        where t.id = p_teacher and s.password_changed_at > p_changed and (
+          s.password_changed_at < p_effective
+          or exists (
+            select 1 from private.teacher_suspension_requests r
+            where r.teacher_id = p_teacher and r.proposed_at < p_effective and (r.status = 'pending' or r.decided_at > s.password_changed_at)))) then 'dead'
     when exists (
         select 1 from private.teacher_suspension_requests r
         where r.teacher_id = p_teacher and r.status = 'pending' and r.proposed_at < p_effective) then 'held'

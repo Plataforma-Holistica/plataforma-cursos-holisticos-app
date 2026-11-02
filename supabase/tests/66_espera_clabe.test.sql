@@ -3,7 +3,7 @@
 -- cambiada o un fraude confirmado dentro de la espera la anulan, para siempre; con una propuesta de fraude pendiente no madura, sin que el maestro lo note.
 begin;
 \ir _ayuda.psql
-select plan(75);
+select plan(79);
 
 select pruebas.alta('a6600000-0000-0000-0000-000000000001', 'mara-66@prueba.test');
 select pruebas.alta('c6600000-0000-0000-0000-000000000001', 'f1-66@prueba.test');
@@ -232,6 +232,23 @@ select pruebas.propuesta(:'m', 'confirmed', now() - interval '6 hours', now() - 
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'confirmado dentro de la espera, la anula');
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '1 hour');
 select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'también si la fecha ya pasó: nunca madura, ni al levantarse la suspensión');
+-- Detenida por una propuesta, y decidida ya pasada la fecha: nunca rigió. Confirmarla no la deja regir.
+select pruebas.sin_propuestas();
+select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');
+select pruebas.propuesta(:'m', 'confirmed', now() - interval '90 hours', now() - interval '1 hour');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'propuesta durante la espera y confirmada después de la fecha: la anula');
+-- La contraseña cambiada mientras seguía detenida la anula, aunque ya pasara la fecha.
+select pruebas.sin_propuestas();
+select pruebas.propuesta(:'m', 'rejected', now() - interval '90 hours', now() - interval '1 hour');
+select pruebas.contrasena(now() - interval '5 hours');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'contraseña cambiada mientras seguía detenida, aunque luego se rechace la propuesta');
+select pruebas.contrasena(now() - interval '30 minutes');
+select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'cambiada después de rechazarla, ya regía: no importa');
+select pruebas.sin_propuestas();
+select pruebas.propuesta(:'m', 'pending', now() - interval '90 hours');
+select pruebas.contrasena(now() - interval '5 hours');
+select is(pruebas.finanzas(:'pago') ->> 'outcome', 'clabe_recapture', 'con la propuesta aún pendiente, también');
+select pruebas.contrasena(now() - interval '1 year');
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'confirmed', now() - interval '6 hours', now() - interval '5 hours');
 select pruebas.mueve(:'m', now() - interval '100 hours', now() - interval '28 hours');

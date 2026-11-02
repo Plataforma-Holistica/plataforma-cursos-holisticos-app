@@ -44,7 +44,7 @@ export interface TaxProfileSeal {
   rfc: SealedField;
   legalName: SealedField;
   clabe: SealedField;
-  /** Si la CLABE escrita es otra que la vigente: la base no las puede comparar. Cierto si no se supo. */
+  /** Si la CLABE escrita es otra que la vigente: la base no las puede comparar. Cierto también si lo vigente no abrió. */
   clabeChanged: boolean;
 }
 
