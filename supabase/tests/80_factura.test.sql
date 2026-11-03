@@ -4,7 +4,7 @@
 -- compara con la liquidación y la pasa a revisión. Finanzas acepta (lista para pago) o rechaza con motivo. Una pagada exige una factura aceptada.
 begin;
 \ir _ayuda.psql
-select plan(86);
+select plan(98);
 
 select pruebas.alta('a8000000-0000-0000-0000-000000000001', 'tere-80@prueba.test');
 select pruebas.alta('a8000000-0000-0000-0000-000000000002', 'otra-80@prueba.test');
@@ -49,13 +49,15 @@ begin
 end
 $$;
 -- Honorarios de 1 000 pesos: 16 % de IVA, 10 % de ISR y dos tercios del IVA retenidos, al centavo.
+-- El periodo de la liquidación n: los meses de 2031, y de la 13 en adelante, los de 2032.
+create function pruebas.mes(n integer) returns integer language sql immutable as $$ select case when n <= 12 then 203100 + n else 203200 + n - 12 end $$;
 create function pruebas.liquidacion(n integer, p_teacher integer, p_estado public.payout_status default 'awaiting_invoice') returns uuid language plpgsql as $$
 begin
-  perform pruebas.periodo((203100 + n)::public.period_id);
+  perform pruebas.periodo(pruebas.mes(n)::public.period_id);
   set local session_replication_role = replica;
   insert into public.payouts (id, period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, vat_cents, income_tax_withheld_cents,
                               vat_withheld_cents, net_cents, released_at, released_by, invoice_due_on)
-  values (pruebas.p(n), 203100 + n, pruebas.m(p_teacher), (select close_run_id from public.payout_periods where period_id = 203100 + n), p_estado,
+  values (pruebas.p(n), pruebas.mes(n), pruebas.m(p_teacher), (select close_run_id from public.payout_periods where period_id = pruebas.mes(n)), p_estado,
           100000, 100000, 16000, 10000, 10667, 95333, now(), pruebas.f1(), current_date + 30);
   set local session_replication_role = origin;
   return pruebas.p(n);
@@ -204,7 +206,9 @@ select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issuer_regime": "626"}')) ->> 
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"receiver_rfc": "XYZ200101AB1"}')) ->> 'outcome', 'receiver_mismatch', 'facturada a otro receptor');
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"vat_cents": 16001, "total_cents": 95334}')) - 'row',
   '{"outcome": "amounts_mismatch", "fields": ["vat_cents", "total_cents"]}'::jsonb, 'un centavo de IVA de más, y dice cuáles no coinciden');
-select is(pruebas.rechazo(1, pruebas.hechos(1, '{"income_tax_withheld_cents": 9999, "total_cents": 95334}')) ->> 'outcome', 'amounts_mismatch', 'ni un centavo de ISR de menos');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"income_tax_withheld_cents": 9999}')) -> 'fields', '["income_tax_withheld_cents"]'::jsonb, 'ni un centavo de ISR de menos, aunque el total cuadre');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"vat_withheld_cents": 10666, "subtotal_cents": 99999}')) -> 'fields', '["subtotal_cents", "vat_withheld_cents"]'::jsonb,
+  'ni del IVA retenido o el subtotal');
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"uuid": "no-es-un-folio"}')) ->> 'outcome', 'malformed', 'un folio fiscal sin forma');
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"subtotal_cents": "100000"}')) ->> 'outcome', 'malformed', 'un monto que no es número');
 select is(pruebas.rechazo(1, pruebas.hechos(1, jsonb_build_object('stamped_at', to_char(now() at time zone 'America/Mexico_City' + interval '3 days', 'YYYY-MM-DD"T"HH24:MI:SS')))) ->> 'outcome',
@@ -305,6 +309,48 @@ select throws_ok(format($$update private.teacher_invoices set status = 'in_revie
 select throws_ok(format($$delete from private.teacher_invoices where id = %L$$, :'r10'), '23514', null, 'una en revisión no se borra');
 select throws_ok(format($$update private.teacher_invoices set subtotal_cents = 1 where id = %L$$, :'r10'), '23514', null, 'ni se cambia lo leído');
 
+-- Quién hace cada paso, también a mano: a revisión solo su maestra; aceptar, nunca su maestra; y la ruta al nacer, la de su liquidación.
+-- Todo esto corre en la misma hora: el freno de Tere empieza de nuevo aquí.
+delete from private.rate_limit_counters where bucket = 'invoice_upload:' || pruebas.m(1);
+select pruebas.liquidacion(13, 1);
+select throws_ok(format($$insert into private.teacher_invoices (payout_id, teacher_id, pdf_path, expires_at) values (%L, %L, 'otra/ruta.pdf', now() + interval '1 hour')$$,
+  pruebas.p(13), pruebas.m(1)), '23514', null, 'una factura nace en la ruta de su liquidación');
+select pruebas.id(pruebas.empieza(pruebas.p(13))) as f13 \gset
+select throws_like(format($$select pruebas.a_mano(%L, %L)$$, pruebas.f1(), format('update private.teacher_invoices set status = %L where id = %L', 'in_review', :'f13')),
+  '%submitted by its teacher%', 'nadie más que su maestra la pasa a revisión');
+select throws_like(format($$select pruebas.a_mano(%L, %L)$$, pruebas.tere(), format('update private.teacher_invoices set status = %L where id = %L', 'accepted', :'r10')),
+  '%reviewed by someone else%', 'su maestra no la acepta');
+set local session_replication_role = replica;
+update private.teacher_invoices set status = 'accepted', reviewed_by = pruebas.f1(), reviewed_at = now() where id = :'r10';
+set local session_replication_role = origin;
+select throws_like(pruebas.a_estado(pruebas.tere(), pruebas.p(10), 'ready_to_pay'), '%does not go from invoice_in_review to ready_to_pay%',
+  'ni pone su liquidación lista para pago, aunque la factura esté aceptada');
+select lives_ok(pruebas.a_estado(pruebas.f1(), pruebas.p(10), 'ready_to_pay'), 'finanzas, sí');
+select is(pruebas.pide(pruebas.tere(), format('private.invoice_cancel(%L)', :'r1'))::jsonb ->> 'outcome', 'not_uploading', 'cancelar una que ya no se sube, no');
+-- Retenida entre empezar y subir: ya no espera factura, y la subida se va.
+select (select id from private.teacher_invoices where payout_id = pruebas.p(4) and status = 'uploading') as f4 \gset
+select pruebas.pide(pruebas.f1(), format('private.hold_payout(%L, %L, %L)', pruebas.p(4), 'Se investiga', 'awaiting_invoice'));
+select is(pruebas.sube(:'f4', pruebas.hechos(4), p_quien => pruebas.susi()) ->> 'outcome', 'changed', 'retenida entre empezar y subir, changed');
+select is(pruebas.fila(:'f4'), 'gone', 'y la subida se va');
+-- El freno: veinte por hora por maestro.
+create function pruebas.hasta_frenar(p_pago uuid) returns text language plpgsql as $$
+declare
+  r jsonb;
+begin
+  for i in 1..30 loop
+    r := pruebas.empieza(p_pago);
+    if r ->> 'outcome' <> 'begun' then
+      return r ->> 'outcome';
+    end if;
+    perform pruebas.pide(pruebas.tere(), format('private.invoice_cancel(%L)', r ->> 'invoice_id'));
+  end loop;
+  return 'nunca';
+end
+$$;
+select pruebas.pide(pruebas.tere(), format('private.invoice_cancel(%L)', :'f13'));
+select is(pruebas.hasta_frenar(pruebas.p(13)), 'throttled', 'después de veinte en una hora, se frena');
+delete from private.rate_limit_counters where bucket = 'invoice_upload:' || pruebas.m(1);
+
 -- Una pagada exige una factura aceptada (al confirmar).
 select pruebas.liquidacion(11, 1, 'paid');
 set local session_replication_role = replica;
@@ -348,6 +394,9 @@ select pruebas.como_dueno();
 select is(pruebas.fila(:'f12'), 'gone', 'el trabajo se lleva la subida vencida');
 select cmp_ok((select count(*)::integer from private.invoice_sweep()), '>=', 1, 'y el barrido dice qué PDF ya nadie nombra');
 select is((select count(*)::integer from private.invoice_sweep() s join private.teacher_invoices i on i.pdf_path = s.path), 0, 'nunca uno que una fila nombra');
+select is((select count(*)::integer from private.invoice_unused_objects(pruebas.p(1)) u join private.teacher_invoices i on i.pdf_path = u.path), 0,
+  'ni por liquidación');
+select cmp_ok((select count(*)::integer from private.invoice_unused_objects(pruebas.p(1))), '>=', 1, 'aunque en su carpeta sobren otros');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante.
