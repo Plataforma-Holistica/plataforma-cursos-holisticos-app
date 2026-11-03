@@ -75,7 +75,9 @@ export const SUBMIT_ANSWERS = [
 export type SubmitAnswer = (typeof SUBMIT_ANSWERS)[number];
 
 /** Lo que contesta `private.course_submit_assets()`. */
-export type SubmitAssets = { kind: "ok"; assets: { lesson: string; provider: string; asset: string | null }[] } | { kind: "not_found" | "not_editable" | "suspended" | "not_teacher" };
+export type SubmitAssets =
+  | { kind: "ok"; assets: { lesson: string; provider: string; asset: string | null; playback: string | null }[] }
+  | { kind: "not_found" | "not_editable" | "suspended" | "not_teacher" };
 
 /** Lo que el maestro aceptó (PA-50), sin el origen. */
 export interface AcceptedAnnex {
@@ -120,8 +122,8 @@ export type CourseSubmitted =
   | { kind: "not_accepted" }
   /** El formulario no tiene forma: no se le preguntó a nadie. */
   | { kind: "malformed" }
-  /** Un video vigente que Mux ya no tiene listo, o no tiene. */
-  | { kind: "video_not_ready" }
+  /** Videos vigentes que su proveedor ya no tiene listos, o no tiene: sus lecciones, para decir cuáles. */
+  | { kind: "video_not_ready"; lessons: string[] }
   | { kind: "session"; check: Exclude<SessionCheck, { kind: "pass" }> }
   | { kind: "unknown" };
 
@@ -157,18 +159,22 @@ export function createSubmit(deps: SubmitDeps) {
   }
 
   /**
-   * Si cada video vigente sigue listo en su proveedor: `ok`, `not_ready` o nulo si no se supo. Lo del proveedor de prueba contesta listo. Un proveedor que esta instalación no sabe
-   * hablarle cuenta como «no se supo»: no se firma a ciegas.
+   * Las lecciones cuyo video vigente su proveedor ya no tiene listo con la reproducción que se firma, o nulo si no se supo. Lo del proveedor de prueba contesta listo. Un proveedor
+   * con el que esta instalación no habla cuenta como «no se supo»: no se firma a ciegas. Se pregunta por todos a la vez: el adaptador corta cada pregunta a los 10 s, así que una
+   * acción no espera más que eso.
    */
-  async function videosReady(assets: Extract<SubmitAssets, { kind: "ok" }>["assets"]): Promise<"ok" | "not_ready" | null> {
-    for (const each of assets) {
-      const provider = deps.providers.of(each.provider);
-      if (provider === null || each.asset === null) return null;
-      const read = await provider.read(each.asset);
-      if (read === null) return null;
-      if (read === "gone" || read.state !== "ready" || read.playback === null) return "not_ready";
-    }
-    return "ok";
+  async function videosNotReady(assets: Extract<SubmitAssets, { kind: "ok" }>["assets"]): Promise<string[] | null> {
+    const answers = await Promise.all(
+      assets.map(async (each) => {
+        const provider = deps.providers.of(each.provider);
+        if (provider === null || each.asset === null) return null;
+        const read = await provider.read(each.asset);
+        if (read === null) return null;
+        return read !== "gone" && read.state === "ready" && read.playback !== null && read.playback === each.playback ? "ok" : each.lesson;
+      }),
+    );
+    if (answers.some((answer) => answer === null)) return null;
+    return answers.filter((answer): answer is string => answer !== "ok" && answer !== null);
   }
 
   /** Enviar (FL-34, pasos 4 a 6). Lleva lo que se vio y la casilla; el origen sale de la petición. */
@@ -186,15 +192,25 @@ export function createSubmit(deps: SubmitDeps) {
     }
     if (input.accepted !== true) return { kind: "not_accepted" };
 
+    // Hasta aquí no se firmó nada: lo que falle es «no se pudo», no «no se supo».
+    let notReady: string[] | null;
     try {
       const assets = await deps.store.assets(check.claims, course);
       if (assets.kind !== "ok") return { kind: assets.kind };
-      const ready = await videosReady(assets.assets);
-      if (ready === null) {
-        await deps.report("submit_provider_unavailable");
-        return { kind: "unavailable" };
-      }
-      if (ready === "not_ready") return { kind: "video_not_ready" };
+      notReady = await videosNotReady(assets.assets);
+    } catch {
+      notReady = null;
+    }
+    if (notReady === null) {
+      await deps.report("submit_provider_unavailable");
+      return { kind: "unavailable" };
+    }
+    // La base los da por listos y su proveedor no: alguien tiene que mirar la fila (OP-21).
+    if (notReady.length > 0) {
+      await deps.report("submit_video_gone");
+      return { kind: "video_not_ready", lessons: notReady };
+    }
+    try {
       return { kind: await deps.store.submit(check.claims, { course, annex, seen, term, submission }, deps.evidence(origin)) };
     } catch {
       await deps.report("course_submit_unavailable");

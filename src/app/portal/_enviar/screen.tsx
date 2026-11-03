@@ -12,7 +12,9 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { submitCourseAction } from "./actions";
-import { ACCEPT_FIELD, type SubmitFailure, type SubmitState } from "./outcomes";
+import { t } from "@/messages/format";
+
+import { ACCEPT_FIELD, type RemoveFailure, type SubmitFailure, type SubmitState } from "./outcomes";
 import type { SubmitView } from "./rows";
 
 // PA-44 · Enviar a revisión (`/portal/cursos/<id>/enviar`; RF-606, FL-34; T-405). Tres pasos que se ven a la vez: lo que falta o lo completo, los avisos que no impiden enviar, y el
@@ -23,12 +25,13 @@ const text = portal.submit;
 const IDLE: SubmitState = { kind: "idle" };
 const BLOCK_ID = "bloque-enviar";
 
-const FAILURES: Record<SubmitFailure, string> = {
+const FAILURES: Record<Exclude<SubmitFailure, "video_not_ready"> | RemoveFailure, string> = {
+  remove_changed: text.failures.removeChanged,
+  remove_unavailable: text.failures.removeUnavailable,
   not_accepted: text.failures.notAccepted,
   changed: text.failures.changed,
   not_ready: text.failures.notReady,
   annex_missing: text.annexMissing,
-  video_not_ready: text.failures.videoNotReady,
   origin_missing: text.failures.originMissing,
   unavailable: text.failures.unavailable,
   unknown: text.failures.unknown,
@@ -37,12 +40,21 @@ const FAILURES: Record<SubmitFailure, string> = {
 export function SubmitScreen({ view, blocks }: { view: SubmitView; blocks: readonly LegalBlock[] }) {
   const [state, action, pending] = useActionState(submitCourseAction, IDLE, `${view.self}#${BLOCK_ID}`);
   const answer = useRef<HTMLDivElement>(null);
-  const failed = !pending && state.kind === "failed" ? state : null;
+  const answered = !pending && state.kind !== "idle" ? state : null;
+  const failed = answered?.kind === "failed" ? answered : null;
+  const said =
+    answered === null
+      ? null
+      : answered.kind === "removed"
+        ? text.removed
+        : answered.reason === "video_not_ready"
+          ? t(text.failures.videoNotReady, { lessons: answered.lessons.map((lesson) => `«${view.lessonTitles[lesson] ?? ""}»`).join(", ") })
+          : FAILURES[answered.reason];
 
-  // La respuesta toma el foco: el botón que se pulsó pudo irse con la página nueva.
+  // La respuesta toma el foco: el botón que se pulsó pudo irse con la página nueva (al quitar, con su fila).
   useEffect(() => {
-    if (failed !== null) answer.current?.focus();
-  }, [failed]);
+    if (answered !== null) answer.current?.focus();
+  }, [answered]);
 
   return (
     <section id={BLOCK_ID} aria-labelledby="enviar-titulo" className="flex max-w-reading flex-col gap-8">
@@ -53,13 +65,14 @@ export function SubmitScreen({ view, blocks }: { view: SubmitView; blocks: reado
         </h1>
         <p className="text-text-2">{text.intro}</p>
       </div>
-      {failed !== null && (
+      {answered !== null && said !== null && (
         <div ref={answer} tabIndex={-1} className="outline-none">
-          <InlineAlert tone={failed.reason === "unknown" || failed.reason === "unavailable" ? "danger" : "warning"}>{FAILURES[failed.reason]}</InlineAlert>
+          <InlineAlert tone={answered.kind === "removed" ? "success" : failed?.reason === "unknown" || failed?.reason === "unavailable" ? "danger" : "warning"}>{said}</InlineAlert>
         </div>
       )}
       {view.blocked !== null && <InlineAlert tone="warning">{view.blocked}</InlineAlert>}
 
+      {view.blocked === null && (
       <form action={action} noValidate className="flex flex-col gap-8">
         <section aria-labelledby="enviar-paso-1" className="flex flex-col gap-3">
           <h2 id="enviar-paso-1" className="text-h3">
@@ -131,6 +144,7 @@ export function SubmitScreen({ view, blocks }: { view: SubmitView; blocks: reado
           </section>
         )}
       </form>
+      )}
     </section>
   );
 }

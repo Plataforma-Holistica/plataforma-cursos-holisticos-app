@@ -501,7 +501,7 @@ export async function readSubmitPreview(tx: Tx, course: string): Promise<SubmitP
 }
 
 const assetsRow = z.union([
-  z.object({ answer: z.literal("ok"), assets: z.array(z.strictObject({ lesson: id, provider: z.string(), asset: z.string().nullable() })) }),
+  z.object({ answer: z.literal("ok"), assets: z.array(z.strictObject({ lesson: id, provider: z.string(), asset: z.string().nullable(), playback: z.string().nullable() })) }),
   z.object({ answer: z.enum(["not_found", "not_editable", "suspended", "not_teacher"]) }),
 ]);
 

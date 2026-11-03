@@ -209,7 +209,8 @@ export const portal = defineMessages({
     step1Missing: "1. Lo que falta para enviarlo",
     done: {
       data: "Datos del curso",
-      modules: { one: "{modules} módulo, {lessons} lecciones", other: "{modules} módulos, {lessons} lecciones" },
+      modules: { one: "{count} módulo", other: "{count} módulos" },
+      lessons: { one: "{count} lección", other: "{count} lecciones" },
       videos: "{count} de {count} videos listos",
     },
     missing: {
@@ -238,11 +239,15 @@ export const portal = defineMessages({
     lockedNote: "Mientras lo revisamos no se puede editar.",
     annexMissing: "Por ahora no se puede enviar: falta el texto vigente del anexo de licencia. Avísale al equipo.",
     notEditable: "Este curso ya no es un borrador: no se puede enviar.",
+    cannotSubmit: "Por ahora no puedes enviar cursos. Vuelve a Mis cursos para ver por qué.",
+    removed: "Quitado. Ya no impide enviar.",
     failures: {
       notAccepted: "Marca la casilla para aceptar el anexo. Sin aceptarlo no se envía, y tu curso sigue como está.",
       changed: "Algo cambió en tu curso o en el anexo mientras lo revisabas. Revisa otra vez esta página antes de enviar.",
       notReady: "A tu curso le falta algo: revisa la lista.",
-      videoNotReady: "Algún video ya no está listo en el servicio de video. Revisa tus lecciones en el editor.",
+      videoNotReady: "El servicio de video ya no tiene listo el video de: {lessons}. Súbelo otra vez en el editor. Ya le avisamos al equipo.",
+      removeChanged: "Ese recurso cambió mientras tanto. Revisa la lista otra vez.",
+      removeUnavailable: "No se pudo quitar. Intenta de nuevo en un momento.",
       originMissing: "No pudimos registrar desde dónde aceptas. Intenta de nuevo; si sigue, avísale al equipo.",
       unavailable: "No se pudo enviar. Intenta de nuevo en un momento.",
       unknown: "No supimos si se envió. Revisa Mis cursos antes de intentarlo otra vez.",

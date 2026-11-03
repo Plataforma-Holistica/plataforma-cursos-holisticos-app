@@ -31,8 +31,10 @@ export interface SubmitView {
   warnings: string[];
   /** El anexo y lo que se acepta, solo si no falta nada. */
   annex: { meta: string; draft: boolean; title: string; body: string; href: string; statement: string; button: string } | null;
-  /** Por qué no se puede enviar, si no es por algo que falte. */
+  /** Por qué no se puede enviar, si no es por algo que falte. Con esto no se pintan los pasos. */
   blocked: string | null;
+  /** El título de cada lección, para decir cuál tiene un video que su proveedor ya no tiene. */
+  lessonTitles: Record<string, string>;
 }
 
 function missingText(line: MissingLine): string {
@@ -87,7 +89,8 @@ export function submitView(preview: SubmitPreview, draft: DraftCourse, tolerance
   const back = portalCoursePath(course) ?? ROUTES.portalCourses;
   const self = `${back}/enviar`;
   const lessons = draft.modules.reduce((sum, module) => sum + module.lessons.length, 0);
-  const base = { course, title: draft.title, back, self, warnings: warningsOf(draft, tolerance) };
+  const lessonTitles = Object.fromEntries(draft.modules.flatMap((module) => module.lessons.map((lesson) => [lesson.id, lesson.title])));
+  const base = { course, title: draft.title, back, self, warnings: warningsOf(draft, tolerance), lessonTitles };
 
   if (preview.kind === "not_ready") {
     return {
@@ -103,13 +106,14 @@ export function submitView(preview: SubmitPreview, draft: DraftCourse, tolerance
     };
   }
   if (preview.kind !== "ready") {
-    return { ...base, done: [], missing: [], annex: null, blocked: preview.kind === "annex_missing" ? text.annexMissing : text.notEditable };
+    const blocked = preview.kind === "annex_missing" ? text.annexMissing : preview.kind === "not_editable" ? text.notEditable : text.cannotSubmit;
+    return { ...base, done: [], missing: [], annex: null, blocked };
   }
   return {
     ...base,
     done: [
       text.done.data,
-      t(plural(draft.modules.length, text.done.modules), { modules: draft.modules.length, lessons }),
+      `${t(plural(draft.modules.length, text.done.modules), { count: draft.modules.length })}, ${t(plural(lessons, text.done.lessons), { count: lessons })}`,
       t(text.done.videos, { count: lessons }),
     ],
     missing: [],

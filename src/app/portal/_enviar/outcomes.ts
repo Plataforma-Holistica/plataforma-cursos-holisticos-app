@@ -49,6 +49,9 @@ export function readSubmitForm(form: unknown): SubmitRequest {
   return { step: "none" };
 }
 
+/** Lo que contestó quitar un recurso pendiente. */
+export type RemoveFailure = "remove_changed" | "remove_unavailable";
+
 export type SubmitFailure =
   | "not_accepted"
   | "changed"
@@ -59,9 +62,14 @@ export type SubmitFailure =
   | "unavailable"
   | "unknown";
 
-export type SubmitState = { kind: "idle" } | { kind: "failed"; reason: SubmitFailure; attempt: number };
+export type SubmitState =
+  | { kind: "idle" }
+  /** Quitado: se dice, y el foco lo toma el aviso, porque el botón se fue con su fila. */
+  | { kind: "removed"; attempt: number }
+  /** `lessons`: las de un video que su proveedor ya no tiene listo. */
+  | { kind: "failed"; reason: SubmitFailure | RemoveFailure; lessons: string[]; attempt: number };
 
-export type SubmitOutcome = Leave | { kind: "failed"; reason: SubmitFailure };
+export type SubmitOutcome = Leave | { kind: "failed"; reason: SubmitFailure; lessons: string[] };
 
 const leave = (to: string, notice: Leave["notice"] = null): Leave => ({ kind: "leave", to, notice, closeSession: false });
 
@@ -81,23 +89,24 @@ export function submitOutcome(result: CourseSubmitted, back: string): SubmitOutc
     case "not_teacher":
       // La guarda de esta misma ruta dice qué pasa.
       return leave(back);
+    case "video_not_ready":
+      return { kind: "failed", reason: "video_not_ready", lessons: result.lessons };
     case "not_accepted":
     case "changed":
     case "not_ready":
     case "annex_missing":
-    case "video_not_ready":
     case "origin_missing":
     case "unavailable":
     case "unknown":
-      return { kind: "failed", reason: result.kind };
+      return { kind: "failed", reason: result.kind, lessons: [] };
     case "invalid":
     case "malformed":
       // Solo con un formulario armado a mano: la página de ahora lo aclara.
-      return { kind: "failed", reason: "changed" };
+      return { kind: "failed", reason: "changed", lessons: [] };
     case "session": {
       // Las mismas salidas que cualquier cambio al borrador.
       const outcome = changeOutcome(result, back);
-      return outcome.kind === "leave" ? outcome : { kind: "failed", reason: "unavailable" };
+      return outcome.kind === "leave" ? outcome : { kind: "failed", reason: "unavailable", lessons: [] };
     }
   }
 }

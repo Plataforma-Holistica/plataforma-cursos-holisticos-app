@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
+import { resolveOrigin } from "@/services/account/origin";
 import { createSubmitStore } from "@/services/drafts/store";
 import { createSubmit } from "@/services/drafts/submit";
 import type { ProviderAsset, VideoProvider } from "@/services/media/video-provider";
@@ -64,7 +65,11 @@ const submit = createSubmit({
   store: createSubmitStore(run),
   providers: { active: () => "mux", of: (name) => (name === "mux" ? mux : null) },
   checkSession: (reader) => testServices().checkSession(reader),
-  evidence: (origin) => ({ address: origin.realIp, userAgent: origin.userAgent }),
+  // Como lo arma `editor.ts`, con el proxy de fiar: la dirección canónica y el navegador recortado.
+  evidence: (origin) => {
+    const { address, userAgent } = resolveOrigin(origin, true);
+    return { address, userAgent };
+  },
   report: (code) => (reported.push(code), Promise.resolve()),
 });
 const ORIGIN = { realIp: "203.0.113.9", userAgent: "Navegador de la 97" };

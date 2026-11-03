@@ -26,12 +26,12 @@ export async function submitCourseAction(previous: SubmitState, form: FormData):
     const outcome = changeOutcome(await removeResource(jar, { course: request.course, resource: request.resource, seen: request.seen }), back);
     if (outcome.kind === "leave") return leaveFor(jar, outcome);
     refresh();
-    return outcome.kind === "done" ? { kind: "idle" } : { kind: "failed", reason: outcome.reason === "changed" ? "changed" : "unavailable", attempt };
+    return outcome.kind === "done" ? { kind: "removed", attempt } : { kind: "failed", reason: outcome.reason === "changed" ? "remove_changed" : "remove_unavailable", lessons: [], attempt };
   }
 
   const { course, annex, seen, term, submission, accepted } = request;
   const outcome = submitOutcome(await submitCourse(jar, { course, annex, seen, term, submission, accepted }, await requestOrigin()), back);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   if (outcome.reason !== "not_accepted") refresh();
-  return { kind: "failed", reason: outcome.reason, attempt };
+  return { kind: "failed", reason: outcome.reason, lessons: outcome.lessons, attempt };
 }

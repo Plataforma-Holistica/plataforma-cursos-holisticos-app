@@ -60,12 +60,12 @@ describe("submitOutcome", () => {
     not_found: leave(ROUTES.portalCourses, "course_gone"),
     suspended: leave(BACK),
     not_teacher: leave(BACK),
-    changed: { kind: "failed", reason: "changed" },
-    not_ready: { kind: "failed", reason: "not_ready" },
-    annex_missing: { kind: "failed", reason: "annex_missing" },
-    origin_missing: { kind: "failed", reason: "origin_missing" },
-    unavailable: { kind: "failed", reason: "unavailable" },
-    invalid: { kind: "failed", reason: "changed" },
+    changed: { kind: "failed", reason: "changed", lessons: [] },
+    not_ready: { kind: "failed", reason: "not_ready", lessons: [] },
+    annex_missing: { kind: "failed", reason: "annex_missing", lessons: [] },
+    origin_missing: { kind: "failed", reason: "origin_missing", lessons: [] },
+    unavailable: { kind: "failed", reason: "unavailable", lessons: [] },
+    invalid: { kind: "failed", reason: "changed", lessons: [] },
   };
 
   it.each(SUBMIT_ANSWERS)("la base contesta %s", (answer) => {
@@ -73,13 +73,13 @@ describe("submitOutcome", () => {
   });
 
   it("lo que el servicio decide sin la base", () => {
-    expect(submitOutcome({ kind: "not_accepted" }, BACK)).toEqual({ kind: "failed", reason: "not_accepted" });
-    expect(submitOutcome({ kind: "video_not_ready" }, BACK)).toEqual({ kind: "failed", reason: "video_not_ready" });
-    expect(submitOutcome({ kind: "malformed" }, BACK)).toEqual({ kind: "failed", reason: "changed" });
+    expect(submitOutcome({ kind: "not_accepted" }, BACK)).toEqual({ kind: "failed", reason: "not_accepted", lessons: [] });
+    expect(submitOutcome({ kind: "video_not_ready", lessons: ["x"] }, BACK)).toEqual({ kind: "failed", reason: "video_not_ready", lessons: ["x"] });
+    expect(submitOutcome({ kind: "malformed" }, BACK)).toEqual({ kind: "failed", reason: "changed", lessons: [] });
   });
 
   it("no se supo nunca se pinta como hecho", () => {
-    expect(submitOutcome({ kind: "unknown" }, BACK)).toEqual({ kind: "failed", reason: "unknown" });
+    expect(submitOutcome({ kind: "unknown" }, BACK)).toEqual({ kind: "failed", reason: "unknown", lessons: [] });
   });
 
   it("sin sesión, a entrar y de vuelta aquí", () => {

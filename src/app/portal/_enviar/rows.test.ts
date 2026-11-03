@@ -75,9 +75,15 @@ describe("submitView", () => {
     expect(view.missing[0]).toMatchObject({ href: null, remove: `remove:${COURSE}:e0000000-0000-4000-8000-000000000009:4` });
   });
 
-  it("sin anexo vigente, o si ya no es borrador, lo dice", () => {
+  it("sin anexo vigente, si ya no es borrador, o si no puede enviar, lo dice por su causa", () => {
     expect(submitView({ kind: "annex_missing" }, draft, TOLERANCE).blocked).toMatch(/falta el texto vigente del anexo/);
     expect(submitView({ kind: "not_editable" }, draft, TOLERANCE).blocked).toMatch(/ya no es un borrador/);
+    expect(submitView({ kind: "suspended" }, draft, TOLERANCE).blocked).toMatch(/no puedes enviar cursos/);
+    expect(submitView({ kind: "not_teacher" }, draft, TOLERANCE).blocked).toMatch(/no puedes enviar cursos/);
+  });
+
+  it("lo hecho dice módulos y lecciones, cada uno en su número", () => {
+    expect(submitView(READY, draft, TOLERANCE).done[1]).toBe("1 módulo, 1 lección");
   });
 
   it("la versión 0 dice que es un borrador sin validez", () => {

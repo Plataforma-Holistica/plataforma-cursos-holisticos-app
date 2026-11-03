@@ -123,8 +123,8 @@ select pruebas.video(1, 'curso', true) as vigente \gset
 select pruebas.video(1, 'curso', false, 'processing') as reemplazo \gset
 select is(
   pruebas.rj(pruebas.p(1), format('private.course_submit_assets(%L)', pruebas.id('curso'))),
-  jsonb_build_object('answer', 'ok', 'assets', jsonb_build_array(jsonb_build_object('lesson', pruebas.id('curso-l'), 'provider', 'mux', 'asset', 'asset-' || :'vigente'))),
-  'solo el vigente, con su proveedor y su asset');
+  jsonb_build_object('answer', 'ok', 'assets', jsonb_build_array(jsonb_build_object('lesson', pruebas.id('curso-l'), 'provider', 'mux', 'asset', 'asset-' || :'vigente', 'playback', 'play-' || :'vigente'))),
+  'solo el vigente, con su proveedor, su asset y la reproducción que se firma');
 select is(pruebas.rj(pruebas.p(2), format('private.course_submit_assets(%L)', pruebas.id('curso'))) ->> 'answer', 'not_found', 'el curso de otro maestro, para él, no existe');
 select is(pruebas.rj(pruebas.p(3), format('private.course_submit_assets(%L)', pruebas.id('curso'))) ->> 'answer', 'not_teacher', 'quien no es maestro no lo pide');
 select pruebas.como_dueno();

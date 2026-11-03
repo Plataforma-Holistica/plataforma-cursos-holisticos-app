@@ -2,8 +2,8 @@
 -- estaban desde la primera solicitud.
 --
 -- Por qué es así:
---   · Los assets vigentes, para preguntarle a Mux antes de firmar y fuera de la transacción: el maestro no lee `provider_asset_id` (permiso por columnas). Solo su maestro activo, con
---     el curso en borrador: es lo que enviar exige.
+--   · Los assets vigentes y su reproducción, para preguntarle a Mux antes de firmar y fuera de la transacción: el maestro no lee `provider_asset_id` (permiso por columnas). Lo que
+--     se compara es la reproducción que va en la fotografía. Solo su maestro activo, con el curso en borrador: es lo que enviar exige.
 --   · PA-42 cuenta lo que falta con la misma lista de enviar (`course_readiness`), que ve reemplazos, pendientes y módulos vacíos; lo que el dominio contaba antes no los veía.
 --   · Lo aceptado, para PA-50: la frase, la versión, la fecha y el plazo, sin el origen. El título es el de la fotografía: lo que se aceptó, aunque el curso cambie o se borre.
 --   · El texto de una versión del anexo: la vigente, o una que ese maestro aceptó. El anexo no es un texto público (`/legal` no lo sirve).
@@ -23,7 +23,7 @@ begin
     return pg_catalog.jsonb_build_object('answer', v_answer);
   end if;
   return pg_catalog.jsonb_build_object('answer', 'ok', 'assets', coalesce((
-    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('lesson', v.lesson_id, 'provider', v.provider, 'asset', v.provider_asset_id) order by v.lesson_id)
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('lesson', v.lesson_id, 'provider', v.provider, 'asset', v.provider_asset_id, 'playback', v.provider_playback_id) order by v.lesson_id)
     from public.draft_videos v where v.course_id = p_course and v.is_current), '[]'::jsonb));
 end
 $$;

@@ -43,7 +43,7 @@ function submitWith(
     assets: vi.fn(() => {
       calls.push("assets");
       if (setup.assets === "throws") return Promise.reject(new Error("sin base"));
-      return Promise.resolve<SubmitAssets>(setup.assets ?? { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: "Asset1" }] });
+      return Promise.resolve<SubmitAssets>(setup.assets ?? { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: "Asset1", playback: "Play" }] });
     }),
     submit: vi.fn(() => {
       calls.push("enviar");
@@ -104,10 +104,28 @@ describe("submitCourse", () => {
     ["se está procesando", { ...READY, state: "preparing" }],
     ["tiene error", { ...READY, state: "errored" }],
     ["no tiene reproducción firmada", { ...READY, playback: null }],
-  ] as const)("un video que en Mux %s no se envía", async (_what, read) => {
-    const { service, calls } = submitWith({ read });
-    expect(await service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "video_not_ready" });
+    ["tiene otra reproducción que la que se firma", { ...READY, playback: "Otra" }],
+  ] as const)("un video que en Mux %s no se envía: dice qué lección, y se reporta", async (_what, read) => {
+    const { service, calls, reported } = submitWith({ read });
+    expect(await service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "video_not_ready", lessons: [LESSON] });
     expect(calls).not.toContain("enviar");
+    expect(reported).toEqual(["submit_video_gone"]);
+  });
+
+  it("se le pregunta por todos los videos a la vez", async () => {
+    const other = "d0000000-0000-4000-8000-000000000005";
+    const { service, mux } = submitWith({ assets: { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: "A1", playback: "Play" }, { lesson: other, provider: "mux", asset: "A2", playback: "Play" }] } });
+    let open = 0;
+    let most = 0;
+    vi.mocked(mux.read).mockImplementation(async () => {
+      open += 1;
+      most = Math.max(most, open);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open -= 1;
+      return READY;
+    });
+    expect(await service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "submitted" });
+    expect(most).toBe(2);
   });
 
   it("si Mux no contesta, no se envía, y se reporta", async () => {
@@ -119,7 +137,7 @@ describe("submitCourse", () => {
 
   it("un proveedor con el que esta instalación no habla, o un video sin asset, tampoco se firma a ciegas", async () => {
     expect(await submitWith({ provider: "none" }).service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unavailable" });
-    const noAsset = submitWith({ assets: { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: null }] } });
+    const noAsset = submitWith({ assets: { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: null, playback: null }] } });
     expect(await noAsset.service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unavailable" });
     expect(noAsset.calls).not.toContain("enviar");
   });
@@ -140,10 +158,13 @@ describe("submitCourse", () => {
     expect(reported).toEqual(["course_submit_unavailable"]);
   });
 
-  it("si Mux lanza, también: no se supo", async () => {
-    const { service, reported } = submitWith({ read: "throws" });
-    expect(await service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unknown" });
-    expect(reported).toEqual(["course_submit_unavailable"]);
+  it("lo que falla antes de firmar es «no se pudo», no «no se supo»: nada se firmó", async () => {
+    const mux = submitWith({ read: "throws" });
+    expect(await mux.service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unavailable" });
+    expect(mux.reported).toEqual(["submit_provider_unavailable"]);
+    const base = submitWith({ assets: "throws" });
+    expect(await base.service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unavailable" });
+    expect(base.calls).not.toContain("enviar");
   });
 });
 
