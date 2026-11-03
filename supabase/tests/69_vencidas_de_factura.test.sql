@@ -3,7 +3,7 @@
 -- las que lo pasaron. Una sola regla dice cuándo un periodo está pagado (`period_settled`), y la usan el periodo y quien lo paga. Al final, lo que vigila el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(36);
+select plan(38);
 
 select pruebas.alta('a6900000-0000-0000-0000-000000000001', 'luz-69@prueba.test');
 select pruebas.alta('c6900000-0000-0000-0000-000000000001', 'f1-69@prueba.test');
@@ -99,9 +99,9 @@ values ('d6900000-0000-4000-8000-000000000004', pruebas.p(8), pruebas.m(), 'd690
 insert into private.payout_requests (kind, payout_id, payment_id, note, proposed_by, status, decided_by, decided_at)
 values ('payment_return', pruebas.p(8), 'd6900000-0000-4000-8000-000000000004', 'El banco la regresó', pruebas.f1(), 'confirmed',
         'a6900000-0000-0000-0000-000000000001', now() - interval '2 hours');
--- La llamada del primer pago, de antes de la devolución: ya no vale.
-insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
-values (pruebas.m(), now() - interval '10 days', 'Luz', now() - interval '3 hours', pruebas.f1());
+-- La llamada del primer pago, anotada antes de la devolución aunque diga una hora de después: ya no vale, porque cuenta cuándo se anotó.
+insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by, recorded_at)
+values (pruebas.m(), now() - interval '10 days', 'Luz', now() - interval '1 hour', pruebas.f1(), now() - interval '3 hours');
 set local session_replication_role = origin;
 select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb ->> 'outcome', 'needs_call',
           'con su único pago devuelto, la llamada de antes ya no vale: se vuelve a llamar');
@@ -111,6 +111,23 @@ select (pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pru
 select is(pruebas.pide(pruebas.f1(), format('private.payout_mark_paid(%L, %L, %L, %L, 100000)', pruebas.p(8), :'lectura8', 'DEV2',
                                             (now() at time zone 'America/Mexico_City')::date))::jsonb ->> 'outcome', 'paid', 'y se paga');
 select ok((select first_time from private.payout_payments where payout_id = pruebas.p(8) and reference = 'DEV2'), 'y ese pago cuenta como el primero a esta cuenta');
+
+-- Una devolución entre abrir y marcar: ya no hay pago vivo a esta cuenta, y marcar también pide la llamada nueva.
+select pruebas.periodo(203106);
+set local session_replication_role = replica;
+insert into public.payouts (id, period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+values (pruebas.p(6), 203106, pruebas.m(), (select close_run_id from public.payout_periods where period_id = 203106), 'ready_to_pay', 100000, 100000, 100000, now(), pruebas.f1());
+set local session_replication_role = origin;
+select (pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(6)))::jsonb ->> 'read_id')::uuid as lectura6 \gset
+select ok(:'lectura6' is not null, 'con el pago de antes vivo, se abre sin llamar');
+set local session_replication_role = replica;
+insert into private.payout_requests (kind, payout_id, payment_id, note, proposed_by, status, decided_by, decided_at)
+select 'payment_return', x.payout_id, x.id, 'El banco la regresó', pruebas.f1(), 'confirmed', 'a6900000-0000-0000-0000-000000000001', clock_timestamp()
+from private.payout_payments x where x.payout_id = pruebas.p(8) and x.reference = 'DEV2';
+set local session_replication_role = origin;
+select is(pruebas.pide(pruebas.f1(), format('private.payout_mark_paid(%L, %L, %L, %L, 100000)', pruebas.p(6), :'lectura6', 'DEV3',
+                                            (now() at time zone 'America/Mexico_City')::date))::jsonb ->> 'conflict', 'needs_call',
+          'devuelto entre abrir y marcar: la transferencia choca y retiene');
 
 -- Sin liberar no está pagado, aunque no tenga liquidaciones.
 select pruebas.periodo(203107);

@@ -248,7 +248,8 @@ describe("dos aperturas a la vez", () => {
       financeB,
       (client) => call(client, "private.payout_account_open($1)", [payout.get(204207)]),
     );
-    expect(first).toMatchObject({ clabe_last4: "7771" });
+    expect(first).toMatchObject({ outcome: "ok", clabe_last4: "7771" });
+    expect(first.read_id).toEqual(expect.any(String));
     expect(second).toMatchObject({ outcome: "already_open", read_by: financeA.person.id, own: false });
   });
 

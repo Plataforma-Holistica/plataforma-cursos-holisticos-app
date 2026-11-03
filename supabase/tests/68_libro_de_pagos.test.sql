@@ -4,7 +4,7 @@
 -- ninguno. Abrir la cuenta, llamar y marcar se prueban aquí; las vencidas de factura y lo que vigila el vigilante, en la 69.
 begin;
 \ir _ayuda.psql
-select plan(121);
+select plan(122);
 
 select pruebas.alta('a6800000-0000-0000-0000-000000000001', 'tere-68@prueba.test');
 select pruebas.alta('c6800000-0000-0000-0000-000000000001', 'f1-68@prueba.test');
@@ -351,6 +351,7 @@ select is(pruebas.abre(pruebas.p(6)) ->> 'outcome', 'self', 'abrir la cuenta pro
 select is(pruebas.llama(pruebas.p(6)) ->> 'outcome', 'self', 'anotar la llamada propia, no');
 select is(pruebas.marca(pruebas.p(6), :'lectura6', 'R6') ->> 'outcome', 'self', 'marcar la propia, no');
 select is(pruebas.devuelve((select id from private.payout_payments where payout_id = pruebas.p(6) and reference = 'R6'), pruebas.f1()) ->> 'outcome', 'self', 'devolver la propia, no');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L, %L)', :'lectura6', 'No transferí'))::jsonb ->> 'outcome', 'self', 'anular una lectura de la propia, no');
 select pruebas.como_dueno();
 set local session_replication_role = replica;
 update public.teachers set profile_id = pruebas.tere() where id = pruebas.m();

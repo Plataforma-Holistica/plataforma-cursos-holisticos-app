@@ -102,7 +102,7 @@ create table private.payout_payments (
   constraint payout_payments_amount_positive check (amount_cents > 0),
   constraint payout_payments_reference_form check (pg_catalog.char_length(reference) between 1 and 100 and reference = pg_catalog.btrim(reference)),
   constraint payout_payments_conflict_known check (
-    conflict is null or conflict in ('on_hold', 'already_paid', 'under_investigation', 'amount_differs', 'duplicate_reference', 'not_ready', 'stale_read'))
+    conflict is null or conflict in ('on_hold', 'already_paid', 'under_investigation', 'amount_differs', 'duplicate_reference', 'not_ready', 'stale_read', 'needs_call'))
 );
 comment on table private.payout_payments is 'El libro de pagos a maestros (RF-505): cada transferencia reportada, con la lectura con que se abrió la cuenta. Solo inserción.';
 create index payout_payments_payout_idx on private.payout_payments (payout_id);
@@ -261,15 +261,8 @@ end
 $$;
 revoke all on function private.invoice_due_on(public.period_id, date) from public;
 
--- Lo ya liberado antes de esta migración: su día, el del día en que se liberó. Sin él, `invoice_deadline` nunca la vencería. El parámetro llega con la semilla:
--- si todavía no está, no hay qué rellenar (no hay nada liberado), y lo que haya se rellena a mano con esta misma sentencia.
-alter table public.payouts disable trigger payouts_guard;
-update public.payouts y set invoice_due_on = private.invoice_due_on(y.period_id, (y.released_at at time zone private.period_zone())::date)
-where private.parameter_value('PLAZO_FACTURA_MIN_DIAS') is not null
-  and y.released_at is not null and y.invoice_due_on is null
-  and (y.status in ('awaiting_invoice', 'invoice_in_review', 'invoice_rejected', 'ready_to_pay')
-       or y.held_from_status in ('awaiting_invoice', 'invoice_in_review', 'invoice_rejected', 'ready_to_pay'));
-alter table public.payouts enable trigger payouts_guard;
+-- Sin relleno: una liquidación liberada antes de esta migración no tiene su día, y no vence. Fuera de una base local no hay ninguna (en producción no se ha
+-- liberado nada), y en local `pnpm db:reset` la rehace.
 
 -- Cuándo un periodo liberado está pagado (RF-501): cada liquidación pagada, acumulada o vencida de factura. Una sola regla, para el periodo y para quien lo paga.
 create function private.period_settled(p_period public.period_id) returns boolean
@@ -334,6 +327,21 @@ as $$
       or exists (select 1 from public.teachers t where t.id = p_teacher and t.suspension_approved_by is not null)
 $$;
 revoke all on function private.payout_fraud_decided(uuid, public.period_id) from public;
+
+-- Si ya se llamó por esta CLABE (decisión 2): una llamada anotada después de la última devolución confirmada de un pago a ella. Cuenta cuándo se anotó, no la
+-- hora que escribió quien llamó.
+create function private.payout_call_ok(p_teacher uuid, p_clabe_changed timestamptz) returns boolean
+language sql stable set search_path = ''
+as $$
+  select exists (
+    select 1 from private.payout_account_calls c
+    where c.teacher_id = p_teacher and c.clabe_changed_at = p_clabe_changed
+      and c.recorded_at > coalesce((
+        select pg_catalog.max(q.decided_at) from private.payout_requests q join private.payout_payments x on x.id = q.payment_id
+        where q.kind = 'payment_return' and q.status = 'confirmed' and x.teacher_id = p_teacher and x.clabe_changed_at = p_clabe_changed),
+        '-infinity'::timestamptz))
+$$;
+revoke all on function private.payout_call_ok(uuid, timestamptz) from public;
 
 -- La identidad de la CLABE vigente de un maestro, sin nada cifrado: con qué fila, qué versión y cuándo cambió. Solo para las funciones del dueño.
 create function private.tax_profile_account(p_teacher uuid)
@@ -616,6 +624,8 @@ begin
   if private.actor_owns_teacher(y.teacher_id) then
     return '{"outcome": "self"}'::jsonb;
   end if;
+  -- El candado de las cuentas del maestro, después del periodo y la liquidación: una devolución de otro periodo no se cuela entre mirar la primera vez y escribir.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('payout_account:' || y.teacher_id::text, 0));
   if y.status = 'on_hold' then
     return '{"outcome": "on_hold"}'::jsonb;
   end if;
@@ -647,13 +657,7 @@ begin
     select 1 from private.payout_payments x
     where x.teacher_id = y.teacher_id and x.clabe_changed_at = p.clabe_changed_at
       and not exists (select 1 from private.payout_requests r where r.payment_id = x.id and r.kind = 'payment_return' and r.status = 'confirmed'));
-  if v_first and not exists (
-      select 1 from private.payout_account_calls c
-      where c.teacher_id = y.teacher_id and c.clabe_changed_at = p.clabe_changed_at
-        and c.called_at > coalesce((
-          select pg_catalog.max(q.decided_at) from private.payout_requests q join private.payout_payments x on x.id = q.payment_id
-          where q.kind = 'payment_return' and q.status = 'confirmed' and x.teacher_id = y.teacher_id and x.clabe_changed_at = p.clabe_changed_at),
-          '-infinity'::timestamptz)) then
+  if v_first and not private.payout_call_ok(y.teacher_id, p.clabe_changed_at) then
     -- Con qué cuenta se llama: sus últimos cuatro y desde cuándo es esa. La llamada se anota a esa, no a la que haya al anotar.
     return pg_catalog.jsonb_build_object('outcome', 'needs_call', 'clabe_last4', p.clabe_last4, 'clabe_changed_at', p.clabe_changed_at);
   end if;
@@ -709,6 +713,9 @@ begin
   select y.period_id into v_period from public.payouts y where y.id = r.payout_id;
   perform 1 from public.payout_periods x where x.period_id = v_period for update;
   perform 1 from public.payouts y where y.id = r.payout_id for update;
+  if private.actor_owns_teacher(r.teacher_id) then
+    return '{"outcome": "self"}'::jsonb;
+  end if;
   if r.read_by <> private.actor_id() and exists (
       select 1 from public.admin_capabilities c where c.profile_id = r.read_by and c.capability = 'finance' and c.revoked_at is null) then
     return '{"outcome": "not_yours"}'::jsonb;
@@ -812,6 +819,8 @@ begin
   if y.released_at is null or p_paid_on < (y.released_at at time zone private.period_zone())::date then
     return '{"outcome": "malformed"}'::jsonb;
   end if;
+  -- El candado de las cuentas del maestro, después del periodo y la liquidación: una devolución de otro periodo no se cuela entre mirar la primera vez y escribir.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('payout_account:' || y.teacher_id::text, 0));
   select * into v_existing from private.payout_payments x
   where x.read_id = p_read and x.payout_id = p_payout and pg_catalog.upper(x.reference) = pg_catalog.upper(v_reference)
     and x.paid_on = p_paid_on and x.amount_cents = p_amount_cents
@@ -824,6 +833,10 @@ begin
     return '{"outcome": "needs_read"}'::jsonb;
   end if;
 
+  v_first := not exists (
+    select 1 from private.payout_payments x
+    where x.teacher_id = y.teacher_id and x.clabe_changed_at = r.clabe_changed_at
+      and not exists (select 1 from private.payout_requests q where q.payment_id = x.id and q.kind = 'payment_return' and q.status = 'confirmed'));
   v_conflict := case
     when y.status = 'paid' then 'already_paid'
     when y.status = 'on_hold' then 'on_hold'
@@ -832,14 +845,11 @@ begin
     when r.read_at < private.payout_ready_since(p_payout) or exists (select 1 from private.payout_account_read_voids v where v.read_id = r.id)
          or exists (select 1 from private.payout_payments x where x.read_id = r.id) then 'stale_read'
     when private.payout_under_review(y.teacher_id, y.period_id) then 'under_investigation'
+    when v_first and not private.payout_call_ok(y.teacher_id, r.clabe_changed_at) then 'needs_call'
     when exists (select 1 from private.payout_payments x
                  where pg_catalog.upper(x.reference) = pg_catalog.upper(v_reference) and x.paid_on = p_paid_on and x.conflict is null) then 'duplicate_reference'
     when p_amount_cents <> y.net_cents then 'amount_differs'
   end;
-  v_first := not exists (
-    select 1 from private.payout_payments x
-    where x.teacher_id = y.teacher_id and x.clabe_changed_at = r.clabe_changed_at
-      and not exists (select 1 from private.payout_requests q where q.payment_id = x.id and q.kind = 'payment_return' and q.status = 'confirmed'));
   -- La CLABE, no la fila: cambiar el RFC o la razón social no cambia la cuenta a la que se transfirió.
   v_changed := (select a.clabe_changed_at from private.tax_profile_account(y.teacher_id) a) is distinct from r.clabe_changed_at;
   begin
@@ -871,6 +881,7 @@ begin
         when 'duplicate_reference' then 'Se reportó una transferencia con una referencia que ya se usó ese día.'
         when 'amount_differs' then 'Se reportó una transferencia por otro monto que el neto.'
         when 'stale_read' then 'Se reportó una transferencia con una lectura de la cuenta vieja, anulada o ya usada.'
+        when 'needs_call' then 'Se reportó una transferencia a una cuenta a la que hay que volver a llamar.'
         else 'Se reportó una transferencia sobre una liquidación devuelta.' end
     where x.id = p_payout;
   end if;
@@ -918,6 +929,8 @@ begin
   if private.actor_owns_teacher(y.teacher_id) then
     return '{"outcome": "self"}'::jsonb;
   end if;
+  -- El candado de las cuentas del maestro, después del periodo y la liquidación: una devolución de otro periodo no se cuela entre mirar la primera vez y escribir.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('payout_account:' || y.teacher_id::text, 0));
   if exists (select 1 from private.payout_requests r where r.payment_id = p_payment and r.kind = 'payment_return' and r.status = 'confirmed') then
     return '{"outcome": "already_returned"}'::jsonb;
   end if;
@@ -1424,7 +1437,7 @@ as $$
            ('guard_payout_request', false, false, true), ('invoice_deadline', false, false, true), ('payout_account_open', true, true, true),
            ('payout_account_call', true, true, true), ('payout_mark_paid', true, true, true), ('payout_return_payment', true, true, true),
            ('payout_withdraw_request', true, true, true), ('payout_reopen', true, true, true), ('payout_account_void_read', true, true, true),
-           ('payout_ready_since', false, false, true), ('payout_open_read', false, false, true)),
+           ('payout_ready_since', false, false, true), ('payout_open_read', false, false, true), ('payout_call_ok', false, false, true)),
   found as (
     select f.name, f.definer, f.server, f.fixed_path, p.oid, p.prosecdef, p.proconfig
     from payout_functions f
@@ -1590,7 +1603,7 @@ as $$
   union all
   -- Y abrir la cuenta mira la liquidación, lo que se investiga y la primera vez (T-604): sin eso, se le pagaría a una cuenta en plena investigación.
   select 'tax finance read without the payout checks', 'payout_account_open'
-  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.payout_account_open(uuid)')) like '%ready_to_pay%payout_under_review%payout_account_calls%payout_account_reads%', false)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.payout_account_open(uuid)')) like '%ready_to_pay%payout_under_review%payout_call_ok%payout_account_reads%', false)
   union all
   select k.name || ' reachable', k.name
   from (values ('tax_clabe_standing', 'private.tax_clabe_standing(uuid, timestamptz, timestamptz)'), ('tax_clabe_wait', 'private.tax_clabe_wait()'),
