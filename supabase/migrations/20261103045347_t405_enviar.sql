@@ -4,7 +4,8 @@
 -- Por qué es así:
 --   · Los assets vigentes y su reproducción, para preguntarle a Mux antes de firmar y fuera de la transacción: el maestro no lee `provider_asset_id` (permiso por columnas). Lo que
 --     se compara es la reproducción que va en la fotografía. Solo su maestro activo, con el curso en borrador: es lo que enviar exige.
---   · PA-42 cuenta lo que falta con la misma lista de enviar (`course_readiness`), que ve reemplazos, pendientes y módulos vacíos; lo que el dominio contaba antes no los veía.
+--   · PA-42 no dice «Listo para enviar» si la lista de enviar (`course_readiness`) ve algo: reemplazos en camino, pendientes o módulos vacíos. El número de «Faltan» sigue la regla
+--     de Sergio del 2026-10-29, que cuenta el dominio.
 --   · Lo aceptado, para PA-50: la frase, la versión, la fecha y el plazo, sin el origen. El título es el de la fotografía: lo que se aceptó, aunque el curso cambie o se borre.
 --   · El texto de una versión del anexo: la vigente, o una que ese maestro aceptó. El anexo no es un texto público (`/legal` no lo sirve).
 

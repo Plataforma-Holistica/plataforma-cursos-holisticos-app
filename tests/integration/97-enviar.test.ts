@@ -58,7 +58,8 @@ const mux: VideoProvider = {
   create: () => Promise.resolve(null),
   findByPassthrough: () => Promise.resolve(null),
   remove: () => Promise.resolve(true),
-  read: () => Promise.resolve(muxSays),
+  // Lo que guarda la prueba: la reproducción es `play-` y el resto del asset. Con «listo», Mux contesta esa.
+  read: (asset) => Promise.resolve(muxSays !== null && muxSays !== "gone" && muxSays.playback === "Play" ? { ...muxSays, playback: asset.replace(/^asset-/, "play-") } : muxSays),
 };
 const reported: string[] = [];
 const submit = createSubmit({
@@ -187,7 +188,7 @@ describe("enviar", () => {
     const course = await readyCourse("Mux dice");
     try {
       muxSays = "gone";
-      expect(await submit.submitCourse(jar, { ...(await seen(course)), accepted: true }, ORIGIN)).toEqual({ kind: "video_not_ready" });
+      expect(await submit.submitCourse(jar, { ...(await seen(course)), accepted: true }, ORIGIN)).toEqual({ kind: "video_not_ready", lessons: [expect.any(String)] });
       muxSays = null;
       expect(await submit.submitCourse(jar, { ...(await seen(course)), accepted: true }, ORIGIN)).toEqual({ kind: "unavailable" });
       expect(reported).toContain("submit_provider_unavailable");

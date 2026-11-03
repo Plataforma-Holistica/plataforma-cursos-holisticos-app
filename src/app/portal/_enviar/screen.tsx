@@ -28,6 +28,7 @@ const BLOCK_ID = "bloque-enviar";
 const FAILURES: Record<Exclude<SubmitFailure, "video_not_ready"> | RemoveFailure, string> = {
   remove_changed: text.failures.removeChanged,
   remove_unavailable: text.failures.removeUnavailable,
+  remove_unknown: text.failures.removeUnknown,
   not_accepted: text.failures.notAccepted,
   changed: text.failures.changed,
   not_ready: text.failures.notReady,
@@ -48,8 +49,11 @@ export function SubmitScreen({ view, blocks }: { view: SubmitView; blocks: reado
       : answered.kind === "removed"
         ? text.removed
         : answered.reason === "video_not_ready"
-          ? t(text.failures.videoNotReady, { lessons: answered.lessons.map((lesson) => `«${view.lessonTitles[lesson] ?? ""}»`).join(", ") })
-          : FAILURES[answered.reason];
+          ? t(text.failures.videoNotReady, { lessons: answered.lessons.map((lesson) => (lesson in view.lessonTitles ? `«${view.lessonTitles[lesson]}»` : text.failures.oneLesson)).join(", ") })
+          : // Lo que la página ya dice por su cuenta, con la vista de ahora, no se repite.
+            answered.reason === "annex_missing" && view.blocked !== null
+            ? null
+            : FAILURES[answered.reason];
 
   // La respuesta toma el foco: el botón que se pulsó pudo irse con la página nueva (al quitar, con su fila).
   useEffect(() => {

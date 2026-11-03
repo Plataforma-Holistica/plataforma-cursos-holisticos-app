@@ -73,6 +73,13 @@ describe("submitCourseAction", () => {
     expect(mocks.refresh).toHaveBeenCalledOnce();
   });
 
+  it("lo que ya no estaba cuenta como quitado, y lo que no se supo se dice así", async () => {
+    mocks.removeResource.mockResolvedValueOnce({ kind: "not_found" });
+    expect(await submitCourseAction(IDLE, form([["do", removePendingButton(COURSE, RESOURCE, 4)]]))).toEqual({ kind: "removed", attempt: 1 });
+    mocks.removeResource.mockResolvedValueOnce({ kind: "unknown" });
+    expect(await submitCourseAction(IDLE, form([["do", removePendingButton(COURSE, RESOURCE, 4)]]))).toEqual({ kind: "failed", reason: "remove_unknown", lessons: [], attempt: 1 });
+  });
+
   it("si quitar no se pudo, lo dice con sus propias palabras", async () => {
     mocks.removeResource.mockResolvedValueOnce({ kind: "changed" });
     expect(await submitCourseAction(IDLE, form([["do", removePendingButton(COURSE, RESOURCE, 4)]]))).toEqual({ kind: "failed", reason: "remove_changed", lessons: [], attempt: 1 });

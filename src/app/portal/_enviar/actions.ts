@@ -23,10 +23,14 @@ export async function submitCourseAction(previous: SubmitState, form: FormData):
   const back = `${portalCoursePath(request.course) ?? ROUTES.portalCourses}/enviar`;
 
   if (request.step === "remove") {
-    const outcome = changeOutcome(await removeResource(jar, { course: request.course, resource: request.resource, seen: request.seen }), back);
+    const result = await removeResource(jar, { course: request.course, resource: request.resource, seen: request.seen });
+    const outcome = changeOutcome(result, back);
     if (outcome.kind === "leave") return leaveFor(jar, outcome);
     refresh();
-    return outcome.kind === "done" ? { kind: "removed", attempt } : { kind: "failed", reason: outcome.reason === "changed" ? "remove_changed" : "remove_unavailable", lessons: [], attempt };
+    // Ya no estaba (lo quitó otra pestaña, o venció): para quien quería quitarlo, es lo mismo que quitado.
+    if (outcome.kind === "done" || outcome.reason === "gone") return { kind: "removed", attempt };
+    const reason = outcome.reason === "changed" ? "remove_changed" : result.kind === "unknown" ? "remove_unknown" : "remove_unavailable";
+    return { kind: "failed", reason, lessons: [], attempt };
   }
 
   const { course, annex, seen, term, submission, accepted } = request;

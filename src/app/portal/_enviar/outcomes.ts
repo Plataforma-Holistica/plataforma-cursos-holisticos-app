@@ -50,7 +50,7 @@ export function readSubmitForm(form: unknown): SubmitRequest {
 }
 
 /** Lo que contestó quitar un recurso pendiente. */
-export type RemoveFailure = "remove_changed" | "remove_unavailable";
+export type RemoveFailure = "remove_changed" | "remove_unavailable" | "remove_unknown";
 
 export type SubmitFailure =
   | "not_accepted"

@@ -112,7 +112,24 @@ describe("submitCourse", () => {
     expect(reported).toEqual(["submit_video_gone"]);
   });
 
-  it("se le pregunta por todos los videos a la vez", async () => {
+  it("se le pregunta de cuatro en cuatro: nunca más a la vez", async () => {
+    const many = Array.from({ length: 9 }, (_, n) => ({ lesson: `d0000000-0000-4000-8000-00000000010${n}`, provider: "mux", asset: `A${n}`, playback: "Play" }));
+    const { service, mux } = submitWith({ assets: { kind: "ok", assets: many } });
+    let open = 0;
+    let most = 0;
+    vi.mocked(mux.read).mockImplementation(async () => {
+      open += 1;
+      most = Math.max(most, open);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open -= 1;
+      return READY;
+    });
+    expect(await service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "submitted" });
+    expect(most).toBe(4);
+    expect(mux.read).toHaveBeenCalledTimes(9);
+  });
+
+  it("se le pregunta por varios a la vez", async () => {
     const other = "d0000000-0000-4000-8000-000000000005";
     const { service, mux } = submitWith({ assets: { kind: "ok", assets: [{ lesson: LESSON, provider: "mux", asset: "A1", playback: "Play" }, { lesson: other, provider: "mux", asset: "A2", playback: "Play" }] } });
     let open = 0;
@@ -165,6 +182,8 @@ describe("submitCourse", () => {
     const base = submitWith({ assets: "throws" });
     expect(await base.service.submitCourse(reader, INPUT, ORIGIN)).toEqual({ kind: "unavailable" });
     expect(base.calls).not.toContain("enviar");
+    // La base, no Mux: quien opere busca donde está la falla.
+    expect(base.reported).toEqual(["draft_read_unavailable"]);
   });
 });
 

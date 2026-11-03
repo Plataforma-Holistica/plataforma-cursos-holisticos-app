@@ -129,6 +129,8 @@ export type CourseSubmitted =
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
+/** Cuántos videos se le preguntan a la vez a su proveedor. */
+const PROVIDER_BATCH = 4;
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 
 export function createSubmit(deps: SubmitDeps) {
@@ -160,19 +162,24 @@ export function createSubmit(deps: SubmitDeps) {
 
   /**
    * Las lecciones cuyo video vigente su proveedor ya no tiene listo con la reproducción que se firma, o nulo si no se supo. Lo del proveedor de prueba contesta listo. Un proveedor
-   * con el que esta instalación no habla cuenta como «no se supo»: no se firma a ciegas. Se pregunta por todos a la vez: el adaptador corta cada pregunta a los 10 s, así que una
-   * acción no espera más que eso.
+   * con el que esta instalación no habla cuenta como «no se supo»: no se firma a ciegas. Se pregunta de cuatro en cuatro: una ráfaga por curso grande chocaría con el límite de
+   * peticiones de Mux, y el adaptador corta cada pregunta a los 10 s.
    */
   async function videosNotReady(assets: Extract<SubmitAssets, { kind: "ok" }>["assets"]): Promise<string[] | null> {
-    const answers = await Promise.all(
-      assets.map(async (each) => {
+    const answers: (string | null)[] = [];
+    for (let start = 0; start < assets.length; start += PROVIDER_BATCH) {
+      answers.push(
+        ...(await Promise.all(
+      assets.slice(start, start + PROVIDER_BATCH).map(async (each) => {
         const provider = deps.providers.of(each.provider);
         if (provider === null || each.asset === null) return null;
         const read = await provider.read(each.asset);
         if (read === null) return null;
         return read !== "gone" && read.state === "ready" && read.playback !== null && read.playback === each.playback ? "ok" : each.lesson;
       }),
-    );
+        )),
+      );
+    }
     if (answers.some((answer) => answer === null)) return null;
     return answers.filter((answer): answer is string => answer !== "ok" && answer !== null);
   }
@@ -193,10 +200,16 @@ export function createSubmit(deps: SubmitDeps) {
     if (input.accepted !== true) return { kind: "not_accepted" };
 
     // Hasta aquí no se firmó nada: lo que falle es «no se pudo», no «no se supo».
+    let assets: SubmitAssets;
+    try {
+      assets = await deps.store.assets(check.claims, course);
+    } catch {
+      await deps.report("draft_read_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (assets.kind !== "ok") return { kind: assets.kind };
     let notReady: string[] | null;
     try {
-      const assets = await deps.store.assets(check.claims, course);
-      if (assets.kind !== "ok") return { kind: assets.kind };
       notReady = await videosNotReady(assets.assets);
     } catch {
       notReady = null;

@@ -248,6 +248,8 @@ export const portal = defineMessages({
       videoNotReady: "El servicio de video ya no tiene listo el video de: {lessons}. Súbelo otra vez en el editor. Ya le avisamos al equipo.",
       removeChanged: "Ese recurso cambió mientras tanto. Revisa la lista otra vez.",
       removeUnavailable: "No se pudo quitar. Intenta de nuevo en un momento.",
+      removeUnknown: "No supimos si se quitó. Revisa la lista antes de intentarlo otra vez.",
+      oneLesson: "una lección",
       originMissing: "No pudimos registrar desde dónde aceptas. Intenta de nuevo; si sigue, avísale al equipo.",
       unavailable: "No se pudo enviar. Intenta de nuevo en un momento.",
       unknown: "No supimos si se envió. Revisa Mis cursos antes de intentarlo otra vez.",
