@@ -10,6 +10,7 @@ import {
   readLessonVideo,
   readPlaybackSpeeds,
   readResourceFacts,
+  readReviewResourceFile,
   readWatchFacts,
   recordDownloadHit,
   recordHeartbeat,
@@ -30,6 +31,14 @@ export function mediaStoreOn(owner: Client): MediaStore {
     execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
   };
   return {
+    reviewResourceFile: async (claims, resourceId) => {
+      await asServer(owner, claims.userId, claims.sessionId ?? "");
+      try {
+        return await readReviewResourceFile(tx, resourceId);
+      } finally {
+        await asOwner(owner);
+      }
+    },
     draftVideo: async (claims, courseId, lessonId) => {
       await asServer(owner, claims.userId, claims.sessionId ?? "");
       try {

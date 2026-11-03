@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => {
   return {
     giveCatalogCode: logged("giveCatalogCode", unavailable),
     approveCourse: logged("approveCourse", unavailable),
+    returnCourse: logged("returnCourse", unavailable),
     getMediaGrant: logged("getMediaGrant", unavailable),
+    getReviewVideoGrant: logged("getReviewVideoGrant", unavailable),
+    getReviewResourceGrant: logged("getReviewResourceGrant", unavailable),
     leaveNotice: logged("leaveNotice", () => undefined),
     refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
@@ -29,15 +32,15 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
 vi.mock("@/services/catalog/catalog", () => ({ giveCatalogCode: mocks.giveCatalogCode }));
-vi.mock("@/services/review/review", () => ({ approveCourse: mocks.approveCourse }));
-vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant }));
+vi.mock("@/services/review/review", () => ({ approveCourse: mocks.approveCourse, returnCourse: mocks.returnCourse }));
+vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant, getReviewVideoGrant: mocks.getReviewVideoGrant, getReviewResourceGrant: mocks.getReviewResourceGrant }));
 vi.mock("@/services/account/account", () => ({ signOut: vi.fn(), forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { approveAction, lessonVideoAction, reviewCodeAction } from "@/app/admin/_revision/actions";
-import { reviewButton } from "@/app/admin/_revision/outcomes";
+import { approveAction, lessonVideoAction, returnAction, reviewCodeAction, reviewResourceAction, reviewVideoAction } from "@/app/admin/_revision/actions";
+import { returnButton, reviewButton } from "@/app/admin/_revision/outcomes";
 
 const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;
@@ -140,5 +143,91 @@ describe("lessonVideoAction", () => {
   it("no se supo: unavailable, sin volver a pedir la página", async () => {
     expect(await lessonVideoAction(LESSON)).toEqual({ kind: "unavailable" });
     expect(calls.order).toEqual(["getMediaGrant"]);
+  });
+});
+
+describe("returnAction", () => {
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const NONE = { reason: null, whatToFix: null };
+  const sending = (reason: string, whatToFix: string) => {
+    const data = pressed(returnButton.send(COURSE, SUBMISSION));
+    data.append("motivo", reason);
+    data.append("que_corregir", whatToFix);
+    return data;
+  };
+  const open = { kind: "open", course: COURSE, submission: SUBMISSION, reason: "", whatToFix: "", problems: NONE, failure: null, attempt: 1 } as const;
+
+  it("«Devolver» abre los campos: no llama a nadie", async () => {
+    expect(await returnAction(IDLE, pressed(returnButton.ask(COURSE, SUBMISSION)))).toEqual(open);
+    expect(calls.order).toEqual([]);
+  });
+
+  it("«Cancelar», o un envío vacío, no llama a nadie", async () => {
+    expect(await returnAction(open, pressed(returnButton.cancel()))).toEqual(IDLE);
+    expect(await returnAction(open, new FormData())).toEqual(IDLE);
+    expect(calls.order).toEqual([]);
+  });
+
+  it("sin motivo no se llama al servicio, y lo escrito vuelve", async () => {
+    expect(await returnAction(open, sending("  ", "Corrige."))).toEqual({ ...open, reason: "  ", whatToFix: "Corrige.", problems: { reason: "empty", whatToFix: null }, attempt: 2 });
+    expect(calls.order).toEqual([]);
+  });
+
+  it("devuelto: redirige con el aviso", async () => {
+    once("returnCourse", { kind: "answered", answer: "returned" });
+    await expect(returnAction(open, sending("Motivo.", "Corrige."))).rejects.toThrow("redirige a /admin/revision");
+    expect(mocks.returnCourse).toHaveBeenCalledWith(jar, { course: COURSE, submission: SUBMISSION, reason: "Motivo.", whatToFix: "Corrige." });
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "course_returned");
+    expect(calls.order).toEqual(["returnCourse", "leaveNotice", "redirect"]);
+  });
+
+  it("lo que no se hizo se dice, con lo escrito, y la página se vuelve a pedir", async () => {
+    once("returnCourse", { kind: "answered", answer: "changed" });
+    expect(await returnAction(open, sending("Motivo.", "Corrige."))).toEqual({ ...open, reason: "Motivo.", whatToFix: "Corrige.", failure: "changed", attempt: 2 });
+    expect(calls.order).toEqual(["returnCourse", "refresh"]);
+  });
+
+  it("del estado anterior solo se lee el intento: qué curso sale del botón", async () => {
+    once("returnCourse", { kind: "answered", answer: "not_pending" });
+    await returnAction({ ...open, course: "c0000000-0000-4000-8000-00000000000f" }, sending("Motivo.", "Corrige."));
+    expect(mocks.returnCourse).toHaveBeenCalledWith(jar, expect.objectContaining({ course: COURSE }));
+  });
+});
+
+describe("reviewVideoAction", () => {
+  it("le pasa el curso y la lección a la función única de medios", async () => {
+    once("getReviewVideoGrant", { kind: "granted", playbackId: "P", tokens: { video: "v", thumbnail: "t", storyboard: "s" }, expiresAt: 1, speeds: [1], watermark: "yo@prueba.test" });
+    expect(await reviewVideoAction(COURSE, LESSON)).toMatchObject({ kind: "granted", watermark: "yo@prueba.test" });
+    expect(mocks.getReviewVideoGrant).toHaveBeenCalledWith(jar, COURSE, LESSON);
+  });
+
+  it("a quien la guarda no dejó se le manda a esta misma página", async () => {
+    once("getReviewVideoGrant", { kind: "refused" });
+    await expect(reviewVideoAction(COURSE, LESSON)).rejects.toThrow("redirige a /admin/revision");
+  });
+});
+
+describe("reviewResourceAction", () => {
+  const RESOURCE = "a1000000-0000-4000-8000-000000000001";
+  const download = (js: boolean) => {
+    const data = pressed(`download:${RESOURCE}`);
+    if (js) data.append("canal", "js");
+    return data;
+  };
+
+  it("un envío vacío no llama a nadie", async () => {
+    expect(await reviewResourceAction(IDLE, new FormData())).toEqual(IDLE);
+    expect(calls.order).toEqual([]);
+  });
+
+  it("sin JavaScript redirige al archivo", async () => {
+    once("getReviewResourceGrant", { kind: "granted", url: "https://storage/bajar" });
+    await expect(reviewResourceAction(IDLE, download(false))).rejects.toThrow("redirige a https://storage/bajar");
+    expect(mocks.getReviewResourceGrant).toHaveBeenCalledWith(jar, RESOURCE);
+  });
+
+  it("lo que ya no existe se dice", async () => {
+    once("getReviewResourceGrant", { kind: "not_found" });
+    expect(await reviewResourceAction(IDLE, download(false))).toEqual({ kind: "gone", attempt: 1 });
   });
 });

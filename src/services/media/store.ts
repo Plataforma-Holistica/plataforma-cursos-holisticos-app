@@ -10,6 +10,7 @@ import {
   readLessonVideo,
   readPlaybackSpeeds,
   readResourceFacts,
+  readReviewResourceFile,
   readWatchFacts,
   recordDownloadHit,
   recordHeartbeat,
@@ -41,4 +42,5 @@ export const databaseMediaStore: MediaStore = {
   draftResourceFile: (claims, courseId, resourceId) => asServer({ claims, reason: "media_grant" }, (tx) => readDraftResourceFile(tx, courseId, resourceId)),
   downloadHit: (claims) => asServer({ claims, reason: "resource_download" }, (tx) => recordDownloadHit(tx)),
   draftVideo: (claims, courseId, lessonId) => asServer({ claims, reason: "media_grant" }, (tx) => readDraftVideo(tx, courseId, lessonId)),
+  reviewResourceFile: (claims, resourceId) => asServer({ claims, reason: "media_grant" }, (tx) => readReviewResourceFile(tx, resourceId)),
 };

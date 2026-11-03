@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import { COURSE_STATES, type CourseFields, type DraftChoices, type DraftCourse, type TeacherCourse } from "./drafts";
+import { COURSE_STATES, type CourseFields, type DraftChoices, type DraftCourse, type ReturnNote, type TeacherCourse } from "./drafts";
 
 // Lo que el servicio del borrador le pregunta a la base (esquema §5.2). Las lecturas reciben la
 // transacción abierta como la persona; los cambios, como el servidor. Ninguna recibe quién actúa.
@@ -71,6 +71,7 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     updatedAt: row.updated_at,
     contentRevision: row.content_revision,
     teacherName: row.teacher_name,
+    returned: null,
     practiceName: row.practice_name,
     coverTone: row.cover_tone,
     draft: row.has_draft
@@ -145,6 +146,14 @@ const draftRow = z.object({
  * consulta: con varias, en read committed, cada una vería otra foto, y una lección que se movió entre
  * dos de ellas a un módulo nuevo se perdería de la vista.
  */
+const returnNoteRow = z.strictObject({ course_id: id, reason: z.string(), what_to_fix: z.string(), returned_at: z.string() });
+
+/** Por qué se devolvió cada curso de quien pide, también suspendido (`private.course_return_notes()`). Como el servidor: la persona no lee los envíos. */
+export async function readReturnNotes(tx: Tx): Promise<Map<string, ReturnNote>> {
+  const [row] = await tx.query(sql`select private.course_return_notes() as notes`, z.object({ notes: z.array(returnNoteRow) }));
+  return new Map((row?.notes ?? []).map((note) => [note.course_id, { reason: note.reason, whatToFix: note.what_to_fix, returnedAt: note.returned_at }]));
+}
+
 export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCourse | null> {
   const [draft] = await tx.query(
     sql`select d.course_id, r.state, d.version, d.title, d.summary, d.practice_id, d.level_id,
@@ -195,6 +204,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
     resources: draft.resources,
     videos: draft.videos,
     teacherName: draft.teacher_name,
+    returned: null,
   };
 }
 

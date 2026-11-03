@@ -21,6 +21,7 @@ export async function ReviewSection({ claims }: { claims: VerifiedClaims }) {
   const read = await reviewQueue(reader, claims);
   if (read.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.review} withSession />;
 
-  // Aprobar redirige aquí con un aviso: la cola de ahora ya no trae ese curso.
-  return <ReviewScreen view={reviewView(read.queue)} published={readNotice(reader) === "course_approved"} />;
+  // Aprobar y devolver redirigen aquí con un aviso: la cola de ahora ya no trae ese curso.
+  const notice = readNotice(reader);
+  return <ReviewScreen view={reviewView(read.queue)} published={notice === "course_approved"} returned={notice === "course_returned"} />;
 }

@@ -63,6 +63,7 @@ describe("la cola, como la contesta la base", () => {
         {
           courseId: COURSE,
           title: "Naturaleza",
+          summary: null,
           teacherName: "Maestra",
           teacherListed: false,
           practice: "Naturaleza",
@@ -70,7 +71,8 @@ describe("la cola, como la contesta la base", () => {
           lessonCount: 1,
           totalDurationSeconds: 356,
           loadedAt: "2026-10-14T20:00:00+00:00",
-          lessons: [{ lessonId: LESSON, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" }],
+          lessons: [{ lessonId: LESSON, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable", description: null, resources: [] }],
+          submission: null,
         },
       ],
     });
@@ -122,5 +124,63 @@ describe("el almacén", () => {
   it("una respuesta que no está en su lista lanza: no se pinta como hecha", async () => {
     const { run } = runnerWith([{ answer: "publicado" }]);
     await expect(createReviewStore(run).approve(claims, COURSE)).rejects.toThrow();
+  });
+});
+
+describe("lo enviado por el portal, en la cola", () => {
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const lesson = { lesson_id: LESSON, module_id: LESSON, module: "Uno", title: "Primera", duration_seconds: 600, video: "playable" };
+  const sent = {
+    course_id: COURSE,
+    title: "Respirar",
+    summary: "Un resumen.",
+    teacher_name: "Ana",
+    teacher_listed: false,
+    practice: "P",
+    level: "N",
+    lesson_count: 1,
+    total_duration_seconds: 600,
+    loaded_at: "2026-11-02T18:00:00Z",
+    lessons: [{ ...lesson, description: null, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100 }] }],
+    submission: { id: SUBMISSION, number: 1, resources: [], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
+  };
+
+  it("se lee con su envío y sus recursos", () => {
+    const [course] = queueOf({ fresh_code: true, courses: [sent] })?.courses ?? [];
+    expect(course?.summary).toBe("Un resumen.");
+    expect(course?.lessons[0]?.resources).toEqual([{ id: LESSON, title: "Guía", kind: "pdf", sizeBytes: 100 }]);
+    expect(course?.submission).toEqual({ id: SUBMISSION, number: 1, resources: [], annex: { version: 1, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto.", termYears: 10 } });
+  });
+
+  it("uno por guion, sin esos campos, sale sin envío", () => {
+    const script = Object.fromEntries(Object.entries(sent).filter(([key]) => key !== "summary" && key !== "submission"));
+    const [course] = queueOf({ fresh_code: true, courses: [{ ...script, lessons: [lesson] }] })?.courses ?? [];
+    expect(course).toMatchObject({ summary: null, submission: null });
+    expect(course?.lessons[0]).toMatchObject({ description: null, resources: [] });
+  });
+
+  it.each([
+    ["una ruta en un recurso", { ...sent, lessons: [{ ...lesson, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100, storage_path: "ruta" }] }] }],
+    ["el origen en el anexo", { ...sent, submission: { ...sent.submission, annex: { ...sent.submission.annex, ip: "203.0.113.7" } } }],
+    ["la huella en el envío", { ...sent, submission: { ...sent.submission, content_sha256: "ab" } }],
+  ])("%s no pasa: la lectura es estricta", (_what, course) => {
+    expect(() => queueOf({ fresh_code: true, courses: [course] })).toThrow();
+  });
+});
+
+describe("devolver", () => {
+  const INPUT = { course: COURSE, submission: LESSON, reason: "Motivo.", whatToFix: "Corrección." };
+
+  it("va a nombre de las claims, con el envío que se vio", async () => {
+    const { run, opened, sent } = runnerWith([{ answer: "returned" }]);
+    expect(await createReviewStore(run).returnCourse(claims, INPUT)).toBe("returned");
+    expect(opened.map((actor) => actor.reason)).toEqual(["course_return"]);
+    expect(sent[0]?.text).toContain("private.review_return(");
+    expect(sent[0]?.values).toEqual([COURSE, LESSON, "Motivo.", "Corrección."]);
+  });
+
+  it("una respuesta que no conoce lanza: no se pinta como hecha", async () => {
+    const { run } = runnerWith([{ answer: "otra" }]);
+    await expect(createReviewStore(run).returnCourse(claims, INPUT)).rejects.toThrow();
   });
 });

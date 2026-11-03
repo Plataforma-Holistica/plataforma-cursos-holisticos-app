@@ -22,6 +22,11 @@ function queueWith(setup: { check?: TeamCheck; queue?: ReviewQueue | null | "thr
   const calls: string[] = [];
   const reported: string[] = [];
   const store: ReviewStore = {
+    returnCourse: vi.fn((_claims: VerifiedClaims, input: { course: string }) => {
+      calls.push(`devolver ${input.course}`);
+      if (setup.answer === "throws") return Promise.reject(new Error("sin base"));
+      return Promise.resolve((setup.answer ?? "returned") as never);
+    }),
     queue: vi.fn(() => {
       calls.push("cola");
       if (setup.queue === "throws") return Promise.reject(new Error("sin base"));
@@ -125,5 +130,55 @@ describe("approveCourse", () => {
     const service = queueWith({ answer: "throws" });
     expect(await service.approveCourse(reader, { course: COURSE })).toEqual({ kind: "unknown" });
     expect(service.reported).toEqual(["course_approval_unavailable"]);
+  });
+});
+
+describe("returnCourse", () => {
+  const COURSE = "c0000000-0000-4000-8000-000000000002";
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const INPUT = { course: COURSE, submission: SUBMISSION, reason: "  El audio se corta.\r\nEn la 1.  ", whatToFix: " Súbela otra vez. " };
+
+  it("corre la guarda y le pasa a la base el texto ya revisado", async () => {
+    const service = queueWith();
+    expect(await service.returnCourse(reader, INPUT)).toEqual({ kind: "answered", answer: "returned" });
+    expect(service.calls).toEqual(["guarda", `devolver ${COURSE}`]);
+    expect(service.store.returnCourse).toHaveBeenCalledWith(claims, { course: COURSE, submission: SUBMISSION, reason: "El audio se corta.\nEn la 1.", whatToFix: "Súbela otra vez." });
+  });
+
+  it("sin Contenido: refused, sin preguntarle nada a la base", async () => {
+    const service = queueWith({ check: teamCheck(standingOf(["finance"])) });
+    expect(await service.returnCourse(reader, INPUT)).toEqual({ kind: "refused" });
+    expect(service.calls).toEqual(["guarda"]);
+  });
+
+  it("no se supo quién pide: unavailable", async () => {
+    const service = queueWith({ check: { kind: "unavailable" } as TeamCheck });
+    expect(await service.returnCourse(reader, INPUT)).toEqual({ kind: "unavailable" });
+  });
+
+  it.each([
+    ["el curso", { ...INPUT, course: "x" }],
+    ["el envío", { ...INPUT, submission: 7 }],
+  ])("%s sin forma no llega a la base", async (_what, input) => {
+    const service = queueWith();
+    expect(await service.returnCourse(reader, input)).toEqual({ kind: "malformed" });
+    expect(service.calls).toEqual(["guarda"]);
+  });
+
+  it.each([
+    ["sin motivo", { ...INPUT, reason: "   " }],
+    ["sin qué corregir", { ...INPUT, whatToFix: "\n" }],
+    ["un motivo que no es texto", { ...INPUT, reason: 3 }],
+    ["un carácter de ancho cero", { ...INPUT, whatToFix: "a\u200b" }],
+  ])("%s: invalid, sin preguntarle a la base", async (_what, input) => {
+    const service = queueWith();
+    expect(await service.returnCourse(reader, input)).toEqual({ kind: "answered", answer: "invalid" });
+    expect(service.calls).toEqual(["guarda"]);
+  });
+
+  it("si la base no contestó: unknown, y se reporta", async () => {
+    const service = queueWith({ answer: "throws" });
+    expect(await service.returnCourse(reader, INPUT)).toEqual({ kind: "unknown" });
+    expect(service.reported).toEqual(["course_return_unavailable"]);
   });
 });

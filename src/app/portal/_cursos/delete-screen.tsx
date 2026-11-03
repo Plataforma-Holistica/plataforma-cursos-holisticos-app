@@ -12,7 +12,7 @@ import { failureText } from "../_lib/words";
 import { deleteCourseAction } from "./actions";
 import type { DeleteState } from "./outcomes";
 
-// Confirmar el borrado de un curso que nunca se envió (decisión de Sergio del 2026-10-29). Es una
+// Confirmar el borrado de un curso que nunca se publicó (decisiones de Sergio del 2026-10-29 y del 2026-11-02: el de uno rechazado conserva su envío y su licencia). Es una
 // pantalla y no un diálogo: así funciona igual sin JavaScript. «Cancelar» va primero (diseño, `Dialog`),
 // y el botón que confirma repite el verbo del título.
 
@@ -26,9 +26,11 @@ export interface DeleteCourseScreenProps {
   confirm: string;
   /** Esta misma ruta, ya armada. */
   path: string;
+  /** Se envió y volvió: lo enviado y lo aceptado se quedan, y se dice. */
+  wasSent?: boolean;
 }
 
-export function DeleteCourseScreen({ title, confirm, path }: DeleteCourseScreenProps) {
+export function DeleteCourseScreen({ title, confirm, path, wasSent = false }: DeleteCourseScreenProps) {
   const [state, action, pending] = useActionState(deleteCourseAction, IDLE, `${path}#${BLOCK_ID}`);
 
   return (
@@ -37,6 +39,7 @@ export function DeleteCourseScreen({ title, confirm, path }: DeleteCourseScreenP
         {text.title}
       </h1>
       <p className="text-body-l text-text-2">{t(text.body, { title })}</p>
+      {wasSent && <p className="text-text-2">{text.keptNote}</p>}
       {state.kind === "failed" && (
         <InlineAlert tone="danger" live>
           {failureText(state.reason)}

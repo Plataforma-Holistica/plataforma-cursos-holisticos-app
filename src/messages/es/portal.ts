@@ -166,6 +166,8 @@ export const portal = defineMessages({
     edit: "Editar",
     view: "Ver",
     delete: "Borrar",
+    fix: "Corregir",
+    fixNamed: "Corregir {title}",
     editNamed: "Editar {title}",
     viewNamed: "Ver {title}",
     deleteNamed: "Borrar {title}",
@@ -178,6 +180,7 @@ export const portal = defineMessages({
     published: "Publicado",
     changesPending: "Con cambios pendientes",
     withdrawn: "Despublicado",
+    returned: "Rechazado",
   },
   stateDetail: {
     inReview: "No se puede editar mientras está en revisión.",
@@ -196,6 +199,7 @@ export const portal = defineMessages({
   deleteCourse: {
     title: "Borrar el curso",
     body: "Se borra «{title}» con sus módulos y sus lecciones. No se puede deshacer.",
+    keptNote: "Lo que enviaste a revisión y el anexo que aceptaste se conservan como prueba.",
     confirm: "Borrar curso",
     deleting: "Borrando…",
     cancel: "Cancelar",
@@ -222,6 +226,12 @@ export const portal = defineMessages({
     levelInactive: "Ese nivel ya no está disponible. Elige otro.",
   },
   editor: {
+    returned: {
+      title: "Este curso volvió de la revisión el {date}",
+      reason: "Motivo",
+      whatToFix: "Qué corregir",
+      resend: "Corrígelo y vuelve a enviarlo.",
+    },
     back: "Mis cursos",
     savedAt: "Guardado a las {time}",
     savedOn: "Guardado el {date} a las {time}",

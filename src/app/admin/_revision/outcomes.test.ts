@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { ROUTES } from "@/services/account/navigation";
-import { APPROVE_ANSWERS } from "@/services/review/review";
+import { APPROVE_ANSWERS, RETURN_ANSWERS } from "@/services/review/review";
 
-import { approveOutcome, readReviewForm, reviewButton, reviewCodeOutcome, videoAnswerOf } from "./outcomes";
+import { approveOutcome, readReviewForm, reviewButton, reviewCodeOutcome, videoAnswerOf, readReturnForm, returnButton, returnOutcome, returnProblems, reviewVideoAnswerOf } from "./outcomes";
 
 // La tabla de la pantalla de revisión: lo que llega, lo que contesta cada servicio y a dónde
 // va. Pura: sin servicios ni base.
@@ -103,5 +103,102 @@ describe("videoAnswerOf", () => {
     expect(videoAnswerOf({ kind: "refused" })).toEqual(TO_PAGE);
     expect(videoAnswerOf({ kind: "no_video" })).toEqual({ kind: "no_video" });
     expect(videoAnswerOf({ kind: "unavailable" })).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("devolver: lo que llega", () => {
+  const C = "c0000000-0000-4000-8000-000000000002";
+  const S = "f0000000-0000-4000-8000-000000000001";
+  const form = (entries: [string, string][]) => {
+    const data = new FormData();
+    for (const [name, value] of entries) data.append(name, value);
+    return data;
+  };
+
+  it("los botones se leen como se arman", () => {
+    expect(readReturnForm(form([["do", returnButton.ask(C, S)]]))).toEqual({ step: "ask", course: C, submission: S });
+    expect(readReturnForm(form([["do", returnButton.cancel()]]))).toEqual({ step: "cancel" });
+  });
+
+  it("enviar lee lo escrito", () => {
+    expect(readReturnForm(form([["do", returnButton.send(C, S)], ["motivo", "Uno"], ["que_corregir", "Dos"]]))).toEqual({ step: "send", course: C, submission: S, reason: "Uno", whatToFix: "Dos" });
+  });
+
+  it("sin los campos, cuentan como vacíos", () => {
+    expect(readReturnForm(form([["do", returnButton.send(C, S)]]))).toEqual({ step: "send", course: C, submission: S, reason: "", whatToFix: "" });
+  });
+
+  it.each([
+    ["sin do", []],
+    ["con dos", [["do", returnButton.ask(C, S)], ["do", returnButton.ask(C, S)]]],
+    ["un curso sin forma", [["do", `return_ask:x:${S}`]]],
+    ["sin envío", [["do", `return_ask:${C}`]]],
+    ["de más", [["do", `return_ask:${C}:${S}:otro`]]],
+    ["otro verbo", [["do", `confirm:${C}:${S}`]]],
+  ] as [string, [string, string][]][])("%s: vacío", (_what, entries) => {
+    expect(readReturnForm(form(entries))).toEqual({ step: "none" });
+  });
+
+  it("lo que no es un formulario: vacío", () => {
+    expect(readReturnForm("hola")).toEqual({ step: "none" });
+  });
+});
+
+describe("devolver: lo escrito", () => {
+  it("los dos son obligatorios", () => {
+    expect(returnProblems({ reason: "  ", whatToFix: "\n" })).toEqual({ reason: "empty", whatToFix: "empty" });
+    expect(returnProblems({ reason: "Motivo.", whatToFix: "" })).toEqual({ reason: null, whatToFix: "empty" });
+    expect(returnProblems({ reason: "", whatToFix: "Corrige." })).toEqual({ reason: "empty", whatToFix: null });
+  });
+
+  it("largo y caracteres, con la regla de la base", () => {
+    expect(returnProblems({ reason: "a".repeat(2001), whatToFix: "a\u200b" })).toEqual({ reason: "too_long", whatToFix: "invalid" });
+  });
+
+  it("con los dos, nada", () => {
+    expect(returnProblems({ reason: "Motivo.", whatToFix: "Corrige." })).toEqual({ reason: null, whatToFix: null });
+  });
+});
+
+describe("returnOutcome", () => {
+  const cases: Record<(typeof RETURN_ANSWERS)[number], ReturnType<typeof returnOutcome>> = {
+    returned: { kind: "leave", to: ROUTES.review, notice: "course_returned" },
+    forbidden: TO_PAGE as never,
+    needs_fresh_code: { kind: "failed", reason: "needs_code" },
+    not_found: { kind: "failed", reason: "not_pending" },
+    not_pending: { kind: "failed", reason: "not_pending" },
+    changed: { kind: "failed", reason: "changed" },
+    self: { kind: "failed", reason: "self" },
+    invalid: { kind: "failed", reason: "invalid" },
+  };
+
+  it.each(RETURN_ANSWERS)("la base contesta %s", (answer) => {
+    expect(returnOutcome({ kind: "answered", answer })).toEqual(cases[answer]);
+  });
+
+  it("refused: a esta misma página, donde decide la guarda", () => {
+    expect(returnOutcome({ kind: "refused" })).toEqual(TO_PAGE);
+  });
+
+  it("no se supo nunca se pinta como hecho", () => {
+    expect(returnOutcome({ kind: "unavailable" })).toEqual({ kind: "failed", reason: "unavailable" });
+    expect(returnOutcome({ kind: "unknown" })).toEqual({ kind: "failed", reason: "unknown" });
+  });
+
+  it("un curso sin forma: la cola de ahora lo aclara", () => {
+    expect(returnOutcome({ kind: "malformed" })).toEqual({ kind: "failed", reason: "not_pending" });
+  });
+});
+
+describe("reviewVideoAnswerOf", () => {
+  it("lleva la marca de agua", () => {
+    const answer = reviewVideoAnswerOf({ kind: "granted", playbackId: "P", tokens: { video: "v", thumbnail: "t", storyboard: "s" }, expiresAt: 9, speeds: [1], watermark: "yo@prueba.test" });
+    expect(answer).toEqual({ kind: "granted", playbackId: "P", tokens: { playback: "v", thumbnail: "t", storyboard: "s" }, speeds: [1], watermark: "yo@prueba.test" });
+  });
+
+  it("lo demás", () => {
+    expect(reviewVideoAnswerOf({ kind: "refused" })).toEqual(TO_PAGE);
+    expect(reviewVideoAnswerOf({ kind: "no_video" })).toEqual({ kind: "no_video" });
+    expect(reviewVideoAnswerOf({ kind: "unavailable" })).toEqual({ kind: "unavailable" });
   });
 });

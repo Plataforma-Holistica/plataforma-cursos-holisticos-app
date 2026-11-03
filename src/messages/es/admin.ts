@@ -290,6 +290,34 @@ export const admin = defineMessages({
     videosNotReady: "Alguna lección de ese curso tiene un video que no está listo: todavía no se puede publicar.",
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite.",
     unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
+
+    // Lo enviado por el portal (T-405): PA-62 con lo que hace falta.
+    submitted: "Enviado el {date}. Envío número {number}.",
+    annexTitle: "Anexo aceptado",
+    annexLine: { one: "Versión {version}, aceptada el {date}, por {years} año.", other: "Versión {version}, aceptada el {date}, por {years} años." },
+    courseResources: "Recursos del curso",
+    lessonResources: "Recursos de esta lección",
+    approveLater: "Llegó por el portal: publicarlo todavía no está disponible. Lo que sí puedes es devolverlo a su {maestro}.",
+
+    // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.
+    returnOpen: "Devolver al {maestro}",
+    returnTitle: "Devolver este curso",
+    returnBody: "Vuelve a borrador y su {maestro} lee lo que escribas en el portal. Todavía no se le manda un correo: avísale por fuera.",
+    returnReason: "Motivo",
+    returnReasonHint: "Qué encontraste y en qué lección.",
+    returnFix: "Qué corregir",
+    returnFixHint: "Lo que tiene que cambiar para volver a enviarlo.",
+    returnSend: "Sí, devolverlo",
+    returnWorking: "Devolviendo…",
+    returned: "Devuelto a su {maestro}. Ya no está en la cola.",
+    returnProblems: "Revisa lo marcado: los dos campos son obligatorios.",
+    returnEmptyReason: "Escribe el motivo.",
+    returnEmptyFix: "Escribe qué corregir.",
+    returnTooLong: "Es demasiado largo: el tope es de {max} caracteres.",
+    returnInvalid: "Tiene caracteres que no se pueden guardar.",
+    returnChanged: "Ese curso se volvió a enviar mientras escribías: revísalo otra vez. Lo que escribiste sigue aquí.",
+    returnSelf: "Ese curso es tuyo como {maestro}: lo devuelve otra persona con Contenido.",
+    returnUnknown: "No supimos si el curso quedó devuelto. Revisa la cola antes de intentarlo otra vez.",
   },
   // PA-65 y PA-66, los maestros (T-401). El motivo interno y el texto para el maestro son dos cosas distintas: el
   // maestro solo lee el segundo.

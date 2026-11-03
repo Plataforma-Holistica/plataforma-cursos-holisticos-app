@@ -25,6 +25,13 @@ import type { FailureCode } from "@/services/error-reporting/server";
 export const COURSE_STATES = ["draft", "in_review", "published", "changes_pending", "withdrawn"] as const;
 export type CourseState = (typeof COURSE_STATES)[number];
 
+/** Por qué Contenido devolvió un curso (RF-607): el motivo y qué corregir, de su último envío, mientras sigue en borrador. Sin decir quién. */
+export interface ReturnNote {
+  reason: string;
+  whatToFix: string;
+  returnedAt: string;
+}
+
 /** Un curso de quien pide, para PA-42. El título es el del borrador, o el publicado si no hay borrador. */
 export interface TeacherCourse {
   id: string;
@@ -41,6 +48,8 @@ export interface TeacherCourse {
   coverTone: number | null;
   /** Lo que se cuenta para «Faltan {n} cosas»; nulo si no tiene borrador (los cargados por guion). */
   draft: DraftReadiness | null;
+  /** Si Contenido lo devolvió. */
+  returned: ReturnNote | null;
 }
 
 export interface DraftLesson {
@@ -105,6 +114,8 @@ export interface DraftCourse {
   videos: DraftVideo[];
   /** El nombre de su maestro, para la portada. */
   teacherName: string | null;
+  /** Si Contenido lo devolvió. */
+  returned: ReturnNote | null;
 }
 
 /** Una práctica o un nivel que el editor ofrece. */

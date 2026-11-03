@@ -1,15 +1,22 @@
+import { resourceItems } from "@/app/_catalog/resources/words";
 import { longDate } from "@/app/_lib/dates";
 import { admin } from "@/messages/es/admin";
 import { plural, t } from "@/messages/format";
 import type { LessonVideo, ReviewCourse, ReviewQueue } from "@/services/review/review";
 
-import { reviewButton } from "./outcomes";
+import { returnButton, reviewButton } from "./outcomes";
 
 // Lo que la pantalla de revisión pinta, ya en palabras y con los valores de sus botones. Lo
 // arma la página con lo que leyó: el navegador no decide qué se ofrece. Nada de aquí trae un
 // identificador del proveedor de video: el video sale solo por la acción que lo pide.
 
 const text = admin.review;
+
+export interface ResourceItem {
+  id: string;
+  title: string;
+  detail: string;
+}
 
 export interface LessonRow {
   id: string;
@@ -24,6 +31,10 @@ export interface LessonRow {
   detail: string;
   /** De qué curso y de qué maestro es: lo dice el reproductor, lejos de la cola. */
   context: string;
+  /** El curso, si llegó por el editor: su video se pide por otra acción, con marca de agua. */
+  draftCourse: string | null;
+  description: string | null;
+  resources: ResourceItem[];
 }
 
 export interface ModuleRows {
@@ -32,9 +43,18 @@ export interface ModuleRows {
   lessons: LessonRow[];
 }
 
+export interface SubmissionRow {
+  id: string;
+  annex: string;
+  statement: string;
+  resources: ResourceItem[];
+  buttons: { ask: string; send: string };
+}
+
 export interface CourseRow {
   id: string;
   title: string;
+  summary: string | null;
   practiceAndLevel: string;
   lessons: string;
   loaded: string;
@@ -42,6 +62,8 @@ export interface CourseRow {
   /** Lo que la confirmación dice de más: que también se lista la ficha del maestro. */
   firstOfTeacher: string | null;
   buttons: { ask: string; confirm: string };
+  /** Lo enviado por el editor; nulo en un curso por guion. Aprobarlo llega con la cuarta solicitud de T-405: hasta entonces solo se devuelve. */
+  submission: SubmissionRow | null;
 }
 
 /** Los cursos de un maestro, del más antiguo al más nuevo. */
@@ -92,19 +114,41 @@ function courseRow(course: ReviewCourse): CourseRow {
       status: STATUS[lesson.video],
       detail: t(text.watchOf, { title: lesson.title }),
       context: t(text.watchingContext, { course: course.title, teacher: course.teacherName }),
+      draftCourse: course.submission === null ? null : course.courseId,
+      description: lesson.description,
+      resources: resourceItems(lesson.resources),
     };
     if (last !== undefined && last.id === lesson.moduleId) last.lessons.push(row);
     else modules.push({ id: lesson.moduleId, title: lesson.module, lessons: [row] });
   }
+  const { submission } = course;
   return {
     id: course.courseId,
     title: course.title,
+    summary: course.summary,
     practiceAndLevel: t(text.practiceAndLevel, { practice: course.practice ?? text.unset, level: course.level ?? text.unset }),
     lessons: t(plural(course.lessonCount, text.lessons), { count: String(course.lessonCount), duration: playLength(course.totalDurationSeconds) }),
-    loaded: t(text.loaded, { date: longDate(course.loadedAt) }),
+    loaded:
+      submission === null
+        ? t(text.loaded, { date: longDate(course.loadedAt) })
+        : t(text.submitted, { date: longDate(course.loadedAt), number: String(submission.number) }),
     modules,
     firstOfTeacher: course.teacherListed ? null : t(text.confirmFirst, { teacher: course.teacherName }),
     buttons: { ask: reviewButton.ask(course.courseId), confirm: reviewButton.confirm(course.courseId) },
+    submission:
+      submission === null
+        ? null
+        : {
+            id: submission.id,
+            annex: t(plural(submission.annex.termYears, text.annexLine), {
+              version: String(submission.annex.version),
+              date: longDate(submission.annex.acceptedAt),
+              years: String(submission.annex.termYears),
+            }),
+            statement: submission.annex.statement,
+            resources: resourceItems(submission.resources),
+            buttons: { ask: returnButton.ask(course.courseId, submission.id), send: returnButton.send(course.courseId, submission.id) },
+          },
   };
 }
 

@@ -46,3 +46,9 @@ export function parseDraftText(kind: DraftTextKind, input: string | null): Draft
   if ((multiline ? FORBIDDEN_MULTILINE : FORBIDDEN).test(text)) return { ok: false, reason: "invalid" };
   return { ok: true, text };
 }
+
+/** El tope de lo que se escribe al devolver un curso (T-405; RF-607): el de la base, igual al de una descripción. */
+export const REVIEW_NOTE_MAX = DRAFT_TEXT_LIMITS.description;
+
+/** El motivo y qué corregir usan la regla de la descripción, con saltos de línea. Vacío da nulo, y quien lo pide lo trata como falta: los dos son obligatorios. */
+export const parseReviewNote = (input: string | null): DraftTextResult => parseDraftText("description", input);

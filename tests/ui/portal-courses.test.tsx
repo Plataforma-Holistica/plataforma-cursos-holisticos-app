@@ -49,6 +49,7 @@ const course = {
   practiceName: "Respiración",
   coverTone: 3,
   draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
+  returned: null,
 };
 
 /** Lo que pinta el comodín en esa ruta, ya resuelta la sección del servidor. */
@@ -73,7 +74,7 @@ beforeEach(() => {
     mocks.order.push("cursos");
     return Promise.resolve({ kind: "ready", value: [course] });
   });
-  mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { id: COURSE, state: "draft", title: "Respirar", contentRevision: 3 } });
+  mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { id: COURSE, state: "draft", title: "Respirar", contentRevision: 3, returned: null } });
 });
 
 describe("el comodín del portal", () => {
@@ -114,6 +115,15 @@ describe("PA-42 · Mis cursos", () => {
     expect(within(item).getByRole("link", { name: "Editar Respirar" }).getAttribute("href")).toBe(`/portal/cursos/${COURSE}`);
     expect(within(item).getByRole("link", { name: "Borrar Respirar" }).getAttribute("href")).toBe(`/portal/cursos/${COURSE}/borrar`);
     expect(screen.getByRole("navigation", { name: "Portal" })).toBeTruthy();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("uno que Contenido devolvió dice «Rechazado», su motivo, y se corrige", async () => {
+    mocks.teacherCourses.mockResolvedValue({ kind: "ready", value: [{ ...course, returned: { reason: "El audio se corta.", whatToFix: "Vuelve a subir la lección 1.", returnedAt: "2026-11-02T18:00:00.000Z" } }] });
+    const { container } = render(await at(["cursos"]));
+    expect(screen.getByText("Rechazado")).toBeTruthy();
+    expect(screen.getByText("El audio se corta.").className).toContain("line-clamp-2");
+    expect(screen.getByRole("link", { name: "Corregir Respirar" })).toBeTruthy();
     expect(await a11yViolations(container)).toEqual([]);
   });
 
@@ -158,6 +168,15 @@ describe("crear un curso", () => {
 });
 
 describe("borrar un curso", () => {
+  it("uno que se envió y volvió dice que la prueba se queda; uno que nunca se envió, no", async () => {
+    const first = render(await at(["cursos", COURSE, "borrar"]));
+    expect(screen.queryByText(/se conservan como prueba/)).toBeNull();
+    first.unmount();
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { id: COURSE, state: "draft", title: "Respirar", contentRevision: 3, returned: { reason: "El audio se corta.", whatToFix: "Vuelve a subir la lección 1.", returnedAt: "2026-11-02T18:00:00.000Z" } } });
+    render(await at(["cursos", COURSE, "borrar"]));
+    expect(screen.getByText(/se conservan como prueba/)).toBeTruthy();
+  });
+
   it("«Cancelar» primero, y el botón lleva la revisión que se vio", async () => {
     const { container } = render(await at(["cursos", COURSE, "borrar"]));
     const controls = [...(container.querySelector("#bloque-curso-borrar form")?.querySelectorAll("a, button") ?? [])];

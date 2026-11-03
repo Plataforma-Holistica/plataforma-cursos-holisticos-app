@@ -1,7 +1,8 @@
 import type { CatalogCode } from "@/services/catalog/catalog";
 import { ROUTES } from "@/services/account/navigation";
-import type { ReviewGrant } from "@/services/media/media";
-import type { CourseApproved } from "@/services/review/review";
+import { parseReviewNote, REVIEW_NOTE_MAX } from "@/services/drafts/field-rules";
+import type { ReviewGrant, ReviewVideoGrant } from "@/services/media/media";
+import type { CourseApproved, CourseReturned } from "@/services/review/review";
 
 import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
 
@@ -29,6 +30,9 @@ const TO_PAGE: Leave = { kind: "leave", to: ROUTES.review, notice: null };
  * sin JavaScript, recargar no reenvía el formulario.
  */
 const APPROVED: Leave = { kind: "leave", to: ROUTES.review, notice: "course_approved" };
+
+/** Devuelto: a esta misma página, con el aviso. Por lo mismo que aprobar. */
+const RETURNED: Leave = { kind: "leave", to: ROUTES.review, notice: "course_returned" };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_INTENT = 120;
@@ -127,11 +131,119 @@ export function approveOutcome(result: CourseApproved): ApproveOutcome {
 }
 
 // ---------------------------------------------------------------------------------------
+// Devolver (RF-607; FL-45, paso 7). Cada curso lleva su propio formulario y su estado: lo escrito no se mezcla con otro curso.
+
+export const RETURN_REASON_FIELD = "motivo";
+export const RETURN_FIX_FIELD = "que_corregir";
+/** El tope que pinta cada campo: el navegador no deja pasar de ahí. */
+export const RETURN_MAX = REVIEW_NOTE_MAX;
+
+export type ReturnRequest =
+  | { step: "none" }
+  | { step: "cancel" }
+  | { step: "ask"; course: string; submission: string }
+  | { step: "send"; course: string; submission: string; reason: string; whatToFix: string };
+
+const textField = (form: FormData, name: string): string => {
+  const value = form.get(name);
+  return typeof value === "string" ? value : "";
+};
+
+/** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. Lo escrito solo se lee al enviar. */
+export function readReturnForm(form: unknown): ReturnRequest {
+  if (!(form instanceof FormData)) return { step: "none" };
+  const pressed = form.getAll("do");
+  const [only] = pressed;
+  if (pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return { step: "none" };
+  const [verb, course, submission, ...rest] = only.split(":");
+  if (rest.length > 0) return { step: "none" };
+  if (verb === "return_cancel" && course === undefined) return { step: "cancel" };
+  if (course === undefined || submission === undefined || !ID.test(course) || !ID.test(submission)) return { step: "none" };
+  if (verb === "return_ask") return { step: "ask", course, submission };
+  if (verb === "return_send") return { step: "send", course, submission, reason: textField(form, RETURN_REASON_FIELD), whatToFix: textField(form, RETURN_FIX_FIELD) };
+  return { step: "none" };
+}
+
+/** Los valores de los botones. Los arma esta tabla y los lee `readReturnForm`. */
+export const returnButton = {
+  ask: (course: string, submission: string) => `return_ask:${course}:${submission}`,
+  send: (course: string, submission: string) => `return_send:${course}:${submission}`,
+  cancel: () => "return_cancel",
+} as const;
+
+export type ReturnProblem = "empty" | "too_long" | "invalid";
+export interface ReturnProblems {
+  reason: ReturnProblem | null;
+  whatToFix: ReturnProblem | null;
+}
+export const NO_RETURN_PROBLEMS: ReturnProblems = { reason: null, whatToFix: null };
+
+const problemOf = (text: string): ReturnProblem | null => {
+  const parsed = parseReviewNote(text);
+  if (!parsed.ok) return parsed.reason;
+  return parsed.text === null ? "empty" : null;
+};
+
+/** Lo que está mal en lo escrito, con la misma regla de la base: así se dice en su campo y no se pierde. Los dos son obligatorios. */
+export function returnProblems(input: { reason: string; whatToFix: string }): ReturnProblems {
+  return { reason: problemOf(input.reason), whatToFix: problemOf(input.whatToFix) };
+}
+
+export type ReturnFailure = "not_pending" | "changed" | "self" | "invalid" | "needs_code" | "unavailable" | "unknown";
+
+export type ReturnState =
+  | { kind: "idle" }
+  /** Se pregunta dentro del curso, con lo escrito: viaja en el estado, porque React devuelve el formulario a sus valores por omisión. */
+  | { kind: "open"; course: string; submission: string; reason: string; whatToFix: string; problems: ReturnProblems; failure: ReturnFailure | null; attempt: number };
+
+export type ReturnOutcome = Leave | { kind: "failed"; reason: ReturnFailure };
+
+/** Lo que contestó devolver. */
+export function returnOutcome(result: CourseReturned): ReturnOutcome {
+  switch (result.kind) {
+    case "refused":
+      return TO_PAGE;
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable" };
+    case "unknown":
+      return { kind: "failed", reason: "unknown" };
+    case "malformed":
+      // Solo pasa con un formulario armado a mano: la cola de ahora lo aclara.
+      return { kind: "failed", reason: "not_pending" };
+    case "answered":
+      switch (result.answer) {
+        case "returned":
+          return RETURNED;
+        case "forbidden":
+          return TO_PAGE;
+        case "needs_fresh_code":
+          return { kind: "failed", reason: "needs_code" };
+        case "not_found":
+        case "not_pending":
+          return { kind: "failed", reason: "not_pending" };
+        case "changed":
+          return { kind: "failed", reason: "changed" };
+        case "self":
+          return { kind: "failed", reason: "self" };
+        case "invalid":
+          return { kind: "failed", reason: "invalid" };
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------------------
 // Reproducir.
 
 /** Lo que el reproductor recibe. Los nombres de los tokens son los de Mux Player. */
 export type VideoAnswer =
-  | { kind: "granted"; playbackId: string; tokens: { playback: string; thumbnail: string; storyboard: string }; speeds: number[] }
+  | {
+      kind: "granted";
+      playbackId: string;
+      tokens: { playback: string; thumbnail: string; storyboard: string };
+      speeds: number[];
+      /** Solo en lo enviado por el editor: el correo de quien revisa, encima del video. */
+      watermark?: string;
+    }
   | { kind: "no_video" }
   | { kind: "unavailable" };
 
@@ -158,3 +270,22 @@ export function videoAnswerOf(grant: ReviewGrant): Leave | VideoAnswer {
   }
 }
 
+/** Lo mismo para lo enviado por el editor (PA-62), que además lleva la marca de agua. */
+export function reviewVideoAnswerOf(grant: ReviewVideoGrant): Leave | VideoAnswer {
+  switch (grant.kind) {
+    case "granted":
+      return {
+        kind: "granted",
+        playbackId: grant.playbackId,
+        tokens: { playback: grant.tokens.video, thumbnail: grant.tokens.thumbnail, storyboard: grant.tokens.storyboard },
+        speeds: grant.speeds,
+        watermark: grant.watermark,
+      };
+    case "refused":
+      return TO_PAGE;
+    case "no_video":
+      return { kind: "no_video" };
+    case "unavailable":
+      return { kind: "unavailable" };
+  }
+}

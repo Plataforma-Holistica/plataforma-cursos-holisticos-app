@@ -36,6 +36,7 @@ import {
   createdOf,
   readDraftChoices,
   readDraftCourse,
+  readReturnNotes,
   readTeacherCourses,
   readUnusedResources,
   askVideoBegin,
@@ -85,8 +86,19 @@ export function createDraftsStore(
   }
 
   return {
-    teacherCourses: (claims) => read(claims, (tx) => readTeacherCourses(tx)),
-    draftCourse: (claims, course) => read(claims, (tx) => readDraftCourse(tx, course)),
+    // Por qué se devolvió va aparte, como el servidor: la persona no lee los envíos. Solo se pregunta si hay un borrador al que le pueda tocar.
+    teacherCourses: async (claims) => {
+      const courses = await read(claims, (tx) => readTeacherCourses(tx));
+      if (!courses.some((course) => course.state === "draft")) return courses;
+      const notes = await run({ claims, reason: "draft_return_notes" }, (tx) => readReturnNotes(tx));
+      return courses.map((course) => ({ ...course, returned: notes.get(course.id) ?? null }));
+    },
+    draftCourse: async (claims, course) => {
+      const draft = await read(claims, (tx) => readDraftCourse(tx, course));
+      if (draft === null || draft.state !== "draft") return draft;
+      const notes = await run({ claims, reason: "draft_return_notes" }, (tx) => readReturnNotes(tx));
+      return { ...draft, returned: notes.get(draft.id) ?? null };
+    },
     create: async (claims, token, title) =>
       createdOf(CREATE_ANSWERS, await change(claims, "draft_create", (tx) => askCreate(tx, token, title))),
     saveCourse: async (claims, course, seen, fields) =>
