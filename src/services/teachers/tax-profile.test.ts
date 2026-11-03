@@ -12,6 +12,7 @@ import { createTaxProfile, type PasswordCheck, type TaxPayoutAnswer, type TaxPro
 
 const TEACHER = "b0000000-0000-4000-8000-000000000002";
 const PAYOUT = "d0000000-0000-4000-8000-000000000003";
+const READ = "d0000000-0000-4000-8000-000000000004";
 const claims = { userId: "a0000000-0000-4000-8000-000000000001", sessionId: "s", email: "ana@prueba.test" } as never;
 const jar = { get: () => undefined, set: () => undefined } as never;
 const origin = { ip: "203.0.113.1", userAgent: "prueba" } as never;
@@ -66,7 +67,9 @@ function service(cipher: TaxProfileDeps["cipher"]) {
     },
     forPayout: (_claims, payout) => {
       order.push(`forPayout:${payout}`);
-      return Promise.resolve(payoutAnswer ?? (stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored }));
+      return Promise.resolve(
+        payoutAnswer ?? (stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored, readId: READ, firstTime: true }),
+      );
     },
   };
   return createTaxProfile({
@@ -303,6 +306,8 @@ describe("finanzas lee por una liquidación", () => {
     expect(await service(cipher).taxProfileForPayout(jar, PAYOUT)).toEqual({
       kind: "ok",
       data: { rfc: RFC, legalName: NAME, regime: "626", payee: "person", clabe: CLABE, version: 3, updatedAt: AT },
+      readId: READ,
+      firstTime: true,
     });
     expect(order).toEqual([`forPayout:${PAYOUT}`]);
   });
@@ -312,7 +317,17 @@ describe("finanzas lee por una liquidación", () => {
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "clabe_waiting", until: AT });
   });
 
-  it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending"] as const)("con %s, nada", async (outcome) => {
+  it("con la cuenta abierta por otra persona, quién y desde cuándo", async () => {
+    payoutAnswer = { outcome: "already_open", readBy: READ, readAt: AT, own: false };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "already_open", readBy: READ, readAt: AT, own: false });
+  });
+
+  it("la primera vez, a qué cuenta se llama", async () => {
+    payoutAnswer = { outcome: "needs_call", last4: "7771", clabeChangedAt: AT };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "needs_call", last4: "7771", clabeChangedAt: AT });
+  });
+
+  it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending", "not_ready", "on_hold", "under_investigation"] as const)("con %s, nada", async (outcome) => {
     payoutAnswer = { outcome };
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: outcome });
   });

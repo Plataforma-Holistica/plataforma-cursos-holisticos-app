@@ -61,9 +61,31 @@ begin
   perform pruebas.aviso_enviado(p_teacher);
 end
 $$;
+-- «Ya llamé» a la CLABE vigente, para que la primera vez no la detenga: aquí se prueba la espera, y la llamada en la 68 (T-604, segunda solicitud).
+create function pruebas.ya_llamo(p_pago uuid) returns void language plpgsql security definer as $$
+declare
+  v_teacher uuid;
+  v_cambio timestamptz;
+begin
+  select y.teacher_id into v_teacher from public.payouts y where y.id = p_pago;
+  select x.clabe_changed_at into v_cambio from private.teacher_tax_profiles x where x.teacher_id = v_teacher order by x.version desc limit 1;
+  if v_cambio is null then
+    return;
+  end if;
+  set local session_replication_role = replica;
+  insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
+  values (v_teacher, v_cambio, 'prueba', now(), pruebas.f1());
+  -- Y «no transferí» en la lectura anterior: aquí se abre muchas veces mientras la CLABE cambia, y una lectura sin pago impide abrir otra (eso, en la 68).
+  insert into private.payout_account_read_voids (read_id, voided_by, note)
+  select r.id, pruebas.f1(), 'prueba' from private.payout_account_reads r
+  where r.payout_id = p_pago and not exists (select 1 from private.payout_account_read_voids v where v.read_id = r.id);
+  set local session_replication_role = origin;
+end
+$$;
 create function pruebas.finanzas(p_pago uuid) returns jsonb language plpgsql as $$
 begin
-  return pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L)', p_pago))::jsonb;
+  perform pruebas.ya_llamo(p_pago);
+  return pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', p_pago))::jsonb;
 end
 $$;
 create function pruebas.estado() returns jsonb language plpgsql as $$
@@ -119,8 +141,9 @@ select set_config('app.actor_id', pruebas.mara()::text, true);
 insert into public.consents (profile_id, legal_document_id, origin) values (pruebas.mara(), private.current_legal_document('teacher_privacy_notice'), 'account_settings');
 select pruebas.limpiar();
 set local session_replication_role = replica;
-insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-  values (202610, :'m', gen_random_uuid(), 100, 100, 100) returning id as pago \gset
+-- Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+  values (202610, :'m', gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), pruebas.f1()) returning id as pago \gset
 insert into public.withholding_rules (tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
   values ('612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de la prueba');
 set local session_replication_role = origin;
@@ -315,7 +338,8 @@ select pruebas.propuesta(:'m', 'withdrawn', now() - interval '90 hours', now() -
 select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'retirada ya pasada la fecha: rige');
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'pending', now());
-select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'propuesta cuando ya regía: sigue');
+-- La CLABE sigue vigente; lo que la detiene es la investigación (T-604): con una propuesta pendiente de cualquier mes no se paga.
+select is(private.tax_clabe_standing(:'m', (pruebas.ultima(:'m')).clabe_changed_at, (pruebas.ultima(:'m')).clabe_effective_from), 'in_force', 'propuesta cuando ya regía: sigue');
 select pruebas.sin_propuestas();
 select pruebas.propuesta(:'m', 'rejected', now() - interval '1 hour', now() - interval '30 minutes');
 select is(pruebas.finanzas(:'pago') ->> 'clabe_last4', '4321', 'rechazada, rige por su fecha');
@@ -358,7 +382,7 @@ revoke execute on function private.tax_clabe_standing(uuid, timestamptz, timesta
 alter table private.teacher_tax_profiles drop constraint teacher_tax_profiles_clabe_dates;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax table constraint missing: teacher_tax_profiles_clabe_dates'), 've la restricción de las fechas quitada');
 alter table private.teacher_tax_profiles add constraint teacher_tax_profiles_clabe_dates check (clabe_effective_from >= clabe_changed_at);
-create or replace function private.tax_profile_for_payout(p_payout uuid) returns jsonb
+create or replace function private.payout_account_open(p_payout uuid) returns jsonb
 language plpgsql volatile security definer set search_path = ''
 as $$ begin perform 1 from public.audit_log; perform private.finance_change_gate(); perform private.actor_owns_teacher(gen_random_uuid()); insert into public.audit_log (action) select 'tax_profile.read' where false; return (select to_jsonb(x) from private.teacher_tax_profiles x limit 1); end $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax finance read without the clabe wait'), 've una lectura de finanzas que no mira la espera');

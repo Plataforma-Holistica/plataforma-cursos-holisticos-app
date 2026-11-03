@@ -94,15 +94,30 @@ export async function askTaxMine(tx: Tx): Promise<TaxReadAnswer> {
 }
 
 const payoutAnswer = z.union([
-  payload,
+  payload.extend({ read_id: z.uuid(), first_time: z.boolean() }).strict(),
   z.object({ outcome: z.literal("clabe_waiting"), until: z.string() }).strict(),
-  z.object({ outcome: z.enum(["forbidden", "needs_fresh_code", "not_found", "self", "no_profile", "clabe_held", "clabe_recapture", "clabe_notice_pending"]) }).strict(),
+  z.object({ outcome: z.literal("already_open"), read_by: z.uuid(), read_at: z.string(), own: z.boolean() }).strict(),
+  z.object({ outcome: z.literal("needs_call"), clabe_last4: z.string(), clabe_changed_at: z.string() }).strict(),
+  z
+    .object({
+      outcome: z.enum([
+        "forbidden", "needs_fresh_code", "not_found", "self", "no_profile", "clabe_held", "clabe_recapture", "clabe_notice_pending",
+        "not_ready", "on_hold", "under_investigation",
+      ]),
+    })
+    .strict(),
 ]);
 
+/** Abrir la cuenta para pagar (T-604): deja una lectura en el libro y en la auditoría, y marcar pagada lleva la suya. */
 export async function askTaxForPayout(tx: Tx, payout: string): Promise<TaxPayoutAnswer> {
-  const rows = await tx.query(sql`select private.tax_profile_for_payout(${payout}::uuid) as answer`, answerRow);
+  const rows = await tx.query(sql`select private.payout_account_open(${payout}::uuid) as answer`, answerRow);
   const answer = payoutAnswer.parse(rows[0]?.answer);
-  if (answer.outcome === "ok") return { outcome: "ok", row: rowOf(answer) };
+  if (answer.outcome === "ok") return { outcome: "ok", row: rowOf(answer), readId: answer.read_id, firstTime: answer.first_time };
   if (answer.outcome === "clabe_waiting") return { outcome: "clabe_waiting", until: new Date(answer.until).toISOString() };
+  if (answer.outcome === "already_open") {
+    return { outcome: "already_open", readBy: answer.read_by, readAt: new Date(answer.read_at).toISOString(), own: answer.own };
+  }
+  // La fecha va como la dio la base: es la llave de la cuenta a la que se llama, y `-infinity` no es una fecha de JavaScript.
+  if (answer.outcome === "needs_call") return { outcome: "needs_call", last4: answer.clabe_last4, clabeChangedAt: answer.clabe_changed_at };
   return { outcome: answer.outcome };
 }
