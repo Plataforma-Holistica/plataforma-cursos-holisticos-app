@@ -85,7 +85,7 @@ select ok(
   and not has_column_privilege('app_service', 'public.teachers', 'tiebreak_rank', 'select')
   and has_column_privilege('app_service', 'public.teachers', 'status', 'select'),
   'el orden de desempate de un maestro no sale de la base');
-select hasnt_column('public', 'published_courses', 'course_review_id', 'lo publicado nace sin la revisión: llega con T-405');
+select has_column('public', 'published_courses', 'course_review_id', 'lo publicado dice qué envío lo publicó (T-405)');
 select hasnt_column('public', 'video_assets', 'lesson_ref', 'sin Payload: el video dice su lección por lesson_id');
 select col_has_default('public', 'course_registry', 'course_id', 'el curso tiene su propio identificador');
 select ok(
@@ -166,12 +166,16 @@ select is(private.system_load_course((select id from maestra), jsonb_set(pruebas
   'invalid', 'una lección sin título: invalid');
 select is(private.system_load_course((select id from maestra), pruebas.curso('Otro Mal')) ->> 'answer', 'invalid', 'un slug sin forma: invalid');
 select is((select count(*)::int from public.course_registry), 1, 'ningún rechazo escribió');
--- Sin el ajuste del guion local, un video de prueba no entra, ni como sistema.
+-- Sin el ajuste del guion local, un video de prueba no entra, ni como sistema. Desde T-405 también entra con la marca local de los videos de prueba
+-- (la pone db:login): sin ella, tampoco.
+select pruebas.limpiar();
+delete from private.local_flags where flag = 'video_test';
 select pruebas.como_dueno_sistema();
 select throws_ok($$select private.system_load_course((select id from maestra), pruebas.curso('sin-ajuste'))$$,
   '42501', 'public.video_assets: test videos are only loaded by the local courses script',
   'sin el ajuste del guion local, un video de prueba no entra');
 select pruebas.limpiar();
+insert into private.local_flags (flag) values ('video_test') on conflict do nothing;
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que se ve antes de aprobar.
