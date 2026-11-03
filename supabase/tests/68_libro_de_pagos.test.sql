@@ -54,6 +54,14 @@ begin
   set local session_replication_role = replica;
   insert into public.payouts (id, period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
   values (pruebas.p(n), 203000 + n, pruebas.m(), (select close_run_id from public.payout_periods where period_id = 203000 + n), p_estado, p_neto, p_neto, p_neto, now(), pruebas.f1());
+  -- Desde la tercera solicitud, una pagada exige su factura aceptada: la que nace lista para pago ya la tiene (la 80 prueba cómo se llega).
+  if p_estado in ('ready_to_pay', 'paid', 'payment_returned') then
+    insert into private.teacher_invoices (payout_id, teacher_id, status, pdf_path, pdf_object_id, pdf_object_version, pdf_bytes, xml_enc, xml_sha256, cfdi_uuid,
+                                          issued_at, stamped_at, issuer_regime, issuer_profile_version, receiver_rfc, subtotal_cents, vat_cents,
+                                          income_tax_withheld_cents, vat_withheld_cents, total_cents, submitted_by, submitted_at, reviewed_by, reviewed_at)
+    values (pruebas.p(n), pruebas.m(), 'accepted', 'prueba-68/' || n || '.pdf', gen_random_uuid(), 'v1', 1000, pruebas.sellado(40), sha256('68'::bytea),
+            gen_random_uuid(), now(), now(), '612', 1, 'PHO200101AB1', p_neto, 0, 0, 0, p_neto, pruebas.tere(), now(), pruebas.f1(), now());
+  end if;
   set local session_replication_role = origin;
   return pruebas.p(n);
 end

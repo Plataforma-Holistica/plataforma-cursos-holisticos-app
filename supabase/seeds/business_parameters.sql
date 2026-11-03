@@ -77,6 +77,8 @@ from (values
   ('LICENCIA_ANIOS',            '10',                   'decided'),
   ('LIMITE_FACTURA',            '3',                    'proposed'),
   ('PLAZO_FACTURA_MIN_DIAS',    '5',                    'proposed'),
+  -- Sin el RFC de PQ-20 todavía: un texto que no es RFC, para que ninguna factura se empiece hasta que llegue.
+  ('RFC_RECEPTOR',              '"PQ-20"',              'to_confirm'),
   ('RESPUESTA_FRAUDE',          '5',                    'proposed'),
   -- Operación y escala
   ('TIPO_CAMBIO',               '"18.5"',               'to_confirm'),
