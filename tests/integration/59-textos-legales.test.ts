@@ -19,8 +19,8 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // y que un formulario abierto con el texto de antes ya no vale.
 //
 // Publicar es un libro que no se borra: lo que esta prueba confirma lo quita al terminar con las guardias
-// apagadas (`session_replication_role = replica`), como la 58. La auditoría se queda. Usa el anexo de
-// licencia, que ninguna otra prueba de integración publica.
+// apagadas (`session_replication_role = replica`), como la 58. La auditoría se queda. Usa la política de
+// comunidad, que ninguna otra prueba de integración publica ni `db:drafts` carga.
 
 let owner: Client;
 let config: Finance;
@@ -55,8 +55,8 @@ const claims = (person: Finance) => ({ userId: person.person.id, aal: "aal2", se
 
 beforeAll(async () => {
   owner = await connect();
-  const taken = await owner.query("select 1 from public.legal_documents where doc_type = 'license_annex'");
-  if ((taken.rowCount ?? 0) > 0) throw new Error("hay un anexo de licencia en la base local: pnpm db:reset");
+  const taken = await owner.query("select 1 from public.legal_documents where doc_type = 'community_policy'");
+  if ((taken.rowCount ?? 0) > 0) throw new Error("hay una política de comunidad en la base local: pnpm db:reset");
   config = await financePerson(emails, "config");
   rival = await financePerson(emails, "config");
   // Las conexiones del dueño toman el rol del servidor; se le quita al terminar (como la 54).
@@ -88,7 +88,7 @@ describe("dos publicaciones a la vez", () => {
         await actAs(client, person);
       }
       const publish = (client: Client, person: Finance) =>
-        storeOn(client, person).store.publish(claims(person), { docType: "license_annex", title: "Anexo", body: "Texto del anexo.", day, seenVersion: null });
+        storeOn(client, person).store.publish(claims(person), { docType: "community_policy", title: "Comunidad", body: "Texto de la política.", day, seenVersion: null });
 
       const one = await publish(first, config);
       expect(one).toMatchObject({ answer: "published", version: 1 });
@@ -98,7 +98,7 @@ describe("dos publicaciones a la vez", () => {
       await retire(first, config);
       await first.query("commit");
       expect(await waiting).toEqual({ answer: "changed", version: 1 });
-      expect((await owner.query("select 1 from public.legal_documents where doc_type = 'license_annex'")).rowCount).toBe(1);
+      expect((await owner.query("select 1 from public.legal_documents where doc_type = 'community_policy'")).rowCount).toBe(1);
     } finally {
       await second.query("rollback").catch(() => undefined);
       await first.query("rollback").catch(() => undefined);
@@ -157,7 +157,7 @@ describe("publicar y volver a pedir el consentimiento", () => {
       await client.query("begin isolation level repeatable read");
       await actAs(client, config);
       const { store } = storeOn(client, config);
-      await expect(store.publish(claims(config), { docType: "license_annex", title: "A", body: "B", day: await today(client), seenVersion: 1 })).rejects.toMatchObject({ code: "25000" });
+      await expect(store.publish(claims(config), { docType: "community_policy", title: "A", body: "B", day: await today(client), seenVersion: 1 })).rejects.toMatchObject({ code: "25000" });
     }, false);
   });
 });

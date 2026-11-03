@@ -295,8 +295,8 @@ select is(
   private.current_legal_document('recurring_charge_consent'), :'cargo0'::uuid,
   'un borrador es el vigente mientras no haya versión publicada');
 select is(
-  private.current_legal_document('license_annex'), null,
-  'un tipo sin ningún texto no tiene vigente');
+  private.current_legal_document('community_policy', timestamptz '2000-01-01'), null,
+  'antes de su primer texto, un tipo no tiene vigente');
 select pruebas.como_usuario('a0000000-0000-0000-0000-000000000001');
 select throws_ok(
   $$select private.current_legal_document('refund_policy')$$,
