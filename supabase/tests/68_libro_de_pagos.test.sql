@@ -4,7 +4,7 @@
 -- ninguno. Abrir la cuenta, llamar y marcar se prueban aquí; las vencidas de factura y lo que vigila el vigilante, en la 69.
 begin;
 \ir _ayuda.psql
-select plan(93);
+select plan(114);
 
 select pruebas.alta('a6800000-0000-0000-0000-000000000001', 'tere-68@prueba.test');
 select pruebas.alta('c6800000-0000-0000-0000-000000000001', 'f1-68@prueba.test');
@@ -129,7 +129,9 @@ select is(pruebas.abre(pruebas.p(1)) ->> 'outcome', 'ok', 'con la llamada, se ab
 select is(pruebas.abre(pruebas.p(1)) ->> 'clabe_last4', '7771', 'con sus datos');
 select ok((pruebas.abre(pruebas.p(1)) ->> 'first_time')::boolean, 'y dice que es la primera vez');
 select is(pruebas.lecturas(), 3::bigint, 'cada apertura queda en la auditoría');
-select is((select count(*) from private.payout_account_reads where payout_id = pruebas.p(1)), 3::bigint, 'y en el libro de lecturas');
+select is((select count(*) from private.payout_account_reads where payout_id = pruebas.p(1)), 1::bigint, 'quien la abrió vuelve a ver la suya: una lectura');
+select is(pruebas.abre(pruebas.p(1), pruebas.f2()) ->> 'outcome', 'already_open', 'otra persona no la abre mientras esa lectura no tenga su pago');
+select is((pruebas.abre(pruebas.p(1), pruebas.f2()) ->> 'read_by')::uuid, pruebas.f1(), 'y sabe quién la tiene abierta');
 select is((select tax_profile_version from private.payout_account_reads where payout_id = pruebas.p(1) limit 1), 1::smallint, 'con la versión que se abrió');
 select (pruebas.abre(pruebas.p(1)) ->> 'read_id')::uuid as lectura1 \gset
 
@@ -153,7 +155,6 @@ select is((select tax_profile_version from private.payout_payments where payout_
 select (select id from private.payout_payments where payout_id = pruebas.p(1)) as pago1 \gset
 select is(pruebas.marca(pruebas.p(1), :'lectura1', 'ABC123') ->> 'outcome', 'already_reported', 'reintentar con la misma lectura no duplica');
 select is(pruebas.marca(pruebas.p(1), :'lectura1', 'ABC123') ->> 'payment_id', :'pago1', 'y contesta el mismo pago');
-select is(pruebas.marca(pruebas.p(1), :'lectura1', 'OTRA') ->> 'outcome', 'read_used', 'una lectura sirve para una transferencia');
 select is((select count(*) from private.payout_payments), 1::bigint, 'el libro tiene un pago');
 select is(pruebas.abre(pruebas.p(1)), '{"outcome": "not_ready"}'::jsonb, 'una pagada no abre la cuenta');
 
@@ -169,7 +170,9 @@ select is((select hold_kind || ':' || held_from_status from public.payouts where
 select is(pruebas.vivos(pruebas.p(2)), 1::bigint, 'el pago entra al libro: la transferencia ya salió');
 select is(pruebas.estado_periodo(203002), 'closed', 'el periodo sigue pendiente');
 select is(pruebas.abre(pruebas.p(2)), '{"outcome": "on_hold"}'::jsonb, 'una retenida no abre la cuenta');
-select is(pruebas.suelta(pruebas.p(2), pruebas.f1()) ->> 'to', 'paid', 'al soltarla, con un pago vivo, va a pagada');
+select is(pruebas.suelta(pruebas.p(2), pruebas.f1()) ->> 'outcome', 'proposed', 'soltarla la pagaría: una persona propone');
+select is(pruebas.suelta(pruebas.p(2), pruebas.f1()) ->> 'outcome', 'awaiting_second', 'y no la confirma ella misma');
+select is(pruebas.suelta(pruebas.p(2), pruebas.f2()) ->> 'to', 'paid', 'otra persona la suelta, y con un pago vivo va a pagada');
 select is(pruebas.estado_periodo(203002), 'paid', 'y su periodo también');
 
 -- ---------------------------------------------------------------------------------------
@@ -226,7 +229,8 @@ select is(pruebas.pide(pruebas.f2(), format('private.hold_payout(%L, %L, %L)', p
 select is(pruebas.marca(pruebas.p(4), :'lectura4', 'R4') ->> 'conflict', 'on_hold', 'la transferencia llega con la liquidación retenida');
 select is(pruebas.vivos(pruebas.p(4)), 1::bigint, 'y entra al libro');
 select is(pruebas.estado(pruebas.p(4)), 'on_hold', 'sin dejar de estar retenida');
-select is(pruebas.suelta(pruebas.p(4), pruebas.f1()) ->> 'to', 'paid', 'al soltarla va a pagada, no a lista para pago: así no se paga dos veces');
+select is(pruebas.suelta(pruebas.p(4), pruebas.f1()) ->> 'outcome', 'proposed', 'soltarla la pagaría: lo propone una persona');
+select is(pruebas.suelta(pruebas.p(4), pruebas.f2()) ->> 'to', 'paid', 'y al confirmarla otra va a pagada, no a lista para pago: así no se paga dos veces');
 
 -- ---------------------------------------------------------------------------------------
 -- Bajo investigación no se abre, y lo que nace después de abrir detiene el pago.
@@ -268,12 +272,41 @@ select pruebas.como_dueno();
 set local session_replication_role = replica;
 insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version,
                                           created_by, clabe_changed_at, clabe_effective_from)
-values (pruebas.m(), 2, pruebas.sellado(13), pruebas.sellado(20), '612', 'person', pruebas.sellado(18), '7771', 1, pruebas.tere(),
-        now() - interval '10 days', now() - interval '7 days');
+values (pruebas.m(), 2, pruebas.sellado(13), pruebas.sellado(20), '612', 'person', pruebas.sellado(18), '7772', 1, pruebas.tere(),
+        now() - interval '9 days', now() - interval '6 days');
+insert into private.mail_outbox (idempotency_key, template, profile_id, recipient, params, sent_at)
+values (private.clabe_notice_key(pruebas.m(), now() - interval '9 days'), 'CO-27', pruebas.tere(), 'tere-68@prueba.test', '{"hours": 72}', now() - interval '9 days');
+-- Ya se le llamó a la cuenta nueva: la primera vez se prueba arriba.
+insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
+values (pruebas.m(), now() - interval '9 days', 'Tere', now(), pruebas.f1());
 set local session_replication_role = origin;
 select is(pruebas.marca(pruebas.p(6), :'lectura6', 'R6') ->> 'outcome', 'paid', 'se paga');
-select ok((select account_changed_since_read from private.payout_payments where payout_id = pruebas.p(6)), 'y queda dicho que la cuenta cambió desde la lectura');
+select ok((select account_changed_since_read from private.payout_payments where payout_id = pruebas.p(6)), 'y queda dicho que la CLABE cambió desde la lectura');
 select is((select tax_profile_version from private.payout_payments where payout_id = pruebas.p(6)), 1::smallint, 'con la versión que se abrió, no la de ahora');
+-- Una segunda transferencia con la misma lectura también entra: ya salió.
+select is(pruebas.marca(pruebas.p(6), :'lectura6', 'R6-BIS') ->> 'conflict', 'already_paid', 'una segunda transferencia con la misma lectura entra con su conflicto');
+select is(pruebas.vivos(pruebas.p(6)), 2::bigint, 'y quedan las dos en el libro');
+select is(pruebas.estado(pruebas.p(6)), 'paid', 'sin dejar de estar pagada');
+
+-- ---------------------------------------------------------------------------------------
+-- Una lectura vieja y una anulada: la transferencia entra, choca y retiene.
+
+select pruebas.liquidacion(8, 'ready_to_pay');
+select (pruebas.abre(pruebas.p(8)) ->> 'read_id')::uuid as lectura8 \gset
+select is(pruebas.pide(pruebas.f2(), format('private.hold_payout(%L, %L, %L)', pruebas.p(8), 'Se revisa', 'ready_to_pay'))::jsonb ->> 'outcome', 'held', 'se retiene');
+select is(pruebas.suelta(pruebas.p(8), pruebas.f1()) ->> 'to', 'ready_to_pay', 'y se suelta sin pagos: una persona basta');
+select isnt((pruebas.abre(pruebas.p(8)) ->> 'read_id')::uuid, :'lectura8'::uuid, 'la lectura de antes de retenerla ya no es la abierta');
+select is(pruebas.marca(pruebas.p(8), :'lectura8', 'R8') ->> 'conflict', 'stale_read', 'una transferencia con la lectura de antes choca');
+select is(pruebas.estado(pruebas.p(8)), 'on_hold', 'y retiene');
+
+select pruebas.liquidacion(9, 'ready_to_pay');
+select (pruebas.abre(pruebas.p(9)) ->> 'read_id')::uuid as lectura9 \gset
+select is(pruebas.pide(pruebas.f2(), format('private.payout_account_void_read(%L, %L)', :'lectura9', 'No transferí'))::jsonb ->> 'outcome', 'not_yours', 'solo quien la abrió la anula');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L, %L)', :'lectura9', ' '))::jsonb ->> 'outcome', 'malformed', 'con su nota');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L, %L)', :'lectura9', 'No transferí'))::jsonb ->> 'outcome', 'voided', 'quien la abrió la anula');
+select is(pruebas.abre(pruebas.p(9), pruebas.f2()) ->> 'outcome', 'ok', 'y otra persona ya la puede abrir');
+select is(pruebas.marca(pruebas.p(9), :'lectura9', 'R9') ->> 'conflict', 'stale_read', 'una transferencia con la lectura anulada choca');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L, %L)', :'lectura9', 'Otra vez'))::jsonb ->> 'outcome', 'used', 'y una lectura con su pago ya no se anula');
 
 -- ---------------------------------------------------------------------------------------
 -- Nadie sobre sí.
@@ -290,7 +323,7 @@ select pruebas.f1_es_maestra();
 select is(pruebas.abre(pruebas.p(6)) ->> 'outcome', 'self', 'abrir la cuenta propia, no');
 select is(pruebas.llama(pruebas.p(6)) ->> 'outcome', 'self', 'anotar la llamada propia, no');
 select is(pruebas.marca(pruebas.p(6), :'lectura6', 'R6') ->> 'outcome', 'self', 'marcar la propia, no');
-select is(pruebas.devuelve((select id from private.payout_payments where payout_id = pruebas.p(6)), pruebas.f1()) ->> 'outcome', 'self', 'devolver la propia, no');
+select is(pruebas.devuelve((select id from private.payout_payments where payout_id = pruebas.p(6) and reference = 'R6'), pruebas.f1()) ->> 'outcome', 'self', 'devolver la propia, no');
 select pruebas.como_dueno();
 set local session_replication_role = replica;
 update public.teachers set profile_id = pruebas.tere() where id = pruebas.m();
@@ -300,6 +333,15 @@ set local session_replication_role = origin;
 -- Lo que la base exige al confirmar, aunque alguien escriba directo.
 
 select pruebas.liquidacion(7, 'ready_to_pay');
+-- Con fraude decidido, soltar pide dos personas aunque no la pague (decisión 3).
+select pruebas.como_dueno();
+set local session_replication_role = replica;
+insert into public.anomaly_alerts (period_id, kind, teacher_id, metric_value, threshold_value, status, is_fraud, reviewed_by, reviewed_at, review_note, fraud_marked_by, evidence)
+values (203007, 'teacher_points_jump', pruebas.m(), 1, 1, 'reviewed', true, pruebas.k1(), now(), 'Era fraude', pruebas.k1(), 'Capturas del panel');
+set local session_replication_role = origin;
+select is(pruebas.pide(pruebas.f2(), format('private.hold_payout(%L, %L, %L)', pruebas.p(7), 'Fraude', 'ready_to_pay'))::jsonb ->> 'outcome', 'held', 'se retiene por el fraude');
+select is(pruebas.suelta(pruebas.p(7), pruebas.f1()) ->> 'outcome', 'proposed', 'soltarla sin pagarla, con fraude decidido, es una propuesta');
+select is(pruebas.suelta(pruebas.p(7), pruebas.f2()) ->> 'to', 'ready_to_pay', 'y otra persona la suelta a lista para pago');
 select pruebas.como_dueno();
 select set_config('app.actor_id', pruebas.f1()::text, true);
 set constraints all immediate;

@@ -317,6 +317,11 @@ describe("finanzas lee por una liquidación", () => {
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "clabe_waiting", until: AT });
   });
 
+  it("con la cuenta abierta por otra persona, quién y desde cuándo", async () => {
+    payoutAnswer = { outcome: "already_open", readBy: READ, readAt: AT };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "already_open", readBy: READ, readAt: AT });
+  });
+
   it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending", "not_ready", "on_hold", "under_investigation", "needs_call"] as const)("con %s, nada", async (outcome) => {
     payoutAnswer = { outcome };
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: outcome });

@@ -253,6 +253,8 @@ describe("la lectura de finanzas", () => {
   it("las respuestas de la base las entiende el servicio: detenida, en espera, anulada y vigente", async () => {
     const ana = await person();
     const finance = await financePerson(emails);
+    // Antes de la transacción: dar de alta a alguien espera los candados que ella tiene.
+    const second = await financePerson(emails);
     await reverted(async (owner) => {
       const id = await teacher(owner, ana);
       await serviceOn(owner, ana).saveTaxProfile(jar, { ...FORM, clabe: CLABE_A, seen: 0 }, freshOrigin());
@@ -299,6 +301,9 @@ describe("la lectura de finanzas", () => {
       );
       await owner.query("set local session_replication_role = origin");
       expect((await read()).outcome).toBe("ok");
+      // Otra persona de finanzas, con esa lectura todavía sin pago: no recibe la cuenta, y el servicio sabe quién la tiene.
+      await actAs(owner, second);
+      expect(await read()).toMatchObject({ outcome: "already_open", readBy: finance.person.id });
     });
   });
 });

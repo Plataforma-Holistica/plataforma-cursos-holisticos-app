@@ -53,6 +53,7 @@ export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "
 export type TaxPayoutAnswer =
   | { outcome: "ok"; row: TaxProfileRow; readId: string; firstTime: boolean }
   | { outcome: "clabe_waiting"; until: string }
+  | { outcome: "already_open"; readBy: string; readAt: string }
   | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" };
 
 export interface TaxProfileState {
@@ -117,6 +118,7 @@ export type TaxSave = Proof | { kind: "saved" | "off" | "changed" | "suspended" 
 export type TaxPayoutRead =
   | { kind: "ok"; data: OpenTaxProfile; readId: string; firstTime: boolean }
   | { kind: "clabe_waiting"; until: string }
+  | { kind: "already_open"; readBy: string; readAt: string }
   | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" | "off" | "unavailable" }
   | { kind: "session"; check: Refused };
 
@@ -270,6 +272,8 @@ export function createTaxProfile(deps: TaxProfileDeps) {
       return { kind: "unavailable" };
     }
     if (answer.outcome === "clabe_waiting") return { kind: "clabe_waiting", until: answer.until };
+    // Otra persona tiene la cuenta abierta y su transferencia quizá ya salió: se dice quién y desde cuándo.
+    if (answer.outcome === "already_open") return { kind: "already_open", readBy: answer.readBy, readAt: answer.readAt };
     if (answer.outcome !== "ok") return { kind: answer.outcome };
     const open = openRow(answer.row);
     if (open === null) {

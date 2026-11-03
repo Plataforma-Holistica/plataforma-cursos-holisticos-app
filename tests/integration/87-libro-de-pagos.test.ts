@@ -6,7 +6,8 @@ import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // El libro de pagos (T-604, segunda solicitud) contra la base local, en lo que una transacción revertida no puede mostrar: dos personas de finanzas a la
 // vez sobre la misma liquidación. Abrir, marcar, retener, soltar y devolver toman el periodo para escribir antes que la liquidación, así que van uno tras
-// otro, y quien llega tarde se entera de lo que pasó: nunca se le da la cuenta a una segunda transferencia, y toda transferencia reportada entra al libro.
+// otro, y quien llega tarde se entera de lo que pasó: mientras una lectura no tenga su pago nadie más recibe la cuenta, y toda transferencia reportada entra
+// al libro.
 // Y dos marcas con la misma referencia en periodos distintos, que no comparten candado: el índice único decide, y la segunda entra con su conflicto.
 //
 // Usa meses de 2042, que ninguna otra prueba usa: los arma cerrados y liberados con las guardias apagadas, sin pasar por el cierre (eso lo prueban la 53 y
@@ -203,11 +204,11 @@ describe("dos personas de finanzas sobre la misma liquidación, de verdad", () =
     expect(await paymentsOf(204202)).toMatchObject([{ conflict: "on_hold", reference: "R-2" }]);
   });
 
-  it("dos marcas con dos lecturas: la segunda espera, entra al libro como pagada dos veces, y no deja de estar pagada", async () => {
-    const readA = (await open(financeA, 204203)).read_id as string;
-    const readB = (await open(financeB, 204203)).read_id as string;
+  it("con una lectura abierta nadie más abre; dos marcas a la vez con esa lectura: la segunda espera, entra al libro, y no deja de estar pagada", async () => {
+    const read = (await open(financeA, 204203)).read_id as string;
+    expect(await open(financeB, 204203)).toMatchObject({ outcome: "already_open", read_by: financeA.person.id });
     const day = await today();
-    const [first, second] = await race(financeA, markWith(204203, readA, "R-3A", day), financeB, markWith(204203, readB, "R-3B", day));
+    const [first, second] = await race(financeA, markWith(204203, read, "R-3A", day), financeB, markWith(204203, read, "R-3B", day));
     expect(first).toMatchObject({ outcome: "paid" });
     expect(second).toMatchObject({ outcome: "conflict", conflict: "already_paid", status: "paid" });
     expect((await paymentsOf(204203)).map((row) => row.conflict)).toEqual([null, "already_paid"]);
