@@ -10,7 +10,7 @@ import { databaseReviewStore } from "./store";
 // errores. Lo que importan las pantallas. Dar el código otra vez es el del catálogo
 // (`giveCatalogCode`): comprueba la misma puerta de Contenido.
 
-export type { ApproveAnswer, CourseApproved, LessonVideo, QueueRead, ReviewCourse, ReviewLesson, ReviewQueue } from "./queue";
-export { APPROVE_ANSWERS, LESSON_VIDEOS } from "./queue";
+export type { ApproveAnswer, CourseApproved, CourseReturned, LessonVideo, QueueRead, ReturnAnswer, ReviewCourse, ReviewLesson, ReviewQueue, ReviewResource, ReviewSubmission } from "./queue";
+export { APPROVE_ANSWERS, LESSON_VIDEOS, RETURN_ANSWERS } from "./queue";
 
-export const { reviewQueue, approveCourse } = createReviewQueue({ report: reportFailure }, { teamStanding, store: databaseReviewStore });
+export const { reviewQueue, approveCourse, returnCourse } = createReviewQueue({ report: reportFailure }, { teamStanding, store: databaseReviewStore });

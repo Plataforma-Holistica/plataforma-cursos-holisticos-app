@@ -15,10 +15,13 @@ const lesson = (n: number, module: string, video: ReviewCourse["lessons"][number
   title: `Lección ${n}`,
   durationSeconds: 356,
   video,
+  description: null,
+  resources: [],
 });
 const COURSE_ROW: ReviewCourse = {
   courseId: COURSE,
   title: "Naturaleza",
+  summary: null,
   teacherName: "Ana Robles",
   teacherListed: false,
   practice: "Respiración",
@@ -27,6 +30,7 @@ const COURSE_ROW: ReviewCourse = {
   totalDurationSeconds: 3723,
   loadedAt: "2026-10-14T18:00:00Z",
   lessons: [lesson(1, "Uno", "playable"), lesson(2, "Uno", "test"), lesson(3, "Dos", "processing"), lesson(4, "Dos", "errored")],
+  submission: null,
 };
 
 describe("playLength", () => {
@@ -150,5 +154,54 @@ describe("reviewView", () => {
   it("una lección de un curso de una lección: «lección», en singular", () => {
     const one = reviewView({ freshCode: true, courses: [{ ...COURSE_ROW, lessonCount: 1, totalDurationSeconds: 356, lessons: [lesson(1, "Uno", "playable")] }] });
     expect(one.teachers[0]?.courses[0]?.lessons).toBe("1 lección, 5:56 en total.");
+  });
+});
+
+describe("lo enviado por el portal", () => {
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const SENT: ReviewCourse = {
+    ...COURSE_ROW,
+    summary: "Un resumen.",
+    lessons: [{ ...lesson(1, "Uno", "playable"), description: "De qué trata.", resources: [{ id: "a1000000-0000-4000-8000-000000000001", title: "Guía", kind: "pdf", sizeBytes: 2048 }] }],
+    submission: {
+      id: SUBMISSION,
+      number: 2,
+      resources: [{ id: "a1000000-0000-4000-8000-000000000002", title: "Temario", kind: "pdf", sizeBytes: 1024 }],
+      annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo.", termYears: 10 },
+    },
+  };
+  const rowOf = (course: ReviewCourse) => reviewView({ freshCode: true, courses: [course] }).teachers[0]?.courses[0];
+
+  it("dice cuándo se envió y qué número de envío es, no cuándo se cargó", () => {
+    expect(rowOf(SENT)?.loaded).toMatch(/^Enviado el .* Envío número 2\.$/);
+    expect(rowOf(SENT)?.summary).toBe("Un resumen.");
+  });
+
+  it("el anexo: versión, fecha y plazo, y la frase aceptada", () => {
+    expect(rowOf(SENT)?.submission?.annex).toMatch(/^Versión 3, aceptada el .*, por 10 años\.$/);
+    expect(rowOf(SENT)?.submission?.statement).toBe("Acepto el anexo.");
+  });
+
+  it("un plazo de un año, en singular", () => {
+    const one: ReviewCourse = { ...SENT, submission: { ...SENT.submission!, annex: { ...SENT.submission!.annex, termYears: 1 } } };
+    expect(rowOf(one)?.submission?.annex).toMatch(/por 1 año\.$/);
+  });
+
+  it("los botones llevan el curso y el envío que se vio", () => {
+    expect(rowOf(SENT)?.submission?.ask).toBe(`return_ask:${COURSE}:${SUBMISSION}`);
+  });
+
+  it("su video se pide con el curso; el de uno por guion, no", () => {
+    expect(rowOf(SENT)?.modules[0]?.lessons[0]?.draftCourse).toBe(COURSE);
+    expect(rowOf(COURSE_ROW)?.modules[0]?.lessons[0]?.draftCourse).toBeNull();
+  });
+
+  it("sus recursos, ya en palabras, sin nada que se pueda bajar sin la puerta de medios", () => {
+    expect(rowOf(SENT)?.modules[0]?.lessons[0]?.resources).toEqual([{ id: "a1000000-0000-4000-8000-000000000001", title: "Guía", detail: expect.stringContaining("2") }]);
+    expect(rowOf(SENT)?.submission?.resources.map((each) => each.title)).toEqual(["Temario"]);
+  });
+
+  it("uno por guion no tiene envío", () => {
+    expect(rowOf(COURSE_ROW)?.submission).toBeNull();
   });
 });

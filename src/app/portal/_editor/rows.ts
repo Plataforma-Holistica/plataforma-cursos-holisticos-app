@@ -101,6 +101,8 @@ export interface EditorView {
   editable: boolean;
   /** Por qué no se edita, si el curso ya no es un borrador. */
   notice: string | null;
+  /** Si Contenido lo devolvió: arriba de todo (FL-35, paso 3). */
+  returned: { title: string; reason: string; whatToFix: string } | null;
   paths: { base: string; self: string };
   data: {
     title: string;
@@ -291,6 +293,10 @@ export function editorView(
     saved: savedLabel(draft.updatedAt, context.now),
     editable: draft.state === "draft" && !context.readOnly,
     notice: key === "draft" ? null : portal.stateDetail[key],
+    returned:
+      draft.returned === null
+        ? null
+        : { title: t(text.returned.title, { date: longDate(draft.returned.returnedAt) }), reason: draft.returned.reason, whatToFix: draft.returned.whatToFix },
     paths: { base, self },
     data: {
       title: draft.title,

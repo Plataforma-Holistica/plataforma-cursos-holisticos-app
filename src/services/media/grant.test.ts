@@ -103,6 +103,7 @@ function grantWith(
     recorded?: BatchRecord | "throws";
     resourceFacts?: ResourceFacts | null | "throws";
     draftFile?: ResourceFile | null | "throws";
+    reviewFile?: ResourceFile | null | "throws";
   draftVideo?: DraftVideoFacts | null | "throws";
     hit?: DownloadHit | "throws";
     downloadUrl?: string | null;
@@ -132,6 +133,11 @@ function grantWith(
           calls.push(`borrador ${course} ${id}`);
           if (setup.draftFile === "throws") return Promise.reject(new Error("sin base"));
           return Promise.resolve(setup.draftFile === undefined ? FILE : setup.draftFile);
+        }),
+        reviewResourceFile: vi.fn((_claims: VerifiedClaims, id: string) => {
+          calls.push(`recurso en revisión ${id}`);
+          if (setup.reviewFile === "throws") return Promise.reject(new Error("sin base"));
+          return Promise.resolve(setup.reviewFile === undefined ? FILE : setup.reviewFile);
         }),
         draftVideo: vi.fn((_claims: VerifiedClaims, course: string, lesson: string) => {
           calls.push(`video del borrador ${course} ${lesson}`);
@@ -1020,5 +1026,86 @@ describe("bajar lo que subió a su borrador (PA-43)", () => {
   it("el mismo freno", async () => {
     const service = grantWith({ hit: "throttled" });
     expect(await service.getDraftResourceGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "throttled" });
+  });
+});
+
+describe("lo enviado por el editor, para quien revisa (T-405)", () => {
+  const NOT_TEAM: TeamCheck = { kind: "not_team" } as unknown as TeamCheck;
+  const NO_CONTENT = teamCheck(standingOf(["finance"]));
+
+  describe("getReviewVideoGrant", () => {
+    it("corre la guarda del equipo, no la de sesión, y firma con la marca de quien revisa", async () => {
+      const { calls, ...service } = grantWith();
+      const answer = await service.getReviewVideoGrant(reader, COURSE, RESOURCE);
+      expect(answer).toMatchObject({ kind: "granted", playbackId: "PlayBorrador", watermark: "maestra@prueba.test" });
+      expect(calls[0]).toBe("guarda del equipo");
+      expect(calls).not.toContain("guarda de sesión");
+      expect(calls).not.toContain("abre");
+    });
+
+    it.each([
+      ["sin ser del equipo", NOT_TEAM],
+      ["sin Contenido", NO_CONTENT],
+    ])("%s: refused, antes de leer nada", async (_what, check) => {
+      const { calls, ...service } = grantWith({ check });
+      expect(await service.getReviewVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "refused" });
+      expect(calls).toEqual(["guarda del equipo"]);
+    });
+
+    it("no se supo quién pide: unavailable", async () => {
+      const service = grantWith({ check: { kind: "unavailable" } as TeamCheck });
+      expect(await service.getReviewVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "unavailable" });
+    });
+
+    it("un id sin forma no llega a la base", async () => {
+      const { calls, ...service } = grantWith();
+      expect(await service.getReviewVideoGrant(reader, "x", RESOURCE)).toEqual({ kind: "no_video" });
+      expect(calls).toEqual(["guarda del equipo"]);
+    });
+
+    it("sin marca de agua no hay video", async () => {
+      const { reported, ...service } = grantWith({ draftVideo: { ...DRAFT_VIDEO, email: null } });
+      expect(await service.getReviewVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "unavailable" });
+      expect(reported).toEqual(["media_watermark_unavailable"]);
+    });
+
+    it("lo del proveedor de prueba no tiene qué reproducir", async () => {
+      const service = grantWith({ draftVideo: { ...DRAFT_VIDEO, provider: "test" } });
+      expect(await service.getReviewVideoGrant(reader, COURSE, RESOURCE)).toEqual({ kind: "no_video" });
+    });
+  });
+
+  describe("getReviewResourceGrant", () => {
+    it("con Contenido: la base lo suelta, el freno cuenta y se firma", async () => {
+      const { calls, ...service } = grantWith();
+      expect(await service.getReviewResourceGrant(reader, RESOURCE)).toEqual({ kind: "granted", url: DOWNLOAD_URL });
+      expect(calls.slice(0, 3)).toEqual(["guarda del equipo", `recurso en revisión ${RESOURCE}`, "freno"]);
+    });
+
+    it.each([
+      ["sin ser del equipo", NOT_TEAM],
+      ["sin Contenido", NO_CONTENT],
+    ])("%s: refused, antes de leer nada", async (_what, check) => {
+      const { calls, ...service } = grantWith({ check });
+      expect(await service.getReviewResourceGrant(reader, RESOURCE)).toEqual({ kind: "refused" });
+      expect(calls).toEqual(["guarda del equipo"]);
+    });
+
+    it("lo que la base no suelta no existe, y un id sin forma tampoco llega", async () => {
+      expect(await grantWith({ reviewFile: null }).getReviewResourceGrant(reader, RESOURCE)).toEqual({ kind: "not_found" });
+      const bad = grantWith();
+      expect(await bad.getReviewResourceGrant(reader, "x")).toEqual({ kind: "not_found" });
+      expect(bad.calls).toEqual(["guarda del equipo"]);
+    });
+
+    it("si no se supo, se reporta y no se firma", async () => {
+      const { reported, ...service } = grantWith({ reviewFile: "throws" });
+      expect(await service.getReviewResourceGrant(reader, RESOURCE)).toEqual({ kind: "unavailable" });
+      expect(reported).toEqual(["resource_grant_unavailable"]);
+    });
+
+    it("el freno también vale", async () => {
+      expect(await grantWith({ hit: "throttled" }).getReviewResourceGrant(reader, RESOURCE)).toEqual({ kind: "throttled" });
+    });
   });
 });

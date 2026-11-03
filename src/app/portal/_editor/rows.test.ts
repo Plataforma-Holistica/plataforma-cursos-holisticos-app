@@ -29,6 +29,7 @@ const draft: DraftCourse = {
   contentRevision: 9,
   updatedAt: "2026-10-29T18:05:00.000Z",
   teacherName: "Ana Ruiz",
+  returned: null,
   resources: [],
   videos: [],
   modules: [

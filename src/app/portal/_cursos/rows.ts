@@ -13,6 +13,7 @@ import type { StatusTone } from "@/ui/status-badge";
 //     el video de cada lección, que llega con T-403), se edita y, si nunca se envió, se borra.
 //   · Al maestro suspendido se le ofrece «Ver», nunca editar ni borrar (RF-702).
 //   · Un curso sin borrador (los cargados por guion) no se abre en el editor hasta T-405.
+//   · Uno que Contenido devolvió dice «Rechazado» y su motivo, en dos líneas, y se corrige (FL-35; T-405).
 
 const text = portal.courses;
 
@@ -29,6 +30,8 @@ export interface CourseRow {
   state: string;
   tone: StatusTone;
   detail: string | null;
+  /** El detalle es el motivo de un rechazo: se corta en dos líneas. */
+  detailIsReason: boolean;
   lessons: string | null;
   edited: string;
   action: CourseLink | null;
@@ -55,6 +58,7 @@ const TONES: Record<CourseState, StatusTone> = {
 
 function detailOf(course: TeacherCourse): string | null {
   if (course.state === "draft") {
+    if (course.returned !== null) return course.returned.reason;
     if (course.draft === null) return null;
     const missing = missingItems(course.draft);
     return missing === 0 ? text.ready : t(plural(missing, text.missing), { count: missing });
@@ -67,16 +71,19 @@ export function courseRows(courses: readonly TeacherCourse[], readOnly: boolean)
     const editable = course.state === "draft" && !readOnly;
     const href = course.draft !== null ? portalCoursePath(course.id) : null;
     const removeHref = editable && course.draft !== null ? portalDeleteCoursePath(course.id) : null;
-    const verb = editable ? text.edit : text.view;
+    const returned = course.state === "draft" && course.returned !== null;
+    const verb = !editable ? text.view : returned ? text.fix : text.edit;
+    const named = !editable ? text.viewNamed : returned ? text.fixNamed : text.editNamed;
     return {
       id: course.id,
       title: course.title,
-      state: portal.states[STATE_KEYS[course.state]],
-      tone: TONES[course.state],
+      state: returned ? portal.states.returned : portal.states[STATE_KEYS[course.state]],
+      tone: returned ? "bad" : TONES[course.state],
       detail: detailOf(course),
+      detailIsReason: returned,
       lessons: course.draft === null ? null : t(plural(course.draft.lessons, text.lessons), { count: course.draft.lessons }),
       edited: longDate(course.updatedAt),
-      action: href === null ? null : { label: verb, href, name: t(editable ? text.editNamed : text.viewNamed, { title: course.title }) },
+      action: href === null ? null : { label: verb, href, name: t(named, { title: course.title }) },
       remove: removeHref === null ? null : { label: text.delete, href: removeHref, name: t(text.deleteNamed, { title: course.title }) },
       cover: { title: course.title, teacherName: course.teacherName, practiceName: course.practiceName, tone: course.coverTone },
     };

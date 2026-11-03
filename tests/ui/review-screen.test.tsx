@@ -11,6 +11,9 @@ const actions = vi.hoisted(() => ({
   reviewCodeAction: vi.fn(),
   approveAction: vi.fn(),
   lessonVideoAction: vi.fn(),
+  returnAction: vi.fn(),
+  reviewVideoAction: vi.fn(),
+  reviewResourceAction: vi.fn(),
 }));
 vi.mock("@/app/admin/_revision/actions", () => actions);
 
@@ -59,6 +62,7 @@ const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
     {
       courseId: COURSE,
       title: "Naturaleza",
+      summary: null,
       teacherName: "Ana Robles",
       teacherListed: false,
       practice: "Naturaleza",
@@ -67,9 +71,10 @@ const queueOf = (over: Partial<ReviewQueue> = {}): ReviewQueue => ({
       totalDurationSeconds: 765,
       loadedAt: "2026-10-14T18:00:00Z",
       lessons: [
-        { lessonId: MUX, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable" },
-        { lessonId: TEST, moduleId: MODULE, module: "Uno", title: "El río", durationSeconds: 409, video: "test" },
+        { lessonId: MUX, moduleId: MODULE, module: "Uno", title: "El bosque", durationSeconds: 356, video: "playable", description: null, resources: [] },
+        { lessonId: TEST, moduleId: MODULE, module: "Uno", title: "El río", durationSeconds: 409, video: "test", description: null, resources: [] },
       ],
+      submission: null,
     },
   ],
   ...over,
@@ -350,5 +355,239 @@ describe("aprobar", () => {
     await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
     await act(async () => undefined);
     expect(screen.queryByText(/Tu código ya no es reciente/)).not.toBeInTheDocument();
+  });
+});
+
+describe("lo enviado por el portal", () => {
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const RESOURCE = "a1000000-0000-4000-8000-000000000001";
+  const sent = (freshCode = true): ReviewQueue => {
+    const base = queueOf({ freshCode });
+    const [course] = base.courses;
+    return {
+      ...base,
+      courses: [
+        {
+          ...course!,
+          summary: "Un resumen del curso.",
+          lessons: [{ ...course!.lessons[0]!, description: "De qué trata.", resources: [{ id: RESOURCE, title: "Guía", kind: "pdf", sizeBytes: 2048 }] }],
+          submission: {
+            id: SUBMISSION,
+            number: 2,
+            resources: [],
+            annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo de licencia para el curso «Naturaleza».", termYears: 10 },
+          },
+        },
+      ],
+    };
+  };
+  const OPEN = { kind: "open", course: COURSE, submission: SUBMISSION, reason: "", whatToFix: "", problems: { reason: null, whatToFix: null }, failure: null, attempt: 1 } as const;
+  const openIt = async (answer: unknown = OPEN) => {
+    actions.returnAction.mockResolvedValue(answer);
+    const shown = show(sent());
+    await shown.user.click(screen.getByRole("button", { name: /Devolver/ }));
+    await screen.findByLabelText(/Motivo/);
+    return shown;
+  };
+
+  it("pinta el resumen, la descripción, el recurso y el anexo aceptado", () => {
+    show(sent());
+    expect(screen.getByText("Un resumen del curso.")).toBeInTheDocument();
+    expect(screen.getByText("De qué trata.")).toBeInTheDocument();
+    expect(screen.getByText("Guía")).toBeInTheDocument();
+    expect(screen.getByText(/^Versión 3, aceptada el .*, por 10 años\.$/)).toBeInTheDocument();
+    expect(screen.getByText("Acepto el anexo de licencia para el curso «Naturaleza».")).toBeInTheDocument();
+  });
+
+  it("aprobar no se ofrece, y lo dice: publicar lo enviado llega después", () => {
+    show(sent());
+    expect(screen.queryByRole("button", { name: /Aprobar y publicar/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/publicarlo todavía no está disponible/)).toBeInTheDocument();
+  });
+
+  it("uno por guion no ofrece devolver", () => {
+    show(queueOf());
+    expect(screen.queryByRole("button", { name: /Devolver/ })).not.toBeInTheDocument();
+  });
+
+  it("sin código reciente no se ofrece devolver", () => {
+    show(sent(false));
+    expect(screen.queryByRole("button", { name: /Devolver/ })).not.toBeInTheDocument();
+  });
+
+  it("«Devolver» lleva el curso y el envío, y abre los dos campos, con el foco ahí", async () => {
+    await openIt();
+    expect(Object.fromEntries(actions.returnAction.mock.calls[0]?.[1] as FormData)).toEqual({ do: `return_ask:${COURSE}:${SUBMISSION}` });
+    expect(screen.getByLabelText(/Motivo/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Qué corregir/)).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toHaveTextContent("Devolver este curso"));
+  });
+
+  it("lo que falta se dice en su campo, y lo escrito se queda", async () => {
+    await openIt({ ...OPEN, whatToFix: "Lo que ya escribí.", problems: { reason: "empty", whatToFix: null }, attempt: 2 });
+    expect(screen.getByText("Escribe el motivo.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Qué corregir/)).toHaveValue("Lo que ya escribí.");
+    expect(screen.getByText(/los dos campos son obligatorios/)).toBeInTheDocument();
+  });
+
+  it("enviar lleva el botón de enviar y lo escrito", async () => {
+    const { user } = await openIt();
+    await user.type(screen.getByLabelText(/Motivo/), "El audio se corta.");
+    await user.type(screen.getByLabelText(/Qué corregir/), "Súbela otra vez.");
+    actions.returnAction.mockResolvedValue({ ...OPEN, failure: "changed", attempt: 2 });
+    await user.click(screen.getByRole("button", { name: "Sí, devolverlo" }));
+    expect(Object.fromEntries(actions.returnAction.mock.calls[1]?.[1] as FormData)).toEqual({
+      do: `return_send:${COURSE}:${SUBMISSION}`,
+      motivo: "El audio se corta.",
+      que_corregir: "Súbela otra vez.",
+    });
+    expect(await screen.findByText(/se volvió a enviar mientras escribías/)).toBeInTheDocument();
+  });
+
+  const NEWER = "f0000000-0000-4000-8000-000000000002";
+  const withNewer = (): ReviewQueue => {
+    const queue = sent();
+    return { ...queue, courses: [{ ...queue.courses[0]!, submission: { ...queue.courses[0]!.submission!, id: NEWER, number: 3 } }] };
+  };
+
+  it("enviar lleva el envío que se estaba viendo", async () => {
+    await openIt();
+    expect(screen.getByRole("button", { name: "Sí, devolverlo" })).toHaveValue(`return_send:${COURSE}:${SUBMISSION}`);
+  });
+
+  it("si el envío cambió sin que nadie lo dijera, no se ofrece enviar: lo dice, y lo escrito se queda", async () => {
+    const { rerender, user } = await openIt({ ...OPEN, reason: "Lo escrito." });
+    rerender(<ReviewScreen view={reviewView(withNewer())} />);
+    expect(screen.queryByRole("button", { name: "Sí, devolverlo" })).not.toBeInTheDocument();
+    expect(screen.getByText(/se volvió a enviar mientras escribías/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Motivo/)).toHaveValue("Lo escrito.");
+    // Seguir pide el envío de ahora, con lo escrito, y solo entonces se ofrece enviar.
+    actions.returnAction.mockResolvedValue({ ...OPEN, submission: NEWER, reason: "Lo escrito.", attempt: 2 });
+    await user.click(screen.getByRole("button", { name: "Seguir con este envío" }));
+    const form = Object.fromEntries(actions.returnAction.mock.calls.at(-1)?.[1] as FormData);
+    expect(form).toEqual({ do: `return_ask:${COURSE}:${NEWER}`, motivo: "Lo escrito.", que_corregir: "" });
+    expect(await screen.findByRole("button", { name: "Sí, devolverlo" })).toHaveValue(`return_send:${COURSE}:${NEWER}`);
+    expect(screen.queryByText(/se volvió a enviar mientras escribías/)).not.toBeInTheDocument();
+  });
+
+  it("si el curso se fue de la cola, lo dice arriba, con lo escrito a la vista y cómo cerrarlo", async () => {
+    const { rerender, user } = await openIt({ ...OPEN, reason: "Lo escrito.", whatToFix: "Lo otro.", failure: "not_pending", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} />);
+    expect(screen.getByText(/ya no está por revisar/)).toBeInTheDocument();
+    expect(screen.getByText("Lo escrito.")).toBeInTheDocument();
+    expect(screen.getByText("Lo otro.")).toBeInTheDocument();
+    actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
+    await user.click(screen.getByRole("button", { name: "Cerrar este aviso" }));
+    await waitFor(() => expect(screen.queryByText("Lo escrito.")).not.toBeInTheDocument());
+    expect(Object.fromEntries(actions.returnAction.mock.calls.at(-1)?.[1] as FormData)).toEqual({ do: `return_cancel:${COURSE}` });
+  });
+
+  it("si el curso se fue sin haber enviado nada, también lo dice", async () => {
+    const { rerender } = await openIt();
+    rerender(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} />);
+    expect(screen.getByText(/ya no está por revisar/)).toBeInTheDocument();
+    expect(screen.queryByText("Esto es lo que habías escrito:")).not.toBeInTheDocument();
+  });
+
+  it("«Seguir» queda arriba de los campos y lejos de enviar: el segundo clic de un doble clic no cae en enviar", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito." });
+    rerender(<ReviewScreen view={reviewView(withNewer())} />);
+    const go = screen.getByRole("button", { name: "Seguir con este envío" });
+    const field = screen.getByLabelText(/Motivo/);
+    expect(go.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("si no se supo y el envío cambió, manda «no se supo»: pudo haberse devuelto", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "unknown", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(withNewer())} />);
+    expect(screen.getByText(/No supimos si el curso quedó devuelto/)).toBeInTheDocument();
+  });
+
+  it("sin código reciente, «Cancelar» deja el foco en ese curso", async () => {
+    const { rerender, user } = await openIt({ ...OPEN, failure: "needs_code", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(sent(false))} />);
+    actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(document.activeElement).toHaveTextContent(/Para devolverlo a su/));
+  });
+
+  it("con un curso abierto, uno por guion no ofrece aprobar: se llevaría lo escrito; y un aviso viejo de aprobar se va", async () => {
+    const queue = sent();
+    const script = { ...queueOf().courses[0]!, courseId: "c0000000-0000-4000-8000-000000000008", title: "Por guion" };
+    actions.approveAction.mockResolvedValue({ kind: "failed", reason: "videos_not_ready", attempt: 1 });
+    actions.returnAction.mockResolvedValue(OPEN);
+    const { user } = show({ ...queue, courses: [queue.courses[0]!, script] });
+    await user.click(screen.getByRole("button", { name: /Aprobar y publicar.*Por guion/ }));
+    await waitFor(() => expect(screen.getByText(/todavía no se puede publicar/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /Devolver/ }));
+    await screen.findByLabelText(/Motivo/);
+    expect(screen.queryByRole("button", { name: /Aprobar y publicar/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Hay otro curso abierto para devolver/)).toBeInTheDocument();
+    expect(screen.queryByText(/todavía no se puede publicar/)).not.toBeInTheDocument();
+  });
+
+  it("si no se supo y el curso se fue, dice que no se supo", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "unknown", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} />);
+    expect(screen.getByText(/No supimos si el curso quedó devuelto/)).toBeInTheDocument();
+  });
+
+  it("«Cancelar» deja el foco en ese curso, no al principio de la cola", async () => {
+    const { user } = await openIt();
+    actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Devolver este curso"));
+  });
+
+  it("con un curso abierto, otro no ofrece devolver: se llevaría lo escrito", async () => {
+    const queue = sent();
+    const other = { ...queue.courses[0]!, courseId: "c0000000-0000-4000-8000-000000000009", title: "Otro", submission: { ...queue.courses[0]!.submission!, id: "f0000000-0000-4000-8000-000000000009" } };
+    actions.returnAction.mockResolvedValue(OPEN);
+    const { user } = show({ ...queue, courses: [queue.courses[0]!, other] });
+    expect(screen.getAllByRole("button", { name: /Devolver/ })).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: /Devolver.*Naturaleza/ }));
+    await screen.findByLabelText(/Motivo/);
+    expect(screen.queryByRole("button", { name: /Devolver.*Otro/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Hay otro curso abierto para devolver/)).toBeInTheDocument();
+  });
+
+  it("sin código reciente dice cómo devolver", () => {
+    show(sent(false));
+    expect(screen.getByText(/Para devolverlo a su .*, escribe tu código/)).toBeInTheDocument();
+  });
+
+  it("«Cancelar» cierra los campos", async () => {
+    const { user } = await openIt();
+    actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByLabelText(/Motivo/)).not.toBeInTheDocument());
+  });
+
+  it("con lo escrito a la vista, un código que dejó de ser reciente no lo borra", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "needs_code", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(sent(false))} />);
+    expect(screen.getByLabelText(/Motivo/)).toHaveValue("Lo escrito.");
+    expect(screen.getByText(/Copia lo que escribiste antes de dar tu código/)).toBeInTheDocument();
+    expect(screen.getByText(/ya no es reciente/)).toBeInTheDocument();
+  });
+
+  it("el video se pide por su acción, con el curso, y lleva la marca de agua", async () => {
+    actions.reviewVideoAction.mockResolvedValue({ ...GRANT, watermark: "revisa@prueba.test" });
+    const { user } = show(sent());
+    await user.click(screen.getByRole("button", { name: /Ver «El bosque»/ }));
+    await screen.findByTestId("reproductor");
+    expect(actions.reviewVideoAction).toHaveBeenCalledWith(COURSE, MUX);
+    expect(actions.lessonVideoAction).not.toHaveBeenCalled();
+    expect(player.last?.watermark).toBe("revisa@prueba.test");
+  });
+
+  it("dice que se devolvió", () => {
+    render(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} returned />);
+    expect(screen.getByText(/Ya no está en la cola/)).toBeInTheDocument();
+  });
+
+  it("sin problemas de accesibilidad, con los campos abiertos", async () => {
+    const { container } = await openIt();
+    expect(await a11yViolations(container)).toEqual([]);
   });
 });

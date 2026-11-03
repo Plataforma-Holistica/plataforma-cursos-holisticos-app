@@ -250,6 +250,12 @@ export async function readDraftResourceFile(tx: Tx, courseId: string, resourceId
   return row?.file ?? null;
 }
 
+/** Un recurso de lo que está en revisión, para Contenido. La base decide. Nulo si no. */
+export async function readReviewResourceFile(tx: Tx, resourceId: string): Promise<ResourceFile | null> {
+  const [row] = await tx.query(sql`select private.review_resource_object(${resourceId}::uuid) as file`, z.object({ file: fileRow.nullable() }));
+  return row?.file ?? null;
+}
+
 const draftVideoAnswer = z.object({
   answer: z.string(),
   playback: z.string().nullish(),

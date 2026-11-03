@@ -73,7 +73,9 @@ describe("solo la función única de medios firma", () => {
     expect(store).toMatch(/downloadHit: \(claims\) => asServer\(\{ claims, reason: "resource_download" \}, \(tx\) => recordDownloadHit\(tx\)\),/);
     // La vista previa del borrador (T-403), a nombre de quien actúa: quién puede lo decide `video_preview`.
     expect(store).toMatch(/draftVideo: \(claims, courseId, lessonId\) => asServer\(\{ claims, reason: "media_grant" \}, \(tx\) => readDraftVideo\(tx, courseId, lessonId\)\),/);
-    expect(store.match(/\basServer\(/g)).toHaveLength(8);
+    // Un recurso de lo enviado (T-405), a nombre de quien revisa: la base decide.
+    expect(store).toMatch(/reviewResourceFile: \(claims, resourceId\) => asServer\(\{ claims, reason: "media_grant" \}/);
+    expect(store.match(/\basServer\(/g)).toHaveLength(9);
   });
 
   it("solo la función única abre y late reproducciones, y la tabla no se toca de otro modo (T-204)", () => {

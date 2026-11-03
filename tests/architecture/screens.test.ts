@@ -270,6 +270,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // El video: solo la función única de medios firma, y corre la guarda. Lo que llega es la
     // lección, nunca un playback id.
     lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId, "review"\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
+    // Devolver: del formulario llegan qué botón, qué curso, qué envío y lo escrito. Abrir no llama a nadie, y lo que no pasa tampoco.
+    returnAction:
+      /if \(request\.step === "ask"\) return \{ kind: "open"[\s\S]*const problems = returnProblems\(request\);[\s\S]*returnOutcome\(await returnCourse\(jar, \{ course, submission, reason, whatToFix \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Lo enviado, por la función única de medios: lo que llega es el curso y la lección, o el recurso.
+    reviewVideoAction: /const answer = reviewVideoAnswerOf\(await getReviewVideoGrant\(jar, courseId, lessonId\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,
+    reviewResourceAction: /downloadOutcome\(await getReviewResourceGrant\(await cookieJar\(\), request\.resource\), request\.javascript, nextAttempt\(previous\)\);/,
   },
   "src/app/admin/_periodos/actions.ts": {
     // Dar el código otra vez: el de los periodos, que comprueba lo reciente con la lista que pide finanzas.

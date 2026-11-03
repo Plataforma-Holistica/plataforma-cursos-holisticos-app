@@ -388,15 +388,15 @@ select throws_ok(format($$update public.course_reviews set content_sha256 = sha2
   '42501', null, 'un envío no cambia su fotografía');
 select throws_ok(format($$update public.course_reviews set result = 'approved' where course_id = %L$$, pruebas.id('curso')),
   '23514', null, 'y no se decide sin quién y cuándo');
-select throws_ok(format($$update public.course_reviews set result = 'rejected', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+select throws_ok(format($$update public.course_reviews set result = 'rejected', what_to_fix = 'Arréglalo.', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'un rechazo sin motivo no se guarda (RF-607)');
-select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = '   ', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+select throws_ok(format($$update public.course_reviews set result = 'rejected', what_to_fix = 'Arréglalo.', reason = '   ', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'ni con un motivo en blanco');
-select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = E'\n\t', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+select throws_ok(format($$update public.course_reviews set result = 'rejected', what_to_fix = 'Arréglalo.', reason = E'\n\t', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'ni con solo saltos de línea y tabuladores');
-select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = U&'\00A0\3000', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+select throws_ok(format($$update public.course_reviews set result = 'rejected', what_to_fix = 'Arréglalo.', reason = U&'\00A0\3000', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'ni con espacios que no se ven');
-select throws_ok(format($$update public.course_reviews set result = 'rejected', reason = U&'\200B', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
+select throws_ok(format($$update public.course_reviews set result = 'rejected', what_to_fix = 'Arréglalo.', reason = U&'\200B', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('curso')),
   '23514', null, 'ni con un carácter de ancho cero');
 select lives_ok(format($$update public.course_reviews set result = 'approved', reviewed_by = %L, reviewed_at = now() where course_id = %L$$, pruebas.p(1), pruebas.id('sinfirma')),
   'de pendiente a decidido, sí');
@@ -432,7 +432,7 @@ select is(private.catalog_in_use('levels', 'a7400000-0000-0000-0002-000000000002
 -- Borrar un curso rechazado que ya se firmó (decisión de Sergio del 2026-11-02): se va el curso y se quedan su envío y su licencia.
 
 select pruebas.como_dueno_sistema();
-update public.course_reviews set result = 'rejected', reviewed_by = pruebas.p(1), reviewed_at = now(), reason = 'Falta audio' where course_id = pruebas.id('curso');
+update public.course_reviews set result = 'rejected', reviewed_by = pruebas.p(1), reviewed_at = now(), reason = 'Falta audio', what_to_fix = 'Graba otra vez.' where course_id = pruebas.id('curso');
 update public.course_registry set state = 'draft', updated_at = now() where course_id = pruebas.id('curso');
 select pruebas.como_dueno();
 select is(pruebas.r(pruebas.p(1), format('private.resource_confirm(%L, %L, true)', pruebas.id('curso'), 'a7400000-0000-0000-0003-000000000003')), 'expired', 'ya devuelto, contesta que venció');
@@ -446,7 +446,7 @@ select is(pruebas.enviar() ->> 'answer', 'submitted', 'y con lo que ve ahora, se
 select is((select max(submission_no) from public.course_reviews where course_id = pruebas.id('curso')), 2, 'como segundo envío');
 select is((select count(*)::integer from public.licenses where course_id = pruebas.id('curso')), 2, 'con su propia licencia');
 select pruebas.como_dueno_sistema();
-update public.course_reviews set result = 'rejected', reviewed_by = pruebas.p(1), reviewed_at = now(), reason = 'Sigue sin audio' where course_id = pruebas.id('curso') and result = 'pending';
+update public.course_reviews set result = 'rejected', reviewed_by = pruebas.p(1), reviewed_at = now(), reason = 'Sigue sin audio', what_to_fix = 'Graba otra vez.' where course_id = pruebas.id('curso') and result = 'pending';
 update public.course_registry set state = 'draft', updated_at = now() where course_id = pruebas.id('curso');
 select pruebas.como_dueno();
 select id as envio from public.course_reviews where course_id = pruebas.id('curso') and submission_no = 1 \gset

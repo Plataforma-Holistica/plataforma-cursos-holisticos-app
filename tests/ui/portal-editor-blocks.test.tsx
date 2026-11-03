@@ -34,6 +34,7 @@ const draft: DraftCourse = {
   contentRevision: 9,
   updatedAt: new Date().toISOString(),
   teacherName: "Ana Ruiz",
+  returned: null,
   resources: [],
   videos: [],
   modules: [
