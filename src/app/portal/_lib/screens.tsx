@@ -5,7 +5,9 @@ import type { VerifiedClaims } from "@/services/account/account";
 import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
 import { DeleteCourseSection } from "../_cursos/remove";
+import { AccountSection, AnnexSection } from "../_cuenta/section";
 import { EditorSection } from "../_editor/section";
+import { SubmitSection } from "../_enviar/section";
 import { TaxDataSection } from "../_fiscal/section";
 
 // Las pantallas del portal del maestro (T-402). Ninguna tiene su propia página: todas las sirve el
@@ -40,11 +42,16 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   if (section === "datos-fiscales") {
     return id === undefined ? { render: ({ claims, readOnly, search }) => <TaxDataSection claims={claims} readOnly={readOnly} search={search} /> } : null;
   }
+  if (section === "cuenta") return id === undefined ? { render: ({ claims, readOnly }) => <AccountSection claims={claims} readOnly={readOnly} /> } : null;
+  if (section === "anexo") {
+    return id !== undefined && ID_SEGMENT.test(id) && page === undefined ? { render: ({ claims, readOnly }) => <AnnexSection claims={claims} document={id} readOnly={readOnly} /> } : null;
+  }
   if (section !== "cursos" || more.length > 0) return null;
   if (id === undefined) return { render: ({ claims, readOnly }) => <CoursesSection claims={claims} readOnly={readOnly} /> };
   if (id === "nuevo") return page === undefined ? { render: ({ readOnly }) => <NewCourseSection readOnly={readOnly} /> } : null;
   if (!ID_SEGMENT.test(id)) return null;
   if (page === undefined) return { render: ({ claims, readOnly, search }) => <EditorSection claims={claims} course={id} readOnly={readOnly} search={search} /> };
   if (page === "borrar") return { render: ({ claims, readOnly }) => <DeleteCourseSection claims={claims} course={id} readOnly={readOnly} /> };
+  if (page === "enviar") return { render: ({ claims, readOnly }) => <SubmitSection claims={claims} course={id} readOnly={readOnly} /> };
   return null;
 }

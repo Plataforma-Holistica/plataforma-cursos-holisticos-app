@@ -59,6 +59,9 @@ const FAILURES = {
   catalog_unavailable: "No se pudieron leer los cursos listados (T-210): el inicio, una ficha de curso o de maestro dijo «algo falló».",
   course_progress_unavailable: "No se pudo leer el avance de una cuenta en un curso (T-210): su ficha se pintó sin el avance.",
   saved_courses_unavailable: "No se pudo leer o cambiar la lista de una cuenta (Mi lista, T-210): su inicio se pintó sin el carrusel, o guardar o quitar dijo «algo falló».",
+  course_submit_unavailable: "Enviar un curso a revisión se quedó sin respuesta, o con una que el servidor no conoce (T-405): no se sabe si quedó enviado, y al maestro se le dijo que revise sus cursos.",
+  submit_video_gone: "Al enviar un curso, su proveedor de video ya no tenía listo un video que la base da por listo (T-405): no se envió, y la fila hay que mirarla a mano (OP-21).",
+  submit_provider_unavailable: "Antes de enviar un curso no se pudo preguntarle a su proveedor de video por algún video vigente (T-405): no se envió.",
   draft_read_unavailable: "No se pudo leer el borrador de un curso, o la lista de cursos de un maestro (T-402): su pantalla dijo «algo falló».",
   draft_change_unavailable:
     "Un cambio al borrador de un curso (T-402) se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó guardado, y la pantalla vuelve a leer el borrador.",

@@ -134,6 +134,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     deleteCourseAction:
       /const outcome = deleteOutcome\(await deleteCourse\(jar, \{ course: request\.course, seen: request\.seen \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/portal/_enviar/actions.ts": {
+    // Enviar a revisión (T-405): el servicio corre la guarda, la casilla y Mux, y la base firma solo lo que se vio. El origen sale de la petición, nunca del formulario.
+    submitCourseAction:
+      /removeResource\(jar, \{ course: request\.course, resource: request\.resource, seen: request\.seen \}\)[\s\S]*submitOutcome\(await submitCourse\(jar, \{ course, annex, seen, term, submission, accepted \}, await requestOrigin\(\)\), back\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
   "src/app/_catalog/resources/actions.ts": {
     // Bajar un recurso (T-404): del formulario solo qué recurso y si hay JavaScript; la puerta de medios corre la guarda y firma.
     downloadResourceAction: /const request = readDownloadForm\(form\);[\s\S]*downloadOutcome\(await getResourceGrant\(await cookieJar\(\), request\.resource\), request\.javascript, nextAttempt\(previous\)\)/,
@@ -809,6 +814,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-editor-leccion",
       "bloque-editor-modulo",
       "bloque-editor-recursos",
+      "bloque-enviar",
       "bloque-equipo-codigo",
       "bloque-equipo-invitaciones",
       "bloque-equipo-invitar",

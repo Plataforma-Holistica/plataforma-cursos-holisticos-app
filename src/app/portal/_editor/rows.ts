@@ -2,7 +2,7 @@ import { resourceDetail, sizeText } from "@/app/_catalog/resources/words";
 import { clockTime, longDate, PRODUCT_TIME_ZONE, productDay } from "@/app/_lib/dates";
 import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
-import { portalCoursePath, ROUTES } from "@/services/account/navigation";
+import { portalCoursePath, ROUTES, portalSubmitPath } from "@/services/account/navigation";
 import type { CourseState, DraftChoices, DraftCourse, DraftVideo } from "@/services/drafts/editor";
 import type { StatusTone } from "@/ui/status-badge";
 
@@ -101,6 +101,8 @@ export interface EditorView {
   editable: boolean;
   /** Por qué no se edita, si el curso ya no es un borrador. */
   notice: string | null;
+  /** PA-44, si se puede enviar desde aquí. */
+  submitHref: string | null;
   /** Si Contenido lo devolvió: arriba de todo (FL-35, paso 3). */
   returned: { title: string; reason: string; whatToFix: string } | null;
   paths: { base: string; self: string };
@@ -172,8 +174,8 @@ function checkVideosEvery(videos: readonly DraftVideo[]): number | null {
   return videos.some((video) => video.state === "uploaded" || (video.state === "ready" && !video.captionsReady)) ? 60 : null;
 }
 
-/** «1 h 20 min», «20 min 34 s». */
-function lengthText(seconds: number | null): string {
+/** «1 h 20 min», «20 min 34 s». También lo usa PA-44. */
+export function lengthText(seconds: number | null): string {
   if (seconds === null) return "";
   const hours = Math.floor(seconds / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
@@ -293,6 +295,7 @@ export function editorView(
     saved: savedLabel(draft.updatedAt, context.now),
     editable: draft.state === "draft" && !context.readOnly,
     notice: key === "draft" ? null : portal.stateDetail[key],
+    submitHref: draft.state === "draft" && !context.readOnly ? portalSubmitPath(draft.id) : null,
     returned:
       draft.returned === null
         ? null

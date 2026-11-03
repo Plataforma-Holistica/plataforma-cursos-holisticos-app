@@ -50,6 +50,10 @@ export interface TeacherCourse {
   draft: DraftReadiness | null;
   /** Si Contenido lo devolvió. */
   returned: ReturnNote | null;
+  /** Cuántas cosas le faltan para enviarse, con la lista de enviar; nulo si no se supo o no es un borrador. */
+  missing: number | null;
+  /** Cuándo se envió, en ISO, si espera revisión. */
+  submittedAt: string | null;
 }
 
 export interface DraftLesson {

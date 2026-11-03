@@ -53,6 +53,8 @@ export const ROUTES = {
   portalNotice: "/portal/aviso",
   /** PA-48, los datos fiscales y bancarios (T-409). */
   portalTaxData: "/portal/datos-fiscales",
+  /** PA-50, lo mínimo: lo que el maestro aceptó (T-405). El texto de una versión, `portalAnnexPath`. */
+  portalAccount: "/portal/cuenta",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -147,6 +149,16 @@ export function portalCoursePath(course: string, selected: { module?: string; le
 /** Confirmar el borrado de un curso; nulo si el id no tiene forma. */
 export function portalDeleteCoursePath(course: string): string | null {
   return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/borrar` : null;
+}
+
+/** PA-44, enviar un curso a revisión (T-405). */
+export function portalSubmitPath(course: string): string | null {
+  return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/enviar` : null;
+}
+
+/** El texto de una versión del anexo de licencia, en el portal: no es un texto público (T-405). */
+export function portalAnnexPath(document: string): string | null {
+  return LESSON_ID.test(document) ? `${ROUTES.portal}/anexo/${document}` : null;
 }
 
 /** PA-81, las liquidaciones de un periodo. */

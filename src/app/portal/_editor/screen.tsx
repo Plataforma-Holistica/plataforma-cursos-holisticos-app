@@ -3,6 +3,7 @@
 import { portal } from "@/messages/es/portal";
 import { ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
+import { Button } from "@/ui/button";
 import { InlineAlert } from "@/ui/inline-alert";
 import { StatusBadge } from "@/ui/status-badge";
 import { cx } from "@/ui/cx";
@@ -35,6 +36,11 @@ export function EditorScreen({ view }: { view: EditorView }) {
             <h1 className="text-h1">{view.title}</h1>
             <StatusBadge tone={view.tone}>{view.state}</StatusBadge>
           </div>
+          {view.submitHref !== null && (
+            <div>
+              <Button href={view.submitHref}>{text.submit}</Button>
+            </div>
+          )}
           <SavedStatus saved={view.saved} />
         </div>
         {view.returned !== null && (

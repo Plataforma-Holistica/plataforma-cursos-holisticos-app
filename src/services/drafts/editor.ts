@@ -1,6 +1,7 @@
 import "server-only";
 
 import { checkSession } from "@/services/account/account";
+import { proxyIsTrusted, resolveOrigin } from "@/services/account/origin";
 import { reportFailure } from "@/services/error-reporting/server";
 
 import { createResourceFiles } from "@/services/media/resource-files";
@@ -9,7 +10,8 @@ import { createVideoProviders } from "@/services/media/video-provider";
 
 import { createDrafts } from "./drafts";
 import { createDraftResources } from "./resources";
-import { databaseDraftsStore, databaseResourcesStore, databaseVideosStore } from "./store";
+import { databaseDraftsStore, databaseResourcesStore, databaseSubmitStore, databaseVideosStore } from "./store";
+import { createSubmit } from "./submit";
 import { createDraftVideos } from "./videos";
 
 // El borrador de los cursos, ya armado con la guarda de sesión, la base y el registro de errores.
@@ -31,6 +33,8 @@ export type {
   TeacherCourse,
 } from "./drafts";
 export type { BeginResult, ConfirmResult, RejectReason } from "./resources";
+export type { AcceptedAnnex, AnnexText, CourseSubmitted, MissingKind, MissingLine, SubmitPreview, SubmitRead } from "./submit";
+export { SUBMIT_ANSWERS } from "./submit";
 export { DRAFT_TEXT_LIMITS, missingItems, parseDraftText } from "./field-rules";
 
 const resources = createDraftResources({ store: databaseResourcesStore, files: createResourceFiles(), checkSession, report: reportFailure });
@@ -62,3 +66,15 @@ export const {
   checkSession,
   report: reportFailure,
 });
+
+export const { submitPreview, acceptedAnnexes, annexText, submitCourse } = createSubmit({
+  store: databaseSubmitStore,
+  providers: createVideoProviders(),
+  checkSession,
+  evidence: (origin) => {
+    const { address, userAgent } = resolveOrigin(origin, proxyIsTrusted());
+    return { address, userAgent };
+  },
+  report: reportFailure,
+});
+
