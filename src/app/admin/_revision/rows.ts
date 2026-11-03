@@ -48,7 +48,8 @@ export interface SubmissionRow {
   annex: string;
   statement: string;
   resources: ResourceItem[];
-  buttons: { ask: string; send: string };
+  /** Abrir devolver, o seguir con este envío si el que se veía cambió. */
+  ask: string;
 }
 
 export interface CourseRow {
@@ -147,7 +148,7 @@ function courseRow(course: ReviewCourse): CourseRow {
             }),
             statement: submission.annex.statement,
             resources: resourceItems(submission.resources),
-            buttons: { ask: returnButton.ask(course.courseId, submission.id), send: returnButton.send(course.courseId, submission.id) },
+            ask: returnButton.ask(course.courseId, submission.id),
           },
   };
 }

@@ -359,6 +359,7 @@ as $$
       ('private.review_resource_object(uuid)', 'actor_has_capability'),
       ('private.review_resource_object(uuid)', 'in_review'),
       ('private.video_preview(uuid, uuid)', 'in_review'),
+      ('private.video_preview(uuid, uuid)', 'actor_has_capability'),
       ('private.course_return_notes()', 'actor_teacher_id')
     ) as b (signature, rule)
   where pg_catalog.strpos(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(b.signature)), b.rule) = 0

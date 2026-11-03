@@ -164,10 +164,30 @@ describe("returnAction", () => {
     expect(calls.order).toEqual([]);
   });
 
-  it("«Cancelar», o un envío vacío, no llama a nadie", async () => {
-    expect(await returnAction(open, pressed(returnButton.cancel()))).toEqual(IDLE);
+  it("«Cancelar» cierra ese curso, y un envío vacío no hace nada: ninguno llama a nadie", async () => {
+    expect(await returnAction(open, pressed(returnButton.cancel(COURSE)))).toEqual({ kind: "closed", course: COURSE });
     expect(await returnAction(open, new FormData())).toEqual(IDLE);
     expect(calls.order).toEqual([]);
+  });
+
+  it("seguir con el envío de ahora no llama a nadie, y lo escrito vuelve", async () => {
+    const newer = "f0000000-0000-4000-8000-000000000002";
+    const data = pressed(returnButton.ask(COURSE, newer));
+    data.append("motivo", "Lo escrito.");
+    expect(await returnAction({ ...open, failure: "changed" }, data)).toEqual({ ...open, submission: newer, reason: "Lo escrito.", failure: null, attempt: 2 });
+    expect(mocks.returnCourse).not.toHaveBeenCalled();
+  });
+
+  it("el aviso con el que se llegó se limpia en todo envío, antes de preguntar: no sale junto a otra respuesta", async () => {
+    once("returnCourse", { kind: "answered", answer: "returned" });
+    await expect(returnAction(open, sending("Motivo.", "Corrige."))).rejects.toThrow("redirige");
+    expect(mocks.clearNotice.mock.invocationCallOrder[0]).toBeLessThan(mocks.returnCourse.mock.invocationCallOrder[0]!);
+    vi.clearAllMocks();
+    await returnAction(open, sending("", ""));
+    expect(mocks.clearNotice).toHaveBeenCalledExactlyOnceWith(jar);
+    vi.clearAllMocks();
+    await returnAction(IDLE, pressed(returnButton.ask(COURSE, SUBMISSION)));
+    expect(mocks.clearNotice).toHaveBeenCalledExactlyOnceWith(jar);
   });
 
   it("sin motivo no se llama al servicio, y lo escrito vuelve", async () => {

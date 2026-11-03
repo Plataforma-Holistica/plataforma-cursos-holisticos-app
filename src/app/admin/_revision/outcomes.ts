@@ -140,8 +140,8 @@ export const RETURN_MAX = REVIEW_NOTE_MAX;
 
 export type ReturnRequest =
   | { step: "none" }
-  | { step: "cancel" }
-  | { step: "ask"; course: string; submission: string }
+  | { step: "cancel"; course: string }
+  | { step: "ask"; course: string; submission: string; reason: string; whatToFix: string }
   | { step: "send"; course: string; submission: string; reason: string; whatToFix: string };
 
 const textField = (form: FormData, name: string): string => {
@@ -149,7 +149,7 @@ const textField = (form: FormData, name: string): string => {
   return typeof value === "string" ? value : "";
 };
 
-/** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. Lo escrito solo se lee al enviar. */
+/** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. Pasar a otro envío también lleva lo escrito: no se pierde. */
 export function readReturnForm(form: unknown): ReturnRequest {
   if (!(form instanceof FormData)) return { step: "none" };
   const pressed = form.getAll("do");
@@ -157,10 +157,12 @@ export function readReturnForm(form: unknown): ReturnRequest {
   if (pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return { step: "none" };
   const [verb, course, submission, ...rest] = only.split(":");
   if (rest.length > 0) return { step: "none" };
-  if (verb === "return_cancel" && course === undefined) return { step: "cancel" };
-  if (course === undefined || submission === undefined || !ID.test(course) || !ID.test(submission)) return { step: "none" };
-  if (verb === "return_ask") return { step: "ask", course, submission };
-  if (verb === "return_send") return { step: "send", course, submission, reason: textField(form, RETURN_REASON_FIELD), whatToFix: textField(form, RETURN_FIX_FIELD) };
+  if (course === undefined || !ID.test(course)) return { step: "none" };
+  if (verb === "return_cancel" && submission === undefined) return { step: "cancel", course };
+  if (submission === undefined || !ID.test(submission)) return { step: "none" };
+  const written = { reason: textField(form, RETURN_REASON_FIELD), whatToFix: textField(form, RETURN_FIX_FIELD) };
+  if (verb === "return_ask") return { step: "ask", course, submission, ...written };
+  if (verb === "return_send") return { step: "send", course, submission, ...written };
   return { step: "none" };
 }
 
@@ -168,7 +170,7 @@ export function readReturnForm(form: unknown): ReturnRequest {
 export const returnButton = {
   ask: (course: string, submission: string) => `return_ask:${course}:${submission}`,
   send: (course: string, submission: string) => `return_send:${course}:${submission}`,
-  cancel: () => "return_cancel",
+  cancel: (course: string) => `return_cancel:${course}`,
 } as const;
 
 export type ReturnProblem = "empty" | "too_long" | "invalid";
@@ -193,7 +195,12 @@ export type ReturnFailure = "not_pending" | "changed" | "self" | "invalid" | "ne
 
 export type ReturnState =
   | { kind: "idle" }
-  /** Se pregunta dentro del curso, con lo escrito: viaja en el estado, porque React devuelve el formulario a sus valores por omisión. */
+  /** Se cerró: el foco vuelve a ese curso. */
+  | { kind: "closed"; course: string }
+  /**
+   * Se pregunta dentro del curso, con lo escrito: viaja en el estado, porque React devuelve el formulario a sus valores por omisión. `submission` es el envío que se está viendo: es el
+   * que se devuelve, y solo cambia cuando quien revisa pide seguir con el de ahora. Así, un envío nuevo nunca recibe un rechazo escrito para otro.
+   */
   | { kind: "open"; course: string; submission: string; reason: string; whatToFix: string; problems: ReturnProblems; failure: ReturnFailure | null; attempt: number };
 
 export type ReturnOutcome = Leave | { kind: "failed"; reason: ReturnFailure };

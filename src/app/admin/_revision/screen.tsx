@@ -67,7 +67,7 @@ const RETURN_FAILURES: Record<ReturnFailure, string> = {
   changed: text.returnChanged,
   self: t(text.returnSelf),
   invalid: text.returnInvalid,
-  needs_code: text.needsCode,
+  needs_code: text.returnNeedsCode,
   unavailable: account.common.unavailable,
   unknown: text.returnUnknown,
 };
@@ -210,10 +210,22 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
   const returnHasProblems = returnOpen !== null && (returnOpen.problems.reason !== null || returnOpen.problems.whatToFix !== null);
   // Si la página ya leyó un código reciente, pedirlo ya no es cierto: lo escrito sigue, listo para enviar.
   const returnFailure = returnOpen === null || returnOpen.failure === null || (returnOpen.failure === "needs_code" && view.canChange) ? null : RETURN_FAILURES[returnOpen.failure];
-  const returnResult = returnPending ? null : returnHasProblems ? text.returnProblems : returnFailure;
-  const { block: returnBlock, answer: returnAnswer, spoken: returnSpoken } = useAnswerFocus(returnPending, returnOpen?.attempt ?? 0, returnResult);
   // Sigue en la cola: se contesta dentro de su tarjeta. Si se fue, arriba de la cola, porque ya no hay dónde.
-  const returnHere = returnOpen !== null && view.teachers.some((teacher) => teacher.courses.some((course) => course.id === returnOpen.course && course.submission !== null));
+  const returnCourse = returning.kind === "idle" ? null : returning.course;
+  const returnRow = returnCourse === null ? undefined : view.teachers.flatMap((teacher) => teacher.courses).find((course) => course.id === returnCourse && course.submission !== null);
+  const returnHere = returnOpen !== null && returnRow !== undefined;
+  // Lo que se dice, en este orden: el curso se fue, el envío que se veía cambió, y lo que contestó el último envío.
+  const returnGone = returnOpen !== null && returnRow === undefined;
+  const returnChanged = returnOpen !== null && returnRow?.submission !== null && returnRow?.submission !== undefined && returnRow.submission.id !== returnOpen.submission;
+  const returnSaid = returnGone && returnOpen.failure !== "unknown" && returnOpen.failure !== "unavailable"
+    ? text.notPending
+    : returnChanged
+      ? text.returnChanged
+      : returnHasProblems
+        ? text.returnProblems
+        : returnFailure;
+  const returnResult = returnPending ? null : returnSaid;
+  const { block: returnBlock, answer: returnAnswer, spoken: returnSpoken } = useAnswerFocus(returnPending, returnOpen?.attempt ?? 0, returnResult);
 
   const status =
     video.kind === "loading" ? text.loading : video.kind === "no_video" ? text.noVideo : video.kind === "failed" ? text.failed : null;
@@ -290,10 +302,25 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
           </div>
         )}
         <BlockResult message={result} tone={tone} pending={queuePending} pendingText={text.working} answer={answer} spoken={spoken} />
-        {returnOpen !== null && !returnHere && (
-          <BlockResult message={returnResult} tone="warning" pending={returnPending} pendingText={text.returnWorking} answer={returnAnswer} spoken={returnSpoken} />
+        {returnGone && (
+          <div className="flex flex-col gap-3">
+            <BlockResult message={returnResult} tone="warning" pending={false} pendingText="" answer={returnAnswer} spoken={returnSpoken} />
+            {(returnOpen.reason !== "" || returnOpen.whatToFix !== "") && (
+              <div className="flex flex-col gap-1">
+                <p className="text-body-s font-semibold">{text.returnWritten}</p>
+                <p className="whitespace-pre-line break-words text-body-s text-text-2">{returnOpen.reason}</p>
+                <p className="whitespace-pre-line break-words text-body-s text-text-2">{returnOpen.whatToFix}</p>
+              </div>
+            )}
+            <form action={sendReturn}>
+              <Button type="submit" name="do" value={returnButton.cancel(returnOpen.course)} variant="secondary" size="md" disabled={returnPending}>
+                {text.returnDismiss}
+              </Button>
+            </form>
+          </div>
         )}
-        <section ref={returnBlock} tabIndex={-1} className="flex flex-col gap-6 outline-none">
+        {/* El foco de «Cerrar este aviso», cuando el curso ya no está. Con el curso en la cola, lo toma su bloque. */}
+        <section ref={returnRow === undefined ? returnBlock : undefined} tabIndex={-1} className="flex flex-col gap-6 outline-none">
         {view.teachers.length === 0 ? (
           <p className="text-text-2">{text.empty}</p>
         ) : (
@@ -315,12 +342,14 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     onWatch={(lesson) => void watch(lesson)}
                     returning={{
                       open: returnOpen?.course === course.id ? returnOpen : null,
+                      lastHere: returnCourse === course.id,
                       // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel.
                       mayOpen: !returnHere,
                       action: sendReturn,
                       pending: returnPending,
                       result: returnResult,
                     }}
+                    returnBlock={returnBlock}
                     returnAnswer={returnAnswer}
                     returnSpoken={returnSpoken}
                   />
@@ -358,11 +387,12 @@ interface CourseProps {
   watching: string | null;
   onWatch: (lesson: LessonRow) => void;
   returning: Returning;
+  returnBlock: RefObject<HTMLElement | null>;
   returnAnswer: RefObject<HTMLDivElement | null>;
   returnSpoken: RefObject<HTMLSpanElement | null>;
 }
 
-function Course({ course, canChange, confirming, answer, action, pending, mounted, watching, onWatch, returning, returnAnswer, returnSpoken }: CourseProps) {
+function Course({ course, canChange, confirming, answer, action, pending, mounted, watching, onWatch, returning, returnBlock, returnAnswer, returnSpoken }: CourseProps) {
   const headingId = `revision-curso-${course.id}`;
   return (
     <li>
@@ -417,7 +447,7 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
         ))}
 
         {course.submission !== null && <Submitted submission={course.submission} />}
-        {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} answer={returnAnswer} spoken={returnSpoken} />}
+        {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} block={returnBlock} answer={returnAnswer} spoken={returnSpoken} />}
         {course.submission === null && canChange && (
           <form action={action} noValidate className="flex flex-col gap-3">
             {confirming ? (
@@ -474,6 +504,8 @@ function Submitted({ submission }: { submission: SubmissionRow }) {
 interface Returning {
   /** Lo abierto, si es este curso. */
   open: Extract<ReturnState, { kind: "open" }> | null;
+  /** Fue este el último curso que se abrió: el foco vuelve aquí al cancelar. */
+  lastHere: boolean;
   mayOpen: boolean;
   action: (form: FormData) => void;
   pending: boolean;
@@ -485,34 +517,37 @@ interface ReturnBlockProps {
   submission: SubmissionRow;
   canChange: boolean;
   returning: Returning;
+  block: RefObject<HTMLElement | null>;
   answer: RefObject<HTMLDivElement | null>;
   spoken: RefObject<HTMLSpanElement | null>;
 }
 
 /**
- * Devolver al maestro, en dos pasos dentro del curso. Se ofrece solo con el código reciente, como aprobar; con algo ya escrito se queda a la vista, para no perderlo. El botón lleva el envío que
- * se ve ahora: si cambió mientras se escribía, la pantalla ya lo dijo, y lo que se devuelve es lo que está a la vista.
+ * Devolver al maestro, en dos pasos dentro del curso. Se ofrece solo con el código reciente, como aprobar; con algo ya escrito se queda a la vista, para no perderlo. Enviar lleva el envío que
+ * se estaba viendo, nunca el de ahora: si cambió, no se ofrece enviar hasta que quien revisa pide seguir con el de ahora.
  */
-function ReturnBlock({ course, submission, canChange, returning, answer, spoken }: ReturnBlockProps) {
-  const { open, action, pending, result } = returning;
+function ReturnBlock({ course, submission, canChange, returning, block, answer, spoken }: ReturnBlockProps) {
+  const { open, action, pending, result, lastHere } = returning;
+  const changed = open !== null && open.submission !== submission.id;
   const fieldId = (name: string) => `revision-devolver-${name}-${course.id}`;
 
   if (open === null && !canChange) return <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>;
-  if (open === null && !returning.mayOpen) return null;
+  if (open === null && !returning.mayOpen) return <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>;
   return (
-    <section aria-label={text.returnTitle} className="flex flex-col gap-3">
+    <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="flex flex-col gap-3 outline-none">
       {open !== null && <BlockResult message={result} tone="warning" pending={pending} pendingText={text.returnWorking} answer={answer} spoken={spoken} />}
       <form action={action} noValidate className="flex flex-col gap-3">
         {open === null ? (
           <div>
-            <Button type="submit" name="do" value={submission.buttons.ask} variant="secondary" size="md" disabled={pending}>
+            <Button type="submit" name="do" value={submission.ask} variant="secondary" size="md" disabled={pending}>
               {t(text.returnOpen)}
               {SPACE}
               <span className="sr-only">{t(text.watchOf, { title: course.title })}</span>
             </Button>
           </div>
         ) : (
-          <div ref={result === null ? answer : undefined} tabIndex={-1} className="flex flex-col gap-3 outline-none">
+          // Con un envío en camino no toma el foco: al llegar la respuesta contaría como que la persona se fue.
+          <div ref={result === null && !pending ? answer : undefined} tabIndex={-1} className="flex flex-col gap-3 outline-none">
             <p className="font-semibold">{text.returnTitle}</p>
             <p className="text-text-2">{t(text.returnBody)}</p>
             <Textarea
@@ -538,10 +573,16 @@ function ReturnBlock({ course, submission, canChange, returning, answer, spoken 
               readOnly={pending}
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" name="do" value={submission.buttons.send} size="md" loading={pending} loadingLabel={text.returnWorking}>
-                {text.returnSend}
-              </Button>
-              <Button type="submit" name="do" value={returnButton.cancel()} variant="secondary" size="md" disabled={pending}>
+              {changed ? (
+                <Button type="submit" name="do" value={submission.ask} size="md" loading={pending} loadingLabel={text.returnWorking}>
+                  {text.returnContinue}
+                </Button>
+              ) : (
+                <Button type="submit" name="do" value={returnButton.send(course.id, open.submission)} size="md" loading={pending} loadingLabel={text.returnWorking}>
+                  {text.returnSend}
+                </Button>
+              )}
+              <Button type="submit" name="do" value={returnButton.cancel(course.id)} variant="secondary" size="md" disabled={pending}>
                 {text.cancel}
               </Button>
             </div>

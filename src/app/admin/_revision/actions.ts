@@ -63,11 +63,11 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
   const request = readReviewForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
-  if (request.step === "ask") return { kind: "confirming", course: request.course, attempt };
-
   const jar = await cookieJar();
   // El aviso con el que se llegó ya se leyó: no vuelve a salir junto a otra respuesta, hablando de otro curso.
   clearNotice(jar);
+  if (request.step === "ask") return { kind: "confirming", course: request.course, attempt };
+
   const outcome = approveOutcome(await approveCourse(jar, { course: request.course }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
@@ -92,17 +92,16 @@ export async function lessonVideoAction(lessonId: unknown): Promise<VideoAnswer>
  */
 export async function returnAction(previous: ReturnState, form: FormData): Promise<ReturnState> {
   const request = readReturnForm(form);
-  if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
+  if (request.step === "none") return { kind: "idle" };
+  if (request.step === "cancel") return { kind: "closed", course: request.course };
   const attempt = nextAttempt(previous);
-  if (request.step === "ask") {
-    return { kind: "open", course: request.course, submission: request.submission, reason: "", whatToFix: "", problems: NO_RETURN_PROBLEMS, failure: null, attempt };
-  }
+  const jar = await cookieJar();
+  clearNotice(jar);
   const { course, submission, reason, whatToFix } = request;
+  if (request.step === "ask") return { kind: "open", course, submission, reason, whatToFix, problems: NO_RETURN_PROBLEMS, failure: null, attempt };
   const problems = returnProblems(request);
   if (problems.reason !== null || problems.whatToFix !== null) return { kind: "open", course, submission, reason, whatToFix, problems, failure: null, attempt };
 
-  const jar = await cookieJar();
-  clearNotice(jar);
   const outcome = returnOutcome(await returnCourse(jar, { course, submission, reason, whatToFix }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();

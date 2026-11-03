@@ -188,7 +188,7 @@ describe("lo enviado por el portal", () => {
   });
 
   it("los botones llevan el curso y el envío que se vio", () => {
-    expect(rowOf(SENT)?.submission?.buttons).toEqual({ ask: `return_ask:${COURSE}:${SUBMISSION}`, send: `return_send:${COURSE}:${SUBMISSION}` });
+    expect(rowOf(SENT)?.submission?.ask).toBe(`return_ask:${COURSE}:${SUBMISSION}`);
   });
 
   it("su video se pide con el curso; el de uno por guion, no", () => {

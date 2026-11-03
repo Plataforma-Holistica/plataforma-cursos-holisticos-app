@@ -116,12 +116,16 @@ describe("devolver: lo que llega", () => {
   };
 
   it("los botones se leen como se arman", () => {
-    expect(readReturnForm(form([["do", returnButton.ask(C, S)]]))).toEqual({ step: "ask", course: C, submission: S });
-    expect(readReturnForm(form([["do", returnButton.cancel()]]))).toEqual({ step: "cancel" });
+    expect(readReturnForm(form([["do", returnButton.ask(C, S)]]))).toEqual({ step: "ask", course: C, submission: S, reason: "", whatToFix: "" });
+    expect(readReturnForm(form([["do", returnButton.cancel(C)]]))).toEqual({ step: "cancel", course: C });
   });
 
   it("enviar lee lo escrito", () => {
     expect(readReturnForm(form([["do", returnButton.send(C, S)], ["motivo", "Uno"], ["que_corregir", "Dos"]]))).toEqual({ step: "send", course: C, submission: S, reason: "Uno", whatToFix: "Dos" });
+  });
+
+  it("seguir con otro envío lleva lo escrito: no se pierde", () => {
+    expect(readReturnForm(form([["do", returnButton.ask(C, S)], ["motivo", "Uno"], ["que_corregir", "Dos"]]))).toEqual({ step: "ask", course: C, submission: S, reason: "Uno", whatToFix: "Dos" });
   });
 
   it("sin los campos, cuentan como vacíos", () => {
@@ -135,6 +139,8 @@ describe("devolver: lo que llega", () => {
     ["sin envío", [["do", `return_ask:${C}`]]],
     ["de más", [["do", `return_ask:${C}:${S}:otro`]]],
     ["otro verbo", [["do", `confirm:${C}:${S}`]]],
+    ["cancelar sin curso", [["do", "return_cancel"]]],
+    ["cancelar con envío", [["do", `return_cancel:${C}:${S}`]]],
   ] as [string, [string, string][]][])("%s: vacío", (_what, entries) => {
     expect(readReturnForm(form(entries))).toEqual({ step: "none" });
   });

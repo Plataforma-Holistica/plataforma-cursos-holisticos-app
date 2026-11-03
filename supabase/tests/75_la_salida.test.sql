@@ -3,7 +3,7 @@
 -- las funciones de la primera solicitud: la aplicación todavía no envía. Pasa con los borradores legales cargados y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(97);
+select plan(99);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7500000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -344,6 +344,16 @@ select is(pruebas.r(pruebas.p(1), format('private.draft_save_course(%L, 2, %L, %
 select pruebas.envio('curso') as primero \gset
 select is(pruebas.enviar(1, 'curso'), 'submitted', 'y reenviar');
 select is(pruebas.nota(pruebas.p(1), 'curso'), null, 'con el reenvío, la nota se va');
+-- Un rechazo seguido de un envío pendiente, con el curso forzado a borrador: la nota mira solo el último.
+select pruebas.como_dueno();
+alter table public.course_registry disable trigger user;
+update public.course_registry set state = 'draft' where course_id = pruebas.id('curso');
+alter table public.course_registry enable trigger user;
+select is(pruebas.nota(pruebas.p(1), 'curso'), null, 'el rechazo de antes no sale si el último está pendiente');
+select pruebas.como_dueno();
+alter table public.course_registry disable trigger user;
+update public.course_registry set state = 'in_review' where course_id = pruebas.id('curso');
+alter table public.course_registry enable trigger user;
 select is(pruebas.de_cola('curso') ->> 'title', 'Respirar mejor', 'y la cola ve lo corregido');
 select is((pruebas.de_cola('curso') -> 'submission' ->> 'number')::integer, 2, 'con su número');
 select is(pruebas.devolver(pruebas.p(3), 'curso', 'Otro.', 'Otra.', :'primero'), 'changed', 'devolver con el envío de antes no vale');
@@ -404,6 +414,11 @@ create or replace function private.review_return(p_course uuid, p_submission uui
 language plpgsql security definer set search_path = '' as $$ begin return private.content_change_gate(); end $$;
 select ok('submission function without its rule actor_owns_teacher' = any(pruebas.vigila()), 'devolver sin «nadie devuelve lo suyo» se nota');
 select :'devolver_antes' \gexec
+select pg_get_functiondef('private.video_preview(uuid, uuid)'::regprocedure) as preview_antes \gset
+create or replace function private.video_preview(p_course uuid, p_lesson uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$ begin return (select pg_catalog.jsonb_build_object('state', 'in_review')); end $$;
+select ok('submission function without its rule actor_has_capability' = any(pruebas.vigila()), 'ver un video sin mirar la capacidad se nota');
+select :'preview_antes' \gexec
 create function private.review_otra() returns void language sql set search_path = '' as $$ select 1 $$;
 select ok('submission function not in the watchdog area' = any(pruebas.vigila()), 'una función nueva de revisar se nota');
 drop function private.review_otra();
