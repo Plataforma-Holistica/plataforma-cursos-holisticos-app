@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     getReviewVideoGrant: logged("getReviewVideoGrant", unavailable),
     getReviewResourceGrant: logged("getReviewResourceGrant", unavailable),
     leaveNotice: logged("leaveNotice", () => undefined),
+    clearNotice: vi.fn(),
     refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
       calls.order.push("redirect");
@@ -35,7 +36,7 @@ vi.mock("@/services/catalog/catalog", () => ({ giveCatalogCode: mocks.giveCatalo
 vi.mock("@/services/review/review", () => ({ approveCourse: mocks.approveCourse, returnCourse: mocks.returnCourse }));
 vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant, getReviewVideoGrant: mocks.getReviewVideoGrant, getReviewResourceGrant: mocks.getReviewResourceGrant }));
 vi.mock("@/services/account/account", () => ({ signOut: vi.fn(), forgetBrowserProofs: vi.fn() }));
-vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
+vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice, clearNotice: mocks.clearNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
@@ -91,6 +92,7 @@ describe("approveAction", () => {
     once("approveCourse", { kind: "answered", answer: "not_pending" });
     expect(await approveAction(IDLE, pressed(reviewButton.confirm(COURSE)))).toEqual({ kind: "failed", reason: "not_pending", attempt: 1 });
     expect(calls.order).toEqual(["approveCourse", "refresh"]);
+    expect(mocks.clearNotice).toHaveBeenCalledExactlyOnceWith(jar);
   });
 
   it("a quien la guarda no dejó, a la página: decide su guarda", async () => {
@@ -185,6 +187,8 @@ describe("returnAction", () => {
     once("returnCourse", { kind: "answered", answer: "changed" });
     expect(await returnAction(open, sending("Motivo.", "Corrige."))).toEqual({ ...open, reason: "Motivo.", whatToFix: "Corrige.", failure: "changed", attempt: 2 });
     expect(calls.order).toEqual(["returnCourse", "refresh"]);
+    // El aviso del envío anterior no sale junto a esta respuesta, hablando de otro curso.
+    expect(mocks.clearNotice).toHaveBeenCalledExactlyOnceWith(jar);
   });
 
   it("del estado anterior solo se lee el intento: qué curso sale del botón", async () => {

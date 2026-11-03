@@ -3,7 +3,7 @@
 -- las funciones de la primera solicitud: la aplicación todavía no envía. Pasa con los borradores legales cargados y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(92);
+select plan(97);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7500000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -268,6 +268,14 @@ select is(pruebas.devolver(pruebas.p(4), 'curso'), 'needs_fresh_code', 'devolver
 select is(pruebas.devolver(pruebas.p(3), 'propio', 'Motivo.', 'Corrección.'), 'returned', 'otra persona con Contenido devuelve el de quien revisa');
 select is(pruebas.enviar(2, 'propio'), 'submitted', 'y vuelve a enviarlo');
 select is(pruebas.devolver(pruebas.p(2), 'propio'), 'self', 'nadie devuelve lo suyo');
+-- Una invitación a su correo cuenta como suyo, también revocada: si no, alguien se devuelve su curso y acepta después.
+select pruebas.como_dueno_sistema();
+insert into private.teacher_invitations (teacher_id, email, created_at, expires_at, revoked_at)
+values (pruebas.m(1), 'salida-3@prueba.test', now(), now() + interval '1 day', now());
+select is(pruebas.devolver(pruebas.p(3), 'segundo'), 'self', 'una invitación de ese maestro a su correo cuenta como suyo');
+select pruebas.como_dueno_sistema();
+delete from private.teacher_invitations where email = 'salida-3@prueba.test';
+select pruebas.como_dueno();
 select is(pruebas.devolver(pruebas.p(3), 'curso', '   '), 'invalid', 'un motivo de solo espacios no vale');
 select is(pruebas.devolver(pruebas.p(3), 'curso', E'\n\n'), 'invalid', 'ni de solo saltos de línea');
 select is(pruebas.devolver(pruebas.p(3), 'curso', null), 'invalid', 'ni sin motivo');
@@ -350,6 +358,24 @@ select pruebas.como_dueno_sistema();
 update public.teachers set status = 'active', suspended_at = null, suspension_reason = null, suspension_notice = null where id = pruebas.m(1);
 select pruebas.como_dueno();
 
+-- Dos estados que hoy no se alcanzan sin forzar la base: las defensas no dependen de que nunca lleguen.
+select pruebas.como_dueno();
+alter table public.course_registry disable trigger user;
+update public.course_registry set state = 'draft' where course_id = pruebas.id('segundo');
+alter table public.course_registry enable trigger user;
+select is(pruebas.devolver(pruebas.p(3), 'segundo'), 'not_pending', 'un envío pendiente con el curso fuera de revisión no se devuelve');
+select is(pruebas.nota(pruebas.p(1), 'segundo'), null, 'y lo pendiente no da nota, aunque el curso esté en borrador');
+select pruebas.como_dueno();
+alter table public.course_registry disable trigger user;
+update public.course_registry set state = 'in_review' where course_id = pruebas.id('segundo');
+update public.course_registry set state = 'published', first_published_at = now() where course_id = pruebas.id('curso');
+alter table public.course_registry enable trigger user;
+select is(pruebas.nota(pruebas.p(1), 'curso'), null, 'un curso que ya no es borrador no da nota, aunque su último envío se haya rechazado');
+select pruebas.como_dueno();
+alter table public.course_registry disable trigger user;
+update public.course_registry set state = 'draft', first_published_at = null where course_id = pruebas.id('curso');
+alter table public.course_registry enable trigger user;
+
 -- Lo devuelto ya no se revisa.
 select is(pruebas.rj(pruebas.p(3), format('private.video_preview(%L, %L)', pruebas.id('curso'), pruebas.id('curso-l'))) ->> 'answer', 'not_found', 'de vuelta en borrador, Contenido ya no ve su video');
 select is(pruebas.objeto_de(pruebas.p(3), 'a7500000-0000-0000-0003-000000000001'), null, 'de vuelta en borrador, Contenido ya no baja sus recursos');
@@ -372,6 +398,12 @@ revoke execute on function private.review_return(uuid, uuid, text, text) from au
 alter table public.course_reviews drop constraint course_reviews_rejection_has_fix;
 select ok('evidence table without constraint course_reviews_rejection_has_fix' = any(pruebas.vigila()), 'un rechazo sin qué corregir se nota');
 alter table public.course_reviews add constraint course_reviews_rejection_has_fix check (result <> 'rejected' or private.draft_text_ok(what_to_fix, 2000, true));
+-- Una función recreada sin su regla, con el mismo nombre y los mismos permisos.
+select pg_get_functiondef('private.review_return(uuid, uuid, text, text)'::regprocedure) as devolver_antes \gset
+create or replace function private.review_return(p_course uuid, p_submission uuid, p_reason text, p_what_to_fix text) returns text
+language plpgsql security definer set search_path = '' as $$ begin return private.content_change_gate(); end $$;
+select ok('submission function without its rule actor_owns_teacher' = any(pruebas.vigila()), 'devolver sin «nadie devuelve lo suyo» se nota');
+select :'devolver_antes' \gexec
 create function private.review_otra() returns void language sql set search_path = '' as $$ select 1 $$;
 select ok('submission function not in the watchdog area' = any(pruebas.vigila()), 'una función nueva de revisar se nota');
 drop function private.review_otra();

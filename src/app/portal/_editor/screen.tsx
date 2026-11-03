@@ -44,7 +44,7 @@ export function EditorScreen({ view }: { view: EditorView }) {
             <span className="block whitespace-pre-line break-words">{view.returned.reason}</span>
             <span className="mt-2 block font-medium">{text.returned.whatToFix}</span>
             <span className="block whitespace-pre-line break-words">{view.returned.whatToFix}</span>
-            <span className="mt-2 block">{text.returned.resend}</span>
+            {view.editable && <span className="mt-2 block">{text.returned.resend}</span>}
           </InlineAlert>
         )}
         {view.notice !== null && <InlineAlert tone="neutral">{view.notice}</InlineAlert>}

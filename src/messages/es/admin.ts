@@ -297,7 +297,8 @@ export const admin = defineMessages({
     annexLine: { one: "Versión {version}, aceptada el {date}, por {years} año.", other: "Versión {version}, aceptada el {date}, por {years} años." },
     courseResources: "Recursos del curso",
     lessonResources: "Recursos de esta lección",
-    approveLater: "Llegó por el portal: publicarlo todavía no está disponible. Lo que sí puedes es devolverlo a su {maestro}.",
+    approveLater: "Llegó por el portal: publicarlo todavía no está disponible.",
+    returnLocked: "Para devolverlo a su {maestro}, escribe tu código, al inicio de esta página.",
 
     // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.
     returnOpen: "Devolver al {maestro}",
@@ -315,7 +316,7 @@ export const admin = defineMessages({
     returnEmptyFix: "Escribe qué corregir.",
     returnTooLong: "Es demasiado largo: el tope es de {max} caracteres.",
     returnInvalid: "Tiene caracteres que no se pueden guardar.",
-    returnChanged: "Ese curso se volvió a enviar mientras escribías: revísalo otra vez. Lo que escribiste sigue aquí.",
+    returnChanged: "Ese curso se volvió a enviar mientras escribías: revísalo otra vez antes de devolverlo. Lo que escribiste sigue aquí.",
     returnSelf: "Ese curso es tuyo como {maestro}: lo devuelve otra persona con Contenido.",
     returnUnknown: "No supimos si el curso quedó devuelto. Revisa la cola antes de intentarlo otra vez.",
   },

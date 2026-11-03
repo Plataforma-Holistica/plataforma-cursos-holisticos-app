@@ -386,6 +386,7 @@ describe("lo enviado por el portal", () => {
     actions.returnAction.mockResolvedValue(answer);
     const shown = show(sent());
     await shown.user.click(screen.getByRole("button", { name: /Devolver/ }));
+    await screen.findByLabelText(/Motivo/);
     return shown;
   };
 
@@ -441,6 +442,38 @@ describe("lo enviado por el portal", () => {
       que_corregir: "Súbela otra vez.",
     });
     expect(await screen.findByText(/se volvió a enviar mientras escribías/)).toBeInTheDocument();
+  });
+
+  it("si el envío cambió mientras se escribía, lo escrito y el aviso se quedan, y el botón lleva el envío de ahora", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "changed", attempt: 2 });
+    const newer = "f0000000-0000-4000-8000-000000000002";
+    const queue = sent();
+    rerender(<ReviewScreen view={reviewView({ ...queue, courses: [{ ...queue.courses[0]!, submission: { ...queue.courses[0]!.submission!, id: newer, number: 3 } }] })} />);
+    expect(screen.getByLabelText(/Motivo/)).toHaveValue("Lo escrito.");
+    expect(screen.getByText(/se volvió a enviar mientras escribías/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sí, devolverlo" })).toHaveValue(`return_send:${COURSE}:${newer}`);
+  });
+
+  it("si el curso se fue de la cola, el aviso sigue, arriba de la cola", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "not_pending", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} />);
+    expect(screen.getByText(/ya no está por revisar/)).toBeInTheDocument();
+  });
+
+  it("con un curso abierto, otro no ofrece devolver: se llevaría lo escrito", async () => {
+    const queue = sent();
+    const other = { ...queue.courses[0]!, courseId: "c0000000-0000-4000-8000-000000000009", title: "Otro", submission: { ...queue.courses[0]!.submission!, id: "f0000000-0000-4000-8000-000000000009" } };
+    actions.returnAction.mockResolvedValue(OPEN);
+    const { user } = show({ ...queue, courses: [queue.courses[0]!, other] });
+    expect(screen.getAllByRole("button", { name: /Devolver/ })).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: /Devolver.*Naturaleza/ }));
+    await screen.findByLabelText(/Motivo/);
+    expect(screen.queryByRole("button", { name: /Devolver.*Otro/ })).not.toBeInTheDocument();
+  });
+
+  it("sin código reciente dice cómo devolver", () => {
+    show(sent(false));
+    expect(screen.getByText(/Para devolverlo a su .*, escribe tu código/)).toBeInTheDocument();
   });
 
   it("«Cancelar» cierra los campos", async () => {

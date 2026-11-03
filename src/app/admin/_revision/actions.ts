@@ -10,6 +10,7 @@ import { checkCode, readGiveCodeForm } from "@/app/(cuenta)/entrar/segundo-facto
 import { downloadOutcome, readDownloadForm, type DownloadState } from "@/app/_catalog/resources/outcomes";
 import { cookieJar } from "@/app/_lib/request-context";
 import { giveCatalogCode } from "@/services/catalog/catalog";
+import { clearNotice } from "@/services/account/notice";
 import { getMediaGrant, getReviewResourceGrant, getReviewVideoGrant } from "@/services/media/media";
 import { approveCourse, returnCourse } from "@/services/review/review";
 
@@ -65,6 +66,8 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
   if (request.step === "ask") return { kind: "confirming", course: request.course, attempt };
 
   const jar = await cookieJar();
+  // El aviso con el que se llegó ya se leyó: no vuelve a salir junto a otra respuesta, hablando de otro curso.
+  clearNotice(jar);
   const outcome = approveOutcome(await approveCourse(jar, { course: request.course }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
@@ -84,7 +87,7 @@ export async function lessonVideoAction(lessonId: unknown): Promise<VideoAnswer>
 }
 
 /**
- * Devolver un curso enviado, en dos pasos, cada curso con su estado. «Devolver» y «Cancelar» no llaman a nadie. Lo que falta o no pasa se dice en su campo, sin llamar al servicio: lo
+ * Devolver un curso enviado, en dos pasos. «Devolver» y «Cancelar» no llaman a nadie. Lo que falta o no pasa se dice en su campo, sin llamar al servicio: lo
  * escrito viaja en el estado. Devuelto, se redirige a esta misma página con el aviso; si no, se vuelve a pedir la página, porque la cola pudo cambiar.
  */
 export async function returnAction(previous: ReturnState, form: FormData): Promise<ReturnState> {
@@ -99,6 +102,7 @@ export async function returnAction(previous: ReturnState, form: FormData): Promi
   if (problems.reason !== null || problems.whatToFix !== null) return { kind: "open", course, submission, reason, whatToFix, problems, failure: null, attempt };
 
   const jar = await cookieJar();
+  clearNotice(jar);
   const outcome = returnOutcome(await returnCourse(jar, { course, submission, reason, whatToFix }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();

@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { createDraftsStore } from "@/services/drafts/store";
-import { readDraftCourse, readTeacherCourses } from "@/services/drafts/records";
+import { readDraftCourse, readReturnNotes, readTeacherCourses } from "@/services/drafts/records";
 import { createReviewStore } from "@/services/review/store";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
@@ -43,6 +43,21 @@ async function inTx<T>(client: Client, work: () => Promise<T>): Promise<T> {
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
+  }
+}
+
+class Rollback extends Error {}
+
+/** Lo que corre aquí se deshace: termina con `throw new Rollback()`. */
+async function inTxUndone(client: Client, work: () => Promise<void>): Promise<void> {
+  await client.query("begin");
+  try {
+    await work();
+    throw new Error("Faltó deshacer.");
+  } catch (error) {
+    if (!(error instanceof Rollback)) throw error;
+  } finally {
+    await client.query("rollback").catch(() => undefined);
   }
 }
 
@@ -192,6 +207,29 @@ describe("la cola, en la lectura estricta de la aplicación", () => {
   });
 });
 
+describe("un recurso de lo enviado", () => {
+  it("Contenido lo baja mientras se revisa, con el objeto sin cambios; sin Contenido, nada", async () => {
+    const { course, lesson } = await sentCourse("Con recurso");
+    const media = mediaStoreOn(owner);
+    const claimsOf = (id: string, session: string) => ({ userId: id, sessionId: session }) as unknown as VerifiedClaims;
+    const resource = randomUUID();
+    await inTxUndone(owner, async () => {
+      const object = (await owner.query<{ id: string }>(
+        "insert into storage.objects (bucket_id, name, version, metadata) values ('course-resources', $1, 'v1', '{}'::jsonb) returning id",
+        [`salida/${resource}`],
+      )).rows[0]!.id;
+      await owner.query(
+        `insert into public.draft_resources (id, course_id, teacher_id, lesson_id, title, kind, mime, storage_path, size_bytes, state, position, object_id, object_version)
+         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'Guía', 'pdf', 'application/pdf', $5::text, 100, 'ready', 1, $6::uuid, 'v1')`,
+        [resource, course, teacherId, lesson, `salida/${resource}`, object],
+      );
+      expect(await media.reviewResourceFile(claimsOf(reviewerProfile, reviewerSession), resource)).toEqual({ path: `salida/${resource}`, mime: "application/pdf", title: "Guía" });
+      expect(await media.reviewResourceFile(claimsOf(otherProfile, randomUUID()), resource)).toBeNull();
+      throw new Rollback();
+    });
+  });
+});
+
 describe("el video de lo enviado", () => {
   it("Contenido lo ve con su propia marca de agua, y quien no es nadie no recibe nada", async () => {
     const { course, lesson } = await sentCourse("Con marca");
@@ -241,7 +279,7 @@ describe("devolver", () => {
         }
       }) as never;
     const teacherStore = createDraftsStore(asServerFor(teacherProfile), asPerson(teacherProfile));
-    await inTx(owner, async () => {
+    await inTxUndone(owner, async () => {
       const list = await teacherStore.teacherCourses(CLAIMS);
       expect(list.find((each) => each.id === course)?.returned).toMatchObject({ reason: "El audio se corta.", whatToFix: "Súbela otra vez." });
       const draft = await teacherStore.draftCourse(CLAIMS, course);
@@ -251,8 +289,15 @@ describe("devolver", () => {
       expect(direct?.returned).toBeNull();
       const listed = await asPersonRead(owner, teacherProfile, (tx) => readTeacherCourses(tx));
       expect(listed.find((each) => each.id === course)?.returned).toBeNull();
-      const stranger = createDraftsStore(asServerFor(otherProfile), asPerson(otherProfile));
-      expect(await stranger.teacherCourses(CLAIMS)).toEqual([]);
+      // Otro maestro de verdad no lee esa nota, ni como el servidor.
+      await asSystem(owner);
+      await owner.query("insert into public.teachers (profile_id, status) values ($1, 'active')", [otherProfile]);
+      await asOwner(owner);
+      await asServer(owner, otherProfile, teacherSession);
+      const hers = await readReturnNotes(txOn(owner));
+      expect(hers.size).toBe(0);
+      await asOwner(owner);
+      throw new Rollback();
     });
   });
 

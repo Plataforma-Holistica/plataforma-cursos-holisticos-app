@@ -199,7 +199,7 @@ export const portal = defineMessages({
   deleteCourse: {
     title: "Borrar el curso",
     body: "Se borra «{title}» con sus módulos y sus lecciones. No se puede deshacer.",
-    keptNote: "Lo que enviaste a revisión y el anexo que aceptaste se conservan como prueba.",
+    keptNote: "Sus archivos también se borran. Los datos de lo que enviaste a revisión y el anexo que aceptaste se conservan como prueba.",
     confirm: "Borrar curso",
     deleting: "Borrando…",
     cancel: "Cancelar",
@@ -227,9 +227,9 @@ export const portal = defineMessages({
   },
   editor: {
     returned: {
-      title: "Este curso volvió de la revisión el {date}",
+      title: "Tu curso fue devuelto el {date}",
       reason: "Motivo",
-      whatToFix: "Qué corregir",
+      whatToFix: "Para corregir",
       resend: "Corrígelo y vuelve a enviarlo.",
     },
     back: "Mis cursos",

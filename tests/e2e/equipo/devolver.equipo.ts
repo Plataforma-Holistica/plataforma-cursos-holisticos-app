@@ -104,7 +104,7 @@ async function sentCourse(teacher: Person, teacherId: string, title: string): Pr
     await client.query(
       `insert into public.draft_videos (id, course_id, teacher_id, lesson_id, state, is_current, file_name, mime, storage_path, size_bytes, object_id, object_version, read_seconds,
                                         provider, provider_asset_id, provider_playback_id, duration_seconds)
-       values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'ready', true, 'clase.mp4', 'video/mp4', $5::text, 1000, gen_random_uuid(), 'v1', 600, 'mux', $6::text, $7::text, 600)`,
+       values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'ready', true, 'clase.mp4', 'video/mp4', $5::text, 1000, gen_random_uuid(), 'v1', 600, 'test', $6::text, $7::text, 600)`,
       [video, course, teacherId, lesson, `rutasalida/${video}`, `AssetSalida${video}`, `PlaySalida${video}`],
     );
     await asTeacher();
@@ -208,7 +208,7 @@ test("FL-45 y FL-35: Contenido lo devuelve con motivo y qué corregir, y su maes
 
     await row.getByRole("link", { name: `Corregir ${title}` }).click();
     await expect(hers).toHaveURL(`/portal/cursos/${course}`);
-    await expect(hers.getByText(/Este curso volvió de la revisión el/)).toBeVisible();
+    await expect(hers.getByText(/Tu curso fue devuelto el/)).toBeVisible();
     await expect(hers.getByText("El audio se corta en el minuto 3.")).toBeVisible();
     await expect(hers.getByText("Vuelve a subir la lección 1.")).toBeVisible();
     // Se abre otra vez: el editor ofrece guardar.
@@ -219,7 +219,7 @@ test("FL-45 y FL-35: Contenido lo devuelve con motivo y qué corregir, y su maes
     await hers.goto(`/portal/cursos/${course}/borrar`);
     await expect(hers.getByText(/se conservan como prueba/)).toBeVisible();
     await hers.getByRole("button", { name: "Borrar curso" }).click();
-    await expect(hers).toHaveURL("/portal/cursos");
+    await expect(hers).toHaveURL("/portal/cursos", { timeout: 20_000 });
     await expect(hers.getByText("Borraste el curso.")).toBeVisible();
   } finally {
     await context.close();

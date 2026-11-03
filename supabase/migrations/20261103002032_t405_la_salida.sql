@@ -333,6 +333,7 @@ as $$
       ('public.course_reviews', 'course_reviews_rejection_has_reason', 'CHECK (((result <> ''rejected''::public.review_result) OR private.draft_text_ok(reason, 2000, true)))'),
       ('public.course_reviews', 'course_reviews_rejection_has_fix', 'CHECK (((result <> ''rejected''::public.review_result) OR private.draft_text_ok(what_to_fix, 2000, true)))'),
       ('public.course_reviews', 'course_reviews_reason_only_if_rejected', 'CHECK (((result = ''rejected''::public.review_result) OR ((reason IS NULL) AND (what_to_fix IS NULL))))'),
+      ('public.course_reviews', 'course_reviews_result_consistent', 'CHECK ((((result = ''pending''::public.review_result) = (reviewed_at IS NULL)) AND ((result = ''pending''::public.review_result) = (reviewed_by IS NULL))))'),
       ('public.course_reviews', 'course_reviews_submission_uq', 'UNIQUE (course_id, submission_no)'),
       ('public.licenses', 'licenses_course_review_id_key', 'UNIQUE (course_review_id)'),
       ('public.licenses', 'licenses_statement_hash_length', 'CHECK ((octet_length(accepted_statement_sha256) = 32))')
@@ -348,6 +349,19 @@ as $$
     select 1 from pg_catalog.pg_indexes i
     where i.schemaname = 'public' and i.indexname = 'course_reviews_one_pending_uq'
       and i.indexdef = 'CREATE UNIQUE INDEX course_reviews_one_pending_uq ON public.course_reviews USING btree (course_id) WHERE (result = ''pending''::public.review_result)')
+  union all
+  -- Las reglas de acceso viven adentro de las funciones: quien recree una sin su regla se nota aquí, sin esperar a una prueba.
+  select 'submission function without its rule ' || b.rule, b.signature
+  from (values
+      ('private.review_queue()', 'actor_has_capability'),
+      ('private.review_return(uuid, uuid, text, text)', 'content_change_gate'),
+      ('private.review_return(uuid, uuid, text, text)', 'actor_owns_teacher'),
+      ('private.review_resource_object(uuid)', 'actor_has_capability'),
+      ('private.review_resource_object(uuid)', 'in_review'),
+      ('private.video_preview(uuid, uuid)', 'in_review'),
+      ('private.course_return_notes()', 'actor_teacher_id')
+    ) as b (signature, rule)
+  where pg_catalog.strpos(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(b.signature)), b.rule) = 0
   union all
   select 'submission function missing', f.signature
   from found f where f.oid is null

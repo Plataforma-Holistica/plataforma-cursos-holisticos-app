@@ -131,6 +131,8 @@ export interface ReviewScreenProps {
 export function ReviewScreen({ view, published = false, returned = false }: ReviewScreenProps) {
   const [code, codeAction, codePending] = useActionState(reviewCodeAction, CODE_IDLE, CODE_PERMALINK);
   const [queue, sendQueue, queuePending] = useActionState(approveAction, QUEUE_IDLE, QUEUE_PERMALINK);
+  // Vive aquí y no en la tarjeta: con la respuesta, el curso puede irse de la cola o traer otro envío, y lo que contestó (y lo escrito) no se va con él.
+  const [returning, sendReturn, returnPending] = useActionState(returnAction, RETURN_IDLE, QUEUE_PERMALINK);
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>({ kind: "none" });
   // Cuál pedido manda: si se pulsa «Ver» en otra lección antes de que conteste el primero, el
@@ -203,6 +205,15 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
         : FAILURES[queue.reason];
   const tone = queue.kind === "failed" && (queue.reason === "unavailable" || queue.reason === "unknown") ? "danger" : "warning";
   const { block, answer, spoken } = useAnswerFocus(queuePending, attempt, result);
+
+  const returnOpen = returning.kind === "open" ? returning : null;
+  const returnHasProblems = returnOpen !== null && (returnOpen.problems.reason !== null || returnOpen.problems.whatToFix !== null);
+  // Si la página ya leyó un código reciente, pedirlo ya no es cierto: lo escrito sigue, listo para enviar.
+  const returnFailure = returnOpen === null || returnOpen.failure === null || (returnOpen.failure === "needs_code" && view.canChange) ? null : RETURN_FAILURES[returnOpen.failure];
+  const returnResult = returnPending ? null : returnHasProblems ? text.returnProblems : returnFailure;
+  const { block: returnBlock, answer: returnAnswer, spoken: returnSpoken } = useAnswerFocus(returnPending, returnOpen?.attempt ?? 0, returnResult);
+  // Sigue en la cola: se contesta dentro de su tarjeta. Si se fue, arriba de la cola, porque ya no hay dónde.
+  const returnHere = returnOpen !== null && view.teachers.some((teacher) => teacher.courses.some((course) => course.id === returnOpen.course && course.submission !== null));
 
   const status =
     video.kind === "loading" ? text.loading : video.kind === "no_video" ? text.noVideo : video.kind === "failed" ? text.failed : null;
@@ -279,6 +290,10 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
           </div>
         )}
         <BlockResult message={result} tone={tone} pending={queuePending} pendingText={text.working} answer={answer} spoken={spoken} />
+        {returnOpen !== null && !returnHere && (
+          <BlockResult message={returnResult} tone="warning" pending={returnPending} pendingText={text.returnWorking} answer={returnAnswer} spoken={returnSpoken} />
+        )}
+        <section ref={returnBlock} tabIndex={-1} className="flex flex-col gap-6 outline-none">
         {view.teachers.length === 0 ? (
           <p className="text-text-2">{text.empty}</p>
         ) : (
@@ -298,12 +313,23 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     mounted={mounted}
                     watching={watchedLesson}
                     onWatch={(lesson) => void watch(lesson)}
+                    returning={{
+                      open: returnOpen?.course === course.id ? returnOpen : null,
+                      // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel.
+                      mayOpen: !returnHere,
+                      action: sendReturn,
+                      pending: returnPending,
+                      result: returnResult,
+                    }}
+                    returnAnswer={returnAnswer}
+                    returnSpoken={returnSpoken}
                   />
                 ))}
               </ol>
             </div>
           ))
         )}
+        </section>
       </section>
 
       <p className="text-body-s">
@@ -331,9 +357,12 @@ interface CourseProps {
   /** La lección que está en el reproductor. */
   watching: string | null;
   onWatch: (lesson: LessonRow) => void;
+  returning: Returning;
+  returnAnswer: RefObject<HTMLDivElement | null>;
+  returnSpoken: RefObject<HTMLSpanElement | null>;
 }
 
-function Course({ course, canChange, confirming, answer, action, pending, mounted, watching, onWatch }: CourseProps) {
+function Course({ course, canChange, confirming, answer, action, pending, mounted, watching, onWatch, returning, returnAnswer, returnSpoken }: CourseProps) {
   const headingId = `revision-curso-${course.id}`;
   return (
     <li>
@@ -388,7 +417,7 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
         ))}
 
         {course.submission !== null && <Submitted submission={course.submission} />}
-        {course.submission !== null && <ReturnBlock key={course.submission.id} course={course} submission={course.submission} canChange={canChange} />}
+        {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} answer={returnAnswer} spoken={returnSpoken} />}
         {course.submission === null && canChange && (
           <form action={action} noValidate className="flex flex-col gap-3">
             {confirming ? (
@@ -436,29 +465,43 @@ function Submitted({ submission }: { submission: SubmissionRow }) {
         <p className="text-body-s text-text-2">{submission.annex}</p>
         <p className="break-words text-body-s text-text-2">{submission.statement}</p>
       </section>
-      <p className="text-body-s text-text-2">{t(text.approveLater)}</p>
+      <p className="text-body-s text-text-2">{text.approveLater}</p>
     </>
   );
 }
 
+/** Lo que el bloque de devolver de una tarjeta recibe de la pantalla, que es donde vive su estado. */
+interface Returning {
+  /** Lo abierto, si es este curso. */
+  open: Extract<ReturnState, { kind: "open" }> | null;
+  mayOpen: boolean;
+  action: (form: FormData) => void;
+  pending: boolean;
+  result: string | null;
+}
+
+interface ReturnBlockProps {
+  course: CourseRow;
+  submission: SubmissionRow;
+  canChange: boolean;
+  returning: Returning;
+  answer: RefObject<HTMLDivElement | null>;
+  spoken: RefObject<HTMLSpanElement | null>;
+}
+
 /**
- * Devolver al maestro, en dos pasos dentro del curso, con su propio estado: lo escrito en un curso no se mezcla con otro, y sobrevive a que su código deje de ser reciente. Se ofrece solo
- * con el código reciente, como aprobar; con algo ya escrito se queda a la vista, para no perderlo.
+ * Devolver al maestro, en dos pasos dentro del curso. Se ofrece solo con el código reciente, como aprobar; con algo ya escrito se queda a la vista, para no perderlo. El botón lleva el envío que
+ * se ve ahora: si cambió mientras se escribía, la pantalla ya lo dijo, y lo que se devuelve es lo que está a la vista.
  */
-function ReturnBlock({ course, submission, canChange }: { course: CourseRow; submission: SubmissionRow; canChange: boolean }) {
-  const [state, action, pending] = useActionState(returnAction, RETURN_IDLE, QUEUE_PERMALINK);
-  const attempt = state.kind === "idle" ? 0 : state.attempt;
-  const open = state.kind === "open" ? state : null;
-  const hasProblems = open !== null && (open.problems.reason !== null || open.problems.whatToFix !== null);
-  const failure = open === null || open.failure === null || (open.failure === "needs_code" && canChange) ? null : RETURN_FAILURES[open.failure];
-  const result = pending ? null : hasProblems ? text.returnProblems : failure;
-  const { block, answer, spoken } = useAnswerFocus(pending, attempt, result);
+function ReturnBlock({ course, submission, canChange, returning, answer, spoken }: ReturnBlockProps) {
+  const { open, action, pending, result } = returning;
   const fieldId = (name: string) => `revision-devolver-${name}-${course.id}`;
 
-  if (open === null && !canChange) return null;
+  if (open === null && !canChange) return <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>;
+  if (open === null && !returning.mayOpen) return null;
   return (
-    <section ref={block} tabIndex={-1} aria-label={text.returnTitle} className="flex flex-col gap-3 outline-none">
-      <BlockResult message={result} tone="warning" pending={pending} pendingText={text.returnWorking} answer={answer} spoken={spoken} />
+    <section aria-label={text.returnTitle} className="flex flex-col gap-3">
+      {open !== null && <BlockResult message={result} tone="warning" pending={pending} pendingText={text.returnWorking} answer={answer} spoken={spoken} />}
       <form action={action} noValidate className="flex flex-col gap-3">
         {open === null ? (
           <div>

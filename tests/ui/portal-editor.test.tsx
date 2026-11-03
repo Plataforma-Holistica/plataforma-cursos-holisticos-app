@@ -210,7 +210,8 @@ describe("PA-43 · El editor de curso", () => {
   it("uno que Contenido devolvió dice por qué, arriba, y se puede corregir", async () => {
     mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { ...draft, returned: { reason: "El audio se corta.", whatToFix: "Vuelve a subir la lección 1.", returnedAt: "2026-11-02T18:00:00.000Z" } } });
     const { container } = render(await at());
-    expect(screen.getByText(/^Este curso volvió de la revisión el /)).toBeTruthy();
+    expect(screen.getByText(/^Tu curso fue devuelto el /)).toBeTruthy();
+    expect(screen.getByText("Corrígelo y vuelve a enviarlo.")).toBeTruthy();
     expect(screen.getByText("El audio se corta.")).toBeTruthy();
     expect(screen.getByText("Vuelve a subir la lección 1.")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Guardar" }).length).toBeGreaterThan(0);
@@ -219,7 +220,7 @@ describe("PA-43 · El editor de curso", () => {
 
   it("uno sin devolver no dice nada de eso", async () => {
     render(await at());
-    expect(screen.queryByText(/^Este curso volvió de la revisión/)).toBeNull();
+    expect(screen.queryByText(/^Tu curso fue devuelto/)).toBeNull();
   });
 
   it("un curso en revisión se ve en solo lectura y lo dice", async () => {
