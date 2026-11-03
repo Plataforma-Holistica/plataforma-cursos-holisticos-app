@@ -10,7 +10,7 @@ import { a11yViolations } from "../support/a11y";
 import { clearCounters, lastMailTo, ownerQuery, person, testEmail, tokenHashIn, type Person } from "../support/stack";
 
 // Devolver un curso enviado, de extremo a extremo (T-405, segunda solicitud; RF-607, RF-701, FL-35, FL-45), con JavaScript y sin él: Contenido lo ve en la cola con su anexo aceptado, un
-// motivo vacío no se guarda, y su maestro lee por qué, puede corregir y puede borrar. El envío se fuerza aquí con las funciones de la base: la aplicación todavía no envía. Deja residuo:
+// motivo vacío no se guarda, y su maestro lee por qué, puede corregir y puede borrar. El envío se fuerza aquí con las funciones de la base (enviar desde el portal lo prueba enviar.equipo.ts). Deja residuo:
 // `pnpm test:e2e:equipo` rehace la base al terminar. Un código no se da dos veces, así que los casos van en serie.
 
 test.beforeEach(clearCounters);
@@ -171,9 +171,9 @@ test("FL-45 y FL-35: Contenido lo devuelve con motivo y qué corregir, y su maes
   await expect(card.getByText("Un resumen del curso.")).toBeVisible();
   await expect(card.getByText("Anexo aceptado")).toBeVisible();
   await expect(card.getByText(/^Acepto el anexo de licencia, .*«Curso para devolver»/)).toBeVisible();
-  // Publicarlo todavía no se ofrece, y se dice. Tampoco un botón que contestaría «le falta su práctica».
-  await expect(card.getByRole("button", { name: /Aprobar y publicar/ })).toHaveCount(0);
-  await expect(card.getByText(/publicarlo todavía no está disponible/)).toBeVisible();
+  // Desde la cuarta solicitud también se aprueba (lo prueba publicar.equipo.ts), y dice qué espera sus subtítulos: el video de prueba de aquí todavía no los tiene.
+  await expect(card.getByRole("button", { name: /Aprobar y publicar/ })).toBeVisible();
+  await expect(card.getByText(/^Sin subtítulos confirmados: «Primera lección»/)).toBeVisible();
   // Nada de la fotografía que no sea para la pantalla, ni del origen de la aceptación, en todo el documento.
   const served = await page.content();
   for (const secret of ["PlaySalida", "AssetSalida", "rutasalida", "203.0.113.7", "NavegadorSalida"]) expect(served).not.toContain(secret);

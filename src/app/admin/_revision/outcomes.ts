@@ -2,7 +2,7 @@ import type { CatalogCode } from "@/services/catalog/catalog";
 import { ROUTES } from "@/services/account/navigation";
 import { parseReviewNote, REVIEW_NOTE_MAX } from "@/services/drafts/field-rules";
 import type { ReviewGrant, ReviewVideoGrant } from "@/services/media/media";
-import type { CourseApproved, CourseReturned } from "@/services/review/review";
+import type { CourseApproved, CourseReturned, SubmissionApproved } from "@/services/review/review";
 
 import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
 
@@ -45,7 +45,12 @@ export function reviewCodeOutcome(result: CatalogCode): CodeOutcome {
 // ---------------------------------------------------------------------------------------
 // Aprobar: lo que llega.
 
-export type ReviewRequest = { step: "none" } | { step: "cancel" } | { step: "ask"; course: string } | { step: "confirm"; course: string };
+/** `submission`: el envío que se vio, en lo enviado por el editor (T-405). Un curso por guion no lo lleva. */
+export type ReviewRequest =
+  | { step: "none" }
+  | { step: "cancel" }
+  | { step: "ask"; course: string; submission?: string }
+  | { step: "confirm"; course: string; submission?: string };
 
 /** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. */
 export function readReviewForm(form: unknown): ReviewRequest {
@@ -54,19 +59,21 @@ export function readReviewForm(form: unknown): ReviewRequest {
   const pressed = form.getAll("do");
   const [only] = pressed;
   if (pressed.length !== 1 || typeof only !== "string" || only === "" || only.length > MAX_INTENT) return { step: "none" };
-  const [verb, course, ...rest] = only.split(":");
+  const [verb, course, submission, ...rest] = only.split(":");
   if (rest.length > 0) return { step: "none" };
   if (verb === "cancel" && course === undefined) return { step: "cancel" };
   if (course === undefined || !ID.test(course)) return { step: "none" };
-  if (verb === "ask") return { step: "ask", course };
-  if (verb === "confirm") return { step: "confirm", course };
+  if (submission !== undefined && !ID.test(submission)) return { step: "none" };
+  const seen = submission === undefined ? {} : { submission };
+  if (verb === "ask") return { step: "ask", course, ...seen };
+  if (verb === "confirm") return { step: "confirm", course, ...seen };
   return { step: "none" };
 }
 
 /** Los valores de los botones. Los arma esta tabla y los lee `readReviewForm`. */
 export const reviewButton = {
-  ask: (course: string) => `ask:${course}`,
-  confirm: (course: string) => `confirm:${course}`,
+  ask: (course: string, submission?: string) => (submission === undefined ? `ask:${course}` : `ask:${course}:${submission}`),
+  confirm: (course: string, submission?: string) => (submission === undefined ? `confirm:${course}` : `confirm:${course}:${submission}`),
   cancel: () => "cancel",
 } as const;
 
@@ -80,6 +87,13 @@ export type ReviewFailure =
   | "practice_inactive"
   | "level_inactive"
   | "videos_not_ready"
+  // Lo enviado por el editor (T-405).
+  | "changed"
+  | "teacher_suspended"
+  | "annex_draft"
+  | "files_changed"
+  | "captions_pending"
+  | "video_gone"
   | "needs_code"
   | "unavailable"
   | "unknown";
@@ -88,10 +102,12 @@ export type ReviewFailure =
 export type ReviewState =
   | { kind: "idle" }
   /** El primer paso: se pregunta en el bloque del curso, sin haber llamado a nadie. */
-  | { kind: "confirming"; course: string; attempt: number }
-  | { kind: "failed"; reason: ReviewFailure; attempt: number };
+  /** `submission`: el envío que se vio al preguntar. Es el que se aprueba: si llegó otro, la base contesta `changed`. */
+  | { kind: "confirming"; course: string; submission: string | null; attempt: number }
+  /** `lessons`: las de un video que su proveedor ya no tiene listo (`video_gone`). */
+  | { kind: "failed"; reason: ReviewFailure; lessons?: string[]; attempt: number };
 
-export type ApproveOutcome = Leave | { kind: "failed"; reason: ReviewFailure };
+export type ApproveOutcome = Leave | { kind: "failed"; reason: ReviewFailure; lessons?: string[] };
 
 /** Lo que contestó aprobar. */
 export function approveOutcome(result: CourseApproved): ApproveOutcome {
@@ -126,6 +142,45 @@ export function approveOutcome(result: CourseApproved): ApproveOutcome {
           return { kind: "failed", reason: "level_inactive" };
         case "videos_not_ready":
           return { kind: "failed", reason: "videos_not_ready" };
+      }
+  }
+}
+
+/** Lo que contestó aprobar lo enviado por el editor (T-405). */
+export function approveSubmissionOutcome(result: SubmissionApproved): ApproveOutcome {
+  switch (result.kind) {
+    case "refused":
+      return TO_PAGE;
+    case "unavailable":
+      return { kind: "failed", reason: "unavailable" };
+    case "unknown":
+      return { kind: "failed", reason: "unknown" };
+    case "malformed":
+      return { kind: "failed", reason: "not_pending" };
+    case "video_not_ready":
+      return { kind: "failed", reason: "video_gone", lessons: result.lessons };
+    case "answered":
+      switch (result.answer) {
+        case "approved":
+          return APPROVED;
+        case "forbidden":
+          return TO_PAGE;
+        case "needs_fresh_code":
+          return { kind: "failed", reason: "needs_code" };
+        case "not_found":
+        case "not_pending":
+          return { kind: "failed", reason: "not_pending" };
+        case "unavailable":
+          return { kind: "failed", reason: "unavailable" };
+        case "changed":
+        case "self":
+        case "teacher_suspended":
+        case "annex_draft":
+        case "practice_inactive":
+        case "level_inactive":
+        case "files_changed":
+        case "captions_pending":
+          return { kind: "failed", reason: result.answer };
       }
   }
 }

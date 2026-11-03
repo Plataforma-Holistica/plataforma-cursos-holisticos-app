@@ -290,6 +290,14 @@ export const admin = defineMessages({
     videosNotReady: "Alguna lección de ese curso tiene un video que no está listo: todavía no se puede publicar.",
     needsCode: "Tu código ya no es reciente. Escríbelo otra vez, al inicio de esta página, y repite.",
     unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
+    // Lo enviado por el editor (T-405, cuarta solicitud).
+    changed: "Ese curso se volvió a enviar mientras lo revisabas: lo de arriba ya es el envío nuevo. Revísalo antes de aprobarlo.",
+    teacherSuspended: "El {maestro} de ese curso está suspendido o ya no está en la plataforma: no se publica. Se queda en revisión; si no va a volver, devuélvelo.",
+    annexDraft: "El anexo que se aceptó es un borrador sin validez: fuera de una prueba local no se publica.",
+    filesChanged: "Un archivo de ese curso cambió por fuera después de enviarse: no se publica. La tarjeta dice cuál; devuélvelo para que su {maestro} lo vuelva a subir.",
+    captionsPending: "Mux todavía no tiene subtítulos de alguna lección de ese curso: no se publica sin ellos. Inténtalo más tarde; si no llegan, devuélvelo.",
+    videoGone: "Mux ya no tiene listo el video de {lessons}: no se publica. Devuélvelo para que su {maestro} lo vuelva a subir.",
+    oneLesson: "una lección",
 
     // Lo enviado por el portal (T-405): PA-62 con lo que hace falta.
     submitted: "Enviado el {date}. Envío número {number}.",
@@ -297,12 +305,15 @@ export const admin = defineMessages({
     annexLine: { one: "Versión {version}, aceptada el {date}, por {years} año.", other: "Versión {version}, aceptada el {date}, por {years} años." },
     courseResources: "Recursos del curso",
     lessonResources: "Recursos de esta lección",
-    approveLater: "Llegó por el portal: publicarlo todavía no está disponible.",
+    captionsWaiting: "Sin subtítulos confirmados: {lessons}. Al aprobar se le pregunta a Mux; sin ellos no se publica.",
+    filesWaiting: "Cambió por fuera después de enviarse: {files}. Así no se publica: devuélvelo para que su {maestro} vuelva a subir ese archivo.",
     returnLocked: "Para devolverlo a su {maestro}, escribe tu código, al inicio de esta página.",
 
     // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.
     returnOpen: "Devolver al {maestro}",
     returnTitle: "Devolver este curso",
+    // El nombre del bloque, con su curso: con varios enviados en la cola, dos regiones con el mismo nombre no se distinguen.
+    returnRegion: "Devolver «{title}»",
     returnBody: "Vuelve a borrador y su {maestro} lee lo que escribas en el portal. Todavía no se le manda un correo: avísale por fuera.",
     returnReason: "Motivo",
     returnReasonHint: "Qué encontraste y en qué lección.",

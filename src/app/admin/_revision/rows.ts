@@ -48,6 +48,10 @@ export interface SubmissionRow {
   annex: string;
   statement: string;
   resources: ResourceItem[];
+  /** Las lecciones sin subtítulos confirmados, en una frase; nulo si ninguna (RF-310). */
+  captions: string | null;
+  /** Lo que cambió por fuera después de enviarse, en una frase; nulo si nada. */
+  files: string | null;
   /** Abrir devolver, o seguir con este envío si el que se veía cambió. */
   ask: string;
 }
@@ -63,7 +67,7 @@ export interface CourseRow {
   /** Lo que la confirmación dice de más: que también se lista la ficha del maestro. */
   firstOfTeacher: string | null;
   buttons: { ask: string; confirm: string };
-  /** Lo enviado por el editor; nulo en un curso por guion. Aprobarlo llega con la cuarta solicitud de T-405: hasta entonces solo se devuelve. */
+  /** Lo enviado por el editor; nulo en un curso por guion. Aprobarlo lleva el envío que se vio (T-405). */
   submission: SubmissionRow | null;
 }
 
@@ -135,7 +139,7 @@ function courseRow(course: ReviewCourse): CourseRow {
         : t(text.submitted, { date: longDate(course.loadedAt), number: String(submission.number) }),
     modules,
     firstOfTeacher: course.teacherListed ? null : t(text.confirmFirst, { teacher: course.teacherName }),
-    buttons: { ask: reviewButton.ask(course.courseId), confirm: reviewButton.confirm(course.courseId) },
+    buttons: { ask: reviewButton.ask(course.courseId, submission?.id), confirm: reviewButton.confirm(course.courseId, submission?.id) },
     submission:
       submission === null
         ? null
@@ -148,6 +152,13 @@ function courseRow(course: ReviewCourse): CourseRow {
             }),
             statement: submission.annex.statement,
             resources: resourceItems(submission.resources),
+            captions:
+              submission.captionsMissing.length === 0
+                ? null
+                : t(text.captionsWaiting, {
+                    lessons: submission.captionsMissing.map((id) => `«${course.lessons.find((lesson) => lesson.lessonId === id)?.title ?? ""}»`).join(", "),
+                  }),
+            files: submission.filesChanged.length === 0 ? null : t(text.filesWaiting, { files: submission.filesChanged.map((title) => `«${title}»`).join(", ") }),
             ask: returnButton.ask(course.courseId, submission.id),
           },
   };

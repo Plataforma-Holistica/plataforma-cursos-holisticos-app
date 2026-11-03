@@ -36,7 +36,7 @@ describe("enviar pasa por un solo camino", () => {
     const service = codeOf("src/services/drafts/submit.ts");
     const accepted = service.indexOf("if (input.accepted !== true)");
     const assets = service.indexOf("deps.store.assets(");
-    const ready = service.indexOf("await videosNotReady(");
+    const ready = service.indexOf("await checkAssets(");
     const submit = service.indexOf("deps.store.submit(");
     expect(accepted).toBeGreaterThan(0);
     expect(accepted).toBeLessThan(assets);

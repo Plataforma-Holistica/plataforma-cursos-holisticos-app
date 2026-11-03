@@ -311,7 +311,7 @@ describe("reproducir", () => {
 
 describe("aprobar", () => {
   it("en dos pasos: preguntar dice qué va a pasar y toma el foco; confirmar manda ese curso", async () => {
-    const confirming: ReviewState = { kind: "confirming", course: COURSE, attempt: 1 };
+    const confirming: ReviewState = { kind: "confirming", course: COURSE, submission: null, attempt: 1 };
     // Aprobado, la acción redirige: mientras tanto no contesta. Se suelta al final, porque una
     // acción que nunca termina deja enredadas las transiciones de las pruebas siguientes.
     let release: (value: unknown) => void = () => undefined;
@@ -376,6 +376,8 @@ describe("lo enviado por el portal", () => {
             number: 2,
             resources: [],
             annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo de licencia para el curso «Naturaleza».", termYears: 10 },
+            captionsMissing: [],
+      filesChanged: [],
           },
         },
       ],
@@ -399,10 +401,34 @@ describe("lo enviado por el portal", () => {
     expect(screen.getByText("Acepto el anexo de licencia para el curso «Naturaleza».")).toBeInTheDocument();
   });
 
-  it("aprobar no se ofrece, y lo dice: publicar lo enviado llega después", () => {
-    show(sent());
-    expect(screen.queryByRole("button", { name: /Aprobar y publicar/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/publicarlo todavía no está disponible/)).toBeInTheDocument();
+  it("aprobar lo enviado lleva el envío que se vio, y confirmar manda ese aunque la cola traiga otro (T-405)", async () => {
+    actions.approveAction.mockResolvedValueOnce({ kind: "confirming", course: COURSE, submission: SUBMISSION, attempt: 1 });
+    const { user, rerender } = show(sent());
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    expect(formOf(0)).toEqual({ do: `ask:${COURSE}:${SUBMISSION}` });
+    await screen.findByText("¿Aprobar y publicar este curso?");
+    // Llega otro envío del mismo curso: el «Sí» sigue siendo el del que se vio, y la base contesta `changed`.
+    const other = sent();
+    other.courses[0] = { ...other.courses[0]!, submission: { ...other.courses[0]!.submission!, id: "f0000000-0000-4000-8000-000000000009", number: 3 } };
+    rerender(<ReviewScreen view={reviewView(other)} />);
+    actions.approveAction.mockResolvedValueOnce({ kind: "failed", reason: "changed", attempt: 2 });
+    await user.click(screen.getByRole("button", { name: "Sí, aprobar y publicar" }));
+    expect(formOf(1)).toEqual({ do: `confirm:${COURSE}:${SUBMISSION}` });
+    expect(await screen.findByText(/se volvió a enviar mientras lo revisabas/)).toBeVisible();
+  });
+
+  it("dice qué lecciones esperan sus subtítulos", () => {
+    const waiting = sent();
+    waiting.courses[0] = { ...waiting.courses[0]!, submission: { ...waiting.courses[0]!.submission!, captionsMissing: [waiting.courses[0]!.lessons[0]!.lessonId] } };
+    show(waiting);
+    expect(screen.getByText("Sin subtítulos confirmados: «El bosque». Al aprobar se le pregunta a Mux; sin ellos no se publica.")).toBeInTheDocument();
+  });
+
+  it("un video que su proveedor ya no tiene: dice cuál lección, por su título", async () => {
+    actions.approveAction.mockResolvedValueOnce({ kind: "failed", reason: "video_gone", lessons: [sent().courses[0]!.lessons[0]!.lessonId], attempt: 1 });
+    const { user } = show(sent());
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    expect(await screen.findByText(/^Mux ya no tiene listo el video de «El bosque»/)).toBeVisible();
   });
 
   it("uno por guion no ofrece devolver", () => {
@@ -536,7 +562,7 @@ describe("lo enviado por el portal", () => {
     const { user } = await openIt();
     actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Devolver este curso"));
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Devolver «Naturaleza»"));
   });
 
   it("con un curso abierto, otro no ofrece devolver: se llevaría lo escrito", async () => {

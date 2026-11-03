@@ -7,7 +7,7 @@ import type { SessionCheck } from "@/services/account/admission";
 import type { RequestOrigin } from "@/services/account/origin";
 import type { ConsentEvidence } from "@/services/account/records";
 import type { FailureCode } from "@/services/error-reporting/server";
-import type { VideoProviders } from "@/services/media/video-provider";
+import { checkAssets, type VideoProviders } from "@/services/media/video-provider";
 
 // Enviar un curso a revisión desde el portal (RF-606, FL-34; PA-44, T-405). La base decide todo lo que importa (`course_submit`): qué falta, qué anexo vale, que lo que se
 // firma sea lo que se vio, y los candados. Aquí se decide a quién se le pregunta qué y en qué orden:
@@ -129,8 +129,6 @@ export type CourseSubmitted =
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
-/** Cuántos videos se le preguntan a la vez a su proveedor. */
-const PROVIDER_BATCH = 4;
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 
 export function createSubmit(deps: SubmitDeps) {
@@ -160,30 +158,6 @@ export function createSubmit(deps: SubmitDeps) {
     return read(() => deps.store.annex(claims, document));
   }
 
-  /**
-   * Las lecciones cuyo video vigente su proveedor ya no tiene listo con la reproducción que se firma, o nulo si no se supo. Lo del proveedor de prueba contesta listo. Un proveedor
-   * con el que esta instalación no habla cuenta como «no se supo»: no se firma a ciegas. Se pregunta de cuatro en cuatro: una ráfaga por curso grande chocaría con el límite de
-   * peticiones de Mux, y el adaptador corta cada pregunta a los 10 s.
-   */
-  async function videosNotReady(assets: Extract<SubmitAssets, { kind: "ok" }>["assets"]): Promise<string[] | null> {
-    const answers: (string | null)[] = [];
-    for (let start = 0; start < assets.length; start += PROVIDER_BATCH) {
-      answers.push(
-        ...(await Promise.all(
-      assets.slice(start, start + PROVIDER_BATCH).map(async (each) => {
-        const provider = deps.providers.of(each.provider);
-        if (provider === null || each.asset === null) return null;
-        const read = await provider.read(each.asset);
-        if (read === null) return null;
-        return read !== "gone" && read.state === "ready" && read.playback !== null && read.playback === each.playback ? "ok" : each.lesson;
-      }),
-        )),
-      );
-    }
-    if (answers.some((answer) => answer === null)) return null;
-    return answers.filter((answer): answer is string => answer !== "ok" && answer !== null);
-  }
-
   /** Enviar (FL-34, pasos 4 a 6). Lleva lo que se vio y la casilla; el origen sale de la petición. */
   async function submitCourse(
     reader: CookieReader,
@@ -208,12 +182,12 @@ export function createSubmit(deps: SubmitDeps) {
       return { kind: "unavailable" };
     }
     if (assets.kind !== "ok") return { kind: assets.kind };
-    let notReady: string[] | null;
-    try {
-      notReady = await videosNotReady(assets.assets);
-    } catch {
-      notReady = null;
-    }
+    // Cada video vigente, con la reproducción que se firma. Lo que no se supo no se firma a ciegas: un video que ya no existe se licenciaría sin que nadie lo pueda ver.
+    const checked = await checkAssets(
+      deps.providers,
+      assets.assets.map((each) => ({ key: each.lesson, provider: each.provider, asset: each.asset, playback: each.playback })),
+    );
+    const notReady = checked?.notReady ?? null;
     if (notReady === null) {
       await deps.report("submit_provider_unavailable");
       return { kind: "unavailable" };

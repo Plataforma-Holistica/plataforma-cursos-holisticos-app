@@ -20,7 +20,7 @@ import type { PlayerProps } from "@/app/_video/player";
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
 import { approveAction, lessonVideoAction, returnAction, reviewCodeAction, reviewResourceAction, reviewVideoAction } from "./actions";
-import { RETURN_FIX_FIELD, RETURN_MAX, RETURN_REASON_FIELD, returnButton, type CodeState, type ReturnFailure, type ReturnProblem, type ReturnState, type ReviewFailure, type ReviewState, type VideoAnswer } from "./outcomes";
+import { RETURN_FIX_FIELD, RETURN_MAX, RETURN_REASON_FIELD, returnButton, reviewButton, type CodeState, type ReturnFailure, type ReturnProblem, type ReturnState, type ReviewFailure, type ReviewState, type VideoAnswer } from "./outcomes";
 import type { CourseRow, LessonRow, ReviewView, SubmissionRow } from "./rows";
 
 // PA-61 y PA-62 mínimas · Los cursos por revisar, en una sola pantalla (decisión de Sergio del
@@ -57,6 +57,12 @@ const FAILURES: Record<ReviewFailure, string> = {
   practice_inactive: text.practiceInactive,
   level_inactive: text.levelInactive,
   videos_not_ready: text.videosNotReady,
+  changed: text.changed,
+  teacher_suspended: t(text.teacherSuspended),
+  annex_draft: text.annexDraft,
+  files_changed: t(text.filesChanged),
+  captions_pending: text.captionsPending,
+  video_gone: t(text.videoGone, { lessons: text.oneLesson }),
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,
@@ -202,7 +208,10 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
       : // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
         queue.reason === "needs_code" && view.canChange
         ? null
-        : FAILURES[queue.reason];
+        : queue.reason === "video_gone" && queue.lessons !== undefined && queue.lessons.length > 0
+          ? // Las lecciones, por su título en la cola de ahora; la que ya no está, «una lección».
+            t(text.videoGone, { lessons: queue.lessons.map((id) => titleOf(view, id)).join(", ") })
+          : FAILURES[queue.reason];
   const tone = queue.kind === "failed" && (queue.reason === "unavailable" || queue.reason === "unknown") ? "danger" : "warning";
   const { block, answer, spoken } = useAnswerFocus(queuePending, attempt, result);
 
@@ -328,7 +337,8 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     key={course.id}
                     course={course}
                     canChange={view.canChange}
-                    confirming={queue.kind === "confirming" && queue.course === course.id}
+                    // Lo que se confirma es el envío que se vio al preguntar, no el de esta pintada.
+                    confirming={queue.kind === "confirming" && queue.course === course.id ? reviewButton.confirm(course.id, queue.submission ?? undefined) : null}
                     answer={answer}
                     action={sendQueue}
                     pending={queuePending}
@@ -338,8 +348,8 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     returning={{
                       open: returnOpen?.course === course.id ? returnOpen : null,
                       lastHere: returnCourse === course.id,
-                      // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel.
-                      mayOpen: !returnHere,
+                      // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel. Tampoco con lo escrito a la vista de uno que se fue: se perdería.
+                      mayOpen: !returnHere && !returnGone,
                       action: sendReturn,
                       pending: returnPending,
                       result: returnResult,
@@ -363,6 +373,12 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
   );
 }
 
+/** El título de una lección de la cola, entre comillas, o «una lección» si ya no está. */
+function titleOf(view: ReviewView, lesson: string): string {
+  const found = view.teachers.flatMap((teacher) => teacher.courses).flatMap((course) => course.modules).flatMap((part) => part.lessons).find((each) => each.id === lesson);
+  return found === undefined ? text.oneLesson : `«${found.title}»`;
+}
+
 /** El foco no tiene dueño: quedó en el documento. */
 function focusIsLost(): boolean {
   return document.activeElement === null || document.activeElement === document.body;
@@ -371,8 +387,8 @@ function focusIsLost(): boolean {
 interface CourseProps {
   course: CourseRow;
   canChange: boolean;
-  /** Se está preguntando si se aprueba este curso. */
-  confirming: boolean;
+  /** Se está preguntando si se aprueba este curso: el valor de su «Sí». */
+  confirming: string | null;
   /** Dónde va el foco cuando llega la pregunta: el botón pulsado desaparece con ella. */
   answer: RefObject<HTMLDivElement | null>;
   action: (form: FormData) => void;
@@ -443,16 +459,17 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
 
         {course.submission !== null && <Submitted submission={course.submission} />}
         {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} block={returnBlock} answer={returnAnswer} spoken={returnSpoken} />}
+        {/* Aprobar, en lo enviado y en lo cargado por guion. Con un curso abierto para devolver no se ofrece: lo escrito ahí se perdería con la respuesta. */}
         {course.submission === null && canChange && !returning.mayOpen && <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>}
-        {course.submission === null && canChange && returning.mayOpen && (
+        {canChange && returning.mayOpen && (
           <form action={action} noValidate className="flex flex-col gap-3">
-            {confirming ? (
+            {confirming !== null ? (
               <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
                 <p className="font-semibold">{text.confirmTitle}</p>
                 <p className="text-text-2">{text.confirmBody}</p>
                 {course.firstOfTeacher !== null && <p className="text-text-2">{course.firstOfTeacher}</p>}
                 <div className="flex flex-wrap gap-2">
-                  <Button type="submit" name="do" value={course.buttons.confirm} size="md" loading={pending} loadingLabel={text.working}>
+                  <Button type="submit" name="do" value={confirming} size="md" loading={pending} loadingLabel={text.working}>
                     {text.confirm}
                   </Button>
                   <Button type="submit" name="do" value="cancel" variant="secondary" size="md" disabled={pending}>
@@ -491,7 +508,8 @@ function Submitted({ submission }: { submission: SubmissionRow }) {
         <p className="text-body-s text-text-2">{submission.annex}</p>
         <p className="break-words text-body-s text-text-2">{submission.statement}</p>
       </section>
-      <p className="text-body-s text-text-2">{text.approveLater}</p>
+      {submission.files !== null && <p className="text-body-s font-semibold">{submission.files}</p>}
+      {submission.captions !== null && <p className="text-body-s text-text-2">{submission.captions}</p>}
     </>
   );
 }
@@ -529,14 +547,14 @@ function ReturnBlock({ course, submission, canChange, returning, block, answer, 
 
   if (open === null && !canChange) {
     return (
-      <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="outline-none">
+      <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={t(text.returnRegion, { title: course.title })} className="outline-none">
         <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>
       </section>
     );
   }
   if (open === null && !returning.mayOpen) return <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>;
   return (
-    <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="flex flex-col gap-3 outline-none">
+    <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={t(text.returnRegion, { title: course.title })} className="flex flex-col gap-3 outline-none">
       {open !== null && <BlockResult message={result} tone="warning" pending={pending} pendingText={text.returnWorking} answer={answer} spoken={spoken} />}
       <form action={action} noValidate className="flex flex-col gap-3">
         {open === null ? (
