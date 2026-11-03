@@ -103,3 +103,25 @@ describe("un curso que Contenido devolvió (FL-35)", () => {
     expect(courseRows([draft], false)[0]).toMatchObject({ state: "Borrador", tone: "neutral", detailIsReason: false });
   });
 });
+
+describe("lo que falta, con la lista de enviar", () => {
+  const ready = { ...draft, draft: { hasSummary: true, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 0, modulesWithLessons: 1 } };
+
+  it("el número es el de la regla; la lista de enviar no lo cambia", () => {
+    expect(courseRows([{ ...draft, missing: 5 }], false)[0]?.detail).toBe("Faltan 3 cosas para enviarlo");
+  });
+
+  it("si la regla no ve nada y la lista de enviar sí, no dice «Listo»", () => {
+    expect(courseRows([{ ...ready, missing: 1 }], false)[0]?.detail).toBe("Falta 1 cosa para enviarlo");
+  });
+
+  it("con las dos de acuerdo, «Listo para enviar»", () => {
+    expect(courseRows([{ ...ready, missing: 0 }], false)[0]?.detail).toBe("Listo para enviar");
+    expect(courseRows([{ ...ready, missing: null }], false)[0]?.detail).toBe("Listo para enviar");
+  });
+
+  it("en revisión, la fecha de envío", () => {
+    expect(courseRows([{ ...draft, state: "in_review", submittedAt: "2026-11-02T18:00:00.000Z" }], false)[0]?.detail).toMatch(/^Enviado el /);
+  });
+});
+
