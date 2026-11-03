@@ -873,6 +873,24 @@ que no se ve leyendo un solo archivo:
   escribe es `parseReviewNote`, la de la descripción. Usa pgTAP 75, integración 96 y `tests/e2e/equipo/devolver.equipo.ts`, que fuerzan el envío con las funciones de la primera solicitud y por eso conceden `app_service` a `postgres`. Cambiaron por el requisito la 74 (un rechazo forzado lleva también qué
   corregir) y `tests/architecture/media.test.ts` (una consulta más como servidor). Decisiones mías sin confirmar: devolver sin diálogo, dentro del curso; pide el código reciente, como aprobar; mirar y bajar no; y `self` cuenta también a quien tiene una invitación de ese maestro. Para el A: nada que le toque, salvo no
   llamar `review_*` a una función suya sin decirlo.
+- **Lo que T-405 suma al carril B** (cuarta solicitud, `t405_publicar`; RF-606, RF-701, RN-16, RF-310; decisiones de Sergio del 2026-11-03: sin subtítulos no se publica, y un curso
+  con su maestro suspendido no se aprueba). Publicar desde el borrador. **Una función nueva, `private.review_approve(curso, envío, subtítulos)`, y no `approve_course`**, que sigue para los
+  cursos por guion y es del carril A. Lleva el envío que se vio (`changed`), toma la fila del maestro `for share` antes de las listas, el curso y el registro (el orden de enviar: así no
+  se publica el curso de alguien que se suspende en ese instante; la integración 98 lo prueba con dos conexiones), y contesta `self` con `actor_owns_teacher`. Lo demás lo decide
+  `private.review_publish`, que no ejecuta nadie de la aplicación: maestro y cuenta activos (`teacher_suspended`, también si se fue), el anexo aceptado publicado (`annex_draft`: la versión 0
+  solo con la marca `legal_drafts`), práctica y nivel activos, cada archivo (el original de cada video y cada recurso) con el objeto y la versión de la fotografía (`files_changed`), y
+  todos los videos con subtítulos (`captions_pending`): **los subtítulos que el servidor le preguntó a Mux llegan en la misma llamada y se anotan antes de decidir.** Publica desde la
+  fotografía con los ids del borrador (para que «Editar» los recree), las lecciones numeradas en el curso entero, el slug del título con un número si ya existe (bajo un candado propio),
+  y cada video con `original_path` (RNF-17) y lo que el borrador necesita para volver (`file_name`, `mime`, `object_id`, `object_version`, `read_seconds`, columnas nuevas). Después
+  **borra el borrador** (05 §5.2), en la misma transacción, y saca de la papelera lo que la cascada mandó y lo publicado nombra: sin `original_path`, el repaso daría el original por
+  huérfano y lo borraría (la 77 lo exige). `published_courses` gana `course_review_id` y `published_lessons` la descripción, públicas como el temario. El servicio es `approveSubmission`
+  (`src/services/review/queue.ts`): la guarda, los videos del envío (`review_approve_assets`), su proveedor de cuatro en cuatro fuera de la transacción (`checkAssets` en
+  `src/services/media/video-provider.ts`, el mismo que usa enviar), y la base con los que ya tienen subtítulos. Si el proveedor no contesta, no se aprueba (`approve_provider_unavailable`);
+  si ya no tiene un video listo, tampoco (`approve_video_gone`). La cola dice qué lecciones esperan sus subtítulos (`captions_missing`). En PA-62 «Aprobar y publicar» sale también en lo
+  enviado: preguntar guarda el envío que se vio (`ask:<curso>:<envío>`) y el «Sí» manda ese, aunque la cola traiga otro. **`guard_publication` acepta un video del proveedor de prueba también
+  con la marca local `video_test`** (la pone `db:login`; acordado con el carril A el 2026-11-03), y la 18 lo prueba sin ella. `db:student` sigue publicando solo los cursos por guion: un
+  envío aprobado exige una persona en `reviewed_by` (decisión mía sin confirmar). Usa pgTAP 77, integración 98 y `tests/e2e/equipo/publicar.equipo.ts`; cambiaron por el requisito la 18,
+  la 39, `devolver.equipo.ts` y las de arquitectura (`media`, `review`, `screens`, `submit`). Para el A: `guard_publication` cambió solo en el video de prueba.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
