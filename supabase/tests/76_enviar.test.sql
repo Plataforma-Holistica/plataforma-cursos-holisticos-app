@@ -3,7 +3,7 @@
 -- cargados y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(40);
+select plan(42);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7600000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -179,6 +179,15 @@ alter table public.course_drafts disable trigger user;
 update public.course_drafts set title = 'Otro nombre' where course_id = pruebas.id('curso');
 alter table public.course_drafts enable trigger user;
 select is(pruebas.rj(pruebas.p(1), 'private.course_submit_licenses()') -> 0 ->> 'course_title', 'Respirar', 'el título no cambia con el borrador');
+
+-- Devuelto, ya no dice que se envió: la fecha es la del envío pendiente.
+select pruebas.como_dueno();
+select c.id as envio from public.course_reviews c where c.course_id = pruebas.id('curso') and c.result = 'pending' \gset
+select pruebas.a_nombre_de(pruebas.p(3));
+select private.review_return(pruebas.id('curso'), :'envio', 'Motivo.', 'Corrección.') as devuelto \gset
+select pruebas.limpiar();
+select is(:'devuelto'::text, 'returned', 'Contenido lo devuelve');
+select is(pruebas.estado(pruebas.p(1), 'curso') ->> 'submitted_at', null, 'y de vuelta en borrador no hay fecha de envío');
 
 -- ---------------------------------------------------------------------------------------
 -- El texto de una versión del anexo: la vigente, o una que el maestro aceptó.
