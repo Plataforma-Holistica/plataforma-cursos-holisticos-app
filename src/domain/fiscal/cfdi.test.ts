@@ -158,6 +158,8 @@ describe("la forma del comprobante", () => {
     ["en dólares", { Moneda: "USD" }, "not_mxn"],
     ["sin fecha", { Fecha: undefined }, "shape"],
     ["una fecha sin forma", { Fecha: "03/11/2026" }, "shape"],
+    ["un 31 de febrero", { Fecha: "2026-02-31T10:00:00" }, "shape"],
+    ["un 29 de febrero que no existe", { Fecha: "2027-02-29T10:00:00" }, "shape"],
     ["sin total", { Total: undefined }, "amount"],
   ])("%s: %s", (_label, attrs, expected) => {
     expect(problem(invoice({ attrs }))).toBe(expected);
@@ -183,6 +185,7 @@ describe("la forma del comprobante", () => {
     ["sin timbre", (c: readonly XmlNode[]) => c.filter((n) => n.name !== "Complemento")],
     ["un timbre fuera del complemento", (c: readonly XmlNode[]) => [...c.filter((n) => n.name !== "Complemento"), el("Addenda", {}, [STAMP])]],
     ["dos timbres", (c: readonly XmlNode[]) => [...c, el("Addenda", {}, [STAMP])]],
+    ["un timbre del 31 de febrero", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, attrs: { ...STAMP.attrs, FechaTimbrado: "2026-02-31T10:01:00" } }]) : n))],
     ["un timbre sin folio fiscal", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, attrs: { ...STAMP.attrs, UUID: "no" } }]) : n))],
     ["un timbre de otro espacio", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, ns: CFD }]) : n))],
   ])("%s: no está timbrada", (_label, change) => {

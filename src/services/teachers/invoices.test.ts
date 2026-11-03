@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
@@ -39,7 +41,7 @@ function harness(change: { store?: Partial<InvoiceStore>; files?: Partial<Invoic
   let submitted: InvoiceSeal | null = null;
   const store: InvoiceStore = {
     begin: async () => ({ outcome: "begun", invoice: INVOICE, path: PATH, expiresAt: "2026-11-03T13:00:00.000Z" }),
-    upload: async () => ({ path: PATH, payout: PAYOUT }),
+    upload: async () => ({ path: PATH, payout: PAYOUT, status: "uploading" }),
     submit: async (_claims, seal) => {
       submitted = seal;
       calls.push("submit");
@@ -102,6 +104,12 @@ describe("empezar", () => {
     });
   });
 
+  it("empezar se lleva lo que sobró en la carpeta de esa liquidación: una subida vencida o un rechazo de antes", async () => {
+    const { service, calls } = harness();
+    await service.beginInvoice(reader, PAYOUT, "awaiting_invoice");
+    expect(calls).toEqual(["unused", `remove:${PATH}`]);
+  });
+
   it("si no se pudo firmar, se cancela lo reservado: ocuparía la subida 3 h", async () => {
     const { service, calls } = harness({ files: { signUpload: async () => null } });
     expect(await service.beginInvoice(reader, PAYOUT, "awaiting_invoice")).toEqual({ kind: "unavailable" });
@@ -123,6 +131,33 @@ describe("subir", () => {
     expect(submitted()).toMatchObject({ invoice: INVOICE, issuerMatches: true, profileVersion: 2, pdfOk: true, facts: { uuid: "6f9619ff-8b86-d011-b42d-00c04fc964ff", totalCents: 95333 } });
   });
 
+  it("con la marca de UTF-8, lo cifrado es el archivo exacto: su huella se puede comprobar", async () => {
+    const { service, sealed, submitted } = harness();
+    const withMark = new Uint8Array([0xef, 0xbb, 0xbf, ...bytes(XML)]);
+    expect(await service.submitInvoice(reader, INVOICE, withMark)).toEqual({ kind: "submitted" });
+    expect(Buffer.from(sealed[0]!.text, "utf8").equals(Buffer.from(withMark))).toBe(true);
+    expect(submitted()?.sha256).toBe(createHash("sha256").update(withMark).digest("hex"));
+  });
+
+  it("un reintento después de una respuesta perdida sabe que ya se subió, sin abrir sus datos", async () => {
+    const { service, calls } = harness({ store: { upload: async () => ({ path: PATH, payout: PAYOUT, status: "in_review" }) } });
+    expect(await service.submitInvoice(reader, INVOICE, bytes(XML))).toEqual({ kind: "already_submitted" });
+    expect(calls).toEqual([]);
+  });
+
+  it("una factura que no es suya no abre sus datos fiscales: no deja una lectura en la auditoría", async () => {
+    const { service, calls } = harness({ store: { upload: async () => null } });
+    expect(await service.submitInvoice(reader, INVOICE, bytes(XML))).toEqual({ kind: "not_found" });
+    expect(calls).toEqual([]);
+  });
+
+  it("sin sesión no se hace nada más", async () => {
+    const { service, calls, reported } = harness({ session: { kind: "anonymous" }, cipherOn: false });
+    expect((await service.submitInvoice(reader, INVOICE, bytes(XML))).kind).toBe("session");
+    expect(calls).toEqual([]);
+    expect(reported).toEqual([]);
+  });
+
   it("un XML que no se lee no llega a la base, y la subida se queda para otro intento", async () => {
     const { service, calls } = harness();
     expect(await service.submitInvoice(reader, INVOICE, bytes("<!DOCTYPE x><x/>"))).toEqual({ kind: "xml", problem: "doctype" });
@@ -139,6 +174,11 @@ describe("subir", () => {
     const { service, calls } = harness({ store: { submit: async () => ({ outcome: "amounts_mismatch", fields: ["vat_cents"] }) } });
     expect(await service.submitInvoice(reader, INVOICE, bytes(XML))).toEqual({ kind: "amounts_mismatch", fields: ["vat_cents"] });
     expect(calls).toEqual(["mine", "unused", `remove:${PATH}`]);
+  });
+
+  it("bajar un PDF reemplazado no firma nada", async () => {
+    const { service } = harness({ store: { file: async () => ({ outcome: "file_changed" }) } });
+    expect(await service.invoiceFile(reader, INVOICE, "pdf")).toEqual({ kind: "file_changed" });
   });
 
   it("si no se pudo borrar, se reporta y la respuesta es la misma", async () => {

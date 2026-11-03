@@ -54,6 +54,14 @@ const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 // Hasta billones de pesos: en centavos cabe sin perder un dígito. Los ceros de más en los decimales se aceptan; un tercer decimal, no.
 const AMOUNT = /^(0|[1-9][0-9]{0,12})(?:\.([0-9]{1,6}))?$/;
 
+/** Con forma y un día que existe: la forma sola deja pasar un 31 de febrero, y la base no lo podría leer. */
+function isDateTime(text: string | undefined): text is string {
+  if (text === undefined || !DATETIME.test(text)) return false;
+  const [year, month, day] = text.slice(0, 10).split("-").map(Number) as [number, number, number];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 class Refused extends Error {
   constructor(readonly problem: CfdiProblem) {
     super(problem);
@@ -139,7 +147,7 @@ function stamp(root: XmlNode): XmlNode {
   if (count(root, TFD, "TimbreFiscalDigital") !== 1) return refuse("no_stamp");
   const inside = childrenOf(root, "Complemento").flatMap((c) => childrenOf(c, "TimbreFiscalDigital", TFD));
   const found = inside.length === 1 ? inside[0]! : refuse("no_stamp");
-  if (!UUID.test(found.attrs.UUID ?? "") || !DATETIME.test(found.attrs.FechaTimbrado ?? "")) refuse("no_stamp");
+  if (!UUID.test(found.attrs.UUID ?? "") || !isDateTime(found.attrs.FechaTimbrado)) refuse("no_stamp");
   return found;
 }
 
@@ -151,7 +159,7 @@ export function readCfdi(root: XmlNode): CfdiReading {
     if (root.attrs.TipoDeComprobante !== "I") refuse("not_income");
     if (root.attrs.Moneda !== "MXN") refuse("not_mxn");
     const issuedAt = text(root, "Fecha");
-    if (!DATETIME.test(issuedAt)) refuse("shape");
+    if (!isDateTime(issuedAt)) refuse("shape");
     const subtotalCents = cents(root.attrs.SubTotal);
     const totalCents = cents(root.attrs.Total);
     if (root.attrs.Descuento !== undefined && cents(root.attrs.Descuento) !== 0) refuse("discount");

@@ -50,11 +50,12 @@ export type InvoiceReviewAnswer =
 export type InvoiceFileAnswer =
   | { outcome: "pdf"; path: string; version: string }
   | { outcome: "xml"; teacher: string; xml: Buffer }
-  | { outcome: "malformed" | "not_found" | "self" };
+  | { outcome: "malformed" | "not_found" | "self" | "file_changed" | "forbidden" | "needs_fresh_code" };
 
 export interface InvoiceStore {
   begin: (claims: VerifiedClaims, payout: string, seen: string) => Promise<InvoiceBeginAnswer>;
-  upload: (claims: VerifiedClaims, invoice: string) => Promise<{ path: string; payout: string } | null>;
+  /** A dónde subió y en qué va su factura, o nulo si no es suya. */
+  upload: (claims: VerifiedClaims, invoice: string) => Promise<{ path: string; payout: string; status: string } | null>;
   submit: (claims: VerifiedClaims, seal: InvoiceSeal) => Promise<InvoiceSubmitAnswer>;
   cancel: (claims: VerifiedClaims, invoice: string) => Promise<"cancelled" | "not_teacher" | "not_found" | "not_uploading">;
   review: (claims: VerifiedClaims, invoice: string, decision: { accept: true } | { accept: false; reason: string }) => Promise<InvoiceReviewAnswer>;
@@ -88,7 +89,11 @@ export type InvoiceSubmit =
   | Session;
 export type InvoiceCancel = { kind: "cancelled" | "not_teacher" | "not_found" | "not_uploading" | "unavailable" } | Session;
 export type InvoiceReview = { kind: InvoiceReviewAnswer | "unavailable" } | Session;
-export type InvoiceFile = { kind: "url"; url: string } | { kind: "xml"; text: string } | { kind: "malformed" | "not_found" | "self" | "off" | "unavailable" } | Session;
+export type InvoiceFile =
+  | { kind: "url"; url: string }
+  | { kind: "xml"; text: string }
+  | { kind: "malformed" | "not_found" | "self" | "file_changed" | "forbidden" | "needs_fresh_code" | "off" | "unavailable" }
+  | Session;
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATUS = /^[a-z_]{1,32}$/;
@@ -139,6 +144,8 @@ export function createInvoices(deps: InvoicesDeps) {
         await report("invoice_unavailable");
         return { kind: "unavailable" };
       }
+      // Lo que sobró en su carpeta (una subida que venció, o un rechazo cuyo borrado falló) se va ahora: la nueva ya nombra su ruta.
+      await cleanUp(claims, payout);
       return { kind: "begun", invoice: answer.invoice, uploadUrl, expiresAt: answer.expiresAt };
     } catch {
       await report("invoice_unavailable");
@@ -152,14 +159,19 @@ export function createInvoices(deps: InvoicesDeps) {
    */
   async function submitInvoice(reader: CookieReader, invoice: string, xml: Uint8Array): Promise<InvoiceSubmit> {
     if (!ID.test(invoice)) return { kind: "not_found" };
+    const claims = await session(reader);
+    if (refused(claims)) return claims;
     if (await cipherIsOff()) return { kind: "off" };
     const reading = readInvoiceXml(xml);
     if (reading.kind === "problem") return { kind: "xml", problem: reading.problem };
-    const claims = await session(reader);
-    if (refused(claims)) return claims;
     let answer: InvoiceSubmitAnswer;
     let payout: string;
     try {
+      // Primero si es suya y se está subiendo: abrir sus datos deja una lectura en la auditoría, y no se gasta en una factura ajena o ya subida.
+      const upload = await store.upload(claims, invoice);
+      if (upload === null) return { kind: "not_found" };
+      if (upload.status !== "uploading") return { kind: "already_submitted" };
+      payout = upload.payout;
       const mine = await deps.mine(claims);
       if (mine.outcome !== "ok") return { kind: mine.outcome === "no_profile" ? "no_profile" : "not_teacher" };
       let rfc: string;
@@ -169,10 +181,8 @@ export function createInvoices(deps: InvoicesDeps) {
         await report("tax_profile_unreadable");
         return { kind: "unavailable" };
       }
-      const upload = await store.upload(claims, invoice);
-      if (upload === null) return { kind: "not_found" };
-      payout = upload.payout;
-      const text = new TextDecoder("utf-8").decode(xml);
+      // Con su marca de UTF-8, si la trae: lo cifrado vuelve a ser el archivo exacto, y su huella se puede comprobar.
+      const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(xml);
       answer = await store.submit(claims, {
         invoice,
         xml: cipher.seal({ teacher: mine.row.teacherId, field: "invoice_xml", invoice }, text),
@@ -223,9 +233,9 @@ export function createInvoices(deps: InvoicesDeps) {
   /** Bajar: el PDF por una dirección firmada de 5 minutos, como adjunto; el XML, abierto aquí. Quién puede, y la lectura de finanzas, los decide la base. */
   async function invoiceFile(reader: CookieReader, invoice: string, kind: "pdf" | "xml"): Promise<InvoiceFile> {
     if (!ID.test(invoice)) return { kind: "not_found" };
-    if (kind === "xml" && (await cipherIsOff())) return { kind: "off" };
     const claims = await session(reader);
     if (refused(claims)) return claims;
+    if (kind === "xml" && (await cipherIsOff())) return { kind: "off" };
     let answer: InvoiceFileAnswer;
     try {
       answer = await store.file(claims, invoice, kind);

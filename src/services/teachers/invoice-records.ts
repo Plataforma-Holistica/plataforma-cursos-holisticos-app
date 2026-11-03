@@ -31,14 +31,14 @@ export async function askInvoiceBegin(tx: Tx, payout: string, seen: string): Pro
 }
 
 const uploadAnswer = z.union([
-  z.object({ outcome: z.literal("ok"), path: z.string(), payout_id: z.string().regex(ID) }).strict(),
+  z.object({ outcome: z.literal("ok"), path: z.string(), payout_id: z.string().regex(ID), status: z.enum(["uploading", "in_review", "accepted", "rejected"]) }).strict(),
   z.object({ outcome: z.literal("not_found") }).strict(),
 ]);
 
-/** A dónde subió su maestro, mientras se sube. Nulo si no es suya o ya no se sube. */
-export async function askInvoiceUpload(tx: Tx, invoice: string): Promise<{ path: string; payout: string } | null> {
+/** A dónde subió su maestro y en qué va su factura. Nulo si no es suya. */
+export async function askInvoiceUpload(tx: Tx, invoice: string): Promise<{ path: string; payout: string; status: string } | null> {
   const answer = uploadAnswer.parse(await ask(tx, sql`select private.invoice_upload(${invoice}::uuid) as answer`));
-  return answer.outcome === "ok" ? { path: answer.path, payout: answer.payout_id } : null;
+  return answer.outcome === "ok" ? { path: answer.path, payout: answer.payout_id, status: answer.status } : null;
 }
 
 const submitAnswer = z.union([
@@ -98,7 +98,7 @@ export async function askInvoiceReview(tx: Tx, invoice: string, decision: { acce
 const fileAnswer = z.union([
   z.object({ outcome: z.literal("ok"), path: z.string(), object_version: z.string() }).strict(),
   z.object({ outcome: z.literal("ok"), teacher_id: z.string().regex(ID), xml: z.string().regex(BASE64) }).strict(),
-  z.object({ outcome: z.enum(["malformed", "not_found", "self"]) }).strict(),
+  z.object({ outcome: z.enum(["malformed", "not_found", "self", "file_changed", "forbidden", "needs_fresh_code"]) }).strict(),
 ]);
 
 export async function askInvoiceFile(tx: Tx, invoice: string, kind: "pdf" | "xml"): Promise<InvoiceFileAnswer> {

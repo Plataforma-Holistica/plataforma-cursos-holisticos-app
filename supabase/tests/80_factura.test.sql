@@ -4,7 +4,7 @@
 -- compara con la liquidación y la pasa a revisión. Finanzas acepta (lista para pago) o rechaza con motivo. Una pagada exige una factura aceptada.
 begin;
 \ir _ayuda.psql
-select plan(98);
+select plan(102);
 
 select pruebas.alta('a8000000-0000-0000-0000-000000000001', 'tere-80@prueba.test');
 select pruebas.alta('a8000000-0000-0000-0000-000000000002', 'otra-80@prueba.test');
@@ -167,7 +167,7 @@ select is(pruebas.empieza(pruebas.p(4), 'awaiting_invoice', pruebas.susi()) ->> 
 select pruebas.id(:'empieza1') as f1 \gset
 -- La ruta del PDF, para que el servidor lo lea antes de subir: solo a su maestra, y solo mientras se sube.
 select is(pruebas.pide(pruebas.tere(), format('private.invoice_upload(%L)', :'f1'))::jsonb,
-  jsonb_build_object('outcome', 'ok', 'path', :'empieza1'::jsonb ->> 'path', 'payout_id', pruebas.p(1)), 'su maestra sabe a dónde subió');
+  jsonb_build_object('outcome', 'ok', 'path', :'empieza1'::jsonb ->> 'path', 'payout_id', pruebas.p(1), 'status', 'uploading'), 'su maestra sabe a dónde subió');
 select is(pruebas.pide(pruebas.otra(), format('private.invoice_upload(%L)', :'f1'))::jsonb ->> 'outcome', 'not_found', 'otra maestra no');
 
 -- ---------------------------------------------------------------------------------------
@@ -213,9 +213,11 @@ select is(pruebas.rechazo(1, pruebas.hechos(1, '{"uuid": "no-es-un-folio"}')) ->
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"subtotal_cents": "100000"}')) ->> 'outcome', 'malformed', 'un monto que no es número');
 select is(pruebas.rechazo(1, pruebas.hechos(1, jsonb_build_object('stamped_at', to_char(now() at time zone 'America/Mexico_City' + interval '3 days', 'YYYY-MM-DD"T"HH24:MI:SS')))) ->> 'outcome',
   'malformed', 'timbrada en el futuro');
-select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T10:05:00"}')) ->> 'outcome', 'malformed', 'expedida después de timbrada');
-select is(pruebas.rechazo(1, pruebas.hechos(1, '{"payment_method": "PPD", "use": "S01"}')) ->> 'outcome', 'submitted',
-  'PPD y otro uso no rechazan: finanzas los ve (decisión 3 de Sergio del 2026-11-03)');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T11:05:00"}')) ->> 'outcome', 'malformed', 'expedida más de una hora después de timbrada');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-02-31T10:00:00"}')) ->> 'outcome', 'malformed', 'un 31 de febrero no tiene forma, y no tumba nada');
+-- Expedida en Quintana Roo (una hora adelante del Centro, donde se timbra), PPD y otro uso: no rechazan.
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T10:30:00", "payment_method": "PPD", "use": "S01"}')) ->> 'outcome', 'submitted',
+  'expedida en Quintana Roo y timbrada en el Centro, PPD y otro uso no rechazan: finanzas los ve (decisión 3 de Sergio del 2026-11-03)');
 select is(pruebas.estado(pruebas.p(1)), 'invoice_in_review', 'la liquidación pasa a factura en revisión');
 select is((select row(status, cfdi_uuid::text, octet_length(xml_sha256), payment_method)::text from private.teacher_invoices where payout_id = pruebas.p(1) and status <> 'uploading'),
   row('in_review', '6f9619ff-8b86-d011-b42d-000000000001', 32, 'PPD')::text, 'la factura, en revisión, con su folio fiscal y su huella');
@@ -294,6 +296,8 @@ begin
   perform pruebas.limpiar();
 end
 $$;
+-- Todo esto corre en la misma hora: el freno de Tere (veinte por hora) empieza de nuevo aquí, y otra vez abajo.
+delete from private.rate_limit_counters where bucket = 'invoice_upload:' || pruebas.m(1);
 select pruebas.liquidacion(10, 1);
 create function pruebas.a_estado(p_quien uuid, p_pago uuid, p_estado text) returns text language sql immutable as $$
   select format('select pruebas.a_mano(%L, %L)', p_quien, format('update public.payouts set status = %L where id = %L', p_estado, p_pago))
@@ -320,6 +324,9 @@ select throws_like(format($$select pruebas.a_mano(%L, %L)$$, pruebas.f1(), forma
   '%submitted by its teacher%', 'nadie más que su maestra la pasa a revisión');
 select throws_like(format($$select pruebas.a_mano(%L, %L)$$, pruebas.tere(), format('update private.teacher_invoices set status = %L where id = %L', 'accepted', :'r10')),
   '%reviewed by someone else%', 'su maestra no la acepta');
+select throws_like(format($$select pruebas.a_mano(%L, %L)$$, pruebas.f2(),
+  format('update private.teacher_invoices set status = %L, subtotal_cents = 1 where id = %L', 'accepted', :'r7')),
+  '%reviewed by someone else, without changing what was read%', 'ni finanzas la acepta cambiando lo leído');
 set local session_replication_role = replica;
 update private.teacher_invoices set status = 'accepted', reviewed_by = pruebas.f1(), reviewed_at = now() where id = :'r10';
 set local session_replication_role = origin;
@@ -370,6 +377,13 @@ select is(pruebas.pide(pruebas.otra(), format('private.invoice_file(%L, %L)', :'
 select is(pruebas.pide(pruebas.f2(), format('private.invoice_file(%L, %L)', :'r5', 'xml'))::jsonb ->> 'outcome', 'ok', 'f2 baja la suya como maestra');
 select is(pruebas.pide(pruebas.f1(), format('private.invoice_file(%L, %L)', :'r1', 'xml'))::jsonb ->> 'outcome', 'ok', 'finanzas baja el XML');
 select is((select count(*)::integer from public.audit_log where action = 'invoice.read' and entity_id = :'r1'), 1, 'y queda en la auditoría');
+-- Como al abrir la cuenta, con su código reciente: el XML trae RFC, nombre y régimen.
+update auth.mfa_amr_claims set updated_at = clock_timestamp() - interval '20 minutes' where session_id = pruebas.sesion(pruebas.f1());
+select is(pruebas.pide(pruebas.f1(), format('private.invoice_file(%L, %L)', :'r1', 'xml'))::jsonb ->> 'outcome', 'needs_fresh_code', 'sin código reciente, finanzas no baja');
+select pruebas.equipar(pruebas.f1());
+-- Un PDF que ya no es el que se subió no se entrega.
+update storage.objects set version = 'otra' where bucket_id = 'teacher-invoices' and name = (select pdf_path from private.teacher_invoices where id = :'r1');
+select is(pruebas.pide(pruebas.tere(), format('private.invoice_file(%L, %L)', :'r1', 'pdf'))::jsonb ->> 'outcome', 'file_changed', 'un PDF reemplazado no baja');
 
 -- ---------------------------------------------------------------------------------------
 -- La auditoría no dice montos, régimen, XML ni motivo: configuración la lee.

@@ -375,10 +375,16 @@ begin
       v_refusal := 'malformed';
     else
       v_uuid := (p_facts ->> 'uuid')::uuid;
-      v_issued := (p_facts ->> 'issued_at')::timestamp at time zone private.period_zone();
-      v_stamped := (p_facts ->> 'stamped_at')::timestamp at time zone private.period_zone();
-      -- Expedida antes de timbrar, y timbrada a lo más hoy (un día de holgura por la zona de donde se expidió).
-      if v_issued > v_stamped or v_stamped > pg_catalog.now() + interval '1 day' then
+      -- La forma deja pasar un 31 de febrero: una fecha que no existe no tiene forma, y no tumba la transacción.
+      begin
+        v_issued := (p_facts ->> 'issued_at')::timestamp at time zone private.period_zone();
+        v_stamped := (p_facts ->> 'stamped_at')::timestamp at time zone private.period_zone();
+      exception when datetime_field_overflow or invalid_datetime_format then
+        v_refusal := 'malformed';
+      end;
+      -- `Fecha` va en la hora de donde se expidió y `FechaTimbrado` en la del Centro (Anexo 20): Quintana Roo va una hora adelante todo el año, así que una
+      -- expedida «después» de timbrada hasta por una hora es legítima. Timbrada a lo más hoy, con un día de holgura.
+      if v_refusal is null and (v_issued > v_stamped + interval '1 hour' or v_stamped > pg_catalog.now() + interval '1 day') then
         v_refusal := 'malformed';
       end if;
     end if;
@@ -442,13 +448,14 @@ $$;
 revoke all on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean, integer, boolean) from public;
 grant execute on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean, integer, boolean) to app_service;
 
--- A dónde subió su maestro, mientras se sube: el servidor lee el principio del PDF antes de subir, y la ruta no se la cree al navegador.
+-- A dónde subió su maestro: el servidor lee el principio del PDF antes de subir, y la ruta no se la cree al navegador. Con su estado: un reintento después
+-- de una respuesta perdida sabe que ya se subió, en vez de oír que no existe.
 create function private.invoice_upload(p_invoice uuid) returns jsonb
 language sql stable security definer set search_path = ''
 as $$
   select coalesce(
-    (select pg_catalog.jsonb_build_object('outcome', 'ok', 'path', i.pdf_path, 'payout_id', i.payout_id)
-     from private.teacher_invoices i where i.id = p_invoice and i.status = 'uploading' and i.teacher_id = private.actor_teacher_id()),
+    (select pg_catalog.jsonb_build_object('outcome', 'ok', 'path', i.pdf_path, 'payout_id', i.payout_id, 'status', i.status)
+     from private.teacher_invoices i where i.id = p_invoice and i.teacher_id = private.actor_teacher_id()),
     '{"outcome": "not_found"}'::jsonb)
 $$;
 revoke all on function private.invoice_upload(uuid) from public;
@@ -546,13 +553,15 @@ revoke all on function private.invoice_reject(uuid, text) from public;
 grant execute on function private.invoice_reject(uuid, text) to app_service;
 
 -- ---------------------------------------------------------------------------------------
--- Bajar el PDF o el XML: su maestro, o finanzas sin sobre sí, que deja la lectura en la auditoría. El XML sale cifrado: lo abre el servidor.
+-- Bajar el PDF o el XML: su maestro, o finanzas sin sobre sí, con su puerta y su código reciente como al abrir la cuenta (traen RFC, nombre y régimen), y
+-- dejando la lectura en la auditoría. El XML sale cifrado: lo abre el servidor. Un PDF que ya no es el que se subió no se entrega (`file_changed`).
 
 create function private.invoice_file(p_invoice uuid, p_kind text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_row private.teacher_invoices;
+  v_gate text;
 begin
   if p_kind is null or p_kind not in ('pdf', 'xml') then
     return '{"outcome": "malformed"}'::jsonb;
@@ -565,9 +574,19 @@ begin
     if not private.actor_has_capability('finance') then
       return '{"outcome": "not_found"}'::jsonb;
     end if;
+    v_gate := private.finance_change_gate();
+    if v_gate is not null then
+      return pg_catalog.jsonb_build_object('outcome', v_gate);
+    end if;
     if private.actor_owns_teacher(v_row.teacher_id) then
       return '{"outcome": "self"}'::jsonb;
     end if;
+  end if;
+  if p_kind = 'pdf' and not exists (select 1 from storage.objects o where o.bucket_id = 'teacher-invoices' and o.name = v_row.pdf_path
+                                                                     and o.id = v_row.pdf_object_id and o.version = v_row.pdf_object_version) then
+    return '{"outcome": "file_changed"}'::jsonb;
+  end if;
+  if private.actor_teacher_id() is distinct from v_row.teacher_id then
     insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, new_value, reason, request_id)
     values (private.actor_id(), 'user', 'privacy', 'invoice.read', 'private.teacher_invoices', v_row.id::text,
             pg_catalog.jsonb_build_object('teacher_id', v_row.teacher_id, 'payout_id', v_row.payout_id, 'kind', p_kind),
