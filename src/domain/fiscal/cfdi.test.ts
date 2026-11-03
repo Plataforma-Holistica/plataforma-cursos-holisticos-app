@@ -9,7 +9,7 @@ import { CFDI_MAX_BYTES, cfdiBytesProblem, readCfdi, type XmlNode } from "./cfdi
 const CFD = "http://www.sat.gob.mx/cfd/4";
 const TFD = "http://www.sat.gob.mx/TimbreFiscalDigital";
 
-const el = (name: string, attrs: Record<string, string> = {}, children: XmlNode[] = [], ns = CFD): XmlNode => ({ ns, name, attrs, children });
+const el = (name: string, attrs: Record<string, string> = {}, children: readonly XmlNode[] = [], ns = CFD): XmlNode => ({ ns, name, attrs, children });
 
 const STAMP = el("TimbreFiscalDigital", { Version: "1.1", UUID: "6F9619FF-8B86-D011-B42D-00C04FC964FF", FechaTimbrado: "2026-11-03T10:01:00" }, [], TFD);
 
@@ -33,7 +33,7 @@ const ROOT_ATTRS = {
   TipoDeComprobante: "I", MetodoPago: "PUE", Exportacion: "01", LugarExpedicion: "06600",
 };
 
-function invoice(change: { attrs?: Record<string, string | undefined>; children?: XmlNode[]; taxes?: XmlNode | null } = {}): XmlNode {
+function invoice(change: { attrs?: Record<string, string | undefined>; children?: readonly XmlNode[]; taxes?: XmlNode | null } = {}): XmlNode {
   const attrs = Object.fromEntries(Object.entries({ ...ROOT_ATTRS, ...change.attrs }).filter((e): e is [string, string] => e[1] !== undefined));
   const children = change.children ?? [
     el("Emisor", { Rfc: "GOMA800101AB1", Nombre: "ANA GOMEZ", RegimenFiscal: "612" }),
@@ -169,22 +169,22 @@ describe("la forma del comprobante", () => {
   });
 
   it.each([
-    ["sin emisor", (c: XmlNode[]) => c.filter((n) => n.name !== "Emisor")],
-    ["dos emisores", (c: XmlNode[]) => [el("Emisor", { Rfc: "XAXX010101000", Nombre: "X", RegimenFiscal: "612" }), ...c]],
-    ["dos receptores", (c: XmlNode[]) => [el("Receptor", { Rfc: "XAXX010101000" }), ...c]],
-    ["dos bloques de impuestos", (c: XmlNode[]) => [TAXES, ...c]],
-    ["un emisor sin régimen", (c: XmlNode[]) => c.map((n) => (n.name === "Emisor" ? el("Emisor", { Rfc: "GOMA800101AB1", Nombre: "ANA" }) : n))],
-    ["un comprobante dentro de otro", (c: XmlNode[]) => [...c, el("Addenda", {}, [invoice()])]],
+    ["sin emisor", (c: readonly XmlNode[]) => c.filter((n) => n.name !== "Emisor")],
+    ["dos emisores", (c: readonly XmlNode[]) => [el("Emisor", { Rfc: "XAXX010101000", Nombre: "X", RegimenFiscal: "612" }), ...c]],
+    ["dos receptores", (c: readonly XmlNode[]) => [el("Receptor", { Rfc: "XAXX010101000" }), ...c]],
+    ["dos bloques de impuestos", (c: readonly XmlNode[]) => [TAXES, ...c]],
+    ["un emisor sin régimen", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Emisor" ? el("Emisor", { Rfc: "GOMA800101AB1", Nombre: "ANA" }) : n))],
+    ["un comprobante dentro de otro", (c: readonly XmlNode[]) => [...c, el("Addenda", {}, [invoice()])]],
   ])("%s no tiene forma", (_label, change) => {
     expect(problem(invoice({ children: change(invoice().children) }))).toBe("shape");
   });
 
   it.each([
-    ["sin timbre", (c: XmlNode[]) => c.filter((n) => n.name !== "Complemento")],
-    ["un timbre fuera del complemento", (c: XmlNode[]) => [...c.filter((n) => n.name !== "Complemento"), el("Addenda", {}, [STAMP])]],
-    ["dos timbres", (c: XmlNode[]) => [...c, el("Addenda", {}, [STAMP])]],
-    ["un timbre sin folio fiscal", (c: XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, attrs: { ...STAMP.attrs, UUID: "no" } }]) : n))],
-    ["un timbre de otro espacio", (c: XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, ns: CFD }]) : n))],
+    ["sin timbre", (c: readonly XmlNode[]) => c.filter((n) => n.name !== "Complemento")],
+    ["un timbre fuera del complemento", (c: readonly XmlNode[]) => [...c.filter((n) => n.name !== "Complemento"), el("Addenda", {}, [STAMP])]],
+    ["dos timbres", (c: readonly XmlNode[]) => [...c, el("Addenda", {}, [STAMP])]],
+    ["un timbre sin folio fiscal", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, attrs: { ...STAMP.attrs, UUID: "no" } }]) : n))],
+    ["un timbre de otro espacio", (c: readonly XmlNode[]) => c.map((n) => (n.name === "Complemento" ? el("Complemento", {}, [{ ...STAMP, ns: CFD }]) : n))],
   ])("%s: no está timbrada", (_label, change) => {
     expect(problem(invoice({ children: change(invoice().children) }))).toBe("no_stamp");
   });

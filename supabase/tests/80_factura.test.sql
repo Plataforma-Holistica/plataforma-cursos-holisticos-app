@@ -4,7 +4,7 @@
 -- compara con la liquidación y la pasa a revisión. Finanzas acepta (lista para pago) o rechaza con motivo. Una pagada exige una factura aceptada.
 begin;
 \ir _ayuda.psql
-select plan(84);
+select plan(86);
 
 select pruebas.alta('a8000000-0000-0000-0000-000000000001', 'tere-80@prueba.test');
 select pruebas.alta('a8000000-0000-0000-0000-000000000002', 'otra-80@prueba.test');
@@ -163,6 +163,10 @@ select is(:'empieza1'::jsonb ->> 'path', pruebas.m(1) || '/' || pruebas.p(1) || 
 select is(pruebas.empieza(pruebas.p(1)) ->> 'outcome', 'already_in_progress', 'otra subida a la vez, no');
 select is(pruebas.empieza(pruebas.p(4), 'awaiting_invoice', pruebas.susi()) ->> 'outcome', 'begun', 'una maestra suspendida factura (FL-40 E3)');
 select pruebas.id(:'empieza1') as f1 \gset
+-- La ruta del PDF, para que el servidor lo lea antes de subir: solo a su maestra, y solo mientras se sube.
+select is(pruebas.pide(pruebas.tere(), format('private.invoice_upload(%L)', :'f1'))::jsonb,
+  jsonb_build_object('outcome', 'ok', 'path', :'empieza1'::jsonb ->> 'path', 'payout_id', pruebas.p(1)), 'su maestra sabe a dónde subió');
+select is(pruebas.pide(pruebas.otra(), format('private.invoice_upload(%L)', :'f1'))::jsonb ->> 'outcome', 'not_found', 'otra maestra no');
 
 -- ---------------------------------------------------------------------------------------
 -- Subir: el PDF tiene que estar, y lo leído tiene que coincidir.

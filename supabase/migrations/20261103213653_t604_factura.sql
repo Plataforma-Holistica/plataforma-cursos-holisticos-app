@@ -442,6 +442,18 @@ $$;
 revoke all on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean, integer, boolean) from public;
 grant execute on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean, integer, boolean) to app_service;
 
+-- A dónde subió su maestro, mientras se sube: el servidor lee el principio del PDF antes de subir, y la ruta no se la cree al navegador.
+create function private.invoice_upload(p_invoice uuid) returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(
+    (select pg_catalog.jsonb_build_object('outcome', 'ok', 'path', i.pdf_path, 'payout_id', i.payout_id)
+     from private.teacher_invoices i where i.id = p_invoice and i.status = 'uploading' and i.teacher_id = private.actor_teacher_id()),
+    '{"outcome": "not_found"}'::jsonb)
+$$;
+revoke all on function private.invoice_upload(uuid) from public;
+grant execute on function private.invoice_upload(uuid) to app_service;
+
 -- Cancelar una subida propia.
 create function private.invoice_cancel(p_invoice uuid) returns jsonb
 language plpgsql security definer set search_path = ''
@@ -839,7 +851,7 @@ as $$
            ('payout_ready_since', false, false, true), ('payout_open_read', false, false, true), ('payout_call_ok', false, false, true),
            ('payout_account_first_time', false, false, true),
            ('invoice_receiver_rfc', false, false, true), ('guard_teacher_invoice', false, false, true), ('invoice_facts_ok', false, false, true),
-           ('invoice_begin', true, true, true), ('invoice_submit', true, true, true), ('invoice_cancel', true, true, true),
+           ('invoice_begin', true, true, true), ('invoice_submit', true, true, true), ('invoice_cancel', true, true, true), ('invoice_upload', true, true, true),
            ('invoice_review', false, false, true), ('invoice_accept', true, true, true), ('invoice_reject', true, true, true),
            ('invoice_file', true, true, true), ('invoice_unused_objects', true, true, true), ('invoice_sweep', false, false, true),
            ('invoice_expire', false, false, true)),

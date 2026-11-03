@@ -2,9 +2,9 @@ import "server-only";
 
 import { getEnv } from "@/config/env";
 
-// El adaptador de Storage para los recursos de un curso (T-404). Habla con la API de Storage con la llave
-// secreta, que salta las políticas (`storage.objects` no tiene ninguna): por eso no sale de aquí, y solo lo
-// llama `src/services/media/resource-files.ts`.
+// El adaptador de Storage para los recursos de un curso (T-404), los videos del borrador (T-403) y el PDF de las facturas (T-604). Habla
+// con la API de Storage con la llave secreta, que salta las políticas (`storage.objects` no tiene ninguna): por eso no sale de aquí, y
+// solo lo llama el módulo de medios (`src/services/media/*-files.ts`).
 //
 //   · La dirección de subida se firma SIN `upsert`: un segundo envío con la misma dirección no reemplaza el
 //     objeto, y lo que se leyó al confirmar sigue siendo lo que se sirve. Lo manda la firma, no el navegador.
@@ -127,6 +127,18 @@ export function createVideoStorage(base: Fetch = fetch): VideoStorage {
 }
 
 export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
+  return bucketStorage(BUCKET, base);
+}
+
+// Las facturas del maestro (T-604): el PDF, en su propia cubeta (solo PDF, 5 MB). Lo mismo que un recurso: sube del navegador sin `upsert`, se
+// lee por rango y baja como adjunto. El XML no pasa por aquí: va cifrado a la base.
+const INVOICE_BUCKET = "teacher-invoices";
+
+export function createInvoiceStorage(base: Fetch = fetch): ResourceStorage {
+  return bucketStorage(INVOICE_BUCKET, base);
+}
+
+function bucketStorage(bucket: string, base: Fetch): ResourceStorage {
   const root = () => `${getEnv().NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, "")}/storage/v1`;
   const authorized = (extra: Record<string, string> = {}) => {
     const key = getEnv().SUPABASE_SECRET_KEY;
@@ -134,7 +146,7 @@ export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
   };
   const call = (url: string, init: RequestInit) => base(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
   // Las rutas las pone la base, y son uuid separados por `/`: cada tramo se manda tal cual.
-  const objectUrl = (path: string) => `${root()}/object/${BUCKET}/${path}`;
+  const objectUrl = (path: string) => `${root()}/object/${bucket}/${path}`;
 
   async function readRange(path: string, range: string): Promise<Uint8Array | null> {
     try {
@@ -149,7 +161,7 @@ export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
   return {
     signUpload: async (path) => {
       try {
-        const response = await call(`${root()}/object/upload/sign/${BUCKET}/${path}`, {
+        const response = await call(`${root()}/object/upload/sign/${bucket}/${path}`, {
           method: "POST",
           headers: authorized({ "content-type": "application/json" }),
           body: "{}",
@@ -164,7 +176,7 @@ export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
     },
     signDownload: async (path, name, seconds) => {
       try {
-        const response = await call(`${root()}/object/sign/${BUCKET}/${path}`, {
+        const response = await call(`${root()}/object/sign/${bucket}/${path}`, {
           method: "POST",
           headers: authorized({ "content-type": "application/json" }),
           body: JSON.stringify({ expiresIn: seconds }),
@@ -182,7 +194,7 @@ export function createResourceStorage(base: Fetch = fetch): ResourceStorage {
     readEnd: (path, bytes) => readRange(path, `bytes=-${bytes}`),
     remove: async (paths) => {
       if (paths.length === 0) return;
-      const response = await call(`${root()}/object/${BUCKET}`, {
+      const response = await call(`${root()}/object/${bucket}`, {
         method: "DELETE",
         headers: authorized({ "content-type": "application/json" }),
         body: JSON.stringify({ prefixes: paths }),
