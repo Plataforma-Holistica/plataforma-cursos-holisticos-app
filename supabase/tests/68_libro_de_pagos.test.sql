@@ -4,7 +4,7 @@
 -- ninguno. Abrir la cuenta, llamar y marcar se prueban aquí; las vencidas de factura y lo que vigila el vigilante, en la 69.
 begin;
 \ir _ayuda.psql
-select plan(122);
+select plan(125);
 
 select pruebas.alta('a6800000-0000-0000-0000-000000000001', 'tere-68@prueba.test');
 select pruebas.alta('c6800000-0000-0000-0000-000000000001', 'f1-68@prueba.test');
@@ -65,7 +65,7 @@ end
 $$;
 create function pruebas.llama(p_pago uuid, p_quien uuid default 'c6800000-0000-0000-0000-000000000001') returns jsonb language plpgsql as $$
 begin
-  return pruebas.pide(p_quien, format('private.payout_account_call(%L, %L, %L, %L)', p_pago, pruebas.cambio(), 'Tere, al teléfono que dio Contenido', now() - interval '1 hour'))::jsonb;
+  return pruebas.pide(p_quien, format('private.payout_account_call(%L, %L, %L, %L)', p_pago, pruebas.cambio(), 'Tere, al teléfono que dio Contenido', clock_timestamp()))::jsonb;
 end
 $$;
 create function pruebas.marca(p_pago uuid, p_lectura uuid, p_ref text, p_monto bigint default 100000,
@@ -198,7 +198,12 @@ select is(pruebas.abre(pruebas.p(1)), '{"outcome": "not_ready"}'::jsonb, 'una de
 select is(pruebas.pide(pruebas.f1(), format('private.payout_reopen(%L, %L)', pruebas.p(1), 'paid'))::jsonb ->> 'outcome', 'changed', 'reabrir lleva el estado que se vio');
 select is(pruebas.pide(pruebas.f1(), format('private.payout_reopen(%L, %L)', pruebas.p(1), 'payment_returned'))::jsonb ->> 'outcome', 'reopened', 'y vuelve a lista para pago');
 select is(pruebas.estado(pruebas.p(1)), 'ready_to_pay', 'la liquidación');
-select ok(not (pruebas.abre(pruebas.p(1)) ->> 'first_time')::boolean, 'el pago de la segunda sigue vivo: ya no es la primera vez');
+-- El de la segunda chocó: no dice que la cuenta funciona. Con el único pago limpio devuelto, se vuelve a llamar, y la llamada de antes no vale.
+select is(pruebas.abre(pruebas.p(1)) ->> 'outcome', 'needs_call', 'con su único pago limpio devuelto, la cuenta pide otra vez la llamada');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), pruebas.cambio(), 'Tere', now()))::jsonb ->> 'outcome',
+          'before_return', 'una llamada que dice una hora de antes de la devolución no la confirma');
+select is(pruebas.llama(pruebas.p(1)) ->> 'outcome', 'recorded', 'se le vuelve a llamar');
+select ok((pruebas.abre(pruebas.p(1)) ->> 'first_time')::boolean, 'y se abre, como primera vez otra vez');
 
 -- Retirar una propuesta: solo quien la hizo.
 select is(pruebas.devuelve((select id from private.payout_payments where payout_id = pruebas.p(2)), pruebas.f2()) ->> 'outcome', 'proposed', 'otra propuesta');

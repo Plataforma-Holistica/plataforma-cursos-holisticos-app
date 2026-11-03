@@ -3,7 +3,7 @@
 -- las que lo pasaron. Una sola regla dice cuándo un periodo está pagado (`period_settled`), y la usan el periodo y quien lo paga. Al final, lo que vigila el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(38);
+select plan(39);
 
 select pruebas.alta('a6900000-0000-0000-0000-000000000001', 'luz-69@prueba.test');
 select pruebas.alta('c6900000-0000-0000-0000-000000000001', 'f1-69@prueba.test');
@@ -127,7 +127,8 @@ from private.payout_payments x where x.payout_id = pruebas.p(8) and x.reference 
 set local session_replication_role = origin;
 select is(pruebas.pide(pruebas.f1(), format('private.payout_mark_paid(%L, %L, %L, %L, 100000)', pruebas.p(6), :'lectura6', 'DEV3',
                                             (now() at time zone 'America/Mexico_City')::date))::jsonb ->> 'conflict', 'needs_call',
-          'devuelto entre abrir y marcar: la transferencia choca y retiene');
+          'devuelto entre abrir y marcar: la transferencia choca');
+select is((select status::text || ':' || hold_kind from public.payouts where id = pruebas.p(6)), 'on_hold:payment', 'y retiene, por el pago');
 
 -- Sin liberar no está pagado, aunque no tenga liquidaciones.
 select pruebas.periodo(203107);

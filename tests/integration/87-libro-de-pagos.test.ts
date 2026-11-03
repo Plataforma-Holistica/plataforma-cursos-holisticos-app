@@ -20,6 +20,8 @@ let financeA: Finance;
 let financeB: Finance;
 let financeC: Finance;
 let teacher: string;
+/** Otra maestra, para la referencia repetida en dos periodos: con la misma, el candado de sus cuentas las pondría en fila antes del índice. */
+let other: string;
 const emails: string[] = [];
 const payout = new Map<number, string>();
 
@@ -97,26 +99,29 @@ beforeAll(async () => {
   await owner.query("begin");
   await owner.query("select set_config('app.actor_kind', 'system', true)");
   teacher = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;
+  other = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;
   await owner.query("set local session_replication_role = replica");
   // Su CLABE rige desde hace una semana, con su aviso enviado, y ya se le llamó: aquí no se prueba la primera vez (eso, en la 68).
+  for (const who of [teacher, other]) {
   await owner.query(
     `insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version,
                                                created_by, clabe_changed_at, clabe_effective_from)
      values ($1, 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person',
              decode('010001' || repeat('ab', 46), 'hex'), '7771', 1, $2, now() - interval '10 days', now() - interval '7 days')`,
-    [teacher, financeA.person.id],
+    [who, financeA.person.id],
   );
   await owner.query(
     `insert into private.mail_outbox (idempotency_key, template, recipient, params, sent_at)
      select private.clabe_notice_key($1, x.clabe_changed_at), 'CO-27', 'maestra-87@prueba.test', '{"hours": 72}', x.clabe_changed_at
      from private.teacher_tax_profiles x where x.teacher_id = $1`,
-    [teacher],
+    [who],
   );
   await owner.query(
     `insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
      select $1, clabe_changed_at, 'La maestra', now(), $2 from private.teacher_tax_profiles where teacher_id = $1`,
-    [teacher, financeA.person.id],
+    [who, financeA.person.id],
   );
+  }
   for (const period of OURS) {
     const run = (
       await owner.query<{ id: string }>(
@@ -137,7 +142,7 @@ beforeAll(async () => {
       await owner.query<{ id: string }>(
         `insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
          values ($1, $2, $3, 'ready_to_pay', 100000, 100000, 100000, now(), $4) returning id::text`,
-        [period, teacher, run, financeA.person.id],
+        [period, period === 204206 ? other : teacher, run, financeA.person.id],
       )
     ).rows[0]!.id;
     payout.set(period, id);
@@ -154,15 +159,15 @@ afterAll(async () => {
     await owner.query("delete from private.payout_requests where payout_id = any($1::uuid[])", [ids]);
     await owner.query("delete from private.payout_payments where payout_id = any($1::uuid[])", [ids]);
     await owner.query("delete from private.payout_account_reads where payout_id = any($1::uuid[])", [ids]);
-    await owner.query("delete from private.payout_account_calls where teacher_id = $1", [teacher]);
+    await owner.query("delete from private.payout_account_calls where teacher_id = any($1::uuid[])", [[teacher, other]]);
     await owner.query("delete from public.payout_status_events where payout_id = any($1::uuid[])", [ids]);
     await owner.query("delete from public.payouts where id = any($1::uuid[])", [ids]);
     await owner.query("update public.payout_periods set close_run_id = null where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_periods where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from private.mail_outbox where recipient = 'maestra-87@prueba.test'");
-    await owner.query("delete from private.teacher_tax_profiles where teacher_id = $1", [teacher]);
-    await owner.query("delete from public.teachers where id = $1", [teacher]);
+    await owner.query("delete from private.teacher_tax_profiles where teacher_id = any($1::uuid[])", [[teacher, other]]);
+    await owner.query("delete from public.teachers where id = any($1::uuid[])", [[teacher, other]]);
     await owner.query("set local session_replication_role = origin");
     await owner.query("commit");
   } catch (error) {
@@ -262,7 +267,7 @@ describe("dos aperturas a la vez", () => {
 });
 
 describe("la misma referencia en dos periodos a la vez", () => {
-  it("no comparten candado: el índice único decide, y la segunda entra con su conflicto y retiene", async () => {
+  it("de dos maestras, no comparten candado: el índice único decide, y la segunda entra con su conflicto y retiene", async () => {
     const readE = (await open(financeA, 204205)).read_id as string;
     const readF = (await open(financeB, 204206)).read_id as string;
     const day = await today();
