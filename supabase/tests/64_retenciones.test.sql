@@ -5,7 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
-select plan(145);
+select plan(147);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6400000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -248,19 +248,23 @@ grant execute on all functions in schema pruebas to anon, authenticated, app_ser
 -- El cálculo.
 
 select is(pruebas.calc(100000, 0, 0, 0), array[0, 0, 0, 100000]::bigint[], 'una regla en 0 conserva las cifras');
-select is(pruebas.calc(100000, 0.16, 0.10, 0.106667), array[16000, 10000, 10666, 95334]::bigint[], 'honorarios: 16 % de IVA, 10 % de ISR y dos tercios del IVA');
+select is(pruebas.calc(100000, 0.16, 0.10, 0.106667), array[16000, 10000, 10667, 95333]::bigint[], 'honorarios: 16 % de IVA, 10 % de ISR y dos tercios del IVA');
 select is(pruebas.calc(100000, 0, 0.0125, 0), array[0, 1250, 0, 98750]::bigint[], 'RESICO: 1.25 % de ISR');
 select is(pruebas.calc(1, 0.16, 0.10, 0.106667), array[0, 0, 0, 1]::bigint[], 'un centavo no se retiene ni se come el neto');
 select is(pruebas.calc(4, 0.125, 0, 0), array[1, 0, 0, 5]::bigint[], 'medio centavo de IVA sube');
-select is(pruebas.calc(99, 0, 0.5, 0.49), array[0, 49, 48, 2]::bigint[], 'lo retenido va hacia abajo: nunca se come el bruto, aun casi completo');
+-- Lo retenido se redondea al centavo más cercano, como el IVA y como el facturador del maestro: si no, su factura no coincidiría
+-- (decisión de Sergio del 2026-11-03).
+select is(pruebas.calc(123457, 0.16, 0.10, 0.106667), array[19753, 12346, 13169, 117695]::bigint[], 'lo retenido se redondea al centavo, como el SAT');
+select is(pruebas.calc(3, 0, 0.25, 0.249), array[0, 1, 1, 1]::bigint[], 'y no se come el bruto, aun con casi la mitad retenida');
 select is(
   (select count(*)::integer from generate_series(1, 3000) n
-   cross join lateral (select round(random()::numeric, 6) as i, round(random()::numeric * 0.5, 6) as r, round(random()::numeric * 0.499, 6) as v, (1 + floor(random() * 500000))::bigint as s, n) x
+   cross join lateral (select round(random()::numeric, 6) as i, round(random()::numeric * 0.25, 6) as r, round(random()::numeric * 0.249, 6) as v, (1 + floor(random() * 500000))::bigint as s, n) x
    where (private.compute_withholdings(x.s, x.i, x.r, x.v) ->> 'net_cents')::bigint <= 0), 0,
-  'con lo retenido debajo de 1, el neto nunca llega a 0, sea cual sea el bruto');
+  'con lo retenido debajo de la mitad, el neto nunca llega a 0, sea cual sea el bruto');
 select is((select provolatile from pg_proc where oid = 'private.compute_withholdings(bigint, numeric, numeric, numeric)'::regprocedure), 'i'::"char", 'el cálculo es puro');
 select throws_ok($$select pruebas.regla('612', 'person', 0, 0.6, 0.4)$$, '23514', null, 'una regla que retiene todo no entra: el neto llegaría a 0');
-select lives_ok($$select pruebas.regla('605', 'person', 0, 0.6, 0.3, '2090-01-01')$$, 'una que retiene casi todo, sí (esta rige en 2090: aquí no cuenta)');
+select throws_ok($$select pruebas.regla('612', 'person', 0, 0.3, 0.2)$$, '23514', null, 'ni una que retiene la mitad: redondeado al centavo, se comería un bruto de dos');
+select lives_ok($$select pruebas.regla('605', 'person', 0, 0.3, 0.19, '2090-01-01')$$, 'una que retiene casi la mitad, sí (esta rige en 2090: aquí no cuenta)');
 
 -- El mínimo se mide contra el bruto, y lo que no llega no necesita nada.
 select is(private.payout_tax_row(pruebas.id('M1'), 9999, 10000), '{"tax_state": "not_needed", "subtotal_cents": 9999, "profile_version": null, "rule_id": null, "vat_cents": 0, "income_tax_withheld_cents": 0, "vat_withheld_cents": 0, "net_cents": 9999}'::jsonb, 'debajo del mínimo no hay impuestos');
@@ -410,8 +414,8 @@ select pruebas.en_cierre(202611);
 select is(pruebas.o(pruebas.cierra(202611)), 'closed', 'noviembre se cierra');
 select is(pruebas.o(pruebas.libera(202610)), 'released', 'con M2 retenida, se libera');
 select is((select status::text from public.payouts where id = pruebas.y('M1', 202610)), 'awaiting_invoice', 'M1, en espera de factura');
-select ok((select vat_cents = round(subtotal_cents * 0.16)::bigint and income_tax_withheld_cents = floor(subtotal_cents * 0.10)::bigint
-                  and vat_withheld_cents = floor(subtotal_cents * 0.106667)::bigint and vat_cents > 0
+select ok((select vat_cents = round(subtotal_cents * 0.16)::bigint and income_tax_withheld_cents = round(subtotal_cents * 0.10)::bigint
+                  and vat_withheld_cents = round(subtotal_cents * 0.106667)::bigint and vat_cents > 0
            from public.payouts where id = pruebas.y('M1', 202610)), 'con sus impuestos');
 select ok((select net_cents = subtotal_cents + vat_cents - income_tax_withheld_cents - vat_withheld_cents from public.payouts where id = pruebas.y('M1', 202610)), 'y su neto');
 select is((select withholding_rule_id from public.payouts where id = pruebas.y('M1', 202610)), (select id from regla), 'dice con qué regla');

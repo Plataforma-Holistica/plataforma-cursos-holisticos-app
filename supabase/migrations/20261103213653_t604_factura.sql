@@ -58,3 +58,25 @@ begin
   return 'approved';
 end
 $$;
+
+-- ---------------------------------------------------------------------------------------
+-- Las retenciones se redondean al centavo más cercano, como el IVA y como el facturador del maestro (decisión de Sergio del 2026-11-03): con
+-- «sin tolerancia» al subir la factura, redondear hacia abajo rechazaría cerca de la mitad de las legítimas. Lo confirma el contador.
+-- Redondeado, lo retenido ya no queda siempre debajo de lo retenido exacto: con las dos tasas debajo de la mitad, lo redondeado queda debajo del
+-- bruto para todo bruto positivo (a lo más medio centavo de más por cada una), y el neto sigue positivo.
+
+create or replace function private.compute_withholdings(p_subtotal bigint, p_vat numeric, p_income numeric, p_vat_withheld numeric) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'vat_cents', v.vat, 'income_tax_withheld_cents', v.income, 'vat_withheld_cents', v.vat_withheld,
+    'net_cents', p_subtotal + v.vat - v.income - v.vat_withheld)
+  from (select pg_catalog.round(p_subtotal * p_vat)::bigint as vat,
+               pg_catalog.round(p_subtotal * p_income)::bigint as income,
+               pg_catalog.round(p_subtotal * p_vat_withheld)::bigint as vat_withheld) v
+$$;
+revoke all on function private.compute_withholdings(bigint, numeric, numeric, numeric) from public;
+
+alter table public.withholding_rules
+  drop constraint withholding_rules_something_left,
+  add constraint withholding_rules_something_left check (income_tax_withholding_rate + vat_withholding_rate < 0.5);
