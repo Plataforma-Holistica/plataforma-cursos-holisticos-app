@@ -89,6 +89,8 @@ describe("los candados de lo publicado", () => {
     // como lo haría quien opera la base.
     const client = await asSystem();
     try {
+      // Desde T-405 también entra con la marca local de los videos de prueba (la pone db:login): sin ella, tampoco. La transacción se revierte.
+      await client.query("delete from private.local_flags where flag = 'video_test'");
       await client.query("select private.system_catalog_add('practices', 'Práctica sin ajuste'), private.system_catalog_add('levels', 'Nivel sin ajuste')");
       const teacher = (await client.query<{ id: string }>("select private.system_add_teacher('Sin ajuste', 'sin-ajuste', null) as id")).rows[0]?.id;
       const course = {

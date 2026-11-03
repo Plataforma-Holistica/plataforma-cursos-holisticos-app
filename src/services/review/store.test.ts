@@ -142,7 +142,7 @@ describe("lo enviado por el portal, en la cola", () => {
     total_duration_seconds: 600,
     loaded_at: "2026-11-02T18:00:00Z",
     lessons: [{ ...lesson, description: null, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100 }] }],
-    submission: { id: SUBMISSION, number: 1, resources: [], captions_missing: [LESSON], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
+    submission: { id: SUBMISSION, number: 1, resources: [], captions_missing: [LESSON], files_changed: ["Guía"], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
   };
 
   it("se lee con su envío y sus recursos", () => {
@@ -154,6 +154,7 @@ describe("lo enviado por el portal, en la cola", () => {
       number: 1,
       resources: [],
       captionsMissing: [LESSON],
+      filesChanged: ["Guía"],
       annex: { version: 1, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto.", termYears: 10 },
     });
   });
@@ -198,22 +199,23 @@ describe("aprobar lo enviado", () => {
 
   it("los videos se leen a nombre de las claims, en nombres de la aplicación", async () => {
     const { run, opened, sent } = runnerWith([{ assets: { answer: "ok", assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P" }] } }]);
-    expect(await createReviewStore(run).approveAssets(claims, COURSE)).toEqual({
+    expect(await createReviewStore(run).approveAssets(claims, { course: COURSE, submission: SUBMISSION })).toEqual({
       kind: "ok",
       assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P" }],
     });
     expect(opened.map((actor) => actor.reason)).toEqual(["course_approval"]);
     expect(sent[0]?.text).toContain("private.review_approve_assets(");
+    expect(sent[0]?.values).toEqual([COURSE, SUBMISSION]);
   });
 
-  it.each(["forbidden", "not_found", "not_pending"])("los videos, con %s, lo dicen", async (answer) => {
+  it.each(["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self"])("los videos, con %s, lo dicen", async (answer) => {
     const { run } = runnerWith([{ assets: { answer } }]);
-    expect(await createReviewStore(run).approveAssets(claims, COURSE)).toEqual({ kind: answer });
+    expect(await createReviewStore(run).approveAssets(claims, { course: COURSE, submission: SUBMISSION })).toEqual({ kind: answer });
   });
 
   it("unos videos con otra forma lanzan: la lectura es estricta", async () => {
     const { run } = runnerWith([{ assets: { answer: "ok", assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P", path: "ruta" }] } }]);
-    await expect(createReviewStore(run).approveAssets(claims, COURSE)).rejects.toThrow();
+    await expect(createReviewStore(run).approveAssets(claims, { course: COURSE, submission: SUBMISSION })).rejects.toThrow();
   });
 
   it("aprobar va con el envío que se vio y los videos con subtítulos", async () => {

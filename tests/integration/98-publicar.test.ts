@@ -196,7 +196,7 @@ describe("aprobar lo enviado, en la lectura estricta de la aplicación", () => {
   it("los videos para Mux, lo que espera subtítulos, y aprobar publica y borra el borrador", async () => {
     const { course, lesson, video, submission } = await sentCourse("Respirar en la 98");
     const store = storeOn(owner);
-    expect(await inTx(owner, () => store.approveAssets(CLAIMS, course))).toEqual({
+    expect(await inTx(owner, () => store.approveAssets(CLAIMS, { course, submission }))).toEqual({
       kind: "ok",
       assets: [{ video, lesson, provider: "mux", asset: `asset-${video}`, playback: `play-${video}` }],
     });
@@ -209,7 +209,7 @@ describe("aprobar lo enviado, en la lectura estricta de la aplicación", () => {
     expect(await state(course)).toMatchObject({ registry: "in_review", review: "pending", published: 0, drafts: 1 });
     expect(await inTx(owner, () => store.approveSubmission(CLAIMS, { course, submission, captions: [video] }))).toBe("approved");
     expect(await state(course)).toEqual({ registry: "published", review: "approved", published: 1, drafts: 0, original: `${teacherId}/${course}/${video}` });
-    expect(await inTx(owner, () => store.approveAssets(CLAIMS, course))).toEqual({ kind: "not_pending" });
+    expect(await inTx(owner, () => store.approveAssets(CLAIMS, { course, submission }))).toEqual({ kind: "not_pending" });
   });
 
   it("aprobar mientras alguien suspende al maestro: espera su fila, y no publica", async () => {

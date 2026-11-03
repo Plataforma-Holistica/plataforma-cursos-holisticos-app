@@ -57,8 +57,10 @@ export interface ReviewSubmission {
   number: number;
   resources: ReviewResource[];
   annex: { version: number; acceptedAt: string; statement: string; termYears: number };
-  /** Las lecciones cuyo video todavía no tiene subtítulos: sin ellos no se publica (RF-310). */
+  /** Las lecciones cuyo video todavía no tiene subtítulos confirmados: sin ellos no se publica (RF-310). */
   captionsMissing: string[];
+  /** Lo que cambió por fuera después de enviarse, por el título de su lección o del recurso: no se publica así. */
+  filesChanged: string[];
 }
 export interface ReviewCourse {
   courseId: string;
@@ -122,7 +124,8 @@ export type SubmissionApproveAnswer = (typeof SUBMISSION_APPROVE_ANSWERS)[number
 /** Los videos de lo enviado, para preguntarle a su proveedor antes de aprobar (`private.review_approve_assets()`). */
 export type ApproveAssets =
   | { kind: "ok"; assets: { video: string; lesson: string; provider: string; asset: string | null; playback: string | null }[] }
-  | { kind: "forbidden" | "not_found" | "not_pending" };
+  /** Lo que aprobar contestaría sin mirar los videos: se dice antes de preguntarle a Mux. */
+  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "not_pending" | "changed" | "self" };
 
 /** Lo que contesta `private.review_return()`. */
 export const RETURN_ANSWERS = ["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self", "invalid", "returned"] as const;
@@ -145,7 +148,7 @@ export interface ReviewStore {
   queue(claims: VerifiedClaims): Promise<ReviewQueue | null>;
   approve(claims: VerifiedClaims, courseId: string): Promise<ApproveAnswer>;
   returnCourse(claims: VerifiedClaims, input: CourseReturn): Promise<ReturnAnswer>;
-  approveAssets(claims: VerifiedClaims, courseId: string): Promise<ApproveAssets>;
+  approveAssets(claims: VerifiedClaims, input: { course: string; submission: string }): Promise<ApproveAssets>;
   /** `captions`: los videos que su proveedor dijo que ya tienen subtítulos. */
   approveSubmission(claims: VerifiedClaims, input: { course: string; submission: string; captions: string[] }): Promise<SubmissionApproveAnswer>;
 }
@@ -246,9 +249,9 @@ export function createReviewQueue(deps: { report: (code: FailureCode) => Promise
     if (typeof course !== "string" || !ID.test(course) || typeof submission !== "string" || !ID.test(submission)) return { kind: "malformed" };
     let assets: ApproveAssets;
     try {
-      assets = await core.store.approveAssets(team.claims, course);
+      assets = await core.store.approveAssets(team.claims, { course, submission });
     } catch {
-      await deps.report("course_approval_unavailable");
+      await deps.report("approve_read_unavailable");
       return { kind: "unavailable" };
     }
     if (assets.kind !== "ok") return { kind: "answered", answer: assets.kind };
@@ -265,12 +268,16 @@ export function createReviewQueue(deps: { report: (code: FailureCode) => Promise
       await deps.report("approve_video_gone");
       return { kind: "video_not_ready", lessons: assets.assets.filter((each) => checked.notReady.includes(each.video)).map((each) => each.lesson) };
     }
+    let answer: SubmissionApproveAnswer;
     try {
-      return { kind: "answered", answer: await core.store.approveSubmission(team.claims, { course, submission, captions: checked.captioned }) };
+      answer = await core.store.approveSubmission(team.claims, { course, submission, captions: checked.captioned });
     } catch {
       await deps.report("course_approval_unavailable");
       return { kind: "unknown" };
     }
+    // Le falta algo que nadie de la pantalla puede dar (la ficha de su maestro): alguien tiene que mirarlo.
+    if (answer === "unavailable") await deps.report("approve_unavailable");
+    return { kind: "answered", answer };
   }
 
   return { reviewQueue, approveCourse, returnCourse, approveSubmission };

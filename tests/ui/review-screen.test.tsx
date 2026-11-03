@@ -377,6 +377,7 @@ describe("lo enviado por el portal", () => {
             resources: [],
             annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo de licencia para el curso «Naturaleza».", termYears: 10 },
             captionsMissing: [],
+      filesChanged: [],
           },
         },
       ],
@@ -420,7 +421,14 @@ describe("lo enviado por el portal", () => {
     const waiting = sent();
     waiting.courses[0] = { ...waiting.courses[0]!, submission: { ...waiting.courses[0]!.submission!, captionsMissing: [waiting.courses[0]!.lessons[0]!.lessonId] } };
     show(waiting);
-    expect(screen.getByText("Esperan sus subtítulos: «El bosque». Sin ellos no se publica.")).toBeInTheDocument();
+    expect(screen.getByText("Sin subtítulos confirmados: «El bosque». Al aprobar se le pregunta a Mux; sin ellos no se publica.")).toBeInTheDocument();
+  });
+
+  it("un video que su proveedor ya no tiene: dice cuál lección, por su título", async () => {
+    actions.approveAction.mockResolvedValueOnce({ kind: "failed", reason: "video_gone", lessons: [sent().courses[0]!.lessons[0]!.lessonId], attempt: 1 });
+    const { user } = show(sent());
+    await user.click(screen.getByRole("button", { name: "Aprobar y publicar «Naturaleza»" }));
+    expect(await screen.findByText(/^Mux ya no tiene listo el video de «El bosque»/)).toBeVisible();
   });
 
   it("uno por guion no ofrece devolver", () => {

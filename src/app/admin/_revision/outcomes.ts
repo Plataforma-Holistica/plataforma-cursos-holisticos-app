@@ -104,9 +104,10 @@ export type ReviewState =
   /** El primer paso: se pregunta en el bloque del curso, sin haber llamado a nadie. */
   /** `submission`: el envío que se vio al preguntar. Es el que se aprueba: si llegó otro, la base contesta `changed`. */
   | { kind: "confirming"; course: string; submission: string | null; attempt: number }
-  | { kind: "failed"; reason: ReviewFailure; attempt: number };
+  /** `lessons`: las de un video que su proveedor ya no tiene listo (`video_gone`). */
+  | { kind: "failed"; reason: ReviewFailure; lessons?: string[]; attempt: number };
 
-export type ApproveOutcome = Leave | { kind: "failed"; reason: ReviewFailure };
+export type ApproveOutcome = Leave | { kind: "failed"; reason: ReviewFailure; lessons?: string[] };
 
 /** Lo que contestó aprobar. */
 export function approveOutcome(result: CourseApproved): ApproveOutcome {
@@ -157,7 +158,7 @@ export function approveSubmissionOutcome(result: SubmissionApproved): ApproveOut
     case "malformed":
       return { kind: "failed", reason: "not_pending" };
     case "video_not_ready":
-      return { kind: "failed", reason: "video_gone" };
+      return { kind: "failed", reason: "video_gone", lessons: result.lessons };
     case "answered":
       switch (result.answer) {
         case "approved":

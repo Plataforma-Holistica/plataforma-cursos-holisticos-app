@@ -25,8 +25,9 @@ export function createReviewStore(run: typeof asServer = asServer): ReviewStore 
     returnCourse: async (claims, input) =>
       returnAnswerOf(await withLockRetry(() => run({ claims, reason: "course_return" }, (tx) => askReturn(tx, input)), isLockConflict)),
     // Solo lee la fotografía del envío.
-    approveAssets: (claims, courseId) => run({ claims, reason: "course_approval" }, (tx) => readApproveAssets(tx, courseId)),
-    // Aprobar lo enviado toma la fila del maestro, las listas, el curso y el registro, y no escribe antes de rechazar: un choque se intenta una vez más.
+    approveAssets: (claims, input) => run({ claims, reason: "course_approval" }, (tx) => readApproveAssets(tx, input)),
+    // Aprobar lo enviado toma la fila del maestro y la de su cuenta, las listas, el curso y el registro. Antes de rechazar solo anota los subtítulos que dijo Mux: un choque revierte
+    // todo, y se intenta una vez más.
     approveSubmission: async (claims, input) =>
       submissionApproveAnswerOf(await withLockRetry(() => run({ claims, reason: "course_approval" }, (tx) => askApproveSubmission(tx, input)), isLockConflict)),
   };

@@ -62,7 +62,7 @@ const FAILURES: Record<ReviewFailure, string> = {
   annex_draft: text.annexDraft,
   files_changed: t(text.filesChanged),
   captions_pending: text.captionsPending,
-  video_gone: t(text.videoGone),
+  video_gone: t(text.videoGone, { lessons: text.oneLesson }),
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,
@@ -208,7 +208,10 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
       : // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
         queue.reason === "needs_code" && view.canChange
         ? null
-        : FAILURES[queue.reason];
+        : queue.reason === "video_gone" && queue.lessons !== undefined && queue.lessons.length > 0
+          ? // Las lecciones, por su título en la cola de ahora; la que ya no está, «una lección».
+            t(text.videoGone, { lessons: queue.lessons.map((id) => titleOf(view, id)).join(", ") })
+          : FAILURES[queue.reason];
   const tone = queue.kind === "failed" && (queue.reason === "unavailable" || queue.reason === "unknown") ? "danger" : "warning";
   const { block, answer, spoken } = useAnswerFocus(queuePending, attempt, result);
 
@@ -345,8 +348,8 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     returning={{
                       open: returnOpen?.course === course.id ? returnOpen : null,
                       lastHere: returnCourse === course.id,
-                      // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel.
-                      mayOpen: !returnHere,
+                      // Con otro curso abierto no se ofrece: abrir este se llevaría lo escrito en aquel. Tampoco con lo escrito a la vista de uno que se fue: se perdería.
+                      mayOpen: !returnHere && !returnGone,
                       action: sendReturn,
                       pending: returnPending,
                       result: returnResult,
@@ -368,6 +371,12 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
       </p>
     </main>
   );
+}
+
+/** El título de una lección de la cola, entre comillas, o «una lección» si ya no está. */
+function titleOf(view: ReviewView, lesson: string): string {
+  const found = view.teachers.flatMap((teacher) => teacher.courses).flatMap((course) => course.modules).flatMap((part) => part.lessons).find((each) => each.id === lesson);
+  return found === undefined ? text.oneLesson : `«${found.title}»`;
 }
 
 /** El foco no tiene dueño: quedó en el documento. */
@@ -499,6 +508,7 @@ function Submitted({ submission }: { submission: SubmissionRow }) {
         <p className="text-body-s text-text-2">{submission.annex}</p>
         <p className="break-words text-body-s text-text-2">{submission.statement}</p>
       </section>
+      {submission.files !== null && <p className="text-body-s font-semibold">{submission.files}</p>}
       {submission.captions !== null && <p className="text-body-s text-text-2">{submission.captions}</p>}
     </>
   );

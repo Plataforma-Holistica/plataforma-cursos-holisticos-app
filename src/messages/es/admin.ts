@@ -292,11 +292,12 @@ export const admin = defineMessages({
     unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
     // Lo enviado por el editor (T-405, cuarta solicitud).
     changed: "Ese curso se volvió a enviar mientras lo revisabas: lo de arriba ya es el envío nuevo. Revísalo antes de aprobarlo.",
-    teacherSuspended: "El {maestro} de ese curso está suspendido: no se publica. Se queda en revisión hasta que vuelva, o devuélvelo.",
+    teacherSuspended: "El {maestro} de ese curso está suspendido o ya no está en la plataforma: no se publica. Se queda en revisión; si no va a volver, devuélvelo.",
     annexDraft: "El anexo que se aceptó es un borrador sin validez: fuera de una prueba local no se publica.",
-    filesChanged: "Un archivo de ese curso cambió por fuera después de enviarse: no se publica. Devuélvelo para que su {maestro} lo envíe otra vez.",
-    captionsPending: "A ese curso le faltan subtítulos: no se publica sin ellos. Mux los está terminando; inténtalo en unos minutos.",
-    videoGone: "Mux ya no tiene listo el video de alguna lección de ese curso: no se publica. Devuélvelo para que su {maestro} lo vuelva a subir.",
+    filesChanged: "Un archivo de ese curso cambió por fuera después de enviarse: no se publica. La tarjeta dice cuál; devuélvelo para que su {maestro} lo vuelva a subir.",
+    captionsPending: "Mux todavía no tiene subtítulos de alguna lección de ese curso: no se publica sin ellos. Inténtalo más tarde; si no llegan, devuélvelo.",
+    videoGone: "Mux ya no tiene listo el video de {lessons}: no se publica. Devuélvelo para que su {maestro} lo vuelva a subir.",
+    oneLesson: "una lección",
 
     // Lo enviado por el portal (T-405): PA-62 con lo que hace falta.
     submitted: "Enviado el {date}. Envío número {number}.",
@@ -304,7 +305,8 @@ export const admin = defineMessages({
     annexLine: { one: "Versión {version}, aceptada el {date}, por {years} año.", other: "Versión {version}, aceptada el {date}, por {years} años." },
     courseResources: "Recursos del curso",
     lessonResources: "Recursos de esta lección",
-    captionsWaiting: "Esperan sus subtítulos: {lessons}. Sin ellos no se publica.",
+    captionsWaiting: "Sin subtítulos confirmados: {lessons}. Al aprobar se le pregunta a Mux; sin ellos no se publica.",
+    filesWaiting: "Cambió por fuera después de enviarse: {files}. Así no se publica: devuélvelo para que su {maestro} vuelva a subir ese archivo.",
     returnLocked: "Para devolverlo a su {maestro}, escribe tu código, al inicio de esta página.",
 
     // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.

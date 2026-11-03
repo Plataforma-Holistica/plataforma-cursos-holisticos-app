@@ -108,7 +108,7 @@ describe("approveSubmissionOutcome", () => {
     [{ kind: "unavailable" } as const, { kind: "failed", reason: "unavailable" }],
     [{ kind: "unknown" } as const, { kind: "failed", reason: "unknown" }],
     [{ kind: "malformed" } as const, { kind: "failed", reason: "not_pending" }],
-    [{ kind: "video_not_ready", lessons: ["l"] } as { kind: "video_not_ready"; lessons: string[] }, { kind: "failed", reason: "video_gone" }],
+    [{ kind: "video_not_ready", lessons: ["l"] } as { kind: "video_not_ready"; lessons: string[] }, { kind: "failed", reason: "video_gone", lessons: ["l"] }],
   ])("lo que no llegó a la base: %o", (result, outcome) => {
     expect(approveSubmissionOutcome(result)).toEqual(outcome);
   });

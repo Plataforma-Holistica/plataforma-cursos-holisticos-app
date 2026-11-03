@@ -76,7 +76,7 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
       : approveSubmissionOutcome(await approveSubmission(jar, { course: request.course, submission: request.submission }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
-  return { kind: "failed", reason: outcome.reason, attempt };
+  return outcome.lessons === undefined ? { kind: "failed", reason: outcome.reason, attempt } : { kind: "failed", reason: outcome.reason, lessons: outcome.lessons, attempt };
 }
 
 /**

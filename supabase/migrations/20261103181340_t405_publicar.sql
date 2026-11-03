@@ -4,12 +4,13 @@
 -- Por qué es así:
 --   · Una función nueva (`review_approve`) y no `approve_course`, que sigue para los cursos por guion y es del carril A. Las dos comparten el guardián de lo publicado.
 --   · Aprobar lleva el envío que se vio, como devolver: un formulario que llega tarde, con el curso devuelto y vuelto a enviar, contesta `changed`.
---   · Candados en el orden de enviar: la fila del maestro (`for share`, la que suspender toma para cambiar), las listas, el curso y el registro. Así no se publica el curso de alguien
---     que se suspende en ese instante.
+--   · Candados en el orden de enviar: la fila del maestro y la de su cuenta (`for share`, las que suspender toma para cambiar), las listas, el curso y el registro. Así no se publica el
+--     curso de alguien que se suspende, o a quien se le suspende la cuenta, en ese instante.
 --   · No se aprueba (decisiones de Sergio del 2026-11-03): el curso de un maestro suspendido, o con la cuenta suspendida, o que se fue (`teacher_suspended`; se queda en revisión), ni
 --     un curso con una lección sin subtítulos (`captions_pending`, RF-310): lo que el servidor le preguntó a Mux llega en la misma llamada y se anota antes de decidir.
 --   · RN-16: el anexo aceptado tiene que ser una versión publicada (1 o más). La 0 solo vale en una base local, con la marca de `db:drafts` (`annex_draft`).
---   · Cada archivo se compara con el que se revisó: el original de cada video y cada recurso, por su objeto y su versión en Storage (`files_changed`).
+--   · Cada archivo se compara con el que se revisó: el original de cada video y cada recurso, por su objeto y su versión en Storage (`files_changed`). La cola dice cuál cambió: si no,
+--     ni quien revisa ni el maestro sabrían qué volver a subir.
 --   · Lo publicado sale de la fotografía, no del borrador: es lo que se revisó. Los ids son los del borrador (módulos, lecciones, videos y recursos), para que «Editar» (la quinta
 --     solicitud) los recree iguales. Las lecciones se numeran en el curso entero, como lo publicado; en el borrador van por módulo.
 --   · Cada video guarda su original (`original_path`, RNF-17) y lo que el borrador necesita para volver. Sin la ruta, al borrar el borrador la papelera sacaría el renglón por el asset
@@ -307,8 +308,9 @@ begin
   if v_teacher is null then
     return 'not_found';
   end if;
-  -- El orden de enviar: la fila del maestro, las listas, el curso y el registro.
+  -- El orden de enviar: la fila del maestro y la de su cuenta, las listas, el curso y el registro.
   perform 1 from public.teachers t where t.id = v_teacher for share;
+  perform 1 from public.profiles p where p.id = (select t.profile_id from public.teachers t where t.id = v_teacher) for share;
   perform private.catalog_lock('practices');
   perform private.catalog_lock('levels');
   perform private.course_lock(p_course);
@@ -333,40 +335,46 @@ $$;
 revoke all on function private.review_approve(uuid, uuid, uuid[]) from public;
 grant execute on function private.review_approve(uuid, uuid, uuid[]) to app_service;
 
--- Lo que el servidor le pregunta a Mux antes de aprobar: cada video de lo enviado, con la reproducción que se publica. Para Contenido, sin código reciente, como mirar.
-create function private.review_approve_assets(p_course uuid) returns jsonb
+-- Lo que el servidor le pregunta a Mux antes de aprobar: cada video de lo enviado, con la reproducción que se publica. Contesta antes, sin escribir, lo que aprobar contestaría sin
+-- mirar los videos (la puerta, el envío visto y lo suyo): así no se le pregunta a Mux por nada.
+create function private.review_approve_assets(p_course uuid, p_submission uuid) returns jsonb
 language plpgsql stable security definer set search_path = ''
 as $$
 declare
-  v_state public.course_state;
-  v_snapshot jsonb;
+  v_gate text := private.content_change_gate();
+  v_registry public.course_registry;
+  v_review public.course_reviews;
 begin
-  if private.actor_id() is null or not private.actor_has_capability('content'::public.capability) then
-    return pg_catalog.jsonb_build_object('answer', 'forbidden');
+  if v_gate is not null then
+    return pg_catalog.jsonb_build_object('answer', v_gate);
   end if;
-  select r.state into v_state from public.course_registry r where r.course_id = p_course;
-  if v_state is null then
+  select * into v_registry from public.course_registry r where r.course_id = p_course;
+  if v_registry.course_id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
-  select c.content_snapshot into v_snapshot
-  from public.course_reviews c
-  join public.course_registry r on r.course_id = c.course_id and r.state = 'in_review'
-  where c.course_id = p_course and c.result = 'pending';
-  if v_snapshot is null then
+  select c.* into v_review from public.course_reviews c where c.course_id = p_course and c.result = 'pending';
+  if v_registry.state <> 'in_review' or v_review.id is null then
     return pg_catalog.jsonb_build_object('answer', 'not_pending');
+  end if;
+  if v_review.id is distinct from p_submission then
+    return pg_catalog.jsonb_build_object('answer', 'changed');
+  end if;
+  if private.actor_owns_teacher(v_registry.teacher_id) then
+    return pg_catalog.jsonb_build_object('answer', 'self');
   end if;
   return pg_catalog.jsonb_build_object('answer', 'ok', 'assets', coalesce((
     select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
              'video', x.video -> 'id', 'lesson', x.lesson_id, 'provider', x.video -> 'provider',
              'asset', x.video -> 'provider_asset_id', 'playback', x.video -> 'provider_playback_id') order by x.lesson_position)
-    from private.review_snapshot_lessons(v_snapshot) x), '[]'::jsonb));
+    from private.review_snapshot_lessons(v_review.content_snapshot) x), '[]'::jsonb));
 end
 $$;
-revoke all on function private.review_approve_assets(uuid) from public;
-grant execute on function private.review_approve_assets(uuid) to app_service;
+revoke all on function private.review_approve_assets(uuid, uuid) from public;
+grant execute on function private.review_approve_assets(uuid, uuid) to app_service;
 
 -- ---------------------------------------------------------------------------------------
--- La cola dice, de lo enviado, qué lecciones esperan todavía sus subtítulos. Lo demás, como en la segunda solicitud.
+-- La cola dice, de lo enviado, qué lecciones no tienen todavía subtítulos confirmados, y qué archivo cambió por fuera después de enviarse (el título de su lección o del recurso). Lo
+-- demás, como en la segunda solicitud.
 
 create or replace function private.review_submission_row(p_review uuid) returns jsonb
 language sql stable security definer set search_path = ''
@@ -410,6 +418,21 @@ as $$
         where not exists (
           select 1 from public.draft_videos v
           where v.id = (x.lesson -> 'video' ->> 'id')::uuid and v.is_current and v.captions_ready)), '[]'::jsonb),
+      'files_changed', coalesce((
+        select pg_catalog.jsonb_agg(f.title order by f.n)
+        from (
+          select x.module_order * 1000 + x.lesson_order as n, x.lesson ->> 'title' as title
+          from lessons x
+          where not exists (
+            select 1 from storage.objects o
+            where o.bucket_id = 'video-originals' and o.name = x.lesson -> 'video' ->> 'storage_path'
+              and o.id = (x.lesson -> 'video' ->> 'object_id')::uuid and o.version = x.lesson -> 'video' ->> 'object_version')
+          union all
+          select 1000000, r.title
+          from private.review_snapshot_resources(c.content_snapshot) r
+          where not exists (
+            select 1 from storage.objects o
+            where o.bucket_id = 'course-resources' and o.name = r.storage_path and o.id = r.object_id and o.version = r.object_version)) as f), '[]'::jsonb),
       'annex', pg_catalog.jsonb_build_object(
         'version', d.version, 'accepted_at', l.accepted_at, 'statement', l.accepted_statement, 'term_years', l.term_years)))
   from public.course_reviews c
@@ -453,7 +476,7 @@ as $$
            ('private.course_submit_licenses()', true),
            ('private.course_submit_annex(uuid)', true),
            ('private.review_approve(uuid, uuid, uuid[])', true),
-           ('private.review_approve_assets(uuid)', true),
+           ('private.review_approve_assets(uuid, uuid)', true),
            ('private.review_publish(uuid, uuid, uuid[])', false),
            ('private.review_snapshot_lessons(jsonb)', false),
            ('private.review_snapshot_resources(jsonb)', false)),
@@ -545,8 +568,9 @@ as $$
       ('private.review_approve(uuid, uuid, uuid[])', 'content_change_gate'),
       ('private.review_approve(uuid, uuid, uuid[])', 'actor_owns_teacher'),
       ('private.review_approve(uuid, uuid, uuid[])', 'in_review'),
-      ('private.review_approve_assets(uuid)', 'actor_has_capability'),
-      ('private.review_approve_assets(uuid)', 'in_review'),
+      ('private.review_approve_assets(uuid, uuid)', 'content_change_gate'),
+      ('private.review_approve_assets(uuid, uuid)', 'actor_owns_teacher'),
+      ('private.review_approve_assets(uuid, uuid)', 'in_review'),
       ('private.review_publish(uuid, uuid, uuid[])', 'legal_drafts'),
       ('private.review_publish(uuid, uuid, uuid[])', 'video-originals'),
       ('private.review_publish(uuid, uuid, uuid[])', 'captions_ready')

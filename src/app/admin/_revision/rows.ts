@@ -48,8 +48,10 @@ export interface SubmissionRow {
   annex: string;
   statement: string;
   resources: ResourceItem[];
-  /** Las lecciones que esperan sus subtítulos, en una frase; nulo si ninguna (RF-310). */
+  /** Las lecciones sin subtítulos confirmados, en una frase; nulo si ninguna (RF-310). */
   captions: string | null;
+  /** Lo que cambió por fuera después de enviarse, en una frase; nulo si nada. */
+  files: string | null;
   /** Abrir devolver, o seguir con este envío si el que se veía cambió. */
   ask: string;
 }
@@ -156,6 +158,7 @@ function courseRow(course: ReviewCourse): CourseRow {
                 : t(text.captionsWaiting, {
                     lessons: submission.captionsMissing.map((id) => `«${course.lessons.find((lesson) => lesson.lessonId === id)?.title ?? ""}»`).join(", "),
                   }),
+            files: submission.filesChanged.length === 0 ? null : t(text.filesWaiting, { files: submission.filesChanged.map((title) => `«${title}»`).join(", ") }),
             ask: returnButton.ask(course.courseId, submission.id),
           },
   };

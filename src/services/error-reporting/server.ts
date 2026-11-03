@@ -81,6 +81,8 @@ const FAILURES = {
   media_email_unverified: "Una cuenta que pasó la guarda pidió un video sin tener su correo verificado. No debería pasar: el registro verifica el correo. La regla siguió sin abrirle el curso abierto.",
   review_queue_unavailable: "No se pudo leer la cola de revisión: quien tiene Contenido no pudo ver los cursos por aprobar.",
   approve_video_gone: "Al aprobar un curso enviado, su proveedor de video ya no tenía listo un video que la base da por listo (T-405): no se aprobó, y la fila hay que mirarla a mano (OP-21).",
+  approve_read_unavailable: "Antes de aprobar un curso enviado no se pudieron leer sus videos (T-405): no se intentó aprobar.",
+  approve_unavailable: "Aprobar un curso enviado contestó que le falta algo que la pantalla no puede dar, como la ficha de su maestro (T-405): no se publicó, y hay que mirarlo a mano.",
   approve_provider_unavailable: "Antes de aprobar un curso enviado no se pudo preguntarle a su proveedor de video por algún video (T-405): no se aprobó.",
   course_approval_unavailable: "Aprobar un curso se quedó sin respuesta, o con una que el servidor no conoce: no se sabe si quedó publicado, y a quien lo pidió se le dijo que revise la cola.",
   course_return_unavailable: "Devolver un curso se quedó sin respuesta, o con una que el servidor no conoce (T-405): no se sabe si quedó devuelto, y a quien lo pidió se le dijo que revise la cola.",

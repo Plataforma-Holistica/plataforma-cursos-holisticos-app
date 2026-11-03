@@ -65,6 +65,7 @@ const queueSchema = z.strictObject({
           number: z.number().int().min(1),
           resources: z.array(resourceRow),
           captions_missing: z.array(id),
+          files_changed: z.array(z.string()),
           annex: z.strictObject({ version: z.number().int().min(0), accepted_at: z.string(), statement: z.string(), term_years: z.number().int().min(1) }),
         })
         .optional(),
@@ -113,6 +114,7 @@ export function queueOf(raw: unknown): ReviewQueue | null {
                 termYears: course.submission.annex.term_years,
               },
               captionsMissing: course.submission.captions_missing,
+              filesChanged: course.submission.files_changed,
             },
     })),
   };
@@ -144,7 +146,7 @@ const assetsSchema = z.discriminatedUnion("answer", [
     answer: z.literal("ok"),
     assets: z.array(z.strictObject({ video: id, lesson: id, provider: z.string(), asset: z.string().nullable(), playback: z.string().nullable() })),
   }),
-  z.strictObject({ answer: z.enum(["forbidden", "not_found", "not_pending"]) }),
+  z.strictObject({ answer: z.enum(["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self"]) }),
 ]);
 
 /** Lo que contestó `private.review_approve_assets()`. Otra forma lanza. */
@@ -169,8 +171,8 @@ export async function askApprove(tx: Tx, courseId: string): Promise<string> {
 }
 
 /** Los videos de lo enviado, para preguntarle a su proveedor antes de aprobar. */
-export async function readApproveAssets(tx: Tx, courseId: string): Promise<ApproveAssets> {
-  const [row] = await tx.query(sql`select private.review_approve_assets(${courseId}::uuid) as assets`, z.object({ assets: z.unknown() }));
+export async function readApproveAssets(tx: Tx, input: { course: string; submission: string }): Promise<ApproveAssets> {
+  const [row] = await tx.query(sql`select private.review_approve_assets(${input.course}::uuid, ${input.submission}::uuid) as assets`, z.object({ assets: z.unknown() }));
   if (!row) throw new Error("La base no contestó los videos de lo enviado.");
   return approveAssetsOf(row.assets);
 }

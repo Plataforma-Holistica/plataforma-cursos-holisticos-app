@@ -181,7 +181,7 @@ test("FL-45: Contenido aprueba lo enviado, y el curso aparece en el catálogo co
 
   const card = page.getByRole("article").filter({ hasText: title });
   // El video todavía no tiene subtítulos: la tarjeta lo dice, y aprobar le pregunta al proveedor.
-  await expect(card.getByText(/^Esperan sus subtítulos: «Primera lección»/)).toBeVisible();
+  await expect(card.getByText(/^Sin subtítulos confirmados: «Primera lección»/)).toBeVisible();
   await card.getByRole("button", { name: `Aprobar y publicar «${title}»` }).click();
   await expect(card.getByText("¿Aprobar y publicar este curso?")).toBeVisible();
   await expect(card.getByText(/Es el primer curso de Maestra Publicar/)).toBeVisible();

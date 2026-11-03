@@ -60,8 +60,8 @@ function queueWith(
       if (setup.answer === "throws") return Promise.reject(new Error("sin base"));
       return Promise.resolve((setup.answer ?? "approved") as never);
     }),
-    approveAssets: vi.fn((_claims: VerifiedClaims, course: string) => {
-      calls.push(`videos ${course}`);
+    approveAssets: vi.fn((_claims: VerifiedClaims, input: { course: string; submission: string }) => {
+      calls.push(`videos ${input.course}`);
       if (setup.assets === "throws") return Promise.reject(new Error("sin base"));
       return Promise.resolve(setup.assets ?? ASSETS);
     }),
@@ -234,6 +234,7 @@ describe("approveSubmission", () => {
     const service = queueWith({ reads: { A1: READY("P1"), A2: READY("P2", false) } });
     expect(await service.approveSubmission(reader, INPUT)).toEqual({ kind: "answered", answer: "approved" });
     expect(service.calls).toEqual(["guarda", `videos ${COURSE}`, "mux A1", "mux A2", `publicar ${COURSE}`]);
+    expect(service.store.approveAssets).toHaveBeenCalledWith(claims, { course: COURSE, submission: SUBMISSION });
     expect(service.store.approveSubmission).toHaveBeenCalledWith(claims, { course: COURSE, submission: SUBMISSION, captions: [V1] });
   });
 
@@ -258,7 +259,7 @@ describe("approveSubmission", () => {
     expect(service.calls).toEqual(["guarda"]);
   });
 
-  it.each(["forbidden", "not_found", "not_pending"] as const)("la base no da los videos (%s): se dice, sin preguntarle a Mux", async (kind) => {
+  it.each(["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self"] as const)("la base no da los videos (%s): se dice, sin preguntarle a Mux", async (kind) => {
     const service = queueWith({ assets: { kind } });
     expect(await service.approveSubmission(reader, INPUT)).toEqual({ kind: "answered", answer: kind });
     expect(service.calls).toEqual(["guarda", `videos ${COURSE}`]);
@@ -267,7 +268,7 @@ describe("approveSubmission", () => {
   it("si no se pudieron leer los videos: unavailable, y se reporta", async () => {
     const service = queueWith({ assets: "throws" });
     expect(await service.approveSubmission(reader, INPUT)).toEqual({ kind: "unavailable" });
-    expect(service.reported).toEqual(["course_approval_unavailable"]);
+    expect(service.reported).toEqual(["approve_read_unavailable"]);
   });
 
   it("si Mux no contesta por uno: no se aprueba a ciegas, y se reporta", async () => {
@@ -284,10 +285,16 @@ describe("approveSubmission", () => {
     expect(service.calls).not.toContain(`publicar ${COURSE}`);
   });
 
-  it.each(SUBMISSION_APPROVE_ANSWERS)("la base contesta %s: tal cual", async (answer) => {
+  it.each(SUBMISSION_APPROVE_ANSWERS.filter((answer) => answer !== "unavailable"))("la base contesta %s: tal cual", async (answer) => {
     const service = queueWith({ answer });
     expect(await service.approveSubmission(reader, INPUT)).toEqual({ kind: "answered", answer });
     expect(service.reported).toEqual([]);
+  });
+
+  it("la base contesta unavailable: se dice, y se reporta, porque nadie de la pantalla lo arregla", async () => {
+    const service = queueWith({ answer: "unavailable" });
+    expect(await service.approveSubmission(reader, INPUT)).toEqual({ kind: "answered", answer: "unavailable" });
+    expect(service.reported).toEqual(["approve_unavailable"]);
   });
 
   it("si aprobar no contestó: unknown, y se reporta", async () => {

@@ -3,7 +3,7 @@
 -- suspendido, un anexo de borrador fuera de local, lo que no tiene subtítulos y un archivo que cambió por fuera. Pasa con los borradores legales cargados y sin ellos.
 begin;
 \ir _ayuda.psql
-select plan(71);
+select plan(81);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a7700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -218,7 +218,7 @@ select pruebas.armar(1, 'borrador', 'Nunca enviado');
 -- Antes de enviar no hay nada que aprobar.
 
 select is(pruebas.aprobar(pruebas.p(3), 'borrador'), 'not_pending', 'un borrador no se aprueba');
-select is(pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L)', pruebas.id('borrador'))) ->> 'answer', 'not_pending', 'ni se piden sus videos');
+select is(pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L, %L)', pruebas.id('borrador'), pruebas.envio('borrador'))) ->> 'answer', 'not_pending', 'ni se piden sus videos');
 
 select is(pruebas.enviar(1, 'curso'), 'submitted', 'el maestro envía');
 select is(pruebas.enviar(2, 'propio'), 'submitted', 'quien revisa envía uno suyo');
@@ -230,13 +230,16 @@ select is(pruebas.enviar(1, 'huerfano'), 'submitted', 'y uno más');
 -- Lo que el servidor le pregunta a Mux antes de aprobar.
 
 select is(
-  pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L)', pruebas.id('curso'))) -> 'assets' -> 0,
+  pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), pruebas.envio('curso'))) -> 'assets' -> 0,
   jsonb_build_object('video', :'v1', 'lesson', pruebas.id('l1'), 'provider', 'mux', 'asset', 'asset-' || :'v1', 'playback', 'play-' || :'v1'),
   'cada video de lo enviado, con su asset y la reproducción que se publica');
-select is(jsonb_array_length(pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L)', pruebas.id('curso'))) -> 'assets'), 3, 'los tres');
-select is(pruebas.rj(pruebas.p(4), format('private.review_approve_assets(%L)', pruebas.id('curso'))) ->> 'answer', 'ok', 'leerlos no pide un código reciente');
-select is(pruebas.rj(pruebas.p(5), format('private.review_approve_assets(%L)', pruebas.id('curso'))) ->> 'answer', 'forbidden', 'sin Contenido, no');
-select is(pruebas.rj(pruebas.p(1), format('private.review_approve_assets(%L)', pruebas.id('curso'))) ->> 'answer', 'forbidden', 'ni su maestro');
+select is(jsonb_array_length(pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), pruebas.envio('curso'))) -> 'assets'), 3, 'los tres');
+-- Lo que aprobar contestaría sin mirar los videos se contesta antes: así no se le pregunta a Mux por nada.
+select is(pruebas.rj(pruebas.p(4), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), pruebas.envio('curso'))) ->> 'answer', 'needs_fresh_code', 'sin un código reciente, tampoco los videos');
+select is(pruebas.rj(pruebas.p(3), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), gen_random_uuid())) ->> 'answer', 'changed', 'ni de otro envío que el que se vio');
+select is(pruebas.rj(pruebas.p(2), format('private.review_approve_assets(%L, %L)', pruebas.id('propio'), pruebas.envio('propio'))) ->> 'answer', 'self', 'ni de lo suyo');
+select is(pruebas.rj(pruebas.p(5), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), pruebas.envio('curso'))) ->> 'answer', 'forbidden', 'sin Contenido, no');
+select is(pruebas.rj(pruebas.p(1), format('private.review_approve_assets(%L, %L)', pruebas.id('curso'), pruebas.envio('curso'))) ->> 'answer', 'forbidden', 'ni su maestro');
 
 -- ---------------------------------------------------------------------------------------
 -- Cada respuesta, sin escribir nada antes de rechazar.
@@ -258,6 +261,29 @@ select pruebas.suspender(pruebas.p(1));
 select is(pruebas.aprobar(pruebas.p(3), 'curso'), 'teacher_suspended', 'ni el de una cuenta suspendida');
 select pruebas.como_dueno_sistema();
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.p(1);
+
+-- Un maestro que se fue cuenta igual.
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'left', left_at = now() where id = pruebas.m(1);
+select is(pruebas.aprobar(pruebas.p(3), 'curso'), 'teacher_suspended', 'ni el de un maestro que se fue');
+select pruebas.como_dueno_sistema();
+update public.teachers set status = 'active', left_at = null where id = pruebas.m(1);
+
+-- Sin la ficha del maestro no hay con qué nombrarlo en el catálogo: no se publica.
+select pruebas.como_dueno();
+alter table public.published_teachers disable trigger user;
+delete from public.published_teachers where teacher_id = pruebas.m(2) returning slug as ficha_slug, display_name as ficha_nombre \gset
+alter table public.published_teachers enable trigger user;
+select is(pruebas.aprobar(pruebas.p(3), 'propio'), 'unavailable', 'sin la ficha de su maestro, no se publica');
+select pruebas.como_dueno_sistema();
+insert into public.published_teachers (teacher_id, slug, display_name) values (pruebas.m(2), :'ficha_slug', :'ficha_nombre');
+
+-- Un curso por guion, en revisión y sin envío, lo aprueba approve_course.
+select pruebas.como_dueno_sistema();
+insert into public.course_registry (course_id, teacher_id, state) values ('a7700000-0000-0000-0005-000000000001', pruebas.m(1), 'in_review');
+select pruebas.como_dueno();
+insert into pruebas.ids values ('por-guion', 'a7700000-0000-0000-0005-000000000001');
+select is(pruebas.aprobar(pruebas.p(3), 'por-guion'), 'not_pending', 'un curso por guion no se aprueba por aquí');
 
 -- Un anexo de borrador no se aprueba fuera de local (RN-16).
 select pruebas.como_dueno();
@@ -282,11 +308,25 @@ select pruebas.como_dueno();
 alter table public.practices disable trigger user;
 update public.practices set is_active = true where id = 'a7700000-0000-0000-0002-000000000001';
 alter table public.practices enable trigger user;
+alter table public.levels disable trigger user;
+update public.levels set is_active = false where id = 'a7700000-0000-0000-0002-000000000002';
+alter table public.levels enable trigger user;
+select is(pruebas.aprobar(pruebas.p(3), 'curso'), 'level_inactive', 'ni con el nivel desactivado');
+select pruebas.como_dueno();
+alter table public.levels disable trigger user;
+update public.levels set is_active = true where id = 'a7700000-0000-0000-0002-000000000002';
+alter table public.levels enable trigger user;
 
 -- Sin subtítulos no se publica (RF-310; decisión de Sergio del 2026-11-03). Lo que Mux dijo se queda, aunque falte otro.
 select is(pruebas.aprobar(pruebas.p(3), 'curso', 'none'), 'captions_pending', 'sin subtítulos, no se aprueba');
 select is(pruebas.aprobar(pruebas.p(3), 'curso', 'first'), 'captions_pending', 'con los de uno solo, tampoco');
 select is((select count(*)::integer from public.draft_videos where course_id = pruebas.id('curso') and captions_ready), 1, 'y lo que sí tiene queda anotado');
+-- Un video de otro curso en la lista no se toca.
+select pruebas.id('curso') as curso_id, pruebas.envio('curso') as envio_curso, pruebas.subtitulos('huerfano', 'all') as de_otro \gset
+select pruebas.a_nombre_de(pruebas.p(3));
+select private.review_approve(:'curso_id', :'envio_curso', :'de_otro') as otro_curso \gset
+select pruebas.limpiar();
+select is((select bool_or(captions_ready) from public.draft_videos where course_id = pruebas.id('huerfano')), false, 'los subtítulos que se anotan son solo los de ese curso');
 select ok((pruebas.de_cola('curso') -> 'submission' -> 'captions_missing') @> jsonb_build_array(pruebas.id('l2'), pruebas.id('l3')), 'la cola dice qué lecciones esperan sus subtítulos');
 select is(jsonb_array_length(pruebas.de_cola('curso') -> 'submission' -> 'captions_missing'), 2, 'solo esas');
 
@@ -294,10 +334,12 @@ select is(jsonb_array_length(pruebas.de_cola('curso') -> 'submission' -> 'captio
 select pruebas.como_dueno();
 update storage.objects set version = 'v2' where bucket_id = 'video-originals' and name = (select storage_path from public.draft_videos where id = :'v2');
 select is(pruebas.aprobar(pruebas.p(3), 'curso'), 'files_changed', 'un original reemplazado por fuera no se publica');
+select is(pruebas.de_cola('curso') -> 'submission' -> 'files_changed', jsonb_build_array('Ritmo'), 'y la cola dice cuál, por su lección');
 select pruebas.como_dueno();
 update storage.objects set version = 'v1' where bucket_id = 'video-originals' and name = (select storage_path from public.draft_videos where id = :'v2');
 update storage.objects set version = 'v2' where bucket_id = 'course-resources' and name = (select storage_path from public.draft_resources where id = :'rl');
 select is(pruebas.aprobar(pruebas.p(3), 'curso'), 'files_changed', 'ni un recurso reemplazado');
+select is(pruebas.de_cola('curso') -> 'submission' -> 'files_changed', jsonb_build_array('Guía'), 'por su título');
 select pruebas.como_dueno();
 update storage.objects set version = 'v1' where bucket_id = 'course-resources' and name = (select storage_path from public.draft_resources where id = :'rl');
 select pruebas.como_dueno();
@@ -307,6 +349,7 @@ select pruebas.como_dueno();
 update storage.objects set name = (select storage_path from public.draft_videos where id = :'v3')
 where bucket_id = 'video-originals' and name = (select storage_path from public.draft_videos where id = :'v3') || '.movido';
 
+select is(pruebas.de_cola('curso') -> 'submission' -> 'files_changed', '[]'::jsonb, 'con todo en su lugar, nada cambió');
 select is(pruebas.estado('curso'), 'in_review', 'tras cada rechazo el curso sigue en revisión');
 select is((select count(*)::integer from public.published_courses where course_id = pruebas.id('curso')), 0, 'sin nada publicado');
 select is((select result::text from public.course_reviews where id = pruebas.envio('curso')), 'pending', 'y el envío pendiente');
@@ -409,7 +452,7 @@ select is((select provider from public.video_assets where course_id = pruebas.id
 select pruebas.como_dueno();
 select ok(
   (select bool_and(has_function_privilege('app_service', f, 'execute') and not has_function_privilege('authenticated', f, 'execute') and not has_function_privilege('anon', f, 'execute'))
-   from unnest(array['private.review_approve(uuid, uuid, uuid[])', 'private.review_approve_assets(uuid)']) f),
+   from unnest(array['private.review_approve(uuid, uuid, uuid[])', 'private.review_approve_assets(uuid, uuid)']) f),
   'aprobar y sus videos son del servidor, y de nadie más');
 select ok(
   (select bool_and(not has_function_privilege(r, f, 'execute'))

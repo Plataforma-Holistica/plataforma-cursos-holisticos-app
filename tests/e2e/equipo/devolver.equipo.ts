@@ -173,7 +173,7 @@ test("FL-45 y FL-35: Contenido lo devuelve con motivo y qué corregir, y su maes
   await expect(card.getByText(/^Acepto el anexo de licencia, .*«Curso para devolver»/)).toBeVisible();
   // Desde la cuarta solicitud también se aprueba (lo prueba publicar.equipo.ts), y dice qué espera sus subtítulos: el video de prueba de aquí todavía no los tiene.
   await expect(card.getByRole("button", { name: /Aprobar y publicar/ })).toBeVisible();
-  await expect(card.getByText(/^Esperan sus subtítulos: «Primera lección»/)).toBeVisible();
+  await expect(card.getByText(/^Sin subtítulos confirmados: «Primera lección»/)).toBeVisible();
   // Nada de la fotografía que no sea para la pantalla, ni del origen de la aceptación, en todo el documento.
   const served = await page.content();
   for (const secret of ["PlaySalida", "AssetSalida", "rutasalida", "203.0.113.7", "NavegadorSalida"]) expect(served).not.toContain(secret);
