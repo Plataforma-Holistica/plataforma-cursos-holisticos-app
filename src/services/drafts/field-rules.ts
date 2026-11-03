@@ -5,7 +5,7 @@
 // Este archivo viaja al navegador: no importa la base, ni la configuración, ni nada que sea solo
 // del servidor. La revisión que manda es la de la base.
 
-export { DRAFT_TEXT_LIMITS, parseDraftText, type DraftTextKind, type DraftTextResult } from "@/domain/catalog/draft-text";
+export { DRAFT_TEXT_LIMITS, parseDraftText, parseReviewNote, REVIEW_NOTE_MAX, type DraftTextKind, type DraftTextResult } from "@/domain/catalog/draft-text";
 export { missingItems, type DraftReadiness } from "@/domain/catalog/draft-readiness";
 export { RESOURCE_EXTENSIONS, resourceTypeOf, type ResourceKind } from "@/domain/catalog/resource-content";
 export { VIDEO_EXTENSIONS, videoMimeOf } from "@/domain/catalog/video-content";

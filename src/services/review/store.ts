@@ -6,7 +6,7 @@ import { isLockConflict } from "@/adapters/supabase/errors";
 import { withLockRetry } from "@/services/account/team";
 
 import type { ReviewStore } from "./queue";
-import { approveAnswerOf, askApprove, readReviewQueue } from "./records";
+import { approveAnswerOf, askApprove, askReturn, readReviewQueue, returnAnswerOf } from "./records";
 
 // Lo que el servicio de revisión le pregunta a la base, a nombre de las claims que verificó:
 // cada pregunta abre su transacción como servidor, con quién actúa y con qué sesión tomados
@@ -21,6 +21,9 @@ export function createReviewStore(run: typeof asServer = asServer): ReviewStore 
     // rechazar: un choque revierte la transacción entera, y se intenta una vez más.
     approve: async (claims, courseId) =>
       approveAnswerOf(await withLockRetry(() => run({ claims, reason: "course_approval" }, (tx) => askApprove(tx, courseId)), isLockConflict)),
+    // Devolver toma el candado del curso y tampoco escribe antes de rechazar.
+    returnCourse: async (claims, input) =>
+      returnAnswerOf(await withLockRetry(() => run({ claims, reason: "course_return" }, (tx) => askReturn(tx, input)), isLockConflict)),
   };
 }
 

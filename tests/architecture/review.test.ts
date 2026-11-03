@@ -25,7 +25,7 @@ describe("la revisión pasa por las funciones de la base", () => {
     for (const code of [queue, store, records]) expect(code.length).toBeGreaterThan(0);
   });
 
-  it.each(["approve_course", "review_queue"])("private.%s() se nombra en un solo archivo, una vez", (name) => {
+  it.each(["approve_course", "review_queue", "review_return"])("private.%s() se nombra en un solo archivo, una vez", (name) => {
     const naming = sources.filter((source) => new RegExp(`private\\.${name}\\b`).test(source.text)).map((source) => source.file);
     expect(naming).toEqual(["src/services/review/records.ts"]);
     expect(records.match(new RegExp(`private\\.${name}\\(`, "g"))).toHaveLength(1);
@@ -46,6 +46,16 @@ describe("la revisión pasa por las funciones de la base", () => {
     expect(bodyOf("approveCourse")).toMatch(
       /^ {2}async function approveCourse\([^)]*\): Promise<CourseApproved> \{\n {4}const team = await core\.teamStanding\(reader\);/,
     );
+  });
+
+  it("devolver corre la guarda antes que cualquier otra cosa", () => {
+    expect(bodyOf("returnCourse")).toMatch(/^ {2}async function returnCourse\([^)]*\): Promise<CourseReturned> \{\n {4}const team = await core\.teamStanding\(reader\);/);
+  });
+
+  it("lo que lee el maestro y la puerta de los recursos se nombran en un solo archivo", () => {
+    const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(source.text)).map((source) => source.file);
+    expect(naming(/private\.course_return_notes\b/)).toEqual(["src/services/drafts/records.ts"]);
+    expect(naming(/private\.review_resource_object\b/)).toEqual(["src/services/media/records.ts"]);
   });
 
   it("las pantallas llegan por review.ts, nunca a queue.ts, store.ts ni records.ts", () => {

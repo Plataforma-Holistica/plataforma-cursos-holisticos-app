@@ -2,15 +2,33 @@
 
 import { refresh } from "next/cache";
 
+import { redirect } from "next/navigation";
+
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { checkCode, readGiveCodeForm } from "@/app/(cuenta)/entrar/segundo-factor/outcomes";
+import { downloadOutcome, readDownloadForm, type DownloadState } from "@/app/_catalog/resources/outcomes";
 import { cookieJar } from "@/app/_lib/request-context";
 import { giveCatalogCode } from "@/services/catalog/catalog";
-import { getMediaGrant } from "@/services/media/media";
-import { approveCourse } from "@/services/review/review";
+import { clearNotice } from "@/services/account/notice";
+import { getMediaGrant, getReviewResourceGrant, getReviewVideoGrant } from "@/services/media/media";
+import { approveCourse, returnCourse } from "@/services/review/review";
 
-import { approveOutcome, readReviewForm, reviewCodeOutcome, videoAnswerOf, type CodeState, type ReviewState, type VideoAnswer } from "./outcomes";
+import {
+  approveOutcome,
+  NO_RETURN_PROBLEMS,
+  readReturnForm,
+  readReviewForm,
+  returnOutcome,
+  returnProblems,
+  reviewCodeOutcome,
+  reviewVideoAnswerOf,
+  videoAnswerOf,
+  type CodeState,
+  type ReturnState,
+  type ReviewState,
+  type VideoAnswer,
+} from "./outcomes";
 
 // Las acciones de la pantalla de revisión (PA-61 y PA-62 mínimas; FL-45; T-108). Ninguna
 // decide quién puede: los servicios corren la guarda, y la base vuelve a comprobar que quien
@@ -45,9 +63,11 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
   const request = readReviewForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
+  const jar = await cookieJar();
+  // El aviso con el que se llegó ya se leyó: no vuelve a salir junto a otra respuesta, hablando de otro curso.
+  clearNotice(jar);
   if (request.step === "ask") return { kind: "confirming", course: request.course, attempt };
 
-  const jar = await cookieJar();
   const outcome = approveOutcome(await approveCourse(jar, { course: request.course }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
@@ -64,4 +84,43 @@ export async function lessonVideoAction(lessonId: unknown): Promise<VideoAnswer>
   const answer = videoAnswerOf(await getMediaGrant(jar, lessonId, "review"));
   if (answer.kind === "leave") return leaveFor(jar, answer);
   return answer;
+}
+
+/**
+ * Devolver un curso enviado, en dos pasos. «Devolver» y «Cancelar» no llaman a nadie. Lo que falta o no pasa se dice en su campo, sin llamar al servicio: lo
+ * escrito viaja en el estado. Devuelto, se redirige a esta misma página con el aviso; si no, se vuelve a pedir la página, porque la cola pudo cambiar.
+ */
+export async function returnAction(previous: ReturnState, form: FormData): Promise<ReturnState> {
+  const request = readReturnForm(form);
+  if (request.step === "none") return { kind: "idle" };
+  if (request.step === "cancel") return { kind: "closed", course: request.course };
+  const attempt = nextAttempt(previous);
+  const jar = await cookieJar();
+  clearNotice(jar);
+  const { course, submission, reason, whatToFix } = request;
+  if (request.step === "ask") return { kind: "open", course, submission, reason, whatToFix, problems: NO_RETURN_PROBLEMS, failure: null, attempt };
+  const problems = returnProblems(request);
+  if (problems.reason !== null || problems.whatToFix !== null) return { kind: "open", course, submission, reason, whatToFix, problems, failure: null, attempt };
+
+  const outcome = returnOutcome(await returnCourse(jar, { course, submission, reason, whatToFix }));
+  if (outcome.kind === "leave") return leaveFor(jar, outcome);
+  refresh();
+  return { kind: "open", course, submission, reason, whatToFix, problems, failure: outcome.reason, attempt };
+}
+
+/** La dirección firmada de una lección enviada por el editor, con su marca de agua. Lo que llega es el curso y la lección, nunca un playback id. */
+export async function reviewVideoAction(courseId: unknown, lessonId: unknown): Promise<VideoAnswer> {
+  const jar = await cookieJar();
+  const answer = reviewVideoAnswerOf(await getReviewVideoGrant(jar, courseId, lessonId));
+  if (answer.kind === "leave") return leaveFor(jar, answer);
+  return answer;
+}
+
+/** Bajar un recurso de lo enviado, por la puerta de medios. Del formulario solo se lee qué recurso y si hay JavaScript. */
+export async function reviewResourceAction(previous: DownloadState, form: FormData): Promise<DownloadState> {
+  const request = readDownloadForm(form);
+  if (request.kind === "none") return { kind: "idle" };
+  const outcome = downloadOutcome(await getReviewResourceGrant(await cookieJar(), request.resource), request.javascript, nextAttempt(previous));
+  if (outcome.kind === "redirect") redirect(outcome.url);
+  return outcome;
 }

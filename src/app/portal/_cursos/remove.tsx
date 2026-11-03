@@ -10,7 +10,7 @@ import { DeleteCourseScreen } from "./delete-screen";
 import { deleteButton } from "./outcomes";
 
 // Confirmar el borrado de un curso (`/portal/cursos/<id>/borrar`). Lo sirve el comodín del portal,
-// después de la guarda. Solo un borrador del maestro, nunca enviado, y no a un suspendido: lo demás
+// después de la guarda. Solo un borrador del maestro que nunca se publicó, también uno rechazado, y no a un suspendido: lo demás
 // contesta lo mismo que una ruta que no existe. La base lo vuelve a exigir al borrar.
 
 export async function DeleteCourseSection({ claims, course, readOnly }: { claims: VerifiedClaims; course: string; readOnly: boolean }) {
@@ -22,7 +22,7 @@ export async function DeleteCourseSection({ claims, course, readOnly }: { claims
 
   return (
     <PortalFrame current={ROUTES.portalCourses} readOnly={false}>
-      <DeleteCourseScreen title={read.value.title} confirm={deleteButton(read.value.id, read.value.contentRevision)} path={path} />
+      <DeleteCourseScreen title={read.value.title} confirm={deleteButton(read.value.id, read.value.contentRevision)} path={path} wasSent={read.value.returned !== null} />
     </PortalFrame>
   );
 }

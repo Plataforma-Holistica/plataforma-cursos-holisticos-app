@@ -80,6 +80,8 @@ import type {
 // borrador. Bajar no abre reproducción, no late y nunca cuenta para el reparto (RF-306).
 //
 // Desde T-403 firma además la vista previa de un video del borrador (`getDraftVideoGrant`), con las mismas tres cosas: sin reproducción, sin latidos y sin puntos.
+//
+// Desde T-405, Contenido llega a lo enviado por el editor con la guarda del equipo: `getReviewVideoGrant` y `getReviewResourceGrant`. Las mismas tres cosas, con la marca de agua de quien revisa.
 
 /** Una dirección firmada, con lo que el reproductor necesita para usarla. */
 interface Signed {
@@ -209,6 +211,12 @@ export type DraftResourceGrant = Exclude<ResourceGrant, { kind: "denied" }>;
 /** Lo que contesta la vista previa de un video del borrador (PA-43): con su marca, sin reproducción ni latidos. */
 export type DraftVideoGrant = (Signed & { watermark: string }) | Extract<Refusal, { kind: "refused" | "suspended" | "no_video" | "unavailable" }>;
 
+/** Lo que contesta revisar un video enviado por el editor: la guarda es la del equipo, que no habla de la cuenta. */
+export type ReviewVideoGrant = Exclude<DraftVideoGrant, { kind: "suspended" }>;
+
+/** Lo que contesta bajar un recurso de lo enviado. */
+export type ReviewResourceGrant = Exclude<DraftResourceGrant, { kind: "suspended" }>;
+
 export interface MediaStore {
   lessonVideo(claims: VerifiedClaims, lessonId: string): Promise<LessonVideo | null>;
   watchFacts(claims: VerifiedClaims, lessonId: string): Promise<WatchFacts | null>;
@@ -219,6 +227,7 @@ export interface MediaStore {
   draftResourceFile(claims: VerifiedClaims, courseId: string, resourceId: string): Promise<ResourceFile | null>;
   downloadHit(claims: VerifiedClaims): Promise<DownloadHit>;
   draftVideo(claims: VerifiedClaims, courseId: string, lessonId: string): Promise<DraftVideoFacts | null>;
+  reviewResourceFile(claims: VerifiedClaims, resourceId: string): Promise<ResourceFile | null>;
 }
 
 export interface MediaCore {
@@ -651,13 +660,18 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
     if (session.kind === "unavailable") return { kind: "unavailable" };
     if (session.kind === "suspended") return { kind: "suspended" };
     if (session.kind !== "pass") return { kind: "refused" };
+    return signDraftVideo(session.claims, courseId, lessonId);
+  }
+
+  /** Lo que comparten el maestro y quien revisa, con su guarda ya corrida: la base decide quién ve, y sin marca no hay video. */
+  async function signDraftVideo(claims: VerifiedClaims, courseId: unknown, lessonId: unknown): Promise<ReviewVideoGrant> {
     const course = idOrNull(courseId);
     const lesson = idOrNull(lessonId);
     if (course === null || lesson === null) return { kind: "no_video" };
 
     let facts: DraftVideoFacts | null;
     try {
-      facts = await core.store.draftVideo(session.claims, course, lesson);
+      facts = await core.store.draftVideo(claims, course, lesson);
     } catch {
       await deps.report("media_facts_unavailable");
       return { kind: "unavailable" };
@@ -668,9 +682,44 @@ export function createMediaGrant(deps: { report: (code: FailureCode) => Promise<
       await deps.report("media_watermark_unavailable");
       return { kind: "unavailable" };
     }
-    const signed = await signFor(session.claims, { playbackId: facts.playbackId, durationSeconds: facts.durationSeconds });
+    const signed = await signFor(claims, { playbackId: facts.playbackId, durationSeconds: facts.durationSeconds });
     return signed.kind === "granted" ? { ...signed, watermark } : signed;
   }
 
-  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant, getDraftVideoGrant };
+  /** Quien revisa: la guarda del equipo con Contenido. A quien no pasa se le contesta antes de leer nada, y no se le dice si lo pedido existe. */
+  async function reviewer(reader: CookieReader): Promise<{ kind: "reviewer"; claims: VerifiedClaims } | { kind: "refused" } | { kind: "unavailable" }> {
+    const team = await core.teamStanding(reader);
+    // La guarda ya reportó lo suyo.
+    if (team.kind === "unavailable") return { kind: "unavailable" };
+    const content = team.kind === "team" && holds(team.standing, "content");
+    const viewer: MediaViewer = { accountSuspended: false, content, teacherId: null, emailVerified: false };
+    if (team.kind !== "team" || !mayReview(viewer)) return { kind: "refused" };
+    return { kind: "reviewer", claims: team.claims };
+  }
+
+  /** Ver lo enviado por el editor (PA-62; RF-306): sin reproducción, sin latidos y sin puntos. */
+  async function getReviewVideoGrant(reader: CookieReader, courseId: unknown, lessonId: unknown): Promise<ReviewVideoGrant> {
+    const who = await reviewer(reader);
+    if (who.kind !== "reviewer") return who;
+    return signDraftVideo(who.claims, courseId, lessonId);
+  }
+
+  /** Bajar un recurso de lo enviado (PA-62). La base solo lo suelta con el curso en revisión y el archivo sin cambios. */
+  async function getReviewResourceGrant(reader: CookieReader, resourceId: unknown): Promise<ReviewResourceGrant> {
+    const who = await reviewer(reader);
+    if (who.kind !== "reviewer") return who;
+    const id = idOrNull(resourceId);
+    if (id === null) return { kind: "not_found" };
+
+    let file: ResourceFile | null;
+    try {
+      file = await core.store.reviewResourceFile(who.claims, id);
+    } catch {
+      await deps.report("resource_grant_unavailable");
+      return { kind: "unavailable" };
+    }
+    return file === null ? { kind: "not_found" } : signResource(who.claims, file);
+  }
+
+  return { getMediaGrant, lessonAccess, playbackHeartbeat, flushHeartbeats, getResourceGrant, getDraftResourceGrant, getDraftVideoGrant, getReviewVideoGrant, getReviewResourceGrant };
 }

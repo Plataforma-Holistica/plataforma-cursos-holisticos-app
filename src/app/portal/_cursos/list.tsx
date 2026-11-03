@@ -60,7 +60,7 @@ export async function CoursesSection({ claims, readOnly }: { claims: VerifiedCla
                   {row.lessons !== null && <span>{row.lessons}</span>}
                   <span>{t(text.editedOn, { date: row.edited })}</span>
                 </div>
-                {row.detail !== null && <p className="text-body-s text-text-2">{row.detail}</p>}
+                {row.detail !== null && <p className={row.detailIsReason ? "line-clamp-2 whitespace-pre-line break-words text-body-s text-text-2" : "text-body-s text-text-2"}>{row.detail}</p>}
               </div>
               <div className="flex flex-wrap gap-3 sm:flex-col sm:items-end">
                 {row.action !== null && (

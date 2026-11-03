@@ -27,6 +27,7 @@ export type {
   DraftRead,
   DraftResource,
   DraftVideo,
+  ReturnNote,
   TeacherCourse,
 } from "./drafts";
 export type { BeginResult, ConfirmResult, RejectReason } from "./resources";

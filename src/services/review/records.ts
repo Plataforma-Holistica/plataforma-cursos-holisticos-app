@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import { APPROVE_ANSWERS, LESSON_VIDEOS, type ApproveAnswer, type ReviewQueue } from "./queue";
+import { APPROVE_ANSWERS, LESSON_VIDEOS, RETURN_ANSWERS, type ApproveAnswer, type CourseReturn, type ReturnAnswer, type ReviewQueue, type ReviewResource } from "./queue";
 
 // Lo que el servicio de revisión le pregunta a la base (esquema, «Lo publicado»): la cola para
 // la pantalla, y aprobar un curso. Cada función recibe la transacción ya abierta como
@@ -13,6 +13,10 @@ import { APPROVE_ANSWERS, LESSON_VIDEOS, type ApproveAnswer, type ReviewQueue } 
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const id = z.string().regex(ID);
+
+const resourceRow = z.strictObject({ id, title: z.string(), kind: z.enum(["pdf", "doc", "audio"]), size_bytes: z.number().int().min(0) });
+const resourcesOf = (rows: z.infer<typeof resourceRow>[]): ReviewResource[] =>
+  rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
 
 // Estrictos: un campo que este código no conoce no pasa. Así un playback id que alguien
 // agregue a la función de la base no llega a la pantalla sin que esto cambie a la vista.
@@ -22,6 +26,8 @@ const queueSchema = z.strictObject({
     z.strictObject({
       course_id: id,
       title: z.string(),
+      // Lo enviado por el editor suma lo suyo; un curso por guion sale como siempre.
+      summary: z.string().nullable().optional(),
       teacher_name: z.string(),
       teacher_listed: z.boolean(),
       practice: z.string().nullable(),
@@ -37,8 +43,18 @@ const queueSchema = z.strictObject({
           title: z.string(),
           duration_seconds: z.number().int().min(0),
           video: z.enum(LESSON_VIDEOS),
+          description: z.string().nullable().optional(),
+          resources: z.array(resourceRow).optional(),
         }),
       ),
+      submission: z
+        .strictObject({
+          id,
+          number: z.number().int().min(1),
+          resources: z.array(resourceRow),
+          annex: z.strictObject({ version: z.number().int().min(0), accepted_at: z.string(), statement: z.string(), term_years: z.number().int().min(1) }),
+        })
+        .optional(),
     }),
   ),
 });
@@ -52,6 +68,7 @@ export function queueOf(raw: unknown): ReviewQueue | null {
     courses: queue.courses.map((course) => ({
       courseId: course.course_id,
       title: course.title,
+      summary: course.summary ?? null,
       teacherName: course.teacher_name,
       teacherListed: course.teacher_listed,
       practice: course.practice,
@@ -66,7 +83,23 @@ export function queueOf(raw: unknown): ReviewQueue | null {
         title: lesson.title,
         durationSeconds: lesson.duration_seconds,
         video: lesson.video,
+        description: lesson.description ?? null,
+        resources: resourcesOf(lesson.resources ?? []),
       })),
+      submission:
+        course.submission === undefined
+          ? null
+          : {
+              id: course.submission.id,
+              number: course.submission.number,
+              resources: resourcesOf(course.submission.resources),
+              annex: {
+                version: course.submission.annex.version,
+                acceptedAt: course.submission.annex.accepted_at,
+                statement: course.submission.annex.statement,
+                termYears: course.submission.annex.term_years,
+              },
+            },
     })),
   };
 }
@@ -74,6 +107,13 @@ export function queueOf(raw: unknown): ReviewQueue | null {
 /** La respuesta de la base, si está en la lista. Otra lanza: no se pinta como hecha. */
 export function approveAnswerOf(answer: string): ApproveAnswer {
   const found = APPROVE_ANSWERS.find((each) => each === answer);
+  if (found === undefined) throw new Error("La base contestó algo que este servicio no conoce.");
+  return found;
+}
+
+/** La respuesta de devolver, si está en la lista. Otra lanza: no se pinta como hecha. */
+export function returnAnswerOf(answer: string): ReturnAnswer {
+  const found = RETURN_ANSWERS.find((each) => each === answer);
   if (found === undefined) throw new Error("La base contestó algo que este servicio no conoce.");
   return found;
 }
@@ -90,5 +130,14 @@ export async function readReviewQueue(tx: Tx): Promise<ReviewQueue | null> {
 /** Aprueba (`private.approve_course()`). Devuelve lo que contestó, sin juzgarlo. */
 export async function askApprove(tx: Tx, courseId: string): Promise<string> {
   const [row] = await tx.query(sql`select private.approve_course(${courseId}::uuid) as answer`, answerRow);
+  return row?.answer ?? "";
+}
+
+/** Devuelve lo enviado (`private.review_return()`). Devuelve lo que contestó, sin juzgarlo. */
+export async function askReturn(tx: Tx, input: CourseReturn): Promise<string> {
+  const [row] = await tx.query(
+    sql`select private.review_return(${input.course}::uuid, ${input.submission}::uuid, ${input.reason}::text, ${input.whatToFix}::text) as answer`,
+    answerRow,
+  );
   return row?.answer ?? "";
 }

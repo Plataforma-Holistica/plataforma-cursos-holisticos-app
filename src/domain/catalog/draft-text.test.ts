@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DRAFT_TEXT_LIMITS, parseDraftText } from "./draft-text";
+import { DRAFT_TEXT_LIMITS, parseDraftText, parseReviewNote, REVIEW_NOTE_MAX } from "./draft-text";
 
 // Los textos del borrador (T-402). La base revisa lo mismo y manda; estas pruebas fijan la regla de
 // este lado, con los casos que prueba la base en `supabase/tests/37_borrador.test.sql`.
@@ -65,5 +65,21 @@ describe("parseDraftText", () => {
     ["un separador de párrafo en una descripción", "description", "Uno\u2029dos"],
   ] as const)("rechaza %s", (_name, kind, input) => {
     expect(parseDraftText(kind, input)).toEqual({ ok: false, reason: "invalid" });
+  });
+});
+
+describe("parseReviewNote", () => {
+  it("quita los espacios de las puntas y conserva los saltos de línea", () => {
+    expect(parseReviewNote("  El audio se corta.\r\nEn la lección 1.  ")).toEqual({ ok: true, text: "El audio se corta.\nEn la lección 1." });
+  });
+
+  it.each(["", "   ", "\n\n", "\t"])("%j queda vacío: nulo, y quien lo pide lo trata como falta", (input) => {
+    expect(parseReviewNote(input)).toEqual({ ok: true, text: null });
+  });
+
+  it("el tope es el de la base, y un carácter de ancho cero no pasa", () => {
+    expect(parseReviewNote("a".repeat(REVIEW_NOTE_MAX))).toEqual({ ok: true, text: "a".repeat(REVIEW_NOTE_MAX) });
+    expect(parseReviewNote("a".repeat(REVIEW_NOTE_MAX + 1))).toEqual({ ok: false, reason: "too_long" });
+    expect(parseReviewNote("hola\u200b")).toEqual({ ok: false, reason: "invalid" });
   });
 });

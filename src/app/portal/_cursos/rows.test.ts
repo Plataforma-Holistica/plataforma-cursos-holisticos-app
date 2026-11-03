@@ -19,6 +19,7 @@ const draft: TeacherCourse = {
   practiceName: "Respiración",
   coverTone: 3,
   draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
+  returned: null,
 };
 const published: TeacherCourse = {
   id: PUBLISHED,
@@ -30,6 +31,7 @@ const published: TeacherCourse = {
   practiceName: null,
   coverTone: null,
   draft: null,
+  returned: null,
 };
 
 describe("courseRows", () => {
@@ -71,5 +73,29 @@ describe("courseRows", () => {
     const [row] = courseRows([{ ...draft, state: "in_review" }], false);
     expect(row).toMatchObject({ state: "En revisión", detail: "No se puede editar mientras está en revisión.", remove: null });
     expect(row?.action?.label).toBe("Ver");
+  });
+});
+
+describe("un curso que Contenido devolvió (FL-35)", () => {
+  const returned: TeacherCourse = { ...draft, returned: { reason: "El audio se corta.", whatToFix: "Vuelve a subirla.", returnedAt: "2026-11-02T18:00:00.000Z" } };
+
+  it("dice «Rechazado» y su motivo, y se corrige", () => {
+    const [row] = courseRows([returned], false);
+    expect(row).toMatchObject({ state: "Rechazado", tone: "bad", detail: "El audio se corta.", detailIsReason: true });
+    expect(row?.action).toMatchObject({ label: "Corregir", name: "Corregir Respirar" });
+  });
+
+  it("se puede borrar: la prueba se queda en la base", () => {
+    expect(courseRows([returned], false)[0]?.remove).not.toBeNull();
+  });
+
+  it("al suspendido se le ofrece ver, nunca corregir ni borrar", () => {
+    const [row] = courseRows([returned], true);
+    expect(row?.action).toMatchObject({ label: "Ver", name: "Ver Respirar" });
+    expect(row?.remove).toBeNull();
+  });
+
+  it("un borrador sin devolver sigue como siempre", () => {
+    expect(courseRows([draft], false)[0]).toMatchObject({ state: "Borrador", tone: "neutral", detailIsReason: false });
   });
 });

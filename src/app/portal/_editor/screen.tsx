@@ -37,6 +37,16 @@ export function EditorScreen({ view }: { view: EditorView }) {
           </div>
           <SavedStatus saved={view.saved} />
         </div>
+        {view.returned !== null && (
+          <InlineAlert tone="warning">
+            <span className="block font-semibold">{view.returned.title}</span>
+            <span className="mt-2 block font-medium">{text.returned.reason}</span>
+            <span className="block whitespace-pre-line break-words">{view.returned.reason}</span>
+            <span className="mt-2 block font-medium">{text.returned.whatToFix}</span>
+            <span className="block whitespace-pre-line break-words">{view.returned.whatToFix}</span>
+            {view.editable && <span className="mt-2 block">{text.returned.resend}</span>}
+          </InlineAlert>
+        )}
         {view.notice !== null && <InlineAlert tone="neutral">{view.notice}</InlineAlert>}
         <div className="grid gap-8 lg:grid-cols-editor">
           <div id="estructura" className={cx(chosen ? "order-2" : "order-1", "lg:order-1")}>

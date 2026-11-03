@@ -3,6 +3,8 @@ import "server-only";
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 
+import { parseReviewNote } from "@/domain/catalog/draft-text";
+
 import { holds, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
 
@@ -21,11 +23,21 @@ import type { FailureCode } from "@/services/error-reporting/server";
 //     cerrada. Otra cosa, o una excepción, es `unknown`: se reporta y nunca se pinta como hecho.
 //
 // El video de cada lección no sale de aquí: lo firma la función única de medios.
+//
+// Desde T-405 la cola trae además lo enviado por el editor, por su fotografía (`submission`), y Contenido lo devuelve con motivo y qué corregir (`returnCourse`, RF-607). Aprobarlo
+// llega con la cuarta solicitud: hoy la base contesta `incomplete`, y la pantalla no lo ofrece.
 
 /** Lo que la pantalla dice del video de una lección (un mapa cerrado de la base). */
 export const LESSON_VIDEOS = ["playable", "test", "processing", "errored"] as const;
 export type LessonVideo = (typeof LESSON_VIDEOS)[number];
 
+/** Un recurso de lo enviado: sin ruta ni objeto, que no salen de la puerta de medios. */
+export interface ReviewResource {
+  id: string;
+  title: string;
+  kind: "pdf" | "doc" | "audio";
+  sizeBytes: number;
+}
 export interface ReviewLesson {
   lessonId: string;
   moduleId: string;
@@ -33,10 +45,22 @@ export interface ReviewLesson {
   title: string;
   durationSeconds: number;
   video: LessonVideo;
+  /** Solo de lo enviado por el editor. */
+  description: string | null;
+  resources: ReviewResource[];
+}
+/** El envío: cuál es, para devolverlo, y lo que se aceptó. Nunca el origen de la aceptación (LF-24). */
+export interface ReviewSubmission {
+  id: string;
+  number: number;
+  resources: ReviewResource[];
+  annex: { version: number; acceptedAt: string; statement: string; termYears: number };
 }
 export interface ReviewCourse {
   courseId: string;
   title: string;
+  /** Solo de lo enviado por el editor. */
+  summary: string | null;
   teacherName: string;
   /** La ficha del maestro ya está listada: aprobar no la lista otra vez. */
   teacherListed: boolean;
@@ -47,6 +71,8 @@ export interface ReviewCourse {
   /** Cuándo se cargó, en ISO. */
   loadedAt: string;
   lessons: ReviewLesson[];
+  /** Lo enviado por el editor; nulo en un curso cargado por guion. */
+  submission: ReviewSubmission | null;
 }
 export interface ReviewQueue {
   /** Aprobar pasaría hoy la puerta sin pedir el código otra vez. */
@@ -70,6 +96,18 @@ export const APPROVE_ANSWERS = [
 ] as const;
 export type ApproveAnswer = (typeof APPROVE_ANSWERS)[number];
 
+/** Lo que contesta `private.review_return()`. */
+export const RETURN_ANSWERS = ["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self", "invalid", "returned"] as const;
+export type ReturnAnswer = (typeof RETURN_ANSWERS)[number];
+
+/** Lo que se devuelve, ya revisado: en NFC y sin espacios en las puntas. */
+export interface CourseReturn {
+  course: string;
+  submission: string;
+  reason: string;
+  whatToFix: string;
+}
+
 /**
  * Lo que este servicio le pregunta a la base, a nombre de las claims que se le pasan. La cola
  * es nula cuando quien actúa no pasa la puerta del equipo con Contenido. Aprobar lanza si la
@@ -78,9 +116,16 @@ export type ApproveAnswer = (typeof APPROVE_ANSWERS)[number];
 export interface ReviewStore {
   queue(claims: VerifiedClaims): Promise<ReviewQueue | null>;
   approve(claims: VerifiedClaims, courseId: string): Promise<ApproveAnswer>;
+  returnCourse(claims: VerifiedClaims, input: CourseReturn): Promise<ReturnAnswer>;
 }
 
 export type QueueRead = { kind: "queue"; queue: ReviewQueue } | { kind: "unavailable" };
+export type CourseReturned =
+  | { kind: "refused" }
+  | { kind: "unavailable" }
+  | { kind: "unknown" }
+  | { kind: "malformed" }
+  | { kind: "answered"; answer: ReturnAnswer };
 export type CourseApproved =
   | { kind: "refused" }
   | { kind: "unavailable" }
@@ -131,5 +176,23 @@ export function createReviewQueue(deps: { report: (code: FailureCode) => Promise
     }
   }
 
-  return { reviewQueue, approveCourse };
+  /** Devolver lo enviado (FL-45, paso 7). Lleva el envío que se vio. Un texto que no pasa no llega a la base. */
+  async function returnCourse(reader: CookieReader, input: { course: unknown; submission: unknown; reason: unknown; whatToFix: unknown }): Promise<CourseReturned> {
+    const team = await core.teamStanding(reader);
+    // La guarda ya reportó lo suyo.
+    if (team.kind === "unavailable") return { kind: "unavailable" };
+    if (team.kind !== "team" || !holds(team.standing, "content")) return { kind: "refused" };
+    if (typeof input.course !== "string" || !ID.test(input.course) || typeof input.submission !== "string" || !ID.test(input.submission)) return { kind: "malformed" };
+    const reason = typeof input.reason === "string" ? parseReviewNote(input.reason) : null;
+    const whatToFix = typeof input.whatToFix === "string" ? parseReviewNote(input.whatToFix) : null;
+    if (!reason?.ok || reason.text === null || !whatToFix?.ok || whatToFix.text === null) return { kind: "answered", answer: "invalid" };
+    try {
+      return { kind: "answered", answer: await core.store.returnCourse(team.claims, { course: input.course, submission: input.submission, reason: reason.text, whatToFix: whatToFix.text }) };
+    } catch {
+      await deps.report("course_return_unavailable");
+      return { kind: "unknown" };
+    }
+  }
+
+  return { reviewQueue, approveCourse, returnCourse };
 }
