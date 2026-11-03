@@ -151,9 +151,9 @@ beforeAll(async () => {
       `insert into private.teacher_invoices (payout_id, teacher_id, status, pdf_path, pdf_object_id, pdf_object_version, pdf_bytes, xml_enc, xml_sha256, cfdi_uuid,
                                              issued_at, stamped_at, issuer_regime, issuer_profile_version, receiver_rfc, subtotal_cents, vat_cents,
                                              income_tax_withheld_cents, vat_withheld_cents, total_cents, submitted_by, submitted_at, reviewed_by, reviewed_at)
-       select $1, y.teacher_id, 'accepted', 'prueba-87/' || $1 || '.pdf', gen_random_uuid(), 'v1', 1000, decode('010001' || repeat('ab', 60), 'hex'),
-              sha256('87'::bytea), gen_random_uuid(), now(), now(), '612', 1, 'PHO200101AB1', 100000, 0, 0, 0, 100000, $2, now(), $2, now()
-       from public.payouts y where y.id = $1`,
+       select y.id, y.teacher_id, 'accepted', 'prueba-87/' || y.id || '.pdf', gen_random_uuid(), 'v1', 1000, decode('010001' || repeat('ab', 60), 'hex'),
+              sha256('87'::bytea), gen_random_uuid(), now(), now(), '612', 1, 'PHO200101AB1', 100000, 0, 0, 0, 100000, $2::uuid, now(), $2::uuid, now()
+       from public.payouts y where y.id = $1::uuid`,
       [id, financeA.person.id],
     );
   }
