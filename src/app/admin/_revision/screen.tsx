@@ -67,7 +67,7 @@ const RETURN_FAILURES: Record<ReturnFailure, string> = {
   changed: text.returnChanged,
   self: t(text.returnSelf),
   invalid: text.returnInvalid,
-  needs_code: text.returnNeedsCode,
+  needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.returnUnknown,
 };
@@ -197,7 +197,7 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
 
   const attempt = queue.kind === "idle" ? 0 : queue.attempt;
   const result: string | null =
-    queuePending || queue.kind !== "failed"
+    queuePending || queue.kind !== "failed" || returning.kind === "open"
       ? null
       : // Si la página ya leyó un código reciente (se dio después), pedirlo ya no es cierto.
         queue.reason === "needs_code" && view.canChange
@@ -214,16 +214,11 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
   const returnCourse = returning.kind === "idle" ? null : returning.course;
   const returnRow = returnCourse === null ? undefined : view.teachers.flatMap((teacher) => teacher.courses).find((course) => course.id === returnCourse && course.submission !== null);
   const returnHere = returnOpen !== null && returnRow !== undefined;
-  // Lo que se dice, en este orden: el curso se fue, el envío que se veía cambió, y lo que contestó el último envío.
+  // Lo que se dice, en este orden: no se supo (pudo haberse devuelto), el curso se fue, el envío que se veía cambió, y lo que contestó el último envío.
   const returnGone = returnOpen !== null && returnRow === undefined;
   const returnChanged = returnOpen !== null && returnRow?.submission !== null && returnRow?.submission !== undefined && returnRow.submission.id !== returnOpen.submission;
-  const returnSaid = returnGone && returnOpen.failure !== "unknown" && returnOpen.failure !== "unavailable"
-    ? text.notPending
-    : returnChanged
-      ? text.returnChanged
-      : returnHasProblems
-        ? text.returnProblems
-        : returnFailure;
+  const returnUnknown = returnOpen?.failure === "unknown" || returnOpen?.failure === "unavailable";
+  const returnSaid = returnUnknown ? returnFailure : returnGone ? text.notPending : returnChanged ? text.returnChanged : returnHasProblems ? text.returnProblems : returnFailure;
   const returnResult = returnPending ? null : returnSaid;
   const { block: returnBlock, answer: returnAnswer, spoken: returnSpoken } = useAnswerFocus(returnPending, returnOpen?.attempt ?? 0, returnResult);
 
@@ -448,7 +443,8 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
 
         {course.submission !== null && <Submitted submission={course.submission} />}
         {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} block={returnBlock} answer={returnAnswer} spoken={returnSpoken} />}
-        {course.submission === null && canChange && (
+        {course.submission === null && canChange && !returning.mayOpen && <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>}
+        {course.submission === null && canChange && returning.mayOpen && (
           <form action={action} noValidate className="flex flex-col gap-3">
             {confirming ? (
               <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
@@ -531,7 +527,13 @@ function ReturnBlock({ course, submission, canChange, returning, block, answer, 
   const changed = open !== null && open.submission !== submission.id;
   const fieldId = (name: string) => `revision-devolver-${name}-${course.id}`;
 
-  if (open === null && !canChange) return <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>;
+  if (open === null && !canChange) {
+    return (
+      <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="outline-none">
+        <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>
+      </section>
+    );
+  }
   if (open === null && !returning.mayOpen) return <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>;
   return (
     <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="flex flex-col gap-3 outline-none">
@@ -550,6 +552,15 @@ function ReturnBlock({ course, submission, canChange, returning, block, answer, 
           <div ref={result === null && !pending ? answer : undefined} tabIndex={-1} className="flex flex-col gap-3 outline-none">
             <p className="font-semibold">{text.returnTitle}</p>
             <p className="text-text-2">{t(text.returnBody)}</p>
+            {!canChange && <p className="font-medium">{text.returnCopyFirst}</p>}
+            {/* Arriba de los campos, lejos de enviar: el segundo clic de un doble clic no debe caer en algo que no se deshace. */}
+            {changed && (
+              <div>
+                <Button type="submit" name="do" value={submission.ask} variant="secondary" size="md" disabled={pending}>
+                  {text.returnContinue}
+                </Button>
+              </div>
+            )}
             <Textarea
               id={fieldId("motivo")}
               name={RETURN_REASON_FIELD}
@@ -573,11 +584,7 @@ function ReturnBlock({ course, submission, canChange, returning, block, answer, 
               readOnly={pending}
             />
             <div className="flex flex-wrap gap-2">
-              {changed ? (
-                <Button type="submit" name="do" value={submission.ask} size="md" loading={pending} loadingLabel={text.returnWorking}>
-                  {text.returnContinue}
-                </Button>
-              ) : (
+              {!changed && (
                 <Button type="submit" name="do" value={returnButton.send(course.id, open.submission)} size="md" loading={pending} loadingLabel={text.returnWorking}>
                   {text.returnSend}
                 </Button>

@@ -489,6 +489,43 @@ describe("lo enviado por el portal", () => {
     expect(screen.queryByText("Esto es lo que habías escrito:")).not.toBeInTheDocument();
   });
 
+  it("«Seguir» queda arriba de los campos y lejos de enviar: el segundo clic de un doble clic no cae en enviar", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito." });
+    rerender(<ReviewScreen view={reviewView(withNewer())} />);
+    const go = screen.getByRole("button", { name: "Seguir con este envío" });
+    const field = screen.getByLabelText(/Motivo/);
+    expect(go.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("si no se supo y el envío cambió, manda «no se supo»: pudo haberse devuelto", async () => {
+    const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "unknown", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(withNewer())} />);
+    expect(screen.getByText(/No supimos si el curso quedó devuelto/)).toBeInTheDocument();
+  });
+
+  it("sin código reciente, «Cancelar» deja el foco en ese curso", async () => {
+    const { rerender, user } = await openIt({ ...OPEN, failure: "needs_code", attempt: 2 });
+    rerender(<ReviewScreen view={reviewView(sent(false))} />);
+    actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(document.activeElement).toHaveTextContent(/Para devolverlo a su/));
+  });
+
+  it("con un curso abierto, uno por guion no ofrece aprobar: se llevaría lo escrito; y un aviso viejo de aprobar se va", async () => {
+    const queue = sent();
+    const script = { ...queueOf().courses[0]!, courseId: "c0000000-0000-4000-8000-000000000008", title: "Por guion" };
+    actions.approveAction.mockResolvedValue({ kind: "failed", reason: "videos_not_ready", attempt: 1 });
+    actions.returnAction.mockResolvedValue(OPEN);
+    const { user } = show({ ...queue, courses: [queue.courses[0]!, script] });
+    await user.click(screen.getByRole("button", { name: /Aprobar y publicar.*Por guion/ }));
+    await waitFor(() => expect(screen.getByText(/todavía no se puede publicar/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /Devolver/ }));
+    await screen.findByLabelText(/Motivo/);
+    expect(screen.queryByRole("button", { name: /Aprobar y publicar/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Hay otro curso abierto para devolver/)).toBeInTheDocument();
+    expect(screen.queryByText(/todavía no se puede publicar/)).not.toBeInTheDocument();
+  });
+
   it("si no se supo y el curso se fue, dice que no se supo", async () => {
     const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "unknown", attempt: 2 });
     rerender(<ReviewScreen view={reviewView(queueOf({ courses: [] }))} />);
@@ -530,7 +567,8 @@ describe("lo enviado por el portal", () => {
     const { rerender } = await openIt({ ...OPEN, reason: "Lo escrito.", failure: "needs_code", attempt: 2 });
     rerender(<ReviewScreen view={reviewView(sent(false))} />);
     expect(screen.getByLabelText(/Motivo/)).toHaveValue("Lo escrito.");
-    expect(screen.getByText(/Copia lo que escribiste antes de darlo/)).toBeInTheDocument();
+    expect(screen.getByText(/Copia lo que escribiste antes de dar tu código/)).toBeInTheDocument();
+    expect(screen.getByText(/ya no es reciente/)).toBeInTheDocument();
   });
 
   it("el video se pide por su acción, con el curso, y lleva la marca de agua", async () => {
