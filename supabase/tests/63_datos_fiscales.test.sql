@@ -88,12 +88,15 @@ insert into public.consents (profile_id, legal_document_id, origin) values (prue
 select pruebas.limpiar();
 
 set local session_replication_role = replica;
-insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-  values (202610, :'mara_m', gen_random_uuid(), 100, 100, 100) returning id as pago_mara \gset
-insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-  values (202610, :'fm_m', gen_random_uuid(), 100, 100, 100) returning id as pago_fm \gset
-insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-  values (202610, :'nita_m', gen_random_uuid(), 100, 100, 100) returning id as pago_nita \gset
+-- Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+  values (202610, :'mara_m', gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), pruebas.f1()) returning id as pago_mara \gset
+-- Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+  values (202610, :'fm_m', gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), pruebas.f1()) returning id as pago_fm \gset
+-- Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+  values (202610, :'nita_m', gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), pruebas.f1()) returning id as pago_nita \gset
 set local session_replication_role = origin;
 
 -- ---------------------------------------------------------------------------------------
@@ -217,25 +220,27 @@ select is((select a.new_value - 'teacher_id' from public.audit_log a where a.act
 -- ---------------------------------------------------------------------------------------
 -- Finanzas lee por una liquidación, nunca por un maestro.
 
-select is(pruebas.pide(pruebas.k1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_mara')), 'forbidden', 'Contenido no');
-select is(pruebas.pide(pruebas.alu(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_mara')), 'forbidden', 'una alumna no');
+select is(pruebas.pide(pruebas.k1(), format('private.payout_account_open(%L) ->> $$outcome$$', :'pago_mara')), 'forbidden', 'Contenido no');
+select is(pruebas.pide(pruebas.alu(), format('private.payout_account_open(%L) ->> $$outcome$$', :'pago_mara')), 'forbidden', 'una alumna no');
 select is(pruebas.lecturas(pruebas.k1()), 0::bigint, 'sin lectura que auditar');
 select pruebas.sin_codigo(pruebas.f1());
-select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_mara')), 'needs_fresh_code', 'finanzas sin código reciente no');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L) ->> $$outcome$$', :'pago_mara')), 'needs_fresh_code', 'finanzas sin código reciente no');
 select pruebas.equipar(pruebas.f1());
-select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', gen_random_uuid())), 'not_found', 'una liquidación que no existe');
-select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_nita')), 'no_profile', 'un maestro sin datos');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L) ->> $$outcome$$', gen_random_uuid())), 'not_found', 'una liquidación que no existe');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L) ->> $$outcome$$', :'pago_nita')), 'no_profile', 'un maestro sin datos');
 select is(pruebas.lecturas(pruebas.f1()), 0::bigint, 'nada de eso es una lectura');
 -- Con la espera ya cumplida: la espera se prueba en `66_espera_clabe`.
 set local session_replication_role = replica;
 update private.teacher_tax_profiles set clabe_changed_at = '-infinity', clabe_effective_from = '-infinity' where teacher_id = :'mara_m';
+-- Y con «ya llamé», que la primera vez se exige (T-604): eso se prueba en la 68.
+insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by) values (:'mara_m', '-infinity', 'prueba', now(), pruebas.f1());
 set local session_replication_role = origin;
-select is(pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L) ->> $$clabe_last4$$', :'pago_mara')), '7771', 'finanzas, por su liquidación, sí');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L) ->> $$clabe_last4$$', :'pago_mara')), '7771', 'finanzas, por su liquidación, sí');
 select is(pruebas.lecturas(pruebas.f1()), 1::bigint, 'y queda en la auditoría');
 select is((select a.new_value ->> 'payout_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), :'pago_mara', 'con la liquidación por la que se leyó: es la condición de RF-510');
 select is((select a.new_value ->> 'teacher_id' from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), :'mara_m', 'y de qué maestro');
 select isnt((select a.entity_id from public.audit_log a where a.action = 'tax_profile.read' and a.actor_id = pruebas.f1()), null, 'y qué fila');
-select is(pruebas.pide(pruebas.fm(), format('private.tax_profile_for_payout(%L) ->> $$outcome$$', :'pago_fm')), 'self', 'nadie sobre sí: lo suyo se lee por su pantalla');
+select is(pruebas.pide(pruebas.fm(), format('private.payout_account_open(%L) ->> $$outcome$$', :'pago_fm')), 'self', 'nadie sobre sí: lo suyo se lee por su pantalla');
 select is(pruebas.lecturas(pruebas.fm()), 0::bigint, 'sin lectura');
 
 -- ---------------------------------------------------------------------------------------
@@ -300,9 +305,9 @@ drop function private.tax_otra_lectura();
 create function public.tax_profile_mine() returns bigint language sql as $$ select count(*) from private.teacher_tax_profiles $$;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'tax_profile_mine'), 've el mismo nombre en otro esquema');
 drop function public.tax_profile_mine();
-create function private.tax_profile_for_payout(p_payout uuid, p_otro text) returns bigint language sql as $$ select count(*) from private.teacher_tax_profiles $$;
-select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'tax_profile_for_payout'), 've el mismo nombre con otra firma');
-drop function private.tax_profile_for_payout(uuid, text);
+create function private.payout_account_open(p_payout uuid, p_otro text) returns bigint language sql as $$ select count(*) from private.teacher_tax_profiles $$;
+select ok(exists (select 1 from private.schema_violations() where problem = 'tax function not in the list' and object_name = 'payout_account_open'), 've el mismo nombre con otra firma');
+drop function private.payout_account_open(uuid, text);
 -- Una vista corre como su dueño: saltaría los permisos y la auditoría.
 create view private.tax_por_atras as select * from private.teacher_tax_profiles;
 select ok(exists (select 1 from private.schema_violations() where problem = 'tax table read by a view' and object_name = 'tax_por_atras'), 've una vista sobre la tabla');

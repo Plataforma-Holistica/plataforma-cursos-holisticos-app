@@ -30,9 +30,27 @@ create function pruebas.ultima(p_teacher uuid) returns private.teacher_tax_profi
 as $$ select x from private.teacher_tax_profiles x where x.teacher_id = p_teacher order by x.version desc limit 1 $$;
 create function pruebas.vista(p_teacher uuid) returns integer language sql security definer
 as $$ select coalesce(max(x.version), 0)::integer from private.teacher_tax_profiles x where x.teacher_id = p_teacher $$;
+-- «Ya llamé» a la CLABE vigente, para que la primera vez no la detenga: aquí se prueba la espera, y la llamada en la 68 (T-604, segunda solicitud).
+create function pruebas.ya_llamo(p_pago uuid) returns void language plpgsql security definer as $$
+declare
+  v_teacher uuid;
+  v_cambio timestamptz;
+begin
+  select y.teacher_id into v_teacher from public.payouts y where y.id = p_pago;
+  select x.clabe_changed_at into v_cambio from private.teacher_tax_profiles x where x.teacher_id = v_teacher order by x.version desc limit 1;
+  if v_cambio is null then
+    return;
+  end if;
+  set local session_replication_role = replica;
+  insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
+  values (v_teacher, v_cambio, 'prueba', now(), pruebas.f1());
+  set local session_replication_role = origin;
+end
+$$;
 create function pruebas.finanzas(p_pago uuid) returns jsonb language plpgsql as $$
 begin
-  return pruebas.pide(pruebas.f1(), format('private.tax_profile_for_payout(%L)', p_pago))::jsonb;
+  perform pruebas.ya_llamo(p_pago);
+  return pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', p_pago))::jsonb;
 end
 $$;
 create function pruebas.estado() returns jsonb language plpgsql as $$
@@ -72,8 +90,9 @@ select set_config('app.actor_id', pruebas.mara()::text, true);
 insert into public.consents (profile_id, legal_document_id, origin) values (pruebas.mara(), private.current_legal_document('teacher_privacy_notice'), 'account_settings');
 select pruebas.limpiar();
 set local session_replication_role = replica;
-insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
-  values (202610, :'m', gen_random_uuid(), 100, 100, 100) returning id as pago \gset
+-- Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+  values (202610, :'m', gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), pruebas.f1()) returning id as pago \gset
 set local session_replication_role = origin;
 select pruebas.como_dueno();
 
