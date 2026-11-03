@@ -4,7 +4,7 @@
 -- compara con la liquidación y la pasa a revisión. Finanzas acepta (lista para pago) o rechaza con motivo. Una pagada exige una factura aceptada.
 begin;
 \ir _ayuda.psql
-select plan(102);
+select plan(106);
 
 select pruebas.alta('a8000000-0000-0000-0000-000000000001', 'tere-80@prueba.test');
 select pruebas.alta('a8000000-0000-0000-0000-000000000002', 'otra-80@prueba.test');
@@ -165,7 +165,7 @@ select is(:'empieza1'::jsonb ->> 'path', pruebas.m(1) || '/' || pruebas.p(1) || 
 select is(pruebas.empieza(pruebas.p(1)) ->> 'outcome', 'already_in_progress', 'otra subida a la vez, no');
 select is(pruebas.empieza(pruebas.p(4), 'awaiting_invoice', pruebas.susi()) ->> 'outcome', 'begun', 'una maestra suspendida factura (FL-40 E3)');
 select pruebas.id(:'empieza1') as f1 \gset
--- La ruta del PDF, para que el servidor lo lea antes de subir: solo a su maestra, y solo mientras se sube.
+-- La ruta del PDF, para que el servidor lo lea antes de subir, y en qué va: solo a su maestra.
 select is(pruebas.pide(pruebas.tere(), format('private.invoice_upload(%L)', :'f1'))::jsonb,
   jsonb_build_object('outcome', 'ok', 'path', :'empieza1'::jsonb ->> 'path', 'payout_id', pruebas.p(1), 'status', 'uploading'), 'su maestra sabe a dónde subió');
 select is(pruebas.pide(pruebas.otra(), format('private.invoice_upload(%L)', :'f1'))::jsonb ->> 'outcome', 'not_found', 'otra maestra no');
@@ -213,15 +213,19 @@ select is(pruebas.rechazo(1, pruebas.hechos(1, '{"uuid": "no-es-un-folio"}')) ->
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"subtotal_cents": "100000"}')) ->> 'outcome', 'malformed', 'un monto que no es número');
 select is(pruebas.rechazo(1, pruebas.hechos(1, jsonb_build_object('stamped_at', to_char(now() at time zone 'America/Mexico_City' + interval '3 days', 'YYYY-MM-DD"T"HH24:MI:SS')))) ->> 'outcome',
   'malformed', 'timbrada en el futuro');
-select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T11:05:00"}')) ->> 'outcome', 'malformed', 'expedida más de una hora después de timbrada');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T11:02:00"}')) ->> 'outcome', 'malformed', 'expedida más de una hora después de timbrada');
 select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-02-31T10:00:00"}')) ->> 'outcome', 'malformed', 'un 31 de febrero no tiene forma, y no tumba nada');
 -- Expedida en Quintana Roo (una hora adelante del Centro, donde se timbra), PPD y otro uso: no rechazan.
-select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T10:30:00", "payment_method": "PPD", "use": "S01"}')) ->> 'outcome', 'submitted',
-  'expedida en Quintana Roo y timbrada en el Centro, PPD y otro uso no rechazan: finanzas los ve (decisión 3 de Sergio del 2026-11-03)');
+select is(pruebas.rechazo(1, pruebas.hechos(1, '{"issued_at": "2026-11-03T11:01:00", "payment_method": "PPD", "use": "S01"}')) ->> 'outcome', 'submitted',
+  'expedida en Quintana Roo justo una hora «después» de timbrada en el Centro, PPD y otro uso no rechazan: finanzas los ve (decisión 3 de Sergio del 2026-11-03)');
 select is(pruebas.estado(pruebas.p(1)), 'invoice_in_review', 'la liquidación pasa a factura en revisión');
 select is((select row(status, cfdi_uuid::text, octet_length(xml_sha256), payment_method)::text from private.teacher_invoices where payout_id = pruebas.p(1) and status <> 'uploading'),
   row('in_review', '6f9619ff-8b86-d011-b42d-000000000001', 32, 'PPD')::text, 'la factura, en revisión, con su folio fiscal y su huella');
 select is(pruebas.empieza(pruebas.p(1), 'invoice_in_review') ->> 'outcome', 'not_awaiting', 'una en revisión no se vuelve a subir');
+select is(pruebas.pide(pruebas.tere(), format('private.invoice_upload(%L)', (select id from private.teacher_invoices where payout_id = pruebas.p(1) and status = 'in_review')))::jsonb ->> 'status',
+  'in_review', 'su maestra sabe que ya está en revisión: un reintento no oye que no existe');
+select is(pruebas.pide(pruebas.otra(), format('private.invoice_upload(%L)', (select id from private.teacher_invoices where payout_id = pruebas.p(1) and status = 'in_review')))::jsonb ->> 'outcome',
+  'not_found', 'y otra maestra, en ningún estado');
 
 -- El mismo folio fiscal no respalda otra liquidación, tampoco en mayúsculas.
 select is(pruebas.rechazo(2, pruebas.hechos(1, '{"uuid": "6F9619FF-8B86-D011-B42D-000000000001"}')) ->> 'outcome', 'duplicate_cfdi', 'el mismo folio en mayúsculas, no');
@@ -384,6 +388,8 @@ select pruebas.equipar(pruebas.f1());
 -- Un PDF que ya no es el que se subió no se entrega.
 update storage.objects set version = 'otra' where bucket_id = 'teacher-invoices' and name = (select pdf_path from private.teacher_invoices where id = :'r1');
 select is(pruebas.pide(pruebas.tere(), format('private.invoice_file(%L, %L)', :'r1', 'pdf'))::jsonb ->> 'outcome', 'file_changed', 'un PDF reemplazado no baja');
+select is(pruebas.pide(pruebas.f1(), format('private.invoice_file(%L, %L)', :'r1', 'pdf'))::jsonb ->> 'outcome', 'file_changed', 'ni a finanzas');
+select is((select count(*)::integer from public.audit_log where action = 'invoice.read' and entity_id = :'r1'), 1, 'y lo que no se entregó no queda como lectura');
 
 -- ---------------------------------------------------------------------------------------
 -- La auditoría no dice montos, régimen, XML ni motivo: configuración la lee.

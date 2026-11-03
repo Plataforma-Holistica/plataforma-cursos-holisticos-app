@@ -31,7 +31,7 @@ export async function askInvoiceBegin(tx: Tx, payout: string, seen: string): Pro
 }
 
 const uploadAnswer = z.union([
-  z.object({ outcome: z.literal("ok"), path: z.string(), payout_id: z.string().regex(ID), status: z.enum(["uploading", "in_review", "accepted", "rejected"]) }).strict(),
+  z.object({ outcome: z.literal("ok"), path: z.string(), payout_id: z.string().regex(ID), status: z.enum(["uploading", "expired", "in_review", "accepted", "rejected"]) }).strict(),
   z.object({ outcome: z.literal("not_found") }).strict(),
 ]);
 

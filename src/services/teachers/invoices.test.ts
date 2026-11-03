@@ -104,10 +104,17 @@ describe("empezar", () => {
     });
   });
 
-  it("empezar se lleva lo que sobró en la carpeta de esa liquidación: una subida vencida o un rechazo de antes", async () => {
-    const { service, calls } = harness();
+  it("empezar se lleva lo que sobró en la carpeta de esa liquidación: una subida vencida o un rechazo de antes (la base nunca da la nueva: la 80)", async () => {
+    const OLD = `${TEACHER}/${PAYOUT}/c0000000-0000-4000-8000-000000000099.pdf`;
+    const { service, calls } = harness({ store: { unused: async () => [OLD] } });
     await service.beginInvoice(reader, PAYOUT, "awaiting_invoice");
-    expect(calls).toEqual(["unused", `remove:${PATH}`]);
+    expect(calls).toEqual([`remove:${OLD}`]);
+  });
+
+  it("una subida vencida lo dice sin abrir sus datos fiscales", async () => {
+    const { service, calls } = harness({ store: { upload: async () => ({ path: PATH, payout: PAYOUT, status: "expired" }) } });
+    expect(await service.submitInvoice(reader, INVOICE, bytes(XML))).toEqual({ kind: "expired" });
+    expect(calls).toEqual([]);
   });
 
   it("si no se pudo firmar, se cancela lo reservado: ocuparía la subida 3 h", async () => {

@@ -170,6 +170,7 @@ export function createInvoices(deps: InvoicesDeps) {
       // Primero si es suya y se está subiendo: abrir sus datos deja una lectura en la auditoría, y no se gasta en una factura ajena o ya subida.
       const upload = await store.upload(claims, invoice);
       if (upload === null) return { kind: "not_found" };
+      if (upload.status === "expired") return { kind: "expired" };
       if (upload.status !== "uploading") return { kind: "already_submitted" };
       payout = upload.payout;
       const mine = await deps.mine(claims);

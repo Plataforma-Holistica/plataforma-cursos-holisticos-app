@@ -449,12 +449,13 @@ revoke all on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean
 grant execute on function private.invoice_submit(uuid, bytea, bytea, jsonb, boolean, integer, boolean) to app_service;
 
 -- A dónde subió su maestro: el servidor lee el principio del PDF antes de subir, y la ruta no se la cree al navegador. Con su estado: un reintento después
--- de una respuesta perdida sabe que ya se subió, en vez de oír que no existe.
+-- de una respuesta perdida sabe que ya se subió, en vez de oír que no existe; y una subida vencida lo dice antes de que se abran sus datos fiscales.
 create function private.invoice_upload(p_invoice uuid) returns jsonb
 language sql stable security definer set search_path = ''
 as $$
   select coalesce(
-    (select pg_catalog.jsonb_build_object('outcome', 'ok', 'path', i.pdf_path, 'payout_id', i.payout_id, 'status', i.status)
+    (select pg_catalog.jsonb_build_object('outcome', 'ok', 'path', i.pdf_path, 'payout_id', i.payout_id,
+                                          'status', case when i.status = 'uploading' and i.expires_at <= pg_catalog.now() then 'expired' else i.status end)
      from private.teacher_invoices i where i.id = p_invoice and i.teacher_id = private.actor_teacher_id()),
     '{"outcome": "not_found"}'::jsonb)
 $$;
