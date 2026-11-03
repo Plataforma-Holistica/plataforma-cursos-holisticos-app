@@ -51,9 +51,9 @@ export interface TaxProfileSeal {
 export type TaxSaveAnswer = "saved" | "changed" | "invalid" | "not_teacher" | "suspended" | "needs_notice";
 export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "no_profile" | "not_teacher" };
 export type TaxPayoutAnswer =
-  | { outcome: "ok"; row: TaxProfileRow }
+  | { outcome: "ok"; row: TaxProfileRow; readId: string; firstTime: boolean }
   | { outcome: "clabe_waiting"; until: string }
-  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" };
+  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" };
 
 export interface TaxProfileState {
   version: number;
@@ -115,9 +115,9 @@ type Proof = Exclude<PasswordCheck, { kind: "confirmed" | "wrong" }> | { kind: "
 export type TaxReveal = Proof | { kind: "revealed"; data: MaskedTaxProfile } | { kind: "off" | "no_profile" | "not_teacher" };
 export type TaxSave = Proof | { kind: "saved" | "off" | "changed" | "suspended" | "not_teacher" } | { kind: "invalid"; problems: TaxFormProblems };
 export type TaxPayoutRead =
-  | { kind: "ok"; data: OpenTaxProfile }
+  | { kind: "ok"; data: OpenTaxProfile; readId: string; firstTime: boolean }
   | { kind: "clabe_waiting"; until: string }
-  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "off" | "unavailable" }
+  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" | "off" | "unavailable" }
   | { kind: "session"; check: Refused };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -253,7 +253,10 @@ export function createTaxProfile(deps: TaxProfileDeps) {
     }
   }
 
-  /** Lo que finanzas lee, por una liquidación y nunca por un maestro (T-604). La puerta y la auditoría son de la base. */
+  /**
+   * Lo que finanzas lee para pagar, por una liquidación lista para pago y nunca por un maestro (T-604). La puerta, la investigación, la primera vez
+   * y la auditoría son de la base; la lectura que devuelve es la que marcar pagada lleva.
+   */
   async function taxProfileForPayout(reader: CookieReader, payout: string): Promise<TaxPayoutRead> {
     if (!ID.test(payout)) return { kind: "not_found" };
     if (await cipherIsOff()) return { kind: "off" };
@@ -274,7 +277,7 @@ export function createTaxProfile(deps: TaxProfileDeps) {
       return { kind: "unavailable" };
     }
     const { regime, payee, version, updatedAt } = answer.row;
-    return { kind: "ok", data: { ...open, regime, payee, version, updatedAt } };
+    return { kind: "ok", data: { ...open, regime, payee, version, updatedAt }, readId: answer.readId, firstTime: answer.firstTime };
   }
 
   /** Si hay con qué abrir y sellar: sin llave la pantalla lo dice antes de pedir nada, y se reporta. */

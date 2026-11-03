@@ -76,6 +76,7 @@ from (values
   ('UMBRAL_DISPERSION_API',     '15',                   'to_confirm'),
   ('LICENCIA_ANIOS',            '10',                   'decided'),
   ('LIMITE_FACTURA',            '3',                    'proposed'),
+  ('PLAZO_FACTURA_MIN_DIAS',    '5',                    'proposed'),
   ('RESPUESTA_FRAUDE',          '5',                    'proposed'),
   -- Operación y escala
   ('TIPO_CAMBIO',               '"18.5"',               'to_confirm'),
