@@ -203,8 +203,9 @@ create trigger payout_requests_guard before insert or update or delete on privat
   for each row execute function private.guard_payout_request();
 create trigger ledger_no_truncate before truncate on private.payout_requests
   for each statement execute function private.reject_mutation();
+-- Sin la huella de soltar (con las reglas a la vista, se podría probar hasta dar con el régimen) ni las notas, que son texto libre.
 create trigger audit_changes after insert or update on private.payout_requests
-  for each row execute function private.audit_row_change('money');
+  for each row execute function private.audit_row_change('money', 'fingerprint', 'note', 'decision_note');
 
 -- ---------------------------------------------------------------------------------------
 -- Las reglas.
@@ -260,13 +261,15 @@ end
 $$;
 revoke all on function private.invoice_due_on(public.period_id, date) from public;
 
--- Lo ya liberado antes de esta migración: su día, el del día en que se liberó. Sin él, `invoice_deadline` nunca la vencería.
-set local session_replication_role = replica;
+-- Lo ya liberado antes de esta migración: su día, el del día en que se liberó. Sin él, `invoice_deadline` nunca la vencería. El parámetro llega con la semilla:
+-- si todavía no está, no hay qué rellenar (no hay nada liberado), y lo que haya se rellena a mano con esta misma sentencia.
+alter table public.payouts disable trigger payouts_guard;
 update public.payouts y set invoice_due_on = private.invoice_due_on(y.period_id, (y.released_at at time zone private.period_zone())::date)
-where y.released_at is not null and y.invoice_due_on is null
+where private.parameter_value('PLAZO_FACTURA_MIN_DIAS') is not null
+  and y.released_at is not null and y.invoice_due_on is null
   and (y.status in ('awaiting_invoice', 'invoice_in_review', 'invoice_rejected', 'ready_to_pay')
        or y.held_from_status in ('awaiting_invoice', 'invoice_in_review', 'invoice_rejected', 'ready_to_pay'));
-set local session_replication_role = origin;
+alter table public.payouts enable trigger payouts_guard;
 
 -- Cuándo un periodo liberado está pagado (RF-501): cada liquidación pagada, acumulada o vencida de factura. Una sola regla, para el periodo y para quien lo paga.
 create function private.period_settled(p_period public.period_id) returns boolean
@@ -290,12 +293,13 @@ as $$
 $$;
 revoke all on function private.payout_ready_since(uuid) from public;
 
--- La lectura abierta de una liquidación: de esta vez, sin anular y sin un pago que la use. Mientras exista, la transferencia quizá ya salió.
+-- La lectura abierta de una liquidación: sin anular y sin un pago que la use, sea de cuando sea. Mientras exista, la transferencia quizá ya salió: retener y
+-- soltar, o devolver y reabrir, no la cierran.
 create function private.payout_open_read(p_payout uuid) returns private.payout_account_reads
 language sql stable set search_path = ''
 as $$
   select r.* from private.payout_account_reads r
-  where r.payout_id = p_payout and r.read_at >= private.payout_ready_since(p_payout)
+  where r.payout_id = p_payout
     and not exists (select 1 from private.payout_account_read_voids v where v.read_id = r.id)
     and not exists (select 1 from private.payout_payments x where x.read_id = r.id)
   order by r.read_at desc
@@ -644,20 +648,28 @@ begin
     where x.teacher_id = y.teacher_id and x.clabe_changed_at = p.clabe_changed_at
       and not exists (select 1 from private.payout_requests r where r.payment_id = x.id and r.kind = 'payment_return' and r.status = 'confirmed'));
   if v_first and not exists (
-      select 1 from private.payout_account_calls c where c.teacher_id = y.teacher_id and c.clabe_changed_at = p.clabe_changed_at) then
-    return '{"outcome": "needs_call"}'::jsonb;
+      select 1 from private.payout_account_calls c
+      where c.teacher_id = y.teacher_id and c.clabe_changed_at = p.clabe_changed_at
+        and c.called_at > coalesce((
+          select pg_catalog.max(q.decided_at) from private.payout_requests q join private.payout_payments x on x.id = q.payment_id
+          where q.kind = 'payment_return' and q.status = 'confirmed' and x.teacher_id = y.teacher_id and x.clabe_changed_at = p.clabe_changed_at),
+          '-infinity'::timestamptz)) then
+    -- Con qué cuenta se llama: sus últimos cuatro y desde cuándo es esa. La llamada se anota a esa, no a la que haya al anotar.
+    return pg_catalog.jsonb_build_object('outcome', 'needs_call', 'clabe_last4', p.clabe_last4, 'clabe_changed_at', p.clabe_changed_at);
   end if;
-  -- Una lectura sin pago es una transferencia que quizá ya salió: otra persona no recibe la cuenta hasta que se marque o se anule. Quien la abrió vuelve a ver la
-  -- suya, o, si sus datos cambiaron desde entonces, recibe una lectura nueva.
+  -- Una lectura sin pago es una transferencia que quizá ya salió: nadie recibe la cuenta otra vez hasta que se marque o se anule. Solo quien la abrió vuelve a ver
+  -- la suya, si es de esta vez en lista para pago y con los mismos datos; si no, también él la marca o la anula antes.
   v_open := private.payout_open_read(p_payout);
-  if v_open.id is not null and v_open.read_by <> private.actor_id() then
-    return pg_catalog.jsonb_build_object('outcome', 'already_open', 'read_by', v_open.read_by, 'read_at', v_open.read_at);
+  if v_open.id is not null and (v_open.read_by <> private.actor_id() or v_open.tax_profile_id <> p.id
+                                or v_open.read_at < private.payout_ready_since(p_payout)) then
+    return pg_catalog.jsonb_build_object('outcome', 'already_open', 'read_by', v_open.read_by, 'read_at', v_open.read_at,
+                                         'own', v_open.read_by = private.actor_id());
   end if;
   insert into public.audit_log (actor_id, actor_kind, category, action, entity_table, entity_id, new_value, reason, request_id)
   values (private.actor_id(), 'user', 'privacy', 'tax_profile.read', 'private.teacher_tax_profiles', p.id::text, pg_catalog.jsonb_build_object('teacher_id', p.teacher_id, 'payout_id', p_payout),
           nullif(pg_catalog.current_setting('app.reason', true), ''),
           nullif(pg_catalog.current_setting('app.request_id', true), ''));
-  if v_open.id is not null and v_open.tax_profile_id = p.id then
+  if v_open.id is not null then
     return private.tax_profile_payload(p) || pg_catalog.jsonb_build_object('read_id', v_open.id, 'first_time', v_open.first_time);
   end if;
   insert into private.payout_account_reads (payout_id, teacher_id, tax_profile_id, tax_profile_version, clabe_changed_at, first_time, read_by)
@@ -669,7 +681,8 @@ $$;
 revoke all on function private.payout_account_open(uuid) from public;
 drop function private.tax_profile_for_payout(uuid);
 
--- «No transferí»: quien abrió anula su lectura, con su nota. Una que ya tiene su pago no se anula: esa transferencia salió.
+-- «No transferí»: quien abrió anula su lectura, con su nota. Si ya no es de finanzas, la anula otra persona, que responde por eso en la nota. Una que ya tiene su
+-- pago no se anula: esa transferencia salió.
 create function private.payout_account_void_read(p_read uuid, p_note text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -696,7 +709,8 @@ begin
   select y.period_id into v_period from public.payouts y where y.id = r.payout_id;
   perform 1 from public.payout_periods x where x.period_id = v_period for update;
   perform 1 from public.payouts y where y.id = r.payout_id for update;
-  if r.read_by <> private.actor_id() then
+  if r.read_by <> private.actor_id() and exists (
+      select 1 from public.admin_capabilities c where c.profile_id = r.read_by and c.capability = 'finance' and c.revoked_at is null) then
     return '{"outcome": "not_yours"}'::jsonb;
   end if;
   if exists (select 1 from private.payout_payments x where x.read_id = p_read) then
@@ -709,8 +723,9 @@ end
 $$;
 revoke all on function private.payout_account_void_read(uuid, text) from public;
 
--- «Ya llamé», con quién y cuándo. Una llamada de antes del cambio no confirma esta cuenta.
-create function private.payout_account_call(p_payout uuid, p_spoke_with text, p_called_at timestamptz) returns jsonb
+-- «Ya llamé», con quién y cuándo, a la CLABE que se vio (la de `needs_call`): si cambió mientras tanto, contesta `changed`. Una llamada de antes del cambio no
+-- confirma esta cuenta.
+create function private.payout_account_call(p_payout uuid, p_seen_clabe timestamptz, p_spoke_with text, p_called_at timestamptz) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -723,7 +738,7 @@ begin
   if v_gate is not null then
     return pg_catalog.jsonb_build_object('outcome', v_gate);
   end if;
-  if p_payout is null or pg_catalog.char_length(pg_catalog.btrim(coalesce(p_spoke_with, ''))) not between 1 and 200
+  if p_payout is null or p_seen_clabe is null or pg_catalog.char_length(pg_catalog.btrim(coalesce(p_spoke_with, ''))) not between 1 and 200
      or p_called_at is null or p_called_at > pg_catalog.clock_timestamp() + interval '1 minute' then
     return '{"outcome": "malformed"}'::jsonb;
   end if;
@@ -738,6 +753,9 @@ begin
   if a.id is null then
     return '{"outcome": "no_profile"}'::jsonb;
   end if;
+  if a.clabe_changed_at is distinct from p_seen_clabe then
+    return '{"outcome": "changed"}'::jsonb;
+  end if;
   if p_called_at < a.clabe_changed_at then
     return '{"outcome": "before_change"}'::jsonb;
   end if;
@@ -747,7 +765,7 @@ begin
   return pg_catalog.jsonb_build_object('outcome', 'recorded', 'call_id', v);
 end
 $$;
-revoke all on function private.payout_account_call(uuid, text, timestamptz) from public;
+revoke all on function private.payout_account_call(uuid, timestamptz, text, timestamptz) from public;
 
 -- ---------------------------------------------------------------------------------------
 -- Marcar pagada.
@@ -1184,7 +1202,7 @@ begin
 end
 $$;
 
-grant execute on function private.payout_account_open(uuid), private.payout_account_call(uuid, text, timestamptz),
+grant execute on function private.payout_account_open(uuid), private.payout_account_call(uuid, timestamptz, text, timestamptz),
   private.payout_mark_paid(uuid, uuid, text, date, bigint), private.payout_return_payment(uuid, text), private.payout_withdraw_request(uuid),
   private.payout_reopen(uuid, text), private.payout_account_void_read(uuid, text) to app_service;
 
@@ -1508,10 +1526,11 @@ as $$
   where not exists (select 1 from found where found.name = k.name
                       and pg_catalog.pg_get_functiondef(found.oid) ~ 'from public\.payout_periods [a-z]+ where [a-z]+\.period_id = v_period(_id)? for update;')
   union all
-  -- La auditoría de los pagos no lleva el monto (con el bruto diría el régimen), y la de las llamadas, con quién se habló.
+  -- La auditoría de los pagos no lleva el monto (con el bruto diría el régimen), la de las llamadas con quién se habló, y la de las propuestas, su huella ni sus notas.
   select 'payouts audit names what it must not: ' || k.table_name, k.table_name
   from (values ('private.payout_payments', '%audit_row_change(''money'', ''amount_cents'')%'),
-               ('private.payout_account_calls', '%audit_row_change(''money'', ''spoke_with'')%')) k (table_name, pattern)
+               ('private.payout_account_calls', '%audit_row_change(''money'', ''spoke_with'')%'),
+               ('private.payout_requests', '%audit_row_change(''money'', ''fingerprint'', ''note'', ''decision_note'')%')) k (table_name, pattern)
   where not exists (select 1 from pg_catalog.pg_trigger tg where tg.tgrelid = pg_catalog.to_regclass(k.table_name) and tg.tgname = 'audit_changes'
                       and pg_catalog.pg_get_triggerdef(tg.oid) like k.pattern)
 $$;

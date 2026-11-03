@@ -4,7 +4,7 @@
 -- ninguno. Abrir la cuenta, llamar y marcar se prueban aquí; las vencidas de factura y lo que vigila el vigilante, en la 69.
 begin;
 \ir _ayuda.psql
-select plan(114);
+select plan(121);
 
 select pruebas.alta('a6800000-0000-0000-0000-000000000001', 'tere-68@prueba.test');
 select pruebas.alta('c6800000-0000-0000-0000-000000000001', 'f1-68@prueba.test');
@@ -22,7 +22,11 @@ create function pruebas.f2() returns uuid language sql immutable as $$ select 'c
 create function pruebas.k1() returns uuid language sql immutable as $$ select 'c6800000-0000-0000-0000-000000000003'::uuid $$;
 create function pruebas.m() returns uuid language sql immutable as $$ select 'e6800000-0000-4000-8000-000000000001'::uuid $$;
 -- La liquidación n es la del periodo 20300n.
-create function pruebas.p(n integer) returns uuid language sql immutable as $$ select ('b6800000-0000-4000-8000-00000000000' || n)::uuid $$;
+create function pruebas.p(n integer) returns uuid language sql immutable as $$ select ('b6800000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid $$;
+-- Desde cuándo es suya la CLABE vigente: con eso se dice a qué cuenta se llamó.
+create function pruebas.cambio() returns timestamptz language sql security definer as $$
+  select x.clabe_changed_at from private.teacher_tax_profiles x where x.teacher_id = 'e6800000-0000-4000-8000-000000000001' order by x.version desc limit 1
+$$;
 create function pruebas.sellado(p_largo integer) returns bytea language sql immutable
 as $$ select decode('010001' || repeat('ab', 12 + p_largo + 16), 'hex') $$;
 
@@ -61,7 +65,7 @@ end
 $$;
 create function pruebas.llama(p_pago uuid, p_quien uuid default 'c6800000-0000-0000-0000-000000000001') returns jsonb language plpgsql as $$
 begin
-  return pruebas.pide(p_quien, format('private.payout_account_call(%L, %L, %L)', p_pago, 'Tere, al teléfono que dio Contenido', now() - interval '1 hour'))::jsonb;
+  return pruebas.pide(p_quien, format('private.payout_account_call(%L, %L, %L, %L)', p_pago, pruebas.cambio(), 'Tere, al teléfono que dio Contenido', now() - interval '1 hour'))::jsonb;
 end
 $$;
 create function pruebas.marca(p_pago uuid, p_lectura uuid, p_ref text, p_monto bigint default 100000,
@@ -114,13 +118,16 @@ select pruebas.liquidacion(5, 'ready_to_pay');
 -- ---------------------------------------------------------------------------------------
 -- La primera vez que se paga a esta cuenta: sin «ya llamé», no se abre (decisión 2).
 
-select is(pruebas.abre(pruebas.p(1)), '{"outcome": "needs_call"}'::jsonb, 'la primera vez, sin llamada, no se abre la cuenta');
+select is(pruebas.abre(pruebas.p(1)) ->> 'outcome', 'needs_call', 'la primera vez, sin llamada, no se abre la cuenta');
+select is(pruebas.abre(pruebas.p(1)) - 'outcome' - 'clabe_changed_at', '{"clabe_last4": "7771"}'::jsonb, 'dice a qué cuenta se llama: sus últimos cuatro, y nada más');
 select is(pruebas.lecturas(), 0::bigint, 'y no queda lectura en la auditoría');
 select is((select count(*) from private.payout_account_reads), 0::bigint, 'ni en el libro de lecturas');
-select is(pruebas.pide(pruebas.k1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(1), 'Tere', now()) ) ::jsonb ->> 'outcome', 'forbidden', 'Contenido no anota llamadas');
-select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(1), '  ', now()))::jsonb ->> 'outcome', 'malformed', 'sin con quién habló, no');
-select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(1), 'Tere', now() + interval '1 hour'))::jsonb ->> 'outcome', 'malformed', 'una llamada que no ha pasado, no');
-select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(1), 'Tere', now() - interval '11 days'))::jsonb ->> 'outcome', 'before_change', 'una llamada de antes del cambio no confirma esta cuenta');
+select is(pruebas.pide(pruebas.k1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), pruebas.cambio(), 'Tere', now()) ) ::jsonb ->> 'outcome', 'forbidden', 'Contenido no anota llamadas');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), pruebas.cambio(), '  ', now()))::jsonb ->> 'outcome', 'malformed', 'sin con quién habló, no');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), pruebas.cambio(), 'Tere', now() + interval '1 hour'))::jsonb ->> 'outcome', 'malformed', 'una llamada que no ha pasado, no');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), pruebas.cambio(), 'Tere', now() - interval '11 days'))::jsonb ->> 'outcome', 'before_change', 'una llamada de antes del cambio no confirma esta cuenta');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(1), now() - interval '20 days', 'Tere', now()))::jsonb ->> 'outcome',
+          'changed', 'una llamada a otra cuenta que la de ahora, no');
 select is(pruebas.llama(pruebas.p(1)) ->> 'outcome', 'recorded', 'finanzas anota que llamó');
 select is((select spoke_with from private.payout_account_calls where teacher_id = pruebas.m()), 'Tere, al teléfono que dio Contenido', 'con quién');
 select is((select recorded_by from private.payout_account_calls where teacher_id = pruebas.m()), pruebas.f1(), 'y quién lo anotó');
@@ -295,7 +302,9 @@ select pruebas.liquidacion(8, 'ready_to_pay');
 select (pruebas.abre(pruebas.p(8)) ->> 'read_id')::uuid as lectura8 \gset
 select is(pruebas.pide(pruebas.f2(), format('private.hold_payout(%L, %L, %L)', pruebas.p(8), 'Se revisa', 'ready_to_pay'))::jsonb ->> 'outcome', 'held', 'se retiene');
 select is(pruebas.suelta(pruebas.p(8), pruebas.f1()) ->> 'to', 'ready_to_pay', 'y se suelta sin pagos: una persona basta');
-select isnt((pruebas.abre(pruebas.p(8)) ->> 'read_id')::uuid, :'lectura8'::uuid, 'la lectura de antes de retenerla ya no es la abierta');
+select is(pruebas.abre(pruebas.p(8), pruebas.f2()) ->> 'outcome', 'already_open', 'retener y soltar no cierra la lectura: otra persona sigue sin la cuenta');
+select is(pruebas.abre(pruebas.p(8)) ->> 'outcome', 'already_open', 'ni quien la abrió recibe otra: la de antes la marca o la anula');
+select ok((pruebas.abre(pruebas.p(8)) ->> 'own')::boolean, 'y sabe que es la suya');
 select is(pruebas.marca(pruebas.p(8), :'lectura8', 'R8') ->> 'conflict', 'stale_read', 'una transferencia con la lectura de antes choca');
 select is(pruebas.estado(pruebas.p(8)), 'on_hold', 'y retiene');
 
@@ -307,6 +316,24 @@ select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L
 select is(pruebas.abre(pruebas.p(9), pruebas.f2()) ->> 'outcome', 'ok', 'y otra persona ya la puede abrir');
 select is(pruebas.marca(pruebas.p(9), :'lectura9', 'R9') ->> 'conflict', 'stale_read', 'una transferencia con la lectura anulada choca');
 select is(pruebas.pide(pruebas.f1(), format('private.payout_account_void_read(%L, %L)', :'lectura9', 'Otra vez'))::jsonb ->> 'outcome', 'used', 'y una lectura con su pago ya no se anula');
+
+-- La lectura de quien ya no es de finanzas la anula otra persona, o la liquidación no se abriría nunca.
+select pruebas.liquidacion(10, 'ready_to_pay');
+select (pruebas.abre(pruebas.p(10)) ->> 'read_id')::uuid as lectura10 \gset
+select is(pruebas.abre(pruebas.p(10), pruebas.f2()) ->> 'outcome', 'already_open', 'abierta por otra persona');
+create function pruebas.f1_sin_finanzas(p_sin boolean) returns void language plpgsql security definer as $$
+begin
+  set local session_replication_role = replica;
+  update public.admin_capabilities set revoked_at = case when p_sin then now() end, revoked_by = case when p_sin then pruebas.f2() end
+  where profile_id = pruebas.f1() and capability = 'finance';
+  set local session_replication_role = origin;
+end
+$$;
+select pruebas.f1_sin_finanzas(true);
+select is(pruebas.pide(pruebas.f2(), format('private.payout_account_void_read(%L, %L)', :'lectura10', 'Ya no está en finanzas; no transfirió'))::jsonb ->> 'outcome', 'voided',
+          'si quien la abrió ya no es de finanzas, otra persona la anula');
+select pruebas.f1_sin_finanzas(false);
+select is(pruebas.abre(pruebas.p(10), pruebas.f2()) ->> 'outcome', 'ok', 'y ya se abre');
 
 -- ---------------------------------------------------------------------------------------
 -- Nadie sobre sí.

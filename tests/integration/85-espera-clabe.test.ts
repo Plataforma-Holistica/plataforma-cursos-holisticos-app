@@ -292,7 +292,7 @@ describe("la lectura de finanzas", () => {
 
       await age(owner, id);
       // La primera vez que se le paga a esta cuenta, con «ya llamé» (T-604): eso se prueba en la 68.
-      expect(await read()).toEqual({ outcome: "needs_call" });
+      expect(await read()).toMatchObject({ outcome: "needs_call", last4: CLABE_A.slice(-4) });
       await owner.query("set local session_replication_role = replica");
       await owner.query(
         `insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)

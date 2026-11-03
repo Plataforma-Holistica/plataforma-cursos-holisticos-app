@@ -13,7 +13,7 @@ import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 // Usa meses de 2042, que ninguna otra prueba usa: los arma cerrados y liberados con las guardias apagadas, sin pasar por el cierre (eso lo prueban la 53 y
 // la 55), y al terminar quita lo suyo de la misma manera; la auditoría se queda.
 
-const OURS = [204201, 204202, 204203, 204204, 204205, 204206];
+const OURS = [204201, 204202, 204203, 204204, 204205, 204206, 204207];
 
 let owner: Client;
 let financeA: Finance;
@@ -237,6 +237,26 @@ describe("dos personas de finanzas sobre la misma liquidación, de verdad", () =
     expect(returned).toMatchObject({ outcome: "returned", status: "payment_returned" });
     expect(again).toEqual({ outcome: "already_returned" });
     expect(await statusOf(204204)).toBe("payment_returned");
+  });
+});
+
+describe("dos aperturas a la vez", () => {
+  it("la segunda espera, y como la primera dejó una lectura sin pago, no recibe la cuenta", async () => {
+    const [first, second] = await race(
+      financeA,
+      (client) => call(client, "private.payout_account_open($1)", [payout.get(204207)]),
+      financeB,
+      (client) => call(client, "private.payout_account_open($1)", [payout.get(204207)]),
+    );
+    expect(first).toMatchObject({ clabe_last4: "7771" });
+    expect(second).toMatchObject({ outcome: "already_open", read_by: financeA.person.id, own: false });
+  });
+
+  it("retener y soltar no la cierran: otra persona sigue sin la cuenta", async () => {
+    expect(await asOne(financeB, (client) => call(client, "private.hold_payout($1, 'Se revisa.', 'ready_to_pay')", [payout.get(204207)]))).toMatchObject({ outcome: "held" });
+    const seen = (await owner.query<{ h: string }>("select private.unhold_preview($1) ->> 'fingerprint' as h", [payout.get(204207)])).rows[0]!.h;
+    expect(await asOne(financeB, (client) => call(client, "private.unhold_payout($1, null, $2)", [payout.get(204207), seen]))).toMatchObject({ to: "ready_to_pay" });
+    expect(await open(financeB, 204207)).toMatchObject({ outcome: "already_open", read_by: financeA.person.id });
   });
 });
 

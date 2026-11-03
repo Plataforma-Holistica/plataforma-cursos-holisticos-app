@@ -98,11 +98,14 @@ values ('d6900000-0000-4000-8000-000000000004', pruebas.p(8), pruebas.m(), 'd690
         (now() at time zone 'America/Mexico_City')::date, 100000, true, false, pruebas.f1());
 insert into private.payout_requests (kind, payout_id, payment_id, note, proposed_by, status, decided_by, decided_at)
 values ('payment_return', pruebas.p(8), 'd6900000-0000-4000-8000-000000000004', 'El banco la regresó', pruebas.f1(), 'confirmed',
-        'a6900000-0000-0000-0000-000000000001', now());
+        'a6900000-0000-0000-0000-000000000001', now() - interval '2 hours');
+-- La llamada del primer pago, de antes de la devolución: ya no vale.
+insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
+values (pruebas.m(), now() - interval '10 days', 'Luz', now() - interval '3 hours', pruebas.f1());
 set local session_replication_role = origin;
-select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb, '{"outcome": "needs_call"}'::jsonb,
-          'con su único pago devuelto, la cuenta pide otra vez la llamada');
-select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(8), 'Luz', now() - interval '1 hour'))::jsonb ->> 'outcome',
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb ->> 'outcome', 'needs_call',
+          'con su único pago devuelto, la llamada de antes ya no vale: se vuelve a llamar');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L, %L)', pruebas.p(8), now() - interval '10 days', 'Luz', now() - interval '1 hour'))::jsonb ->> 'outcome',
           'recorded', 'se le llama');
 select (pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb ->> 'read_id')::uuid as lectura8 \gset
 select is(pruebas.pide(pruebas.f1(), format('private.payout_mark_paid(%L, %L, %L, %L, 100000)', pruebas.p(8), :'lectura8', 'DEV2',

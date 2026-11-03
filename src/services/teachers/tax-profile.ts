@@ -53,8 +53,9 @@ export type TaxReadAnswer = { outcome: "ok"; row: TaxProfileRow } | { outcome: "
 export type TaxPayoutAnswer =
   | { outcome: "ok"; row: TaxProfileRow; readId: string; firstTime: boolean }
   | { outcome: "clabe_waiting"; until: string }
-  | { outcome: "already_open"; readBy: string; readAt: string }
-  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" };
+  | { outcome: "already_open"; readBy: string; readAt: string; own: boolean }
+  | { outcome: "needs_call"; last4: string; clabeChangedAt: string }
+  | { outcome: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" };
 
 export interface TaxProfileState {
   version: number;
@@ -118,8 +119,9 @@ export type TaxSave = Proof | { kind: "saved" | "off" | "changed" | "suspended" 
 export type TaxPayoutRead =
   | { kind: "ok"; data: OpenTaxProfile; readId: string; firstTime: boolean }
   | { kind: "clabe_waiting"; until: string }
-  | { kind: "already_open"; readBy: string; readAt: string }
-  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "needs_call" | "off" | "unavailable" }
+  | { kind: "already_open"; readBy: string; readAt: string; own: boolean }
+  | { kind: "needs_call"; last4: string; clabeChangedAt: string }
+  | { kind: "forbidden" | "needs_fresh_code" | "not_found" | "self" | "no_profile" | "clabe_held" | "clabe_recapture" | "clabe_notice_pending" | "not_ready" | "on_hold" | "under_investigation" | "off" | "unavailable" }
   | { kind: "session"; check: Refused };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -273,7 +275,8 @@ export function createTaxProfile(deps: TaxProfileDeps) {
     }
     if (answer.outcome === "clabe_waiting") return { kind: "clabe_waiting", until: answer.until };
     // Otra persona tiene la cuenta abierta y su transferencia quizá ya salió: se dice quién y desde cuándo.
-    if (answer.outcome === "already_open") return { kind: "already_open", readBy: answer.readBy, readAt: answer.readAt };
+    if (answer.outcome === "already_open") return { kind: "already_open", readBy: answer.readBy, readAt: answer.readAt, own: answer.own };
+    if (answer.outcome === "needs_call") return { kind: "needs_call", last4: answer.last4, clabeChangedAt: answer.clabeChangedAt };
     if (answer.outcome !== "ok") return { kind: answer.outcome };
     const open = openRow(answer.row);
     if (open === null) {

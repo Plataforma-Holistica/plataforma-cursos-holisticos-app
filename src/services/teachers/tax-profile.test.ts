@@ -318,11 +318,16 @@ describe("finanzas lee por una liquidación", () => {
   });
 
   it("con la cuenta abierta por otra persona, quién y desde cuándo", async () => {
-    payoutAnswer = { outcome: "already_open", readBy: READ, readAt: AT };
-    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "already_open", readBy: READ, readAt: AT });
+    payoutAnswer = { outcome: "already_open", readBy: READ, readAt: AT, own: false };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "already_open", readBy: READ, readAt: AT, own: false });
   });
 
-  it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending", "not_ready", "on_hold", "under_investigation", "needs_call"] as const)("con %s, nada", async (outcome) => {
+  it("la primera vez, a qué cuenta se llama", async () => {
+    payoutAnswer = { outcome: "needs_call", last4: "7771", clabeChangedAt: AT };
+    expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "needs_call", last4: "7771", clabeChangedAt: AT });
+  });
+
+  it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending", "not_ready", "on_hold", "under_investigation"] as const)("con %s, nada", async (outcome) => {
     payoutAnswer = { outcome };
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: outcome });
   });

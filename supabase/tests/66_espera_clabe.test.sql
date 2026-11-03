@@ -75,6 +75,10 @@ begin
   set local session_replication_role = replica;
   insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
   values (v_teacher, v_cambio, 'prueba', now(), pruebas.f1());
+  -- Y «no transferí» en la lectura anterior: aquí se abre muchas veces mientras la CLABE cambia, y una lectura sin pago impide abrir otra (eso, en la 68).
+  insert into private.payout_account_read_voids (read_id, voided_by, note)
+  select r.id, pruebas.f1(), 'prueba' from private.payout_account_reads r
+  where r.payout_id = p_pago and not exists (select 1 from private.payout_account_read_voids v where v.read_id = r.id);
   set local session_replication_role = origin;
 end
 $$;
