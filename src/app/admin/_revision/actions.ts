@@ -12,10 +12,11 @@ import { cookieJar } from "@/app/_lib/request-context";
 import { giveCatalogCode } from "@/services/catalog/catalog";
 import { clearNotice } from "@/services/account/notice";
 import { getMediaGrant, getReviewResourceGrant, getReviewVideoGrant } from "@/services/media/media";
-import { approveCourse, returnCourse } from "@/services/review/review";
+import { approveCourse, approveSubmission, returnCourse } from "@/services/review/review";
 
 import {
   approveOutcome,
+  approveSubmissionOutcome,
   NO_RETURN_PROBLEMS,
   readReturnForm,
   readReviewForm,
@@ -66,9 +67,13 @@ export async function approveAction(previous: ReviewState, form: FormData): Prom
   const jar = await cookieJar();
   // El aviso con el que se llegó ya se leyó: no vuelve a salir junto a otra respuesta, hablando de otro curso.
   clearNotice(jar);
-  if (request.step === "ask") return { kind: "confirming", course: request.course, attempt };
+  if (request.step === "ask") return { kind: "confirming", course: request.course, submission: request.submission ?? null, attempt };
 
-  const outcome = approveOutcome(await approveCourse(jar, { course: request.course }));
+  // Lo enviado por el editor lleva el envío que se vio; un curso por guion, no (T-405).
+  const outcome =
+    request.submission === undefined
+      ? approveOutcome(await approveCourse(jar, { course: request.course }))
+      : approveSubmissionOutcome(await approveSubmission(jar, { course: request.course, submission: request.submission }));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
   return { kind: "failed", reason: outcome.reason, attempt };

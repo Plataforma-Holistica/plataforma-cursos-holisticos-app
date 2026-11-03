@@ -20,7 +20,7 @@ import type { PlayerProps } from "@/app/_video/player";
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
 import { approveAction, lessonVideoAction, returnAction, reviewCodeAction, reviewResourceAction, reviewVideoAction } from "./actions";
-import { RETURN_FIX_FIELD, RETURN_MAX, RETURN_REASON_FIELD, returnButton, type CodeState, type ReturnFailure, type ReturnProblem, type ReturnState, type ReviewFailure, type ReviewState, type VideoAnswer } from "./outcomes";
+import { RETURN_FIX_FIELD, RETURN_MAX, RETURN_REASON_FIELD, returnButton, reviewButton, type CodeState, type ReturnFailure, type ReturnProblem, type ReturnState, type ReviewFailure, type ReviewState, type VideoAnswer } from "./outcomes";
 import type { CourseRow, LessonRow, ReviewView, SubmissionRow } from "./rows";
 
 // PA-61 y PA-62 mínimas · Los cursos por revisar, en una sola pantalla (decisión de Sergio del
@@ -57,6 +57,12 @@ const FAILURES: Record<ReviewFailure, string> = {
   practice_inactive: text.practiceInactive,
   level_inactive: text.levelInactive,
   videos_not_ready: text.videosNotReady,
+  changed: text.changed,
+  teacher_suspended: t(text.teacherSuspended),
+  annex_draft: text.annexDraft,
+  files_changed: t(text.filesChanged),
+  captions_pending: text.captionsPending,
+  video_gone: t(text.videoGone),
   needs_code: text.needsCode,
   unavailable: account.common.unavailable,
   unknown: text.unknown,
@@ -328,7 +334,8 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
                     key={course.id}
                     course={course}
                     canChange={view.canChange}
-                    confirming={queue.kind === "confirming" && queue.course === course.id}
+                    // Lo que se confirma es el envío que se vio al preguntar, no el de esta pintada.
+                    confirming={queue.kind === "confirming" && queue.course === course.id ? reviewButton.confirm(course.id, queue.submission ?? undefined) : null}
                     answer={answer}
                     action={sendQueue}
                     pending={queuePending}
@@ -371,8 +378,8 @@ function focusIsLost(): boolean {
 interface CourseProps {
   course: CourseRow;
   canChange: boolean;
-  /** Se está preguntando si se aprueba este curso. */
-  confirming: boolean;
+  /** Se está preguntando si se aprueba este curso: el valor de su «Sí». */
+  confirming: string | null;
   /** Dónde va el foco cuando llega la pregunta: el botón pulsado desaparece con ella. */
   answer: RefObject<HTMLDivElement | null>;
   action: (form: FormData) => void;
@@ -443,16 +450,17 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
 
         {course.submission !== null && <Submitted submission={course.submission} />}
         {course.submission !== null && <ReturnBlock course={course} submission={course.submission} canChange={canChange} returning={returning} block={returnBlock} answer={returnAnswer} spoken={returnSpoken} />}
+        {/* Aprobar, en lo enviado y en lo cargado por guion. Con un curso abierto para devolver no se ofrece: lo escrito ahí se perdería con la respuesta. */}
         {course.submission === null && canChange && !returning.mayOpen && <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>}
-        {course.submission === null && canChange && returning.mayOpen && (
+        {canChange && returning.mayOpen && (
           <form action={action} noValidate className="flex flex-col gap-3">
-            {confirming ? (
+            {confirming !== null ? (
               <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
                 <p className="font-semibold">{text.confirmTitle}</p>
                 <p className="text-text-2">{text.confirmBody}</p>
                 {course.firstOfTeacher !== null && <p className="text-text-2">{course.firstOfTeacher}</p>}
                 <div className="flex flex-wrap gap-2">
-                  <Button type="submit" name="do" value={course.buttons.confirm} size="md" loading={pending} loadingLabel={text.working}>
+                  <Button type="submit" name="do" value={confirming} size="md" loading={pending} loadingLabel={text.working}>
                     {text.confirm}
                   </Button>
                   <Button type="submit" name="do" value="cancel" variant="secondary" size="md" disabled={pending}>
@@ -491,7 +499,7 @@ function Submitted({ submission }: { submission: SubmissionRow }) {
         <p className="text-body-s text-text-2">{submission.annex}</p>
         <p className="break-words text-body-s text-text-2">{submission.statement}</p>
       </section>
-      <p className="text-body-s text-text-2">{text.approveLater}</p>
+      {submission.captions !== null && <p className="text-body-s text-text-2">{submission.captions}</p>}
     </>
   );
 }

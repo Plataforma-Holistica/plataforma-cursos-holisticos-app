@@ -271,7 +271,8 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
       /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*reviewCodeOutcome\(await giveCatalogCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
     // Aprobar: del formulario solo llega qué botón y qué curso. Preguntar no llama a nadie.
     approveAction:
-      /if \(request\.step === "ask"\) return \{ kind: "confirming", course: request\.course, attempt \};[\s\S]*approveOutcome\(await approveCourse\(jar, \{ course: request\.course \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
+      // Lo enviado por el editor lleva el envío que se vio (T-405); un curso por guion, no.
+      /if \(request\.step === "ask"\) return \{ kind: "confirming", course: request\.course, submission: request\.submission \?\? null, attempt \};[\s\S]*approveOutcome\(await approveCourse\(jar, \{ course: request\.course \}\)\)[\s\S]*approveSubmissionOutcome\(await approveSubmission\(jar, \{ course: request\.course, submission: request\.submission \}\)\);[\s\S]*return leaveFor\(jar, outcome\);/,
     // El video: solo la función única de medios firma, y corre la guarda. Lo que llega es la
     // lección, nunca un playback id.
     lessonVideoAction: /const answer = videoAnswerOf\(await getMediaGrant\(jar, lessonId, "review"\)\);\s*if \(answer\.kind === "leave"\) return leaveFor\(jar, answer\);/,

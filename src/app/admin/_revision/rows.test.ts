@@ -168,6 +168,7 @@ describe("lo enviado por el portal", () => {
       number: 2,
       resources: [{ id: "a1000000-0000-4000-8000-000000000002", title: "Temario", kind: "pdf", sizeBytes: 1024 }],
       annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo.", termYears: 10 },
+      captionsMissing: [],
     },
   };
   const rowOf = (course: ReviewCourse) => reviewView({ freshCode: true, courses: [course] }).teachers[0]?.courses[0];
@@ -189,6 +190,14 @@ describe("lo enviado por el portal", () => {
 
   it("los botones llevan el curso y el envío que se vio", () => {
     expect(rowOf(SENT)?.submission?.ask).toBe(`return_ask:${COURSE}:${SUBMISSION}`);
+    expect(rowOf(SENT)?.buttons).toEqual({ ask: `ask:${COURSE}:${SUBMISSION}`, confirm: `confirm:${COURSE}:${SUBMISSION}` });
+    expect(rowOf(COURSE_ROW)?.buttons).toEqual({ ask: `ask:${COURSE}`, confirm: `confirm:${COURSE}` });
+  });
+
+  it("dice qué lecciones esperan sus subtítulos, por su título; sin ninguna, nada", () => {
+    expect(rowOf(SENT)?.submission?.captions).toBeNull();
+    const waiting: ReviewCourse = { ...SENT, submission: { ...SENT.submission!, captionsMissing: [SENT.lessons[0]!.lessonId] } };
+    expect(rowOf(waiting)?.submission?.captions).toBe("Esperan sus subtítulos: «Lección 1». Sin ellos no se publica.");
   });
 
   it("su video se pide con el curso; el de uno por guion, no", () => {

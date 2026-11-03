@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { ROUTES } from "@/services/account/navigation";
-import { APPROVE_ANSWERS, RETURN_ANSWERS } from "@/services/review/review";
+import { APPROVE_ANSWERS, RETURN_ANSWERS, SUBMISSION_APPROVE_ANSWERS } from "@/services/review/review";
 
-import { approveOutcome, readReviewForm, reviewButton, reviewCodeOutcome, videoAnswerOf, readReturnForm, returnButton, returnOutcome, returnProblems, reviewVideoAnswerOf } from "./outcomes";
+import { approveOutcome, approveSubmissionOutcome, readReviewForm, reviewButton, reviewCodeOutcome, videoAnswerOf, readReturnForm, returnButton, returnOutcome, returnProblems, reviewVideoAnswerOf } from "./outcomes";
 
 // La tabla de la pantalla de revisión: lo que llega, lo que contesta cada servicio y a dónde
 // va. Pura: sin servicios ni base.
 
 const COURSE = "c0000000-0000-4000-8000-000000000002";
+const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
 const TO_PAGE = { kind: "leave", to: ROUTES.review, notice: null };
 
 function formWith(...values: [string, string][]) {
@@ -22,6 +23,13 @@ describe("readReviewForm", () => {
     expect(readReviewForm(formWith(["do", reviewButton.ask(COURSE)]))).toEqual({ step: "ask", course: COURSE });
     expect(readReviewForm(formWith(["do", reviewButton.confirm(COURSE)]))).toEqual({ step: "confirm", course: COURSE });
     expect(readReviewForm(formWith(["do", reviewButton.cancel()]))).toEqual({ step: "cancel" });
+  });
+
+  it("lo enviado por el editor lleva el envío que se vio (T-405)", () => {
+    expect(readReviewForm(formWith(["do", reviewButton.ask(COURSE, SUBMISSION)]))).toEqual({ step: "ask", course: COURSE, submission: SUBMISSION });
+    expect(readReviewForm(formWith(["do", reviewButton.confirm(COURSE, SUBMISSION)]))).toEqual({ step: "confirm", course: COURSE, submission: SUBMISSION });
+    expect(readReviewForm(formWith(["do", `confirm:${COURSE}:${SUBMISSION}:otra`]))).toEqual({ step: "none" });
+    expect(readReviewForm(formWith(["do", `confirm:${COURSE}:${SUBMISSION.toUpperCase()}`]))).toEqual({ step: "none" });
   });
 
   it.each([
@@ -70,6 +78,39 @@ describe("approveOutcome", () => {
 
   it("un curso sin forma: la cola de ahora lo aclara", () => {
     expect(approveOutcome({ kind: "malformed" })).toEqual({ kind: "failed", reason: "not_pending" });
+  });
+});
+
+describe("approveSubmissionOutcome", () => {
+  const cases: Record<(typeof SUBMISSION_APPROVE_ANSWERS)[number], ReturnType<typeof approveSubmissionOutcome>> = {
+    approved: { kind: "leave", to: ROUTES.review, notice: "course_approved" },
+    forbidden: TO_PAGE as never,
+    needs_fresh_code: { kind: "failed", reason: "needs_code" },
+    not_found: { kind: "failed", reason: "not_pending" },
+    not_pending: { kind: "failed", reason: "not_pending" },
+    changed: { kind: "failed", reason: "changed" },
+    self: { kind: "failed", reason: "self" },
+    teacher_suspended: { kind: "failed", reason: "teacher_suspended" },
+    unavailable: { kind: "failed", reason: "unavailable" },
+    annex_draft: { kind: "failed", reason: "annex_draft" },
+    practice_inactive: { kind: "failed", reason: "practice_inactive" },
+    level_inactive: { kind: "failed", reason: "level_inactive" },
+    files_changed: { kind: "failed", reason: "files_changed" },
+    captions_pending: { kind: "failed", reason: "captions_pending" },
+  };
+
+  it.each(SUBMISSION_APPROVE_ANSWERS)("la base contesta %s", (answer) => {
+    expect(approveSubmissionOutcome({ kind: "answered", answer })).toEqual(cases[answer]);
+  });
+
+  it.each([
+    [{ kind: "refused" } as const, TO_PAGE],
+    [{ kind: "unavailable" } as const, { kind: "failed", reason: "unavailable" }],
+    [{ kind: "unknown" } as const, { kind: "failed", reason: "unknown" }],
+    [{ kind: "malformed" } as const, { kind: "failed", reason: "not_pending" }],
+    [{ kind: "video_not_ready", lessons: ["l"] } as { kind: "video_not_ready"; lessons: string[] }, { kind: "failed", reason: "video_gone" }],
+  ])("lo que no llegó a la base: %o", (result, outcome) => {
+    expect(approveSubmissionOutcome(result)).toEqual(outcome);
   });
 });
 

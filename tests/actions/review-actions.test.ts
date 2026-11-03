@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
   return {
     giveCatalogCode: logged("giveCatalogCode", unavailable),
     approveCourse: logged("approveCourse", unavailable),
+    approveSubmission: logged("approveSubmission", unavailable),
     returnCourse: logged("returnCourse", unavailable),
     getMediaGrant: logged("getMediaGrant", unavailable),
     getReviewVideoGrant: logged("getReviewVideoGrant", unavailable),
@@ -33,7 +34,7 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
 vi.mock("@/services/catalog/catalog", () => ({ giveCatalogCode: mocks.giveCatalogCode }));
-vi.mock("@/services/review/review", () => ({ approveCourse: mocks.approveCourse, returnCourse: mocks.returnCourse }));
+vi.mock("@/services/review/review", () => ({ approveCourse: mocks.approveCourse, approveSubmission: mocks.approveSubmission, returnCourse: mocks.returnCourse }));
 vi.mock("@/services/media/media", () => ({ getMediaGrant: mocks.getMediaGrant, getReviewVideoGrant: mocks.getReviewVideoGrant, getReviewResourceGrant: mocks.getReviewResourceGrant }));
 vi.mock("@/services/account/account", () => ({ signOut: vi.fn(), forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice, clearNotice: mocks.clearNotice }));
@@ -47,6 +48,7 @@ const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;
 const COURSE = "c0000000-0000-4000-8000-000000000002";
 const LESSON = "d0000000-0000-4000-8000-000000000003";
+const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
 
 const pressed = (value: string) => {
   const data = new FormData();
@@ -68,7 +70,7 @@ beforeEach(() => {
 
 describe("approveAction", () => {
   it("«Aprobar y publicar» solo pregunta: no llama a nadie", async () => {
-    expect(await approveAction(IDLE, pressed(reviewButton.ask(COURSE)))).toEqual({ kind: "confirming", course: COURSE, attempt: 1 });
+    expect(await approveAction(IDLE, pressed(reviewButton.ask(COURSE)))).toEqual({ kind: "confirming", course: COURSE, submission: null, attempt: 1 });
     expect(calls.order).toEqual([]);
   });
 
@@ -80,7 +82,7 @@ describe("approveAction", () => {
 
   it("confirmar: le pasa al servicio el curso del botón y, aprobado, redirige con el aviso", async () => {
     once("approveCourse", { kind: "answered", answer: "approved" });
-    await expect(approveAction({ kind: "confirming", course: COURSE, attempt: 1 }, pressed(reviewButton.confirm(COURSE)))).rejects.toThrow(
+    await expect(approveAction({ kind: "confirming", course: COURSE, submission: null, attempt: 1 }, pressed(reviewButton.confirm(COURSE)))).rejects.toThrow(
       "redirige a /admin/revision",
     );
     expect(mocks.approveCourse).toHaveBeenCalledWith(jar, { course: COURSE });
@@ -99,6 +101,23 @@ describe("approveAction", () => {
     once("approveCourse", { kind: "refused" });
     await expect(approveAction(IDLE, pressed(reviewButton.confirm(COURSE)))).rejects.toThrow("redirige a /admin/revision");
     expect(calls.order).toEqual(["approveCourse", "redirect"]);
+  });
+
+  it("lo enviado por el editor: preguntar guarda el envío que se vio, y confirmar se lo pasa al servicio de lo enviado (T-405)", async () => {
+    expect(await approveAction(IDLE, pressed(reviewButton.ask(COURSE, SUBMISSION)))).toEqual({ kind: "confirming", course: COURSE, submission: SUBMISSION, attempt: 1 });
+    once("approveSubmission", { kind: "answered", answer: "approved" });
+    await expect(approveAction({ kind: "confirming", course: COURSE, submission: SUBMISSION, attempt: 1 }, pressed(reviewButton.confirm(COURSE, SUBMISSION)))).rejects.toThrow(
+      "redirige a /admin/revision",
+    );
+    expect(mocks.approveSubmission).toHaveBeenCalledWith(jar, { course: COURSE, submission: SUBMISSION });
+    expect(mocks.approveCourse).not.toHaveBeenCalled();
+    expect(calls.order).toEqual(["approveSubmission", "leaveNotice", "redirect"]);
+  });
+
+  it("lo enviado que no se publicó se dice, y la página se vuelve a pedir", async () => {
+    once("approveSubmission", { kind: "answered", answer: "captions_pending" });
+    expect(await approveAction(IDLE, pressed(reviewButton.confirm(COURSE, SUBMISSION)))).toEqual({ kind: "failed", reason: "captions_pending", attempt: 1 });
+    expect(calls.order).toEqual(["approveSubmission", "refresh"]);
   });
 });
 
