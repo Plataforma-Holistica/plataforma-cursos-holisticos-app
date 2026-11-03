@@ -60,9 +60,11 @@ function detailOf(course: TeacherCourse): string | null {
   if (course.state === "draft") {
     if (course.returned !== null) return course.returned.reason;
     if (course.draft === null) return null;
-    const missing = missingItems(course.draft);
+    // La misma lista que enviar comprueba; si no se pudo leer, la cuenta del dominio, que no ve reemplazos ni pendientes.
+    const missing = course.missing ?? missingItems(course.draft);
     return missing === 0 ? text.ready : t(plural(missing, text.missing), { count: missing });
   }
+  if (course.state === "in_review" && course.submittedAt !== null) return t(text.sentOn, { date: longDate(course.submittedAt) });
   return portal.stateDetail[STATE_KEYS[course.state]];
 }
 

@@ -20,6 +20,8 @@ const draft: TeacherCourse = {
   coverTone: 3,
   draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
   returned: null,
+  missing: null,
+  submittedAt: null,
 };
 const published: TeacherCourse = {
   id: PUBLISHED,
@@ -32,6 +34,8 @@ const published: TeacherCourse = {
   coverTone: null,
   draft: null,
   returned: null,
+  missing: null,
+  submittedAt: null,
 };
 
 describe("courseRows", () => {

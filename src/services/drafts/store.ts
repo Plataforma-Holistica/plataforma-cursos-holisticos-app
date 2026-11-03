@@ -6,6 +6,8 @@ import { isLockConflict } from "@/adapters/supabase/errors";
 
 import { withLockRetry } from "@/services/account/team";
 
+import type { SubmitStore } from "./submit";
+
 import {
   ADD_ANSWERS,
   CREATE_ANSWERS,
@@ -37,6 +39,12 @@ import {
   readDraftChoices,
   readDraftCourse,
   readReturnNotes,
+  readSubmitStatus,
+  readSubmitPreview,
+  readSubmitAssets,
+  askSubmit,
+  readAcceptedAnnexes,
+  readAnnexText,
   readTeacherCourses,
   readUnusedResources,
   askVideoBegin,
@@ -89,9 +97,14 @@ export function createDraftsStore(
     // Por qué se devolvió va aparte, como el servidor: la persona no lee los envíos. Solo se pregunta si hay un borrador al que le pueda tocar.
     teacherCourses: async (claims) => {
       const courses = await read(claims, (tx) => readTeacherCourses(tx));
-      if (!courses.some((course) => course.state === "draft")) return courses;
-      const notes = await run({ claims, reason: "draft_return_notes" }, (tx) => readReturnNotes(tx));
-      return courses.map((course) => ({ ...course, returned: notes.get(course.id) ?? null }));
+      if (!courses.some((course) => course.state === "draft" || course.state === "in_review")) return courses;
+      const [notes, status] = await run({ claims, reason: "draft_return_notes" }, async (tx) => [await readReturnNotes(tx), await readSubmitStatus(tx)] as const);
+      return courses.map((course) => ({
+        ...course,
+        returned: notes.get(course.id) ?? null,
+        missing: status.get(course.id)?.missing ?? null,
+        submittedAt: status.get(course.id)?.submittedAt ?? null,
+      }));
     },
     draftCourse: async (claims, course) => {
       const draft = await read(claims, (tx) => readDraftCourse(tx, course));
@@ -200,3 +213,16 @@ export function createVideosStore(run: typeof asServer = asServer): VideosStore 
 }
 
 export const databaseVideosStore = createVideosStore();
+
+/** Enviar (T-405): todo como el servidor, a nombre de quien actúa. Enviar toma los candados de las listas, del curso y del registro, y no escribe antes de rechazar: un choque se intenta una vez más. */
+export function createSubmitStore(run: typeof asServer = asServer): SubmitStore {
+  return {
+    preview: (claims, course) => run({ claims, reason: "course_submit_preview" }, (tx) => readSubmitPreview(tx, course)),
+    assets: (claims, course) => run({ claims, reason: "course_submit_assets" }, (tx) => readSubmitAssets(tx, course)),
+    submit: (claims, input, evidence) => withLockRetry(() => run({ claims, reason: "course_submit" }, (tx) => askSubmit(tx, input, evidence)), isLockConflict),
+    accepted: (claims) => run({ claims, reason: "course_submit_licenses" }, (tx) => readAcceptedAnnexes(tx)),
+    annex: (claims, document) => run({ claims, reason: "course_submit_annex" }, (tx) => readAnnexText(tx, document)),
+  };
+}
+
+export const databaseSubmitStore = createSubmitStore();
