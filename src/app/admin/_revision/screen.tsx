@@ -547,14 +547,14 @@ function ReturnBlock({ course, submission, canChange, returning, block, answer, 
 
   if (open === null && !canChange) {
     return (
-      <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="outline-none">
+      <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={t(text.returnRegion, { title: course.title })} className="outline-none">
         <p className="text-body-s text-text-2">{t(text.returnLocked)}</p>
       </section>
     );
   }
   if (open === null && !returning.mayOpen) return <p className="text-body-s text-text-2">{text.returnOneAtATime}</p>;
   return (
-    <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={text.returnTitle} className="flex flex-col gap-3 outline-none">
+    <section ref={lastHere ? block : undefined} tabIndex={-1} aria-label={t(text.returnRegion, { title: course.title })} className="flex flex-col gap-3 outline-none">
       {open !== null && <BlockResult message={result} tone="warning" pending={pending} pendingText={text.returnWorking} answer={answer} spoken={spoken} />}
       <form action={action} noValidate className="flex flex-col gap-3">
         {open === null ? (

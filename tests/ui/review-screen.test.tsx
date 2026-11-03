@@ -562,7 +562,7 @@ describe("lo enviado por el portal", () => {
     const { user } = await openIt();
     actions.returnAction.mockResolvedValue({ kind: "closed", course: COURSE });
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Devolver este curso"));
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Devolver «Naturaleza»"));
   });
 
   it("con un curso abierto, otro no ofrece devolver: se llevaría lo escrito", async () => {

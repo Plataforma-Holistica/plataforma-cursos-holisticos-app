@@ -312,6 +312,8 @@ export const admin = defineMessages({
     // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.
     returnOpen: "Devolver al {maestro}",
     returnTitle: "Devolver este curso",
+    // El nombre del bloque, con su curso: con varios enviados en la cola, dos regiones con el mismo nombre no se distinguen.
+    returnRegion: "Devolver «{title}»",
     returnBody: "Vuelve a borrador y su {maestro} lee lo que escribas en el portal. Todavía no se le manda un correo: avísale por fuera.",
     returnReason: "Motivo",
     returnReasonHint: "Qué encontraste y en qué lección.",
