@@ -6,7 +6,7 @@ import type { asServer, ServerActor, Tx } from "@/adapters/supabase/db";
 import { toDatabaseError } from "@/adapters/supabase/errors";
 import type { SqlQuery } from "@/adapters/supabase/sql";
 
-import { APPROVE_ANSWERS } from "./queue";
+import { APPROVE_ANSWERS, SUBMISSION_APPROVE_ANSWERS } from "./queue";
 import { queueOf } from "./records";
 import { createReviewStore } from "./store";
 
@@ -142,14 +142,20 @@ describe("lo enviado por el portal, en la cola", () => {
     total_duration_seconds: 600,
     loaded_at: "2026-11-02T18:00:00Z",
     lessons: [{ ...lesson, description: null, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100 }] }],
-    submission: { id: SUBMISSION, number: 1, resources: [], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
+    submission: { id: SUBMISSION, number: 1, resources: [], captions_missing: [LESSON], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
   };
 
   it("se lee con su envío y sus recursos", () => {
     const [course] = queueOf({ fresh_code: true, courses: [sent] })?.courses ?? [];
     expect(course?.summary).toBe("Un resumen.");
     expect(course?.lessons[0]?.resources).toEqual([{ id: LESSON, title: "Guía", kind: "pdf", sizeBytes: 100 }]);
-    expect(course?.submission).toEqual({ id: SUBMISSION, number: 1, resources: [], annex: { version: 1, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto.", termYears: 10 } });
+    expect(course?.submission).toEqual({
+      id: SUBMISSION,
+      number: 1,
+      resources: [],
+      captionsMissing: [LESSON],
+      annex: { version: 1, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto.", termYears: 10 },
+    });
   });
 
   it("uno por guion, sin esos campos, sale sin envío", () => {
@@ -182,5 +188,54 @@ describe("devolver", () => {
   it("una respuesta que no conoce lanza: no se pinta como hecha", async () => {
     const { run } = runnerWith([{ answer: "otra" }]);
     await expect(createReviewStore(run).returnCourse(claims, INPUT)).rejects.toThrow();
+  });
+});
+
+describe("aprobar lo enviado", () => {
+  const SUBMISSION = "f0000000-0000-4000-8000-000000000001";
+  const VIDEO = "a1000000-0000-4000-8000-000000000005";
+  const INPUT = { course: COURSE, submission: SUBMISSION, captions: [VIDEO] };
+
+  it("los videos se leen a nombre de las claims, en nombres de la aplicación", async () => {
+    const { run, opened, sent } = runnerWith([{ assets: { answer: "ok", assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P" }] } }]);
+    expect(await createReviewStore(run).approveAssets(claims, COURSE)).toEqual({
+      kind: "ok",
+      assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P" }],
+    });
+    expect(opened.map((actor) => actor.reason)).toEqual(["course_approval"]);
+    expect(sent[0]?.text).toContain("private.review_approve_assets(");
+  });
+
+  it.each(["forbidden", "not_found", "not_pending"])("los videos, con %s, lo dicen", async (answer) => {
+    const { run } = runnerWith([{ assets: { answer } }]);
+    expect(await createReviewStore(run).approveAssets(claims, COURSE)).toEqual({ kind: answer });
+  });
+
+  it("unos videos con otra forma lanzan: la lectura es estricta", async () => {
+    const { run } = runnerWith([{ assets: { answer: "ok", assets: [{ video: VIDEO, lesson: LESSON, provider: "mux", asset: "A", playback: "P", path: "ruta" }] } }]);
+    await expect(createReviewStore(run).approveAssets(claims, COURSE)).rejects.toThrow();
+  });
+
+  it("aprobar va con el envío que se vio y los videos con subtítulos", async () => {
+    const { run, sent } = runnerWith([{ answer: "approved" }]);
+    expect(await createReviewStore(run).approveSubmission(claims, INPUT)).toBe("approved");
+    expect(sent[0]?.text).toContain("private.review_approve(");
+    expect(sent[0]?.values).toEqual([COURSE, SUBMISSION, [VIDEO]]);
+  });
+
+  it.each(SUBMISSION_APPROVE_ANSWERS)("contesta %s tal cual", async (answer) => {
+    const { run } = runnerWith([{ answer }]);
+    expect(await createReviewStore(run).approveSubmission(claims, INPUT)).toBe(answer);
+  });
+
+  it("un choque de candados se intenta una vez más", async () => {
+    const { run, opened } = runnerWith([{ answer: "approved" }], [lockConflict("55P03")]);
+    expect(await createReviewStore(run).approveSubmission(claims, INPUT)).toBe("approved");
+    expect(opened).toHaveLength(2);
+  });
+
+  it("una respuesta que no conoce lanza: no se pinta como hecha", async () => {
+    const { run } = runnerWith([{ answer: "incomplete" }]);
+    await expect(createReviewStore(run).approveSubmission(claims, INPUT)).rejects.toThrow();
   });
 });

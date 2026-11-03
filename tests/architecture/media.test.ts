@@ -25,7 +25,8 @@ describe("solo la función única de medios firma", () => {
 
   it("crear, leer y borrar en Mux, y el token con que se hace, viven en un solo camino (T-403): cada llamada cuesta dinero", () => {
     expect(naming(/adapters\/mux\/assets/)).toEqual(["src/services/media/video-provider.ts"]);
-    expect(naming(/createVideoProviders/)).toEqual(["src/services/drafts/editor.ts", "src/services/media/video-provider.ts"]);
+    // Desde T-405 también aprobar lo enviado le pregunta a Mux por cada video: solo lee.
+    expect(naming(/createVideoProviders/)).toEqual(["src/services/drafts/editor.ts", "src/services/media/video-provider.ts", "src/services/review/review.ts"]);
     expect(naming(/MUX_TOKEN_(ID|SECRET)/)).toEqual(["src/adapters/mux/assets.ts", "src/config/env.ts", "src/services/media/video-provider.ts"]);
     expect(naming(/api\.mux\.com/)).toEqual(["src/adapters/mux/assets.ts"]);
   });

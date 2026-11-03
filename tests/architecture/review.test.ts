@@ -25,7 +25,7 @@ describe("la revisión pasa por las funciones de la base", () => {
     for (const code of [queue, store, records]) expect(code.length).toBeGreaterThan(0);
   });
 
-  it.each(["approve_course", "review_queue", "review_return"])("private.%s() se nombra en un solo archivo, una vez", (name) => {
+  it.each(["approve_course", "review_queue", "review_return", "review_approve", "review_approve_assets"])("private.%s() se nombra en un solo archivo, una vez", (name) => {
     const naming = sources.filter((source) => new RegExp(`private\\.${name}\\b`).test(source.text)).map((source) => source.file);
     expect(naming).toEqual(["src/services/review/records.ts"]);
     expect(records.match(new RegExp(`private\\.${name}\\(`, "g"))).toHaveLength(1);
@@ -46,6 +46,17 @@ describe("la revisión pasa por las funciones de la base", () => {
     expect(bodyOf("approveCourse")).toMatch(
       /^ {2}async function approveCourse\([^)]*\): Promise<CourseApproved> \{\n {4}const team = await core\.teamStanding\(reader\);/,
     );
+  });
+
+  it("aprobar lo enviado corre la guarda primero, y le pregunta a Mux después de leer los videos y antes de aprobar (T-405)", () => {
+    const body = bodyOf("approveSubmission");
+    expect(body).toMatch(/^ {2}async function approveSubmission\([^)]*\): Promise<SubmissionApproved> \{\n {4}const team = await core\.teamStanding\(reader\);/);
+    const assets = body.indexOf("core.store.approveAssets(");
+    const checked = body.indexOf("await checkAssets(");
+    const approve = body.indexOf("core.store.approveSubmission(");
+    expect(assets).toBeGreaterThan(0);
+    expect(assets).toBeLessThan(checked);
+    expect(checked).toBeLessThan(approve);
   });
 
   it("devolver corre la guarda antes que cualquier otra cosa", () => {

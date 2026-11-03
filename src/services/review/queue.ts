@@ -7,6 +7,7 @@ import { parseReviewNote } from "@/domain/catalog/draft-text";
 
 import { holds, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
+import { checkAssets, type VideoProviders } from "@/services/media/video-provider";
 
 // La cola de revisión y aprobar un curso (RF-701; PA-61 y PA-62 mínimas, FL-45; T-108).
 // Decisiones de Sergio del 2026-10-14: una sola pantalla; reproducir no pide el código
@@ -24,8 +25,9 @@ import type { FailureCode } from "@/services/error-reporting/server";
 //
 // El video de cada lección no sale de aquí: lo firma la función única de medios.
 //
-// Desde T-405 la cola trae además lo enviado por el editor, por su fotografía (`submission`), y Contenido lo devuelve con motivo y qué corregir (`returnCourse`, RF-607). Aprobarlo
-// llega con la cuarta solicitud: hoy la base contesta `incomplete`, y la pantalla no lo ofrece.
+// Desde T-405 la cola trae además lo enviado por el editor, por su fotografía (`submission`), y Contenido lo devuelve con motivo y qué corregir (`returnCourse`, RF-607) o lo aprueba
+// (`approveSubmission`, cuarta solicitud): lleva el envío que se vio, y antes se le pregunta a Mux por cada video, fuera de la transacción, como al enviar. Si no contesta, no se
+// aprueba; lo que diga de los subtítulos viaja a la base, que decide (RF-310).
 
 /** Lo que la pantalla dice del video de una lección (un mapa cerrado de la base). */
 export const LESSON_VIDEOS = ["playable", "test", "processing", "errored"] as const;
@@ -55,6 +57,8 @@ export interface ReviewSubmission {
   number: number;
   resources: ReviewResource[];
   annex: { version: number; acceptedAt: string; statement: string; termYears: number };
+  /** Las lecciones cuyo video todavía no tiene subtítulos: sin ellos no se publica (RF-310). */
+  captionsMissing: string[];
 }
 export interface ReviewCourse {
   courseId: string;
@@ -96,6 +100,30 @@ export const APPROVE_ANSWERS = [
 ] as const;
 export type ApproveAnswer = (typeof APPROVE_ANSWERS)[number];
 
+/** Lo que contesta `private.review_approve()`, para lo enviado por el editor. */
+export const SUBMISSION_APPROVE_ANSWERS = [
+  "forbidden",
+  "needs_fresh_code",
+  "not_found",
+  "not_pending",
+  "changed",
+  "self",
+  "teacher_suspended",
+  "unavailable",
+  "annex_draft",
+  "practice_inactive",
+  "level_inactive",
+  "files_changed",
+  "captions_pending",
+  "approved",
+] as const;
+export type SubmissionApproveAnswer = (typeof SUBMISSION_APPROVE_ANSWERS)[number];
+
+/** Los videos de lo enviado, para preguntarle a su proveedor antes de aprobar (`private.review_approve_assets()`). */
+export type ApproveAssets =
+  | { kind: "ok"; assets: { video: string; lesson: string; provider: string; asset: string | null; playback: string | null }[] }
+  | { kind: "forbidden" | "not_found" | "not_pending" };
+
 /** Lo que contesta `private.review_return()`. */
 export const RETURN_ANSWERS = ["forbidden", "needs_fresh_code", "not_found", "not_pending", "changed", "self", "invalid", "returned"] as const;
 export type ReturnAnswer = (typeof RETURN_ANSWERS)[number];
@@ -117,6 +145,9 @@ export interface ReviewStore {
   queue(claims: VerifiedClaims): Promise<ReviewQueue | null>;
   approve(claims: VerifiedClaims, courseId: string): Promise<ApproveAnswer>;
   returnCourse(claims: VerifiedClaims, input: CourseReturn): Promise<ReturnAnswer>;
+  approveAssets(claims: VerifiedClaims, courseId: string): Promise<ApproveAssets>;
+  /** `captions`: los videos que su proveedor dijo que ya tienen subtítulos. */
+  approveSubmission(claims: VerifiedClaims, input: { course: string; submission: string; captions: string[] }): Promise<SubmissionApproveAnswer>;
 }
 
 export type QueueRead = { kind: "queue"; queue: ReviewQueue } | { kind: "unavailable" };
@@ -132,12 +163,21 @@ export type CourseApproved =
   | { kind: "unknown" }
   | { kind: "malformed" }
   | { kind: "answered"; answer: ApproveAnswer };
+export type SubmissionApproved =
+  | { kind: "refused" }
+  | { kind: "unavailable" }
+  | { kind: "unknown" }
+  | { kind: "malformed" }
+  /** Videos que su proveedor ya no tiene listos con la reproducción que se publica: sus lecciones. */
+  | { kind: "video_not_ready"; lessons: string[] }
+  | { kind: "answered"; answer: SubmissionApproveAnswer };
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface ReviewCore {
   teamStanding: (reader: CookieReader) => Promise<TeamCheck>;
   store: ReviewStore;
+  providers: VideoProviders;
 }
 
 export function createReviewQueue(deps: { report: (code: FailureCode) => Promise<void> }, core: ReviewCore) {
@@ -194,5 +234,44 @@ export function createReviewQueue(deps: { report: (code: FailureCode) => Promise
     }
   }
 
-  return { reviewQueue, approveCourse, returnCourse };
+  /**
+   * Aprobar lo enviado por el editor (FL-45, paso 8). Lleva el envío que se vio. Hasta preguntarle a la base no se escribió nada: lo que falle antes es «no se pudo», no «no se supo».
+   */
+  async function approveSubmission(reader: CookieReader, input: { course: unknown; submission: unknown }): Promise<SubmissionApproved> {
+    const team = await core.teamStanding(reader);
+    // La guarda ya reportó lo suyo.
+    if (team.kind === "unavailable") return { kind: "unavailable" };
+    if (team.kind !== "team" || !holds(team.standing, "content")) return { kind: "refused" };
+    const { course, submission } = input;
+    if (typeof course !== "string" || !ID.test(course) || typeof submission !== "string" || !ID.test(submission)) return { kind: "malformed" };
+    let assets: ApproveAssets;
+    try {
+      assets = await core.store.approveAssets(team.claims, course);
+    } catch {
+      await deps.report("course_approval_unavailable");
+      return { kind: "unavailable" };
+    }
+    if (assets.kind !== "ok") return { kind: "answered", answer: assets.kind };
+    const checked = await checkAssets(
+      core.providers,
+      assets.assets.map((each) => ({ key: each.video, provider: each.provider, asset: each.asset, playback: each.playback })),
+    );
+    if (checked === null) {
+      await deps.report("approve_provider_unavailable");
+      return { kind: "unavailable" };
+    }
+    // La base los da por listos y su proveedor no: alguien tiene que mirar la fila (OP-21).
+    if (checked.notReady.length > 0) {
+      await deps.report("approve_video_gone");
+      return { kind: "video_not_ready", lessons: assets.assets.filter((each) => checked.notReady.includes(each.video)).map((each) => each.lesson) };
+    }
+    try {
+      return { kind: "answered", answer: await core.store.approveSubmission(team.claims, { course, submission, captions: checked.captioned }) };
+    } catch {
+      await deps.report("course_approval_unavailable");
+      return { kind: "unknown" };
+    }
+  }
+
+  return { reviewQueue, approveCourse, returnCourse, approveSubmission };
 }

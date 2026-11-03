@@ -91,7 +91,8 @@ function reviewOn(owner: Client) {
   const reported: string[] = [];
   const review = createReviewQueue(
     { report: (code) => (reported.push(code), Promise.resolve()) },
-    { teamStanding: services.teamStanding, store: reviewStoreOn(owner) },
+    // Aprobar un curso por guion no le pregunta a Mux.
+    { teamStanding: services.teamStanding, store: reviewStoreOn(owner), providers: { active: () => null, of: () => null } },
   );
   return { ...review, reported, services };
 }
