@@ -56,6 +56,13 @@ const schema = z.object({
   // disponible y lo demás funciona igual. Van juntas. Antes de salir a producción son obligatorias (06 §8).
   PII_ENCRYPTION_KEYS: z.string().regex(piiKeys).optional(),
   PII_ENCRYPTION_ACTIVE_VERSION: z.string().regex(/^[1-9][0-9]{0,4}$/).optional(),
+  // El correo propio (T-604; TRD §7.5): la llave de Resend, secreta, y el remitente de los avisos. Fuera de local manda Resend. En local el correo va siempre al buzón (`MAILPIT_URL`, con su valor
+  // por omisión), aunque haya llave. En producción son obligatorias: sin el aviso de CLABE no se le paga a una cuenta nueva.
+  RESEND_API_KEY: z.string().optional(),
+  MAIL_FROM_NOTICES: z.string().regex(/^[^<>@]*<[^\s<>@]+@[^\s<>@]+>$|^[^\s<>@]+@[^\s<>@]+$/).optional(),
+  MAILPIT_URL: httpUrl.optional(),
+  // La llave con que Vercel Cron pide el barrido de la salida de correo. Secreta. Sin ella la ruta contesta como si no existiera.
+  CRON_SECRET: z.string().min(32).optional(),
 });
 
 // La llave privada de firma, en PEM o en base64, como la entrega Mux. Aquí solo se revisa su
@@ -90,6 +97,7 @@ const names = Object.keys(schema.shape) as EnvName[];
 // En local se puede trabajar sin ellas. Donde se atiende a personas, no: arrancar sin
 // registro de errores sería quedarse a ciegas.
 const requiredOutsideLocal: EnvName[] = ["SENTRY_DSN"];
+const requiredInProduction: EnvName[] = ["RESEND_API_KEY", "MAIL_FROM_NOTICES", "CRON_SECRET"];
 
 // Variables que no se admiten. El SDK de Sentry lee esta por su cuenta, sin pasar por
 // aquí, y con ella prende las trazas: otra recolección, que no pasa por el filtro de los
@@ -144,6 +152,12 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     }
     // Y cifrada. Sin cifrar solo en local, para probar contra un receptor en la máquina.
     if (present.SENTRY_DSN?.startsWith("http://")) failed.add("SENTRY_DSN");
+  }
+  // Una vista previa puede ir sin correo. Producción no: sin él, ninguna CLABE nueva se abre.
+  if (present.APP_ENV === "production") {
+    for (const name of requiredInProduction) {
+      if (present[name] === undefined) failed.add(name);
+    }
   }
   // La llave de firma va completa o no va: con una sola de las dos no se firma nada, y eso
   // se diría como «no hay video» cuando es configuración.

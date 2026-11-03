@@ -4,6 +4,9 @@ import { after } from "next/server";
 
 import { createAccountServices } from "@/services/account/account";
 import { reportFailure } from "@/services/error-reporting/server";
+import { dispatchMail } from "@/services/mail/mail";
+
+import { mailCopy } from "./mail-copy";
 
 // Pedir el correo de registro y el de recuperación, armados para las pantallas (TRD §9.2,
 // fila «Registro»; flujo de la app FL-02 y FL-06).
@@ -35,3 +38,6 @@ export function deferAfterResponse(work: () => Promise<void>): Promise<void> {
 }
 
 export const { requestRegistration, requestRecovery } = createAccountServices({ defer: deferAfterResponse });
+
+/** Manda lo que la base dejó en la salida de correo, detrás de la respuesta (T-604). Lo que no alcance a salir lo recoge el barrido. */
+export const sendQueuedMail = (): Promise<void> => deferAfterResponse(() => dispatchMail(mailCopy));
