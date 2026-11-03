@@ -121,6 +121,23 @@ async function age(owner: Client, id: string) {
      where teacher_id = $1 and version = (select max(version) from private.teacher_tax_profiles where teacher_id = $1)`,
     [id],
   );
+  await owner.query(
+    `insert into private.mail_outbox (idempotency_key, template, sent_at) values (private.clabe_notice_key($1, now() - interval '100 hours'), 'CO-27', now() - interval '100 hours')
+     on conflict (idempotency_key) do update set sent_at = excluded.sent_at`,
+    [id],
+  );
+  await owner.query("set local session_replication_role = origin");
+}
+
+/** El aviso de la última versión salió justo al cambiar (T-604): lo que pasa si sale tarde se prueba en la integración 86. */
+async function noticeSent(owner: Client, id: string) {
+  await owner.query("set local session_replication_role = replica");
+  await owner.query(
+    `update private.mail_outbox m set sent_at = x.clabe_changed_at
+     from (select clabe_changed_at from private.teacher_tax_profiles where teacher_id = $1 order by version desc limit 1) x
+     where m.idempotency_key = private.clabe_notice_key($1, x.clabe_changed_at)`,
+    [id],
+  );
   await owner.query("set local session_replication_role = origin");
 }
 
@@ -133,6 +150,7 @@ describe("el servicio dice si la CLABE cambió", () => {
       const id = await teacher(owner, ana);
       const service = serviceOn(owner, ana);
       expect(await service.saveTaxProfile(jar, { ...FORM, clabe: CLABE_A, seen: 0 }, freshOrigin())).toEqual({ kind: "saved" });
+      await noticeSent(owner, id);
       const row = await lastRow(owner, id);
       const state = await service.taxProfileState(ana.claims);
       expect(state?.clabeWaitsUntil).toBe(row?.effective.toISOString());
@@ -261,6 +279,8 @@ describe("la lectura de finanzas", () => {
       await owner.query("set local session_replication_role = replica");
       await owner.query("delete from private.teacher_suspension_requests where id = $1", [request]);
       await owner.query("set local session_replication_role = origin");
+      expect(await read()).toEqual({ outcome: "clabe_notice_pending" });
+      await noticeSent(owner, id);
       expect(await read()).toEqual({ outcome: "clabe_waiting", until: row?.effective.toISOString() });
 
       await owner.query("update private.account_security set password_changed_at = clock_timestamp() where profile_id = $1", [ana.id]);

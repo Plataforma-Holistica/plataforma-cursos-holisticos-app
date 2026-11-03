@@ -28,11 +28,27 @@ begin
   perform pruebas.a_nombre_de(pruebas.mara());
   v := private.tax_profile_save(p_teacher, p_vista, pruebas.sellado(13), pruebas.sellado(20), p_regimen, 'person', pruebas.sellado(18), p_ultimos, 1, p_cambio);
   perform pruebas.limpiar();
+  perform pruebas.aviso_enviado(p_teacher);
   return v;
 end
 $$;
 create function pruebas.ultima(p_teacher uuid) returns private.teacher_tax_profiles language sql security definer
 as $$ select x from private.teacher_tax_profiles x where x.teacher_id = p_teacher order by x.version desc limit 1 $$;
+-- El aviso de la última versión, enviado al instante de cambiar (T-604): lo que pasa si sale tarde o no sale se prueba en la 67. Con eso las fechas de aquí significan lo mismo que antes.
+create function pruebas.aviso_enviado(p_teacher uuid) returns void language plpgsql security definer as $$
+declare
+  v_cambio timestamptz := (pruebas.ultima(p_teacher)).clabe_changed_at;
+begin
+  if not isfinite(v_cambio) then
+    return;
+  end if;
+  set local session_replication_role = replica;
+  insert into private.mail_outbox (idempotency_key, template, profile_id, recipient, params, sent_at)
+  values (private.clabe_notice_key(p_teacher, v_cambio), 'CO-27', pruebas.mara(), 'mara-66@prueba.test', '{"hours": 72}', v_cambio)
+  on conflict (idempotency_key) do update set sent_at = v_cambio;
+  set local session_replication_role = origin;
+end
+$$;
 create function pruebas.vista(p_teacher uuid) returns integer language sql security definer
 as $$ select coalesce(max(x.version), 0)::integer from private.teacher_tax_profiles x where x.teacher_id = p_teacher $$;
 -- Mueve las fechas de la última versión: el libro no admite cambios, salvo apagando sus disparadores.
@@ -42,6 +58,7 @@ begin
   update private.teacher_tax_profiles x set clabe_changed_at = p_cambio, clabe_effective_from = p_rige
   where x.teacher_id = p_teacher and x.version = pruebas.vista(p_teacher);
   set local session_replication_role = origin;
+  perform pruebas.aviso_enviado(p_teacher);
 end
 $$;
 create function pruebas.finanzas(p_pago uuid) returns jsonb language plpgsql as $$

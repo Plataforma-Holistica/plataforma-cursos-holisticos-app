@@ -39,3 +39,9 @@ export async function requestOrigin(): Promise<RequestOrigin> {
   const list = await headers();
   return { realIp: list.get("x-real-ip"), userAgent: list.get("user-agent") };
 }
+
+/** La llave que trae la petición en `Authorization: Bearer`, tal como llegó, o nulo. Si vale lo decide el servicio. */
+export async function bearerToken(): Promise<string | null> {
+  const value = (await headers()).get("authorization");
+  return value?.startsWith("Bearer ") === true ? value.slice("Bearer ".length) : null;
+}

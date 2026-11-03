@@ -53,6 +53,7 @@ const stateAnswer = z.union([
       updated_at: z.string().nullable(),
       can_save: z.boolean(),
       clabe_waits_until: z.string().nullable(),
+      clabe_notice_pending: z.boolean(),
       clabe_recapture: z.boolean(),
     })
     .strict(),
@@ -68,6 +69,7 @@ export async function askTaxState(tx: Tx): Promise<TaxProfileState | null> {
     updatedAt: answer.updated_at === null ? null : new Date(answer.updated_at).toISOString(),
     canSave: answer.can_save,
     clabeWaitsUntil: answer.clabe_waits_until === null ? null : new Date(answer.clabe_waits_until).toISOString(),
+    clabeNoticePending: answer.clabe_notice_pending,
     clabeRecapture: answer.clabe_recapture,
   };
 }
@@ -94,7 +96,7 @@ export async function askTaxMine(tx: Tx): Promise<TaxReadAnswer> {
 const payoutAnswer = z.union([
   payload,
   z.object({ outcome: z.literal("clabe_waiting"), until: z.string() }).strict(),
-  z.object({ outcome: z.enum(["forbidden", "needs_fresh_code", "not_found", "self", "no_profile", "clabe_held", "clabe_recapture"]) }).strict(),
+  z.object({ outcome: z.enum(["forbidden", "needs_fresh_code", "not_found", "self", "no_profile", "clabe_held", "clabe_recapture", "clabe_notice_pending"]) }).strict(),
 ]);
 
 export async function askTaxForPayout(tx: Tx, payout: string): Promise<TaxPayoutAnswer> {

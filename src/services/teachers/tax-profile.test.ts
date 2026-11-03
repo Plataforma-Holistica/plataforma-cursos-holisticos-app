@@ -54,7 +54,7 @@ function sealedRow(cipher: ReturnType<typeof workingCipher>): TaxProfileRow {
 
 function service(cipher: TaxProfileDeps["cipher"]) {
   const store: TaxStore = {
-    state: () => Promise.resolve({ version: 3, updatedAt: AT, canSave: true, clabeWaitsUntil: null, clabeRecapture: false }),
+    state: () => Promise.resolve({ version: 3, updatedAt: AT, canSave: true, clabeWaitsUntil: null, clabeNoticePending: false, clabeRecapture: false }),
     mine: () => {
       order.push("mine");
       return Promise.resolve(stored === null ? { outcome: "no_profile" as const } : { outcome: "ok" as const, row: stored });
@@ -312,7 +312,7 @@ describe("finanzas lee por una liquidación", () => {
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: "clabe_waiting", until: AT });
   });
 
-  it.each(["clabe_held", "clabe_recapture"] as const)("con %s, nada", async (outcome) => {
+  it.each(["clabe_held", "clabe_recapture", "clabe_notice_pending"] as const)("con %s, nada", async (outcome) => {
     payoutAnswer = { outcome };
     expect(await service(workingCipher()).taxProfileForPayout(jar, PAYOUT)).toEqual({ kind: outcome });
   });

@@ -72,6 +72,8 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
   "src/app/api/origin-drill/route.ts": /if \(!errorDrillAllowed\(\)\) return new Response\(null, \{ status: 404 \}\);/,
   // Cierra una sesión solo si la guarda la rechaza: eso lo decide el servicio.
   "src/app/sesion/cerrar/route.ts": /closedSessionRoute\(await closeRejectedSession\(jar\)\)/,
+  // El barrido de la salida de correo: sin la llave de Vercel Cron no existe.
+  "src/app/api/trabajos/correo/route.ts": /if \(!mailSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
 };
 
 /**
@@ -99,7 +101,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   "src/app/portal/_fiscal/actions.ts": {
     // PA-48 (T-409): el servicio corre la guarda y comprueba la contraseña del mismo envío. Del formulario no sale de quién son los datos.
     revealTaxDataAction: /const \{ password \} = readRevealForm\(form\)[\s\S]*revealOutcome\(await revealTaxProfile\(jar, password, await requestOrigin\(\)\), attempt\)/,
-    saveTaxDataAction: /const input = readTaxForm\(form\)[\s\S]*saveOutcome\(await saveTaxProfile\(jar, \{ \.\.\.input, seen: input\.seen \}, await requestOrigin\(\)\), attempt\)/,
+    saveTaxDataAction: /const input = readTaxForm\(form\)[\s\S]*const saved = await saveTaxProfile\(jar, \{ \.\.\.input, seen: input\.seen \}, await requestOrigin\(\)\);[\s\S]*if \(saved\.kind === "saved"\) await sendQueuedMail\(\);\s*const outcome = saveOutcome\(saved, attempt\)/,
   },
   "src/app/portal/_editor/actions.ts": {
     // El editor de curso (T-402, PA-43): una acción para todos sus bloques. Revisa los textos con la regla

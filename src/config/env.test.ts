@@ -20,6 +20,13 @@ const valid = {
   RATE_LIMIT_HMAC_SECRET: "secreto-de-prueba-para-las-huellas-0123",
 };
 
+// Lo que producción pide además (T-604). Se suma donde una prueba corre con `APP_ENV` de fuera de local y trata de otra cosa.
+const mail = {
+  RESEND_API_KEY: "re_prueba",
+  MAIL_FROM_NOTICES: "Avisos <avisos@ejemplo.test>",
+  CRON_SECRET: "llave-del-barrido-de-prueba-012345678",
+};
+
 function problemsOf(source: Record<string, string | undefined>): string[] {
   try {
     parseEnv(source);
@@ -122,7 +129,7 @@ describe("parseEnv", () => {
 
     it.each(["local", "staging", "production"])("es obligatoria también en %s", (appEnv) => {
       const fakeDsn = ["https://0123456789abcdef", "o1.ingest.sentry.example/1"].join("@");
-      expect(problemsOf({ ...valid, APP_ENV: appEnv, SENTRY_DSN: fakeDsn, RATE_LIMIT_HMAC_SECRET: undefined })).toEqual([
+      expect(problemsOf({ ...valid, ...mail, APP_ENV: appEnv, SENTRY_DSN: fakeDsn, RATE_LIMIT_HMAC_SECRET: undefined })).toEqual([
         "RATE_LIMIT_HMAC_SECRET: falta",
       ]);
     });
@@ -140,8 +147,8 @@ describe("parseEnv", () => {
     });
 
     it.each(["staging", "production"])("es obligatoria en %s", (appEnv) => {
-      expect(problemsOf({ ...valid, APP_ENV: appEnv })).toEqual(["SENTRY_DSN: falta"]);
-      expect(parseEnv({ ...valid, APP_ENV: appEnv, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(
+      expect(problemsOf({ ...valid, ...mail, APP_ENV: appEnv })).toEqual(["SENTRY_DSN: falta"]);
+      expect(parseEnv({ ...valid, ...mail, APP_ENV: appEnv, SENTRY_DSN: fakeDsn }).SENTRY_DSN).toBe(
         fakeDsn,
       );
     });
@@ -169,7 +176,7 @@ describe("parseEnv", () => {
     it.each(["staging", "production"])("en %s tiene que ir cifrada", (appEnv) => {
       const plain = ["http://0123456789abcdef", "o1.ingest.sentry.example/1"].join("@");
 
-      expect(problemsOf({ ...valid, APP_ENV: appEnv, SENTRY_DSN: plain })).toEqual([
+      expect(problemsOf({ ...valid, ...mail, APP_ENV: appEnv, SENTRY_DSN: plain })).toEqual([
         "SENTRY_DSN: tiene un valor inválido",
       ]);
       // En local sí: sirve para probar contra un receptor en la propia máquina.
@@ -340,7 +347,7 @@ describe("el proveedor de los videos del borrador (T-403)", () => {
   it("el proveedor de prueba solo en local", () => {
     expect(parseEnv({ ...valid, VIDEO_PROVIDER: "test" }).VIDEO_PROVIDER).toBe("test");
     for (const APP_ENV of ["staging", "production"]) {
-      const outside = { ...hosted, APP_ENV, SENTRY_DSN: "https://llave@sentry.example/1", VIDEO_PROVIDER: "test" };
+      const outside = { ...hosted, ...mail, APP_ENV, SENTRY_DSN: "https://llave@sentry.example/1", VIDEO_PROVIDER: "test" };
       expect(problemsOf(outside)).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
     }
   });
@@ -348,5 +355,35 @@ describe("el proveedor de los videos del borrador (T-403)", () => {
   it("otro nombre no se admite, y vacío cuenta como ausente", () => {
     expect(problemsOf({ ...valid, VIDEO_PROVIDER: "otro" })).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
     expect(parseEnv({ ...valid, VIDEO_PROVIDER: "" })).not.toHaveProperty("VIDEO_PROVIDER");
+  });
+});
+
+describe("el correo propio (T-604)", () => {
+  const without = (...names: (keyof typeof mail)[]) => ({ ...valid, ...Object.fromEntries(Object.entries(mail).filter(([name]) => !names.includes(name as keyof typeof mail))) });
+  const hosted = (appEnv: string) => ({ APP_ENV: appEnv, SENTRY_DSN: "https://llave@sentry.example/1", NEXT_PUBLIC_SUPABASE_URL: "https://proyecto.supabase.co" });
+
+  it.each(["RESEND_API_KEY", "MAIL_FROM_NOTICES", "CRON_SECRET"] as const)("en producción %s es obligatoria: sin el aviso, ninguna CLABE nueva se abre", (name) => {
+    expect(problemsOf({ ...without(name), ...hosted("production") })).toEqual([`${name}: falta`]);
+  });
+
+  it("una vista previa puede ir sin correo", () => {
+    expect(() => parseEnv({ ...without("RESEND_API_KEY", "MAIL_FROM_NOTICES", "CRON_SECRET"), ...hosted("staging") })).not.toThrow();
+  });
+
+  it("en local no hacen falta", () => {
+    expect(() => parseEnv(valid)).not.toThrow();
+  });
+
+  it("una llave del barrido corta no se admite, y el error no la dice", () => {
+    const problems = problemsOf({ ...valid, CRON_SECRET: "corta" });
+    expect(problems).toEqual(["CRON_SECRET: tiene un valor inválido"]);
+  });
+
+  it.each(["Avisos <avisos@ejemplo.test>", "avisos@ejemplo.test"])("el remitente %s se admite", (from) => {
+    expect(parseEnv({ ...valid, MAIL_FROM_NOTICES: from }).MAIL_FROM_NOTICES).toBe(from);
+  });
+
+  it.each(["avisos", "Avisos <avisos>", "a b@ejemplo.test"])("el remitente %s no", (from) => {
+    expect(problemsOf({ ...valid, MAIL_FROM_NOTICES: from })).toEqual(["MAIL_FROM_NOTICES: tiene un valor inválido"]);
   });
 });

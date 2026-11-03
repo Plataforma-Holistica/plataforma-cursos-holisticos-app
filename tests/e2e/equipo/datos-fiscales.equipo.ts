@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
+import { lastMailTo, linksIn } from "../../integration/helpers/mailbox";
 import { actionFields, postAction } from "../support/actions";
 import { a11yViolations } from "../support/a11y";
 import { clearCounters, ownerQuery, person, type Person } from "../support/stack";
@@ -62,6 +63,16 @@ async function capture(page: Page, password: string, clabe = CLABE): Promise<voi
   await page.getByRole("button", { name: "Guardar" }).click();
 }
 
+/** La espera cuenta desde que sale el aviso (T-604), y sale detrás de la respuesta: la pantalla que llega al guardar puede decir que falta. Volver a pedirla ya trae la fecha. */
+async function waitForClabeDate(page: Page): Promise<void> {
+  const date = page.getByText(/Tu CLABE nueva rige a partir del .* hora del centro de México/);
+  await expect(async () => {
+    await page.reload();
+    await expect(date).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(page.getByText("Te estamos mandando un correo")).toHaveCount(0);
+}
+
 test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ page }) => {
   const ana = await person();
   await makeTeacher(ana);
@@ -89,8 +100,12 @@ test("FL-31 con JavaScript: captura, ve lo oculto en parte, y cambia", async ({ 
 
   await capture(page, ana.password);
   await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
-  // La primera captura también espera, y se dice en la pantalla y en el inicio del portal: es lo que hoy le avisa de un cambio que no hizo.
-  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
+  // La primera captura también espera, y se dice en la pantalla. El aviso llega al buzón, sin nada de la cuenta, y desde él cuenta la espera.
+  await waitForClabeDate(page);
+  const notice = await lastMailTo(ana.email);
+  expect(notice.subject).toBe("Se guardó una CLABE nueva en tu cuenta");
+  for (const plain of [CLABE, LAST4, RFC]) expect(`${notice.text}${notice.html}`).not.toContain(plain);
+  expect(linksIn(notice).some((link) => link.endsWith("/recuperar"))).toBe(true);
   expect(await reads(ana)).toBe("0");
   // Ni el documento ni la dirección traen lo escrito.
   const saved = await page.content();
@@ -246,7 +261,7 @@ test("la espera de la CLABE se dice sin pedir la contraseña, en la pantalla y e
   await signIn(page, ana, PATH);
   await capture(page, ana.password);
   await expect(page.getByText("Tus datos quedaron guardados.")).toBeVisible();
-  await expect(page.getByText(/Tu CLABE nueva rige a partir del .* hora del centro de México/)).toBeVisible();
+  await waitForClabeDate(page);
   await page.goto("/portal");
   await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
@@ -261,7 +276,7 @@ test("la espera de la CLABE se dice sin pedir la contraseña, en la pantalla y e
   await capture(page, ana.password);
   await expect(page).toHaveURL(PATH);
   await expect(page.getByText("Tu último cambio de CLABE quedó anulado.")).toHaveCount(0);
-  await expect(page.getByText(/Tu CLABE nueva rige a partir del/)).toBeVisible();
+  await waitForClabeDate(page);
 });
 
 test("un maestro suspendido por fraude ve lo suyo y no lo cambia", async ({ page }) => {

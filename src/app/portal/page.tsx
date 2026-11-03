@@ -45,6 +45,7 @@ export default async function PortalHomePage() {
         </InlineAlert>
       )}
       {taxData?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(taxData.clabeWaitsUntil)}</InlineAlert>}
+      {taxData?.clabeNoticePending === true && <InlineAlert tone="warning">{messages.portal.taxData.clabeNoticePending}</InlineAlert>}
       {taxData?.clabeRecapture === true && taxData.canSave && (
         <InlineAlert tone="warning">
           {messages.portal.taxData.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{messages.portal.taxData.clabeRecaptureLink}</TextLink>
