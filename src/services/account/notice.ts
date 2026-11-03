@@ -68,6 +68,8 @@ export const NOTICES = [
   // Un curso en borrador quedó borrado (T-402), o ya no existía cuando se pidió borrarlo otra vez.
   "course_deleted",
   "course_gone",
+  // Un curso quedó enviado a revisión (T-405): Mis cursos lo dice al volver.
+  "course_submitted",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

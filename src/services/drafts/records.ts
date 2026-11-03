@@ -6,6 +6,7 @@ import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
 import { COURSE_STATES, type CourseFields, type DraftChoices, type DraftCourse, type ReturnNote, type TeacherCourse } from "./drafts";
+import { MISSING_KINDS, SUBMIT_ANSWERS, type AcceptedAnnex, type AnnexText, type SubmitAnswer, type SubmitAssets, type SubmitInput, type SubmitPreview } from "./submit";
 
 // Lo que el servicio del borrador le pregunta a la base (esquema §5.2). Las lecturas reciben la
 // transacción abierta como la persona; los cambios, como el servidor. Ninguna recibe quién actúa.
@@ -72,6 +73,8 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     contentRevision: row.content_revision,
     teacherName: row.teacher_name,
     returned: null,
+    missing: null,
+    submittedAt: null,
     practiceName: row.practice_name,
     coverTone: row.cover_tone,
     draft: row.has_draft
@@ -444,4 +447,117 @@ const unusedRow = z.object({ path: z.string() });
 export async function readUnusedResources(tx: Tx, course: string): Promise<string[]> {
   const rows = await tx.query(sql`select u.path from private.resource_unused_objects(${course}::uuid) u`, unusedRow);
   return rows.map((row) => row.path);
+}
+
+// ---------------------------------------------------------------------------------------
+// Enviar (T-405, tercera solicitud). Como el servidor, a nombre del maestro de las claims: la base decide. Nada de aquí lee `course_reviews` ni `licenses`: lo hacen las funciones.
+
+const isoOf = z.union([z.string(), z.date()]).transform((value) => (value instanceof Date ? value.toISOString() : value));
+const annexRow = z.strictObject({ id, version: z.number().int().min(0), title: z.string(), body: z.string(), effective_from: isoOf });
+const annexOf = (row: z.infer<typeof annexRow>): AnnexText => ({ id: row.id, version: row.version, title: row.title, body: row.body, effectiveFrom: row.effective_from });
+const missingRow = z.object({
+  what: z.enum(MISSING_KINDS),
+  module: id.optional(),
+  lesson: id.nullish(),
+  resource: id.optional(),
+  title: z.string().optional(),
+  revision: z.coerce.number().int().optional(),
+});
+const previewRow = z.union([
+  z.object({
+    answer: z.literal("ready"),
+    annex: annexRow,
+    term_years: z.number().int().min(1),
+    statement: z.string(),
+    submission_no: z.number().int().min(1),
+    content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+  z.object({ answer: z.literal("not_ready"), missing: z.array(missingRow) }),
+  z.object({ answer: z.enum(["annex_missing", "unavailable", "not_found", "not_editable", "suspended", "not_teacher"]) }),
+]);
+
+/** Lo que el maestro ve antes de firmar (`private.course_submit_preview()`). Otra forma lanza. */
+export async function readSubmitPreview(tx: Tx, course: string): Promise<SubmitPreview> {
+  const [row] = await tx.query(sql`select private.course_submit_preview(${course}::uuid) as result`, z.object({ result: previewRow }));
+  if (!row) throw new Error("La base no contestó la vista previa del envío.");
+  const result = row.result;
+  if (result.answer === "ready") {
+    return { kind: "ready", annex: annexOf(result.annex), termYears: result.term_years, statement: result.statement, submissionNo: result.submission_no, contentSha256: result.content_sha256 };
+  }
+  if (result.answer === "not_ready") {
+    return {
+      kind: "not_ready",
+      missing: result.missing.map((line) => ({
+        what: line.what,
+        module: line.module ?? null,
+        lesson: line.lesson ?? null,
+        resource: line.resource ?? null,
+        title: line.title ?? null,
+        revision: line.revision ?? null,
+      })),
+    };
+  }
+  return { kind: result.answer };
+}
+
+const assetsRow = z.union([
+  z.object({ answer: z.literal("ok"), assets: z.array(z.strictObject({ lesson: id, provider: z.string(), asset: z.string().nullable(), playback: z.string().nullable() })) }),
+  z.object({ answer: z.enum(["not_found", "not_editable", "suspended", "not_teacher"]) }),
+]);
+
+/** Los assets vigentes del curso, para preguntarle a su proveedor antes de firmar. */
+export async function readSubmitAssets(tx: Tx, course: string): Promise<SubmitAssets> {
+  const [row] = await tx.query(sql`select private.course_submit_assets(${course}::uuid) as result`, z.object({ result: assetsRow }));
+  if (!row) throw new Error("La base no contestó los videos del curso.");
+  return row.result.answer === "ok" ? { kind: "ok", assets: row.result.assets } : { kind: row.result.answer };
+}
+
+/** Envía (`private.course_submit()`). Una respuesta que no conoce lanza: no se pinta como hecha. */
+export async function askSubmit(tx: Tx, input: SubmitInput, evidence: { address: string | null; userAgent: string | null }): Promise<SubmitAnswer> {
+  const [row] = await tx.query(
+    sql`select private.course_submit(${input.course}::uuid, ${input.annex}::uuid, ${input.seen}::text, ${input.term}::integer, ${input.submission}::integer,
+                                     ${evidence.address}::inet, ${evidence.userAgent}::text) ->> 'answer' as answer`,
+    z.object({ answer: z.string().nullable() }),
+  );
+  const found = SUBMIT_ANSWERS.find((each) => each === row?.answer);
+  if (found === undefined) throw new Error("La base contestó algo que este servicio no conoce.");
+  return found;
+}
+
+const statusRow = z.strictObject({ course_id: id, missing: z.number().int().min(0).nullable(), submitted_at: isoOf.nullable() });
+
+/** De cada curso del maestro: cuántas cosas le faltan para enviarse (si está en borrador) y cuándo se envió (si espera revisión). */
+export async function readSubmitStatus(tx: Tx): Promise<Map<string, { missing: number | null; submittedAt: string | null }>> {
+  const [row] = await tx.query(sql`select private.course_submit_status() as status`, z.object({ status: z.array(statusRow) }));
+  return new Map((row?.status ?? []).map((each) => [each.course_id, { missing: each.missing, submittedAt: each.submitted_at }]));
+}
+
+const acceptedRow = z.strictObject({
+  course_id: id,
+  course_title: z.string(),
+  submission_no: z.number().int().min(1),
+  accepted_at: isoOf,
+  statement: z.string(),
+  term_years: z.number().int().min(1),
+  annex: z.strictObject({ id, version: z.number().int().min(0), title: z.string(), effective_from: isoOf }),
+});
+
+/** Lo que el maestro aceptó, sin el origen (PA-50). */
+export async function readAcceptedAnnexes(tx: Tx): Promise<AcceptedAnnex[]> {
+  const [row] = await tx.query(sql`select private.course_submit_licenses() as accepted`, z.object({ accepted: z.array(acceptedRow) }));
+  return (row?.accepted ?? []).map((each) => ({
+    courseId: each.course_id,
+    courseTitle: each.course_title,
+    submissionNo: each.submission_no,
+    acceptedAt: each.accepted_at,
+    statement: each.statement,
+    termYears: each.term_years,
+    annex: { id: each.annex.id, version: each.annex.version, title: each.annex.title, effectiveFrom: each.annex.effective_from },
+  }));
+}
+
+/** El texto de una versión del anexo, si ese maestro la puede leer. */
+export async function readAnnexText(tx: Tx, document: string): Promise<AnnexText | null> {
+  const [row] = await tx.query(sql`select private.course_submit_annex(${document}::uuid) as annex`, z.object({ annex: annexRow.nullable() }));
+  return row?.annex ? annexOf(row.annex) : null;
 }

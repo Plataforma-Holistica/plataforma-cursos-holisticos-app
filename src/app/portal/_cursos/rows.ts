@@ -60,9 +60,13 @@ function detailOf(course: TeacherCourse): string | null {
   if (course.state === "draft") {
     if (course.returned !== null) return course.returned.reason;
     if (course.draft === null) return null;
-    const missing = missingItems(course.draft);
+    // El número es el de la regla de Sergio del 2026-10-29 (`missingItems`). Si dice «Listo» lo decide además la lista de enviar (`course_readiness`), que ve reemplazos en
+    // camino y pendientes: con algo de eso, no hay «Listo» aunque la regla no lo cuente.
+    const counted = missingItems(course.draft);
+    const missing = course.missing !== null && course.missing > 0 ? Math.max(counted, 1) : counted;
     return missing === 0 ? text.ready : t(plural(missing, text.missing), { count: missing });
   }
+  if (course.state === "in_review" && course.submittedAt !== null) return t(text.sentOn, { date: longDate(course.submittedAt) });
   return portal.stateDetail[STATE_KEYS[course.state]];
 }
 
