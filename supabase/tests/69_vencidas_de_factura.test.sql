@@ -3,7 +3,7 @@
 -- las que lo pasaron. Una sola regla dice cuándo un periodo está pagado (`period_settled`), y la usan el periodo y quien lo paga. Al final, lo que vigila el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(30);
+select plan(36);
 
 select pruebas.alta('a6900000-0000-0000-0000-000000000001', 'luz-69@prueba.test');
 select pruebas.alta('c6900000-0000-0000-0000-000000000001', 'f1-69@prueba.test');
@@ -64,6 +64,57 @@ select is((private.parameter_value('PLAZO_FACTURA_MIN_DIAS'))::integer, 5, 'el p
 select is(private.invoice_due_on(202610, '2026-11-02'), '2026-11-09'::date, 'liberada el lunes 2, vence el lunes 9: el plazo mínimo gana al límite del jueves 5');
 select is(private.invoice_due_on(202610, '2026-10-27'), '2026-11-05'::date, 'liberada antes, vence en el límite');
 select is(private.invoice_due_on(202612, '2027-01-04'), '2027-01-11'::date, 'el mes que sigue a diciembre es enero del año siguiente');
+
+-- Liberar pone el día en que vence (el guardián, con la regla y quien libera).
+select pruebas.periodo(203109);
+set local session_replication_role = replica;
+insert into public.withholding_rules (id, tax_regime_code, payee_kind, vat_rate, income_tax_withholding_rate, vat_withholding_rate, effective_from, note)
+values ('d6900000-0000-4000-8000-000000000001', '612', 'person', 0, 0, 0, '2000-01-01', 'regla en 0 de la prueba');
+insert into public.payouts (id, period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents)
+values (pruebas.p(9), 203109, pruebas.m(), (select close_run_id from public.payout_periods where period_id = 203109), 100000, 100000, 100000);
+set local session_replication_role = origin;
+select set_config('app.actor_id', pruebas.f1()::text, true);
+update public.payouts set status = 'awaiting_invoice', withholding_rule_id = 'd6900000-0000-4000-8000-000000000001', withholding_profile_version = 1
+where id = pruebas.p(9);
+select pruebas.como_dueno();
+select is((select invoice_due_on from public.payouts where id = pruebas.p(9)), private.invoice_due_on(203109, private.release_day()), 'liberar pone el día en que vence su factura');
+
+-- Un pago devuelto no cuenta para la primera vez (decisión 2): la cuenta se vuelve a confirmar por teléfono.
+select pruebas.periodo(203108);
+set local session_replication_role = replica;
+insert into private.teacher_tax_profiles (id, teacher_id, version, rfc_enc, legal_name_enc, tax_regime_code, payee_kind, clabe_enc, clabe_last4, key_version,
+                                          created_by, clabe_changed_at, clabe_effective_from)
+values ('d6900000-0000-4000-8000-000000000002', pruebas.m(), 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person',
+        decode('010001' || repeat('ab', 46), 'hex'), '7771', 1, 'a6900000-0000-0000-0000-000000000001', now() - interval '10 days', now() - interval '7 days');
+insert into private.mail_outbox (idempotency_key, template, recipient, params, sent_at)
+values (private.clabe_notice_key(pruebas.m(), now() - interval '10 days'), 'CO-27', 'luz-69@prueba.test', '{"hours": 72}', now() - interval '10 days');
+insert into public.payouts (id, period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+values (pruebas.p(8), 203108, pruebas.m(), (select close_run_id from public.payout_periods where period_id = 203108), 'ready_to_pay', 100000, 100000, 100000, now(), pruebas.f1());
+insert into private.payout_account_reads (id, payout_id, teacher_id, tax_profile_id, tax_profile_version, clabe_changed_at, first_time, read_by)
+values ('d6900000-0000-4000-8000-000000000003', pruebas.p(8), pruebas.m(), 'd6900000-0000-4000-8000-000000000002', 1, now() - interval '10 days', true, pruebas.f1());
+insert into private.payout_payments (id, payout_id, teacher_id, read_id, tax_profile_version, clabe_changed_at, reference, paid_on, amount_cents, first_time,
+                                     account_changed_since_read, recorded_by)
+values ('d6900000-0000-4000-8000-000000000004', pruebas.p(8), pruebas.m(), 'd6900000-0000-4000-8000-000000000003', 1, now() - interval '10 days', 'DEV1',
+        (now() at time zone 'America/Mexico_City')::date, 100000, true, false, pruebas.f1());
+insert into private.payout_requests (kind, payout_id, payment_id, note, proposed_by, status, decided_by, decided_at)
+values ('payment_return', pruebas.p(8), 'd6900000-0000-4000-8000-000000000004', 'El banco la regresó', pruebas.f1(), 'confirmed',
+        'a6900000-0000-0000-0000-000000000001', now());
+set local session_replication_role = origin;
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb, '{"outcome": "needs_call"}'::jsonb,
+          'con su único pago devuelto, la cuenta pide otra vez la llamada');
+select is(pruebas.pide(pruebas.f1(), format('private.payout_account_call(%L, %L, %L)', pruebas.p(8), 'Luz', now() - interval '1 hour'))::jsonb ->> 'outcome',
+          'recorded', 'se le llama');
+select (pruebas.pide(pruebas.f1(), format('private.payout_account_open(%L)', pruebas.p(8)))::jsonb ->> 'read_id')::uuid as lectura8 \gset
+select is(pruebas.pide(pruebas.f1(), format('private.payout_mark_paid(%L, %L, %L, %L, 100000)', pruebas.p(8), :'lectura8', 'DEV2',
+                                            (now() at time zone 'America/Mexico_City')::date))::jsonb ->> 'outcome', 'paid', 'y se paga');
+select ok((select first_time from private.payout_payments where payout_id = pruebas.p(8) and reference = 'DEV2'), 'y ese pago cuenta como el primero a esta cuenta');
+
+-- Sin liberar no está pagado, aunque no tenga liquidaciones.
+select pruebas.periodo(203107);
+set local session_replication_role = replica;
+update public.payout_periods set payouts_released_at = null, payouts_released_by = null where period_id = 203107;
+set local session_replication_role = origin;
+select ok(not private.period_settled(203107), 'un periodo sin liberar no está pagado');
 
 -- ---------------------------------------------------------------------------------------
 -- El trabajo de cada noche.

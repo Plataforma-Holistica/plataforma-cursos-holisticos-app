@@ -4,7 +4,7 @@
 -- ninguno. Abrir la cuenta, llamar y marcar se prueban aquí; las vencidas de factura y lo que vigila el vigilante, en la 69.
 begin;
 \ir _ayuda.psql
-select plan(91);
+select plan(93);
 
 select pruebas.alta('a6800000-0000-0000-0000-000000000001', 'tere-68@prueba.test');
 select pruebas.alta('c6800000-0000-0000-0000-000000000001', 'f1-68@prueba.test');
@@ -137,6 +137,7 @@ select (pruebas.abre(pruebas.p(1)) ->> 'read_id')::uuid as lectura1 \gset
 -- Marcar pagada lleva la lectura con que se abrió la cuenta.
 
 select is(pruebas.marca(pruebas.p(1), gen_random_uuid(), 'ABC123') ->> 'outcome', 'needs_read', 'sin una lectura de esa liquidación, no');
+select is(pruebas.marca(pruebas.p(2), :'lectura1', 'ABC123') ->> 'outcome', 'needs_read', 'ni con la lectura de otra liquidación');
 select is(pruebas.marca(pruebas.p(1), :'lectura1', ' ') ->> 'outcome', 'malformed', 'sin referencia, no');
 select is(pruebas.marca(pruebas.p(1), :'lectura1', 'ABC123', 0) ->> 'outcome', 'malformed', 'sin monto, no');
 select is(pruebas.marca(pruebas.p(1), :'lectura1', 'ABC123', 100000, pruebas.f1(), current_date + 2) ->> 'outcome', 'malformed', 'con fecha futura, no');
@@ -167,6 +168,7 @@ select is(pruebas.estado(pruebas.p(2)), 'on_hold', 'y la liquidación queda rete
 select is((select hold_kind || ':' || held_from_status from public.payouts where id = pruebas.p(2)), 'payment:ready_to_pay', 'por el pago, desde lista para pago');
 select is(pruebas.vivos(pruebas.p(2)), 1::bigint, 'el pago entra al libro: la transferencia ya salió');
 select is(pruebas.estado_periodo(203002), 'closed', 'el periodo sigue pendiente');
+select is(pruebas.abre(pruebas.p(2)), '{"outcome": "on_hold"}'::jsonb, 'una retenida no abre la cuenta');
 select is(pruebas.suelta(pruebas.p(2), pruebas.f1()) ->> 'to', 'paid', 'al soltarla, con un pago vivo, va a pagada');
 select is(pruebas.estado_periodo(203002), 'paid', 'y su periodo también');
 
@@ -304,7 +306,7 @@ set constraints all immediate;
 select throws_ok(format($$update public.payouts set status = 'paid' where id = %L$$, pruebas.p(7)), '23514', null, 'pagada sin un pago vivo, no');
 select throws_ok($$update private.payout_payments set amount_cents = 1$$, '42501', null, 'el libro de pagos no se edita');
 select throws_ok($$delete from private.payout_account_reads$$, '42501', null, 'ni el de lecturas se borra');
-select throws_ok(format($$update public.payouts set status = 'ready_to_pay' where id = %L$$, pruebas.p(6)), '23514', null, 'de pagada a lista para pago no se pasa');
+select throws_like(format($$update public.payouts set status = 'ready_to_pay' where id = %L$$, pruebas.p(6)), '%does not go from paid to ready_to_pay%', 'de pagada a lista para pago no se pasa: lo detiene el guardián');
 select throws_ok(format($$update public.payouts set status = 'payment_returned' where id = %L$$, pruebas.p(6)), '23514', null, 'devuelta con un pago vivo, no');
 set constraints all deferred;
 

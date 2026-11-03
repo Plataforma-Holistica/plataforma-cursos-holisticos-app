@@ -259,8 +259,10 @@ describe("la lectura de finanzas", () => {
       await owner.query("set local session_replication_role = replica");
       const payout = (
         await owner.query<{ id: string }>(
-          "insert into public.payouts (period_id, teacher_id, close_run_id, pool_cents, subtotal_cents, net_cents) values (202610, $1, gen_random_uuid(), 100, 100, 100) returning id",
-          [id],
+          // Lista para pago: abrir la cuenta solo se puede así (T-604, segunda solicitud).
+          `insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents, released_at, released_by)
+           values (202610, $1, gen_random_uuid(), 'ready_to_pay', 100, 100, 100, now(), $2) returning id`,
+          [id, finance.person.id],
         )
       ).rows[0]!.id;
       const request = (
@@ -287,6 +289,15 @@ describe("la lectura de finanzas", () => {
       expect(await read()).toEqual({ outcome: "clabe_recapture" });
 
       await age(owner, id);
+      // La primera vez que se le paga a esta cuenta, con «ya llamé» (T-604): eso se prueba en la 68.
+      expect(await read()).toEqual({ outcome: "needs_call" });
+      await owner.query("set local session_replication_role = replica");
+      await owner.query(
+        `insert into private.payout_account_calls (teacher_id, clabe_changed_at, spoke_with, called_at, recorded_by)
+         select $1, x.clabe_changed_at, 'Ana', now(), $2 from private.teacher_tax_profiles x where x.teacher_id = $1 order by x.version desc limit 1`,
+        [id, finance.person.id],
+      );
+      await owner.query("set local session_replication_role = origin");
       expect((await read()).outcome).toBe("ok");
     });
   });
