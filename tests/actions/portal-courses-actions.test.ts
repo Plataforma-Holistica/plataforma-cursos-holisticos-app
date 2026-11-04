@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
   return {
     createCourse: logged("createCourse", unknown),
     deleteCourse: logged("deleteCourse", unknown),
+    openVersion: logged("openVersion", unknown),
+    discardVersion: logged("discardVersion", unknown),
     leaveNotice: logged("leaveNotice", () => undefined),
     signOut: logged("signOut", () => Promise.resolve()),
     refresh: logged("refresh", () => undefined),
@@ -28,14 +30,19 @@ const mocks = vi.hoisted(() => {
   };
 });
 vi.mock("@/app/_lib/request-context", () => ({ cookieJar: mocks.cookieJar }));
-vi.mock("@/services/drafts/editor", () => ({ createCourse: mocks.createCourse, deleteCourse: mocks.deleteCourse }));
+vi.mock("@/services/drafts/editor", () => ({
+  createCourse: mocks.createCourse,
+  deleteCourse: mocks.deleteCourse,
+  openVersion: mocks.openVersion,
+  discardVersion: mocks.discardVersion,
+}));
 vi.mock("@/services/account/account", () => ({ signOut: mocks.signOut, forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { createCourseAction, deleteCourseAction } from "@/app/portal/_cursos/actions";
-import { deleteButton } from "@/app/portal/_cursos/outcomes";
+import { createCourseAction, deleteCourseAction, discardVersionAction, openVersionAction } from "@/app/portal/_cursos/actions";
+import { deleteButton, discardButton, openButton } from "@/app/portal/_cursos/outcomes";
 
 const jar = { get: () => undefined, set: () => undefined };
 const IDLE = { kind: "idle" } as const;
@@ -128,5 +135,49 @@ describe("borrar un curso", () => {
   it("un formulario sin botón con forma no llama a nadie", async () => {
     expect(await deleteCourseAction(IDLE, form([["do", "delete:x:4"]]))).toEqual(IDLE);
     expect(mocks.deleteCourse).not.toHaveBeenCalled();
+  });
+});
+
+describe("«Editar» un curso publicado (T-405)", () => {
+  it("le pasa al servicio el curso del botón, y abierta vuelve al editor", async () => {
+    once("openVersion", { kind: "opened" });
+    await expect(openVersionAction(IDLE, form([["do", openButton(COURSE)]]))).rejects.toThrow(`redirige a /portal/cursos/${COURSE}`);
+    expect(mocks.openVersion).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE });
+    expect(calls.order).toEqual(["openVersion", "redirect"]);
+  });
+
+  it("un curso por guion no se copia: se queda y lo dice", async () => {
+    once("openVersion", { kind: "not_copyable" });
+    expect(await openVersionAction(IDLE, form([["do", openButton(COURSE)]]))).toEqual({ kind: "failed", reason: "not_copyable", attempt: 1 });
+  });
+
+  it("«no se supo» se queda y lo dice", async () => {
+    expect(await openVersionAction(IDLE, form([["do", openButton(COURSE)]]))).toEqual({ kind: "failed", reason: "unavailable", attempt: 1 });
+  });
+
+  it("un formulario sin botón con forma no llama a nadie", async () => {
+    expect(await openVersionAction(IDLE, form([["do", "open:x"]]))).toEqual(IDLE);
+    expect(mocks.openVersion).not.toHaveBeenCalled();
+  });
+});
+
+describe("descartar la versión (T-405, H-18)", () => {
+  it("le pasa al servicio el curso y la revisión del botón, y descartada vuelve a la lista con su aviso", async () => {
+    once("discardVersion", { kind: "discarded" });
+    await expect(discardVersionAction(IDLE, form([["do", discardButton(COURSE, 6)]]))).rejects.toThrow("redirige a /portal/cursos");
+    expect(mocks.discardVersion).toHaveBeenCalledExactlyOnceWith(jar, { course: COURSE, seen: 6 });
+    expect(mocks.leaveNotice).toHaveBeenCalledExactlyOnceWith(jar, "version_discarded");
+    expect(calls.order).toEqual(["discardVersion", "leaveNotice", "redirect"]);
+  });
+
+  it("si cambió en otra pestaña, no se descarta: lo dice y vuelve a leer", async () => {
+    once("discardVersion", { kind: "changed" });
+    expect(await discardVersionAction(IDLE, form([["do", discardButton(COURSE, 6)]]))).toEqual({ kind: "failed", reason: "changed", attempt: 1 });
+    expect(calls.order).toEqual(["discardVersion", "refresh"]);
+  });
+
+  it("un botón de borrar no descarta", async () => {
+    expect(await discardVersionAction(IDLE, form([["do", deleteButton(COURSE, 6)]]))).toEqual(IDLE);
+    expect(mocks.discardVersion).not.toHaveBeenCalled();
   });
 });

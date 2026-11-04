@@ -2,7 +2,7 @@ import { resourceItems } from "@/app/_catalog/resources/words";
 import { longDate } from "@/app/_lib/dates";
 import { admin } from "@/messages/es/admin";
 import { plural, t } from "@/messages/format";
-import type { LessonVideo, ReviewCourse, ReviewQueue } from "@/services/review/review";
+import type { LessonVideo, ReviewCourse, ReviewQueue, VersionChanges } from "@/services/review/review";
 
 import { returnButton, reviewButton } from "./outcomes";
 
@@ -52,6 +52,10 @@ export interface SubmissionRow {
   captions: string | null;
   /** Lo que cambió por fuera después de enviarse, en una frase; nulo si nada. */
   files: string | null;
+  /** De una versión de un curso ya publicado, cuál es; nulo en un primer envío (T-405). */
+  version: string | null;
+  /** De una versión, qué cambió frente a lo publicado, una frase por cosa; vacío en un primer envío (FL-45). */
+  changes: string[];
   /** Abrir devolver, o seguir con este envío si el que se veía cambió. */
   ask: string;
 }
@@ -159,9 +163,41 @@ function courseRow(course: ReviewCourse): CourseRow {
                     lessons: submission.captionsMissing.map((id) => `«${course.lessons.find((lesson) => lesson.lessonId === id)?.title ?? ""}»`).join(", "),
                   }),
             files: submission.filesChanged.length === 0 ? null : t(text.filesWaiting, { files: submission.filesChanged.map((title) => `«${title}»`).join(", ") }),
+            version: submission.isRevision ? t(text.versionOf, { number: String(submission.version) }) : null,
+            changes: submission.changes === null ? [] : changeLines(submission.changes),
             ask: returnButton.ask(course.courseId, submission.id),
           },
   };
+}
+
+/** «a», «a y b», «a, b y c». */
+function joined(items: readonly string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${text.and} ${items.at(-1)}`;
+}
+
+/** Qué cambió, una frase por cosa, en el orden en que se lee un curso. Nada, también se dice. */
+function changeLines(changes: VersionChanges): string[] {
+  const quoted = (titles: readonly string[]) => titles.map((title) => `«${title}»`).join(", ");
+  const lists = [
+    [text.modulesAdded, changes.modulesAdded],
+    [text.modulesRemoved, changes.modulesRemoved],
+    [text.modulesRenamed, changes.modulesRenamed],
+    [text.modulesMoved, changes.modulesMoved],
+    [text.lessonsAdded, changes.lessonsAdded],
+    [text.lessonsRemoved, changes.lessonsRemoved],
+    [text.lessonsVideo, changes.lessonsVideo],
+    [text.lessonsText, changes.lessonsText],
+    [text.lessonsMoved, changes.lessonsMoved],
+    [text.resourcesAdded, changes.resourcesAdded],
+    [text.resourcesRemoved, changes.resourcesRemoved],
+    [text.resourcesRenamed, changes.resourcesRenamed],
+    [text.resourcesMoved, changes.resourcesMoved],
+  ] as const;
+  const lines = [
+    ...(changes.course.length === 0 ? [] : [t(text.courseFields, { fields: joined(changes.course.map((field) => text.fieldNames[field])) })]),
+    ...lists.filter(([, titles]) => titles.length > 0).map(([line, titles]) => t(line, { items: quoted(titles) })),
+  ];
+  return lines.length === 0 ? [text.noChanges] : lines;
 }
 
 /** El nombre con que se agrupa: el mismo a la vista, aunque llegue escrito distinto en Unicode o con espacios de más. */

@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { checkDraftText, createOutcome, deleteButton, deleteOutcome, readDeleteForm, readNewCourseForm } from "./outcomes";
+import {
+  checkDraftText,
+  createOutcome,
+  deleteButton,
+  deleteOutcome,
+  discardButton,
+  discardOutcome,
+  openButton,
+  openOutcome,
+  readDeleteForm,
+  readDiscardForm,
+  readNewCourseForm,
+  readOpenForm,
+} from "./outcomes";
 
 // Crear y borrar un curso (T-402): lo que llega del formulario y qué se hace con cada respuesta.
 
@@ -78,5 +91,61 @@ describe("borrar un curso", () => {
     expect(deleteOutcome({ kind: "changed" }, COURSE)).toEqual({ kind: "failed", reason: "changed" });
     expect(deleteOutcome({ kind: "unknown" }, COURSE)).toEqual({ kind: "failed", reason: "unavailable" });
     expect(deleteOutcome({ kind: "not_editable" }, COURSE)).toEqual({ kind: "leave", to: `/portal/cursos/${COURSE}/borrar`, notice: null, closeSession: false });
+  });
+});
+
+describe("«Editar» un curso publicado (T-405, FL-36)", () => {
+  it("el botón lleva el curso, y se lee igual", () => {
+    expect(readOpenForm(form([["do", openButton(COURSE)]]))).toEqual({ course: COURSE });
+  });
+
+  it.each([
+    ["sin botón", []],
+    ["dos botones", [["do", openButton(COURSE)], ["do", openButton(COURSE)]]],
+    ["otro verbo", [["do", `delete:${COURSE}:7`]]],
+    ["un id sin forma", [["do", "open:x"]]],
+    ["de más", [["do", `open:${COURSE}:1`]]],
+  ] as [string, [string, string][]][])("%s no es nada", (_name, entries) => {
+    expect(readOpenForm(form(entries))).toBeNull();
+  });
+
+  it("abierta, o ya abierta, al editor de ese curso", () => {
+    const editor = { kind: "leave", to: `/portal/cursos/${COURSE}`, notice: null, closeSession: false };
+    expect(openOutcome({ kind: "opened" }, COURSE)).toEqual(editor);
+    expect(openOutcome({ kind: "open" }, COURSE)).toEqual(editor);
+    // Ya no se puede editar así (por ejemplo, la versión ya se envió): la página dice en qué está.
+    expect(openOutcome({ kind: "not_editable" }, COURSE)).toEqual(editor);
+  });
+
+  it("un curso por guion no se copia, y se dice", () => {
+    expect(openOutcome({ kind: "not_copyable" }, COURSE)).toEqual({ kind: "failed", reason: "not_copyable" });
+  });
+
+  it("si ya no existe, a la lista con su aviso; «no se supo» no abre nada", () => {
+    expect(openOutcome({ kind: "not_found" }, COURSE)).toEqual({ kind: "leave", to: "/portal/cursos", notice: "course_gone", closeSession: false });
+    expect(openOutcome({ kind: "unknown" }, COURSE)).toEqual({ kind: "failed", reason: "unavailable" });
+    expect(openOutcome({ kind: "suspended" }, COURSE)).toEqual({ kind: "leave", to: `/portal/cursos/${COURSE}`, notice: null, closeSession: false });
+  });
+});
+
+describe("descartar la versión (H-18)", () => {
+  it("el botón lleva el curso y la revisión que se vio, y se lee igual", () => {
+    expect(readDiscardForm(form([["do", discardButton(COURSE, 4)]]))).toEqual({ course: COURSE, seen: 4 });
+    expect(readDiscardForm(form([["do", deleteButton(COURSE, 4)]]))).toBeNull();
+    expect(readDiscardForm(form([["do", `discard:${COURSE}:0`]]))).toBeNull();
+  });
+
+  it("descartada, a la lista con su aviso; si ya no existía, con el suyo", () => {
+    expect(discardOutcome({ kind: "discarded" }, COURSE)).toEqual({ kind: "leave", to: "/portal/cursos", notice: "version_discarded", closeSession: false });
+    expect(discardOutcome({ kind: "not_found" }, COURSE)).toEqual({ kind: "leave", to: "/portal/cursos", notice: "course_gone", closeSession: false });
+  });
+
+  it("ya enviada o ya descartada, al editor, que dice en qué está", () => {
+    expect(discardOutcome({ kind: "not_editable" }, COURSE)).toEqual({ kind: "leave", to: `/portal/cursos/${COURSE}`, notice: null, closeSession: false });
+  });
+
+  it("si cambió mientras se veía, se queda y lo dice; «no se supo» no es descartado", () => {
+    expect(discardOutcome({ kind: "changed" }, COURSE)).toEqual({ kind: "failed", reason: "changed" });
+    expect(discardOutcome({ kind: "unknown" }, COURSE)).toEqual({ kind: "failed", reason: "unavailable" });
   });
 });

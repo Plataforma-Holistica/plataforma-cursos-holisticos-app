@@ -4,6 +4,7 @@ import type { VerifiedClaims } from "@/services/account/account";
 
 import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
+import { DiscardVersionSection } from "../_cursos/discard";
 import { DeleteCourseSection } from "../_cursos/remove";
 import { AccountSection, AnnexSection } from "../_cuenta/section";
 import { EditorSection } from "../_editor/section";
@@ -52,6 +53,7 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   if (!ID_SEGMENT.test(id)) return null;
   if (page === undefined) return { render: ({ claims, readOnly, search }) => <EditorSection claims={claims} course={id} readOnly={readOnly} search={search} /> };
   if (page === "borrar") return { render: ({ claims, readOnly }) => <DeleteCourseSection claims={claims} course={id} readOnly={readOnly} /> };
+  if (page === "descartar") return { render: ({ claims, readOnly }) => <DiscardVersionSection claims={claims} course={id} readOnly={readOnly} /> };
   if (page === "enviar") return { render: ({ claims, readOnly }) => <SubmitSection claims={claims} course={id} readOnly={readOnly} /> };
   return null;
 }

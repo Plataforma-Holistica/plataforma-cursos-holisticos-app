@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
+import { createDraftsStore } from "@/services/drafts/store";
 import { createReviewStore } from "@/services/review/store";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
@@ -65,6 +66,30 @@ function storeOn(client: Client) {
 }
 
 const CLAIMS = {} as VerifiedClaims;
+
+/** El almacén del portal a nombre del maestro: lee como la persona, y cambia como el servidor (T-405, sexta solicitud). */
+function teacherStoreOn(client: Client) {
+  const read = (async (_claims: unknown, work: (tx: Tx) => Promise<unknown>) => {
+    await asOwner(client);
+    await client.query("select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)", [
+      JSON.stringify({ sub: teacherProfile, role: "authenticated", aal: "aal1", session_id: teacherSession }),
+    ]);
+    try {
+      return await work(txOn(client));
+    } finally {
+      await asOwner(client);
+    }
+  }) as never;
+  const run = (async (_actor: unknown, work: (tx: Tx) => Promise<unknown>) => {
+    await asServer(client, teacherProfile, teacherSession);
+    try {
+      return await work(txOn(client));
+    } finally {
+      await asOwner(client);
+    }
+  }) as never;
+  return createDraftsStore(run, read);
+}
 let reviewerSession = "";
 
 /** Un video listo de una lección del borrador, con su original en la cubeta. Vigente, o en camino de reemplazarla. */
@@ -237,6 +262,37 @@ describe("una versión, en la lectura estricta de la aplicación", () => {
     const queue = await inTx(owner, () => storeOn(owner).queue(CLAIMS));
     const row = queue?.courses.find((each) => each.courseId === course);
     expect(row?.submission).toMatchObject({ version: 2, isRevision: true, changes: { course: ["title"], lessonsAdded: [], lessonsRemoved: [] } });
+  });
+});
+
+describe("el portal, con una versión (sexta solicitud)", () => {
+  it("lo publicado se lee en solo lectura; «Editar» abre la versión; devuelta, el maestro lee el motivo; y se descarta", async () => {
+    const course = await publishedWithVersion("Portal en la 100");
+    const teacher = teacherStoreOn(owner);
+    const listed = async () => (await inTx(owner, () => teacher.teacherCourses(CLAIMS))).find((each) => each.id === course);
+
+    expect(await listed()).toMatchObject({ state: "published", pendingVersion: null, draft: null, returned: null });
+    expect(await inTx(owner, () => teacher.draftCourse(CLAIMS, course))).toBeNull();
+    const published = await inTx(owner, () => teacher.publishedCourse(CLAIMS, course));
+    expect(published).toMatchObject({ id: course, state: "published", pendingVersion: null, title: "Portal en la 100", summary: "Un resumen." });
+    expect(published?.modules).toEqual([{ id: expect.any(String), title: "Inicio", lessons: [{ id: expect.any(String), title: "Primera", seconds: 600 }] }]);
+
+    expect(await inTx(owner, () => teacher.openVersion(CLAIMS, course))).toBe("opened");
+    expect(await inTx(owner, () => teacher.openVersion(CLAIMS, course))).toBe("open");
+    expect(await listed()).toMatchObject({ state: "changes_pending", pendingVersion: "draft", missing: 0 });
+    expect(await inTx(owner, () => teacher.draftCourse(CLAIMS, course))).toMatchObject({ state: "changes_pending", pendingVersion: "draft", version: 2 });
+
+    // Enviada y devuelta: el motivo llega a Mis cursos y al editor, como en un curso nuevo.
+    await inTx(owner, async () => expect(await submit(owner, course)).toBe("submitted"));
+    expect(await listed()).toMatchObject({ state: "changes_pending", pendingVersion: "in_review", submittedAt: expect.any(String) });
+    expect(await inTx(owner, async () => storeOn(owner).returnCourse(CLAIMS, { course, submission: await pending(course), reason: "Falta el cierre.", whatToFix: "Agrégalo." }))).toBe("returned");
+    expect((await listed())?.returned).toMatchObject({ reason: "Falta el cierre.", whatToFix: "Agrégalo." });
+    expect((await inTx(owner, () => teacher.draftCourse(CLAIMS, course)))?.returned).toMatchObject({ reason: "Falta el cierre." });
+
+    const seen = Number(await contentRevision(course));
+    expect(await inTx(owner, () => teacher.discardVersion(CLAIMS, course, seen + 1))).toBe("changed");
+    expect(await inTx(owner, () => teacher.discardVersion(CLAIMS, course, seen))).toBe("discarded");
+    expect(await listed()).toMatchObject({ state: "published", pendingVersion: null, returned: null });
   });
 });
 

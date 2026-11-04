@@ -70,6 +70,8 @@ export const NOTICES = [
   "course_gone",
   // Un curso quedó enviado a revisión (T-405): Mis cursos lo dice al volver.
   "course_submitted",
+  // La versión de un curso publicado quedó descartada (T-405): Mis cursos lo dice al volver.
+  "version_discarded",
 ] as const;
 export type Notice = (typeof NOTICES)[number];
 

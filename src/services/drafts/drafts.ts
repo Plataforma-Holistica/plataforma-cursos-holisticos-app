@@ -2,6 +2,7 @@ import "server-only";
 
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
+import type { CourseState, PendingVersion } from "@/domain/catalog/course-phase";
 import type { DraftReadiness } from "@/domain/catalog/draft-readiness";
 import { parseDraftText, type DraftTextKind } from "@/domain/catalog/draft-text";
 
@@ -22,8 +23,7 @@ import type { FailureCode } from "@/services/error-reporting/server";
 //
 // Leer va como la persona (`asUser`): su maestro lee lo suyo, también suspendido.
 
-export const COURSE_STATES = ["draft", "in_review", "published", "changes_pending", "withdrawn"] as const;
-export type CourseState = (typeof COURSE_STATES)[number];
+export { COURSE_STATES, PENDING_VERSIONS, type CourseState, type PendingVersion } from "@/domain/catalog/course-phase";
 
 /** Por qué Contenido devolvió un curso (RF-607): el motivo y qué corregir, de su último envío, mientras sigue en borrador. Sin decir quién. */
 export interface ReturnNote {
@@ -36,6 +36,8 @@ export interface ReturnNote {
 export interface TeacherCourse {
   id: string;
   state: CourseState;
+  /** La versión pendiente de un curso publicado (T-405), o nula. */
+  pendingVersion: PendingVersion | null;
   title: string;
   /** Lo último guardado en su borrador, o el último cambio del registro. */
   updatedAt: string;
@@ -103,6 +105,8 @@ export interface DraftVideo {
 export interface DraftCourse {
   id: string;
   state: CourseState;
+  /** La versión pendiente de un curso publicado (T-405), o nula: el borrador de una versión se edita como uno nuevo. */
+  pendingVersion: PendingVersion | null;
   version: number;
   title: string;
   summary: string | null;
@@ -120,6 +124,16 @@ export interface DraftCourse {
   teacherName: string | null;
   /** Si Contenido lo devolvió. */
   returned: ReturnNote | null;
+}
+
+/** Un curso publicado sin versión abierta, para PA-43 en solo lectura (T-405): lo que ven los alumnos, sin el reproductor ni los recursos. */
+export interface PublishedCourse {
+  id: string;
+  state: CourseState;
+  pendingVersion: PendingVersion | null;
+  title: string;
+  summary: string | null;
+  modules: { id: string; title: string; lessons: { id: string; title: string; seconds: number }[] }[];
 }
 
 /** Una práctica o un nivel que el editor ofrece. */
@@ -152,12 +166,18 @@ export const ADD_ANSWERS = ["created", "changed", "invalid", ...OPEN] as const;
 export const SAVE_ANSWERS = ["saved", "changed", "invalid", ...OPEN] as const;
 export const MOVE_ANSWERS = ["moved", "changed", "invalid", ...OPEN] as const;
 export const DELETE_ANSWERS = ["deleted", "changed", ...OPEN] as const;
+/** «Editar» un curso publicado (`private.course_version_open`): la abrió, ya estaba abierta, o no se copia (un curso por guion). */
+export const OPEN_VERSION_ANSWERS = ["opened", "open", "not_copyable", ...OPEN] as const;
+/** Descartar la versión (`private.course_version_discard`). */
+export const DISCARD_ANSWERS = ["discarded", "changed", ...OPEN] as const;
 export type CreateAnswer = (typeof CREATE_ANSWERS)[number];
 export type SaveCourseAnswer = (typeof SAVE_COURSE_ANSWERS)[number];
 export type AddAnswer = (typeof ADD_ANSWERS)[number];
 export type SaveAnswer = (typeof SAVE_ANSWERS)[number];
 export type MoveAnswer = (typeof MOVE_ANSWERS)[number];
 export type DeleteAnswer = (typeof DELETE_ANSWERS)[number];
+export type OpenVersionAnswer = (typeof OPEN_VERSION_ANSWERS)[number];
+export type DiscardAnswer = (typeof DISCARD_ANSWERS)[number];
 
 /** Lo que contestó crear o agregar: el id de lo nuevo, solo con `created`. */
 export interface Created<Answer extends string> {
@@ -199,6 +219,10 @@ export interface DraftsStore {
     to: { module: string; position: number },
   ) => Promise<MoveAnswer>;
   deleteCourse: (claims: VerifiedClaims, course: string, seen: number) => Promise<DeleteAnswer>;
+  openVersion: (claims: VerifiedClaims, course: string) => Promise<OpenVersionAnswer>;
+  discardVersion: (claims: VerifiedClaims, course: string, seen: number) => Promise<DiscardAnswer>;
+  /** Lo publicado de un curso suyo, como la persona; nulo si para ella no existe. */
+  publishedCourse: (claims: VerifiedClaims, course: string) => Promise<PublishedCourse | null>;
   /** Como sistema: los nombres de una práctica o un nivel desactivados no los lee una cuenta. */
   choices: (practiceId: string | null, levelId: string | null) => Promise<DraftChoices>;
 }
@@ -253,6 +277,12 @@ export function createDrafts(deps: DraftsDeps) {
   function draftCourse(claims: VerifiedClaims, course: string): Promise<DraftRead<DraftCourse | null>> {
     if (!isId(course)) return Promise.resolve({ kind: "ready", value: null });
     return read(() => deps.store.draftCourse(claims, course));
+  }
+
+  /** Lo publicado de un curso de quien trae esas claims (T-405), para PA-43 sin versión abierta; nulo si para esa persona no existe. */
+  function publishedCourse(claims: VerifiedClaims, course: string): Promise<DraftRead<PublishedCourse | null>> {
+    if (!isId(course)) return Promise.resolve({ kind: "ready", value: null });
+    return read(() => deps.store.publishedCourse(claims, course));
   }
 
   /**
@@ -414,9 +444,27 @@ export function createDrafts(deps: DraftsDeps) {
     });
   }
 
+  /** «Editar» un curso publicado (T-405, FL-36): abre su versión en borrador, o la que ya estaba. */
+  function openVersion(reader: CookieReader, input: { course: string }) {
+    return change<OpenVersionAnswer>(reader, isId(input.course), async (claims) => ({ kind: await deps.store.openVersion(claims, input.course) }));
+  }
+
+  /** Descartar la versión (H-18), con la revisión del contenido que se vio. Lo que la versión subió y nadie nombra sobra, como al borrar. */
+  function discardVersion(reader: CookieReader, input: { course: string; seen: number }) {
+    const formed = isId(input.course) && isCount(input.seen);
+    return change<DiscardAnswer>(reader, formed, async (claims) => {
+      const kind = await deps.store.discardVersion(claims, input.course, input.seen);
+      if (kind === "discarded") await deps.afterDelete(claims, input.course);
+      return { kind };
+    });
+  }
+
   return {
     teacherCourses,
     draftCourse,
+    publishedCourse,
+    openVersion,
+    discardVersion,
     draftChoices,
     createCourse,
     saveCourse,

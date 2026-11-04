@@ -916,6 +916,17 @@ que no se ve leyendo un solo archivo:
   fueron, se renombraron, cambiaron de video o de lugar; nulo en un primer envío), y la lectura estricta de `src/services/review/records.ts` los exige. Usa pgTAP 90 a 92 (con
   `supabase/tests/_versiones.psql`, sus ayudantes) e integración 100; desde el 2026-11-03 el carril B usa pgTAP del 90 al 99 e integración del 100 al 109 (acordado con el A,
   confirmado por Sergio). Para el A: `guard_publication` suma los tres pasos del maestro (abrir, descartar y enviar la versión) y la regla de lo retirado; `approve_course` no cambia.
+- **Lo que T-405 suma al carril B** (sexta solicitud, sin migración; RF-608, FL-36, FL-45; plan aprobado por Sergio el 2026-11-04). Las versiones en pantalla. Qué se
+  edita y qué se revisa lo dice una regla pura del dominio, `src/domain/catalog/course-phase.ts` (`isEditable`, `isInReview`; la misma de `course_editable` y `course_reviewing`, que
+  reexporta `field-rules.ts` para el navegador), y `TeacherCourse` y `DraftCourse` traen `pendingVersion`. El almacén pide el motivo y el envío también con una versión. **PA-42:** un curso
+  publicado ofrece «Ver»; con una versión en borrador, «Editar» y lo que le falta (o «Rechazado» y su motivo); enviada, «En revisión» y la fecha; una versión no se borra. **PA-43 sin
+  borrador** (`_editor/published.ts` y `published-screen.tsx`) pinta lo publicado en solo lectura (`readPublishedCourse`, como la persona: sus lecciones por la política propia y el título de
+  cada módulo por la pública) y «Editar», un formulario que llama a `course_version_open` y vuelve al editor, también sin JavaScript; un curso por guion contesta `not_copyable` y se dice.
+  **PA-43 de una versión** es el editor de siempre con el aviso de que los alumnos siguen viendo lo publicado y «Descartar cambios», que lleva a `/portal/cursos/<id>/descartar`
+  (`_cursos/discard.tsx`, como borrar: la revisión del contenido, y al descartar limpia como borrar) y vuelve a Mis cursos con el aviso `version_discarded`. Las acciones son
+  `openVersionAction` y `discardVersionAction` en `_cursos/actions.ts`. **PA-62** dice de una versión cuál es y qué cambió, una frase por cosa (`changeLines` en `_revision/rows.ts`).
+  Usa la integración 100 (el almacén del portal con una versión) y `tests/e2e/equipo/versiones.equipo.ts`. Decisiones mías sin confirmar: PA-43 de un curso publicado sin el reproductor
+  ni los recursos (están en la ficha); una versión enviada se dice «En revisión»; descartar se confirma en su propia pantalla. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

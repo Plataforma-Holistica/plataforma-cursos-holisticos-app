@@ -151,6 +151,11 @@ export function portalDeleteCoursePath(course: string): string | null {
   return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/borrar` : null;
 }
 
+/** Confirmar que se descarta la versión de un curso publicado (T-405, H-18); nulo si el id no tiene forma. */
+export function portalDiscardVersionPath(course: string): string | null {
+  return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/descartar` : null;
+}
+
 /** PA-44, enviar un curso a revisión (T-405). */
 export function portalSubmitPath(course: string): string | null {
   return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/enviar` : null;

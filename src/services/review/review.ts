@@ -25,6 +25,7 @@ export type {
   ReviewSubmission,
   SubmissionApproveAnswer,
   SubmissionApproved,
+  VersionChanges,
 } from "./queue";
 export { APPROVE_ANSWERS, LESSON_VIDEOS, RETURN_ANSWERS, SUBMISSION_APPROVE_ANSWERS } from "./queue";
 

@@ -36,9 +36,14 @@ export function EditorScreen({ view }: { view: EditorView }) {
             <h1 className="text-h1">{view.title}</h1>
             <StatusBadge tone={view.tone}>{view.state}</StatusBadge>
           </div>
-          {view.submitHref !== null && (
-            <div>
-              <Button href={view.submitHref}>{text.submit}</Button>
+          {(view.submitHref !== null || view.discardHref !== null) && (
+            <div className="flex flex-wrap gap-3">
+              {view.submitHref !== null && <Button href={view.submitHref}>{text.submit}</Button>}
+              {view.discardHref !== null && (
+                <Button href={view.discardHref} variant="secondary">
+                  {text.discard}
+                </Button>
+              )}
             </div>
           )}
           <SavedStatus saved={view.saved} />

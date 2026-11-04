@@ -177,6 +177,7 @@ export const portal = defineMessages({
     submitted: "Enviado a revisión. Mientras lo revisamos no se puede editar.",
     sentOn: "Enviado el {date}.",
     gone: "Ese curso ya no existe.",
+    discarded: "Descartaste los cambios. Tus alumnos siguen viendo el curso publicado.",
   },
   states: {
     draft: "Borrador",
@@ -268,6 +269,25 @@ export const portal = defineMessages({
     back: "Volver a lo que aceptaste",
     annexMeta: "Versión {version}, vigente desde el {date}.",
   },
+  discardVersion: {
+    title: "Descartar los cambios",
+    body: "Se descartan los cambios que hiciste a «{title}». Tus alumnos siguen viendo el curso publicado, sin cambios. No se puede deshacer.",
+    keptNote: "Lo que enviaste a revisión antes y el anexo que aceptaste se conservan como prueba.",
+    confirm: "Descartar cambios",
+    discarding: "Descartando…",
+    cancel: "Cancelar",
+  },
+  published: {
+    intro: "Tus alumnos ven esta versión. Para cambiar algo, crea una versión nueva: la revisamos antes de publicarla.",
+    edit: "Editar",
+    editing: "Abriendo…",
+    notCopyable: "Este curso se cargó directamente y no se puede editar desde aquí. Escríbenos si necesitas cambiarlo.",
+    modules: "Módulos y lecciones",
+    module: "Módulo {number}: {title}",
+    moduleUntitled: "Módulo {number}",
+    lesson: "{title}, {length}",
+    noSummary: "Sin resumen.",
+  },
   deleteCourse: {
     title: "Borrar el curso",
     body: "Se borra «{title}» con sus módulos y sus lecciones. No se puede deshacer.",
@@ -299,6 +319,8 @@ export const portal = defineMessages({
   },
   editor: {
     submit: "Enviar a revisión",
+    versionNotice: "Tus alumnos siguen viendo la versión publicada hasta que se apruebe la nueva.",
+    discard: "Descartar cambios",
     returned: {
       title: "Tu curso fue devuelto el {date}",
       reason: "Motivo",

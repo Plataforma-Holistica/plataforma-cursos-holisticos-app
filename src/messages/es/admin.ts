@@ -309,6 +309,27 @@ export const admin = defineMessages({
     filesWaiting: "Cambió por fuera después de enviarse: {files}. Así no se publica: devuélvelo para que su {maestro} vuelva a subir ese archivo.",
     returnLocked: "Para devolverlo a su {maestro}, escribe tu código, al inicio de esta página.",
 
+    // Una versión de un curso ya publicado (T-405, FL-45): cuál es y qué cambió frente a lo publicado.
+    versionOf: "Versión {number} de un curso ya publicado. Los alumnos siguen viendo la anterior hasta que se apruebe.",
+    changesTitle: "Qué cambió frente a lo publicado",
+    noChanges: "Nada cambió frente a lo publicado.",
+    courseFields: "Datos del curso: {fields}.",
+    fieldNames: { title: "el título", summary: "el resumen", practice: "la práctica", level: "el nivel" },
+    and: "y",
+    modulesAdded: "Módulos nuevos: {items}.",
+    modulesRemoved: "Módulos quitados: {items}.",
+    modulesRenamed: "Módulos con otro nombre: {items}.",
+    modulesMoved: "Módulos que cambiaron de orden: {items}.",
+    lessonsAdded: "Lecciones nuevas: {items}.",
+    lessonsRemoved: "Lecciones quitadas: {items}.",
+    lessonsVideo: "Lecciones con otro video: {items}.",
+    lessonsText: "Lecciones con otro título o descripción: {items}.",
+    lessonsMoved: "Lecciones que cambiaron de lugar: {items}.",
+    resourcesAdded: "Recursos nuevos: {items}.",
+    resourcesRemoved: "Recursos quitados: {items}.",
+    resourcesRenamed: "Recursos con otro nombre: {items}.",
+    resourcesMoved: "Recursos que cambiaron de orden: {items}.",
+
     // Devolver, con dos campos obligatorios (RF-607). El correo al {maestro} llega con T-410.
     returnOpen: "Devolver al {maestro}",
     returnTitle: "Devolver este curso",

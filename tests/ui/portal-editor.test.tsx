@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireTeacher: vi.fn(),
   draftCourse: vi.fn(),
+  publishedCourse: vi.fn(() => Promise.resolve({ kind: "ready", value: null })),
   draftChoices: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/app/_lib/guard", () => ({ requireTeacher: mocks.requireTeacher }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ readNotice: vi.fn(() => null) }));
-vi.mock("@/services/drafts/editor", () => ({ draftCourse: mocks.draftCourse, draftChoices: mocks.draftChoices, teacherCourses: vi.fn() }));
+vi.mock("@/services/drafts/editor", () => ({ draftCourse: mocks.draftCourse, publishedCourse: mocks.publishedCourse, draftChoices: mocks.draftChoices, teacherCourses: vi.fn() }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 vi.mock("@/app/portal/_editor/actions", () => ({ editorAction: vi.fn() }));
 vi.mock("@/app/portal/_cursos/actions", () => ({ createCourseAction: vi.fn(), deleteCourseAction: vi.fn() }));

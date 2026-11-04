@@ -493,10 +493,21 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
   );
 }
 
-/** Lo que el curso trae por haberse enviado: sus recursos y el anexo aceptado (PA-62). */
+/** Lo que el curso trae por haberse enviado: de una versión, cuál es y qué cambió (T-405); sus recursos y el anexo aceptado (PA-62). */
 function Submitted({ submission }: { submission: SubmissionRow }) {
   return (
     <>
+      {submission.version !== null && (
+        <section className="flex flex-col gap-2">
+          <p className="text-body-s font-semibold">{submission.version}</p>
+          <h5 className="text-body font-semibold">{text.changesTitle}</h5>
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-body-s">
+            {submission.changes.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {submission.resources.length > 0 && (
         <section className="flex flex-col gap-2">
           <h5 className="text-body font-semibold">{text.courseResources}</h5>

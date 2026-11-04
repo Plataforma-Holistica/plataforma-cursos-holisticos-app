@@ -12,6 +12,7 @@ const PUBLISHED = "c0000000-0000-4000-8000-000000000002";
 const draft: TeacherCourse = {
   id: DRAFT,
   state: "draft",
+  pendingVersion: null,
   title: "Respirar",
   updatedAt: "2026-10-29T18:00:00.000Z",
   contentRevision: 3,
@@ -26,6 +27,7 @@ const draft: TeacherCourse = {
 const published: TeacherCourse = {
   id: PUBLISHED,
   state: "published",
+  pendingVersion: null,
   title: "El bosque",
   updatedAt: "2026-10-01T18:00:00.000Z",
   contentRevision: null,
@@ -67,9 +69,10 @@ describe("courseRows", () => {
     expect(row?.remove).toBeNull();
   });
 
-  it("un curso sin borrador (los cargados por guion) no se abre en el editor ni se borra", () => {
+  it("un curso publicado se ve en el editor, en solo lectura, y no se borra (T-405)", () => {
     const [row] = courseRows([published], false);
-    expect(row).toMatchObject({ state: "Publicado", detail: "Tus alumnos ven la versión publicada.", lessons: null, action: null, remove: null });
+    expect(row).toMatchObject({ state: "Publicado", detail: "Tus alumnos ven la versión publicada.", lessons: null, remove: null });
+    expect(row?.action).toEqual({ label: "Ver", href: `/portal/cursos/${PUBLISHED}`, name: "Ver El bosque" });
     expect(row?.cover).toEqual({ title: "El bosque", teacherName: "Ana Ruiz", practiceName: null, tone: null });
   });
 
@@ -125,3 +128,30 @@ describe("lo que falta, con la lista de enviar", () => {
   });
 });
 
+
+describe("la versión de un curso publicado (T-405, FL-36)", () => {
+  const version: TeacherCourse = { ...draft, id: PUBLISHED, state: "changes_pending", pendingVersion: "draft", title: "El bosque" };
+
+  it("en borrador: con cambios pendientes, lo que le falta y editar, sin borrar", () => {
+    const [row] = courseRows([version], false);
+    expect(row).toMatchObject({ state: "Con cambios pendientes", tone: "active", detail: "Faltan 3 cosas para enviarlo", lessons: "2 lecciones", remove: null });
+    expect(row?.action).toEqual({ label: "Editar", href: `/portal/cursos/${PUBLISHED}`, name: "Editar El bosque" });
+  });
+
+  it("devuelta: «Rechazado», su motivo y corregir, sin borrar", () => {
+    const [row] = courseRows([{ ...version, returned: { reason: "Falta el cierre.", whatToFix: "Agrégalo.", returnedAt: "2026-11-02T18:00:00.000Z" } }], false);
+    expect(row).toMatchObject({ state: "Rechazado", tone: "bad", detail: "Falta el cierre.", detailIsReason: true, remove: null });
+    expect(row?.action?.label).toBe("Corregir");
+  });
+
+  it("enviada: en revisión, con la fecha de envío, y solo ver", () => {
+    const [row] = courseRows([{ ...version, pendingVersion: "in_review", submittedAt: "2026-11-02T18:00:00.000Z" }], false);
+    expect(row).toMatchObject({ state: "En revisión", tone: "attention", remove: null });
+    expect(row?.detail).toMatch(/^Enviado el /);
+    expect(row?.action?.label).toBe("Ver");
+  });
+
+  it("al suspendido, ver", () => {
+    expect(courseRows([version], true)[0]?.action?.label).toBe("Ver");
+  });
+});
