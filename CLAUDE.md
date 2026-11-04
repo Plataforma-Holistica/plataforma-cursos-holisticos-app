@@ -902,7 +902,8 @@ que no se ve leyendo un solo archivo:
   el mayor del curso más uno:** una versión enviada y descartada no se repite, y por eso `course_return_notes` muestra el motivo solo si es de la versión del borrador (comparar
   fechas no sirve: dentro de una transacción de prueba todas son iguales). **Descartar** es `course_version_discard(curso, content_revision)` (H-18), y la baja de un maestro
   (OP-06) `system_discard_version`, de quien opera como dueño declarado sistema; una en revisión la devuelve antes Contenido. **Los dos toman los videos del borrador antes que el
-  registro** (y `draft_delete_course` también), porque asentar un video toma su fila y después el registro: al revés se interbloquean (la integración 100 lo prueba). **Publicar una
+  registro, los que no son vigentes primero** (`order by is_current, id`; `draft_delete_course` también), porque asentar un video toma su fila, después el registro para compartir y al
+  promoverlo borra la vigente de su lección: en otro orden se interbloquean. La integración 100 lo prueba con `video_settle` de verdad; con un simulacro a mano no se veía. **Publicar una
   versión** (`review_publish`) sustituye sin borrar: lo quitado queda retirado con su id (RN-14), lo que siguió conserva el suyo, el slug, el curso abierto, el listado, la fecha de
   publicación y la de la primera vez se quedan, y un video que ya no usa ninguna lección vigente queda retirado (`video_assets.retired_at`). Las posiciones vigentes se corren hacia
   arriba (más un millón) antes de escribir las nuevas: sus índices son parciales y no se difieren, y la de recursos exige `>= 1`. **Lo retirado no vuelve, para nadie:**

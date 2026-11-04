@@ -294,6 +294,36 @@ describe("dos a la vez, con dos conexiones de verdad", () => {
     expect(await state(course)).toEqual({ registry: "published", drafts: 0 });
   });
 
+  it("la baja mientras un video de la versión se asienta: espera, y no se interbloquea", async () => {
+    const course = await publishedWithVersion("Baja y asentar en la 100");
+    expect(await inTx(owner, () => open(owner, course))).toBe("opened");
+    const lesson = (await owner.query<{ id: string }>("select id from public.draft_lessons where course_id = $1", [course])).rows[0]!.id;
+    const arriving = await inTx(owner, () => videoFor(course, lesson, "processing"));
+    const first = await connect();
+    const second = await connect();
+    try {
+      await first.query("begin");
+      await first.query("select 1 from public.draft_videos where id = $1 for update", [arriving]);
+      // Quien opera, como el dueño declarado sistema (OP-06).
+      await second.query("begin");
+      await second.query("select set_config('app.actor_kind', 'system', true)");
+      const waiting = second.query<{ r: string }>("select private.system_discard_version($1) as r", [course]);
+      await waitBehind(owner, first, 1);
+      await asServer(first, teacherProfile, teacherSession);
+      expect((await call(first, "private.video_settle($1, 'ready', $2, 600, true, null)", [arriving, `play-${arriving}`])).answer).toBe("ready");
+      await asOwner(first);
+      await first.query("commit");
+      expect((await waiting).rows[0]!.r).toBe("discarded");
+      await second.query("commit");
+    } finally {
+      await second.query("rollback").catch(() => undefined);
+      await first.query("rollback").catch(() => undefined);
+      await first.end();
+      await second.end();
+    }
+    expect(await state(course)).toEqual({ registry: "published", drafts: 0 });
+  });
+
   it("descartar mientras se envía: espera, y contesta que ya no se puede", async () => {
     const course = await publishedWithVersion("Enviar y descartar en la 100");
     expect(await inTx(owner, () => open(owner, course))).toBe("opened");

@@ -8,8 +8,9 @@
 --   · «Editar» (`course_version_open`) copia lo vigente de lo publicado al borrador con los mismos ids, sin tocar lo que ven los alumnos. Un curso por guion (sin el envío que lo
 --     publicó) o uno al que le falta lo que el borrador exige contesta `not_copyable`, antes de escribir. Si ya hay versión, la abre (E1).
 --   · El número de versión es el mayor del curso más uno: una versión enviada y descartada no se repite, y dos licencias no dicen lo mismo de contenidos distintos (LF-24).
---   · Descartar borra el borrador y el curso vuelve a publicado (H-18). Toma los videos del borrador antes que el registro: asentar un video toma su fila y después el registro
---     (`video_settle`, `video_promote`), y al revés se interbloquean. `draft_delete_course` también.
+--   · Descartar borra el borrador y el curso vuelve a publicado (H-18). Toma los videos del borrador antes que el registro, los que no son vigentes primero: asentar un video toma
+--     su fila, después el registro y al promoverlo la vigente de su lección (`video_settle`, `video_promote`), y en otro orden se interbloquean. La baja y
+--     `draft_delete_course` también.
 --   · Publicar una versión sustituye a lo publicado sin borrar nada: lo que la versión quitó queda retirado, con su id, porque el consumo, el progreso y el reparto apuntan a él
 --     (RN-14); el slug, el curso abierto, la fecha de publicación y la de la primera vez no cambian. Un video que ya no usa ninguna lección vigente queda retirado. Las posiciones
 --     vigentes se corren hacia arriba antes de escribir las nuevas: sus índices son parciales y no se difieren.
@@ -287,7 +288,7 @@ begin
   if (select content_revision from public.course_drafts where course_id = p_course) is distinct from p_seen then
     return pg_catalog.jsonb_build_object('answer', 'changed');
   end if;
-  perform 1 from public.draft_videos v where v.course_id = p_course for update;
+  perform 1 from public.draft_videos v where v.course_id = p_course order by v.is_current, v.id for update;
   delete from public.course_registry where course_id = p_course and teacher_id = v_teacher;
   return pg_catalog.jsonb_build_object('answer', 'deleted');
 end
@@ -401,8 +402,9 @@ begin
     return pg_catalog.jsonb_build_object('answer', 'not_found');
   end if;
   perform private.course_lock(p_course);
-  -- Los videos del borrador antes que el registro: asentar un video toma su fila y después el registro.
-  perform 1 from public.draft_videos v where v.course_id = p_course for update;
+  -- Los videos del borrador antes que el registro, y los que no son vigentes antes que los vigentes: asentar un video toma su fila, después el registro para compartir
+  -- y al promoverlo borra la vigente de esa lección. En otro orden se interbloquean (la integración 100 lo prueba con `video_settle` de verdad).
+  perform 1 from public.draft_videos v where v.course_id = p_course order by v.is_current, v.id for update;
   select * into v_registry from public.course_registry r where r.course_id = p_course for update;
   if v_registry.state <> 'changes_pending' or v_registry.pending_version_state <> 'draft' then
     return pg_catalog.jsonb_build_object('answer', 'not_editable');
@@ -431,7 +433,7 @@ begin
   -- El orden de siempre: la fila del maestro, el curso, los videos del borrador y el registro.
   perform 1 from public.teachers t where t.id = (select r.teacher_id from public.course_registry r where r.course_id = p_course) for share;
   perform private.course_lock(p_course);
-  perform 1 from public.draft_videos v where v.course_id = p_course for update;
+  perform 1 from public.draft_videos v where v.course_id = p_course order by v.is_current, v.id for update;
   select * into v_registry from public.course_registry r where r.course_id = p_course for update;
   if v_registry.course_id is null then
     return 'not_found';
