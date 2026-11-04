@@ -39,7 +39,7 @@ begin
   insert into public.payout_periods (period_id, starts_at, ends_at, timezone, status, entered_closing_at, active_students, pool_bps,
                                      net_revenue_cents, student_pools_cents, pool_cents, assigned_cents, unconsumed_cents, carried_out_cents,
                                      close_run_id, closed_at, closed_by, payouts_released_at, payouts_released_by)
-  select pruebas.mes(n), b.starts_at, b.ends_at, 'America/Mexico_City', p_estado, now(), 4, 6000,
+  select pruebas.mes(n), b.starts_at, b.ends_at, 'America/Mexico_City', p_estado, case when p_estado = 'open' then null else now() end, 4, 6000,
          8333333, 5000000, 5000000, case when n = 9 then 0 else 4000000 end, case when n = 9 then 5000000 else 1000000 end, 0,
          v_run, case when p_estado = 'open' then null else now() end, case when p_estado = 'open' then null else pruebas.f1() end, null, null
   from private.month_bounds(pruebas.mes(n), 'America/Mexico_City') b;

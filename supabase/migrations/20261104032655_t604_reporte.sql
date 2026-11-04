@@ -240,12 +240,13 @@ create function private.payout_report_csv_mine(p_period public.period_id) return
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
-  v_report jsonb := private.payout_report_mine(p_period);
+  v_report jsonb;
   v_crlf text := pg_catalog.chr(13) || pg_catalog.chr(10);
 begin
-  if v_report ->> 'outcome' = 'not_teacher' then
-    return v_report;
+  if private.actor_teacher_id() is null then
+    return '{"outcome": "not_teacher"}'::jsonb;
   end if;
+  v_report := private.payout_report_mine(p_period);
   if v_report ->> 'outcome' <> 'ok' then
     return '{"outcome": "not_found"}'::jsonb;
   end if;
