@@ -1,7 +1,8 @@
 // El repaso de los recursos (T-404; decisión de Sergio del 2026-10-30) en la base LOCAL: se lleva los pendientes
 // vencidos (`private.resource_sweep()`, que dice qué objetos ninguna fila nombra) y los borra de la cubeta por la API
 // de Storage. Cubre lo que borrar al momento no alcanza: una caída entre la base y Storage, o una subida que terminó
-// después de que su fila se fue.
+// después de que su fila se fue. Desde T-405 borra además el archivo de un recurso que una versión retiró, pasados
+// ARCHIVO_RETIRADO_DIAS (`private.retired_files_due()`): la fila se queda y se anota lo borrado.
 //
 //   pnpm storage:repaso            # dice qué sobra y lo borra
 //   pnpm storage:repaso --ver      # solo dice cuántos sobran, y no toca nada: lo que barre se revierte
@@ -58,24 +59,48 @@ const client = new pg.Client({
 });
 
 let paths;
+let retired;
 try {
   await client.connect();
   await client.query("begin");
   paths = (await client.query("select path from private.resource_sweep()")).rows.map((row) => row.path);
   await client.query(onlyLook ? "rollback" : "commit");
+  retired = (await client.query("select id, path from private.retired_files_due() where kind = 'resource'")).rows;
 } catch (error) {
+  await client.end().catch(() => {});
   fail(`no se pudo leer la base (${codeOf(error)}).`);
+}
+
+console.log(`storage:repaso: ${paths.length} objeto(s) que ninguna fila nombra, ${retired.length} recurso(s) retirado(s) y vencido(s).`);
+if (onlyLook || paths.length + retired.length === 0) {
+  await client.end().catch(() => {});
+  process.exit(0);
+}
+
+async function remove(objects) {
+  const response = await fetch(`${api.origin}/storage/v1/object/${BUCKET}`, {
+    method: "DELETE",
+    headers: { apikey: secret, authorization: `Bearer ${secret}`, "content-type": "application/json" },
+    body: JSON.stringify({ prefixes: objects }),
+  }).catch((error) => fail(`Storage no contestó (${codeOf(error)}).`));
+  if (!response.ok) fail(`Storage contestó ${response.status}.`);
+}
+
+let unmarked = 0;
+try {
+  if (paths.length > 0) await remove(paths);
+  // Lo que una versión retiró y ya venció (T-405): se borra y después se anota; la base comprueba otra vez que vence. La fila se queda.
+  for (const row of retired) {
+    await remove([row.path]);
+    const answer = (await client.query("select private.retired_file_done('resource', $1) as answer", [row.id])).rows[0]?.answer;
+    if (answer !== "done") {
+      unmarked += 1;
+      console.log(`storage:repaso: se borró, pero la base contestó ${answer ?? "nada"} al anotarlo: ${row.id}`);
+    }
+  }
+} catch (error) {
+  fail(`no se pudo terminar (${codeOf(error)}).`);
 } finally {
   await client.end().catch(() => {});
 }
-
-console.log(`storage:repaso: ${paths.length} objeto(s) que ninguna fila nombra.`);
-if (onlyLook || paths.length === 0) process.exit(0);
-
-const response = await fetch(`${api.origin}/storage/v1/object/${BUCKET}`, {
-  method: "DELETE",
-  headers: { apikey: secret, authorization: `Bearer ${secret}`, "content-type": "application/json" },
-  body: JSON.stringify({ prefixes: paths }),
-}).catch((error) => fail(`Storage no contestó (${codeOf(error)}).`));
-if (!response.ok) fail(`Storage contestó ${response.status}.`);
-console.log(`storage:repaso: borrados.`);
+console.log(unmarked === 0 ? `storage:repaso: borrados.` : `storage:repaso: borrados; ${unmarked} sin anotar.`);

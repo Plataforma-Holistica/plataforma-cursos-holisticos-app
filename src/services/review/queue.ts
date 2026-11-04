@@ -61,6 +61,28 @@ export interface ReviewSubmission {
   captionsMissing: string[];
   /** Lo que cambió por fuera después de enviarse, por el título de su lección o del recurso: no se publica así. */
   filesChanged: string[];
+  /** La versión del curso que se envió, y si es una versión de un curso ya publicado (RF-608). */
+  version: number;
+  isRevision: boolean;
+  /** De una versión, qué cambió frente a lo publicado (FL-45). Nulo en un primer envío. */
+  changes: VersionChanges | null;
+}
+/** Lo que cambió, por nombre: los datos del curso, y los títulos de lo que llegó, se fue, se renombró, cambió de video o de lugar. */
+export interface VersionChanges {
+  course: ("title" | "summary" | "practice" | "level")[];
+  modulesAdded: string[];
+  modulesRemoved: string[];
+  modulesRenamed: string[];
+  modulesMoved: string[];
+  lessonsAdded: string[];
+  lessonsRemoved: string[];
+  lessonsVideo: string[];
+  lessonsText: string[];
+  lessonsMoved: string[];
+  resourcesAdded: string[];
+  resourcesRemoved: string[];
+  resourcesRenamed: string[];
+  resourcesMoved: string[];
 }
 export interface ReviewCourse {
   courseId: string;
