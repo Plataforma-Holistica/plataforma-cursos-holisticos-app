@@ -1,0 +1,225 @@
+-- Los ayudantes de las pruebas de versiones (T-405, quinta solicitud: 90, 91 y 92), después de `_ayuda.psql`. Dejan dos maestros, Contenido, una práctica, un nivel, el anexo
+-- publicado y el curso «Respirar» de 1 ya publicado desde el editor: dos módulos, tres lecciones con video, un recurso del curso y otro de una lección.
+
+create function pruebas.p(p_n integer) returns uuid language sql immutable
+as $$ select ('a9000000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
+create function pruebas.m(p_n integer) returns uuid language sql immutable
+as $$ select ('a9000000-0000-0000-0001-' || lpad(p_n::text, 12, '0'))::uuid $$;
+create function pruebas.maestro(p_n integer, p_name text) returns void
+language plpgsql as $$
+begin
+  perform pruebas.como_dueno_sistema();
+  insert into public.teachers (id, profile_id, status) values (pruebas.m(p_n), pruebas.p(p_n), 'active');
+  insert into public.published_teachers (teacher_id, slug, display_name) values (pruebas.m(p_n), private.catalog_slug(p_name), p_name);
+  if private.current_legal_document('teacher_privacy_notice') is null then
+    insert into public.legal_documents (doc_type, version, title, body, effective_from)
+    values ('teacher_privacy_notice', 1, 'Aviso', 'Texto del aviso', now());
+  end if;
+  perform pruebas.limpiar();
+  perform set_config('app.actor_id', pruebas.p(p_n)::text, true);
+  insert into public.consents (profile_id, legal_document_id, origin)
+  values (pruebas.p(p_n), private.current_legal_document('teacher_privacy_notice'), 'account_settings');
+  perform pruebas.limpiar();
+end
+$$;
+create table pruebas.ids (k text primary key, v uuid not null);
+create function pruebas.id(p_k text) returns uuid language sql stable
+as $$ select v from pruebas.ids where k = p_k $$;
+create function pruebas.rj(p_id uuid, p_call text) returns jsonb
+language plpgsql as $$
+declare
+  v jsonb;
+begin
+  perform pruebas.a_nombre_de(p_id);
+  execute 'select ' || p_call into v;
+  perform pruebas.limpiar();
+  return v;
+end
+$$;
+create function pruebas.r(p_id uuid, p_call text, p_k text default null) returns text
+language plpgsql as $$
+declare
+  v jsonb := pruebas.rj(p_id, p_call);
+begin
+  if p_k is not null and coalesce(v ->> 'course', v ->> 'module', v ->> 'lesson') is not null then
+    insert into pruebas.ids values (p_k, coalesce(v ->> 'course', v ->> 'module', v ->> 'lesson')::uuid)
+    on conflict (k) do update set v = excluded.v;
+  end if;
+  return v ->> 'answer';
+end
+$$;
+-- Un video listo, con su original en la cubeta, como lo deja T-403. Vigente, o uno que llega a reemplazar a la vigente.
+create function pruebas.video(p_n integer, p_k text, p_lesson text, p_current boolean default true) returns uuid
+language plpgsql as $$
+declare
+  v_id uuid := gen_random_uuid();
+  v_path text := pruebas.m(p_n)::text || '/' || pruebas.id(p_k)::text || '/' || v_id::text;
+  v_object uuid;
+begin
+  perform pruebas.como_dueno();
+  insert into storage.objects (bucket_id, name, version, metadata)
+  values ('video-originals', v_path, 'v1', jsonb_build_object('size', 1000, 'mimetype', 'video/mp4'))
+  returning id into v_object;
+  insert into public.draft_videos (id, course_id, teacher_id, lesson_id, state, is_current, file_name, mime, storage_path, size_bytes, object_id, object_version, read_seconds,
+                                   provider, provider_asset_id, provider_playback_id, duration_seconds)
+  values (v_id, pruebas.id(p_k), pruebas.m(p_n), pruebas.id(p_lesson), 'ready', p_current, 'clase.mp4', 'video/mp4', v_path, 1000, v_object, 'v1', 300,
+          'mux', 'asset-' || v_id, 'play-' || v_id, 300);
+  return v_id;
+end
+$$;
+-- Un recurso listo, con su objeto en la cubeta, al final de su lugar. Lección nula: es del curso.
+create function pruebas.recurso(p_n integer, p_k text, p_lesson text, p_title text) returns uuid
+language plpgsql as $$
+declare
+  v_id uuid := gen_random_uuid();
+  v_path text := pruebas.m(p_n)::text || '/' || pruebas.id(p_k)::text || '/' || v_id::text;
+  v_object uuid;
+begin
+  perform pruebas.como_dueno();
+  insert into storage.objects (bucket_id, name, version, metadata)
+  values ('course-resources', v_path, 'v1', jsonb_build_object('size', 100, 'mimetype', 'application/pdf'))
+  returning id into v_object;
+  insert into public.draft_resources (id, course_id, teacher_id, lesson_id, title, kind, mime, storage_path, size_bytes, state, position, object_id, object_version)
+  values (v_id, pruebas.id(p_k), pruebas.m(p_n), pruebas.id(p_lesson), p_title, 'pdf', 'application/pdf', v_path, 100, 'ready',
+          coalesce((select max(x.position) from public.draft_resources x where x.place_id = coalesce(pruebas.id(p_lesson), pruebas.id(p_k))), 0) + 1, v_object, 'v1');
+  return v_id;
+end
+$$;
+-- Un curso de un módulo y una lección, con su video.
+create function pruebas.armar(p_n integer, p_k text, p_title text) returns void
+language plpgsql as $$
+begin
+  perform pruebas.r(pruebas.p(p_n), format('private.draft_create(%L, %L)', gen_random_uuid(), p_title), p_k);
+  perform pruebas.r(pruebas.p(p_n), format('private.draft_save_course(%L, 1, %L, %L, %L, %L)', pruebas.id(p_k), p_title, 'Un resumen.',
+          'a9000000-0000-0000-0002-000000000001', 'a9000000-0000-0000-0002-000000000002'));
+  perform pruebas.r(pruebas.p(p_n), format('private.draft_add_module(%L, 1, %L)', pruebas.id(p_k), 'Inicio'), p_k || '-m');
+  perform pruebas.r(pruebas.p(p_n), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id(p_k), pruebas.id(p_k || '-m'), 'Primera'), p_k || '-l');
+  perform pruebas.video(p_n, p_k, p_k || '-l');
+end
+$$;
+create function pruebas.vista(p_n integer, p_k text) returns jsonb
+language sql as $$ select pruebas.rj(pruebas.p(p_n), format('private.course_submit_preview(%L)', pruebas.id(p_k))) $$;
+create function pruebas.enviar(p_n integer, p_k text) returns text
+language plpgsql as $$
+declare
+  v jsonb := pruebas.vista(p_n, p_k);
+begin
+  return pruebas.rj(pruebas.p(p_n), format('private.course_submit(%L, %L, %L, %s, %s, %L, %L)', pruebas.id(p_k), v -> 'annex' ->> 'id', v ->> 'content_sha256',
+    v ->> 'term_years', v ->> 'submission_no', '203.0.113.7', 'Navegador de prueba')) ->> 'answer';
+end
+$$;
+create function pruebas.envio(p_k text) returns uuid language sql stable
+as $$ select c.id from public.course_reviews c where c.course_id = pruebas.id(p_k) order by c.submission_no desc limit 1 $$;
+-- Contenido aprueba, con los subtítulos de todos los videos vigentes.
+create function pruebas.aprobar(p_k text) returns text
+language plpgsql as $$
+declare
+  v text;
+  v_captions uuid[] := (select coalesce(array_agg(v.id), '{}') from public.draft_videos v where v.course_id = pruebas.id(p_k) and v.is_current);
+  v_submission uuid := pruebas.envio(p_k);
+begin
+  perform pruebas.a_nombre_de(pruebas.p(3));
+  v := private.review_approve(pruebas.id(p_k), v_submission, v_captions);
+  perform pruebas.limpiar();
+  return v;
+end
+$$;
+create function pruebas.devolver(p_k text) returns text
+language sql as $$
+  select pruebas.pide(pruebas.p(3), format('private.review_return(%L, %L, %L, %L)', pruebas.id(p_k), pruebas.envio(p_k), 'Falta una lección.', 'Agrega la lección de cierre.'))
+$$;
+create function pruebas.abrir(p_n integer, p_k text) returns text
+language sql as $$ select pruebas.r(pruebas.p(p_n), format('private.course_version_open(%L)', pruebas.id(p_k))) $$;
+create function pruebas.descartar(p_n integer, p_k text, p_seen bigint default null) returns text
+language sql as $$
+  select pruebas.r(pruebas.p(p_n), format('private.course_version_discard(%L, %s)', pruebas.id(p_k),
+    coalesce(p_seen, (select d.content_revision from public.course_drafts d where d.course_id = pruebas.id(p_k)), 0)))
+$$;
+create function pruebas.estado(p_k text) returns text language sql stable
+as $$ select r.state::text || coalesce('/' || r.pending_version_state::text, '') from public.course_registry r where r.course_id = pruebas.id(p_k) $$;
+-- Todo lo que ven los alumnos de un curso, y lo que del registro no cambia con una versión.
+create function pruebas.publicado(p_k text) returns jsonb
+language sql stable as $$
+  select jsonb_build_object(
+    'course', (select to_jsonb(c) from public.published_courses c where c.course_id = pruebas.id(p_k)),
+    'modules', (select jsonb_agg(to_jsonb(m) order by m.id) from public.published_modules m where m.course_id = pruebas.id(p_k)),
+    'lessons', (select jsonb_agg(to_jsonb(l) order by l.id) from public.published_lessons l where l.course_id = pruebas.id(p_k)),
+    'resources', (select jsonb_agg(to_jsonb(x) order by x.id) from public.published_resources x where x.course_id = pruebas.id(p_k)),
+    'videos', (select jsonb_agg(to_jsonb(a) order by a.id) from public.video_assets a where a.course_id = pruebas.id(p_k)),
+    'registry', (select to_jsonb(r) - array['state', 'pending_version_state', 'updated_at'] from public.course_registry r where r.course_id = pruebas.id(p_k)))
+$$;
+create function pruebas.borrador(p_k text) returns integer language sql stable
+as $$
+  select (select count(*) from public.course_drafts where course_id = pruebas.id(p_k))::integer
+       + (select count(*) from public.draft_modules where course_id = pruebas.id(p_k))::integer
+       + (select count(*) from public.draft_lessons where course_id = pruebas.id(p_k))::integer
+       + (select count(*) from public.draft_videos where course_id = pruebas.id(p_k))::integer
+       + (select count(*) from public.draft_resources where course_id = pruebas.id(p_k))::integer
+$$;
+create function pruebas.barrido(p_k text) returns text[]
+language plpgsql as $$
+declare
+  v text[];
+begin
+  perform pruebas.como_dueno();
+  select coalesce(array_agg(s.kind order by s.kind), '{}') into v from private.video_sweep() s
+  where starts_with(s.path, pruebas.m(1)::text || '/' || pruebas.id(p_k)::text || '/');
+  return v;
+end
+$$;
+create function pruebas.notas(p_n integer) returns jsonb
+language sql as $$ select pruebas.rj(pruebas.p(p_n), 'private.course_return_notes()') $$;
+-- La fila de la cola de un curso, como la lee Contenido.
+create function pruebas.de_cola(p_k text) returns jsonb
+language sql as $$
+  select c from jsonb_array_elements(pruebas.rj(pruebas.p(3), 'private.review_queue()') -> 'courses') c where c ->> 'course_id' = pruebas.id(p_k)::text
+$$;
+-- La revisión que lleva una fila del borrador, para las funciones que piden lo que se vio.
+create function pruebas.rev(p_table text, p_k text) returns bigint
+language plpgsql stable as $$
+declare
+  v bigint;
+begin
+  execute format('select revision from public.%I where id = %L', p_table, pruebas.id(p_k)) into v;
+  return v;
+end
+$$;
+grant execute on all functions in schema pruebas to anon, authenticated, app_service;
+grant select on pruebas.ids to anon, authenticated, app_service;
+grant insert, update on pruebas.ids to anon, authenticated, app_service;
+
+-- 1 y 2 son maestros. 3 tiene Contenido. 5 no tiene nada.
+select pruebas.alta(pruebas.p(n), 'versiones-' || n || '@prueba.test'), pruebas.confirmar(pruebas.p(n)) from generate_series(1, 5) n;
+select pruebas.maestro(1, 'Ana Luz');
+select pruebas.maestro(2, 'Beto Mar');
+select pruebas.dar_capacidad(pruebas.p(3), 'content');
+select pruebas.equipar(pruebas.p(3));
+select pruebas.limpiar();
+
+select pruebas.como_dueno_sistema();
+insert into public.practices (id, slug, name, position, cover_tone) values
+  ('a9000000-0000-0000-0002-000000000001', 'versiones-practica', 'Versiones práctica', 990, 1),
+  ('a9000000-0000-0000-0002-000000000003', 'versiones-otra', 'Versiones otra', 991, 2);
+insert into public.levels (id, slug, name, position) values ('a9000000-0000-0000-0002-000000000002', 'versiones-nivel', 'Versiones nivel', 990);
+insert into public.legal_documents (doc_type, version, title, body, effective_from)
+values ('license_annex', 1, 'Anexo de licencia', 'El texto completo del anexo.', now());
+select pruebas.como_dueno();
+insert into private.local_flags (flag) values ('video_test') on conflict do nothing;
+
+select pruebas.r(pruebas.p(1), format('private.draft_create(%L, %L)', gen_random_uuid(), 'Respirar'), 'curso');
+select pruebas.r(pruebas.p(1), format('private.draft_save_course(%L, 1, %L, %L, %L, %L)', pruebas.id('curso'), 'Respirar', 'Un resumen.',
+       'a9000000-0000-0000-0002-000000000001', 'a9000000-0000-0000-0002-000000000002'));
+select pruebas.r(pruebas.p(1), format('private.draft_add_module(%L, 1, %L)', pruebas.id('curso'), 'Inicio'), 'm1');
+select pruebas.r(pruebas.p(1), format('private.draft_add_module(%L, 2, %L)', pruebas.id('curso'), 'Práctica'), 'm2');
+select pruebas.r(pruebas.p(1), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('m1'), 'Postura'), 'l1');
+select pruebas.r(pruebas.p(1), format('private.draft_add_lesson(%L, %L, 2, %L)', pruebas.id('curso'), pruebas.id('m1'), 'Ritmo'), 'l2');
+select pruebas.r(pruebas.p(1), format('private.draft_add_lesson(%L, %L, 1, %L)', pruebas.id('curso'), pruebas.id('m2'), 'Sesión'), 'l3');
+select pruebas.r(pruebas.p(1), format('private.draft_save_lesson(%L, %L, 1, %L, %L)', pruebas.id('curso'), pruebas.id('l1'), 'Postura', 'Sentada, con la espalda recta.'));
+select pruebas.video(1, 'curso', 'l1') as v1 \gset
+select pruebas.video(1, 'curso', 'l2') as v2 \gset
+select pruebas.video(1, 'curso', 'l3') as v3 \gset
+select pruebas.recurso(1, 'curso', null, 'Temario') as rc \gset
+select pruebas.recurso(1, 'curso', 'l1', 'Guía') as rl \gset
+select pruebas.enviar(1, 'curso');
+select pruebas.aprobar('curso');
+select pruebas.como_dueno();

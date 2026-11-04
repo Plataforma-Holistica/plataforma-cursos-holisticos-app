@@ -1,7 +1,8 @@
 // El repaso de los videos (T-403) en la base LOCAL: vence lo que toca (`private.video_sweep()`, que dice qué hay en la papelera, qué sobra en la cubeta y qué lleva más de un día
 // sin terminar), le borra a Mux y a la cubeta lo que ya nadie nombra, y saca de la papelera lo que quedó borrado. Alcanza lo que el editor no: la papelera de un curso que ya no se
 // abre o que se borró. Un renglón reclamado y sin asset se busca por `passthrough` antes de sacarlo, porque Mux pudo haberlo creado; la base no lo da hasta 5 minutos después, porque un
-// asset recién creado puede no aparecer todavía en la lista. Si no se pudo buscar o borrar, el renglón se queda.
+// asset recién creado puede no aparecer todavía en la lista. Si no se pudo buscar o borrar, el renglón se queda. Desde T-405 borra además lo que una versión retiró y ya venció
+// (`private.retired_files_due()`): el video en Mux pasados VIDEO_RETIRADO_PROVEEDOR_DIAS, y su original pasados ARCHIVO_RETIRADO_DIAS; la fila se queda y se anota lo borrado.
 //
 //   pnpm video:repaso            # dice qué hay y lo borra
 //   pnpm video:repaso --ver      # solo dice cuántos hay, y no toca nada: lo que barre se revierte
@@ -117,12 +118,23 @@ async function clearTrash(row) {
   return removeObjects(row.path === null ? [] : [row.path]);
 }
 
+/** Borra lo que venció de un video que una versión retiró (T-405): en su proveedor, o su original en la cubeta. La fila se queda. */
+async function clearRetired(row) {
+  if (row.kind === "provider" && row.provider === "mux") {
+    if (muxHeaders === null || !(await removeAsset(row.asset))) return false;
+  }
+  if (row.kind === "original" && !(await removeObjects([row.path]))) return false;
+  return true;
+}
+
 let rows = [];
+let retired = [];
 try {
   await client.connect();
   await client.query("begin");
   rows = (await client.query("select kind, path, video, asset, provider, trash_id, claimed_since from private.video_sweep()")).rows;
   await client.query(onlyLook ? "rollback" : "commit");
+  retired = (await client.query("select kind, id, provider, asset, path from private.retired_files_due() where kind in ('provider', 'original')")).rows;
 } catch (error) {
   await client.end().catch(() => {});
   fail(`no se pudo leer la base (${codeOf(error)}).`);
@@ -132,6 +144,9 @@ const trash = rows.filter((row) => row.kind === "trash");
 const orphans = rows.filter((row) => row.kind === "orphan");
 const stuck = rows.filter((row) => row.kind === "stuck");
 console.log(`video:repaso: ${trash.length} en la papelera, ${orphans.length} que ninguna fila nombra, ${stuck.length} sin terminar desde hace más de un día.`);
+console.log(
+  `video:repaso: de lo que una versión retiró, ${retired.filter((row) => row.kind === "provider").length} vencido(s) en el proveedor y ${retired.filter((row) => row.kind === "original").length} original(es) vencido(s).`,
+);
 // Lo que sigue nombrado no se toca: se decide a mano (OP-21).
 for (const row of stuck) console.log(`video:repaso: sin terminar: ${row.video}`);
 
@@ -143,10 +158,22 @@ try {
       else left += 1;
     }
     if (!(await removeObjects(orphans.map((row) => row.path)))) fail("Storage no borró lo que sobra.");
+    // Lo retirado y vencido: se borra y después se anota; la base comprueba otra vez que vence.
+    for (const row of retired) {
+      if (!(await clearRetired(row))) {
+        left += 1;
+        continue;
+      }
+      const answer = (await client.query("select private.retired_file_done($1, $2) as answer", [row.kind, row.id])).rows[0]?.answer;
+      if (answer !== "done") {
+        left += 1;
+        console.log(`video:repaso: se borró, pero la base contestó ${answer ?? "nada"} al anotarlo: ${row.kind} ${row.id}`);
+      }
+    }
   }
 } catch (error) {
   fail(`no se pudo terminar (${codeOf(error)}).`);
 } finally {
   await client.end().catch(() => {});
 }
-if (!onlyLook) console.log(`video:repaso: ${left === 0 ? "listo." : `${left} se quedaron en la papelera: no se pudieron buscar o borrar.`}`);
+if (!onlyLook) console.log(`video:repaso: ${left === 0 ? "listo." : `${left} se quedaron sin borrar: no se pudieron buscar o borrar.`}`);

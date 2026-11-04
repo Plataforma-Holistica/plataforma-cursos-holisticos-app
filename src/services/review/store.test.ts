@@ -142,7 +142,33 @@ describe("lo enviado por el portal, en la cola", () => {
     total_duration_seconds: 600,
     loaded_at: "2026-11-02T18:00:00Z",
     lessons: [{ ...lesson, description: null, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100 }] }],
-    submission: { id: SUBMISSION, number: 1, resources: [], captions_missing: [LESSON], files_changed: ["Guía"], annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 } },
+    submission: {
+      id: SUBMISSION,
+      number: 1,
+      resources: [],
+      captions_missing: [LESSON],
+      files_changed: ["Guía"],
+      version: 1,
+      is_revision: false,
+      changes: null,
+      annex: { version: 1, accepted_at: "2026-11-02T18:00:00Z", statement: "Acepto.", term_years: 10 },
+    },
+  };
+  const CHANGES = {
+    course: ["title", "practice"],
+    modules_added: ["Final"],
+    modules_removed: [],
+    modules_renamed: ["Práctica diaria"],
+    modules_moved: ["Final", "Inicio"],
+    lessons_added: ["Nueva"],
+    lessons_removed: ["Postura"],
+    lessons_video: ["Sesión"],
+    lessons_text: [],
+    lessons_moved: ["Ritmo"],
+    resources_added: ["Temario nuevo"],
+    resources_removed: ["Temario"],
+    resources_renamed: [],
+    resources_moved: ["Guía"],
   };
 
   it("se lee con su envío y sus recursos", () => {
@@ -155,7 +181,35 @@ describe("lo enviado por el portal, en la cola", () => {
       resources: [],
       captionsMissing: [LESSON],
       filesChanged: ["Guía"],
+      version: 1,
+      isRevision: false,
+      changes: null,
       annex: { version: 1, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto.", termYears: 10 },
+    });
+  });
+
+  it("una versión de un curso publicado dice cuál es y qué cambió (RF-608, FL-45)", () => {
+    const version = { ...sent, submission: { ...sent.submission, version: 3, is_revision: true, changes: CHANGES } };
+    const [course] = queueOf({ fresh_code: true, courses: [version] })?.courses ?? [];
+    expect(course?.submission).toMatchObject({
+      version: 3,
+      isRevision: true,
+      changes: {
+        course: ["title", "practice"],
+        modulesAdded: ["Final"],
+        modulesRemoved: [],
+        modulesRenamed: ["Práctica diaria"],
+        modulesMoved: ["Final", "Inicio"],
+        lessonsAdded: ["Nueva"],
+        lessonsRemoved: ["Postura"],
+        lessonsVideo: ["Sesión"],
+        lessonsText: [],
+        lessonsMoved: ["Ritmo"],
+        resourcesAdded: ["Temario nuevo"],
+        resourcesRemoved: ["Temario"],
+        resourcesRenamed: [],
+        resourcesMoved: ["Guía"],
+      },
     });
   });
 
@@ -170,6 +224,8 @@ describe("lo enviado por el portal, en la cola", () => {
     ["una ruta en un recurso", { ...sent, lessons: [{ ...lesson, resources: [{ id: LESSON, title: "Guía", kind: "pdf", size_bytes: 100, storage_path: "ruta" }] }] }],
     ["el origen en el anexo", { ...sent, submission: { ...sent.submission, annex: { ...sent.submission.annex, ip: "203.0.113.7" } } }],
     ["la huella en el envío", { ...sent, submission: { ...sent.submission, content_sha256: "ab" } }],
+    ["un dato del curso que no se conoce en lo que cambió", { ...sent, submission: { ...sent.submission, is_revision: true, changes: { ...CHANGES, course: ["cover"] } } }],
+    ["una lista de más en lo que cambió", { ...sent, submission: { ...sent.submission, is_revision: true, changes: { ...CHANGES, videos_added: [] } } }],
   ])("%s no pasa: la lectura es estricta", (_what, course) => {
     expect(() => queueOf({ fresh_code: true, courses: [course] })).toThrow();
   });
