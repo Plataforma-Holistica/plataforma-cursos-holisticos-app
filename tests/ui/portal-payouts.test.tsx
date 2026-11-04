@@ -296,6 +296,17 @@ describe("PA-47 · Liquidación del periodo", () => {
     const invoice = screen.getByRole("region", { name: "Factura" });
     expect(within(invoice).getByText(/Todavía no se puede facturar: nos falta el dato de La Plataforma/)).toBeInTheDocument();
     expect(within(invoice).getByText("Todavía no has enviado una factura de este periodo.")).toBeInTheDocument();
+    // «Qué sigue» tampoco lo ofrece: diría lo contrario que el bloque de factura.
+    expect(screen.queryByText(/Ya puedes facturar/)).not.toBeInTheDocument();
+  });
+
+  it("una acumulada lleva su bruto, que pasa al siguiente, sin IVA, retenciones ni neto", async () => {
+    const money = { ...REPORT.money!, vatCents: 0, incomeTaxWithheldCents: 0, vatWithheldCents: 0, netCents: REPORT.money!.subtotalCents };
+    mocks.payoutReport.mockResolvedValueOnce({ kind: "ready", value: { outcome: "ok", value: { ...REPORT, status: "carried_forward", money } } });
+    render(await at(["pagos", "2031-02"]));
+    expect(screen.getByRole("region", { name: "Cómo se llega a tu pago" })).toBeInTheDocument();
+    expect(screen.queryByText("Neto a pagar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Retenciones")).not.toBeInTheDocument();
   });
 
   it("sin datos fiscales, el bloque de factura se sustituye por el aviso con «Capturar datos»", async () => {

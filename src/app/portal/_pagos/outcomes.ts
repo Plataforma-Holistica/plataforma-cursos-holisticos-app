@@ -57,6 +57,8 @@ export interface NextFacts {
   reference: string | null;
   /** Lo que una acumulada pasa al siguiente, sin signo; `against` si va en contra. */
   carried: { amount: string; against: boolean } | null;
+  /** Si existe el RFC de quien recibe (PQ-20). Sin él no se puede facturar, y «Qué sigue» no lo ofrece. */
+  receiverReady: boolean;
 }
 
 export interface NextStep {
@@ -76,11 +78,13 @@ export function nextStep(facts: NextFacts): NextStep {
     case "calculated":
       return say(next.calculated);
     case "awaiting_invoice":
+      if (!facts.receiverReady) return say(t(text.receiverMissing));
       if (facts.amount === null) return say(next.awaitingInvoiceBare);
       return say(facts.dueOn === null ? t(next.awaitingInvoiceNoDate, { amount: facts.amount }) : t(next.awaitingInvoice, { amount: facts.amount, date: facts.dueOn }));
     case "invoice_in_review":
       return say(facts.submittedOn === null ? next.invoiceInReviewNoDate : t(next.invoiceInReview, { date: facts.submittedOn }));
     case "invoice_rejected":
+      if (!facts.receiverReady) return say(t(text.receiverMissing));
       return say(facts.rejectionReason === null ? next.invoiceRejectedNoReason : t(next.invoiceRejected, { reason: facts.rejectionReason }));
     case "ready_to_pay":
       return say(next.readyToPay);

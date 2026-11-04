@@ -380,7 +380,7 @@ export const portal = defineMessages({
     paymentTitle: "Pago",
     paidOn: "Fecha",
     reference: "Referencia",
-    paidAmount: "Neto pagado",
+    paidAmount: "Monto transferido",
     studentsTitle: "Alumno por alumno",
     aliasNote: "Cada alumno aparece con un alias: el mismo siempre contigo, y distinto con cada {maestro}. Su historial en otros cursos es privado, incluso para ti.",
     studentsCaption: "Tus alumnos del periodo, con sus puntos",

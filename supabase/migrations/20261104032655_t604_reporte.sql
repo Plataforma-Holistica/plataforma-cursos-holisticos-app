@@ -45,28 +45,32 @@ $$;
 revoke all on function private.alias_candidate(integer) from public;
 
 -- Que cada alumno del maestro en el periodo tenga su alias. Bajo el candado del maestro: dos lecturas a la vez no chocan en el único. Si no cabe, falla
--- entero: un alumno sin alias desaparecería del reporte.
+-- entero: un alumno sin alias desaparecería del reporte. El tramo de números arranca según cuántos alias tiene ya el maestro: con la mitad de un tramo
+-- ocupada se empieza en el siguiente, para no gastar decenas de choques por alumno en un maestro grande.
 create function private.ensure_student_aliases(p_teacher uuid, p_period public.period_id) returns void
 language plpgsql set search_path = ''
 as $$
 declare
   v_profile uuid;
   v_try integer;
+  v_start integer;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('student_aliases:' || p_teacher::text, 0));
+  select case when x.n >= 21600 then 60 when x.n >= 1800 then 20 else 0 end into v_start
+  from (select pg_catalog.count(*) as n from private.student_aliases a where a.teacher_id = p_teacher) x;
   for v_profile in
     select s.profile_id from public.payout_shares s
     where s.period_id = p_period and s.teacher_id = p_teacher
       and not exists (select 1 from private.student_aliases a where a.teacher_id = p_teacher and a.profile_id = s.profile_id)
   loop
-    v_try := 0;
+    v_try := v_start;
     loop
       insert into private.student_aliases (teacher_id, profile_id, alias)
       values (p_teacher, v_profile, private.alias_candidate(v_try))
       on conflict (teacher_id, alias) do nothing;
       exit when found;
       v_try := v_try + 1;
-      if v_try >= 400 then
+      if v_try >= v_start + 400 then
         raise exception 'student alias space exhausted' using errcode = 'P0001';
       end if;
     end loop;

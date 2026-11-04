@@ -138,8 +138,9 @@ const STEPS = PAYOUT_STEPS.map((step) => ({ step, label: PAYOUT_STATUS[step].lab
 
 const BONUS_LABEL = { founder: text.lines.founder, open_course: text.lines.openCourse, discretionary: text.lines.discretionary } as const;
 
-function moneyLines(value: PayoutMoney): MoneyLine[] {
-  return [
+/** Una acumulada no se paga: lleva el bruto, que pasa al siguiente, sin IVA, retenciones ni neto. */
+function moneyLines(value: PayoutMoney, carried: boolean): MoneyLine[] {
+  const lines: MoneyLine[] = [
     { key: "pool", label: text.lines.pool, amount: money(value.poolCents) },
     ...value.bonuses.map((bonus, index) => ({ key: `bono-${index}`, label: BONUS_LABEL[bonus.kind], amount: money(bonus.amountCents) })),
     ...value.adjustments.map((adjustment, index) => ({
@@ -153,6 +154,7 @@ function moneyLines(value: PayoutMoney): MoneyLine[] {
     { key: "retenciones", label: text.lines.withheld, amount: money(-(value.incomeTaxWithheldCents + value.vatWithheldCents)) },
     { key: "neto", label: text.lines.net, amount: money(value.netCents), total: true },
   ];
+  return carried ? lines.filter((line) => line.key !== "iva" && line.key !== "retenciones" && line.key !== "neto") : lines;
 }
 
 /** Sin factura: antes de liberar, en lo que no se paga y cuando faltan los datos fiscales (ahí va el aviso con «Capturar datos»). */
@@ -181,11 +183,12 @@ export function reportView(value: PayoutReportValue): ReportView {
       paidOn: value.payment === null ? null : longDay(value.payment.paidOn),
       reference: value.payment?.reference ?? null,
       carried: carried === null ? null : { amount: money(Math.abs(carried)), against: carried < 0 },
+      receiverReady: value.invoice.receiverRfc !== null,
     }),
     overdue: value.overdue ? overdueText(dueOn) : null,
     summary: { pool: money(summary.poolCents), poolBps: poolPercent(summary.poolBps), share: money(summary.totalCents), nothingAssigned: summary.nothingAssigned },
     downloadable: true,
-    money: released === null ? null : moneyLines(released),
+    money: released === null ? null : moneyLines(released, value.status === "carried_forward"),
     invoice:
       released === null || NO_INVOICE.has(value.status)
         ? null
@@ -224,7 +227,7 @@ export function emptyReportView(read: { period: string; poolCents: number; poolB
     status: statusOf("empty"),
     step: null,
     steps: STEPS,
-    next: nextStep({ status: "empty", amount: null, dueOn: null, submittedOn: null, rejectionReason: null, paidOn: null, reference: null, carried: null }),
+    next: nextStep({ status: "empty", amount: null, dueOn: null, submittedOn: null, rejectionReason: null, paidOn: null, reference: null, carried: null, receiverReady: false }),
     overdue: null,
     summary: { pool: money(read.poolCents), poolBps: poolPercent(read.poolBps), share: money(0), nothingAssigned: read.nothingAssigned },
     downloadable: false,

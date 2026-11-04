@@ -16,6 +16,7 @@ const NONE: Omit<NextFacts, "status"> = {
   paidOn: null,
   reference: null,
   carried: null,
+  receiverReady: true,
 };
 const next = (status: TeacherPayoutStatus, facts: Partial<NextFacts> = {}) => nextStep({ ...NONE, status, ...facts });
 const BACK = "/portal/pagos/2031-02";
