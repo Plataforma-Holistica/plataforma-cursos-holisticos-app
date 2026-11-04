@@ -38,10 +38,18 @@ const KEY_ENTRY = /^([1-9][0-9]{0,4}):([A-Za-z0-9+/]{43}=):([0-9a-f]{8})$/;
 /** Lo cifrado. Solo este archivo lo emite: un texto cualquiera no pasa por aquí. */
 export type SealedField = Buffer & { readonly __sealed: unique symbol };
 
-export type TaxField = "rfc" | "legal_name" | "clabe";
+export type TaxField = "rfc" | "legal_name" | "clabe" | "invoice_xml";
 
-/** De qué columna es un dato. `last4` solo en la CLABE: los últimos cuatro que van en claro. */
-export type TaxFieldContext = { teacher: string; rowVersion: number } & ({ field: Exclude<TaxField, "clabe"> } | { field: "clabe"; last4: string });
+/**
+ * De qué columna es un dato. `last4` solo en la CLABE: los últimos cuatro que van en claro. El XML de una factura (T-604; decisión de Sergio del
+ * 2026-11-03) lo atan su maestro y su factura, y no tiene versión de fila: una factura no cambia.
+ */
+export type TaxFieldContext =
+  | ({ teacher: string; rowVersion: number } & ({ field: "rfc" | "legal_name" } | { field: "clabe"; last4: string }))
+  | { teacher: string; field: "invoice_xml"; invoice: string };
+
+/** Lo más que mide un XML de factura: lo que la base guarda (`teacher_invoices_xml_sealed`). */
+const MAX_INVOICE_XML_BYTES = 256 * 1024;
 
 /** No hay llave con que hacerlo. La aplicación sigue, y lo fiscal dice que no está disponible. */
 export class TaxCipherUnavailable extends Error {
@@ -92,13 +100,21 @@ function loadKeys(keys: string | undefined, active: string | undefined): Keys | 
 }
 
 function assertContext(context: TaxFieldContext): void {
-  const { teacher, rowVersion } = context;
-  if (!TEACHER_ID.test(teacher) || !Number.isSafeInteger(rowVersion) || rowVersion < 1 || rowVersion > MAX_VERSION) throw new TaxCipherMisuse();
+  if (!TEACHER_ID.test(context.teacher)) throw new TaxCipherMisuse();
+  if (context.field === "invoice_xml") {
+    if (!TEACHER_ID.test(context.invoice)) throw new TaxCipherMisuse();
+    return;
+  }
+  const { rowVersion } = context;
+  if (!Number.isSafeInteger(rowVersion) || rowVersion < 1 || rowVersion > MAX_VERSION) throw new TaxCipherMisuse();
   if (context.field === "clabe" && !/^[0-9]{4}$/.test(context.last4)) throw new TaxCipherMisuse();
 }
 
-/** Los datos asociados. Canónicos porque `assertContext` ya revisó que ningún valor pueda traer el separador. */
+/** Los datos asociados. Canónicos porque `assertContext` ya revisó que ningún valor pueda traer el separador. La tabla va primero: lo de una no abre en la otra. */
 function associatedData(context: TaxFieldContext, keyVersion: number): Buffer {
+  if (context.field === "invoice_xml") {
+    return Buffer.from(["teacher_invoices", context.teacher, context.field, context.invoice, String(keyVersion)].join("|"), "utf8");
+  }
   const last4 = context.field === "clabe" ? context.last4 : "";
   return Buffer.from(["teacher_tax_profiles", context.teacher, context.field, String(context.rowVersion), String(keyVersion), last4].join("|"), "utf8");
 }
@@ -128,6 +144,7 @@ export function createTaxCipher(source: KeySource = () => ({ keys: getEnv().PII_
       assertContext(context);
       if (text === "") throw new TaxCipherMisuse();
       if (context.field === "clabe" && (!/^[0-9]{18}$/.test(text) || !text.endsWith(context.last4))) throw new TaxCipherMisuse();
+      if (context.field === "invoice_xml" && Buffer.byteLength(text, "utf8") > MAX_INVOICE_XML_BYTES) throw new TaxCipherMisuse();
       const current = keys();
       const key = current?.byVersion.get(current.active);
       if (current === null || key === undefined) throw new TaxCipherUnavailable();

@@ -204,3 +204,38 @@ describe("un contexto sin forma no se usa", () => {
     }
   });
 });
+
+// El XML de la factura del maestro va con la misma llave (decisión de Sergio del 2026-11-03: trae su RFC, su nombre y su régimen). Lo ata
+// su maestro y su factura: copiado a otra factura, o a una columna de los datos fiscales, no abre.
+describe("el XML de una factura", () => {
+  const INVOICE = "c0000000-0000-4000-8000-000000000009";
+  const invoice: TaxFieldContext = { teacher: TEACHER, field: "invoice_xml", invoice: INVOICE };
+  const XML = '<?xml version="1.0" encoding="UTF-8"?><cfdi:Comprobante Nombre="ANA GÓMEZ"/>';
+
+  it("se cifra y se abre igual", () => {
+    expect(cipher.open(invoice, cipher.seal(invoice, XML))).toBe(XML);
+  });
+
+  it("en otra factura, de otro maestro o como RFC, no abre", () => {
+    const sealed = cipher.seal(invoice, XML);
+    expect(() => cipher.open({ ...invoice, invoice: "c0000000-0000-4000-8000-000000000008" }, sealed)).toThrow(TaxCipherTampered);
+    expect(() => cipher.open({ ...invoice, teacher: OTHER }, sealed)).toThrow(TaxCipherTampered);
+    expect(() => cipher.open({ teacher: TEACHER, field: "rfc", rowVersion: 1 }, sealed)).toThrow(TaxCipherTampered);
+  });
+
+  it("lo que mide la base: el texto más 31 bytes", () => {
+    expect(cipher.seal(invoice, XML).length).toBe(Buffer.byteLength(XML) + 31);
+  });
+
+  it.each([
+    ["una factura sin forma", { ...invoice, invoice: "x|rfc" }],
+    ["un maestro sin forma", { ...invoice, teacher: "x" }],
+  ] as [string, TaxFieldContext][])("%s no se usa", (_name, bad) => {
+    expect(() => cipher.seal(bad, XML)).toThrow(TaxCipherMisuse);
+  });
+
+  it("más de 256 KB no se cifra: la base no lo guardaría", () => {
+    expect(() => cipher.seal(invoice, "x".repeat(256 * 1024 + 1))).toThrow(TaxCipherMisuse);
+    expect(() => cipher.seal(invoice, "x".repeat(256 * 1024))).not.toThrow();
+  });
+});

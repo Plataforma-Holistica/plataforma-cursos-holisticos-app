@@ -18,7 +18,13 @@ const naming = (pattern: RegExp) => sources.filter((source) => pattern.test(sour
 const CIPHER = "src/services/teachers/tax-cipher.ts";
 
 /** Quién usa el cifrado. Una entrada nueva aquí es decidir que ese código puede ver un dato fiscal. */
-const USERS: readonly string[] = ["src/services/teachers/tax-data.ts", "src/services/teachers/tax-profile.ts"];
+// La factura del maestro (T-604) cifra su XML con la misma llave y abre el RFC para compararlo: decisión de Sergio del 2026-11-03.
+const USERS: readonly string[] = [
+  "src/services/teachers/invoice-data.ts",
+  "src/services/teachers/invoices.ts",
+  "src/services/teachers/tax-data.ts",
+  "src/services/teachers/tax-profile.ts",
+];
 
 describe("los datos fiscales se cifran en un solo lugar", () => {
   it("AES-GCM se usa solo en el archivo del cifrado", () => {
@@ -64,5 +70,10 @@ describe("los datos fiscales se cifran en un solo lugar", () => {
     const code = sources.find((source) => source.file === CIPHER)?.text ?? "";
     expect(code).not.toMatch(/\bconsole\./);
     expect(code).not.toMatch(/\bcause\b/);
+  });
+
+  it("las funciones de la factura (T-604) se nombran en un solo archivo, y su tabla solo en los datos asociados del cifrado", () => {
+    expect(naming(/private\.invoice_/)).toEqual(["src/services/teachers/invoice-records.ts"]);
+    expect(naming(/teacher_invoices/)).toEqual([CIPHER]);
   });
 });
