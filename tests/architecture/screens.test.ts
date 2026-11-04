@@ -133,6 +133,10 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
       /const outcome = createOutcome\(await createCourse\(jar, \{ token, title: request\.title \}\)\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
     deleteCourseAction:
       /const outcome = deleteOutcome\(await deleteCourse\(jar, \{ course: request\.course, seen: request\.seen \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+    // Las versiones de un curso publicado (T-405): «Editar» lleva el curso; descartar, la revisión que se vio.
+    openVersionAction: /const outcome = openOutcome\(await openVersion\(jar, \{ course: request\.course \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+    discardVersionAction:
+      /const outcome = discardOutcome\(await discardVersion\(jar, \{ course: request\.course, seen: request\.seen \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
   "src/app/portal/_enviar/actions.ts": {
     // Enviar a revisión (T-405): el servicio corre la guarda, la casilla y Mux, y la base firma solo lo que se vio. El origen sale de la petición, nunca del formulario.
@@ -815,6 +819,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-contrasena",
       "bloque-curso-borrar",
       "bloque-curso-nuevo",
+      "bloque-curso-publicado",
       "bloque-editor-datos",
       "bloque-editor-estructura",
       "bloque-editor-leccion",
@@ -843,6 +848,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-sesiones",
       "bloque-textos-codigo",
       "bloque-textos-lista",
+      "bloque-version-descartar",
     ]);
   });
 

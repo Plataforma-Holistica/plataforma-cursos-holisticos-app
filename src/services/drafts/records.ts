@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
-import { COURSE_STATES, type CourseFields, type DraftChoices, type DraftCourse, type ReturnNote, type TeacherCourse } from "./drafts";
+import { COURSE_STATES, PENDING_VERSIONS, type CourseFields, type DraftChoices, type DraftCourse, type PublishedCourse, type ReturnNote, type TeacherCourse } from "./drafts";
 import { MISSING_KINDS, SUBMIT_ANSWERS, type AcceptedAnnex, type AnnexText, type SubmitAnswer, type SubmitAssets, type SubmitInput, type SubmitPreview } from "./submit";
 
 // Lo que el servicio del borrador le pregunta a la base (esquema §5.2). Las lecturas reciben la
@@ -14,6 +14,7 @@ import { MISSING_KINDS, SUBMIT_ANSWERS, type AcceptedAnnex, type AnnexText, type
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const id = z.string().regex(ID);
 const state = z.enum(COURSE_STATES);
+const pending = z.enum(PENDING_VERSIONS).nullable();
 // Las revisiones son bigint: llegan como texto y se leen como número entero que cabe.
 const count = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const instant = z.union([z.string(), z.date()]).transform((value) => (value instanceof Date ? value.toISOString() : value));
@@ -22,12 +23,15 @@ const tally = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const teacherCourseRow = z.object({
   course_id: id,
   state,
+  pending_version_state: pending,
   title: z.string(),
   updated_at: instant,
   content_revision: count.nullable(),
   teacher_name: z.string().nullable(),
   practice_name: z.string().nullable(),
   cover_tone: z.number().int().min(1).max(8).nullable(),
+  lesson_count: tally.nullable(),
+  slug: z.string().nullable(),
   has_draft: z.boolean(),
   has_summary: z.boolean(),
   practice_ready: z.boolean(),
@@ -45,10 +49,12 @@ const teacherCourseRow = z.object({
  */
 export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
   const rows = await tx.query(
-    sql`select r.course_id, r.state, coalesce(d.title, p.title, '') as title,
+    sql`select r.course_id, r.state, r.pending_version_state, coalesce(d.title, p.title, '') as title,
                coalesce(d.updated_at, r.updated_at) as updated_at, d.content_revision,
                (select pr.display_name from public.profiles pr where pr.id = (select auth.uid())) as teacher_name,
                pc.name as practice_name, pc.cover_tone,
+               case when d.course_id is not null then (select count(*) from public.draft_lessons l where l.course_id = d.course_id) else p.lesson_count end as lesson_count,
+               p.slug,
                d.course_id is not null as has_draft,
                d.summary is not null as has_summary,
                pc.id is not null as practice_ready,
@@ -60,7 +66,7 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
         from public.course_registry r
         left join public.course_drafts d on d.course_id = r.course_id
         left join public.published_courses p on p.course_id = r.course_id
-        left join public.practices pc on pc.id = d.practice_id and pc.is_active
+        left join public.practices pc on pc.id = coalesce(d.practice_id, p.practice_id) and pc.is_active
         where r.teacher_id = (select private.current_teacher_id())
         order by coalesce(d.updated_at, r.updated_at) desc, r.course_id`,
     teacherCourseRow,
@@ -68,6 +74,7 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
   return rows.map((row) => ({
     id: row.course_id,
     state: row.state,
+    pendingVersion: row.pending_version_state,
     title: row.title,
     updatedAt: row.updated_at,
     contentRevision: row.content_revision,
@@ -77,6 +84,8 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     submittedAt: null,
     practiceName: row.practice_name,
     coverTone: row.cover_tone,
+    lessonCount: row.lesson_count,
+    slug: row.slug,
     draft: row.has_draft
       ? {
           hasSummary: row.has_summary,
@@ -129,6 +138,7 @@ const videoSchema = z.strictObject({
 const draftRow = z.object({
   course_id: id,
   state,
+  pending_version_state: pending,
   version: z.number().int().min(1),
   title: z.string(),
   summary: z.string().nullable(),
@@ -159,7 +169,7 @@ export async function readReturnNotes(tx: Tx): Promise<Map<string, ReturnNote>> 
 
 export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCourse | null> {
   const [draft] = await tx.query(
-    sql`select d.course_id, r.state, d.version, d.title, d.summary, d.practice_id, d.level_id,
+    sql`select d.course_id, r.state, r.pending_version_state, d.version, d.title, d.summary, d.practice_id, d.level_id,
                d.revision, d.structure_revision, d.content_revision, d.updated_at,
                (select pr.display_name from public.profiles pr where pr.id = (select auth.uid())) as teacher_name,
                coalesce((
@@ -194,6 +204,7 @@ export async function readDraftCourse(tx: Tx, course: string): Promise<DraftCour
   return {
     id: draft.course_id,
     state: draft.state,
+    pendingVersion: draft.pending_version_state,
     version: draft.version,
     title: draft.title,
     summary: draft.summary,
@@ -318,6 +329,64 @@ export const askMoveLesson = (
 
 export const askDeleteCourse = (tx: Tx, course: string, seen: number) =>
   ask(tx, sql`select private.draft_delete_course(${course}::uuid, ${seen}::bigint) as result`);
+
+/** «Editar» un curso publicado (T-405): su versión en borrador. */
+export const askOpenVersion = (tx: Tx, course: string) => ask(tx, sql`select private.course_version_open(${course}::uuid) as result`);
+
+/** Descartar la versión, con la revisión del contenido que se vio. */
+export const askDiscardVersion = (tx: Tx, course: string, seen: number) =>
+  ask(tx, sql`select private.course_version_discard(${course}::uuid, ${seen}::bigint) as result`);
+
+const publishedRow = z.object({
+  course_id: id,
+  state,
+  pending_version_state: pending,
+  title: z.string(),
+  summary: z.string().nullable(),
+  slug: z.string(),
+  copyable: z.boolean(),
+  modules: z.array(
+    z.strictObject({
+      id,
+      title: z.string(),
+      lessons: z.array(z.strictObject({ id, title: z.string(), seconds: z.number().int().min(1) })),
+    }),
+  ),
+});
+
+/**
+ * Lo publicado de un curso del maestro de la sesión, como la persona (T-405): sus lecciones vigentes por la política «solo lo suyo», y el título de cada
+ * módulo por la pública, que pide el curso listado. En una sola consulta, como el borrador.
+ */
+export async function readPublishedCourse(tx: Tx, course: string): Promise<PublishedCourse | null> {
+  const [row] = await tx.query(
+    sql`select p.course_id, r.state, r.pending_version_state, p.title, p.summary, p.slug, p.course_review_id is not null as copyable,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object('id', x.module_id, 'title', x.module_title, 'lessons', x.lessons) order by x.first)
+                 from (
+                   select l.module_id, coalesce(m.title, '') as module_title, min(l.position) as first,
+                          jsonb_agg(jsonb_build_object('id', l.id, 'title', l.title, 'seconds', l.duration_seconds) order by l.position) as lessons
+                   from public.published_lessons l
+                   left join public.published_modules m on m.id = l.module_id
+                   where l.course_id = p.course_id and l.is_current
+                   group by l.module_id, m.title) as x), '[]'::jsonb) as modules
+        from public.published_courses p
+        join public.course_registry r on r.course_id = p.course_id
+        where p.course_id = ${course}::uuid and p.teacher_id = (select private.current_teacher_id())`,
+    publishedRow,
+  );
+  if (!row) return null;
+  return {
+    id: row.course_id,
+    state: row.state,
+    pendingVersion: row.pending_version_state,
+    title: row.title,
+    summary: row.summary,
+    slug: row.slug,
+    copyable: row.copyable,
+    modules: row.modules,
+  };
+}
 
 /** Lo que contestó un cambio, como una de las respuestas de su lista. Otra cosa lanza. */
 export function answerOf<Answer extends string>(known: readonly Answer[], answer: string): Answer {

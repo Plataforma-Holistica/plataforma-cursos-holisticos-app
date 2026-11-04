@@ -29,6 +29,8 @@ export type {
   DraftRead,
   DraftResource,
   DraftVideo,
+  PendingVersion,
+  PublishedCourse,
   ReturnNote,
   TeacherCourse,
 } from "./drafts";
@@ -45,6 +47,9 @@ export const { beginVideo, renewVideoUpload, confirmVideo, removeVideo, checkVid
 export const {
   teacherCourses,
   draftCourse,
+  publishedCourse,
+  openVersion,
+  discardVersion,
   draftChoices,
   createCourse,
   saveCourse,

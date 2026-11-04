@@ -2,8 +2,9 @@ import { resourceDetail, sizeText } from "@/app/_catalog/resources/words";
 import { clockTime, longDate, PRODUCT_TIME_ZONE, productDay } from "@/app/_lib/dates";
 import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
-import { portalCoursePath, ROUTES, portalSubmitPath } from "@/services/account/navigation";
+import { portalCoursePath, portalDiscardVersionPath, ROUTES, portalSubmitPath } from "@/services/account/navigation";
 import type { CourseState, DraftChoices, DraftCourse, DraftVideo } from "@/services/drafts/editor";
+import { isEditable, isInReview } from "@/services/drafts/field-rules";
 import type { StatusTone } from "@/ui/status-badge";
 
 import { editorButton, moveTarget } from "./outcomes";
@@ -19,6 +20,8 @@ import { resourceButton } from "./resource-outcomes";
 //     campo no los quita (el borrador los conserva hasta que su maestro elija otros).
 //   · La hora del guardado va en la zona del producto, con la fecha si no es de hoy (decisión mía sin
 //     confirmar).
+//   · La versión de un curso publicado (T-405) se edita como un borrador, con el aviso de que los alumnos siguen viendo lo publicado, y se
+//     descarta desde aquí; enviada, se dice como un curso en revisión.
 
 const text = portal.editor;
 
@@ -103,6 +106,8 @@ export interface EditorView {
   notice: string | null;
   /** PA-44, si se puede enviar desde aquí. */
   submitHref: string | null;
+  /** Descartar la versión de un curso publicado (T-405), si se puede. */
+  discardHref: string | null;
   /** Si Contenido lo devolvió: arriba de todo (FL-35, paso 3). */
   returned: { title: string; reason: string; whatToFix: string } | null;
   paths: { base: string; self: string };
@@ -286,16 +291,21 @@ export function editorView(
     };
   });
 
-  const key = STATE_KEYS[draft.state];
+  const editable = isEditable(draft.state, draft.pendingVersion);
+  const version = draft.state === "changes_pending" && draft.pendingVersion === "draft";
+  // Una versión enviada se dice como un curso en revisión.
+  const shown: CourseState = isInReview(draft.state, draft.pendingVersion) ? "in_review" : draft.state;
+  const key = STATE_KEYS[shown];
   return {
     course: draft.id,
     title: draft.title,
     state: portal.states[key],
-    tone: TONES[draft.state],
+    tone: TONES[shown],
     saved: savedLabel(draft.updatedAt, context.now),
-    editable: draft.state === "draft" && !context.readOnly,
-    notice: key === "draft" ? null : portal.stateDetail[key],
-    submitHref: draft.state === "draft" && !context.readOnly ? portalSubmitPath(draft.id) : null,
+    editable: editable && !context.readOnly,
+    notice: version ? text.versionNotice : key === "draft" ? null : portal.stateDetail[key],
+    submitHref: editable && !context.readOnly ? portalSubmitPath(draft.id) : null,
+    discardHref: version && !context.readOnly ? portalDiscardVersionPath(draft.id) : null,
     returned:
       draft.returned === null
         ? null

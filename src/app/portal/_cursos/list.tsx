@@ -38,6 +38,7 @@ export async function CoursesSection({ claims, readOnly }: { claims: VerifiedCla
       {notice === "course_deleted" && <InlineAlert tone="success">{text.deleted}</InlineAlert>}
       {notice === "course_gone" && <InlineAlert tone="neutral">{text.gone}</InlineAlert>}
       {notice === "course_submitted" && <InlineAlert tone="success">{text.submitted}</InlineAlert>}
+      {notice === "version_discarded" && <InlineAlert tone="success">{text.discarded}</InlineAlert>}
       {rows.length === 0 ? (
         <div className="flex flex-col items-start gap-4 rounded-md border border-border p-6">
           <p className="text-body-l text-text-2">{text.empty}</p>
@@ -69,6 +70,12 @@ export async function CoursesSection({ claims, readOnly }: { claims: VerifiedCla
                     <span aria-hidden="true">{row.action.label}</span>
                     <span className="sr-only">{row.action.name}</span>
                   </Button>
+                )}
+                {row.publicPage !== null && (
+                  <TextLink href={row.publicPage.href}>
+                    <span aria-hidden="true">{row.publicPage.label}</span>
+                    <span className="sr-only">{row.publicPage.name}</span>
+                  </TextLink>
                 )}
                 {row.remove !== null && (
                   <TextLink href={row.remove.href}>

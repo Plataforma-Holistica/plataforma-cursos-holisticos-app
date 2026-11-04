@@ -12,12 +12,15 @@ const PUBLISHED = "c0000000-0000-4000-8000-000000000002";
 const draft: TeacherCourse = {
   id: DRAFT,
   state: "draft",
+  pendingVersion: null,
   title: "Respirar",
   updatedAt: "2026-10-29T18:00:00.000Z",
   contentRevision: 3,
   teacherName: "Ana Ruiz",
   practiceName: "Respiración",
   coverTone: 3,
+  lessonCount: 2,
+  slug: null,
   draft: { hasSummary: false, practiceReady: true, levelReady: true, lessons: 2, lessonsWithoutVideo: 2, modulesWithLessons: 1 },
   returned: null,
   missing: null,
@@ -26,12 +29,15 @@ const draft: TeacherCourse = {
 const published: TeacherCourse = {
   id: PUBLISHED,
   state: "published",
+  pendingVersion: null,
   title: "El bosque",
   updatedAt: "2026-10-01T18:00:00.000Z",
   contentRevision: null,
   teacherName: "Ana Ruiz",
   practiceName: null,
   coverTone: null,
+  lessonCount: 4,
+  slug: "el-bosque",
   draft: null,
   returned: null,
   missing: null,
@@ -67,10 +73,22 @@ describe("courseRows", () => {
     expect(row?.remove).toBeNull();
   });
 
-  it("un curso sin borrador (los cargados por guion) no se abre en el editor ni se borra", () => {
+  it("un curso publicado: «Editar» lleva a su editor, el enlace a su ficha y sus lecciones, y no se borra (diseño, PA-42; T-405)", () => {
     const [row] = courseRows([published], false);
-    expect(row).toMatchObject({ state: "Publicado", detail: "Tus alumnos ven la versión publicada.", lessons: null, action: null, remove: null });
+    expect(row).toMatchObject({ state: "Publicado", detail: null, lessons: "4 lecciones", remove: null });
+    expect(row?.action).toEqual({ label: "Editar", href: `/portal/cursos/${PUBLISHED}`, name: "Editar El bosque" });
+    expect(row?.publicPage).toEqual({ label: "Ver su ficha", href: "/cursos/el-bosque", name: "Ver la ficha de El bosque" });
     expect(row?.cover).toEqual({ title: "El bosque", teacherName: "Ana Ruiz", practiceName: null, tone: null });
+  });
+
+  it("al suspendido, un curso publicado se ve, sin «Editar»", () => {
+    expect(courseRows([published], true)[0]?.action).toMatchObject({ label: "Ver" });
+  });
+
+  it("un curso despublicado se ve, sin su ficha", () => {
+    const [row] = courseRows([{ ...published, state: "withdrawn" }], false);
+    expect(row).toMatchObject({ state: "Despublicado", publicPage: null });
+    expect(row?.action).toMatchObject({ label: "Ver", href: `/portal/cursos/${PUBLISHED}` });
   });
 
   it("un borrador que ya se envió no se borra", () => {
@@ -125,3 +143,35 @@ describe("lo que falta, con la lista de enviar", () => {
   });
 });
 
+
+describe("la versión de un curso publicado (T-405, FL-36)", () => {
+  const version: TeacherCourse = { ...draft, id: PUBLISHED, state: "changes_pending", pendingVersion: "draft", title: "El bosque" };
+
+  it("en borrador: con cambios pendientes, que los alumnos ven lo publicado, y «Seguir editando», sin borrar (diseño, PA-42)", () => {
+    const [row] = courseRows([{ ...version, slug: "el-bosque" }], false);
+    expect(row).toMatchObject({ state: "Con cambios pendientes", tone: "active", detail: "Tus alumnos ven la versión publicada.", lessons: "2 lecciones", remove: null });
+    expect(row?.action).toEqual({ label: "Seguir editando", href: `/portal/cursos/${PUBLISHED}`, name: "Seguir editando El bosque" });
+    expect(row?.publicPage?.href).toBe("/cursos/el-bosque");
+  });
+
+  it("devuelta: «Rechazado», su motivo y corregir, sin borrar", () => {
+    const [row] = courseRows([{ ...version, returned: { reason: "Falta el cierre.", whatToFix: "Agrégalo.", returnedAt: "2026-11-02T18:00:00.000Z" } }], false);
+    expect(row).toMatchObject({ state: "Rechazado", tone: "bad", detail: "Falta el cierre.", detailIsReason: true, remove: null });
+    expect(row?.action?.label).toBe("Corregir");
+  });
+
+  it("enviada sin la fecha: dice en revisión, también en la línea de detalle", () => {
+    expect(courseRows([{ ...version, pendingVersion: "in_review" }], false)[0]?.detail).toBe("No se puede editar mientras está en revisión.");
+  });
+
+  it("enviada: en revisión, con la fecha de envío, y solo ver", () => {
+    const [row] = courseRows([{ ...version, pendingVersion: "in_review", submittedAt: "2026-11-02T18:00:00.000Z" }], false);
+    expect(row).toMatchObject({ state: "En revisión", tone: "attention", remove: null });
+    expect(row?.detail).toMatch(/^Enviado el /);
+    expect(row?.action?.label).toBe("Ver");
+  });
+
+  it("al suspendido, ver", () => {
+    expect(courseRows([version], true)[0]?.action?.label).toBe("Ver");
+  });
+});

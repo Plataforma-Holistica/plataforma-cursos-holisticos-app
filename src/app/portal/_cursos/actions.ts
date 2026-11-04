@@ -7,11 +7,25 @@ import { refresh } from "next/cache";
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { cookieJar } from "@/app/_lib/request-context";
-import { createCourse, deleteCourse } from "@/services/drafts/editor";
+import { createCourse, deleteCourse, discardVersion, openVersion } from "@/services/drafts/editor";
 
-import { checkDraftText, createOutcome, deleteOutcome, readDeleteForm, readNewCourseForm, type DeleteState, type NewCourseState } from "./outcomes";
+import {
+  checkDraftText,
+  createOutcome,
+  deleteOutcome,
+  discardOutcome,
+  openOutcome,
+  readDeleteForm,
+  readDiscardForm,
+  readNewCourseForm,
+  readOpenForm,
+  type DeleteState,
+  type DiscardState,
+  type NewCourseState,
+  type OpenState,
+} from "./outcomes";
 
-// Crear y borrar un curso (T-402; PA-42). Ninguna decide quién puede: el servicio corre la guarda y la
+// Crear y borrar un curso (T-402; PA-42), y abrir o descartar la versión de uno publicado (T-405). Ninguna decide quién puede: el servicio corre la guarda y la
 // base escribe solo a nombre del maestro activo. Del estado anterior solo se lee el número de intento.
 
 /**
@@ -41,6 +55,31 @@ export async function deleteCourseAction(previous: DeleteState, form: FormData):
 
   const jar = await cookieJar();
   const outcome = deleteOutcome(await deleteCourse(jar, { course: request.course, seen: request.seen }), request.course);
+  if (outcome.kind === "leave") return leaveFor(jar, outcome);
+  refresh();
+  return { kind: "failed", reason: outcome.reason, attempt };
+}
+
+/** «Editar» un curso publicado (T-405, FL-36): abre su versión, o la que ya estaba, y vuelve al editor. */
+export async function openVersionAction(previous: OpenState, form: FormData): Promise<OpenState> {
+  const request = readOpenForm(form);
+  if (request === null) return { kind: "idle" };
+  const attempt = nextAttempt(previous);
+
+  const jar = await cookieJar();
+  const outcome = openOutcome(await openVersion(jar, { course: request.course }), request.course);
+  if (outcome.kind === "leave") return leaveFor(jar, outcome);
+  return { kind: "failed", reason: outcome.reason, attempt };
+}
+
+/** Descartar la versión de un curso publicado (H-18), con la revisión del contenido que se vio. */
+export async function discardVersionAction(previous: DiscardState, form: FormData): Promise<DiscardState> {
+  const request = readDiscardForm(form);
+  if (request === null) return { kind: "idle" };
+  const attempt = nextAttempt(previous);
+
+  const jar = await cookieJar();
+  const outcome = discardOutcome(await discardVersion(jar, { course: request.course, seen: request.seen }), request.course);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
   return { kind: "failed", reason: outcome.reason, attempt };

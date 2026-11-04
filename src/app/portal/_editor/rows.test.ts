@@ -19,6 +19,7 @@ const LV = "f0000000-0000-4000-8000-000000000003";
 const draft: DraftCourse = {
   id: COURSE,
   state: "draft",
+  pendingVersion: null,
   version: 1,
   title: "Respirar",
   summary: null,
@@ -147,6 +148,39 @@ describe("editorView", () => {
   it("en solo lectura no se ofrece nada que cambie", () => {
     expect(view({}, true).editable).toBe(false);
     expect(view({}, false, { state: "in_review" })).toMatchObject({ editable: false, notice: "No se puede editar mientras está en revisión." });
+  });
+
+  it("un borrador nuevo no se descarta: se borra desde Mis cursos", () => {
+    expect(view().discardHref).toBeNull();
+  });
+});
+
+describe("la versión de un curso publicado (T-405, FL-36)", () => {
+  const version: Partial<DraftCourse> = { state: "changes_pending", pendingVersion: "draft", version: 2 };
+
+  it("en borrador se edita y se envía, con el aviso de que los alumnos siguen viendo lo publicado, y se descarta", () => {
+    expect(view({}, false, version)).toMatchObject({
+      editable: true,
+      state: "Con cambios pendientes",
+      tone: "active",
+      notice: "Tus alumnos siguen viendo la versión publicada hasta que se apruebe la nueva.",
+      submitHref: `/portal/cursos/${COURSE}/enviar`,
+      discardHref: `/portal/cursos/${COURSE}/descartar`,
+    });
+  });
+
+  it("enviada, en solo lectura y sin descartar", () => {
+    expect(view({}, false, { ...version, pendingVersion: "in_review" })).toMatchObject({
+      editable: false,
+      state: "En revisión",
+      notice: "No se puede editar mientras está en revisión.",
+      submitHref: null,
+      discardHref: null,
+    });
+  });
+
+  it("al suspendido, ni editar ni descartar", () => {
+    expect(view({}, true, version)).toMatchObject({ editable: false, submitHref: null, discardHref: null });
   });
 });
 

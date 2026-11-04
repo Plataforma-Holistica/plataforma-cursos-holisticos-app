@@ -173,11 +173,16 @@ export const portal = defineMessages({
     fixNamed: "Corregir {title}",
     editNamed: "Editar {title}",
     viewNamed: "Ver {title}",
+    continue: "Seguir editando",
+    continueNamed: "Seguir editando {title}",
+    publicPage: "Ver su ficha",
+    publicPageNamed: "Ver la ficha de {title}",
     deleteNamed: "Borrar {title}",
     deleted: "Borraste el curso.",
     submitted: "Enviado a revisión. Mientras lo revisamos no se puede editar.",
     sentOn: "Enviado el {date}.",
     gone: "Ese curso ya no existe.",
+    discarded: "Descartaste los cambios. Tus alumnos siguen viendo el curso publicado.",
   },
   states: {
     draft: "Borrador",
@@ -268,6 +273,26 @@ export const portal = defineMessages({
     readNamed: "Leer el anexo de «{title}», versión {version}",
     back: "Volver a lo que aceptaste",
     annexMeta: "Versión {version}, vigente desde el {date}.",
+  },
+  discardVersion: {
+    title: "Descartar los cambios",
+    body: "Se descartan los cambios que hiciste a «{title}». Tus alumnos siguen viendo el curso publicado, sin cambios. No se puede deshacer.",
+    keptNote: "Lo que enviaste a revisión antes y el anexo que aceptaste se conservan como prueba.",
+    confirm: "Descartar cambios",
+    discarding: "Descartando…",
+    cancel: "Cancelar",
+  },
+  published: {
+    intro: "Tus alumnos ven esta versión. Para cambiar algo, crea una versión nueva: la revisamos antes de publicarla.",
+    edit: "Editar",
+    editing: "Abriendo…",
+    notCopyable: "Este curso se cargó directamente y no se puede editar desde aquí. Escríbenos si necesitas cambiarlo.",
+    modules: "Módulos y lecciones",
+    module: "Módulo {number}: {title}",
+    moduleUntitled: "Módulo {number}",
+    lesson: "{title}, {length}",
+    noSummary: "Sin resumen.",
+    publicPage: "Ver su ficha pública, con el reproductor y los recursos",
   },
   // PA-46 y PA-47, los pagos (T-604, cuarta solicitud). Por alumno van el alias y los puntos, nunca los pesos (decisión de Sergio del 2026-11-03).
   payouts: {
@@ -433,6 +458,8 @@ export const portal = defineMessages({
   },
   editor: {
     submit: "Enviar a revisión",
+    versionNotice: "Tus alumnos siguen viendo la versión publicada hasta que se apruebe la nueva.",
+    discard: "Descartar cambios",
     returned: {
       title: "Tu curso fue devuelto el {date}",
       reason: "Motivo",

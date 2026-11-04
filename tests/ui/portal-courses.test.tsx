@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   requireTeacher: vi.fn(),
   teacherCourses: vi.fn(),
   draftCourse: vi.fn(),
+  publishedCourse: vi.fn(),
   readNotice: vi.fn((): string | null => null),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
@@ -22,13 +23,19 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/app/_lib/guard", () => ({ requireTeacher: mocks.requireTeacher }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ readNotice: mocks.readNotice }));
-vi.mock("@/services/drafts/editor", () => ({ teacherCourses: mocks.teacherCourses, draftCourse: mocks.draftCourse }));
+vi.mock("@/services/drafts/editor", () => ({
+  teacherCourses: mocks.teacherCourses,
+  draftCourse: mocks.draftCourse,
+  publishedCourse: mocks.publishedCourse,
+  draftChoices: vi.fn(),
+}));
 vi.mock("next/navigation", async (original) => ({
   ...(await original<typeof import("next/navigation")>()),
   notFound: mocks.notFound,
   redirect: mocks.redirect,
 }));
-vi.mock("@/app/portal/_cursos/actions", () => ({ createCourseAction: vi.fn(), deleteCourseAction: vi.fn() }));
+vi.mock("@/app/portal/_cursos/actions", () => ({ createCourseAction: vi.fn(), deleteCourseAction: vi.fn(), openVersionAction: vi.fn(), discardVersionAction: vi.fn() }));
+vi.mock("@/app/portal/_editor/actions", () => ({ editorAction: vi.fn() }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
 import PortalRestPage from "@/app/portal/[...resto]/page";
@@ -42,6 +49,9 @@ const COURSE = "c0000000-0000-4000-8000-000000000001";
 const course = {
   id: COURSE,
   state: "draft",
+  pendingVersion: null,
+  lessonCount: 2,
+  slug: null,
   title: "Respirar",
   updatedAt: "2026-10-29T18:00:00.000Z",
   contentRevision: 3,
@@ -192,5 +202,94 @@ describe("borrar un curso", () => {
   ])("para %s no existe", async (_name, arrange) => {
     arrange();
     await expect(at(["cursos", COURSE, "borrar"])).rejects.toThrow("no encontrado");
+  });
+});
+
+describe("las versiones de un curso publicado (T-405, FL-36)", () => {
+  const published = {
+    id: COURSE,
+    state: "published",
+    pendingVersion: null,
+    title: "El bosque",
+    summary: "Caminar despacio.",
+    slug: "el-bosque",
+    copyable: true,
+    modules: [{ id: "d0000000-0000-4000-8000-000000000001", title: "Inicio", lessons: [{ id: "e0000000-0000-4000-8000-000000000001", title: "Entrar", seconds: 600 }] }],
+  };
+  const version = { id: COURSE, state: "changes_pending", pendingVersion: "draft", title: "El bosque", contentRevision: 5, returned: null };
+
+  it("el editor de un curso publicado: lo publicado en solo lectura y «Editar», sin fallas de accesibilidad", async () => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null });
+    mocks.publishedCourse.mockResolvedValue({ kind: "ready", value: published });
+    const { container } = render(await at(["cursos", COURSE]));
+    expect(screen.getByRole("heading", { level: 1, name: "El bosque" })).toBeTruthy();
+    expect(screen.getByText(/Tus alumnos ven esta versión/)).toBeTruthy();
+    expect(screen.getByText("Entrar, 10 min 0 s")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Editar" }).getAttribute("value")).toBe(`open:${COURSE}`);
+    expect(screen.getByRole("link", { name: /Ver su ficha pública/ }).getAttribute("href")).toBe("/cursos/el-bosque");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("uno cargado por guion lo dice de entrada, sin «Editar»", async () => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null });
+    mocks.publishedCourse.mockResolvedValue({ kind: "ready", value: { ...published, copyable: false } });
+    render(await at(["cursos", COURSE]));
+    expect(screen.getByText(/se cargó directamente y no se puede editar desde aquí/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("Mis cursos: un curso publicado ofrece «Editar» y el enlace a su ficha, sin fallas de accesibilidad", async () => {
+    mocks.teacherCourses.mockResolvedValue({
+      kind: "ready",
+      value: [{ ...course, state: "published", draft: null, contentRevision: null, lessonCount: 3, slug: "el-bosque", title: "El bosque" }],
+    });
+    const { container } = render(await at(["cursos"]));
+    expect(screen.getByRole("link", { name: "Editar El bosque" }).getAttribute("href")).toBe(`/portal/cursos/${COURSE}`);
+    expect(screen.getByRole("link", { name: "Ver la ficha de El bosque" }).getAttribute("href")).toBe("/cursos/el-bosque");
+    expect(screen.getByText("3 lecciones")).toBeTruthy();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("al suspendido, sin «Editar»", async () => {
+    teaches("suspended");
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null });
+    mocks.publishedCourse.mockResolvedValue({ kind: "ready", value: published });
+    render(await at(["cursos", COURSE]));
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("sin borrador ni nada publicado suyo, no existe", async () => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null });
+    mocks.publishedCourse.mockResolvedValue({ kind: "ready", value: null });
+    await expect(at(["cursos", COURSE])).rejects.toThrow("no encontrado");
+  });
+
+  it("descartar: «Cancelar» primero, de vuelta al editor, y el botón lleva la revisión que se vio", async () => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: version });
+    const { container } = render(await at(["cursos", COURSE, "descartar"]));
+    expect(screen.getByRole("heading", { level: 1, name: "Descartar los cambios" })).toBeTruthy();
+    const controls = [...(container.querySelector("#bloque-version-descartar form")?.querySelectorAll("a, button") ?? [])];
+    expect(controls).toEqual([screen.getByRole("link", { name: "Cancelar" }), screen.getByRole("button", { name: "Descartar cambios" })]);
+    expect(screen.getByRole("link", { name: "Cancelar" }).getAttribute("href")).toBe(`/portal/cursos/${COURSE}`);
+    expect(screen.getByRole("button", { name: "Descartar cambios" }).getAttribute("value")).toBe(`discard:${COURSE}:5`);
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it.each([
+    ["un suspendido", () => teaches("suspended")],
+    ["un borrador nuevo", () => mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { ...version, state: "draft", pendingVersion: null } })],
+    ["una versión enviada", () => mocks.draftCourse.mockResolvedValue({ kind: "ready", value: { ...version, pendingVersion: "in_review" } })],
+    ["un curso que no es suyo", () => mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null })],
+  ])("descartar para %s no existe", async (_name, arrange) => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: version });
+    arrange();
+    await expect(at(["cursos", COURSE, "descartar"])).rejects.toThrow("no encontrado");
+  });
+
+  it("Mis cursos dice el aviso de una versión descartada", async () => {
+    mocks.readNotice.mockReturnValueOnce("version_discarded");
+    render(await at(["cursos"]));
+    expect(screen.getByText("Descartaste los cambios. Tus alumnos siguen viendo el curso publicado.")).toBeTruthy();
   });
 });

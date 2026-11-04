@@ -4,6 +4,8 @@ import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asSystem, asUser, type Tx } from "@/adapters/supabase/db";
 import { isLockConflict } from "@/adapters/supabase/errors";
 
+import { isEditable, isInReview } from "@/domain/catalog/course-phase";
+
 import { withLockRetry } from "@/services/account/team";
 
 import type { SubmitStore } from "./submit";
@@ -12,7 +14,9 @@ import {
   ADD_ANSWERS,
   CREATE_ANSWERS,
   DELETE_ANSWERS,
+  DISCARD_ANSWERS,
   MOVE_ANSWERS,
+  OPEN_VERSION_ANSWERS,
   SAVE_ANSWERS,
   SAVE_COURSE_ANSWERS,
   type DraftsStore,
@@ -28,6 +32,8 @@ import {
   askResourceMove,
   askResourceRemove,
   askDeleteCourse,
+  askDiscardVersion,
+  askOpenVersion,
   askDeleteLesson,
   askDeleteModule,
   askMoveLesson,
@@ -38,6 +44,7 @@ import {
   createdOf,
   readDraftChoices,
   readDraftCourse,
+  readPublishedCourse,
   readReturnNotes,
   readSubmitStatus,
   readSubmitPreview,
@@ -94,10 +101,11 @@ export function createDraftsStore(
   }
 
   return {
-    // Por qué se devolvió va aparte, como el servidor: la persona no lee los envíos. Solo se pregunta si hay un borrador al que le pueda tocar.
+    // Por qué se devolvió va aparte, como el servidor: la persona no lee los envíos. Solo se pregunta si hay un borrador al que le pueda tocar: uno
+    // que se edita o que se revisa, también la versión de un curso publicado (T-405).
     teacherCourses: async (claims) => {
       const courses = await read(claims, (tx) => readTeacherCourses(tx));
-      if (!courses.some((course) => course.state === "draft" || course.state === "in_review")) return courses;
+      if (!courses.some((course) => isEditable(course.state, course.pendingVersion) || isInReview(course.state, course.pendingVersion))) return courses;
       const [notes, status] = await run({ claims, reason: "draft_return_notes" }, async (tx) => [await readReturnNotes(tx), await readSubmitStatus(tx)] as const);
       return courses.map((course) => ({
         ...course,
@@ -108,7 +116,7 @@ export function createDraftsStore(
     },
     draftCourse: async (claims, course) => {
       const draft = await read(claims, (tx) => readDraftCourse(tx, course));
-      if (draft === null || draft.state !== "draft") return draft;
+      if (draft === null || !isEditable(draft.state, draft.pendingVersion)) return draft;
       const notes = await run({ claims, reason: "draft_return_notes" }, (tx) => readReturnNotes(tx));
       return { ...draft, returned: notes.get(draft.id) ?? null };
     },
@@ -140,6 +148,10 @@ export function createDraftsStore(
       answerOf(MOVE_ANSWERS, (await change(claims, "draft_move_lesson", (tx) => askMoveLesson(tx, course, lesson, seen, to))).answer),
     deleteCourse: async (claims, course, seen) =>
       answerOf(DELETE_ANSWERS, (await change(claims, "draft_delete_course", (tx) => askDeleteCourse(tx, course, seen))).answer),
+    openVersion: async (claims, course) => answerOf(OPEN_VERSION_ANSWERS, (await change(claims, "course_version_open", (tx) => askOpenVersion(tx, course))).answer),
+    discardVersion: async (claims, course, seen) =>
+      answerOf(DISCARD_ANSWERS, (await change(claims, "course_version_discard", (tx) => askDiscardVersion(tx, course, seen))).answer),
+    publishedCourse: (claims, course) => read(claims, (tx) => readPublishedCourse(tx, course)),
     choices: (practiceId, levelId) => system({ reason: "draft_choices" }, (tx) => readDraftChoices(tx, practiceId, levelId)),
   };
 }

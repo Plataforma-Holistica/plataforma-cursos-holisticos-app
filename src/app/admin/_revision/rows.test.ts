@@ -204,6 +204,61 @@ describe("lo enviado por el portal", () => {
     expect(rowOf(waiting)?.submission?.captions).toBe("Sin subtítulos confirmados: «Lección 1». Al aprobar se le pregunta a Mux; sin ellos no se publica.");
   });
 
+  it("un primer envío no dice versión ni qué cambió", () => {
+    expect(rowOf(SENT)?.submission).toMatchObject({ version: null, changes: [] });
+  });
+
+  it("una versión de un curso publicado dice cuál es y qué cambió (RF-608, FL-45)", () => {
+    const changes = {
+      course: ["title", "summary"] as ("title" | "summary")[],
+      modulesAdded: ["Final"],
+      modulesRemoved: [],
+      modulesRenamed: [],
+      modulesMoved: ["Inicio", "Final"],
+      lessonsAdded: ["Nueva"],
+      lessonsRemoved: ["Postura"],
+      lessonsVideo: ["Sesión"],
+      lessonsText: [],
+      lessonsMoved: [],
+      resourcesAdded: [],
+      resourcesRemoved: ["Temario"],
+      resourcesRenamed: [],
+      resourcesMoved: [],
+    };
+    const version: ReviewCourse = { ...SENT, submission: { ...SENT.submission!, version: 3, isRevision: true, changes } };
+    expect(rowOf(version)?.submission?.version).toBe("Versión 3 de un curso ya publicado. Los alumnos siguen viendo la anterior hasta que se apruebe.");
+    expect(rowOf(version)?.submission?.changes).toEqual([
+      "Datos del curso: el título y el resumen.",
+      "Módulos nuevos: «Final».",
+      "Módulos que cambiaron de orden: «Inicio», «Final».",
+      "Lecciones nuevas: «Nueva».",
+      "Lecciones quitadas: «Postura».",
+      "Lecciones con otro video: «Sesión».",
+      "Recursos quitados: «Temario».",
+    ]);
+  });
+
+  it("una versión sin cambios lo dice", () => {
+    const empty = {
+      course: [],
+      modulesAdded: [],
+      modulesRemoved: [],
+      modulesRenamed: [],
+      modulesMoved: [],
+      lessonsAdded: [],
+      lessonsRemoved: [],
+      lessonsVideo: [],
+      lessonsText: [],
+      lessonsMoved: [],
+      resourcesAdded: [],
+      resourcesRemoved: [],
+      resourcesRenamed: [],
+      resourcesMoved: [],
+    };
+    const version: ReviewCourse = { ...SENT, submission: { ...SENT.submission!, version: 2, isRevision: true, changes: empty } };
+    expect(rowOf(version)?.submission?.changes).toEqual(["Nada cambió frente a lo publicado."]);
+  });
+
   it("dice qué archivo cambió por fuera; sin ninguno, nada", () => {
     expect(rowOf(SENT)?.submission?.files).toBeNull();
     const changed: ReviewCourse = { ...SENT, submission: { ...SENT.submission!, filesChanged: ["Lección 1", "Temario"] } };

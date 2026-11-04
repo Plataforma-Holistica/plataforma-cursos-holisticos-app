@@ -25,6 +25,7 @@ const L3 = "e0000000-0000-4000-8000-000000000003";
 const draft: DraftCourse = {
   id: COURSE,
   state: "draft",
+  pendingVersion: null,
   version: 1,
   title: "Respirar",
   summary: null,

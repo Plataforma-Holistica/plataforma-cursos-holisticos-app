@@ -37,6 +37,9 @@ function setup(session: SessionCheck = { kind: "pass", claims }) {
     deleteLesson: vi.fn(() => Promise.resolve("deleted" as const)),
     moveLesson: vi.fn(() => Promise.resolve("moved" as const)),
     deleteCourse: vi.fn(() => Promise.resolve("deleted" as const)),
+    openVersion: vi.fn(() => Promise.resolve("opened" as const)),
+    discardVersion: vi.fn(() => Promise.resolve("discarded" as const)),
+    publishedCourse: vi.fn(() => Promise.resolve(null)),
     choices: vi.fn(() => Promise.resolve({ practices: [], levels: [], resourceLimits: { maxBytes: null, perPlace: null }, videoMaxBytes: null, lessonTolerance: null })),
   };
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
@@ -60,6 +63,60 @@ describe("borrar deja archivos que sobran", () => {
     vi.mocked(service.store.deleteLesson).mockResolvedValue("changed");
     await service.deleteLesson(reader, { course: COURSE, lesson: LESSON, seen: 1 });
     expect(service.afterDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("las versiones de un curso publicado (T-405)", () => {
+  it("«Editar» abre la versión a nombre de la sesión que pasó", async () => {
+    const service = setup();
+    expect(await service.openVersion(reader, { course: COURSE })).toEqual({ kind: "opened" });
+    expect(service.store.openVersion).toHaveBeenCalledExactlyOnceWith(claims, COURSE);
+  });
+
+  it("descartar lleva la revisión del contenido que se vio, y limpia lo que sobra", async () => {
+    const service = setup();
+    expect(await service.discardVersion(reader, { course: COURSE, seen: 3 })).toEqual({ kind: "discarded" });
+    expect(service.store.discardVersion).toHaveBeenCalledExactlyOnceWith(claims, COURSE, 3);
+    expect(service.afterDelete).toHaveBeenCalledExactlyOnceWith(claims, COURSE);
+  });
+
+  it("si no se descartó, no se limpia", async () => {
+    const service = setup();
+    vi.mocked(service.store.discardVersion).mockResolvedValue("changed");
+    expect(await service.discardVersion(reader, { course: COURSE, seen: 3 })).toEqual({ kind: "changed" });
+    expect(service.afterDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["abrir un curso sin forma", () => setup().openVersion(reader, { course: "x" })],
+    ["descartar un curso sin forma", () => setup().discardVersion(reader, { course: "x", seen: 1 })],
+    ["descartar con una revisión cero", () => setup().discardVersion(reader, { course: COURSE, seen: 0 })],
+  ])("%s contesta invalid sin preguntarle a nadie", async (_name, call) => {
+    expect(await call()).toEqual({ kind: "invalid" });
+  });
+
+  it("sin sesión no abre ni descarta", async () => {
+    const check = { kind: "anonymous" } as const;
+    const service = setup(check);
+    expect(await service.openVersion(reader, { course: COURSE })).toEqual({ kind: "session", check });
+    expect(await service.discardVersion(reader, { course: COURSE, seen: 1 })).toEqual({ kind: "session", check });
+    expect(service.store.openVersion).not.toHaveBeenCalled();
+    expect(service.store.discardVersion).not.toHaveBeenCalled();
+  });
+
+  it("si abrir lanza, contesta «no se supo» y lo reporta", async () => {
+    const service = setup();
+    vi.mocked(service.store.openVersion).mockRejectedValue(new Error("caída"));
+    expect(await service.openVersion(reader, { course: COURSE })).toEqual({ kind: "unknown" });
+    expect(service.reported).toEqual(["draft_change_unavailable"]);
+  });
+
+  it("lo publicado se lee como la persona; un id sin forma no se pregunta", async () => {
+    const service = setup();
+    expect(await service.publishedCourse(claims, COURSE)).toEqual({ kind: "ready", value: null });
+    expect(service.store.publishedCourse).toHaveBeenCalledExactlyOnceWith(claims, COURSE);
+    expect(await service.publishedCourse(claims, "x")).toEqual({ kind: "ready", value: null });
+    expect(service.store.publishedCourse).toHaveBeenCalledTimes(1);
   });
 });
 
