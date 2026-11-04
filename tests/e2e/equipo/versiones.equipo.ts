@@ -289,7 +289,8 @@ test("sin JavaScript: «Editar» abre la versión, y descartarla deja el curso c
     await expect(page).toHaveURL(`/portal/cursos/${course}/descartar`);
     await expect(page.getByRole("heading", { level: 1, name: "Descartar los cambios" })).toBeVisible();
     await page.getByRole("button", { name: "Descartar cambios" }).click();
-    await expect(page).toHaveURL("/portal/cursos");
+    // Sin JavaScript, el navegador conserva el ancla del formulario al seguir la redirección: es Mis cursos.
+    await expect(page).toHaveURL(/\/portal\/cursos(#bloque-version-descartar)?$/);
     await expect(page.getByText("Descartaste los cambios. Tus alumnos siguen viendo el curso publicado.")).toBeVisible();
     await expect(page.getByRole("listitem").filter({ hasText: title }).getByText("Publicado")).toBeVisible();
   } finally {
