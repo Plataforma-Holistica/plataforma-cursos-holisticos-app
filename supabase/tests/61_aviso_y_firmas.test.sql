@@ -6,7 +6,7 @@
 -- cuenta atada y aunque la hayan revocado. Y una suspensión por fraude no la confirma quien la propuso ni quien marcó la alerta como fraude.
 begin;
 \ir _ayuda.psql
-select plan(34);
+select plan(37);
 
 -- k1 y k2 tienen Contenido; kf, Contenido y finanzas; f1, finanzas; cf, configuración; mara es maestra.
 select pruebas.alta('c6100000-0000-0000-0000-000000000001', 'k1-61@prueba.test');
@@ -143,6 +143,14 @@ select is(pruebas.pide(pruebas.k2(), format('private.set_teacher_founder(%L, %L)
   'k2 no se marca fundador antes de aceptar');
 select is(pruebas.pide(pruebas.k2(), format('private.suspend_teacher(%L, %L, %L)', :'k2_m', 'motivo', 'aviso')), 'self',
   'ni se suspende');
+-- Ni aprueba un curso de ese maestro (T-604, decisión de Sergio del 2026-11-03).
+select pruebas.como_dueno_sistema();
+insert into public.course_registry (teacher_id, state) values (:'k2_m', 'in_review') returning course_id as curso_k2 \gset
+select pruebas.limpiar();
+select is(pruebas.pide(pruebas.k2(), format('private.approve_course(%L)', :'curso_k2')), 'self',
+  'ni aprueba un curso de ese maestro');
+select is(pruebas.pide(pruebas.k1(), format('private.approve_course(%L)', :'curso_k2')), 'incomplete',
+  'k1 sigue al resto de las comprobaciones');
 select is((pruebas.fila(pruebas.k2(), :'k2_m') ->> 'is_self')::boolean, true, 'y la lista le dice a k2 que es el suyo');
 select is((pruebas.fila(pruebas.k1(), :'k2_m') ->> 'is_self')::boolean, false, 'a k1, no');
 select pruebas.dueno_a_nombre_de(pruebas.k2());
@@ -154,6 +162,8 @@ select is(pruebas.pide(pruebas.k1(), format('private.revoke_teacher_invitation(%
 select is((pruebas.fila(pruebas.k2(), :'k2_m') ->> 'is_self')::boolean, true, 'revocada, sigue siendo suyo: el correo de un maestro no cambia');
 select is(pruebas.pide(pruebas.k2(), format('private.set_teacher_founder(%L, %L)', :'k2_m', :'mes')), 'self',
   'y k2 tampoco se marca fundador con la invitación revocada');
+select is(pruebas.pide(pruebas.k2(), format('private.approve_course(%L)', :'curso_k2')), 'self',
+  'ni aprueba su curso');
 select is(pruebas.pide(pruebas.k1(), format('private.set_teacher_founder(%L, null)', :'k2_m')), 'cleared',
   'k1 sí le quita la marca');
 -- Un maestro sin cuenta ni invitación no es de nadie.

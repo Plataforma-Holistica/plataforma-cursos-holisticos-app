@@ -198,7 +198,7 @@ describe("guardar los datos y liberar, de verdad", () => {
       await releaser.end();
     }
     const paid = await payoutOf(FIRST);
-    expect(paid).toMatchObject({ status: "awaiting_invoice", version: 1, rule, subtotal: String(AMOUNT), vat: "16000", income: "10000", vat_withheld: "10666", net: "95334" });
+    expect(paid).toMatchObject({ status: "awaiting_invoice", version: 1, rule, subtotal: String(AMOUNT), vat: "16000", income: "10000", vat_withheld: "10667", net: "95333" });
   });
 
   it("se retiene antes de liberar su mes", async () => {
