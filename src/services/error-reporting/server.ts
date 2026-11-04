@@ -115,6 +115,7 @@ const FAILURES = {
   invoice_unavailable: "No se pudo empezar, subir, revisar o bajar la factura de un maestro (T-604): la base o Storage no contestaron, o no se pudo firmar la dirección. Se le dijo que no se supo.",
   invoice_cleanup_failed: "No se pudo borrar de la cubeta el PDF de una factura que ya nadie nombra (T-604): lo alcanza el barrido (`invoice_sweep`).",
   invoice_unreadable: "El XML guardado de una factura no abre: otra llave o algo manipulado (OP-19). Quien lo pidió no pudo verlo.",
+  payout_report_unavailable: "No se pudieron leer las liquidaciones o el reporte de un maestro (T-604): la base no contestó, o contestó algo sin la forma esperada. Se le dijo que no se supo.",
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
   password_change_incomplete: "Una contraseña se cambió desde la cuenta y la aplicación no pudo fechar el cambio: una entrada hecha antes con la contraseña vieja podría quedar reconocida.",
