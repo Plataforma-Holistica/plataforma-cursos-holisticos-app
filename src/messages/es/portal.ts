@@ -172,6 +172,10 @@ export const portal = defineMessages({
     fixNamed: "Corregir {title}",
     editNamed: "Editar {title}",
     viewNamed: "Ver {title}",
+    continue: "Seguir editando",
+    continueNamed: "Seguir editando {title}",
+    publicPage: "Ver su ficha",
+    publicPageNamed: "Ver la ficha de {title}",
     deleteNamed: "Borrar {title}",
     deleted: "Borraste el curso.",
     submitted: "Enviado a revisión. Mientras lo revisamos no se puede editar.",
@@ -287,6 +291,7 @@ export const portal = defineMessages({
     moduleUntitled: "Módulo {number}",
     lesson: "{title}, {length}",
     noSummary: "Sin resumen.",
+    publicPage: "Ver su ficha pública, con el reproductor y los recursos",
   },
   deleteCourse: {
     title: "Borrar el curso",

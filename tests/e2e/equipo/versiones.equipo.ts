@@ -218,7 +218,8 @@ test("FL-36: «Editar» un curso publicado, enviar la versión, Contenido la ve 
     await signIn(portal, teacher, "/portal/cursos");
     const row = portal.getByRole("listitem").filter({ hasText: title });
     await expect(row.getByText("Publicado")).toBeVisible();
-    await row.getByRole("link", { name: `Ver ${title}` }).click();
+    await expect(row.getByRole("link", { name: `Ver la ficha de ${title}` })).toBeVisible();
+    await row.getByRole("link", { name: `Editar ${title}` }).click();
     await expect(portal).toHaveURL(`/portal/cursos/${course}`);
     await expect(portal.getByText(/Tus alumnos ven esta versión/)).toBeVisible();
     await expect(portal.getByText("Primera lección, 10 min 0 s")).toBeVisible();

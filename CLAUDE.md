@@ -918,13 +918,17 @@ que no se ve leyendo un solo archivo:
   confirmado por Sergio). Para el A: `guard_publication` suma los tres pasos del maestro (abrir, descartar y enviar la versión) y la regla de lo retirado; `approve_course` no cambia.
 - **Lo que T-405 suma al carril B** (sexta solicitud, sin migración; RF-608, FL-36, FL-45; plan aprobado por Sergio el 2026-11-04). Las versiones en pantalla. Qué se
   edita y qué se revisa lo dice una regla pura del dominio, `src/domain/catalog/course-phase.ts` (`isEditable`, `isInReview`; la misma de `course_editable` y `course_reviewing`, que
-  reexporta `field-rules.ts` para el navegador), y `TeacherCourse` y `DraftCourse` traen `pendingVersion`. El almacén pide el motivo y el envío también con una versión. **PA-42:** un curso
-  publicado ofrece «Ver»; con una versión en borrador, «Editar» y lo que le falta (o «Rechazado» y su motivo); enviada, «En revisión» y la fecha; una versión no se borra. **PA-43 sin
+  reexporta `field-rules.ts` para el navegador), y `TeacherCourse` y `DraftCourse` traen `pendingVersion`. El almacén pide el motivo y el envío también con una versión. **PA-42** sigue la tabla del diseño:
+  un curso publicado ofrece «Editar» (su editor en solo lectura, con el botón que crea la versión) y el enlace a su ficha, con las lecciones de lo publicado; con una versión en borrador,
+  «Tus alumnos ven la versión publicada» y «Seguir editando» (o «Rechazado», su motivo y «Corregir»); enviada, «En revisión» y la fecha; despublicado, «Ver»; una versión no se borra. **PA-43 sin
   borrador** (`_editor/published.ts` y `published-screen.tsx`) pinta lo publicado en solo lectura (`readPublishedCourse`, como la persona: sus lecciones por la política propia y el título de
-  cada módulo por la pública) y «Editar», un formulario que llama a `course_version_open` y vuelve al editor, también sin JavaScript; un curso por guion contesta `not_copyable` y se dice.
+  cada módulo por la pública) y «Editar», un formulario que llama a `course_version_open` y vuelve al editor, también sin JavaScript. Un curso por guion (sin `course_review_id`) no ofrece «Editar» y lo dice de entrada;
+  cada estado se dice por su nombre (con cambios pendientes: otra pestaña abrió la versión entre las dos lecturas). **Límite conocido:** el título de cada módulo sale de la política pública,
+  que pide el curso listado; uno no listado (despublicado, T-406) muestra «Módulo N».
   **PA-43 de una versión** es el editor de siempre con el aviso de que los alumnos siguen viendo lo publicado y «Descartar cambios», que lleva a `/portal/cursos/<id>/descartar`
   (`_cursos/discard.tsx`, como borrar: la revisión del contenido, y al descartar limpia como borrar) y vuelve a Mis cursos con el aviso `version_discarded`. Las acciones son
-  `openVersionAction` y `discardVersionAction` en `_cursos/actions.ts`. **PA-62** dice de una versión cuál es y qué cambió, una frase por cosa (`changeLines` en `_revision/rows.ts`).
+  `openVersionAction` y `discardVersionAction` en `_cursos/actions.ts`; si a quien descarta lo suspendieron mientras confirmaba, vuelve al editor. Un doble envío sin JavaScript
+  al descartar llega al editor de lo publicado sin el aviso (el segundo contesta `not_editable`), como en enviar. **PA-62** dice de una versión cuál es y qué cambió, una frase por cosa (`changeLines` en `_revision/rows.ts`).
   Usa la integración 100 (el almacén del portal con una versión) y `tests/e2e/equipo/versiones.equipo.ts`. Decisiones mías sin confirmar: PA-43 de un curso publicado sin el reproductor
   ni los recursos (están en la ficha); una versión enviada se dice «En revisión»; descartar se confirma en su propia pantalla. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la

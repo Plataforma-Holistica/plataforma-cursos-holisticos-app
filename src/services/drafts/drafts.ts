@@ -45,10 +45,14 @@ export interface TeacherCourse {
   contentRevision: number | null;
   /** El nombre de su maestro, para la portada. */
   teacherName: string | null;
-  /** La práctica del borrador y su tono, para la portada; nulos si no tiene una activa. */
+  /** La práctica del borrador (o la publicada, si no tiene borrador) y su tono, para la portada; nulos si no tiene una activa. */
   practiceName: string | null;
   coverTone: number | null;
-  /** Lo que se cuenta para «Faltan {n} cosas»; nulo si no tiene borrador (los cargados por guion). */
+  /** Cuántas lecciones tiene su borrador, o lo publicado si no tiene borrador; nulo si ninguno de los dos. */
+  lessonCount: number | null;
+  /** El slug de su ficha pública, si se publicó (T-405). */
+  slug: string | null;
+  /** Lo que se cuenta para «Faltan {n} cosas»; nulo si no tiene borrador (un curso publicado sin versión abierta). */
   draft: DraftReadiness | null;
   /** Si Contenido lo devolvió. */
   returned: ReturnNote | null;
@@ -133,6 +137,10 @@ export interface PublishedCourse {
   pendingVersion: PendingVersion | null;
   title: string;
   summary: string | null;
+  /** El de su ficha pública. */
+  slug: string;
+  /** Se publicó desde el editor: «Editar» lo copia. Uno cargado por guion no (`not_copyable`). */
+  copyable: boolean;
   modules: { id: string; title: string; lessons: { id: string; title: string; seconds: number }[] }[];
 }
 

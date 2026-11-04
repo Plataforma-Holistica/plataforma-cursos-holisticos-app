@@ -117,7 +117,11 @@ export function discardOutcome(result: DraftChange<DraftAnswer | "discarded">, c
       return { kind: "leave", to: ROUTES.portalCourses, notice: "version_discarded", closeSession: false };
     case "not_found":
       return { kind: "leave", to: ROUTES.portalCourses, notice: "course_gone", closeSession: false };
+    // Ya enviada, ya descartada, o quien descarta ya no puede editar (lo suspendieron mientras confirmaba): el editor dice en qué está. La
+    // pantalla de descartar no existe para un suspendido.
     case "not_editable":
+    case "suspended":
+    case "not_teacher":
       return { kind: "leave", to: portalCoursePath(course) ?? ROUTES.portalCourses, notice: null, closeSession: false };
   }
   // Lo propio de descartar ya contestó arriba: lo que queda es de la lista común.

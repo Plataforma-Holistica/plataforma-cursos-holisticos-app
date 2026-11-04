@@ -144,6 +144,27 @@ describe("descartar la versión (H-18)", () => {
     expect(discardOutcome({ kind: "not_editable" }, COURSE)).toEqual({ kind: "leave", to: `/portal/cursos/${COURSE}`, notice: null, closeSession: false });
   });
 
+  it("si lo suspendieron mientras confirmaba, al editor en solo lectura: descartar ya no existe para él", () => {
+    const editor = { kind: "leave", to: `/portal/cursos/${COURSE}`, notice: null, closeSession: false };
+    expect(discardOutcome({ kind: "suspended" }, COURSE)).toEqual(editor);
+    expect(discardOutcome({ kind: "not_teacher" }, COURSE)).toEqual(editor);
+  });
+
+  it("sin sesión, a entrar y de vuelta a descartar", () => {
+    expect(discardOutcome({ kind: "session", check: { kind: "anonymous" } }, COURSE)).toEqual({
+      kind: "leave",
+      to: `/entrar?volver=${encodeURIComponent(`/portal/cursos/${COURSE}/descartar`)}`,
+      notice: null,
+      closeSession: false,
+    });
+    expect(openOutcome({ kind: "session", check: { kind: "anonymous" } }, COURSE)).toEqual({
+      kind: "leave",
+      to: `/entrar?volver=${encodeURIComponent(`/portal/cursos/${COURSE}`)}`,
+      notice: null,
+      closeSession: false,
+    });
+  });
+
   it("si cambió mientras se veía, se queda y lo dice; «no se supo» no es descartado", () => {
     expect(discardOutcome({ kind: "changed" }, COURSE)).toEqual({ kind: "failed", reason: "changed" });
     expect(discardOutcome({ kind: "unknown" }, COURSE)).toEqual({ kind: "failed", reason: "unavailable" });

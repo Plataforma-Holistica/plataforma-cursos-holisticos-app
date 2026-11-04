@@ -50,6 +50,8 @@ const course = {
   id: COURSE,
   state: "draft",
   pendingVersion: null,
+  lessonCount: 2,
+  slug: null,
   title: "Respirar",
   updatedAt: "2026-10-29T18:00:00.000Z",
   contentRevision: 3,
@@ -210,6 +212,8 @@ describe("las versiones de un curso publicado (T-405, FL-36)", () => {
     pendingVersion: null,
     title: "El bosque",
     summary: "Caminar despacio.",
+    slug: "el-bosque",
+    copyable: true,
     modules: [{ id: "d0000000-0000-4000-8000-000000000001", title: "Inicio", lessons: [{ id: "e0000000-0000-4000-8000-000000000001", title: "Entrar", seconds: 600 }] }],
   };
   const version = { id: COURSE, state: "changes_pending", pendingVersion: "draft", title: "El bosque", contentRevision: 5, returned: null };
@@ -222,7 +226,28 @@ describe("las versiones de un curso publicado (T-405, FL-36)", () => {
     expect(screen.getByText(/Tus alumnos ven esta versión/)).toBeTruthy();
     expect(screen.getByText("Entrar, 10 min 0 s")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Editar" }).getAttribute("value")).toBe(`open:${COURSE}`);
+    expect(screen.getByRole("link", { name: /Ver su ficha pública/ }).getAttribute("href")).toBe("/cursos/el-bosque");
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("uno cargado por guion lo dice de entrada, sin «Editar»", async () => {
+    mocks.draftCourse.mockResolvedValue({ kind: "ready", value: null });
+    mocks.publishedCourse.mockResolvedValue({ kind: "ready", value: { ...published, copyable: false } });
+    render(await at(["cursos", COURSE]));
+    expect(screen.getByText(/se cargó directamente y no se puede editar desde aquí/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
+  });
+
+  it("Mis cursos: un curso publicado ofrece «Editar» y el enlace a su ficha, sin fallas de accesibilidad", async () => {
+    mocks.teacherCourses.mockResolvedValue({
+      kind: "ready",
+      value: [{ ...course, state: "published", draft: null, contentRevision: null, lessonCount: 3, slug: "el-bosque", title: "El bosque" }],
+    });
+    const { container } = render(await at(["cursos"]));
+    expect(screen.getByRole("link", { name: "Editar El bosque" }).getAttribute("href")).toBe(`/portal/cursos/${COURSE}`);
+    expect(screen.getByRole("link", { name: "Ver la ficha de El bosque" }).getAttribute("href")).toBe("/cursos/el-bosque");
+    expect(screen.getByText("3 lecciones")).toBeTruthy();
     expect(await a11yViolations(container)).toEqual([]);
   });
 

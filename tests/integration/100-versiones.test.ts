@@ -271,10 +271,10 @@ describe("el portal, con una versión (sexta solicitud)", () => {
     const teacher = teacherStoreOn(owner);
     const listed = async () => (await inTx(owner, () => teacher.teacherCourses(CLAIMS))).find((each) => each.id === course);
 
-    expect(await listed()).toMatchObject({ state: "published", pendingVersion: null, draft: null, returned: null });
+    expect(await listed()).toMatchObject({ state: "published", pendingVersion: null, draft: null, returned: null, lessonCount: 1, slug: expect.any(String) });
     expect(await inTx(owner, () => teacher.draftCourse(CLAIMS, course))).toBeNull();
     const published = await inTx(owner, () => teacher.publishedCourse(CLAIMS, course));
-    expect(published).toMatchObject({ id: course, state: "published", pendingVersion: null, title: "Portal en la 100", summary: "Un resumen." });
+    expect(published).toMatchObject({ id: course, state: "published", pendingVersion: null, title: "Portal en la 100", summary: "Un resumen.", copyable: true, slug: expect.any(String) });
     expect(published?.modules).toEqual([{ id: expect.any(String), title: "Inicio", lessons: [{ id: expect.any(String), title: "Primera", seconds: 600 }] }]);
 
     expect(await inTx(owner, () => teacher.openVersion(CLAIMS, course))).toBe("opened");

@@ -30,6 +30,8 @@ const teacherCourseRow = z.object({
   teacher_name: z.string().nullable(),
   practice_name: z.string().nullable(),
   cover_tone: z.number().int().min(1).max(8).nullable(),
+  lesson_count: tally.nullable(),
+  slug: z.string().nullable(),
   has_draft: z.boolean(),
   has_summary: z.boolean(),
   practice_ready: z.boolean(),
@@ -51,6 +53,8 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
                coalesce(d.updated_at, r.updated_at) as updated_at, d.content_revision,
                (select pr.display_name from public.profiles pr where pr.id = (select auth.uid())) as teacher_name,
                pc.name as practice_name, pc.cover_tone,
+               case when d.course_id is not null then (select count(*) from public.draft_lessons l where l.course_id = d.course_id) else p.lesson_count end as lesson_count,
+               p.slug,
                d.course_id is not null as has_draft,
                d.summary is not null as has_summary,
                pc.id is not null as practice_ready,
@@ -62,7 +66,7 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
         from public.course_registry r
         left join public.course_drafts d on d.course_id = r.course_id
         left join public.published_courses p on p.course_id = r.course_id
-        left join public.practices pc on pc.id = d.practice_id and pc.is_active
+        left join public.practices pc on pc.id = coalesce(d.practice_id, p.practice_id) and pc.is_active
         where r.teacher_id = (select private.current_teacher_id())
         order by coalesce(d.updated_at, r.updated_at) desc, r.course_id`,
     teacherCourseRow,
@@ -80,6 +84,8 @@ export async function readTeacherCourses(tx: Tx): Promise<TeacherCourse[]> {
     submittedAt: null,
     practiceName: row.practice_name,
     coverTone: row.cover_tone,
+    lessonCount: row.lesson_count,
+    slug: row.slug,
     draft: row.has_draft
       ? {
           hasSummary: row.has_summary,
@@ -337,6 +343,8 @@ const publishedRow = z.object({
   pending_version_state: pending,
   title: z.string(),
   summary: z.string().nullable(),
+  slug: z.string(),
+  copyable: z.boolean(),
   modules: z.array(
     z.strictObject({
       id,
@@ -352,7 +360,7 @@ const publishedRow = z.object({
  */
 export async function readPublishedCourse(tx: Tx, course: string): Promise<PublishedCourse | null> {
   const [row] = await tx.query(
-    sql`select p.course_id, r.state, r.pending_version_state, p.title, p.summary,
+    sql`select p.course_id, r.state, r.pending_version_state, p.title, p.summary, p.slug, p.course_review_id is not null as copyable,
                coalesce((
                  select jsonb_agg(jsonb_build_object('id', x.module_id, 'title', x.module_title, 'lessons', x.lessons) order by x.first)
                  from (
@@ -368,7 +376,16 @@ export async function readPublishedCourse(tx: Tx, course: string): Promise<Publi
     publishedRow,
   );
   if (!row) return null;
-  return { id: row.course_id, state: row.state, pendingVersion: row.pending_version_state, title: row.title, summary: row.summary, modules: row.modules };
+  return {
+    id: row.course_id,
+    state: row.state,
+    pendingVersion: row.pending_version_state,
+    title: row.title,
+    summary: row.summary,
+    slug: row.slug,
+    copyable: row.copyable,
+    modules: row.modules,
+  };
 }
 
 /** Lo que contestó un cambio, como una de las respuestas de su lista. Otra cosa lanza. */

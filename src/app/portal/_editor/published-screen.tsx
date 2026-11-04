@@ -8,6 +8,7 @@ import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { InlineAlert } from "@/ui/inline-alert";
 import { StatusBadge } from "@/ui/status-badge";
+import { TextLink } from "@/ui/text-link";
 
 import { openVersionAction } from "../_cursos/actions";
 import type { OpenState } from "../_cursos/outcomes";
@@ -43,6 +44,12 @@ export function PublishedScreen({ view, path }: { view: PublishedView; path: str
         )}
       </div>
       <InlineAlert tone="neutral">{view.intro}</InlineAlert>
+      {view.blocked !== null && <InlineAlert tone="neutral">{view.blocked}</InlineAlert>}
+      {view.publicHref !== null && (
+        <p>
+          <TextLink href={view.publicHref}>{text.publicPage}</TextLink>
+        </p>
+      )}
       {state.kind === "failed" && (
         <InlineAlert tone={state.reason === "not_copyable" ? "neutral" : "danger"} live>
           {state.reason === "not_copyable" ? text.notCopyable : failureText(state.reason)}

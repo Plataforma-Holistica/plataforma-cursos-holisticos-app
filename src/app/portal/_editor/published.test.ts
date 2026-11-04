@@ -13,6 +13,8 @@ const course: PublishedCourse = {
   pendingVersion: null,
   title: "El bosque",
   summary: "Caminar despacio.",
+  slug: "el-bosque",
+  copyable: true,
   modules: [
     { id: "d0000000-0000-4000-8000-000000000001", title: "Inicio", lessons: [{ id: "e0000000-0000-4000-8000-000000000001", title: "Entrar", seconds: 1234 }] },
     { id: "d0000000-0000-4000-8000-000000000002", title: "", lessons: [{ id: "e0000000-0000-4000-8000-000000000002", title: "Salir", seconds: 45 }] },
@@ -20,13 +22,15 @@ const course: PublishedCourse = {
 };
 
 describe("publishedView", () => {
-  it("lo publicado, en palabras, con el aviso y «Editar»", () => {
+  it("lo publicado, en palabras, con el aviso, su ficha y «Editar»", () => {
     expect(publishedView(course, false)).toEqual({
       course: COURSE,
       title: "El bosque",
       state: "Publicado",
       tone: "good",
       intro: "Tus alumnos ven esta versión. Para cambiar algo, crea una versión nueva: la revisamos antes de publicarla.",
+      blocked: null,
+      publicHref: "/cursos/el-bosque",
       summary: "Caminar despacio.",
       modules: [
         { id: "d0000000-0000-4000-8000-000000000001", heading: "Módulo 1: Inicio", lessons: ["Entrar, 20 min 34 s"] },
@@ -36,12 +40,27 @@ describe("publishedView", () => {
     });
   });
 
-  it("al suspendido, sin «Editar»", () => {
-    expect(publishedView(course, true).open).toBeNull();
+  it("al suspendido, solo lectura y sin «Editar»", () => {
+    expect(publishedView(course, true)).toMatchObject({ open: null, intro: "Estás viendo el curso en solo lectura." });
   });
 
-  it("uno retirado, sin «Editar»: retirar es de Contenido (T-406)", () => {
-    expect(publishedView({ ...course, state: "withdrawn" }, false)).toMatchObject({ state: "Despublicado", open: null });
+  it("uno que no se puede copiar (cargado por guion) lo dice de entrada, sin «Editar»", () => {
+    expect(publishedView({ ...course, copyable: false }, false)).toMatchObject({
+      open: null,
+      blocked: "Este curso se cargó directamente y no se puede editar desde aquí. Escríbenos si necesitas cambiarlo.",
+    });
+  });
+
+  it("uno despublicado, sin «Editar» ni su ficha: volver a publicarlo es de Contenido (T-406)", () => {
+    expect(publishedView({ ...course, state: "withdrawn" }, false)).toMatchObject({ state: "Despublicado", tone: "bad", open: null, publicHref: null });
+  });
+
+  it("si otra pestaña acaba de abrir la versión, se dice como tal, y «Editar» lleva a ella", () => {
+    expect(publishedView({ ...course, state: "changes_pending", pendingVersion: "draft" }, false)).toMatchObject({
+      state: "Con cambios pendientes",
+      tone: "active",
+      open: `open:${COURSE}`,
+    });
   });
 
   it("sin resumen, lo dice", () => {
