@@ -50,6 +50,7 @@ const row = (period: string, status: MyPayouts["periods"][number]["status"], ext
 
 const MINE: MyPayouts = {
   balanceCents: 4_500,
+  receiverReady: true,
   periods: [
     row("2030-11", "empty", { poolCents: 0, bonusesCents: 0, adjustmentsCents: 0 }),
     row("2031-01", "paid", { netCents: 98_000 }),
@@ -140,11 +141,20 @@ describe("PA-46 · Pagos", () => {
     const december = within(table).getByRole("rowheader", { name: "Diciembre de 2030" }).closest("tr") as HTMLElement;
     expect(within(december).getByText("Acumulada")).toBeInTheDocument();
     expect(within(december).getByText("Pasa a tu siguiente pago: $45.00")).toBeInTheDocument();
-    expect(within(december).getByText("Todavía no")).toBeInTheDocument();
+    expect(within(december).getByText("No se paga")).toBeInTheDocument();
     const november = within(table).getByRole("rowheader", { name: "Noviembre de 2030" }).closest("tr") as HTMLElement;
     expect(within(november).getByText("En cero")).toBeInTheDocument();
     expect(within(november).getAllByText("$0.00")).toHaveLength(3);
     expect(within(november).getByRole("link", { name: "Ver la liquidación de Noviembre de 2030" })).toHaveAttribute("href", "/portal/pagos/2030-11");
+  });
+
+  it("sin el RFC de quien recibe (PQ-20) no ofrece facturar: solo ver la liquidación", async () => {
+    mocks.myPayouts.mockResolvedValueOnce({ kind: "ready", value: { outcome: "ok", value: { ...MINE, receiverReady: false } } });
+    render(await at(["pagos"]));
+    const table = screen.getByRole("table", { name: "Tus liquidaciones" });
+    const february = within(table).getByRole("rowheader", { name: "Febrero de 2031" }).closest("tr") as HTMLElement;
+    expect(within(february).queryByRole("link", { name: "Ya puedes facturar Febrero de 2031" })).not.toBeInTheDocument();
+    expect(within(february).getByRole("link", { name: "Ver la liquidación de Febrero de 2031" })).toHaveAttribute("href", "/portal/pagos/2031-02");
   });
 
   it("en teléfono, tarjetas en el mismo orden", async () => {
@@ -331,6 +341,8 @@ describe("PA-47 · Liquidación del periodo", () => {
     expect(screen.getByText("En cero")).toBeInTheDocument();
     expect(screen.getByText(/Este periodo quedó en cero/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Factura" })).not.toBeInTheDocument();
+    // Un periodo en cero no tiene CSV: la base contestaría que no existe.
+    expect(screen.queryByRole("button", { name: "Descargar CSV" })).not.toBeInTheDocument();
   });
 
   it.each(["not_found", "not_teacher"] as const)("«%s» no existe", async (outcome) => {

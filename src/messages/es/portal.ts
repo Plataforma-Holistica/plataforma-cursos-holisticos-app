@@ -289,6 +289,8 @@ export const portal = defineMessages({
       action: "Qué toca",
     },
     netPending: "Todavía no",
+    netNone: "No se paga",
+    noPercent: "Sin porcentaje",
     carriedOn: "Pasa a tu siguiente pago: {amount}",
     carriedAgainst: "Se descuenta de tu siguiente pago: {amount}",
     canInvoice: "Ya puedes facturar",

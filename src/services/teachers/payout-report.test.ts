@@ -17,7 +17,7 @@ function harness(change: { store?: Partial<PayoutReportStore>; session?: Session
   const asked: number[] = [];
   const reported: FailureCode[] = [];
   const store: PayoutReportStore = {
-    mine: () => Promise.resolve({ outcome: "ok", value: { balanceCents: null, periods: [] } }),
+    mine: () => Promise.resolve({ outcome: "ok", value: { balanceCents: null, receiverReady: true, periods: [] } }),
     report: (_c, period) => {
       asked.push(period);
       return Promise.resolve({ outcome: "not_found" });

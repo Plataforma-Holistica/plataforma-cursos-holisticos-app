@@ -3,7 +3,7 @@
 -- sin decir quién es: PA-46 (`payouts_mine`), PA-47 (`payout_report_mine`) y el CSV. El alias de cada alumno se crea al leer, distinto por maestro.
 begin;
 \ir _ayuda.psql
-select plan(67);
+select plan(76);
 
 select pruebas.alta('a8100000-0000-0000-0000-000000000001', 'tere-81@prueba.test');
 select pruebas.alta('a8100000-0000-0000-0000-000000000002', 'otra-81@prueba.test');
@@ -134,11 +134,13 @@ select pruebas.liquidacion(1, 2, 10000, 'awaiting_invoice', jsonb_build_object(
 select pruebas.liquidacion(2, 2, 3400, 'calculated');
 select pruebas.liquidacion(3, 2, 900, 'carried_forward', '{"invoice_due_on": null}');
 set local session_replication_role = replica;
-insert into public.bonuses (teacher_id, period_id, kind, status, amount_cents, basis_cents, multiplier_bps)
-values (pruebas.m(1), pruebas.mes(2), 'founder', 'confirmed', 2000, 10000, 2000),
-       (pruebas.m(1), pruebas.mes(2), 'discretionary', 'proposed', 900, null, null);
+insert into public.bonuses (teacher_id, period_id, kind, status, amount_cents, basis_cents, multiplier_bps, close_run_id, created_by, reason, decided_by, decided_at)
+values (pruebas.m(1), pruebas.mes(2), 'founder', 'confirmed', 2000, 10000, 2000, (select close_run_id from public.payout_periods where period_id = pruebas.mes(2)),
+        null, null, pruebas.f1(), now()),
+       (pruebas.m(1), pruebas.mes(2), 'discretionary', 'proposed', 900, null, null, null, pruebas.f1(), 'prueba', null, null);
 insert into public.payout_adjustments (teacher_id, origin_period_id, applied_period_id, amount_cents, reason, created_by)
-values (pruebas.m(1), pruebas.mes(1), pruebas.mes(2), -500, 'Un motivo interno que el maestro no ve', pruebas.f1());
+values (pruebas.m(1), pruebas.mes(1), pruebas.mes(2), -500, 'Un motivo interno que el maestro no ve', pruebas.f1()),
+       (pruebas.m(1), pruebas.mes(3), pruebas.mes(4), 700, 'Otro periodo', pruebas.f1());
 set local session_replication_role = origin;
 -- Enero: Otra no publicó, pero tiene un bono: su liquidación en 0 del bote aparece.
 select pruebas.liquidacion(2, 1, 0, 'carried_forward', '{"bonuses_cents": 300, "subtotal_cents": 300, "net_cents": 300}');
@@ -164,17 +166,22 @@ insert into private.teacher_tax_profiles (teacher_id, version, rfc_enc, legal_na
 values (pruebas.m(1), 1, decode('010001' || repeat('ab', 41), 'hex'), decode('010001' || repeat('ab', 48), 'hex'), '612', 'person',
         decode('010001' || repeat('ab', 46), 'hex'), '7771', 1, pruebas.tere(), now() - interval '10 days', now() - interval '7 days');
 insert into private.payout_account_reads (id, payout_id, teacher_id, tax_profile_id, tax_profile_version, clabe_changed_at, first_time, read_by)
-values ('f8100000-0000-4000-8000-000000000001', pruebas.p(1, 8), pruebas.m(1), gen_random_uuid(), 1, now(), false, pruebas.f1()),
-       ('f8100000-0000-4000-8000-000000000002', pruebas.p(1, 8), pruebas.m(1), gen_random_uuid(), 1, now(), false, pruebas.f1());
--- Dos transferencias reportadas: la primera chocó y se devolvió; la que vale es la segunda.
+select ('f8100000-0000-4000-8000-00000000000' || n)::uuid, case when n = 4 then pruebas.p(1, 7) else pruebas.p(1, 8) end, pruebas.m(1), gen_random_uuid(), 1, now(),
+       false, pruebas.f1()
+from generate_series(1, 4) n;
+-- Agosto, tres transferencias: una que chocó, la que vale y, después, una sin choque que el banco devolvió. Julio: la que chocó y la retuvo.
 insert into private.payout_payments (id, payout_id, teacher_id, read_id, tax_profile_version, clabe_changed_at, reference, paid_on, amount_cents, first_time,
                                      account_changed_since_read, conflict, recorded_by, recorded_at)
 values ('f8100000-0000-4000-8000-000000000011', pruebas.p(1, 8), pruebas.m(1), 'f8100000-0000-4000-8000-000000000001', 1, now(), 'MAL-1', '2031-09-08', 8000,
-        false, false, 'amount_differs', pruebas.f1(), now() - interval '2 days'),
+        false, false, 'amount_differs', pruebas.f1(), now() - interval '3 days'),
        ('f8100000-0000-4000-8000-000000000012', pruebas.p(1, 8), pruebas.m(1), 'f8100000-0000-4000-8000-000000000002', 1, now(), 'SPEI-778', '2031-09-10', 9000,
-        false, false, null, pruebas.f1(), now() - interval '1 day');
+        false, false, null, pruebas.f1(), now() - interval '2 days'),
+       ('f8100000-0000-4000-8000-000000000013', pruebas.p(1, 8), pruebas.m(1), 'f8100000-0000-4000-8000-000000000003', 1, now(), 'DEV-9', '2031-09-12', 9000,
+        false, false, null, pruebas.f1(), now() - interval '1 day'),
+       ('f8100000-0000-4000-8000-000000000014', pruebas.p(1, 7), pruebas.m(1), 'f8100000-0000-4000-8000-000000000004', 1, now(), 'SPEI-778', '2031-09-10', 9000,
+        false, false, 'duplicate_reference', pruebas.f1(), now());
 insert into private.payout_requests (kind, payout_id, payment_id, note, proposed_by, status, decided_by, decided_at)
-values ('payment_return', pruebas.p(1, 8), 'f8100000-0000-4000-8000-000000000011', 'Devuelto', pruebas.f1(), 'confirmed', pruebas.tere(), now());
+values ('payment_return', pruebas.p(1, 8), 'f8100000-0000-4000-8000-000000000013', 'Devuelto', pruebas.f1(), 'confirmed', pruebas.tere(), now());
 insert into private.teacher_invoices (id, payout_id, teacher_id, status, pdf_path, pdf_object_id, pdf_object_version, pdf_bytes, xml_enc, xml_sha256, cfdi_uuid,
                                       issued_at, stamped_at, issuer_regime, issuer_profile_version, receiver_rfc, subtotal_cents, vat_cents,
                                       income_tax_withheld_cents, vat_withheld_cents, total_cents, submitted_by, submitted_at, reviewed_by, reviewed_at, rejection_reason)
@@ -182,6 +189,9 @@ values ('f8100000-0000-4000-8000-000000000021', pruebas.p(1, 9), pruebas.m(1), '
         pruebas.m(1) || '/' || pruebas.p(1, 9) || '/f8100000-0000-4000-8000-000000000021.pdf', gen_random_uuid(), 'v1', 2000,
         decode('010001' || repeat('ab', 40), 'hex'), sha256('x'), gen_random_uuid(), now(), now(), '612', 1, 'PHO200101AB1', 9000, 0, 0, 0, 8000,
         pruebas.tere(), '2031-10-15 10:00-06', pruebas.f1(), '2031-10-16 10:00-06', 'El total no coincide con tu liquidación');
+-- Febrero: una subida empezada que no terminó. No es una factura todavía.
+insert into private.teacher_invoices (payout_id, teacher_id, status, expires_at, pdf_path)
+values (pruebas.p(1, 2), pruebas.m(1), 'uploading', now() + interval '1 hour', pruebas.m(1) || '/' || pruebas.p(1, 2) || '/f8100000-0000-4000-8000-000000000022.pdf');
 set local session_replication_role = origin;
 
 -- ---------------------------------------------------------------------------------------
@@ -198,7 +208,7 @@ select is(pruebas.reporte(pruebas.nadie(), 2) ->> 'outcome', 'not_teacher', 'ni 
 -- ---------------------------------------------------------------------------------------
 -- PA-46: los periodos con liquidación, y en cero desde el primer curso publicado.
 
-select is((select array_agg((x ->> 'period_id')::integer order by ordinality) from jsonb_array_elements(pruebas.mias(pruebas.tere()) -> 'periods') with ordinality x),
+select is((select array_agg((x ->> 'period_id')::integer order by ordinality) from jsonb_array_elements(pruebas.mias(pruebas.tere()) -> 'periods') with ordinality as w (x, ordinality)),
   array[203111, 203110, 203109, 203108, 203107, 203106, 203105, 203104, 203103, 203102], 'Tere: de su primer mes publicado al último cerrado, el más reciente primero');
 select is(pruebas.fila(pruebas.tere(), 3) - 'period_id', jsonb_build_object('status', 'empty', 'pool_cents', 0, 'bonuses_cents', 0,
   'adjustments_cents', 0, 'balance_applied_cents', 0, 'net_cents', null, 'carried_cents', null, 'invoice_due_on', null, 'overdue', false, 'action', null),
@@ -216,6 +226,9 @@ select is(pruebas.fila(pruebas.tere(), 9) ->> 'action', 'upload_invoice', 'venci
 select is(pruebas.fila(pruebas.tere(), 9) ->> 'overdue', 'true', 'y dice que venció');
 select is(pruebas.fila(pruebas.tere(), 11) ->> 'net_cents', null, 'sin liberar, sin neto');
 select is(pruebas.fila(pruebas.tere(), 11) ->> 'pool_cents', '9000', 'pero sí su reparto');
+select is(pruebas.fila(pruebas.tere(), 11) -> 'bonuses_cents', 'null'::jsonb, 'y sin bonos, ajustes ni saldo, que llegan al liberar');
+select is(pruebas.fila(pruebas.tere(), 6) -> 'adjustments_cents', 'null'::jsonb, 'tampoco retenida desde calculada');
+select is(pruebas.mias(pruebas.tere()) ->> 'receiver_ready', 'false', 'sin RFC de quien recibe, todavía no se factura');
 select is(pruebas.mias(pruebas.tere()) ->> 'balance_cents', null, 'sin saldo acumulado, no hay cifra');
 set local session_replication_role = replica;
 insert into public.teacher_balance_entries (teacher_id, payout_id, period_id, kind, amount_cents)
@@ -262,15 +275,22 @@ select is(pruebas.reporte(pruebas.tere(), 6) -> 'money', 'null'::jsonb, 'ni rete
 select is(pruebas.reporte(pruebas.tere(), 9) -> 'summary' ->> 'nothing_assigned', 'true', 'un periodo sin nada asignado lo dice (FL-39 A3)');
 select is(pruebas.reporte(pruebas.tere(), 9) -> 'invoice' -> 'latest', jsonb_build_object('status', 'rejected', 'submitted_at', '2031-10-15 10:00-06'::timestamptz,
   'reviewed_at', '2031-10-16 10:00-06'::timestamptz, 'rejection_reason', 'El total no coincide con tu liquidación'), 'la factura rechazada, con su motivo');
-select is(pruebas.reporte(pruebas.tere(), 2) -> 'invoice' -> 'latest', 'null'::jsonb, 'sin factura todavía');
+select is(pruebas.reporte(pruebas.tere(), 2) -> 'invoice' -> 'latest', 'null'::jsonb, 'una subida que no terminó no es una factura');
 select is(pruebas.reporte(pruebas.tere(), 2) -> 'invoice' ->> 'receiver_rfc', null, 'sin RFC de quien recibe (PQ-20)');
 select is(pruebas.reporte(pruebas.tere(), 8) -> 'payment', jsonb_build_object('paid_on', '2031-09-10', 'reference', 'SPEI-778', 'amount_cents', 9000),
-  'pagada: la transferencia que vale, con el neto');
+  'pagada: la transferencia viva que no chocó, ni la devuelta ni la que chocó');
+select is(pruebas.reporte(pruebas.tere(), 7) -> 'payment', 'null'::jsonb, 'una retenida no dice su pago, aunque haya una transferencia');
+select is(pruebas.reporte(pruebas.tere(), 4) -> 'money' -> 'adjustments', jsonb_build_array(jsonb_build_object('origin_period_id', 203103, 'amount_cents', 700)),
+  'cada periodo, solo sus ajustes');
 select is(pruebas.reporte(pruebas.tere(), 2) -> 'payment', 'null'::jsonb, 'sin pagar, sin pago');
 select is(pruebas.reporte(pruebas.tere(), 10) ->> 'status', 'payment_returned', 'el pago devuelto se dice');
+select is(pruebas.reporte(pruebas.otra(), 1) -> 'summary' ->> 'total_cents', '0', 'una liquidación de un bono, sin consumo: el reparto en cero');
+select is(pruebas.reporte(pruebas.otra(), 1) -> 'students', '[]'::jsonb, 'y sin alumnos');
+select is(pruebas.reporte(pruebas.otra(), 1) -> 'money' ->> 'subtotal_cents', '300', 'con su bono en el dinero');
+select is(pruebas.csv(pruebas.tere(), 3) ->> 'outcome', 'not_found', 'un mes en cero no tiene CSV');
 
 -- Las filas: alias y medios puntos, sin pesos por alumno, de más a menos puntos.
-select is((select array_agg(x ->> 'half_points' order by ordinality) from jsonb_array_elements(pruebas.reporte(pruebas.tere(), 2) -> 'students') with ordinality x),
+select is((select array_agg(x ->> 'half_points' order by ordinality) from jsonb_array_elements(pruebas.reporte(pruebas.tere(), 2) -> 'students') with ordinality as w (x, ordinality)),
   array['6', '3', '3'], 'una fila por alumno, de más a menos');
 select is((select array_agg(k order by k) from jsonb_array_elements(pruebas.reporte(pruebas.tere(), 2) -> 'students') x, jsonb_object_keys(x) k),
   array['alias', 'alias', 'alias', 'half_points', 'half_points', 'half_points'], 'cada fila trae solo alias y puntos');
@@ -287,7 +307,7 @@ select is((pruebas.reporte(pruebas.tere(), 2) -> 'summary' ->> 'total_cents')::b
 -- ---------------------------------------------------------------------------------------
 -- El alias: estable, con forma, distinto con otro maestro, y nunca en el cierre.
 
-select ok(pruebas.alias(1, 1) ~ '^[A-Z][a-z]+ [1-9][0-9]{1,2}$', 'el alias tiene la forma de «Ceiba 42»');
+select ok(pruebas.alias(1, 1) ~ '^[A-Z][a-z]+ [1-9][0-9]{1,3}$', 'el alias tiene la forma de «Ceiba 42»');
 select is((select x ->> 'alias' from jsonb_array_elements(pruebas.reporte(pruebas.tere(), 2) -> 'students') x where (x ->> 'half_points')::integer = 6),
   pruebas.alias(1, 1), 'leer otra vez da el mismo');
 select ok(pruebas.alias(2, 1) is null, 'Otra todavía no leyó: su alumno no tiene alias con ella');
@@ -299,7 +319,8 @@ select throws_ok($$ update private.student_aliases set alias = 'Ceiba 10' $$, '4
 select throws_ok($$ delete from private.student_aliases $$, '42501', null, 'ni se borra');
 -- Una lápida conserva el suyo.
 set local session_replication_role = replica;
-update public.profiles set status = 'deleted' where id = pruebas.a(1);
+update public.profiles set status = 'deleted', deleted_at = now(), display_name = null, country_code = null, adult_declared_at = null, comment_ban_until = null
+  where id = pruebas.a(1);
 set local session_replication_role = origin;
 select is((select x ->> 'alias' from jsonb_array_elements(pruebas.reporte(pruebas.tere(), 2) -> 'students') x where (x ->> 'half_points')::integer = 6),
   pruebas.alias(1, 1), 'el alumno que borró su cuenta sigue con su alias');

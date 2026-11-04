@@ -27,14 +27,14 @@ const status = z.enum([
 
 const row = z
   .object({
-    period_id: period, status, pool_cents: money, bonuses_cents: money, adjustments_cents: money, balance_applied_cents: money,
+    period_id: period, status, pool_cents: money, bonuses_cents: money.nullable(), adjustments_cents: money.nullable(), balance_applied_cents: money.nullable(),
     net_cents: money.nullable(), carried_cents: money.nullable(), invoice_due_on: day.nullable(), overdue: z.boolean(),
     action: z.literal("upload_invoice").nullable(),
   })
   .strict();
 
 const mineAnswer = z.union([
-  z.object({ outcome: z.literal("ok"), balance_cents: money.nullable(), periods: z.array(row) }).strict(),
+  z.object({ outcome: z.literal("ok"), balance_cents: money.nullable(), receiver_ready: z.boolean(), periods: z.array(row) }).strict(),
   z.object({ outcome: z.literal("not_teacher") }).strict(),
 ]);
 
@@ -45,6 +45,7 @@ export async function askPayoutsMine(tx: Tx): Promise<{ outcome: "ok"; value: My
     outcome: "ok",
     value: {
       balanceCents: answer.balance_cents,
+      receiverReady: answer.receiver_ready,
       periods: answer.periods.map((r) => ({
         period: periodSegment(r.period_id), status: r.status, poolCents: r.pool_cents, bonusesCents: r.bonuses_cents, adjustmentsCents: r.adjustments_cents,
         balanceAppliedCents: r.balance_applied_cents, netCents: r.net_cents, carriedCents: r.carried_cents, invoiceDueOn: r.invoice_due_on,
@@ -66,7 +67,7 @@ const reportAnswer = z.union([
       overdue: z.boolean(),
       summary: z
         .object({
-          pool_cents: money, pool_bps: z.number().int(), nothing_assigned: z.boolean(), assigned_cents: money, unconsumed_cents: money,
+          pool_cents: money, pool_bps: z.number().int().nullable(), nothing_assigned: z.boolean(), assigned_cents: money, unconsumed_cents: money,
           total_cents: money, half_points: z.number().int(), students: z.number().int(),
         })
         .strict(),
@@ -95,7 +96,7 @@ const reportAnswer = z.union([
       students: z.array(z.object({ alias: z.string(), half_points: z.number().int() }).strict()),
     })
     .strict(),
-  z.object({ outcome: z.literal("empty"), period_id: period, pool_cents: money, pool_bps: z.number().int(), nothing_assigned: z.boolean() }).strict(),
+  z.object({ outcome: z.literal("empty"), period_id: period, pool_cents: money, pool_bps: z.number().int().nullable(), nothing_assigned: z.boolean() }).strict(),
   z.object({ outcome: z.enum(["not_teacher", "not_found"]) }).strict(),
 ]);
 

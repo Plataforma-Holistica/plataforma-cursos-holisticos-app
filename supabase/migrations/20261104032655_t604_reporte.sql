@@ -17,7 +17,7 @@ create table private.student_aliases (
   created_at timestamptz not null default clock_timestamp(),
   primary key (teacher_id, profile_id),
   constraint student_aliases_alias_uq unique (teacher_id, alias),
-  constraint student_aliases_alias_form check (alias ~ '^[A-Z][a-z]+ [1-9][0-9]{1,2}$')
+  constraint student_aliases_alias_form check (alias ~ '^[A-Z][a-z]+ [1-9][0-9]{1,3}$')
 );
 comment on table private.student_aliases is 'El alias de cada alumno con cada maestro (RN-15). Solo inserción, sin auditoría: la auditoría guarda la fila entera, y la lee quien tiene configuración.';
 
@@ -28,7 +28,8 @@ create trigger ledger_no_update_delete before update or delete on private.studen
 create trigger ledger_no_truncate before truncate on private.student_aliases
   for each statement execute function private.reject_mutation();
 
--- Un alias al azar: una de 40 plantas y árboles de México y un número de 10 a 99; pasados 20 choques, de 100 a 999.
+-- Un alias al azar: una de 40 plantas y árboles de México y un número de 10 a 99; pasados 20 choques, de 100 a 999, y pasados 60, de 1000 a 9999
+-- (casi 400 000 por maestro).
 create function private.alias_candidate(p_try integer) returns text
 language sql volatile set search_path = ''
 as $$
@@ -38,7 +39,8 @@ as $$
                 'Nopal', 'Maguey', 'Agave', 'Yuca', 'Salvia', 'Romero', 'Ruda', 'Toronjil', 'Cempasuchil', 'Dalia'])
            [1 + pg_catalog.floor(pg_catalog.random() * 40)::integer]
          || ' ' || case when p_try < 20 then 10 + pg_catalog.floor(pg_catalog.random() * 90)::integer
-                        else 100 + pg_catalog.floor(pg_catalog.random() * 900)::integer end
+                        when p_try < 60 then 100 + pg_catalog.floor(pg_catalog.random() * 900)::integer
+                        else 1000 + pg_catalog.floor(pg_catalog.random() * 9000)::integer end
 $$;
 revoke all on function private.alias_candidate(integer) from public;
 
@@ -61,10 +63,10 @@ begin
     loop
       insert into private.student_aliases (teacher_id, profile_id, alias)
       values (p_teacher, v_profile, private.alias_candidate(v_try))
-      on conflict do nothing;
+      on conflict (teacher_id, alias) do nothing;
       exit when found;
       v_try := v_try + 1;
-      if v_try >= 200 then
+      if v_try >= 400 then
         raise exception 'student alias space exhausted' using errcode = 'P0001';
       end if;
     end loop;
@@ -90,8 +92,8 @@ as $$
 $$;
 revoke all on function private.payout_teacher_status(public.payouts) from public;
 
--- La fila de PA-46. Neto solo en lo que se paga y ya se liberó; la acumulada dice lo que pasa al siguiente, con signo. «Subir factura» también vencida: la
--- factura tardía se sube y se paga.
+-- La fila de PA-46. Bonos, ajustes y saldo solo después de liberar: los escribe liberar, y antes son ceros de relleno. Neto solo en lo que se paga y ya
+-- se liberó; la acumulada dice lo que pasa al siguiente, con signo. «Subir factura» también vencida: la factura tardía se sube y se paga.
 create function private.payout_mine_row(p_period public.period_id, p public.payouts) returns jsonb
 language sql stable set search_path = ''
 as $$
@@ -100,7 +102,9 @@ as $$
                                   'balance_applied_cents', 0, 'net_cents', null, 'carried_cents', null, 'invoice_due_on', null, 'overdue', false, 'action', null)
   else
     pg_catalog.jsonb_build_object('period_id', p.period_id, 'status', private.payout_teacher_status(p), 'pool_cents', p.pool_cents,
-                                  'bonuses_cents', p.bonuses_cents, 'adjustments_cents', p.adjustments_cents, 'balance_applied_cents', p.balance_applied_cents,
+                                  'bonuses_cents', case when p.released_at is not null then p.bonuses_cents end,
+                                  'adjustments_cents', case when p.released_at is not null then p.adjustments_cents end,
+                                  'balance_applied_cents', case when p.released_at is not null then p.balance_applied_cents end,
                                   'net_cents', case when p.released_at is not null and p.status <> 'carried_forward' then p.net_cents end,
                                   'carried_cents', case when p.status = 'carried_forward' then p.subtotal_cents end,
                                   'invoice_due_on', p.invoice_due_on, 'overdue', p.invoice_overdue_at is not null,
@@ -132,7 +136,9 @@ begin
   v_first := private.teacher_first_period(v_teacher);
   return pg_catalog.jsonb_build_object(
     'outcome', 'ok',
-    'balance_cents', pg_catalog.nullif(private.teacher_balance(v_teacher), 0),
+    'balance_cents', nullif(private.teacher_balance(v_teacher), 0),
+    -- Sin RFC de quien recibe (PQ-20) no se puede empezar ninguna factura: la pantalla no la ofrece.
+    'receiver_ready', private.invoice_receiver_rfc() is not null,
     'periods', coalesce((
       select pg_catalog.jsonb_agg(private.payout_mine_row(q.period_id, y) order by q.period_id desc)
       from public.payout_periods q
@@ -213,9 +219,10 @@ begin
                  where i.payout_id = y.id and i.status in ('in_review', 'accepted', 'rejected')
                  order by i.submitted_at desc, i.id
                  limit 1)),
-    -- El pago que vale: vivo, y entre los vivos el que no chocó. El monto es el neto de la liquidación, no lo tecleado.
+    -- El pago que vale: vivo, y entre los vivos el que no chocó. El monto es lo transferido: el de una que chocó por el monto y se soltó a pagada no
+    -- es el neto.
     'payment', case when y.status = 'paid' then (
-      select pg_catalog.jsonb_build_object('paid_on', x.paid_on, 'reference', x.reference, 'amount_cents', y.net_cents)
+      select pg_catalog.jsonb_build_object('paid_on', x.paid_on, 'reference', x.reference, 'amount_cents', x.amount_cents)
       from private.payout_payments x
       where x.payout_id = y.id
         and not exists (select 1 from private.payout_requests r where r.payment_id = x.id and r.kind = 'payment_return' and r.status = 'confirmed')

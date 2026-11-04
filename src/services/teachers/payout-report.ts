@@ -20,9 +20,10 @@ export interface PayoutRow {
   period: string;
   status: TeacherPayoutStatus;
   poolCents: number;
-  bonusesCents: number;
-  adjustmentsCents: number;
-  balanceAppliedCents: number;
+  /** Bonos, ajustes y saldo: nulos antes de liberar, porque los escribe liberar. */
+  bonusesCents: number | null;
+  adjustmentsCents: number | null;
+  balanceAppliedCents: number | null;
   /** Solo en lo que se paga y ya se liberó. */
   netCents: number | null;
   /** Lo que una acumulada pasa al siguiente, con signo. */
@@ -35,6 +36,8 @@ export interface PayoutRow {
 export interface MyPayouts {
   /** El saldo acumulado; nulo si es cero. */
   balanceCents: number | null;
+  /** Si ya existe el RFC de quien recibe (PQ-20): sin él no se puede empezar ninguna factura. */
+  receiverReady: boolean;
   periods: PayoutRow[];
 }
 
@@ -61,7 +64,8 @@ export interface PayoutReportValue {
   overdue: boolean;
   summary: {
     poolCents: number;
-    poolBps: number;
+    /** Nulo si el periodo no tenía juego de tramos. */
+    poolBps: number | null;
     nothingAssigned: boolean;
     assignedCents: number;
     unconsumedCents: number;
@@ -76,6 +80,7 @@ export interface PayoutReportValue {
     receiverRfc: string | null;
     latest: { status: "in_review" | "accepted" | "rejected"; submittedAt: string; reviewedAt: string | null; rejectionReason: string | null } | null;
   };
+  /** El monto es lo transferido. */
   payment: { paidOn: string; reference: string; amountCents: number } | null;
   /** Alias y medios puntos, de más a menos. */
   students: { alias: string; halfPoints: number }[];
@@ -83,7 +88,7 @@ export interface PayoutReportValue {
 
 export type PayoutReportAnswer =
   | { outcome: "ok"; value: PayoutReportValue }
-  | { outcome: "empty"; period: string; poolCents: number; poolBps: number; nothingAssigned: boolean }
+  | { outcome: "empty"; period: string; poolCents: number; poolBps: number | null; nothingAssigned: boolean }
   | { outcome: "not_teacher" | "not_found" };
 
 export type PayoutCsvAnswer = { outcome: "ok"; csv: string } | { outcome: "not_teacher" | "not_found" };

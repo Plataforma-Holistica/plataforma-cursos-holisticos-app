@@ -62,7 +62,7 @@ function carriedText(cents: number | null): string | null {
   return cents < 0 ? t(text.carriedAgainst, { amount: money(-cents) }) : t(text.carriedOn, { amount: money(cents) });
 }
 
-function payoutRowView(row: PayoutRow): PayoutRowView {
+function payoutRowView(row: PayoutRow, receiverReady: boolean): PayoutRowView {
   const empty = row.status === "empty";
   return {
     key: row.period,
@@ -71,17 +71,18 @@ function payoutRowView(row: PayoutRow): PayoutRowView {
     status: statusOf(row.status),
     carried: carriedText(row.carriedCents),
     pool: money(row.poolCents),
-    extras: money(row.bonusesCents + row.adjustmentsCents),
-    // Un periodo en cero se muestra en cero, también el neto.
-    net: row.netCents !== null ? money(row.netCents) : empty ? money(0) : text.netPending,
-    canInvoice: row.action === "upload_invoice",
+    // Antes de liberar no hay bonos ni ajustes que decir: los escribe liberar.
+    extras: row.bonusesCents === null || row.adjustmentsCents === null ? text.netPending : money(row.bonusesCents + row.adjustmentsCents),
+    // Un periodo en cero se muestra en cero, también el neto; una acumulada no se paga: lo dice su frase.
+    net: row.netCents !== null ? money(row.netCents) : empty ? money(0) : row.status === "carried_forward" ? text.netNone : text.netPending,
+    canInvoice: row.action === "upload_invoice" && receiverReady,
     overdue: row.overdue,
   };
 }
 
 /** PA-46: la más reciente primero, en la tabla y en las tarjetas. */
 export function payoutsView(read: MyPayouts): PayoutsView {
-  const rows = [...read.periods].sort((a, b) => (a.period < b.period ? 1 : a.period > b.period ? -1 : 0)).map(payoutRowView);
+  const rows = [...read.periods].sort((a, b) => (a.period < b.period ? 1 : a.period > b.period ? -1 : 0)).map((row) => payoutRowView(row, read.receiverReady));
   return {
     balance:
       read.balanceCents === null
@@ -113,6 +114,8 @@ export interface ReportView {
   next: NextStep;
   overdue: string | null;
   summary: { pool: string; poolBps: string; share: string; nothingAssigned: boolean };
+  /** El CSV: no lo hay de un periodo en cero. */
+  downloadable: boolean;
   /** Nulo antes de liberar: sin neto. */
   money: MoneyLine[] | null;
   /** Nulo si no toca facturar (antes de liberar, acumulada, sin datos fiscales). */
@@ -128,6 +131,8 @@ export interface ReportView {
   totalPoints: string;
   total: string;
 }
+
+const poolPercent = (bps: number | null) => (bps === null ? text.noPercent : percent(bps));
 
 const STEPS = PAYOUT_STEPS.map((step) => ({ step, label: PAYOUT_STATUS[step].label }));
 
@@ -178,7 +183,8 @@ export function reportView(value: PayoutReportValue): ReportView {
       carried: carried === null ? null : { amount: money(Math.abs(carried)), against: carried < 0 },
     }),
     overdue: value.overdue ? overdueText(dueOn) : null,
-    summary: { pool: money(summary.poolCents), poolBps: percent(summary.poolBps), share: money(summary.totalCents), nothingAssigned: summary.nothingAssigned },
+    summary: { pool: money(summary.poolCents), poolBps: poolPercent(summary.poolBps), share: money(summary.totalCents), nothingAssigned: summary.nothingAssigned },
+    downloadable: true,
     money: released === null ? null : moneyLines(released),
     invoice:
       released === null || NO_INVOICE.has(value.status)
@@ -211,7 +217,7 @@ export function reportView(value: PayoutReportValue): ReportView {
 }
 
 /** Un periodo en cero (`outcome: "empty"`): se muestra en cero, sin desglose ni factura. */
-export function emptyReportView(read: { period: string; poolCents: number; poolBps: number; nothingAssigned: boolean }): ReportView {
+export function emptyReportView(read: { period: string; poolCents: number; poolBps: number | null; nothingAssigned: boolean }): ReportView {
   return {
     period: read.period,
     title: periodTitle(read.period),
@@ -220,7 +226,8 @@ export function emptyReportView(read: { period: string; poolCents: number; poolB
     steps: STEPS,
     next: nextStep({ status: "empty", amount: null, dueOn: null, submittedOn: null, rejectionReason: null, paidOn: null, reference: null, carried: null }),
     overdue: null,
-    summary: { pool: money(read.poolCents), poolBps: percent(read.poolBps), share: money(0), nothingAssigned: read.nothingAssigned },
+    summary: { pool: money(read.poolCents), poolBps: poolPercent(read.poolBps), share: money(0), nothingAssigned: read.nothingAssigned },
+    downloadable: false,
     money: null,
     invoice: null,
     payment: null,

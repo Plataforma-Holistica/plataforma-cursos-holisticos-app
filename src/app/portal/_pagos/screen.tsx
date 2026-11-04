@@ -269,12 +269,14 @@ export function ReportScreen({ view, page, readOnly }: { view: ReportView; page:
         />
       </Section>
 
-      <section id={DOWNLOAD_BLOCK_ID} aria-labelledby="descargas-titulo" className="flex flex-col gap-3">
-        <h2 id="descargas-titulo" className="text-h2">
-          {text.downloadTitle}
-        </h2>
-        <CsvDownload period={view.period} page={page} />
-      </section>
+      {view.downloadable && (
+        <section id={DOWNLOAD_BLOCK_ID} aria-labelledby="descargas-titulo" className="flex flex-col gap-3">
+          <h2 id="descargas-titulo" className="text-h2">
+            {text.downloadTitle}
+          </h2>
+          <CsvDownload period={view.period} page={page} />
+        </section>
+      )}
     </PortalFrame>
   );
 }

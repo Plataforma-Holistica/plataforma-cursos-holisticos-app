@@ -20,7 +20,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // con alias y puntos. Todo vive en una transacción del dueño que se revierte.
 //
 // Y lo que una transacción revertida no puede mostrar: dos lecturas a la vez del mismo maestro crean los alias una sola vez. Usa enero de 2044, que ninguna
-// otra prueba usa, armado con las guardias apagadas, y al terminar se quita de la misma manera.
+// otra prueba usa, armado con las guardias apagadas, y al terminar se quita de la misma manera. Para eso el dueño toma el rol del servidor y lo suelta.
 
 const emails: string[] = [];
 
@@ -95,12 +95,12 @@ async function closedPeriod(
     const assigned = mine.reduce((sum, s) => sum + s.cents, 0);
     await owner.query(
       `insert into public.payout_teacher_totals (period_id, teacher_id, close_run_id, half_points, students, assigned_cents, unconsumed_cents, total_cents)
-       values ($1, $2, $3, $4, $5, $6, 1000, $6 + 1000)`,
+       values ($1, $2, $3, $4, $5, $6::bigint, 1000, $6::bigint + 1000)`,
       [period, t, run, mine.reduce((sum, s) => sum + s.half, 0), mine.length, assigned],
     );
     await owner.query(
       `insert into public.payouts (period_id, teacher_id, close_run_id, status, pool_cents, subtotal_cents, net_cents)
-       values ($1, $2, $3, 'calculated', $4 + 1000, $4 + 1000, $4 + 1000)`,
+       values ($1, $2, $3, 'calculated', $4::bigint + 1000, $4::bigint + 1000, $4::bigint + 1000)`,
       [period, t, run, assigned],
     );
   }
@@ -157,9 +157,10 @@ describe("por el servicio", () => {
           outcome: "ok",
           value: {
             balanceCents: null,
+            receiverReady: false,
             periods: [
               {
-                period: "2043-12", status: "calculated", poolCents: 21000, bonusesCents: 0, adjustmentsCents: 0, balanceAppliedCents: 0, netCents: null,
+                period: "2043-12", status: "calculated", poolCents: 21000, bonusesCents: null, adjustmentsCents: null, balanceAppliedCents: null, netCents: null,
                 carriedCents: null, invoiceDueOn: null, overdue: false, action: null,
               },
             ],
@@ -171,7 +172,7 @@ describe("por el servicio", () => {
       if (report.kind !== "ready" || report.value.outcome !== "ok") throw new Error("Ana no tiene reporte");
       const anaRows = report.value.value.students;
       expect(anaRows.map((r) => r.halfPoints)).toEqual([5, 2]);
-      expect(anaRows.every((r) => /^[A-Z][a-z]+ [1-9][0-9]{1,2}$/.test(r.alias))).toBe(true);
+      expect(anaRows.every((r) => /^[A-Z][a-z]+ [1-9][0-9]{1,3}$/.test(r.alias))).toBe(true);
       expect(report.value.value.summary).toMatchObject({ assignedCents: 20000, unconsumedCents: 1000, totalCents: 21000, halfPoints: 7, students: 2 });
       expect(report.value.value.money).toBeNull();
       // Nada en la respuesta nombra a un alumno.
@@ -204,6 +205,8 @@ describe("dos lecturas a la vez", () => {
       await setup.query("begin");
       anaT = await teacher(setup, ana);
       await closedPeriod(setup, PERIOD, ana.id, students.map((profile, i) => ({ profile, teacher: anaT, half: 2 + i, cents: 1000 * (i + 1) })));
+      // Las dos conexiones confirman como el servidor: el dueño toma su rol, sin heredarlo, y lo suelta al terminar (como la 54).
+      await setup.query("grant app_service to postgres with set true, inherit false");
       await setup.query("commit");
 
       const [first, second] = [await connect(), await connect()];
@@ -228,6 +231,7 @@ describe("dos lecturas a la vez", () => {
       }
     } finally {
       await setup.query("rollback").catch(() => undefined);
+      await setup.query("revoke app_service from postgres");
       await setup.query("begin");
       await setup.query("set local session_replication_role = replica");
       if (anaT !== "") {
