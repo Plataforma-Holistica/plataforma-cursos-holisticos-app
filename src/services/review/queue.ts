@@ -73,6 +73,7 @@ export interface VersionChanges {
   modulesAdded: string[];
   modulesRemoved: string[];
   modulesRenamed: string[];
+  modulesMoved: string[];
   lessonsAdded: string[];
   lessonsRemoved: string[];
   lessonsVideo: string[];
@@ -81,6 +82,7 @@ export interface VersionChanges {
   resourcesAdded: string[];
   resourcesRemoved: string[];
   resourcesRenamed: string[];
+  resourcesMoved: string[];
 }
 export interface ReviewCourse {
   courseId: string;

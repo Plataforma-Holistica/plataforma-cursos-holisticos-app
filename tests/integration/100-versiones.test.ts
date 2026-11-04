@@ -272,13 +272,16 @@ describe("dos a la vez, con dos conexiones de verdad", () => {
     const first = await connect();
     const second = await connect();
     try {
-      // Asentar: la fila del video primero, y al promoverlo el registro para compartir.
+      // Un asentado que ya tomó la fila del video (lo primero que hace `video_settle`); descartar llega en ese momento, y después el asentado termina de verdad, promoviendo
+      // el video (`video_promote` pide el registro para compartir). Si descartar tomara el registro antes que los videos, aquí se interbloquearían.
       await first.query("begin");
       await first.query("select 1 from public.draft_videos where id = $1 for update", [arriving]);
       await second.query("begin");
       const waiting = discard(second, course, seen);
       await waitBehind(owner, first, 1);
-      await first.query("select 1 from public.course_registry where course_id = $1 for share", [course]);
+      await asServer(first, teacherProfile, teacherSession);
+      expect((await call(first, "private.video_settle($1, 'ready', $2, 600, true, null)", [arriving, `play-${arriving}`])).answer).toBe("ready");
+      await asOwner(first);
       await first.query("commit");
       expect(await waiting).toBe("discarded");
       await second.query("commit");

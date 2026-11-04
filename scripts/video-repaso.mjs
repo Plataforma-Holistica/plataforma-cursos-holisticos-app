@@ -160,8 +160,15 @@ try {
     if (!(await removeObjects(orphans.map((row) => row.path)))) fail("Storage no borró lo que sobra.");
     // Lo retirado y vencido: se borra y después se anota; la base comprueba otra vez que vence.
     for (const row of retired) {
-      if (await clearRetired(row)) await client.query("select private.retired_file_done($1, $2)", [row.kind, row.id]);
-      else left += 1;
+      if (!(await clearRetired(row))) {
+        left += 1;
+        continue;
+      }
+      const answer = (await client.query("select private.retired_file_done($1, $2) as answer", [row.kind, row.id])).rows[0]?.answer;
+      if (answer !== "done") {
+        left += 1;
+        console.log(`video:repaso: se borró, pero la base contestó ${answer ?? "nada"} al anotarlo: ${row.kind} ${row.id}`);
+      }
     }
   }
 } catch (error) {

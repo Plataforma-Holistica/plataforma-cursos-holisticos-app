@@ -38,6 +38,9 @@ alter table public.video_assets
   add constraint video_assets_original_deleted_is_retired check (original_deleted_at is null or (retired_at is not null and original_path is not null));
 comment on column public.video_assets.retired_at is 'Desde cuándo ninguna lección vigente lo usa: una versión nueva lo quitó (T-405). Nunca se vacía.';
 
+-- Qué lecciones vigentes usan un video: lo pregunta el guardián en cada escritura de `video_assets`, y publicar y la retención también.
+create index published_lessons_video_idx on public.published_lessons (video_asset_id) where is_current;
+
 alter table public.published_resources
   add column file_deleted_at timestamptz,
   add constraint published_resources_file_deleted_is_retired check (file_deleted_at is null or retired_at is not null);
@@ -765,7 +768,8 @@ end
 $$;
 
 -- Qué cambió de una versión frente a lo publicado (FL-45): los datos del curso, y los títulos de lo que llegó, se fue, se renombró, cambió de video o de lugar. Nulo en un primer envío.
--- Una lección cambia de lugar si cambia de módulo, o si cambia su orden entre las que siguen en el mismo módulo: que se quite la de antes no la mueve.
+-- Una lección cambia de lugar si cambia de módulo, o si cambia su orden entre las que siguen en el mismo módulo: que se quite la de antes no la mueve. Un módulo, si cambia su orden
+-- entre los que siguen.
 create function private.course_version_changes(p_review uuid) returns jsonb
 language sql stable security definer set search_path = ''
 as $$
@@ -794,11 +798,22 @@ as $$
            pg_catalog.row_number() over (partition by c.new_module order by c.new_position) as new_rank,
            pg_catalog.row_number() over (partition by c.new_module order by c.old_position) as old_rank
     from common c where c.new_module = c.old_module),
+  common_modules as (
+    select n.id, n.title, n.position,
+           pg_catalog.row_number() over (order by n.position) as new_rank,
+           pg_catalog.row_number() over (order by o.position) as old_rank
+    from new_modules n join old_modules o on o.id = n.id),
   new_resources as (
-    select x.id, x.title from review r cross join lateral private.review_snapshot_resources(r.s) x),
+    select x.id, x.title, x.lesson_id, x.position from review r cross join lateral private.review_snapshot_resources(r.s) x),
   old_resources as (
-    select x.id, x.title from public.published_resources x join review r on r.course_id = x.course_id
-    where x.is_current and (x.lesson_id is null or exists (select 1 from public.published_lessons l where l.id = x.lesson_id and l.is_current)))
+    select x.id, x.title, x.lesson_id, x.position from public.published_resources x join review r on r.course_id = x.course_id
+    where x.is_current and (x.lesson_id is null or exists (select 1 from public.published_lessons l where l.id = x.lesson_id and l.is_current))),
+  -- Un recurso cambia de lugar si cambia su orden entre los que siguen en su misma lección o en el curso.
+  common_resources as (
+    select n.id, n.title,
+           pg_catalog.row_number() over (partition by n.lesson_id order by n.position) as new_rank,
+           pg_catalog.row_number() over (partition by n.lesson_id order by o.position) as old_rank
+    from new_resources n join old_resources o on o.id = n.id and o.lesson_id is not distinct from n.lesson_id)
   select pg_catalog.jsonb_build_object(
     'course', coalesce((
       select pg_catalog.jsonb_agg(f.name order by f.n)
@@ -812,6 +827,7 @@ as $$
     'modules_added', coalesce((select pg_catalog.jsonb_agg(n.title order by n.position) from new_modules n where not exists (select 1 from old_modules o where o.id = n.id)), '[]'::jsonb),
     'modules_removed', coalesce((select pg_catalog.jsonb_agg(o.title order by o.position) from old_modules o where not exists (select 1 from new_modules n where n.id = o.id)), '[]'::jsonb),
     'modules_renamed', coalesce((select pg_catalog.jsonb_agg(n.title order by n.position) from new_modules n join old_modules o on o.id = n.id where n.title is distinct from o.title), '[]'::jsonb),
+    'modules_moved', coalesce((select pg_catalog.jsonb_agg(c.title order by c.position) from common_modules c where c.new_rank <> c.old_rank), '[]'::jsonb),
     'lessons_added', coalesce((select pg_catalog.jsonb_agg(n.title order by n.position) from new_lessons n where not exists (select 1 from old_lessons o where o.id = n.id)), '[]'::jsonb),
     'lessons_removed', coalesce((select pg_catalog.jsonb_agg(o.title order by o.position) from old_lessons o where not exists (select 1 from new_lessons n where n.id = o.id)), '[]'::jsonb),
     'lessons_video', coalesce((select pg_catalog.jsonb_agg(c.title order by c.position) from common c where c.video_changed), '[]'::jsonb),
@@ -821,7 +837,8 @@ as $$
       where c.new_module <> c.old_module or exists (select 1 from stayed s where s.id = c.id and s.new_rank <> s.old_rank)), '[]'::jsonb),
     'resources_added', coalesce((select pg_catalog.jsonb_agg(n.title order by n.title) from new_resources n where not exists (select 1 from old_resources o where o.id = n.id)), '[]'::jsonb),
     'resources_removed', coalesce((select pg_catalog.jsonb_agg(o.title order by o.title) from old_resources o where not exists (select 1 from new_resources n where n.id = o.id)), '[]'::jsonb),
-    'resources_renamed', coalesce((select pg_catalog.jsonb_agg(n.title order by n.title) from new_resources n join old_resources o on o.id = n.id where n.title is distinct from o.title), '[]'::jsonb))
+    'resources_renamed', coalesce((select pg_catalog.jsonb_agg(n.title order by n.title) from new_resources n join old_resources o on o.id = n.id where n.title is distinct from o.title), '[]'::jsonb),
+    'resources_moved', coalesce((select pg_catalog.jsonb_agg(c.title order by c.title) from common_resources c where c.new_rank <> c.old_rank), '[]'::jsonb))
   from review
 $$;
 revoke all on function private.course_version_changes(uuid) from public;
@@ -1443,7 +1460,14 @@ as $$
       ('private.retired_files_due()', 'is_current'),
       ('private.retired_files_due()', 'draft_videos'),
       ('private.retired_files_due()', 'draft_resources'),
-      ('private.retired_file_done(text, uuid)', 'retired_files_due')
+      ('private.retired_file_done(text, uuid)', 'retired_files_due'),
+      -- Lo que hace segura la retención vive en el guardián que comparten los dos carriles: si alguien lo recrea desde una copia anterior, se nota aquí.
+      ('private.guard_publication()', 'a retired row does not come back'),
+      ('private.guard_publication()', 'a retired row keeps its date'),
+      ('private.guard_publication()', 'a current lesson does not play a retired video'),
+      ('private.guard_publication()', 'a retired video keeps its date'),
+      ('private.guard_publication()', 'a video a current lesson plays is not retired'),
+      ('private.guard_publication()', 'pending_version_state')
     ) as b (signature, rule)
   where pg_catalog.strpos(coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(b.signature)), ''), b.rule) = 0
   union all

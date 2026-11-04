@@ -4,7 +4,7 @@
 begin;
 \ir _ayuda.psql
 \ir _versiones.psql
-select plan(31);
+select plan(33);
 
 create function pruebas.vencido(p_kind text) returns text[]
 language sql as $$
@@ -48,6 +48,18 @@ select pruebas.atrasar('VIDEO_RETIRADO_PROVEEDOR_DIAS');
 select is(pruebas.vencido('provider'), array[:'v1'], 'pasado su plazo, el video retirado vence en el proveedor');
 select is(pruebas.vencido('original'), '{}', 'su original todavía no: su plazo es más largo');
 select is((select d.asset from private.retired_files_due() d where d.kind = 'provider' and d.id = :'v1'), 'asset-' || :'v1', 'con su asset, para borrarlo');
+
+-- Una versión abierta cuyo borrador nombrara ese asset lo detiene.
+select pruebas.abrir(1, 'curso');
+select pruebas.como_dueno();
+insert into public.draft_videos (id, course_id, teacher_id, lesson_id, state, is_current, file_name, mime, storage_path, size_bytes, object_id, object_version, read_seconds,
+                                 provider, provider_asset_id)
+values (gen_random_uuid(), pruebas.id('curso'), pruebas.m(1), pruebas.id('l2'), 'processing', false, 'clase.mp4', 'video/mp4', 'otra/ruta/' || gen_random_uuid(), 1000,
+        gen_random_uuid(), 'v1', 300, 'mux', 'asset-' || :'v1');
+select is(pruebas.vencido('provider'), '{}', 'lo que un borrador nombra no vence en el proveedor');
+select pruebas.descartar(1, 'curso');
+select pruebas.como_dueno();
+delete from private.video_trash where course_id = pruebas.id('curso');
 select is(private.retired_file_done('provider', :'v1'), 'done', 'quien opera lo anota después de borrarlo');
 select isnt((select provider_deleted_at from public.video_assets where id = :'v1'), null, 'con la fecha');
 select is((select retired_at is not null and status = 'ready' and provider_asset_id is not null from public.video_assets where id = :'v1'), true, 'la fila se queda, con su asset');
@@ -74,7 +86,11 @@ insert into public.draft_videos (id, course_id, teacher_id, lesson_id, state, is
 select gen_random_uuid(), pruebas.id('curso'), pruebas.m(1), pruebas.id('l2'), 'uploaded', false, 'clase.mp4', 'video/mp4', a.original_path, 1000, a.object_id, 'v1', 300,
        'mux', null, null, null
 from public.video_assets a where a.id = :'v1';
+insert into public.draft_resources (id, course_id, teacher_id, lesson_id, title, kind, mime, storage_path, size_bytes)
+select gen_random_uuid(), pruebas.id('curso'), pruebas.m(1), null, 'Otra vez', 'pdf', 'application/pdf', r.storage_path, 100
+from public.published_resources r where r.id = :'rl';
 select is(pruebas.vencido('original'), '{}', 'lo que un borrador nombra no vence');
+select is(pruebas.vencido('resource'), '{}', 'tampoco el archivo de un recurso');
 select is(private.retired_file_done('original', :'v1'), 'not_due', 'ni se anota');
 select pruebas.descartar(1, 'curso');
 select pruebas.como_dueno();

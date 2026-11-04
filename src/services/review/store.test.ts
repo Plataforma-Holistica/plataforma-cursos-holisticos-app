@@ -159,6 +159,7 @@ describe("lo enviado por el portal, en la cola", () => {
     modules_added: ["Final"],
     modules_removed: [],
     modules_renamed: ["Práctica diaria"],
+    modules_moved: ["Final", "Inicio"],
     lessons_added: ["Nueva"],
     lessons_removed: ["Postura"],
     lessons_video: ["Sesión"],
@@ -167,6 +168,7 @@ describe("lo enviado por el portal, en la cola", () => {
     resources_added: ["Temario nuevo"],
     resources_removed: ["Temario"],
     resources_renamed: [],
+    resources_moved: ["Guía"],
   };
 
   it("se lee con su envío y sus recursos", () => {
@@ -197,6 +199,7 @@ describe("lo enviado por el portal, en la cola", () => {
         modulesAdded: ["Final"],
         modulesRemoved: [],
         modulesRenamed: ["Práctica diaria"],
+        modulesMoved: ["Final", "Inicio"],
         lessonsAdded: ["Nueva"],
         lessonsRemoved: ["Postura"],
         lessonsVideo: ["Sesión"],
@@ -205,6 +208,7 @@ describe("lo enviado por el portal, en la cola", () => {
         resourcesAdded: ["Temario nuevo"],
         resourcesRemoved: ["Temario"],
         resourcesRenamed: [],
+        resourcesMoved: ["Guía"],
       },
     });
   });

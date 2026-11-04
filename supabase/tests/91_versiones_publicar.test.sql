@@ -4,7 +4,7 @@
 begin;
 \ir _ayuda.psql
 \ir _versiones.psql
-select plan(49);
+select plan(52);
 
 -- Publicado ayer: dentro de esta transacción «ahora» es siempre la misma hora, y así se ve si publicar la versión la renueva.
 select pruebas.como_dueno();
@@ -55,10 +55,11 @@ select is(
   pruebas.de_cola('curso') -> 'submission' -> 'changes',
   jsonb_build_object(
     'course', jsonb_build_array('title', 'summary', 'practice'),
-    'modules_added', jsonb_build_array('Final'), 'modules_removed', '[]'::jsonb, 'modules_renamed', jsonb_build_array('Práctica diaria'),
+    'modules_added', jsonb_build_array('Final'), 'modules_removed', '[]'::jsonb, 'modules_renamed', jsonb_build_array('Práctica diaria'), 'modules_moved', '[]'::jsonb,
     'lessons_added', jsonb_build_array('Nueva', 'Cierre'), 'lessons_removed', jsonb_build_array('Postura'),
     'lessons_video', jsonb_build_array('Sesión'), 'lessons_text', '[]'::jsonb, 'lessons_moved', '[]'::jsonb,
-    'resources_added', jsonb_build_array('Nuevo temario'), 'resources_removed', jsonb_build_array('Guía', 'Temario'), 'resources_renamed', '[]'::jsonb),
+    'resources_added', jsonb_build_array('Nuevo temario'), 'resources_removed', jsonb_build_array('Guía', 'Temario'), 'resources_renamed', '[]'::jsonb,
+    'resources_moved', '[]'::jsonb),
   'la cola dice qué cambió frente a lo publicado');
 select pruebas.armar(2, 'nuevo', 'Curso nuevo');
 select pruebas.enviar(2, 'nuevo');
@@ -125,6 +126,7 @@ select is((select count(*)::integer from public.draft_lessons where course_id = 
 
 select pruebas.r(pruebas.p(1), format('private.draft_delete_module(%L, %L, %s)', pruebas.id('curso'), pruebas.id('m3'), pruebas.rev('draft_modules', 'm3')));
 select pruebas.r(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, %s, %L, %s)', pruebas.id('curso'), pruebas.id('l4'), pruebas.id('m1'), 2, pruebas.id('m2'), 2));
+select pruebas.recurso(1, 'curso', null, 'Extra') as rx \gset
 select is(pruebas.enviar(1, 'curso'), 'submitted', 'se envía');
 select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'modules_removed', jsonb_build_array('Final'), 'la cola dice qué módulo se quitó');
 select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'lessons_moved', jsonb_build_array('Nueva'), 'y qué lección cambió de lugar');
@@ -139,12 +141,21 @@ select is(
   'las lecciones vigentes, en su orden nuevo');
 select is((select module_id from public.published_lessons where id = pruebas.id('l4')), pruebas.id('m2'), 'la que se movió, en su módulo nuevo');
 select is((select retired_at is not null from public.video_assets where id = :'v6'), true, 'el video de la lección quitada queda retirado');
+select is(
+  (select array_agg(r.title || ':' || r.position order by r.position) from public.published_resources r where r.course_id = pruebas.id('curso') and r.is_current),
+  array['Nuevo temario:1', 'Extra:2'],
+  'el recurso que siguió vuelve a su posición, y el nuevo va después');
 
--- La versión 4: dentro de «Práctica diaria», «Nueva» pasa antes que «Sesión». Moverse dentro del módulo también es cambiar de lugar.
+-- La versión 4: dentro de «Práctica diaria», «Nueva» pasa antes que «Sesión»; «Práctica diaria» pasa antes que «Inicio»; «Extra» pasa antes que «Nuevo temario».
+-- Cambiar el orden también es cambiar de lugar.
 select is(pruebas.abrir(1, 'curso'), 'opened', 'otra versión');
 select pruebas.r(pruebas.p(1), format('private.draft_move_lesson(%L, %L, %L, %s, %L, %s)', pruebas.id('curso'), pruebas.id('l4'), pruebas.id('m2'), 2, pruebas.id('m2'), 1));
+select pruebas.r(pruebas.p(1), format('private.draft_move_module(%L, %L, %s, %s)', pruebas.id('curso'), pruebas.id('m2'), 2, 1));
+select pruebas.r(pruebas.p(1), format('private.resource_move(%L, %L, %s, %s)', pruebas.id('curso'), :'rx', 2, 1));
 select is(pruebas.enviar(1, 'curso'), 'submitted', 'se envía');
-select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'lessons_moved', jsonb_build_array('Nueva', 'Sesión'), 'la cola dice las dos que cambiaron de orden');
+select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'lessons_moved', jsonb_build_array('Nueva', 'Sesión'), 'la cola dice las dos lecciones que cambiaron de orden');
+select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'modules_moved', jsonb_build_array('Práctica diaria', 'Inicio'), 'los dos módulos');
+select is(pruebas.de_cola('curso') -> 'submission' -> 'changes' -> 'resources_moved', jsonb_build_array('Extra', 'Nuevo temario'), 'y los dos recursos');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo retirado no vuelve: ni lecciones, ni recursos, ni videos, ni una lección vigente que apunte a un video retirado. Ni el sistema.

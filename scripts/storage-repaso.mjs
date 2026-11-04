@@ -86,16 +86,21 @@ async function remove(objects) {
   if (!response.ok) fail(`Storage contestó ${response.status}.`);
 }
 
+let unmarked = 0;
 try {
   if (paths.length > 0) await remove(paths);
   // Lo que una versión retiró y ya venció (T-405): se borra y después se anota; la base comprueba otra vez que vence. La fila se queda.
   for (const row of retired) {
     await remove([row.path]);
-    await client.query("select private.retired_file_done('resource', $1)", [row.id]);
+    const answer = (await client.query("select private.retired_file_done('resource', $1) as answer", [row.id])).rows[0]?.answer;
+    if (answer !== "done") {
+      unmarked += 1;
+      console.log(`storage:repaso: se borró, pero la base contestó ${answer ?? "nada"} al anotarlo: ${row.id}`);
+    }
   }
 } catch (error) {
   fail(`no se pudo terminar (${codeOf(error)}).`);
 } finally {
   await client.end().catch(() => {});
 }
-console.log(`storage:repaso: borrados.`);
+console.log(unmarked === 0 ? `storage:repaso: borrados.` : `storage:repaso: borrados; ${unmarked} sin anotar.`);

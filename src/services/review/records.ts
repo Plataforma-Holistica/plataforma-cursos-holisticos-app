@@ -37,6 +37,7 @@ const changesRow = z.strictObject({
   modules_added: titles,
   modules_removed: titles,
   modules_renamed: titles,
+  modules_moved: titles,
   lessons_added: titles,
   lessons_removed: titles,
   lessons_video: titles,
@@ -45,6 +46,7 @@ const changesRow = z.strictObject({
   resources_added: titles,
   resources_removed: titles,
   resources_renamed: titles,
+  resources_moved: titles,
 });
 const changesOf = (row: z.infer<typeof changesRow> | null): VersionChanges | null =>
   row === null
@@ -54,6 +56,7 @@ const changesOf = (row: z.infer<typeof changesRow> | null): VersionChanges | nul
         modulesAdded: row.modules_added,
         modulesRemoved: row.modules_removed,
         modulesRenamed: row.modules_renamed,
+        modulesMoved: row.modules_moved,
         lessonsAdded: row.lessons_added,
         lessonsRemoved: row.lessons_removed,
         lessonsVideo: row.lessons_video,
@@ -62,6 +65,7 @@ const changesOf = (row: z.infer<typeof changesRow> | null): VersionChanges | nul
         resourcesAdded: row.resources_added,
         resourcesRemoved: row.resources_removed,
         resourcesRenamed: row.resources_renamed,
+        resourcesMoved: row.resources_moved,
       };
 
 // Estrictos: un campo que este código no conoce no pasa. Así un playback id que alguien
