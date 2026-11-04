@@ -55,6 +55,8 @@ export const ROUTES = {
   portalTaxData: "/portal/datos-fiscales",
   /** PA-50, lo mínimo: lo que el maestro aceptó (T-405). El texto de una versión, `portalAnnexPath`. */
   portalAccount: "/portal/cuenta",
+  /** PA-46, las liquidaciones del maestro (T-604). La de un periodo, `portalPayoutPath`. */
+  portalPayouts: "/portal/pagos",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
@@ -159,6 +161,14 @@ export function portalSubmitPath(course: string): string | null {
 /** El texto de una versión del anexo de licencia, en el portal: no es un texto público (T-405). */
 export function portalAnnexPath(document: string): string | null {
   return LESSON_ID.test(document) ? `${ROUTES.portal}/anexo/${document}` : null;
+}
+
+/** El periodo como va en la dirección del portal: «2031-02». */
+export const PAYOUT_PERIOD_SEGMENT = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** PA-47, la liquidación de un periodo («2031-02»); nulo si el periodo no tiene forma (T-604). */
+export function portalPayoutPath(period: string): string | null {
+  return PAYOUT_PERIOD_SEGMENT.test(period) ? `${ROUTES.portalPayouts}/${period}` : null;
 }
 
 /** PA-81, las liquidaciones de un periodo. */

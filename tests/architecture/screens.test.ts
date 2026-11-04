@@ -139,6 +139,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     submitCourseAction:
       /removeResource\(jar, \{ course: request\.course, resource: request\.resource, seen: request\.seen \}\)[\s\S]*submitOutcome\(await submitCourse\(jar, \{ course, annex, seen, term, submission, accepted \}, await requestOrigin\(\)\), back\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
+  "src/app/portal/_pagos/actions.ts": {
+    // El CSV de PA-47 (T-604): del formulario solo el periodo; el servicio corre la guarda de sesión y la base contesta solo lo del maestro que pide.
+    payoutCsvAction:
+      /const request = readCsvForm\(form\);[\s\S]*const outcome = csvOutcome\(await payoutReportCsv\(jar, request\.period\), back\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
   "src/app/_catalog/resources/actions.ts": {
     // Bajar un recurso (T-404): del formulario solo qué recurso y si hay JavaScript; la puerta de medios corre la guarda y firma.
     downloadResourceAction: /const request = readDownloadForm\(form\);[\s\S]*downloadOutcome\(await getResourceGrant\(await cookieJar\(\), request\.resource\), request\.javascript, nextAttempt\(previous\)\)/,

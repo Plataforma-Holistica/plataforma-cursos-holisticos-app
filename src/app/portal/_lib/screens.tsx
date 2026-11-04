@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { VerifiedClaims } from "@/services/account/account";
+import { PAYOUT_PERIOD_SEGMENT } from "@/services/account/navigation";
 
 import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
@@ -9,6 +10,7 @@ import { AccountSection, AnnexSection } from "../_cuenta/section";
 import { EditorSection } from "../_editor/section";
 import { SubmitSection } from "../_enviar/section";
 import { TaxDataSection } from "../_fiscal/section";
+import { PayoutReportSection, PayoutsSection } from "../_pagos/section";
 
 // Las pantallas del portal del maestro (T-402). Ninguna tiene su propia página: todas las sirve el
 // comodín (`[...resto]/page.tsx`), después de correr la guarda, por lo mismo que en administración: con
@@ -41,6 +43,11 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   if (section === "aviso" && id === undefined) return { kind: "notice", render: () => null };
   if (section === "datos-fiscales") {
     return id === undefined ? { render: ({ claims, readOnly, search }) => <TaxDataSection claims={claims} readOnly={readOnly} search={search} /> } : null;
+  }
+  if (section === "pagos") {
+    if (id === undefined) return { render: ({ claims, readOnly }) => <PayoutsSection claims={claims} readOnly={readOnly} /> };
+    // El periodo, con su forma exacta («2031-02»): otra forma no es una pantalla.
+    return PAYOUT_PERIOD_SEGMENT.test(id) && page === undefined ? { render: ({ claims, readOnly }) => <PayoutReportSection claims={claims} period={id} readOnly={readOnly} /> } : null;
   }
   if (section === "cuenta") return id === undefined ? { render: ({ claims, readOnly }) => <AccountSection claims={claims} readOnly={readOnly} /> } : null;
   if (section === "anexo") {
