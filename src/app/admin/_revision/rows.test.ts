@@ -170,6 +170,9 @@ describe("lo enviado por el portal", () => {
       annex: { version: 3, acceptedAt: "2026-11-02T18:00:00Z", statement: "Acepto el anexo.", termYears: 10 },
       captionsMissing: [],
       filesChanged: [],
+      version: 1,
+      isRevision: false,
+      changes: null,
     },
   };
   const rowOf = (course: ReviewCourse) => reviewView({ freshCode: true, courses: [course] }).teachers[0]?.courses[0];

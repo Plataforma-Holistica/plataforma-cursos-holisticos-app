@@ -891,6 +891,30 @@ que no se ve leyendo un solo archivo:
   con la marca local `video_test`** (la pone `db:login`; acordado con el carril A el 2026-11-03), y la 18 lo prueba sin ella. `db:student` sigue publicando solo los cursos por guion: un
   envío aprobado exige una persona en `reviewed_by` (decisión mía sin confirmar). Usa pgTAP 77, integración 98 y `tests/e2e/equipo/publicar.equipo.ts`; cambiaron por el requisito la 18,
   la 39, `devolver.equipo.ts` y las de arquitectura (`media`, `review`, `screens`, `submit`). Para el A: `guard_publication` cambió solo en el video de prueba.
+- **Lo que T-405 suma al carril B** (quinta solicitud, `t405_versiones`; RF-608, RN-14, FL-36, FL-45; plan aprobado por Sergio el 2026-11-03, sin pantallas: llegan con la
+  sexta). Las versiones de un curso publicado, en la base. **Una versión nunca está en `in_review`:** vive como `changes_pending` con la versión en `draft` o `in_review`
+  (`pending_version_state`), porque la cola y `approve_course` toman un curso en revisión con fila publicada como uno por guion. Lo que se edita y lo que se revisa lo dicen dos
+  ayudantes, `private.course_editable` y `course_reviewing`, que usan `draft_open` (y con él todo `draft_*`, `video_*` y `resource_*`), `video_promote`, `video_due`, enviar,
+  devolver, aprobar, la cola, la vista previa, los recursos de Contenido, «en uso» y `course_submit_status`; el área `versions` del vigilante los revisa por lo que contestan en cada
+  combinación, y las reglas de `submissions` que buscaban el literal `'in_review'` ahora buscan el ayudante. **«Editar»** es `private.course_version_open(curso)`: copia lo vigente
+  de lo publicado al borrador con los mismos ids (las lecciones, numeradas otra vez dentro de su módulo; cada video con su original y lo que el borrador exige; los recursos), sin
+  tocar lo que ven los alumnos; si ya hay versión contesta `open` (E1), y un curso por guion o uno al que le falta algo, `not_copyable`, antes de escribir. **El número de versión es
+  el mayor del curso más uno:** una versión enviada y descartada no se repite, y por eso `course_return_notes` muestra el motivo solo si es de la versión del borrador (comparar
+  fechas no sirve: dentro de una transacción de prueba todas son iguales). **Descartar** es `course_version_discard(curso, content_revision)` (H-18), y la baja de un maestro
+  (OP-06) `system_discard_version`, de quien opera como dueño declarado sistema; una en revisión la devuelve antes Contenido. **Los dos toman los videos del borrador antes que el
+  registro** (y `draft_delete_course` también), porque asentar un video toma su fila y después el registro: al revés se interbloquean (la integración 100 lo prueba). **Publicar una
+  versión** (`review_publish`) sustituye sin borrar: lo quitado queda retirado con su id (RN-14), lo que siguió conserva el suyo, el slug, el curso abierto, el listado, la fecha de
+  publicación y la de la primera vez se quedan, y un video que ya no usa ninguna lección vigente queda retirado (`video_assets.retired_at`). Las posiciones vigentes se corren hacia
+  arriba (más un millón) antes de escribir las nuevas: sus índices son parciales y no se difieren, y la de recursos exige `>= 1`. **Lo retirado no vuelve, para nadie:**
+  `guard_publication` no deja pasar `is_current` de falso a verdadero ni vaciar `retired_at` en módulos, lecciones, recursos y videos, ni que una lección vigente apunte a un video
+  retirado; una prueba que lo necesite apaga los disparadores de la tabla (así quedó la 24, por el requisito). **La retención** (decisiones de Sergio del 2026-11-03): la fila se
+  queda siempre; `private.retired_files_due()` da lo vencido (el video en su proveedor pasados `VIDEO_RETIRADO_PROVEEDOR_DIAS`, el original y el archivo de un recurso pasados
+  `ARCHIVO_RETIRADO_DIAS`, nunca lo que una lección o un recurso vigentes o un borrador nombran) y `retired_file_done(tipo, id)` lo anota después de borrar, comprobando otra vez y
+  escribiendo como sistema solo en esa sentencia; las dos son de quien opera, y `pnpm video:repaso` y `pnpm storage:repaso` las usan. Sin trabajo programado: en producción es
+  OP-21. **La cola** suma de cada envío `version`, `is_revision` y `changes` (`private.course_version_changes`: datos del curso, módulos, lecciones y recursos que llegaron, se
+  fueron, se renombraron, cambiaron de video o de lugar; nulo en un primer envío), y la lectura estricta de `src/services/review/records.ts` los exige. Usa pgTAP 90 a 92 (con
+  `supabase/tests/_versiones.psql`, sus ayudantes) e integración 100; desde el 2026-11-03 el carril B usa pgTAP del 90 al 99 e integración del 100 al 109 (acordado con el A,
+  confirmado por Sergio). Para el A: `guard_publication` suma los tres pasos del maestro (abrir, descartar y enviar la versión) y la regla de lo retirado; `approve_course` no cambia.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

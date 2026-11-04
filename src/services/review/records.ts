@@ -17,6 +17,7 @@ import {
   type ReviewQueue,
   type ReviewResource,
   type SubmissionApproveAnswer,
+  type VersionChanges,
 } from "./queue";
 
 // Lo que el servicio de revisión le pregunta a la base (esquema, «Lo publicado»): la cola para
@@ -29,6 +30,39 @@ const id = z.string().regex(ID);
 const resourceRow = z.strictObject({ id, title: z.string(), kind: z.enum(["pdf", "doc", "audio"]), size_bytes: z.number().int().min(0) });
 const resourcesOf = (rows: z.infer<typeof resourceRow>[]): ReviewResource[] =>
   rows.map((row) => ({ id: row.id, title: row.title, kind: row.kind, sizeBytes: row.size_bytes }));
+
+const titles = z.array(z.string());
+const changesRow = z.strictObject({
+  course: z.array(z.enum(["title", "summary", "practice", "level"])),
+  modules_added: titles,
+  modules_removed: titles,
+  modules_renamed: titles,
+  lessons_added: titles,
+  lessons_removed: titles,
+  lessons_video: titles,
+  lessons_text: titles,
+  lessons_moved: titles,
+  resources_added: titles,
+  resources_removed: titles,
+  resources_renamed: titles,
+});
+const changesOf = (row: z.infer<typeof changesRow> | null): VersionChanges | null =>
+  row === null
+    ? null
+    : {
+        course: row.course,
+        modulesAdded: row.modules_added,
+        modulesRemoved: row.modules_removed,
+        modulesRenamed: row.modules_renamed,
+        lessonsAdded: row.lessons_added,
+        lessonsRemoved: row.lessons_removed,
+        lessonsVideo: row.lessons_video,
+        lessonsText: row.lessons_text,
+        lessonsMoved: row.lessons_moved,
+        resourcesAdded: row.resources_added,
+        resourcesRemoved: row.resources_removed,
+        resourcesRenamed: row.resources_renamed,
+      };
 
 // Estrictos: un campo que este código no conoce no pasa. Así un playback id que alguien
 // agregue a la función de la base no llega a la pantalla sin que esto cambie a la vista.
@@ -66,6 +100,9 @@ const queueSchema = z.strictObject({
           resources: z.array(resourceRow),
           captions_missing: z.array(id),
           files_changed: z.array(z.string()),
+          version: z.number().int().min(1),
+          is_revision: z.boolean(),
+          changes: changesRow.nullable(),
           annex: z.strictObject({ version: z.number().int().min(0), accepted_at: z.string(), statement: z.string(), term_years: z.number().int().min(1) }),
         })
         .optional(),
@@ -115,6 +152,9 @@ export function queueOf(raw: unknown): ReviewQueue | null {
               },
               captionsMissing: course.submission.captions_missing,
               filesChanged: course.submission.files_changed,
+              version: course.submission.version,
+              isRevision: course.submission.is_revision,
+              changes: changesOf(course.submission.changes),
             },
     })),
   };

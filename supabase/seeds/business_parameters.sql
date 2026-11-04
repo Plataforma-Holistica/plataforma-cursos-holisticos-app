@@ -112,7 +112,9 @@ from (values
   ('VIDEO_DURACION_MAX',        '7200',                 'decided'),
   ('VIDEOS_POR_HORA_MAX',       '10',                   'decided'),
   ('VIDEO_MINUTOS_MES_MAX',     '1500',                 'decided'),
-  ('VIDEO_SUBIDA_ABIERTA',      'true',                 'decided')
+  ('VIDEO_SUBIDA_ABIERTA',      'true',                 'decided'),
+  ('VIDEO_RETIRADO_PROVEEDOR_DIAS', '30',               'decided'),
+  ('ARCHIVO_RETIRADO_DIAS',     '90',                   'decided')
 ) as v (key, value, status)
 join public.parameter_definitions d on d.key = v.key
 on conflict (key, effective_from) where canceled_at is null do nothing;

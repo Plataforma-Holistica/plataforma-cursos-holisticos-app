@@ -356,8 +356,11 @@ select pruebas.limpiar();
 select is(
   pruebas.avanza(pruebas.beto(), pruebas.sesion(pruebas.beto()), (select id from r where name = 'abierto'), jsonb_build_array(pruebas.tramo(2, 70, 80))),
   pruebas.estado(pruebas.leccion('Lección dos'), 80, false, false), 'una lección retirada con el mismo video sigue avanzando');
-select pruebas.como_dueno_sistema();
+-- Volverla vigente es solo para seguir con el caso: desde T-405 el guardián no deja que lo retirado vuelva, así que se hace con él apagado.
+select pruebas.como_dueno();
+alter table public.published_lessons disable trigger user;
 update public.published_lessons set is_current = true, retired_at = null where id = pruebas.leccion('Lección dos');
+alter table public.published_lessons enable trigger user;
 select pruebas.limpiar();
 
 -- La lección cambia a un video más corto, y el primer lote del nuevo sale rechazado: lo guardado
