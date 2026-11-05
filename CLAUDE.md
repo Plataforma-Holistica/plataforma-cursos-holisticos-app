@@ -931,6 +931,21 @@ que no se ve leyendo un solo archivo:
   al descartar llega al editor de lo publicado sin el aviso (el segundo contesta `not_editable`), como en enviar. **PA-62** dice de una versión cuál es y qué cambió, una frase por cosa (`changeLines` en `_revision/rows.ts`).
   Usa la integración 100 (el almacén del portal con una versión) y `tests/e2e/equipo/versiones.equipo.ts`. Decisiones mías sin confirmar: PA-43 de un curso publicado sin el reproductor
   ni los recursos (están en la ficha); una versión enviada se dice «En revisión»; descartar se confirma en su propia pantalla. Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (primera parte, la marca, sin migración; diseño §3.12; elección de Sergio del 2026-11-05: el logotipo A y seis fotos de Pexels). El logotipo
+  provisional es un solo componente, `src/ui/wordmark.tsx`: el nombre de `terms.Plataforma` en Bricolage con un punto del acento al final, que mide y se separa en `em` (tokens
+  `brand-dot` y `brand-dot-gap`); el tamaño y el enlace los pone quien lo usa. **El icono del sitio son dos archivos con las convenciones de Next** (`src/app/icon.svg` y
+  `apple-icon.png`, 180 × 180): la P de Bricolage 700 con el punto, sacada de la fuente como trazo (sin `<text>`: una pestaña no carga fuentes) y con los contornos fundidos, porque los de
+  una fuente variable se enciman. Cambiar al definitivo es reemplazar el componente y esos dos archivos. **Las fotos de ambiente viven en `src/ui/photos/`** con su registro de créditos
+  (`credits.ts`: fuente, autor, licencia, enlace y fecha de descarga), y `tests/design/brand.test.ts` exige una fila por archivo y un archivo por fila, el ancho y el peso, y que el icono
+  use los colores de los tokens. Esta parte no las pone en ninguna pantalla: lo hacen las partes 2 a 4, con `next/image`. **El selector de archivo en español** es `src/ui/file-input.tsx`
+  (`FileInput`): el control nativo se queda fuera de la vista, con el foco y un nombre por `aria-labelledby` que junta el del campo (`labelId`) y el texto del botón (WCAG 2.5.3: quien lo
+  pide por voz dice lo que lee), y lo que se ve es una etiqueta con forma de botón y el nombre de lo elegido, ocultos al lector; el anillo de foco lo pinta el botón (`shadow-focus`, token
+  nuevo), así que el control va antes. El nombre se lee después de avisar: `FileUpload` vacía el control al recibir el archivo y vuelve a «Ningún archivo elegido»; los recursos del editor
+  lo vacían más tarde, al adjuntar, y por eso lo vuelven a montar con otra `key`. Las pruebas que vacían el control usan `user-event`: con `fireEvent` el DOM simulado no vacía la lista de
+  archivos. Lo que el control nativo dice de sí al lector («No file chosen») sigue en el idioma del navegador. **El recorrido de capturas** es `tests/e2e/equipo/vitrina.equipo.ts`, que se salta sin `VITRINA_OUT` y se corre solo (su cabecera
+  dice cómo). `/muestra` tenía roto el selector de video desde T-403 (una función pasada a un componente del navegador desde el servidor); va en `sample-file-upload.tsx`. Las
+  pruebas de arquitectura ya no siguen la importación de una imagen. Decisiones mías sin confirmar: el registro de créditos como módulo de TypeScript; el recorrido fuera de la corrida
+  de siempre; el velo de la muestra al 65 % (cada lugar mide el suyo). Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

@@ -254,6 +254,10 @@
   --spacing-sidenav: 15.5rem;
   /* El margen interior de una portada generada: 6 % de su ancho (diseño, sección 4.3). */
   --spacing-cover: 6cqw;
+  /* El punto de oro del logotipo provisional (diseño, sección 3.12): mide y se separa en `em`,
+     para crecer con la letra del nombre. */
+  --spacing-brand-dot: 0.17em;
+  --spacing-brand-dot-gap: 0.06em;
 
   --radius-*: initial;
   --radius-none: 0;
@@ -264,6 +268,9 @@
   --shadow-*: initial;
   --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.40);
   --shadow-overlay: 0 8px 32px rgb(0 0 0 / 0.55);
+  /* El halo del anillo de foco, para el control que lo pinta en otro elemento (`FileInput`): el
+     mismo del foco global, más abajo. */
+  --shadow-focus: 0 0 0 6px var(--focus-halo);
 
   --breakpoint-sm: 40rem;   /* 640 px */
   --breakpoint-md: 48rem;   /* 768 px */

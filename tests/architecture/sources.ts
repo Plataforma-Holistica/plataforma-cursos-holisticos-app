@@ -41,8 +41,8 @@ export function resolveLocal(from: string, specifier: string): string | null {
       ? resolve(dirname(from), specifier)
       : null;
   if (base === null) return null;
-  // Una hoja de estilos no es código: no trae nada más.
-  if (/\.css$/.test(specifier)) return null;
+  // Una hoja de estilos o una imagen no son código: no traen nada más.
+  if (/\.(css|jpe?g|png|svg|webp|avif)$/.test(specifier)) return null;
   const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
   const found = candidates.find((candidate) => existsSync(candidate) && /\.tsx?$/.test(candidate));
   if (!found) throw new Error(`No se pudo seguir la importación "${specifier}" de ${posix(from)}.`);

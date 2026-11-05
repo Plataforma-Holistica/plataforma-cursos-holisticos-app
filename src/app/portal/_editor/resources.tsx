@@ -11,6 +11,7 @@ import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
 import { DRAFT_TEXT_LIMITS, RESOURCE_EXTENSIONS, resourceTypeOf } from "@/services/drafts/field-rules";
 import { Button } from "@/ui/button";
+import { FileInput } from "@/ui/file-input";
 import { InlineAlert } from "@/ui/inline-alert";
 import { ProgressBar } from "@/ui/progress-bar";
 
@@ -78,6 +79,7 @@ function AttachForm({ course, lesson, maxBytes, maxText, full }: AttachProps) {
   const [done, setDone] = useState(false);
   const [title, setTitle] = useState("");
   const [picked, setPicked] = useState(0);
+  const [attached, setAttached] = useState(0);
   // Cuenta los intentos: el aviso se vuelve a armar, y el mismo problema dos veces se anuncia dos veces.
   const [attempt, setAttempt] = useState(0);
   // Cuenta los errores del título: el foco llega al campo cuando su error ya está pintado.
@@ -143,6 +145,7 @@ function AttachForm({ course, lesson, maxBytes, maxText, full }: AttachProps) {
     autoTitle.current = "";
     setTitle("");
     setPicked((count) => count + 1);
+    setAttached((count) => count + 1);
     if (input.current !== null) input.current.value = "";
   }
 
@@ -218,18 +221,19 @@ function AttachForm({ course, lesson, maxBytes, maxText, full }: AttachProps) {
     <form onSubmit={(event) => void onSubmit(event)} className="flex flex-col gap-3" aria-label={text.attach}>
       <input type="hidden" name="course" value={course} />
       <div className="flex flex-col gap-2">
-        <label htmlFor={`recurso-archivo-${place}`} className="text-label">
+        <label id={`recurso-etiqueta-${place}`} htmlFor={`recurso-archivo-${place}`} className="text-label">
           {text.fileLabel}
         </label>
-        <input
+        {/* Se vuelve a montar al adjuntar: el control se vacía por código, y su nombre no se entera. */}
+        <FileInput
+          key={attached}
           ref={input}
           id={`recurso-archivo-${place}`}
-          type="file"
+          labelId={`recurso-etiqueta-${place}`}
           accept={RESOURCE_EXTENSIONS.join(",")}
           onChange={onPick}
           disabled={busy || full}
           aria-describedby={`recurso-nota-${place}`}
-          className="min-h-touch text-body-s text-text-2"
         />
         <p id={`recurso-nota-${place}`} className="text-caption text-text-3">
           {maxText === "" ? text.fileHintNoLimit : t(text.fileHint, { max: maxText })}
