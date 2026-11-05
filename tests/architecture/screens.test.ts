@@ -44,8 +44,6 @@ function routeOf(file: string): string {
 
 /** Las páginas que cualquiera ve sin sesión. Una página nueva no es pública hasta que entra aquí. */
 const PUBLIC_PAGES = [
-  // La portada provisional.
-  "src/app/page.tsx",
   // Los textos legales, que cualquiera lee sin sesión.
   "src/app/legal/[documento]/page.tsx",
   // «Revisa tu correo» y «Completa tu cuenta» (PA-14): una cuenta sin verificar no tiene

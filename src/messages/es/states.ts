@@ -1,11 +1,8 @@
 import { defineMessages } from "../format";
 
-// Los textos de las pantallas que no son de ninguna superficie: la portada provisional y
-// los estados que sustituyen a la pantalla pedida (diseño, PA-18 y PA-19).
+// Los textos de las pantallas que no son de ninguna superficie: los estados que sustituyen a la
+// pantalla pedida (diseño, PA-18 y PA-19). La portada tiene los suyos (`landing.ts`).
 export const states = defineMessages({
-  home: {
-    status: "En construcción.",
-  },
   // PA-19. Es idéntica para una dirección que no existe, para un curso despublicado y para
   // una ruta de otro rol: no revela cuál de las tres es (RF-105).
   notFound: {

@@ -25,6 +25,9 @@ function nextConfig(phase: string): NextConfig {
     agentRules: false,
     pageExtensions:
       phase === PHASE_DEVELOPMENT_SERVER ? ["dev.tsx", ...PAGE_EXTENSIONS] : PAGE_EXTENSIONS,
+    // Las fotos de ambiente (diseño, sección 3.12; T-614): AVIF primero, que pesa menos, y WebP para
+    // el navegador que no lo lee. Sin esto Next solo da WebP.
+    images: { formats: ["image/avif", "image/webp"] },
     // Lo poco que el navegador puede saber (src/config/public-env.ts). Se copia de las
     // variables del servidor al compilar, para configurar cada valor una sola vez.
     // Ninguna es secreta: la dirección de Sentry está hecha para ser pública.
