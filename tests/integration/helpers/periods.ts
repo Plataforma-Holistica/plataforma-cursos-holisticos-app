@@ -6,7 +6,7 @@ import type { Client } from "pg";
 // cuando su mes termina. Por eso cada prueba que corre la corrida quita, al terminar, las filas que
 // se crearon mientras corría y las corridas del paso a cierre. Las filas no se borran: se quitan con
 // su guardián apagado, solo esas y si nada apunta a ellas (un cobro, el consolidado, una alerta o una
-// exclusión). La auditoría se queda.
+// exclusión). La auditoría se queda. Desde T-408 quita también las corridas del estimado de esos días.
 
 /** La ventana es la de siempre (el mes anterior y el en curso): si no, la base local tiene periodos de otra corrida. */
 export async function assertPlainWindow(owner: Client): Promise<void> {
@@ -37,6 +37,20 @@ export async function dropTransitionLeftovers(owner: Client, since: string): Pro
     );
     await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
     await owner.query("delete from public.job_runs where job = 'period_transition' and started_at >= $1::timestamptz", [since]);
+    // Las corridas del estimado de los maestros que dejó la corrida de cada noche (T-408): de solo inserción, se quitan en réplica.
+    await owner.query("set local session_replication_role = replica");
+    await owner.query(
+      `delete from private.teacher_period_course_figures f using private.teacher_estimate_runs r
+       where r.id = f.run_id and r.started_at >= $1::timestamptz`,
+      [since],
+    );
+    await owner.query(
+      `delete from private.teacher_period_estimates e using private.teacher_estimate_runs r
+       where r.id = e.run_id and r.started_at >= $1::timestamptz`,
+      [since],
+    );
+    await owner.query("delete from private.teacher_estimate_runs where started_at >= $1::timestamptz", [since]);
+    await owner.query("set local session_replication_role = origin");
     await owner.query("commit");
   } catch (error) {
     await owner.query("rollback");

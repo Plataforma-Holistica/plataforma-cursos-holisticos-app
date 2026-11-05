@@ -14,7 +14,8 @@ import { assertPlainWindow } from "../integration/helpers/periods";
 // propio reloj cada paso del recálculo completo (RF-408) con el consolidado vacío y lleno, sin
 // `analyze` y con él, sin `vacuum` y con él; la selección de antes, en una muestra del cursor; la
 // selección sin el blindaje del plan, con plan genérico; una noche normal con 10 000 pares marcados
-// (`nightly_rollup()` entero) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
+// (`nightly_rollup()` entero, que desde T-408 trae el estimado de los maestros, y el paso del estimado
+// solo) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
 // consolidado que pasar todos los pares por el modo marcado. Al final, sobre ese mes, el reparto (que
 // tiene que caber en el tope de una sentencia del servidor) y el ensayo y el cierre (que se miden).
 //
@@ -480,6 +481,33 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
       [since],
     );
     expect(transition).toEqual({ status: "succeeded", error: null });
+
+    // El estimado de los maestros (T-408) corrió dentro de esa noche, en su propia corrida: bien, con una fila por maestro con puntos. Y el paso
+    // solo, medido con su propio reloj en una transacción que se deshace.
+    const estimate = await one<{ status: string; error: string | null; teachers: string; courses: string }>(
+      `select r.status, r.error,
+              (select count(*) from private.teacher_period_estimates e where e.run_id = r.id) as teachers,
+              (select count(*) from private.teacher_period_course_figures f where f.run_id = r.id) as courses
+       from private.teacher_estimate_runs r where r.period_id = $1 and r.started_at >= $2::timestamptz order by r.started_at desc limit 1`,
+      [period, since],
+    );
+    expect(estimate).toMatchObject({ status: "succeeded", error: null });
+    const withPoints = await one<{ n: string }>(
+      "select count(distinct teacher_id) as n from public.watch_rollup where period_id = $1 and half_points > 0",
+      [period],
+    );
+    expect(estimate.teachers).toBe(withPoints.n);
+    let stepMs = 0;
+    await tx(async () => {
+      const start = performance.now();
+      const step = await one<{ r: { outcome: string } }>("select private.teacher_estimates_step($1) as r", [period]);
+      stepMs = ms(start);
+      expect(step.r.outcome).toBe("estimated");
+      throw new Error("deshacer");
+    }).catch((error: Error) => {
+      if (error.message !== "deshacer") throw error;
+    });
+    report.teacher_estimates = { step_ms: stepMs, teachers: Number(estimate.teachers), course_rows: Number(estimate.courses) };
   });
 });
 
