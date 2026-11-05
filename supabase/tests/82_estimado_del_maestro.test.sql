@@ -9,7 +9,7 @@
 -- en que corre; el panel lee el mes en curso, que se limpia de corridas de estimado al empezar.
 begin;
 \ir _ayuda.psql
-select plan(106);
+select plan(112);
 
 select pruebas.alta('a8200000-0000-0000-0000-000000000001', 'tere-82@prueba.test');
 select pruebas.alta('a8200000-0000-0000-0000-000000000002', 'beto-82@prueba.test');
@@ -267,7 +267,9 @@ select is((select array_agg(k order by k) from jsonb_object_keys(pruebas.panel(p
 select is((select array_agg(k order by k) from jsonb_object_keys(pruebas.panel(pruebas.tere()) -> 'current') k),
   array['estimated_cents', 'full_lessons', 'half_lessons', 'last_failed', 'period_id', 'stale', 'students', 'updated_at'], 'y el mes en curso también');
 select is((select array_agg(distinct k order by k) from jsonb_array_elements(pruebas.panel(pruebas.tere()) -> 'courses') x, jsonb_object_keys(x) k),
-  array['course_id', 'full_lessons', 'half_lessons', 'students', 'title'], 'y cada curso');
+  array['course_id', 'full_lessons', 'half_lessons', 'owned', 'students', 'title'], 'y cada curso');
+select is(array(select x ->> 'owned' from jsonb_array_elements(pruebas.panel(pruebas.tere()) -> 'courses') x), array['true', 'true'],
+  'los dos cursos de Tere son suyos');
 select is(pruebas.panel(pruebas.tere()) ->> 'outcome', 'ok', 'una maestra activa lee su panel');
 select is(pruebas.panel(pruebas.tere()) ->> 'has_published', 'true', 'y tiene un curso publicado');
 select is(pruebas.panel(pruebas.beto()) ->> 'has_published', 'false', 'Beto no publicó');
@@ -306,6 +308,8 @@ select pruebas.mes_en_curso(), pruebas.a(2), l.id, l.course_id, pruebas.m(2), l.
 insert into r values ('c4', (pruebas.paso(pruebas.mes_en_curso()) ->> 'run_id')::uuid);
 select is(pruebas.cursos(pruebas.tere()), array['Curso e82-a1:0:0:0', 'Curso e82-a2:0:0:0'], 'Tere no ve las cifras de Beto en su curso');
 select is(pruebas.cursos(pruebas.beto()), array['Curso e82-a1:1:0:1'], 'Beto sí, y solo las de su alumno con base');
+select is((select x ->> 'owned' from jsonb_array_elements(pruebas.panel(pruebas.beto()) -> 'courses') x where x ->> 'title' = 'Curso e82-a1'), 'false',
+  'pero ese curso no es suyo: le llega solo por sus cifras, y no se enlaza a su editor');
 
 -- Una corrida de otro trabajo del periodo, fallida, no es la consolidación.
 insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, error)
@@ -365,6 +369,9 @@ select throws_ok(format($$ insert into private.teacher_period_course_figures (ru
 select throws_ok($$ update private.teacher_estimate_runs set error = null where period_id = 204501 $$, '42501', null, 'una corrida no cambia');
 select throws_ok($$ delete from private.teacher_period_estimates where period_id = 204501 $$, '42501', null, 'un estimado no se borra');
 select throws_ok($$ truncate private.teacher_period_course_figures $$, '42501', null, 'ni se vacían las cifras');
+-- Una corrida fallida sí entra: sin cifras, y sin tomar el periodo (si el paso falló por no alcanzar ese candado, no se podría anotar).
+select lives_ok($$ insert into private.teacher_estimate_runs (period_id, status, error, started_at, finished_at)
+                   values (204501, 'failed', 'prueba', now(), now()) $$, 'una corrida fallida de un periodo cerrado sí entra');
 set local session_replication_role = replica;
 update public.payout_periods set status = 'paid' where period_id = 204501;
 set local session_replication_role = origin;
@@ -417,6 +424,18 @@ select is(pruebas.paso(204505) - 'run_id', '{"outcome": "failed", "error": "roll
 select is((select count(*)::integer from private.teacher_period_estimates where period_id in (204504, 204505)), 0, 'y no deja estimados');
 select is((select count(*)::integer from private.teacher_estimate_runs where period_id in (204504, 204505) and status = 'failed' and input_hash is null), 2,
   'pero sí su corrida fallida, que el panel ve');
+-- La carrera: una consolidación del periodo que sigue viva (con latido reciente) aunque la última en empezar ya terminó bien. Lo leído pudo cambiar.
+select pruebas.forzar(204506, 'open');
+select pruebas.datos(204506);
+insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
+values ('nightly_rollup', 204506, 'running', now() - interval '1 hour', clock_timestamp(), '{"mode": "full"}');
+select is(pruebas.paso(204506) - 'run_id', '{"outcome": "failed", "error": "rollup running"}'::jsonb, 'con otra consolidación viva del periodo, no guarda como bueno');
+-- Una que se quedó corriendo sin latir en 15 minutos está caída: no detiene el estimado (la siguiente corrida la da por fallida).
+select pruebas.forzar(204507, 'open');
+select pruebas.datos(204507);
+insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
+values ('nightly_rollup', 204507, 'running', now() - interval '1 hour', clock_timestamp() - interval '20 minutes', '{"mode": "full"}');
+select is(pruebas.paso(204507) ->> 'outcome', 'estimated', 'una caída, sin latido, no la detiene');
 -- Un periodo de la ventana sin fila (en una base nueva, antes del primer paso a cierre) también se estima: no hay nada que tomar ni que cerrar.
 select pruebas.consolidado(204512, 'succeeded');
 select is(pruebas.paso(204512) - 'run_id', '{"outcome": "estimated", "teachers": 0}'::jsonb, 'un periodo sin fila que se consolidó, se estima');
@@ -528,6 +547,9 @@ as $$ select pg_catalog.count(*) from private.teacher_period_estimates $$;
 revoke all on function private.zz_82_lee() from public;
 select ok(pruebas.vigila_con('teacher estimates function not in the list'), 'y una función nueva que nombra las tablas');
 drop function private.zz_82_lee();
+create view private.zz_82_vista as select run_id, teacher_id, assigned_cents from private.teacher_period_estimates;
+select ok(pruebas.vigila_con('teacher estimates table read by a view'), 'y una vista sobre las tablas, que correría como su dueño');
+drop view private.zz_82_vista;
 select is(pruebas.vigila(), '{}'::text[], 'y en cero otra vez');
 
 select * from finish();

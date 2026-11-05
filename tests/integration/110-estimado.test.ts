@@ -3,10 +3,16 @@ import { randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
+import type { Tx } from "@/adapters/supabase/db";
+import { askTeacherDashboard } from "@/services/teachers/dashboard-records";
+
+import { claimedUser, freshOrigin, testServices } from "./helpers/account";
+import { memoryJar } from "./helpers/auth";
 import { actAs, clearPeriodsBefore, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
 import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
-import { asOwner, asSystem } from "./helpers/team";
-import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, type TestUser } from "./helpers/users";
+import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
+import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUsersByEmail, type TestUser } from "./helpers/users";
 
 // El estimado del maestro (T-408, primera solicitud) contra la base local, en lo que una transacción revertida no puede mostrar. Dos partes.
 //
@@ -14,9 +20,12 @@ import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, type TestUser 
 // periodo que consolidó deja su estimado en su propia corrida; un paso que falla no deja fallida la consolidación; un recálculo pedido también
 // estima. Corre sobre el mes en curso de la base local, sin marcas, y al terminar quita lo que dejó.
 //
-// Y el congelado con dos conexiones: un cierre en vuelo y la escritura del estimado no se cruzan. Usa enero y febrero de 2046, que ninguna otra
+// El congelado con dos conexiones: un cierre en vuelo y la escritura del estimado no se cruzan. Usa enero y febrero de 2046, que ninguna otra
 // prueba usa, con un maestro, dos alumnos y su consumo escritos con las guardias apagadas; el cierre lo hace alguien de finanzas de verdad. Al
-// terminar quita lo suyo de la misma manera.
+// terminar quita lo suyo de la misma manera. El candado tomado más de 30 s usa mayo de 2046.
+//
+// Y la forma estricta del servidor (`askTeacherDashboard`) contra lo que la base contesta de verdad, como un maestro con su sesión, en una
+// transacción que se revierte: sin corrida, con una buena y con una fallida después de una buena vieja.
 
 const emails: string[] = [];
 let owner: Client;
@@ -171,17 +180,17 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     expect(await estimateRunsSince(start)).toEqual([]);
   });
 
-  it("un paso cancelado tampoco detiene la noche: la cancelación queda anotada y la corrida termina bien", async () => {
+  it("un paso cancelado deja su corrida fallida con 57014, y la noche termina bien", async () => {
     const period = await currentPeriod();
     const start = await now();
     const runner = await connect();
     try {
       const pid = (await runner.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
-      // El paso se queda dormido al escribir su corrida; mientras duerme, alguien cancela la consulta.
+      // El paso se queda dormido al escribir su corrida buena; mientras duerme, alguien cancela la consulta. La fallida no duerme.
       await withBroken(
         "private.teacher_estimate_runs",
         "insert",
-        "",
+        "when (new.status = 'succeeded')",
         async () => {
           const call = runner.query("call private.nightly_rollup(true, $1)", [period]);
           const deadline = Date.now() + 20_000;
@@ -199,10 +208,47 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     } finally {
       await runner.end();
     }
+    // La cancelación la atrapa el paso: su corrida fallida lo dice (y el panel con ella), y la de la consolidación no lleva nada.
     const runs = await rollupRunsSince(start);
     expect(runs).toEqual([expect.objectContaining({ period_id: period, status: "succeeded", error: null })]);
-    expect(String(runs[0]!.details.teacher_estimates_failed)).toMatch(/^57014: /);
-    expect(await estimateRunsSince(start, period)).toEqual([]);
+    expect(runs[0]!.details.teacher_estimates_failed).toBeUndefined();
+    const estimates = await estimateRunsSince(start, period);
+    expect(estimates).toEqual([expect.objectContaining({ status: "failed", input_hash: null })]);
+    expect(estimates[0]!.error).toMatch(/^57014: /);
+  });
+
+  it("el periodo tomado más de 30 s da 55P03: el paso deja su corrida fallida, que se escribe sin esperar ese candado", async () => {
+    // Un periodo propio, abierto y sin nada; otra conexión toma su fila para cambiarla y no suelta.
+    const PERIOD = 204605;
+    await owner.query("begin");
+    await asSystem(owner);
+    await owner.query("select private.open_period($1)", [PERIOD]);
+    await asOwner(owner);
+    await owner.query("commit");
+    const holder = await connect();
+    const estimator = await connect();
+    try {
+      await holder.query("begin");
+      await holder.query("select 1 from public.payout_periods where period_id = $1 for update", [PERIOD]);
+      const started = Date.now();
+      const r = (await estimator.query<{ r: { outcome: string; error: string } }>("select private.teacher_estimates_step($1) as r", [PERIOD])).rows[0]!.r;
+      expect(Date.now() - started).toBeGreaterThanOrEqual(29_000);
+      expect(r.outcome).toBe("failed");
+      expect(r.error).toMatch(/^55P03: /);
+      const runs = await estimateRunsSince("-infinity", PERIOD);
+      expect(runs).toEqual([expect.objectContaining({ status: "failed", input_hash: null })]);
+      expect(runs[0]!.error).toMatch(/^55P03: /);
+    } finally {
+      await holder.query("rollback").catch(() => undefined);
+      await holder.end();
+      await estimator.end();
+      await owner.query("begin");
+      await owner.query("set local session_replication_role = replica");
+      await owner.query("delete from private.teacher_estimate_runs where period_id = $1", [PERIOD]);
+      await owner.query("delete from public.payout_periods where period_id = $1", [PERIOD]);
+      await owner.query("set local session_replication_role = origin");
+      await owner.query("commit");
+    }
   });
 
   it("un recálculo pedido también estima", async (ctx) => {
@@ -433,5 +479,95 @@ describe("el congelado con dos conexiones", { timeout: 120_000 }, () => {
         [OURS[1]],
       ),
     ).rejects.toMatchObject({ code: "55000" });
+  });
+});
+
+describe("la forma estricta del servidor, contra la base", () => {
+  /** Una persona de verdad, con su sesión del Auth local, como en la 89. */
+  async function person(): Promise<{ id: string; claims: VerifiedClaims }> {
+    const who = await claimedUser();
+    emails.push(who.email);
+    await completeAccountAsOwner(who.id);
+    const jar = memoryJar();
+    const entered = await testServices().signIn(jar, who, freshOrigin());
+    if (entered.kind !== "entered") throw new Error(`La persona de prueba no entró: ${entered.kind}`);
+    const check = await testServices().checkSession(jar);
+    if (check.kind !== "pass") throw new Error(`La guarda no la dejó pasar: ${check.kind}`);
+    return { id: who.id, claims: check.claims };
+  }
+
+  const txOn = (client: Client): Tx => ({
+    query: async (query, row) => (await client.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
+    execute: async (query) => (await client.query(query.text, [...query.values])).rowCount ?? 0,
+  });
+
+  it("lo que contesta `teacher_dashboard` pasa la forma de `askTeacherDashboard`: sin corrida, con una buena, y con una fallida y vieja", async () => {
+    const maestra = await person();
+    await reverted(async (tx) => {
+      await asSystem(tx);
+      const teacher = (await tx.query<{ id: string }>("insert into public.teachers (profile_id, status) values ($1, 'active') returning id::text", [maestra.id]))
+        .rows[0]!.id;
+      await asOwner(tx);
+      const period = (await tx.query<{ p: number }>("select private.period_of(now()) as p")).rows[0]!.p;
+      const course = randomUUID();
+      const clean = async () => {
+        await tx.query("set local session_replication_role = replica");
+        await tx.query("delete from private.teacher_period_course_figures where period_id = $1", [period]);
+        await tx.query("delete from private.teacher_period_estimates where period_id = $1", [period]);
+        await tx.query("delete from private.teacher_estimate_runs where period_id = $1", [period]);
+        await tx.query("set local session_replication_role = origin");
+      };
+      /** Una corrida buena que terminó hace `ago`, con lo asignado a la maestra y las cifras de un curso que no es suyo. */
+      const goodRun = async (ago: string) => {
+        const run = (
+          await tx.query<{ id: string }>(
+            `insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
+             values ($1, '\\x00', 'succeeded', clock_timestamp() - $2::interval - interval '1 second', clock_timestamp() - $2::interval) returning id::text`,
+            [period, ago],
+          )
+        ).rows[0]!.id;
+        await tx.query(
+          `insert into private.teacher_period_estimates (run_id, period_id, teacher_id, half_points, assigned_cents, full_lessons, half_lessons, students)
+           values ($1, $2, $3, 7, 12345, 3, 1, 2)`,
+          [run, period, teacher],
+        );
+        await tx.query(
+          `insert into private.teacher_period_course_figures (run_id, period_id, teacher_id, course_id, full_lessons, half_lessons, students)
+           values ($1, $2, $3, $4, 3, 1, 2)`,
+          [run, period, teacher, course],
+        );
+      };
+      const ask = async () => {
+        const { claims } = readVerifiedClaims(maestra.claims);
+        await asServer(tx, claims.userId, claims.sessionId ?? "");
+        try {
+          return await askTeacherDashboard(txOn(tx));
+        } finally {
+          await asOwner(tx);
+        }
+      };
+
+      await clean();
+      const none = await ask();
+      if (none.outcome !== "ok") throw new Error("la maestra no tiene panel");
+      expect(none.value.current).toMatchObject({ run: null, lastFailed: false, stale: false });
+
+      await goodRun("0 seconds");
+      const good = await ask();
+      if (good.outcome !== "ok") throw new Error("la maestra no tiene panel");
+      expect(good.value.current).toMatchObject({ run: { estimatedCents: 12345, fullLessons: 3, halfLessons: 1, students: 2 }, lastFailed: false, stale: false });
+      expect(good.value.courses).toEqual([expect.objectContaining({ courseId: course, figures: { fullLessons: 3, halfLessons: 1, students: 2 } })]);
+
+      await clean();
+      await goodRun("27 hours");
+      await tx.query(
+        `insert into private.teacher_estimate_runs (period_id, status, error, started_at, finished_at)
+         values ($1, 'failed', 'prueba', clock_timestamp(), clock_timestamp())`,
+        [period],
+      );
+      const failed = await ask();
+      if (failed.outcome !== "ok") throw new Error("la maestra no tiene panel");
+      expect(failed.value.current).toMatchObject({ run: { estimatedCents: 12345 }, lastFailed: true, stale: true });
+    });
   });
 });

@@ -39,6 +39,9 @@ const SAMPLE = 20;
 // 15 minutos se da por muerta (T-207), así que ningún paso puede pasar de ahí.
 const FULL_LIMIT_MS = 30 * 60_000;
 const BEAT_LIMIT_MS = 15 * 60_000;
+// El paso del estimado de los maestros (T-408), solo: el reparto que repite tiene que caber en los 10 s del servidor, y el paso suma sus escrituras
+// (una fila por maestro y por curso). Con 20 s de tope le queda el doble, y una regresión que lo haga crecer con los alumnos se ve.
+const ESTIMATE_STEP_LIMIT_MS = 20_000;
 
 // Dónde dejar las cifras: lo pasa `scripts/test-escala.mjs`.
 const REPORT_PATH = process.env.ESCALA_REPORT;
@@ -516,7 +519,8 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     }).catch((error: Error) => {
       if (error.message !== "deshacer") throw error;
     });
-    report.teacher_estimates = { step_ms: stepMs, teachers: Number(estimate.teachers), course_rows: Number(estimate.courses) };
+    report.teacher_estimates = { step_ms: stepMs, limit_ms: ESTIMATE_STEP_LIMIT_MS, teachers: Number(estimate.teachers), course_rows: Number(estimate.courses) };
+    expect(stepMs).toBeLessThan(ESTIMATE_STEP_LIMIT_MS);
   });
 });
 

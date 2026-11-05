@@ -67,8 +67,13 @@ alter table private.teacher_period_course_figures enable row level security;
 revoke all on private.teacher_estimate_runs, private.teacher_period_estimates, private.teacher_period_course_figures
   from public, anon, authenticated, service_role, app_service;
 
-create trigger teacher_estimate_runs_frozen before insert or update or delete on private.teacher_estimate_runs
+-- Una corrida fallida entra aunque el periodo esté cerrado o tomado: no lleva cifras, y es lo que el panel lee para decir que no se pudo. Si el
+-- congelado la revisara, tomaría la fila del periodo para compartir, y cuando el paso falló justo por no alcanzar ese candado (55P03) tampoco se
+-- podría anotar. Una buena, sus estimados y sus cifras sí se congelan.
+create trigger teacher_estimate_runs_frozen before update or delete on private.teacher_estimate_runs
   for each row execute function private.guard_frozen_period('period_id');
+create trigger teacher_estimate_runs_frozen_good before insert on private.teacher_estimate_runs
+  for each row when (new.status = 'succeeded') execute function private.guard_frozen_period('period_id');
 create trigger teacher_period_estimates_frozen before insert or update or delete on private.teacher_period_estimates
   for each row execute function private.guard_frozen_period('period_id');
 create trigger teacher_period_course_figures_frozen before insert or update or delete on private.teacher_period_course_figures
@@ -94,7 +99,8 @@ create trigger ledger_no_truncate before truncate on private.teacher_period_cour
 -- Contesta:
 --   {outcome: 'estimated', run_id, teachers}   escrito: una fila por maestro con puntos de alumnos con base y las cifras de cada curso
 --   {outcome: 'failed', run_id, error}         su corrida, fallida: la última consolidación del periodo no terminó bien ('rollup failed',
---                                              'rollup running', 'rollup missing'), o el cálculo lanzó (el código)
+--                                              'rollup running', 'rollup missing'), otra del periodo empezó mientras calculaba ('rollup
+--                                              running'), o algo lanzó, también el candado (55P03) o una cancelación (57014): el código
 --   {outcome: 'closed'}                        cerrado o pagado: no se estima ni se escribe
 --   {outcome: 'before_launch'}                 sin tramos para el periodo (antes del arranque), como el ensayo: no se estima ni se escribe
 --
@@ -104,7 +110,8 @@ create trigger ledger_no_truncate before truncate on private.teacher_period_cour
 -- en ninguna cifra, porque con un estimado en 0 se le podría deducir.
 --
 -- Su tope es el de los candados (`lock_timeout`, 30 s), que corre dentro de la sentencia: `statement_timeout` se arma al empezar cada sentencia que
--- llega del cliente, y cambiarlo aquí, dentro de un `call`, no acota esta. Un candado que no llega lanza 55P03, que la corrida atrapa y anota.
+-- llega del cliente, y cambiarlo aquí, dentro de un `call`, no acota esta. Todo, desde tomar el periodo, va en un solo bloque que atrapa también
+-- `query_canceled` (`others` no la atrapa): un candado que no llega o una cancelación dejan su corrida fallida, y el panel lo dice.
 create function private.teacher_estimates_step(p_period public.period_id) returns jsonb
 language plpgsql volatile set search_path = '' set lock_timeout = '30s'
 as $$
@@ -122,33 +129,42 @@ begin
   if p_period is null then
     raise exception 'teacher estimates need a period' using errcode = '22023';
   end if;
-  -- Sin fila, se estima igual: la ventana de la consolidación no la pide, no hay nada que tomar, y un periodo sin fila no se cierra.
-  select p.status into v_status from public.payout_periods p where p.period_id = p_period for share;
-  if v_status in ('closed', 'paid') then
-    return '{"outcome": "closed"}'::jsonb;
-  end if;
-  -- Antes del arranque `pool_bps` lanza: no es una falla, y una corrida fallida cada noche diría lo contrario.
-  if (select t.thresholds from private.pool_tiers_for(p_period) t) is null then
-    return '{"outcome": "before_launch"}'::jsonb;
-  end if;
+  begin
+    -- Sin fila, se estima igual: la ventana de la consolidación no la pide, no hay nada que tomar, y un periodo sin fila no se cierra.
+    select p.status into v_status from public.payout_periods p where p.period_id = p_period for share;
+    if v_status in ('closed', 'paid') then
+      return '{"outcome": "closed"}'::jsonb;
+    end if;
+    -- Antes del arranque `pool_bps` lanza: no es una falla, y una corrida fallida cada noche diría lo contrario.
+    if (select t.thresholds from private.pool_tiers_for(p_period) t) is null then
+      return '{"outcome": "before_launch"}'::jsonb;
+    end if;
 
-  -- La última consolidación del periodo, como la mira el cierre: si no terminó bien, el consolidado puede estar a medias.
-  select j.status into v_rollup
-  from public.job_runs j
-  where j.job = 'nightly_rollup' and j.period_id = p_period
-  order by j.started_at desc, j.id desc
-  limit 1;
-  v_rollup_found := found;
-  if not v_rollup_found then
-    v_error := 'rollup missing';
-  elsif v_rollup <> 'succeeded' then
-    v_error := 'rollup ' || v_rollup::text;
-  else
-    begin
+    -- La última consolidación del periodo, como la mira el cierre: si no terminó bien, el consolidado puede estar a medias.
+    select j.status into v_rollup
+    from public.job_runs j
+    where j.job = 'nightly_rollup' and j.period_id = p_period
+    order by j.started_at desc, j.id desc
+    limit 1;
+    v_rollup_found := found;
+    if not v_rollup_found then
+      v_error := 'rollup missing';
+    elsif v_rollup <> 'succeeded' then
+      v_error := 'rollup ' || v_rollup::text;
+    else
       select * into v_in from private.close_input(p_period) i;
       v_lines := array(select row(x.kind, x.profile_id, x.teacher_id, x.tiebreak_rank, x.cents, x.base_cents, x.half_points)::private.payout_line
                        from private.compute_payout(v_in.pool_bps, v_in.carried_in_cents, v_in.bases, v_in.points) with ordinality x
                        order by x.ordinality);
+      -- La carrera: otra consolidación del periodo viva (con latido en los últimos 15 minutos, como la mira el cierre), que empezó después de
+      -- mirar o que sigue de antes, puede estar cambiando el consolidado que se leyó. Entonces no se guarda como bueno.
+      if exists (select 1 from public.job_runs j
+                 where j.job = 'nightly_rollup' and j.period_id = p_period and j.status = 'running'
+                   and j.heartbeat_at >= pg_catalog.clock_timestamp() - interval '15 minutes') then
+        v_error := 'rollup running';
+      end if;
+    end if;
+    if v_error is null then
       insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
       values (p_period, v_in.input_hash, 'succeeded', v_started, pg_catalog.clock_timestamp())
       returning id into v_run;
@@ -175,10 +191,10 @@ begin
       from figures f
       where f.by_teacher = 0;
       select pg_catalog.count(*)::integer into v_teachers from private.teacher_period_estimates e where e.run_id = v_run;
-    exception when others then
-      v_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
-    end;
-  end if;
+    end if;
+  exception when query_canceled or others then
+    v_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
+  end;
 
   if v_error is not null then
     insert into private.teacher_estimate_runs (period_id, status, error, started_at, finished_at)
@@ -369,7 +385,8 @@ revoke all on function private.teacher_estimate_last_run(public.period_id, boole
 --   current        el mes en curso: lo asignado y las cifras de la última corrida buena y su fecha (nulos si no hay ninguna; ceros si el maestro
 --                  no tiene fila en ella), si la última corrida falló (`last_failed`) y si la buena tiene más de 26 horas (`stale`: la noche no
 --                  la renovó, aunque no haya dejado una fallida)
---   courses        cada curso suyo que se publicó alguna vez, y cada uno con cifras suyas en esa corrida, con su título y sus cifras
+--   courses        cada curso suyo que se publicó alguna vez, y cada uno con cifras suyas en esa corrida, con su título, sus cifras y si hoy es
+--                  suyo (`owned`): uno que le llega solo por sus cifras (cambió de maestro, RN-14) no se enlaza a un editor ajeno
 --   series         hasta 12 periodos, del más viejo al más nuevo: los cerrados o pagados con su total (`payout_teacher_totals.total_cents`, 0 si no
 --                  tiene, como PA-46), y los que están en cierre o siguen abiertos antes del mes en curso (entre el día 1 y la corrida, o con un
 --                  paso a cierre fallido) con lo asignado de su última corrida buena, marcados como estimado; desde el primero en que publicó, o
@@ -409,7 +426,7 @@ begin
       'stale', coalesce(v_good.finished_at < pg_catalog.now() - interval '26 hours', false)),
     'courses', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
-               'course_id', x.course_id, 'title', coalesce(pc.title, d.title),
+               'course_id', x.course_id, 'title', coalesce(pc.title, d.title), 'owned', coalesce(cr.teacher_id = v_teacher, false),
                'full_lessons', case when v_good.id is not null then coalesce(f.full_lessons, 0) end,
                'half_lessons', case when v_good.id is not null then coalesce(f.half_lessons, 0) end,
                'students', case when v_good.id is not null then coalesce(f.students, 0) end)
@@ -419,6 +436,7 @@ begin
             select g.course_id from private.teacher_period_course_figures g where g.run_id = v_good.id and g.teacher_id = v_teacher) x
       left join public.published_courses pc on pc.course_id = x.course_id
       left join public.course_drafts d on d.course_id = x.course_id
+      left join public.course_registry cr on cr.course_id = x.course_id
       left join private.teacher_period_course_figures f on f.run_id = v_good.id and f.teacher_id = v_teacher and f.course_id = x.course_id),
       '[]'::jsonb),
     'series', coalesce((
@@ -446,8 +464,8 @@ grant execute on function private.teacher_dashboard() to app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante del estimado (área del carril A): las tablas sin permisos, con seguridad por fila, congeladas y de solo inserción; el panel, la
--- única puerta; el paso, su ayudante y la retención, del sistema; toda función que nombre las tablas, en una lista cerrada; y la corrida de cada
--- noche llama al paso, en un bloque que atrapa también la cancelación.
+-- única puerta; el paso y su ayudante, del sistema; toda función que nombre las tablas, en una lista cerrada, y ninguna vista sobre ellas; y la
+-- corrida de cada noche llama al paso, en un bloque que atrapa también la cancelación.
 
 create function private.schema_violations_teacher_estimates()
 returns table (problem text, object_name text)
@@ -463,12 +481,18 @@ as $$
                  ('private.schema_violations_teacher_estimates()')) k (signature)),
   estimate_tables (table_name) as (
     values ('private.teacher_estimate_runs'), ('private.teacher_period_estimates'), ('private.teacher_period_course_figures')),
+  -- Los congelados: los estimados y las cifras en todo cambio; las corridas al cambiar o borrar, y al insertar solo una buena (una fallida entra
+  -- aunque el periodo esté tomado, para poder decir que no se pudo). Y en las tres, el de solo inserción.
   estimate_triggers (table_name, trigger_name, definition) as (
+    values ('private.teacher_estimate_runs', 'teacher_estimate_runs_frozen', 'BEFORE DELETE OR UPDATE%guard_frozen_period(''period_id'')'),
+           ('private.teacher_estimate_runs', 'teacher_estimate_runs_frozen_good', 'BEFORE INSERT%WHEN ((new.status = ''succeeded''::text))%guard_frozen_period(''period_id'')'),
+           ('private.teacher_period_estimates', 'teacher_period_estimates_frozen', 'BEFORE INSERT OR DELETE OR UPDATE%guard_frozen_period(''period_id'')'),
+           ('private.teacher_period_course_figures', 'teacher_period_course_figures_frozen', 'BEFORE INSERT OR DELETE OR UPDATE%guard_frozen_period(''period_id'')')
+    union all
     select t.table_name, x.trigger_name, x.definition
     from estimate_tables t
-    cross join lateral (values (pg_catalog.split_part(t.table_name, '.', 2) || '_frozen', 'BEFORE INSERT OR DELETE OR UPDATE%guard_frozen_period(''period_id'')'),
-                               ('ledger_no_update_delete', 'BEFORE DELETE OR UPDATE%reject_mutation()'),
-                               ('ledger_no_truncate', 'BEFORE TRUNCATE%reject_mutation()')) x (trigger_name, definition)),
+    cross join (values ('ledger_no_update_delete', 'BEFORE DELETE OR UPDATE%reject_mutation()'),
+                       ('ledger_no_truncate', 'BEFORE TRUNCATE%reject_mutation()')) x (trigger_name, definition)),
   system_functions (signature) as (
     values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'))
   select 'teacher estimates table reachable by ' || r.rolname, t.table_name
@@ -510,6 +534,15 @@ as $$
   where n.nspname in ('public', 'private')
     and (coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '')) ~ '(teacher_period_estimates|teacher_period_course_figures|teacher_estimate_runs)'
     and p.oid not in (select k.oid from estimate_known k where k.oid is not null)
+  union all
+  -- Una vista corre como su dueño: saltaría los permisos (como en el área `tax`).
+  select 'teacher estimates table read by a view', vn.nspname || '.' || c.relname
+  from pg_catalog.pg_depend d
+  join pg_catalog.pg_rewrite w on w.oid = d.objid
+  join pg_catalog.pg_class c on c.oid = w.ev_class
+  join pg_catalog.pg_namespace vn on vn.oid = c.relnamespace
+  where d.classid = 'pg_catalog.pg_rewrite'::regclass and d.refclassid = 'pg_catalog.pg_class'::regclass
+    and d.refobjid in (select t.table_name::regclass::oid from estimate_tables t)
   union all
   select 'nightly rollup does not estimate, or a cancellation stops it', 'private.nightly_rollup(boolean, integer)'
   where pg_catalog.pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure)
