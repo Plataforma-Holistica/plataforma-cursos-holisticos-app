@@ -127,8 +127,8 @@ export const portal = defineMessages({
     month: "{month}, en curso",
     updatedAt: "Actualizado el {date} a las {time}, hora del centro de México.",
     noRun: "Todavía no hay cifras de este mes: se calculan cada noche.",
-    lastFailed: "La actualización de anoche no se completó. Estas cifras son del {date}.",
-    lastFailedNoRun: "La actualización de anoche no se completó. Todavía no hay cifras de este mes.",
+    lastFailed: "No se pudieron actualizar tus cifras. Estas son del {date}.",
+    lastFailedNoRun: "No se pudieron actualizar tus cifras. Todavía no hay cifras de este mes.",
     figures: {
       estimated: "Llevas ganado",
       fullLessons: "Lecciones terminadas",
@@ -138,7 +138,7 @@ export const portal = defineMessages({
     estimatedTag: "Estimado",
     estimatedContext: "Actualizado el {date}. La cifra final sale al cierre y puede subir o bajar: la cuota de cada alumno se reparte entre todos {los_maestros} que ve en el mes.",
     estimatedNote: "Lo estimado es solo lo que te toca por lo que vieron tus alumnos. No incluye tu parte del bote sin consumo, los bonos ni los ajustes: esos se suman al cerrar el mes, en tu liquidación.",
-    noViews: "Todavía nadie ha visto tus lecciones este mes.",
+    noViews: "Todavía no hay vistas que cuenten para el reparto este mes.",
     coursesTitle: "Por curso",
     coursesCaption: "Tus cursos este mes",
     courseColumns: {
@@ -151,7 +151,7 @@ export const portal = defineMessages({
     untitled: "Curso sin título",
     seriesTitle: "Periodos anteriores",
     seriesCaption: "Lo que te tocó en cada periodo",
-    seriesNote: "Cada periodo cerrado abre su liquidación. El que todavía no cierra es un estimado.",
+    seriesNote: "Cada periodo cerrado abre su liquidación, y su cifra ya incluye tu parte del bote sin consumo. El que todavía no cierra es un estimado sin esa parte: por eso puede verse más bajo.",
     noSeries: "Tu primer periodo aparece aquí cuando cierre el mes.",
     closing: "Todavía sin cerrar",
     unavailable: "No pudimos leer tus cifras. Intenta de nuevo en un momento.",

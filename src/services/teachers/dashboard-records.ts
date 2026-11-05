@@ -36,8 +36,8 @@ const current = z.union([
 ]);
 
 const course = z.union([
-  z.object({ course_id: uuid, title: z.string().nullable(), full_lessons: count, half_lessons: count, students: count }).strict(),
-  z.object({ course_id: uuid, title: z.string().nullable(), full_lessons: z.null(), half_lessons: z.null(), students: z.null() }).strict(),
+  z.object({ course_id: uuid, title: z.string().nullable(), owned: z.boolean(), full_lessons: count, half_lessons: count, students: count }).strict(),
+  z.object({ course_id: uuid, title: z.string().nullable(), owned: z.boolean(), full_lessons: z.null(), half_lessons: z.null(), students: z.null() }).strict(),
 ]);
 
 const dashboardAnswer = z.union([
@@ -77,6 +77,7 @@ export async function askTeacherDashboard(tx: Tx): Promise<DashboardAnswer> {
       courses: a.courses.map((c) => ({
         courseId: c.course_id,
         title: c.title,
+        owned: c.owned,
         figures: c.full_lessons === null ? null : { fullLessons: c.full_lessons, halfLessons: c.half_lessons, students: c.students },
       })),
       series: a.series.map((s) => ({ period: periodSegment(s.period_id), cents: s.cents, estimated: s.estimated })),

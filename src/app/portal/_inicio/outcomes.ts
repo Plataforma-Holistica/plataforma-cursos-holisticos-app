@@ -73,9 +73,9 @@ export function isFirstTime(value: DashboardValue): boolean {
 
 /**
  * «Para empezar»: los datos fiscales (PA-48) y el primer curso (PA-42). La semblanza (PA-49) todavía no existe, y no se promete. Un paso hecho no
- * enlaza; uno que no se puede hacer (un suspendido por fraude no captura datos) tampoco.
+ * enlaza; uno que no se puede hacer tampoco: un suspendido por fraude no captura datos, y un suspendido en solo lectura no crea cursos.
  */
-export function firstSteps(taxData: TaxDataFacts | null): FirstStep[] {
+export function firstSteps(taxData: TaxDataFacts | null, readOnly: boolean): FirstStep[] {
   const taxDone = taxData !== null && taxData.version > 0;
   return [
     {
@@ -84,7 +84,7 @@ export function firstSteps(taxData: TaxDataFacts | null): FirstStep[] {
       href: taxDone || taxData?.canSave === false ? null : ROUTES.portalTaxData,
       state: taxData === null ? null : taxDone ? text.firstTime.done : text.firstTime.pending,
     },
-    { key: "primer-curso", label: text.firstTime.course, href: ROUTES.portalCourses, state: text.firstTime.pending },
+    { key: "primer-curso", label: text.firstTime.course, href: readOnly ? null : ROUTES.portalCourses, state: text.firstTime.pending },
   ];
 }
 
@@ -112,10 +112,11 @@ function seriesBars(value: DashboardValue): PeriodBar[] {
   });
 }
 
-export function dashboardView(value: DashboardValue, taxData: TaxDataFacts | null): DashboardView {
+/** @param readOnly El maestro está suspendido: ve todo, y no se le ofrece lo que no puede hacer. */
+export function dashboardView(value: DashboardValue, taxData: TaxDataFacts | null, readOnly: boolean): DashboardView {
   const { run } = value.current;
   return {
-    firstTime: isFirstTime(value) ? firstSteps(taxData) : null,
+    firstTime: isFirstTime(value) ? firstSteps(taxData, readOnly) : null,
     month: t(text.month, { month: periodTitle(value.current.period) }),
     updated: run === null ? null : t(text.updatedAt, { date: longDate(run.updatedAt), time: clockTime(run.updatedAt, PRODUCT_TIME_ZONE) }),
     runNotice: runNotice(value),
@@ -132,7 +133,8 @@ export function dashboardView(value: DashboardValue, taxData: TaxDataFacts | nul
     courses: value.courses.map((course) => ({
       key: course.courseId,
       title: course.title ?? text.untitled,
-      href: portalCoursePath(course.courseId),
+      // Un curso que ya no es suyo no enlaza: su editor es de otro maestro.
+      href: course.owned ? portalCoursePath(course.courseId) : null,
       fullLessons: figure(course.figures, "fullLessons"),
       halfLessons: figure(course.figures, "halfLessons"),
       students: figure(course.figures, "students"),

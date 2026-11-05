@@ -41,6 +41,8 @@ export interface DashboardCourse {
   courseId: string;
   /** Nulo si la base no tiene título que darle. */
   title: string | null;
+  /** Si el curso es hoy suyo: uno que cambió de maestro sale con sus cifras de este mes, pero su editor ya no es de este maestro. */
+  owned: boolean;
   /** Nulas si no hay corrida buena del mes. */
   figures: DashboardFigures | null;
 }

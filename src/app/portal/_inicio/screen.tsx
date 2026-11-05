@@ -119,9 +119,9 @@ export function DashboardPanel({ view }: { view: DashboardView }) {
           {view.updated !== null && <p className="text-body-s text-text-2">{view.updated}</p>}
         </div>
         {view.runNotice !== null && <InlineAlert tone={view.runNotice.tone}>{view.runNotice.text}</InlineAlert>}
-        {/* En el teléfono, lo ganado primero y a todo el ancho; en escritorio, al final de la fila. */}
+        {/* Lo ganado primero, como en el diseño: en el teléfono, a todo el ancho; en escritorio, el primero de la fila. */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <div className="col-span-2 lg:order-last lg:col-span-1">
+          <div className="col-span-2 lg:col-span-1">
             <StatTile label={text.figures.estimated} value={tiles.estimated.value} tag={text.estimatedTag} context={tiles.estimated.context ?? undefined} />
           </div>
           <StatTile label={text.figures.fullLessons} value={tiles.fullLessons} />

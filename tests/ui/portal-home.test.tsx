@@ -36,8 +36,8 @@ const VALUE: DashboardValue = {
   hasPublished: true,
   current: { period: "2031-03", run: RUN, lastFailed: false, stale: false },
   courses: [
-    { courseId: COURSE, title: "Respirar para volver", figures: { fullLessons: 150, halfLessons: 22, students: 41 } },
-    { courseId: OTHER, title: "Meditación para empezar", figures: { fullLessons: 64, halfLessons: 15, students: 23 } },
+    { courseId: COURSE, title: "Respirar para volver", owned: true, figures: { fullLessons: 150, halfLessons: 22, students: 41 } },
+    { courseId: OTHER, title: "Meditación para empezar", owned: true, figures: { fullLessons: 64, halfLessons: 15, students: 23 } },
   ],
   series: [
     { period: "2031-01", cents: 98_000, estimated: false },
@@ -105,9 +105,14 @@ describe("PA-41 · Panel", () => {
     const estimated = within(month).getByText("Llevas ganado").parentElement as HTMLElement;
     expect(estimated.textContent).toMatch(/Estimado\$1,234\.56Actualizado el 12 de marzo de 2031\. La cifra final sale al cierre y puede subir o bajar/);
     expect(estimated).toHaveClass("border-dashed");
+    // Lo ganado va primero, en el teléfono y en escritorio, como en el diseño.
+    const grid = estimated.parentElement?.parentElement as HTMLElement;
+    expect(grid.firstElementChild).toContainElement(estimated);
+    const reordered = [...month.querySelectorAll("[class]")].filter((node) => [...node.classList].some((name) => /(^|:)order-/.test(name)));
+    expect(reordered).toEqual([]);
     expect(within(month).getByText(/No incluye tu parte del bote sin consumo, los bonos ni los ajustes/)).toBeInTheDocument();
-    expect(screen.queryByText(/La actualización de anoche no se completó/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Todavía nadie ha visto tus lecciones este mes.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No se pudieron actualizar tus cifras/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Todavía no hay vistas que cuenten para el reparto este mes.")).not.toBeInTheDocument();
   });
 
   it("la tabla por curso, cada fila con su enlace al curso", async () => {
@@ -117,6 +122,17 @@ describe("PA-41 · Panel", () => {
     for (const value of ["150", "22", "41"]) expect(within(row).getByText(value)).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "Respirar para volver" })).toHaveAttribute("href", `/portal/cursos/${COURSE}`);
     expect(within(screen.getByRole("list", { name: "Tus cursos este mes" })).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("la fila de un curso que ya no es suyo va con sus cifras y sin enlace", async () => {
+    answers(ready({ ...VALUE, courses: [{ ...VALUE.courses[0]!, owned: false }, VALUE.courses[1]!] }));
+    await home();
+    const table = screen.getByRole("table", { name: "Tus cursos este mes" });
+    const row = within(table).getByRole("rowheader", { name: "Respirar para volver" }).closest("tr") as HTMLElement;
+    expect(within(row).getByText("150")).toBeInTheDocument();
+    expect(within(row).queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Respirar para volver" })).not.toBeInTheDocument();
+    expect(within(table).getByRole("link", { name: "Meditación para empezar" })).toHaveAttribute("href", `/portal/cursos/${OTHER}`);
   });
 
   it("los periodos anteriores: el cerrado con su total y su liquidación, el que todavía no cierra como estimado", async () => {
@@ -141,12 +157,12 @@ describe("PA-41 · Panel", () => {
   it("publicado y sin vistas: ceros, con su frase", async () => {
     answers(ready({ ...VALUE, current: { period: "2031-03", run: { ...RUN, estimatedCents: 0, fullLessons: 0, halfLessons: 0, students: 0 }, lastFailed: false, stale: false } }));
     await home();
-    expect(screen.getByText("Todavía nadie ha visto tus lecciones este mes.")).toBeInTheDocument();
+    expect(screen.getByText("Todavía no hay vistas que cuenten para el reparto este mes.")).toBeInTheDocument();
     expect(screen.getByText("$0.00")).toBeInTheDocument();
   });
 
   it("sin corrida: ninguna cifra ni un cero, y lo dice", async () => {
-    answers(ready({ ...VALUE, current: { period: "2031-03", run: null, lastFailed: false, stale: false }, courses: [{ courseId: COURSE, title: "Respirar para volver", figures: null }] }));
+    answers(ready({ ...VALUE, current: { period: "2031-03", run: null, lastFailed: false, stale: false }, courses: [{ courseId: COURSE, title: "Respirar para volver", owned: true, figures: null }] }));
     await home();
     const month = screen.getByRole("region", { name: "Marzo de 2031, en curso" });
     expect(within(month).getAllByText("Sin datos todavía")).toHaveLength(4);
@@ -160,14 +176,23 @@ describe("PA-41 · Panel", () => {
   it("la corrida que falló: lo dice con la fecha de lo que se ve, sin cifra inventada", async () => {
     answers(ready({ ...VALUE, current: { period: "2031-03", run: RUN, lastFailed: true, stale: false } }));
     await home();
-    expect(screen.getByText("La actualización de anoche no se completó. Estas cifras son del 12 de marzo de 2031.")).toBeInTheDocument();
+    expect(screen.getByText("No se pudieron actualizar tus cifras. Estas son del 12 de marzo de 2031.")).toBeInTheDocument();
     expect(screen.getByText("$1,234.56")).toBeInTheDocument();
 
     answers(ready({ ...VALUE, current: { period: "2031-03", run: null, lastFailed: true, stale: false } }));
     const again = await home();
-    expect(within(again.container).getByText("La actualización de anoche no se completó. Todavía no hay cifras de este mes.")).toBeInTheDocument();
+    expect(within(again.container).getByText("No se pudieron actualizar tus cifras. Todavía no hay cifras de este mes.")).toBeInTheDocument();
     const month = within(again.container).getByRole("region", { name: "Marzo de 2031, en curso" });
     expect(within(month).queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
+  it("la corrida buena vieja (la noche no la renovó): lo dice con su fecha, sin cifra inventada", async () => {
+    answers(ready({ ...VALUE, current: { period: "2031-03", run: RUN, lastFailed: false, stale: true } }));
+    await home();
+    const month = screen.getByRole("region", { name: "Marzo de 2031, en curso" });
+    expect(within(month).getByText("No se pudieron actualizar tus cifras. Estas son del 12 de marzo de 2031.")).toBeInTheDocument();
+    expect(within(month).getByText("$1,234.56")).toBeInTheDocument();
+    expect(screen.queryByText(/anoche/)).not.toBeInTheDocument();
   });
 
   it("sin cursos publicados: «Para empezar» con sus pasos y «Ir a mis cursos», sin cifras", async () => {
@@ -194,6 +219,20 @@ describe("PA-41 · Panel", () => {
     const start = screen.getByRole("region", { name: "Para empezar" });
     expect(within(start).queryByRole("link", { name: "Captura tus datos fiscales y bancarios" })).not.toBeInTheDocument();
     expect(within(start).getByText("Listo")).toBeInTheDocument();
+  });
+
+  it("el suspendido en «Para empezar»: no se le ofrece crear un curso", async () => {
+    teaches("suspended");
+    mocks.taxProfileState.mockResolvedValueOnce({ ...TAX, version: 0 });
+    answers(ready({ hasPublished: false, current: { period: "2031-03", run: null, lastFailed: false, stale: false }, courses: [], series: [] }));
+    const { container } = await home();
+    expect(screen.getByText(/Tu cuenta está en solo lectura/)).toBeInTheDocument();
+    const start = screen.getByRole("region", { name: "Para empezar" });
+    expect(within(start).getByText("Crea y envía tu primer curso")).toBeInTheDocument();
+    expect(within(start).queryByRole("link", { name: "Crea y envía tu primer curso" })).not.toBeInTheDocument();
+    // Sus datos fiscales sí los captura: de ellos depende su pago (decisión de Sergio del 2026-11-01).
+    expect(within(start).getByRole("link", { name: "Captura tus datos fiscales y bancarios" })).toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
   it("el suspendido lo ve todo, con la franja de solo lectura y el texto que se escribió para él", async () => {

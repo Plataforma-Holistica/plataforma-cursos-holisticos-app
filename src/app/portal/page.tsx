@@ -32,7 +32,7 @@ export default async function PortalHomePage() {
   // FL-31, E2: sin ellos no se le puede pagar. «No se supo» no se dice como que faltan. Se le dice también a un suspendido, salvo por fraude.
   const [taxData, dashboard] = await Promise.all([taxProfileState(step.claims), teacherDashboard(step.claims)]);
   // Quien ya no es maestro para la base (se fue entre la guarda y la lectura) no tiene panel: se le dice como «no se supo», y la guarda decide al reintentar.
-  const panel = dashboard.kind === "ready" && dashboard.value.outcome === "ok" ? dashboardView(dashboard.value.value, taxData) : null;
+  const panel = dashboard.kind === "ready" && dashboard.value.outcome === "ok" ? dashboardView(dashboard.value.value, taxData, suspended) : null;
   return (
     <PortalFrame current={ROUTES.portal} readOnly={suspended}>
       <h1 className="text-h1">{text.title}</h1>

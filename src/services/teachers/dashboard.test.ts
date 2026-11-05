@@ -17,7 +17,7 @@ const OK = {
   outcome: "ok",
   has_published: true,
   current: { period_id: 203103, estimated_cents: 123_456, full_lessons: 214, half_lessons: 37, students: 58, updated_at: "2031-03-12T11:40:00.123+00:00", last_failed: false, stale: false },
-  courses: [{ course_id: COURSE, title: "Respirar para volver", full_lessons: 150, half_lessons: 22, students: 41 }],
+  courses: [{ course_id: COURSE, title: "Respirar para volver", owned: true, full_lessons: 150, half_lessons: 22, students: 41 }],
   series: [
     { period_id: 203101, cents: 98_000, estimated: false },
     { period_id: 203102, cents: 101_234, estimated: true },
@@ -40,7 +40,7 @@ describe("la lectura de la base", () => {
           lastFailed: false,
           stale: false,
         },
-        courses: [{ courseId: COURSE, title: "Respirar para volver", figures: { fullLessons: 150, halfLessons: 22, students: 41 } }],
+        courses: [{ courseId: COURSE, title: "Respirar para volver", owned: true, figures: { fullLessons: 150, halfLessons: 22, students: 41 } }],
         series: [
           { period: "2031-01", cents: 98_000, estimated: false },
           { period: "2031-02", cents: 101_234, estimated: true },
@@ -53,7 +53,7 @@ describe("la lectura de la base", () => {
     const answer = {
       ...OK,
       current: { period_id: 203103, estimated_cents: null, full_lessons: null, half_lessons: null, students: null, updated_at: null, last_failed: true, stale: false },
-      courses: [{ course_id: COURSE, title: null, full_lessons: null, half_lessons: null, students: null }],
+      courses: [{ course_id: COURSE, title: null, owned: false, full_lessons: null, half_lessons: null, students: null }],
       series: [{ period_id: 203102, cents: null, estimated: true }],
     };
     const read = await askTeacherDashboard(txAnswering(answer));
@@ -62,7 +62,7 @@ describe("la lectura de la base", () => {
       value: {
         hasPublished: true,
         current: { period: "2031-03", run: null, lastFailed: true, stale: false },
-        courses: [{ courseId: COURSE, title: null, figures: null }],
+        courses: [{ courseId: COURSE, title: null, owned: false, figures: null }],
         series: [{ period: "2031-02", cents: null, estimated: true }],
       },
     });
@@ -81,6 +81,7 @@ describe("la lectura de la base", () => {
     ["el mes con fecha y sin cifras", { ...OK, current: { ...OK.current, estimated_cents: null } }],
     ["el mes sin corrida y viejo", { ...OK, current: { ...OK.current, estimated_cents: null, full_lessons: null, half_lessons: null, students: null, updated_at: null, stale: true } }],
     ["el mes sin decir si es viejo", { ...OK, current: { ...OK.current, stale: undefined } }],
+    ["un curso sin decir si es suyo", { ...OK, courses: [{ ...OK.courses[0], owned: undefined }] }],
     ["un curso con cifras a medias", { ...OK, courses: [{ ...OK.courses[0], students: null }] }],
     ["una cifra negativa", { ...OK, current: { ...OK.current, estimated_cents: -1 } }],
     ["una fecha que no se entiende", { ...OK, current: { ...OK.current, updated_at: "ayer" } }],
