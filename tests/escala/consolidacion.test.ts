@@ -482,8 +482,14 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     );
     expect(transition).toEqual({ status: "succeeded", error: null });
 
-    // El estimado de los maestros (T-408) corrió dentro de esa noche, en su propia corrida: bien, con una fila por maestro con puntos. Y el paso
+    // El estimado de los maestros (T-408) corrió dentro de esa noche, en su propia corrida: bien, sin falla anotada en la consolidación. Y el paso
     // solo, medido con su propio reloj en una transacción que se deshace.
+    expect(runs.some((run) => run.period_id === period)).toBe(true);
+    const noted = await one<{ failed: string | null }>(
+      "select details ->> 'teacher_estimates_failed' as failed from public.job_runs where job = 'nightly_rollup' and period_id = $1 and started_at >= $2::timestamptz",
+      [period, since],
+    );
+    expect(noted.failed).toBeNull();
     const estimate = await one<{ status: string; error: string | null; teachers: string; courses: string }>(
       `select r.status, r.error,
               (select count(*) from private.teacher_period_estimates e where e.run_id = r.id) as teachers,
@@ -492,8 +498,11 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
       [period, since],
     );
     expect(estimate).toMatchObject({ status: "succeeded", error: null });
+    // Una fila por maestro con puntos de alumnos con base (los que entran al reparto).
     const withPoints = await one<{ n: string }>(
-      "select count(distinct teacher_id) as n from public.watch_rollup where period_id = $1 and half_points > 0",
+      `select count(distinct r.teacher_id) as n from public.watch_rollup r
+       join private.close_input_students($1) s on s.profile_id = r.profile_id
+       where r.period_id = $1 and r.half_points > 0`,
       [period],
     );
     expect(estimate.teachers).toBe(withPoints.n);

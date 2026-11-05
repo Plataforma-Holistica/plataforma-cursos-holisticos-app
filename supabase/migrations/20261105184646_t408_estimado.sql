@@ -35,24 +35,23 @@ create table private.teacher_period_estimates (
   period_id public.period_id not null,
   teacher_id uuid not null,
   half_points integer not null,        -- los de sus alumnos con base: los que entran al reparto
-  paying_students integer not null,    -- sus alumnos con base y puntos: una parte por alumno
   assigned_cents bigint not null,      -- lo asignado por consumo, sin el bote sin consumo (decisión 1 de Sergio del 2026-11-04)
-  full_lessons integer not null,       -- lecciones terminadas: pares de alumno y lección con 2 medios puntos
+  full_lessons integer not null,       -- lecciones terminadas: pares de alumno con base y lección con 2 medios puntos
   half_lessons integer not null,       -- a medias: con 1
-  students integer not null,           -- alumnos distintos con algún medio punto, con base o sin ella
+  students integer not null,           -- sus alumnos con base y puntos, como `payout_teacher_totals.students`: una parte por alumno
   primary key (run_id, teacher_id),
   constraint teacher_period_estimates_run_fk foreign key (run_id, period_id) references private.teacher_estimate_runs (id, period_id),
   constraint teacher_period_estimates_not_negative check (
-    half_points >= 0 and paying_students >= 0 and assigned_cents >= 0 and full_lessons >= 0 and half_lessons >= 0 and students >= 0)
+    half_points >= 0 and assigned_cents >= 0 and full_lessons >= 0 and half_lessons >= 0 and students >= 0)
 );
-comment on table private.teacher_period_estimates is 'El estimado de cada maestro con puntos en una corrida (RF-601, RF-602). Sin fila en la última corrida buena, su estimado es 0. Solo inserción.';
+comment on table private.teacher_period_estimates is 'El estimado de cada maestro con puntos de alumnos con base en una corrida (RF-601, RF-602). Sin fila en la última corrida buena, su estimado es 0. Solo inserción.';
 
 create table private.teacher_period_course_figures (
   run_id uuid not null,
   period_id public.period_id not null,
   teacher_id uuid not null,            -- el maestro del consolidado (RN-14): un curso que cambió de maestro sale con cada uno
   course_id uuid not null,
-  full_lessons integer not null,
+  full_lessons integer not null,       -- todo, como en su fila: solo de alumnos con base
   half_lessons integer not null,
   students integer not null,
   primary key (run_id, teacher_id, course_id),
@@ -93,16 +92,21 @@ create trigger ledger_no_truncate before truncate on private.teacher_period_cour
 -- cierre en vuelo lo hace esperar y después ve el periodo cerrado, y un cierre que llega después espera a que el estimado confirme.
 --
 -- Contesta:
---   {outcome: 'estimated', run_id, teachers}   escrito: una fila por maestro con puntos y las cifras de cada curso
+--   {outcome: 'estimated', run_id, teachers}   escrito: una fila por maestro con puntos de alumnos con base y las cifras de cada curso
 --   {outcome: 'failed', run_id, error}         su corrida, fallida: la última consolidación del periodo no terminó bien ('rollup failed',
 --                                              'rollup running', 'rollup missing'), o el cálculo lanzó (el código)
 --   {outcome: 'closed'}                        cerrado o pagado: no se estima ni se escribe
+--   {outcome: 'before_launch'}                 sin tramos para el periodo (antes del arranque), como el ensayo: no se estima ni se escribe
 --
 -- El cálculo es el del ensayo: `compute_payout` con lo que da `close_input`, que es `payout_for_period` con la entrada ya armada (y así la huella
 -- que se guarda es la de lo calculado). De cada maestro se queda con lo asignado, sin el sin consumo ni el bono. Las cifras salen del consolidado
--- (los pares con algún medio punto), en una sola sentencia para el maestro y sus cursos.
+-- (los pares con algún medio punto), solo de alumnos con base, en una sola sentencia para el maestro y sus cursos: un alumno sin base no aparece
+-- en ninguna cifra, porque con un estimado en 0 se le podría deducir.
+--
+-- Su tope es el de los candados (`lock_timeout`, 30 s), que corre dentro de la sentencia: `statement_timeout` se arma al empezar cada sentencia que
+-- llega del cliente, y cambiarlo aquí, dentro de un `call`, no acota esta. Un candado que no llega lanza 55P03, que la corrida atrapa y anota.
 create function private.teacher_estimates_step(p_period public.period_id) returns jsonb
-language plpgsql volatile set search_path = ''
+language plpgsql volatile set search_path = '' set lock_timeout = '30s'
 as $$
 declare
   v_started timestamptz := pg_catalog.clock_timestamp();
@@ -122,6 +126,10 @@ begin
   select p.status into v_status from public.payout_periods p where p.period_id = p_period for share;
   if v_status in ('closed', 'paid') then
     return '{"outcome": "closed"}'::jsonb;
+  end if;
+  -- Antes del arranque `pool_bps` lanza: no es una falla, y una corrida fallida cada noche diría lo contrario.
+  if (select t.thresholds from private.pool_tiers_for(p_period) t) is null then
+    return '{"outcome": "before_launch"}'::jsonb;
   end if;
 
   -- La última consolidación del periodo, como la mira el cierre: si no terminó bien, el consolidado puede estar a medias.
@@ -144,19 +152,20 @@ begin
       insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
       values (p_period, v_in.input_hash, 'succeeded', v_started, pg_catalog.clock_timestamp())
       returning id into v_run;
-      with figures as (
+      with based as (select b.profile_id from pg_catalog.unnest(v_in.bases) b),
+      figures as (
         select r.teacher_id, r.course_id, grouping(r.course_id) as by_teacher,
                (pg_catalog.count(*) filter (where r.half_points = 2))::integer as full_lessons,
                (pg_catalog.count(*) filter (where r.half_points = 1))::integer as half_lessons,
                (pg_catalog.count(distinct r.profile_id))::integer as students
         from public.watch_rollup r
+        join based on based.profile_id = r.profile_id
         where r.period_id = p_period and r.half_points > 0
         group by grouping sets ((r.teacher_id), (r.teacher_id, r.course_id))),
       estimates as (
-        insert into private.teacher_period_estimates (run_id, period_id, teacher_id, half_points, paying_students, assigned_cents,
-                                                      full_lessons, half_lessons, students)
-        select v_run, p_period, coalesce(c.teacher_id, f.teacher_id), coalesce(c.half_points, 0), coalesce(c.students, 0),
-               coalesce(c.assigned_cents, 0), coalesce(f.full_lessons, 0), coalesce(f.half_lessons, 0), coalesce(f.students, 0)
+        insert into private.teacher_period_estimates (run_id, period_id, teacher_id, half_points, assigned_cents, full_lessons, half_lessons, students)
+        select v_run, p_period, coalesce(c.teacher_id, f.teacher_id), coalesce(c.half_points, 0), coalesce(c.assigned_cents, 0),
+               coalesce(f.full_lessons, 0), coalesce(f.half_lessons, 0), coalesce(c.students, 0)
         from private.close_teacher_totals(v_lines) c
         full join (select * from figures where figures.by_teacher = 1) f on f.teacher_id = c.teacher_id)
       -- Una sentencia con un insert en su `with` lo corre entero, y las claves foráneas se revisan al final de toda la sentencia: las cifras de un
@@ -185,11 +194,14 @@ revoke all on function private.teacher_estimates_step(public.period_id) from pub
 -- ---------------------------------------------------------------------------------------
 -- La corrida de cada noche (t602_congelado), con el estimado: después de cerrar la corrida de cada periodo, el paso, con su propio `commit` y en
 -- su bloque. Se le llama aunque la consolidación haya fallado: entonces deja su corrida fallida sin calcular, y el panel dice que la de anoche no se
--- completó. Lo que falle del paso no toca la corrida de la consolidación: el cierre mira solo esa.
+-- completó. Lo que falle del paso no toca el estado de la corrida de la consolidación, que es lo que mira el cierre: si lanza fuera de su propio
+-- bloque, se anota en `details` de esa corrida (`teacher_estimates_failed`) y en el registro de la base, y la noche sigue. El bloque atrapa también
+-- `query_canceled`, que `others` no atrapa: una cancelación del paso cortaría la noche entera.
 create or replace procedure private.nightly_rollup(p_full boolean default false, p_period integer default null)
 language plpgsql
 as $$
 declare
+  v_estimate_error text;
   v_start timestamptz := pg_catalog.clock_timestamp();
   v_path text := pg_catalog.current_setting('search_path');
   v_window integer[];
@@ -274,12 +286,18 @@ begin
     perform private.close_job_run(v_run, coalesce(v_error,
       case when v_anomalies ? 'anomalies_failed' then 'anomalies failed: ' || (v_anomalies ->> 'anomalies_failed') end));
     commit;
-    -- El estimado de los maestros (T-408), con lo que esta corrida dejó. Si lanza, se avisa en el registro de la base y se sigue.
+    -- El estimado de los maestros (T-408), con lo que esta corrida dejó.
+    v_estimate_error := null;
     begin
       perform private.teacher_estimates_step(v_period);
-    exception when others then
-      raise warning 'teacher estimates for period % failed: %', v_period, sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
+    exception when query_canceled or others then
+      v_estimate_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
     end;
+    if v_estimate_error is not null then
+      update public.job_runs j set details = j.details || pg_catalog.jsonb_build_object('teacher_estimates_failed', v_estimate_error)
+      where j.id = v_run;
+      raise warning 'teacher estimates for period % failed: %', v_period, v_estimate_error;
+    end if;
     commit;
   end loop;
 
@@ -349,10 +367,13 @@ revoke all on function private.teacher_estimate_last_run(public.period_id, boole
 
 -- El panel, con una lista cerrada de claves:
 --   current        el mes en curso: lo asignado y las cifras de la última corrida buena y su fecha (nulos si no hay ninguna; ceros si el maestro
---                  no tiene fila en ella), y si la última corrida falló (`last_failed`)
+--                  no tiene fila en ella), si la última corrida falló (`last_failed`) y si la buena tiene más de 26 horas (`stale`: la noche no
+--                  la renovó, aunque no haya dejado una fallida)
 --   courses        cada curso suyo que se publicó alguna vez, y cada uno con cifras suyas en esa corrida, con su título y sus cifras
---   series         hasta 12 periodos, del más viejo al más nuevo: los cerrados o pagados con su total (`payout_teacher_totals.total_cents`) y el que
---                  está en cierre con lo asignado de su última corrida buena, marcado como estimado; desde el primero en que publicó, o en que tiene cifra
+--   series         hasta 12 periodos, del más viejo al más nuevo: los cerrados o pagados con su total (`payout_teacher_totals.total_cents`, 0 si no
+--                  tiene, como PA-46), y los que están en cierre o siguen abiertos antes del mes en curso (entre el día 1 y la corrida, o con un
+--                  paso a cierre fallido) con lo asignado de su última corrida buena, marcados como estimado; desde el primero en que publicó, o
+--                  en que tiene cifra
 --   has_published  si tiene algún curso publicado ahora
 -- Sin el porcentaje del bote ni nada por alumno.
 create function private.teacher_dashboard() returns jsonb
@@ -384,7 +405,8 @@ begin
       'half_lessons', case when v_good.id is not null then coalesce(v_mine.half_lessons, 0) end,
       'students', case when v_good.id is not null then coalesce(v_mine.students, 0) end,
       'updated_at', v_good.finished_at,
-      'last_failed', coalesce(v_last.status = 'failed', false)),
+      'last_failed', coalesce(v_last.status = 'failed', false),
+      'stale', coalesce(v_good.finished_at < pg_catalog.now() - interval '26 hours', false)),
     'courses', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
                'course_id', x.course_id, 'title', coalesce(pc.title, d.title),
@@ -403,16 +425,16 @@ begin
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('period_id', s.period_id, 'cents', s.cents, 'estimated', s.estimated)
                                   order by s.period_id)
       from (select q.period_id, q.estimated, q.cents
-            from (select p.period_id, p.status = 'closing' as estimated,
-                         case when p.status = 'closing' then
+            from (select p.period_id, p.status in ('closing', 'open') as estimated,
+                         case when p.status in ('closing', 'open') then
                            case when g.id is not null then coalesce(e.assigned_cents, 0) end
-                         else t.total_cents end as cents,
+                         else coalesce(t.total_cents, 0) end as cents,
                          t.teacher_id is not null or e.teacher_id is not null as has_figure
                   from public.payout_periods p
                   left join public.payout_teacher_totals t on t.period_id = p.period_id and t.teacher_id = v_teacher and p.status in ('closed', 'paid')
-                  left join lateral (select (private.teacher_estimate_last_run(p.period_id, true)).id) g (id) on p.status = 'closing'
+                  left join lateral (select (private.teacher_estimate_last_run(p.period_id, true)).id) g (id) on p.status in ('closing', 'open')
                   left join private.teacher_period_estimates e on e.run_id = g.id and e.teacher_id = v_teacher
-                  where p.status in ('closing', 'closed', 'paid')) q
+                  where p.status in ('closing', 'closed', 'paid') or (p.status = 'open' and p.period_id < v_period)) q
             where q.has_figure or q.period_id >= v_first
             order by q.period_id desc
             limit 12) s), '[]'::jsonb));
@@ -422,8 +444,42 @@ revoke all on function private.teacher_dashboard() from public;
 grant execute on function private.teacher_dashboard() to app_service;
 
 -- ---------------------------------------------------------------------------------------
+-- La retención, de quien opera (no de la aplicación): de cada periodo cerrado o pagado deja solo su última corrida buena, con sus filas, y quita
+-- las demás (cada noche deja una por periodo, y una vez cerrado nadie las lee: la serie toma el total del cierre). De un periodo abierto o en
+-- cierre no quita nada. Lo congelado y lo de solo inserción no dejan borrar, así que la función corre en réplica (`session_replication_role`,
+-- en su propia configuración: Postgres lo devuelve al salir, también si lanza), que apaga sus disparadores y las claves foráneas solo mientras
+-- ella corre; por eso borra en una sola sentencia las filas de cada corrida que quita, y nada más. Es segura sin candado: un periodo cerrado ya no
+-- recibe estimados, y nadie lo reabre. Contesta cuántas corridas, estimados y cifras de curso quitó.
+create function private.teacher_estimates_purge() returns jsonb
+language plpgsql volatile set search_path = '' set session_replication_role = 'replica'
+as $$
+declare
+  v_runs integer;
+  v_estimates integer;
+  v_figures integer;
+begin
+  with doomed as (
+    select r.id
+    from private.teacher_estimate_runs r
+    join public.payout_periods p on p.period_id = r.period_id and p.status in ('closed', 'paid')
+    where r.id is distinct from (private.teacher_estimate_last_run(r.period_id, true)).id),
+  figures as (
+    delete from private.teacher_period_course_figures f using doomed d where f.run_id = d.id returning 1),
+  estimates as (
+    delete from private.teacher_period_estimates e using doomed d where e.run_id = d.id returning 1),
+  runs as (
+    delete from private.teacher_estimate_runs x using doomed d where x.id = d.id returning 1)
+  select (select pg_catalog.count(*) from runs), (select pg_catalog.count(*) from estimates), (select pg_catalog.count(*) from figures)
+  into v_runs, v_estimates, v_figures;
+  return pg_catalog.jsonb_build_object('runs', v_runs, 'estimates', v_estimates, 'course_figures', v_figures);
+end
+$$;
+revoke all on function private.teacher_estimates_purge() from public;
+
+-- ---------------------------------------------------------------------------------------
 -- El vigilante del estimado (área del carril A): las tablas sin permisos, con seguridad por fila, congeladas y de solo inserción; el panel, la
--- única puerta; el paso y su ayudante, del sistema; y la corrida de cada noche llama al paso.
+-- única puerta; el paso, su ayudante y la retención, del sistema; toda función que nombre las tablas, en una lista cerrada; y la corrida de cada
+-- noche llama al paso, en un bloque que atrapa también la cancelación.
 
 create function private.schema_violations_teacher_estimates()
 returns table (problem text, object_name text)
@@ -431,6 +487,12 @@ language sql stable set search_path = ''
 as $$
   with app_roles (rolname) as (
     values ('anon'), ('authenticated'), ('service_role'), ('app_service')),
+  -- Las únicas funciones que nombran las tablas. Una nueva es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
+  estimate_known (oid) as (
+    select pg_catalog.to_regprocedure(k.signature)::oid
+    from (values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'),
+                 ('private.teacher_dashboard()'), ('private.teacher_estimates_purge()'),
+                 ('private.schema_violations_teacher_estimates()')) k (signature)),
   estimate_tables (table_name) as (
     values ('private.teacher_estimate_runs'), ('private.teacher_period_estimates'), ('private.teacher_period_course_figures')),
   estimate_triggers (table_name, trigger_name, definition) as (
@@ -440,7 +502,8 @@ as $$
                                ('ledger_no_update_delete', 'BEFORE DELETE OR UPDATE%reject_mutation()'),
                                ('ledger_no_truncate', 'BEFORE TRUNCATE%reject_mutation()')) x (trigger_name, definition)),
   system_functions (signature) as (
-    values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'))
+    values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'),
+           ('private.teacher_estimates_purge()'))
   select 'teacher estimates table reachable by ' || r.rolname, t.table_name
   from app_roles r cross join estimate_tables t
   where pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'select, insert, update, delete, truncate, references, trigger')
@@ -474,7 +537,15 @@ as $$
          from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure(f.signature))
      or exists (select 1 from app_roles r where pg_catalog.has_function_privilege(r.rolname::name, f.signature, 'execute'))
   union all
-  select 'nightly rollup does not estimate', 'private.nightly_rollup(boolean, integer)'
-  where pg_catalog.pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure) not like '%perform private.teacher_estimates_step(v_period);%'
+  select 'teacher estimates function not in the list', n.nspname || '.' || p.proname
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname in ('public', 'private')
+    and (coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '')) ~ '(teacher_period_estimates|teacher_period_course_figures|teacher_estimate_runs)'
+    and p.oid not in (select k.oid from estimate_known k where k.oid is not null)
+  union all
+  select 'nightly rollup does not estimate, or a cancellation stops it', 'private.nightly_rollup(boolean, integer)'
+  where pg_catalog.pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure)
+        not like '%perform private.teacher_estimates_step(v_period);%exception when query_canceled or others then%'
 $$;
 revoke all on function private.schema_violations_teacher_estimates() from public;

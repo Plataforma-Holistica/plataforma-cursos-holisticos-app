@@ -52,10 +52,12 @@ async function estimateRunsSince(start: string, period?: number): Promise<Estima
   ).rows;
 }
 
-async function rollupRunsSince(start: string): Promise<{ id: string; period_id: number; status: string; error: string | null }[]> {
+type RollupRun = { id: string; period_id: number; status: string; error: string | null; details: Record<string, unknown> };
+
+async function rollupRunsSince(start: string): Promise<RollupRun[]> {
   const rows = (
-    await owner.query<{ id: string; period_id: number; status: string; error: string | null }>(
-      "select id::text, period_id, status::text, error from public.job_runs where job = 'nightly_rollup' and started_at >= $1::timestamptz order by period_id",
+    await owner.query<RollupRun>(
+      "select id::text, period_id, status::text, error, details from public.job_runs where job = 'nightly_rollup' and started_at >= $1::timestamptz order by period_id",
       [start],
     )
   ).rows;
@@ -64,23 +66,31 @@ async function rollupRunsSince(start: string): Promise<{ id: string; period_id: 
 }
 
 const currentPeriod = async () => (await owner.query<{ p: number }>("select private.period_of(now()) as p")).rows[0]!.p;
+const windowPeriods = async () => (await owner.query<{ p: number }>("select private.rollup_window() as p order by 1")).rows.map((row) => row.p);
 
-/** Un disparador de prueba sobre la tabla de las corridas del estimado, que lanza; se quita al terminar, pase o falle. */
-async function withBrokenRuns(when: string, work: () => Promise<void>): Promise<void> {
+/**
+ * Un disparador de prueba que lanza (o, con `body`, que hace otra cosa) antes de una escritura en `table`; se quita al terminar, pase o falle. Se
+ * confirma: la corrida de cada noche corre en otras transacciones.
+ */
+async function withBroken(
+  table: string,
+  event: string,
+  when: string,
+  work: () => Promise<void>,
+  body = "raise exception 'roto a propósito' using errcode = 'P0001';",
+): Promise<void> {
   await owner.query(`create function private.zz_prueba_110_romper() returns trigger language plpgsql set search_path = ''
-                     as $$ begin raise exception 'roto a propósito' using errcode = 'P0001'; end $$`);
+                     as $$ begin ${body} return case when tg_op = 'DELETE' then old else new end; end $$`);
   await owner.query("revoke all on function private.zz_prueba_110_romper() from public");
-  await owner.query(
-    `create trigger zz_prueba_110_romper before insert on private.teacher_estimate_runs for each row ${when}
-     execute function private.zz_prueba_110_romper()`,
-  );
+  await owner.query(`create trigger zz_prueba_110_romper before ${event} on ${table} for each row ${when} execute function private.zz_prueba_110_romper()`);
   try {
     await work();
   } finally {
-    await owner.query("drop trigger if exists zz_prueba_110_romper on private.teacher_estimate_runs");
+    await owner.query(`drop trigger if exists zz_prueba_110_romper on ${table}`);
     await owner.query("drop function if exists private.zz_prueba_110_romper()");
   }
 }
+const withBrokenRuns = (when: string, work: () => Promise<void>) => withBroken("private.teacher_estimate_runs", "insert", when, work);
 
 describe("la corrida de verdad", { timeout: 180_000 }, () => {
   it("cada periodo que consolidó deja su estimado, en su propia corrida y con la entrada del cierre", async () => {
@@ -107,22 +117,20 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
   });
 
   it("una consolidación fallida deja su estimado fallido, sin calcular, para que el panel lo diga", async () => {
-    // Un periodo anterior a la ventana con una marca: sin umbrales (la semilla los pone desde 202610), su consolidación falla (como en la 43).
-    const window = (await owner.query<{ p: number }>("select private.rollup_window() as p order by 1")).rows.map((row) => row.p);
-    const older = window[0]! % 100 === 1 ? window[0]! - 89 : window[0]! - 1;
-    const mark = [older, randomUUID(), randomUUID()];
-    await owner.query("insert into private.rollup_dirty (period_id, profile_id, lesson_id) values ($1, $2, $3)", mark);
+    // El mes en curso con una marca, y un disparador que no deja borrar marcas: el paso de la consolidación lanza al final y su corrida falla.
+    const period = await currentPeriod();
+    const mark = [period, randomUUID(), randomUUID()];
+    await owner.query("insert into private.rollup_dirty (period_id, profile_id, lesson_id, touched_at) values ($1, $2, $3, clock_timestamp() - interval '1 minute')", mark);
     try {
       const start = await now();
-      await owner.query("call private.nightly_rollup()");
-      const run = (await rollupRunsSince(start)).find((r) => r.period_id === older)!;
-      const estimates = await estimateRunsSince(start, older);
-      if (run.status === "failed") {
-        expect(estimates).toEqual([expect.objectContaining({ status: "failed", error: "rollup failed", input_hash: null })]);
-      } else {
-        expect(estimates).toEqual([expect.objectContaining({ status: "succeeded" })]);
-      }
-      expect(run.status).toBe("failed");
+      await withBroken("private.rollup_dirty", "delete", "", async () => {
+        await owner.query("call private.nightly_rollup(false, $1)", [period]);
+      });
+      const runs = await rollupRunsSince(start);
+      expect(runs).toEqual([expect.objectContaining({ period_id: period, status: "failed", error: "P0001: roto a propósito" })]);
+      expect(await estimateRunsSince(start, period)).toEqual([
+        expect.objectContaining({ status: "failed", error: "rollup failed", input_hash: null }),
+      ]);
     } finally {
       await owner.query("delete from private.rollup_dirty where period_id = $1 and profile_id = $2 and lesson_id = $3", mark);
     }
@@ -141,23 +149,60 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     ]);
   });
 
-  it("un paso que lanza no detiene la corrida ni la deja fallida, y la sesión recupera su search_path", async () => {
-    const period = await currentPeriod();
+  it("un paso que lanza no detiene la noche: todo consolida, el paso a cierre corre y la falla queda anotada en cada corrida", async () => {
     const start = await now();
     const path = (await owner.query<{ search_path: string }>("show search_path")).rows[0]!.search_path;
     await withBrokenRuns("", async () => {
-      await owner.query("call private.nightly_rollup(true, $1)", [period]);
+      await owner.query("call private.nightly_rollup()");
     });
     expect((await owner.query<{ search_path: string }>("show search_path")).rows[0]!.search_path).toBe(path);
     const runs = await rollupRunsSince(start);
-    expect(runs).toEqual([expect.objectContaining({ period_id: period, status: "succeeded", error: null })]);
-    expect(await estimateRunsSince(start, period)).toEqual([]);
-    // Con la consolidación buena, el cierre no la ve fallida (lo que `close_period` mira es esta corrida).
-    const last = await owner.query<{ status: string }>(
-      "select status::text from public.job_runs where job = 'nightly_rollup' and period_id = $1 order by started_at desc limit 1",
-      [period],
+    expect(runs.map((run) => run.period_id)).toEqual(await windowPeriods());
+    for (const run of runs) {
+      // El estado lo mira el cierre: no cambia. Lo que falló se dice en sus detalles.
+      expect(run).toMatchObject({ status: "succeeded", error: null });
+      expect(run.details.teacher_estimates_failed).toBe("P0001: roto a propósito");
+    }
+    const transition = await owner.query<{ status: string }>(
+      "select status::text from public.job_runs where job = 'period_transition' and started_at >= $1::timestamptz",
+      [start],
     );
-    expect(last.rows[0]!.status).toBe("succeeded");
+    expect(transition.rows).toHaveLength(1);
+    expect(await estimateRunsSince(start)).toEqual([]);
+  });
+
+  it("un paso cancelado tampoco detiene la noche: la cancelación queda anotada y la corrida termina bien", async () => {
+    const period = await currentPeriod();
+    const start = await now();
+    const runner = await connect();
+    try {
+      const pid = (await runner.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      // El paso se queda dormido al escribir su corrida; mientras duerme, alguien cancela la consulta.
+      await withBroken(
+        "private.teacher_estimate_runs",
+        "insert",
+        "",
+        async () => {
+          const call = runner.query("call private.nightly_rollup(true, $1)", [period]);
+          const deadline = Date.now() + 20_000;
+          for (;;) {
+            const sleeping = await owner.query("select 1 from pg_stat_activity where pid = $1 and wait_event = 'PgSleep'", [pid]);
+            if ((sleeping.rowCount ?? 0) > 0) break;
+            if (Date.now() > deadline) throw new Error("el paso no llegó a dormirse");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          await owner.query("select pg_cancel_backend($1)", [pid]);
+          await call;
+        },
+        "perform pg_catalog.pg_sleep(30);",
+      );
+    } finally {
+      await runner.end();
+    }
+    const runs = await rollupRunsSince(start);
+    expect(runs).toEqual([expect.objectContaining({ period_id: period, status: "succeeded", error: null })]);
+    expect(String(runs[0]!.details.teacher_estimates_failed)).toMatch(/^57014: /);
+    expect(await estimateRunsSince(start, period)).toEqual([]);
   });
 
   it("un recálculo pedido también estima", async (ctx) => {
