@@ -714,7 +714,7 @@ async function publishCourseOf(who: Person, title: string): Promise<{ course: st
 async function seedEstimate(period: number, teacher: string, course: string, figures: { cents: number; full: number; half: number; students: number }) {
   const [run] = await ownerQuery<{ id: string }>(
     `insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
-     values ($1, '\x00', 'succeeded', now() - interval '1 minute', now()) returning id::text`,
+     values ($1, pg_catalog.decode('00', 'hex'), 'succeeded', now() - interval '1 minute', now()) returning id::text`,
     [period],
   );
   await ownerQuery(
