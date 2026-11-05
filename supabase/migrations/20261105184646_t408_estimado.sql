@@ -443,38 +443,6 @@ $$;
 revoke all on function private.teacher_dashboard() from public;
 grant execute on function private.teacher_dashboard() to app_service;
 
--- ---------------------------------------------------------------------------------------
--- La retención, de quien opera (no de la aplicación): de cada periodo cerrado o pagado deja solo su última corrida buena, con sus filas, y quita
--- las demás (cada noche deja una por periodo, y una vez cerrado nadie las lee: la serie toma el total del cierre). De un periodo abierto o en
--- cierre no quita nada. Lo congelado y lo de solo inserción no dejan borrar, así que la función corre en réplica (`session_replication_role`,
--- en su propia configuración: Postgres lo devuelve al salir, también si lanza), que apaga sus disparadores y las claves foráneas solo mientras
--- ella corre; por eso borra en una sola sentencia las filas de cada corrida que quita, y nada más. Es segura sin candado: un periodo cerrado ya no
--- recibe estimados, y nadie lo reabre. Contesta cuántas corridas, estimados y cifras de curso quitó.
-create function private.teacher_estimates_purge() returns jsonb
-language plpgsql volatile set search_path = '' set session_replication_role = 'replica'
-as $$
-declare
-  v_runs integer;
-  v_estimates integer;
-  v_figures integer;
-begin
-  with doomed as (
-    select r.id
-    from private.teacher_estimate_runs r
-    join public.payout_periods p on p.period_id = r.period_id and p.status in ('closed', 'paid')
-    where r.id is distinct from (private.teacher_estimate_last_run(r.period_id, true)).id),
-  figures as (
-    delete from private.teacher_period_course_figures f using doomed d where f.run_id = d.id returning 1),
-  estimates as (
-    delete from private.teacher_period_estimates e using doomed d where e.run_id = d.id returning 1),
-  runs as (
-    delete from private.teacher_estimate_runs x using doomed d where x.id = d.id returning 1)
-  select (select pg_catalog.count(*) from runs), (select pg_catalog.count(*) from estimates), (select pg_catalog.count(*) from figures)
-  into v_runs, v_estimates, v_figures;
-  return pg_catalog.jsonb_build_object('runs', v_runs, 'estimates', v_estimates, 'course_figures', v_figures);
-end
-$$;
-revoke all on function private.teacher_estimates_purge() from public;
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante del estimado (área del carril A): las tablas sin permisos, con seguridad por fila, congeladas y de solo inserción; el panel, la
@@ -491,7 +459,7 @@ as $$
   estimate_known (oid) as (
     select pg_catalog.to_regprocedure(k.signature)::oid
     from (values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'),
-                 ('private.teacher_dashboard()'), ('private.teacher_estimates_purge()'),
+                 ('private.teacher_dashboard()'),
                  ('private.schema_violations_teacher_estimates()')) k (signature)),
   estimate_tables (table_name) as (
     values ('private.teacher_estimate_runs'), ('private.teacher_period_estimates'), ('private.teacher_period_course_figures')),
@@ -502,8 +470,7 @@ as $$
                                ('ledger_no_update_delete', 'BEFORE DELETE OR UPDATE%reject_mutation()'),
                                ('ledger_no_truncate', 'BEFORE TRUNCATE%reject_mutation()')) x (trigger_name, definition)),
   system_functions (signature) as (
-    values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'),
-           ('private.teacher_estimates_purge()'))
+    values ('private.teacher_estimates_step(public.period_id)'), ('private.teacher_estimate_last_run(public.period_id, boolean)'))
   select 'teacher estimates table reachable by ' || r.rolname, t.table_name
   from app_roles r cross join estimate_tables t
   where pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'select, insert, update, delete, truncate, references, trigger')

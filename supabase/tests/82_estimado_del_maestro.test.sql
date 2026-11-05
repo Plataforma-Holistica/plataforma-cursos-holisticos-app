@@ -4,12 +4,12 @@
 -- el maestro lo lee con `private.teacher_dashboard()`. Todas las cifras son de alumnos con base: uno sin base no se puede deducir de un estimado en 0.
 --
 -- La corrida de cada noche es un procedimiento con `commit` y no se llama aquí: que llame al paso, que un recálculo pedido estime, que una falla
--- o una cancelación del paso no deje fallida la consolidación lo prueba la integración 110. Aquí, el paso, la lectura, la retención y el vigilante
+-- o una cancelación del paso no deje fallida la consolidación lo prueba la integración 110. Aquí, el paso, la lectura y el vigilante
 -- (que rompe la corrida de cada noche dentro de la transacción). Los meses de 2045 van forzados (abierto, en cierre): la prueba no depende del día
 -- en que corre; el panel lee el mes en curso, que se limpia de corridas de estimado al empezar.
 begin;
 \ir _ayuda.psql
-select plan(114);
+select plan(106);
 
 select pruebas.alta('a8200000-0000-0000-0000-000000000001', 'tere-82@prueba.test');
 select pruebas.alta('a8200000-0000-0000-0000-000000000002', 'beto-82@prueba.test');
@@ -198,7 +198,6 @@ select ok(has_function_privilege('app_service', 'private.teacher_dashboard()', '
           and not has_function_privilege('authenticated', 'private.teacher_dashboard()', 'execute')
           and not has_function_privilege('anon', 'private.teacher_dashboard()', 'execute'), 'el panel lo pide el servidor, y nadie más');
 select ok(not has_function_privilege('app_service', 'private.teacher_estimates_step(public.period_id)', 'execute'), 'estimar no es de la aplicación');
-select ok(not has_function_privilege('app_service', 'private.teacher_estimates_purge()', 'execute'), 'ni la retención, que es de quien opera');
 select ok(not (select prosecdef from pg_proc where oid = 'private.teacher_estimates_step(public.period_id)'::regprocedure),
   'el paso corre como quien lo llama: la corrida de cada noche');
 select ok((select provolatile = 's' from pg_proc where oid = 'private.teacher_dashboard()'::regprocedure), 'el panel es de solo lectura');
@@ -272,7 +271,7 @@ select is((select array_agg(distinct k order by k) from jsonb_array_elements(pru
 select is(pruebas.panel(pruebas.tere()) ->> 'outcome', 'ok', 'una maestra activa lee su panel');
 select is(pruebas.panel(pruebas.tere()) ->> 'has_published', 'true', 'y tiene un curso publicado');
 select is(pruebas.panel(pruebas.beto()) ->> 'has_published', 'false', 'Beto no publicó');
-select is(pruebas.panel(pruebas.beto()) -> 'current' - 'updated_at', jsonb_build_object('period_id', pruebas.mes_en_curso(), 'estimated_cents', 0,
+select is((pruebas.panel(pruebas.beto()) -> 'current') - 'updated_at', jsonb_build_object('period_id', pruebas.mes_en_curso(), 'estimated_cents', 0,
   'full_lessons', 0, 'half_lessons', 0, 'students', 0, 'last_failed', false, 'stale', false),
   'su único alumno no pagó: todo en 0, sin lecciones que lo delaten');
 select is(pruebas.cursos(pruebas.beto()), '{}'::text[], 'y su curso, que nunca se publicó y no tiene cifras con base, no sale');
@@ -469,22 +468,8 @@ select is(pruebas.serie(pruebas.tere()), array(select (204600 + n) || ':0:false'
   'la serie se queda con los últimos doce');
 
 -- ---------------------------------------------------------------------------------------
--- La retención: de un periodo cerrado o pagado queda solo su última corrida buena.
+-- Un periodo pagado sigue congelado para el estimado.
 
-select ok((pruebas.paso(204503) ->> 'outcome') = 'estimated', 'otra corrida de un periodo abierto');
-create temporary table antes as
-  select (select count(*) from private.teacher_period_estimates where run_id = (select id from r where k = 'e1')) as estimados_e1,
-         (select count(*) from private.teacher_period_course_figures where run_id = (select id from r where k = 'e1')) as cifras_e1,
-         (select count(*) from private.teacher_estimate_runs where period_id = 204503) as corridas_abierto;
-select cmp_ok((private.teacher_estimates_purge() ->> 'runs')::integer, '>=', 1, 'la retención quita algo');
-select is((select count(*)::integer from private.teacher_estimate_runs where id = (select id from r where k = 'e2')), 0,
-  'la corrida fallida del periodo pagado se va');
-select is((select format('%s:%s', (select count(*) from private.teacher_period_estimates where run_id = (select id from r where k = 'e1')),
-                                  (select count(*) from private.teacher_period_course_figures where run_id = (select id from r where k = 'e1')))),
-          (select format('%s:%s', estimados_e1, cifras_e1) from antes), 'la última buena se queda, con sus filas');
-select is((select count(*) from private.teacher_estimate_runs where period_id = 204503), (select corridas_abierto from antes),
-  'de un periodo abierto no se quita nada');
-select is(current_setting('session_replication_role'), 'origin', 'y al salir la sesión vuelve a lo de siempre');
 select throws_ok($$ insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
                     values (204501, '\x00', 'succeeded', now(), now()) $$, '55000', null, 'el periodo pagado sigue congelado');
 
@@ -514,9 +499,6 @@ revoke execute on function private.teacher_estimates_step(public.period_id) from
 alter function private.teacher_estimates_step(public.period_id) security definer;
 select ok(pruebas.vigila_con('teacher estimates system function reachable or wrong'), 'y el paso como su dueño');
 alter function private.teacher_estimates_step(public.period_id) security invoker;
-grant execute on function private.teacher_estimates_purge() to app_service;
-select ok(pruebas.vigila_con('teacher estimates system function reachable or wrong'), 'y la retención al alcance de la aplicación');
-revoke execute on function private.teacher_estimates_purge() from app_service;
 revoke execute on function private.teacher_dashboard() from app_service;
 select ok(pruebas.vigila_con('teacher dashboard door missing or wrong'), 'y el panel fuera del alcance del servidor');
 grant execute on function private.teacher_dashboard() to app_service;
