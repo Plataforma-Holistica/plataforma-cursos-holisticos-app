@@ -1,5 +1,6 @@
 import { Info, SearchX } from "lucide";
 import type { Metadata } from "next";
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { BackLink } from "@/ui/back-link";
@@ -13,7 +14,6 @@ import { FullScreenState } from "@/ui/full-screen-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
-import { FileUpload } from "@/ui/file-upload";
 import { ProgressBar } from "@/ui/progress-bar";
 
 // Los estados de una fila, como los da el servicio: una prop de estado no es texto.
@@ -30,6 +30,10 @@ import { Tabs } from "@/ui/tabs";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 import { Textarea } from "@/ui/textarea";
+import portada from "@/ui/photos/portada-muelle.jpg";
+import { Wordmark } from "@/ui/wordmark";
+
+import { SampleFileUpload } from "./sample-file-upload";
 
 // Página de muestra de los componentes base. Solo existe en desarrollo (ver
 // next.config.ts): `pnpm dev` y http://localhost:3000/muestra.
@@ -71,6 +75,24 @@ export default function SamplePage() {
           Recórrela con el teclado, a 320 px de ancho y con el movimiento reducido activado.
         </p>
       </header>
+
+      <Section title="Marca">
+        <Wordmark className="text-display-xl" />
+        <Wordmark className="text-h3" />
+        <div className="relative isolate overflow-hidden rounded-md px-6 py-16">
+          <Image src={portada} alt="" fill sizes="(min-width: 768px) 720px, 100vw" className="-z-20 object-cover" />
+          {/* El velo del fondo (diseño, sección 3.12). Al 65 %, el nombre da 4.5 o más contra lo más claro de esta foto; cada lugar mide el suyo. */}
+          <span className="absolute inset-0 -z-10 bg-bg/65" />
+          <Wordmark className="text-display-l" />
+        </div>
+        <div className="flex items-center gap-4">
+          {/* El icono del sitio, a tamaño de pestaña y de pantalla de inicio. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- el archivo tal cual, sin optimizar */}
+          <img src="/icon.svg" alt="" width={32} height={32} />
+          {/* eslint-disable-next-line @next/next/no-img-element -- el archivo tal cual, sin optimizar */}
+          <img src="/apple-icon.png" alt="" width={96} height={96} className="rounded-md" />
+        </div>
+      </Section>
 
       <Section title="Tipografía">
         <p className="text-display-xl font-display">Display XL</p>
@@ -230,7 +252,7 @@ export default function SamplePage() {
               label: "Temario",
               panel: (
                 <div className="flex flex-col gap-3">
-                  <FileUpload label="Elige el video" hint="MP4 o MOV, hasta 5 GB." accept=".mp4,.mov" onFile={() => undefined} />
+                  <SampleFileUpload label="Elige el video" hint="MP4 o MOV, hasta 5 GB." accept=".mp4,.mov" />
                   <ProgressBar value={1} max={4} label="Avance del curso" text="1 de 4 lecciones" />
                   <div className="flex flex-col">
                     <LessonRow href="/muestra" number={1} title="Soltar los hombros" duration="5 min" state={COMPLETED} />

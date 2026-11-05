@@ -61,6 +61,12 @@ export const ui = defineMessages({
   dialog: {
     irreversible: "Acción irreversible",
   },
+  // El selector de archivo: el botón del control nativo lo escribe el navegador en su idioma, así
+  // que lo que se ve es propio.
+  fileInput: {
+    choose: "Elegir archivo",
+    none: "Ningún archivo elegido",
+  },
   disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
   // Tarjetas y carruseles del catálogo (diseño, sección 5.3; T-210). Toda la tarjeta es un solo
   // enlace, y su nombre dice lo mismo que se ve.
