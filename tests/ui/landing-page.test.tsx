@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -52,6 +52,10 @@ async function renderPage() {
   return container;
 }
 
+afterEach(() => {
+  Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+});
+
 beforeEach(() => {
   mocks.visitorOnly.mockReset().mockResolvedValue(undefined);
   mocks.homeShelf.mockReset().mockResolvedValue({ kind: "ready", shelf: shelf([course("respirar"), course("soltar")]) });
@@ -98,15 +102,26 @@ describe("la portada (PA-01)", () => {
     expect(within(bar).getByRole("navigation", { name: landing.header.label })).toBeInTheDocument();
   });
 
+  it("los enlaces sueltos de la barra y del pie miden lo que pide el toque", async () => {
+    await renderPage();
+    const bar = screen.getByRole("banner");
+    for (const link of within(bar).getAllByRole("link")) expect(link).toHaveClass("min-h-touch");
+    for (const link of within(screen.getByRole("contentinfo")).getAllByRole("link")) expect(link).toHaveClass("min-h-touch");
+  });
+
   it("la barra va transparente sobre la foto y sólida al desplazar la página", async () => {
     await renderPage();
     const bar = screen.getByRole("banner");
     expect(bar).toHaveAttribute("data-solid", "false");
+    // Sin fijar arriba: sin JavaScript se va con la página y nunca tapa el contenido sin su fondo.
+    expect(bar).toHaveClass("absolute", "bg-transparent");
+    expect(bar).not.toHaveClass("fixed");
     act(() => {
       Object.defineProperty(window, "scrollY", { value: 120, configurable: true });
       fireEvent.scroll(window);
     });
     expect(bar).toHaveAttribute("data-solid", "true");
+    expect(bar).toHaveClass("fixed", "bg-surface-1");
     act(() => {
       Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
       fireEvent.scroll(window);
@@ -127,6 +142,14 @@ describe("la portada (PA-01)", () => {
     const how = screen.getByRole("region", { name: landing.how.title });
     expect(within(how).getAllByRole("listitem")).toHaveLength(3);
     expect(how.textContent).not.toMatch(/\$|MXN|\d/);
+  });
+
+  it("ningún texto de la portada habla de precio ni de suscripción: todavía no existen", async () => {
+    const open = course("abierto", { isOpen: true });
+    mocks.homeShelf.mockResolvedValue({ kind: "ready", shelf: shelf([course("respirar")], open) });
+    const container = await renderPage();
+    // «Sin pagar» sí: es lo que el curso abierto ya hace.
+    expect(container.textContent).not.toMatch(/precio|suscri|\bplan(es)?\b/i);
   });
 
   it("con curso abierto, el enlace del encabezado y su bloque llevan a su ficha", async () => {

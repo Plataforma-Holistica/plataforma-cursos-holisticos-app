@@ -3,9 +3,10 @@ import { defineMessages } from "../format";
 // Los textos de la portada pública (PA-01; T-614, parte 2) y de su barra y su pie.
 //
 // Lo que todavía no existe no se promete (decisiones de Sergio del 2026-11-05): sin la pantalla de
-// planes ni la suscripción, el botón dice «Crear cuenta» y lleva al registro, y no hay precio ni
-// preguntas frecuentes; sin constancias (T-504), «Cómo funciona» no las menciona. Planes, Para
-// maestros y Ayuda entran a la barra y al pie cuando existan sus pantallas.
+// planes ni la suscripción, el botón dice «Crear cuenta» y lleva al registro, no hay precio ni
+// preguntas frecuentes, y ningún texto habla de precio ni de suscripción; sin constancias (T-504),
+// «Cómo funciona» no las menciona. Planes, Para maestros y Ayuda entran a la barra y al pie cuando
+// existan sus pantallas.
 export const landing = defineMessages({
   header: {
     label: "Principal",
@@ -14,7 +15,7 @@ export const landing = defineMessages({
   },
   hero: {
     title: "Aprende con quienes practican lo que enseñan",
-    lead: "Cursos en video para cuidar el cuerpo y la mente. Un precio, todo el catálogo.",
+    lead: "Cursos en video de prácticas para cuidar el cuerpo y la mente.",
     signUp: "Crear cuenta",
     openCourse: "Empieza con el curso abierto",
     haveAccount: "¿Ya tienes cuenta?",
@@ -34,8 +35,8 @@ export const landing = defineMessages({
   how: {
     title: "Cómo funciona",
     catalog: {
-      title: "Un precio, todo el catálogo",
-      body: "Con tu suscripción ves todos los cursos, sin pagar uno por uno.",
+      title: "Cursos completos",
+      body: "Cada curso va de principio a fin, en lecciones que siguen un orden.",
     },
     lessons: {
       title: "Lecciones cortas",

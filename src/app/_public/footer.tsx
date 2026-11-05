@@ -22,17 +22,21 @@ export function PublicFooter() {
       <div className="mx-auto flex max-w-page flex-col gap-6 px-4 py-10 sm:px-8">
         <Wordmark className="text-h3" />
         <nav aria-label={text.label}>
-          <ul className="flex flex-wrap gap-x-6 gap-y-3 text-body-s">
+          <ul className="flex flex-wrap gap-x-6 text-body-s">
             {LEGAL.map(({ docType, label }) => {
               const slug = slugOfDocType(docType);
               return slug === null ? null : (
                 <li key={docType}>
-                  <TextLink href={`/legal/${slug}`}>{label}</TextLink>
+                  <TextLink href={`/legal/${slug}`} className="inline-flex min-h-touch items-center">
+                    {label}
+                  </TextLink>
                 </li>
               );
             })}
             <li>
-              <TextLink href={ROUTES.signIn}>{landing.header.signIn}</TextLink>
+              <TextLink href={ROUTES.signIn} className="inline-flex min-h-touch items-center">
+                {landing.header.signIn}
+              </TextLink>
             </li>
           </ul>
         </nav>

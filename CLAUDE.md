@@ -954,7 +954,9 @@ que no se ve leyendo un solo archivo:
   en Next 16 `priority` está en desuso. `next.config.ts` sirve las imágenes en AVIF y WebP. Medido en desarrollo: la foto llega en AVIF y pesa 15 KB en un Pixel 7, y el texto da 6.17 o más
   contra lo más claro de la foto con su velo. Usa `tests/ui/landing-page.test.tsx` y `tests/e2e/portada.spec.ts` (con el catálogo vacío de la corrida de siempre; exige AVIF y el tope de
   200 KB en el teléfono). Decisiones mías sin confirmar: la muestra son los cursos más nuevos, sin «Ver todo» (explorar pide sesión); el botón de la barra es secundario; en el teléfono la
-  barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. Para el A: nada que le toque.
+  barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. De la revisión del diff: ningún
+  texto habla de precio ni de suscripción (una prueba lo exige), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
+  sueltos de la barra y del pie miden `min-h-touch`. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

@@ -37,18 +37,20 @@ export function PublicHeader() {
     <header
       data-solid={solid}
       className={cx(
-        "inset-x-0 top-0 z-30 border-b transition-colors duration-(--duration-fast) ease-standard",
+        "inset-x-0 top-0 z-(--z-sticky) border-b transition-colors duration-(--duration-fast) ease-standard",
         solid ? "fixed border-border bg-surface-1" : "absolute border-transparent bg-transparent",
       )}
     >
       <div className="mx-auto flex max-w-page items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-8">
-        <Link href={ROUTES.landing} className="text-body-l sm:text-h3">
+        <Link href={ROUTES.landing} className="inline-flex min-h-touch items-center text-body-l sm:text-h3">
           <Wordmark />
         </Link>
         <nav aria-label={text.label}>
           <ul className="flex items-center gap-4 sm:gap-6">
             <li className="hidden sm:block">
-              <TextLink href={ROUTES.signIn}>{text.signIn}</TextLink>
+              <TextLink href={ROUTES.signIn} className="inline-flex min-h-touch items-center">
+                {text.signIn}
+              </TextLink>
             </li>
             <li>
               <Button href={ROUTES.signUp} variant="secondary" size="md" className="min-h-touch whitespace-nowrap">

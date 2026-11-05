@@ -28,13 +28,13 @@ import { TextLink } from "@/ui/text-link";
 // Contenido), sin «Ver todo» (explorar pide sesión), y quienes enseñan son los maestros con cursos
 // listados.
 //
-// La foto es la única de la página que carga con prioridad (`loading="eager"` y `fetchPriority`, lo que
-// pide Next 16 en vez de `priority`): es la que mide RNF-02. El velo va del fondo
-// más ligero arriba al fondo entero abajo, para que la foto se funda con la página.
+// La foto es la única de la página que carga con prioridad: es la que mide RNF-02. Va con
+// `loading="eager"` y `fetchPriority="high"`, lo que la documentación de Next 16 recomienda en vez de
+// `preload` (`priority` está en desuso). El velo va del fondo más ligero arriba al fondo entero abajo,
+// para que la foto se funda con la página. Foto, velo y texto se apilan por su orden, sin capas.
 
 const text = messages.landing;
 
-const HERO_ID = "portada-titulo";
 const OPEN_ID = "curso-abierto";
 const HOW_ID = "como-funciona";
 
@@ -68,26 +68,31 @@ export default async function LandingPage() {
     <>
       <PublicHeader />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
-        <section aria-labelledby={HERO_ID} className="relative isolate overflow-hidden">
-          <Image src={portada} alt="" fill loading="eager" fetchPriority="high" sizes="100vw" className="-z-20 object-cover" />
-          <span aria-hidden="true" className="absolute inset-0 -z-10 bg-linear-to-b from-bg/70 via-bg/65 to-bg" />
-          <div className="mx-auto flex max-w-page flex-col items-start gap-6 px-4 pt-32 pb-20 sm:px-8 sm:pt-44 sm:pb-28">
+        {/* Sin nombre de región: lo nombraría el titular, que ya es el de la página. */}
+        <div className="relative isolate overflow-hidden">
+          <Image src={portada} alt="" fill loading="eager" fetchPriority="high" sizes="100vw" className="object-cover" />
+          <span aria-hidden="true" className="absolute inset-0 bg-linear-to-b from-bg/70 via-bg/65 to-bg" />
+          <div className="relative mx-auto flex max-w-page flex-col items-start gap-6 px-4 pt-32 pb-20 sm:px-8 sm:pt-44 sm:pb-28">
             {/* El ancho de lectura se mide con la letra del cuerpo: medido en el titular, no lo partiría. */}
             <div className="flex max-w-reading flex-col gap-6">
-              <h1 id={HERO_ID} className="text-display-xl text-balance">
+              <h1 className="text-display-xl text-balance">
                 {text.hero.title}
               </h1>
               <p className="text-body-l text-text">{text.hero.lead}</p>
             </div>
             <div className="flex w-full flex-col gap-4 sm:w-auto sm:flex-row sm:items-center sm:gap-6">
               <Button href={ROUTES.signUp}>{text.hero.signUp}</Button>
-              {openHref !== null && <TextLink href={openHref}>{text.hero.openCourse}</TextLink>}
+              {openHref !== null && (
+                <TextLink href={openHref} className="inline-flex min-h-touch items-center">
+                  {text.hero.openCourse}
+                </TextLink>
+              )}
             </div>
             <p className="text-body-s text-text sm:hidden">
               {text.hero.haveAccount} <TextLink href={ROUTES.signIn}>{text.hero.signIn}</TextLink>
             </p>
           </div>
-        </section>
+        </div>
 
         <div className="mx-auto flex max-w-page flex-col gap-14 pb-16">
           {shelf.kind === "unavailable" && (
