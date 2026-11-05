@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { ui } from "@/messages/es/ui";
 import { FileUpload } from "@/ui/file-upload";
 
 const file = new File(["x"], "clase.mp4", { type: "video/mp4" });
@@ -19,11 +21,18 @@ describe("FileUpload", () => {
     expect(input).toHaveAccessibleDescription("MP4 o MOV");
   });
 
-  it("avisa al elegir, y se vacía: elegir el mismo otra vez vuelve a avisar", () => {
+  // Con `user-event`: vaciar el control vacía su lista de archivos, como en un navegador (con `fireEvent` no).
+  it("avisa al elegir, y se vacía: elegir el mismo otra vez vuelve a avisar", async () => {
     const { input, onFile } = setup();
-    fireEvent.change(input, { target: { files: [file] } });
+    const user = userEvent.setup();
+    await user.upload(input, file);
     expect(onFile).toHaveBeenCalledWith(file);
     expect(input.value).toBe("");
+    await user.upload(input, file);
+    expect(onFile).toHaveBeenCalledTimes(2);
+    // Vacío también a la vista: un archivo rechazado no se queda como si siguiera elegido.
+    expect(screen.getByText(ui.fileInput.none)).toBeInTheDocument();
+    expect(screen.queryByText("clase.mp4")).not.toBeInTheDocument();
   });
 
   it("arrastrar un archivo avisa igual, y se marca mientras está encima", () => {

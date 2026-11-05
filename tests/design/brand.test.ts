@@ -19,6 +19,11 @@ function jpegWidth(bytes: Buffer): number {
   let at = 2;
   while (at + 9 < bytes.length) {
     if (bytes[at] !== 0xff) throw new Error("JPEG sin marcador donde se esperaba");
+    // Un marcador puede llevar bytes de relleno (0xFF) antes.
+    if (bytes[at + 1] === 0xff) {
+      at += 1;
+      continue;
+    }
     const marker = bytes[at + 1] ?? 0;
     const length = bytes.readUInt16BE(at + 2);
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return bytes.readUInt16BE(at + 7);

@@ -938,9 +938,11 @@ que no se ve leyendo un solo archivo:
   una fuente variable se enciman. Cambiar al definitivo es reemplazar el componente y esos dos archivos. **Las fotos de ambiente viven en `src/ui/photos/`** con su registro de créditos
   (`credits.ts`: fuente, autor, licencia, enlace y fecha de descarga), y `tests/design/brand.test.ts` exige una fila por archivo y un archivo por fila, el ancho y el peso, y que el icono
   use los colores de los tokens. Esta parte no las pone en ninguna pantalla: lo hacen las partes 2 a 4, con `next/image`. **El selector de archivo en español** es `src/ui/file-input.tsx`
-  (`FileInput`): el control nativo se queda fuera de la vista, con el foco y el nombre del campo por `aria-labelledby` (`labelId`), y lo que se ve es una etiqueta con forma de botón y el
-  nombre de lo elegido, ocultos al lector; el anillo de foco lo pinta el botón (`shadow-focus`, token nuevo). Lo usan `FileUpload` y los recursos del editor, que lo vuelven a montar al
-  adjuntar (vaciar el control por código no avisa). **El recorrido de capturas** es `tests/e2e/equipo/vitrina.equipo.ts`, que se salta sin `VITRINA_OUT` y se corre solo (su cabecera
+  (`FileInput`): el control nativo se queda fuera de la vista, con el foco y un nombre por `aria-labelledby` que junta el del campo (`labelId`) y el texto del botón (WCAG 2.5.3: quien lo
+  pide por voz dice lo que lee), y lo que se ve es una etiqueta con forma de botón y el nombre de lo elegido, ocultos al lector; el anillo de foco lo pinta el botón (`shadow-focus`, token
+  nuevo), así que el control va antes. El nombre se lee después de avisar: `FileUpload` vacía el control al recibir el archivo y vuelve a «Ningún archivo elegido»; los recursos del editor
+  lo vacían más tarde, al adjuntar, y por eso lo vuelven a montar con otra `key`. Las pruebas que vacían el control usan `user-event`: con `fireEvent` el DOM simulado no vacía la lista de
+  archivos. Lo que el control nativo dice de sí al lector («No file chosen») sigue en el idioma del navegador. **El recorrido de capturas** es `tests/e2e/equipo/vitrina.equipo.ts`, que se salta sin `VITRINA_OUT` y se corre solo (su cabecera
   dice cómo). `/muestra` tenía roto el selector de video desde T-403 (una función pasada a un componente del navegador desde el servidor); va en `sample-file-upload.tsx`. Las
   pruebas de arquitectura ya no siguen la importación de una imagen. Decisiones mías sin confirmar: el registro de créditos como módulo de TypeScript; el recorrido fuera de la corrida
   de siempre; el velo de la muestra al 65 % (cada lugar mide el suyo). Para el A: nada que le toque.
