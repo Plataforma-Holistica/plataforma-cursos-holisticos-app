@@ -81,4 +81,14 @@ export const ui = defineMessages({
     previous: "Ver anteriores de {row}",
     next: "Ver más de {row}",
   },
+  // Barras por periodo (diseño, sección 5.10; T-408). La gráfica es una ayuda: los mismos datos van en su tabla, que el lector de pantalla siempre lee y
+  // que «Ver como tabla» muestra. Lo estimado se dice con la palabra y con el contorno punteado, no solo con el color.
+  periodBars: {
+    showTable: "Ver como tabla",
+    period: "Periodo",
+    amount: "Monto",
+    kind: "Cifra",
+    final: "Final",
+    estimated: "Estimado",
+  },
 });

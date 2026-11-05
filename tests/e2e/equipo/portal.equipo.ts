@@ -551,6 +551,9 @@ test("invitada con cuenta: se le pide probar su buzón, recupera su contraseña,
   await page.getByRole("button", { name: "Aceptar y entrar" }).click();
   await expect(page).toHaveURL("/portal");
   await expect(page.getByText(/Ya eres /)).toBeVisible();
+  // El inicio es el panel (PA-41, T-408): sin cursos publicados, «Para empezar».
+  await expect(page.getByRole("heading", { level: 1, name: "Panel" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Para empezar" })).toBeVisible();
   expect(await consentsOf(ana)).toEqual(["teacher_agreement", "teacher_privacy_notice"]);
   expect(await a11yViolations(page)).toEqual([]);
 
