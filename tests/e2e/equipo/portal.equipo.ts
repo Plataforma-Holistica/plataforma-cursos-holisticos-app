@@ -668,3 +668,119 @@ test("un maestro suspendido ve en su portal el texto escrito para él, nunca el 
   expect(await page.content()).not.toContain("Motivo interno de la prueba");
   expect(await a11yViolations(page)).toEqual([]);
 });
+
+/**
+ * Un curso publicado de esa maestra, cargado como el guion local (con un video del proveedor de prueba) y puesto en publicado como sistema, como en
+ * `catalogo.equipo.ts`. Devuelve el curso y el id de la maestra.
+ */
+async function publishCourseOf(who: Person, title: string): Promise<{ course: string; teacher: string }> {
+  const declared = "with declared as materialized (select set_config('app.actor_kind', 'system', true) as done)";
+  const [teacher] = await ownerQuery<{ id: string }>("select id::text from public.teachers where profile_id = $1", [who.id]);
+  const slug = `panel-${who.id.slice(0, 8)}`;
+  await ownerQuery(`${declared} insert into public.published_teachers (teacher_id, slug, display_name) select $1::uuid, $2, 'Maestra Panel' from declared`, [
+    teacher!.id,
+    `maestra-${slug}`,
+  ]);
+  const course = {
+    slug,
+    title,
+    summary: "Un curso para probar el panel.",
+    modules: [{ title: "Uno", lessons: [{ title: "Primera", video: { provider: "test", asset_id: `${slug}-1`, playback_id: `prueba:${slug}-1`, duration_seconds: 300 } }] }],
+  };
+  const [loaded] = await ownerQuery<{ answer: string; course: string }>(
+    `with declared as materialized (
+       select set_config('app.actor_kind', 'system', true), set_config('app.local_courses', 'on', true)),
+     shaped as materialized (
+       select $2::jsonb || pg_catalog.jsonb_build_object(
+                'practice', (select slug from public.practices where name = $3), 'level', (select slug from public.levels where name = $4)) as body
+       from declared)
+     select r ->> 'answer' as answer, r ->> 'course_id' as course
+     from (select private.system_load_course($1::uuid, (select body from shaped)) as r) x`,
+    [teacher!.id, JSON.stringify(course), PRACTICE, LEVEL],
+  );
+  expect(loaded?.answer).toBe("loaded");
+  await ownerQuery(
+    `${declared} update public.course_registry set state = 'published', first_published_at = now()
+      where course_id = $1::uuid and (select count(*) from declared) = 1`,
+    [loaded!.course],
+  );
+  return { course: loaded!.course, teacher: teacher!.id };
+}
+
+/**
+ * Una corrida buena del estimado de ese periodo, sembrada por el dueño de la base como la escribiría el paso de la noche (T-408): lo asignado y las
+ * cifras de la maestra, y las de su curso. Las tablas son de solo inserción: lo que deja lo rehace `pnpm test:e2e:equipo` al terminar.
+ */
+async function seedEstimate(period: number, teacher: string, course: string, figures: { cents: number; full: number; half: number; students: number }) {
+  const [run] = await ownerQuery<{ id: string }>(
+    `insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
+     values ($1, '\x00', 'succeeded', now() - interval '1 minute', now()) returning id::text`,
+    [period],
+  );
+  await ownerQuery(
+    `insert into private.teacher_period_estimates (run_id, period_id, teacher_id, half_points, assigned_cents, full_lessons, half_lessons, students)
+     values ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8)`,
+    [run!.id, period, teacher, figures.full * 2 + figures.half, figures.cents, figures.full, figures.half, figures.students],
+  );
+  await ownerQuery(
+    `insert into private.teacher_period_course_figures (run_id, period_id, teacher_id, course_id, full_lessons, half_lessons, students)
+     values ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6, $7)`,
+    [run!.id, period, teacher, course, figures.full, figures.half, figures.students],
+  );
+}
+
+test("PA-41: el panel con un curso publicado y su estimado, «Ver como tabla», en escritorio y en el teléfono", async ({ page }) => {
+  const gil = await person();
+  await makeTeacher(gil);
+  const title = `Panel de prueba ${gil.id.slice(0, 8)}`;
+  const { course, teacher } = await publishCourseOf(gil, title);
+
+  // El mes en curso, y el anterior todavía sin cerrar (abierto o en cierre), para que la serie tenga su barra estimada.
+  const [periods] = await ownerQuery<{ current: number; previous: number }>(
+    "select private.period_of(now())::int as current, private.period_plus(private.period_of(now()), -1)::int as previous",
+  );
+  await ownerQuery("select private.open_period($1)", [periods!.previous]);
+  const [previous] = await ownerQuery<{ status: string }>("select status::text from public.payout_periods where period_id = $1", [periods!.previous]);
+  expect(["open", "closing"], "el mes anterior tiene que seguir sin cerrar para estimarse").toContain(previous?.status);
+  await seedEstimate(periods!.previous, teacher, course, { cents: 45_000, full: 9, half: 2, students: 3 });
+  await seedEstimate(periods!.current, teacher, course, { cents: 123_456, full: 21, half: 7, students: 5 });
+
+  await signIn(page, gil, "/portal");
+  await expect(page.getByRole("heading", { level: 1, name: "Panel" })).toBeVisible();
+  const month = page.getByRole("region", { name: /, en curso$/ });
+  for (const [label, value] of [
+    ["Llevas ganado", "$1,234.56"],
+    ["Lecciones terminadas", "21"],
+    ["Lecciones a medias", "7"],
+    ["Alumnos distintos", "5"],
+  ] as const) {
+    const tile = month.locator("div", { has: page.getByText(label, { exact: true }) }).last();
+    await expect(tile.getByText(value, { exact: true })).toBeVisible();
+  }
+  await expect(month.getByText("Estimado", { exact: true })).toBeVisible();
+  await expect(month.getByText(/No incluye tu parte del bote sin consumo/)).toBeVisible();
+
+  const courses = page.getByRole("table", { name: "Tus cursos este mes" });
+  await expect(courses).toBeVisible();
+  const row = courses.getByRole("row", { name: new RegExp(title) });
+  await expect(row.getByRole("link", { name: title })).toHaveAttribute("href", `/portal/cursos/${course}`);
+  for (const value of ["21", "7", "5"]) await expect(row.getByRole("cell", { name: value, exact: true })).toBeVisible();
+
+  // La tabla de las barras está para el lector de pantalla, sin verse; «Ver como tabla» la muestra.
+  const series = page.getByRole("table", { name: "Lo que te tocó en cada periodo" });
+  const width = async () => (await series.boundingBox())?.width ?? 0;
+  expect(await width()).toBeLessThanOrEqual(1);
+  await page.getByRole("checkbox", { name: "Ver como tabla" }).check();
+  await expect.poll(width).toBeGreaterThan(100);
+  await expect(series.getByRole("row", { name: /\$450\.00/ })).toBeVisible();
+  await expect(series.getByText("Estimado", { exact: true }).first()).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // En el teléfono: las cifras en dos columnas y la tabla por curso como tarjetas.
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.reload();
+  await expect(page.getByRole("list", { name: "Tus cursos este mes" }).getByRole("link", { name: title })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Tus cursos este mes" })).toBeHidden();
+  await expect(page.getByRole("region", { name: /, en curso$/ }).getByText("$1,234.56", { exact: true })).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+});
