@@ -766,9 +766,10 @@ test("PA-41: el panel con un curso publicado y su estimado, «Ver como tabla», 
   await expect(row.getByRole("link", { name: title })).toHaveAttribute("href", `/portal/cursos/${course}`);
   for (const value of ["21", "7", "5"]) await expect(row.getByRole("cell", { name: value, exact: true })).toBeVisible();
 
-  // La tabla de las barras está para el lector de pantalla, sin verse; «Ver como tabla» la muestra.
+  // La tabla de las barras está para el lector de pantalla, sin verse; «Ver como tabla» la muestra. Se mide su contenedor, el que la recorta: la
+  // caja de la tabla conserva su ancho aunque un ancestro con `overflow: hidden` no la deje ver.
   const series = page.getByRole("table", { name: "Lo que te tocó en cada periodo" });
-  const width = async () => (await series.boundingBox())?.width ?? 0;
+  const width = async () => (await page.locator("#periodos-anteriores-datos").boundingBox())?.width ?? 0;
   expect(await width()).toBeLessThanOrEqual(1);
   await page.getByRole("checkbox", { name: "Ver como tabla" }).check();
   await expect.poll(width).toBeGreaterThan(100);
