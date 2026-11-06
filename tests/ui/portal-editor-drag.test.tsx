@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -232,8 +232,10 @@ describe("cambios sin guardar", () => {
     const { user } = show();
     await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
     await user.click(screen.getByRole("button", { name: "Guardar" }));
-    // Se mira después de pintar la respuesta: antes de que llegue, la marca sigue aunque la respuesta la fuera a quitar.
+    // Se mira después de pintar la respuesta y de correr sus efectos (ahí se quita la marca): antes, la marca sigue
+    // aunque la respuesta la fuera a quitar.
     expect(await screen.findAllByText(/puede tener hasta/)).not.toHaveLength(0);
+    await act(async () => undefined);
     expect(screen.getByText("Cambios sin guardar")).toBeTruthy();
   });
 
