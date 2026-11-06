@@ -26,7 +26,7 @@ function course(slug: string, day: number, extra: Partial<ShelfCourse> = {}): Sh
 
 describe("homeShelfOf", () => {
   it("sin cursos, todas las filas van vacías", () => {
-    expect(homeShelfOf([])).toEqual({ starters: [], newest: [], practices: [], teachers: [], practiceOf: new Map() });
+    expect(homeShelfOf([])).toEqual({ starters: [], newest: [], practices: [], teachers: [], practiceOf: new Map(), open: null });
   });
 
   it("«Nuevos» va del más nuevo al más viejo, y en un empate por slug", () => {
@@ -62,6 +62,17 @@ describe("homeShelfOf", () => {
     expect(shelf.practiceOf.get("c00")).toEqual({ name: "Meditación", tone: 3 });
     expect(shelf.newest.some((each) => each.slug === "c00")).toBe(false);
     expect(homeShelfOf([course("sin", 1, { practice: null })]).practiceOf.get("sin")).toBeNull();
+  });
+
+  it("el curso abierto se sabe aunque no quepa en «Nuevos»: si hubiera dos, el más nuevo", () => {
+    const many = Array.from({ length: ROW_LIMIT + 2 }, (_, index) => course(`c${String(index).padStart(2, "0")}`, index + 3));
+    const shelf = homeShelfOf([...many, course("abierto-viejo", 1, { isOpen: true }), course("abierto", 2, { isOpen: true })]);
+    expect(shelf.newest.some((each) => each.isOpen)).toBe(false);
+    expect(shelf.open?.slug).toBe("abierto");
+  });
+
+  it("sin curso abierto, no hay ninguno", () => {
+    expect(homeShelfOf([course("a", 1)]).open).toBeNull();
   });
 
   it("ninguna fila pasa del tope", () => {

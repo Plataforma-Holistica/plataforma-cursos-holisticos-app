@@ -46,6 +46,8 @@ export interface HomeShelf {
   teachers: ShelfTeacher[];
   /** La práctica de cada curso listado, por slug, de todos y no solo de las filas: «continuar viendo» pinta con ella su portada. */
   practiceOf: ReadonlyMap<string, { name: string; tone: number } | null>;
+  /** El curso abierto (RF-309), aunque no quepa en ninguna fila: la portada lo ofrece. Si hubiera dos, el más nuevo. */
+  open: ShelfCourse | null;
 }
 
 /** Cuántas tarjetas lleva una fila, como mucho: lo demás se encuentra en explorar. */
@@ -106,5 +108,6 @@ export function homeShelfOf(courses: readonly ShelfCourse[]): HomeShelf {
       .map((row) => ({ slug: row.slug, name: row.name, tone: row.tone, courses: row.courses })),
     teachers: teachersOf(ordered),
     practiceOf: new Map(ordered.map((course) => [course.slug, course.practice === null ? null : { name: course.practice.name, tone: course.practice.tone }])),
+    open: ordered.find((course) => course.isOpen) ?? null,
   };
 }

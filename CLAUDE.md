@@ -946,6 +946,17 @@ que no se ve leyendo un solo archivo:
   dice cómo). `/muestra` tenía roto el selector de video desde T-403 (una función pasada a un componente del navegador desde el servidor); va en `sample-file-upload.tsx`. Las
   pruebas de arquitectura ya no siguen la importación de una imagen. Decisiones mías sin confirmar: el registro de créditos como módulo de TypeScript; el recorrido fuera de la corrida
   de siempre; el velo de la muestra al 65 % (cada lugar mide el suyo). Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (segunda parte, la portada pública, sin migración; PA-01 en lo visual, lo indexable sigue en T-606; decisiones de Sergio del 2026-11-05: el
+  encabezado lleva solo la foto, «Crear cuenta» lleva al registro hasta que existan los planes, y sin precio ni preguntas frecuentes). **`/` ya no es pública: es de visitante**, como
+  `/entrar`, y con sesión `visitorOnly` manda al inicio; salió de `PUBLIC_PAGES` en `screens.test.ts`. La barra (`src/app/_public/header.tsx`, `PublicHeader`) va transparente sobre la
+  foto y, con JavaScript, sólida y fija al desplazar (`data-solid`); sin él se va con la página. El pie es `src/app/_public/footer.tsx`. Los textos tienen su bloque, `src/messages/es/landing.ts`
+  (`states.home` se fue). El catálogo da además el curso abierto (`HomeShelf.open`, el más nuevo, aunque no quepa en ninguna fila). **La foto carga con `loading="eager"` y `fetchPriority="high"`:**
+  en Next 16 `priority` está en desuso. `next.config.ts` sirve las imágenes en AVIF y WebP. Medido en desarrollo: la foto llega en AVIF y pesa 15 KB en un Pixel 7, y el texto da 6.17 o más
+  contra lo más claro de la foto con su velo. Usa `tests/ui/landing-page.test.tsx` y `tests/e2e/portada.spec.ts` (con el catálogo vacío de la corrida de siempre; exige AVIF y el tope de
+  200 KB en el teléfono). Decisiones mías sin confirmar: la muestra son los cursos más nuevos, sin «Ver todo» (explorar pide sesión); el botón de la barra es secundario; en el teléfono la
+  barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. De la revisión del diff: ningún
+  texto habla de precio ni de suscripción (una prueba lo exige), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
+  sueltos de la barra y del pie miden `min-h-touch`. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
