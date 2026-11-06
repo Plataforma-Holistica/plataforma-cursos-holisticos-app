@@ -14,8 +14,8 @@ import { assertPlainWindow } from "../integration/helpers/periods";
 // propio reloj cada paso del recálculo completo (RF-408) con el consolidado vacío y lleno, sin
 // `analyze` y con él, sin `vacuum` y con él; la selección de antes, en una muestra del cursor; la
 // selección sin el blindaje del plan, con plan genérico; una noche normal con 10 000 pares marcados
-// (`nightly_rollup()` entero, que desde T-408 trae el estimado de los maestros, y el paso del estimado
-// solo) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
+// (`nightly_rollup()` entero, que desde T-408 trae el estimado de los maestros y el avance de los alumnos,
+// y cada paso solo, con la primera lectura de un curso de 13 000 alumnos) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
 // consolidado que pasar todos los pares por el modo marcado. Al final, sobre ese mes, el reparto (que
 // tiene que caber en el tope de una sentencia del servidor) y el ensayo y el cierre (que se miden).
 //
@@ -42,6 +42,9 @@ const BEAT_LIMIT_MS = 15 * 60_000;
 // El paso del estimado de los maestros (T-408), solo: el reparto que repite tiene que caber en los 10 s del servidor, y el paso suma sus escrituras
 // (una fila por maestro y por curso). Con 20 s de tope le queda el doble, y una regresión que lo haga crecer con los alumnos se ve.
 const ESTIMATE_STEP_LIMIT_MS = 20_000;
+// El paso del avance de los alumnos (T-408, PA-51), con la lista de la semana: lee todo el progreso dos veces y escribe una fila por curso, por
+// lección y por alumno en cada curso. Corre al final de la noche, sin nadie esperándolo: 60 s de tope (decisión mía sin confirmar).
+const COURSE_PROGRESS_STEP_LIMIT_MS = 60_000;
 
 // Dónde dejar las cifras: lo pasa `scripts/test-escala.mjs`.
 const REPORT_PATH = process.env.ESCALA_REPORT;
@@ -313,6 +316,25 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     expect(Number((await one<{ n: string }>("select count(*) as n from public.watch_events where period_id = $1", [period])).n)).toBe(
       STUDENTS * LESSONS_PER_STUDENT * BEATS_PER_PAIR,
     );
+    // El progreso de cada par, que la escala no escribe por los latidos (T-408, PA-51): empezado hace más de una semana, y la mitad terminado. Y
+    // todos los alumnos en la primera lección del primer curso, para que ese curso tenga 13 000 en su lista.
+    await owner.query(
+      `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, first_watched_at, last_watched_at,
+                                           completed_at, last_playback_session_id, last_seq)
+       select profile_id, lesson_id, course_id, video_asset_id, 600, now() - interval '9 days', now() - interval '8 days',
+              case when hashtext(session_id::text) % 2 = 0 then now() - interval '8 days' end, session_id, 1
+       from pairs`,
+    );
+    await owner.query(
+      `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, first_watched_at, last_watched_at,
+                                           completed_at, last_playback_session_id, last_seq)
+       select ('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid, l.id, l.course_id, l.video_asset_id, 600, now() - interval '9 days',
+              now() - interval '8 days', null, gen_random_uuid(), 1
+       from generate_series(1, $1) s cross join lessons l
+       where l.i = 0
+       on conflict (profile_id, lesson_id) do nothing`,
+      [STUDENTS],
+    );
 
     // El mes, en cierre desde ayer y con su foto, como lo deja el paso a cierre.
     await tx(async () => {
@@ -521,6 +543,71 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     });
     report.teacher_estimates = { step_ms: stepMs, limit_ms: ESTIMATE_STEP_LIMIT_MS, teachers: Number(estimate.teachers), course_rows: Number(estimate.courses) };
     expect(stepMs).toBeLessThan(ESTIMATE_STEP_LIMIT_MS);
+  });
+
+  it("el avance de los alumnos (PA-51): la noche lo guarda, el paso cabe en su tope, y la primera lectura de un curso de 13 000 crea sus alias en el del servidor", async () => {
+    // Lo guardó la noche de arriba, al final, sin falla anotada.
+    const state = await one<{ daily: boolean; weekly: boolean; error: string | null }>(
+      "select daily_cut_at is not null as daily, weekly_cut_at is not null as weekly, error from private.course_progress_state",
+    );
+    expect(state).toEqual({ daily: true, weekly: true, error: null });
+    const course = (await one<{ id: string }>("select course_id::text as id from lessons where i = 0")).id;
+    const listed = await one<{ n: string }>(
+      "select count(*) as n from private.course_student_progress where course_id = $1 and cut_at = (select weekly_cut_at from private.course_progress_state)",
+      [course],
+    );
+    expect(Number(listed.n)).toBe(STUDENTS);
+
+    // El paso solo, con la lista también (la semana se olvida), medido con su propio reloj en una transacción que se deshace.
+    let stepMs = 0;
+    await tx(async () => {
+      await owner.query("update private.course_progress_state set weekly_cut_at = null, weekly_built_at = null");
+      const start = performance.now();
+      const step = await one<{ r: { outcome: string; weekly_rebuilt: boolean } }>("select private.course_progress_step() as r");
+      stepMs = ms(start);
+      expect(step.r).toMatchObject({ outcome: "built", weekly_rebuilt: true });
+      throw new Error("deshacer");
+    }).catch((error: Error) => {
+      if (error.message !== "deshacer") throw error;
+    });
+
+    // La primera lectura de ese curso, a nombre de su maestra y con el tope de una sentencia del servidor: crea los 13 000 alias. Y la segunda.
+    const reads: number[] = [];
+    await tx(async () => {
+      await owner.query("insert into auth.users (id, email) values ('e5ca1a00-0000-4000-b000-000000000001', 'escala-maestra@prueba.test')");
+      await owner.query("set local session_replication_role = replica");
+      await owner.query(
+        `update public.teachers t set profile_id = 'e5ca1a00-0000-4000-b000-000000000001', status = 'active'
+         from public.course_registry r where r.course_id = $1 and t.id = r.teacher_id`,
+        [course],
+      );
+      // La carga del sistema deja el curso en revisión, y PA-51 contesta de uno que nunca se publicó como de uno que no existe.
+      await owner.query("update public.course_registry set state = 'published', first_published_at = now() where course_id = $1", [course]);
+      await owner.query("set local session_replication_role = origin");
+      await owner.query("select set_config('app.actor_id', 'e5ca1a00-0000-4000-b000-000000000001', true)");
+      await owner.query(`set local statement_timeout = '${SERVER_STATEMENT_MS / 1000}s'`);
+      for (let read = 0; read < 2; read++) {
+        const start = performance.now();
+        const answer = await one<{ r: { outcome: string; total_students: number; students: unknown[]; pages: number } }>(
+          "select private.teacher_course_students($1, 'progress', 1) as r",
+          [course],
+        );
+        reads.push(ms(start));
+        expect(answer.r).toMatchObject({ outcome: "ok", total_students: STUDENTS, pages: Math.ceil(STUDENTS / 50) });
+        expect(answer.r.students).toHaveLength(50);
+      }
+      const aliases = await one<{ n: string }>(
+        "select count(*) as n from private.progress_aliases a join public.course_registry r on r.teacher_id = a.teacher_id where r.course_id = $1",
+        [course],
+      );
+      expect(Number(aliases.n)).toBe(STUDENTS);
+      throw new Error("deshacer");
+    }).catch((error: Error) => {
+      if (error.message !== "deshacer") throw error;
+    });
+    report.course_progress = { step_ms: stepMs, limit_ms: COURSE_PROGRESS_STEP_LIMIT_MS, first_read_ms: reads[0], second_read_ms: reads[1], students: STUDENTS };
+    expect(stepMs).toBeLessThan(COURSE_PROGRESS_STEP_LIMIT_MS);
+    expect(reads[0]).toBeLessThan(SERVER_STATEMENT_MS);
   });
 });
 

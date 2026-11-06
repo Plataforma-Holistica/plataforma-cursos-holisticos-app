@@ -97,4 +97,9 @@ export const ui = defineMessages({
     final: "Final",
     estimated: "Estimado",
   },
+  lessonFunnel: {
+    showTable: "Ver como tabla",
+    lesson: "Lección",
+    finished: "La terminaron",
+  },
 });

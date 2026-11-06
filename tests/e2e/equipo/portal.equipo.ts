@@ -763,7 +763,8 @@ test("PA-41: el panel con un curso publicado y su estimado, «Ver como tabla», 
   const courses = page.getByRole("table", { name: "Tus cursos este mes" });
   await expect(courses).toBeVisible();
   const row = courses.getByRole("row", { name: new RegExp(title) });
-  await expect(row.getByRole("link", { name: title })).toHaveAttribute("href", `/portal/cursos/${course}`);
+  await expect(row.getByRole("link", { name: title, exact: true })).toHaveAttribute("href", `/portal/cursos/${course}`);
+  await expect(row.getByRole("link", { name: `Ver avance de ${title}` })).toHaveAttribute("href", `/portal/cursos/${course}/alumnos`);
   for (const value of ["21", "7", "5"]) await expect(row.getByRole("cell", { name: value, exact: true })).toBeVisible();
 
   // La tabla de las barras está para el lector de pantalla, sin verse; «Ver como tabla» la muestra. Se mide su contenedor, el que la recorta: la
@@ -780,8 +781,75 @@ test("PA-41: el panel con un curso publicado y su estimado, «Ver como tabla», 
   // En el teléfono: las cifras en dos columnas y la tabla por curso como tarjetas.
   await page.setViewportSize({ width: 412, height: 915 });
   await page.reload();
-  await expect(page.getByRole("list", { name: "Tus cursos este mes" }).getByRole("link", { name: title })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Tus cursos este mes" }).getByRole("link", { name: title, exact: true })).toBeVisible();
   await expect(page.getByRole("table", { name: "Tus cursos este mes" })).toBeHidden();
   await expect(page.getByRole("region", { name: /, en curso$/ }).getByText("$1,234.56", { exact: true })).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+});
+
+test("PA-51: desde Mis cursos al avance de los alumnos, con las cifras, el avance por lección y la lista con su alias, en escritorio y en el teléfono", async ({ page }) => {
+  const ivi = await person();
+  await makeTeacher(ivi);
+  const title = `Avance de prueba ${ivi.id.slice(0, 8)}`;
+  const { course } = await publishCourseOf(ivi, title);
+  // Dos alumnas que empezaron hace más de una semana (antes del último lunes): una terminó la lección, la otra no.
+  const [first, second] = [await person(), await person()];
+  await ownerQuery(
+    `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, first_watched_at, last_watched_at,
+                                         completed_at, last_playback_session_id, last_seq)
+     select p.id, l.id, l.course_id, l.video_asset_id, 60, now() - interval '9 days', now() - interval '8 days',
+            case when p.done then now() - interval '8 days' end, gen_random_uuid(), 1
+     from public.published_lessons l, (values ($2::uuid, true), ($3::uuid, false)) p (id, done)
+     where l.course_id = $1::uuid`,
+    [course, first!.id, second!.id],
+  );
+  // El paso de la noche, como lo corre la consolidación. La lista de esta semana pudo armarla otra noche: se olvida, para que la arme este.
+  await ownerQuery("update private.course_progress_state set weekly_cut_at = null, weekly_built_at = null");
+  const [built] = await ownerQuery<{ outcome: string }>("select private.course_progress_step() ->> 'outcome' as outcome");
+  expect(built?.outcome).toBe("built");
+
+  await signIn(page, ivi, "/portal/cursos");
+  await page.getByRole("link", { name: `Ver el avance de los alumnos de ${title}` }).click();
+  await expect(page).toHaveURL(`/portal/cursos/${course}/alumnos`);
+  await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+  await expect(page.getByText(/^Ves a cada persona con un alias/)).toBeVisible();
+  const figures = page.getByRole("region", { name: "Cómo va" });
+  for (const [label, value] of [
+    ["Lo empezaron", "2"],
+    ["Van a medio curso", "1"],
+    ["Lo terminaron", "1"],
+  ] as const) {
+    const tile = figures.locator("div", { has: page.getByText(label, { exact: true }) }).last();
+    await expect(tile.getByText(value, { exact: true })).toBeVisible();
+  }
+
+  // El avance por lección: su tabla está para el lector de pantalla, sin verse; «Ver como tabla» la muestra.
+  const width = async () => (await page.locator("#avance-por-leccion-datos").boundingBox())?.width ?? 0;
+  expect(await width()).toBeLessThanOrEqual(1);
+  await page.getByRole("checkbox", { name: "Ver como tabla" }).check();
+  await expect.poll(width).toBeGreaterThan(100);
+  await expect(page.getByRole("table", { name: "Cuántos alumnos terminaron cada lección" }).getByRole("row", { name: /1\. Primera/ })).toBeVisible();
+
+  // La lista: dos alias, la que terminó primero; ningún correo ni nombre.
+  const list = page.getByRole("table", { name: "Tus alumnos en este curso" });
+  const aliases = await list.getByRole("rowheader").allTextContents();
+  expect(aliases).toHaveLength(2);
+  for (const alias of aliases) expect(alias).toMatch(/^[A-Z][a-z]+ [1-9][0-9]{1,3}$/);
+  await expect(list.getByRole("row").nth(1).getByRole("progressbar")).toHaveAttribute("aria-valuetext", "1 de 1");
+  await expect(page.locator("main")).not.toContainText(first!.email);
+  await expect(page.locator("main")).not.toContainText(second!.email);
+  expect(await a11yViolations(page)).toEqual([]);
+
+  // Por alias, con un enlace: la dirección lo lleva, y la página dice cuál se ve.
+  await page.getByRole("link", { name: "Por alias" }).click();
+  await expect(page).toHaveURL(`/portal/cursos/${course}/alumnos?orden=alias`);
+  expect(await page.getByRole("table", { name: "Tus alumnos en este curso" }).getByRole("rowheader").allTextContents()).toEqual([...aliases].sort());
+  await expect(page.getByText("Por alias", { exact: true })).toHaveAttribute("aria-current", "true");
+
+  // En el teléfono: filas compactas en vez de la tabla.
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.reload();
+  await expect(page.getByRole("list", { name: "Tus alumnos en este curso" }).getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByRole("table", { name: "Tus alumnos en este curso" })).toBeHidden();
   expect(await a11yViolations(page)).toEqual([]);
 });

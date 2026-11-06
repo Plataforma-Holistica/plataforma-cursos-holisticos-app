@@ -158,6 +158,18 @@ export function portalDiscardVersionPath(course: string): string | null {
   return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/descartar` : null;
 }
 
+/**
+ * PA-51, el avance de los alumnos de un curso (T-408); nulo si el id no tiene forma. El orden por avance y la primera página no van en la dirección:
+ * cada lista se escribe de una sola manera.
+ */
+export function portalStudentsPath(course: string, list: { order?: "progress" | "alias"; page?: number } = {}): string | null {
+  if (!LESSON_ID.test(course)) return null;
+  const query = [list.order === "alias" ? "orden=alias" : null, list.page !== undefined && list.page > 1 ? `pagina=${list.page}` : null].filter(
+    (part) => part !== null,
+  );
+  return `${ROUTES.portalCourses}/${course}/alumnos${query.length === 0 ? "" : `?${query.join("&")}`}`;
+}
+
 /** PA-44, enviar un curso a revisión (T-405). */
 export function portalSubmitPath(course: string): string | null {
   return LESSON_ID.test(course) ? `${ROUTES.portalCourses}/${course}/enviar` : null;
