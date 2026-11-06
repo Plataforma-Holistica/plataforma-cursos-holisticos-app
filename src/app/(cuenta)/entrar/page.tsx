@@ -4,6 +4,7 @@ import { visitorOnly } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
 import { RETURN_PARAM } from "@/services/account/navigation";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { readNotice, type Notice } from "@/services/account/notice";
 
 import { SignInScreen } from "./screen";
@@ -36,11 +37,13 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const notice = readNotice(await cookieReader());
 
   return (
-    <SignInScreen
-      // Tal como llegó: la acción lo valida al entrar. Repetido en la dirección no es un destino.
-      returnTo={typeof returnTo === "string" ? returnTo : ""}
-      notice={notice === null ? null : (NOTICES[notice] ?? null)}
-      noticeTone={notice !== null && WARNINGS.has(notice) ? "warning" : "success"}
-    />
+    <AccessFrame>
+      <SignInScreen
+        // Tal como llegó: la acción lo valida al entrar. Repetido en la dirección no es un destino.
+        returnTo={typeof returnTo === "string" ? returnTo : ""}
+        notice={notice === null ? null : (NOTICES[notice] ?? null)}
+        noticeTone={notice !== null && WARNINGS.has(notice) ? "warning" : "success"}
+      />
+    </AccessFrame>
   );
 }

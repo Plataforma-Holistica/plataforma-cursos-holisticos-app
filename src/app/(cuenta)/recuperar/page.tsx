@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { readNotice, type Notice } from "@/services/account/notice";
 
 import { RecoverScreen } from "./screen";
@@ -22,5 +23,9 @@ const NOTICES: Partial<Record<Notice, string>> = {
 
 export default async function RecoverPage() {
   const notice = readNotice(await cookieReader());
-  return <RecoverScreen notice={notice === null ? null : (NOTICES[notice] ?? null)} />;
+  return (
+    <AccessFrame>
+      <RecoverScreen notice={notice === null ? null : (NOTICES[notice] ?? null)} />
+    </AccessFrame>
+  );
 }

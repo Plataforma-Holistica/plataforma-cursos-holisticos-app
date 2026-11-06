@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Las páginas de registro, verificación y recuperación, con la guarda y los servicios
@@ -151,7 +151,8 @@ describe("la página de «Completa tu cuenta» (PA-14)", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Completa tu cuenta");
     expect(container.querySelector('input[type="hidden"][name="token"]')).toHaveValue(TOKEN);
     expect(screen.getAllByRole("checkbox")).toHaveLength(3);
-    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+    // Los del formulario: fuera de él está el logotipo del marco de acceso (T-614), que lleva a la portada.
+    expect(within(screen.getByRole("main")).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
       "/legal/terminos?v=2",
       "/legal/privacidad?v=2",
       "/legal/historial-de-cursos?v=2",

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 
 import { messages } from "@/messages";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { isLinkToken } from "@/services/account/account";
 
 import { RecoveryLinkDeadScreen } from "../../_lib/states";
@@ -21,5 +22,9 @@ export default async function ChangePasswordPage({ params }: { params: Promise<{
   await connection();
   const { token } = await params;
   if (!isLinkToken(token)) return <RecoveryLinkDeadScreen />;
-  return <ChangePasswordScreen token={token} />;
+  return (
+    <AccessFrame>
+      <ChangePasswordScreen token={token} />
+    </AccessFrame>
+  );
 }

@@ -1,4 +1,5 @@
 import { requireFactorSetup } from "@/app/_lib/guard";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { ROUTES } from "@/services/account/navigation";
 
 import { SuspendedScreen, UnavailableScreen } from "../../../_lib/states";
@@ -22,5 +23,9 @@ export default async function FactorSetupPage() {
   if (step.kind === "suspended") return <SuspendedScreen withSession />;
   if (step.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.factorSetup} withSession />;
 
-  return <FactorSetupScreen view={step} />;
+  return (
+    <AccessFrame photo={false}>
+      <FactorSetupScreen view={step} />
+    </AccessFrame>
+  );
 }

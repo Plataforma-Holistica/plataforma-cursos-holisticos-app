@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { readRegistration } from "@/services/account/pending-registration";
 
 import { pendingRequestFacts } from "../_lib/link-facts";
@@ -19,9 +20,18 @@ export const metadata: Metadata = { title: messages.account.checkMail.title };
 
 export default async function CheckMailPage() {
   const pending = readRegistration(await cookieReader());
-  if (pending === null) return <CheckMailScreen email={null} lifetimeSeconds={null} wait={null} />;
+  if (pending === null)
+    return (
+      <AccessFrame>
+        <CheckMailScreen email={null} lifetimeSeconds={null} wait={null} />
+      </AccessFrame>
+    );
 
   // Solo para decir cuánto dura el enlace y cuándo se puede reenviar.
   const facts = await pendingRequestFacts(pending.sentAt);
-  return <CheckMailScreen email={pending.email} lifetimeSeconds={facts?.lifetimeSeconds ?? null} wait={facts?.wait ?? null} />;
+  return (
+    <AccessFrame>
+      <CheckMailScreen email={pending.email} lifetimeSeconds={facts?.lifetimeSeconds ?? null} wait={facts?.wait ?? null} />
+    </AccessFrame>
+  );
 }

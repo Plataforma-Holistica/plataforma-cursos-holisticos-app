@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { visitorOnly } from "@/app/_lib/guard";
 import { messages } from "@/messages";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { slugOfDocType } from "@/services/legal/texts";
 
 import { SignUpScreen } from "./screen";
@@ -17,5 +18,9 @@ const legalHref = (docType: string): string | null => {
 
 export default async function SignUpPage() {
   await visitorOnly();
-  return <SignUpScreen termsHref={legalHref("terms")} privacyHref={legalHref("student_privacy_notice")} />;
+  return (
+    <AccessFrame>
+      <SignUpScreen termsHref={legalHref("terms")} privacyHref={legalHref("student_privacy_notice")} />
+    </AccessFrame>
+  );
 }
