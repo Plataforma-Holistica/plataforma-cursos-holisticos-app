@@ -137,6 +137,7 @@ describe("la imagen del código QR", () => {
   ])("%s se rechaza enseguida", (_what, hostile) => {
     const started = performance.now();
     expect(qrImage(hostile)).toBeNull();
-    expect(performance.now() - started).toBeLessThan(500);
+    // Con holgura para la batería cargada: lo que crece con el cuadrado, con estos tamaños, tarda segundos.
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 });

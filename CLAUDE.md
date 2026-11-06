@@ -88,6 +88,15 @@ auditoría de dependencias y `build`; después de compilar instala Chromium, cor
 extremo a extremo (con el comando escrito en `ci.yml`, no con el guion de `package.json`)
 y las pruebas de base una vez más.
 
+Las pruebas de pantalla no dependen de la carga (2026-11-05). Con la batería entera corriendo a la vez que el otro
+carril, en cada corrida fallaba alguna prueba distinta que sola pasaba. Lo que las rompía era mirar algo que la pantalla
+hace un instante después de pintar: el foco que toma un aviso, el formulario que React vacía al terminar la acción, el
+título de la pantalla nueva. **Eso se mira dentro de `waitFor`**, nunca justo después de un `findBy…`, que puede encontrar
+lo de antes. `tests/setup/dom.ts` sube la espera de `findBy…` y `waitFor` a 3 s (`asyncUtilTimeout`), y cada `vi.waitFor`
+lleva `{ timeout: 3_000 }`, porque no toma esa configuración. Un texto largo se pega (`user.paste`), no se teclea. Los
+topes de tiempo que cuidan que una regla no se trabe (el filtro de Sentry y el lector de QR) dejan holgura a la carga: lo
+que retrocede tarda segundos, no cientos de milisegundos.
+
 `pnpm test:e2e` necesita tres cosas. La pila local arriba y lista (`db:start`, `db:login` y
 `db:drafts`, o `db:reset`). El puerto 3000 libre: Playwright compila la aplicación él
 mismo (`next build && next start`) y la sirve en `http://localhost:3000`, que es a donde
@@ -967,6 +976,17 @@ que no se ve leyendo un solo archivo:
   contra lo más claro de la foto (al 55 % daba 3.83, sobre las nubes). De la revisión del diff: el logotipo es la segunda parada del teclado en esas pantallas, después de
   «Saltar al contenido» (la prueba de entrar con el teclado lo dice), y la columna del formulario lleva `lg:*:w-full`, porque en una columna flexible el `mx-auto` de cada `<main>`
   lo encogía a su contenido. Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (cuarta parte, el inicio y las fichas, sin migración; decisiones de Sergio del 2026-11-05: prácticas cortas lado a lado, la cabecera del inicio
+  alterna el faro y las estrellas una por día, y el maestro sin retrato lleva la foto de su primera práctica en su ficha y en su tarjeta). **Qué foto toca** lo dice
+  `src/ui/photos/choice.ts`, puro: `practicePhoto(posición)` alterna las dos por el orden de la práctica en PA-67 (la misma práctica, siempre la misma), y `homeHeaderPhoto(fecha)` alterna
+  por día de la Ciudad de México. Para eso `ShelfTeacher` trae `practicePosition`, y `TeacherCard` la pide. **Las prácticas lado a lado:** `layOutRows` (`src/app/_catalog/rows.ts`,
+  puro) junta dos seguidas de a lo más `SHORT_ROW` (2) cursos, sin cambiar su orden, y `PracticeRows` las pinta, en el inicio y en explorar sin filtro; cada una sigue siendo su
+  carrusel. El saludo del inicio va sobre su franja (`data-home-header`). La barra del alumno lleva el `Wordmark` (`browse.nav.brand` se fue). **`PublicHeader` tiene dos variantes:**
+  `overPhoto` (la portada, transparente y fija al desplazar) y sólida (`sticky`), que es la de las fichas para el visitante; `PublicFooter` va ahí sin el deslinde
+  (`withDisclaimer={false}`), porque la ficha del curso ya lo pinta al final. A quien no se sabe quién es, ni la barra del alumno ni la pública. Cambiaron por el requisito dos
+  pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno (también en `tests/e2e/equipo/catalogo.equipo.ts`, por la revisión del diff). El visitante
+  no lleva el margen de abajo que reserva la barra inferior del alumno. Las posiciones de las prácticas no tienen huecos (una nueva va al final y reordenar intercambia dos), así
+  que la alternancia de las fotos sigue el orden del catálogo. Para el A: `ShelfTeacher` ganó un campo.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

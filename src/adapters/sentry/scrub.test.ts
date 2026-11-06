@@ -679,7 +679,8 @@ describe("scrubEvent: el texto del mensaje", () => {
       }),
     );
 
-    expect(performance.now() - started).toBeLessThan(500);
+    // Con holgura: sin el recorte tardaba segundos, y con la batería cargada lo sano pasó de 400 ms.
+    expect(performance.now() - started).toBeLessThan(2_000);
     expect(clean.message?.length).toBeLessThan(2_100);
     expect(clean.message).toContain("[recortado]");
   });
@@ -698,7 +699,9 @@ describe("scrubEvent: el texto del mensaje", () => {
     const started = performance.now();
     for (let i = 0; i < 20; i += 1) masked(adverse);
 
-    expect(performance.now() - started).toBeLessThan(400);
+    // Una regla que retrocede tarda segundos con 8 000 caracteres; lo sano tarda decenas de milisegundos, y con
+    // la batería cargada llegó a 424. El tope deja holgura a la carga y sigue atrapando lo que se traba.
+    expect(performance.now() - started).toBeLessThan(1_500);
   });
 
   it.each([

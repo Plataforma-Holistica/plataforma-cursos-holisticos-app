@@ -239,7 +239,9 @@ describe("adjuntar", () => {
     await user.upload(screen.getByLabelText("Archivo"), pdf());
     const field = screen.getByRole("textbox", { name: "Título del recurso" });
     await user.clear(field);
-    await user.type(field, "a".repeat(121));
+    // Pegado y no tecleado: 121 teclas, cada una con su render, pasaban de cinco segundos con la batería cargada.
+    await user.click(field);
+    await user.paste("a".repeat(121));
     await user.click(screen.getByRole("button", { name: "Adjuntar recurso" }));
     await waitFor(() => expect(field).toHaveFocus());
     expect(actions.beginResourceAction).not.toHaveBeenCalled();

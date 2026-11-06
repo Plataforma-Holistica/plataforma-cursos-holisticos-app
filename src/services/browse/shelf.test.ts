@@ -95,8 +95,8 @@ describe("teachersOf", () => {
       course("d", 4, { teacherName: "Beto Luna", teacherSlug: "beto-luna", practice: null }),
     ]);
     expect(teachers).toEqual([
-      { slug: "ana-robles", name: "Ana Robles", practices: ["Yoga", "Meditación"], tone: 5, courseCount: 3 },
-      { slug: "beto-luna", name: "Beto Luna", practices: [], tone: null, courseCount: 1 },
+      { slug: "ana-robles", name: "Ana Robles", practices: ["Yoga", "Meditación"], tone: 5, practicePosition: 1, courseCount: 3 },
+      { slug: "beto-luna", name: "Beto Luna", practices: [], tone: null, practicePosition: null, courseCount: 1 },
     ]);
   });
 

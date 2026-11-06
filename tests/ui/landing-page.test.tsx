@@ -41,7 +41,7 @@ function shelf(courses: ShelfCourse[], open: ShelfCourse | null = null): HomeShe
     starters: [],
     newest: courses,
     practices: [],
-    teachers: courses.length === 0 ? [] : [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, courseCount: courses.length }],
+    teachers: courses.length === 0 ? [] : [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, practicePosition: 1, courseCount: courses.length }],
     practiceOf: new Map(),
     open,
   };

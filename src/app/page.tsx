@@ -66,7 +66,7 @@ export default async function LandingPage() {
 
   return (
     <>
-      <PublicHeader />
+      <PublicHeader overPhoto />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
         {/* Sin nombre de región: lo nombraría el titular, que ya es el de la página. */}
         <div className="relative isolate overflow-hidden">
@@ -138,7 +138,7 @@ export default async function LandingPage() {
               {ready.teachers.map((teacher) => {
                 const href = teacherPath(teacher.slug);
                 if (href === null) return null;
-                return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} />;
+                return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} practicePosition={teacher.practicePosition} />;
               })}
             </Carousel>
           )}
