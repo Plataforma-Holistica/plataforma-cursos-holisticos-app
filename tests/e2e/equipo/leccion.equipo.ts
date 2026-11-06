@@ -295,8 +295,9 @@ test("en un iPhone: la pantalla completa es dentro de la página, con la marca s
   expect(stage.height).toBeCloseTo((390 * 9) / 16, 0);
   expect(mark.y).toBeGreaterThanOrEqual(stage.y);
   expect(mark.y + mark.height).toBeLessThanOrEqual(stage.y + stage.height);
-  // La página de atrás no se desplaza.
+  // La página de atrás no se desplaza, y la barra inferior del alumno se retira (T-614): no queda encima del video.
   expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(true);
+  await expect(page.getByRole("navigation", { name: "Principal" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Salir de pantalla completa" })).toBeFocused();
   await expect(page.getByRole("status").filter({ hasText: "Gira tu teléfono para verlo más grande" })).toBeVisible();
   expect(await cellsUnderButtons(page, who.email)).toEqual([]);
@@ -341,6 +342,7 @@ test("en un iPhone: la pantalla completa es dentro de la página, con la marca s
   await page.getByRole("button", { name: "Salir de pantalla completa" }).click();
   await expect(frame).not.toHaveAttribute("data-filled");
   expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(false);
+  await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible();
 
   // Si iOS entra solo a la del sistema (un pellizco), se sale de ella y pasa a la propia.
   await page.evaluate(() => {

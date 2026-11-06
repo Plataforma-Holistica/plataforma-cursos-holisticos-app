@@ -160,7 +160,9 @@ describe("lo de alrededor del reproductor", () => {
   it("un maestro sin ficha se nombra sin enlace", () => {
     show({ teacher: { name: "Ana Robles", href: null } });
     expect(screen.queryByRole("link", { name: "Ana Robles" })).toBeNull();
-    expect(screen.getByText("Ana Robles")).toBeVisible();
+    // En la línea bajo el título, no en la portada del reproductor, que también lo nombra.
+    const byline = screen.getByRole("link", { name: "Respirar para dormir" }).closest("p");
+    expect(byline).toHaveTextContent("Respirar para dormir · Ana Robles");
   });
 
   it("antes de reproducir, la portada del curso detrás del botón, decorativa (T-614)", () => {
