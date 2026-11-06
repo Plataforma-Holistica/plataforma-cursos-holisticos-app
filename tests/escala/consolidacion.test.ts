@@ -581,6 +581,8 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
          from public.course_registry r where r.course_id = $1 and t.id = r.teacher_id`,
         [course],
       );
+      // La carga del sistema deja el curso en revisión, y PA-51 contesta de uno que nunca se publicó como de uno que no existe.
+      await owner.query("update public.course_registry set state = 'published', first_published_at = now() where course_id = $1", [course]);
       await owner.query("set local session_replication_role = origin");
       await owner.query("select set_config('app.actor_id', 'e5ca1a00-0000-4000-b000-000000000001', true)");
       await owner.query(`set local statement_timeout = '${SERVER_STATEMENT_MS / 1000}s'`);
