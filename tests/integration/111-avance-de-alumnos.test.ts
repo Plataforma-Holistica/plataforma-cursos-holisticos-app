@@ -179,6 +179,39 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
   });
 });
 
+describe("una cancelación fuera del bloque del paso", { timeout: 180_000 }, () => {
+  it("tampoco corta la noche: la atrapa el bloque de la corrida", async () => {
+    const start = await now();
+    const runner = await connect();
+    try {
+      const pid = (await runner.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      // Lo que salió bien lanza, y al anotar la falla (ya fuera del bloque del paso) se queda dormido: ahí lo cancelan.
+      await withBrokenState(
+        "",
+        async () => {
+          const call = runner.query("call private.nightly_rollup()");
+          const deadline = Date.now() + 60_000;
+          for (;;) {
+            const sleeping = await owner.query("select 1 from pg_stat_activity where pid = $1 and wait_event = 'PgSleep'", [pid]);
+            if ((sleeping.rowCount ?? 0) > 0) break;
+            if (Date.now() > deadline) throw new Error("el paso no llegó a dormirse");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          await owner.query("select pg_cancel_backend($1)", [pid]);
+          await call;
+        },
+        "if new.failed_at is not distinct from old.failed_at then raise exception 'roto a propósito' using errcode = 'P0001'; end if; perform pg_catalog.pg_sleep(30);",
+      );
+    } finally {
+      await runner.end();
+    }
+    expect((await stateSince(start)).built_since).toBe(false);
+    expect((await runsSince(start)).filter((run) => run.job === "period_transition")).toEqual([
+      expect.objectContaining({ status: "succeeded" }),
+    ]);
+  });
+});
+
 describe("los candados de los alias, con dos conexiones", { timeout: 60_000 }, () => {
   let teacherId = "";
   let people: TestUser[] = [];

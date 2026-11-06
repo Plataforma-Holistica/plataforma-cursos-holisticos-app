@@ -12,7 +12,7 @@
 -- deje fallida lo prueba la integración 111. Aquí, el paso con su reloj (2045, para no depender del día en que corre), la lectura y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(118);
+select plan(122);
 
 select pruebas.alta('a8300000-0000-0000-0000-000000000001', 'tere-83@prueba.test');
 select pruebas.alta('a8300000-0000-0000-0000-000000000002', 'beto-83@prueba.test');
@@ -165,13 +165,17 @@ $$;
 create temporary table muchos as select gen_random_uuid() as id from generate_series(1, 13000);
 set local session_replication_role = replica;
 select set_config('pruebas.intentos', '0', true);
-select private.alias_insert('progress', pruebas.m(2), array(select id from muchos));
-select is((select count(*)::integer from private.progress_aliases where teacher_id = pruebas.m(2)), 13000, '13 000 alias de PA-51 de una vez');
-select cmp_ok(current_setting('pruebas.intentos')::integer, '<', 20000, 'con menos de 20 000 intentos: el tramo sube dentro del ciclo');
-select set_config('pruebas.intentos', '0', true);
 select private.alias_insert('student', pruebas.m(2), array(select id from muchos));
-select is((select count(*)::integer from private.student_aliases where teacher_id = pruebas.m(2)), 13000, 'y 13 000 de PA-47');
+select is((select count(*)::integer from private.student_aliases where teacher_id = pruebas.m(2)), 13000, '13 000 alias de PA-47 de una vez');
+select cmp_ok(current_setting('pruebas.intentos')::integer, '<', 20000, 'con menos de 20 000 intentos: el tramo sube dentro del ciclo');
+-- El tramo de PA-51 cuenta solo los de PA-51: con 13 000 de PA-47, los primeros de PA-51 siguen siendo de dos cifras.
+select private.alias_insert('progress', pruebas.m(2), array(select id from muchos order by id limit 10));
+select ok((select bool_and(alias ~ ' [1-9][0-9]$') from private.progress_aliases where teacher_id = pruebas.m(2)), 'cada tipo cuenta su propio tramo');
+select set_config('pruebas.intentos', '0', true);
+select private.alias_insert('progress', pruebas.m(2), array(select id from muchos));
+select is((select count(*)::integer from private.progress_aliases where teacher_id = pruebas.m(2)), 13000, 'y 13 000 de PA-51');
 select cmp_ok(current_setting('pruebas.intentos')::integer, '<', 20000, 'también con menos de 20 000 intentos');
+select is(private.alias_insert('progress', pruebas.m(2), array[pruebas.a(7), pruebas.a(7)]), 1, 'un perfil repetido en la lista recibe un solo alias');
 select is((select count(*)::integer from private.progress_aliases p join private.student_aliases s using (teacher_id, profile_id) where p.alias = s.alias),
   0, 'ningún alumno tiene el mismo alias en las dos pantallas');
 select set_config('pruebas.intentos', '0', true);
@@ -237,7 +241,7 @@ select is((select (r ->> 'stale')::boolean from lect where k = 'r0'), true, 'y c
 -- ---------------------------------------------------------------------------------------
 -- Lo que pasa en la semana del lunes 2045-03-06. En el curso A:
 --   a1 lo terminó el jueves anterior; a2 terminó la Uno y empezó la Dos el martes; a3 empezó el martes; a4 empezó y terminó la Uno el miércoles a
---   la 01:00, después de la medianoche; a5 lo terminó y borró su cuenta; a6 empezó y está suspendido; a7 solo vio la Tres; y Tere vio todo su curso.
+--   la 01:00, después de la medianoche; a5 lo terminó y borró su cuenta; a6 empezó y está suspendido; a7 solo vio la Tres, y la terminó el miércoles a las 02:00, después de la medianoche; y Tere vio todo su curso.
 -- En el B, 55 alumnos que empezaron la Uno. En el C, de Beto, a2 terminó la Uno.
 
 select pruebas.avance(pruebas.a(1), pruebas.lec('e83-a', t), '2045-03-01 10:00', '2045-03-02 10:00') from unnest(array['Uno', 'Dos', 'Tres']) t;
@@ -247,7 +251,7 @@ select pruebas.avance(pruebas.a(3), pruebas.lec('e83-a', 'Uno'), '2045-03-07 10:
 select pruebas.avance(pruebas.a(4), pruebas.lec('e83-a', 'Uno'), '2045-03-08 01:00', '2045-03-08 02:00');
 select pruebas.avance(pruebas.a(5), pruebas.lec('e83-a', t), '2045-03-01 10:00', '2045-03-02 10:00') from unnest(array['Uno', 'Dos', 'Tres']) t;
 select pruebas.avance(pruebas.a(6), pruebas.lec('e83-a', 'Uno'), '2045-03-01 10:00');
-select pruebas.avance(pruebas.a(7), pruebas.lec('e83-a', 'Tres'), '2045-03-01 10:00');
+select pruebas.avance(pruebas.a(7), pruebas.lec('e83-a', 'Tres'), '2045-03-01 10:00', '2045-03-08 02:00');
 select pruebas.avance(pruebas.tere(), pruebas.lec('e83-a', t), '2045-03-01 10:00', '2045-03-02 10:00') from unnest(array['Uno', 'Dos', 'Tres']) t;
 select pruebas.avance(pruebas.b(n), pruebas.lec('e83-b', 'Uno'), '2045-03-01 10:00') from generate_series(1, 55) n;
 select pruebas.avance(pruebas.a(2), pruebas.lec('e83-c', 'Uno'), '2045-03-01 10:00', '2045-03-02 10:00');
@@ -351,7 +355,7 @@ select is((select format('%s:%s', r ->> 'outcome', r ->> 'weekly_rebuilt') from 
 select is((select weekly_built_at::text from pruebas.estado()), (select d from definiciones where k = 'semana'), 'la lista sigue siendo la del lunes');
 insert into lect values ('r2', pruebas.lee(pruebas.tere(), pruebas.curso_de('e83-a')));
 select is(pruebas.cifras((select r from lect where k = 'r2')), '6:5:1', 'a4 ya cuenta en las cifras');
-select is(pruebas.lecciones((select r from lect where k = 'r2')), array['Uno:3', 'Dos:1', 'Tres:1'], 'y en su lección');
+select is(pruebas.lecciones((select r from lect where k = 'r2')), array['Uno:3', 'Dos:1', 'Tres:2'], 'y en su lección; y a7 ya terminó la Tres');
 select is(pruebas.lista((select r from lect where k = 'r2')), array['3/3', '1/3', '0/3', '0/3'], 'pero no en la lista');
 
 -- Un paso que falla deja el resumen anterior, y lo anota.
@@ -381,6 +385,7 @@ select ok('a3' = any (pruebas.quienes(pruebas.m(1), (select r from lect where k 
   'con quienes empezaron la semana pasada');
 select ok(not ('a7' = any (pruebas.quienes(pruebas.m(1), (select r from lect where k = 'r4')))), 'y sin quien solo vio lo retirado');
 select is((select (r ->> 'list_cut_at')::timestamptz from lect where k = 'r4'), pruebas.h('2045-03-13 00:00'), 'al lunes nuevo');
+select is((select (r ->> 'total_students')::integer from lect where k = 'r4'), 5, 'y cuenta solo la lista nueva, aunque la anterior siga guardada');
 
 -- Una lección nueva: quien lo había terminado deja de contar como terminado.
 set local session_replication_role = replica;
@@ -437,6 +442,9 @@ revoke execute on function private.teacher_course_students(uuid, text, integer) 
 grant execute on function private.course_progress_step(timestamptz) to app_service;
 select ok(pruebas.cp_con('course progress system function reachable or wrong'), 'el paso al alcance del servidor');
 revoke execute on function private.course_progress_step(timestamptz) from app_service;
+alter function private.teacher_course_students(uuid, text, integer) stable;
+select ok(pruebas.cp_con('teacher course students door missing or wrong'), 'una lectura que no es volátil no puede crear los alias');
+alter function private.teacher_course_students(uuid, text, integer) volatile;
 select pruebas.restaurar('noche');
 do $$ begin execute replace((select d from definiciones where k = 'noche'), 'perform private.course_progress_step();', 'perform 1;'); end $$;
 select ok(pruebas.cp_con('nightly rollup does not build the course progress'), 'una noche que no guarda el resumen');
