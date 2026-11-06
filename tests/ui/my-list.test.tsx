@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,7 +60,7 @@ describe("el botón de guardar (PA-02, PA-21)", () => {
     const pending = await screen.findByRole("button", { name: "Guardando…" });
     expect(pending).toHaveAttribute("aria-disabled", "true");
     expect(pending).toBeEnabled();
-    expect(pending).toHaveFocus();
+    await waitFor(() => expect(pending).toHaveFocus());
     await user.click(pending);
     expect(sent).toEqual(["save:respirar"]);
 
@@ -68,7 +68,7 @@ describe("el botón de guardar (PA-02, PA-21)", () => {
     // La página se vuelve a pedir y dice que ya está guardado.
     rerender(button({ action, saved: true }));
     const remove = screen.getByRole("button", { name: "Quitar de mi lista: Respirar" });
-    expect(remove).toHaveFocus();
+    await waitFor(() => expect(remove).toHaveFocus());
     expect(remove).not.toHaveAttribute("aria-disabled");
     expect(result()).toHaveTextContent("Guardado en tu lista.");
   });
@@ -153,7 +153,7 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     expect(sent).toEqual(["remove:dos"]);
     await answer({ kind: "removed", slug: "dos", attempt: 1 });
     rerender(page(action, [A, C]));
-    expect(quitar("Tres")).toHaveFocus();
+    await waitFor(() => expect(quitar("Tres")).toHaveFocus());
     expect(quitar("Uno")).not.toHaveAttribute("aria-disabled");
     expect(result()).toHaveTextContent("Quitado de tu lista.");
   });
@@ -202,7 +202,7 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     await user.click(quitar("Uno"));
     await answer({ kind: "removed", slug: "dos", attempt: 1 });
     rerender(page(action, [A, C]));
-    expect(quitar("Tres")).toHaveFocus();
+    await waitFor(() => expect(quitar("Tres")).toHaveFocus());
   });
 
   it("si no se pudo, la tarjeta se queda, y se ve y se dice", async () => {

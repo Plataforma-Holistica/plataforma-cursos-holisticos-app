@@ -88,6 +88,15 @@ auditoría de dependencias y `build`; después de compilar instala Chromium, cor
 extremo a extremo (con el comando escrito en `ci.yml`, no con el guion de `package.json`)
 y las pruebas de base una vez más.
 
+Las pruebas de pantalla no dependen de la carga (2026-11-05). Con la batería entera corriendo a la vez que el otro
+carril, en cada corrida fallaba alguna prueba distinta que sola pasaba. Lo que las rompía era mirar algo que la pantalla
+hace un instante después de pintar: el foco que toma un aviso, el formulario que React vacía al terminar la acción, el
+título de la pantalla nueva. **Eso se mira dentro de `waitFor`**, nunca justo después de un `findBy…`, que puede encontrar
+lo de antes. `tests/setup/dom.ts` sube la espera de `findBy…` y `waitFor` a 3 s (`asyncUtilTimeout`), y cada `vi.waitFor`
+lleva `{ timeout: 3_000 }`, porque no toma esa configuración. Un texto largo se pega (`user.paste`), no se teclea. Los
+topes de tiempo que cuidan que una regla no se trabe (el filtro de Sentry y el lector de QR) dejan holgura a la carga: lo
+que retrocede tarda segundos, no cientos de milisegundos.
+
 `pnpm test:e2e` necesita tres cosas. La pila local arriba y lista (`db:start`, `db:login` y
 `db:drafts`, o `db:reset`). El puerto 3000 libre: Playwright compila la aplicación él
 mismo (`next build && next start`) y la sirve en `http://localhost:3000`, que es a donde

@@ -73,7 +73,7 @@ describe("pedir un recurso", () => {
     show(action);
     await pressFirst();
     await pressFirst();
-    await vi.waitFor(() => expect(mocks.openFile).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.openFile).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(mocks.openFile).toHaveBeenLastCalledWith("https://storage/bajar?token=2");
   });
 
@@ -124,7 +124,7 @@ describe("pedir un recurso", () => {
   it("si la sesión ya no pasa, vuelve a pedir la página, donde decide su guarda", async () => {
     show(answering({ kind: "reload", attempt: 1 }));
     await pressFirst();
-    await vi.waitFor(() => expect(mocks.reloadPage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mocks.reloadPage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
     expect(mocks.openFile).not.toHaveBeenCalled();
   });
 });

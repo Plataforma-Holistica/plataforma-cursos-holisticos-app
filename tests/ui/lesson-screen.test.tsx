@@ -312,7 +312,7 @@ describe("el lugar del reproductor", () => {
     const fails = await screen.findByRole("button", { name: "falla" });
     fails.focus();
     await user.click(fails);
-    expect(area().querySelector("[tabindex='-1']")).toHaveFocus();
+    await waitFor(() => expect(area().querySelector("[tabindex='-1']")).toHaveFocus());
   });
 
   it("PA-33 que llega al reproducir se anuncia", async () => {

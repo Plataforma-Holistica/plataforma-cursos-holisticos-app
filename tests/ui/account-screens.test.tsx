@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -109,7 +109,7 @@ describe("la pantalla de entrar (PA-11)", () => {
 
   it("cuenta suspendida: la pantalla es PA-35, sin formulario y sin sesión que cerrar", async () => {
     const { container } = await submitSignIn({ kind: "suspended" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida"));
     expect(screen.queryByLabelText("Correo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cerrar sesión" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ir al inicio" })).toHaveAttribute("href", "/");
@@ -124,7 +124,7 @@ describe("la pantalla de entrar (PA-11)", () => {
     expect(screen.getByLabelText("Correo")).not.toBeInvalid();
     await user.type(screen.getByLabelText("Correo"), "esto no es un correo");
     await user.tab();
-    expect(screen.getByLabelText("Correo")).toBeInvalid();
+    await waitFor(() => expect(screen.getByLabelText("Correo")).toBeInvalid());
     expect(screen.getByText("Ese correo no tiene forma de correo. Revísalo.")).toBeVisible();
     await user.clear(screen.getByLabelText("Correo"));
     await user.type(screen.getByLabelText("Correo"), "ana@prueba.test");
@@ -293,7 +293,7 @@ describe("la pantalla que pide lo que le falta a la cuenta (PA-15)", () => {
     render(<ConsentsScreen view={updated} returnTo="" />);
     await user.click(screen.getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida"));
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
   });
 });
@@ -335,7 +335,10 @@ describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
     await user.type(screen.getByLabelText("Nombre"), "Ana");
     await all(user);
     await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
 
     // El segundo envío tarda. Mientras, lo que dijo la respuesta anterior deja de decirse: la
     // última palabra es la revisión del navegador, que no encontró nada.
@@ -346,7 +349,7 @@ describe("PA-15: las dos cuentas de las revisiones del navegador", () => {
     await user.click(name);
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
-    expect(name).toHaveFocus();
+    await waitFor(() => expect(name).toHaveFocus());
     expect(name).not.toBeInvalid();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
@@ -388,11 +391,14 @@ describe("PA-15: el resumen vuelve a tomar el foco cuando la misma revisión fal
     const user = userEvent.setup();
     render(<ConsentsScreen view={complete} returnTo="/inicio" />);
     await user.click(screen.getByRole("button", { name: "Aceptar y seguir" }));
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
     await user.click(screen.getByLabelText("Nombre"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("alert")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
     expect(actions.completeAccountAction).not.toHaveBeenCalled();
   });
 });

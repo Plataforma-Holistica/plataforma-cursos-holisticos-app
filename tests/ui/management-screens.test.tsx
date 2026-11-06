@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -177,7 +177,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
 
   it("cuenta suspendida: la pantalla es PA-35, con «Cerrar sesión» y sin formulario", async () => {
     await saveName("Beatriz", { kind: "suspended" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida"));
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeVisible();
   });
@@ -280,7 +280,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     await screen.findByRole("alert");
     mocks.changeNameAction.mockResolvedValue({ kind: "unavailable", name: "Beatriz", attempt: 2 });
     await user.click(saveButton());
-    await vi.waitFor(() => expect(mocks.changeNameAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.changeNameAction).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(await screen.findAllByRole("alert")).toHaveLength(1);
   });
 
@@ -302,13 +302,13 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     await user.type(before, "Beatriz{Enter}");
     expect(await screen.findByText("Guardado.")).toBeVisible();
     expect(nameField()).not.toBe(before);
-    expect(nameField()).toHaveFocus();
+    await waitFor(() => expect(nameField()).toHaveFocus());
   });
 
   it("guardar desde el botón deja el foco en el botón", async () => {
     await saveName("Beatriz", { kind: "saved", name: "Beatriz", attempt: 1 });
     expect(await screen.findByText("Guardado.")).toBeVisible();
-    expect(saveButton()).toHaveFocus();
+    await waitFor(() => expect(saveButton()).toHaveFocus());
   });
 
   it("si el servicio no lo aceptó, el foco es del resumen de errores y nadie se lo quita", async () => {
@@ -317,7 +317,10 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     await user.clear(nameField());
     await user.type(nameField(), "Beatriz{Enter}");
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
   });
 
   // A dónde vuelve el formulario sin JavaScript (a esta pantalla, en su bloque) no se ve
@@ -336,7 +339,7 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(nameField()).not.toBeInvalid();
     await user.type(nameField(), "...");
     await user.tab();
-    await vi.waitFor(() => expect(nameField()).toBeInvalid());
+    await vi.waitFor(() => expect(nameField()).toBeInvalid(), { timeout: 3_000 });
     expect(screen.getByText("Ese nombre tiene caracteres que no podemos guardar. Escríbelo de nuevo.")).toBeVisible();
   });
 });
@@ -414,7 +417,7 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
   ] as const)("cerrada (%s): lo dice en el bloque, y el aviso toma el foco", async (what, message) => {
     await closeWith([here, phone], () => closeButtonOf(phone), { kind: "closed", what, attempt: 1 });
     const notice = await within(sessionsBlock()).findByText(message);
-    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    await waitFor(() => expect(notice.closest('[tabindex="-1"]')).toHaveFocus());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     // El bloque del nombre no dice nada de esto.
     expect(savedNotice()).not.toBeInTheDocument();
@@ -423,14 +426,14 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
   it("no se supo: lo dice en el bloque, con el foco, y la lista sigue como estaba", async () => {
     await closeWith([here, phone], () => closeButtonOf(phone), { kind: "unavailable", attempt: 1 });
     const notice = await within(sessionsBlock()).findByText("No pudimos hacerlo. Intenta de nuevo en un momento.");
-    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    await waitFor(() => expect(notice.closest('[tabindex="-1"]')).toHaveFocus());
     expect(within(sessionsBlock()).getAllByRole("listitem")).toHaveLength(2);
     expect(closeButtonOf(phone)).toBeEnabled();
   });
 
   it("cuenta suspendida: la pantalla entera pasa a PA-35", async () => {
     await closeWith([here, phone], closeOthers, { kind: "suspended" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida"));
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
@@ -472,7 +475,7 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
       await Promise.resolve();
     });
     const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
-    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    await waitFor(() => expect(notice.closest('[tabindex="-1"]')).toHaveFocus());
   });
 
   it("el aviso no le quita el foco a quien ya se fue a escribir a otro bloque", async () => {
@@ -513,7 +516,7 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
     await user.click(nameField());
     await user.type(nameField(), " María{Enter}");
-    await vi.waitFor(() => expect(mocks.changeNameAction).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(mocks.changeNameAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
 
     await act(async () => {
       closed({ kind: "closed", what: "one", attempt: 1 });
@@ -522,7 +525,7 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     });
     expect(await screen.findByText("Guardado.")).toBeVisible();
     expect(nameField()).toHaveValue("Ana María");
-    expect(nameField()).toHaveFocus();
+    await waitFor(() => expect(nameField()).toHaveFocus());
     // Y el cierre se le dice sin moverle el foco.
     const [, voice] = await within(sessionsBlock()).findAllByText("Cerramos esa sesión.");
     expect(voice).toHaveAttribute("role", "status");
@@ -545,8 +548,8 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     // El segundo cierre, sin irse a ningún lado: ahora el aviso sí toma el foco.
     mocks.closeSessionsAction.mockResolvedValue({ kind: "closed", what: "one", attempt: 2 });
     await user.click(closeButtonOf(other));
-    await vi.waitFor(() => expect(mocks.closeSessionsAction).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(within(sessionsBlock()).getByText("Cerramos esa sesión.").closest('[tabindex="-1"]')).toHaveFocus());
+    await vi.waitFor(() => expect(mocks.closeSessionsAction).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+    await vi.waitFor(() => expect(within(sessionsBlock()).getByText("Cerramos esa sesión.").closest('[tabindex="-1"]')).toHaveFocus(), { timeout: 3_000 });
   });
 
   it("volver a la pantalla antes de que llegue la respuesta ya no es haberse ido", async () => {
@@ -565,7 +568,7 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
       await Promise.resolve();
     });
     const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
-    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    await waitFor(() => expect(notice.closest('[tabindex="-1"]')).toHaveFocus());
   });
 
   it("si el foco está en la pantalla y en nada en particular, el aviso lo toma", async () => {
@@ -577,14 +580,14 @@ describe("el bloque de sesiones abiertas (PA-25)", () => {
     expect(await within(sessionsBlock()).findByText("Cerrando…")).toBeVisible();
     // Un clic en una zona que no es ningún control deja el foco en el contenedor de la pantalla.
     screen.getByRole("main").focus();
-    expect(screen.getByRole("main")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
 
     await act(async () => {
       finish({ kind: "closed", what: "one", attempt: 1 });
       await Promise.resolve();
     });
     const notice = await within(sessionsBlock()).findByText("Cerramos esa sesión.");
-    expect(notice.closest('[tabindex="-1"]')).toHaveFocus();
+    await waitFor(() => expect(notice.closest('[tabindex="-1"]')).toHaveFocus());
   });
 
   it("el botón de cada fila tiene el alto de los controles del alumno, no el de administración", () => {
@@ -829,7 +832,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
   it("pasada la espera, un intento nuevo en camino deja de decir que hay que esperar", async () => {
     const { user } = await change({ kind: "throttled", retryAt: new Date(Date.now() - 1_000).toISOString(), attempt: 1 });
     await screen.findByRole("alert");
-    await vi.waitFor(() => expect(changeButton()).toBeEnabled());
+    await vi.waitFor(() => expect(changeButton()).toBeEnabled(), { timeout: 3_000 });
 
     let finish: (state: PasswordState) => void = () => undefined;
     mocks.changePasswordAction.mockReturnValue(new Promise<PasswordState>((resolve) => (finish = resolve)));
@@ -859,7 +862,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
 
   it("cuenta suspendida: la pantalla entera pasa a PA-35", async () => {
     await change({ kind: "suspended" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tu cuenta está suspendida"));
     expect(screen.queryByLabelText("Contraseña actual")).not.toBeInTheDocument();
   });
 
@@ -954,7 +957,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
     await user.type(before, `${NEW}{Enter}`);
     expect(await screen.findByText(CHANGED)).toBeVisible();
     expect(newField()).not.toBe(before);
-    expect(newField()).toHaveFocus();
+    await waitFor(() => expect(newField()).toHaveFocus());
   });
 
   it("si el servicio no lo aceptó, el foco es del resumen de errores", async () => {
@@ -963,7 +966,10 @@ describe("el bloque de la contraseña (PA-25)", () => {
     render(<AccountScreen name="Ana" email={null} sessions={ALONE} />);
     await user.type(currentField(), OLD);
     await user.type(newField(), `${NEW}{Enter}`);
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
   });
 
   it("al salir de la contraseña nueva, una que no cumple la regla se marca; la actual no se revisa al salir", async () => {
@@ -975,7 +981,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
     await user.tab();
     expect(newField()).not.toBeInvalid();
     await user.tab();
-    await vi.waitFor(() => expect(newField()).toBeInvalid());
+    await vi.waitFor(() => expect(newField()).toBeInvalid(), { timeout: 3_000 });
     expect(newField()).toHaveAccessibleDescription(expect.stringContaining("Tu contraseña necesita 8 caracteres o más."));
     expect(currentField()).not.toBeInvalid();
   });
@@ -1007,7 +1013,7 @@ describe("el bloque de la contraseña (PA-25)", () => {
       // El botón que se pulsó ya no existe: el foco lo toma la nota, que es además lo que se
       // lo dice a quien usa lector de pantalla. Sin eso caería al documento. Lo toma en un
       // efecto, que corre un instante después de pintar: se espera, no se supone.
-      await vi.waitFor(() => expect(note).toHaveFocus());
+      await vi.waitFor(() => expect(note).toHaveFocus(), { timeout: 3_000 });
       // Con el foco en la nota, no hace falta decirlo además por la región viva.
       expect(within(block()).getByRole("status")).toBeEmptyDOMElement();
       expect(await a11yViolations(container)).toEqual([]);
@@ -1032,11 +1038,11 @@ describe("el bloque de la contraseña (PA-25)", () => {
         await Promise.resolve();
       });
       expect(await within(block()).findByText(NOTE, { selector: "p" })).toBeVisible();
-      expect(nameField()).toHaveFocus();
+      await waitFor(() => expect(nameField()).toHaveFocus());
       expect(nameField()).toHaveValue("Ana María");
       // Pero se entera: se lo dice una región viva que existía desde antes de la respuesta.
       // Es el mismo elemento: una región que nace con su texto no siempre se anuncia.
-      await vi.waitFor(() => expect(within(block()).getByRole("status")).toHaveTextContent(NOTE));
+      await vi.waitFor(() => expect(within(block()).getByRole("status")).toHaveTextContent(NOTE), { timeout: 3_000 });
       expect(within(block()).getByRole("status")).toBe(voice);
     });
   });

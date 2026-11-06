@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Lanza procesos aparte (git y node): con la batería entera corriendo y la máquina cargada pasaban de los
+// 5 s de fábrica sin que nada estuviera roto. El mismo tope que las pruebas de integración.
+vi.setConfig({ testTimeout: 20_000 });
 
 // El guion que comprueba el orden de las migraciones (ola 0), contra un repositorio de git de
 // verdad, temporal: una base con dos migraciones y una rama que agrega, edita o borra.
