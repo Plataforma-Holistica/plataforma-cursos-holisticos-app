@@ -978,6 +978,17 @@ que no se ve leyendo un solo archivo:
   pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno (también en `tests/e2e/equipo/catalogo.equipo.ts`, por la revisión del diff). El visitante
   no lleva el margen de abajo que reserva la barra inferior del alumno. Las posiciones de las prácticas no tienen huecos (una nueva va al final y reordenar intercambia dos), así
   que la alternancia de las fotos sigue el orden del catálogo. Para el A: `ShelfTeacher` ganó un campo.
+- **Lo que T-614 suma al carril B** (quinta parte, la lección, sin migración; PA-22; decisiones de Sergio del 2026-11-05: la barra del alumno completa, con la de abajo en el
+  teléfono, y antes de «Reproducir» la portada generada del curso detrás del botón). La página de la lección pinta `StudentNav` y lee además la ficha del curso del catálogo
+  (`coursePage`, pública y recordada 30 s) junto con el acceso: de ahí salen «Volver al curso» (a PA-02, ya no al inicio), el enlace del maestro (solo con `teacherSlug`) y la
+  portada (`CourseCover`, con un velo del 55 %). Si la ficha no se pudo leer, la lección se ve igual, sin enlace al maestro ni portada. **Esa lectura no decide nada de quién ve
+  qué:** el acceso sigue siendo `lessonAccess`, y la función única de medios no cambió. **La barra inferior se retira con el reproductor a pantalla completa propia:** la
+  utilidad `student-bottom-bar` (`src/ui/theme.css`) la oculta bajo `.player-locked`, porque en el iPhone ese modo vive dentro de la capa de la sección pegada y la barra
+  quedaba encima del video; `tests/design/theme.test.ts` exige que la regla y la clase sigan atadas, y el extremo a extremo del iPhone (`leccion.equipo.ts`) que se vaya y
+  vuelva. Cambió por el requisito ese extremo a extremo: llegaba al inicio con «Volver al inicio» y ahora llega por la barra del alumno. Usa `tests/ui/lesson-page.test.tsx`
+  (también sin la ficha) y casos nuevos en `tests/ui/lesson-screen.test.tsx`. Sin cambio, a propósito: la ficha se lee después de la lección, a la par del acceso, y no junto con la lección; un curso no listado con
+  una lección visible lleva «Volver al curso» a PA-19; la portada se va al pulsar «Reproducir». Decisiones mías sin confirmar: leer la ficha del catálogo en vez de sumar
+  columnas a la consulta de la lección, y el velo al 55 %. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
