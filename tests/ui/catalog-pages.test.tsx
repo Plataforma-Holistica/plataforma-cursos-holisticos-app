@@ -134,7 +134,7 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(within(syllabus).getByRole("link", { name: "Lección 2, La postura, 7 min, requiere suscripción" })).toHaveAttribute("href", lesson(L2));
     expect(screen.getByRole("link", { name: "Ver la ficha de Ana Robles" })).toHaveAttribute("href", "/maestros/ana-robles");
     // Sin sesión no hay barra del alumno, ni avance, ni pregunta de acceso.
-    expect(screen.queryByRole("navigation", { name: "Principal" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Inicio" })).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(mocks.lessonAccess).not.toHaveBeenCalled();
     expect(mocks.courseStanding).not.toHaveBeenCalled();
@@ -202,6 +202,29 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Respirar para dormir");
     expect(screen.queryByRole("link", { name: /Suscribirme|Empezar|Verlo sin costo/ })).toBeNull();
     expect(mocks.lessonAccess).not.toHaveBeenCalled();
+  });
+
+  it("al visitante, la barra y el pie del sitio público, sólida (sin foto debajo) y sin repetir el deslinde (T-614)", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+    render(await CourseRoute(params("respirar")));
+    // La barra del sitio público (la ficha tiene además su propio `<header>` dentro del contenido).
+    const bar = screen.getByRole("link", { name: "Crear cuenta" }).closest("header") as HTMLElement;
+    expect(bar).toHaveAttribute("data-solid", "true");
+    expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
+    expect(within(bar).getByRole("link", { name: "Crear cuenta" })).toHaveAttribute("href", "/registro");
+    const footer = screen.getByRole("contentinfo");
+    expect(within(footer).getByRole("link", { name: "Términos y condiciones" })).toBeInTheDocument();
+    expect(screen.getAllByText(DISCLAIMER)).toHaveLength(1);
+  });
+
+  it("al alumno, su barra con el logotipo, y sin la barra ni el pie del sitio público", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+    mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+    mocks.courseStanding.mockResolvedValue({ kind: "unavailable" });
+    render(await CourseRoute(params("respirar")));
+    expect(screen.getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/inicio");
+    expect(screen.queryByRole("link", { name: "Crear cuenta" })).toBeNull();
+    expect(screen.queryByRole("contentinfo")).toBeNull();
   });
 
   it("el deslinde (RF-809) va al pie, sea quien sea el que mira", async () => {
@@ -274,7 +297,7 @@ describe("la ficha de un maestro (PA-03)", () => {
   it("su nombre, sus prácticas, su semblanza y sus cursos", async () => {
     mocks.teacherPage.mockResolvedValue({
       kind: "found",
-      teacher: { slug: "ana-robles", name: "Ana Robles", bio: "Enseña a respirar.", practices: ["Meditación"], courseCount: 1 },
+      teacher: { slug: "ana-robles", name: "Ana Robles", bio: "Enseña a respirar.", practices: ["Meditación"], tone: 3, practicePosition: 1, courseCount: 1 },
       courses: [COURSE],
     });
     const { container } = render(await TeacherRoute(params("ana-robles")));
@@ -283,15 +306,45 @@ describe("la ficha de un maestro (PA-03)", () => {
     expect(screen.getByText("Enseña a respirar.")).toBeVisible();
     const courses = screen.getByRole("region", { name: "Cursos de Ana Robles" });
     expect(within(courses).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
-    expect(screen.queryByRole("navigation", { name: "Principal" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Inicio" })).toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin retrato, la foto de ambiente de su primera práctica, decorativa (T-614); sin práctica, la inicial", async () => {
+    mocks.teacherPage.mockResolvedValue({
+      kind: "found",
+      teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: ["Meditación"], tone: 3, practicePosition: 1, courseCount: 1 },
+      courses: [COURSE],
+    });
+    const { container, unmount } = render(await TeacherRoute(params("ana-robles")));
+    const photo = container.querySelector("main header img");
+    expect(photo).toHaveAttribute("alt", "");
+    expect(photo?.getAttribute("src")).toMatch(/practica-/);
+    unmount();
+    mocks.teacherPage.mockResolvedValue({
+      kind: "found",
+      teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: [], tone: null, practicePosition: null, courseCount: 1 },
+      courses: [COURSE],
+    });
+    const again = render(await TeacherRoute(params("ana-robles")));
+    expect(again.container.querySelector("main header img")).toBeNull();
+    expect(within(again.container.querySelector("main header") as HTMLElement).getByText("A")).toBeInTheDocument();
+  });
+
+  it("al visitante, la barra y el pie del sitio público (T-614)", async () => {
+    mocks.teacherPage.mockResolvedValue({ kind: "found", teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: [], tone: null, practicePosition: null, courseCount: 1 }, courses: [COURSE] });
+    render(await TeacherRoute(params("ana-robles")));
+    expect(screen.getByRole("link", { name: "Crear cuenta" }).closest("header")).toHaveAttribute("data-solid", "true");
+    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
   });
 
   it("al alumno le pinta su barra", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
-    mocks.teacherPage.mockResolvedValue({ kind: "found", teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: [], courseCount: 1 }, courses: [COURSE] });
+    mocks.teacherPage.mockResolvedValue({ kind: "found", teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: [], tone: null, practicePosition: null, courseCount: 1 }, courses: [COURSE] });
     render(await TeacherRoute(params("ana-robles")));
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Inicio" })).toBeVisible();
+    expect(screen.queryByRole("contentinfo")).toBeNull();
   });
 
   it("un maestro que no existe, o sin cursos, contesta lo mismo que una ruta que no existe", async () => {

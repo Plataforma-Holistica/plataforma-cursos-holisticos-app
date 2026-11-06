@@ -8,8 +8,6 @@ import { defineMessages } from "../format";
 export const browse = defineMessages({
   nav: {
     label: "Principal",
-    // El nombre del producto, como marca de la barra, mientras no haya logotipo (PQ-13).
-    brand: "{Plataforma}",
     home: "Inicio",
     explore: "Explorar",
     account: "Cuenta",

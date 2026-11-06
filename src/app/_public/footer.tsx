@@ -7,7 +7,8 @@ import { Wordmark } from "@/ui/wordmark";
 
 // El pie del sitio público (`Footer`, diseño, sección 5; T-614, parte 2): los textos legales que ya
 // tienen página, «Entrar» y el deslinde. Comunidad, Reembolsos, Ayuda y Para maestros entran cuando
-// existan sus pantallas (T-606).
+// existan sus pantallas (T-606). Una página que ya pinta el deslinde al final (las fichas) lo pide sin él
+// (`withDisclaimer`), para no decirlo dos veces.
 
 const text = landing.footer;
 
@@ -16,7 +17,7 @@ const LEGAL = [
   { docType: "student_privacy_notice", label: text.privacy },
 ] as const;
 
-export function PublicFooter() {
+export function PublicFooter({ withDisclaimer = true }: { withDisclaimer?: boolean }) {
   return (
     <footer className="border-t border-border bg-surface-1">
       <div className="mx-auto flex max-w-page flex-col gap-6 px-4 py-10 sm:px-8">
@@ -40,7 +41,7 @@ export function PublicFooter() {
             </li>
           </ul>
         </nav>
-        <Disclaimer />
+        {withDisclaimer && <Disclaimer />}
       </div>
     </footer>
   );
