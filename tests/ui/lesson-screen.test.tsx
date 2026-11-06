@@ -297,11 +297,19 @@ describe("el lugar del reproductor", () => {
   });
 
   it("la acción que manda a la página (la sesión ya no pasa) no se toma por un error", async () => {
-    actions.watchLessonAction.mockRejectedValueOnce(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+    // El rechazo se suelta a mano y se deja correr una vuelta entera antes de mirar: si se mira en cuanto se llamó la
+    // acción, todavía no se procesó, y la prueba pasaría aunque la pantalla lo tomara por un error.
+    let reject: (error: unknown) => void = () => undefined;
+    actions.watchLessonAction.mockReturnValueOnce(new Promise((_, fail) => (reject = fail)));
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
     await waitFor(() => expect(actions.watchLessonAction).toHaveBeenCalledOnce());
-    expect(screen.queryByText("Algo falló de nuestro lado. No es por algo que hayas hecho.")).toBeNull();
+    await act(async () => {
+      reject(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+      await new Promise((settled) => setTimeout(settled, 0));
+    });
+    expect(screen.queryAllByText("Algo falló de nuestro lado. No es por algo que hayas hecho.")).toHaveLength(0);
+    expect(screen.getByText("Preparando tu lección…")).toBeInTheDocument();
   });
 
   it("al terminar: «Lección terminada», la siguiente y volver a ver, sin arrancar sola (D-07)", async () => {

@@ -232,7 +232,8 @@ describe("cambios sin guardar", () => {
     const { user } = show();
     await user.type(screen.getByRole("textbox", { name: "Título del curso" }), " más");
     await user.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(actions.editorAction).toHaveBeenCalled());
+    // Se mira después de pintar la respuesta: antes de que llegue, la marca sigue aunque la respuesta la fuera a quitar.
+    expect(await screen.findAllByText(/puede tener hasta/)).not.toHaveLength(0);
     expect(screen.getByText("Cambios sin guardar")).toBeTruthy();
   });
 
