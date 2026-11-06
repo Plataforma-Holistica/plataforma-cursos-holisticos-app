@@ -143,6 +143,18 @@ afterAll(async () => {
     // Todos los pedidos de la prueba son de esta persona de finanzas, también los que un caso fallido dejó.
     await owner.query("delete from private.rollup_requests where requested_by = $1", [finance.person.id]);
     await owner.query("delete from public.job_runs where period_id = $1 and started_at >= now() - interval '1 hour'", [current]);
+    // Las corridas del estimado de los maestros (T-408) que dejó el corredor de pedidos al consolidar el mes en curso, igual.
+    await owner.query(
+      `delete from private.teacher_period_course_figures f using private.teacher_estimate_runs r
+       where r.id = f.run_id and r.period_id = $1 and r.started_at >= now() - interval '1 hour'`,
+      [current],
+    );
+    await owner.query(
+      `delete from private.teacher_period_estimates e using private.teacher_estimate_runs r
+       where r.id = e.run_id and r.period_id = $1 and r.started_at >= now() - interval '1 hour'`,
+      [current],
+    );
+    await owner.query("delete from private.teacher_estimate_runs where period_id = $1 and started_at >= now() - interval '1 hour'", [current]);
     await owner.query(
       "delete from public.payout_status_events where payout_id in (select id from public.payouts where period_id = any($1::int[]))",
       [OURS],

@@ -4,16 +4,19 @@ import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
 import { readNotice } from "@/services/account/notice";
+import { teacherDashboard } from "@/services/teachers/dashboard-data";
 import { taxProfileState } from "@/services/teachers/tax-data";
 import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { clabeWaitingText } from "./_fiscal/clabe-wait";
+import { dashboardView } from "./_inicio/outcomes";
+import { DashboardPanel, DashboardUnavailable } from "./_inicio/screen";
 import { PortalFrame } from "./_lib/frame";
 
-// El inicio del portal del maestro (`/portal`, T-401), en su versión mínima: el panel con cifras llega con
-// T-408. A quien no es maestro le contesta lo mismo que una ruta que no existe, y por eso no exporta `metadata`.
-// Un maestro suspendido ve aquí el texto que se escribió para él, nunca el motivo interno.
+// El inicio del portal del maestro (`/portal`): el panel, PA-41 (T-401 y T-408). Primero la guarda; después los avisos (lo aceptado, la cuenta en solo
+// lectura con el texto que se escribió para el maestro y nunca el motivo interno, los datos fiscales y la CLABE) y el panel. A quien no es maestro le
+// contesta lo mismo que una ruta que no existe, y por eso no exporta `metadata`. Si el panel no se pudo leer, los avisos siguen y el panel lo dice.
 
 const text = messages.portal.home;
 
@@ -27,7 +30,9 @@ export default async function PortalHomePage() {
   const notice = readNotice(await cookieReader());
   const suspended = step.teacher.status === "suspended";
   // FL-31, E2: sin ellos no se le puede pagar. «No se supo» no se dice como que faltan. Se le dice también a un suspendido, salvo por fraude.
-  const taxData = await taxProfileState(step.claims);
+  const [taxData, dashboard] = await Promise.all([taxProfileState(step.claims), teacherDashboard(step.claims)]);
+  // Quien ya no es maestro para la base (se fue entre la guarda y la lectura) no tiene panel: se le dice como «no se supo», y la guarda decide al reintentar.
+  const panel = dashboard.kind === "ready" && dashboard.value.outcome === "ok" ? dashboardView(dashboard.value.value, taxData, suspended) : null;
   return (
     <PortalFrame current={ROUTES.portal} readOnly={suspended}>
       <h1 className="text-h1">{text.title}</h1>
@@ -51,10 +56,7 @@ export default async function PortalHomePage() {
           {messages.portal.taxData.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{messages.portal.taxData.clabeRecaptureLink}</TextLink>
         </InlineAlert>
       )}
-      <p className="text-text-2">{text.intro}</p>
-      <p>
-        <TextLink href={ROUTES.portalCourses}>{text.courses}</TextLink>
-      </p>
+      {panel === null ? <DashboardUnavailable /> : <DashboardPanel view={panel} />}
     </PortalFrame>
   );
 }

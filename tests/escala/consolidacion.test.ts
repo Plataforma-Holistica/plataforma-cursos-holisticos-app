@@ -14,7 +14,8 @@ import { assertPlainWindow } from "../integration/helpers/periods";
 // propio reloj cada paso del recálculo completo (RF-408) con el consolidado vacío y lleno, sin
 // `analyze` y con él, sin `vacuum` y con él; la selección de antes, en una muestra del cursor; la
 // selección sin el blindaje del plan, con plan genérico; una noche normal con 10 000 pares marcados
-// (`nightly_rollup()` entero) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
+// (`nightly_rollup()` entero, que desde T-408 trae el estimado de los maestros, y el paso del estimado
+// solo) y `detect_anomalies`. Y comprueba que el recálculo completo deja el mismo
 // consolidado que pasar todos los pares por el modo marcado. Al final, sobre ese mes, el reparto (que
 // tiene que caber en el tope de una sentencia del servidor) y el ensayo y el cierre (que se miden).
 //
@@ -38,6 +39,9 @@ const SAMPLE = 20;
 // 15 minutos se da por muerta (T-207), así que ningún paso puede pasar de ahí.
 const FULL_LIMIT_MS = 30 * 60_000;
 const BEAT_LIMIT_MS = 15 * 60_000;
+// El paso del estimado de los maestros (T-408), solo: el reparto que repite tiene que caber en los 10 s del servidor, y el paso suma sus escrituras
+// (una fila por maestro y por curso). Con 20 s de tope le queda el doble, y una regresión que lo haga crecer con los alumnos se ve.
+const ESTIMATE_STEP_LIMIT_MS = 20_000;
 
 // Dónde dejar las cifras: lo pasa `scripts/test-escala.mjs`.
 const REPORT_PATH = process.env.ESCALA_REPORT;
@@ -480,6 +484,43 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
       [since],
     );
     expect(transition).toEqual({ status: "succeeded", error: null });
+
+    // El estimado de los maestros (T-408) corrió dentro de esa noche, en su propia corrida: bien, sin falla anotada en la consolidación. Y el paso
+    // solo, medido con su propio reloj en una transacción que se deshace.
+    expect(runs.some((run) => run.period_id === period)).toBe(true);
+    const noted = await one<{ failed: string | null }>(
+      "select details ->> 'teacher_estimates_failed' as failed from public.job_runs where job = 'nightly_rollup' and period_id = $1 and started_at >= $2::timestamptz",
+      [period, since],
+    );
+    expect(noted.failed).toBeNull();
+    const estimate = await one<{ status: string; error: string | null; teachers: string; courses: string }>(
+      `select r.status, r.error,
+              (select count(*) from private.teacher_period_estimates e where e.run_id = r.id) as teachers,
+              (select count(*) from private.teacher_period_course_figures f where f.run_id = r.id) as courses
+       from private.teacher_estimate_runs r where r.period_id = $1 and r.started_at >= $2::timestamptz order by r.started_at desc limit 1`,
+      [period, since],
+    );
+    expect(estimate).toMatchObject({ status: "succeeded", error: null });
+    // Una fila por maestro con puntos de alumnos con base (los que entran al reparto).
+    const withPoints = await one<{ n: string }>(
+      `select count(distinct r.teacher_id) as n from public.watch_rollup r
+       join private.close_input_students($1) s on s.profile_id = r.profile_id
+       where r.period_id = $1 and r.half_points > 0`,
+      [period],
+    );
+    expect(estimate.teachers).toBe(withPoints.n);
+    let stepMs = 0;
+    await tx(async () => {
+      const start = performance.now();
+      const step = await one<{ r: { outcome: string } }>("select private.teacher_estimates_step($1) as r", [period]);
+      stepMs = ms(start);
+      expect(step.r.outcome).toBe("estimated");
+      throw new Error("deshacer");
+    }).catch((error: Error) => {
+      if (error.message !== "deshacer") throw error;
+    });
+    report.teacher_estimates = { step_ms: stepMs, limit_ms: ESTIMATE_STEP_LIMIT_MS, teachers: Number(estimate.teachers), course_rows: Number(estimate.courses) };
+    expect(stepMs).toBeLessThan(ESTIMATE_STEP_LIMIT_MS);
   });
 });
 
