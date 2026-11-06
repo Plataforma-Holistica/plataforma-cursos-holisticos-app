@@ -964,7 +964,9 @@ que no se ve leyendo un solo archivo:
   segundo factor (dar el código y configurar) y los consentimientos. Los estados de pantalla completa (cuenta suspendida, «no se supo», un enlace que ya no sirve, el segundo factor
   sin atar) siguen sin marco. `tests/ui/access-frame.test.tsx` lee cada página y exige el marco donde va. Por el marco hay un enlace más en la página (el logotipo), y la prueba de
   «Completa tu cuenta» que contaba enlaces mira ahora solo los del `<main>`. Medido en desarrollo: el formulario queda en la primera pantalla del teléfono, y el logotipo da 5.43 o más
-  contra lo más claro de la foto (al 55 % daba 3.83, sobre las nubes). Para el A: nada que le toque.
+  contra lo más claro de la foto (al 55 % daba 3.83, sobre las nubes). De la revisión del diff: el logotipo es la segunda parada del teclado en esas pantallas, después de
+  «Saltar al contenido» (la prueba de entrar con el teclado lo dice), y la columna del formulario lleva `lg:*:w-full`, porque en una columna flexible el `mx-auto` de cada `<main>`
+  lo encogía a su contenido. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

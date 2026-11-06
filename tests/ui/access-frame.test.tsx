@@ -32,9 +32,9 @@ describe("AccessFrame", () => {
     expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
   });
 
-  it("la foto no carga antes que el formulario: es decorativa", () => {
-    const { container } = render(<AccessFrame>{<Form />}</AccessFrame>);
-    expect(container.querySelector("img")).toHaveAttribute("loading", "lazy");
+  it("en computadora, cada pantalla ocupa el ancho de su columna: en una columna flexible se encogería", () => {
+    render(<AccessFrame>{<Form />}</AccessFrame>);
+    expect(screen.getByRole("main").parentElement).toHaveClass("lg:*:w-full");
   });
 
   it("sin foto: el logotipo y el formulario, sin ninguna imagen", () => {
@@ -70,6 +70,8 @@ describe("las pantallas de acceso usan el marco", () => {
     ["verificar/[token]", "CompleteScreen"],
   ])("%s, con la foto", (path, screenName) => {
     const code = pageOf(path);
+    const uses = [...code.matchAll(new RegExp(`<${screenName}\\b`, "g"))];
+    expect(uses.length, `${path} pinta ${screenName}`).toBeGreaterThan(0);
     for (const use of code.matchAll(new RegExp(`<${screenName}\\b`, "g"))) {
       const before = code.slice(0, use.index);
       expect(before.lastIndexOf("<AccessFrame>"), `${path}: ${screenName} dentro del marco con foto`).toBeGreaterThan(before.lastIndexOf("</AccessFrame>"));

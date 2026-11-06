@@ -46,7 +46,8 @@ export function AccessFrame({ photo = true, children }: { photo?: boolean; child
           <Brand />
         </div>
       </div>
-      <div className="lg:flex lg:flex-col lg:justify-center">{children}</div>
+      {/* Centrado en el alto. `*:w-full`: en una columna flexible, el `mx-auto` de cada `<main>` lo encogería a su contenido. */}
+      <div className="lg:flex lg:flex-col lg:justify-center lg:*:w-full">{children}</div>
     </div>
   );
 }

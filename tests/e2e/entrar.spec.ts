@@ -152,9 +152,12 @@ test("una cuenta cuya contraseña no se fijó desde su buzón no entra: se le ma
 test("se puede entrar solo con el teclado", async ({ page }) => {
   const ana = await person();
   await page.goto("/entrar");
-  // Lo primero que encuentra el teclado es «Saltar al contenido»; lo siguiente, el correo.
+  // Lo primero que encuentra el teclado es «Saltar al contenido»; después, el logotipo del marco de acceso
+  // (T-614), que lleva a la portada; lo siguiente, el correo.
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Saltar al contenido" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("banner").getByRole("link", { name: "La Plataforma" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Correo")).toBeFocused();
   await page.keyboard.type(ana.email);
