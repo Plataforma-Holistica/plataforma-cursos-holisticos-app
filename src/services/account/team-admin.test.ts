@@ -219,7 +219,8 @@ describe("el código que se dicta", () => {
   // La emergencia no pasa por la aplicación: quien opera la base saca el código y su huella
   // de un guion, que no puede importar este archivo. Si aquí cambia la forma del código o
   // cómo se le saca la huella, el guion tiene que cambiar igual, y esto es lo que avisa.
-  it("el guion de la emergencia imprime un código con esa misma forma y la huella que aceptar calculará", () => {
+  // Lanza el guion en un proceso aparte: con la máquina cargada pasaba de los 5 s de fábrica.
+  it("el guion de la emergencia imprime un código con esa misma forma y la huella que aceptar calculará", { timeout: 20_000 }, () => {
     const printed = execFileSync(process.execPath, ["scripts/team-handoff.mjs"], { encoding: "utf8" });
     const code = /^Código para dictar: (\S+)$/m.exec(printed)?.[1] ?? "";
     const print = /^Huella para la sentencia: (\S+)$/m.exec(printed)?.[1] ?? "";

@@ -118,7 +118,7 @@ describe("arrastrar con el teclado", () => {
     const failure = await screen.findByText(/Esto cambió mientras lo veías/);
     expect(voice()).not.toContain("Soltaste");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(failure.closest("[tabindex='-1']")).toHaveFocus();
+    await waitFor(() => expect(failure.closest("[tabindex='-1']")).toHaveFocus());
   });
 
   it("quien se fue a otro campo mientras se guardaba se queda ahí", async () => {
