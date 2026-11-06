@@ -9,7 +9,7 @@
 -- en que corre; el panel lee el mes en curso, que se limpia de corridas de estimado al empezar.
 begin;
 \ir _ayuda.psql
-select plan(112);
+select plan(117);
 
 select pruebas.alta('a8200000-0000-0000-0000-000000000001', 'tere-82@prueba.test');
 select pruebas.alta('a8200000-0000-0000-0000-000000000002', 'beto-82@prueba.test');
@@ -436,6 +436,10 @@ select pruebas.datos(204507);
 insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
 values ('nightly_rollup', 204507, 'running', now() - interval '1 hour', clock_timestamp() - interval '20 minutes', '{"mode": "full"}');
 select is(pruebas.paso(204507) ->> 'outcome', 'estimated', 'una caída, sin latido, no la detiene');
+-- Otro trabajo del periodo vivo, con latido, no es una consolidación: tampoco la detiene.
+insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, details)
+values ('period_transition', 204507, 'running', now() - interval '1 minute', clock_timestamp(), '{}');
+select is(pruebas.paso(204507) ->> 'outcome', 'estimated', 'otro trabajo vivo del periodo no la detiene');
 -- Un periodo de la ventana sin fila (en una base nueva, antes del primer paso a cierre) también se estima: no hay nada que tomar ni que cerrar.
 select pruebas.consolidado(204512, 'succeeded');
 select is(pruebas.paso(204512) - 'run_id', '{"outcome": "estimated", "teachers": 0}'::jsonb, 'un periodo sin fila que se consolidó, se estima');
@@ -471,6 +475,18 @@ select is(pruebas.serie(pruebas.beto()), array[pruebas.mes_anterior() || ':' || 
   'Beto no publicó: solo el periodo en que tiene cifra');
 select is((select array_agg(distinct k order by k) from jsonb_array_elements(pruebas.panel(pruebas.tere()) -> 'series') x, jsonb_object_keys(x) k),
   array['cents', 'estimated', 'period_id'], 'cada barra trae una lista cerrada de claves');
+-- El mes en curso, abierto y con estimado de Tere, va en sus cifras y no en la serie.
+select pruebas.forzar(pruebas.mes_en_curso(), 'open');
+with corrida as (
+  insert into private.teacher_estimate_runs (period_id, input_hash, status, started_at, finished_at)
+  values (pruebas.mes_en_curso(), '\x01', 'succeeded', now(), clock_timestamp()) returning id)
+insert into private.teacher_period_estimates (run_id, period_id, teacher_id, half_points, assigned_cents, full_lessons, half_lessons, students)
+select c.id, pruebas.mes_en_curso(), pruebas.m(1), 2, 500, 1, 0, 1 from corrida c;
+select ok(exists (select 1 from private.teacher_period_estimates e
+                  where e.run_id = (private.teacher_estimate_last_run(pruebas.mes_en_curso(), true)).id and e.teacher_id = pruebas.m(1)),
+  'Tere tiene estimado en el mes en curso');
+select ok(not exists (select 1 from unnest(pruebas.serie(pruebas.tere())) s where s like pruebas.mes_en_curso() || ':%'),
+  'pero el mes en curso no va en la serie');
 -- Un periodo en cierre sin ninguna corrida buena: su barra, sin cifra.
 select pruebas.forzar(204504, 'closing', 6, 6000);
 select is(pruebas.serie(pruebas.tere()), array[
@@ -500,6 +516,12 @@ select is(pruebas.vigila_todo(), '{}'::text[], 'ni el vigilante entero');
 grant select on private.teacher_period_estimates to app_service;
 select ok(pruebas.vigila_con('teacher estimates table reachable by app_service'), 'un permiso de más se ve');
 revoke select on private.teacher_period_estimates from app_service;
+grant truncate on private.teacher_estimate_runs to app_service;
+select ok(pruebas.vigila_con('teacher estimates table reachable by app_service'), 'también uno que no es de columnas');
+revoke truncate on private.teacher_estimate_runs from app_service;
+grant select (teacher_id) on private.teacher_period_course_figures to app_service;
+select ok(pruebas.vigila_con('teacher estimates table reachable by app_service'), 'y uno de una sola columna');
+revoke select (teacher_id) on private.teacher_period_course_figures from app_service;
 alter table private.teacher_estimate_runs disable row level security;
 select ok(pruebas.vigila_con('teacher estimates table without row security'), 'y una tabla sin seguridad por fila');
 alter table private.teacher_estimate_runs enable row level security;
