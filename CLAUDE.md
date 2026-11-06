@@ -976,6 +976,17 @@ que no se ve leyendo un solo archivo:
   contra lo más claro de la foto (al 55 % daba 3.83, sobre las nubes). De la revisión del diff: el logotipo es la segunda parada del teclado en esas pantallas, después de
   «Saltar al contenido» (la prueba de entrar con el teclado lo dice), y la columna del formulario lleva `lg:*:w-full`, porque en una columna flexible el `mx-auto` de cada `<main>`
   lo encogía a su contenido. Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (cuarta parte, el inicio y las fichas, sin migración; decisiones de Sergio del 2026-11-05: prácticas cortas lado a lado, la cabecera del inicio
+  alterna el faro y las estrellas una por día, y el maestro sin retrato lleva la foto de su primera práctica en su ficha y en su tarjeta). **Qué foto toca** lo dice
+  `src/ui/photos/choice.ts`, puro: `practicePhoto(posición)` alterna las dos por el orden de la práctica en PA-67 (la misma práctica, siempre la misma), y `homeHeaderPhoto(fecha)` alterna
+  por día de la Ciudad de México. Para eso `ShelfTeacher` trae `practicePosition`, y `TeacherCard` la pide. **Las prácticas lado a lado:** `layOutRows` (`src/app/_catalog/rows.ts`,
+  puro) junta dos seguidas de a lo más `SHORT_ROW` (2) cursos, sin cambiar su orden, y `PracticeRows` las pinta, en el inicio y en explorar sin filtro; cada una sigue siendo su
+  carrusel. El saludo del inicio va sobre su franja (`data-home-header`). La barra del alumno lleva el `Wordmark` (`browse.nav.brand` se fue). **`PublicHeader` tiene dos variantes:**
+  `overPhoto` (la portada, transparente y fija al desplazar) y sólida (`sticky`), que es la de las fichas para el visitante; `PublicFooter` va ahí sin el deslinde
+  (`withDisclaimer={false}`), porque la ficha del curso ya lo pinta al final. A quien no se sabe quién es, ni la barra del alumno ni la pública. Cambiaron por el requisito dos
+  pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno (también en `tests/e2e/equipo/catalogo.equipo.ts`, por la revisión del diff). El visitante
+  no lleva el margen de abajo que reserva la barra inferior del alumno. Las posiciones de las prácticas no tienen huecos (una nueva va al final y reordenar intercambia dos), así
+  que la alternancia de las fotos sigue el orden del catálogo. Para el A: `ShelfTeacher` ganó un campo.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

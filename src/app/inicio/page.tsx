@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 
 import { homeListAction } from "@/app/_catalog/my-list/actions";
 import { MyListBlock } from "@/app/_catalog/my-list/my-list-block";
 import { StudentNav } from "@/app/_catalog/nav";
+import { PracticeRows } from "@/app/_catalog/practice-rows";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import { requireSession } from "@/app/_lib/guard";
@@ -17,6 +19,7 @@ import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
 import { InlineAlert } from "@/ui/inline-alert";
+import { homeHeaderPhoto } from "@/ui/photos/choice";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TeacherCard } from "@/ui/teacher-card";
 import { TextLink } from "@/ui/text-link";
@@ -92,10 +95,16 @@ export default async function HomePage() {
   return (
     <>
       <StudentNav current={ROUTES.home} />
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 pt-8 pb-24 outline-none sm:pb-16">
-        <div className="flex flex-col gap-1 px-4 sm:px-8">
-          <h1 className="text-h1">{name === null ? text.greetingAnonymous : t(text.greeting, { name })}</h1>
-          {email !== null && <p className="text-body-s text-text-3">{t(messages.account.home.signedInAs, { email })}</p>}
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 pb-24 outline-none sm:pb-16">
+        {/* La franja de ambiente detrás del saludo (diseño, sección 3.12; T-614): corta, para que en el teléfono «continuar
+            viendo» siga en la primera pantalla. El faro y las estrellas se alternan, una por día (decisión de Sergio del 2026-11-05). */}
+        <div data-home-header className="relative isolate overflow-hidden">
+          <Image src={homeHeaderPhoto(new Date())} alt="" fill loading="eager" sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />
+          <span aria-hidden="true" className="absolute inset-0 bg-linear-to-b from-bg/65 to-bg" />
+          <div className="relative flex flex-col gap-1 px-4 pt-10 pb-6 sm:px-8 sm:pt-16 sm:pb-10">
+            <h1 className="text-h1">{name === null ? text.greetingAnonymous : t(text.greeting, { name })}</h1>
+            {email !== null && <p className="text-body-s text-text-2">{t(messages.account.home.signedInAs, { email })}</p>}
+          </div>
         </div>
 
         {invitationGone && (
@@ -179,17 +188,29 @@ export default async function HomePage() {
                 {shelf.shelf.newest.map(courseCard)}
               </Carousel>
             )}
-            {shelf.shelf.practices.map((row) => (
-              <Carousel key={row.slug} id={`practica-${row.slug}`} title={row.name} action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}>
-                {row.courses.map(courseCard)}
-              </Carousel>
-            ))}
+            <PracticeRows
+              rows={shelf.shelf.practices}
+              render={(row) => (
+                <Carousel key={row.slug} id={`practica-${row.slug}`} title={row.name} action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}>
+                  {row.courses.map(courseCard)}
+                </Carousel>
+              )}
+            />
             {shelf.shelf.teachers.length > 0 && (
               <Carousel id="por-maestro" title={t(text.teachersTitle)} shape="tall">
                 {shelf.shelf.teachers.map((teacher) => {
                   const href = teacherPath(teacher.slug);
                   if (href === null) return null;
-                  return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} />;
+                  return (
+                    <TeacherCard
+                      key={teacher.slug}
+                      href={href}
+                      name={teacher.name}
+                      practices={teacher.practices}
+                      tone={teacher.tone}
+                      practicePosition={teacher.practicePosition}
+                    />
+                  );
                 })}
               </Carousel>
             )}
