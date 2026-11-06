@@ -1,4 +1,5 @@
 import { requireSecondFactor } from "@/app/_lib/guard";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { RETURN_PARAM, secondFactorPath } from "@/services/account/navigation";
 
 import { SuspendedScreen, UnavailableScreen } from "../../_lib/states";
@@ -25,5 +26,9 @@ export default async function SecondFactorPage({ searchParams }: { searchParams:
   if (step.kind === "unavailable") return <UnavailableScreen retryHref={secondFactorPath(returnTo)} withSession />;
 
   if (step.view === "unbound") return <SecondFactorUnboundScreen />;
-  return <SecondFactorScreen returnTo={returnTo} />;
+  return (
+    <AccessFrame photo={false}>
+      <SecondFactorScreen returnTo={returnTo} />
+    </AccessFrame>
+  );
 }

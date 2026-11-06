@@ -957,6 +957,14 @@ que no se ve leyendo un solo archivo:
   barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. De la revisión del diff: ningún
   texto habla de precio ni de suscripción (una prueba lo exige), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
   sueltos de la barra y del pie miden `min-h-touch`. Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (tercera parte, el acceso a la cuenta, sin migración; diseño §3.12; decisiones de Sergio del 2026-11-05: franja corta en el teléfono, y PA-12 y
+  PA-15 con el logotipo y sin foto). Un marco, `src/app/(cuenta)/_lib/access-frame.tsx` (`AccessFrame`): en computadora la foto de acceso (las ondas) en media pantalla con el
+  velo del fondo al 65 % y el logotipo; en el teléfono una franja de 128 px arriba; con `photo={false}`, solo el logotipo. Solo envuelve: cada página pone dentro la pantalla de
+  siempre, que sigue pintando su `<main>`, sus textos y sus estados. Lo usan registro, entrar, recuperar y su enlace, y «Revisa tu correo» y «Completa tu cuenta»; sin foto, el
+  segundo factor (dar el código y configurar) y los consentimientos. Los estados de pantalla completa (cuenta suspendida, «no se supo», un enlace que ya no sirve, el segundo factor
+  sin atar) siguen sin marco. `tests/ui/access-frame.test.tsx` lee cada página y exige el marco donde va. Por el marco hay un enlace más en la página (el logotipo), y la prueba de
+  «Completa tu cuenta» que contaba enlaces mira ahora solo los del `<main>`. Medido en desarrollo: el formulario queda en la primera pantalla del teléfono, y el logotipo da 5.43 o más
+  contra lo más claro de la foto (al 55 % daba 3.83, sobre las nubes). Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

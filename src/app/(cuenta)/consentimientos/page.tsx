@@ -5,6 +5,7 @@ import { requireIncompleteSession } from "@/app/_lib/guard";
 import { messages } from "@/messages";
 import { accountFormFacts } from "@/services/account/account";
 import { RETURN_PARAM, ROUTES } from "@/services/account/navigation";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { slugOfDocType } from "@/services/legal/texts";
 
 import { NoCurrentTextScreen, SuspendedScreen, UnavailableScreen } from "../_lib/states";
@@ -33,5 +34,9 @@ export default async function ConsentsPage({ searchParams }: { searchParams: Pro
   if (facts.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.consents} withSession />;
 
   const view = consentsView(session.pending, facts, { slugOf: slugOfDocType, formatDate: longDate });
-  return <ConsentsScreen view={view} returnTo={returnTo} />;
+  return (
+    <AccessFrame photo={false}>
+      <ConsentsScreen view={view} returnTo={returnTo} />
+    </AccessFrame>
+  );
 }

@@ -5,6 +5,7 @@ import { longDate } from "@/app/_lib/dates";
 import { messages } from "@/messages";
 import { isLinkToken } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
+import { AccessFrame } from "@/app/(cuenta)/_lib/access-frame";
 import { slugOfDocType } from "@/services/legal/texts";
 
 import { formFacts } from "../../_lib/link-facts";
@@ -38,5 +39,9 @@ export default async function CompletePage({ params }: { params: Promise<{ token
   const self = `${ROUTES.verify}/${token}`;
   if (facts.kind === "unavailable") return <UnavailableScreen retryHref={self} withSession={false} />;
 
-  return <CompleteScreen token={token} view={completeView(facts, { slugOf: slugOfDocType, formatDate: longDate })} />;
+  return (
+    <AccessFrame>
+      <CompleteScreen token={token} view={completeView(facts, { slugOf: slugOfDocType, formatDate: longDate })} />
+    </AccessFrame>
+  );
 }
