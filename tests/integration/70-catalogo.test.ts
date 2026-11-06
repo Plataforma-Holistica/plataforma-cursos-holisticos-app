@@ -174,6 +174,8 @@ describe("lo público del catálogo, leído como sistema", () => {
         practices: ["Práctica de catálogo"],
         // El tono de su práctica: la base lo da por rotación al crearla.
         tone: course?.practice?.tone,
+        // Y su orden en el catálogo, que elige la foto del maestro sin retrato (T-614).
+        practicePosition: course?.practice?.position,
         courseCount: 1,
       });
     });
