@@ -233,7 +233,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await expect(page.getByRole("heading", { level: 1, name: "Administración" })).toBeVisible();
   await expect(page.getByText(`Entraste como ${email}.`)).toBeVisible();
   await expect(page.getByText("No tienes pendientes.")).toBeVisible();
-  await expect(page.getByRole("listitem")).toHaveText(["Soporte", "Configuración"]);
+  await expect(page.getByRole("main").getByRole("listitem")).toHaveText(["Soporte", "Configuración"]);
   expect(await a11yViolations(page)).toEqual([]);
   expect((await page.request.get("/admin")).headers()["cache-control"]).toMatch(/no-store/);
 
@@ -313,7 +313,7 @@ test("sin JavaScript también se configura el segundo factor, y la clave no viaj
     await page.getByLabel("Código").fill(await nextCode(secret, used));
     await page.getByRole("button", { name: "Continuar" }).click();
     await expect(page).toHaveURL("/admin");
-    await expect(page.getByRole("listitem")).toHaveText(["Contenido"]);
+    await expect(page.getByRole("main").getByRole("listitem")).toHaveText(["Contenido"]);
   });
 });
 
@@ -867,7 +867,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     // qué capacidad le falta (PA-88). Tampoco sus envíos directos hacen nada.
     await inContext(browser, {}, async (hers, herContext) => {
       await enterAdmin(hers, carla, "/admin");
-      await expect(hers.getByRole("listitem")).toHaveText(["Soporte"]);
+      await expect(hers.getByRole("main").getByRole("listitem")).toHaveText(["Soporte"]);
       await expect(hers.getByRole("link", { name: "Equipo de administración" })).toHaveCount(0);
       await hers.goto(TEAM);
       await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Configuración" })).toBeVisible();
