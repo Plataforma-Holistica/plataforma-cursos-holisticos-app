@@ -29,6 +29,8 @@ export interface ShelfTeacher {
   practices: string[];
   /** El tono de la primera de esas prácticas, para su tarjeta; nulo si ninguno de sus cursos tiene práctica. */
   tone: number | null;
+  /** El orden en el catálogo (PA-67) de esa primera práctica: elige su foto de ambiente mientras no haya retrato (T-614). */
+  practicePosition: number | null;
   courseCount: number;
 }
 
@@ -74,7 +76,14 @@ export function teachersOf(courses: readonly ShelfCourse[]): ShelfTeacher[] {
   return [...found.entries()]
     .map(([slug, teacher]) => {
       const practices = [...teacher.practices.entries()].sort((a, b) => a[1].position - b[1].position);
-      return { slug, name: teacher.name, practices: practices.map(([name]) => name), tone: practices[0]?.[1].tone ?? null, courseCount: teacher.count };
+      return {
+        slug,
+        name: teacher.name,
+        practices: practices.map(([name]) => name),
+        tone: practices[0]?.[1].tone ?? null,
+        practicePosition: practices[0]?.[1].position ?? null,
+        courseCount: teacher.count,
+      };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es") || a.slug.localeCompare(b.slug));
 }

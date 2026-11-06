@@ -5,6 +5,7 @@ import Link from "next/link";
 import { exploreListAction } from "@/app/_catalog/my-list/actions";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
 import { StudentNav } from "@/app/_catalog/nav";
+import { PracticeRows } from "@/app/_catalog/practice-rows";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireSession } from "@/app/_lib/guard";
 import { messages, plural, t } from "@/messages";
@@ -155,16 +156,19 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
         shelf.practices.length === 0 ? (
           <p className="px-4 text-body-l text-text-2 sm:px-8">{messages.browse.home.empty}</p>
         ) : (
-          shelf.practices.map((row) => (
-          <Carousel
-            key={row.slug}
-            id={`practica-${row.slug}`}
-            title={row.name}
-            action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}
-          >
-            {row.courses.map(card)}
-          </Carousel>
-          ))
+          <PracticeRows
+            rows={shelf.practices}
+            render={(row) => (
+              <Carousel
+                key={row.slug}
+                id={`practica-${row.slug}`}
+                title={row.name}
+                action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}
+              >
+                {row.courses.map(card)}
+              </Carousel>
+            )}
+          />
         )
       ) : (
         <>
@@ -173,7 +177,7 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
               {results.teachers.map((teacher) => {
                 const href = teacherPath(teacher.slug);
                 if (href === null) return null;
-                return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} />;
+                return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} practicePosition={teacher.practicePosition} />;
               })}
             </Carousel>
           )}

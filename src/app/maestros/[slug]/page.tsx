@@ -1,20 +1,25 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
+import { PublicFooter } from "@/app/_public/footer";
+import { PublicHeader } from "@/app/_public/header";
 import { messages, t } from "@/messages";
 import { coursePath, ROUTES, teacherPath } from "@/services/account/navigation";
 import { teacherPage } from "@/services/browse/browse";
 import { CourseCard } from "@/ui/course-card";
 import { toneClasses } from "@/ui/course-cover";
 import { cx } from "@/ui/cx";
+import { practicePhoto } from "@/ui/photos/choice";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 // La ficha de un maestro (PA-03; RF-303; T-210). Pública, y la misma para todos; solo pregunta
-// quién mira, para darle al alumno su barra. Sin retrato (los carga contenido en PA-66), la
-// inicial sobre el tono de su primera práctica. Debajo, sus cursos listados, los más nuevos
+// quién mira, para darle al alumno su barra (y al visitante la del sitio público, T-614). Sin retrato (los
+// carga contenido en PA-66), la foto de ambiente de su primera práctica (T-614, parte 4); sin práctica, la
+// inicial sobre el tono neutro. Debajo, sus cursos listados, los más nuevos
 // primero, en una cuadrícula: con pocos cursos, una fila fija se lee mejor que un carrusel
 // (PA-03). Un maestro sin cursos listados, o que no está listado, no existe (PA-19). «Suscribirme» del visitante espera a la pantalla de
 // planes (T-30x).
@@ -34,17 +39,27 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={teacherPath(slug) ?? ROUTES.landing} withSession={viewer.kind === "student"} />;
   const { teacher, courses } = found;
   const initial = [...teacher.name.trim()][0]?.toUpperCase() ?? "";
+  const photo = practicePhoto(teacher.practicePosition);
 
   return (
     <>
       {viewer.kind === "student" && <StudentNav />}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 pb-24 outline-none sm:px-8 sm:pb-16">
+      {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). */}
+      {viewer.kind === "visitor" && <PublicHeader />}
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 outline-none sm:px-8", viewer.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         <header className="grid gap-6 sm:grid-cols-12 sm:items-end sm:gap-10">
           <div
             aria-hidden="true"
-            className={cx("@container flex aspect-2/3 max-h-96 items-center justify-center rounded-md bg-linear-to-t shadow-raised sm:col-span-4 lg:col-span-3", toneClasses(teacher.tone))}
+            className={cx(
+              "@container relative flex aspect-2/3 max-h-96 items-center justify-center overflow-hidden rounded-md bg-linear-to-t shadow-raised sm:col-span-4 lg:col-span-3",
+              toneClasses(teacher.tone),
+            )}
           >
-            <span className="font-display text-cover-initial text-text">{initial}</span>
+            {photo === null ? (
+              <span className="font-display text-cover-initial text-text">{initial}</span>
+            ) : (
+              <Image src={photo} alt="" fill sizes="(min-width: 1024px) 336px, (min-width: 640px) 33vw, 100vw" className="object-cover" />
+            )}
           </div>
           <div className="flex flex-col gap-4 sm:col-span-8 lg:col-span-9">
             <h1 className="text-display-l">{teacher.name}</h1>
@@ -78,6 +93,7 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
           </ul>
         </section>
       </main>
+      {viewer.kind === "visitor" && <PublicFooter />}
     </>
   );
 }

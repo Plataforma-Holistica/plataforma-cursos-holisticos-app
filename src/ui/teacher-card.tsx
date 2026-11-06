@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { t } from "@/messages/format";
@@ -5,24 +6,28 @@ import { ui } from "@/messages/es/ui";
 
 import { toneClasses } from "./course-cover";
 import { cx } from "./cx";
+import { practicePhoto } from "./photos/choice";
 
 // Tarjeta de maestro (`TeacherCard`, diseño, sección 5.3; T-210), vertical 2:3 para el carrusel
-// «Por maestro». Mientras no haya retratos (PA-66), lleva la inicial sobre el tono de su primera
-// práctica (PA-03, «sin retrato»). Debajo, el nombre y sus prácticas. Un solo enlace, con su
-// nombre entero en un texto que solo se lee.
+// «Por maestro». Mientras no haya retratos (PA-66), lleva la foto de ambiente de su primera práctica
+// (diseño, sección 3.12; T-614, parte 4), decorativa; sin práctica, la inicial sobre el tono neutro.
+// Debajo, el nombre y sus prácticas. Un solo enlace, con su nombre entero en un texto que solo se lee.
 
 export interface TeacherCardProps {
   href: string;
   name: string;
   practices: readonly string[];
   tone: number | null;
+  /** El orden en el catálogo de su primera práctica: elige su foto (`practicePhoto`). */
+  practicePosition: number | null;
   className?: string;
 }
 
-export function TeacherCard({ href, name, practices, tone, className }: TeacherCardProps) {
+export function TeacherCard({ href, name, practices, tone, practicePosition, className }: TeacherCardProps) {
   const text = ui.teacherCard;
   const label = practices.length > 0 ? t(text.name, { name, practices: practices.join(", ") }) : t(text.nameWithoutPractices, { name });
   const initial = [...name.trim()][0]?.toUpperCase() ?? "";
+  const photo = practicePhoto(practicePosition);
   return (
     <Link
       href={href}
@@ -31,9 +36,13 @@ export function TeacherCard({ href, name, practices, tone, className }: TeacherC
       <span className="sr-only">{label}</span>
       <span
         aria-hidden="true"
-        className={cx("@container flex aspect-2/3 items-center justify-center overflow-hidden rounded-md bg-linear-to-t group-hover:shadow-raised", toneClasses(tone))}
+        className={cx("@container relative flex aspect-2/3 items-center justify-center overflow-hidden rounded-md bg-linear-to-t group-hover:shadow-raised", toneClasses(tone))}
       >
-        <span className="font-display text-cover-initial text-text">{initial}</span>
+        {photo === null ? (
+          <span className="font-display text-cover-initial text-text">{initial}</span>
+        ) : (
+          <Image src={photo} alt="" fill sizes="(min-width: 640px) 176px, 42vw" className="object-cover" />
+        )}
       </span>
       <span aria-hidden="true" className="flex flex-col gap-1">
         <span className="text-h3 text-text">{name}</span>

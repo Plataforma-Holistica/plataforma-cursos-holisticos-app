@@ -61,7 +61,7 @@ const SHELF = {
   open: null,
 };
 const NOTHING: { q: string | null; practice: string | null; teacher: string | null; level: string | null } = { q: null, practice: null, teacher: null, level: null };
-const ANA = { slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, courseCount: 1 };
+const ANA = { slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, practicePosition: 1, courseCount: 1 };
 const ready = (query: Partial<typeof NOTHING>, results: { courses: unknown[]; teachers: unknown[] } | null) => ({
   kind: "ready",
   query: { ...NOTHING, ...query },
@@ -97,6 +97,16 @@ describe("explorar (PA-21)", () => {
     const nav = screen.getByRole("navigation", { name: "Principal" });
     expect(within(nav).getByRole("link", { name: "Explorar" })).toHaveAttribute("aria-current", "page");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin filtro: las prácticas con uno o dos cursos comparten renglón en computadora, en su orden (T-614)", async () => {
+    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
+    mocks.explore.mockResolvedValue({ ...ready({}, null), shelf: { ...SHELF, practices: [row("a", "Alfa", 2), row("b", "Beta", 1), row("c", "Gama", 4)] } });
+    render(await ExplorePage(params({})));
+    const pair = screen.getByRole("region", { name: "Alfa" }).parentElement;
+    expect(pair).toHaveClass("lg:grid-cols-2");
+    expect(pair).toContainElement(screen.getByRole("region", { name: "Beta" }));
+    expect(pair).not.toContainElement(screen.getByRole("region", { name: "Gama" }));
   });
 
   it("con búsqueda y filtro: cuántos, la cuadrícula, los maestros encontrados y cómo quitar cada cosa", async () => {

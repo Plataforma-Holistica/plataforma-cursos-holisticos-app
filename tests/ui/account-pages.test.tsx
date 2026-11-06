@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
 
+import { terms } from "@/messages/es/terms";
+
 // Las páginas de la cuenta, con la guarda y los servicios simulados: qué pinta cada una
 // con cada respuesta. La tabla de la guarda (quién redirige a dónde) está en
 // src/app/_lib/guard-steps.test.ts; aquí se cuida que cada página obedezca lo que no es
@@ -88,7 +90,7 @@ const shelfWith = (over: Record<string, unknown> = {}) => ({
     starters: [COURSE],
     newest: [COURSE],
     practices: [{ slug: "meditacion", name: "Meditación", tone: 3, courses: [COURSE] }],
-    teachers: [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, courseCount: 1 }],
+    teachers: [{ slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, practicePosition: 1, courseCount: 1 }],
     practiceOf: new Map([["respirar", { name: "Meditación", tone: 3 }]]),
     open: null,
     ...over,
@@ -115,6 +117,44 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(within(nav).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Explorar" })).toHaveAttribute("href", "/explorar");
     expect(within(nav).getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
+  });
+
+  it("la barra lleva el logotipo, que vuelve al inicio (T-614)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    render(await HomePage());
+    const bar = screen.getByRole("banner");
+    expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/inicio");
+    expect(bar.querySelector("[data-brand-dot]")).not.toBeNull();
+  });
+
+  it("el saludo va sobre una franja de ambiente, decorativa (T-614)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    render(await HomePage());
+    const greeting = screen.getByRole("heading", { level: 1 });
+    const strip = greeting.closest("[data-home-header]");
+    expect(strip).not.toBeNull();
+    const photo = strip?.querySelector("img");
+    expect(photo).toHaveAttribute("alt", "");
+    expect(photo?.getAttribute("src")).toMatch(/inicio-(faro|estrellas)/);
+    // Va arriba del todo: no espera a acercarse a la vista.
+    expect(photo).toHaveAttribute("loading", "eager");
+  });
+
+  it("las prácticas con uno o dos cursos comparten renglón en computadora, de dos en dos y en su orden (T-614)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
+    mocks.homeShelf.mockResolvedValue(shelfWith({ practices: [row("a", "Alfa", 1), row("b", "Beta", 2), row("c", "Gama", 5), row("d", "Delta", 1)] }));
+    render(await HomePage());
+    const blockOf = (name: string) => screen.getByRole("region", { name });
+    const pair = blockOf("Alfa").parentElement;
+    expect(pair).toHaveClass("lg:grid-cols-2");
+    expect(pair).toContainElement(blockOf("Beta"));
+    expect(pair).not.toContainElement(blockOf("Gama"));
+    // Delta va sola: Gama, larga, la separa de las otras cortas.
+    expect(blockOf("Delta").parentElement).not.toHaveClass("lg:grid-cols-2");
+    // El orden de PA-67 no cambia.
+    const order = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+    expect(order.filter((name) => ["Alfa", "Beta", "Gama", "Delta"].includes(name ?? ""))).toEqual(["Alfa", "Beta", "Gama", "Delta"]);
   });
 
   it("«Ver todo» lleva a explorar con el filtro de la fila; «Nuevos» no lo lleva (PA-20, PA-21)", async () => {

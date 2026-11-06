@@ -1,10 +1,11 @@
 import { Compass, House, UserRound } from "lucide";
 import Link from "next/link";
 
-import { messages, t } from "@/messages";
+import { messages } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
 import { cx } from "@/ui/cx";
 import { Icon } from "@/ui/icon";
+import { Wordmark } from "@/ui/wordmark";
 
 // La barra del alumno (`AppHeader` y `BottomNav`, diseño, sección 5; T-210): arriba en
 // escritorio, abajo y fija en el teléfono. Inicio, Explorar (PA-21) y Cuenta: la Cuenta ocupa el
@@ -23,8 +24,9 @@ export function StudentNav({ current }: { current?: (typeof LINKS)[number]["href
   return (
     <header className="border-border sm:border-b">
       <div className="mx-auto flex max-w-page items-center justify-between gap-6 px-4 py-3 sm:px-8">
-        <Link href={ROUTES.home} className="font-display text-h3 text-text">
-          {t(text.brand)}
+        {/* El logotipo provisional (T-614, parte 4), que vuelve al inicio. */}
+        <Link href={ROUTES.home} className="inline-flex min-h-touch items-center text-h3">
+          <Wordmark />
         </Link>
         <nav
           aria-label={text.label}
