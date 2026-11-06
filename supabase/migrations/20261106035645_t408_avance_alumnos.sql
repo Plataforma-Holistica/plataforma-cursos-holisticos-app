@@ -293,8 +293,8 @@ revoke all on function private.course_progress_step(timestamptz) from public;
 
 -- ---------------------------------------------------------------------------------------
 -- La corrida de cada noche (t408_estimado), con el avance de los alumnos al final: solo en la corrida de la noche, sin periodo (un recálculo pedido
--- trae uno), después del sellado y antes de anotar la corrida del paso a cierre, con su propio `commit` y en su bloque, que atrapa también
--- `query_canceled`: una cancelación del paso cortaría la noche entera. Lo que falle lo anotan el estado del paso y los detalles de esa corrida.
+-- trae uno), después de anotar la corrida del paso a cierre, con su propio `commit` y en su bloque, que atrapa también `query_canceled`: una
+-- cancelación del paso cortaría la noche entera. Lo que falle lo anotan el estado del paso y los detalles de esa corrida.
 create or replace procedure private.nightly_rollup(p_full boolean default false, p_period integer default null)
 language plpgsql
 as $$
@@ -302,6 +302,7 @@ declare
   v_estimate_error text;
   v_progress_error text;
   v_progress jsonb;
+  v_transition_run uuid;
   v_start timestamptz := pg_catalog.clock_timestamp();
   v_path text := pg_catalog.current_setting('search_path');
   v_window integer[];
@@ -431,21 +432,6 @@ begin
       end;
       commit;
     end loop;
-    -- El avance de los alumnos (T-408, PA-51), con su `commit`. Lo que falle, dentro del paso o fuera de su bloque, se anota en los detalles de la
-    -- corrida del paso a cierre de esta noche (`course_progress_failed`), sin cambiar su estado, y en el registro de la base.
-    v_progress_error := null;
-    begin
-      v_progress := private.course_progress_step();
-      if v_progress ->> 'outcome' = 'failed' then
-        v_progress_error := v_progress ->> 'error';
-      end if;
-    exception when query_canceled or others then
-      v_progress_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
-    end;
-    if v_progress_error is not null then
-      raise warning 'course progress failed: %', v_progress_error;
-    end if;
-    commit;
     v_error := nullif(pg_catalog.array_to_string(array[
       v_error,
       case when v_transition ? 'open_failed' then 'open failed: ' || pg_catalog.left((v_transition -> 'open_failed')::text, 250) end,
@@ -458,9 +444,27 @@ begin
     values ('period_transition', case when v_error is null then 'succeeded' else 'failed' end::public.run_status,
             v_transition_start, pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(),
             coalesce(v_transition, '{}'::jsonb) || pg_catalog.jsonb_build_object('photos', v_photos, 'sealed', pg_catalog.to_jsonb(v_sealed))
-              || case when v_seal_failed = '{}'::jsonb then '{}'::jsonb else pg_catalog.jsonb_build_object('seal_failed', v_seal_failed) end
-              || case when v_progress_error is null then '{}'::jsonb else pg_catalog.jsonb_build_object('course_progress_failed', v_progress_error) end,
-            v_error);
+              || case when v_seal_failed = '{}'::jsonb then '{}'::jsonb else pg_catalog.jsonb_build_object('seal_failed', v_seal_failed) end,
+            v_error)
+    returning id into v_transition_run;
+    commit;
+    -- El avance de los alumnos (T-408, PA-51), con su `commit`, después de anotar la corrida del paso a cierre: si la base muere a la mitad, esa
+    -- corrida ya está. Lo que falle, dentro del paso o fuera de su bloque, se suma a sus detalles (`course_progress_failed`), sin cambiar su
+    -- estado, y va al registro de la base.
+    v_progress_error := null;
+    begin
+      v_progress := private.course_progress_step();
+      if v_progress ->> 'outcome' = 'failed' then
+        v_progress_error := v_progress ->> 'error';
+      end if;
+    exception when query_canceled or others then
+      v_progress_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
+    end;
+    if v_progress_error is not null then
+      update public.job_runs j set details = j.details || pg_catalog.jsonb_build_object('course_progress_failed', v_progress_error)
+      where j.id = v_transition_run;
+      raise warning 'course progress failed: %', v_progress_error;
+    end if;
     commit;
   end if;
   perform pg_catalog.set_config('search_path', v_path, false);
@@ -638,6 +642,17 @@ as $$
   where n.nspname in ('public', 'private')
     and (coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '')) ~ ('\m' || x.table_name || '\M')
     and p.oid not in (select k.oid from alias_known k where k.table_name = x.table_name and k.oid is not null)
+  union all
+  -- Sin nombrar la tabla, una función llegaría a los alias de la otra pantalla por una ayudante: la lectura de PA-51 no llama a las de PA-47 (ni pide
+  -- alias de pagos), y las de PA-47 no llaman a la de PA-51 (ni piden alias del avance).
+  select 'aliases crossed through a helper', d.signature
+  from (values ('private.teacher_course_students(uuid, text, integer)', '(payout_report_students|ensure_student_aliases|''student'')'),
+               ('private.payout_report_mine(public.period_id)', '(teacher_course_students|''progress'')'),
+               ('private.payout_report_csv_mine(public.period_id)', '(teacher_course_students|''progress'')'),
+               ('private.payout_report_students(uuid, public.period_id)', '(teacher_course_students|''progress'')'),
+               ('private.ensure_student_aliases(uuid, public.period_id)', '(teacher_course_students|''progress'')')) d (signature, pattern)
+  where pg_catalog.to_regprocedure(d.signature) is not null
+    and pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(d.signature)) ~ d.pattern
   union all
   -- Una vista corre como su dueño: saltaría los permisos (como en el área `tax`).
   select 'aliases read by a view', vn.nspname || '.' || c.relname

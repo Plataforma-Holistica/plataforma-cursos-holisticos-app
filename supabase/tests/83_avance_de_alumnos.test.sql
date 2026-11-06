@@ -12,7 +12,7 @@
 -- deje fallida lo prueba la integración 111. Aquí, el paso con su reloj (2045, para no depender del día en que corre), la lectura y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(129);
+select plan(131);
 
 select pruebas.alta('a8300000-0000-0000-0000-000000000001', 'tere-83@prueba.test');
 select pruebas.alta('a8300000-0000-0000-0000-000000000002', 'beto-83@prueba.test');
@@ -409,11 +409,12 @@ select gen_random_uuid(), l.course_id, l.module_id, l.teacher_id, l.video_asset_
        (select max(x.position) + 1 from public.published_lessons x where x.course_id = l.course_id), 100
 from public.published_lessons l where l.id = pruebas.lec('e83-a', 'Uno');
 update public.published_lessons set is_current = false, retired_at = now() where id = pruebas.lec('e83-a', 'Dos');
+update public.published_lessons set position = 1000 where id = pruebas.lec('e83-a', 'Uno');
 update public.profiles set status = 'deleted', deleted_at = now(), display_name = null, country_code = null, adult_declared_at = null, comment_ban_until = null
   where id = pruebas.a(3);
 set local session_replication_role = origin;
 insert into lect values ('r6', pruebas.lee(pruebas.tere(), pruebas.curso_de('e83-a')));
-select is(pruebas.lecciones((select r from lect where k = 'r6')), array['Uno:3', 'Dos:1', 'Seis:0'], 'las lecciones son las del corte, como las cifras');
+select is(pruebas.lecciones((select r from lect where k = 'r6')), array['Uno:3', 'Dos:1', 'Seis:0'], 'las lecciones son las del corte, como las cifras, también en su orden');
 select is((select (r ->> 'total_students')::integer from lect where k = 'r6'), 4, 'la cuenta borrada sale de la lista al leer');
 select ok(not ('a3' = any (pruebas.quienes(pruebas.m(1), (select r from lect where k = 'r6')))), 'y no se ve su alias');
 
@@ -421,8 +422,10 @@ select ok(not ('a3' = any (pruebas.quienes(pruebas.m(1), (select r from lect whe
 update private.course_progress_state set daily_built_at = now() - interval '27 hours';
 select is((pruebas.lee(pruebas.tere(), pruebas.curso_de('e83-a'))) ->> 'stale', 'true', 'un resumen de hace más de 26 horas lleva el aviso');
 update private.course_progress_state set daily_built_at = now();
-select is(array(select distinct cut_at from private.course_progress_figures union select distinct cut_at from private.course_lesson_figures order by 1),
-  array[pruebas.h('2045-03-13 00:00'), pruebas.h('2045-03-14 00:00')], 'las cifras guardan el corte de hoy y el anterior, entero, y nada más');
+select is(array(select distinct cut_at from private.course_progress_figures order by 1), array[pruebas.h('2045-03-13 00:00'), pruebas.h('2045-03-14 00:00')],
+  'las cifras guardan el corte de hoy y el anterior, y nada más');
+select is(array(select distinct cut_at from private.course_lesson_figures order by 1), array[pruebas.h('2045-03-13 00:00'), pruebas.h('2045-03-14 00:00')],
+  'y las lecciones también');
 select is(array(select distinct cut_at from private.course_student_progress order by 1), array[pruebas.h('2045-03-06 00:00'), pruebas.h('2045-03-13 00:00')],
   'y la lista, el lunes de esta semana y el anterior');
 
@@ -506,6 +509,11 @@ language sql stable set search_path = ''
 as $$ select coalesce(pg_catalog.jsonb_agg(a.alias), '[]'::jsonb) from private.progress_aliases a where a.teacher_id = p_teacher $$;
 select ok(pruebas.tr_con('alias function not in the list'), 'el reporte de PA-47 que nombra los alias de PA-51');
 select pruebas.restaurar('reporte');
+create or replace function private.teacher_course_students(p_course uuid, p_order text, p_page integer) returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $$ begin return private.payout_report_students(private.actor_teacher_id(), 204501); end $$;
+select ok(pruebas.tr_con('aliases crossed through a helper'), 'ni la lectura de PA-51 llega a los de PA-47 por una ayudante');
+select pruebas.restaurar('lectura');
 create view private.v83 as select teacher_id from private.progress_aliases;
 select ok(pruebas.tr_con('aliases read by a view'), 'una vista que lee los alias');
 drop view private.v83;

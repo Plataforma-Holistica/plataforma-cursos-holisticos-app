@@ -58,6 +58,18 @@ async function stateSince(start: string): Promise<State> {
   ).rows[0]!;
 }
 
+/** La falla del avance que la noche dejó en los detalles de su corrida del paso a cierre, o nulo. */
+async function progressFailedSince(start: string): Promise<string | null> {
+  const rows = (
+    await owner.query<{ failed: string | null }>(
+      "select details ->> 'course_progress_failed' as failed from public.job_runs where job = 'period_transition' and started_at >= $1::timestamptz",
+      [start],
+    )
+  ).rows;
+  expect(rows).toHaveLength(1);
+  return rows[0]!.failed;
+}
+
 /** Las corridas de la consolidación y del paso a cierre desde `start`; se anotan para quitarlas al terminar. */
 async function runsSince(start: string): Promise<{ job: string; status: string; error: string | null }[]> {
   const rows = (
@@ -108,6 +120,7 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     expect((await runsSince(start)).filter((run) => run.job === "period_transition")).toEqual([
       expect.objectContaining({ status: "succeeded" }),
     ]);
+    expect(await progressFailedSince(start)).toBeNull();
   });
 
   it("un recálculo pedido no lo guarda", async () => {
@@ -149,6 +162,7 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     const runs = await runsSince(start);
     expect(runs.filter((run) => run.job === "period_transition")).toEqual([expect.objectContaining({ status: "succeeded" })]);
     expect(runs.every((run) => run.status === "succeeded")).toBe(true);
+    expect(await progressFailedSince(start)).toBe("P0001: roto a propósito");
   });
 
   it("un paso cancelado anota 57014, y la noche termina bien", async () => {
@@ -182,6 +196,7 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     expect((await runsSince(start)).filter((run) => run.job === "period_transition")).toEqual([
       expect.objectContaining({ status: "succeeded" }),
     ]);
+    expect(await progressFailedSince(start)).toMatch(/^57014: /);
   });
 });
 
@@ -215,6 +230,7 @@ describe("una cancelación fuera del bloque del paso", { timeout: 180_000 }, () 
     expect((await runsSince(start)).filter((run) => run.job === "period_transition")).toEqual([
       expect.objectContaining({ status: "succeeded" }),
     ]);
+    expect(await progressFailedSince(start)).toMatch(/^57014: /);
   });
 });
 
