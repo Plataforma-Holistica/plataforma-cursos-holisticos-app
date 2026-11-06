@@ -26,6 +26,16 @@ export function actionFields(html: string, position = 0): Record<string, string>
   throw new Error("La página no trae ese formulario con una acción de servidor.");
 }
 
+/**
+ * Lo que pinta la pantalla, desde su `<main>`: el menú lateral del portal y de administración trae antes
+ * su propio formulario («Cerrar sesión», una vez en la hoja del teléfono y otra en la columna).
+ */
+export function mainOf(html: string): string {
+  const start = html.indexOf("<main");
+  if (start < 0) throw new Error("La página no trae su <main>.");
+  return html.slice(start);
+}
+
 export type Field = string | { name: string; mimeType: string; buffer: Buffer };
 
 /** Envía un formulario a una acción, tal cual, sin seguir redirecciones. */

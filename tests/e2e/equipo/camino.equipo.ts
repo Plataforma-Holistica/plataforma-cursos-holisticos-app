@@ -7,7 +7,7 @@ import { Client } from "pg";
 import { localOwnerUrl } from "../../integration/helpers/local";
 import { totpCode, wrongCode } from "../../integration/helpers/totp";
 import { a11yViolations } from "../support/a11y";
-import { actionFields, postAction } from "../support/actions";
+import { actionFields, mainOf, postAction } from "../support/actions";
 import {
   clearCounters,
   lastMailTo,
@@ -792,7 +792,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page.locator("#bloque-equipo-invitaciones").getByText(bait, { exact: true })).toBeVisible();
     const baitId = (await ownerQuery<{ id: string }>("select id::text as id from private.admin_invitations where email = $1", [bait]))[0]?.id ?? "";
     expect(baitId).not.toBe("");
-    const html = await (await page.request.get(TEAM)).text();
+    const html = mainOf(await (await page.request.get(TEAM)).text());
     const inviteFields = actionFields(html, 0);
     const teamFields = actionFields(html, 1);
     const invitationFields = actionFields(html, 2);
@@ -808,7 +808,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
        from auth.sessions s where c.session_id = s.id and s.user_id = $1 and c.authentication_method = 'totp'`,
       [ana.id],
     );
-    const stale = await (await page.request.get(TEAM)).text();
+    const stale = mainOf(await (await page.request.get(TEAM)).text());
     expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeGreaterThan(-1);
     expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeLessThan(stale.indexOf("<form"));
     const codeFields = actionFields(stale, 0);
@@ -1266,7 +1266,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       // El mismo «Subir», enviado dos veces (un doble clic, o recargar y reenviar): sube una.
       const taichi = await practiceId("Tai chi chuan");
       if (!taichi) throw new Error("Falta la práctica recién agregada.");
-      const fields = actionFields(await (await context.request.get(CATALOG)).text(), 0);
+      const fields = actionFields(mainOf(await (await context.request.get(CATALOG)).text()), 0);
       const up = { ...fields, do: `up:${taichi.id}:${taichi.position}` };
       expect((await postAction(context.request, CATALOG, up)).status()).toBe(200);
       const once = await practicesNow();
@@ -1308,7 +1308,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(row.getByRole("button", { name: "Renombrar «Respiración»" })).toBeVisible();
 
     // Llamada directo, la base contesta «en uso» y no la desactiva.
-    const fields = actionFields(await (await page.request.get(CATALOG)).text(), 0);
+    const fields = actionFields(mainOf(await (await page.request.get(CATALOG)).text()), 0);
     const id = (await practiceId("Respiración"))?.id ?? "";
     const answered = await postAction(page.context().request, CATALOG, { ...fields, do: `deactivate:${id}` });
     expect(answered.status()).toBe(200);
@@ -1450,7 +1450,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     expect(await auditRows()).toBeGreaterThan(audited);
 
     // Una pestaña vieja que confirma otra vez: ya no está por revisar, y nada cambia.
-    const fields = actionFields(await (await page.request.get(REVIEW)).text(), 0);
+    const fields = actionFields(mainOf(await (await page.request.get(REVIEW)).text()), 0);
     const again = await postAction(page.context().request, REVIEW, { ...fields, do: `confirm:${course}` });
     expect(again.status()).toBe(200);
     expect(await again.text()).toContain("Ese curso ya no está por revisar");
@@ -1860,14 +1860,14 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.
     await enterAdmin(page, ana, CATALOG);
-    const html = await (await page.request.get(CATALOG)).text();
+    const html = mainOf(await (await page.request.get(CATALOG)).text());
     const practicesFields = actionFields(html, 0);
     const levelsFields = actionFields(html, 2);
     expect(practicesFields).not.toEqual(levelsFields);
     const yoga = await practiceId("Yoga suave");
     if (!yoga) throw new Error("Falta la práctica del caso de arriba.");
     await ageCode(ana.id);
-    const stale = await (await page.request.get(CATALOG)).text();
+    const stale = mainOf(await (await page.request.get(CATALOG)).text());
     const codeFields = actionFields(stale, 0);
     expect(codeFields).not.toEqual(practicesFields);
 
