@@ -215,6 +215,8 @@ describe("la ficha de un curso (PA-02)", () => {
     const footer = screen.getByRole("contentinfo");
     expect(within(footer).getByRole("link", { name: "Términos y condiciones" })).toBeInTheDocument();
     expect(screen.getAllByText(DISCLAIMER)).toHaveLength(1);
+    // Sin el margen de abajo que reserva la barra inferior del alumno en el teléfono.
+    expect(screen.getByRole("main")).not.toHaveClass("pb-24");
   });
 
   it("al alumno, su barra con el logotipo, y sin la barra ni el pie del sitio público", async () => {
@@ -225,6 +227,7 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/inicio");
     expect(screen.queryByRole("link", { name: "Crear cuenta" })).toBeNull();
     expect(screen.queryByRole("contentinfo")).toBeNull();
+    expect(screen.getByRole("main")).toHaveClass("pb-24");
   });
 
   it("el deslinde (RF-809) va al pie, sea quien sea el que mira", async () => {

@@ -46,7 +46,7 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
       {viewer.kind === "student" && <StudentNav />}
       {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). */}
       {viewer.kind === "visitor" && <PublicHeader />}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 pb-24 outline-none sm:px-8 sm:pb-16">
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 outline-none sm:px-8", viewer.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         <header className="grid gap-6 sm:grid-cols-12 sm:items-end sm:gap-10">
           <div
             aria-hidden="true"

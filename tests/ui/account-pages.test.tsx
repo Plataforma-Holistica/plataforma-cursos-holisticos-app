@@ -136,6 +136,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     const photo = strip?.querySelector("img");
     expect(photo).toHaveAttribute("alt", "");
     expect(photo?.getAttribute("src")).toMatch(/inicio-(faro|estrellas)/);
+    // Va arriba del todo: no espera a acercarse a la vista.
+    expect(photo).toHaveAttribute("loading", "eager");
   });
 
   it("las prácticas con uno o dos cursos comparten renglón en computadora, de dos en dos y en su orden (T-614)", async () => {

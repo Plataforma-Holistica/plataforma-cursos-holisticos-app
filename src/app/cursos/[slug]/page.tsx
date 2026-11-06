@@ -20,6 +20,7 @@ import { lessonAccess } from "@/services/media/media";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
+import { cx } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
@@ -101,7 +102,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
       {who.kind === "student" && <StudentNav />}
       {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). A quien no se sabe quién es, ninguna de las dos. */}
       {who.kind === "visitor" && <PublicHeader />}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 pb-24 outline-none sm:px-8 sm:pb-16">
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         {who.kind === "student" && <BackLink href={ROUTES.home}>{text.back}</BackLink>}
 
         <header className="grid gap-6 md:grid-cols-12 md:items-center md:gap-10">

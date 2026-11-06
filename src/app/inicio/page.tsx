@@ -99,7 +99,7 @@ export default async function HomePage() {
         {/* La franja de ambiente detrás del saludo (diseño, sección 3.12; T-614): corta, para que en el teléfono «continuar
             viendo» siga en la primera pantalla. El faro y las estrellas se alternan, una por día (decisión de Sergio del 2026-11-05). */}
         <div data-home-header className="relative isolate overflow-hidden">
-          <Image src={homeHeaderPhoto(new Date())} alt="" fill sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />
+          <Image src={homeHeaderPhoto(new Date())} alt="" fill loading="eager" sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />
           <span aria-hidden="true" className="absolute inset-0 bg-linear-to-b from-bg/65 to-bg" />
           <div className="relative flex flex-col gap-1 px-4 pt-10 pb-6 sm:px-8 sm:pt-16 sm:pb-10">
             <h1 className="text-h1">{name === null ? text.greetingAnonymous : t(text.greeting, { name })}</h1>

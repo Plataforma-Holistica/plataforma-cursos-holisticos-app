@@ -975,7 +975,9 @@ que no se ve leyendo un solo archivo:
   carrusel. El saludo del inicio va sobre su franja (`data-home-header`). La barra del alumno lleva el `Wordmark` (`browse.nav.brand` se fue). **`PublicHeader` tiene dos variantes:**
   `overPhoto` (la portada, transparente y fija al desplazar) y sólida (`sticky`), que es la de las fichas para el visitante; `PublicFooter` va ahí sin el deslinde
   (`withDisclaimer={false}`), porque la ficha del curso ya lo pinta al final. A quien no se sabe quién es, ni la barra del alumno ni la pública. Cambiaron por el requisito dos
-  pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno. Para el A: `ShelfTeacher` ganó un campo.
+  pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno (también en `tests/e2e/equipo/catalogo.equipo.ts`, por la revisión del diff). El visitante
+  no lleva el margen de abajo que reserva la barra inferior del alumno. Las posiciones de las prácticas no tienen huecos (una nueva va al final y reordenar intercambia dos), así
+  que la alternancia de las fotos sigue el orden del catálogo. Para el A: `ShelfTeacher` ganó un campo.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
