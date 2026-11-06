@@ -577,7 +577,8 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
       await owner.query("insert into auth.users (id, email) values ('e5ca1a00-0000-4000-b000-000000000001', 'escala-maestra@prueba.test')");
       await owner.query("set local session_replication_role = replica");
       await owner.query(
-        "update public.teachers t set profile_id = 'e5ca1a00-0000-4000-b000-000000000001' from public.course_registry r where r.course_id = $1 and t.id = r.teacher_id",
+        `update public.teachers t set profile_id = 'e5ca1a00-0000-4000-b000-000000000001', status = 'active'
+         from public.course_registry r where r.course_id = $1 and t.id = r.teacher_id`,
         [course],
       );
       await owner.query("set local session_replication_role = origin");
