@@ -3,7 +3,7 @@ import { money } from "@/app/admin/_periodos/rows";
 import { clockTime, longDate, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { portal } from "@/messages/es/portal";
 import { t } from "@/messages/format";
-import { portalCoursePath, portalPayoutPath, ROUTES } from "@/services/account/navigation";
+import { portalCoursePath, portalPayoutPath, portalStudentsPath, ROUTES } from "@/services/account/navigation";
 import type { DashboardFigures, DashboardValue } from "@/services/teachers/dashboard-data";
 import type { PeriodBar } from "@/ui/period-bars";
 
@@ -38,6 +38,8 @@ export interface CourseRowView {
   key: string;
   title: string;
   href: string | null;
+  /** El avance de sus alumnos (PA-51), con su nombre accesible; nulo si el curso ya no es suyo. */
+  progress: { href: string; name: string } | null;
   fullLessons: string | null;
   halfLessons: string | null;
   students: string | null;
@@ -130,15 +132,22 @@ export function dashboardView(value: DashboardValue, taxData: TaxDataFacts | nul
       students: figure(run, "students"),
     },
     noViews: run !== null && run.fullLessons === 0 && run.halfLessons === 0 && run.students === 0,
-    courses: value.courses.map((course) => ({
-      key: course.courseId,
-      title: course.title ?? text.untitled,
-      // Un curso que ya no es suyo no enlaza: su editor es de otro maestro.
-      href: course.owned ? portalCoursePath(course.courseId) : null,
-      fullLessons: figure(course.figures, "fullLessons"),
-      halfLessons: figure(course.figures, "halfLessons"),
-      students: figure(course.figures, "students"),
-    })),
+    courses: value.courses.map((course) => courseRow(course)),
     series: seriesBars(value),
+  };
+}
+
+function courseRow(course: DashboardValue["courses"][number]): CourseRowView {
+  const title = course.title ?? text.untitled;
+  // Un curso que ya no es suyo no enlaza: su editor y el avance de sus alumnos son de otro maestro.
+  const progress = course.owned ? portalStudentsPath(course.courseId) : null;
+  return {
+    key: course.courseId,
+    title,
+    href: course.owned ? portalCoursePath(course.courseId) : null,
+    progress: progress === null ? null : { href: progress, name: t(text.progressLink, { title }) },
+    fullLessons: figure(course.figures, "fullLessons"),
+    halfLessons: figure(course.figures, "halfLessons"),
+    students: figure(course.figures, "students"),
   };
 }

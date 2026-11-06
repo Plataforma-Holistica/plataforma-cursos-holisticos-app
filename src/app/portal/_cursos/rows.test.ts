@@ -175,3 +175,27 @@ describe("la versión de un curso publicado (T-405, FL-36)", () => {
     expect(courseRows([version], true)[0]?.action?.label).toBe("Ver");
   });
 });
+
+describe("el avance de los alumnos (PA-51, T-408)", () => {
+  const progress = { label: "Ver avance", href: `/portal/cursos/${PUBLISHED}/alumnos`, name: "Ver el avance de los alumnos de El bosque" };
+
+  it.each<[string, Partial<TeacherCourse>]>([
+    ["publicado", {}],
+    ["con cambios pendientes", { state: "changes_pending", pendingVersion: "draft" }],
+    ["con su versión en revisión", { state: "changes_pending", pendingVersion: "in_review" }],
+    ["despublicado", { state: "withdrawn" }],
+  ])("un curso %s enlaza a su avance", (_name, change) => {
+    expect(courseRows([{ ...published, ...change }], false)[0]?.progress).toEqual(progress);
+  });
+
+  it("también al suspendido: ver su avance no cambia nada", () => {
+    expect(courseRows([published], true)[0]?.progress).toEqual(progress);
+  });
+
+  it.each<[string, Partial<TeacherCourse>]>([
+    ["un borrador", {}],
+    ["uno que se envió por primera vez", { state: "in_review" }],
+  ])("%s no tiene alumnos: sin enlace", (_name, change) => {
+    expect(courseRows([{ ...draft, ...change }], false)[0]?.progress).toBeNull();
+  });
+});

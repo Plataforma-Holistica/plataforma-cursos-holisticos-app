@@ -6,7 +6,7 @@ import type { Client } from "pg";
 // cuando su mes termina. Por eso cada prueba que corre la corrida quita, al terminar, las filas que
 // se crearon mientras corría y las corridas del paso a cierre. Las filas no se borran: se quitan con
 // su guardián apagado, solo esas y si nada apunta a ellas (un cobro, el consolidado, una alerta o una
-// exclusión). La auditoría se queda. Desde T-408 quita también las corridas del estimado de esos días.
+// exclusión). La auditoría se queda. Desde T-408 quita también las corridas del estimado de esos días y el avance de los alumnos.
 
 /** La ventana es la de siempre (el mes anterior y el en curso): si no, la base local tiene periodos de otra corrida. */
 export async function assertPlainWindow(owner: Client): Promise<void> {
@@ -51,6 +51,18 @@ export async function dropTransitionLeftovers(owner: Client, since: string): Pro
     );
     await owner.query("delete from private.teacher_estimate_runs where started_at >= $1::timestamptz", [since]);
     await owner.query("set local session_replication_role = origin");
+    // Y el avance de los alumnos (T-408, PA-51), que la corrida guarda al final: si se escribió desde entonces, el resumen se vacía entero.
+    const progress = await owner.query(
+      `update private.course_progress_state
+       set daily_cut_at = null, daily_built_at = null, weekly_cut_at = null, weekly_built_at = null, failed_at = null, error = null
+       where greatest(daily_built_at, weekly_built_at, failed_at) >= $1::timestamptz`,
+      [since],
+    );
+    if ((progress.rowCount ?? 0) > 0) {
+      await owner.query("delete from private.course_progress_figures");
+      await owner.query("delete from private.course_lesson_figures");
+      await owner.query("delete from private.course_student_progress");
+    }
     await owner.query("commit");
   } catch (error) {
     await owner.query("rollback");

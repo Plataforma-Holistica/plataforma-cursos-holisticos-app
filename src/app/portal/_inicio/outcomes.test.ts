@@ -76,15 +76,33 @@ describe("el mes en curso", () => {
 describe("por curso y la serie", () => {
   it("cada curso con su enlace y sus cifras; sin corrida, sin cifras; sin título, lo dice", () => {
     expect(dashboardView(VALUE, TAX, false).courses).toEqual([
-      { key: COURSE, title: "Respirar para volver", href: `/portal/cursos/${COURSE}`, fullLessons: "150", halfLessons: "22", students: "41" },
+      {
+        key: COURSE,
+        title: "Respirar para volver",
+        href: `/portal/cursos/${COURSE}`,
+        progress: { href: `/portal/cursos/${COURSE}/alumnos`, name: "Ver avance de Respirar para volver" },
+        fullLessons: "150",
+        halfLessons: "22",
+        students: "41",
+      },
     ]);
     const bare = dashboardView({ ...VALUE, courses: [{ courseId: COURSE, title: null, owned: true, figures: null }] }, TAX, false).courses;
-    expect(bare).toEqual([{ key: COURSE, title: "Curso sin título", href: `/portal/cursos/${COURSE}`, fullLessons: null, halfLessons: null, students: null }]);
+    expect(bare).toEqual([
+      {
+        key: COURSE,
+        title: "Curso sin título",
+        href: `/portal/cursos/${COURSE}`,
+        progress: { href: `/portal/cursos/${COURSE}/alumnos`, name: "Ver avance de Curso sin título" },
+        fullLessons: null,
+        halfLessons: null,
+        students: null,
+      },
+    ]);
   });
 
-  it("un curso que ya no es suyo sale con sus cifras y sin enlace: su editor es de otro", () => {
+  it("un curso que ya no es suyo sale con sus cifras, sin enlace a su editor ni a su avance: son de otro (PA-51, T-408)", () => {
     const [course] = dashboardView({ ...VALUE, courses: [{ ...VALUE.courses[0]!, owned: false }] }, TAX, false).courses;
-    expect(course).toMatchObject({ title: "Respirar para volver", href: null, fullLessons: "150" });
+    expect(course).toMatchObject({ title: "Respirar para volver", href: null, progress: null, fullLessons: "150" });
   });
 
   it("los cerrados con su total y su liquidación; uno sin total, en cero; el que todavía no cierra, estimado y sin enlace", () => {
