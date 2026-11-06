@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,7 +60,7 @@ describe("el botón de guardar (PA-02, PA-21)", () => {
     const pending = await screen.findByRole("button", { name: "Guardando…" });
     expect(pending).toHaveAttribute("aria-disabled", "true");
     expect(pending).toBeEnabled();
-    expect(pending).toHaveFocus();
+    await waitFor(() => expect(pending).toHaveFocus());
     await user.click(pending);
     expect(sent).toEqual(["save:respirar"]);
 

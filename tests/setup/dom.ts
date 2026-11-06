@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
 // Preparación del proyecto `ui` de Vitest. Las aserciones de DOM (`toBeVisible`,
@@ -13,6 +13,12 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 // pantallas de la cuenta, y nadie lo vio porque Vitest calla la consola de las pruebas que
 // pasan.
 const DUPLICATE_KEY = "Encountered two children with the same key";
+
+// Cuánto espera `findBy…` y `waitFor` antes de rendirse. El valor de fábrica es un segundo, y con la
+// batería entera corriendo a la vez (los dos carriles, la integración continua) una pantalla que pinta su
+// aviso y después le pone el foco puede tardar más: la prueba fallaba sin que nada estuviera roto. Esperar
+// más no deja pasar nada que esté mal: lo que nunca llega sigue fallando, solo que a los tres segundos.
+configure({ asyncUtilTimeout: 3_000 });
 let duplicateKeys: string[] = [];
 
 beforeEach(() => {

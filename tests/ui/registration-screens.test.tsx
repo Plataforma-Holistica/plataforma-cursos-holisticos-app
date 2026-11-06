@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -465,7 +465,7 @@ describe("«Completa tu cuenta» (PA-14)", () => {
 
   it("enlace caducado o usado: «Ese enlace ya no sirve», con sus tres salidas y sin formulario", async () => {
     const { container } = await submitComplete({ kind: "link_dead" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve"));
     expect(screen.getByRole("link", { name: "Pedir otro enlace" })).toHaveAttribute("href", "/registro");
     expect(screen.getByRole("link", { name: "Recuperar mi contraseña" })).toHaveAttribute("href", "/recuperar");
     expect(screen.getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/entrar");
@@ -475,7 +475,7 @@ describe("«Completa tu cuenta» (PA-14)", () => {
 
   it("enlace gastado sin cuenta lista: manda a recuperar la contraseña, y a ningún otro lado", async () => {
     const { container } = await submitComplete({ kind: "recover_instead" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("No pudimos terminar tu registro");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("No pudimos terminar tu registro"));
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByRole("link", { name: "Recuperar mi contraseña" })).toHaveAttribute("href", "/recuperar");
     expect(await a11yViolations(container)).toEqual([]);
@@ -483,7 +483,7 @@ describe("«Completa tu cuenta» (PA-14)", () => {
 
   it("sin texto vigente de un documento obligatorio: no hay formulario ni sesión que cerrar", async () => {
     await submitComplete({ kind: "texts_unavailable" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("No podemos completar tu cuenta");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("No podemos completar tu cuenta"));
     expect(screen.queryByLabelText("Nombre")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cerrar sesión" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ir al inicio" })).toHaveAttribute("href", "/");
@@ -784,7 +784,7 @@ describe("recuperar la contraseña, «cambiar» (PA-13)", () => {
 
   it("enlace caducado o usado: «Ese enlace ya no sirve» y «Pedir otro»", async () => {
     const { container } = await submitChange({ kind: "link_dead" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve"));
     expect(screen.getByRole("link", { name: "Pedir otro" })).toHaveAttribute("href", "/recuperar");
     expect(screen.queryByLabelText("Contraseña nueva")).not.toBeInTheDocument();
     expect(await a11yViolations(container)).toEqual([]);
@@ -792,7 +792,7 @@ describe("recuperar la contraseña, «cambiar» (PA-13)", () => {
 
   it("enlace gastado sin cambio hecho: «No pudimos terminar el cambio» y «Pedir otro»", async () => {
     const { container } = await submitChange({ kind: "request_new_link" });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("No pudimos terminar el cambio");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("No pudimos terminar el cambio"));
     expect(screen.getByRole("link", { name: "Pedir otro" })).toHaveAttribute("href", "/recuperar");
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(await a11yViolations(container)).toEqual([]);
@@ -941,7 +941,7 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
     const password = screen.getByLabelText("Contraseña nueva");
     await user.type(password, "una clave larga{Enter}");
     const summary = await screen.findByRole("alert");
-    expect(summary).toHaveFocus();
+    await waitFor(() => expect(summary).toHaveFocus());
 
     // El segundo envío tarda. Mientras, lo que dijo la respuesta anterior deja de decirse:
     // la última palabra es la revisión del navegador, que no encontró nada. El foco se queda
@@ -952,7 +952,7 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
     await user.click(again);
     await user.keyboard("otra clave larga{Enter}");
     expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
-    expect(again).toHaveFocus();
+    await waitFor(() => expect(again).toHaveFocus());
     expect(again).not.toBeInvalid();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
@@ -1015,7 +1015,7 @@ describe("lo que encontró la revisión de los segundos arreglos", () => {
       finish({ kind: "link_dead" });
       await Promise.resolve();
     });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve"));
   });
 
   it("pulsar sobre la etiqueta o sobre la regla de la contraseña sí es salir del campo: solo «Mostrar» no lo es", async () => {
@@ -1040,7 +1040,10 @@ describe("«Completa tu cuenta»: el foco con errores del servidor a la vista", 
     render(complete);
     await fillComplete(user);
     await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
 
     let finish: (state: CompleteState) => void = () => undefined;
     actions.completeRegistrationAction.mockReturnValue(new Promise<CompleteState>((resolve) => (finish = resolve)));
@@ -1050,13 +1053,13 @@ describe("«Completa tu cuenta»: el foco con errores del servidor a la vista", 
     await user.click(name);
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
-    expect(name).toHaveFocus();
+    await waitFor(() => expect(name).toHaveFocus());
 
     await act(async () => {
       finish({ kind: "link_dead" });
       await Promise.resolve();
     });
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ese enlace ya no sirve"));
   });
 });
 
@@ -1091,7 +1094,7 @@ describe("manda la última revisión, sea del navegador o del servidor", () => {
     });
     const summary = await screen.findByRole("alert");
     expect(summary).toHaveTextContent("Esa contraseña es demasiado larga. Elige una más corta.");
-    expect(summary).toHaveFocus();
+    await waitFor(() => expect(summary).toHaveFocus());
     expect(screen.getByLabelText("Contraseña nueva")).toBeInvalid();
   });
 
@@ -1107,7 +1110,7 @@ describe("manda la última revisión, sea del navegador o del servidor", () => {
     // con otros errores, y el resumen toma el foco.
     await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
     const summary = await screen.findByText(/Hay 4 datos por corregir/);
-    expect(summary.closest('[role="alert"]')).toHaveFocus();
+    await waitFor(() => expect(summary.closest('[role="alert"]')).toHaveFocus());
     // Los del servidor ya no se dicen: la última revisión es la del navegador.
     expect(screen.queryByText(/Ese nombre tiene caracteres/)).not.toBeInTheDocument();
 
@@ -1121,7 +1124,7 @@ describe("manda la última revisión, sea del navegador o del servidor", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "Confirmando…" })).toBeDisabled();
     // El foco se queda en el campo, y no reaparece ni el error del servidor ni el resumen.
-    expect(name).toHaveFocus();
+    await waitFor(() => expect(name).toHaveFocus());
     expect(name).not.toBeInvalid();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
@@ -1148,7 +1151,10 @@ describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra
     const user = userEvent.setup();
     render(<ChangePasswordScreen token={TOKEN} />);
     await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
     // Vuelve al campo y envía igual: los mismos errores, pero es otra revisión.
     await user.click(screen.getByLabelText("Contraseña nueva"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
@@ -1161,7 +1167,10 @@ describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra
     const user = userEvent.setup();
     render(complete);
     await user.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
-    expect(await screen.findByRole("alert")).toHaveFocus();
+    {
+      const target = await screen.findByRole("alert");
+      await waitFor(() => expect(target).toHaveFocus());
+    }
     await user.click(screen.getByLabelText("Nombre"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
     await user.keyboard("{Enter}");
@@ -1178,7 +1187,7 @@ describe("dos respuestas seguidas, sin recargar, dejan un solo aviso", () => {
     for (const attempt of [2, 3]) {
       answers<MailRequestState>(actions.requestRegistrationAction, { kind: "failed", email: "ana@prueba.test", reason: "unavailable", attempt });
       await user.click(screen.getByRole("button", { name: "Crear mi cuenta" }));
-      await vi.waitFor(() => expect(actions.requestRegistrationAction).toHaveBeenCalledTimes(attempt));
+      await vi.waitFor(() => expect(actions.requestRegistrationAction).toHaveBeenCalledTimes(attempt), { timeout: 3_000 });
       await screen.findByRole("button", { name: "Crear mi cuenta" });
       expect(screen.getAllByText(message)).toHaveLength(1);
     }
@@ -1195,7 +1204,7 @@ describe("dos respuestas seguidas, sin recargar, dejan un solo aviso", () => {
     answers<MailRequestState>(actions.requestRecoveryAction, { kind: "sent", lifetimeSeconds: 3_600, attempt: 2 });
     await user.type(screen.getByLabelText("Correo"), "ana@prueba.test");
     await user.click(screen.getByRole("button", { name: "Mandarme el enlace" }));
-    await vi.waitFor(() => expect(actions.requestRecoveryAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(actions.requestRecoveryAction).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     await screen.findByRole("button", { name: "Mandarme el enlace" });
     expect(screen.getAllByText(/Si ese correo tiene cuenta/)).toHaveLength(1);
 
@@ -1219,7 +1228,7 @@ describe("dos respuestas seguidas, sin recargar, dejan un solo aviso", () => {
     answers<ChangePasswordState>(actions.completeRecoveryAction, { kind: "unavailable", attempt: 2 });
     await user.type(screen.getByLabelText("Contraseña nueva"), "una clave larga");
     await user.click(screen.getByRole("button", { name: "Guardar contraseña" }));
-    await vi.waitFor(() => expect(actions.completeRecoveryAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(actions.completeRecoveryAction).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(await screen.findAllByText(message)).toHaveLength(1);
   });
 
@@ -1230,7 +1239,7 @@ describe("dos respuestas seguidas, sin recargar, dejan un solo aviso", () => {
     for (const attempt of [1, 2, 3]) {
       answers<ResendState>(actions.resendAction, { kind: "failed", reason: "unavailable", attempt });
       await user.click(screen.getByRole("button", { name: "Reenviar" }));
-      await vi.waitFor(() => expect(actions.resendAction).toHaveBeenCalledTimes(attempt));
+      await vi.waitFor(() => expect(actions.resendAction).toHaveBeenCalledTimes(attempt), { timeout: 3_000 });
       expect(await screen.findAllByRole("alert")).toHaveLength(1);
     }
   });

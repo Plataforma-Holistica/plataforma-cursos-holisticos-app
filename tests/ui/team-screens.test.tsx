@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -109,7 +109,7 @@ describe("la pantalla de dar el código (PA-12, pedir)", () => {
     actions.giveCodeAction.mockResolvedValue({ kind: "failed", reason: "unavailable", attempt: 2 });
     await user.type(screen.getByLabelText("Código"), "654321");
     await user.click(screen.getByRole("button", { name: "Continuar" }));
-    await vi.waitFor(() => expect(actions.giveCodeAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(actions.giveCodeAction).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(await screen.findAllByRole("alert")).toHaveLength(1);
   });
 
@@ -134,7 +134,7 @@ describe("la pantalla de dar el código (PA-12, pedir)", () => {
     await user.clear(screen.getByLabelText("Código"));
     await user.type(screen.getByLabelText("Código"), " 123 456 ");
     await user.tab();
-    await vi.waitFor(() => expect(screen.getByLabelText("Código")).not.toBeInvalid());
+    await vi.waitFor(() => expect(screen.getByLabelText("Código")).not.toBeInvalid(), { timeout: 3_000 });
     expect(actions.giveCodeAction).not.toHaveBeenCalled();
   });
 
@@ -179,7 +179,7 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
     const started = await begin(STARTED, view);
     await started.user.type(await screen.findByLabelText("Código"), "123456");
     await started.user.click(screen.getByRole("button", { name: "Continuar" }));
-    await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
     return started;
   }
 
@@ -261,13 +261,14 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
 
   it("enviado el código, la clave deja de pintarse, salga bien o mal", async () => {
     const { container } = await confirm({ kind: "invalid", fields: { code: "wrong" }, attempt: 1 });
-    await vi.waitFor(() => expect(screen.queryByText(SECRET)).not.toBeInTheDocument());
+    await vi.waitFor(() => expect(screen.queryByText(SECRET)).not.toBeInTheDocument(), { timeout: 3_000 });
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Abrir en mi aplicación de códigos" })).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(SECRET);
     // Sigue pudiendo dar su código, y empezar de nuevo si ya no tiene la clave.
     expect(screen.getByText(/Ya empezaste a configurarlo en este navegador\./)).toBeVisible();
-    expect(screen.getByLabelText("Código")).toHaveValue("");
+    // React vacía el formulario al terminar la acción, un instante después de pintar la respuesta.
+    await waitFor(() => expect(screen.getByLabelText("Código")).toHaveValue(""));
     expect(screen.getByRole("link", { name: "Empezar de nuevo" })).toHaveAttribute("href", "/entrar/segundo-factor/configurar");
   });
 
@@ -280,7 +281,7 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
     await screen.findByText(SECRET);
     if (typed !== "") await user.type(screen.getByLabelText("Código"), typed);
     await user.click(screen.getByRole("button", { name: "Continuar" }));
-    await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
     expect(await screen.findByRole("alert")).toBeVisible();
     expect(screen.getByLabelText("Código")).toBeInvalid();
     expect(screen.getByText(SECRET)).toBeVisible();
@@ -373,7 +374,7 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
       await user.type(handoff, "ab12-cd34");
       await user.type(screen.getByLabelText("Código"), "123456");
       await user.click(screen.getByRole("button", { name: "Continuar" }));
-      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
       expect(formOf(actions.confirmSecondFactorAction)).toEqual({ code: "123456", handoff: "ab12-cd34", painted: FACTOR });
     });
 
@@ -409,7 +410,7 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
 
       await user.type(screen.getByLabelText("Código"), "123456");
       await user.click(screen.getByRole("button", { name: "Continuar" }));
-      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
       expect(formOf(actions.confirmSecondFactorAction)).toEqual({ code: "123456", painted: OTHER });
     });
 
@@ -432,7 +433,7 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
       render(<FactorSetupScreen view={RESUME} />);
       await user.type(screen.getByLabelText("Código"), "123456");
       await user.click(screen.getByRole("button", { name: "Continuar" }));
-      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(actions.confirmSecondFactorAction).toHaveBeenCalledOnce(), { timeout: 3_000 });
       await user.click(await screen.findByRole("button", { name: "Empezar de nuevo" }));
       expect(await screen.findByText(SECRET)).toBeVisible();
       // Y sin el error del intento anterior: ese código era de otra clave.

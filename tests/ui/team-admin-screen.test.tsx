@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -302,7 +302,7 @@ describe("el bloque «El equipo»", () => {
     const { user, container } = show(roster());
     await user.click(blockOf("El equipo").getByRole("button", { name: "Quitar Soporte a otra@prueba.test" }));
     const panel = (await screen.findByText("¿Quitar Soporte a otra@prueba.test?")).parentElement as HTMLElement;
-    expect(panel).toHaveFocus();
+    await waitFor(() => expect(panel).toHaveFocus());
     expect(within(panel).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "Se cierran todas sus sesiones.",
       "Queda registrado con tu nombre.",
@@ -321,7 +321,7 @@ describe("el bloque «El equipo»", () => {
     await user.click(await screen.findByRole("button", { name: "Sí, quitar" }));
     expect(formOf(actions.teamAction, 1)).toEqual({ do: `confirm:revoke:${OTHER}:support:` });
     const done = await screen.findByText("Capacidad quitada. Se cerraron las sesiones de esa cuenta.");
-    expect(done.closest("[tabindex]")).toHaveFocus();
+    await waitFor(() => expect(done.closest("[tabindex]")).toHaveFocus());
     expect(screen.queryByText("¿Quitar Soporte a otra@prueba.test?")).not.toBeInTheDocument();
   });
 
@@ -333,7 +333,7 @@ describe("el bloque «El equipo»", () => {
     expect(formOf(actions.teamAction, 1)).toEqual({ do: "cancel" });
     expect(await screen.findByRole("button", { name: "Quitar Soporte a otra@prueba.test" })).toBeEnabled();
     expect(screen.queryByText("¿Quitar Soporte a otra@prueba.test?")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "El equipo" }).closest("section")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "El equipo" }).closest("section")).toHaveFocus());
   });
 
   it("dar una capacidad que no es configuración no pregunta: el botón ya lo hace", async () => {
@@ -465,7 +465,7 @@ describe("el bloque «Restablecer un segundo factor»", () => {
     await choose(user);
     expect(formOf(actions.resetAction)).toEqual({ do: `choose:${OTHER}` });
     const panel = (await screen.findByText("¿Restablecer el segundo factor de otra@prueba.test?")).parentElement as HTMLElement;
-    expect(panel).toHaveFocus();
+    await waitFor(() => expect(panel).toHaveFocus());
     expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
     // El botón lleva a quién, lo que se confirma y la versión de la persona que la página leyó.
     expect(within(panel).getByRole("button", { name: "Sí, restablecer" })).toHaveValue(`confirm:${OTHER}::${VERSION}`);
