@@ -124,7 +124,7 @@ describe("la pantalla de entrar (PA-11)", () => {
     expect(screen.getByLabelText("Correo")).not.toBeInvalid();
     await user.type(screen.getByLabelText("Correo"), "esto no es un correo");
     await user.tab();
-    expect(screen.getByLabelText("Correo")).toBeInvalid();
+    await waitFor(() => expect(screen.getByLabelText("Correo")).toBeInvalid());
     expect(screen.getByText("Ese correo no tiene forma de correo. Revísalo.")).toBeVisible();
     await user.clear(screen.getByLabelText("Correo"));
     await user.type(screen.getByLabelText("Correo"), "ana@prueba.test");
@@ -398,7 +398,7 @@ describe("PA-15: el resumen vuelve a tomar el foco cuando la misma revisión fal
     await user.click(screen.getByLabelText("Nombre"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("alert")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
     expect(actions.completeAccountAction).not.toHaveBeenCalled();
   });
 });

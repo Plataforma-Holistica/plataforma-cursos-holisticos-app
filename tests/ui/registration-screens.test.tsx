@@ -543,7 +543,7 @@ describe("«Completa tu cuenta» (PA-14)", () => {
     await user.click(name);
     await user.paste("x".repeat(121));
     await user.tab();
-    expect(name).toBeInvalid();
+    await waitFor(() => expect(name).toBeInvalid());
     await user.clear(name);
     await user.tab();
     expect(name).not.toBeInvalid();
@@ -606,7 +606,7 @@ describe("«Completa tu cuenta» (PA-14)", () => {
     await user.click(screen.getByLabelText("Nombre"));
     await user.paste("x".repeat(121));
     await user.tab();
-    expect(screen.getByLabelText("Nombre")).toBeInvalid();
+    await waitFor(() => expect(screen.getByLabelText("Nombre")).toBeInvalid());
     expect(screen.getByText("Ese nombre es demasiado largo. Escribe uno más corto.")).toBeVisible();
   });
 });
@@ -1159,7 +1159,7 @@ describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra
     await user.click(screen.getByLabelText("Contraseña nueva"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("alert")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
     expect(actions.completeRecoveryAction).not.toHaveBeenCalled();
   });
 
@@ -1174,7 +1174,7 @@ describe("el resumen vuelve a tomar el foco cuando la misma revisión falla otra
     await user.click(screen.getByLabelText("Nombre"));
     expect(screen.getByRole("alert")).not.toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("alert")).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
     expect(actions.completeRegistrationAction).not.toHaveBeenCalled();
   });
 });

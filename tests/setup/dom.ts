@@ -6,7 +6,13 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 // Preparación del proyecto `ui` de Vitest. Las aserciones de DOM (`toBeVisible`,
 // `toHaveAccessibleName`...) y la limpieza entre pruebas: sin las variables globales de
 // Vitest, Testing Library no la registra sola.
-//
+
+// Cuánto espera `findBy…` y `waitFor` antes de rendirse. El valor de fábrica es un segundo, y con la
+// batería entera corriendo a la vez (los dos carriles, la integración continua) una pantalla que pinta su
+// aviso y después le pone el foco puede tardar más: la prueba fallaba sin que nada estuviera roto. Esperar
+// más no deja pasar nada que esté mal: lo que nunca llega sigue fallando, solo que a los tres segundos.
+configure({ asyncUtilTimeout: 3_000 });
+
 // Y una guarda: ninguna prueba pasa si React avisó de dos hermanos con la misma `key`. Ese
 // aviso no es cosmético. Con la misma `key`, React confunde un elemento con otro: un aviso
 // de un intento anterior se queda en pantalla y se acumula con el siguiente. Pasó en las
@@ -14,11 +20,6 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 // pasan.
 const DUPLICATE_KEY = "Encountered two children with the same key";
 
-// Cuánto espera `findBy…` y `waitFor` antes de rendirse. El valor de fábrica es un segundo, y con la
-// batería entera corriendo a la vez (los dos carriles, la integración continua) una pantalla que pinta su
-// aviso y después le pone el foco puede tardar más: la prueba fallaba sin que nada estuviera roto. Esperar
-// más no deja pasar nada que esté mal: lo que nunca llega sigue fallando, solo que a los tres segundos.
-configure({ asyncUtilTimeout: 3_000 });
 let duplicateKeys: string[] = [];
 
 beforeEach(() => {
