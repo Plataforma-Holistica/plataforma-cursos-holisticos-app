@@ -1,10 +1,16 @@
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
+import type { Tx } from "@/adapters/supabase/db";
+import { askCourseStudents } from "@/services/teachers/course-students-records";
+
+import { claimedUser, freshOrigin, testServices } from "./helpers/account";
+import { memoryJar } from "./helpers/auth";
 import { connect, waitBehind } from "./helpers/finance";
 import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
-import { asOwner, asSystem } from "./helpers/team";
-import { createTestUser, deleteTestUsers, type TestUser } from "./helpers/users";
+import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
+import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUsersByEmail, type TestUser } from "./helpers/users";
 
 // El avance de los alumnos (T-408, segunda solicitud; PA-51) contra la base local, en lo que una transacción revertida no puede mostrar.
 //
@@ -14,7 +20,11 @@ import { createTestUser, deleteTestUsers, type TestUser } from "./helpers/users"
 //
 // Los candados de los alias, con dos conexiones: dos lecturas de PA-51 del mismo maestro van una tras otra y no chocan en el único; una de PA-47 no
 // espera a una de PA-51.
+//
+// Y la forma estricta del servidor (`askCourseStudents`) contra lo que la base contesta de verdad, como una maestra con su sesión, en una transacción que
+// se revierte.
 
+const emails: string[] = [];
 let owner: Client;
 let suiteStart: string;
 const seenRuns: string[] = [];
@@ -30,6 +40,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (seenRuns.length > 0) await owner.query("delete from public.job_runs where id = any($1::uuid[])", [seenRuns.splice(0)]);
   await dropTransitionLeftovers(owner, suiteStart);
+  await deleteTestUsersByEmail(emails);
   await owner.end();
 });
 
@@ -233,5 +244,105 @@ describe("los candados de los alias, con dos conexiones", { timeout: 60_000 }, (
       [teacherId],
     );
     expect(aliases.rows[0]).toEqual({ n: 3, distinct_aliases: 3 });
+  });
+});
+
+describe("la forma estricta del servidor, contra la base", () => {
+  /** Una persona de verdad, con su sesión del Auth local, como en la 110. */
+  async function person(): Promise<{ id: string; claims: VerifiedClaims }> {
+    const who = await claimedUser();
+    emails.push(who.email);
+    await completeAccountAsOwner(who.id);
+    const jar = memoryJar();
+    const entered = await testServices().signIn(jar, who, freshOrigin());
+    if (entered.kind !== "entered") throw new Error(`La persona de prueba no entró: ${entered.kind}`);
+    const check = await testServices().checkSession(jar);
+    if (check.kind !== "pass") throw new Error(`La guarda no la dejó pasar: ${check.kind}`);
+    return { id: who.id, claims: check.claims };
+  }
+
+  const txOn = (client: Client): Tx => ({
+    query: async (query, row) => (await client.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
+    execute: async (query) => (await client.query(query.text, [...query.values])).rowCount ?? 0,
+  });
+
+  it("lo que contesta `teacher_course_students` pasa la forma de `askCourseStudents`: con resumen, y otro curso como uno que no existe", async () => {
+    const maestra = await person();
+    const students = [await createTestUser(), await createTestUser()];
+    try {
+      await reverted(async (tx) => {
+        await asSystem(tx);
+        await tx.query("select set_config('app.local_courses', 'on', true)");
+        await tx.query("select private.system_catalog_add('practices', 'Práctica de avance'), private.system_catalog_add('levels', 'Nivel de avance')");
+        const teacher = (await tx.query<{ id: string }>("select private.system_add_teacher('Maestra de avance', 'maestra-avance-111', null) as id")).rows[0]!.id;
+        const course = {
+          slug: "curso-avance-111",
+          title: "Curso de avance",
+          practice: "practica-de-avance",
+          level: "nivel-de-avance",
+          modules: [
+            {
+              title: "Uno",
+              lessons: ["Uno", "Dos", "Tres"].map((title) => ({
+                title,
+                video: { provider: "mux", asset_id: `AssetAvance${title}`, playback_id: `PlaybackAvance${title}`, duration_seconds: 100 },
+              })),
+            },
+          ],
+        };
+        const loaded = (await tx.query<{ answer: string }>("select private.system_load_course($1::uuid, $2::jsonb) ->> 'answer' as answer", [teacher, JSON.stringify(course)]))
+          .rows[0];
+        if (loaded?.answer !== "loaded") throw new Error(`No cargó el curso: ${loaded?.answer}`);
+        await asOwner(tx);
+        await tx.query("set local session_replication_role = replica");
+        await tx.query("update public.teachers set profile_id = $1, status = 'active' where id = $2", [maestra.id, teacher]);
+        const courseId = (
+          await tx.query<{ id: string }>(
+            `update public.course_registry r set state = 'published', first_published_at = now() - interval '1 year'
+             from public.published_courses c where c.course_id = r.course_id and c.slug = 'curso-avance-111' returning r.course_id::text as id`,
+          )
+        ).rows[0]!.id;
+        await tx.query("set local session_replication_role = origin");
+        // La primera alumna terminó todo hace dos semanas; la segunda empezó la primera lección.
+        await tx.query(
+          `insert into public.lesson_progress (profile_id, lesson_id, course_id, video_asset_id, last_position_seconds, first_watched_at, last_watched_at,
+                                               completed_at, last_playback_session_id, last_seq)
+           select p.id, l.id, l.course_id, l.video_asset_id, 50, now() - interval '15 days', now() - interval '14 days',
+                  case when p.n = 1 then now() - interval '14 days' end, gen_random_uuid(), 1
+           from public.published_lessons l, (values ($2::uuid, 1), ($3::uuid, 2)) p (id, n)
+           where l.course_id = $1 and (p.n = 1 or l.position = (select min(x.position) from public.published_lessons x where x.course_id = $1))`,
+          [courseId, students[0]!.id, students[1]!.id],
+        );
+        // La lista es de cada lunes y no se rehace en la semana: la de esta semana pudo armarla ya otra noche. Se olvida, para que este paso la arme.
+        await tx.query("update private.course_progress_state set weekly_cut_at = null, weekly_built_at = null");
+        expect((await tx.query<{ r: { outcome: string } }>("select private.course_progress_step() as r")).rows[0]!.r.outcome).toBe("built");
+
+        const { claims } = readVerifiedClaims(maestra.claims);
+        await asServer(tx, claims.userId, claims.sessionId ?? "");
+        try {
+          const read = await askCourseStudents(txOn(tx), { course: courseId, order: "progress", page: 1 });
+          if (read.outcome !== "ok") throw new Error(`la maestra no lee su curso: ${read.outcome}`);
+          expect(read.value).toMatchObject({
+            title: "Curso de avance",
+            figures: { started: 2, inProgress: 1, finished: 1 },
+            lessons: [
+              { title: "Uno", finished: 1 },
+              { title: "Dos", finished: 1 },
+              { title: "Tres", finished: 1 },
+            ],
+            page: 1,
+            pages: 1,
+            totalStudents: 2,
+            stale: false,
+          });
+          expect(read.value.students.map((s) => `${s.completed}/${s.total}`)).toEqual(["3/3", "0/3"]);
+          expect(await askCourseStudents(txOn(tx), { course: "00000000-0000-4000-8000-000000000000", order: "alias", page: 1 })).toEqual({ outcome: "not_found" });
+        } finally {
+          await asOwner(tx);
+        }
+      });
+    } finally {
+      await deleteTestUsers(students);
+    }
   });
 });

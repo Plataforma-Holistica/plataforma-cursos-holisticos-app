@@ -1,7 +1,7 @@
 import { longDate } from "@/app/_lib/dates";
 import { portal } from "@/messages/es/portal";
 import { plural, t } from "@/messages/format";
-import { coursePath, portalCoursePath, portalDeleteCoursePath } from "@/services/account/navigation";
+import { coursePath, portalCoursePath, portalDeleteCoursePath, portalStudentsPath } from "@/services/account/navigation";
 import type { CourseState, TeacherCourse } from "@/services/drafts/editor";
 import { isEditable, isInReview, missingItems } from "@/services/drafts/field-rules";
 import type { StatusTone } from "@/ui/status-badge";
@@ -40,6 +40,8 @@ export interface CourseRow {
   remove: CourseLink | null;
   /** Su ficha pública, si está publicado. */
   publicPage: CourseLink | null;
+  /** El avance de sus alumnos (PA-51), si se publicó alguna vez: publicado, con cambios pendientes o despublicado. */
+  progress: CourseLink | null;
   cover: { title: string; teacherName: string | null; practiceName: string | null; tone: number | null };
 }
 
@@ -88,6 +90,8 @@ export function courseRows(courses: readonly TeacherCourse[], readOnly: boolean)
     const continues = course.state === "changes_pending" && course.pendingVersion === "draft" && course.returned === null && !readOnly;
     const publicHref = course.slug !== null && (course.state === "published" || course.state === "changes_pending") ? coursePath(course.slug) : null;
     const removeHref = editable && course.state === "draft" && course.draft !== null ? portalDeleteCoursePath(course.id) : null;
+    // Ver el avance no cambia nada: también al suspendido, y también de un curso despublicado o con su versión en camino (decisión mía sin confirmar).
+    const progressHref = course.state === "published" || course.state === "changes_pending" || course.state === "withdrawn" ? portalStudentsPath(course.id) : null;
     const returned = isEditable(course.state, course.pendingVersion) && course.returned !== null;
     // Una versión enviada se dice como un curso en revisión.
     const shown: CourseState = isInReview(course.state, course.pendingVersion) ? "in_review" : course.state;
@@ -105,6 +109,7 @@ export function courseRows(courses: readonly TeacherCourse[], readOnly: boolean)
       action: href === null ? null : { label: verb, href, name: t(named, { title: course.title }) },
       remove: removeHref === null ? null : { label: text.delete, href: removeHref, name: t(text.deleteNamed, { title: course.title }) },
       publicPage: publicHref === null ? null : { label: text.publicPage, href: publicHref, name: t(text.publicPageNamed, { title: course.title }) },
+      progress: progressHref === null ? null : { label: text.progress, href: progressHref, name: t(text.progressNamed, { title: course.title }) },
       cover: { title: course.title, teacherName: course.teacherName, practiceName: course.practiceName, tone: course.coverTone },
     };
   });
