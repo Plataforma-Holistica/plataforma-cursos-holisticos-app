@@ -56,10 +56,22 @@ const COLUMNS = [
   { key: "fullLessons", header: text.courseColumns.fullLessons, numeric: true },
   { key: "halfLessons", header: text.courseColumns.halfLessons, numeric: true },
   { key: "students", header: text.courseColumns.students, numeric: true },
+  { key: "progress", header: text.courseColumns.progress },
 ] as const;
 
 function CourseTitle({ course }: { course: CourseRowView }) {
   return course.href === null ? <span>{course.title}</span> : <TextLink href={course.href}>{course.title}</TextLink>;
+}
+
+/** «Ver avance» (PA-51), con el curso en su nombre accesible, para que la lista de enlaces se entienda sola. */
+function CourseProgress({ course }: { course: CourseRowView }) {
+  if (course.progress === null) return null;
+  return (
+    <TextLink href={course.progress.href}>
+      <span aria-hidden="true">{portal.courses.progress}</span>
+      <span className="sr-only">{course.progress.name}</span>
+    </TextLink>
+  );
 }
 
 function Courses({ courses }: { courses: readonly CourseRowView[] }) {
@@ -80,6 +92,7 @@ function Courses({ courses }: { courses: readonly CourseRowView[] }) {
               fullLessons: noData(course.fullLessons),
               halfLessons: noData(course.halfLessons),
               students: noData(course.students),
+              progress: <CourseProgress course={course} />,
             },
           }))}
           empty={text.noCourses}
@@ -91,6 +104,11 @@ function Courses({ courses }: { courses: readonly CourseRowView[] }) {
             <p className="font-semibold">
               <CourseTitle course={course} />
             </p>
+            {course.progress !== null && (
+              <p className="text-body-s">
+                <CourseProgress course={course} />
+              </p>
+            )}
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body-s">
               <dt className="text-text-2">{text.courseColumns.fullLessons}</dt>
               <dd className="text-right tabular-nums">{noData(course.fullLessons)}</dd>

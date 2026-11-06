@@ -124,6 +124,19 @@ describe("PA-41 · Panel", () => {
     expect(within(screen.getByRole("list", { name: "Tus cursos este mes" })).getAllByRole("listitem")).toHaveLength(2);
   });
 
+  it("cada curso suyo enlaza al avance de sus alumnos (PA-51); uno que ya no es suyo, no", async () => {
+    answers(ready({ ...VALUE, courses: [VALUE.courses[0]!, { ...VALUE.courses[1]!, owned: false }] }));
+    await home();
+    const table = screen.getByRole("table", { name: "Tus cursos este mes" });
+    const mine = within(table).getByRole("rowheader", { name: "Respirar para volver" }).closest("tr") as HTMLElement;
+    expect(within(mine).getByRole("link", { name: "Ver avance de Respirar para volver" })).toHaveAttribute("href", `/portal/cursos/${COURSE}/alumnos`);
+    const other = within(table).getAllByRole("row")[2] as HTMLElement;
+    expect(within(other).queryByRole("link", { name: /^Ver avance/ })).not.toBeInTheDocument();
+    const cards = within(screen.getByRole("list", { name: "Tus cursos este mes" })).getAllByRole("listitem");
+    expect(within(cards[0]!).getByRole("link", { name: "Ver avance de Respirar para volver" })).toBeInTheDocument();
+    expect(within(cards[1]!).queryByRole("link", { name: /^Ver avance/ })).not.toBeInTheDocument();
+  });
+
   it("la fila de un curso que ya no es suyo va con sus cifras y sin enlace", async () => {
     answers(ready({ ...VALUE, courses: [{ ...VALUE.courses[0]!, owned: false }, VALUE.courses[1]!] }));
     await home();

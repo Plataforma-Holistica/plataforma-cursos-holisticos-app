@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { VerifiedClaims } from "@/services/account/account";
 import { PAYOUT_PERIOD_SEGMENT } from "@/services/account/navigation";
 
+import { StudentsSection } from "../_alumnos/section";
 import { CoursesSection } from "../_cursos/list";
 import { NewCourseSection } from "../_cursos/new";
 import { DiscardVersionSection } from "../_cursos/discard";
@@ -62,5 +63,6 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
   if (page === "borrar") return { render: ({ claims, readOnly }) => <DeleteCourseSection claims={claims} course={id} readOnly={readOnly} /> };
   if (page === "descartar") return { render: ({ claims, readOnly }) => <DiscardVersionSection claims={claims} course={id} readOnly={readOnly} /> };
   if (page === "enviar") return { render: ({ claims, readOnly }) => <SubmitSection claims={claims} course={id} readOnly={readOnly} /> };
+  if (page === "alumnos") return { render: ({ claims, readOnly, search }) => <StudentsSection claims={claims} course={id} readOnly={readOnly} search={search} /> };
   return null;
 }

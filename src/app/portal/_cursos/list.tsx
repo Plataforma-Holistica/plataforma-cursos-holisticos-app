@@ -77,6 +77,12 @@ export async function CoursesSection({ claims, readOnly }: { claims: VerifiedCla
                     <span className="sr-only">{row.publicPage.name}</span>
                   </TextLink>
                 )}
+                {row.progress !== null && (
+                  <TextLink href={row.progress.href}>
+                    <span aria-hidden="true">{row.progress.label}</span>
+                    <span className="sr-only">{row.progress.name}</span>
+                  </TextLink>
+                )}
                 {row.remove !== null && (
                   <TextLink href={row.remove.href}>
                     <span aria-hidden="true">{row.remove.label}</span>
