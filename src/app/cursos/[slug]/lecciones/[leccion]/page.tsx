@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
+import { StudentNav } from "@/app/_catalog/nav";
 import { resourceItems } from "@/app/_catalog/resources/words";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireLessonSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { captionsChoice } from "@/services/account/account";
-import { lessonPath } from "@/services/account/navigation";
+import { coursePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { coursePage } from "@/services/browse/browse";
 import { courseIsOpen, lessonPage, lessonResources, type LessonEntry } from "@/services/lessons/lessons";
 import { lessonAccess } from "@/services/media/media";
 
@@ -24,6 +26,11 @@ import { LessonScreen, type SyllabusEntry } from "./screen";
 // encendidos (RF-310); si no se supo, arrancan apagados. El temario trae el estado de cada lección
 // para quien mira (T-206); el segundo donde arranca el video lo trae la concesión. Los recursos de
 // la lección se leen solo con acceso (T-404): sin él, PA-33 no los muestra.
+//
+// Desde T-614 (parte 5; decisiones de Sergio del 2026-11-05) lleva la barra del alumno, y la ficha del curso del
+// catálogo (`coursePage`, pública y recordada 30 s) da a dónde regresar, los enlaces del curso y del maestro y la
+// portada que va detrás de «Reproducir». Si no se pudo leer, la lección se ve igual: sin enlace al maestro ni
+// portada. Esa lectura no toca lo que decide quién ve qué.
 
 const text = messages.lesson;
 
@@ -44,7 +51,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={path} withSession />;
   const { page } = found;
 
-  const [access, captions] = await Promise.all([lessonAccess(await cookieReader(), leccion), captionsChoice(session.claims)]);
+  const [access, captions, card] = await Promise.all([lessonAccess(await cookieReader(), leccion), captionsChoice(session.claims), coursePage(slug)]);
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
   if (initial.kind === "reload") redirect(path);
@@ -60,20 +67,28 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
     state: lesson.state,
   });
 
+  const listed = card.kind === "found" ? card.detail.course : null;
+  const teacherHref = listed?.teacherSlug == null ? null : teacherPath(listed.teacherSlug);
+
   return (
-    <LessonScreen
-      slug={page.course.slug}
-      lessonId={page.lesson.id}
-      heading={t(text.heading, { number: page.lesson.number, title: page.lesson.title })}
-      byline={t(text.byline, { course: page.course.title, teacher: page.course.teacherName })}
-      summary={page.course.summary}
-      about={t(text.aboutDuration, { duration: minutes(page.lesson.durationSeconds), module: page.lesson.moduleTitle })}
-      modules={page.modules.map((group) => ({ id: group.id, title: group.title, lessons: group.lessons.map(entry) }))}
-      next={page.next === null ? null : { title: page.next.title, href: lessonPath(page.course.slug, page.next.id) ?? path }}
-      progress={page.progress}
-      initial={initial}
-      captions={captions.kind === "ready" && captions.on}
-      resources={resources === null ? null : resourceItems(resources)}
-    />
+    <>
+      <StudentNav />
+      <LessonScreen
+        slug={page.course.slug}
+        lessonId={page.lesson.id}
+        heading={t(text.heading, { number: page.lesson.number, title: page.lesson.title })}
+        course={{ title: page.course.title, href: coursePath(page.course.slug) ?? ROUTES.home }}
+        teacher={{ name: page.course.teacherName, href: teacherHref }}
+        cover={listed === null ? null : { practiceName: listed.practice?.name ?? null, tone: listed.practice?.tone ?? null }}
+        summary={page.course.summary}
+        about={t(text.aboutDuration, { duration: minutes(page.lesson.durationSeconds), module: page.lesson.moduleTitle })}
+        modules={page.modules.map((group) => ({ id: group.id, title: group.title, lessons: group.lessons.map(entry) }))}
+        next={page.next === null ? null : { title: page.next.title, href: lessonPath(page.course.slug, page.next.id) ?? path }}
+        progress={page.progress}
+        initial={initial}
+        captions={captions.kind === "ready" && captions.on}
+        resources={resources === null ? null : resourceItems(resources)}
+      />
+    </>
   );
 }

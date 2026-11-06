@@ -650,7 +650,8 @@ test("al navegar dentro de la aplicación, el tramo abierto se cierra y sale (T-
   await expect(page.locator("mux-player")).toHaveCount(1);
   await advance(page);
   await playVideo(page, 0, 3);
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
   await context.close();
@@ -701,7 +702,8 @@ test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo
   await pauseVideo(page);
   await expect.poll(() => progressOf(who)).toEqual({ position: 20, covered: 20, completed: false });
   // El inicio: el curso, con la lección sugerida y su avance.
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   // Desde T-210, una tarjeta del carrusel: su nombre dice la lección sugerida y lo que dice su barra, que solo se ve.
   const offered = page
@@ -747,7 +749,8 @@ test("al llegar a UMBRAL_COMPLETO_PCT, la lección queda terminada sin recargar 
   await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lección");
   await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(0);
   // Terminada, el curso sale de «continuar viendo» (FL-13 A3).
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   await expect(page.getByRole("heading", { name: "Continuar viendo" })).toHaveCount(0);
   await context.close();
