@@ -58,6 +58,7 @@ const SHELF = {
   practices: [{ slug: "meditacion", name: "Meditación", tone: 3, courses: [COURSE] }],
   teachers: [],
   practiceOf: new Map(),
+  open: null,
 };
 const NOTHING: { q: string | null; practice: string | null; teacher: string | null; level: string | null } = { q: null, practice: null, teacher: null, level: null };
 const ANA = { slug: "ana-robles", name: "Ana Robles", practices: ["Meditación"], tone: 3, courseCount: 1 };
