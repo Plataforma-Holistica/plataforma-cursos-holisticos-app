@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Las páginas del equipo (PA-12, PA-60 mínimo, PA-88), con la guarda y los servicios
@@ -47,6 +48,7 @@ vi.mock("@/services/legal/legal-admin", () => ({ legalDocuments: vi.fn(), legalV
 import FactorSetupPage from "@/app/(cuenta)/entrar/segundo-factor/configurar/page";
 import SecondFactorPage from "@/app/(cuenta)/entrar/segundo-factor/page";
 import AdminRestPage from "@/app/admin/[...resto]/page";
+import { AdminFrame, adminEntryOf } from "@/app/admin/_lib/frame";
 import { ForbiddenScreen } from "@/app/admin/_lib/states";
 import AdminHomePage from "@/app/admin/page";
 
@@ -57,6 +59,8 @@ const claims = { userId: "u", aal: "aal2", sessionId: null, issuedAt: 0 };
 const FACTOR = "22222222-2222-4222-8222-222222222222";
 const query = (params: Record<string, string | string[] | undefined>) => ({ searchParams: Promise.resolve(params) });
 const rest = (...resto: string[]) => ({ params: Promise.resolve({ resto }) });
+/** Las direcciones del menú, sin repetir: va dos veces (la hoja del teléfono y la columna), y el logotipo también lleva al inicio. */
+const menuOf = (nav: ReturnType<typeof within>) => [...new Set(nav.getAllByRole("link").map((link: HTMLElement) => link.getAttribute("href")))];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -87,40 +91,49 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     // En el orden de siempre, no en el que las devuelva la base.
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["config", "content", "finance"] });
     const { container } = render(await AdminHomePage());
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Administración");
-    expect(screen.getByText("Entraste como ana@prueba.test.")).toBeVisible();
-    expect(screen.getByText("No tienes pendientes.")).toBeVisible();
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Tus capacidades");
-    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Contenido", "Finanzas", "Configuración"]);
-    expect(screen.getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
-    expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+    const main = within(screen.getByRole("main"));
+    expect(main.getByRole("heading", { level: 1 })).toHaveTextContent("Administración");
+    expect(main.getByText("Entraste como ana@prueba.test.")).toBeVisible();
+    expect(main.getByText("No tienes pendientes.")).toBeVisible();
+    expect(main.getByRole("heading", { level: 2 })).toHaveTextContent("Tus capacidades");
+    expect(main.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Contenido", "Finanzas", "Configuración"]);
+    // Los enlaces de antes se fueron al menú (T-614, parte 6).
+    expect(main.queryAllByRole("link")).toHaveLength(0);
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("a quien tiene configuración le ofrece la pantalla del equipo; a quien no, no", async () => {
-    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "config"] });
-    const withConfig = render(await AdminHomePage());
-    expect(screen.getByRole("link", { name: "Equipo de administración" })).toHaveAttribute("href", "/admin/equipo");
-    withConfig.unmount();
-    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "content", "finance", "moderation"] });
+  it("el menú lleva el logotipo, el inicio marcado, los grupos de sus capacidades, la cuenta y la salida", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance", "content", "moderation"] });
     render(await AdminHomePage());
-    expect(screen.queryByRole("link", { name: "Equipo de administración" })).not.toBeInTheDocument();
+    const nav = within(screen.getByRole("navigation", { name: "Administración" }));
+    expect(menuOf(nav)).toEqual(["/admin", "/admin/revision", "/admin/maestros", "/admin/practicas", "/admin/periodos", "/admin/alertas", "/cuenta", "/inicio"]);
+    // Un grupo por capacidad con pantallas, con su nombre: moderación todavía no tiene ninguna. Cada
+    // cosa va dos veces: en la hoja del teléfono (cerrada) y en la columna.
+    expect(nav.getAllByRole("list", { name: "Contenido" })).toHaveLength(2);
+    expect(nav.getAllByRole("list", { name: "Finanzas" })).toHaveLength(2);
+    expect(nav.queryAllByRole("list", { name: "Moderación" })).toHaveLength(0);
+    expect(nav.queryAllByRole("list", { name: "Configuración" })).toHaveLength(0);
+    for (const link of nav.getAllByRole("link", { name: "Inicio" })) expect(link).toHaveAttribute("aria-current", "page");
+    expect(nav.getAllByRole("link", { current: "page" })).toHaveLength(2);
+    expect(nav.getAllByRole("button", { name: "Cerrar sesión" })).toHaveLength(2);
   });
 
-  it("a quien tiene Contenido le ofrece las prácticas y los niveles; a quien no, no", async () => {
-    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "content"] });
-    const withContent = render(await AdminHomePage());
-    expect(screen.getByRole("link", { name: "Prácticas y niveles" })).toHaveAttribute("href", "/admin/practicas");
-    withContent.unmount();
-    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "config", "finance", "moderation"] });
+  it.each<[string, string[], string[]]>([
+    ["config", ["support", "config"], ["/admin/equipo", "/admin/textos-legales"]],
+    ["content", ["support", "content"], ["/admin/revision", "/admin/maestros", "/admin/practicas"]],
+    ["finance", ["finance"], ["/admin/periodos", "/admin/alertas"]],
+    ["ninguna con pantallas", ["support", "moderation"], []],
+  ])("con %s, el menú ofrece solo sus secciones", async (_, capabilities, sections) => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities });
     render(await AdminHomePage());
-    expect(screen.queryByRole("link", { name: "Prácticas y niveles" })).not.toBeInTheDocument();
+    const nav = within(screen.getByRole("navigation", { name: "Administración" }));
+    expect(menuOf(nav)).toEqual(["/admin", ...sections, "/cuenta", "/inicio"]);
   });
 
   it("una capacidad que el catálogo no sabe nombrar no se pinta a medias", async () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["support", "otra_cosa"] });
     render(await AdminHomePage());
-    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Soporte"]);
+    expect(within(screen.getByRole("main")).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Soporte"]);
   });
 
   it("a una cuenta suspendida no le pinta administración: ve PA-35, con «Cerrar sesión»", async () => {
@@ -189,6 +202,38 @@ describe("lo que cuelga de administración y no tiene página", () => {
       expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/admin");
     },
   );
+});
+
+describe("el marco de las secciones (T-614, parte 6)", () => {
+  it("el comodín pinta la sección dentro del marco, con la ruta pedida y las capacidades que dio la guarda", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance", "content"] });
+    const answer = (await AdminRestPage(rest("periodos", "2027-10", "cierre"))) as ReactElement<{ path: string; capabilities: string[]; children: ReactElement }>;
+    expect(answer.type).toBe(AdminFrame);
+    expect(answer.props.path).toBe("/admin/periodos/2027-10/cierre");
+    expect(answer.props.capabilities).toEqual(["finance", "content"]);
+    expect((answer.props.children.type as { name: string }).name).toBe("CloseSection");
+  });
+
+  it.each([
+    ["/admin", "/admin"],
+    ["/admin/equipo", "/admin/equipo"],
+    ["/admin/periodos/2027-10", "/admin/periodos"],
+    ["/admin/periodos/2027-10/liquidaciones", "/admin/periodos"],
+    ["/admin/maestros/a0000000-0000-4000-8000-000000000001", "/admin/maestros"],
+  ])("en %s se marca %s", (path, entry) => {
+    expect(adminEntryOf(path)).toBe(entry);
+  });
+
+  it("marca la entrada de la sección, también desde lo que cuelga de ella", () => {
+    render(
+      <AdminFrame path="/admin/periodos/2027-10" capabilities={["finance"]}>
+        <main>contenido</main>
+      </AdminFrame>,
+    );
+    const nav = within(screen.getByRole("navigation", { name: "Administración" }));
+    for (const link of nav.getAllByRole("link", { current: "page" })) expect(link).toHaveAttribute("href", "/admin/periodos");
+    expect(nav.getAllByRole("link", { current: "page" })).toHaveLength(2);
+  });
 });
 
 describe("sin permiso (PA-88)", () => {

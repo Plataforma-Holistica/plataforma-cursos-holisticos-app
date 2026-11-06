@@ -38,13 +38,18 @@ vi.mock("@/services/legal/legal-admin", () => ({ legalDocuments: vi.fn(), legalV
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
+import { AdminFrame } from "@/app/admin/_lib/frame";
 import { CatalogSection } from "@/app/admin/_practicas/section";
 
 import { a11yViolations } from "../setup/a11y";
 
 const claims = { userId: "a0000000-0000-4000-8000-000000000001", aal: "aal2", sessionId: null, issuedAt: 0 };
+const isFramed = (answer: unknown): answer is ReactElement<{ children: unknown }> =>
+  typeof answer === "object" && answer !== null && (answer as ReactElement).type === AdminFrame;
 async function at(...resto: string[]) {
-  const page = (await AdminRestPage({ params: Promise.resolve({ resto }) })) as ReactElement<Parameters<typeof CatalogSection>[0]>;
+  const answer = await AdminRestPage({ params: Promise.resolve({ resto }) });
+  // La sección va dentro del marco de administración (sus pruebas, en team-pages.test.tsx): aquí, sola.
+  const page = (isFramed(answer) ? answer.props.children : answer) as ReactElement<Parameters<typeof CatalogSection>[0]>;
   return page.type === CatalogSection ? CatalogSection(page.props) : page;
 }
 

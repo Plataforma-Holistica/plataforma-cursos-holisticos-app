@@ -200,6 +200,14 @@ export const account = defineMessages({
     legalTexts: "Textos legales",
     account: "Cuenta",
     teacherInvitation: "Tienes una invitación como {maestro}: revísala",
+    // El menú lateral (T-614, parte 6). Sus secciones usan los nombres de arriba.
+    nav: {
+      label: "Administración",
+      menu: "Menú",
+      home: "Inicio",
+      platform: "Ir a mi inicio",
+      signOut: "Cerrar sesión",
+    },
     capabilities: {
       content: "Contenido",
       finance: "Finanzas",

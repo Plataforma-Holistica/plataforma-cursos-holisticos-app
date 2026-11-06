@@ -247,7 +247,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await expect(page).toHaveURL("/admin");
 
   // Sale. Al volver a pedir administración entra, da su código, y regresa a donde iba.
-  await page.getByRole("button", { name: "Salir" }).click();
+  await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL("/");
   await signIn(page, { email, password: PASSWORD }, "/entrar?volver=%2Fadmin%2Fequipo");
   await expect(page).toHaveURL("/entrar/segundo-factor?volver=%2Fadmin%2Fequipo");

@@ -496,7 +496,11 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         const wildcard = codeOf("src/app/admin/[...resto]/page.tsx");
         expect(wildcard).toMatch(/const section = sectionAt\(resto\);\s+const step = await requireAdmin\(path, section\?\.capability\);/);
         // La sección se pinta al final, ya obedecido todo lo demás que la guarda contesta.
-        const rendered = wildcard.indexOf("if (section !== null) return section.render(step.claims);");
+        const rendered = wildcard.indexOf("if (section !== null) {");
+        // Con el marco de administración (T-614, parte 6), que también se pinta después de la guarda.
+        expect(wildcard).toMatch(
+          /if \(section !== null\) \{\s+return \(\s+<AdminFrame path=\{path\} capabilities=\{step\.capabilities\}>\s+\{section\.render\(step\.claims\)\}\s+<\/AdminFrame>/,
+        );
         const forbidden = wildcard.indexOf('if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;');
         const unavailable = wildcard.indexOf('step.kind === "unavailable"');
         const suspended = wildcard.indexOf('step.kind === "suspended"');
