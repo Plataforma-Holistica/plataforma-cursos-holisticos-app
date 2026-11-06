@@ -50,6 +50,17 @@ as $$
 $$;
 revoke all on function private.progress_alias_candidate(integer) from public;
 
+-- Los perfiles de la lista, sin repetir, que todavía no tienen alias de ese tipo con ese maestro.
+create function private.alias_missing(p_kind text, p_teacher uuid, p_profiles uuid[]) returns table (profile_id uuid)
+language sql stable set search_path = ''
+as $$
+  select distinct x.profile_id from pg_catalog.unnest(p_profiles) x (profile_id)
+  where x.profile_id is not null
+    and not (p_kind = 'student' and exists (select 1 from private.student_aliases a where a.teacher_id = p_teacher and a.profile_id = x.profile_id))
+    and not (p_kind = 'progress' and exists (select 1 from private.progress_aliases a where a.teacher_id = p_teacher and a.profile_id = x.profile_id))
+$$;
+revoke all on function private.alias_missing(text, uuid, uuid[]) from public;
+
 -- La inserción de los dos alias: que cada perfil de la lista tenga el suyo con el maestro. Bajo el candado del maestro y del tipo: dos lecturas a la
 -- vez no chocan en el único, y PA-47 y PA-51 no se esperan entre sí. Si no cabe, falla entera: un alumno sin alias desaparecería. El tramo de
 -- números sale de cuántos alias tiene ya el maestro, contando los que esta llamada va creando: con la mitad de un tramo ocupada se empieza en el
@@ -67,6 +78,10 @@ begin
   if p_kind is null or p_kind not in ('student', 'progress') then
     raise exception 'unknown alias kind: %', p_kind using errcode = '22023';
   end if;
+  -- Si no falta ninguno, no se toma el candado: una lectura que no crea nada no espera a otra del mismo maestro.
+  if not exists (select 1 from private.alias_missing(p_kind, p_teacher, p_profiles)) then
+    return 0;
+  end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     case p_kind when 'student' then 'student_aliases:' else 'progress_aliases:' end || p_teacher::text, 0));
   if p_kind = 'student' then
@@ -74,11 +89,10 @@ begin
   else
     select pg_catalog.count(*)::integer into v_count from private.progress_aliases a where a.teacher_id = p_teacher;
   end if;
+  -- Al azar: el tramo depende de cuántos se crearon antes, y en el mismo orden en las dos tablas los primeros alumnos recibirían números del
+  -- mismo largo en PA-47 y en PA-51, que cruzaría en parte a los dos alias.
   for v_profile in
-    select distinct x.profile_id from pg_catalog.unnest(p_profiles) x (profile_id)
-    where x.profile_id is not null
-      and not (p_kind = 'student' and exists (select 1 from private.student_aliases a where a.teacher_id = p_teacher and a.profile_id = x.profile_id))
-      and not (p_kind = 'progress' and exists (select 1 from private.progress_aliases a where a.teacher_id = p_teacher and a.profile_id = x.profile_id))
+    select m.profile_id from private.alias_missing(p_kind, p_teacher, p_profiles) m order by pg_catalog.random()
   loop
     v_start := case when v_count >= 21600 then 60 when v_count >= 1800 then 20 else 0 end;
     v_try := v_start;
@@ -136,11 +150,12 @@ create table private.course_lesson_figures (
   cut_at timestamptz not null,
   course_id uuid not null,
   lesson_id uuid not null,
+  position integer not null,           -- su lugar en el temario al corte
   finished integer not null,           -- cuántos la terminaron antes del corte
   primary key (cut_at, course_id, lesson_id),
   constraint course_lesson_figures_not_negative check (finished >= 0)
 );
-comment on table private.course_lesson_figures is 'Lo terminado en cada lección vigente con avance, al corte de cada noche (PA-51, RF-613). Sin fila, cero.';
+comment on table private.course_lesson_figures is 'Cada lección vigente al corte de cada noche, con cuántos la terminaron (PA-51, RF-613): la pantalla muestra las lecciones del corte, como las cifras.';
 
 create table private.course_student_progress (
   cut_at timestamptz not null,
@@ -185,7 +200,8 @@ revoke all on private.course_progress_figures, private.course_lesson_figures, pr
 create function private.course_progress_rows(p_cut timestamptz) returns table (course_id uuid, lesson_id uuid, profile_id uuid, done boolean)
 language sql stable set search_path = ''
 as $$
-  select lp.course_id, lp.lesson_id, lp.profile_id, coalesce(lp.completed_at <= p_cut, false)
+  -- El curso, el de la lección: de ella salen también los totales.
+  select l.course_id, lp.lesson_id, lp.profile_id, coalesce(lp.completed_at <= p_cut, false)
   from public.lesson_progress lp
   join public.published_lessons l on l.id = lp.lesson_id and l.is_current
   join public.teachers t on t.id = l.teacher_id
@@ -225,11 +241,14 @@ begin
     delete from private.course_progress_figures f where f.cut_at = v_day or f.cut_at < coalesce(v_state.daily_cut_at, v_day);
     delete from private.course_lesson_figures f where f.cut_at = v_day or f.cut_at < coalesce(v_state.daily_cut_at, v_day);
     with progress as (select * from private.course_progress_rows(v_day)),
+    -- Todas las lecciones vigentes, también las que nadie ha visto: la pantalla muestra las del corte, no las de ahora.
     lessons as (
-      insert into private.course_lesson_figures (cut_at, course_id, lesson_id, finished)
-      select v_day, x.course_id, x.lesson_id, (pg_catalog.count(*) filter (where x.done))::integer
-      from progress x
-      group by x.course_id, x.lesson_id),
+      insert into private.course_lesson_figures (cut_at, course_id, lesson_id, position, finished)
+      select v_day, l.course_id, l.id, l.position, coalesce(f.finished, 0)
+      from public.published_lessons l
+      left join (select x.lesson_id, (pg_catalog.count(*) filter (where x.done))::integer as finished from progress x group by x.lesson_id) f
+        on f.lesson_id = l.id
+      where l.is_current),
     totals as (
       select l.course_id, pg_catalog.count(*)::integer as n from public.published_lessons l where l.is_current group by l.course_id),
     students as (
@@ -274,14 +293,15 @@ revoke all on function private.course_progress_step(timestamptz) from public;
 
 -- ---------------------------------------------------------------------------------------
 -- La corrida de cada noche (t408_estimado), con el avance de los alumnos al final: solo en la corrida de la noche, sin periodo (un recálculo pedido
--- trae uno), después del paso a cierre, con su propio `commit` y en su bloque, que atrapa también `query_canceled`: una cancelación del paso
--- cortaría la noche entera. Lo que falle dentro del paso lo anota su estado; lo que lance fuera de su bloque, el registro de la base.
+-- trae uno), después del sellado y antes de anotar la corrida del paso a cierre, con su propio `commit` y en su bloque, que atrapa también
+-- `query_canceled`: una cancelación del paso cortaría la noche entera. Lo que falle lo anotan el estado del paso y los detalles de esa corrida.
 create or replace procedure private.nightly_rollup(p_full boolean default false, p_period integer default null)
 language plpgsql
 as $$
 declare
   v_estimate_error text;
   v_progress_error text;
+  v_progress jsonb;
   v_start timestamptz := pg_catalog.clock_timestamp();
   v_path text := pg_catalog.current_setting('search_path');
   v_window integer[];
@@ -411,6 +431,21 @@ begin
       end;
       commit;
     end loop;
+    -- El avance de los alumnos (T-408, PA-51), con su `commit`. Lo que falle, dentro del paso o fuera de su bloque, se anota en los detalles de la
+    -- corrida del paso a cierre de esta noche (`course_progress_failed`), sin cambiar su estado, y en el registro de la base.
+    v_progress_error := null;
+    begin
+      v_progress := private.course_progress_step();
+      if v_progress ->> 'outcome' = 'failed' then
+        v_progress_error := v_progress ->> 'error';
+      end if;
+    exception when query_canceled or others then
+      v_progress_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
+    end;
+    if v_progress_error is not null then
+      raise warning 'course progress failed: %', v_progress_error;
+    end if;
+    commit;
     v_error := nullif(pg_catalog.array_to_string(array[
       v_error,
       case when v_transition ? 'open_failed' then 'open failed: ' || pg_catalog.left((v_transition -> 'open_failed')::text, 250) end,
@@ -423,19 +458,9 @@ begin
     values ('period_transition', case when v_error is null then 'succeeded' else 'failed' end::public.run_status,
             v_transition_start, pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(),
             coalesce(v_transition, '{}'::jsonb) || pg_catalog.jsonb_build_object('photos', v_photos, 'sealed', pg_catalog.to_jsonb(v_sealed))
-              || case when v_seal_failed = '{}'::jsonb then '{}'::jsonb else pg_catalog.jsonb_build_object('seal_failed', v_seal_failed) end,
+              || case when v_seal_failed = '{}'::jsonb then '{}'::jsonb else pg_catalog.jsonb_build_object('seal_failed', v_seal_failed) end
+              || case when v_progress_error is null then '{}'::jsonb else pg_catalog.jsonb_build_object('course_progress_failed', v_progress_error) end,
             v_error);
-    commit;
-    -- El avance de los alumnos (T-408, PA-51).
-    v_progress_error := null;
-    begin
-      perform private.course_progress_step();
-    exception when query_canceled or others then
-      v_progress_error := sqlstate || ': ' || pg_catalog.left(sqlerrm, 200);
-    end;
-    if v_progress_error is not null then
-      raise warning 'course progress failed: %', v_progress_error;
-    end if;
     commit;
   end if;
   perform pg_catalog.set_config('search_path', v_path, false);
@@ -481,10 +506,14 @@ begin
   select * into v_state from private.course_progress_state;
   if v_state.weekly_cut_at is not null then
     perform private.alias_insert('progress', v_teacher, array(
-      select s.profile_id from private.course_student_progress s where s.cut_at = v_state.weekly_cut_at and s.course_id = p_course));
+      select s.profile_id from private.course_student_progress s
+      join public.profiles p on p.id = s.profile_id and p.status <> 'deleted'
+      where s.cut_at = v_state.weekly_cut_at and s.course_id = p_course));
   end if;
   select pg_catalog.count(*)::integer into v_total
-  from private.course_student_progress s where s.cut_at = v_state.weekly_cut_at and s.course_id = p_course;
+  from private.course_student_progress s
+  join public.profiles p on p.id = s.profile_id and p.status <> 'deleted'
+  where s.cut_at = v_state.weekly_cut_at and s.course_id = p_course;
   v_pages := greatest(1, (v_total + 49) / 50);
   v_page := least(greatest(coalesce(p_page, 1), 1), v_pages);
   return pg_catalog.jsonb_build_object(
@@ -495,18 +524,24 @@ begin
                                            'finished', coalesce(f.finished, 0), 'cut_at', v_state.daily_cut_at)
       from (select 1) one
       left join private.course_progress_figures f on f.cut_at = v_state.daily_cut_at and f.course_id = p_course) end,
-    'lessons', coalesce((
-      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
-               'title', l.title, 'finished', case when v_state.daily_cut_at is not null then coalesce(g.finished, 0) end) order by l.position)
+    -- Las lecciones del corte, como las cifras; antes de la primera noche, las de ahora, sin cifra.
+    'lessons', coalesce(case when v_state.daily_cut_at is not null then (
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('title', l.title, 'finished', g.finished) order by g.position)
+      from private.course_lesson_figures g
+      join public.published_lessons l on l.id = g.lesson_id
+      where g.cut_at = v_state.daily_cut_at and g.course_id = p_course)
+    else (
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('title', l.title, 'finished', null) order by l.position)
       from public.published_lessons l
-      left join private.course_lesson_figures g on g.cut_at = v_state.daily_cut_at and g.course_id = p_course and g.lesson_id = l.id
-      where l.course_id = p_course and l.is_current), '[]'::jsonb),
+      where l.course_id = p_course and l.is_current) end, '[]'::jsonb),
     'students', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('alias', x.alias, 'completed', x.completed, 'total', x.total) order by x.n)
       from (select a.alias, s.completed, s.total,
                    pg_catalog.row_number() over (order by case when p_order = 'progress' then s.completed end desc nulls last, a.alias) as n
             from private.course_student_progress s
             join private.progress_aliases a on a.teacher_id = v_teacher and a.profile_id = s.profile_id
+            -- Una cuenta que se borró después del lunes sale de la lista al leer (decisión mía sin confirmar).
+            join public.profiles p on p.id = s.profile_id and p.status <> 'deleted'
             where s.cut_at = v_state.weekly_cut_at and s.course_id = p_course
             order by n
             offset (v_page - 1) * 50
@@ -538,19 +573,23 @@ as $$
            ('payout_report_csv_mine', 'private.payout_report_csv_mine(public.period_id)')),
   helpers (name, signature) as (
     values ('alias_candidate', 'private.alias_candidate(integer)'), ('progress_alias_candidate', 'private.progress_alias_candidate(integer)'),
-           ('alias_insert', 'private.alias_insert(text, uuid, uuid[])'),
+           ('alias_insert', 'private.alias_insert(text, uuid, uuid[])'), ('alias_missing', 'private.alias_missing(text, uuid, uuid[])'),
            ('ensure_student_aliases', 'private.ensure_student_aliases(uuid, public.period_id)'),
            ('payout_teacher_status', 'private.payout_teacher_status(public.payouts)'),
            ('payout_mine_row', 'private.payout_mine_row(public.period_id, public.payouts)'),
            ('teacher_first_period', 'private.teacher_first_period(uuid)'),
            ('payout_report_students', 'private.payout_report_students(uuid, public.period_id)'),
            ('csv_half_points', 'private.csv_half_points(integer)')),
-  -- Las únicas funciones que nombran una tabla de alias. Una nueva es una puerta nueva, aunque se llame igual en otro esquema o con otra firma.
-  alias_known (oid) as (
-    select pg_catalog.to_regprocedure(k.signature)::oid
-    from (values ('private.alias_insert(text, uuid, uuid[])'), ('private.payout_report_students(uuid, public.period_id)'),
-                 ('private.teacher_course_students(uuid, text, integer)'), ('private.schema_violations_teacher_reports()'),
-                 ('private.schema_violations_ledgers()')) k (signature))
+  -- Las únicas funciones que nombran cada tabla de alias. Una nueva es una puerta nueva, aunque se llame igual en otro esquema o con otra firma; y
+  -- la lista es por tabla, porque la lectura de PA-51 que nombrara los alias de PA-47 (o el reporte los de PA-51) los cruzaría.
+  alias_known (table_name, oid) as (
+    select k.table_name, pg_catalog.to_regprocedure(k.signature)::oid
+    from (values ('student_aliases', 'private.alias_insert(text, uuid, uuid[])'), ('student_aliases', 'private.alias_missing(text, uuid, uuid[])'),
+                 ('student_aliases', 'private.payout_report_students(uuid, public.period_id)'),
+                 ('student_aliases', 'private.schema_violations_teacher_reports()'), ('student_aliases', 'private.schema_violations_ledgers()'),
+                 ('progress_aliases', 'private.alias_insert(text, uuid, uuid[])'), ('progress_aliases', 'private.alias_missing(text, uuid, uuid[])'),
+                 ('progress_aliases', 'private.teacher_course_students(uuid, text, integer)'),
+                 ('progress_aliases', 'private.schema_violations_teacher_reports()')) k (table_name, signature))
   select t.label || ' privilege for ' || r.rolname, t.table_name
   from alias_tables t cross join app_roles r
   where pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'select, insert, update, delete, truncate, references, trigger')
@@ -592,12 +631,13 @@ as $$
     where tg.tgrelid = t.table_name::regclass and tg.tgname = x.name
       and tg.tgenabled in ('O', 'A') and pg_catalog.pg_get_triggerdef(tg.oid) like '%reject_mutation%')
   union all
-  select 'alias function not in the list', n.nspname || '.' || p.proname
+  select 'alias function not in the list: ' || x.table_name, n.nspname || '.' || p.proname
   from pg_catalog.pg_proc p
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  cross join (values ('student_aliases'), ('progress_aliases')) x (table_name)
   where n.nspname in ('public', 'private')
-    and (coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '')) ~ '\m(student_aliases|progress_aliases)\M'
-    and p.oid not in (select k.oid from alias_known k where k.oid is not null)
+    and (coalesce(p.prosrc, '') || coalesce(pg_catalog.pg_get_function_sqlbody(p.oid), '')) ~ ('\m' || x.table_name || '\M')
+    and p.oid not in (select k.oid from alias_known k where k.table_name = x.table_name and k.oid is not null)
   union all
   -- Una vista corre como su dueño: saltaría los permisos (como en el área `tax`).
   select 'aliases read by a view', vn.nspname || '.' || c.relname
@@ -638,6 +678,11 @@ as $$
   from progress_tables t
   where not (select c.relrowsecurity from pg_catalog.pg_class c where c.oid = t.table_name::regclass)
   union all
+  -- Ningún disparador: uno de auditoría copiaría a cada alumno y su avance a donde lo lee otro.
+  select 'course progress table with a trigger', t.table_name
+  from progress_tables t
+  where exists (select 1 from pg_catalog.pg_trigger tg where tg.tgrelid = t.table_name::regclass and not tg.tgisinternal)
+  union all
   select 'teacher course students door missing or wrong', 'private.teacher_course_students(uuid, text, integer)'
   where pg_catalog.to_regprocedure('private.teacher_course_students(uuid, text, integer)') is null
      or not coalesce((select p.prosecdef and p.provolatile = 'v' and p.proconfig @> array['search_path=""']
@@ -675,6 +720,6 @@ as $$
   union all
   select 'nightly rollup does not build the course progress, or a cancellation stops it', 'private.nightly_rollup(boolean, integer)'
   where pg_catalog.pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure)
-        not like '%perform private.course_progress_step();%exception when query_canceled or others then%'
+        not like '%:= private.course_progress_step();%exception when query_canceled or others then%'
 $$;
 revoke all on function private.schema_violations_course_progress() from public;

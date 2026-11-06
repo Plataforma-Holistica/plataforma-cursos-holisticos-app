@@ -117,6 +117,12 @@ describe("la vista", () => {
     expect(view.nobody).toBe(true);
   });
 
+  it("con nadie en las cifras pero gente en la lista del lunes (una versión que retiró lo visto), la lista se ve", () => {
+    const view = studentsView(COURSE, { ...VALUE, figures: { ...VALUE.figures!, started: 0, inProgress: 0, finished: 0 } }, "progress");
+    expect(view.nobody).toBe(false);
+    expect(view.list.rows).toHaveLength(2);
+  });
+
   it("con cifras y sin nadie en la lista del lunes: la lista lo explica", () => {
     expect(studentsView(COURSE, { ...VALUE, students: [], totalStudents: 0, page: 1, pages: 1 }, "progress").list.pending).toBe(
       "La lista se arma cada lunes: quien empezó después aparece en la siguiente.",

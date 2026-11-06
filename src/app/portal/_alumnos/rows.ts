@@ -79,7 +79,8 @@ export function studentsView(course: string, value: CourseStudentsValue, order: 
     title: value.title,
     figuresAt: figures === null ? null : t(text.figuresAt, { date: dayBefore(figures.cutAt) }),
     notice: notice(value),
-    nobody: figures !== null && figures.started === 0,
+    // Con gente en la lista del lunes no se dice que nadie empezó, aunque la cifra de anoche diga 0 (una versión que retiró lo visto).
+    nobody: figures !== null && figures.started === 0 && value.totalStudents === 0,
     tiles: {
       started: figures === null ? null : count(figures.started),
       inProgress: figures === null ? null : count(figures.inProgress),

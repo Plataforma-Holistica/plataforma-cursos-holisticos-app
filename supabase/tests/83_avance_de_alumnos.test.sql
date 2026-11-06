@@ -12,7 +12,7 @@
 -- deje fallida lo prueba la integración 111. Aquí, el paso con su reloj (2045, para no depender del día en que corre), la lectura y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(122);
+select plan(129);
 
 select pruebas.alta('a8300000-0000-0000-0000-000000000001', 'tere-83@prueba.test');
 select pruebas.alta('a8300000-0000-0000-0000-000000000002', 'beto-83@prueba.test');
@@ -206,7 +206,9 @@ select ok((select bool_and(private.progress_alias_candidate(t) ~ '^[A-Z][a-z]+ [
 create temporary table definiciones (k text primary key, d text);
 insert into definiciones values
   ('candidato', pg_get_functiondef('private.progress_alias_candidate(integer)'::regprocedure)),
-  ('noche', pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure));
+  ('noche', pg_get_functiondef('private.nightly_rollup(boolean, integer)'::regprocedure)),
+  ('lectura', pg_get_functiondef('private.teacher_course_students(uuid, text, integer)'::regprocedure)),
+  ('reporte', pg_get_functiondef('private.payout_report_students(uuid, public.period_id)'::regprocedure));
 create function pruebas.restaurar(p_k text) returns void language plpgsql as $$
 begin
   execute (select d from definiciones where k = p_k);
@@ -399,12 +401,30 @@ insert into lect values ('r5', pruebas.lee(pruebas.tere(), pruebas.curso_de('e83
 select is(pruebas.cifras((select r from lect where k = 'r5')), '5:5:0', 'con una lección nueva, nadie lo ha terminado');
 select is(pruebas.lecciones((select r from lect where k = 'r5')), array['Uno:3', 'Dos:1', 'Seis:0'], 'y la nueva sale en cero');
 
+-- Lo de después del corte espera a la noche: una lección que llega o se retira a media semana no cambia hasta que la noche la cuente, y una
+-- cuenta que se borra sale de la lista al leer.
+set local session_replication_role = replica;
+insert into public.published_lessons (id, course_id, module_id, teacher_id, video_asset_id, title, position, duration_seconds)
+select gen_random_uuid(), l.course_id, l.module_id, l.teacher_id, l.video_asset_id, 'Siete',
+       (select max(x.position) + 1 from public.published_lessons x where x.course_id = l.course_id), 100
+from public.published_lessons l where l.id = pruebas.lec('e83-a', 'Uno');
+update public.published_lessons set is_current = false, retired_at = now() where id = pruebas.lec('e83-a', 'Dos');
+update public.profiles set status = 'deleted', deleted_at = now(), display_name = null, country_code = null, adult_declared_at = null, comment_ban_until = null
+  where id = pruebas.a(3);
+set local session_replication_role = origin;
+insert into lect values ('r6', pruebas.lee(pruebas.tere(), pruebas.curso_de('e83-a')));
+select is(pruebas.lecciones((select r from lect where k = 'r6')), array['Uno:3', 'Dos:1', 'Seis:0'], 'las lecciones son las del corte, como las cifras');
+select is((select (r ->> 'total_students')::integer from lect where k = 'r6'), 4, 'la cuenta borrada sale de la lista al leer');
+select ok(not ('a3' = any (pruebas.quienes(pruebas.m(1), (select r from lect where k = 'r6')))), 'y no se ve su alias');
+
 -- El aviso de viejo, y que el resumen no guarda historia.
 update private.course_progress_state set daily_built_at = now() - interval '27 hours';
 select is((pruebas.lee(pruebas.tere(), pruebas.curso_de('e83-a'))) ->> 'stale', 'true', 'un resumen de hace más de 26 horas lleva el aviso');
 update private.course_progress_state set daily_built_at = now();
-select ok((select count(distinct cut_at) <= 2 from private.course_progress_figures) and (select count(distinct cut_at) <= 2 from private.course_lesson_figures)
-          and (select count(distinct cut_at) <= 2 from private.course_student_progress), 'se guarda el corte de hoy y el anterior, sin historia');
+select is(array(select distinct cut_at from private.course_progress_figures union select distinct cut_at from private.course_lesson_figures order by 1),
+  array[pruebas.h('2045-03-13 00:00'), pruebas.h('2045-03-14 00:00')], 'las cifras guardan el corte de hoy y el anterior, entero, y nada más');
+select is(array(select distinct cut_at from private.course_student_progress order by 1), array[pruebas.h('2045-03-06 00:00'), pruebas.h('2045-03-13 00:00')],
+  'y la lista, el lunes de esta semana y el anterior');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante: las dos áreas, limpias, y cada regla rota a propósito.
@@ -433,6 +453,9 @@ drop view private.v83;
 create function private.f83() returns bigint language sql as 'select count(*) from private.course_progress_figures';
 select ok(pruebas.cp_con('course progress function not in the list'), 'una función que nombra el resumen y no está en la lista');
 drop function private.f83();
+create trigger t83 after insert on private.course_student_progress for each row execute function private.audit_row_change();
+select ok(pruebas.cp_con('course progress table with a trigger'), 'un disparador sobre el resumen, que lo copiaría a otro lado');
+drop trigger t83 on private.course_student_progress;
 revoke execute on function private.teacher_course_students(uuid, text, integer) from app_service;
 select ok(pruebas.cp_con('teacher course students door missing or wrong'), 'la lectura sin el servidor');
 grant execute on function private.teacher_course_students(uuid, text, integer) to app_service;
@@ -446,7 +469,7 @@ alter function private.teacher_course_students(uuid, text, integer) stable;
 select ok(pruebas.cp_con('teacher course students door missing or wrong'), 'una lectura que no es volátil no puede crear los alias');
 alter function private.teacher_course_students(uuid, text, integer) volatile;
 select pruebas.restaurar('noche');
-do $$ begin execute replace((select d from definiciones where k = 'noche'), 'perform private.course_progress_step();', 'perform 1;'); end $$;
+do $$ begin execute replace((select d from definiciones where k = 'noche'), 'v_progress := private.course_progress_step();', 'v_progress := null;'); end $$;
 select ok(pruebas.cp_con('nightly rollup does not build the course progress'), 'una noche que no guarda el resumen');
 select pruebas.restaurar('noche');
 do $$ begin execute replace((select d from definiciones where k = 'noche'), 'exception when query_canceled or others then', 'exception when others then'); end $$;
@@ -472,6 +495,17 @@ drop function private.f83();
 create function private.f83() returns text language sql as 'select alias from private.student_aliases limit 1';
 select ok(pruebas.tr_con('alias function not in the list'), 'o los de PA-47');
 drop function private.f83();
+-- Cada función de la lista nombra solo la tabla que le toca: la lectura de PA-51 no puede leer los alias de PA-47, ni el reporte los de PA-51.
+create or replace function private.teacher_course_students(p_course uuid, p_order text, p_page integer) returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $$ begin perform private.actor_teacher_id(); return (select pg_catalog.to_jsonb(pg_catalog.count(*)) from private.student_aliases); end $$;
+select ok(pruebas.tr_con('alias function not in the list'), 'la lectura de PA-51 que nombra los alias de PA-47');
+select pruebas.restaurar('lectura');
+create or replace function private.payout_report_students(p_teacher uuid, p_period public.period_id) returns jsonb
+language sql stable set search_path = ''
+as $$ select coalesce(pg_catalog.jsonb_agg(a.alias), '[]'::jsonb) from private.progress_aliases a where a.teacher_id = p_teacher $$;
+select ok(pruebas.tr_con('alias function not in the list'), 'el reporte de PA-47 que nombra los alias de PA-51');
+select pruebas.restaurar('reporte');
 create view private.v83 as select teacher_id from private.progress_aliases;
 select ok(pruebas.tr_con('aliases read by a view'), 'una vista que lee los alias');
 drop view private.v83;

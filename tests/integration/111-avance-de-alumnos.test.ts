@@ -129,6 +129,12 @@ describe("la corrida de verdad", { timeout: 180_000 }, () => {
     const runs = await runsSince(start);
     expect(runs.length).toBeGreaterThan(1);
     expect(runs.every((run) => run.status === "succeeded" && run.error === null)).toBe(true);
+    // Y quien opera la ve donde ve las corridas: en los detalles del paso a cierre de esa noche, sin cambiar su estado.
+    const transition = await owner.query<{ failed: string | null }>(
+      "select details ->> 'course_progress_failed' as failed from public.job_runs where job = 'period_transition' and started_at >= $1::timestamptz",
+      [start],
+    );
+    expect(transition.rows).toEqual([{ failed: "P0001: roto a propósito" }]);
   });
 
   it("un paso que lanza fuera de su bloque no detiene la noche", async () => {
@@ -277,6 +283,23 @@ describe("los candados de los alias, con dos conexiones", { timeout: 60_000 }, (
       [teacherId],
     );
     expect(aliases.rows[0]).toEqual({ n: 3, distinct_aliases: 3 });
+  });
+
+  it("una lectura que no tiene alias que crear no espera el candado", async () => {
+    const holder = await connect();
+    const reader = await connect();
+    try {
+      await holder.query("begin");
+      expect(await insert(holder, "progress", [people[3]!.id])).toBe(1);
+      await reader.query("set lock_timeout = '2s'");
+      expect(await insert(reader, "progress", [people[0]!.id, people[1]!.id, people[2]!.id])).toBe(0);
+      await holder.query("rollback");
+    } finally {
+      for (const client of [holder, reader]) {
+        await client.query("rollback").catch(() => undefined);
+        await client.end();
+      }
+    }
   });
 });
 
