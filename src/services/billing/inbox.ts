@@ -70,8 +70,7 @@ export interface Delivery {
 }
 
 const BUDGET_MS = 8_000;
-const SWEEP_BUDGET_MS = 45_000;
-const SWEEP_BATCH = 10;
+const SWEEP_BUDGET_MS = 35_000;
 // Lo que cualquiera puede mandar sin firmar nada se cuenta y se reporta una vez por hora, al pasar de esto: así no llena el registro de errores.
 const REJECTIONS_PER_HOUR = 5;
 
@@ -256,19 +255,13 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     if (stripe === null) return true;
     const deadline = deps.now().getTime() + (deps.sweepBudgetMs ?? SWEEP_BUDGET_MS);
     try {
-      // Lote tras lote, para que un atraso (Stripe dejó de reenviar, o la llave estuvo mal) se drene en una pasada y no a diez por día. Lo que vuelve a la fila
-      // con su espera no se reclama otra vez en la misma pasada.
-      for (;;) {
-        const due = await store.claimDue(SWEEP_BATCH);
-        for (const event of due) {
-          // Lo que no alcance vuelve a la fila sin gastar más que el intento que ya tomó.
-          if (deps.now().getTime() > deadline) {
-            await store.release(event, "sweep_out_of_time");
-            continue;
-          }
-          await processSafely(stripe, event);
-        }
-        if (due.length < SWEEP_BATCH || deps.now().getTime() > deadline) break;
+      // De uno en uno hasta vaciar la fila o llegar al tope, para que un atraso (Stripe dejó de reenviar, o la llave estuvo mal) se drene en una pasada. Reclamar
+      // gasta un intento, así que solo se reclama lo que se va a procesar: con un lote, lo que no alcanzara volvería a la fila con un intento gastado sin intentarlo.
+      // Lo que vuelve a la fila con su espera (un minuto o más) no se reclama otra vez en la misma pasada.
+      while (deps.now().getTime() <= deadline) {
+        const [event] = await store.claimDue(1);
+        if (event === undefined) break;
+        await processSafely(stripe, event);
       }
       const now = await store.health();
       if (now.failed > 0 || (now.oldest_pending_at !== null && Date.parse(now.oldest_pending_at) < deps.now().getTime() - 24 * 60 * 60 * 1000)) {

@@ -436,39 +436,20 @@ describe("el barrido", () => {
     expect(report).toHaveBeenCalledWith("billing_events_stuck");
   });
 
-  it("lo que no alcanza en su tope vuelve a la fila sin procesarse", async () => {
-    let clock = NOW.getTime();
-    const { store } = setup();
-    vi.mocked(store.claimDue).mockResolvedValueOnce([
-      { id: "a", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" },
-      { id: "b", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" },
-    ]);
-    vi.mocked(store.apply).mockImplementation(() => {
-      clock += 120_000;
-      return Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 });
-    });
-    const inbox = createBillingInbox({ store, stripe: () => stripeWith(), secret: () => SECRET, live: () => false, now: () => new Date(clock), report: vi.fn(() => Promise.resolve()) });
-    expect(await inbox.sweepBillingEvents()).toBe(true);
-    expect(store.apply).toHaveBeenCalledTimes(1);
-    expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), "sweep_out_of_time");
-  });
-
-  it("un atraso de más de un lote se drena en la misma pasada, lote tras lote, hasta que la fila se vacía", async () => {
+  it("reclama de uno en uno hasta vaciar la fila: un atraso se drena en la misma pasada", async () => {
     const { inbox, store } = setup();
-    const batch = (prefix: string, n: number): ClaimedEvent[] =>
-      Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }));
-    vi.mocked(store.claimDue).mockResolvedValueOnce(batch("a", 10)).mockResolvedValueOnce(batch("b", 10)).mockResolvedValueOnce(batch("c", 3));
+    const one = (i: number): ClaimedEvent[] => [{ id: `a${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }];
+    for (let i = 0; i < 23; i += 1) vi.mocked(store.claimDue).mockResolvedValueOnce(one(i));
     expect(await inbox.sweepBillingEvents()).toBe(true);
     expect(store.apply).toHaveBeenCalledTimes(23);
-    expect(store.claimDue).toHaveBeenCalledTimes(3);
+    expect(store.claimDue).toHaveBeenCalledTimes(24);
+    for (const call of vi.mocked(store.claimDue).mock.calls) expect(call).toEqual([1]);
   });
 
-  it("y se detiene en su tope aunque quede fila: no reclama otro lote", async () => {
+  it("al llegar a su tope no reclama otro: nada se reclama sin procesarse, y no se gasta un intento sin intentar", async () => {
     let clock = NOW.getTime();
     const { store } = setup();
-    const batch = (prefix: string): ClaimedEvent[] =>
-      Array.from({ length: 10 }, (_, i) => ({ id: `${prefix}${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }));
-    vi.mocked(store.claimDue).mockResolvedValue(batch("x"));
+    vi.mocked(store.claimDue).mockResolvedValue([{ id: "x", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }]);
     vi.mocked(store.apply).mockImplementation(() => {
       clock += 10_000;
       return Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 });
@@ -483,9 +464,10 @@ describe("el barrido", () => {
       sweepBudgetMs: 60_000,
     });
     expect(await inbox.sweepBillingEvents()).toBe(true);
-    // 60 s de tope, 10 s por aviso: el primer lote alcanza para siete, y los otros tres vuelven a la fila.
-    expect(store.claimDue).toHaveBeenCalledTimes(1);
+    // 60 s de tope y 10 s por aviso: reclama mientras no pasa del tope, y cada reclamado se procesa.
     expect(store.apply).toHaveBeenCalledTimes(7);
+    expect(store.claimDue).toHaveBeenCalledTimes(7);
+    expect(store.release).not.toHaveBeenCalled();
   });
 
   it("si la base no contesta, lo dice", async () => {
