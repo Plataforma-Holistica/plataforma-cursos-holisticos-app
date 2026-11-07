@@ -323,7 +323,7 @@ select pruebas.alta('a0000000-0000-0000-0000-000000000043', 'beto-congelado@prue
 insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
 values ('c0000000-0000-0000-0000-000000000043', 'a0000000-0000-0000-0000-000000000043', 'manual', 'sus-congelado', 'monthly', 'pending', 'MXN');
 grant execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint,
-                                                 bigint, bigint, text, text, text) to app_service;
+                                                 bigint, bigint, text, text, text, uuid) to app_service;
 set constraints revenue_allocations_match_charge deferred;
 select pruebas.como_sistema();
 select is(private.record_charge('a0000000-0000-0000-0000-000000000043', 'c0000000-0000-0000-0000-000000000043', 'manual', 'cobro-congelado',
@@ -332,7 +332,7 @@ select is(private.record_charge('a0000000-0000-0000-0000-000000000043', 'c000000
 select lives_ok('set constraints revenue_allocations_match_charge immediate', 'y la revisión de sus partes, con su rol, pasa');
 select pruebas.como_dueno();
 revoke execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint,
-                                                  bigint, bigint, text, text, text) from app_service;
+                                                  bigint, bigint, text, text, text, uuid) from app_service;
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante de los periodos ve lo nuevo.
