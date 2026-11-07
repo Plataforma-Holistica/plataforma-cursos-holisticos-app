@@ -45,6 +45,7 @@ export interface PaymentSnapshot {
 }
 
 export interface FailureSnapshot {
+  subscription: string;
   invoice: string;
   failed_at: string;
   unpaid: boolean;

@@ -203,7 +203,7 @@ describe("la entrega de un aviso", () => {
     expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
     const [, , payments, failure] = vi.mocked(store.apply).mock.calls[0]!;
     expect(payments).toEqual([]);
-    expect(failure).toEqual({ invoice: "in_1", failed_at: "2026-11-06T17:59:30.000Z", unpaid: true, cycle: true });
+    expect(failure).toEqual({ subscription: "sub_1", invoice: "in_1", failed_at: "2026-11-06T17:59:30.000Z", unpaid: true, cycle: true });
   });
 
   it("un cargo que cambió se aplica por su factura, que se busca por su PaymentIntent", async () => {

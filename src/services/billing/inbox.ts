@@ -124,7 +124,13 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     if (type === "invoice.payment_failed") {
       const invoice = await readPaidInvoiceState(stripe, invoiceId!);
       if (invoice.kind !== "ok") return settle(event, invoice);
-      const failure: FailureSnapshot = { invoice: invoiceId!, failed_at: event.occurredAt, unpaid: invoice.value.unpaid, cycle: invoice.value.cycle };
+      const failure: FailureSnapshot = {
+        subscription: subscriptionId,
+        invoice: invoiceId!,
+        failed_at: event.occurredAt,
+        unpaid: invoice.value.unpaid,
+        cycle: invoice.value.cycle,
+      };
       return applied(await store.apply(event, subscription.value, [], failure));
     }
     return applied(await store.apply(event, subscription.value, [], null));
