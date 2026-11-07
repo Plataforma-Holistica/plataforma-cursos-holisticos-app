@@ -426,7 +426,8 @@ $$;
 revoke all on function private.provider_event_receive(text, text, text, boolean, text, text, timestamptz) from public;
 grant execute on function private.provider_event_receive(text, text, text, boolean, text, text, timestamptz) to app_service;
 
--- Reclama un aviso para procesarlo ahora (la ruta, con cada entrega de Stripe): por 2 minutos, sin mirar su espera. Contesta `claimed` con el intento, `busy` si
+-- Reclama un aviso para procesarlo ahora (la ruta, con cada entrega de Stripe): por 2 minutos, sin mirar su espera. Contesta `claimed` con el intento, su tipo, su
+-- objeto y su hora en Stripe (la de una falla de renovación), `busy` si
 -- otro lo tiene, `finished` si ya no toca (terminado, en espera de otra tarea o fallido: lo reabre finanzas) o `not_found`. Con diez intentos queda fallido.
 create function private.provider_event_claim(p_id uuid) returns jsonb
 language plpgsql volatile security definer set search_path = ''
@@ -450,7 +451,8 @@ begin
     return pg_catalog.jsonb_build_object('outcome', 'finished', 'id', v.id, 'status', 'failed');
   end if;
   update private.provider_events e set status = 'processing', attempts = e.attempts + 1, locked_until = v_now + interval '2 minutes' where e.id = p_id;
-  return pg_catalog.jsonb_build_object('outcome', 'claimed', 'id', v.id, 'attempt', v.attempts + 1, 'event_type', v.event_type, 'object_id', v.object_id);
+  return pg_catalog.jsonb_build_object('outcome', 'claimed', 'id', v.id, 'attempt', v.attempts + 1, 'event_type', v.event_type, 'object_id', v.object_id,
+                                       'occurred_at', v.occurred_at);
 end
 $$;
 revoke all on function private.provider_event_claim(uuid) from public;
@@ -458,7 +460,7 @@ grant execute on function private.provider_event_claim(uuid) to app_service;
 
 -- El barrido de respaldo: lo pendiente con su espera cumplida y lo apartado que venció, sin tomar lo que otro tiene.
 create function private.provider_event_claim_due(p_limit integer)
-returns table (id uuid, attempt integer, event_type text, object_id text)
+returns table (id uuid, attempt integer, event_type text, object_id text, occurred_at timestamptz)
 language plpgsql volatile security definer set search_path = ''
 as $$
 begin
@@ -481,7 +483,7 @@ begin
   update private.provider_events e set status = 'processing', attempts = e.attempts + 1,
                                        locked_until = pg_catalog.clock_timestamp() + interval '2 minutes'
   from due where e.id = due.id
-  returning e.id, e.attempts, e.event_type, e.object_id;
+  returning e.id, e.attempts, e.event_type, e.object_id, e.occurred_at;
 end
 $$;
 revoke all on function private.provider_event_claim_due(integer) from public;

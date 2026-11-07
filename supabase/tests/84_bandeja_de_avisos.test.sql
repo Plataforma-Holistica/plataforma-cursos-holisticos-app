@@ -145,7 +145,7 @@ select is((select count(*)::integer from private.provider_events where provider_
 -- ---------------------------------------------------------------------------------------
 -- Reclamar uno: por 2 minutos, y solo uno a la vez.
 
-select is(pruebas.reclama(pruebas.id_de('evt_84_1')) - 'id',
+select is(pruebas.reclama(pruebas.id_de('evt_84_1')) - 'id' - 'occurred_at',
   '{"outcome": "claimed", "attempt": 1, "event_type": "invoice.paid", "object_id": "in_84"}'::jsonb,
   'se reclama con su primer intento, su tipo y su objeto');
 select results_eq($$select status, attempts, locked_until between now() + interval '119 seconds' and clock_timestamp() + interval '121 seconds'
@@ -165,7 +165,9 @@ select ok(not pruebas.suelta(pruebas.id_de('evt_84_1'), 1), 'soltarlo dos veces 
 select is((select count(*)::integer from pruebas.vencidos() v where v ->> 'id' = pruebas.id_de('evt_84_1')::text), 0,
   'el barrido no lo toma antes de su espera');
 -- Un reenvío de Stripe sí lo intenta ya: reclamar por id no mira la espera.
-select is(pruebas.reclama(pruebas.id_de('evt_84_1')) ->> 'attempt', '2', 'el reenvío lo reclama otra vez, con el segundo intento');
+select results_eq(format($$select x ->> 'attempt', (x ->> 'occurred_at')::timestamptz = %L from (select pruebas.reclama(%L) as x) r$$,
+                         (pruebas.aviso('evt_84_1')).occurred_at, pruebas.id_de('evt_84_1')),
+  $$values ('2', true)$$, 'el reenvío lo reclama otra vez, con el segundo intento y la hora del aviso en Stripe');
 select ok(pruebas.suelta(pruebas.id_de('evt_84_1'), 2), 'y vuelve a fallar de paso');
 select ok((select next_attempt_at between now() + interval '299 seconds' and clock_timestamp() + interval '301 seconds' from pruebas.aviso('evt_84_1')),
   'la segunda espera es de 5 minutos');

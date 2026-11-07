@@ -211,7 +211,7 @@ describe("los avisos de Stripe a la vez", () => {
       expect(new Set(stored.map((answer) => answer.id)).size).toBe(1);
       const claims = await Promise.all(clients.map((client) => claim(client, stored[0]!.id)));
       expect(claims.filter((answer) => answer.outcome === "claimed")).toEqual([
-        { outcome: "claimed", attempt: 1, event_type: "invoice.paid", object_id: `in_${event}`, id: stored[0]!.id },
+        { outcome: "claimed", attempt: 1, event_type: "invoice.paid", object_id: `in_${event}`, id: stored[0]!.id, occurred_at: expect.any(String) },
       ]);
       expect(claims.filter((answer) => answer.outcome === "busy")).toHaveLength(CALLERS);
     } finally {
