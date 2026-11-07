@@ -4,7 +4,7 @@
 -- toca la tabla: entra por sus funciones. Lo que el aviso aplica lo prueba la 85.
 begin;
 \ir _ayuda.psql
-select plan(116);
+select plan(122);
 
 select pruebas.alta('a8400000-0000-0000-0000-000000000001', 'f1-84@prueba.test');
 select pruebas.alta('a8400000-0000-0000-0000-000000000002', 'ana-84@prueba.test');

@@ -6,7 +6,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(83);
+select plan(101);
 
 select pruebas.alta('a8500000-0000-0000-0000-000000000001', 'ana-85@prueba.test');
 select pruebas.alta('a8500000-0000-0000-0000-000000000002', 'beto-85@prueba.test');
@@ -379,7 +379,7 @@ select pruebas.aplica('evt_85_g1', pruebas.sus('sub_gabi_2', pruebas.cuenta(6)::
                       jsonb_build_array(pruebas.pago('ch_gabi_2', '2026-10-10 10:00-06', '2026-10-10 10:00-06', '2026-11-10 10:00-06')));
 select pruebas.aplica('evt_85_g2', pruebas.sus('sub_gabi_1', pruebas.cuenta(6)::text, 'canceled', '2026-10-29 10:00-06', p_started => '2026-10-01 10:00-06'),
                       jsonb_build_array(pruebas.pago('ch_gabi_1', '2026-10-01 10:00-06', '2026-10-01 10:00-06', '2026-11-01 10:00-06')));
-select pruebas.como_usuario(pruebas.cuenta(6));
+select pruebas.como_servicio(pruebas.cuenta(6));
 select is((private.media_facts(null) -> 'subscription' ->> 'paid_through')::timestamptz, '2026-11-10 10:00-06'::timestamptz,
   'el acceso sale de la que empezó después en Stripe');
 select pruebas.como_dueno();
