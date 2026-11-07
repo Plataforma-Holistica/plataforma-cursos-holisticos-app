@@ -86,6 +86,9 @@ revoke all on table private.provider_events from public, anon, authenticated, se
 -- Lo que el barrido toma.
 create index provider_events_due_idx on private.provider_events (next_attempt_at) where status in ('pending', 'processing');
 -- Lo que frena el cierre (la cuarta solicitud de T-303).
+-- Los avisos de una cuenta que esperan por una segunda suscripción viva: vuelven a la fila cuando la otra deja de estarlo.
+create index provider_events_second_live_idx on private.provider_events (profile_id)
+  where last_error = 'second_live_subscription' and status in ('pending', 'failed');
 create index provider_events_unfinished_idx on private.provider_events (occurred_at) where status in ('pending', 'processing', 'failed', 'deferred');
 
 -- Lo que dijo Stripe no cambia, nada se borra, y lo terminado no vuelve atrás. Los intentos solo bajan al reabrir uno fallido, la cuenta se anota una vez, y cada
@@ -576,6 +579,8 @@ declare
   v_detail text;
   v_conflict boolean;
   v_unique boolean := false;
+  v_other uuid;
+  v_other_sub text;
 begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'private.billing_apply() needs read committed isolation' using errcode = '25000';
@@ -725,21 +730,28 @@ begin
       last_renewal_failed_at = v_failed
     where s.id = v_row.id;
 
-    -- Si esta dejó de estar viva, la otra de la misma cuenta que quedó sin dar acceso por ella (con su periodo pagado) se vuelve la viva, y sus avisos vuelven a
-    -- la fila, sin esperar: su acceso no depende de que llegue otro aviso suyo.
-    if v_status not in ('active', 'in_grace')
+    -- Si la cuenta se quedó sin una viva, la otra que quedó sin dar acceso por una segunda viva (con su periodo pagado y vigente, que llega por lo menos hasta donde
+    -- llegaba esta: no se quitan días pagados) se vuelve la viva, y los avisos de esa suscripción que esperaban por eso vuelven a la fila, sin esperar. Su fila se
+    -- toma con su propio candado consultivo, sin esperarlo: si su aviso está en vuelo, no se promueve aquí, y su siguiente intento la vuelve la viva solo.
+    if not v_conflict and v_status not in ('active', 'in_grace')
        and not exists (select 1 from public.subscriptions s where s.profile_id = v_profile and s.status in ('active', 'in_grace')) then
-      update public.subscriptions s set status = private.billing_state(s.provider_status, true)
-      where s.id = (select x.id from public.subscriptions x
-                    where x.profile_id = v_profile and x.id <> v_row.id and x.provider = 'stripe' and x.status = 'pending'
-                      and x.current_period_end is not null and private.billing_state(x.provider_status, true) in ('active', 'in_grace')
-                    order by coalesce(x.provider_started_at, x.created_at) desc, x.id desc
-                    limit 1
-                    for update);
-      if found then
-        update private.provider_events e set status = 'pending', attempts = case when e.status = 'failed' then 0 else e.attempts end,
-                                             next_attempt_at = pg_catalog.clock_timestamp(), locked_until = null
-        where e.profile_id = v_profile and e.id <> p_event and e.last_error = 'second_live_subscription' and e.status in ('pending', 'failed');
+      select x.id, x.provider_subscription_id into v_other, v_other_sub from public.subscriptions x
+      where x.profile_id = v_profile and x.id <> v_row.id and x.provider = 'stripe' and x.status = 'pending'
+        and x.current_period_end > pg_catalog.now() and x.current_period_end >= coalesce(v_end, '-infinity'::timestamptz)
+        and private.billing_state(x.provider_status, true) in ('active', 'in_grace')
+      order by coalesce(x.provider_started_at, x.created_at) desc, x.id desc
+      limit 1;
+      if v_other is not null and pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtextextended('billing_subscription:' || v_other_sub, 0)) then
+        update public.subscriptions s set status = private.billing_state(s.provider_status, true)
+        where s.id = v_other and s.status = 'pending';
+        if found then
+          update private.provider_events e set status = 'pending', attempts = case when e.status = 'failed' then 0 else e.attempts end,
+                                               next_attempt_at = pg_catalog.clock_timestamp(), locked_until = null
+          where e.profile_id = v_profile and e.id <> p_event and e.last_error = 'second_live_subscription' and e.status in ('pending', 'failed')
+            and (e.object_id = v_other_sub
+                 or e.object_id in (select c.provider_invoice_id from public.charges c where c.subscription_id = v_other and c.provider_invoice_id is not null)
+                 or e.object_id in (select c.provider_charge_id from public.charges c where c.subscription_id = v_other));
+        end if;
       end if;
     end if;
 
@@ -965,7 +977,8 @@ $$;
 
 -- Como en T-604, con el aviso de CLABE (CO-27) antes que los recibos: de él depende que una CLABE rija, y un día de renovaciones encola miles de recibos. Con su
 -- índice, en el mismo orden.
-create index mail_outbox_due_order_idx on private.mail_outbox ((template <> 'CO-27'), created_at) where sent_at is null and failed_at is null;
+create index mail_outbox_due_order_idx on private.mail_outbox ((template <> 'CO-27'), created_at)
+  where sent_at is null and failed_at is null and recipient is not null;
 create or replace function private.mail_claim(p_limit integer)
 returns table (id uuid, idempotency_key text, template text, recipient text, params jsonb, attempt integer)
 language plpgsql volatile security definer set search_path = ''
@@ -1151,6 +1164,9 @@ as $$
                ('provider_event_resolve', 'private.provider_event_resolve(uuid, text, integer)')) f (name, signature)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature))
                      like '%v.profile_id = private.actor_id() or private.provider_event_owner(v.object_id) = private.actor_id()%', false)
+  union all
+  select 'mail claim without its index', 'private.mail_outbox'
+  where pg_catalog.to_regclass('private.mail_outbox_due_order_idx') is null
   union all
   select 'charge without its event key', 'public.charges'
   where not exists (select 1 from pg_catalog.pg_constraint c
