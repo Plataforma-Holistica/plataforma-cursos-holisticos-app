@@ -454,7 +454,7 @@ describe("el barrido", () => {
     expect(store.claimDue).toHaveBeenCalledTimes(4);
   });
 
-  it("su tope por omisión deja lugar, dentro de los 60 s de la ruta, a un último aviso con Stripe lento, la revisión y el correo", async () => {
+  it("su tope por omisión no pasa de 20 s: deja de reclamar en cuanto los pasa", async () => {
     let clock = NOW.getTime();
     const { store } = setup();
     vi.mocked(store.claimDue).mockResolvedValue([{ id: "x", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }]);
@@ -464,8 +464,8 @@ describe("el barrido", () => {
     });
     const inbox = createBillingInbox({ store, stripe: () => stripeWith(), secret: () => SECRET, live: () => false, now: () => new Date(clock), report: vi.fn(() => Promise.resolve()) });
     await inbox.sweepBillingEvents();
-    // Cuatro lecturas de Stripe en cadena de 5 s cada una y el correo con sus 10 s: el último reclamo no puede empezar después de los 25 s.
-    expect(clock - NOW.getTime()).toBeLessThanOrEqual(25_000);
+    // Un segundo por aviso: reclama mientras no pasa de 20 s, así que el último reclamo empieza a los 20 s y termina a los 21.
+    expect(clock - NOW.getTime()).toBe(21_000);
   });
 
   it("reclama de uno en uno hasta vaciar la fila: un atraso se drena en la misma pasada", async () => {

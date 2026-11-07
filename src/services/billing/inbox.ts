@@ -70,8 +70,9 @@ export interface Delivery {
 }
 
 const BUDGET_MS = 8_000;
-// El barrido deja de reclamar a los 20 s: el último aviso puede tardar otros 20 (cuatro lecturas de Stripe en cadena, de hasta 5 s cada una), y detrás vienen la
-// revisión y el correo (hasta 10 s), todo dentro de los 60 s de la ruta.
+// El barrido deja de reclamar a los 20 s: el último aviso, si es una factura de un pago, puede tardar otros 20 (cuatro lecturas de Stripe en cadena, de hasta
+// 5 s cada una, y 5 s más por cada pago de más), y detrás vienen la revisión y el correo, dentro de los 60 s de la ruta. El correo manda hasta 20 por pasada, de
+// hasta 10 s cada uno: con Resend lento no cabe todo, y lo que no salió queda apartado 10 minutos y sale en la siguiente pasada, sin duplicarse.
 const SWEEP_BUDGET_MS = 20_000;
 // Lo que cualquiera puede mandar sin firmar nada se cuenta y se reporta una vez por hora, al pasar de esto: así no llena el registro de errores.
 const REJECTIONS_PER_HOUR = 5;
