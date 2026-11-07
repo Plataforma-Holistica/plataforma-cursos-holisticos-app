@@ -30,7 +30,7 @@ export function StudentNav({ current }: { current?: (typeof LINKS)[number]["href
         </Link>
         <nav
           aria-label={text.label}
-          className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface-1 sm:static sm:border-0 sm:bg-transparent"
+          className="student-bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface-1 sm:static sm:border-0 sm:bg-transparent"
         >
           <ul className="flex justify-around sm:justify-end sm:gap-2">
             {LINKS.map((link) => (

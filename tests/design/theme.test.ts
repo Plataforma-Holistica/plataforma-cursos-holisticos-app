@@ -12,6 +12,11 @@ const css = read("src/ui/theme.css");
 const layout = read("src/app/layout.tsx");
 
 describe("hoja de tokens", () => {
+  it("la barra inferior del alumno se retira mientras el reproductor ocupa la ventana (PA-22; T-614)", () => {
+    expect(css).toMatch(/@utility student-bottom-bar \{\s*:where\(\.player-locked\) & \{\s*display: none;/);
+    expect(read("src/app/_catalog/nav.tsx")).toMatch(/className="student-bottom-bar fixed /);
+  });
+
   it("el color del tema que lee el navegador es el token del fondo", () => {
     const background = /--bg:\s*(#[0-9A-Fa-f]{6})/.exec(css)?.[1];
     const themeColor = /themeColor:\s*"(#[0-9A-Fa-f]{6})"/.exec(layout)?.[1];

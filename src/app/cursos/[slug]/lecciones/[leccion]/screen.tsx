@@ -15,6 +15,7 @@ import { plural, t } from "@/messages/format";
 import { lessonPath, ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
+import { CourseCover } from "@/ui/course-cover";
 import { SPACE } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
 import { InlineAlert } from "@/ui/inline-alert";
@@ -83,7 +84,12 @@ export interface LessonScreenProps {
   slug: string;
   lessonId: string;
   heading: string;
-  byline: string;
+  /** El curso y su ficha: «Volver al curso» y el enlace bajo el título (PA-22; T-614). */
+  course: { title: string; href: string };
+  /** Quien lo imparte, con su ficha si está listado. */
+  teacher: { name: string; href: string | null };
+  /** La portada generada del curso, detrás de «Reproducir» (decisión de Sergio del 2026-11-05). Nula si no se supo. */
+  cover: { practiceName: string | null; tone: number | null } | null;
   summary: string | null;
   about: string;
   modules: { id: string; title: string; lessons: SyllabusEntry[] }[];
@@ -94,6 +100,9 @@ export interface LessonScreenProps {
   /** Si la cuenta dejó los subtítulos encendidos. */
   captions: boolean;
 }
+
+/** Entre el curso y quien lo imparte, bajo el título: un signo, no un texto. */
+const BYLINE_SEPARATOR = " · ";
 
 /** Si el reproductor no se pudo descargar: se dice como cualquier otro error, con «Reintentar». */
 function PlayerMissing({ onFailed }: PlayerProps) {
@@ -291,7 +300,7 @@ function Paywall({ denial }: { denial: Denial }) {
   );
 }
 
-export function LessonScreen({ slug, lessonId, heading, byline, summary, about, modules, next, progress, initial, captions, resources }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, summary, about, modules, next, progress, initial, captions, resources }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
   const [captionsOn, setCaptionsOn] = useState(captions);
@@ -565,8 +574,8 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
     );
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-6 px-4 py-6 outline-none">
-      <BackLink href={ROUTES.home}>{text.back}</BackLink>
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-6 px-4 pt-6 pb-24 outline-none sm:pb-6">
+      <BackLink href={course.href}>{text.back}</BackLink>
       <div className="grid gap-8 lg:grid-cols-10">
         <div className="flex flex-col gap-4 lg:col-span-7">
           {/* Pegado arriba al desplazar, en teléfono; PA-34 no: crece, y taparía la página. */}
@@ -619,7 +628,14 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
                   onRetry={() => void watch(video.startTime ?? undefined)}
                 />
               ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+                <div className="relative isolate flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+                  {/* Antes de reproducir, la portada del curso detrás del botón, con un velo (T-614): ya no es una caja negra. */}
+                  {video.kind === "poster" && cover !== null && (
+                    <div data-lesson-cover aria-hidden="true" className="absolute inset-0 -z-10">
+                      <CourseCover title={course.title} teacherName={teacher.name} practiceName={cover.practiceName} tone={cover.tone} className="h-full w-full" />
+                      <span className="absolute inset-0 bg-bg/55" />
+                    </div>
+                  )}
                   {video.kind === "poster" &&
                     (mounted ? (
                       <Button type="button" onClick={() => void watch()}>
@@ -673,7 +689,11 @@ export function LessonScreen({ slug, lessonId, heading, byline, summary, about, 
           </section>
           <div className="flex flex-col gap-1">
             <h1 className="text-h2">{heading}</h1>
-            <p className="text-body-s text-text-2">{byline}</p>
+            <p className="text-body-s text-text-2">
+              <TextLink href={course.href}>{course.title}</TextLink>
+              {BYLINE_SEPARATOR}
+              {teacher.href === null ? teacher.name : <TextLink href={teacher.href}>{teacher.name}</TextLink>}
+            </p>
           </div>
           <section aria-labelledby="sobre-esta-leccion" className="hidden flex-col gap-3 lg:flex">
             <h2 id="sobre-esta-leccion" className="text-h3">

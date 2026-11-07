@@ -295,8 +295,9 @@ test("en un iPhone: la pantalla completa es dentro de la página, con la marca s
   expect(stage.height).toBeCloseTo((390 * 9) / 16, 0);
   expect(mark.y).toBeGreaterThanOrEqual(stage.y);
   expect(mark.y + mark.height).toBeLessThanOrEqual(stage.y + stage.height);
-  // La página de atrás no se desplaza.
+  // La página de atrás no se desplaza, y la barra inferior del alumno se retira (T-614): no queda encima del video.
   expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(true);
+  await expect(page.getByRole("navigation", { name: "Principal" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Salir de pantalla completa" })).toBeFocused();
   await expect(page.getByRole("status").filter({ hasText: "Gira tu teléfono para verlo más grande" })).toBeVisible();
   expect(await cellsUnderButtons(page, who.email)).toEqual([]);
@@ -341,6 +342,7 @@ test("en un iPhone: la pantalla completa es dentro de la página, con la marca s
   await page.getByRole("button", { name: "Salir de pantalla completa" }).click();
   await expect(frame).not.toHaveAttribute("data-filled");
   expect(await page.evaluate(() => document.documentElement.classList.contains("player-locked"))).toBe(false);
+  await expect(page.getByRole("navigation", { name: "Principal" })).toBeVisible();
 
   // Si iOS entra solo a la del sistema (un pellizco), se sale de ella y pasa a la propia.
   await page.evaluate(() => {
@@ -650,7 +652,8 @@ test("al navegar dentro de la aplicación, el tramo abierto se cierra y sale (T-
   await expect(page.locator("mux-player")).toHaveCount(1);
   await advance(page);
   await playVideo(page, 0, 3);
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   await expect.poll(() => watched(who)).toEqual([expect.objectContaining({ seq: 0, from: 0, to: 3, visible: true })]);
   await context.close();
@@ -701,7 +704,8 @@ test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo
   await pauseVideo(page);
   await expect.poll(() => progressOf(who)).toEqual({ position: 20, covered: 20, completed: false });
   // El inicio: el curso, con la lección sugerida y su avance.
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   // Desde T-210, una tarjeta del carrusel: su nombre dice la lección sugerida y lo que dice su barra, que solo se ve.
   const offered = page
@@ -747,7 +751,8 @@ test("al llegar a UMBRAL_COMPLETO_PCT, la lección queda terminada sin recargar 
   await expect(page.getByRole("progressbar", { name: "Avance del curso" }).first()).toHaveAttribute("aria-valuetext", "1 de 1 lección");
   await expect(page.getByText("Esta lección ya cuenta como terminada.")).toHaveCount(0);
   // Terminada, el curso sale de «continuar viendo» (FL-13 A3).
-  await page.getByRole("link", { name: "Volver al inicio" }).click();
+  // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
+  await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
   await expect(page.getByRole("heading", { name: "Continuar viendo" })).toHaveCount(0);
   await context.close();

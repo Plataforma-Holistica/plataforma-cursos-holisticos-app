@@ -430,6 +430,13 @@
   padding: calc(var(--spacing) * 3) max(calc(var(--spacing) * 3), var(--safe-right, 0px)) max(calc(var(--spacing) * 3), var(--safe-bottom, 0px))
     max(calc(var(--spacing) * 3), var(--safe-left, 0px));
 }
+/* La barra inferior del alumno se retira mientras el reproductor ocupa la ventana (PA-22; T-614): si no, en el
+   iPhone queda encima del video, porque la pantalla completa propia vive dentro de la capa de la sección pegada. */
+@utility student-bottom-bar {
+  :where(.player-locked) & {
+    display: none;
+  }
+}
 /* Mientras el reproductor ocupa la ventana, la página de atrás no se desplaza. */
 @utility player-locked {
   overflow: hidden;
