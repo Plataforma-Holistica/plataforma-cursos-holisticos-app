@@ -176,8 +176,10 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if ((present.STRIPE_SECRET_KEY === undefined) !== (present.STRIPE_WEBHOOK_SECRET === undefined)) {
     failed.add(present.STRIPE_SECRET_KEY === undefined ? "STRIPE_SECRET_KEY" : "STRIPE_WEBHOOK_SECRET");
   }
-  // Una llave real fuera de producción cobraría de verdad desde una vista previa; una de prueba en producción daría acceso con tarjetas de prueba.
-  if (present.STRIPE_SECRET_KEY !== undefined && /^(sk|rk)_live_/.test(present.STRIPE_SECRET_KEY) !== (present.APP_ENV === "production")) {
+  // Una llave real fuera de producción cobraría de verdad desde una vista previa; una de prueba en producción daría acceso con tarjetas de prueba. Producción son
+  // dos fuentes, como en el simulacro: lo que se escribió en el panel y lo que Vercel dice del despliegue, si lo dice.
+  const stripeProduction = present.APP_ENV === "production" && (present.VERCEL_ENV === undefined || present.VERCEL_ENV === "production");
+  if (present.STRIPE_SECRET_KEY !== undefined && /^(sk|rk)_live_/.test(present.STRIPE_SECRET_KEY) !== stripeProduction) {
     failed.add("STRIPE_SECRET_KEY");
   }
   if (present.VIDEO_PROVIDER === "mux") {

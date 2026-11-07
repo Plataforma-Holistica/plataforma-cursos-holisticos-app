@@ -97,5 +97,5 @@ export const config = {
   // Todo menos los archivos estáticos y los avisos de los proveedores. Es amplio a propósito: una acción de servidor es
   // una petición a la ruta de su página, y fuera de este alcance no pasaría por aquí. Los avisos (T-303) no llevan sesión, y su
   // firma va sobre el cuerpo crudo, que el proxy copiaría a la memoria antes de la ruta.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|api/webhooks/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|api/webhooks/stripe$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?)$).*)"],
 };

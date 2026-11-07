@@ -52,6 +52,12 @@ describe("los avisos de Stripe", () => {
     expect(vercel.crons.map((cron) => cron.path)).toContain("/api/trabajos/avisos");
   });
 
+  it("las dos rutas declaran su duración: el tope de la entrega, lo que sigue detrás de la respuesta y el barrido no dependen de lo que Vercel ponga por omisión", () => {
+    for (const file of ["src/app/api/webhooks/stripe/route.ts", "src/app/api/trabajos/avisos/route.ts"]) {
+      expect(readFileSync(join(ROOT, file), "utf8"), file).toMatch(/^export const maxDuration = \d+;$/m);
+    }
+  });
+
   it("el proxy deja fuera la ruta de los avisos, y nada más de lo que cuida", () => {
     const source = readFileSync(join(ROOT, "src/proxy.ts"), "utf8");
     const literal = /matcher: \["(.+)"\]/.exec(source)?.[1];
@@ -59,6 +65,9 @@ describe("los avisos de Stripe", () => {
     // El matcher es un texto de TypeScript: sus barras invertidas van dobladas.
     const matcher = new RegExp(`^${literal!.replaceAll("\\\\", "\\")}$`);
     expect(matcher.test("/api/webhooks/stripe")).toBe(false);
-    for (const path of ["/", "/inicio", "/api/trabajos/avisos", "/api/trabajos/correo", "/admin/periodos", "/api/webhooksx"]) expect(matcher.test(path)).toBe(true);
+    // Otra ruta bajo el mismo prefijo no queda fuera sola: dejarla fuera es decidirlo aquí.
+    for (const path of ["/", "/inicio", "/api/trabajos/avisos", "/api/trabajos/correo", "/admin/periodos", "/api/webhooksx", "/api/webhooks/otra", "/api/webhooks/stripe/x", "/api/webhooks/stripex"]) {
+      expect(matcher.test(path)).toBe(true);
+    }
   });
 });

@@ -416,6 +416,12 @@ describe("Stripe (T-303)", () => {
     expect(() => parseEnv({ ...source, STRIPE_SECRET_KEY: key("live") })).not.toThrow();
   });
 
+  it.each(["preview", "development"])("la real tampoco en un despliegue %s de Vercel, aunque APP_ENV diga producción: son dos fuentes", (vercelEnv) => {
+    const source = { ...valid, ...hosted("production"), ...mail, STRIPE_WEBHOOK_SECRET: webhook, VERCEL_ENV: vercelEnv };
+    expect(problemsOf({ ...source, STRIPE_SECRET_KEY: key("live") })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
+    expect(() => parseEnv({ ...source, VERCEL_ENV: "production", STRIPE_SECRET_KEY: key("live") })).not.toThrow();
+  });
+
   it.each(["pk_test_prueba0123456789", "sk_test_", "whsec_prueba0123456789"])("una llave secreta con otra forma (%s) no se admite", (value) => {
     expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: value, STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
   });

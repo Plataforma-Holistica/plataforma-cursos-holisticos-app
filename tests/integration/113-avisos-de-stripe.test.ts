@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { StripeAnswer, StripeGet } from "@/adapters/stripe/api";
 import type { Tx } from "@/adapters/supabase/db";
 import { createBillingInbox, type BillingStore } from "@/services/billing/inbox";
-import { askApply, askClaim, askClaimDue, askFinish, askHealth, askReceive, askRelease } from "@/services/billing/records";
+import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealth, askReceive, askRelease } from "@/services/billing/records";
 
 import { localOwnerUrl } from "./helpers/local";
 import { createTestUser, deleteTestUsers, ownerQuery, type TestUser } from "./helpers/users";
@@ -50,6 +50,7 @@ afterAll(async () => {
        commit;`,
     );
   }
+  await ownerQuery("delete from private.rate_limit_counters where bucket = 'stripe_webhook_rejected'");
   await ownerQuery("revoke app_service from postgres");
 });
 
@@ -83,6 +84,7 @@ const store: BillingStore = {
   finish: (event, status, code) => asServerSystem((tx) => askFinish(tx, event.id, event.attempt, status, code)),
   apply: (event, subscription, payments, failure) => asServerSystem((tx) => askApply(tx, event, subscription, payments, failure)),
   health: () => asServerSystem(askHealth),
+  countRejection: () => asServerSystem(askCountRejection),
 };
 
 const T0 = Math.floor(Date.parse("2026-10-05T16:00:00Z") / 1000);
@@ -223,6 +225,16 @@ describe("los avisos de Stripe de punta a punta", () => {
     expect(await finalState(person.id)).toEqual([{ status: "active", period_end: expect.any(String), cancel: false, charges: 1, receipts: 1, settlements: 1 }]);
     const events = await ownerQuery<{ n: number }>("select count(*)::int as n from private.provider_events where provider_event_id = $1 and status = 'processed'", [id]);
     expect(events[0]?.n).toBe(1);
+  });
+
+  it("diez firmas malas a la vez cuentan diez en la hora, sin perder ninguna: el aviso sale una vez", async () => {
+    await ownerQuery("delete from private.rate_limit_counters where bucket = 'stripe_webhook_rejected'");
+    const hits = await Promise.all(Array.from({ length: 10 }, () => store.countRejection()));
+    expect([...hits].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const rows = await ownerQuery<{ hits: number; aligned: boolean }>(
+      "select hits, window_start = date_trunc('hour', window_start) as aligned from private.rate_limit_counters where bucket = 'stripe_webhook_rejected'",
+    );
+    expect(rows).toEqual([{ hits: 10, aligned: true }]);
   });
 
   it("diez avisos distintos del mismo cobro a la vez: también uno", async () => {

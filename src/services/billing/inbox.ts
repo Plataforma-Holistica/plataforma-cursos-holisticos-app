@@ -32,7 +32,8 @@ export type BillingFailure =
   | "billing_base_error"
   | "billing_event_failed"
   | "billing_event_late"
-  | "billing_events_stuck";
+  | "billing_events_stuck"
+  | "billing_body_too_large";
 
 export interface BillingStore {
   receive: (event: ReceivedEvent) => Promise<Received>;
@@ -42,6 +43,8 @@ export interface BillingStore {
   finish: (event: ClaimedEvent, status: "ignored" | "deferred" | "failed", code: string | null) => Promise<boolean>;
   apply: (event: ClaimedEvent, subscription: SubscriptionSnapshot, payments: readonly PaymentSnapshot[], failure: FailureSnapshot | null) => Promise<Applied>;
   health: () => Promise<{ pending: number; failed: number; deferred: number; oldest_pending_at: string | null }>;
+  /** Cuenta una entrega rechazada antes de la firma (firma mala, cuerpo de más) y contesta cuántas van en esta hora, con ella. */
+  countRejection: () => Promise<number>;
 }
 
 export interface BillingInboxDeps {
@@ -67,8 +70,10 @@ export interface Delivery {
 }
 
 const BUDGET_MS = 8_000;
-const SWEEP_BUDGET_MS = 60_000;
+const SWEEP_BUDGET_MS = 45_000;
 const SWEEP_BATCH = 10;
+// Lo que cualquiera puede mandar sin firmar nada se cuenta y se reporta una vez por hora, al pasar de esto: así no llena el registro de errores.
+const REJECTIONS_PER_HOUR = 5;
 
 // Los tipos que la base aplica y los que esperan a T-307 (`private.billing_event_kind`). Lo demás se ignora. El punto de conexión se suscribe solo a estos.
 const SUBSCRIPTION_EVENTS = new Set(["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"]);
@@ -91,6 +96,12 @@ type Outcome = "done" | "retry";
 
 export function createBillingInbox(deps: BillingInboxDeps) {
   const { store, report } = deps;
+
+  /** Una entrega rechazada antes de la firma: se cuenta, y se reporta solo la que pasa del tope de la hora. Si no se pudo contar, se reporta. */
+  async function noteRejection(code: "stripe_signature_invalid" | "billing_body_too_large"): Promise<void> {
+    const hits = await store.countRejection().catch(() => null);
+    if (hits === null || hits === REJECTIONS_PER_HOUR + 1) await report(code);
+  }
 
   async function settle(event: ClaimedEvent, read: Read<unknown> & { kind: "retry" | "failed" }): Promise<Outcome> {
     if (read.kind === "failed") {
@@ -174,7 +185,7 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     // Sin la cabecera no es Stripe: no se reporta, para que nadie llene el registro de errores sin firmar nada.
     if (signature === null) return { status: 400 };
     if (checkStripeSignature(signature, body, secret, deps.now()) !== "valid") {
-      await report("stripe_signature_invalid");
+      await noteRejection("stripe_signature_invalid");
       return { status: 400 };
     }
     let json: unknown;
@@ -245,14 +256,19 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     if (stripe === null) return true;
     const deadline = deps.now().getTime() + (deps.sweepBudgetMs ?? SWEEP_BUDGET_MS);
     try {
-      const due = await store.claimDue(SWEEP_BATCH);
-      for (const event of due) {
-        // Lo que no alcance vuelve a la fila sin gastar más que el intento que ya tomó.
-        if (deps.now().getTime() > deadline) {
-          await store.release(event, "sweep_out_of_time");
-          continue;
+      // Lote tras lote, para que un atraso (Stripe dejó de reenviar, o la llave estuvo mal) se drene en una pasada y no a diez por día. Lo que vuelve a la fila
+      // con su espera no se reclama otra vez en la misma pasada.
+      for (;;) {
+        const due = await store.claimDue(SWEEP_BATCH);
+        for (const event of due) {
+          // Lo que no alcance vuelve a la fila sin gastar más que el intento que ya tomó.
+          if (deps.now().getTime() > deadline) {
+            await store.release(event, "sweep_out_of_time");
+            continue;
+          }
+          await processSafely(stripe, event);
         }
-        await processSafely(stripe, event);
+        if (due.length < SWEEP_BATCH || deps.now().getTime() > deadline) break;
       }
       const now = await store.health();
       if (now.failed > 0 || (now.oldest_pending_at !== null && Date.parse(now.oldest_pending_at) < deps.now().getTime() - 24 * 60 * 60 * 1000)) {
@@ -265,5 +281,8 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     }
   }
 
-  return { receiveStripeEvent, sweepBillingEvents };
+  /** Un cuerpo de más del tope de la ruta: no se leyó, y cuenta como una firma mala. */
+  const noteOversizedBody = (): Promise<void> => noteRejection("billing_body_too_large");
+
+  return { receiveStripeEvent, sweepBillingEvents, noteOversizedBody };
 }

@@ -30,8 +30,10 @@ describe("el adaptador de Stripe", () => {
     [500, "unavailable"],
     [503, "unavailable"],
   ] as const)("un %i es %s, y no se lee su cuerpo", async (status, answer) => {
-    const get = createStripeApi({ secretKey: KEY, fetch: withStatus(status, { error: { message: "datos de la cuenta" } }) });
+    const response = new Response(JSON.stringify({ error: { message: "datos de la cuenta" } }), { status, headers: { "content-type": "application/json" } });
+    const get = createStripeApi({ secretKey: KEY, fetch: vi.fn(() => Promise.resolve(response)) });
     expect(await get("/v1/subscriptions/sub_1")).toEqual({ status: answer });
+    expect(response.bodyUsed).toBe(false);
   });
 
   it("si la red falla o se acaba el tiempo, no se supo", async () => {

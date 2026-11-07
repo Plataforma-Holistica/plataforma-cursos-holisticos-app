@@ -7,7 +7,7 @@ import { reportFailure } from "@/services/error-reporting/server";
 import { secretMatches } from "@/services/mail/outbox";
 
 import { createBillingInbox } from "./inbox";
-import { askApply, askClaim, askClaimDue, askFinish, askHealth, askReceive, askRelease } from "./records";
+import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealth, askReceive, askRelease } from "./records";
 
 // La bandeja de los avisos de Stripe, ya armada: lo que importan la ruta del aviso y la del barrido (T-303). Corre como sistema: un aviso no tiene una persona detrás.
 // Sin `STRIPE_SECRET_KEY` y `STRIPE_WEBHOOK_SECRET` la ruta del aviso contesta como si no existiera.
@@ -17,7 +17,7 @@ function stripe(): StripeGet | null {
   return key === undefined ? null : createStripeApi({ secretKey: key });
 }
 
-export const { receiveStripeEvent, sweepBillingEvents } = createBillingInbox({
+export const { receiveStripeEvent, sweepBillingEvents, noteOversizedBody } = createBillingInbox({
   store: {
     receive: (event) => asSystem({ reason: "billing_receive" }, (tx) => askReceive(tx, event)),
     claim: (id) => asSystem({ reason: "billing_claim" }, (tx) => askClaim(tx, id)),
@@ -27,6 +27,7 @@ export const { receiveStripeEvent, sweepBillingEvents } = createBillingInbox({
     apply: (event, subscription, payments, failure) =>
       asSystem({ reason: "billing_apply" }, (tx) => askApply(tx, event, subscription, payments, failure)),
     health: () => asSystem({ reason: "billing_health" }, askHealth),
+    countRejection: () => asSystem({ reason: "billing_rejection" }, askCountRejection),
   },
   stripe,
   secret: () => getEnv().STRIPE_WEBHOOK_SECRET ?? null,

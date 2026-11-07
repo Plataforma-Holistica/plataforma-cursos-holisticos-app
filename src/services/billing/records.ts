@@ -126,6 +126,22 @@ const health = z.object({
   answer: z.object({ pending: z.number().int(), failed: z.number().int(), deferred: z.number().int(), oldest_pending_at: z.string().nullable() }).strict(),
 });
 
+const rejectionHits = z.object({ hits: z.number().int() }).strict();
+
+/** Cuenta una entrega rechazada antes de la firma en el contador de la hora (`rate_limit_counters`, la ventana la pone la base) y contesta cuántas van. */
+export async function askCountRejection(tx: Tx): Promise<number> {
+  const rows = await tx.query(
+    sql`insert into private.rate_limit_counters as c (bucket, window_start, hits)
+        values ('stripe_webhook_rejected', date_trunc('hour', pg_catalog.now()), 1)
+        on conflict (bucket, window_start) do update set hits = c.hits + 1
+        returning hits`,
+    rejectionHits,
+  );
+  const row = rows[0];
+  if (row === undefined) throw new Error("el contador de rechazos no contestó");
+  return row.hits;
+}
+
 export async function askHealth(tx: Tx): Promise<z.infer<typeof health>["answer"]> {
   const rows = await tx.query(sql`select private.provider_events_health() as answer`, health);
   const row = rows[0];

@@ -70,10 +70,14 @@ function signed(body: unknown, t = T): { body: Uint8Array; signature: string } {
   return { body: bytes, signature: `t=${t},v1=${createHmac("sha256", SECRET).update(`${t}.`).update(bytes).digest("hex")}` };
 }
 
-function setup(options: { stripe?: StripeGet | null; secret?: string | null; claim?: Claim; apply?: () => Promise<Applied>; status?: string } = {}) {
+function setup(
+  options: { stripe?: StripeGet | null; secret?: string | null; claim?: Claim; apply?: () => Promise<Applied>; status?: string; live?: boolean } = {},
+) {
   const claimed = (type: string, object: string): ClaimedEvent => ({ id: "e1", attempt: 1, eventType: type, objectId: object, occurredAt: "2026-11-06T17:59:30.000Z" });
   let last: { type: string; object: string } = { type: "", object: "" };
+  let rejections = 0;
   const store: BillingStore = {
+    countRejection: vi.fn(() => Promise.resolve(++rejections)),
     receive: vi.fn((received) => {
       last = { type: received.event_type, object: received.object_id };
       return Promise.resolve({ outcome: "stored" as const, id: "e1", status: options.status ?? "pending" });
@@ -91,7 +95,7 @@ function setup(options: { stripe?: StripeGet | null; secret?: string | null; cla
     store,
     stripe: () => stripe,
     secret: () => (options.secret === undefined ? SECRET : options.secret),
-    live: () => false,
+    live: () => options.live ?? false,
     now: () => NOW,
     report,
     budgetMs: 200,
@@ -100,6 +104,7 @@ function setup(options: { stripe?: StripeGet | null; secret?: string | null; cla
   const inbox = {
     receiveStripeEvent: async (body: Uint8Array, signature: string | null) => (await raw.receiveStripeEvent(body, signature)).status,
     sweepBillingEvents: raw.sweepBillingEvents,
+    noteOversizedBody: raw.noteOversizedBody,
   };
   return { inbox, raw, store, report, stripe };
 }
@@ -112,12 +117,45 @@ describe("la entrega de un aviso", () => {
     expect(store.receive).not.toHaveBeenCalled();
   });
 
-  it("con la firma mala no se guarda nada, se contesta 400 y se reporta", async () => {
+  it("con la firma mala no se guarda nada, se contesta 400 y se cuenta; se reporta una vez al pasar de cinco en la hora", async () => {
     const { inbox, store, report } = setup();
     const { body } = signed(event("invoice.paid", "in_1"));
-    expect(await inbox.receiveStripeEvent(body, `t=${T},v1=${"0".repeat(64)}`)).toBe(400);
-    expect(store.receive).not.toHaveBeenCalled();
+    const bad = `t=${T},v1=${"0".repeat(64)}`;
+    for (let i = 0; i < 5; i += 1) expect(await inbox.receiveStripeEvent(body, bad)).toBe(400);
+    expect(store.countRejection).toHaveBeenCalledTimes(5);
+    expect(report).not.toHaveBeenCalled();
+    expect(await inbox.receiveStripeEvent(body, bad)).toBe(400);
+    expect(report).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledWith("stripe_signature_invalid");
+    for (let i = 0; i < 20; i += 1) await inbox.receiveStripeEvent(body, bad);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(store.receive).not.toHaveBeenCalled();
+  });
+
+  it("si no se pudo contar la firma mala, se reporta: sin la cuenta no se sabe si se repite", async () => {
+    const { inbox, store, report } = setup();
+    vi.mocked(store.countRejection).mockRejectedValueOnce(new Error("sin base"));
+    const { body } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, `t=${T},v1=${"0".repeat(64)}`)).toBe(400);
+    expect(report).toHaveBeenCalledWith("stripe_signature_invalid");
+  });
+
+  it("un cuerpo de más del tope cuenta con las firmas malas, y se reporta igual: una vez al pasar de cinco", async () => {
+    const { inbox, report } = setup();
+    for (let i = 0; i < 5; i += 1) await inbox.noteOversizedBody();
+    expect(report).not.toHaveBeenCalled();
+    await inbox.noteOversizedBody();
+    await inbox.noteOversizedBody();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith("billing_body_too_large");
+  });
+
+  it("con la llave del modo real, un aviso del modo real se guarda", async () => {
+    const { inbox, store, report } = setup({ live: true });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1", { livemode: true }));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(store.receive).toHaveBeenCalledWith(expect.objectContaining({ livemode: true }));
+    expect(report).not.toHaveBeenCalledWith("stripe_wrong_mode");
   });
 
   it("sin la cabecera de la firma: 400, sin guardar y sin reportar (no llena el registro de errores)", async () => {
@@ -413,6 +451,41 @@ describe("el barrido", () => {
     expect(await inbox.sweepBillingEvents()).toBe(true);
     expect(store.apply).toHaveBeenCalledTimes(1);
     expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), "sweep_out_of_time");
+  });
+
+  it("un atraso de más de un lote se drena en la misma pasada, lote tras lote, hasta que la fila se vacía", async () => {
+    const { inbox, store } = setup();
+    const batch = (prefix: string, n: number): ClaimedEvent[] =>
+      Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }));
+    vi.mocked(store.claimDue).mockResolvedValueOnce(batch("a", 10)).mockResolvedValueOnce(batch("b", 10)).mockResolvedValueOnce(batch("c", 3));
+    expect(await inbox.sweepBillingEvents()).toBe(true);
+    expect(store.apply).toHaveBeenCalledTimes(23);
+    expect(store.claimDue).toHaveBeenCalledTimes(3);
+  });
+
+  it("y se detiene en su tope aunque quede fila: no reclama otro lote", async () => {
+    let clock = NOW.getTime();
+    const { store } = setup();
+    const batch = (prefix: string): ClaimedEvent[] =>
+      Array.from({ length: 10 }, (_, i) => ({ id: `${prefix}${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }));
+    vi.mocked(store.claimDue).mockResolvedValue(batch("x"));
+    vi.mocked(store.apply).mockImplementation(() => {
+      clock += 10_000;
+      return Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    });
+    const inbox = createBillingInbox({
+      store,
+      stripe: () => stripeWith(),
+      secret: () => SECRET,
+      live: () => false,
+      now: () => new Date(clock),
+      report: vi.fn(() => Promise.resolve()),
+      sweepBudgetMs: 60_000,
+    });
+    expect(await inbox.sweepBillingEvents()).toBe(true);
+    // 60 s de tope, 10 s por aviso: el primer lote alcanza para siete, y los otros tres vuelven a la fila.
+    expect(store.claimDue).toHaveBeenCalledTimes(1);
+    expect(store.apply).toHaveBeenCalledTimes(7);
   });
 
   it("si la base no contesta, lo dice", async () => {
