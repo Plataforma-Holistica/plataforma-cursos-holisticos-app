@@ -1,4 +1,3 @@
-import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireAdmin } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
@@ -7,15 +6,16 @@ import { sessionEmail } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { CAPABILITIES } from "@/services/account/team";
 import { teacherStanding } from "@/services/teachers/teachers";
-import { Button } from "@/ui/button";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
+import { AdminFrame } from "./_lib/frame";
 import { ForbiddenScreen } from "./_lib/states";
 
-// PA-60 · Inicio de administración (`/admin`), en su versión mínima: ninguna de sus tareas
-// existe todavía, así que no hay tarjetas ni menú. Existe para que quien es del equipo tenga
-// a dónde llegar después de dar su código, y vea con qué capacidades entró.
+// PA-60 · Inicio de administración (`/admin`), en su versión mínima: el menú lateral (T-614,
+// parte 6) y, sin tarjetas todavía (llegan con cada tarea; decisión de Sergio del 2026-11-05),
+// el saludo y con qué capacidades entró. Existe para que quien es del equipo tenga a dónde
+// llegar después de dar su código.
 //
 // Quién es del equipo lo dice la base, por la guarda: una capacidad, su factor atado y una
 // sesión que dio ese código hace poco. A quien no lo es se le contesta lo mismo que en una
@@ -41,69 +41,27 @@ export default async function AdminHomePage() {
   const capabilities = CAPABILITIES.filter((capability) => step.capabilities.includes(capability));
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
-      <h1 className="text-h1">{text.admin.title}</h1>
-      <div className="flex flex-col gap-2 text-text-2">
-        {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
-        <p>{text.admin.noPending}</p>
-      </div>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-h3">{text.admin.capabilitiesTitle}</h2>
-        <ul className="list-disc pl-6">
-          {capabilities.map((capability) => (
-            <li key={capability}>{text.admin.capabilities[capability]}</li>
-          ))}
-        </ul>
-      </section>
-      {/* El enlace es una comodidad: quién entra a esa pantalla lo decide su propia guarda. */}
-      {capabilities.includes("config") && (
-        <p>
-          <TextLink href={ROUTES.team}>{text.admin.team}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("config") && (
-        <p>
-          <TextLink href={ROUTES.legalTexts}>{text.admin.legalTexts}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("content") && (
-        <p>
-          <TextLink href={ROUTES.adminTeachers}>{t(text.admin.teachers)}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("content") && (
-        <p>
-          <TextLink href={ROUTES.catalog}>{text.admin.catalog}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("content") && (
-        <p>
-          <TextLink href={ROUTES.review}>{text.admin.review}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("finance") && (
-        <p>
-          <TextLink href={ROUTES.alerts}>{text.admin.alerts}</TextLink>
-        </p>
-      )}
-      {capabilities.includes("finance") && (
-        <p>
-          <TextLink href={ROUTES.periods}>{text.admin.periods}</TextLink>
-        </p>
-      )}
-      {invited && (
-        <p>
-          <TextLink href={ROUTES.portalInvitation}>{t(text.admin.teacherInvitation)}</TextLink>
-        </p>
-      )}
-      <p>
-        <TextLink href={ROUTES.account}>{text.admin.account}</TextLink>
-      </p>
-      <form action={signOutAction}>
-        <Button type="submit" variant="secondary">
-          {text.common.signOut}
-        </Button>
-      </form>
-    </main>
+    <AdminFrame path={ROUTES.admin} capabilities={capabilities}>
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
+        <h1 className="text-h1">{text.admin.title}</h1>
+        <div className="flex flex-col gap-2 text-text-2">
+          {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
+          <p>{text.admin.noPending}</p>
+        </div>
+        <section className="flex flex-col gap-2">
+          <h2 className="text-h3">{text.admin.capabilitiesTitle}</h2>
+          <ul className="list-disc pl-6">
+            {capabilities.map((capability) => (
+              <li key={capability}>{text.admin.capabilities[capability]}</li>
+            ))}
+          </ul>
+        </section>
+        {invited && (
+          <p>
+            <TextLink href={ROUTES.portalInvitation}>{t(text.admin.teacherInvitation)}</TextLink>
+          </p>
+        )}
+      </main>
+    </AdminFrame>
   );
 }

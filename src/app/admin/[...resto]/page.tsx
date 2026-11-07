@@ -4,6 +4,7 @@ import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireAdmin } from "@/app/_lib/guard";
 import { ROUTES, teamDestination } from "@/services/account/navigation";
 
+import { AdminFrame } from "../_lib/frame";
 import { sectionAt } from "../_lib/sections";
 import { ForbiddenScreen } from "../_lib/states";
 
@@ -22,7 +23,7 @@ import { ForbiddenScreen } from "../_lib/states";
 //     2026-10-13): una página propia se distinguía del comodín.
 //
 // Con todo servido desde aquí, de una ruta a otra solo cambia la ruta pedida. Una sección
-// nueva entra a `_lib/sections.tsx`. No exporta `metadata`.
+// nueva entra a `_lib/sections.tsx`, y al menú de `_lib/frame.tsx`. No exporta `metadata`.
 
 export default async function AdminRestPage({ params }: { params: Promise<{ resto: string[] }> }) {
   const { resto } = await params;
@@ -35,7 +36,13 @@ export default async function AdminRestPage({ params }: { params: Promise<{ rest
   if (step.kind === "unavailable") return <UnavailableScreen retryHref={teamDestination(path)} withSession />;
   // Es del equipo y le falta la capacidad de esa sección: se le dice cuál (PA-88).
   if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;
-  if (section !== null) return section.render(step.claims);
+  if (section !== null) {
+    return (
+      <AdminFrame path={path} capabilities={step.capabilities}>
+        {section.render(step.claims)}
+      </AdminFrame>
+    );
+  }
 
   notFound();
 }
