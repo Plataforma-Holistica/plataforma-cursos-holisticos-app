@@ -93,7 +93,9 @@ const PROPS: LessonScreenProps = {
   slug: "respirar",
   lessonId: LESSON,
   heading: "Lección 2 · Respirar acostado",
-  byline: "Respirar para dormir · Ana Robles",
+  course: { title: "Respirar para dormir", href: "/cursos/respirar" },
+  teacher: { name: "Ana Robles", href: "/maestros/ana-robles" },
+  cover: { practiceName: "Meditación", tone: 3 },
   summary: "Un curso corto.",
   about: "Dura 7 min. Es del módulo «Uno».",
   modules: [
@@ -145,12 +147,36 @@ beforeEach(() => {
 });
 
 describe("lo de alrededor del reproductor", () => {
-  it("el título, el curso y quien lo imparte, y «Sobre esta lección»", () => {
+  it("el título, el curso y quien lo imparte como enlaces a sus fichas, y «Sobre esta lección» (T-614)", () => {
     show();
     expect(screen.getByRole("heading", { level: 1, name: "Lección 2 · Respirar acostado" })).toBeVisible();
-    expect(screen.getByText("Respirar para dormir · Ana Robles")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Respirar para dormir" })).toHaveAttribute("href", "/cursos/respirar");
+    expect(screen.getByRole("link", { name: "Ana Robles" })).toHaveAttribute("href", "/maestros/ana-robles");
     expect(screen.getAllByText("Dura 7 min. Es del módulo «Uno».").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Volver al inicio" })).toHaveAttribute("href", "/inicio");
+    // Regresar lleva a la ficha del curso, que ya existe (PA-22).
+    expect(screen.getByRole("link", { name: "Volver al curso" })).toHaveAttribute("href", "/cursos/respirar");
+  });
+
+  it("un maestro sin ficha se nombra sin enlace", () => {
+    show({ teacher: { name: "Ana Robles", href: null } });
+    expect(screen.queryByRole("link", { name: "Ana Robles" })).toBeNull();
+    // En la línea bajo el título, no en la portada del reproductor, que también lo nombra.
+    const byline = screen.getByRole("link", { name: "Respirar para dormir" }).closest("p");
+    expect(byline).toHaveTextContent("Respirar para dormir · Ana Robles");
+  });
+
+  it("antes de reproducir, la portada del curso detrás del botón, decorativa (T-614)", () => {
+    const { area } = show();
+    const cover = area().querySelector("[data-lesson-cover]");
+    expect(cover).not.toBeNull();
+    expect(cover).toHaveAttribute("aria-hidden", "true");
+    expect(cover).toHaveTextContent("Respirar para dormir");
+    expect(cover).toHaveTextContent("Meditación");
+  });
+
+  it("sin datos de la portada, el lugar del video queda como antes", () => {
+    const { area } = show({ cover: null });
+    expect(area().querySelector("[data-lesson-cover]")).toBeNull();
   });
 
   it("el temario marca la lección en curso, en la columna y en la pestaña, sin repetir un id", () => {
@@ -297,11 +323,19 @@ describe("el lugar del reproductor", () => {
   });
 
   it("la acción que manda a la página (la sesión ya no pasa) no se toma por un error", async () => {
-    actions.watchLessonAction.mockRejectedValueOnce(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+    // El rechazo se suelta a mano y se deja correr una vuelta entera antes de mirar: si se mira en cuanto se llamó la
+    // acción, todavía no se procesó, y la prueba pasaría aunque la pantalla lo tomara por un error.
+    let reject: (error: unknown) => void = () => undefined;
+    actions.watchLessonAction.mockReturnValueOnce(new Promise((_, fail) => (reject = fail)));
     const { user } = show();
     await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
     await waitFor(() => expect(actions.watchLessonAction).toHaveBeenCalledOnce());
-    expect(screen.queryByText("Algo falló de nuestro lado. No es por algo que hayas hecho.")).toBeNull();
+    await act(async () => {
+      reject(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/cursos/respirar;307;" }));
+      await new Promise((settled) => setTimeout(settled, 0));
+    });
+    expect(screen.queryAllByText("Algo falló de nuestro lado. No es por algo que hayas hecho.")).toHaveLength(0);
+    expect(screen.getByText("Preparando tu lección…")).toBeInTheDocument();
   });
 
   it("al terminar: «Lección terminada», la siguiente y volver a ver, sin arrancar sola (D-07)", async () => {

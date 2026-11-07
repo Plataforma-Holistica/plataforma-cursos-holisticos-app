@@ -9,9 +9,9 @@ import { defineMessages } from "../format";
 // guarda desde T-206.
 export const lesson = defineMessages({
   pageTitle: "Lección",
-  back: "Volver al inicio",
+  // Regresa a la ficha del curso (PA-22; T-614): desde T-210 existe.
+  back: "Volver al curso",
   heading: "Lección {number} · {title}",
-  byline: "{course} · {teacher}",
   tabsLabel: "Partes de la lección",
   syllabus: "Temario",
   // La barra del temario (T-206): cuántas lecciones vigentes terminó.
