@@ -70,7 +70,9 @@ export interface Delivery {
 }
 
 const BUDGET_MS = 8_000;
-const SWEEP_BUDGET_MS = 35_000;
+// El barrido deja de reclamar a los 20 s: el último aviso puede tardar otros 20 (cuatro lecturas de Stripe en cadena, de hasta 5 s cada una), y detrás vienen la
+// revisión y el correo (hasta 10 s), todo dentro de los 60 s de la ruta.
+const SWEEP_BUDGET_MS = 20_000;
 // Lo que cualquiera puede mandar sin firmar nada se cuenta y se reporta una vez por hora, al pasar de esto: así no llena el registro de errores.
 const REJECTIONS_PER_HOUR = 5;
 

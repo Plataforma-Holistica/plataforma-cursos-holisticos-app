@@ -436,6 +436,38 @@ describe("el barrido", () => {
     expect(report).toHaveBeenCalledWith("billing_events_stuck");
   });
 
+  it("un aviso que falla, y hasta uno que no se pudo devolver a la fila, no detienen la pasada", async () => {
+    const { inbox, store, report } = setup();
+    const one = (id: string): ClaimedEvent[] => [{ id, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }];
+    vi.mocked(store.claimDue).mockResolvedValueOnce(one("a")).mockResolvedValueOnce(one("b")).mockResolvedValueOnce(one("c"));
+    vi.mocked(store.apply)
+      .mockRejectedValueOnce(new Error("la base"))
+      .mockRejectedValueOnce(new Error("la base otra vez"))
+      .mockResolvedValueOnce({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    // El primero vuelve a la fila; el segundo ni eso (se queda con su reclamo de 2 minutos).
+    vi.mocked(store.release).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("tampoco"));
+    expect(await inbox.sweepBillingEvents()).toBe(true);
+    expect(store.apply).toHaveBeenCalledTimes(3);
+    expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }), "base_error");
+    expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), "base_error");
+    expect(report).toHaveBeenCalledWith("billing_base_error");
+    expect(store.claimDue).toHaveBeenCalledTimes(4);
+  });
+
+  it("su tope por omisión deja lugar, dentro de los 60 s de la ruta, a un último aviso con Stripe lento, la revisión y el correo", async () => {
+    let clock = NOW.getTime();
+    const { store } = setup();
+    vi.mocked(store.claimDue).mockResolvedValue([{ id: "x", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }]);
+    vi.mocked(store.apply).mockImplementation(() => {
+      clock += 1_000;
+      return Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    });
+    const inbox = createBillingInbox({ store, stripe: () => stripeWith(), secret: () => SECRET, live: () => false, now: () => new Date(clock), report: vi.fn(() => Promise.resolve()) });
+    await inbox.sweepBillingEvents();
+    // Cuatro lecturas de Stripe en cadena de 5 s cada una y el correo con sus 10 s: el último reclamo no puede empezar después de los 25 s.
+    expect(clock - NOW.getTime()).toBeLessThanOrEqual(25_000);
+  });
+
   it("reclama de uno en uno hasta vaciar la fila: un atraso se drena en la misma pasada", async () => {
     const { inbox, store } = setup();
     const one = (i: number): ClaimedEvent[] => [{ id: `a${i}`, attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" }];
