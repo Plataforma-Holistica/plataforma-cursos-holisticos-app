@@ -133,6 +133,20 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
       await owner.query("alter table public.revenue_allocations enable trigger ledger_no_update_delete");
       await owner.query("alter table public.charges enable trigger ledger_no_update_delete");
     }
+    // Un comentario no se borra ni como dueño (T-501: se vacía), y cuelga del perfil: igual que arriba, se apaga su guardián
+    // en esta transacción, solo para las personas de prueba, con las respuestas que cuelgan de lo suyo. El vigilante
+    // (`schema_violations_comments`) exige que quede prendido. La privacidad no es un libro.
+    const commented = await owner.query("select 1 from public.comments where author_id = any($1::uuid[]) limit 1", [ids]);
+    if ((commented.rowCount ?? 0) > 0) {
+      await owner.query("alter table public.comments disable trigger comments_guard");
+      await owner.query(
+        "delete from public.comments where parent_id in (select id from public.comments where author_id = any($1::uuid[]))",
+        [ids],
+      );
+      await owner.query("delete from public.comments where author_id = any($1::uuid[])", [ids]);
+      await owner.query("alter table public.comments enable trigger comments_guard");
+    }
+    await owner.query("delete from public.profile_privacy where profile_id = any($1::uuid[])", [ids]);
     // Las suscripciones no son un libro; cuelgan del perfil.
     await owner.query("delete from public.subscriptions where profile_id = any($1::uuid[])", [ids]);
     await owner.query("delete from public.profiles where id = any($1::uuid[])", [ids]);
