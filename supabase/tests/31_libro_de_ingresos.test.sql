@@ -315,13 +315,15 @@ from (values
   ('un ingreso neto que no es el de la comisión', '{"revenue_net_mxn_cents": 28582}'),
   ('un impuesto que no es la diferencia', '{"tax_cents": 4815}'),
   ('otra moneda', '{"currency": "USD", "fx_source": "provider"}'),
-  ('un aviso antes de que exista la bandeja', format('{"provider_event_id": "%s"}', gen_random_uuid())),
   ('un recibo sin https', '{"receipt_url": "http://recibo.test"}'),
   ('un identificador con un espacio de más', '{"provider_charge_id": "ejemplo-mensual "}'),
   ('un monto absurdo', '{"gross_cents": 1000000001, "gross_mxn_cents": 1000000001, "net_of_tax_mxn_cents": 862068966, "tax_cents": 137931035, "revenue_net_mxn_cents": 818965517}')
 ) as v (caso, changes);
 select throws_ok(format('select pruebas.cobro_como(%L)', jsonb_build_object('profile_id', pruebas.beto())), '23503', null,
   'ni un cobro de una cuenta con la suscripción de otra');
+-- Desde T-303 el cobro nombra el aviso que lo trajo, y tiene que estar en la bandeja.
+select throws_ok(format('select pruebas.cobro_como(%L)', jsonb_build_object('provider_event_id', gen_random_uuid())), '23503', null,
+  'ni un cobro con un aviso que no está en la bandeja');
 select throws_ok($$select pruebas.parte_como('{}')$$, '23505', null, 'una parte no se repite');
 select throws_ok($$select pruebas.parte_como('{"part_no": 2, "parts_total": 2, "kind": "reversal"}')$$, '23514', null,
   'una parte de reverso no entra sin su reverso (T-307)');
@@ -365,10 +367,10 @@ grant select (base_cents) on public.revenue_allocations to service_role;
 select ok(exists (select 1 from private.schema_violations() where problem = 'revenue table reachable by service_role'
                   and object_name = 'public.revenue_allocations'), 'o una columna de las partes');
 revoke select (base_cents) on public.revenue_allocations from service_role;
-grant execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) to app_service;
+grant execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) to app_service;
 select ok(exists (select 1 from private.schema_violations() where problem = 'revenue function executable by app_service'),
-  'o si el servidor puede registrar cobros antes de T-303');
-revoke execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) from app_service;
+  'o si el servidor puede registrar cobros por su cuenta (desde T-303 los registra la bandeja)');
+revoke execute on function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) from app_service;
 grant execute on function private.revenue_parts(bigint, public.subscription_plan, public.period_id) to public;
 select ok(exists (select 1 from private.schema_violations() where problem = 'revenue function executable by anon'),
   'o si cualquiera ejecuta la aritmética');
@@ -389,14 +391,14 @@ select ok(exists (select 1 from private.schema_violations() where problem = 'rev
                   and object_name = 'public.revenue_allocations'), 'o sin ella');
 create trigger ledger_no_truncate before truncate on public.revenue_allocations
   for each statement execute function private.reject_mutation();
-alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) security invoker;
+alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) security invoker;
 select ok(exists (select 1 from private.schema_violations() where problem = 'revenue function not security definer with fixed search_path'),
   'o si registrar un cobro dejó de correr como el dueño');
-alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) security definer;
-alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) reset search_path;
+alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) security definer;
+alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) reset search_path;
 select ok(exists (select 1 from private.schema_violations() where problem = 'revenue function not security definer with fixed search_path'),
   'o sin su search_path');
-alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text) set search_path = '';
+alter function private.record_charge(uuid, uuid, text, text, text, public.subscription_plan, timestamptz, text, bigint, bigint, bigint, text, text, text, uuid) set search_path = '';
 create function private.record_charge(p_charge text) returns jsonb language sql as $f$ select null::jsonb $f$;
 -- En `private` nadie ejecuta por omisión: se le da a propósito, para ver que el área la mira por su nombre.
 grant execute on function private.record_charge(text) to anon;
