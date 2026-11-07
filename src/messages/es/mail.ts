@@ -12,4 +12,13 @@ export const mail = defineMessages({
     recoverLabel: "Cambiar mi contraseña",
     reviewLabel: "Ver mis datos fiscales",
   },
+  // El recibo de un cobro (CO-03; T-303, decisión 8 de Sergio del 2026-11-06): mínimo. El desglose con el IVA es de T-306.
+  receipt: {
+    subject: "Recibimos tu pago",
+    paid: "Recibimos tu pago de {amount} por tu plan {plan}, el {date}.",
+    monthly: "mensual",
+    annual: "anual",
+    thanks: "Gracias por seguir aprendiendo con nosotros.",
+    accountLabel: "Ver mi cuenta",
+  },
 });

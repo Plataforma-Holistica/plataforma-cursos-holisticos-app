@@ -121,6 +121,19 @@ const FAILURES = {
   account_unavailable: "No se pudo leer o guardar un dato de una cuenta con sesión: esa persona no pudo administrar su cuenta.",
   password_change_unconfirmed: "Un cambio de contraseña desde la cuenta se quedó sin respuesta del servidor de identidad: no se sabe cuál vale, y esa cuenta quedó sin sesiones.",
   password_change_incomplete: "Una contraseña se cambió desde la cuenta y la aplicación no pudo fechar el cambio: una entrada hecha antes con la contraseña vieja podría quedar reconocida.",
+  stripe_signature_invalid:
+    "Llegaron en una hora más de cinco peticiones a la ruta de los avisos de Stripe con la firma mala o vieja, o con un cuerpo de más (T-303): no se guardó ninguna, y se reporta una vez por hora. Alguien está probando la ruta, o el secreto del punto de conexión cambió.",
+  stripe_event_unreadable: "Un aviso de Stripe con la firma buena no tenía la forma esperada: no se guardó, y Stripe lo va a reenviar. Puede ser otra versión de la API en el punto de conexión.",
+  stripe_wrong_mode: "Llegó un aviso de Stripe del otro modo (de prueba contra la llave real, o al revés): no se guardó. Hay un punto de conexión de un modo apuntando al otro entorno.",
+  stripe_event_conflict: "Llegó un aviso de Stripe con el id de uno guardado y otro tipo u objeto: no se aplicó. No debería pasar: revisar el aviso en el panel de Stripe.",
+  stripe_unavailable: "Stripe no contestó al leer el estado de un aviso: el aviso volvió a la fila y Stripe lo reenvía.",
+  stripe_key_rejected: "Stripe rechazó la llave del servidor (401 o 403) al leer el estado de un aviso: ningún aviso se aplica hasta corregir la llave de Stripe del servidor. Los avisos vuelven a la fila.",
+  billing_event_late: "Procesar un aviso de Stripe pasó del tope de la entrega: se contestó 500 para que Stripe lo reenvíe, y lo que faltaba siguió detrás de la respuesta. Si se repite, Stripe o la base van lentos.",
+  billing_body_too_large: "Llegaron en una hora más de cinco peticiones a la ruta de los avisos de Stripe con un cuerpo de más de 512 KB o la firma mala: no se leyó ninguna, y se reporta una vez por hora. Si era un aviso de verdad, sigue en el panel de Stripe y hay que revisarlo.",
+  billing_base_error:
+    "Procesar un aviso de Stripe falló con un error de la base que no se esperaba: el aviso volvió a la fila. Si se repite con el mismo aviso, es una falla de código: revisar el registro de la base.",
+  billing_event_failed: "Un aviso de Stripe no se pudo aplicar y quedó fallido, a la vista de finanzas en la cola de avisos (RF-710): hay que reintentarlo o resolverlo a mano.",
+  billing_events_stuck: "Hay avisos de Stripe fallidos (frenarán el cierre) o pendientes desde hace más de un día (frenan además la foto del mes). Ver la cola de avisos.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;
