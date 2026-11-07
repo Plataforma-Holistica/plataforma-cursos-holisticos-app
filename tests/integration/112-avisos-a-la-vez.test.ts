@@ -76,12 +76,17 @@ async function claim(client: Client, id: string) {
 }
 
 /** Un aviso nuevo de la suscripción, guardado y reclamado en su propia conexión, listo para aplicarse. */
-async function claimed(object: string, type = "customer.subscription.updated"): Promise<{ id: string; attempt: number }> {
+async function claimed(object: string, type = "customer.subscription.updated", attemptsBefore = 0): Promise<{ id: string; attempt: number }> {
   const event = `${PREFIX}${randomUUID()}`;
   const client = await connect();
   try {
     await asServerSystem(client);
     const { id } = await receive(client, event, object, type);
+    if (attemptsBefore > 0) {
+      await ownerQuery(
+        `do $$ begin set local session_replication_role = replica; update private.provider_events set attempts = ${attemptsBefore} where id = '${id}'; end $$`,
+      );
+    }
     const answer = await claim(client, id);
     expect(answer.outcome).toBe("claimed");
     return { id, attempt: answer.attempt! };
@@ -159,10 +164,11 @@ describe("los avisos de Stripe a la vez", () => {
     }
   });
 
-  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, y la otra vuelve a la fila; al reintentarla entra su cobro, sin acceso", async () => {
+  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, y la otra vuelve a la fila aunque sea su quinto intento; al reintentarla entra su cobro, sin acceso", async () => {
     const sub1 = `sub_it112_${randomUUID().slice(0, 8)}`;
     const sub2 = `sub_it112_${randomUUID().slice(0, 8)}`;
-    const [one, two] = await Promise.all([claimed(sub1), claimed(sub2)]);
+    // La segunda va en su quinto intento: un choque de unicidad no escribió nada, así que vuelve a la fila igual, para que el intento siguiente registre su cobro.
+    const [one, two] = await Promise.all([claimed(sub1), claimed(sub2, "customer.subscription.updated", 4)]);
     const [first, second] = await Promise.all([connect(), connect()]);
     try {
       await asServerSystem(first);
@@ -185,12 +191,12 @@ describe("los avisos de Stripe a la vez", () => {
         two!.id,
       ]);
       expect(waitingEvent).toEqual([{ status: "pending", last_error: "second_live_subscription" }]);
-      // El siguiente intento ya ve a la otra viva: registra el cobro (el dinero entró) y deja la segunda sin dar acceso.
+      // El siguiente intento (el sexto) ya ve a la otra viva: registra el cobro (el dinero entró), deja la segunda sin dar acceso y, pasado su tope, queda fallido.
       const again = await claim(second, two!.id);
       expect(again.outcome).toBe("claimed");
       const secondCharge = `ch_it112_${randomUUID().slice(0, 8)}`;
       expect(await apply(second, { id: two!.id, attempt: again.attempt! }, subscription(sub2, beto.id, "2026-10-01T16:00:07Z"), [payment(secondCharge, sub2)])).toEqual({
-        outcome: "retry",
+        outcome: "failed",
         code: "second_live_subscription",
       });
       expect(await ledgerOf(beto.id)).toMatchObject({ charges: 2, receipts: 2, live: 1 });

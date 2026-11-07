@@ -6,7 +6,7 @@
 begin;
 \ir _ayuda.psql
 set constraints all immediate;
-select plan(101);
+select plan(106);
 
 select pruebas.alta('a8500000-0000-0000-0000-000000000001', 'ana-85@prueba.test');
 select pruebas.alta('a8500000-0000-0000-0000-000000000002', 'beto-85@prueba.test');
@@ -69,7 +69,8 @@ declare
   v jsonb;
 begin
   perform pruebas.como_sistema();
-  v := private.billing_apply((v_claim ->> 'id')::uuid, (v_claim ->> 'attempt')::integer, p_sub, pruebas.con_sus(p_sub, p_payments), p_failure);
+  v := private.billing_apply((v_claim ->> 'id')::uuid, (v_claim ->> 'attempt')::integer, p_sub, pruebas.con_sus(p_sub, p_payments),
+                             case when p_failure is not null then jsonb_build_object('subscription', p_sub ->> 'id') || p_failure end);
   perform pruebas.limpiar();
   return v;
 end
@@ -278,14 +279,23 @@ select is(pruebas.recibos(pruebas.cuenta(4)), 2, 'con su recibo');
 select results_eq($$select status, period_end from pruebas.estado_de('sub_dani_2')$$, $$values ('pending', '2026-11-05 10:01-06'::timestamptz)$$,
   'y ella queda sin dar acceso, con su periodo pagado');
 select is((select status from pruebas.estado_de('sub_dani_1')), 'active', 'la otra sigue viva');
+select pruebas.intentos('evt_85_d2', 3);
+select is(pruebas.reaplica('evt_85_d2', pruebas.sus('sub_dani_2', pruebas.cuenta(4)::text, 'active', '2026-10-05 11:00-06'),
+                           jsonb_build_array(pruebas.pago('ch_dani_2', '2026-10-05 10:01-06', '2026-10-05 10:01-06', '2026-11-05 10:01-06'))) ->> 'outcome',
+  'retry', 'al cuarto intento todavía vuelve a la fila');
 select pruebas.intentos('evt_85_d2', 4);
 select is(pruebas.reaplica('evt_85_d2', pruebas.sus('sub_dani_2', pruebas.cuenta(4)::text, 'active', '2026-10-05 12:00-06'),
                            jsonb_build_array(pruebas.pago('ch_dani_2', '2026-10-05 10:01-06', '2026-10-05 10:01-06', '2026-11-05 10:01-06'))),
   '{"outcome": "failed", "code": "second_live_subscription"}'::jsonb, 'al quinto intento queda fallida, para resolverla a mano (decisión 6 de Sergio)');
 select is(pruebas.cobros(pruebas.cuenta(4)), 2, 'sin cobro de más');
--- La otra se da de baja y el aviso se reintenta: la segunda se vuelve la viva.
+select is(pruebas.recibos(pruebas.cuenta(4)), 2, 'ni recibo de más');
+-- La otra se da de baja: la segunda se vuelve la viva sola, y su aviso vuelve a la fila.
 select pruebas.aplica('evt_85_d5', pruebas.sus('sub_dani_1', pruebas.cuenta(4)::text, 'canceled', '2026-10-06 10:00-06', p_canceled => '2026-10-06 09:59-06'),
                       p_type => 'customer.subscription.deleted');
+select results_eq($$select s.provider_subscription_id, s.status::text from public.subscriptions s where s.profile_id = pruebas.cuenta(4) order by 1$$,
+  $$values ('sub_dani_1', 'canceled'), ('sub_dani_2', 'active')$$, 'al darse de baja la otra, la segunda se vuelve la viva sin esperar a otro aviso');
+select results_eq($$select status, attempts from pruebas.evento('evt_85_d2')$$, $$values ('pending', 0)$$,
+  'y su aviso fallido vuelve a la fila, con sus intentos desde cero');
 create function pruebas.reabre(p_event text) returns void language plpgsql security definer as $$
 begin
   set local session_replication_role = replica;
@@ -293,12 +303,10 @@ begin
   set local session_replication_role = origin;
 end
 $$;
-select pruebas.reabre('evt_85_d2');
 select is(pruebas.reaplica('evt_85_d2', pruebas.sus('sub_dani_2', pruebas.cuenta(4)::text, 'active', '2026-10-06 10:01-06'),
                            jsonb_build_array(pruebas.pago('ch_dani_2', '2026-10-05 10:01-06', '2026-10-05 10:01-06', '2026-11-05 10:01-06'))) ->> 'outcome',
-  'processed', 'con la otra cancelada, se aplica');
-select results_eq($$select s.provider_subscription_id, s.status::text from public.subscriptions s where s.profile_id = pruebas.cuenta(4) order by 1$$,
-  $$values ('sub_dani_1', 'canceled'), ('sub_dani_2', 'active')$$, 'y la segunda es la viva');
+  'processed', 'al aplicarse, queda procesado');
+select is((select status from pruebas.estado_de('sub_dani_2')), 'active', 'y la segunda sigue siendo la viva');
 select is(pruebas.cobros(pruebas.cuenta(4)), 2, 'sin cobro de más');
 
 -- La falla dentro del día de holgura se queda aunque llegue otro aviso sin cobro.
@@ -379,10 +387,17 @@ select pruebas.aplica('evt_85_g1', pruebas.sus('sub_gabi_2', pruebas.cuenta(6)::
                       jsonb_build_array(pruebas.pago('ch_gabi_2', '2026-10-10 10:00-06', '2026-10-10 10:00-06', '2026-11-10 10:00-06')));
 select pruebas.aplica('evt_85_g2', pruebas.sus('sub_gabi_1', pruebas.cuenta(6)::text, 'canceled', '2026-10-29 10:00-06', p_started => '2026-10-01 10:00-06'),
                       jsonb_build_array(pruebas.pago('ch_gabi_1', '2026-10-01 10:00-06', '2026-10-01 10:00-06', '2026-11-01 10:00-06')));
+-- La que empezó antes en Stripe queda con la fila más nueva: con el orden por la fila, la elegiría a ella.
+update public.subscriptions set created_at = now() + interval '1 second' where provider_subscription_id = 'sub_gabi_1';
 select pruebas.como_servicio(pruebas.cuenta(6));
 select is((private.media_facts(null) -> 'subscription' ->> 'paid_through')::timestamptz, '2026-11-10 10:00-06'::timestamptz,
   'el acceso sale de la que empezó después en Stripe');
 select pruebas.como_dueno();
+
+-- (la falla de otra suscripción)
+select is(pruebas.aplica('evt_85_x17', pruebas.sus('sub_ana', pruebas.cuenta(1)::text, 'past_due', '2026-10-22 10:00-06'), '[]',
+                         '{"subscription": "sub_otra", "invoice": "in_ana_x", "failed_at": "2026-11-01T17:00:00Z", "unpaid": true, "cycle": true}',
+                         'invoice.payment_failed') ->> 'code', 'object_mismatch', 'ni la falla de otra suscripción');
 
 -- Sin correo, el cobro entra igual y no hay recibo.
 select is(pruebas.aplica('evt_85_e1', pruebas.sus('sub_eli', pruebas.cuenta(5)::text, 'active', '2026-10-20 10:00-06'),
@@ -462,9 +477,10 @@ select ok(not coalesce(private.period_photos() -> 'taken' @> '[202304]', false),
 select pruebas.como_sistema();
 select private.provider_event_claim((pruebas.evento('evt_85_f3')).id);
 select private.provider_event_finish((pruebas.evento('evt_85_f3')).id, 1, 'failed', 'zero_invoice');
+select private.provider_event_receive('stripe', 'evt_85_f4', 'invoice.paid', false, null, 'in_f4', '2023-05-01 00:15-06');
 select pruebas.como_dueno();
 select ok(private.period_photos() -> 'taken' @> '[202304]',
-  'con lo de antes del fin ya terminado, aunque fallido o en espera de T-307, se toma: eso lo frena el cierre, no la foto');
+  'con lo de antes del fin ya terminado, aunque fallido o en espera de T-307, se toma: eso lo frena el cierre, no la foto; y lo de quince minutos después no la espera');
 
 select is_empty('select * from private.schema_violations_billing()', 'el área de los avisos sigue en orden');
 select is_empty('select * from private.schema_violations_periods()', 'y la de los periodos');

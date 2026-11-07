@@ -4,7 +4,7 @@
 -- toca la tabla: entra por sus funciones. Lo que el aviso aplica lo prueba la 85.
 begin;
 \ir _ayuda.psql
-select plan(122);
+select plan(125);
 
 select pruebas.alta('a8400000-0000-0000-0000-000000000001', 'f1-84@prueba.test');
 select pruebas.alta('a8400000-0000-0000-0000-000000000002', 'ana-84@prueba.test');
@@ -243,6 +243,19 @@ select pruebas.intentos('evt_84_6', 10);
 select pruebas.reclama(pruebas.id_de('evt_84_6'));
 select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, %s)', pruebas.id_de('evt_84_6'), pruebas.rev('evt_84_6')))::jsonb ->> 'outcome', 'self',
   'finanzas no reabre el aviso de su propia suscripción');
+-- O si su objeto es una factura de un cobro de quien actúa.
+select pruebas.como_dueno_sistema();
+select private.open_period(202610);
+select pruebas.como_dueno();
+select is(private.record_charge(pruebas.f1(), (select id from public.subscriptions where provider_subscription_id = 'sub_f1_84'), 'stripe', 'ch_f1_84', 'in_f1_84',
+                                'monthly', '2026-10-10 12:00-06', 'MXN', 34900, null, null, null, null, null) ->> 'outcome', 'recorded', '(un cobro de quien tiene finanzas)');
+-- La revisión de sus partes es diferida: que corra aquí, y no estorbe a lo que se prueba después.
+set constraints all immediate;
+select pruebas.recibe('evt_84_8', 'invoice.payment_failed', 'in_f1_84');
+select pruebas.intentos('evt_84_8', 10);
+select pruebas.reclama(pruebas.id_de('evt_84_8'));
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, %s)', pruebas.id_de('evt_84_8'), 'nota', pruebas.rev('evt_84_8')))::jsonb
+          ->> 'outcome', 'self', 'ni resuelve el aviso de la factura de su propio cobro');
 -- Lo de T-307 que se quedó sin intentos no se resuelve a mano: se reintenta.
 select pruebas.recibe('evt_84_7', 'charge.refunded', 'ch_84_7');
 select pruebas.intentos('evt_84_7', 10);
@@ -323,7 +336,7 @@ select throws_ok($$delete from private.provider_event_actions$$, '42501', null, 
 select results_eq($$select (h1 ->> 'pending')::int - (h ->> 'pending')::int, (h1 ->> 'failed')::int - (h ->> 'failed')::int,
                            (h1 ->> 'deferred')::int - (h ->> 'deferred')::int
                     from salud0 cross join (select private.provider_events_health() as h1) x$$,
-  $$values (0, 4, 1)$$, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
+  $$values (0, 5, 1)$$, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
 -- La salida de correo manda primero el aviso de CLABE: un día de renovaciones no lo deja atrás.
 insert into private.mail_outbox (idempotency_key, template, recipient, created_at) values
   ('CO-03:prueba-84-viejo', 'CO-03', 'ana-84@prueba.test', now() - interval '1 hour'),
@@ -403,10 +416,14 @@ select pruebas.sin('private.active_students_at(timestamptz)', 'and coalesce(s.pr
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['active students without the provider start'],
   'y si los alumnos activos no contaran el inicio en Stripe');
 select pruebas.sin('private.active_students_at(timestamptz)', 'and s.created_at <= p_at', 'and coalesce(s.provider_started_at, s.created_at) <= p_at');
-select pruebas.sin('private.mail_claim(integer)', $$order by m.template = 'CO-27' desc, m.created_at$$, 'order by m.created_at');
+select pruebas.sin('private.mail_claim(integer)', $$order by m.template <> 'CO-27', m.created_at$$, 'order by m.created_at');
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['mail claim without the clabe first'],
   'y si la salida de correo no mandara primero el aviso de CLABE');
-select pruebas.sin('private.mail_claim(integer)', 'order by m.created_at', $$order by m.template = 'CO-27' desc, m.created_at$$);
+select pruebas.sin('private.mail_claim(integer)', 'order by m.created_at', $$order by m.template <> 'CO-27', m.created_at$$);
+select pruebas.sin('private.provider_event_retry(uuid, integer)', ' or private.provider_event_owner(v.object_id) = private.actor_id()', '');
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['finance door without the self check: provider_event_retry'],
+  'y si reintentar no mirara al dueño de lo que el aviso nombra');
+select pruebas.sin('private.provider_event_retry(uuid, integer)', 'if v.profile_id = private.actor_id() then', 'if v.profile_id = private.actor_id() or private.provider_event_owner(v.object_id) = private.actor_id() then');
 alter table public.charges drop constraint charges_event_fk;
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['charge without its event key'],
   'y si el cobro no tuviera su clave al aviso');
