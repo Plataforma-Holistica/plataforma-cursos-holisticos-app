@@ -87,7 +87,7 @@ function setup(options: { stripe?: StripeGet | null; secret?: string | null; cla
   };
   const report = vi.fn(() => Promise.resolve());
   const stripe = options.stripe === undefined ? stripeWith() : options.stripe;
-  const inbox = createBillingInbox({
+  const raw = createBillingInbox({
     store,
     stripe: () => stripe,
     secret: () => (options.secret === undefined ? SECRET : options.secret),
@@ -96,7 +96,12 @@ function setup(options: { stripe?: StripeGet | null; secret?: string | null; cla
     report,
     budgetMs: 200,
   });
-  return { inbox, store, report, stripe };
+  // Casi todas miran solo el código HTTP; la del tope mira también lo que sigue.
+  const inbox = {
+    receiveStripeEvent: async (body: Uint8Array, signature: string | null) => (await raw.receiveStripeEvent(body, signature)).status,
+    sweepBillingEvents: raw.sweepBillingEvents,
+  };
+  return { inbox, raw, store, report, stripe };
 }
 
 describe("la entrega de un aviso", () => {
@@ -115,6 +120,14 @@ describe("la entrega de un aviso", () => {
     expect(report).toHaveBeenCalledWith("stripe_signature_invalid");
   });
 
+  it("sin la cabecera de la firma: 400, sin guardar y sin reportar (no llena el registro de errores)", async () => {
+    const { inbox, store, report } = setup();
+    const { body } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, null)).toBe(400);
+    expect(store.receive).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it("con una firma vieja tampoco", async () => {
     const { inbox, store } = setup();
     const { body, signature } = signed(event("invoice.paid", "in_1"), T - 400);
@@ -128,6 +141,13 @@ describe("la entrega de un aviso", () => {
     expect(await inbox.receiveStripeEvent(body, signature)).toBe(400);
     expect(store.receive).not.toHaveBeenCalled();
     expect(report).toHaveBeenCalledWith("stripe_event_unreadable");
+  });
+
+  it("un aviso firmado que no es de cobro y trae otra forma (un saldo) contesta 200, sin guardar: que Stripe no lo reenvíe", async () => {
+    const { inbox, store } = setup();
+    const { body, signature } = signed({ id: "evt_2", type: "balance.available", created: T, livemode: false, data: { object: { object: "balance" } } });
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(store.receive).not.toHaveBeenCalled();
   });
 
   it("un aviso del otro modo no se guarda ni se reenvía", async () => {
@@ -206,12 +226,66 @@ describe("la entrega de un aviso", () => {
     expect(failure).toEqual({ subscription: "sub_1", invoice: "in_1", failed_at: "2026-11-06T17:59:30.000Z", unpaid: true, cycle: true });
   });
 
-  it("un cargo que cambió se aplica por su factura, que se busca por su PaymentIntent", async () => {
+  it("el plan del cobro sale del periodo de la factura, no de la suscripción de ahora", async () => {
+    const annual = { ...INVOICE, lines: { has_more: false, data: [{ period: { start: T - 3600, end: T - 3600 + 365 * 86400 }, parent: { type: "subscription_item_details" } }] } };
+    const { inbox, store } = setup({ stripe: stripeWith({ "/v1/invoices/in_1": { status: "ok", body: annual } }) });
+    const { body, signature } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(vi.mocked(store.apply).mock.calls[0]![2][0]).toMatchObject({ interval: "year", interval_count: 1 });
+  });
+
+  it("un periodo que no es de un mes ni de un año (un prorrateo) no se adivina", async () => {
+    const odd = { ...INVOICE, lines: { has_more: false, data: [{ period: { start: T, end: T + 12 * 86400 }, parent: { type: "subscription_item_details" } }] } };
+    const { inbox, store } = setup({ stripe: stripeWith({ "/v1/invoices/in_1": { status: "ok", body: odd } }) });
+    const { body, signature } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(store.finish).toHaveBeenCalledWith(expect.anything(), "failed", "unknown_plan");
+  });
+
+  it("un pago que no aplicó a la factura lo que se cobró en el cargo no se adivina", async () => {
+    const payments = { has_more: false, data: [{ ...PAYMENTS.data[0]!, amount_paid: 10000 }] };
+    const { inbox, store } = setup({ stripe: stripeWith({ "/v1/invoice_payments": { status: "ok", body: payments } }) });
+    const { body, signature } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(store.finish).toHaveBeenCalledWith(expect.anything(), "failed", "payment_amount_mismatch");
+  });
+
+  it("un cargo que cambió no se aplica: se ignora, sin leer nada", async () => {
     const { inbox, store, stripe } = setup();
     const { body, signature } = signed(event("charge.updated", "ch_1"));
     expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
-    expect((stripe as ReturnType<typeof stripeWith>).calls).toContain("/v1/charges/ch_1");
-    expect(vi.mocked(store.apply).mock.calls[0]![2]).toHaveLength(1);
+    expect(store.finish).toHaveBeenCalledWith(expect.anything(), "ignored", null);
+    expect((stripe as ReturnType<typeof stripeWith>).calls).toEqual([]);
+  });
+
+  it("la factura se lee una sola vez", async () => {
+    const { inbox, stripe } = setup();
+    const { body, signature } = signed(event("invoice.paid", "in_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect((stripe as ReturnType<typeof stripeWith>).calls.filter((path) => path === "/v1/invoices/in_1")).toHaveLength(1);
+  });
+
+  it("una cancelación programada cuenta como no renovar", async () => {
+    const stripe = stripeWith({ "/v1/subscriptions/sub_1": { status: "ok", body: { ...SUBSCRIPTION, cancel_at: T + 86400 } } });
+    const { inbox, store } = setup({ stripe });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect(vi.mocked(store.apply).mock.calls[0]![1].cancel_at_period_end).toBe(true);
+  });
+
+  it("si Stripe rechaza la llave, vuelve a la fila y se reporta como configuración", async () => {
+    const { inbox, store, report } = setup({ stripe: stripeWith({ "/v1/subscriptions/sub_1": { status: "unauthorized" } }) });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(500);
+    expect(store.release).toHaveBeenCalledWith(expect.anything(), "provider_unauthorized");
+    expect(report).toHaveBeenCalledWith("stripe_key_rejected");
+  });
+
+  it("si Stripe contesta 400, no se reintenta: falla a la vista", async () => {
+    const { inbox, store } = setup({ stripe: stripeWith({ "/v1/subscriptions/sub_1": { status: "rejected" } }) });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(store.finish).toHaveBeenCalledWith(expect.anything(), "failed", "provider_rejected");
   });
 
   it("la suscripción sola: sin pagos ni falla", async () => {
@@ -281,10 +355,16 @@ describe("la entrega de un aviso", () => {
     expect(report).toHaveBeenCalledWith("billing_base_error");
   });
 
-  it("si se acaba el tiempo, 500 sin esperar: Stripe lo reenvía", async () => {
-    const { inbox } = setup({ apply: () => new Promise(() => undefined) });
+  it("si se acaba el tiempo, 500 sin esperar (Stripe lo reenvía), con lo que sigue aparte y su reporte", async () => {
+    let finish: (value: Applied) => void = () => undefined;
+    const { raw, report } = setup({ apply: () => new Promise<Applied>((resolve) => (finish = resolve)) });
     const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
-    expect(await inbox.receiveStripeEvent(body, signature)).toBe(500);
+    const delivery = await raw.receiveStripeEvent(body, signature);
+    expect(delivery.status).toBe(500);
+    expect(delivery.rest).toBeInstanceOf(Promise);
+    expect(report).toHaveBeenCalledWith("billing_event_late");
+    finish({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    await expect(delivery.rest).resolves.toBeUndefined();
   });
 
   it("uno ya terminado, o que otro tiene, no se vuelve a procesar", async () => {
@@ -316,6 +396,23 @@ describe("el barrido", () => {
     expect(await inbox.sweepBillingEvents()).toBe(true);
     expect(store.apply).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledWith("billing_events_stuck");
+  });
+
+  it("lo que no alcanza en su tope vuelve a la fila sin procesarse", async () => {
+    let clock = NOW.getTime();
+    const { store } = setup();
+    vi.mocked(store.claimDue).mockResolvedValueOnce([
+      { id: "a", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" },
+      { id: "b", attempt: 1, eventType: "customer.subscription.updated", objectId: "sub_1", occurredAt: "2026-11-05T00:00:00.000Z" },
+    ]);
+    vi.mocked(store.apply).mockImplementation(() => {
+      clock += 120_000;
+      return Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    });
+    const inbox = createBillingInbox({ store, stripe: () => stripeWith(), secret: () => SECRET, live: () => false, now: () => new Date(clock), report: vi.fn(() => Promise.resolve()) });
+    expect(await inbox.sweepBillingEvents()).toBe(true);
+    expect(store.apply).toHaveBeenCalledTimes(1);
+    expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), "sweep_out_of_time");
   });
 
   it("si la base no contesta, lo dice", async () => {

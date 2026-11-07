@@ -420,3 +420,13 @@ describe("Stripe (T-303)", () => {
     expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: value, STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
   });
 });
+
+describe("Stripe con una llave restringida (T-303)", () => {
+  const restricted = (mode: "test" | "live") => ["rk", mode, "prueba0123456789abcdef"].join("_");
+  const webhook = ["whsec", "prueba0123456789abcdef"].join("_");
+
+  it("basta una llave restringida, que también sigue la regla del modo", () => {
+    expect(parseEnv({ ...valid, STRIPE_SECRET_KEY: restricted("test"), STRIPE_WEBHOOK_SECRET: webhook }).STRIPE_SECRET_KEY).toBe(restricted("test"));
+    expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: restricted("live"), STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
+  });
+});

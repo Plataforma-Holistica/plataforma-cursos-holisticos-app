@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-import type { StripeGet } from "@/adapters/stripe/api";
+import type { StripeAnswer, StripeGet } from "@/adapters/stripe/api";
 
 // Lo que el servidor lee de Stripe para aplicar un aviso (T-303; RF-208). No se confía en el cuerpo del aviso: con su tipo y su objeto se lee el estado de ahora, con
 // la versión fija de la API, y eso es lo que va a la base (`billing_apply`), que lo vuelve a revisar. Cada lectura contesta lo leído, `retry` (no se supo, o Stripe
 // todavía no lo liga: se vuelve a intentar) o `failed` con un código (no se aplica nunca solo: queda a la vista de finanzas).
 //
 // Desde la API 2025-03-31.basil el cargo no trae su factura ni la factura su cargo: los pagos de una factura salen de `invoice_payments`, y la suscripción de una
-// factura, de `parent.subscription_details`.
+// factura, de `parent.subscription_details`. Medido contra el sandbox el 2026-11-07 con la versión fija: así llegan.
 
 export interface SubscriptionSnapshot {
   id: string;
@@ -64,6 +64,7 @@ const subscriptionBody = z.object({
   status: z.string(),
   currency: z.string(),
   cancel_at_period_end: z.boolean(),
+  cancel_at: unix.nullable().optional(),
   canceled_at: unix.nullable(),
   start_date: unix,
   metadata: z.record(z.string(), z.string()).nullable().optional(),
@@ -92,6 +93,7 @@ const invoicePayments = z.object({
     z.object({
       invoice: ref,
       status: z.string(),
+      amount_paid: z.number().int().nullable().optional(),
       payment: z.object({ type: z.string(), payment_intent: ref.nullable().optional(), charge: ref.nullable().optional() }),
     }),
   ),
@@ -106,7 +108,6 @@ const chargeBody = z.object({
   amount_captured: z.number().int(),
   currency: z.string(),
   receipt_url: z.string().nullable().optional(),
-  payment_intent: ref.nullable().optional(),
   payment_method_details: z.object({ type: z.string(), card: z.object({ country: z.string().nullable().optional() }).nullable().optional() }).nullable().optional(),
   billing_details: z.object({ address: z.object({ country: z.string().nullable().optional() }).nullable().optional() }).nullable().optional(),
   balance_transaction: z.union([id, balanceTransaction]).nullable().optional(),
@@ -115,16 +116,24 @@ const chargeBody = z.object({
 const paymentIntentBody = z.object({ id, latest_charge: z.union([id, chargeBody]).nullable() });
 
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
+const DAY = 86_400;
+
+/** Lo que una respuesta de Stripe permite hacer. Una llave que no sirve se vuelve a intentar: es configuración, y se reporta aparte. */
+export function settleAnswer(answer: Exclude<StripeAnswer, { status: "ok" }>): Read<never> {
+  if (answer.status === "not_found") return { kind: "failed", code: "provider_not_found" };
+  if (answer.status === "rejected") return { kind: "failed", code: "provider_rejected" };
+  if (answer.status === "unauthorized") return { kind: "retry", code: "provider_unauthorized" };
+  return { kind: "retry", code: "provider_unavailable" };
+}
 
 async function read<T>(get: StripeGet, path: string, schema: z.ZodType<T>, query?: Record<string, string | string[]>): Promise<Read<T>> {
   const answer = await get(path, query);
-  if (answer.status === "unavailable") return { kind: "retry", code: "provider_unavailable" };
-  if (answer.status === "not_found") return { kind: "failed", code: "provider_not_found" };
+  if (answer.status !== "ok") return settleAnswer(answer);
   const parsed = schema.safeParse(answer.body);
   return parsed.success ? { kind: "ok", value: parsed.data } : { kind: "failed", code: "provider_unreadable" };
 }
 
-/** La suscripción de ahora. La cuenta sale de su `metadata.profile_id`, que pone el Checkout (T-302); el plan, de su primer precio. */
+/** La suscripción de ahora. La cuenta sale de su `metadata.profile_id`, que pone el Checkout (T-302). Una cancelación programada (`cancel_at`) cuenta como no renovar. */
 export async function readSubscription(get: StripeGet, subscriptionId: string, now: Date): Promise<Read<SubscriptionSnapshot>> {
   const found = await read(get, `/v1/subscriptions/${subscriptionId}`, subscriptionBody);
   if (found.kind !== "ok") return found;
@@ -141,7 +150,7 @@ export async function readSubscription(get: StripeGet, subscriptionId: string, n
       interval: recurring.interval,
       interval_count: recurring.interval_count,
       currency: sub.currency,
-      cancel_at_period_end: sub.cancel_at_period_end,
+      cancel_at_period_end: sub.cancel_at_period_end || (sub.cancel_at !== null && sub.cancel_at !== undefined),
       canceled_at: sub.canceled_at === null ? null : iso(sub.canceled_at),
       started_at: iso(sub.start_date),
       read_at: now.toISOString(),
@@ -149,87 +158,18 @@ export async function readSubscription(get: StripeGet, subscriptionId: string, n
   };
 }
 
-function method(type: string | undefined): PaymentSnapshot["method"] {
-  if (type === "card") return "card";
-  if (type === "oxxo") return "oxxo";
-  // La transferencia SPEI de Stripe en México entra al saldo del cliente.
-  if (type === "customer_balance") return "bank_transfer";
-  return "other";
-}
-
-const country = (value: string | null | undefined) => (value !== null && value !== undefined && /^[A-Za-z]{2}$/.test(value) ? value.toUpperCase() : null);
-
-/** El cargo con su transacción de saldo, por el PaymentIntent o directo. */
-async function readCharge(get: StripeGet, payment: z.infer<typeof invoicePayments>["data"][number]["payment"]): Promise<Read<z.infer<typeof chargeBody>>> {
-  if (payment.type === "payment_intent" && payment.payment_intent) {
-    const intent = await read(get, `/v1/payment_intents/${payment.payment_intent}`, paymentIntentBody, { "expand[]": ["latest_charge.balance_transaction"] });
-    if (intent.kind !== "ok") return intent;
-    const charge = intent.value.latest_charge;
-    if (charge === null || typeof charge === "string") return { kind: "retry", code: "charge_not_linked" };
-    return { kind: "ok", value: charge };
-  }
-  if (payment.type === "charge" && payment.charge) {
-    return read(get, `/v1/charges/${payment.charge}`, chargeBody, { "expand[]": ["balance_transaction"] });
-  }
-  return { kind: "failed", code: "payment_not_a_charge" };
-}
-
-export interface PaidInvoice {
-  invoice: string;
+export interface Invoice {
+  id: string;
   subscription: string;
+  status: string | null;
   billingReason: string | null;
-  payments: PaymentSnapshot[];
-}
-
-/**
- * Una factura pagada, con sus pagos. Una factura de 0 no tiene cobro y falla a la vista (decisión 7 de Sergio del 2026-11-06); una pagada sin pagos todavía ligados se
- * vuelve a intentar, porque Stripe los liga poco después.
- */
-export async function readPaidInvoice(get: StripeGet, invoiceId: string, plan: { interval: string; interval_count: number }): Promise<Read<PaidInvoice>> {
-  const found = await readInvoice(get, invoiceId);
-  if (found.kind !== "ok") return found;
-  const invoice = found.value;
-  if (invoice.status !== "paid") return { kind: "failed", code: "invoice_not_paid" };
-  if (invoice.amount_paid === 0) return { kind: "failed", code: "zero_invoice" };
-  const paid = await read(get, "/v1/invoice_payments", invoicePayments, { invoice: invoiceId, status: "paid", limit: "100" });
-  if (paid.kind !== "ok") return paid;
-  if (paid.value.has_more) return { kind: "failed", code: "too_many_payments" };
-  if (paid.value.data.length === 0) return { kind: "retry", code: "payments_not_linked" };
-  const payments: PaymentSnapshot[] = [];
-  for (const each of paid.value.data) {
-    const charge = await readCharge(get, each.payment);
-    if (charge.kind !== "ok") return charge;
-    const c = charge.value;
-    const bt = typeof c.balance_transaction === "object" && c.balance_transaction !== null && c.balance_transaction.currency === c.currency ? c.balance_transaction : null;
-    payments.push({
-      charge: c.id,
-      subscription: invoice.subscription,
-      status: c.status,
-      invoice: invoiceId,
-      charged_at: iso(c.created),
-      gross_cents: c.amount_captured,
-      currency: c.currency,
-      method: method(c.payment_method_details?.type),
-      country: country(c.payment_method_details?.card?.country ?? c.billing_details?.address?.country),
-      receipt_url: c.receipt_url ?? null,
-      interval: plan.interval,
-      interval_count: plan.interval_count,
-      period_start: invoice.periodStart,
-      period_end: invoice.periodEnd,
-      fee_cents: bt?.fee ?? null,
-      net_cents: bt?.net ?? null,
-      balance_transaction: bt?.id ?? null,
-      available_on: bt === null ? null : iso(bt.available_on),
-    });
-  }
-  return { kind: "ok", value: { invoice: invoiceId, subscription: invoice.subscription, billingReason: invoice.billing_reason, payments } };
+  amountPaid: number;
+  periodStart: number;
+  periodEnd: number;
 }
 
 /** La factura, con su suscripción y el periodo que paga (la línea de la suscripción que termina más tarde). */
-export async function readInvoice(
-  get: StripeGet,
-  invoiceId: string,
-): Promise<Read<z.infer<typeof invoiceBody> & { subscription: string; periodStart: string; periodEnd: string }>> {
+export async function readInvoice(get: StripeGet, invoiceId: string): Promise<Read<Invoice>> {
   const found = await read(get, `/v1/invoices/${invoiceId}`, invoiceBody);
   if (found.kind !== "ok") return found;
   const invoice = found.value;
@@ -248,17 +188,96 @@ export async function readInvoice(
     null,
   );
   if (latest === null || latest.period.end <= latest.period.start) return { kind: "failed", code: "invoice_without_period" };
-  return { kind: "ok", value: { ...invoice, subscription, periodStart: iso(latest.period.start), periodEnd: iso(latest.period.end) } };
+  return {
+    kind: "ok",
+    value: {
+      id: invoice.id,
+      subscription,
+      status: invoice.status,
+      billingReason: invoice.billing_reason,
+      amountPaid: invoice.amount_paid,
+      periodStart: latest.period.start,
+      periodEnd: latest.period.end,
+    },
+  };
 }
 
-/** La factura de un cargo: por su PaymentIntent, en los pagos de facturas. */
-export async function readChargeInvoice(get: StripeGet, chargeId: string): Promise<Read<string>> {
-  const charge = await read(get, `/v1/charges/${chargeId}`, chargeBody);
-  if (charge.kind !== "ok") return charge;
-  const intent = charge.value.payment_intent;
-  if (intent === null || intent === undefined) return { kind: "failed", code: "charge_without_invoice" };
-  const paid = await read(get, "/v1/invoice_payments", invoicePayments, { "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "10" });
+/**
+ * El plan que paga una factura, por la duración del periodo de su línea: un mes (de 28 a 31 días) o un año (365 o 366). Sale de la factura y no de la suscripción de
+ * ahora: un aviso que se procesa tarde, después de un cambio de plan, registra el plan que se cobró. Un periodo de otra duración (un prorrateo) no se adivina.
+ */
+export function invoicePlan(invoice: Pick<Invoice, "periodStart" | "periodEnd">): { interval: string; interval_count: number } | null {
+  const days = Math.round((invoice.periodEnd - invoice.periodStart) / DAY);
+  if (days >= 28 && days <= 31) return { interval: "month", interval_count: 1 };
+  if (days === 365 || days === 366) return { interval: "year", interval_count: 1 };
+  return null;
+}
+
+function method(type: string | undefined): PaymentSnapshot["method"] {
+  if (type === "card") return "card";
+  if (type === "oxxo") return "oxxo";
+  // La transferencia SPEI de Stripe en México entra al saldo del cliente.
+  if (type === "customer_balance") return "bank_transfer";
+  return "other";
+}
+
+const country = (value: string | null | undefined) => (value !== null && value !== undefined && /^[A-Za-z]{2}$/.test(value) ? value.toUpperCase() : null);
+
+type InvoicePayment = z.infer<typeof invoicePayments>["data"][number];
+
+/** El cargo con su transacción de saldo, por el PaymentIntent o directo. */
+async function readCharge(get: StripeGet, payment: InvoicePayment["payment"]): Promise<Read<z.infer<typeof chargeBody>>> {
+  if (payment.type === "payment_intent" && payment.payment_intent) {
+    const intent = await read(get, `/v1/payment_intents/${payment.payment_intent}`, paymentIntentBody, { "expand[]": ["latest_charge.balance_transaction"] });
+    if (intent.kind !== "ok") return intent;
+    const charge = intent.value.latest_charge;
+    if (charge === null || typeof charge === "string") return { kind: "retry", code: "charge_not_linked" };
+    return { kind: "ok", value: charge };
+  }
+  if (payment.type === "charge" && payment.charge) {
+    return read(get, `/v1/charges/${payment.charge}`, chargeBody, { "expand[]": ["balance_transaction"] });
+  }
+  return { kind: "failed", code: "payment_not_a_charge" };
+}
+
+/**
+ * Los pagos de una factura pagada, cada uno con su cargo. Una pagada sin pagos todavía ligados se vuelve a intentar, porque Stripe los liga poco después. El monto es el
+ * que el pago aplicó a esta factura, y tiene que ser el que se cobró en el cargo: un cargo que pagó varias facturas no se reparte aquí.
+ */
+export async function readInvoicePayments(get: StripeGet, invoice: Invoice, plan: { interval: string; interval_count: number }): Promise<Read<PaymentSnapshot[]>> {
+  const paid = await read(get, "/v1/invoice_payments", invoicePayments, { invoice: invoice.id, status: "paid", limit: "100" });
   if (paid.kind !== "ok") return paid;
-  const invoice = paid.value.data[0]?.invoice;
-  return invoice === undefined ? { kind: "failed", code: "charge_without_invoice" } : { kind: "ok", value: invoice };
+  if (paid.value.has_more) return { kind: "failed", code: "too_many_payments" };
+  if (paid.value.data.length === 0) return { kind: "retry", code: "payments_not_linked" };
+  const payments: PaymentSnapshot[] = [];
+  for (const each of paid.value.data) {
+    const charge = await readCharge(get, each.payment);
+    if (charge.kind !== "ok") return charge;
+    const c = charge.value;
+    if (each.amount_paid !== null && each.amount_paid !== undefined && each.amount_paid !== c.amount_captured) {
+      return { kind: "failed", code: "payment_amount_mismatch" };
+    }
+    const bt = typeof c.balance_transaction === "object" && c.balance_transaction !== null && c.balance_transaction.currency === c.currency ? c.balance_transaction : null;
+    payments.push({
+      charge: c.id,
+      subscription: invoice.subscription,
+      status: c.status,
+      invoice: invoice.id,
+      charged_at: iso(c.created),
+      gross_cents: c.amount_captured,
+      currency: c.currency,
+      method: method(c.payment_method_details?.type),
+      country: country(c.payment_method_details?.card?.country ?? c.billing_details?.address?.country),
+      receipt_url: c.receipt_url ?? null,
+      interval: plan.interval,
+      interval_count: plan.interval_count,
+      period_start: iso(invoice.periodStart),
+      period_end: iso(invoice.periodEnd),
+      fee_cents: bt?.fee ?? null,
+      net_cents: bt?.net ?? null,
+      balance_transaction: bt?.id ?? null,
+      available_on: bt === null ? null : iso(bt.available_on),
+    });
+  }
+  return { kind: "ok", value: payments };
 }

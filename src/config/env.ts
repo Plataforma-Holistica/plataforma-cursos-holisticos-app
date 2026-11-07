@@ -65,8 +65,8 @@ const schema = z.object({
   CRON_SECRET: z.string().min(32).optional(),
   // Stripe (T-303; TRD §7.3): la llave secreta, con la que el servidor lee el estado de un aviso, y el secreto con que Stripe firma los avisos de este punto de conexión
   // (en local lo da `stripe listen`). Secretas, solo en el servidor, y van juntas: sin ellas la ruta del aviso contesta como si no existiera. La de prueba no sale de
-  // fuera de producción, y la real solo vale en producción.
-  STRIPE_SECRET_KEY: z.string().regex(/^sk_(test|live)_[A-Za-z0-9]{10,255}$/).optional(),
+  // fuera de producción, y la real solo vale en producción. Basta una llave restringida de solo lectura (`rk_`): el servidor nunca le cobra a nadie.
+  STRIPE_SECRET_KEY: z.string().regex(/^(sk|rk)_(test|live)_[A-Za-z0-9]{10,255}$/).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().regex(/^whsec_[A-Za-z0-9]{10,255}$/).optional(),
 });
 
@@ -177,7 +177,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     failed.add(present.STRIPE_SECRET_KEY === undefined ? "STRIPE_SECRET_KEY" : "STRIPE_WEBHOOK_SECRET");
   }
   // Una llave real fuera de producción cobraría de verdad desde una vista previa; una de prueba en producción daría acceso con tarjetas de prueba.
-  if (present.STRIPE_SECRET_KEY !== undefined && present.STRIPE_SECRET_KEY.startsWith("sk_live_") !== (present.APP_ENV === "production")) {
+  if (present.STRIPE_SECRET_KEY !== undefined && /^(sk|rk)_live_/.test(present.STRIPE_SECRET_KEY) !== (present.APP_ENV === "production")) {
     failed.add("STRIPE_SECRET_KEY");
   }
   if (present.VIDEO_PROVIDER === "mux") {

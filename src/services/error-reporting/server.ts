@@ -127,6 +127,9 @@ const FAILURES = {
   stripe_wrong_mode: "Llegó un aviso de Stripe del otro modo (de prueba contra la llave real, o al revés): no se guardó. Hay un punto de conexión de un modo apuntando al otro entorno.",
   stripe_event_conflict: "Llegó un aviso de Stripe con el id de uno guardado y otro tipo u objeto: no se aplicó. No debería pasar: revisar el aviso en el panel de Stripe.",
   stripe_unavailable: "Stripe no contestó al leer el estado de un aviso: el aviso volvió a la fila y Stripe lo reenvía.",
+  stripe_key_rejected: "Stripe rechazó la llave del servidor (401 o 403) al leer el estado de un aviso: ningún aviso se aplica hasta corregir la llave de Stripe del servidor. Los avisos vuelven a la fila.",
+  billing_event_late: "Procesar un aviso de Stripe pasó del tope de la entrega: se contestó 500 para que Stripe lo reenvíe, y lo que faltaba siguió detrás de la respuesta. Si se repite, Stripe o la base van lentos.",
+  billing_body_too_large: "Llegó a la ruta de los avisos de Stripe un cuerpo de más de 512 KB: no se leyó. Si era un aviso de verdad, sigue en el panel de Stripe y hay que revisarlo.",
   billing_base_error:
     "Procesar un aviso de Stripe falló con un error de la base que no se esperaba: el aviso volvió a la fila. Si se repite con el mismo aviso, es una falla de código: revisar el registro de la base.",
   billing_event_failed: "Un aviso de Stripe no se pudo aplicar y quedó fallido, a la vista de finanzas en la cola de avisos (RF-710): hay que reintentarlo o resolverlo a mano.",

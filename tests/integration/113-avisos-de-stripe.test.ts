@@ -154,7 +154,7 @@ async function world() {
     const t = Math.floor(Date.now() / 1000);
     const body = new TextEncoder().encode(JSON.stringify({ id, type, created: T0 + 60, livemode: false, api_version: "2026-10-28.endive", data: { object: { id: object } } }));
     const signature = `t=${t},v1=${createHmac("sha256", SECRET).update(`${t}.`).update(body).digest("hex")}`;
-    return inbox.receiveStripeEvent(body, signature);
+    return inbox.receiveStripeEvent(body, signature).then((delivery) => delivery.status);
   };
   return { person, ids, state, deliver, inbox };
 }
@@ -171,13 +171,14 @@ async function finalState(profile: string) {
   return rows;
 }
 
+// El mismo juego en seis órdenes: dos avisos de la factura (el segundo, otro aviso del mismo cobro) y dos de la suscripción.
 const ORDERS = [
-  ["customer.subscription.created", "invoice.paid", "charge.updated", "customer.subscription.updated"],
-  ["invoice.paid", "customer.subscription.created", "customer.subscription.updated", "charge.updated"],
-  ["charge.updated", "customer.subscription.updated", "invoice.paid", "customer.subscription.created"],
-  ["customer.subscription.updated", "charge.updated", "customer.subscription.created", "invoice.paid"],
-  ["invoice.paid", "charge.updated", "customer.subscription.updated", "customer.subscription.created"],
-  ["customer.subscription.created", "customer.subscription.updated", "charge.updated", "invoice.paid"],
+  ["customer.subscription.created", "invoice.paid", "invoice.paid", "customer.subscription.updated"],
+  ["invoice.paid", "customer.subscription.created", "customer.subscription.updated", "invoice.paid"],
+  ["invoice.paid", "customer.subscription.updated", "invoice.paid", "customer.subscription.created"],
+  ["customer.subscription.updated", "invoice.paid", "customer.subscription.created", "invoice.paid"],
+  ["invoice.paid", "invoice.paid", "customer.subscription.updated", "customer.subscription.created"],
+  ["customer.subscription.created", "customer.subscription.updated", "invoice.paid", "invoice.paid"],
 ];
 
 describe("los avisos de Stripe de punta a punta", () => {
@@ -185,10 +186,11 @@ describe("los avisos de Stripe de punta a punta", () => {
     const finals = [];
     for (const order of ORDERS) {
       const { person, ids, state, deliver } = await world();
-      // La cancelación al final del periodo ya pasó en Stripe: cada lectura la ve, llegue el aviso que llegue primero.
-      state.canceling = true;
-      for (const type of order) {
-        const object = type.startsWith("customer.") ? ids.sub : type === "charge.updated" ? ids.charge : ids.invoice;
+      // La cancelación al final del periodo pasa en Stripe a media secuencia: las lecturas de antes no la ven y las de después sí. Gana la lectura más nueva, llegue
+      // el aviso que llegue.
+      for (const [step, type] of order.entries()) {
+        if (step === 2) state.canceling = true;
+        const object = type.startsWith("customer.") ? ids.sub : ids.invoice;
         expect(await deliver(type, object)).toBe(200);
       }
       finals.push(await finalState(person.id));

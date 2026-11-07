@@ -30,7 +30,7 @@ export const { receiveStripeEvent, sweepBillingEvents } = createBillingInbox({
   },
   stripe,
   secret: () => getEnv().STRIPE_WEBHOOK_SECRET ?? null,
-  live: () => getEnv().STRIPE_SECRET_KEY?.startsWith("sk_live_") === true,
+  live: () => /^(sk|rk)_live_/.test(getEnv().STRIPE_SECRET_KEY ?? ""),
   now: () => new Date(),
   report: reportFailure,
 });

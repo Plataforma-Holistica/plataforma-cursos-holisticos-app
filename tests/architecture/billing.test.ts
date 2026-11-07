@@ -52,7 +52,13 @@ describe("los avisos de Stripe", () => {
     expect(vercel.crons.map((cron) => cron.path)).toContain("/api/trabajos/avisos");
   });
 
-  it("el proxy deja fuera la ruta de los avisos", () => {
-    expect(readFileSync(join(ROOT, "src/proxy.ts"), "utf8")).toMatch(/\|api\/webhooks\/\|/);
+  it("el proxy deja fuera la ruta de los avisos, y nada más de lo que cuida", () => {
+    const source = readFileSync(join(ROOT, "src/proxy.ts"), "utf8");
+    const literal = /matcher: \["(.+)"\]/.exec(source)?.[1];
+    expect(literal).toBeDefined();
+    // El matcher es un texto de TypeScript: sus barras invertidas van dobladas.
+    const matcher = new RegExp(`^${literal!.replaceAll("\\\\", "\\")}$`);
+    expect(matcher.test("/api/webhooks/stripe")).toBe(false);
+    for (const path of ["/", "/inicio", "/api/trabajos/avisos", "/api/trabajos/correo", "/admin/periodos", "/api/webhooksx"]) expect(matcher.test(path)).toBe(true);
   });
 });
