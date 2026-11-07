@@ -62,10 +62,10 @@ async function asServerSystem(client: Client): Promise<void> {
   );
 }
 
-async function receive(client: Client, event: string, type = "invoice.paid") {
+async function receive(client: Client, event: string, object: string, type = "invoice.paid") {
   const result = await client.query<{ answer: { outcome: string; id: string; status?: string } }>(
     `select private.provider_event_receive('stripe', $1, $2, false, null, $3, now() - interval '1 minute') as answer`,
-    [event, type, `obj_${event}`],
+    [event, type, object],
   );
   return result.rows[0]!.answer;
 }
@@ -75,13 +75,13 @@ async function claim(client: Client, id: string) {
   return result.rows[0]!.answer;
 }
 
-/** Un aviso nuevo, guardado y reclamado en su propia conexión, listo para aplicarse. */
-async function claimed(type = "invoice.paid"): Promise<{ id: string; attempt: number }> {
+/** Un aviso nuevo de la suscripción, guardado y reclamado en su propia conexión, listo para aplicarse. */
+async function claimed(object: string, type = "customer.subscription.updated"): Promise<{ id: string; attempt: number }> {
   const event = `${PREFIX}${randomUUID()}`;
   const client = await connect();
   try {
     await asServerSystem(client);
-    const { id } = await receive(client, event, type);
+    const { id } = await receive(client, event, object, type);
     const answer = await claim(client, id);
     expect(answer.outcome).toBe("claimed");
     return { id, attempt: answer.attempt! };
@@ -97,9 +97,9 @@ function subscription(id: string, profile: string, read: string) {
   };
 }
 
-function payment(charge: string) {
+function payment(charge: string, subscription: string) {
   return {
-    charge, invoice: `in_${charge}`, charged_at: "2026-10-01T16:00:00Z", gross_cents: 34900, currency: "mxn", method: "card", country: "MX",
+    charge, subscription, invoice: `in_${charge}`, charged_at: "2026-10-01T16:00:00Z", gross_cents: 34900, currency: "mxn", method: "card", country: "MX",
     receipt_url: `https://pay.stripe.com/receipts/${charge}`, interval: "month", interval_count: 1,
     period_start: "2026-10-01T16:00:00Z", period_end: "2026-11-01T16:00:00Z",
     fee_cents: 1600, net_cents: 33300, balance_transaction: `txn_${charge}`, available_on: "2026-10-03T16:00:00Z",
@@ -130,16 +130,16 @@ describe("los avisos de Stripe a la vez", () => {
   it("el mismo cobro desde diez avisos a la vez deja un cobro, un recibo y una liquidación", async () => {
     const sub = `sub_it112_${randomUUID().slice(0, 8)}`;
     const charge = `ch_it112_${randomUUID().slice(0, 8)}`;
-    const claims = await Promise.all(Array.from({ length: CALLERS + 1 }, () => claimed()));
+    const claims = await Promise.all(Array.from({ length: CALLERS + 1 }, () => claimed(sub)));
     const [first, ...others] = await Promise.all(claims.map(() => connect()));
     try {
       for (const client of [first!, ...others]) await asServerSystem(client);
       await first!.query("begin");
-      expect((await apply(first!, claims[0]!, subscription(sub, ana.id, "2026-10-01T16:00:05Z"), [payment(charge)])).outcome).toBe("processed");
+      expect((await apply(first!, claims[0]!, subscription(sub, ana.id, "2026-10-01T16:00:05Z"), [payment(charge, sub)])).outcome).toBe("processed");
       const waiting = Promise.all(
         others.map(async (client, index) => {
           await client.query("begin");
-          const answer = await apply(client, claims[index + 1]!, subscription(sub, ana.id, `2026-10-01T16:00:${10 + index}Z`), [payment(charge)]);
+          const answer = await apply(client, claims[index + 1]!, subscription(sub, ana.id, `2026-10-01T16:00:${10 + index}Z`), [payment(charge, sub)]);
           await client.query("commit");
           return answer;
         }),
@@ -159,30 +159,32 @@ describe("los avisos de Stripe a la vez", () => {
     }
   });
 
-  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, la otra falla a la vista y sin su cobro", async () => {
-    const [one, two] = await Promise.all([claimed(), claimed()]);
+  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, y la otra vuelve a la fila sin su cobro", async () => {
+    const sub1 = `sub_it112_${randomUUID().slice(0, 8)}`;
+    const sub2 = `sub_it112_${randomUUID().slice(0, 8)}`;
+    const [one, two] = await Promise.all([claimed(sub1), claimed(sub2)]);
     const [first, second] = await Promise.all([connect(), connect()]);
     try {
       await asServerSystem(first);
       await asServerSystem(second);
       await first.query("begin");
-      const sub1 = `sub_it112_${randomUUID().slice(0, 8)}`;
-      const sub2 = `sub_it112_${randomUUID().slice(0, 8)}`;
-      expect((await apply(first, one!, subscription(sub1, beto.id, "2026-10-01T16:00:05Z"), [payment(`ch_it112_${randomUUID().slice(0, 8)}`)])).outcome).toBe(
+      expect((await apply(first, one!, subscription(sub1, beto.id, "2026-10-01T16:00:05Z"), [payment(`ch_it112_${randomUUID().slice(0, 8)}`, sub1)])).outcome).toBe(
         "processed",
       );
       const waiting = (async () => {
         await second.query("begin");
-        const answer = await apply(second, two!, subscription(sub2, beto.id, "2026-10-01T16:00:06Z"), [payment(`ch_it112_${randomUUID().slice(0, 8)}`)]);
+        const answer = await apply(second, two!, subscription(sub2, beto.id, "2026-10-01T16:00:06Z"), [payment(`ch_it112_${randomUUID().slice(0, 8)}`, sub2)]);
         await second.query("commit");
         return answer;
       })();
       await waitBehind(owner, first, 1);
       await first.query("commit");
-      expect(await waiting).toEqual({ outcome: "failed", code: "second_live_subscription" });
+      expect(await waiting).toEqual({ outcome: "retry", code: "second_live_subscription" });
       expect(await ledgerOf(beto.id)).toMatchObject({ charges: 1, receipts: 1, live: 1 });
-      const failed = await ownerQuery<{ status: string; last_error: string }>("select status, last_error from private.provider_events where id = $1", [two!.id]);
-      expect(failed).toEqual([{ status: "failed", last_error: "second_live_subscription" }]);
+      const waitingEvent = await ownerQuery<{ status: string; last_error: string }>("select status, last_error from private.provider_events where id = $1", [
+        two!.id,
+      ]);
+      expect(waitingEvent).toEqual([{ status: "pending", last_error: "second_live_subscription" }]);
     } finally {
       await Promise.all([first, second].map((client) => client.query("rollback").catch(() => undefined)));
       await Promise.all([first, second].map((client) => client.end()));
@@ -194,12 +196,14 @@ describe("los avisos de Stripe a la vez", () => {
     const clients = await Promise.all(Array.from({ length: CALLERS + 1 }, () => connect()));
     try {
       for (const client of clients) await asServerSystem(client);
-      const stored = await Promise.all(clients.map((client) => receive(client, event)));
+      const stored = await Promise.all(clients.map((client) => receive(client, event, `in_${event}`)));
       expect(stored.filter((answer) => answer.outcome === "stored")).toHaveLength(1);
       expect(stored.filter((answer) => answer.outcome === "duplicate")).toHaveLength(CALLERS);
       expect(new Set(stored.map((answer) => answer.id)).size).toBe(1);
       const claims = await Promise.all(clients.map((client) => claim(client, stored[0]!.id)));
-      expect(claims.filter((answer) => answer.outcome === "claimed")).toEqual([{ outcome: "claimed", attempt: 1, event_type: "invoice.paid", object_id: `obj_${event}`, id: stored[0]!.id }]);
+      expect(claims.filter((answer) => answer.outcome === "claimed")).toEqual([
+        { outcome: "claimed", attempt: 1, event_type: "invoice.paid", object_id: `in_${event}`, id: stored[0]!.id },
+      ]);
       expect(claims.filter((answer) => answer.outcome === "busy")).toHaveLength(CALLERS);
     } finally {
       await Promise.all(clients.map((client) => client.end()));

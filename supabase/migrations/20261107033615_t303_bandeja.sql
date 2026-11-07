@@ -12,12 +12,21 @@
 --   · `ended_at` no se escribe desde Stripe (es de T-304 y T-307): una cancelación inmediata no corta días pagados;
 --   · la falla de una renovación se anota con la hora de Stripe solo si la factura de ciclo sigue sin pagar, se conserva si ya había una, y la limpia el cobro cuyo
 --     periodo termina después de ella;
---   · la foto del tramo del bote espera a que no haya avisos sin terminar de antes del fin del mes, y los alumnos activos cuentan el inicio de la suscripción en
---     Stripe en vez de la hora de su fila.
+--   · la foto del tramo del bote espera a los avisos en camino (pendientes o en proceso) de antes del fin del mes, con diez minutos de margen, y los alumnos
+--     activos cuentan el inicio de la suscripción en Stripe en vez de la hora de su fila. Lo fallido y lo que espera a T-307 no frenan la foto, que no tendría
+--     salida: los frena el cierre, con la cuarta solicitud de T-303. Un aviso que Stripe entrega horas después del fin del mes no está en la bandeja todavía, y
+--     la foto no lo espera (límite conocido).
+--
+-- Lo que el servidor puede hacer: guardar un aviso, reclamarlo y aplicar lo que dice haber leído de Stripe. Con eso registra cobros, así que la firma del aviso y la
+-- lectura de Stripe son su barrera (la segunda solicitud). La base pone dos más: `billing_apply` solo aplica tipos de cobro, y el objeto del aviso (que viene del
+-- cuerpo firmado) tiene que ser la suscripción leída, o la factura o el cargo de uno de sus pagos; cada pago dice además de qué suscripción es.
+--
+-- Para T-304 y T-307: cada aviso vuelve a escribir `status` con la traducción. Cuando escriban `in_grace`, `refunded` o `expired`, `billing_state` y `billing_apply`
+-- tienen que conocerlos, o el siguiente aviso los pisa.
 --
 -- Decisiones mías sin confirmar: diez intentos con espera creciente (1 min, 5 min, 30 min, 2 h, 12 h, y después un día), reclamar por 2 minutos, la falla de una
--- renovación con un día de holgura antes del fin del periodo pagado, y una segunda suscripción viva de la misma cuenta falla sin escribir su cobro (la
--- conciliación lo dirá hasta que se explique).
+-- renovación con un día de holgura antes del fin del periodo pagado, la foto que no espera lo fallido ni lo que espera a T-307, y una segunda suscripción viva de la
+-- misma cuenta se vuelve a intentar (puede ser el orden de los avisos: la baja de la otra todavía no llega) y queda fallida, sin escribir su cobro, al quinto intento.
 
 -- ---------------------------------------------------------------------------------------
 -- La bandeja.
@@ -40,6 +49,8 @@ create table private.provider_events (
   finished_at timestamptz,
   resolved_by uuid references public.profiles (id),
   resolution_note text,
+  profile_id uuid,                                  -- la cuenta, cuando se supo: nadie reintenta ni resuelve el aviso de su propio pago. Sin clave: el aviso sobrevive a la cuenta
+  revision integer not null default 0,              -- sube con cada cambio: lo que finanzas vio
   constraint provider_events_uq unique (provider, provider_event_id),
   constraint provider_events_provider_known check (provider in ('stripe')),
   constraint provider_events_ids_format check (provider_event_id ~ '^[!-~]{1,255}$' and object_id ~ '^[!-~]{1,255}$'),
@@ -54,15 +65,16 @@ create table private.provider_events (
   constraint provider_events_resolved check ((status = 'resolved') = (resolved_by is not null and resolution_note is not null)),
   constraint provider_events_note_length check (char_length(resolution_note) between 1 and 500)
 );
-comment on table private.provider_events is 'Los avisos del proveedor de cobro (RF-208): uno por su id, sin su cuerpo. Sin terminar (pendiente, en proceso, fallido o en espera) frena la foto del mes y, con T-303, el cierre.';
+comment on table private.provider_events is 'Los avisos del proveedor de cobro (RF-208): uno por su id, sin su cuerpo. En camino (pendiente o en proceso) frena la foto del mes; sin terminar (también fallido o en espera), con la cuarta solicitud de T-303, el cierre.';
 alter table private.provider_events enable row level security;
 revoke all on table private.provider_events from public, anon, authenticated, service_role, app_service;
 -- Lo que el barrido toma.
 create index provider_events_due_idx on private.provider_events (next_attempt_at) where status in ('pending', 'processing');
--- Lo que frena la foto del mes y el cierre.
+-- Lo que frena el cierre (la cuarta solicitud de T-303).
 create index provider_events_unfinished_idx on private.provider_events (occurred_at) where status in ('pending', 'processing', 'failed', 'deferred');
 
--- Lo que dijo Stripe no cambia, nada se borra, y lo terminado no vuelve atrás. Los intentos solo bajan al reabrir uno fallido.
+-- Lo que dijo Stripe no cambia, nada se borra, y lo terminado no vuelve atrás. Los intentos solo bajan al reabrir uno fallido, la cuenta se anota una vez, y cada
+-- cambio sube la revisión.
 create function private.guard_provider_event() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -80,13 +92,17 @@ begin
   if new.attempts < old.attempts and not (old.status = 'failed' and new.status = 'pending') then
     raise exception 'provider event % attempts only go down when it is reopened', old.id using errcode = '42501';
   end if;
+  if old.profile_id is not null and new.profile_id is distinct from old.profile_id then
+    raise exception 'provider event % keeps its account', old.id using errcode = '42501';
+  end if;
+  new.revision := old.revision + 1;
   return new;
 end
 $$;
 revoke all on function private.guard_provider_event() from public;
 create trigger provider_events_guard before update or delete on private.provider_events
   for each row execute function private.guard_provider_event();
-create trigger ledger_no_truncate before truncate on private.provider_events
+create trigger provider_events_no_truncate before truncate on private.provider_events
   for each statement execute function private.reject_mutation();
 
 -- Lo que finanzas hizo con un aviso (RF-710): reintentarlo o resolverlo a mano. Un libro.
@@ -121,8 +137,8 @@ create table private.provider_settlements (
   fee_cents bigint not null,
   net_cents bigint not null,
   available_on timestamptz,
-  read_at timestamptz not null,
-  created_at timestamptz not null default now(),
+  read_at timestamptz not null,                     -- cuándo se leyó de Stripe
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
   constraint provider_settlements_charge_uq unique (charge_id),
   constraint provider_settlements_transaction_uq unique (provider, balance_transaction_id),
   constraint provider_settlements_provider_known check (provider in ('stripe')),
@@ -279,6 +295,18 @@ as $$
 $$;
 revoke all on function private.billing_plan(text, integer) from public;
 
+-- Qué hace la bandeja con un tipo de aviso: `apply` (lo aplica `billing_apply`), `defer` (su regla es de T-307) o nulo (no es de cobro: se puede ignorar).
+create function private.billing_event_kind(p_type text) returns text
+language sql immutable set search_path = ''
+as $$
+  select case
+    when p_type in ('invoice.paid', 'invoice.payment_failed', 'customer.subscription.created', 'customer.subscription.updated',
+                    'customer.subscription.deleted', 'charge.updated') then 'apply'
+    when p_type = 'charge.refunded' or p_type like 'charge.dispute.%' then 'defer'
+  end
+$$;
+revoke all on function private.billing_event_kind(text) from public;
+
 -- Un instante escrito por el servidor, o nulo si no tiene forma. Así una lectura rara no lanza: falla con su código.
 create function private.billing_instant(p text) returns timestamptz
 language plpgsql immutable set search_path = ''
@@ -321,6 +349,7 @@ language sql immutable set search_path = ''
 as $$
   select coalesce(pg_catalog.jsonb_typeof(p) = 'object'
     and (p ->> 'charge') ~ '^[!-~]{1,255}$'
+    and (p ->> 'subscription') ~ '^[!-~]{1,255}$'
     and (coalesce(pg_catalog.jsonb_typeof(p -> 'invoice'), 'null') = 'null' or (p ->> 'invoice') ~ '^[!-~]{1,255}$')
     and private.billing_instant(p ->> 'charged_at') is not null
     and pg_catalog.jsonb_typeof(p -> 'gross_cents') = 'number' and (p ->> 'gross_cents') ~ '^[0-9]{1,10}$'
@@ -466,7 +495,7 @@ $$;
 revoke all on function private.provider_event_release(uuid, integer, text) from public;
 grant execute on function private.provider_event_release(uuid, integer, text) to app_service;
 
--- Termina sin aplicar: `ignored` (un tipo que no es de cobro), `deferred` (su regla es de otra tarea: un reembolso, T-307) o `failed` (no se puede aplicar nunca:
+-- Termina sin aplicar: `ignored` (un tipo que no es de cobro; uno de cobro no se ignora), `deferred` (su regla es de otra tarea: un reembolso, T-307) o `failed` (no se puede aplicar nunca:
 -- una factura de 0, un cargo sin suscripción). Los dos últimos llevan su código. Solo el intento en curso. Procesado lo marca solo `billing_apply`.
 create function private.provider_event_finish(p_id uuid, p_attempt integer, p_status text, p_code text) returns boolean
 language plpgsql volatile security definer set search_path = ''
@@ -476,9 +505,11 @@ begin
      or p_code !~ '^[a-z0-9_]{1,64}$' then
     return false;
   end if;
+  -- Un tipo de cobro no se ignora: lo ignorado no vuelve, y su cobro se perdería.
   update private.provider_events e set status = p_status, locked_until = null, last_error = p_code,
          finished_at = case when p_status = 'ignored' then pg_catalog.clock_timestamp() end
-  where e.id = p_id and e.status = 'processing' and e.attempts = p_attempt;
+  where e.id = p_id and e.status = 'processing' and e.attempts = p_attempt
+    and (p_status <> 'ignored' or private.billing_event_kind(e.event_type) is null);
   return found;
 end
 $$;
@@ -487,10 +518,13 @@ grant execute on function private.provider_event_finish(uuid, integer, text, tex
 
 -- Aplica lo que el servidor leyó de Stripe para un aviso reclamado, en una sola transacción: la suscripción (`p_subscription`), los pagos de una factura pagada
 -- (`p_payments`, un arreglo, vacío si no hay) y la falla de una renovación (`p_failure`, o nulo). Contesta `processed` (con `subscription_id` y cuántos cobros
--- nuevos), `failed` con su código (no escribió nada más que el aviso) o `stale` (no es el intento en curso: no escribe).
+-- nuevos), `failed` con su código (no escribió nada más que el aviso), `retry` con su código (volvió a la fila con su espera: el servidor contesta un error y
+-- Stripe reenvía) o `stale` (no es el intento en curso: no escribe). Un error que no conoce lo relanza, y el aviso vuelve a tomarse al vencer su reclamo.
 --
 -- El orden de candados: el aviso, el candado consultivo de la suscripción de Stripe (dos avisos de la misma van en fila), su fila, y después `record_charge` (la
--- suscripción para compartir y el periodo para compartir, en `allocation_start`). Nada toma `payout_periods` para escribir, así que no se cruza con el cierre.
+-- suscripción para compartir, y en `allocation_start` el periodo para compartir; si no existe, lo abre). Nada toma un periodo que exista para escribir, así que no se
+-- cruza con el cierre. Dar de alta la suscripción y encolar el recibo toman el perfil para compartir su llave (sus claves foráneas), y esperan a `note_session`, que
+-- lo toma para escribir; no se encontró ciclo.
 create function private.billing_apply(p_event uuid, p_attempt integer, p_subscription jsonb, p_payments jsonb, p_failure jsonb)
 returns jsonb
 language plpgsql volatile security definer set search_path = ''
@@ -515,6 +549,7 @@ declare
   v_status public.subscription_status;
   v_email text;
   v_code text;
+  v_detail text;
 begin
   if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
     raise exception 'private.billing_apply() needs read committed isolation' using errcode = '25000';
@@ -533,7 +568,19 @@ begin
        or (coalesce(pg_catalog.jsonb_typeof(p_failure), 'null') <> 'null' and not private.billing_failure_ok(p_failure)) then
       raise exception using errcode = 'PB303', message = 'malformed_snapshot';
     end if;
+    if private.billing_event_kind(v_event.event_type) is distinct from 'apply' then
+      raise exception using errcode = 'PB303', message = 'wrong_event_type';
+    end if;
     v_sub_id := p_subscription ->> 'id';
+    -- El objeto del aviso, que viene del cuerpo firmado, tiene que ser lo que se leyó; y cada pago, de esta suscripción.
+    if v_event.object_id is distinct from v_sub_id
+       and not exists (select 1 from pg_catalog.jsonb_array_elements(p_payments) x where v_event.object_id in (x ->> 'invoice', x ->> 'charge'))
+       and v_event.object_id is distinct from (p_failure ->> 'invoice') then
+      raise exception using errcode = 'PB303', message = 'object_mismatch';
+    end if;
+    if exists (select 1 from pg_catalog.jsonb_array_elements(p_payments) x where x ->> 'subscription' <> v_sub_id) then
+      raise exception using errcode = 'PB303', message = 'object_mismatch';
+    end if;
     v_read := private.billing_instant(p_subscription ->> 'read_at');
     if pg_catalog.lower(p_subscription ->> 'currency') <> 'mxn'
        or exists (select 1 from pg_catalog.jsonb_array_elements(p_payments) x where pg_catalog.lower(x ->> 'currency') <> 'mxn') then
@@ -598,17 +645,17 @@ begin
              (v_payment ->> 'net_cents')::bigint, private.billing_instant(v_payment ->> 'available_on'), v_read
       where v_payment ->> 'balance_transaction' is not null and v_payment ->> 'fee_cents' is not null and v_payment ->> 'net_cents' is not null
         and (v_payment ->> 'gross_cents')::bigint - (v_payment ->> 'fee_cents')::bigint = (v_payment ->> 'net_cents')::bigint
-      on conflict do nothing;
+      on conflict on constraint provider_settlements_charge_uq do nothing;
       if private.billing_instant(v_payment ->> 'period_end') > coalesce(v_end, '-infinity'::timestamptz) then
         v_end := private.billing_instant(v_payment ->> 'period_end');
         v_start := private.billing_instant(v_payment ->> 'period_start');
       end if;
     end loop;
 
-    -- La falla de una renovación: la limpia el cobro cuyo periodo termina después de ella; la anota, con la hora de Stripe, una factura de ciclo que sigue sin
-    -- pagar al leerla, después de un periodo pagado (con un día de holgura antes de su fin) y si no había otra.
+    -- La falla de una renovación: la limpia un cobro de este aviso que avanza el periodo pagado más allá de ella; la anota, con la hora de Stripe, una factura de
+    -- ciclo que sigue sin pagar al leerla, después de un periodo pagado (con un día de holgura antes de su fin) y si no había otra.
     v_failed := v_row.last_renewal_failed_at;
-    if v_failed is not null and v_end > v_failed then
+    if v_failed is not null and v_end > coalesce(v_row.current_period_end, '-infinity'::timestamptz) and v_end > v_failed then
       v_failed := null;
     end if;
     if coalesce(pg_catalog.jsonb_typeof(p_failure), 'null') <> 'null' and (p_failure ->> 'unpaid')::boolean and (p_failure ->> 'cycle')::boolean
@@ -639,28 +686,48 @@ begin
       last_renewal_failed_at = v_failed
     where s.id = v_row.id;
 
-    update private.provider_events e set status = 'processed', finished_at = pg_catalog.clock_timestamp(), locked_until = null, last_error = null
+    update private.provider_events e set status = 'processed', finished_at = pg_catalog.clock_timestamp(), locked_until = null, last_error = null,
+                                         profile_id = coalesce(e.profile_id, v_profile)
     where e.id = p_event;
     return pg_catalog.jsonb_build_object('outcome', 'processed', 'subscription_id', v_row.id, 'recorded', v_recorded);
   exception
     when sqlstate 'PB303' then
       v_code := sqlerrm;
-    -- Sin la regla de RN-02 del mes del cobro, o sin periodo abierto para uno tardío (`revenue_rule`, `allocation_start`).
+    -- Sin la regla de RN-02 del mes del cobro, sin su zona, o sin periodo abierto para uno tardío (`revenue_rule`, `period_of`, `allocation_start`). Otro `P0001`
+    -- (las partes que no suman) es una falla del código: se relanza.
     when sqlstate 'P0001' then
+      get stacked diagnostics v_detail = message_text;
+      if v_detail not like 'revenue rule %' and v_detail not like 'no open period for a late charge %' and v_detail <> 'ZONA_HORARIA_PERIODO is not set' then
+        raise;
+      end if;
       v_code := 'charge_rule_unavailable';
-    -- Otra suscripción de la misma cuenta se volvió viva a la vez (`subscriptions_one_live_uq`).
+    -- Otra suscripción de la misma cuenta se volvió viva a la vez. Otro choque de unicidad no se adivina: se relanza.
     when unique_violation then
+      get stacked diagnostics v_detail = constraint_name;
+      if v_detail is distinct from 'subscriptions_one_live_uq' then
+        raise;
+      end if;
       v_code := 'second_live_subscription';
   end;
-  update private.provider_events e set status = 'failed', last_error = v_code, locked_until = null where e.id = p_event;
+  -- Una segunda suscripción viva puede ser el orden de los avisos (la baja de la otra todavía no llega): vuelve a la fila hasta su quinto intento.
+  if v_code = 'second_live_subscription' and v_event.attempts < 5 then
+    update private.provider_events e set status = 'pending', locked_until = null, last_error = v_code, profile_id = coalesce(e.profile_id, v_profile),
+           next_attempt_at = pg_catalog.clock_timestamp() + case v_event.attempts when 1 then interval '1 minute' when 2 then interval '5 minutes'
+                                                                                   when 3 then interval '30 minutes' else interval '2 hours' end
+    where e.id = p_event;
+    return pg_catalog.jsonb_build_object('outcome', 'retry', 'code', v_code);
+  end if;
+  update private.provider_events e set status = 'failed', last_error = v_code, locked_until = null, profile_id = coalesce(e.profile_id, v_profile)
+  where e.id = p_event;
   return pg_catalog.jsonb_build_object('outcome', 'failed', 'code', v_code);
 end
 $$;
 revoke all on function private.billing_apply(uuid, integer, jsonb, jsonb, jsonb) from public;
 grant execute on function private.billing_apply(uuid, integer, jsonb, jsonb, jsonb) to app_service;
 
--- Finanzas reabre un aviso fallido (RF-710): vuelve pendiente, con sus intentos desde cero. Lleva los intentos que vio: si cambiaron, `changed`.
-create function private.provider_event_retry(p_id uuid, p_seen_attempts integer) returns jsonb
+-- Finanzas reabre un aviso fallido (RF-710): vuelve pendiente, con sus intentos desde cero. Lleva la revisión que vio: si cambió, `changed`. Nadie reabre el aviso
+-- de su propio pago (`self`).
+create function private.provider_event_retry(p_id uuid, p_seen_revision integer) returns jsonb
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
@@ -674,10 +741,13 @@ begin
   if not found then
     return '{"outcome": "not_found"}'::jsonb;
   end if;
+  if v.profile_id = private.actor_id() then
+    return '{"outcome": "self"}'::jsonb;
+  end if;
   if v.status <> 'failed' then
     return pg_catalog.jsonb_build_object('outcome', 'not_failed', 'status', v.status);
   end if;
-  if v.attempts is distinct from p_seen_attempts then
+  if v.revision is distinct from p_seen_revision then
     return '{"outcome": "changed"}'::jsonb;
   end if;
   update private.provider_events e set status = 'pending', attempts = 0, next_attempt_at = pg_catalog.clock_timestamp(), locked_until = null
@@ -690,8 +760,8 @@ revoke all on function private.provider_event_retry(uuid, integer) from public;
 grant execute on function private.provider_event_retry(uuid, integer) to app_service;
 
 -- Finanzas lo resuelve a mano (decisión 6 de Sergio): con una nota de 1 a 500 caracteres, queda terminado y deja de frenar. Solo uno fallido: lo que espera a otra
--- tarea (un reembolso, T-307) no se resuelve a mano.
-create function private.provider_event_resolve(p_id uuid, p_note text, p_seen_attempts integer) returns jsonb
+-- tarea (un reembolso, T-307) no se resuelve a mano. Lleva la revisión que vio, y nadie resuelve el aviso de su propio pago.
+create function private.provider_event_resolve(p_id uuid, p_note text, p_seen_revision integer) returns jsonb
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
@@ -709,10 +779,13 @@ begin
   if not found then
     return '{"outcome": "not_found"}'::jsonb;
   end if;
+  if v.profile_id = private.actor_id() then
+    return '{"outcome": "self"}'::jsonb;
+  end if;
   if v.status <> 'failed' then
     return pg_catalog.jsonb_build_object('outcome', 'not_failed', 'status', v.status);
   end if;
-  if v.attempts is distinct from p_seen_attempts then
+  if v.revision is distinct from p_seen_revision then
     return '{"outcome": "changed"}'::jsonb;
   end if;
   update private.provider_events e set status = 'resolved', resolved_by = private.actor_id(), resolution_note = v_note,
@@ -775,8 +848,9 @@ begin
 end
 $$;
 
--- Como en T-601, y un periodo espera su foto mientras haya un aviso sin terminar (pendiente, en proceso, fallido o en espera) de antes de su fin: un pago de las
--- 23:58 que se procesa a las 00:01 sí cuenta. Sin la foto, el periodo no pasa a cierre.
+-- Como en T-601, y un periodo espera su foto mientras haya un aviso en camino (pendiente o en proceso) de antes de su fin, con diez minutos de margen (Stripe crea
+-- el evento poco después del cobro): un pago de las 23:58 que se procesa a las 00:01 sí cuenta. Lo fallido y lo que espera a T-307 no la frenan: los frena el
+-- cierre. Sin la foto, el periodo no pasa a cierre.
 create or replace function private.period_photos() returns jsonb
 language plpgsql volatile set search_path = ''
 as $$
@@ -793,7 +867,7 @@ begin
     select p.period_id, p.ends_at from public.payout_periods p
     where p.active_students is null and p.status in ('open', 'closing') and p.ends_at <= pg_catalog.now()
       and not exists (select 1 from private.provider_events e
-                      where e.status in ('pending', 'processing', 'failed', 'deferred') and e.occurred_at < p.ends_at)
+                      where e.status in ('pending', 'processing') and e.occurred_at < p.ends_at + interval '10 minutes')
     order by p.period_id
   loop
     begin
@@ -837,7 +911,7 @@ as $$
     values ('billing_state', 'private.billing_state(text, boolean)'), ('billing_plan', 'private.billing_plan(text, integer)'),
            ('billing_instant', 'private.billing_instant(text)'), ('billing_snapshot_ok', 'private.billing_snapshot_ok(jsonb)'),
            ('billing_payment_ok', 'private.billing_payment_ok(jsonb)'), ('billing_failure_ok', 'private.billing_failure_ok(jsonb)'),
-           ('guard_provider_event', 'private.guard_provider_event()'))
+           ('guard_provider_event', 'private.guard_provider_event()'), ('billing_event_kind', 'private.billing_event_kind(text)'))
   select 'billing table privilege for ' || r.rolname, t.table_name
   from app_roles r cross join tables t
   where pg_catalog.has_table_privilege(r.rolname::name, t.table_name::regclass, 'select, insert, update, delete, truncate, references, trigger')
@@ -868,7 +942,7 @@ as $$
   union all
   select 'billing trigger missing: ' || t.name, t.table_name
   from (values ('provider_events_guard', 'private.provider_events', '%guard_provider_event%'),
-               ('ledger_no_truncate', 'private.provider_events', '%reject_mutation%'),
+               ('provider_events_no_truncate', 'private.provider_events', '%reject_mutation%'),
                ('ledger_no_update_delete', 'private.provider_event_actions', '%reject_mutation%'),
                ('ledger_no_truncate', 'private.provider_event_actions', '%reject_mutation%'),
                ('audit_changes', 'private.provider_event_actions', '%audit_row_change%'),
@@ -881,13 +955,15 @@ as $$
   union all
   select 'billing apply without its order', 'billing_apply'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.billing_apply(uuid, integer, jsonb, jsonb, jsonb)'))
-                     like '%for update%pg_advisory_xact_lock%record_charge%update public.subscriptions%update private.provider_events%', false)
+                     like '%from private.provider_events e where e.id = p_event for update%pg_advisory_xact_lock%:= private.record_charge(%update public.subscriptions s set%set status = ''processed''%', false)
   union all
   select 'period photo without the billing wait', 'period_photos'
-  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.period_photos()')) like '%private.provider_events%', false)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.period_photos()'))
+                     like '%not exists (select 1 from private.provider_events e%e.status in (''pending'', ''processing'') and e.occurred_at < p.ends_at + interval%', false)
   union all
   select 'active students without the provider start', 'active_students_at'
-  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.active_students_at(timestamptz)')) like '%provider_started_at%', false)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.active_students_at(timestamptz)'))
+                     like '%and coalesce(s.provider_started_at, s.created_at) <= p_at%', false)
   union all
   select 'charge without its event key', 'public.charges'
   where not exists (select 1 from pg_catalog.pg_constraint c

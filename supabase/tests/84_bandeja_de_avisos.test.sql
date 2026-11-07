@@ -4,7 +4,7 @@
 -- toca la tabla: entra por sus funciones. Lo que el aviso aplica lo prueba la 85.
 begin;
 \ir _ayuda.psql
-select plan(104);
+select plan(116);
 
 select pruebas.alta('a8400000-0000-0000-0000-000000000001', 'f1-84@prueba.test');
 select pruebas.alta('a8400000-0000-0000-0000-000000000002', 'ana-84@prueba.test');
@@ -84,7 +84,17 @@ begin
   set local session_replication_role = origin;
 end
 $$;
+create function pruebas.rev(p_event text) returns integer language sql as $$ select (pruebas.aviso(p_event)).revision $$;
+create function pruebas.de_cuenta(p_event text, p_profile uuid) returns void language plpgsql security definer as $$
+begin
+  set local session_replication_role = replica;
+  update private.provider_events set profile_id = p_profile where provider_event_id = p_event;
+  set local session_replication_role = origin;
+end
+$$;
 grant execute on all functions in schema pruebas to anon, authenticated, app_service;
+-- Lo que ya hubiera en la bandeja: las cuentas de la salud se miden contra esto.
+create temp table salud0 as select private.provider_events_health() as h;
 
 -- ---------------------------------------------------------------------------------------
 -- Las tablas: nadie de la aplicación las toca.
@@ -184,6 +194,7 @@ select ok(not pruebas.termina(pruebas.id_de('evt_84_2'), 1, 'processed'), 'proce
 select ok(not pruebas.termina(pruebas.id_de('evt_84_2'), 1, 'processed', 'a_mano'), 'tampoco con un código');
 select ok(not pruebas.termina(pruebas.id_de('evt_84_2'), 2, 'ignored'), 'ni otro intento');
 select ok(pruebas.termina(pruebas.id_de('evt_84_2'), 1, 'ignored'), 'un tipo que no es de cobro se ignora');
+select ok((pruebas.aviso('evt_84_2')).revision > 0, 'cada cambio sube la revisión');
 select results_eq($$select status, finished_at is not null, locked_until is null from pruebas.aviso('evt_84_2')$$,
   $$values ('ignored', true, true)$$, 'ignorado es terminado');
 select is(pruebas.reclama(pruebas.id_de('evt_84_2')) - 'id', '{"outcome": "finished", "status": "ignored"}'::jsonb, 'ya no se reclama');
@@ -199,6 +210,7 @@ select is((select count(*)::integer from pruebas.vencidos() v where v ->> 'id' =
 
 select pruebas.recibe('evt_84_4', 'invoice.paid', 'in_84_4');
 select pruebas.reclama(pruebas.id_de('evt_84_4'));
+select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'ignored'), 'un aviso de cobro no se ignora: su cobro se perdería');
 select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed'), 'fallido lleva su motivo');
 select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed', 'Sin Forma'), 'con forma de código');
 select ok(pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed', 'zero_invoice'), 'una factura de 0 queda fallida (decisión 7 de Sergio)');
@@ -211,6 +223,14 @@ select pruebas.intentos('evt_84_5', 10);
 select is(pruebas.reclama(pruebas.id_de('evt_84_5')) - 'id', '{"outcome": "finished", "status": "failed"}'::jsonb,
   'con diez intentos, el reenvío tampoco lo toma: queda fallido');
 select is((pruebas.aviso('evt_84_5')).last_error, 'attempts_exhausted', 'por sus intentos');
+-- Nadie reintenta ni resuelve el aviso de su propio pago.
+select pruebas.de_cuenta('evt_84_5', pruebas.f1());
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, %s)', pruebas.id_de('evt_84_5'), pruebas.rev('evt_84_5')))::jsonb ->> 'outcome', 'self',
+  'finanzas no reabre el aviso de su propio pago');
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, %s)', pruebas.id_de('evt_84_5'), 'nota', pruebas.rev('evt_84_5')))::jsonb
+          ->> 'outcome', 'self', 'ni lo resuelve');
+select throws_ok(format('update private.provider_events set profile_id = %L where provider_event_id = %L', pruebas.ana(), 'evt_84_5'), '42501', null,
+  'la cuenta de un aviso no cambia');
 
 -- ---------------------------------------------------------------------------------------
 -- El guardián: nada se borra, lo de Stripe no cambia, y lo terminado no vuelve.
@@ -237,12 +257,12 @@ select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, 1)
   'con finanzas, pide el código reciente');
 select pruebas.equipar(pruebas.f1());
 select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, 1)', gen_random_uuid()))::jsonb ->> 'outcome', 'not_found', 'uno que no existe');
-select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, 0)', pruebas.id_de('evt_84_4')))::jsonb ->> 'outcome', 'changed',
-  'con otros intentos de los que vio, cambió');
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, %s)', pruebas.id_de('evt_84_4'), pruebas.rev('evt_84_4') - 1))::jsonb ->> 'outcome',
+  'changed', 'con otra revisión de la que vio, cambió');
 select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, 1)', pruebas.id_de('evt_84_3')))::jsonb ->> 'outcome', 'not_failed',
   'lo que espera a T-307 no se reintenta');
-select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, 1)', pruebas.id_de('evt_84_4')))::jsonb ->> 'outcome', 'retried',
-  'uno fallido se reintenta');
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, %s)', pruebas.id_de('evt_84_4'), pruebas.rev('evt_84_4')))::jsonb ->> 'outcome',
+  'retried', 'uno fallido se reintenta');
 select results_eq($$select status, attempts, next_attempt_at <= clock_timestamp(), locked_until is null from pruebas.aviso('evt_84_4')$$,
   $$values ('pending', 0, true, true)$$, 'vuelve pendiente, con sus intentos desde cero y ya');
 select results_eq($$select action, actor, note from private.provider_event_actions where event_id = pruebas.id_de('evt_84_4')$$,
@@ -262,8 +282,10 @@ select is(pruebas.pide(pruebas.ana(), format('private.provider_event_resolve(%L,
   'sin finanzas no se resuelve');
 select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, 1)', pruebas.id_de('evt_84_3'), 'nota'))::jsonb ->> 'outcome', 'not_failed',
   'lo que espera a T-307 no se resuelve a mano');
-select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, 1)', pruebas.id_de('evt_84_4'),
-                                            '  Segundo pago de la misma cuenta; se reembolsó en Stripe.  '))::jsonb ->> 'outcome', 'resolved',
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, %s)', pruebas.id_de('evt_84_4'), 'nota', pruebas.rev('evt_84_4') - 1))::jsonb
+          ->> 'outcome', 'changed', 'resolver con una vista vieja: cambió (otro lo reintentó y volvió a fallar)');
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, %s)', pruebas.id_de('evt_84_4'),
+                                            '  Segundo pago de la misma cuenta; se reembolsó en Stripe.  ', pruebas.rev('evt_84_4')))::jsonb ->> 'outcome', 'resolved',
   'con su nota, se resuelve');
 select results_eq($$select status, resolved_by, resolution_note, finished_at is not null from pruebas.aviso('evt_84_4')$$,
   format($$values ('resolved', %L::uuid, 'Segundo pago de la misma cuenta; se reembolsó en Stripe.', true)$$, pruebas.f1()),
@@ -280,10 +302,10 @@ select throws_ok($$delete from private.provider_event_actions$$, '42501', null, 
 -- ---------------------------------------------------------------------------------------
 -- La salud, para el barrido y las alertas, sin nombrar a nadie.
 
-select pruebas.como_sistema();
-select is(private.provider_events_health() - 'oldest_pending_at',
-  '{"pending": 0, "failed": 2, "deferred": 1}'::jsonb, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
-select pruebas.como_dueno();
+select results_eq($$select (h1 ->> 'pending')::int - (h ->> 'pending')::int, (h1 ->> 'failed')::int - (h ->> 'failed')::int,
+                           (h1 ->> 'deferred')::int - (h ->> 'deferred')::int
+                    from salud0 cross join (select private.provider_events_health() as h1) x$$,
+  $$values (0, 2, 1)$$, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
 
 -- ---------------------------------------------------------------------------------------
 -- El libro de ingresos ya sabe de la bandeja, y sigue cerrado a la aplicación.
@@ -323,6 +345,30 @@ alter table private.provider_events disable trigger provider_events_guard;
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing trigger missing: provider_events_guard'],
   'y si el guardián estuviera apagado');
 alter table private.provider_events enable trigger provider_events_guard;
+alter table private.provider_settlements disable row level security;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing table without row security'],
+  'y si una tabla quedara sin seguridad por fila');
+alter table private.provider_settlements enable row level security;
+alter function private.provider_event_claim(uuid) reset search_path;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing door missing or wrong: provider_event_claim'],
+  'y si una puerta perdiera su search_path');
+alter function private.provider_event_claim(uuid) set search_path = '';
+alter function private.billing_apply(uuid, integer, jsonb, jsonb, jsonb) rename to billing_apply_x;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing apply without its order'],
+  'y si aplicar no tuviera su orden de candados');
+alter function private.billing_apply_x(uuid, integer, jsonb, jsonb, jsonb) rename to billing_apply;
+alter function private.period_photos() rename to period_photos_x;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['period photo without the billing wait'],
+  'y si la foto no esperara a los avisos');
+alter function private.period_photos_x() rename to period_photos;
+alter function private.active_students_at(timestamptz) rename to active_students_at_x;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['active students without the provider start'],
+  'y si los alumnos activos no contaran el inicio en Stripe');
+alter function private.active_students_at_x(timestamptz) rename to active_students_at;
+alter table public.charges drop constraint charges_event_fk;
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['charge without its event key'],
+  'y si el cobro no tuviera su clave al aviso');
+alter table public.charges add constraint charges_event_fk foreign key (provider_event_id) references private.provider_events (id);
 select is_empty('select * from private.schema_violations_billing()', 'todo vuelve a su lugar');
 
 select * from finish();
