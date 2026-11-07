@@ -277,6 +277,10 @@ describe("el alcance del paso previo", () => {
     "/cursos/png",
     "/faviconxico",
     "/_next/data/x/inicio.json",
+    // Bajo el prefijo de los avisos, solo la ruta de Stripe queda fuera.
+    "/api/webhooks/otra",
+    "/api/webhooks/stripe/x",
+    "/api/webhooks/stripex",
   ])("cubre %s", (url) => {
     expect(matches(url)).toBe(true);
   });
@@ -290,5 +294,9 @@ describe("el alcance del paso previo", () => {
     "/fuentes/texto.woff2",
   ])("no corre para el archivo estático %s", (url) => {
     expect(matches(url)).toBe(false);
+  });
+
+  it("no corre para la ruta de los avisos de Stripe: la cuida su firma, y el paso previo copiaría el cuerpo a la memoria", () => {
+    expect(matches("/api/webhooks/stripe")).toBe(false);
   });
 });

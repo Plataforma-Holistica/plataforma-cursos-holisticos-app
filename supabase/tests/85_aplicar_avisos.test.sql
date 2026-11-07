@@ -165,7 +165,7 @@ select results_eq($$select idempotency_key = 'CO-03:' || (select id from public.
 -- El mismo cobro otra vez (otro aviso que lo nombra): no se duplica nada.
 select is(pruebas.aplica('evt_85_a3', pruebas.sus('sub_ana', pruebas.cuenta(1)::text, 'active', '2026-10-01 10:00:09-06'),
                          jsonb_build_array(pruebas.pago('ch_ana_1', '2026-10-01 10:00-06', '2026-10-01 10:00-06', '2026-11-01 10:00-06', p_bt => 'txn_ana_1')),
-                         p_type => 'charge.updated') ->> 'outcome', 'processed', 'otro aviso del mismo cobro');
+                         p_type => 'invoice.paid') ->> 'outcome', 'processed', 'otro aviso del mismo cobro');
 select is(pruebas.cobros(pruebas.cuenta(1)), 1, 'sigue un cobro');
 select is(pruebas.recibos(pruebas.cuenta(1)), 1, 'y un recibo');
 select is((select count(*)::integer from private.provider_settlements s join public.charges c on c.id = s.charge_id where c.profile_id = pruebas.cuenta(1)), 1,
