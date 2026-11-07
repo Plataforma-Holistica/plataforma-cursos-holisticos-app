@@ -99,7 +99,7 @@ function subscription(id: string, profile: string, read: string) {
 
 function payment(charge: string, subscription: string) {
   return {
-    charge, subscription, invoice: `in_${charge}`, charged_at: "2026-10-01T16:00:00Z", gross_cents: 34900, currency: "mxn", method: "card", country: "MX",
+    charge, subscription, status: "succeeded", invoice: `in_${charge}`, charged_at: "2026-10-01T16:00:00Z", gross_cents: 34900, currency: "mxn", method: "card", country: "MX",
     receipt_url: `https://pay.stripe.com/receipts/${charge}`, interval: "month", interval_count: 1,
     period_start: "2026-10-01T16:00:00Z", period_end: "2026-11-01T16:00:00Z",
     fee_cents: 1600, net_cents: 33300, balance_transaction: `txn_${charge}`, available_on: "2026-10-03T16:00:00Z",
@@ -159,7 +159,7 @@ describe("los avisos de Stripe a la vez", () => {
     }
   });
 
-  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, y la otra vuelve a la fila sin su cobro", async () => {
+  it("dos suscripciones vivas de la misma cuenta a la vez: una queda, y la otra vuelve a la fila; al reintentarla entra su cobro, sin acceso", async () => {
     const sub1 = `sub_it112_${randomUUID().slice(0, 8)}`;
     const sub2 = `sub_it112_${randomUUID().slice(0, 8)}`;
     const [one, two] = await Promise.all([claimed(sub1), claimed(sub2)]);
@@ -185,6 +185,15 @@ describe("los avisos de Stripe a la vez", () => {
         two!.id,
       ]);
       expect(waitingEvent).toEqual([{ status: "pending", last_error: "second_live_subscription" }]);
+      // El siguiente intento ya ve a la otra viva: registra el cobro (el dinero entró) y deja la segunda sin dar acceso.
+      const again = await claim(second, two!.id);
+      expect(again.outcome).toBe("claimed");
+      const secondCharge = `ch_it112_${randomUUID().slice(0, 8)}`;
+      expect(await apply(second, { id: two!.id, attempt: again.attempt! }, subscription(sub2, beto.id, "2026-10-01T16:00:07Z"), [payment(secondCharge, sub2)])).toEqual({
+        outcome: "retry",
+        code: "second_live_subscription",
+      });
+      expect(await ledgerOf(beto.id)).toMatchObject({ charges: 2, receipts: 2, live: 1 });
     } finally {
       await Promise.all([first, second].map((client) => client.query("rollback").catch(() => undefined)));
       await Promise.all([first, second].map((client) => client.end()));

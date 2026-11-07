@@ -202,6 +202,7 @@ select is(pruebas.reclama(pruebas.id_de('evt_84_2')) - 'id', '{"outcome": "finis
 select pruebas.recibe('evt_84_3', 'charge.refunded', 'ch_84');
 select pruebas.reclama(pruebas.id_de('evt_84_3'));
 select ok(not pruebas.termina(pruebas.id_de('evt_84_3'), 1, 'deferred'), 'en espera lleva su motivo');
+select ok(not pruebas.termina(pruebas.id_de('evt_84_3'), 1, 'failed', 'algo'), 'un reembolso no se da por fallido: se resolvería a mano sin T-307');
 select ok(pruebas.termina(pruebas.id_de('evt_84_3'), 1, 'deferred', 'refund_waits_t307'), 'un reembolso espera a T-307 (decisión 3 de Sergio)');
 select results_eq($$select status, last_error, finished_at is null from pruebas.aviso('evt_84_3')$$,
   $$values ('deferred', 'refund_waits_t307', true)$$, 'en espera no es terminado: frena el cierre');
@@ -211,6 +212,7 @@ select is((select count(*)::integer from pruebas.vencidos() v where v ->> 'id' =
 select pruebas.recibe('evt_84_4', 'invoice.paid', 'in_84_4');
 select pruebas.reclama(pruebas.id_de('evt_84_4'));
 select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'ignored'), 'un aviso de cobro no se ignora: su cobro se perdería');
+select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'deferred', 'algo'), 'ni se deja en espera: solo lo de T-307 espera');
 select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed'), 'fallido lleva su motivo');
 select ok(not pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed', 'Sin Forma'), 'con forma de código');
 select ok(pruebas.termina(pruebas.id_de('evt_84_4'), 1, 'failed', 'zero_invoice'), 'una factura de 0 queda fallida (decisión 7 de Sergio)');
@@ -231,6 +233,20 @@ select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, 
           ->> 'outcome', 'self', 'ni lo resuelve');
 select throws_ok(format('update private.provider_events set profile_id = %L where provider_event_id = %L', pruebas.ana(), 'evt_84_5'), '42501', null,
   'la cuenta de un aviso no cambia');
+-- También si el aviso no la sabe, pero su objeto es una suscripción de quien actúa.
+insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, currency)
+values (pruebas.f1(), 'stripe', 'sub_f1_84', 'monthly', 'pending', 'MXN');
+select pruebas.recibe('evt_84_6', 'customer.subscription.updated', 'sub_f1_84');
+select pruebas.intentos('evt_84_6', 10);
+select pruebas.reclama(pruebas.id_de('evt_84_6'));
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_retry(%L, %s)', pruebas.id_de('evt_84_6'), pruebas.rev('evt_84_6')))::jsonb ->> 'outcome', 'self',
+  'finanzas no reabre el aviso de su propia suscripción');
+-- Lo de T-307 que se quedó sin intentos no se resuelve a mano: se reintenta.
+select pruebas.recibe('evt_84_7', 'charge.refunded', 'ch_84_7');
+select pruebas.intentos('evt_84_7', 10);
+select pruebas.reclama(pruebas.id_de('evt_84_7'));
+select is(pruebas.pide(pruebas.f1(), format('private.provider_event_resolve(%L, %L, %s)', pruebas.id_de('evt_84_7'), 'nota', pruebas.rev('evt_84_7')))::jsonb
+          ->> 'outcome', 'not_failed', 'un reembolso fallido no se resuelve a mano');
 
 -- ---------------------------------------------------------------------------------------
 -- El guardián: nada se borra, lo de Stripe no cambia, y lo terminado no vuelve.
@@ -305,7 +321,14 @@ select throws_ok($$delete from private.provider_event_actions$$, '42501', null, 
 select results_eq($$select (h1 ->> 'pending')::int - (h ->> 'pending')::int, (h1 ->> 'failed')::int - (h ->> 'failed')::int,
                            (h1 ->> 'deferred')::int - (h ->> 'deferred')::int
                     from salud0 cross join (select private.provider_events_health() as h1) x$$,
-  $$values (0, 2, 1)$$, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
+  $$values (0, 4, 1)$$, 'cuántos esperan, cuántos fallaron y cuántos esperan a otra tarea');
+-- La salida de correo manda primero el aviso de CLABE: un día de renovaciones no lo deja atrás.
+insert into private.mail_outbox (idempotency_key, template, recipient, created_at) values
+  ('CO-03:prueba-84-viejo', 'CO-03', 'ana-84@prueba.test', now() - interval '1 hour'),
+  ('CO-27:prueba-84', 'CO-27', 'ana-84@prueba.test', now());
+select pruebas.como_sistema();
+select is((select template from private.mail_claim(1)), 'CO-27', 'el aviso de CLABE sale antes que un recibo más viejo');
+select pruebas.como_dueno();
 
 -- ---------------------------------------------------------------------------------------
 -- El libro de ingresos ya sabe de la bandeja, y sigue cerrado a la aplicación.
@@ -353,18 +376,35 @@ alter function private.provider_event_claim(uuid) reset search_path;
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing door missing or wrong: provider_event_claim'],
   'y si una puerta perdiera su search_path');
 alter function private.provider_event_claim(uuid) set search_path = '';
-alter function private.billing_apply(uuid, integer, jsonb, jsonb, jsonb) rename to billing_apply_x;
+-- Lo que el vigilante busca en el código: una versión a la que le falta, dentro de esta transacción.
+create function pruebas.sin(p_function text, p_old text, p_new text) returns void language plpgsql as $$
+declare
+  v text := pg_get_functiondef(p_function::regprocedure);
+begin
+  if position(p_old in v) = 0 then
+    raise exception 'pruebas.sin: no está en %', p_function;
+  end if;
+  execute replace(v, p_old, p_new);
+end
+$$;
+select pruebas.sin('private.billing_apply(uuid, integer, jsonb, jsonb, jsonb)', ':= private.record_charge(', ':= private.record_charge_x(');
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing apply without its order'],
-  'y si aplicar no tuviera su orden de candados');
-alter function private.billing_apply_x(uuid, integer, jsonb, jsonb, jsonb) rename to billing_apply;
-alter function private.period_photos() rename to period_photos_x;
+  'y si aplicar no registrara el cobro con su orden de candados');
+select pruebas.sin('private.billing_apply(uuid, integer, jsonb, jsonb, jsonb)', ':= private.record_charge_x(', ':= private.record_charge(');
+select pruebas.sin('private.period_photos()', $$e.status in ('pending', 'processing') and e.occurred_at < p.ends_at + interval$$,
+                   $$e.status in ('pending') and e.occurred_at < p.ends_at + interval$$);
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['period photo without the billing wait'],
-  'y si la foto no esperara a los avisos');
-alter function private.period_photos_x() rename to period_photos;
-alter function private.active_students_at(timestamptz) rename to active_students_at_x;
+  'y si la foto no esperara a los avisos en proceso');
+select pruebas.sin('private.period_photos()', $$e.status in ('pending') and e.occurred_at < p.ends_at + interval$$,
+                   $$e.status in ('pending', 'processing') and e.occurred_at < p.ends_at + interval$$);
+select pruebas.sin('private.active_students_at(timestamptz)', 'and coalesce(s.provider_started_at, s.created_at) <= p_at', 'and s.created_at <= p_at');
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['active students without the provider start'],
   'y si los alumnos activos no contaran el inicio en Stripe');
-alter function private.active_students_at_x(timestamptz) rename to active_students_at;
+select pruebas.sin('private.active_students_at(timestamptz)', 'and s.created_at <= p_at', 'and coalesce(s.provider_started_at, s.created_at) <= p_at');
+select pruebas.sin('private.mail_claim(integer)', $$order by m.template = 'CO-27' desc, m.created_at$$, 'order by m.created_at');
+select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['mail claim without the clabe first'],
+  'y si la salida de correo no mandara primero el aviso de CLABE');
+select pruebas.sin('private.mail_claim(integer)', 'order by m.created_at', $$order by m.template = 'CO-27' desc, m.created_at$$);
 alter table public.charges drop constraint charges_event_fk;
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['charge without its event key'],
   'y si el cobro no tuviera su clave al aviso');
