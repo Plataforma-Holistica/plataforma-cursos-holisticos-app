@@ -128,6 +128,13 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
       await owner.query("lock table public.charges, public.revenue_allocations in share row exclusive mode");
       await owner.query("alter table public.charges disable trigger ledger_no_update_delete");
       await owner.query("alter table public.revenue_allocations disable trigger ledger_no_update_delete");
+      // Lo que liquida el proveedor cuelga del cobro (T-303), y también es un libro.
+      await owner.query("alter table private.provider_settlements disable trigger ledger_no_update_delete");
+      await owner.query(
+        "delete from private.provider_settlements s using public.charges c where c.id = s.charge_id and c.profile_id = any($1::uuid[])",
+        [ids],
+      );
+      await owner.query("alter table private.provider_settlements enable trigger ledger_no_update_delete");
       await owner.query("delete from public.revenue_allocations where profile_id = any($1::uuid[])", [ids]);
       await owner.query("delete from public.charges where profile_id = any($1::uuid[])", [ids]);
       await owner.query("alter table public.revenue_allocations enable trigger ledger_no_update_delete");
