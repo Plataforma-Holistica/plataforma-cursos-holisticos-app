@@ -44,6 +44,7 @@ vi.mock("@/services/periods/periods", () => ({ financePeriods: vi.fn(), financeP
 vi.mock("@/services/legal/legal-admin", () => ({ legalDocuments: vi.fn(), legalVersion: vi.fn(), legalBlocks: vi.fn(() => []) }));
 
 import AdminRestPage from "@/app/admin/[...resto]/page";
+import { AdminFrame } from "@/app/admin/_lib/frame";
 import { TeamSection } from "@/app/admin/_equipo/section";
 import { sectionAt } from "@/app/admin/_lib/sections";
 
@@ -51,12 +52,16 @@ import { a11yViolations } from "../setup/a11y";
 
 const reader = { get: () => undefined };
 const claims = { userId: "a0000000-0000-4000-8000-000000000001", aal: "aal2", sessionId: null, issuedAt: 0 };
+const isFramed = (answer: unknown): answer is ReactElement<{ children: unknown }> =>
+  typeof answer === "object" && answer !== null && (answer as ReactElement).type === AdminFrame;
 /**
  * Lo que el comodín pinta en esa ruta. La sección es un componente asíncrono del servidor:
  * Next lo espera al servir la página, y aquí se espera a mano.
  */
 async function at(...resto: string[]) {
-  const page = (await AdminRestPage({ params: Promise.resolve({ resto }) })) as ReactElement<Parameters<typeof TeamSection>[0]>;
+  const answer = await AdminRestPage({ params: Promise.resolve({ resto }) });
+  // La sección va dentro del marco de administración (sus pruebas, en team-pages.test.tsx): aquí, sola.
+  const page = (isFramed(answer) ? answer.props.children : answer) as ReactElement<Parameters<typeof TeamSection>[0]>;
   return page.type === TeamSection ? TeamSection(page.props) : page;
 }
 const roster = (freshCode = true) => ({

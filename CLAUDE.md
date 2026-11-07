@@ -998,6 +998,21 @@ que no se ve leyendo un solo archivo:
   (también sin la ficha) y casos nuevos en `tests/ui/lesson-screen.test.tsx`. Sin cambio, a propósito: la ficha se lee después de la lección, a la par del acceso, y no junto con la lección; un curso no listado con
   una lección visible lleva «Volver al curso» a PA-19; la portada se va al pulsar «Reproducir». Decisiones mías sin confirmar: leer la ficha del catálogo en vez de sumar
   columnas a la consulta de la lección, y el velo al 55 %. Para el A: nada que le toque.
+- **Lo que T-614 suma al carril B** (sexta parte, el marco del portal y de administración, sin migración; decisión de Sergio del 2026-11-05: el
+  inicio de administración, solo con el menú por ahora, y las tarjetas de PA-60 llegan con cada tarea). **El menú lateral es uno solo**,
+  `src/app/_lib/side-nav.tsx` (`SideFrame`): el logotipo arriba, fijo desde `lg` y, más angosto, una barra con el logotipo y «Menú» que abre una
+  hoja encima del contenido (un `<details>`, también sin JavaScript); abajo, «Ir a mi inicio» y «Cerrar sesión». El menú va dos veces en el
+  documento (la hoja y la columna), y cada copia nombra sus grupos con su prefijo. `PortalFrame` lo usa con sus entradas y sigue pintando su
+  `<main>`. **Administración** (`src/app/admin/_lib/frame.tsx`, `AdminFrame`) agrupa por capacidad (Contenido, Finanzas, Configuración; moderación y
+  soporte llegan con sus pantallas), solo con los grupos de quien entra, y marca la entrada de la sección también desde lo que cuelga de ella
+  (`adminEntryOf`). Lo pintan el inicio y el comodín después de la guarda, y cada sección sigue trayendo su `<main>`; `screens.test.ts` exige el
+  marco en el comodín, después de la guarda. Una sección nueva entra también a `GROUPS`. PA-60 dejó su lista de enlaces, su «Cuenta» y su «Salir»:
+  van en el menú, y la salida se llama «Cerrar sesión», como en el portal. PA-88 y los estados de pantalla completa siguen sin marco. **Para las
+  pruebas:** el menú trae antes que la pantalla su propio formulario («Cerrar sesión», dos veces), así que una llamada directo a una acción de
+  administración lee los formularios desde el `<main>` (`mainOf` en `tests/e2e/support/actions.ts`), y una lista de la pantalla se busca dentro del
+  `<main>`. Una prueba de página que monte el comodín recibe la sección dentro de `AdminFrame`. Decisiones mías sin confirmar: el menú lleva
+  «Inicio» aunque el logotipo también vuelva al inicio; PA-88 sin menú; las entradas con el mismo nombre que el título de cada pantalla. Para el
+  A: una sección suya nueva entra al menú de `frame.tsx`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

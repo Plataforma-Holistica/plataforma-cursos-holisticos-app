@@ -7,7 +7,7 @@ import { Client } from "pg";
 import { localOwnerUrl } from "../../integration/helpers/local";
 import { totpCode, wrongCode } from "../../integration/helpers/totp";
 import { a11yViolations } from "../support/a11y";
-import { actionFields, postAction } from "../support/actions";
+import { actionFields, mainOf, postAction } from "../support/actions";
 import {
   clearCounters,
   lastMailTo,
@@ -233,7 +233,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await expect(page.getByRole("heading", { level: 1, name: "Administración" })).toBeVisible();
   await expect(page.getByText(`Entraste como ${email}.`)).toBeVisible();
   await expect(page.getByText("No tienes pendientes.")).toBeVisible();
-  await expect(page.getByRole("listitem")).toHaveText(["Soporte", "Configuración"]);
+  await expect(page.getByRole("main").getByRole("listitem")).toHaveText(["Soporte", "Configuración"]);
   expect(await a11yViolations(page)).toEqual([]);
   expect((await page.request.get("/admin")).headers()["cache-control"]).toMatch(/no-store/);
 
@@ -247,7 +247,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await expect(page).toHaveURL("/admin");
 
   // Sale. Al volver a pedir administración entra, da su código, y regresa a donde iba.
-  await page.getByRole("button", { name: "Salir" }).click();
+  await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL("/");
   await signIn(page, { email, password: PASSWORD }, "/entrar?volver=%2Fadmin%2Fequipo");
   await expect(page).toHaveURL("/entrar/segundo-factor?volver=%2Fadmin%2Fequipo");
@@ -313,7 +313,7 @@ test("sin JavaScript también se configura el segundo factor, y la clave no viaj
     await page.getByLabel("Código").fill(await nextCode(secret, used));
     await page.getByRole("button", { name: "Continuar" }).click();
     await expect(page).toHaveURL("/admin");
-    await expect(page.getByRole("listitem")).toHaveText(["Contenido"]);
+    await expect(page.getByRole("main").getByRole("listitem")).toHaveText(["Contenido"]);
   });
 });
 
@@ -792,7 +792,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page.locator("#bloque-equipo-invitaciones").getByText(bait, { exact: true })).toBeVisible();
     const baitId = (await ownerQuery<{ id: string }>("select id::text as id from private.admin_invitations where email = $1", [bait]))[0]?.id ?? "";
     expect(baitId).not.toBe("");
-    const html = await (await page.request.get(TEAM)).text();
+    const html = mainOf(await (await page.request.get(TEAM)).text());
     const inviteFields = actionFields(html, 0);
     const teamFields = actionFields(html, 1);
     const invitationFields = actionFields(html, 2);
@@ -808,7 +808,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
        from auth.sessions s where c.session_id = s.id and s.user_id = $1 and c.authentication_method = 'totp'`,
       [ana.id],
     );
-    const stale = await (await page.request.get(TEAM)).text();
+    const stale = mainOf(await (await page.request.get(TEAM)).text());
     expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeGreaterThan(-1);
     expect(stale.indexOf('id="bloque-equipo-codigo"')).toBeLessThan(stale.indexOf("<form"));
     const codeFields = actionFields(stale, 0);
@@ -867,7 +867,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     // qué capacidad le falta (PA-88). Tampoco sus envíos directos hacen nada.
     await inContext(browser, {}, async (hers, herContext) => {
       await enterAdmin(hers, carla, "/admin");
-      await expect(hers.getByRole("listitem")).toHaveText(["Soporte"]);
+      await expect(hers.getByRole("main").getByRole("listitem")).toHaveText(["Soporte"]);
       await expect(hers.getByRole("link", { name: "Equipo de administración" })).toHaveCount(0);
       await hers.goto(TEAM);
       await expect(hers.getByRole("heading", { level: 1, name: "Esta sección pide la capacidad de Configuración" })).toBeVisible();
@@ -1266,7 +1266,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       // El mismo «Subir», enviado dos veces (un doble clic, o recargar y reenviar): sube una.
       const taichi = await practiceId("Tai chi chuan");
       if (!taichi) throw new Error("Falta la práctica recién agregada.");
-      const fields = actionFields(await (await context.request.get(CATALOG)).text(), 0);
+      const fields = actionFields(mainOf(await (await context.request.get(CATALOG)).text()), 0);
       const up = { ...fields, do: `up:${taichi.id}:${taichi.position}` };
       expect((await postAction(context.request, CATALOG, up)).status()).toBe(200);
       const once = await practicesNow();
@@ -1308,7 +1308,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(row.getByRole("button", { name: "Renombrar «Respiración»" })).toBeVisible();
 
     // Llamada directo, la base contesta «en uso» y no la desactiva.
-    const fields = actionFields(await (await page.request.get(CATALOG)).text(), 0);
+    const fields = actionFields(mainOf(await (await page.request.get(CATALOG)).text()), 0);
     const id = (await practiceId("Respiración"))?.id ?? "";
     const answered = await postAction(page.context().request, CATALOG, { ...fields, do: `deactivate:${id}` });
     expect(answered.status()).toBe(200);
@@ -1450,7 +1450,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     expect(await auditRows()).toBeGreaterThan(audited);
 
     // Una pestaña vieja que confirma otra vez: ya no está por revisar, y nada cambia.
-    const fields = actionFields(await (await page.request.get(REVIEW)).text(), 0);
+    const fields = actionFields(mainOf(await (await page.request.get(REVIEW)).text()), 0);
     const again = await postAction(page.context().request, REVIEW, { ...fields, do: `confirm:${course}` });
     expect(again.status()).toBe(200);
     expect(await again.text()).toContain("Ese curso ya no está por revisar");
@@ -1860,14 +1860,14 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     test.setTimeout(300_000);
     // Los campos con que React nombra cada acción salen de la página de quien sí puede.
     await enterAdmin(page, ana, CATALOG);
-    const html = await (await page.request.get(CATALOG)).text();
+    const html = mainOf(await (await page.request.get(CATALOG)).text());
     const practicesFields = actionFields(html, 0);
     const levelsFields = actionFields(html, 2);
     expect(practicesFields).not.toEqual(levelsFields);
     const yoga = await practiceId("Yoga suave");
     if (!yoga) throw new Error("Falta la práctica del caso de arriba.");
     await ageCode(ana.id);
-    const stale = await (await page.request.get(CATALOG)).text();
+    const stale = mainOf(await (await page.request.get(CATALOG)).text());
     const codeFields = actionFields(stale, 0);
     expect(codeFields).not.toEqual(practicesFields);
 
