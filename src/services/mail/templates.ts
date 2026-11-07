@@ -21,9 +21,17 @@ export interface MailCopy {
     recoverLabel: string;
     reviewLabel: string;
   };
+  receipt: {
+    subject: string;
+    paid: (cents: number, plan: "monthly" | "annual", chargedAt: string) => string;
+    thanks: string;
+    accountLabel: string;
+  };
 }
 
 const clabeParams = z.object({ hours: z.number().int().min(1) }).strict();
+// Lo que encola la base al registrar un cobro (`billing_apply`): el bruto en centavos, el plan y el instante del cargo.
+const receiptParams = z.object({ gross_cents: z.number().int().min(1), plan: z.enum(["monthly", "annual"]), charged_at: z.string().min(1) }).strict();
 
 const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -45,7 +53,23 @@ function clabeNotice(params: unknown, site: string, copy: MailCopy["clabeNotice"
   };
 }
 
+// El recibo (CO-03): cuánto, de qué plan y cuándo. La cifra y la fecha las escribe quien da los textos.
+function receipt(params: unknown, site: string, copy: MailCopy["receipt"]): RenderedMail | null {
+  const parsed = receiptParams.safeParse(params);
+  if (!parsed.success || Number.isNaN(Date.parse(parsed.data.charged_at))) return null;
+  const { gross_cents, plan, charged_at } = parsed.data;
+  const paragraphs = [copy.paid(gross_cents, plan, charged_at), copy.thanks];
+  const link = { label: copy.accountLabel, url: `${site}${ROUTES.account}` };
+  return {
+    subject: copy.subject,
+    text: [...paragraphs, `${link.label}: ${link.url}`].join("\n\n"),
+    html: [...paragraphs.map((line) => `<p>${escapeHtml(line)}</p>`), `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.label)}</a></p>`].join(""),
+  };
+}
+
 /** El correo armado, o nulo si la fila no tiene forma: es una falla de código, y reintentarla no la arregla. */
 export function renderMail(template: string, params: unknown, site: string, copy: MailCopy): RenderedMail | null {
-  return template === "CO-27" ? clabeNotice(params, site, copy.clabeNotice) : null;
+  if (template === "CO-27") return clabeNotice(params, site, copy.clabeNotice);
+  if (template === "CO-03") return receipt(params, site, copy.receipt);
+  return null;
 }

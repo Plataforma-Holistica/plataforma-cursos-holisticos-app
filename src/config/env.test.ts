@@ -387,3 +387,36 @@ describe("el correo propio (T-604)", () => {
     expect(problemsOf({ ...valid, MAIL_FROM_NOTICES: from })).toEqual(["MAIL_FROM_NOTICES: tiene un valor inválido"]);
   });
 });
+
+describe("Stripe (T-303)", () => {
+  // Las llaves de prueba se arman por partes: escritas de corrido, el escaneo de secretos las toma por reales.
+  const key = (mode: "test" | "live") => ["sk", mode, "prueba0123456789abcdef"].join("_");
+  const webhook = ["whsec", "prueba0123456789abcdef"].join("_");
+  const hosted = (appEnv: string) => ({ APP_ENV: appEnv, SENTRY_DSN: "https://llave@sentry.example/1", NEXT_PUBLIC_SUPABASE_URL: "https://proyecto.supabase.co" });
+
+  it("son opcionales: sin ellas, la ruta de los avisos no existe", () => {
+    expect(parseEnv(valid)).not.toHaveProperty("STRIPE_SECRET_KEY");
+  });
+
+  it("van juntas", () => {
+    expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: key("test") })).toEqual(["STRIPE_WEBHOOK_SECRET: falta"]);
+    expect(problemsOf({ ...valid, STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: falta"]);
+    expect(parseEnv({ ...valid, STRIPE_SECRET_KEY: key("test"), STRIPE_WEBHOOK_SECRET: webhook }).STRIPE_WEBHOOK_SECRET).toBe(webhook);
+  });
+
+  it.each(["local", "staging"])("en %s solo la llave de prueba: una real cobraría de verdad", (appEnv) => {
+    const source = { ...valid, ...hosted(appEnv), ...mail, STRIPE_WEBHOOK_SECRET: webhook };
+    expect(problemsOf({ ...source, STRIPE_SECRET_KEY: key("live") })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
+    expect(() => parseEnv({ ...source, STRIPE_SECRET_KEY: key("test") })).not.toThrow();
+  });
+
+  it("en producción solo la real: una de prueba daría acceso con tarjetas de prueba", () => {
+    const source = { ...valid, ...hosted("production"), ...mail, STRIPE_WEBHOOK_SECRET: webhook };
+    expect(problemsOf({ ...source, STRIPE_SECRET_KEY: key("test") })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
+    expect(() => parseEnv({ ...source, STRIPE_SECRET_KEY: key("live") })).not.toThrow();
+  });
+
+  it.each(["pk_test_prueba0123456789", "sk_test_", "whsec_prueba0123456789"])("una llave secreta con otra forma (%s) no se admite", (value) => {
+    expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: value, STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
+  });
+});

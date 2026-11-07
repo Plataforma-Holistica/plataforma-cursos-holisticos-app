@@ -63,6 +63,11 @@ const schema = z.object({
   MAILPIT_URL: httpUrl.optional(),
   // La llave con que Vercel Cron pide el barrido de la salida de correo. Secreta. Sin ella la ruta contesta como si no existiera.
   CRON_SECRET: z.string().min(32).optional(),
+  // Stripe (T-303; TRD §7.3): la llave secreta, con la que el servidor lee el estado de un aviso, y el secreto con que Stripe firma los avisos de este punto de conexión
+  // (en local lo da `stripe listen`). Secretas, solo en el servidor, y van juntas: sin ellas la ruta del aviso contesta como si no existiera. La de prueba no sale de
+  // fuera de producción, y la real solo vale en producción.
+  STRIPE_SECRET_KEY: z.string().regex(/^sk_(test|live)_[A-Za-z0-9]{10,255}$/).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().regex(/^whsec_[A-Za-z0-9]{10,255}$/).optional(),
 });
 
 // La llave privada de firma, en PEM o en base64, como la entrega Mux. Aquí solo se revisa su
@@ -168,6 +173,13 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     failed.add(present.MUX_TOKEN_ID === undefined ? "MUX_TOKEN_ID" : "MUX_TOKEN_SECRET");
   }
   if (present.VIDEO_PROVIDER === "test" && present.APP_ENV !== "local") failed.add("VIDEO_PROVIDER");
+  if ((present.STRIPE_SECRET_KEY === undefined) !== (present.STRIPE_WEBHOOK_SECRET === undefined)) {
+    failed.add(present.STRIPE_SECRET_KEY === undefined ? "STRIPE_SECRET_KEY" : "STRIPE_WEBHOOK_SECRET");
+  }
+  // Una llave real fuera de producción cobraría de verdad desde una vista previa; una de prueba en producción daría acceso con tarjetas de prueba.
+  if (present.STRIPE_SECRET_KEY !== undefined && present.STRIPE_SECRET_KEY.startsWith("sk_live_") !== (present.APP_ENV === "production")) {
+    failed.add("STRIPE_SECRET_KEY");
+  }
   if (present.VIDEO_PROVIDER === "mux") {
     if (present.MUX_TOKEN_ID === undefined) failed.add("MUX_TOKEN_ID");
     if (present.MUX_TOKEN_SECRET === undefined) failed.add("MUX_TOKEN_SECRET");

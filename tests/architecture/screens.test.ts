@@ -72,6 +72,16 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
   "src/app/sesion/cerrar/route.ts": /closedSessionRoute\(await closeRejectedSession\(jar\)\)/,
   // El barrido de la salida de correo: sin la llave de Vercel Cron no existe.
   "src/app/api/trabajos/correo/route.ts": /if \(!mailSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
+  // El barrido de los avisos de Stripe (T-303): tampoco.
+  "src/app/api/trabajos/avisos/route.ts": /if \(!billingSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
+  // Los avisos de Stripe (T-303): sin sus llaves no existe, y lo demás lo decide la firma, en el servicio.
+  "src/app/api/webhooks/stripe/route.ts":
+    /if \(!stripeWebhookEnabled\(\)\) return new Response\(null, \{ status: 404 \}\);[\s\S]*receiveStripeEvent\(body, await stripeSignature\(\)\)/,
+};
+
+/** Las únicas rutas que reciben algo que no es una lectura, con el único método que atienden: los avisos de los proveedores, que solo saben mandar un POST. */
+const WRITE_ROUTES: Record<string, string> = {
+  "src/app/api/webhooks/stripe/route.ts": "POST",
 };
 
 /**
@@ -632,7 +642,13 @@ describe("toda ruta está en la lista, con lo que la cuida", () => {
     expect(codeOf(file)).toMatch(guard);
   });
 
-  it.each(Object.keys(ROUTE_HANDLERS))("%s solo atiende lecturas: lo que cambia algo es una acción de servidor", (file) => {
+  it.each(Object.entries(WRITE_ROUTES))("%s atiende solo %s, y ninguna lectura", (file, method) => {
+    const methods = [...codeOf(file).matchAll(/export (?:async )?function ([A-Z]+)\(/g)].map((match) => match[1]);
+    expect(methods).toEqual([method]);
+    expect(new Set(codeOf(file).match(/\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\b/g))).toEqual(new Set([method]));
+  });
+
+  it.each(Object.keys(ROUTE_HANDLERS).filter((file) => !(file in WRITE_ROUTES)))("%s solo atiende lecturas: lo que cambia algo es una acción de servidor", (file) => {
     const methods = [...codeOf(file).matchAll(/export (?:async )?function ([A-Z]+)\(/g)].map((match) => match[1]);
     expect(methods.filter((method) => method !== "GET" && method !== "HEAD")).toEqual([]);
     expect(methods).toContain("GET");
