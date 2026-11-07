@@ -13,14 +13,17 @@
 -- revisión con `unavailable`, que es lo que FL-15 E4 dice de un filtro que no responde. La aplicación nunca elige el estado.
 --
 -- El acceso (RN-01) no lo decide la base: lo decide el servidor con la regla única, en la misma transacción en que escribe,
--- como al bajar un recurso. La base comprueba lo que no lo necesita: el interruptor, la cuenta activa, la lección vigente
--- de un curso publicado y listado, el maestro, el veto, el seudónimo y el freno.
+-- como al bajar un recurso, y también al leer. La base comprueba lo que no lo necesita: el interruptor, la cuenta activa,
+-- la lección vigente de un curso publicado y listado, el maestro, el veto, el seudónimo y el freno.
 --
 -- Decisiones mías sin confirmar: `profile_privacy` la escribe solo el servidor (el 05 planeaba que la persona la escribiera
 -- directo) y nace al elegir el seudónimo, no en `handle_new_user`, que es del área `account`, congelada; el freno de 10 cada
--- 10 minutos (TRD §9) se cuenta por minuto y suma los últimos diez, para que el cambio de ventana no deje pasar el doble, y
--- cuenta publicar y editar; borrar lo propio siempre se puede; un comentario editado no lo ven los demás mientras se asienta;
--- los de una lección retirada no se muestran ni aceptan respuestas.
+-- 10 minutos (TRD §9) se cuenta por minuto y suma el que corre y los diez anteriores, para que entre el primero y el undécimo
+-- pasen al menos 10 minutos, y cuenta publicar y editar; borrar lo propio siempre se puede; un comentario editado no lo ven
+-- los demás mientras se asienta, y con él su hilo; los de una lección retirada no se muestran ni aceptan respuestas; el veto
+-- también detiene al maestro en sus lecciones (RF-704 no hace excepción); editar con el mismo texto no escribe nada; el
+-- número de la pestaña cuenta lo publicado que todos ven; un emoji compuesto pasa (`comment_text_ok`); en PA-45, lo que
+-- escribió el maestro no queda «sin responder».
 
 create type public.comment_status as enum ('in_filter', 'published', 'in_review', 'hidden', 'deleted');
 
@@ -43,6 +46,19 @@ comment on table public.profile_privacy is 'La privacidad de cada cuenta (RF-808
 alter table public.profile_privacy enable row level security;
 create trigger touch_updated_at before update on public.profile_privacy
   for each row execute function private.touch_updated_at();
+
+-- ---------------------------------------------------------------------------------------
+-- El texto de un comentario y de un seudónimo: la regla del borrador (`draft_text_ok`), salvo la unión de ancho cero (U+200D)
+-- y la no unión (U+200C) entre dos caracteres que no son espacio, que arman los emoji compuestos (una persona con su género,
+-- una familia) y la escritura de varias lenguas. Sueltas o en una punta siguen sin pasar, y las inversiones de dirección
+-- también. El largo se cuenta con ellas.
+create function private.comment_text_ok(p_text text, p_max integer, p_multiline boolean) returns boolean
+language sql immutable set search_path = ''
+as $$
+  select p_text is not null and pg_catalog.char_length(p_text) <= p_max and p_text is nfc normalized
+     and private.draft_text_ok(pg_catalog.regexp_replace(p_text, '(?<=\S)[\u200c\u200d](?=\S)', '', 'g'), p_max, p_multiline)
+$$;
+revoke all on function private.comment_text_ok(text, integer, boolean) from public;
 
 -- ---------------------------------------------------------------------------------------
 -- Los comentarios (05 §5.6). `revision` no está en el 05: es lo que lleva editar y borrar para no pisar otra pestaña.
@@ -68,7 +84,7 @@ create table public.comments (
   deleted_at timestamptz,
   constraint comments_lesson_fk foreign key (lesson_id, course_id) references public.published_lessons (id, course_id),
   constraint comments_course_fk foreign key (course_id, teacher_id) references public.published_courses (course_id, teacher_id),
-  constraint comments_body_ok check (body is null or private.draft_text_ok(body, 4000, true)),
+  constraint comments_body_ok check (body is null or private.comment_text_ok(body, 4000, true)),
   constraint comments_filter_verdict_known check (filter_verdict in ('pass', 'flagged', 'risk', 'unavailable')),
   constraint comments_report_count_positive check (report_count >= 0),
   constraint comments_deleted_consistent check (
@@ -85,6 +101,8 @@ create index comments_lesson_idx on public.comments (lesson_id, created_at desc,
 create index comments_parent_idx on public.comments (parent_id, created_at, id) where parent_id is not null;
 -- Los de las lecciones de un maestro (PA-45).
 create index comments_teacher_idx on public.comments (teacher_id, created_at desc, id desc) where parent_id is null;
+-- Lo publicado de una lección, para el número de la pestaña.
+create index comments_lesson_published_idx on public.comments (lesson_id) where status = 'published';
 -- Lo propio de un autor, su reincidencia y el borrado al eliminar la cuenta.
 create index comments_author_idx on public.comments (author_id, created_at desc) where author_id is not null;
 
@@ -198,10 +216,11 @@ as $$
 $$;
 revoke all on function private.comment_lesson(uuid) from public;
 
--- El portón de escribir, común a publicar y editar (sin el freno, que va al final de cada una). Primero se sabe si quien
--- escribe es el maestro de la lección: al maestro no se le pide seudónimo (aparece con el nombre de su ficha), y lo detienen
--- su suspensión y su aviso; a los demás, el veto y el seudónimo. Para el maestro toma su fila para compartir, como toda
--- escritura a su nombre: suspenderlo y escribir van uno tras otro.
+-- El portón de escribir, común a publicar y editar (sin el freno, que va al final de cada una). El veto detiene a todos.
+-- Después se sabe si quien escribe es el maestro de la lección (un maestro por guion no tiene cuenta, y entonces nadie lo
+-- es): al maestro no se le pide seudónimo (aparece con el nombre de su ficha), y lo detienen su suspensión y su aviso; a los
+-- demás, el seudónimo. Para el maestro toma su fila para compartir, como toda escritura a su nombre: suspenderlo y escribir
+-- van uno tras otro.
 create function private.comment_gate(p_lesson uuid) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -220,8 +239,11 @@ begin
   if v_lesson.id is null then
     return '{"answer": "not_found"}'::jsonb;
   end if;
+  if exists (select 1 from public.profiles p where p.id = v_actor and p.comment_ban_until > now()) then
+    return '{"answer": "banned"}'::jsonb;
+  end if;
   select t.* into v_teacher from public.teachers t where t.id = v_lesson.teacher_id;
-  if v_teacher.profile_id = v_actor then
+  if v_teacher.profile_id is not distinct from v_actor then
     if v_teacher.status <> 'active' then
       return '{"answer": "suspended"}'::jsonb;
     end if;
@@ -232,22 +254,20 @@ begin
       return '{"answer": "suspended"}'::jsonb;
     end if;
   else
-    if exists (select 1 from public.profiles p where p.id = v_actor and p.comment_ban_until > now()) then
-      return '{"answer": "banned"}'::jsonb;
-    end if;
     if not exists (select 1 from public.profile_privacy x where x.profile_id = v_actor and x.pseudonym is not null) then
       return '{"answer": "needs_pseudonym"}'::jsonb;
     end if;
   end if;
   return pg_catalog.jsonb_build_object(
     'answer', 'ok', 'course', v_lesson.course_id, 'teacher', v_lesson.teacher_id,
-    'is_teacher', v_teacher.profile_id = v_actor);
+    'is_teacher', v_teacher.profile_id is not distinct from v_actor);
 end
 $$;
 revoke all on function private.comment_gate(uuid) from public;
 
--- El freno: 10 cada 10 minutos por cuenta (TRD §9), contando publicar y editar. Cuenta por minuto y suma los últimos diez,
--- bajo un candado de la cuenta para que dos envíos a la vez no pasen los dos con el noveno. Lo que se niega no cuenta.
+-- El freno: 10 cada 10 minutos por cuenta (TRD §9), contando publicar y editar. Cuenta por minuto y suma el que corre y los
+-- diez anteriores (entre el primero y el undécimo pasan al menos 10 minutos), bajo un candado de la cuenta para que dos
+-- envíos a la vez no pasen los dos con el noveno. Lo que se niega no cuenta.
 create function private.comment_hit() returns boolean
 language plpgsql security definer set search_path = ''
 as $$
@@ -257,7 +277,7 @@ declare
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_bucket, 0));
   if (select coalesce(sum(c.hits), 0) from private.rate_limit_counters c
-      where c.bucket = v_bucket and c.window_start > v_minute - interval '10 minutes') >= 10 then
+      where c.bucket = v_bucket and c.window_start >= v_minute - interval '10 minutes') >= 10 then
     return false;
   end if;
   insert into private.rate_limit_counters as c (bucket, window_start, hits)
@@ -305,7 +325,7 @@ $$;
 revoke all on function private.comment_name(public.comments) from public;
 
 -- Lo que se ve de un comentario, con la lista exacta de claves. Lo que está en filtro o en revisión se dice `in_review`,
--- y solo lo ve su autor (lo decide quien llama). Lo borrado sale sin texto ni nombre.
+-- y solo lo ve su autor (lo decide quien llama). Lo borrado sale sin texto ni nombre, y sin decir si era del maestro.
 create function private.comment_view(p_comment public.comments, p_viewer uuid) returns jsonb
 language sql stable security definer set search_path = ''
 as $$
@@ -315,8 +335,8 @@ as $$
     'body', p_comment.body,
     'state', case p_comment.status when 'published' then 'published' when 'deleted' then 'deleted' else 'in_review' end,
     'own', p_comment.author_id is not distinct from p_viewer and p_comment.author_id is not null,
-    'teacher', p_comment.is_teacher_reply,
-    'edited', p_comment.edited_at is not null,
+    'teacher', p_comment.is_teacher_reply and p_comment.status <> 'deleted',
+    'edited', p_comment.edited_at is not null and p_comment.status <> 'deleted',
     'created_at', p_comment.created_at,
     'revision', case when p_comment.author_id = p_viewer then p_comment.revision end)
 $$;
@@ -337,14 +357,16 @@ returns jsonb
 language sql stable security definer set search_path = ''
 as $$
   with visible as (
-    select r from public.comments r
+    select r, pg_catalog.row_number() over (order by r.created_at, r.id) as n
+    from public.comments r
     where r.parent_id = p_parent and private.comment_visible(r, p_viewer)
-      and (p_after_at is null or (r.created_at, r.id) > (p_after_at, p_after_id))
+      and (p_after_at is null
+           or (r.created_at, r.id) > (p_after_at, coalesce(p_after_id, '00000000-0000-0000-0000-000000000000'::uuid)))
     order by r.created_at, r.id
     limit 21)
   select pg_catalog.jsonb_build_object(
-    'items', coalesce((select pg_catalog.jsonb_agg(private.comment_view(v.r, p_viewer) order by (v.r).created_at, (v.r).id)
-                       from (select r from visible limit 20) v), '[]'::jsonb),
+    'items', coalesce((select pg_catalog.jsonb_agg(private.comment_view(v.r, p_viewer) order by v.n)
+                       from visible v where v.n <= 20), '[]'::jsonb),
     'more', (select count(*) from visible) > 20)
 $$;
 revoke all on function private.comment_reply_page(uuid, uuid, timestamptz, uuid) from public;
@@ -353,7 +375,7 @@ revoke all on function private.comment_reply_page(uuid, uuid, timestamptz, uuid)
 -- Lo que el servidor llama. Quien actúa es `private.actor_id()`. Escribir supone que el servidor ya decidió el acceso con la
 -- regla única, en esta misma transacción.
 
--- Publicar un comentario o una respuesta (FL-15, FL-38).
+-- Publicar un comentario o una respuesta (FL-15, FL-38). Responder a una respuesta cuelga del comentario original (FL-15 A1).
 create function private.comment_post(p_lesson uuid, p_parent uuid, p_body text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -366,12 +388,19 @@ begin
   if v_gate ->> 'answer' <> 'ok' then
     return v_gate;
   end if;
-  if not private.draft_text_ok(p_body, 4000, true) then
+  if not private.comment_text_ok(p_body, 4000, true) then
     return '{"answer": "invalid"}'::jsonb;
   end if;
   if p_parent is not null then
     -- Para compartir: borrar el padre a la vez espera a esta respuesta.
     select c.* into v_parent from public.comments c where c.id = p_parent for share;
+    if v_parent.parent_id is not null then
+      -- La respuesta a la que se responde también tiene que estar publicada: borrada o en revisión, no se ve.
+      if v_parent.status <> 'published' then
+        return '{"answer": "bad_parent"}'::jsonb;
+      end if;
+      select c.* into v_parent from public.comments c where c.id = v_parent.parent_id for share;
+    end if;
     if v_parent.id is null or v_parent.lesson_id <> p_lesson or v_parent.parent_id is not null or v_parent.status <> 'published' then
       return '{"answer": "bad_parent"}'::jsonb;
     end if;
@@ -380,7 +409,7 @@ begin
     return '{"answer": "throttled"}'::jsonb;
   end if;
   insert into public.comments (lesson_id, course_id, teacher_id, author_id, parent_id, is_teacher_reply, body)
-  values (p_lesson, (v_gate ->> 'course')::uuid, (v_gate ->> 'teacher')::uuid, private.actor_id(), p_parent,
+  values (p_lesson, (v_gate ->> 'course')::uuid, (v_gate ->> 'teacher')::uuid, private.actor_id(), v_parent.id,
           (v_gate ->> 'is_teacher')::boolean, p_body)
   returning id into v_id;
   v_status := private.comment_settle(v_id);
@@ -410,7 +439,7 @@ begin
   if v_gate ->> 'answer' <> 'ok' then
     return v_gate;
   end if;
-  if not private.draft_text_ok(p_body, 4000, true) then
+  if not private.comment_text_ok(p_body, 4000, true) then
     return '{"answer": "invalid"}'::jsonb;
   end if;
   -- Ya con la fila tomada, otra vez: pudo cambiar entre leer y tomar.
@@ -422,6 +451,11 @@ begin
   end if;
   if v_comment.revision is distinct from p_seen then
     return '{"answer": "changed"}'::jsonb;
+  end if;
+  -- El mismo texto: nada que escribir ni que volver a filtrar.
+  if p_body = v_comment.body then
+    return pg_catalog.jsonb_build_object('answer', 'ok', 'id', p_comment,
+      'state', case v_comment.status when 'published' then 'published' else 'in_review' end);
   end if;
   if not private.comment_hit() then
     return '{"answer": "throttled"}'::jsonb;
@@ -474,7 +508,7 @@ begin
   if v_actor is null or not exists (select 1 from public.profiles p where p.id = v_actor and p.status = 'active') then
     return '{"answer": "suspended_account"}'::jsonb;
   end if;
-  if not private.draft_text_ok(p_pseudonym, 40, false) or pg_catalog.char_length(p_pseudonym) < 2 then
+  if not private.comment_text_ok(p_pseudonym, 40, false) or pg_catalog.char_length(p_pseudonym) < 2 then
     return '{"answer": "invalid"}'::jsonb;
   end if;
   insert into public.profile_privacy as x (profile_id, pseudonym) values (v_actor, p_pseudonym)
@@ -511,7 +545,8 @@ begin
       and (private.comment_visible(c, v_viewer)
            or (c.status = 'deleted' and exists (
                  select 1 from public.comments r where r.parent_id = c.id and private.comment_visible(r, v_viewer))))
-      and (p_before_at is null or (c.created_at, c.id) < (p_before_at, p_before_id))
+      and (p_before_at is null
+           or (c.created_at, c.id) < (p_before_at, coalesce(p_before_id, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid)))
     order by c.created_at desc, c.id desc
     limit 21)
   select coalesce(pg_catalog.jsonb_agg(
@@ -525,7 +560,10 @@ begin
     'answer', 'ok',
     'items', v_items,
     'more', v_more,
-    'count', (select count(*) from public.comments c where c.lesson_id = p_lesson and c.status = 'published'),
+    'count', (select count(*) from public.comments c
+              where c.lesson_id = p_lesson and c.status = 'published'
+                and (c.parent_id is null or exists (
+                       select 1 from public.comments p where p.id = c.parent_id and p.status in ('published', 'deleted')))),
     'me', pg_catalog.jsonb_build_object(
       'teacher', exists (select 1 from public.teachers t where t.id = v_lesson.teacher_id and t.profile_id = v_viewer),
       'pseudonym', (select x.pseudonym from public.profile_privacy x where x.profile_id = v_viewer)));
@@ -534,18 +572,23 @@ $$;
 revoke all on function private.comments_for_lesson(uuid, timestamptz, uuid) from public;
 grant execute on function private.comments_for_lesson(uuid, timestamptz, uuid) to app_service;
 
--- Más respuestas de un comentario de esa lección, después de la última que se vio.
+-- Más respuestas de un comentario de esa lección, después de la última que se vio. Del que quien mira ve en la lección (con la
+-- misma regla de `comments_for_lesson`); de otro, nada.
 create function private.comment_replies(p_lesson uuid, p_parent uuid, p_after_at timestamptz, p_after_id uuid) returns jsonb
 language plpgsql stable security definer set search_path = ''
 as $$
 declare
   v_viewer uuid := private.actor_id();
+  v_parent public.comments;
 begin
   if not private.comments_open() then
     return '{"answer": "closed"}'::jsonb;
   end if;
-  if private.comment_lesson(p_lesson) is null or v_viewer is null
-     or not exists (select 1 from public.comments c where c.id = p_parent and c.lesson_id = p_lesson and c.parent_id is null) then
+  select c.* into v_parent from public.comments c where c.id = p_parent and c.lesson_id = p_lesson and c.parent_id is null;
+  if (private.comment_lesson(p_lesson)).id is null or v_viewer is null or v_parent.id is null
+     or not (private.comment_visible(v_parent, v_viewer)
+             or (v_parent.status = 'deleted' and exists (
+                   select 1 from public.comments r where r.parent_id = v_parent.id and private.comment_visible(r, v_viewer)))) then
     return '{"answer": "not_found"}'::jsonb;
   end if;
   return pg_catalog.jsonb_build_object('answer', 'ok') || private.comment_reply_page(p_parent, v_viewer, p_after_at, p_after_id);
@@ -582,16 +625,18 @@ begin
     join public.course_registry r on r.course_id = c.course_id and r.state in ('published', 'changes_pending')
     where c.teacher_id = v_teacher and c.parent_id is null and c.status = 'published'
       and (p_course is null or c.course_id = p_course)
-      and (not coalesce(p_unanswered, false) or not exists (
-             select 1 from public.comments x where x.parent_id = c.id and x.is_teacher_reply and x.status = 'published'))
-      and (p_before_at is null or (c.created_at, c.id) < (p_before_at, p_before_id))
+      -- Sin responder: lo de los demás que no tiene una respuesta publicada suya. Lo que escribió el maestro no espera respuesta.
+      and (not coalesce(p_unanswered, false) or (not c.is_teacher_reply and not exists (
+             select 1 from public.comments x where x.parent_id = c.id and x.is_teacher_reply and x.status = 'published')))
+      and (p_before_at is null
+           or (c.created_at, c.id) < (p_before_at, coalesce(p_before_id, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid)))
     order by c.created_at desc, c.id desc
     limit 21)
   select coalesce(pg_catalog.jsonb_agg(
            private.comment_view(v.c, v_viewer) || pg_catalog.jsonb_build_object(
              'lesson', (v.c).lesson_id, 'lesson_title', v.lesson_title, 'course', (v.c).course_id,
              'course_title', v.course_title, 'course_slug', v.course_slug,
-             'answered', exists (select 1 from public.comments x
+             'answered', (v.c).is_teacher_reply or exists (select 1 from public.comments x
                                  where x.parent_id = (v.c).id and x.is_teacher_reply and x.status = 'published'),
              'replies', private.comment_reply_page((v.c).id, v_viewer, null, null))
            order by v.n) filter (where v.n <= 20), '[]'::jsonb),
@@ -624,8 +669,8 @@ as $$
            ('private.comments_for_teacher(uuid,boolean,timestamp with time zone,uuid)')),
   -- Las piezas de adentro, que no ejecuta nadie de la aplicación.
   inner_parts (signature) as (
-    values ('private.comments_open()'), ('private.comment_lesson(uuid)'), ('private.comment_gate(uuid)'),
-           ('private.comment_hit()'), ('private.comment_settle(uuid)'), ('private.comment_name(public.comments)'),
+    values ('private.comments_open()'), ('private.comment_text_ok(text,integer,boolean)'), ('private.comment_lesson(uuid)'),
+           ('private.comment_gate(uuid)'), ('private.comment_hit()'), ('private.comment_settle(uuid)'), ('private.comment_name(public.comments)'),
            ('private.comment_view(public.comments,uuid)'), ('private.comment_visible(public.comments,uuid)'),
            ('private.comment_reply_page(uuid,uuid,timestamp with time zone,uuid)'))
   -- Nadie de la aplicación toca las tablas: ni leer, ni escribir una columna. Todo pasa por las funciones.
@@ -652,6 +697,11 @@ as $$
     where t.tgrelid = 'public.comments'::regclass and t.tgname = g.name
       and t.tgfoid = g.fn::regprocedure and t.tgtype = g.kind and t.tgenabled in ('O', 'A'))
   union all
+  -- El guardián decide por quién ejecuta: como dueño (`security definer`) dejaría pasar a todos. Lo mismo la profundidad.
+  select 'comment trigger function runs as its owner', g.fn
+  from (values ('private.guard_comment()'), ('private.check_comment_depth()')) as g (fn)
+  where (select p.prosecdef from pg_catalog.pg_proc p where p.oid = g.fn::regprocedure)
+  union all
   select 'comment function not executable by app_service', d.signature
   from doors d
   where not pg_catalog.has_function_privilege('app_service', d.signature::regprocedure, 'EXECUTE')
@@ -667,7 +717,7 @@ as $$
   -- Una función nueva que nombre las tablas es una puerta nueva: entra a una de las dos listas.
   select 'comment function not listed', p.oid::regprocedure::text
   from pg_catalog.pg_proc p
-  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname = 'private'
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace and n.nspname in ('private', 'public')
   where (p.proname ~ '^comments?_' or p.prosrc ~ 'public\.(comments|profile_privacy)\M')
     and p.proname not in ('guard_comment', 'check_comment_depth', 'schema_violations_comments')
     and p.oid::regprocedure::text not in (select signature from doors union all select signature from inner_parts)

@@ -4,7 +4,7 @@
 -- respuestas del portón y de cada función, con la marca local y sin ella, lo que ve cada quien y el área `comments`.
 begin;
 \ir _ayuda.psql
-select plan(150);
+select plan(206);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9300000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -139,11 +139,13 @@ select set_config('app.local_courses', 'on', true);
 select private.system_catalog_add('practices', 'Naturaleza'), private.system_catalog_add('levels', 'Principiante');
 insert into pruebas.ids values
   ('t3', private.system_add_teacher('Maestra Luz', 'maestra-luz', null)),
-  ('t4', private.system_add_teacher('Maestro Sol', 'maestro-sol', null));
+  ('t4', private.system_add_teacher('Maestro Sol', 'maestro-sol', null)),
+  ('t5', private.system_add_teacher('Maestra Sin Cuenta', 'maestra-sin-cuenta', null));
 update public.teachers set profile_id = pruebas.p(3), status = 'active' where id = pruebas.id('t3');
 update public.teachers set profile_id = pruebas.p(4), status = 'active' where id = pruebas.id('t4');
 select private.system_load_course(pruebas.id('t3'), pruebas.curso('comenta-uno', array['Lección a', 'Lección b']));
 select private.system_load_course(pruebas.id('t4'), pruebas.curso('comenta-dos', array['Lección c']));
+select private.system_load_course(pruebas.id('t5'), pruebas.curso('comenta-tres', array['Lección d']));
 select pruebas.limpiar();
 -- Con el aviso del maestro aceptado: sin él, la base no lo deja escribir a su nombre. Una base sin borradores no lo trae.
 select pruebas.como_dueno_sistema();
@@ -164,7 +166,7 @@ $$;
 select pruebas.aviso(3), pruebas.aviso(4);
 select is(pruebas.pide(pruebas.p(5), format('private.approve_course(%L)', course_id)), 'approved', 'se aprueba ' || slug)
 from public.course_registry r join public.published_courses c using (course_id)
-where c.slug in ('comenta-uno', 'comenta-dos') order by c.slug;
+where c.slug in ('comenta-uno', 'comenta-dos', 'comenta-tres') order by c.slug;
 insert into pruebas.ids select 'L' || substr(l.title, 9, 1), l.id from public.published_lessons l
 where l.course_id in (select course_id from public.published_courses where slug like 'comenta-%');
 insert into private.app_sessions (session_id, profile_id) select pruebas.sesion(pruebas.p(n)), pruebas.p(n) from generate_series(1, 5) n
@@ -200,9 +202,31 @@ alter table public.comments enable trigger comments_guard;
 create function private.comment_extra() returns integer language sql as $$ select 1 $$;
 select is(pruebas.vigila(), array['comment function not listed private.comment_extra()'], 'y una puerta nueva sin lista');
 drop function private.comment_extra();
+grant execute on function private.comment_gate(uuid) to authenticated;
+select is(pruebas.vigila(), array['comment inner function executable by authenticated private.comment_gate(uuid)'],
+  'y una pieza de adentro que ejecuta la persona');
+revoke execute on function private.comment_gate(uuid) from authenticated;
+alter table public.comments disable trigger comments_parent_depth;
+select is(pruebas.vigila(), array['comments without depth check public.comments'], 'y la profundidad apagada');
+alter table public.comments enable trigger comments_parent_depth;
+alter table public.comments disable row level security;
+select is(pruebas.vigila(), array['comments table without row security public.comments'], 'y la tabla sin seguridad por fila');
+alter table public.comments enable row level security;
+create policy prueba on public.profile_privacy for select using (true);
+select is(pruebas.vigila(), array['comments table with a policy public.profile_privacy'], 'y una política');
+drop policy prueba on public.profile_privacy;
+alter function private.guard_comment() security definer;
+select is(pruebas.vigila(), array['comment trigger function runs as its owner private.guard_comment()'],
+  'y el guardián corriendo como su dueño, que dejaría pasar a todos');
+alter function private.guard_comment() security invoker;
+create function public.comment_hoja() returns integer language sql as $$ select count(*)::int from public.comments $$;
+select is(pruebas.vigila(), array['comment function not listed public.comment_hoja()'], 'y una función de public que nombra la tabla');
+drop function public.comment_hoja();
 grant execute on function private.comment_post(uuid, uuid, text) to authenticated;
 select is(pruebas.vigila(), array['comment function executable by authenticated private.comment_post(uuid,uuid,text)'],
   'y una puerta que ejecuta la persona');
+select ok(exists (select 1 from private.schema_violations() v where v.problem = 'comment function executable by authenticated'),
+  'y el vigilante entero también la ve');
 revoke execute on function private.comment_post(uuid, uuid, text) from authenticated;
 
 -- ---------------------------------------------------------------------------------------
@@ -214,6 +238,13 @@ select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', re
 select is(pruebas.r(pruebas.p(1), $$private.comment_set_pseudonym(' Ana')$$), 'invalid', 'con espacio en la punta, no');
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', 'An' || chr(10) || 'a')), 'invalid', 'en dos líneas, no');
 select is(pruebas.r(pruebas.p(1), $$private.comment_set_pseudonym('Anita')$$), 'ok', 'Anita, sí');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana \+01F9D8\200D\2640\FE0F')), 'ok', 'con un emoji compuesto (ZWJ), sí');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana\200D')), 'invalid', 'con la unión en la punta, no');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana \200Dx')), 'invalid', 'ni pegada a un espacio');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', repeat('a', 20) || U&'\200D' || repeat('a', 20))), 'invalid',
+  'y cuenta para el largo: 41 con ella, no');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'An\202Ea')), 'invalid', 'una inversión de dirección sigue sin pasar');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'An\200Ba')), 'invalid', 'ni un espacio de ancho cero entre letras');
 select is(pruebas.r(pruebas.p(1), $$private.comment_set_pseudonym('Ana la del bosque')$$), 'ok', 'y se cambia');
 select is((select pseudonym from public.profile_privacy where profile_id = pruebas.p(1)), 'Ana la del bosque', 'queda el último');
 select is(pruebas.r(null, $$private.comment_set_pseudonym('Nadie')$$), 'suspended_account', 'sin nadie que actúe, no');
@@ -254,6 +285,12 @@ select pruebas.como_dueno_sistema();
 update public.profiles set comment_ban_until = now() - interval '1 second' where id = pruebas.p(2);
 select pruebas.limpiar();
 select is(pruebas.publica(pruebas.p(2), 'La', 'Ya puedo', null, 'b1'), 'ok', 'con el veto vencido, sí');
+-- Un curso por guion: su maestro no tiene cuenta, y nadie escribe como él.
+select is(pruebas.publica(pruebas.p(2), 'Ld', 'En un curso por guion', null, 'd1'), 'ok', 'en el curso de un maestro sin cuenta, sí');
+select is((select is_teacher_reply from public.comments where id = pruebas.id('d1')), false, 'y no como su maestro');
+select is((select array_agg(k order by k) from jsonb_object_keys(
+  pruebas.c(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('Ld'), 'Otra en la d'))) k),
+  array['answer', 'id', 'state'], 'publicar contesta esas claves');
 
 -- Una lección retirada, un curso sin listar o en borrador: no existen para comentar.
 select pruebas.como_dueno();
@@ -300,6 +337,11 @@ select is(pruebas.publica(pruebas.p(3), 'La', 'Suspendida'), 'suspended', 'la ma
 select pruebas.como_dueno_sistema();
 update public.teachers set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.id('t3');
 select pruebas.limpiar();
+select pruebas.suspender(pruebas.p(3));
+select is(pruebas.publica(pruebas.p(3), 'La', 'Cuenta suspendida'), 'suspended_account', 'ni la maestra con la cuenta suspendida');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.p(3);
+select pruebas.limpiar();
 select pruebas.como_dueno();
 set local session_replication_role = replica;
 update public.consents set action = 'withdrawn' where profile_id = pruebas.p(3);
@@ -308,12 +350,22 @@ select is(pruebas.publica(pruebas.p(3), 'La', 'Sin aviso'), 'needs_notice', 'con
 set local session_replication_role = replica;
 update public.consents set action = 'granted' where profile_id = pruebas.p(3);
 reset session_replication_role;
+select pruebas.como_dueno_sistema();
+update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(3);
+select pruebas.limpiar();
+select is(pruebas.publica(pruebas.p(3), 'La', 'Vetada'), 'banned', 'el veto también detiene a la maestra en sus lecciones');
+select pruebas.como_dueno_sistema();
+update public.profiles set comment_ban_until = null where id = pruebas.p(3);
+select pruebas.limpiar();
 
 -- ---------------------------------------------------------------------------------------
 -- Las respuestas: un solo nivel, de la misma lección, a algo publicado.
 
 select is(pruebas.publica(pruebas.p(2), 'La', 'Respondo a Ana', 'c1', 'r1'), 'ok', 'Beto responde a Ana');
-select is(pruebas.publica(pruebas.p(1), 'La', 'A una respuesta', 'r1'), 'bad_parent', 'a una respuesta, no');
+select is(pruebas.publica(pruebas.p(3), 'La', 'A una respuesta', 'r1', 'rr'), 'ok', 'a una respuesta, sí (FL-15 A1)');
+select is((select parent_id from public.comments where id = pruebas.id('rr')), pruebas.id('c1'), 'y cuelga del comentario original');
+select is(pruebas.r(pruebas.p(3), format('private.comment_delete(%L, %s)', pruebas.id('rr'), pruebas.rev('rr'))), 'ok', 'la maestra la borra');
+select is(pruebas.publica(pruebas.p(1), 'La', 'A la respuesta borrada', 'rr'), 'bad_parent', 'a una respuesta borrada, no');
 select is(pruebas.publica(pruebas.p(1), 'Lc', 'En otra lección', 'c1'), 'bad_parent', 'a un comentario de otra lección, no');
 select is(pruebas.r(pruebas.p(1), format('private.comment_post(%L, %L, %L)', pruebas.id('La'), gen_random_uuid(), 'x')), 'bad_parent', 'a uno que no existe, no');
 select pruebas.como_dueno();
@@ -405,9 +457,42 @@ select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pru
 select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Primer comentario, corregido', pruebas.rev('c1'))), 'ok', 'Ana lo corrige');
 select is((select (body, status::text, edited_at is not null, revision) from public.comments where id = pruebas.id('c1')),
   ('Primer comentario, corregido'::text, 'published'::text, true, 2::bigint), 'con su texto, otra vez asentado, editado y una versión más');
+select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Primer comentario, corregido', pruebas.rev('c1'))),
+  'ok', 'con el mismo texto, se acepta');
+select is(pruebas.rev('c1'), 2::bigint, 'sin escribir nada');
+select is((select array_agg(k order by k) from jsonb_object_keys(pruebas.c(pruebas.p(1),
+  format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Primer comentario, corregido', pruebas.rev('c1')))) k),
+  array['answer', 'id', 'state'], 'editar contesta esas claves');
 select pruebas.interruptor('false');
 select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Cerrado', pruebas.rev('c1'))), 'closed', 'cerrados, no se edita');
 select pruebas.interruptor('true');
+select pruebas.suspender(pruebas.p(1));
+select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Suspendida', pruebas.rev('c1'))),
+  'suspended_account', 'con la cuenta suspendida, no se edita');
+select pruebas.como_dueno_sistema();
+update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.p(1);
+select pruebas.limpiar();
+set local session_replication_role = replica;
+update public.published_lessons set is_current = false, retired_at = now() where id = pruebas.id('Lb');
+reset session_replication_role;
+select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('cb'), 'En la retirada', pruebas.rev('cb'))),
+  'not_found', 'en una lección retirada, no se edita');
+select is(pruebas.r(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('Lb'), pruebas.id('cb'))),
+  'not_found', 'ni se piden sus respuestas');
+select is(pruebas.r(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('Lb'))), 'not_found', 'ni se leen sus comentarios');
+select ok(not exists (select 1 from jsonb_array_elements(pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') -> 'items') i
+                      where i ->> 'body' = 'En la b'), 'ni los lista PA-45');
+set local session_replication_role = replica;
+update public.published_lessons set is_current = true, retired_at = null where id = pruebas.id('Lb');
+update public.consents set action = 'withdrawn' where profile_id = pruebas.p(3);
+reset session_replication_role;
+select ok(exists (select 1 from jsonb_array_elements(pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') -> 'items') i
+                  where i ->> 'body' = 'En la b'), 'vigente otra vez, PA-45 lo lista');
+select is(pruebas.r(pruebas.p(3), format('private.comment_edit(%L, %L, %s)', pruebas.id('m1'), 'Sin aviso', pruebas.rev('m1'))),
+  'needs_notice', 'ni la maestra con el aviso pendiente');
+set local session_replication_role = replica;
+update public.consents set action = 'granted' where profile_id = pruebas.p(3);
+reset session_replication_role;
 select pruebas.como_dueno_sistema();
 update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(2);
 select pruebas.limpiar();
@@ -455,18 +540,24 @@ select is((select array_agg(k order by k) from jsonb_object_keys(
   array['answer', 'count', 'items', 'me', 'more'], 'y la respuesta, esas');
 select is(pruebas.c(pruebas.p(2), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) -> 'items' -> 0 ->> 'revision', null,
   'la versión de lo ajeno no viaja');
-select is(pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) ->> 'count', '6',
-  'cuenta lo publicado, con respuestas');
+select is(pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) ->> 'count', '4',
+  'cuenta lo publicado que todos ven, con sus respuestas: no las de lo que está en revisión');
 select is(pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) -> 'me',
   '{"teacher": false, "pseudonym": "Ana la del bosque"}'::jsonb, 'Ana sabe con qué nombre aparece');
 select is(pruebas.c(pruebas.p(3), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) -> 'me',
   '{"teacher": true, "pseudonym": null}'::jsonb, 'la maestra sabe que es la maestra');
 select pruebas.interruptor('false');
 select is(pruebas.r(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))), 'closed', 'cerrados, no se leen');
+select is(pruebas.r(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'), pruebas.id('c1'))), 'closed', 'ni sus respuestas');
 select pruebas.interruptor('true');
 select is(pruebas.r(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', gen_random_uuid())), 'not_found', 'de una lección que no existe, nada');
 select is(pruebas.r(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'), pruebas.id('c1'))), 'ok', 'más respuestas de un comentario de la lección');
 select is(pruebas.r(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('Lc'), pruebas.id('c1'))), 'not_found', 'pero no pidiéndolas desde otra lección');
+select is(pruebas.r(pruebas.p(2), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'), pruebas.id('c1'))), 'not_found',
+  'ni las de un comentario que no ve');
+select is((select array_agg(k order by k) from jsonb_object_keys(
+  pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'), pruebas.id('c1')))) k),
+  array['answer', 'items', 'more'], 'y contesta esas claves');
 
 -- ---------------------------------------------------------------------------------------
 -- Borrar (RF-801): siempre se puede lo propio, y deja la fila vacía.
@@ -488,6 +579,8 @@ select is(pruebas.publica(pruebas.p(4), 'Lb', 'Respondo al aviso', 'm3'), 'ok', 
 select is(pruebas.r(pruebas.p(3), format('private.comment_delete(%L, %s)', pruebas.id('m3'), pruebas.rev('m3'))), 'ok', 'y ella lo borra');
 select is(pruebas.ve(pruebas.p(1), 'Lb'), array['-: - [deleted]', '  Sol: Respondo al aviso [published]'],
   'lo borrado de la maestra tampoco lleva su nombre');
+select is(pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('Lb'))) -> 'items' -> 0 -> 'teacher',
+  'false'::jsonb, 'ni dice que era de la maestra');
 -- Con veto, también: es un derecho sobre lo propio. Beto borra su respuesta a Ana, y otra suya que nadie respondió.
 select is(pruebas.r(pruebas.p(2), format('private.comment_delete(%L, %s)', pruebas.id('b1'), pruebas.rev('b1'))), 'ok', 'con veto, se borra');
 -- Ana borra su comentario con respuestas: queda «borrado» para quien ve alguna.
@@ -501,6 +594,16 @@ select is(pruebas.ve(pruebas.p(4), 'La'), array[
   '  Maestra Luz: Gracias por comentar [published]',
   '  Beto: Respondo a Ana [published]'],
   'el borrado con respuestas sale sin nombre ni texto, y sus respuestas siguen');
+select is((select i -> 'edited' from jsonb_array_elements(
+  pruebas.c(pruebas.p(4), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) -> 'items') i where i ->> 'state' = 'deleted'),
+  'false'::jsonb, 'ni dice que se había editado');
+select is(pruebas.c(pruebas.p(4), format('private.comments_for_lesson(%L, null, null)', pruebas.id('La'))) ->> 'count', '5',
+  'el número cuenta las respuestas de lo borrado');
+select is(pruebas.r(pruebas.p(4), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'), pruebas.id('c1'))), 'ok',
+  'las respuestas de lo borrado se piden');
+select is(pruebas.r(pruebas.p(4), format('private.comment_replies(%L, %L, null, null)', pruebas.id('La'),
+  (select id from public.comments where body = 'Respondo a Ana' and status = 'published'))), 'not_found',
+  'una respuesta no tiene respuestas que pedir');
 select is(pruebas.publica(pruebas.p(2), 'La', 'Respondo a lo borrado', 'c1'), 'banned', 'Beto sigue vetado');
 select is(pruebas.publica(pruebas.p(4), 'La', 'Respondo a lo borrado', 'c1'), 'bad_parent', 'a lo borrado no se responde');
 
@@ -514,6 +617,9 @@ select is(pruebas.r(pruebas.p(4), format('private.comment_edit(%L, %L, %s)', pru
 select pruebas.como_dueno();
 select pruebas.pasan(pruebas.p(4), 9);
 select is(pruebas.publica(pruebas.p(4), 'Lc', 'Página 10'), 'throttled', 'a los nueve minutos, todavía no');
+select pruebas.como_dueno();
+select pruebas.pasan(pruebas.p(4), 1);
+select is(pruebas.publica(pruebas.p(4), 'Lc', 'Página 10'), 'throttled', 'a los diez minutos justos, todavía no');
 select pruebas.como_dueno();
 select pruebas.pasan_diez(pruebas.p(4));
 select is(pruebas.publica(pruebas.p(4), 'Lc', 'Página 10'), 'ok', 'pasados 10 minutos, sí');
@@ -541,6 +647,36 @@ select is((select count(distinct i ->> 'id')::int from (
   union all
   select jsonb_array_elements(pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, %L, %L)', pruebas.id('Lc'), last.at, last.id)) -> 'items')
   from last) x), 22, 'sin repetir ni saltarse ninguno');
+select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (select pruebas.c(pruebas.p(1), format('private.comments_for_lesson(%L, %L, null)',
+  pruebas.id('Lc'), (select created_at from public.comments where body = 'Página 1'))) as r) x),
+  (20, 'true'::text), 'un cursor con la hora y sin id empieza por todo lo de esa hora');
+-- Las respuestas, de 20 en 20. Se cargan a mano (en réplica, sin el guardián ni el freno), todas con la misma hora.
+select pruebas.como_dueno();
+set local session_replication_role = replica;
+insert into public.comments (lesson_id, course_id, teacher_id, author_id, parent_id, body, status, filter_verdict)
+select c.lesson_id, c.course_id, c.teacher_id, pruebas.p(2), c.id, 'Respuesta ' || n, 'published', 'pass'
+from public.comments c, generate_series(1, 22) n where c.body = 'Página 1';
+reset session_replication_role;
+insert into pruebas.ids select 'p1', id from public.comments where body = 'Página 1';
+select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (select pruebas.c(pruebas.p(1),
+  format('private.comment_replies(%L, %L, null, null)', pruebas.id('Lc'), pruebas.id('p1'))) as r) x),
+  (20, 'true'::text), 'las respuestas, 20 a la vez');
+select is((
+  with p1 as (select pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('Lc'), pruebas.id('p1'))) -> 'items' as items),
+       last as (select (items -> 19 ->> 'created_at')::timestamptz as at, (items -> 19 ->> 'id')::uuid as id from p1),
+       p2 as (select pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, %L, %L)', pruebas.id('Lc'), pruebas.id('p1'), last.at, last.id)) as page from last)
+  select (jsonb_array_length(page -> 'items'), page ->> 'more') from p2),
+  (2, 'false'::text), 'la segunda, las 2 que faltan');
+select is((select count(distinct i ->> 'id')::int from (
+  with p1 as (select pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, null, null)', pruebas.id('Lc'), pruebas.id('p1'))) -> 'items' as items),
+       last as (select (items -> 19 ->> 'created_at')::timestamptz as at, (items -> 19 ->> 'id')::uuid as id from p1)
+  select jsonb_array_elements(items) as i from p1
+  union all
+  select jsonb_array_elements(pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, %L, %L)', pruebas.id('Lc'), pruebas.id('p1'), last.at, last.id)) -> 'items')
+  from last) x), 22, 'sin repetir ni saltarse ninguna');
+select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (select pruebas.c(pruebas.p(1), format('private.comment_replies(%L, %L, %L, null)',
+  pruebas.id('Lc'), pruebas.id('p1'), (select created_at from public.comments where body = 'Respuesta 1'))) as r) x),
+  (20, 'true'::text), 'y en las respuestas, un cursor sin id empieza por todo lo de esa hora');
 
 -- ---------------------------------------------------------------------------------------
 -- El maestro en PA-45: lo publicado de sus lecciones, y si ya respondió.
@@ -552,12 +688,15 @@ select is((select array_agg(i ->> 'body' order by i ->> 'body') from jsonb_array
   'la maestra ve lo publicado de sus lecciones, sin lo borrado ni lo que está en revisión');
 select is((select array_agg(i ->> 'body' order by i ->> 'body') from jsonb_array_elements(
   pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, true, null, null)') -> 'items') i),
-  array['Primera línea' || chr(10) || 'segunda', 'Soy otro maestro', 'Un aviso de la maestra'],
-  'sin responder: todos, porque su respuesta colgaba de lo que se borró');
+  array['Primera línea' || chr(10) || 'segunda', 'Soy otro maestro'],
+  'sin responder: lo de los demás, porque su respuesta colgaba de lo que se borró; su propio aviso no espera respuesta');
+select is((select i ->> 'answered' from jsonb_array_elements(
+  pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') -> 'items') i where i ->> 'body' = 'Un aviso de la maestra'),
+  'true', 'y de lo suyo dice que no le falta respuesta');
 select is(pruebas.publica(pruebas.p(3), 'La', 'Gracias, Sol', 'o1'), 'ok', 'la maestra responde a Sol');
 select is((select array_agg(i ->> 'body' order by i ->> 'body') from jsonb_array_elements(
   pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, true, null, null)') -> 'items') i),
-  array['Primera línea' || chr(10) || 'segunda', 'Un aviso de la maestra'],
+  array['Primera línea' || chr(10) || 'segunda'],
   'y Sol ya no está entre los sin responder');
 select is((select i ->> 'answered' from jsonb_array_elements(
   pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') -> 'items') i where i ->> 'body' = 'Soy otro maestro'),
@@ -573,6 +712,39 @@ select is((select array_agg(k order by k) from jsonb_object_keys(
   array['answered', 'body', 'course', 'course_slug', 'course_title', 'created_at', 'edited', 'id', 'lesson', 'lesson_title',
         'name', 'own', 'replies', 'revision', 'state', 'teacher'],
   'cada comentario de PA-45 lleva exactamente esas claves');
+-- PA-45 también va de 20 en 20: Beto deja 21 más en la b (a mano, como arriba).
+select pruebas.como_dueno();
+set local session_replication_role = replica;
+insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
+select l.id, l.course_id, l.teacher_id, pruebas.p(2), 'En la b ' || n, 'published', 'pass'
+from public.published_lessons l, generate_series(1, 21) n where l.id = pruebas.id('Lb');
+reset session_replication_role;
+select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (
+  select pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') as r) x),
+  (20, 'true'::text), 'la maestra los ve de 20 en 20');
+select is((
+  with p1 as (select pruebas.c(pruebas.p(3), 'private.comments_for_teacher(null, false, null, null)') -> 'items' as items),
+       last as (select (items -> 19 ->> 'created_at')::timestamptz as at, (items -> 19 ->> 'id')::uuid as id from p1)
+  select count(distinct i ->> 'id')::int from (
+    select jsonb_array_elements(items) as i from p1
+    union all
+    select jsonb_array_elements(pruebas.c(pruebas.p(3), format('private.comments_for_teacher(null, false, %L, %L)', last.at, last.id)) -> 'items')
+    from last) x),
+  24, 'y con el cursor, los 24 sin repetir ni saltarse');
+select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (select pruebas.c(pruebas.p(3), format('private.comments_for_teacher(null, false, %L, null)',
+  (select created_at from public.comments where body = 'En la b 1'))) as r) x),
+  (20, 'true'::text), 'un cursor con la hora y sin id empieza por todo lo de esa hora');
+
+-- ---------------------------------------------------------------------------------------
+-- Al final, para no mover las listas de arriba: un emoji compuesto, y responder a una respuesta que no está publicada.
+
+select is(pruebas.publica(pruebas.p(4), 'La', U&'Gracias \+01F9D8\200D\2640\FE0F', null, 'em'), 'ok', 'un comentario con un emoji compuesto (ZWJ) se acepta');
+select is(pruebas.estado('em'), 'published', 'y se publica');
+select is(pruebas.publica(pruebas.p(4), 'La', U&'Gracias\200D'), 'invalid', 'la unión suelta en la punta, no');
+select pruebas.marca(false);
+select is(pruebas.publica(pruebas.p(4), 'La', 'Una respuesta que se revisa', 'em', 're'), 'ok', 'Sol se responde, sin la marca');
+select is(pruebas.estado('re'), 'in_review', 'y su respuesta queda en revisión');
+select is(pruebas.publica(pruebas.p(1), 'La', 'A lo que se revisa', 're'), 'bad_parent', 'a una respuesta en revisión no se responde, aunque el original esté publicado');
 
 select * from finish();
 rollback;
