@@ -1013,6 +1013,24 @@ que no se ve leyendo un solo archivo:
   `<main>`. Una prueba de página que monte el comodín recibe la sección dentro de `AdminFrame`. Decisiones mías sin confirmar: el menú lleva
   «Inicio» aunque el logotipo también vuelva al inicio; PA-88 sin menú; las entradas con el mismo nombre que el título de cada pantalla. Para el
   A: una sección suya nueva entra al menú de `frame.tsx`.
+- **Lo que T-501 suma al carril B** (primera solicitud, la base: `t501_comentarios`; RF-801 y RF-609; decisiones de Sergio del 2026-11-06: tras
+  el interruptor `COMENTARIOS_ABIERTOS`, seudónimo mínimo, la regla única de acceso y el borrado que deja la fila vacía). **Nunca sin filtro**, con
+  tres cerrojos: `comments` y `profile_privacy` no tienen permisos para ningún rol de la aplicación y `guard_comment` deja escribir solo al dueño de
+  la tabla (ni el dueño publica a mano: a `published` se llega desde `in_filter` con el veredicto `pass`, o sin veredicto con la marca local
+  `comments_unfiltered`, que pone `db:login` y en producción nadie); todo nace en `in_filter` y `comment_settle` lo asienta en la misma transacción
+  (con la marca, publicado; sin ella, `in_review` con el veredicto `unavailable`); y el servicio contestará `closed` en producción hasta T-502.
+  `hidden` todavía no se alcanza. Los disparadores corren por orden de nombre: `comments_guard` va antes que `comments_parent_depth`,
+  y uno nuevo se nombra para quedar después del guardián. **Quién comenta** lo decide `private.comment_gate` (cerrado, cuenta suspendida, lección que no existe; el maestro
+  del curso por `current_active_teacher_id`, con el aviso al día; los demás por la regla de acceso, sin veto y con seudónimo), y lo usan las
+  puertas `comment_post`, `comment_edit` y `comment_delete` (con la versión que se vio: `changed` si otra pestaña escribió), `comment_set_pseudonym`,
+  `comments_for_lesson`, `comment_replies` y `comments_for_teacher`, todas solo de `app_service`; las internas no las ejecuta nadie. Un nivel de
+  respuestas, solo a lo publicado (`bad_parent`, con el padre tomado para compartir: un borrado a la vez espera). El freno es de 10 en 10 minutos,
+  por persona. Lo borrado se queda como fila vacía, sin autor, y se ve solo si cuelga de él una respuesta visible. El vigilante tiene el área
+  `comments`: una función privada nueva que nombre las tablas entra a su lista o falla. Usa pgTAP 93 e integración 101. Decisiones mías sin
+  confirmar: `profile_privacy` la escribe el servidor y nace al elegir el seudónimo; la marca y el `closed` de producción hasta T-502; lo editado
+  no se muestra a los demás mientras se asienta; lo de una lección retirada no se muestra ni acepta respuestas; la edición sin plazo; el tope de
+  4 000 caracteres; borrar lo propio siempre se puede. Pendiente de preguntar antes de T-502: el TRD dice que la maestra ve también lo oculto y los
+  reportes, y PA-45 solo lo publicado. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
