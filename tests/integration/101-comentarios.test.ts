@@ -204,6 +204,38 @@ describe("los comentarios con dos conexiones (T-501)", () => {
     expect((await owner.query("select 1 from public.comments where parent_id = $1", [second])).rowCount).toBe(1);
   });
 
+  it("responder a una respuesta mientras su autor la borra: también se toma ella, y borrada ya no se responde", async () => {
+    const ana = await student("Ana, la que responde a la respuesta");
+    const beto = await student("Beto, el que se arrepiente");
+    const original = await post(ana, "El original de la respuesta que se borra");
+    const answer = await post(beto, "Una respuesta que se borra", original);
+
+    // La respuesta primero: el borrado de la respuesta espera, y lo nuevo se queda colgado del original.
+    await owner.query("begin");
+    const reply = await as(owner, ana, "private.comment_post($1, $2, $3)", [lesson, answer, "A la respuesta de Beto"]);
+    expect(reply.answer).toBe("ok");
+    await other.query("begin");
+    const deleting = as(other, beto, "private.comment_delete($1, $2::bigint)", [answer, await revision(answer)]);
+    await waitBehind(await connectWatcher(), owner, 1);
+    await owner.query("commit");
+    expect((await deleting).answer).toBe("ok");
+    await other.query("commit");
+    const row = (await owner.query<{ parent_id: string }>("select parent_id from public.comments where id = $1", [reply.id])).rows[0]!;
+    expect(row.parent_id).toBe(original);
+
+    // El borrado primero: la respuesta espera por la respuesta, y al seguir la encuentra borrada.
+    const secondAnswer = await post(beto, "Otra respuesta que se borra", original);
+    await owner.query("begin");
+    expect((await as(owner, beto, "private.comment_delete($1, $2::bigint)", [secondAnswer, await revision(secondAnswer)])).answer).toBe("ok");
+    await other.query("begin");
+    const late = as(other, ana, "private.comment_post($1, $2, $3)", [lesson, secondAnswer, "Llego tarde a la respuesta"]);
+    await waitBehind(await connectWatcher(), owner, 1);
+    await owner.query("commit");
+    expect((await late).answer).toBe("bad_parent");
+    await other.query("commit");
+    expect((await owner.query("select 1 from public.comments where body = $1", ["Llego tarde a la respuesta"])).rowCount).toBe(0);
+  });
+
   it("el freno con dos envíos a la vez: con nueve en la ventana, solo uno de los dos pasa", async () => {
     const ana = await student("Ana, la apurada");
     for (let n = 1; n <= 9; n += 1) await post(ana, `Comentario ${n}`);

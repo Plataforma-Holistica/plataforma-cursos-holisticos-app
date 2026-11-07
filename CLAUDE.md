@@ -1033,19 +1033,24 @@ que no se ve leyendo un solo archivo:
   y los diez anteriores. Lo borrado se queda como fila vacía, sin autor, y se ve solo si cuelga de él una respuesta visible, sin decir si era del
   maestro. El número de la pestaña cuenta lo publicado que todos ven. El vigilante tiene el área `comments`: una función nueva de `private` o de
   `public` que nombre las tablas entra a su lista o falla. El texto de un comentario y del seudónimo es `private.comment_text_ok`: la regla del
-  borrador, salvo la unión (U+200D) y la no unión (U+200C) entre dos caracteres que no son espacio, que arman los emoji compuestos. En PA-45,
-  «sin responder» no incluye lo que escribió el maestro, y de eso `answered` dice verdadero. Responder a una respuesta pide que esa respuesta
-  también esté publicada. **Para la segunda solicitud:** el cursor es `(created_at, id)` con microsegundos, así
+  borrador, salvo una sola unión (U+200D) o no unión (U+200C) entre dos caracteres que no son espacio ni otro carácter de formato, que arman
+  los emoji compuestos; los espacios van escritos, como en `draft_text_ok`. Volver a `in_filter` exige el veredicto y su hora vacíos: el
+  veredicto era del texto de antes. Con el veto no se cambia el seudónimo, porque renombra lo ya publicado; con los comentarios cerrados sí. En
+  PA-45, «sin responder» no incluye lo que escribió el maestro, y de eso `answered` dice verdadero. Responder a una respuesta pide que esa
+  respuesta también esté publicada. **Para la segunda solicitud:** el cursor es `(created_at, id)` con microsegundos, así
   que viaja como texto y no pasa por un `Date` de JavaScript; `me` no dice si quien mira puede escribir (el portón toma filas para compartir y no
   cabe en una lectura estable): la pantalla lo pide aparte. La regla del dominio (`src/domain/catalog/draft-text.ts`) rechaza todo `\p{Cf}`,
-  así que el comentario necesita la suya, con la misma excepción que la base. Usa pgTAP 93 e integración 101; `deleteTestUsers` borra también sus comentarios y su
+  así que el comentario necesita la suya, con la misma excepción que la base. Leer pide ver la lección, y escribir, acceso vigente: en el curso
+  abierto sin suscripción los comentarios se leen y no se escriben (RF-309, FL-15 E1). Un formulario sin JavaScript manda los saltos de
+  línea como CRLF, y la regla de varias líneas rechaza `\r`: el servicio los normaliza antes. Usa pgTAP 93 e integración 101; `deleteTestUsers` borra también sus comentarios y su
   privacidad. Decisiones mías sin confirmar: `profile_privacy` la escribe el servidor y nace al elegir el seudónimo; la marca y el `closed` de
   producción hasta T-502; lo editado no se muestra a los demás mientras se asienta, y con él su hilo; lo de una lección retirada no se muestra ni
   acepta respuestas; la edición sin plazo; el tope de 4 000 caracteres; borrar lo propio siempre se puede; el veto también detiene al maestro; el
   número de la pestaña sin las respuestas de lo que está en revisión; la unión de ancho cero en comentarios y seudónimos; lo propio del maestro
-  fuera de «sin responder». Pendiente para T-502: quitar el camino de la marca local del guardián y de
-  `comment_settle` cuando llegue el filtro, que el seudónimo pase por el filtro y por un freno (hoy se publica tal cual y renombra todo lo ya
-  publicado), y una purga de `rate_limit_counters`. Pendiente de preguntar antes de T-502: el TRD dice que la maestra ve también lo oculto y los
+  fuera de «sin responder»; el veto también detiene el cambio de seudónimo. Pendiente para T-502: quitar el camino de la marca local del
+  guardián y de `comment_settle` cuando llegue el filtro, que el seudónimo pase por el filtro y por un freno (hoy se publica tal cual y renombra
+  todo lo ya publicado), que el filtro quite U+200C y U+200D antes de buscar palabras, que su veredicto lleve la `revision` que filtró (uno que
+  llegue tarde no debe publicar un texto editado después), y una purga de `rate_limit_counters`. Pendiente de preguntar antes de T-502: el TRD dice que la maestra ve también lo oculto y los
   reportes, y PA-45 solo lo publicado. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso

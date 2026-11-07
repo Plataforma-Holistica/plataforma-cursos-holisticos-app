@@ -4,7 +4,7 @@
 -- respuestas del portón y de cada función, con la marca local y sin ella, lo que ve cada quien y el área `comments`.
 begin;
 \ir _ayuda.psql
-select plan(206);
+select plan(212);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9300000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -241,6 +241,9 @@ select is(pruebas.r(pruebas.p(1), $$private.comment_set_pseudonym('Anita')$$), '
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana \+01F9D8\200D\2640\FE0F')), 'ok', 'con un emoji compuesto (ZWJ), sí');
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana\200D')), 'invalid', 'con la unión en la punta, no');
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana \200Dx')), 'invalid', 'ni pegada a un espacio');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana\00A0\200Dx')), 'invalid', 'ni a un espacio duro');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Ana\200D\200Dx')), 'invalid', 'ni dos seguidas');
+select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'Mehr\200Cdad')), 'ok', 'la no unión entre letras, sí');
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', repeat('a', 20) || U&'\200D' || repeat('a', 20))), 'invalid',
   'y cuenta para el largo: 41 con ella, no');
 select is(pruebas.r(pruebas.p(1), format('private.comment_set_pseudonym(%L)', U&'An\202Ea')), 'invalid', 'una inversión de dirección sigue sin pasar');
@@ -277,9 +280,13 @@ select is(pruebas.publica(pruebas.p(2), 'La', 'Suspendido'), 'suspended_account'
 select is(pruebas.r(pruebas.p(2), $$private.comment_set_pseudonym('Beto')$$), 'suspended_account', 'ni elige seudónimo');
 select pruebas.como_dueno_sistema();
 update public.profiles set status = 'active', suspended_at = null, suspension_reason = null where id = pruebas.p(2);
-update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(2);
 select pruebas.limpiar();
 select is(pruebas.r(pruebas.p(2), $$private.comment_set_pseudonym('Beto')$$), 'ok', 'Beto elige su seudónimo');
+select pruebas.como_dueno_sistema();
+update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(2);
+select pruebas.limpiar();
+select is(pruebas.r(pruebas.p(2), $$private.comment_set_pseudonym('Beto el vetado')$$), 'banned',
+  'vetado, no cambia de seudónimo: renombraría lo que ya publicó');
 select is(pruebas.publica(pruebas.p(2), 'La', 'Vetado'), 'banned', 'con el derecho a comentar suspendido, no');
 select pruebas.como_dueno_sistema();
 update public.profiles set comment_ban_until = now() - interval '1 second' where id = pruebas.p(2);
@@ -404,8 +411,12 @@ select throws_ok(format($$update public.comments set status = 'published', filte
   '23514', 'public.comments: nothing is published without the filter (RF-802)', 'ni con el veredicto: se publica solo desde filtro');
 select throws_ok(format($$update public.comments set status = 'in_filter' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: only an edit goes back to the filter', 'a filtro no vuelve sin un texto nuevo');
-select lives_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null where id = %L$$, pruebas.id('g1')),
-  'lo vuelve a filtro con otro texto y sin veredicto (como al editar)');
+select throws_ok(format($$update public.comments set status = 'in_filter', body = 'otro' where id = %L$$, pruebas.id('g1')),
+  '23514', 'public.comments: back to the filter without the verdict of the old text', 'ni con otro texto, si guarda el veredicto del de antes');
+select throws_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null where id = %L$$, pruebas.id('g1')),
+  '23514', 'public.comments: back to the filter without the verdict of the old text', 'ni sin veredicto, si guarda cuándo se filtró');
+select lives_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null, filter_checked_at = null where id = %L$$, pruebas.id('g1')),
+  'lo vuelve a filtro con otro texto, sin veredicto y sin hora del filtro (como al editar)');
 select throws_ok(format($$update public.comments set status = 'published' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: nothing is published without the filter (RF-802)', 'y de filtro, sin veredicto ni marca, no se publica');
 select throws_ok(format($$update public.comments set status = 'in_review' where id = %L$$, pruebas.id('g1')),

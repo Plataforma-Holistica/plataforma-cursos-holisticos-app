@@ -23,7 +23,7 @@
 -- los demás mientras se asienta, y con él su hilo; los de una lección retirada no se muestran ni aceptan respuestas; el veto
 -- también detiene al maestro en sus lecciones (RF-704 no hace excepción); editar con el mismo texto no escribe nada; el
 -- número de la pestaña cuenta lo publicado que todos ven; un emoji compuesto pasa (`comment_text_ok`); en PA-45, lo que
--- escribió el maestro no queda «sin responder».
+-- escribió el maestro no queda «sin responder»; con el veto no se cambia el seudónimo.
 
 create type public.comment_status as enum ('in_filter', 'published', 'in_review', 'hidden', 'deleted');
 
@@ -49,14 +49,18 @@ create trigger touch_updated_at before update on public.profile_privacy
 
 -- ---------------------------------------------------------------------------------------
 -- El texto de un comentario y de un seudónimo: la regla del borrador (`draft_text_ok`), salvo la unión de ancho cero (U+200D)
--- y la no unión (U+200C) entre dos caracteres que no son espacio, que arman los emoji compuestos (una persona con su género,
--- una familia) y la escritura de varias lenguas. Sueltas o en una punta siguen sin pasar, y las inversiones de dirección
--- también. El largo se cuenta con ellas.
+-- y la no unión (U+200C), una sola entre dos caracteres que no son espacio ni otro carácter de formato, que arman los emoji
+-- compuestos (una persona con su género, una familia) y la escritura de varias lenguas. Sueltas, seguidas o en una punta
+-- siguen sin pasar, igual que el espacio de ancho cero y las inversiones de dirección. Los espacios son los de
+-- `draft_text_ok`, escritos, porque `\s` cambia con la configuración regional. El largo se cuenta con ellas. El texto se
+-- guarda con ellas: el filtro de T-502 las quita antes de buscar palabras.
 create function private.comment_text_ok(p_text text, p_max integer, p_multiline boolean) returns boolean
 language sql immutable set search_path = ''
 as $$
   select p_text is not null and pg_catalog.char_length(p_text) <= p_max and p_text is nfc normalized
-     and private.draft_text_ok(pg_catalog.regexp_replace(p_text, '(?<=\S)[\u200c\u200d](?=\S)', '', 'g'), p_max, p_multiline)
+     and private.draft_text_ok(pg_catalog.regexp_replace(p_text,
+       '(?<=[^\x09-\x0d\x20\xa0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff])[\u200c\u200d](?=[^\x09-\x0d\x20\xa0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff])',
+       '', 'g'), p_max, p_multiline)
 $$;
 revoke all on function private.comment_text_ok(text, integer, boolean) from public;
 
@@ -181,6 +185,10 @@ begin
       when 'in_filter' then
         if old.status not in ('published', 'in_review') or new.body is not distinct from old.body then
           raise exception 'public.comments: only an edit goes back to the filter' using errcode = '23514';
+        end if;
+        -- El veredicto era del texto de antes: si se quedara, el texto nuevo se publicaría con él.
+        if new.filter_verdict is not null or new.filter_checked_at is not null then
+          raise exception 'public.comments: back to the filter without the verdict of the old text' using errcode = '23514';
         end if;
       when 'deleted' then
         null;
@@ -507,6 +515,11 @@ declare
 begin
   if v_actor is null or not exists (select 1 from public.profiles p where p.id = v_actor and p.status = 'active') then
     return '{"answer": "suspended_account"}'::jsonb;
+  end if;
+  -- Con el veto no: el seudónimo renombra lo que ya publicó, y sería escribir sin derecho a comentar. Con los comentarios
+  -- cerrados sí, porque es de su privacidad (RF-808) y nadie lo ve.
+  if exists (select 1 from public.profiles p where p.id = v_actor and p.comment_ban_until > now()) then
+    return '{"answer": "banned"}'::jsonb;
   end if;
   if not private.comment_text_ok(p_pseudonym, 40, false) or pg_catalog.char_length(p_pseudonym) < 2 then
     return '{"answer": "invalid"}'::jsonb;
