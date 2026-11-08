@@ -1081,6 +1081,30 @@ que no se ve leyendo un solo archivo:
   pone siempre `comments_accept` en su `pruebas.marca`: la primera corrida de la integración continua va antes de `db:login`. Decisiones mías sin confirmar: las dos puertas; borrar y el seudónimo con solo la sesión; «no se supo»
   niega también en el curso abierto; el maestro tampoco comenta en una lección suya sin listar; se acepta la carrera de una
   suscripción que vence al publicar, como en el latido. Para el A: nada que le toque.
+- **Lo que T-501 suma al carril B** (la 2b, sin migración; PA-22 con los comentarios; plan aprobado por Sergio el 2026-11-07).
+  **Las pestañas de la lección son una sola lista para los dos anchos:** `Tabs` (`src/ui/tabs.tsx`) acepta `narrowOnly`, que
+  desde `lg` no aparece (lo decide `matchMedia("(min-width: 64rem)")`; sin `matchMedia`, como en el DOM de las pruebas, es la
+  angosta). El temario y los recursos son del teléfono; en escritorio quedan «Sobre esta lección» (con los recursos dentro) y
+  «Comentarios ({n})», y si queda una sola va como sección. Así el hilo va una sola vez en el documento. Una prueba de pantalla
+  que mire el escritorio pone `matchMedia` (`wide()` en `tests/ui/lesson-screen.test.tsx`). **El hilo** es
+  `src/app/_comments/lesson-comments.tsx` (con `view.ts`, lo puro, y `state.ts`, el estado), pensado para que PA-45 lo reuse; la
+  acción es `lessonCommentAction` (`comment-actions.ts` junto a la lección) y lo que hace con cada respuesta, `comment-outcomes.ts`.
+  Un solo estado para todo el hilo: lo abierto (responder, editar, la pregunta de borrar, el diálogo del nombre), el aviso y dónde
+  se dice, lo escrito que se queda y lo recién publicado. Cada botón es un envío con `do=` y lo que se vio (`save:<id>:<rev>`,
+  `delete:<id>:<rev>`, `reply:<padre>`), así que todo funciona sin JavaScript; abrir y cerrar no llaman al servicio ni a
+  `refresh()`. **Lo escrito no se pierde:** React 19 devuelve al valor por omisión solo el formulario que envió, así que los campos
+  no llevan `key` por intento; lo que se queda viaja en `kept` y es el valor por omisión, y `CountedField` (movido de
+  `src/app/portal/_lib/` a `src/ui/`) vuelve a contar con el `reset` del formulario. «Cambiar» va dentro del campo de arriba y
+  conserva lo escrito; sin seudónimo, publicar abre el diálogo y lo escrito cruza en campos ocultos y se queda en su campo. **Las
+  páginas van por la dirección** (`?comentarios=`, y `?hilo=` con `?respuestas=` para las respuestas de un hilo), no se acumulan,
+  y un envío sin JavaScript vuelve a lo que se veía (`view.here`); lo publicado que cae fuera de esta página se dice arriba del
+  hilo. El foco va al campo que se abre, a lo publicado, o al comentario que se cerró. Usa `tests/ui/lesson-comments.test.tsx`,
+  `tests/actions/comment-actions.test.ts` y `tests/e2e/equipo/comentarios.equipo.ts`, que prende `COMENTARIOS_ABIERTOS` y lo
+  apaga al terminar (y la preparación de la corrida del equipo lo apaga). Cambió por el requisito una prueba de los recursos de
+  `lesson-screen.test.tsx` (en escritorio van bajo «Sobre esta lección»). Decisiones mías sin confirmar: un texto para el maestro
+  suspendido y el que ya no imparte el curso (el portón contesta lo mismo); sin «Ver planes» ni el motivo del veto, hasta que
+  existan; «Cambiar» abre el diálogo, no PA-28, que no existe; lo propio dice «Tú»; la fecha completa, sin «hoy»; un `pending` para
+  todo el hilo; una dirección con `#comentarios` no elige la pestaña al cargar. Para el A: `Tabs` ganó `narrowOnly`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
