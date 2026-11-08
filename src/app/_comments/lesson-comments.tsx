@@ -1,0 +1,411 @@
+"use client";
+
+import { Ellipsis } from "lucide";
+import { useActionState, useEffect, type ReactNode } from "react";
+
+import { longDate } from "@/app/_lib/dates";
+import { comments as text } from "@/messages/es/comments";
+import { plural, t } from "@/messages/format";
+import { ROUTES } from "@/services/account/navigation";
+import type { CommentThread, CommentView, WriteStanding } from "@/services/comments/comments";
+import { Button } from "@/ui/button";
+import { CountedField } from "@/ui/counted-field";
+import { cx } from "@/ui/cx";
+import { Dialog } from "@/ui/dialog";
+import { Icon } from "@/ui/icon";
+import { InlineAlert } from "@/ui/inline-alert";
+import { TextField } from "@/ui/text-field";
+import { TextLink } from "@/ui/text-link";
+
+import { COMMENT_FIELDS, IDLE_COMMENTS, type CommentNotice, type CommentsState, type NoticePlace, type Place } from "./state";
+import {
+  COMMENTS_ANCHOR,
+  avatarOf,
+  commentAnchor,
+  firstRepliesHref,
+  moreCommentsHref,
+  moreRepliesHref,
+  newestCommentsHref,
+  type CommentsView,
+} from "./view";
+
+// Los comentarios de una lección (PA-22; diseño §5.12; T-501; RF-801, RF-808; FL-15). El hilo, cada comentario y el campo, con
+// un solo estado para todo el hilo (`comment-outcomes.ts`): lo abierto, el aviso y lo escrito que se queda. Cada botón es un
+// envío que dice qué pide con lo que se vio, así que todo funciona también sin JavaScript; con él, la acción vuelve a pintar
+// la página cuando algo cambió.
+//
+// Las páginas van por la dirección y no se acumulan: «Ver más comentarios» lleva a la siguiente y «Más recientes» vuelve a la
+// primera; igual las respuestas de un comentario. En lo ajeno no hay menú hasta T-502 (reportar).
+
+type CommentAction = (previous: CommentsState, form: FormData) => Promise<CommentsState>;
+
+export interface LessonCommentsProps {
+  slug: string;
+  lessonId: string;
+  /** La dirección de la lección, sin parámetros. */
+  back: string;
+  view: CommentsView;
+  /** Con qué nombre aparece el maestro del curso. */
+  teacherName: string;
+  action: CommentAction;
+}
+
+const COMMENT_WARN_AT = 3_800;
+const COMMENT_MAX = 4_000;
+
+const samePlace = (a: NoticePlace, b: NoticePlace) => JSON.stringify(a) === JSON.stringify(b);
+const noticeAt = (state: CommentsState, at: NoticePlace): CommentNotice | null => (state.notice !== null && samePlace(state.notice.at, at) ? state.notice : null);
+const keptAt = (state: CommentsState, at: Place | { kind: "name" }): string | null => (state.kept !== null && samePlace(state.kept.at, at) ? state.kept.body : null);
+
+/** Si se puede escribir: el campo, o el sustituto que lo dice (diseño §5.12, «Variantes que sustituyen al campo»). */
+const canWrite = (write: WriteStanding) => write.kind === "ok" || (write.kind === "gate" && write.answer === "needs_pseudonym");
+
+function Notice({ notice }: { notice: CommentNotice | null }) {
+  if (notice === null) return null;
+  const good = notice.kind === "published" || notice.kind === "in_review" || notice.kind === "deleted" || notice.kind === "name_saved";
+  return (
+    <InlineAlert tone={good ? "success" : "warning"} live>
+      {text.notice[notice.kind]}
+    </InlineAlert>
+  );
+}
+
+function Instead({ write }: { write: WriteStanding }) {
+  let body: ReactNode = text.instead.unavailable;
+  if (write.kind === "read_only") body = text.instead.readOnly;
+  if (write.kind === "gate") {
+    switch (write.answer) {
+      case "banned":
+        body = text.instead.banned;
+        break;
+      case "suspended":
+        body = text.instead.suspended;
+        break;
+      case "closed":
+        body = text.instead.closed;
+        break;
+      case "needs_notice":
+        body = (
+          <>
+            {text.instead.needsNotice} <TextLink href={ROUTES.portal}>{text.instead.needsNoticeLink}</TextLink>
+          </>
+        );
+        break;
+      default:
+        break;
+    }
+  }
+  return <p className="rounded-md border border-border bg-surface-1 p-4 text-body text-text-2">{body}</p>;
+}
+
+/** Los dos campos que dicen de qué lección es cada formulario. */
+function LessonFields({ slug, lessonId }: { slug: string; lessonId: string }) {
+  return (
+    <>
+      <input type="hidden" name={COMMENT_FIELDS.course} value={slug} />
+      <input type="hidden" name={COMMENT_FIELDS.lesson} value={lessonId} />
+    </>
+  );
+}
+
+function Avatar({ name, teacher }: { name: string; teacher: boolean }) {
+  const { initial, tone } = avatarOf(name);
+  return (
+    <span
+      aria-hidden="true"
+      className={cx("grid size-9 shrink-0 place-items-center rounded-full bg-linear-to-br text-body-s font-semibold text-text", TONE_CLASSES[tone], teacher && "ring-2 ring-accent")}
+    >
+      {initial}
+    </span>
+  );
+}
+
+// Escritas enteras: Tailwind no ve una clase armada con texto.
+const TONE_CLASSES: Record<number, string> = {
+  1: "from-cover-1-deep to-cover-1",
+  2: "from-cover-2-deep to-cover-2",
+  3: "from-cover-3-deep to-cover-3",
+  4: "from-cover-4-deep to-cover-4",
+  5: "from-cover-5-deep to-cover-5",
+  6: "from-cover-6-deep to-cover-6",
+  7: "from-cover-7-deep to-cover-7",
+  8: "from-cover-8-deep to-cover-8",
+};
+
+interface Shared {
+  slug: string;
+  lessonId: string;
+  state: CommentsState;
+  formAction: (form: FormData) => void;
+  pending: boolean;
+  write: WriteStanding;
+}
+
+/** Un comentario o una respuesta (diseño §5.12, `Comment`). */
+function CommentItem({ comment, reply, shared, children }: { comment: CommentView; reply: boolean; shared: Shared; children?: ReactNode }) {
+  const { slug, lessonId, state, formAction, pending, write } = shared;
+  if (comment.state === "deleted") {
+    return (
+      <article id={commentAnchor(comment.id)} aria-label={text.deleted} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
+        <p className="text-body-s text-text-2 italic">{text.deleted}</p>
+        {children}
+      </article>
+    );
+  }
+  const author = comment.own ? text.you : (comment.name ?? text.deleted);
+  const editing = comment.own && state.open.kind === "edit" && state.open.id === comment.id && comment.revision !== null;
+  const deleting = comment.own && state.open.kind === "delete" && state.open.id === comment.id && comment.revision !== null;
+  return (
+    <article
+      id={commentAnchor(comment.id)}
+      aria-label={author}
+      tabIndex={-1}
+      className={cx("flex gap-3 py-3 outline-none", comment.teacher && "border-l-2 border-accent pl-3")}
+    >
+      <Avatar name={author} teacher={comment.teacher} />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <p className="flex flex-wrap items-center gap-x-2 text-body-s text-text-2">
+          <span className="font-semibold text-text">{author}</span>
+          {comment.teacher && <span className="text-label text-accent uppercase">{text.teacher}</span>}
+          <time dateTime={comment.createdAt}>{longDate(comment.createdAt)}</time>
+          {comment.edited && <span>{text.edited}</span>}
+          {comment.own && comment.state === "in_review" && <span className="text-label text-warning uppercase">{text.inReview}</span>}
+        </p>
+        {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
+        {editing ? (
+          <form key={state.attempt} action={formAction} className="flex flex-col gap-3">
+            <LessonFields slug={slug} lessonId={lessonId} />
+            <CountedField
+              id={`editar-${comment.id}`}
+              name={COMMENT_FIELDS.body}
+              label={text.composer.editLabel}
+              max={COMMENT_MAX}
+              warnAt={COMMENT_WARN_AT}
+              defaultValue={keptAt(state, { kind: "edit", id: comment.id }) ?? comment.body ?? ""}
+              error={null}
+              multiline
+            />
+            <Notice notice={noticeAt(state, { kind: "edit", id: comment.id })} />
+            <div className="flex flex-wrap gap-3">
+              <Button type="submit" variant="text" name="do" value="cancel">
+                {text.cancel}
+              </Button>
+              <Button type="submit" variant="secondary" name="do" value={`save:${comment.id}:${comment.revision}`} pending={pending} loadingLabel={text.composer.sending}>
+                {text.save}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <p className="text-body break-words whitespace-pre-line text-text">{comment.body}</p>
+        )}
+        <Notice notice={noticeAt(state, { kind: "comment", id: comment.id })} />
+        {!editing && (
+          <form action={formAction} className="flex flex-wrap items-center gap-3">
+            <LessonFields slug={slug} lessonId={lessonId} />
+            {!reply && canWrite(write) && (
+              <Button type="submit" variant="text" name="do" value={`open-reply:${comment.id}`}>
+                {text.reply}
+              </Button>
+            )}
+            {comment.own && comment.revision !== null && (
+              <details className="relative">
+                <summary className="grid min-h-touch min-w-touch cursor-pointer list-none place-items-center rounded-md text-text-2 hover:bg-surface-2">
+                  <Icon icon={Ellipsis} size={20} />
+                  <span className="sr-only">{text.options}</span>
+                </summary>
+                <div className="absolute z-(--z-dropdown) mt-1 flex flex-col rounded-md border border-border bg-surface-1 p-1 shadow-overlay">
+                  {canWrite(write) && (
+                    <Button type="submit" variant="text" name="do" value={`ask-edit:${comment.id}`}>
+                      {text.edit}
+                    </Button>
+                  )}
+                  <Button type="submit" variant="text" name="do" value={`ask-delete:${comment.id}`}>
+                    {text.delete}
+                  </Button>
+                </div>
+              </details>
+            )}
+          </form>
+        )}
+        {deleting && (
+          <form action={formAction}>
+            <LessonFields slug={slug} lessonId={lessonId} />
+            <Dialog
+              title={text.confirmDelete.title}
+              busy={pending}
+              cancel={
+                <Button type="submit" variant="secondary" name="do" value="cancel">
+                  {text.cancel}
+                </Button>
+              }
+              confirm={
+                <Button type="submit" variant="danger" name="do" value={`delete:${comment.id}:${comment.revision}`} pending={pending} loadingLabel={text.composer.sending}>
+                  {text.confirmDelete.confirm}
+                </Button>
+              }
+            >
+              <p>{text.confirmDelete.body}</p>
+            </Dialog>
+          </form>
+        )}
+        {children}
+      </div>
+    </article>
+  );
+}
+
+/** El campo para escribir (diseño §5.12, `CommentComposer`): arriba del hilo, o bajo un comentario para responderle. */
+function Composer({ place, label, shared, identity, onCancel }: { place: Exclude<Place, { kind: "edit" }>; label: string; shared: Shared; identity: ReactNode; onCancel: boolean }) {
+  const { slug, lessonId, state, formAction, pending } = shared;
+  const id = place.kind === "new" ? "comentar" : `responder-${place.parentId}`;
+  return (
+    <form action={formAction} className="flex flex-col gap-3">
+      <LessonFields slug={slug} lessonId={lessonId} />
+      <CountedField id={id} name={COMMENT_FIELDS.body} label={label} max={COMMENT_MAX} warnAt={COMMENT_WARN_AT} defaultValue={keptAt(state, place) ?? ""} error={null} multiline />
+      <Notice notice={noticeAt(state, place)} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-body-s text-text-2">{identity}</div>
+        <div className="flex gap-3">
+          {onCancel && (
+            <Button type="submit" variant="text" name="do" value="cancel">
+              {text.cancel}
+            </Button>
+          )}
+          <Button type="submit" variant="secondary" name="do" value={place.kind === "new" ? "post" : `reply:${place.parentId}`} pending={pending} loadingLabel={text.composer.sending}>
+            {place.kind === "new" ? text.composer.submit : text.reply}
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/** Quién va a aparecer: el seudónimo con «Cambiar», el maestro con su nombre, o el aviso de que lo va a elegir. */
+function Identity({ me, teacherName }: { me: CommentsView["me"]; teacherName: string }) {
+  if (me.teacher) return <p>{t(text.composer.asTeacher, { name: teacherName })}</p>;
+  if (me.pseudonym === null) return <p>{text.composer.choose}</p>;
+  return (
+    <p className="flex flex-wrap items-center gap-x-1">
+      {t(text.composer.as, { name: me.pseudonym })}{" "}
+      <Button type="submit" variant="text" name="do" value="ask-name">
+        {text.composer.change}
+      </Button>
+    </p>
+  );
+}
+
+/** El diálogo del nombre (FL-15 paso 3): vacío, sin el nombre, el alias ni el correo; lo escrito cruza en campos ocultos. */
+function NameDialog({ shared }: { shared: Shared }) {
+  const { slug, lessonId, state, formAction, pending } = shared;
+  if (state.open.kind !== "name") return null;
+  const carry = state.open.carry;
+  const notice = noticeAt(state, { kind: "name" });
+  return (
+    <form action={formAction}>
+      <LessonFields slug={slug} lessonId={lessonId} />
+      {carry !== null && <input type="hidden" name={COMMENT_FIELDS.carry} value={carry.body} />}
+      {carry?.parentId != null && <input type="hidden" name={COMMENT_FIELDS.carryParent} value={carry.parentId} />}
+      <Dialog
+        title={text.name.title}
+        busy={pending}
+        cancel={
+          <Button type="submit" variant="secondary" name="do" value="cancel">
+            {text.cancel}
+          </Button>
+        }
+        confirm={
+          <Button type="submit" variant="primary" name="do" value="name" pending={pending} loadingLabel={text.composer.sending}>
+            {carry === null ? text.name.save : text.name.saveAndPost}
+          </Button>
+        }
+        extra={
+          <TextField
+            id={`${COMMENTS_ANCHOR}-nombre`}
+            name={COMMENT_FIELDS.name}
+            label={text.name.label}
+            hint={text.name.hint}
+            autoComplete="off"
+            defaultValue={keptAt(state, { kind: "name" }) ?? ""}
+            error={notice === null ? undefined : text.notice[notice.kind]}
+          />
+        }
+      >
+        <p>{text.name.body}</p>
+      </Dialog>
+    </form>
+  );
+}
+
+function Thread({ thread, back, shared, pagedThread }: { thread: CommentThread; back: string; shared: Shared; pagedThread: string | null }) {
+  const { state } = shared;
+  const replying = state.open.kind === "reply" && state.open.parentId === thread.id && canWrite(shared.write) && thread.state === "published";
+  const last = thread.replies.items.at(-1);
+  return (
+    <li>
+      <CommentItem comment={thread} reply={false} shared={shared}>
+      {/* Las respuestas van dentro del comentario al que responden. */}
+      {(thread.replies.items.length > 0 || replying || pagedThread === thread.id) && (
+        <div className="ml-6 flex flex-col gap-1">
+          {pagedThread === thread.id && <TextLink href={firstRepliesHref(back, thread.id)}>{text.firstReplies}</TextLink>}
+          {thread.replies.items.length > 0 && (
+            <ol className="flex flex-col">
+              {thread.replies.items.map((reply) => (
+                <li key={reply.id}>
+                  <CommentItem comment={reply} reply shared={shared} />
+                </li>
+              ))}
+            </ol>
+          )}
+          {thread.replies.more && last !== undefined && <TextLink href={moreRepliesHref(back, thread.id, last)}>{text.moreReplies}</TextLink>}
+          {replying && (
+            <Composer
+              key={state.attempt}
+              place={{ kind: "reply", parentId: thread.id }}
+              label={t(text.composer.replyLabel, { name: thread.own ? text.you : (thread.name ?? text.deleted) })}
+              shared={shared}
+              identity={null}
+              onCancel
+            />
+          )}
+        </div>
+      )}
+      </CommentItem>
+    </li>
+  );
+}
+
+export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
+  const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${back}#${COMMENTS_ANCHOR}`);
+  const shared: Shared = { slug, lessonId, state, formAction, pending, write: view.write };
+
+  // Al publicar o guardar, el foco va al comentario (diseño §5.12, «Publicado»).
+  useEffect(() => {
+    if (state.written === null) return;
+    document.getElementById(commentAnchor(state.written))?.focus();
+  }, [state.attempt, state.written]);
+
+  return (
+    <div id={COMMENTS_ANCHOR} className="flex flex-col gap-4">
+      <h3 className="text-h3">{t(plural(view.count, text.title), { count: view.count })}</h3>
+      <Notice notice={noticeAt(state, { kind: "thread" })} />
+      {canWrite(view.write) ? (
+        // Una llave por respuesta: el campo vuelve a lo que se queda (o a vacío) y su contador con él.
+        <Composer key={state.attempt} place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} />} onCancel={false} />
+      ) : (
+        <Instead write={view.write} />
+      )}
+      {view.paged && <TextLink href={newestCommentsHref(back)}>{text.newest}</TextLink>}
+      {view.items.length === 0 && !view.paged ? (
+        <p className="text-body text-text-2">{text.empty}</p>
+      ) : (
+        <ol className="flex flex-col divide-y divide-border">
+          {view.items.map((thread) => (
+            <Thread key={thread.id} thread={thread} back={back} shared={shared} pagedThread={view.pagedThread} />
+          ))}
+        </ol>
+      )}
+      {view.next !== null && <TextLink href={moreCommentsHref(back, view.next)}>{text.more}</TextLink>}
+      <NameDialog shared={shared} />
+    </div>
+  );
+}

@@ -521,8 +521,6 @@ export const portal = defineMessages({
     cancel: "Cancelar",
   },
   field: {
-    counter: "{count} / {max}",
-    nearLimit: "Te quedan {count} caracteres.",
     required: "Escribe el {field}.",
     tooLong: "El {field} puede tener hasta {max} caracteres.",
     invalid: "El {field} tiene caracteres que no se pueden guardar. Bórralos y escríbelo de nuevo.",

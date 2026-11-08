@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 
-import { portal } from "@/messages/es/portal";
+import { ui } from "@/messages/es/ui";
 import { t } from "@/messages/format";
-import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from "@/ui/field";
 
-// Un campo de texto del borrador con su contador (diseño, sección 5.3: «18 / 60»; el título del curso
+import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from "./field";
+
+// Un campo de texto con su contador (diseño, sección 5.3: «18 / 60»; el título del curso
 // avisa al acercarse al límite, 03 §4.1). El contador lo pinta el servidor con lo que ya trae, y con
 // JavaScript sigue lo que se escribe; el aviso de que quedan pocos se anuncia, el contador no, para no
 // hablar con cada tecla. No lleva `maxLength`: el navegador cuenta unidades de UTF-16 y la regla del
@@ -52,9 +53,9 @@ export function CountedField({ id, name, label, max, warnAt, defaultValue, error
         {label}
       </FieldLabel>
       {multiline ? <textarea {...shared} rows={5} className={AREA_CLASSES} /> : <input {...shared} type="text" autoComplete="off" className={INPUT_CLASSES} />}
-      <FieldHint id={counterId}>{t(portal.field.counter, { count, max })}</FieldHint>
+      <FieldHint id={counterId}>{t(ui.field.counter, { count, max })}</FieldHint>
       <p aria-live="polite" className="text-caption text-warning">
-        {near ? t(portal.field.nearLimit, { count: max - count }) : null}
+        {near ? t(ui.field.nearLimit, { count: max - count }) : null}
       </p>
       {error && <FieldError id={errorId}>{error}</FieldError>}
     </div>

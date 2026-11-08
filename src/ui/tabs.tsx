@@ -11,6 +11,10 @@ import { cx } from "./cx";
 //
 // Sin JavaScript no hay con qué cambiar de pestaña: se pintan todos los paneles uno tras otro,
 // cada uno con su título, y nada queda escondido.
+//
+// Una pestaña puede existir solo en pantallas angostas (`narrowOnly`): la lección lleva el temario en
+// su columna en escritorio, y en el teléfono como pestaña. Así una sola lista sirve a los dos anchos y
+// su contenido va una sola vez en el documento. Si en escritorio queda una sola, va como sección (PA-22).
 
 export interface TabItem {
   id: string;
@@ -22,6 +26,8 @@ export interface TabItem {
    * se pueda llegar a leerlo.
    */
   hasFocusableContent?: boolean;
+  /** Solo en pantallas angostas: desde `lg` no aparece. */
+  narrowOnly?: boolean;
 }
 
 export interface TabsProps {
@@ -34,22 +40,41 @@ export interface TabsProps {
 
 const noSubscription = () => () => {};
 
-export function Tabs({ label, items, idPrefix }: TabsProps) {
+/** Desde `lg` (64rem), como la clase de Tailwind. Sin `matchMedia` (el DOM de las pruebas), angosta. */
+const WIDE = "(min-width: 64rem)";
+const wideQuery = () => (typeof window.matchMedia === "function" ? window.matchMedia(WIDE) : null);
+function subscribeWide(change: () => void) {
+  const query = wideQuery();
+  query?.addEventListener("change", change);
+  return () => query?.removeEventListener("change", change);
+}
+
+export function Tabs({ label, items: all, idPrefix }: TabsProps) {
   const mounted = useSyncExternalStore(
     noSubscription,
     () => true,
     () => false,
   );
+  const wide = useSyncExternalStore(
+    subscribeWide,
+    () => wideQuery()?.matches ?? false,
+    () => false,
+  );
+  const items = mounted && wide ? all.filter((item) => item.narrowOnly !== true) : all;
   const [chosen, setActive] = useState(items[0]?.id ?? "");
-  // La elegida puede dejar de existir con la pantalla abierta: sin esto, ningún panel se vería y el teclado no tendría a dónde entrar.
+  // La elegida puede dejar de existir con la pantalla abierta (o al ensancharse): sin esto, ningún panel se vería y el teclado no tendría a dónde entrar.
   const active = items.some((item) => item.id === chosen) ? chosen : (items[0]?.id ?? "");
   const buttons = useRef(new Map<string, HTMLButtonElement>());
 
-  if (!mounted) {
+  if (!mounted || (items.length === 1 && all.length > 1)) {
     return (
       <div className="flex flex-col gap-6">
         {items.map((item) => (
-          <section key={item.id} aria-labelledby={`${idPrefix}-${item.id}-title`} className="flex flex-col gap-3">
+          <section
+            key={item.id}
+            aria-labelledby={`${idPrefix}-${item.id}-title`}
+            className={item.narrowOnly === true ? "flex flex-col gap-3 lg:hidden" : "flex flex-col gap-3"}
+          >
             <h2 id={`${idPrefix}-${item.id}-title`} className="text-h3">
               {item.label}
             </h2>

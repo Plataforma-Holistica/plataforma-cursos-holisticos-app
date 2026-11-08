@@ -23,6 +23,7 @@ const BACK = "/cursos/respirar/lecciones/a0000000-0000-4000-8000-000000000001";
 const NEW: Place = { kind: "new" };
 const REPLY: Place = { kind: "reply", parentId: PARENT };
 const EDIT: Place = { kind: "edit", id: ID };
+const BLANK = { open: { kind: "none" }, notice: null, kept: null, written: null } as const;
 
 function form(...values: [string, string][]): FormData {
   const data = new FormData();
@@ -179,7 +180,7 @@ describe("writeOutcome: lo que pinta la pantalla después de publicar o editar",
 
 describe("deleteOutcome: lo que pinta la pantalla después de borrar", () => {
   it("borrado, ya no estaba, o cambiado en otra pestaña", () => {
-    expect(deleteOutcome(ID, { kind: "deleted" }, BACK)).toEqual({ kind: "state", refresh: true, state: { ...IDLE_COMMENTS, notice: { at: { kind: "thread" }, kind: "deleted" } } });
+    expect(deleteOutcome(ID, { kind: "deleted" }, BACK)).toEqual({ kind: "state", refresh: true, state: { ...BLANK, notice: { at: { kind: "thread" }, kind: "deleted" } } });
     expect(deleteOutcome(ID, { kind: "not_found" }, BACK)).toMatchObject({ refresh: true, state: { notice: { at: { kind: "thread" }, kind: "gone" } } });
     expect(deleteOutcome(ID, { kind: "changed" }, BACK)).toMatchObject({ refresh: true, state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "changed" } } });
   });
@@ -194,7 +195,7 @@ describe("nameOutcome: lo que pinta la pantalla después de elegir el nombre", (
   it("guardado con algo que cruzaba: se publica; sin nada, se dice", () => {
     expect(nameOutcome({ kind: "saved", pseudonym: "Luz" }, "Luz", { parentId: null, body: "Hola" }, BACK)).toEqual({ kind: "post", place: NEW, body: "Hola" });
     expect(nameOutcome({ kind: "saved", pseudonym: "Luz" }, "Luz", { parentId: PARENT, body: "Hola" }, BACK)).toEqual({ kind: "post", place: REPLY, body: "Hola" });
-    expect(nameOutcome({ kind: "saved", pseudonym: "Luz" }, "Luz", null, BACK)).toEqual({ kind: "state", refresh: true, state: { ...IDLE_COMMENTS, notice: { at: { kind: "thread" }, kind: "name_saved" } } });
+    expect(nameOutcome({ kind: "saved", pseudonym: "Luz" }, "Luz", null, BACK)).toEqual({ kind: "state", refresh: true, state: { ...BLANK, notice: { at: { kind: "thread" }, kind: "name_saved" } } });
   });
 
   it("un nombre que no sirve deja el diálogo abierto, con lo escrito y lo que cruzaba", () => {

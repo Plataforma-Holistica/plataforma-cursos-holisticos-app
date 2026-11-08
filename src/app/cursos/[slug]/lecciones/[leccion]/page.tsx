@@ -10,11 +10,12 @@ import { messages, t } from "@/messages";
 import { captionsChoice } from "@/services/account/account";
 import { coursePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
 import { coursePage } from "@/services/browse/browse";
+import { commentReplies, lessonComments, type LessonCommentsAnswer } from "@/services/comments/comments";
 import { courseIsOpen, lessonPage, lessonResources, type LessonEntry } from "@/services/lessons/lessons";
 import { lessonAccess } from "@/services/media/media";
 
 import { initialOf } from "./outcomes";
-import { LessonScreen, type SyllabusEntry } from "./screen";
+import { LessonScreen, type LessonCommentsSlot, type SyllabusEntry } from "./screen";
 
 // La página de una lección (PA-22, T-203). Pide sesión, salvo a dónde va quien no la tiene:
 // al registro si el curso es el abierto, a entrar si no (flujo §6.3).
@@ -31,6 +32,10 @@ import { LessonScreen, type SyllabusEntry } from "./screen";
 // catálogo (`coursePage`, pública y recordada 30 s) da a dónde regresar, los enlaces del curso y del maestro y la
 // portada que va detrás de «Reproducir». Si no se pudo leer, la lección se ve igual: sin enlace al maestro ni
 // portada. Esa lectura no toca lo que decide quién ve qué.
+//
+// Los comentarios (T-501) los lee el servicio, que decide el acceso con la regla única: sin la lección, sin acceso o
+// cerrados, no hay pestaña. La página de comentarios va en la dirección (`?comentarios=`), y las respuestas que siguen de un
+// hilo de esa página también (`?hilo=` y `?respuestas=`): reemplazan las suyas, sin acumularse.
 
 const text = messages.lesson;
 
@@ -39,8 +44,36 @@ export const metadata: Metadata = { title: text.pageTitle };
 
 const minutes = (seconds: number) => t(text.minutes, { minutes: Math.max(1, Math.round(seconds / 60)) });
 
-export default async function LessonRoute({ params }: { params: Promise<{ slug: string; leccion: string }> }) {
+type Search = Record<string, string | string[] | undefined>;
+
+/** Un solo valor de la dirección, o nulo. */
+const one = (search: Search, key: string): string | null => {
+  const value = search[key];
+  return typeof value === "string" ? value : null;
+};
+
+/** Lo que la pantalla pinta de los comentarios, con las respuestas siguientes del hilo que pida la dirección. */
+async function commentsSlot(claims: Parameters<typeof lessonComments>[0], lessonId: string, search: Search, read: LessonCommentsAnswer): Promise<LessonCommentsSlot | null> {
+  if (read.kind === "unavailable") return { kind: "unavailable" };
+  if (read.kind !== "ready") return null;
+  const cursor = one(search, "comentarios");
+  let items = read.items;
+  let pagedThread: string | null = null;
+  const thread = one(search, "hilo");
+  const after = one(search, "respuestas");
+  if (thread !== null && after !== null && items.some((item) => item.id === thread)) {
+    const replies = await commentReplies(claims, lessonId, thread, after);
+    if (replies.kind === "ready") {
+      items = items.map((item) => (item.id === thread ? { ...item, replies: { items: replies.items, more: replies.next !== null } } : item));
+      pagedThread = thread;
+    }
+  }
+  return { kind: "ready", view: { count: read.count, items, next: read.next, paged: cursor !== null, pagedThread, me: read.me, write: read.write } };
+}
+
+export default async function LessonRoute({ params, searchParams }: { params: Promise<{ slug: string; leccion: string }>; searchParams: Promise<Search> }) {
   const { slug, leccion } = await params;
+  const search = await searchParams;
   const path = `/cursos/${slug}/lecciones/${leccion}`;
   const session = await requireLessonSession(path, () => courseIsOpen(slug));
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
@@ -51,11 +84,17 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={path} withSession />;
   const { page } = found;
 
-  const [access, captions, card] = await Promise.all([lessonAccess(await cookieReader(), leccion), captionsChoice(session.claims), coursePage(slug)]);
+  const [access, captions, card, commentsRead] = await Promise.all([
+    lessonAccess(await cookieReader(), leccion),
+    captionsChoice(session.claims),
+    coursePage(slug),
+    lessonComments(session.claims, leccion, one(search, "comentarios")),
+  ]);
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
   if (initial.kind === "reload") redirect(path);
   const resources = initial.kind === "ready" ? await lessonResources(session.claims, page.lesson.id) : [];
+  const comments = initial.kind === "denied" ? null : await commentsSlot(session.claims, leccion, search, commentsRead);
 
   const entry = (lesson: LessonEntry): SyllabusEntry => ({
     id: lesson.id,
@@ -88,6 +127,7 @@ export default async function LessonRoute({ params }: { params: Promise<{ slug: 
         initial={initial}
         captions={captions.kind === "ready" && captions.on}
         resources={resources === null ? null : resourceItems(resources)}
+        comments={comments}
       />
     </>
   );

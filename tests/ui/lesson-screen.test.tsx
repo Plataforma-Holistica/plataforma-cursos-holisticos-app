@@ -265,7 +265,7 @@ describe("los comentarios (T-501)", () => {
     const { user, area } = show({ comments: { kind: "unavailable" } });
     await user.click(screen.getByRole("tab", { name: "Comentarios" }));
     expect(screen.getByText("No pudimos cargar los comentarios. Vuelve a intentarlo en un momento.")).toBeVisible();
-    expect(within(area()).getByRole("button", { name: "Reproducir" })).toBeInTheDocument();
+    expect(within(area()).getByRole("button", { name: "Reproducir la lección" })).toBeInTheDocument();
   });
 
   it("con PA-33 en el lugar del reproductor no hay comentarios, también si el acceso se pierde con la página abierta", async () => {
@@ -275,7 +275,7 @@ describe("los comentarios (T-501)", () => {
 
   it("escribir un comentario no toca el reproductor", async () => {
     const { user } = show({ comments: READY });
-    await user.click(screen.getByRole("button", { name: "Reproducir" }));
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
     await screen.findByTestId("reproductor");
     const before = player.last;
     await user.click(screen.getByRole("tab", { name: "Comentarios (3)" }));
@@ -1204,10 +1204,16 @@ describe("el progreso, con lo que trae la página y lo que llega después (T-206
 describe("los recursos de la lección", () => {
   const GUIDE = { id: "f0000000-0000-4000-8000-000000000001", title: "Guía", detail: "PDF, 2 MB" };
 
-  it("con alguno: la lista con su botón, y su pestaña", () => {
-    show({ resources: [GUIDE] });
+  // Cambió por el requisito (T-501): desde que las pestañas son una sola lista para los dos anchos, en escritorio los recursos
+  // van dentro de «Sobre esta lección», y en el teléfono en su pestaña.
+  it("con alguno: en escritorio, la lista con su botón bajo «Sobre esta lección»; en el teléfono, su pestaña", () => {
+    wide(true);
+    const desktop = show({ resources: [GUIDE] });
     expect(screen.getByRole("heading", { name: "Recursos de esta lección" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Descargar Guía" }).length).toBeGreaterThan(0);
+    desktop.view.unmount();
+    wide(false);
+    show({ resources: [GUIDE] });
     expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
   });
 

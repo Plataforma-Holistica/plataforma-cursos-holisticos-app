@@ -8,6 +8,8 @@ export const ui = defineMessages({
   skipLink: "Saltar al contenido",
   field: {
     optional: "(opcional)",
+    counter: "{count} / {max}",
+    nearLimit: "Te quedan {count} caracteres.",
   },
   password: {
     show: "Mostrar",
