@@ -90,6 +90,27 @@ describe("Tabs y el ancla de la dirección", () => {
   });
 });
 
+describe("Tabs con un ancla mal formada", () => {
+  it("no se cae: se queda en la primera", async () => {
+    window.history.replaceState(null, "", "#100%");
+    try {
+      render(
+        <Tabs
+          label="Partes"
+          idPrefix="mal"
+          items={[
+            { id: "uno", label: "Uno", panel: <p>Panel uno</p> },
+            { id: "dos", label: "Dos", panel: <p>Panel dos</p> },
+          ]}
+        />,
+      );
+      expect(screen.getByRole("tab", { name: "Uno" })).toHaveAttribute("aria-selected", "true");
+    } finally {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  });
+});
+
 describe("CountedField", () => {
   it("al devolver el formulario a su valor por omisión, el contador lo sigue", async () => {
     const user = userEvent.setup();

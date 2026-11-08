@@ -72,7 +72,14 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
   // diálogo abierto en ese panel no quede dentro de algo escondido.
   useLayoutEffect(() => {
     if (!mounted || window.location.hash.length < 2) return;
-    const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    // Un ancla mal formada (`#100%`) no se puede decodificar: entonces no elige nada.
+    let id: string;
+    try {
+      id = decodeURIComponent(window.location.hash.slice(1));
+    } catch {
+      return;
+    }
+    const target = document.getElementById(id);
     const owner = target === null ? null : target.closest<HTMLElement>("[data-tab]");
     if (owner !== null && root.current?.contains(owner)) setActive(owner.dataset.tab ?? "");
   }, [mounted]);

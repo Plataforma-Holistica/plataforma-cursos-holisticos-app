@@ -1101,7 +1101,9 @@ que no se ve leyendo un solo archivo:
   de hidratar** (cada panel es la misma `<section>`, solo cambian sus atributos): si no, el hilo se volvía a montar y perdía el
   estado de un envío hecho antes de que llegara el JavaScript. Al hidratar, la pestaña activa es la que tiene el ancla de la
   dirección (`data-tab`), para que eso no quede detrás de otra. Una edición vive solo mientras está abierta: si volviera, traería
-  lo escrito sobre la revisión anterior y pisaría lo de otra pestaña sin `changed`. **Las
+  lo escrito sobre la revisión anterior y pisaría lo de otra pestaña sin `changed`. Un aviso de algo que la vuelta no pinta (un
+  comentario de otra página, el campo sustituido, la respuesta a lo que ya no la recibe) se dice arriba del hilo, con lo escrito
+  para copiarlo. **Las
   páginas van por la dirección** (`?comentarios=`, y `?hilo=` con `?respuestas=` para las respuestas de un hilo), no se acumulan,
   y un envío sin JavaScript vuelve a lo que se veía (`view.here`); lo publicado que cae fuera de esta página se dice arriba del
   hilo. El foco va al campo que se abre, a lo publicado, o al comentario que se cerró. Usa `tests/ui/lesson-comments.test.tsx`,

@@ -351,6 +351,55 @@ describe("lo escrito y el foco no se pierden", () => {
     expect(screen.getByRole("textbox", { name: "Nombre o seudónimo" })).toHaveAccessibleDescription(/al menos 2 caracteres/);
   });
 
+  it("guardar una edición y volver a editar: el campo trae el texto del comentario", async () => {
+    const action = answers(
+      { ...BLANK, open: { kind: "edit", id: id(1) } },
+      { ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" }, kept: { at: { kind: "edit", id: id(1) }, body: "" } },
+      { ...BLANK, open: { kind: "edit", id: id(1) } },
+    );
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 2 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await user.type(await screen.findByRole("textbox", { name: "Edita tu comentario" }), " más");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    await screen.findByText("Tu comentario se publicó.");
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    expect(await screen.findByRole("textbox", { name: "Edita tu comentario" })).toHaveValue("Texto 1");
+  });
+
+  it("una respuesta que ya no tiene dónde ir: su aviso y lo escrito se dicen arriba del hilo, para copiarlo", async () => {
+    const action = answers({
+      ...BLANK,
+      open: { kind: "reply", parentId: id(1) },
+      notice: { at: { kind: "reply", parentId: id(1) }, kind: "bad_parent" },
+      kept: { at: { kind: "reply", parentId: id(1) }, body: "Mi respuesta" },
+    });
+    const { user } = setup({ count: 1, items: [thread(1, { state: "deleted", name: null, body: null }, [comment(2)]), thread(3, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    expect(await screen.findByText("Ese comentario ya no recibe respuestas.")).toBeInTheDocument();
+    expect(screen.getByText("Mi respuesta")).toBeInTheDocument();
+  });
+
+  it("si el campo se sustituye, lo escrito se muestra para copiarlo", async () => {
+    const action = answers({ ...BLANK, notice: { at: { kind: "new" }, kind: "closed" }, kept: { at: { kind: "new" }, body: "Lo que escribí" } });
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })], write: { kind: "gate", answer: "closed" } }, action);
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    expect(await screen.findByText("Lo que escribí")).toBeInTheDocument();
+    expect(screen.getByText("Esto es lo que escribiste:")).toBeInTheDocument();
+  });
+
+  it("con el diálogo del nombre abierto, el campo de donde salió muestra lo que cruza, aunque la pantalla no lo haya guardado", async () => {
+    const action = answers({
+      ...BLANK,
+      open: { kind: "name", carry: { parentId: null, body: "Hola" } },
+      notice: { at: { kind: "name" }, kind: "name_too_short" },
+      kept: { at: { kind: "name" }, body: "L" },
+    });
+    const { user } = setup({ me: { teacher: false, pseudonym: null } }, action);
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
   it("lo publicado vacía el campo de donde salió", async () => {
     const action = answers({ ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" }, kept: { at: { kind: "new" }, body: "" } });
     const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);

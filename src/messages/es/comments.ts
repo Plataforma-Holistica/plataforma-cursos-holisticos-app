@@ -9,6 +9,7 @@ export const comments = defineMessages({
   title: { one: "1 comentario", other: "{count} comentarios" },
   empty: "Nadie ha comentado esta lección. Si quieres, empieza tú.",
   unavailable: "No pudimos cargar los comentarios. Vuelve a intentarlo en un momento.",
+  strayText: "Esto es lo que escribiste:",
   more: "Ver más comentarios",
   newest: "Más recientes",
   moreReplies: "Ver más respuestas",

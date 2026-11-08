@@ -73,8 +73,18 @@ function withKept(drafts: Drafts, state: CommentsState): Drafts {
   const editing = state.open.kind === "edit" ? placeKey({ kind: "edit", id: state.open.id }) : null;
   const naming = state.open.kind === "name" && state.kept?.at.kind === "name";
   const next = Object.fromEntries(Object.entries(drafts).filter(([key]) => (key.startsWith("edit:") ? key === editing : key !== "name" || naming)));
-  if (state.kept !== null) next[placeKey(state.kept.at)] = state.kept.body;
+  // Lo de una edición cuenta solo si sigue abierta: guardada o cambiada en otra pestaña, se cerró, y volver a editar trae el texto
+  // del comentario.
+  if (state.kept !== null && (state.kept.at.kind !== "edit" || placeKey(state.kept.at) === editing)) next[placeKey(state.kept.at)] = state.kept.body;
   return next;
+}
+
+/** Lo que el diálogo del nombre lleva de un campo (lo que cruza o lo que conserva), para pintarlo en él aunque la pantalla no lo guarde. */
+function carriedBy(state: CommentsState, at: Place | { kind: "name" }): string | null {
+  if (state.open.kind !== "name") return null;
+  const { carry, keep } = state.open;
+  if (carry !== null) return samePlace(carry.parentId === null ? { kind: "new" } : { kind: "reply", parentId: carry.parentId }, at) ? carry.body : null;
+  return keep !== undefined && at.kind === "new" ? keep : null;
 }
 
 /** Si se puede escribir: el campo, o el sustituto que lo dice (diseño §5.12, «Variantes que sustituyen al campo»). */
@@ -444,18 +454,34 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
     formAction,
     pending,
     standing: view.write,
-    draft: (at) => drafts[placeKey(at)] ?? null,
+    // Sin JavaScript, después de un nombre que no sirvió, el estado guarda el nombre: lo del campo lo lleva el diálogo.
+    draft: (at) => drafts[placeKey(at)] ?? carriedBy(state, at),
     write: (at) => (value) => setDrafts((current) => ({ ...current, [placeKey(at)]: value })),
   };
   const heading = useRef<HTMLHeadingElement>(null);
   const lastOpened = useRef<string | null>(null);
   const shown = new Set(view.items.flatMap((thread) => [thread.id, ...thread.replies.items.map((reply) => reply.id)]));
   // Lo que se dice de un comentario que no está en esta página (lo nuevo cae en la primera) se dice arriba del hilo.
-  const at = state.notice?.at;
-  const orphan =
-    at !== undefined &&
-    ((at.kind === "comment" && !shown.has(at.id)) || (!canWrite(view.write) && (at.kind === "new" || at.kind === "reply")));
+  // Un aviso que habla de algo que esta vuelta no pinta (un comentario de otra página, el campo que se sustituyó, la respuesta a un
+  // comentario que ya no la recibe, una edición de lo que se fue) se dice arriba del hilo, con lo escrito para copiarlo.
+  const replyOpen = (parentId: string) => canWrite(view.write) && view.items.some((thread) => thread.id === parentId && thread.state === "published");
+  const painted = (at: NoticePlace): boolean => {
+    switch (at.kind) {
+      case "comment":
+        return shown.has(at.id);
+      case "new":
+        return canWrite(view.write);
+      case "reply":
+        return state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId);
+      case "edit":
+        return shown.has(at.id);
+      default:
+        return true;
+    }
+  };
+  const orphan = state.notice !== null && !painted(state.notice.at);
   const threadNotice = orphan ? state.notice : noticeAt(state, { kind: "thread" });
+  const strayText = state.kept !== null && state.kept.at.kind !== "name" && state.kept.body !== "" && !painted(state.kept.at) ? state.kept.body : null;
 
   // El foco después de cada respuesta: al campo que se abrió, al comentario publicado o guardado, o al comentario que se cerró
   // (el botón que se pulsó ya no está). Los diálogos llevan el suyo.
@@ -484,6 +510,12 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
         {t(plural(view.count, text.title), { count: view.count })}
       </h2>
       <Notice notice={threadNotice} />
+      {strayText !== null && (
+        <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-1 p-4">
+          <p className="text-body-s text-text-2">{text.strayText}</p>
+          <p className="text-body break-words whitespace-pre-line text-text">{strayText}</p>
+        </div>
+      )}
       {canWrite(view.write) ? (
         <>
           <Composer place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} changeable />} onCancel={false} />
