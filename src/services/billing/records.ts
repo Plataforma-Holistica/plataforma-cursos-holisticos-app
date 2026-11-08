@@ -282,11 +282,13 @@ export async function askReconcileRecord(
   return { kind: "refused", answer: known(RECORD_ANSWERS, answer.outcome, "billing_reconciliation_record") };
 }
 
-export async function askReconcileDue(tx: Tx): Promise<number[]> {
-  const rows = await tx.query(sql`select private.billing_reconciliation_due() as answer`, z.object({ answer: z.array(z.number().int()).nullable() }));
+const reconcileDueRow = z.object({ period_id: z.number().int(), overdue: z.boolean() });
+
+export async function askReconcileDue(tx: Tx): Promise<{ period: number; overdue: boolean }[]> {
+  const rows = await tx.query(sql`select private.billing_reconciliation_due() as answer`, z.object({ answer: z.array(reconcileDueRow).nullable() }));
   const answer = rows[0]?.answer;
   if (answer === undefined || answer === null) throw new Error("billing_reconciliation_due no contestó");
-  return answer;
+  return answer.map((row) => ({ period: row.period_id, overdue: row.overdue }));
 }
 
 export async function askSettlementsMissing(tx: Tx, period: number): Promise<string[]> {

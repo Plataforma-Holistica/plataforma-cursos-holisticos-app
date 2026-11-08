@@ -26,8 +26,10 @@ export const EXPLAIN_NOTE_MAX = 500;
 
 const DAY_SECONDS = 86_400;
 const CONCURRENCY = 4;
-/** El tope de una pasada: deja lugar a registrar y a completar lo que liquidó Stripe dentro de los 60 s de la ruta. */
+/** El tope de una lista: deja lugar a registrar y a completar lo que liquidó Stripe dentro de los 60 s de la ruta o de la acción. */
 export const LIST_BUDGET_MS = 40_000;
+/** El tope de toda la pasada del trabajo de cada día, para todos los meses que pide: cada uno recibe lo que quede. */
+export const SWEEP_BUDGET_MS = 50_000;
 
 export interface StripeCharge {
   id: string;
@@ -94,8 +96,14 @@ export async function listCharges(get: StripeGet, starts: number, ends: number, 
         return;
       }
       for (const charge of page.data.data) if (!seen.has(charge.id)) seen.set(charge.id, charge);
+      if (!page.data.has_more) return;
+      // Una página vacía que dice que hay más no se puede seguir: no se adivina que terminó.
       const last = page.data.data.at(-1);
-      if (!page.data.has_more || last === undefined) return;
+      if (last === undefined) {
+        complete = false;
+        failure ??= "billing_reconciliation_unavailable";
+        return;
+      }
       after = last.id;
     }
   }
@@ -112,7 +120,8 @@ export async function listCharges(get: StripeGet, starts: number, ends: number, 
 /** Quién compara: el trabajo de cada día, o una persona de finanzas con sus claims. */
 export type Actor = { kind: "system" } | { kind: "person"; claims: VerifiedClaims };
 
-export const WINDOW_ANSWERS = ["forbidden", "not_found", "closed", "too_early"] as const;
+// La ventana también frena a una persona que pide antes de un minuto, para no listar Stripe en balde.
+export const WINDOW_ANSWERS = ["forbidden", "not_found", "closed", "too_early", "rate_limited"] as const;
 export type WindowRefusal = (typeof WINDOW_ANSWERS)[number];
 export type WindowAnswer = { kind: "window"; startsAt: number; endsAt: number } | { kind: "refused"; answer: WindowRefusal };
 
@@ -149,7 +158,8 @@ export interface Settlement {
 export interface ReconcileStore {
   window(actor: Actor, period: number): Promise<WindowAnswer>;
   record(actor: Actor, period: number, livemode: boolean, startsAt: number, endsAt: number, complete: boolean, charges: StripeCharge[]): Promise<RecordAnswer>;
-  due(): Promise<number[]>;
+  /** Los meses terminados sin una comparación vigente; `overdue`: pasaron dos días de su fin. */
+  due(): Promise<{ period: number; overdue: boolean }[]>;
   settlementsMissing(actor: Actor, period: number): Promise<string[]>;
   completeSettlement(actor: Actor, settlement: Settlement): Promise<SettlementAnswer>;
   explain(claims: VerifiedClaims, explanation: Explanation): Promise<ExplainAnswer>;
@@ -219,7 +229,7 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
           const bt = body.success ? body.data.balance_transaction : null;
           if (!body.success || bt === null || bt === undefined || typeof bt === "string" || bt.currency !== body.data.currency) continue;
           try {
-            await store.completeSettlement(actor, {
+            const answer = await store.completeSettlement(actor, {
               charge,
               transaction: bt.id,
               grossCents: bt.amount,
@@ -227,6 +237,8 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
               netCents: bt.net,
               availableOn: new Date(bt.available_on * 1000).toISOString(),
             });
+            // Otro bruto que el del cobro: no se guarda, y alguien tiene que mirarlo.
+            if (answer === "mismatch") await deps.report("billing_settlement_mismatch");
           } catch {
             await deps.report("billing_reconciliation_unavailable");
             return;
@@ -236,11 +248,11 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
     );
   }
 
-  /** Compara un periodo: pide la ventana, lista y registra. Después completa lo que liquidó Stripe. */
-  async function compare(actor: Actor, period: number): Promise<Compared> {
+  /** Compara un periodo: pide la ventana, lista y registra. Después completa lo que liquidó Stripe. `end`: el tope de la pasada entera, si lo hay. */
+  async function compare(actor: Actor, period: number, end = Number.POSITIVE_INFINITY): Promise<Compared> {
     const get = core.stripe();
     if (get === null) return { kind: "no_stripe" };
-    const deadline = core.now() + LIST_BUDGET_MS;
+    const deadline = Math.min(core.now() + LIST_BUDGET_MS, end - 10_000);
     try {
       const window = await store.window(actor, period);
       if (window.kind === "refused") return window;
@@ -252,7 +264,7 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
         if (recorded.answer === "malformed") await deps.report("billing_reconciliation_rejected");
         return recorded;
       }
-      await settle(get, actor, period, deadline + 10_000);
+      await settle(get, actor, period, Math.min(deadline + 10_000, end));
       return { kind: "recorded", matches: recorded.matches, complete: listed.complete, differences: recorded.differences };
     } catch {
       await deps.report("billing_reconciliation_unavailable");
@@ -263,8 +275,13 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
   return {
     /** El trabajo de cada día: compara cada periodo terminado y sin cerrar que no tiene una comparación vigente. Contesta si la pasada salió entera. */
     async sweepReconciliations(): Promise<boolean> {
-      if (core.stripe() === null) return true;
-      let due: number[];
+      // Sin la llave ningún mes se puede cerrar: se dice cada día.
+      if (core.stripe() === null) {
+        await deps.report("billing_reconciliation_no_key");
+        return false;
+      }
+      const end = core.now() + SWEEP_BUDGET_MS;
+      let due: { period: number; overdue: boolean }[];
       try {
         due = await store.due();
       } catch {
@@ -272,10 +289,15 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
         return false;
       }
       let whole = true;
-      for (const period of due) {
-        const result = await compare({ kind: "system" }, period);
+      for (const { period, overdue } of due) {
+        // Lo que no alcanza queda para mañana; no es una falla.
+        if (core.now() >= end - 10_000) break;
+        const result = await compare({ kind: "system" }, period, end);
         if (result.kind === "unknown") whole = false;
-        if (result.kind === "recorded" && !result.matches) await deps.report("billing_reconciliation_mismatch");
+        if (result.kind === "recorded" && !result.complete) await deps.report("billing_reconciliation_incomplete");
+        else if (result.kind === "recorded" && !result.matches) await deps.report("billing_reconciliation_mismatch");
+        // La alerta del 05: un mes terminado hace dos días sin una comparación vigente.
+        if (overdue && !(result.kind === "recorded" && result.matches)) await deps.report("billing_reconciliation_overdue");
       }
       return whole;
     },

@@ -9,6 +9,7 @@ import {
   EXPLAIN_NOTE_MAX,
   LIST_BUDGET_MS,
   listCharges,
+  SWEEP_BUDGET_MS,
   type Actor,
   type ReconcileStore,
   type RecordAnswer,
@@ -93,9 +94,9 @@ describe("listar los cargos de una ventana", () => {
     expect(odd).toMatchObject({ complete: false, charges: [], failure: "billing_reconciliation_unavailable" });
   });
 
-  it("una página vacía que dice que hay más no se queda dando vueltas", async () => {
+  it("una página vacía que dice que hay más no se sigue ni se da por terminada", async () => {
     const listed = await listCharges(stripeWith({ [String(START)]: [page([], true)] }).get, START, START + DAY, Infinity, () => 0);
-    expect(listed.complete).toBe(true);
+    expect(listed).toMatchObject({ complete: false, failure: "billing_reconciliation_unavailable" });
   });
 });
 
@@ -104,7 +105,8 @@ function serviceWith(
     check?: TeamCheck;
     window?: WindowAnswer | "throws";
     record?: RecordAnswer | "throws";
-    due?: number[] | "throws";
+    due?: { period: number; overdue: boolean }[] | "throws";
+    settlement?: "recorded" | "mismatch";
     missing?: string[];
     stripe?: { get: StripeGet } | null;
     explain?: string | "throws";
@@ -138,7 +140,7 @@ function serviceWith(
     }),
     completeSettlement: vi.fn((_actor: Actor, settlement: unknown) => {
       settled.push(settlement);
-      return Promise.resolve("recorded" as const);
+      return Promise.resolve(setup.settlement ?? "recorded");
     }),
     explain: vi.fn((_claims: VerifiedClaims, explanation: unknown) => {
       calls.push(`explicar ${JSON.stringify(explanation)}`);
@@ -242,27 +244,76 @@ describe("completar lo que liquidó Stripe", () => {
       ],
       "/v1/charges/ch_d": [{ status: "unavailable" }],
     });
-    const { service, settled } = serviceWith({ stripe, missing: ["ch_a", "ch_b", "ch_c", "ch_d"] });
+    const { service, settled, reported } = serviceWith({ stripe, missing: ["ch_a", "ch_b", "ch_c", "ch_d"] });
     await service.compareNow(reader, 202_610);
+    expect(reported).toEqual([]);
     expect(settled).toEqual([
       { charge: "ch_a", transaction: "txn_a", grossCents: 34_900, feeCents: 1_500, netCents: 33_400, availableOn: new Date(1_790_600_000_000).toISOString() },
     ]);
     expect(stripe.asked).toContain("/v1/charges/ch_a?expand[]=balance_transaction");
   });
+
+  it("si la base dice que el bruto no es el del cobro, se reporta", async () => {
+    const stripe = stripeWith({
+      "/v1/charges/ch_a": [
+        { status: "ok", body: { id: "ch_a", currency: "mxn", balance_transaction: { id: "txn_a", amount: 1, fee: 0, net: 1, currency: "mxn", available_on: 1 } } },
+      ],
+    });
+    const { service, reported } = serviceWith({ stripe, missing: ["ch_a"], settlement: "mismatch" });
+    await service.compareNow(reader, 202_610);
+    expect(reported).toEqual(["billing_settlement_mismatch"]);
+  });
 });
 
 describe("el trabajo de cada día", () => {
   it("compara como sistema cada periodo que pide la base, y reporta uno que no coincide", async () => {
-    const { service, calls, reported } = serviceWith({ due: [202_609, 202_610], record: { kind: "recorded", id: "r", matches: false, differences: 1 } });
+    const { service, calls, reported } = serviceWith({
+      due: [
+        { period: 202_609, overdue: false },
+        { period: 202_610, overdue: false },
+      ],
+      record: { kind: "recorded", id: "r", matches: false, differences: 1 },
+    });
     expect(await service.sweepReconciliations()).toBe(true);
     expect(calls.filter((c) => c.startsWith("ventana"))).toEqual(["ventana system 202609", "ventana system 202610"]);
     expect(reported).toEqual(["billing_reconciliation_mismatch", "billing_reconciliation_mismatch"]);
   });
 
-  it("sin la llave de Stripe no le pregunta nada a la base", async () => {
-    const { service, calls } = serviceWith({ stripe: null });
+  it("un mes con dos días sin conciliar se reporta aparte; uno que ya coincide, no", async () => {
+    const late = serviceWith({ due: [{ period: 202_610, overdue: true }], record: { kind: "recorded", id: "r", matches: false, differences: 1 } });
+    await late.service.sweepReconciliations();
+    expect(late.reported).toEqual(["billing_reconciliation_mismatch", "billing_reconciliation_overdue"]);
+    const fixed = serviceWith({ due: [{ period: 202_610, overdue: true }] });
+    await fixed.service.sweepReconciliations();
+    expect(fixed.reported).toEqual([]);
+  });
+
+  it("una lista que no terminó se reporta como incompleta, no como diferencia", async () => {
+    const stripe = stripeWith({ [String(START)]: [{ status: "unavailable" }] });
+    const { service, reported } = serviceWith({ stripe, due: [{ period: 202_610, overdue: false }], record: { kind: "recorded", id: "r", matches: false, differences: 0 } });
+    await service.sweepReconciliations();
+    expect(reported).toEqual(["billing_reconciliation_unavailable", "billing_reconciliation_incomplete"]);
+  });
+
+  it("toda la pasada tiene un tope: lo que no alcanza queda para mañana, sin contar como falla", async () => {
+    // El reloj fija el tope de la pasada al empezar y después ya lo pasó.
+    let reads = 0;
+    const { service, calls } = serviceWith({
+      due: [
+        { period: 202_609, overdue: false },
+        { period: 202_610, overdue: false },
+      ],
+      clock: () => (reads++ === 0 ? 0 : SWEEP_BUDGET_MS),
+    });
     expect(await service.sweepReconciliations()).toBe(true);
+    expect(calls.filter((c) => c.startsWith("ventana"))).toEqual([]);
+  });
+
+  it("sin la llave de Stripe no le pregunta nada a la base, y lo dice cada día", async () => {
+    const { service, calls, reported } = serviceWith({ stripe: null });
+    expect(await service.sweepReconciliations()).toBe(false);
     expect(calls).toEqual([]);
+    expect(reported).toEqual(["billing_reconciliation_no_key"]);
   });
 
   it("si la base no dice qué toca, la pasada no salió", async () => {

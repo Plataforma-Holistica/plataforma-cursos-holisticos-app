@@ -525,6 +525,8 @@ describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () =>
     providerOtherCurrency: 0,
     differencesTotal: 0,
     requested: false,
+    ownCountNow: overrides.ownCount ?? 130,
+    foreignProvider: false,
     matches: true,
     current: true,
     differences: [],
@@ -557,6 +559,15 @@ describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () =>
   it("coincidió pero ya no está vigente, o no coincide: lo dice", () => {
     expect(compared(period({ reconciliation: reconciliation({ current: false }) }))).toMatchObject({ verdict: text.reconciliation.matchesStale, tone: "warning" });
     expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false }) }))).toMatchObject({ verdict: text.reconciliation.mismatch, tone: "warning" });
+    // Sin diferencias propias, la base dice por qué ya no vale: el libro cambió, o hay un proveedor que no se compara.
+    expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, ownCount: 2, ownCountNow: 3 }) }))).toMatchObject({
+      verdict: "Ya no vale: el libro tenía 2 cobros de Stripe al comparar y ahora tiene 3. Compara otra vez antes de cerrar.",
+      tone: "warning",
+    });
+    expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, foreignProvider: true }) }))).toMatchObject({
+      verdict: text.reconciliation.foreignProvider,
+      tone: "warning",
+    });
   });
 
   it("incompleta, con pendientes en Stripe, con más de 200 diferencias o en modo de prueba: en palabras", () => {

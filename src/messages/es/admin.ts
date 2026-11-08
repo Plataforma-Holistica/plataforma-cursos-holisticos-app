@@ -932,6 +932,9 @@ export const admin = defineMessages({
       matchesCurrent: "Coincide y está vigente: no frena el cierre.",
       matchesStale: "Coincidió, pero ya no está vigente: algo cambió después. Compara otra vez antes de cerrar.",
       mismatch: "No coincide: frena el cierre.",
+      // La base dice por qué una comparación sin diferencias propias ya no vale (de la revisión del diff de la 129).
+      ledgerChanged: "Ya no vale: el libro tenía {then} cobros de Stripe al comparar y ahora tiene {now}. Compara otra vez antes de cerrar.",
+      foreignProvider: "Ya no vale: el mes tiene cobros de un proveedor que no se compara con Stripe. Frena el cierre hasta que se corrija.",
       incomplete: "Está incompleta: no se alcanzó a leer todo lo de Stripe. Compara otra vez.",
       pending: {
         one: "Stripe tiene {count} cargo pendiente: hasta que se resuelva, no coincide.",
@@ -961,7 +964,7 @@ export const admin = defineMessages({
       // Lo que oye el lector después del botón: «Explicar el cargo ch_…».
       ofCharge: "el cargo {charge}",
       explainTitle: "Explicar la diferencia",
-      explainBody: "Queda explicada con tu nota y deja de frenar el cierre. Escribe por qué Stripe lo tiene y el libro no: queda en el registro.",
+      explainBody: "Queda explicada con tu nota y deja de frenar el cierre por esta diferencia. Escribe por qué Stripe lo tiene y el libro no: queda en el registro.",
       noteLabel: "Por qué",
       noteHint: "De 1 a {max} caracteres.",
       confirmExplain: "Sí, explicarla",

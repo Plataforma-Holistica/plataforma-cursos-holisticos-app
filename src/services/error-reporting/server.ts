@@ -141,6 +141,14 @@ const FAILURES = {
     "La comparación de los cobros de un mes terminado con Stripe no coincide: el mes no se puede cerrar. Ver el bloque de la conciliación en el panel del periodo (PA-79): lo que sobra en Stripe se explica con nota, y lo que falta en Stripe o cambió de monto se corrige.",
   billing_reconciliation_unavailable:
     "No se pudo comparar un mes con Stripe, o completar lo que liquidó Stripe: Stripe o la base no contestaron, o contestaron algo que el servidor no conoce. La comparación quedó incompleta o sin hacerse, y el trabajo de mañana lo intenta otra vez.",
+  billing_reconciliation_incomplete:
+    "No se alcanzó a listar entero un mes en Stripe al compararlo (el tope de tiempo, o Stripe no contestó una página): la comparación quedó incompleta y no deja cerrar. El trabajo de mañana lo intenta otra vez; finanzas puede pulsar «Comparar ahora».",
+  billing_reconciliation_overdue:
+    "Un mes terminado hace más de dos días todavía no tiene una comparación con Stripe que coincida: no se puede cerrar. Ver el bloque de la conciliación en el panel del periodo (PA-79).",
+  billing_reconciliation_no_key:
+    "El servidor no tiene la llave secreta de Stripe: no se compara ningún mes con Stripe, y ningún mes se puede cerrar hasta que la tenga.",
+  billing_settlement_mismatch:
+    "Lo que Stripe dice que liquidó un cobro trae otro bruto que el que registró el libro: no se guardó. Revisar el cobro en el panel de Stripe.",
   billing_reconciliation_rejected:
     "La base rechazó por su forma los cargos que el servidor leyó de Stripe para comparar un mes. No debería pasar: es una falla de código o una respuesta de Stripe que cambió de forma.",
   billing_queue_unavailable:

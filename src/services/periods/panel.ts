@@ -141,6 +141,10 @@ export interface Reconciliation {
   differencesTotal: number;
   /** La pidió una persona (nula: el trabajo de cada día). */
   requested: boolean;
+  /** Cuántos cobros de Stripe tiene el libro ahora: si no es `ownCount`, el libro cambió desde la comparación y ya no vale. */
+  ownCountNow: number;
+  /** El mes tiene cobros de un proveedor que no se compara: ninguna comparación vale hasta que se corrija. */
+  foreignProvider: boolean;
   matches: boolean;
   current: boolean;
   /** Hasta 200, en el orden de la base. */

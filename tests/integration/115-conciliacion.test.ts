@@ -57,7 +57,7 @@ afterAll(async () => {
 });
 
 /** Las consultas de la aplicación sobre esa transacción, como sistema. */
-function storeOn(owner: Client, due: number[] = [PERIOD]): ReconcileStore {
+function storeOn(owner: Client, due: { period: number; overdue: boolean }[] = [{ period: PERIOD, overdue: false }]): ReconcileStore {
   const tx: Tx = {
     query: async (query, row) => (await owner.query(query.text, [...query.values])).rows.map((each) => row.parse(each)),
     execute: async (query) => (await owner.query(query.text, [...query.values])).rowCount ?? 0,
@@ -161,7 +161,7 @@ async function charged(owner: Client, n: number, at: string, cents = 34_900): Pr
   return { profile, charge };
 }
 
-function service(owner: Client, stripe: StripeGet, options: { live?: boolean; clock?: () => number; due?: number[] } = {}) {
+function service(owner: Client, stripe: StripeGet, options: { live?: boolean; clock?: () => number; due?: { period: number; overdue: boolean }[] } = {}) {
   const reported: FailureCode[] = [];
   const reconciliation = createReconciliation(
     { report: (code) => (reported.push(code), Promise.resolve()) },

@@ -1763,6 +1763,62 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
   const closeRuns = async (period: number) =>
     Number((await ownerQuery<{ n: string }>("select count(*)::text as n from public.close_runs where period_id = $1", [period]))[0]?.n);
 
+  // La conciliación con Stripe en PA-79 (T-303, cuarta solicitud). El extremo a extremo no habla con Stripe: la comparación con una diferencia que se puede
+  // explicar la escribe el dueño, más nueva que la que deja `closingMonth`. Lo que hace la comparación lo prueban `87_conciliacion` y `115-conciliacion`.
+  async function differenceToExplain(period: number, charge: string): Promise<void> {
+    await ownerQuery(
+      `do $$ declare v uuid; begin
+         set local session_replication_role = replica;
+         insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                                      provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+         select p.period_id, false, p.starts_at, p.ends_at, true, 0, 0, 1, 50000, 0, 0, 1, false, p.ends_at + interval '12 minutes'
+         from public.payout_periods p where p.period_id = ${period}
+         returning id into v;
+         insert into private.billing_reconciliation_differences (reconciliation_id, side, provider_charge_id, own_cents, provider_cents, currency)
+         values (v, 'only_provider', '${charge}', null, 50000, 'mxn');
+       end $$`,
+    );
+  }
+  const notesFor = async (period: number) =>
+    (await ownerQuery<{ note: string }>("select note from private.billing_reconciliation_notes where period_id = $1", [period])).map((row) => row.note);
+
+  test("la conciliación con JavaScript: lo que sobra en Stripe se explica en dos pasos y la comparación queda vigente", async ({ page }) => {
+    test.setTimeout(180_000);
+    const charge = `ch_e2e_${randomUUID().slice(0, 8)}`;
+    await closingMonth(204003, flagged.id);
+    await differenceToExplain(204003, charge);
+    await enterAdmin(page, ana, `${PERIODS}/2040-03`);
+    const block = page.getByRole("region", { name: "Conciliación con Stripe" });
+    await expect(block.getByText("No coincide: frena el cierre.")).toBeVisible();
+    const row = block.getByRole("row").filter({ hasText: charge });
+    await expect(row.getByText("Stripe lo cobró y el libro no lo tiene")).toBeVisible();
+    await row.getByRole("button", { name: `Explicar el cargo ${charge}` }).click();
+    await row.getByLabel("Por qué").fill("Cobro de prueba hecho a mano en el panel de Stripe.");
+    await row.getByRole("button", { name: "Sí, explicarla" }).click();
+    await expect(page.getByText("Diferencia explicada.")).toBeVisible();
+    await expect(block.getByText("Coincide y está vigente: no frena el cierre.")).toBeVisible();
+    expect(await notesFor(204003)).toEqual(["Cobro de prueba hecho a mano en el panel de Stripe."]);
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
+  test("la conciliación sin JavaScript: explicar en dos pasos, y recargar no la guarda dos veces", async ({ browser }) => {
+    test.setTimeout(180_000);
+    const charge = `ch_e2e_${randomUUID().slice(0, 8)}`;
+    await closingMonth(204004, flagged.id);
+    await differenceToExplain(204004, charge);
+    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+      await enterAdmin(page, ana, `${PERIODS}/2040-04`);
+      const block = page.getByRole("region", { name: "Conciliación con Stripe" });
+      await block.getByRole("row").filter({ hasText: charge }).getByRole("button", { name: `Explicar el cargo ${charge}` }).click();
+      const asked = page.getByRole("region", { name: "Conciliación con Stripe" }).getByRole("row").filter({ hasText: charge });
+      await asked.getByLabel("Por qué").fill("Cobro de prueba sin JavaScript.");
+      await asked.getByRole("button", { name: "Sí, explicarla" }).click();
+      await expect(page.getByText("Diferencia explicada.")).toBeVisible();
+      await page.reload();
+      expect(await notesFor(204004)).toEqual(["Cobro de prueba sin JavaScript."]);
+    });
+  });
+
   test("periodos con JavaScript: la lista, el panel, recalcular, ensayar, el diálogo de cierre y su respuesta", async ({ page }) => {
     test.setTimeout(240_000);
     await closingMonth(204001, flagged.id);

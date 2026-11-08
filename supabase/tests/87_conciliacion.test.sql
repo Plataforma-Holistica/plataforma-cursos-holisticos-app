@@ -8,7 +8,7 @@
 -- Octubre de 2026 ya terminó y es el mes que se compara y se cierra; el mes de ahora todavía no termina.
 begin;
 \ir _ayuda.psql
-select plan(94);
+select plan(104);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a8700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -273,7 +273,10 @@ select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 3
   'recorded', 'finanzas compara sin código reciente: no cambia dinero');
 select is((select requested_by from private.billing_reconciliations order by registered_at desc, id desc limit 1), pruebas.finanzas(),
   'y queda quién lo pidió');
-select is(pruebas.compara(202610, '[]'::jsonb, p_who => pruebas.otra()) ->> 'outcome', 'rate_limited', 'otra persona no compara el mismo mes antes de un minuto');
+select is(pruebas.ventana(202610, pruebas.otra()) ->> 'outcome', 'rate_limited', 'otra persona no pide la ventana del mismo mes antes de un minuto, antes de listar');
+select is(pruebas.compara(202610, '[]'::jsonb, p_who => pruebas.otra(), p_starts => (select extract(epoch from starts_at)::bigint from public.payout_periods where period_id = 202610),
+                          p_ends => (select extract(epoch from ends_at)::bigint from public.payout_periods where period_id = 202610)) ->> 'outcome',
+  'rate_limited', 'ni la registra');
 select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900))) ->> 'outcome', 'recorded',
   'el sistema sí');
 select is(pruebas.compara(pruebas.ahora(), '[]'::jsonb, p_starts => 0, p_ends => 1) ->> 'outcome', 'too_early', 'el mes de ahora no se registra');
@@ -296,10 +299,13 @@ select is((pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 
 select pruebas.como_dueno();
 select is(pruebas.cobra(3, 'ch_87_tres', 34900), 'recorded', 'entra otro cobro de octubre después de comparar');
 select ok(not pruebas.vigente(202610), 'y la comparación deja de estar vigente: lo propio cambió');
+select is(array[(pruebas.lee('finance_period', 202610) #>> '{reconciliation,own_count}')::int, (pruebas.lee('finance_period', 202610) #>> '{reconciliation,own_count_now}')::int],
+  array[2, 3], 'PA-79 dice cuántos cobros vio la comparación y cuántos tiene el libro ahora');
 select is((pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900),
                                                      pruebas.cargo('ch_87_tres', 34900))) ->> 'matches')::boolean, true, 'con él coincide otra vez');
 select is(pruebas.cobra(4, 'mp_87_cuatro', 34900, p_provider => 'mercadopago'), 'recorded', 'un cobro de otro proveedor en octubre');
 select ok(not pruebas.vigente(202610), 'deja a octubre sin conciliar: ese proveedor no se compara');
+select is(pruebas.lee('finance_period', 202610) #> '{reconciliation,foreign_provider}', 'true'::jsonb, 'y PA-79 dice por qué');
 
 -- ---------------------------------------------------------------------------------------
 -- Explicar.
@@ -336,9 +342,10 @@ select throws_ok($$update private.billing_reconciliation_notes set note = 'otra'
 -- ---------------------------------------------------------------------------------------
 -- Lo que pide el trabajo.
 
-select ok(not (pruebas.servidor('private.billing_reconciliation_due()') @> '[202609]'::jsonb), 'un mes con comparación vigente no se pide');
-select ok(pruebas.servidor('private.billing_reconciliation_due()') @> '[202610]'::jsonb, 'octubre, sin ella, sí');
-select ok(not (pruebas.servidor('private.billing_reconciliation_due()') @> to_jsonb(array[pruebas.ahora()])), 'el mes de ahora no');
+select ok(not (pruebas.servidor('private.billing_reconciliation_due()') @> '[{"period_id": 202609}]'::jsonb), 'un mes con comparación vigente no se pide');
+select ok(pruebas.servidor('private.billing_reconciliation_due()') @> '[{"period_id": 202610, "overdue": true}]'::jsonb,
+  'octubre, sin ella, sí, y ya pasaron dos días de su fin: se reporta');
+select ok(not (pruebas.servidor('private.billing_reconciliation_due()') @> jsonb_build_array(jsonb_build_object('period_id', pruebas.ahora()))), 'el mes de ahora no');
 
 -- ---------------------------------------------------------------------------------------
 -- El cierre.
@@ -374,6 +381,17 @@ select is(pruebas.cierra(202610), 'billing_events_pending', 'uno pendiente de an
 select pruebas.olvida((select id from e where et = 'antes'));
 select is((pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900))) ->> 'matches')::boolean, false,
   'la última comparación no ve el tercer cobro en Stripe');
+insert into e values ('borde', pruebas.recibe('evt_87_borde', p_at => '2026-11-01 00:09-06'));
+select is(pruebas.cierra(202610), 'billing_events_pending', 'uno pendiente de 9 minutos después del fin todavía frena (el margen de la foto)');
+select pruebas.olvida((select id from e where et = 'borde'));
+insert into e values ('proceso', pruebas.recibe('evt_87_proceso', p_at => '2026-10-30 12:00-06'));
+select pruebas.como_sistema();
+select private.provider_event_claim((select id from e where et = 'proceso'));
+select pruebas.limpiar();
+select is(pruebas.cierra(202610), 'billing_events_pending', 'uno que se está procesando también');
+select pruebas.olvida((select id from e where et = 'proceso'));
+insert into e values ('fuera', pruebas.recibe('evt_87_fuera', p_at => '2026-11-01 00:11-06'));
+select is(pruebas.cierra(202610), 'charges_match_provider', 'uno pendiente de 11 minutos después ya no');
 insert into e values ('despues', pruebas.recibe('evt_87_despues', p_at => '2026-11-02 12:00-06'));
 select is(pruebas.cierra(202610), 'charges_match_provider', 'uno pendiente de después no, y sin comparación vigente el cierre se frena');
 select is(pruebas.lee('finance_close', 202610) -> 'checks' -> 'billing_events', '0'::jsonb, 'PA-80 lee los avisos que frenan con la misma regla');
@@ -390,6 +408,12 @@ set local session_replication_role = origin;
 insert into e values ('falla2', pruebas.recibe('evt_87_falla2'));
 select pruebas.termina((select id from e where et = 'falla2'), 'failed', 'unknown_plan');
 select is(pruebas.cierra(202610), 'open_alerts', 'las alertas abiertas van antes que los avisos');
+
+-- Un mes cerrado no se compara, no se explica ni se pide.
+select is(pruebas.ventana(202609) ->> 'outcome', 'closed', 'la ventana de un mes cerrado no se da');
+select is(pruebas.compara(202609, '[]'::jsonb, p_starts => 0, p_ends => 1) ->> 'outcome', 'closed', 'ni se registra una comparación');
+select is(pruebas.explica(202609, 'only_provider', 'ch_87_sep', null, 60000), 'closed', 'ni se explica');
+select ok(not (pruebas.servidor('private.billing_reconciliation_due()') @> '[{"period_id": 202609}]'::jsonb), 'ni lo pide el trabajo');
 
 -- PA-79.
 select is(pruebas.lee('finance_period', 202610) #>> '{reconciliation,current}', 'true', 'PA-79 dice si la comparación está vigente');

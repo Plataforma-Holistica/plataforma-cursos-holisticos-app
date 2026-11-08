@@ -64,7 +64,13 @@ describe("los avisos de Stripe", () => {
   });
 
   it("las tres rutas declaran su duración: el tope de la entrega, lo que sigue detrás de la respuesta, el barrido y la conciliación no dependen de lo que Vercel ponga por omisión", () => {
-    for (const file of ["src/app/api/webhooks/stripe/route.ts", "src/app/api/trabajos/avisos/route.ts", "src/app/api/trabajos/conciliacion/route.ts"]) {
+    for (const file of [
+      "src/app/api/webhooks/stripe/route.ts",
+      "src/app/api/trabajos/avisos/route.ts",
+      "src/app/api/trabajos/conciliacion/route.ts",
+      // «Comparar ahora» corre como acción de la página de administración (T-303, cuarta solicitud).
+      "src/app/admin/[...resto]/page.tsx",
+    ]) {
       expect(readFileSync(join(ROOT, file), "utf8"), file).toMatch(/^export const maxDuration = \d+;$/m);
     }
   });

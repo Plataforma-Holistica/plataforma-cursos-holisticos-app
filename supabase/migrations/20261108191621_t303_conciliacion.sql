@@ -192,6 +192,12 @@ begin
   if pg_catalog.clock_timestamp() < p.ends_at + interval '10 minutes' then
     return pg_catalog.jsonb_build_object('outcome', 'too_early', 'from', p.ends_at + interval '10 minutes');
   end if;
+  -- El freno de las personas va también aquí, antes de que el servidor liste Stripe (registrar lo vuelve a mirar).
+  if not private.actor_is_system() and exists (select 1 from private.billing_reconciliations r
+                                               where r.period_id = p_period and r.requested_by is not null
+                                                 and r.registered_at > pg_catalog.clock_timestamp() - interval '1 minute') then
+    return '{"outcome": "rate_limited"}'::jsonb;
+  end if;
   return pg_catalog.jsonb_build_object('outcome', 'window', 'starts_at', extract(epoch from p.starts_at)::bigint,
                                        'ends_at', extract(epoch from p.ends_at)::bigint);
 end
@@ -200,7 +206,8 @@ revoke all on function private.billing_reconciliation_window(public.period_id) f
 grant execute on function private.billing_reconciliation_window(public.period_id) to app_service;
 
 -- Registra una comparación con los cargos que el servidor leyó de Stripe en la ventana, tal como los leyó. Lo propio lo calcula después de tomar el periodo para
--- compartir: un cierre en vuelo termina antes, y un cobro en vuelo (que toma la fila igual) ya se ve al contar.
+-- compartir: un cierre en vuelo termina antes. Un cobro en vuelo también toma la fila para compartir y no se esperan: si confirma después de contar, lo que lo
+-- protege es la huella (`billing_reconciliation_ok` vuelve a contar), no el candado.
 create function private.billing_reconciliation_record(p_period public.period_id, p_livemode boolean, p_starts bigint, p_ends bigint, p_complete boolean,
                                                       p_charges jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = ''
@@ -303,8 +310,8 @@ $$;
 revoke all on function private.billing_reconciliation_record(public.period_id, boolean, bigint, bigint, boolean, jsonb) from public;
 grant execute on function private.billing_reconciliation_record(public.period_id, boolean, bigint, bigint, boolean, jsonb) to app_service;
 
--- Lo que pide el trabajo de cada día: todo periodo terminado (con su margen) que no está cerrado y no tiene una comparación vigente. Así se compara también antes
--- de `DIA_CIERRE`, cuando finanzas revisa el mes (OP-01, fase A).
+-- Lo que pide el trabajo de cada día: todo periodo terminado (con su margen) que no está cerrado y no tiene una comparación vigente, y si ya pasaron dos días de su
+-- fin sin ella (la alerta del 05: se reporta). Así se compara también antes de `DIA_CIERRE`, cuando finanzas revisa el mes (OP-01, fase A).
 create function private.billing_reconciliation_due() returns jsonb
 language plpgsql stable security definer set search_path = ''
 as $$
@@ -313,8 +320,9 @@ begin
     return null;
   end if;
   return coalesce((
-    select pg_catalog.jsonb_agg(x.period_id order by x.period_id)
-    from (select p.period_id from public.payout_periods p
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('period_id', x.period_id, 'overdue', x.ends_at + interval '2 days' <= pg_catalog.clock_timestamp())
+                                order by x.period_id)
+    from (select p.period_id, p.ends_at from public.payout_periods p
           where p.status in ('open', 'closing') and p.ends_at + interval '10 minutes' <= pg_catalog.clock_timestamp()
             and private.billing_reconciliation_current(p.period_id) is null
           order by p.period_id
@@ -781,6 +789,9 @@ begin
                          'provider_cents', r.provider_cents, 'provider_pending', r.provider_pending,
                          'provider_other_currency', r.provider_other_currency, 'differences_total', r.differences,
                          'requested', r.requested_by is not null, 'matches', private.billing_reconciliation_ok(r.id),
+                         -- Por qué una que no coincide puede haber dejado de hacerlo: lo propio de ahora, y un cobro de un proveedor que no se compara.
+                         'own_count_now', (select pg_catalog.count(*) from public.charges c where c.provider = 'stripe' and c.period_id = p_period),
+                         'foreign_provider', exists (select 1 from public.charges c where c.period_id = p_period and c.provider not in ('stripe', 'manual')),
                          'current', private.billing_reconciliation_current(p_period) is not null,
                          'differences', coalesce((
                            select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
@@ -936,6 +947,14 @@ as $$
                ('billing_settlements_missing', 'private.billing_settlements_missing(public.period_id)'),
                ('billing_settlement_complete', 'private.billing_settlement_complete(text, text, bigint, bigint, bigint, timestamptz)')) f (name, signature)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature)) like '%if not private.billing_reconciliation_allowed() then%', false)
+  union all
+  select 'billing blocking without its rule', 'billing_events_blocking'
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.billing_events_blocking(timestamptz)'))
+                     like '%e.status in (''failed'', ''deferred'')%or (e.status in (''pending'', ''processing'') and e.occurred_at < p_ends + interval ''10 minutes'')%', false)
+  union all
+  select 'finance close without the billing checks', 'finance_close'
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.finance_close(public.period_id)'))
+                     like '%''billing_events'', private.billing_events_blocking(p.ends_at)%''charges_match'', private.billing_reconciliation_current(p_period) is not null%', false)
   union all
   select 'reconciliation explain without its gate', 'billing_reconciliation_explain'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.billing_reconciliation_explain(public.period_id, text, text, bigint, bigint, text, text)'))
