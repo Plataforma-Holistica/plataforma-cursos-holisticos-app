@@ -920,7 +920,7 @@ export const admin = defineMessages({
     // La conciliación con Stripe de PA-79 (T-303, cuarta solicitud; decisiones de Sergio del 2026-11-08).
     reconciliation: {
       title: "Conciliación con Stripe",
-      intro: "Los cobros del libro propio contra los cargos de Stripe del periodo. Para cerrar, la última comparación tiene que coincidir y estar vigente.",
+      intro: "Los cobros del libro propio contra los cargos de Stripe del periodo. Para cerrar, la última comparación completa tiene que coincidir y estar vigente.",
       never: "Todavía no se han comparado los cobros de este periodo con Stripe.",
       last: "Última comparación: el {date} a las {time} ({ago}).",
       today: "hoy",
@@ -944,6 +944,7 @@ export const admin = defineMessages({
       },
       tooMany: "Hay más de 200 diferencias: aquí se ven las primeras 200.",
       testMode: "Comparada con Stripe en modo de prueba.",
+      laterIncomplete: "Después hubo una comparación incompleta, el {date} a las {time}: no cambia esta.",
       phoneOnly: "En el teléfono solo se consulta. Para comparar o explicar, ábrelo en una computadora.",
       changeLocked: "Para explicar una diferencia escribe tu código, al inicio de esta página. Comparar no lo pide.",
       readOnly: "El periodo ya cerró: la conciliación solo se consulta.",

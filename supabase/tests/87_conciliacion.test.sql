@@ -8,7 +8,7 @@
 -- Octubre de 2026 ya terminó y es el mes que se compara y se cierra; el mes de ahora todavía no termina.
 begin;
 \ir _ayuda.psql
-select plan(108);
+select plan(112);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a8700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -296,6 +296,10 @@ select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 3
   'el sistema sí');
 select is((pruebas.compara(202610, '[]'::jsonb, false) ->> 'matches')::boolean, false, 'después, una incompleta (Stripe no contestó)');
 select ok(pruebas.vigente(202610), 'no tira la que ya coincidía: la vigencia la decide la última completa');
+select is(array[pruebas.lee('finance_period', 202610) #>> '{reconciliation,complete}', pruebas.lee('finance_period', 202610) #>> '{reconciliation,matches}',
+                pruebas.lee('finance_period', 202610) #>> '{reconciliation,current}'], array['true', 'true', 'true'],
+  'PA-79 muestra la misma que decide, no la incompleta');
+select isnt(pruebas.lee('finance_period', 202610) #>> '{reconciliation,latest_incomplete_at}', null, 'y dice que después hubo una incompleta');
 select is(pruebas.compara(pruebas.ahora(), '[]'::jsonb, p_starts => 0, p_ends => 1) ->> 'outcome', 'too_early', 'el mes de ahora no se registra');
 
 -- La comparación es un libro, y su hora la pone la base.
@@ -469,6 +473,15 @@ select ok(exists (select 1 from private.schema_violations_close() where problem 
   've un cierre sin las dos comprobaciones de cobro');
 do $$ begin execute (select cierre from definiciones); end $$;
 select is_empty($$select * from private.schema_violations_close()$$, 'y repuesto, ya no');
+-- La regla de «vigente», sin la exigencia de completa: el vigilante de los avisos lo ve.
+insert into definiciones (cierre) select pg_get_functiondef('private.billing_reconciliation_current(public.period_id)'::regprocedure);
+do $$ begin
+  execute replace((select cierre from definiciones where cierre like '%FUNCTION private.billing_reconciliation_current(%'), 'where r.period_id = p_period and r.complete', 'where r.period_id = p_period');
+end $$;
+select ok(exists (select 1 from private.schema_violations_billing() where problem = 'reconciliation without its rule: billing_reconciliation_current'),
+  've una vigencia que ya no exige la comparación completa');
+do $$ begin execute (select cierre from definiciones where cierre like '%FUNCTION private.billing_reconciliation_current(%'); end $$;
+select is_empty($$select * from private.schema_violations_billing()$$, 'y repuesta, ya no');
 
 select * from finish();
 rollback;

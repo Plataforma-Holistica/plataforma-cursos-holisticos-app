@@ -109,8 +109,8 @@ function differenceRow(difference: ReconciliationDifference, index: number, expl
 }
 
 function verdictOf(reconciliation: Reconciliation): { verdict: string; tone: "success" | "warning" } {
-  // La base da `matches` y `current` de la misma comparación (la última completa): coinciden o no, juntos.
-  if (reconciliation.matches && reconciliation.current) return { verdict: text.matchesCurrent, tone: "success" };
+  // Lo que deja cerrar manda: si hay una vigente, no se dice que frena. La base muestra la misma que decide (la última completa).
+  if (reconciliation.current) return { verdict: text.matchesCurrent, tone: "success" };
   // Por qué ya no vale aunque no tenga diferencias propias: lo dice la base, con lo de ahora.
   if (reconciliation.foreignProvider) return { verdict: text.foreignProvider, tone: "warning" };
   if (reconciliation.ownCountNow !== reconciliation.ownCount) {
@@ -132,6 +132,9 @@ export function reconciliationView(read: Extract<FinancePeriod, { period: object
     if (reconciliation.providerPending > 0) notes.push(t(plural(reconciliation.providerPending, text.pending), { count: reconciliation.providerPending }));
     if (reconciliation.tooMany) notes.push(text.tooMany);
     if (!reconciliation.livemode) notes.push(text.testMode);
+    if (reconciliation.latestIncompleteAt !== null) {
+      notes.push(t(text.laterIncomplete, { date: longDate(reconciliation.latestIncompleteAt), time: clockTime(reconciliation.latestIncompleteAt, PRODUCT_TIME_ZONE) }));
+    }
     last = {
       kind: "compared",
       when: t(text.last, {

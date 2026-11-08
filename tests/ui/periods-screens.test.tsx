@@ -368,6 +368,7 @@ describe("PA-79, la conciliación con Stripe (T-303, cuarta solicitud)", () => {
     requested: true,
     ownCountNow: overrides.ownCount ?? 130,
     foreignProvider: false,
+    latestIncompleteAt: null,
     matches: true,
     current: true,
     differences: [],

@@ -527,6 +527,7 @@ describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () =>
     requested: false,
     ownCountNow: overrides.ownCount ?? 130,
     foreignProvider: false,
+    latestIncompleteAt: null,
     matches: true,
     current: true,
     differences: [],
@@ -558,6 +559,10 @@ describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () =>
 
   it("coincidió pero ya no está vigente, o no coincide: lo dice", () => {
     expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false }) }))).toMatchObject({ verdict: text.reconciliation.mismatch, tone: "warning" });
+    // Una incompleta más nueva no cambia lo que decide la última completa: si está vigente, no se dice que frena, y la incompleta va como nota.
+    const later = compared(period({ reconciliation: reconciliation({ matches: true, current: true, latestIncompleteAt: "2027-11-03T15:00:00Z" }) }));
+    expect(later).toMatchObject({ verdict: text.reconciliation.matchesCurrent, tone: "success" });
+    expect(later.notes.some((note: string) => note.startsWith("Después hubo una comparación incompleta"))).toBe(true);
     // Sin diferencias propias, la base dice por qué ya no vale: el libro cambió, o hay un proveedor que no se compara.
     expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, ownCount: 2, ownCountNow: 3 }) }))).toMatchObject({
       verdict: "Ya no vale: el libro tenía 2 cobros de Stripe al comparar y ahora tiene 3. Compara otra vez antes de cerrar.",

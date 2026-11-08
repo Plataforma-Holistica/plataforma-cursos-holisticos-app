@@ -114,6 +114,7 @@ const reconciliationSchema = z.strictObject({
   differences_total: count,
   requested: z.boolean(),
   own_count_now: count,
+  latest_incomplete_at: at.nullable(),
   foreign_provider: z.boolean(),
   matches: z.boolean(),
   current: z.boolean(),
@@ -150,6 +151,7 @@ function reconciliationOf(raw: z.infer<typeof reconciliationSchema>): Reconcilia
     requested: raw.requested,
     ownCountNow: raw.own_count_now,
     foreignProvider: raw.foreign_provider,
+    latestIncompleteAt: raw.latest_incomplete_at,
     matches: raw.matches,
     current: raw.current,
     differences: raw.differences.map((d) => ({

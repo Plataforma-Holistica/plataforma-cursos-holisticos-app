@@ -671,14 +671,22 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
   });
 
   it("registrar una comparación con Stripe a la escala cabe en el tope de una sentencia del servidor (T-303, cuarta solicitud)", async () => {
-    // El mes de la escala no ha terminado: se registra contra el anterior, con 13 000 cargos que el libro no tiene ahí. Es lo más caro: validar y clasificar
-    // cada cargo, y guardar las primeras 200 diferencias. La lista se arma en la misma sentencia (el servidor la manda hecha). Se deshace al terminar.
+    // El mes de la escala no ha terminado: se registra contra el anterior, con 13 000 cobros de Stripe en el libro (uno por alumno, por la función del libro) y
+    // los mismos 13 000 cargos de Stripe: validar y clasificar cada uno, cruzar los dos lados y contar la huella. La lista se arma en la misma sentencia (el
+    // servidor la manda hecha). Se deshace al terminar.
     await owner.query("begin");
     try {
       await owner.query("set local statement_timeout = '10s'");
       await owner.query("select set_config('app.actor_kind', 'system', true)");
       const previous = Number((await one<{ p: string }>("select private.period_plus($1, -1)::text as p", [period])).p);
       await owner.query("select private.open_period($1)", [previous]);
+      await owner.query(
+        `select private.record_charge(('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid, ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid,
+                                      'stripe', 'ch_escala_previo_' || s, null, 'monthly', p.starts_at + s * interval '1 second', 'MXN', 34900,
+                                      null, null, 'card', 'MX', null)
+         from public.payout_periods p, generate_series(1, $2) s where p.period_id = $1`,
+        [previous, STUDENTS],
+      );
       const start = performance.now();
       const recorded = await one<{ r: { outcome: string; differences: number } }>(
         `select private.billing_reconciliation_record(p.period_id, false, extract(epoch from p.starts_at)::bigint, extract(epoch from p.ends_at)::bigint, true,
@@ -692,7 +700,7 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
       const took = ms(start);
       report.reconciliation = { record_ms: took, charges: STUDENTS, differences: recorded.r.differences };
       expect(recorded.r.outcome).toBe("recorded");
-      expect(recorded.r.differences).toBe(STUDENTS);
+      expect(recorded.r.differences).toBe(0);
       expect(took).toBeLessThan(SERVER_STATEMENT_MS);
     } finally {
       await owner.query("rollback");

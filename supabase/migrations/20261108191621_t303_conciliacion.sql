@@ -151,6 +151,18 @@ as $$
 $$;
 revoke all on function private.billing_reconciliation_current(public.period_id) from public;
 
+-- La comparación que se muestra en PA-79 y sobre la que se explica: la misma que decide (la última completa), o la última si no hay ninguna completa. Así lo que
+-- se ve, lo que se explica y lo que deja cerrar hablan de la misma (de la tercera revisión del diff).
+create function private.billing_reconciliation_shown(p_period public.period_id) returns uuid
+language sql stable set search_path = ''
+as $$
+  select r.id from private.billing_reconciliations r
+  where r.period_id = p_period
+  order by r.complete desc, r.registered_at desc, r.id desc
+  limit 1
+$$;
+revoke all on function private.billing_reconciliation_shown(public.period_id) from public;
+
 -- Los avisos de cobro que frenan el cierre de un periodo que termina en `p_ends` (decisiones de Sergio del 2026-11-06 y del 2026-11-08): lo fallido y lo que espera
 -- a T-307 de cualquier fecha (RN-10: un reembolso antes del cierre saca ese cobro del bote), y lo pendiente de antes del fin con el margen de la foto.
 create function private.billing_events_blocking(p_ends timestamptz) returns bigint
@@ -336,7 +348,8 @@ $$;
 revoke all on function private.billing_reconciliation_due() from public;
 grant execute on function private.billing_reconciliation_due() to app_service;
 
--- Finanzas explica lo que Stripe cobró y el libro no tiene, con nota (decisión 6 de Sergio). Solo una diferencia exacta de la última comparación del periodo. Lo que
+-- Finanzas explica lo que Stripe cobró y el libro no tiene, con nota (decisión 6 de Sergio). Solo una diferencia exacta de la comparación que se muestra (la última
+-- completa). Lo que
 -- el libro tiene y Stripe no, o con otro monto, no se explica: frena hasta corregirse (decisión de Sergio del 2026-11-08).
 create function private.billing_reconciliation_explain(p_period public.period_id, p_side text, p_charge text, p_own_cents bigint, p_provider_cents bigint,
                                                        p_currency text, p_note text) returns jsonb
@@ -367,7 +380,7 @@ begin
   if p.status in ('closed', 'paid') then
     return '{"outcome": "closed"}'::jsonb;
   end if;
-  select r.id into v_last from private.billing_reconciliations r where r.period_id = p_period order by r.registered_at desc, r.id desc limit 1;
+  v_last := private.billing_reconciliation_shown(p_period);
   if not exists (select 1 from private.billing_reconciliation_differences d
                  where d.reconciliation_id = v_last and d.side = p_side and d.provider_charge_id = p_charge
                    and d.provider_cents = p_provider_cents and d.currency = p_currency) then
@@ -795,6 +808,9 @@ begin
                          'requested', r.requested_by is not null, 'matches', private.billing_reconciliation_ok(r.id),
                          -- Por qué una que no coincide puede haber dejado de hacerlo: lo propio de ahora, y un cobro de un proveedor que no se compara.
                          'own_count_now', (select pg_catalog.count(*) from public.charges c where c.provider = 'stripe' and c.period_id = p_period),
+                         -- Una incompleta más nueva que la que se muestra: no cambia lo que decide, y se dice como nota.
+                         'latest_incomplete_at', (select pg_catalog.max(x.registered_at) from private.billing_reconciliations x
+                                                  where x.period_id = p_period and not x.complete and x.registered_at > r.registered_at),
                          'foreign_provider', exists (select 1 from public.charges c where c.period_id = p_period and c.provider not in ('stripe', 'manual')),
                          'current', private.billing_reconciliation_current(p_period) is not null,
                          'differences', coalesce((
@@ -808,8 +824,7 @@ begin
                              on n.period_id = r.period_id and n.side = d.side and n.provider_charge_id = d.provider_charge_id
                             and n.provider_cents = d.provider_cents and n.currency = d.currency
                            where d.reconciliation_id = r.id), '[]'::jsonb))
-                       from private.billing_reconciliations r where r.period_id = p_period
-                       order by r.registered_at desc, r.id desc limit 1));
+                       from private.billing_reconciliations r where r.id = private.billing_reconciliation_shown(p_period)));
 end
 $$;
 
@@ -852,6 +867,7 @@ as $$
            ('guard_billing_reconciliation', 'private.guard_billing_reconciliation()'),
            ('billing_reconciliation_ok', 'private.billing_reconciliation_ok(uuid)'),
            ('billing_reconciliation_current', 'private.billing_reconciliation_current(public.period_id)'),
+           ('billing_reconciliation_shown', 'private.billing_reconciliation_shown(public.period_id)'),
            ('billing_events_blocking', 'private.billing_events_blocking(timestamptz)'),
            ('billing_reconciliation_allowed', 'private.billing_reconciliation_allowed()'))
   select 'billing table privilege for ' || r.rolname, t.table_name
@@ -972,7 +988,7 @@ as $$
   union all
   select 'reconciliation explain without its gate', 'billing_reconciliation_explain'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.billing_reconciliation_explain(public.period_id, text, text, bigint, bigint, text, text)'))
-                     like '%v_gate text := private.finance_change_gate();%if p_side in (''only_own'', ''amount'') then%not_explainable%', false)
+                     like '%v_gate text := private.finance_change_gate();%if p_side in (''only_own'', ''amount'') then%not_explainable%v_last := private.billing_reconciliation_shown(p_period);%', false)
   union all
   select 'charge without its event key', 'public.charges'
   where not exists (select 1 from pg_catalog.pg_constraint c

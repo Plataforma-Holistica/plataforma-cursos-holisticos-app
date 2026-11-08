@@ -145,6 +145,8 @@ export interface Reconciliation {
   ownCountNow: number;
   /** El mes tiene cobros de un proveedor que no se compara: ninguna comparación vale hasta que se corrija. */
   foreignProvider: boolean;
+  /** Cuándo hubo una comparación incompleta más nueva que esta (la que se muestra es la última completa); nulo si no la hubo. */
+  latestIncompleteAt: string | null;
   matches: boolean;
   current: boolean;
   /** Hasta 200, en el orden de la base. */

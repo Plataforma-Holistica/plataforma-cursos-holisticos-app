@@ -254,7 +254,7 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
   }
 
   /** Compara un periodo: pide la ventana, lista y registra. Después completa lo que liquidó Stripe. `end`: el tope de la pasada entera, si lo hay. */
-  async function compare(actor: Actor, period: number, end = Number.POSITIVE_INFINITY): Promise<Compared> {
+  async function compare(actor: Actor, period: number, end = Number.POSITIVE_INFINITY, settleMs = 10_000): Promise<Compared> {
     const get = core.stripe();
     if (get === null) return { kind: "no_stripe" };
     const deadline = Math.min(core.now() + LIST_BUDGET_MS, end - 10_000);
@@ -269,7 +269,7 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
         if (recorded.answer === "malformed") await deps.report("billing_reconciliation_rejected");
         return recorded;
       }
-      await settle(get, actor, period, Math.min(deadline + 10_000, end));
+      await settle(get, actor, period, Math.min(deadline + settleMs, end));
       return { kind: "recorded", matches: recorded.matches, complete: listed.complete, differences: recorded.differences };
     } catch {
       await deps.report("billing_reconciliation_unavailable");
@@ -280,17 +280,18 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
   return {
     /** El trabajo de cada día: compara cada periodo terminado y sin cerrar que no tiene una comparación vigente. Contesta si la pasada salió entera. */
     async sweepReconciliations(): Promise<boolean> {
-      // Sin la llave ningún mes se puede cerrar: se dice cada día.
-      if (core.stripe() === null) {
-        await deps.report("billing_reconciliation_no_key");
-        return false;
-      }
       const end = core.now() + SWEEP_BUDGET_MS;
       let due: { period: number; overdue: boolean }[];
       try {
         due = await store.due();
       } catch {
         await deps.report("billing_reconciliation_unavailable");
+        return false;
+      }
+      if (due.length === 0) return true;
+      // Sin la llave ningún mes se puede cerrar: se dice cada día que haya alguno esperando.
+      if (core.stripe() === null) {
+        await deps.report("billing_reconciliation_no_key");
         return false;
       }
       let whole = true;
@@ -305,7 +306,9 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
         if (result.kind === "recorded" && !result.complete) await deps.report("billing_reconciliation_incomplete");
         else if (result.kind === "recorded" && !result.matches) await deps.report("billing_reconciliation_mismatch");
         // La alerta del 05: un mes terminado hace dos días sin una comparación vigente.
-        if (overdue && !(result.kind === "recorded" && result.matches)) await deps.report("billing_reconciliation_overdue");
+        // Uno que se cerró entre medias ya no espera nada.
+        const closed = result.kind === "refused" && result.answer === "closed";
+        if (overdue && !closed && !(result.kind === "recorded" && result.matches)) await deps.report("billing_reconciliation_overdue");
       }
       return whole;
     },
@@ -314,7 +317,8 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
     async compareNow(reader: CookieReader, period: number): Promise<CompareNow> {
       const admitted = await admit(reader);
       if (!admitted.ok) return admitted.result;
-      return { kind: "compared", result: await compare({ kind: "person", claims: admitted.claims }, period) };
+      // En la acción, lo que liquidó Stripe tiene 5 s: lo que no alcance lo completa el trabajo de cada día, y la acción cabe en sus 60 s.
+      return { kind: "compared", result: await compare({ kind: "person", claims: admitted.claims }, period, Number.POSITIVE_INFINITY, 5_000) };
     },
 
     /** Explicar una diferencia de lo que Stripe cobró y el libro no tiene, con nota. Lo revisa todo antes de la base. */

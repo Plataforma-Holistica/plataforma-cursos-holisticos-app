@@ -313,11 +313,21 @@ describe("el trabajo de cada día", () => {
     expect(reported).toEqual(["billing_reconciliation_overdue"]);
   });
 
-  it("sin la llave de Stripe no le pregunta nada a la base, y lo dice cada día", async () => {
-    const { service, calls, reported } = serviceWith({ stripe: null });
-    expect(await service.sweepReconciliations()).toBe(false);
-    expect(calls).toEqual([]);
-    expect(reported).toEqual(["billing_reconciliation_no_key"]);
+  it("sin la llave de Stripe no compara, y lo dice cada día que haya un mes esperando", async () => {
+    const waiting = serviceWith({ stripe: null, due: [{ period: 202_610, overdue: false }] });
+    expect(await waiting.service.sweepReconciliations()).toBe(false);
+    expect(waiting.calls).toEqual(["pendientes"]);
+    expect(waiting.reported).toEqual(["billing_reconciliation_no_key"]);
+    // Sin meses esperando (antes del lanzamiento), no hay nada que decir.
+    const idle = serviceWith({ stripe: null });
+    expect(await idle.service.sweepReconciliations()).toBe(true);
+    expect(idle.reported).toEqual([]);
+  });
+
+  it("un mes que se cerró entre medias no se reporta como vencido", async () => {
+    const { service, reported } = serviceWith({ due: [{ period: 202_610, overdue: true }], window: { kind: "refused", answer: "closed" } });
+    expect(await service.sweepReconciliations()).toBe(true);
+    expect(reported).toEqual([]);
   });
 
   it("si la base no dice qué toca, la pasada no salió", async () => {
