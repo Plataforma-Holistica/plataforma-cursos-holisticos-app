@@ -134,6 +134,10 @@ const FAILURES = {
     "Procesar un aviso de Stripe falló con un error de la base que no se esperaba: el aviso volvió a la fila. Si se repite con el mismo aviso, es una falla de código: revisar el registro de la base.",
   billing_event_failed: "Un aviso de Stripe no se pudo aplicar y quedó fallido, a la vista de finanzas en la cola de avisos (RF-710): hay que reintentarlo o resolverlo a mano.",
   billing_events_stuck: "Hay avisos de Stripe fallidos (frenarán el cierre) o pendientes desde hace más de un día (frenan además la foto del mes). Ver la cola de avisos.",
+  billing_attempts_exhausted:
+    "Un aviso de Stripe agotó sus diez intentos sin poder procesarse (Stripe o la base fallaron de paso cada vez): quedó fallido, a la vista de finanzas en la cola de avisos, que recibe CO-22. Hay que reintentarlo o resolverlo a mano.",
+  billing_queue_unavailable:
+    "No se pudo leer, reintentar o resolver un aviso de Stripe desde la cola de finanzas (PA-84): la base no contestó, o contestó algo que el servidor no conoce. Se le dijo que no se supo, y la pantalla vuelve a leer la cola.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;

@@ -22,7 +22,7 @@ const naming = (pattern: RegExp) => sources.filter(({ text }) => pattern.test(te
 
 describe("los avisos de Stripe", () => {
   it("las funciones de la bandeja se nombran en un solo archivo", () => {
-    expect(naming(/private\.(provider_event_|provider_events_health|billing_apply)/)).toEqual(["src/services/billing/records.ts"]);
+    expect(naming(/private\.(provider_event_|provider_events_(health|list|count)|billing_apply)/)).toEqual(["src/services/billing/records.ts"]);
   });
 
   it("ninguna pantalla ni servicio nombra las tablas de la bandeja ni el libro de lo que liquida Stripe", () => {
