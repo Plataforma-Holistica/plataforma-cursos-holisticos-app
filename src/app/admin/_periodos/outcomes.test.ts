@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { admin } from "@/messages/es/admin";
 import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
 import { CLOSE_ANSWERS, DOWNLOAD_ANSWERS, REHEARSE_ANSWERS, ROLLUP_ANSWERS } from "@/services/periods/periods";
 
@@ -15,6 +16,7 @@ import {
   rollupOutcome,
   type PeriodFailure,
 } from "./outcomes";
+import { FAILURES, toneOf } from "./failures";
 
 // La tabla de PA-79 y PA-80: lo que llega, lo que contesta cada servicio y a dónde va. Pura: sin
 // servicios ni base.
@@ -168,6 +170,9 @@ describe("closeOutcome", () => {
     ["needs_full_rollup", "needs_full_rollup"],
     ["rollup_marks", "rollup_marks"],
     ["open_alerts", "open_alerts"],
+    // Lo de Stripe (T-303, cuarta solicitud).
+    ["billing_events_pending", "billing_events_pending"],
+    ["charges_match_provider", "charges_match_provider"],
     ["rehearsal_missing", "rehearsal_missing"],
     ["rehearsal_stale", "rehearsal_stale"],
     ["rehearsal_superseded", "rehearsal_superseded"],
@@ -184,6 +189,18 @@ describe("closeOutcome", () => {
     expect(closeOutcome({ kind: "unavailable" }, PERIOD)).toEqual(failed("unavailable"));
     expect(closeOutcome({ kind: "answered", answer: "forbidden" }, PERIOD)).toEqual(CLOSE);
     expect(closeOutcome({ kind: "refused" }, PERIOD)).toEqual(CLOSE);
+  });
+});
+
+describe("los textos del cierre", () => {
+  it("cada respuesta tiene su texto, y lo de Stripe dice dónde se revisa, en tono de atención como las alertas", () => {
+    for (const reason of Object.keys(FAILURES) as PeriodFailure[]) expect(FAILURES[reason].length, reason).toBeGreaterThan(0);
+    expect(FAILURES.billing_events_pending).toBe(admin.periods.failures.billingEventsPending);
+    expect(FAILURES.billing_events_pending).toMatch(/cola de avisos de cobro/);
+    expect(FAILURES.charges_match_provider).toBe(admin.periods.failures.chargesMatchProvider);
+    expect(FAILURES.charges_match_provider).toMatch(/conciliación del periodo/);
+    expect(toneOf("billing_events_pending")).toBe(toneOf("open_alerts"));
+    expect(toneOf("charges_match_provider")).toBe("warning");
   });
 });
 

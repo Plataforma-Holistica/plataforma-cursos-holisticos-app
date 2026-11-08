@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => {
     unholdPayout: logged("unholdPayout", unavailable),
     confirmFounderBonus: logged("confirmFounderBonus", unavailable),
     voidFounderBonus: logged("voidFounderBonus", unavailable),
+    compareNow: logged("compareNow", unavailable),
+    explainDifference: logged("explainDifference", unavailable),
     leaveNotice: logged("leaveNotice", () => undefined),
     // Se borra siempre, también al preguntar: no se anota en el orden de lo que se llamó.
     clearNotice: vi.fn(),
@@ -53,14 +55,16 @@ vi.mock("@/services/periods/periods", () => ({
   confirmFounderBonus: mocks.confirmFounderBonus,
   voidFounderBonus: mocks.voidFounderBonus,
 }));
+vi.mock("@/services/billing/billing", () => ({ compareNow: mocks.compareNow, explainDifference: mocks.explainDifference }));
 vi.mock("@/services/account/account", () => ({ signOut: vi.fn(), forgetBrowserProofs: vi.fn() }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice, clearNotice: mocks.clearNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 
-import { closeAction, downloadAction, panelAction, payoutsAction, periodCodeAction } from "@/app/admin/_periodos/actions";
+import { closeAction, downloadAction, panelAction, payoutsAction, periodCodeAction, reconcileAction } from "@/app/admin/_periodos/actions";
 import { csvHref, periodsButton } from "@/app/admin/_periodos/outcomes";
 import { payoutsButton } from "@/app/admin/_periodos/payouts-outcomes";
+import { reconcileButton } from "@/app/admin/_periodos/reconcile-outcomes";
 import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 
 const jar = { get: () => undefined, set: () => undefined };
@@ -302,5 +306,72 @@ describe("payoutsAction (PA-81)", () => {
     expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.cancel()))).toEqual(IDLE);
     expect(await payoutsAction(PERIOD, IDLE, pressed(periodsButton.rehearse(PERIOD)))).toEqual(IDLE);
     expect(calls.order).toEqual(["redirect"]);
+  });
+});
+
+describe("reconcileAction (T-303, cuarta solicitud)", () => {
+  const DIFFERENCE = { side: "only_provider", currency: "mxn", cents: "34900", charge: "ch_1" } as const;
+
+  it("«Comparar ahora» le pasa el periodo atado al servicio, dice lo que salió y vuelve a pedir la página", async () => {
+    once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "recorded", matches: true, complete: true, differences: 0 } }));
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toEqual({ kind: "done", answer: "matches", attempt: 1 });
+    expect(mocks.compareNow).toHaveBeenCalledWith(jar, PERIOD);
+    expect(calls.order).toEqual(["compareNow", "refresh"]);
+    expect(mocks.clearNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it("lo que no salió bien se dice, y la página se vuelve a pedir", async () => {
+    once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "refused", answer: "rate_limited" } }));
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toEqual({ kind: "failed", reason: "rate_limited", note: undefined, attempt: 1 });
+    once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "no_stripe" } }));
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toMatchObject({ reason: "no_stripe" });
+    expect(calls.order).toEqual(["compareNow", "refresh", "compareNow", "refresh"]);
+  });
+
+  it("a quien la guarda no deja, al panel", async () => {
+    once("compareNow", Promise.resolve({ kind: "refused" }));
+    await expect(reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).rejects.toThrow(`redirige a ${periodPath(PERIOD)}`);
+  });
+
+  it("con un periodo armado a mano: a la lista, sin llamar al servicio", async () => {
+    await expect(reconcileAction("202713", IDLE, pressed(reconcileButton.compare()))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    expect(calls.order).toEqual(["redirect"]);
+  });
+
+  it("«Explicar» solo pregunta en su fila, y confirmar sin nota vuelve a preguntar: sin llamar a nadie", async () => {
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.askExplain(DIFFERENCE)))).toEqual({
+      kind: "asking",
+      asked: DIFFERENCE,
+      note: undefined,
+      problem: null,
+      attempt: 1,
+    });
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "   " }))).toMatchObject({ kind: "asking", problem: "missing_note" });
+    expect(calls.order).toEqual([]);
+  });
+
+  it("confirmado con nota: le pasa al servicio el periodo atado, la diferencia como se vio y la nota", async () => {
+    once("explainDifference", Promise.resolve({ kind: "answered", answer: "explained" }));
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" }))).toEqual({ kind: "done", answer: "explained", attempt: 1 });
+    expect(mocks.explainDifference).toHaveBeenCalledWith(jar, { period: PERIOD, ...DIFFERENCE, note: "Cargo de prueba" });
+    expect(calls.order).toEqual(["explainDifference", "refresh"]);
+  });
+
+  it("si no se pudo explicar, la nota vuelve en el estado: no se pierde", async () => {
+    once("explainDifference", Promise.resolve({ kind: "answered", answer: "needs_fresh_code" }));
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" }))).toEqual({
+      kind: "failed",
+      reason: "needs_code",
+      note: "Cargo de prueba",
+      attempt: 1,
+    });
+  });
+
+  it("cancelar, otro botón o ninguno no llaman a nadie", async () => {
+    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.cancel()))).toEqual(IDLE);
+    expect(await reconcileAction(PERIOD, IDLE, pressed(periodsButton.rehearse(PERIOD)))).toEqual(IDLE);
+    expect(await reconcileAction(PERIOD, IDLE, pressed("explain:only_own:mxn:100:ch_1", { note: "x" }))).toEqual(IDLE);
+    expect(await reconcileAction(PERIOD, IDLE, new FormData())).toEqual(IDLE);
+    expect(calls.order).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, asFinance, clearPeriodsBefore, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, asFinance, clearPeriodsBefore, connect, type Finance, financePerson, forgetReconciliations, outcomeOf, reconciled, retire, waitBehind } from "./helpers/finance";
 import { deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
 
 // PA-81 (T-605, cuarta solicitud) contra la base local, en lo que una transacción revertida no puede mostrar: que
@@ -55,6 +55,7 @@ beforeAll(async () => {
      where period_id = any($1::int[])`,
     [OURS],
   );
+  await reconciled(owner, OURS);
   await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   await owner.query(
     `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -88,6 +89,7 @@ afterAll(async () => {
       [OURS],
     );
     await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
+    await forgetReconciliations(owner, OURS);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 204105", [OURS]);

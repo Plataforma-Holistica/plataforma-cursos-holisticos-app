@@ -104,7 +104,48 @@ export type FinancePeriod =
       lastRollup: RollupRun | null;
       lastGoodRollup: Omit<RollupRun, "status"> | null;
       rollupRequest: { status: RollupRequestStatus; requestedAt: string; startedAt: string | null; finishedAt: string | null } | null;
+      /** La última comparación con Stripe (T-303, cuarta solicitud); nula si nunca se comparó. */
+      reconciliation: Reconciliation | null;
     };
+
+export const DIFFERENCE_SIDES = ["only_provider", "only_own", "amount", "other_currency"] as const;
+/** De qué lado está una diferencia: lo que Stripe cobró y el libro no tiene, lo contrario, otro monto, u otra moneda. */
+export type DifferenceSide = (typeof DIFFERENCE_SIDES)[number];
+/** Solo se explica con nota lo que Stripe cobró y el libro no tiene (decisión de Sergio del 2026-11-08). */
+export const EXPLAINABLE_SIDES: readonly DifferenceSide[] = ["only_provider", "other_currency"];
+
+export interface ReconciliationDifference {
+  side: DifferenceSide;
+  charge: string;
+  ownCents: number | null;
+  providerCents: number | null;
+  currency: string;
+  explained: boolean;
+  note: string | null;
+  explainedAt: string | null;
+}
+
+/** Una comparación de los cobros del periodo con Stripe, tal como quedó. `current`: hay una vigente que coincide, la que deja cerrar. */
+export interface Reconciliation {
+  id: string;
+  registeredAt: string;
+  livemode: boolean;
+  complete: boolean;
+  tooMany: boolean;
+  ownCount: number;
+  ownCents: number;
+  providerCount: number;
+  providerCents: number;
+  providerPending: number;
+  providerOtherCurrency: number;
+  differencesTotal: number;
+  /** La pidió una persona (nula: el trabajo de cada día). */
+  requested: boolean;
+  matches: boolean;
+  current: boolean;
+  /** Hasta 200, en el orden de la base. */
+  differences: ReconciliationDifference[];
+}
 
 /** Un maestro de una corrida, con su nombre publicado como estaba. */
 export interface RunTeacher {
@@ -126,7 +167,16 @@ export type FinanceClose =
       freshCode: boolean;
       period: { periodId: number; status: PeriodStatus; endsAt: string; enteredClosingAt: string | null };
       /** Lo que se sabe sin calcular de lo que falta para cerrar. Lo que manda es la respuesta del cierre. */
-      checks: { openAlerts: number; finalRehearsal: boolean; lastRollup: RunStatus | null; rollupMarks: boolean };
+      checks: {
+        openAlerts: number;
+        finalRehearsal: boolean;
+        lastRollup: RunStatus | null;
+        rollupMarks: boolean;
+        /** Los avisos de cobro que frenan el cierre (T-303): con la misma regla que la base. */
+        billingEvents: number;
+        /** Si hay una comparación con Stripe vigente que coincide. */
+        chargesMatch: boolean;
+      };
       /** El último ensayo, bien o fallido (sin el texto del error). */
       rehearsal:
         | (Omit<RunFigures, "runId"> & {
@@ -180,6 +230,9 @@ export const CLOSE_ANSWERS = [
   "needs_full_rollup",
   "rollup_marks",
   "open_alerts",
+  // Hay avisos de cobro sin terminar, o no hay una comparación con Stripe vigente que coincida (T-303, cuarta solicitud).
+  "billing_events_pending",
+  "charges_match_provider",
   "rehearsal_missing",
   "rehearsal_stale",
   // El ensayo que se tenía a la vista ya no es el último: alguien ensayó después (T-605, tercera solicitud).

@@ -1658,34 +1658,41 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
   test("avisos de cobro con JavaScript: la cola dice el código en palabras, y reintentar lo deja en camino", async ({ page }) => {
     const tag = randomUUID().slice(0, 8);
     const id = await failedEvent(tag);
-    await enterAdmin(page, ana, BILLING);
-    const row = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
-    await expect(row.getByText("Es una factura de 0: no tiene cobro que registrar.")).toBeVisible();
-    await row.getByRole("button", { name: `Reintentar el aviso evt_e2e_${tag}` }).click();
-    await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
-    expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
-    expect(await a11yViolations(page)).toEqual([]);
-    // Pendiente sin Stripe se quedaría así, y frenaría la foto de su mes y de los que siguen.
-    await forgetEvent(id);
+    // Pendiente sin Stripe se quedaría así, y frenaría la foto de su mes y de los que siguen; fallido, frenaría además todo cierre (T-303, cuarta
+    // solicitud). Se borra aunque la prueba falle.
+    try {
+      await enterAdmin(page, ana, BILLING);
+      const row = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+      await expect(row.getByText("Es una factura de 0: no tiene cobro que registrar.")).toBeVisible();
+      await row.getByRole("button", { name: `Reintentar el aviso evt_e2e_${tag}` }).click();
+      await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
+      expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
+      expect(await a11yViolations(page)).toEqual([]);
+    } finally {
+      await forgetEvent(id);
+    }
   });
 
   test("avisos de cobro sin JavaScript: resolver a mano en dos pasos, y recargar no reenvía", async ({ browser }) => {
     const tag = randomUUID().slice(0, 8);
     const id = await failedEvent(tag);
-    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
-      await enterAdmin(page, ana, BILLING);
-      await page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` }).getByRole("button", { name: `Resolver a mano el aviso evt_e2e_${tag}` }).click();
-      await expect(page).toHaveURL(`${BILLING}#bloque-avisos-lista`);
-      const asked = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
-      await asked.getByLabel("Qué se hizo").fill("Factura de prueba del extremo a extremo.");
-      await asked.getByRole("button", { name: "Sí, resolverlo" }).click();
-      await expect(page.getByText("Resuelto a mano.")).toBeVisible();
-      expect(await eventRow(id)).toEqual([{ status: "resolved", attempts: 1, resolution_note: "Factura de prueba del extremo a extremo." }]);
-      const audited = await auditRows();
-      await page.reload();
-      expect(await auditRows()).toBe(audited);
-    });
-    await forgetEvent(id);
+    try {
+      await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+        await enterAdmin(page, ana, BILLING);
+        await page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` }).getByRole("button", { name: `Resolver a mano el aviso evt_e2e_${tag}` }).click();
+        await expect(page).toHaveURL(`${BILLING}#bloque-avisos-lista`);
+        const asked = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+        await asked.getByLabel("Qué se hizo").fill("Factura de prueba del extremo a extremo.");
+        await asked.getByRole("button", { name: "Sí, resolverlo" }).click();
+        await expect(page.getByText("Resuelto a mano.")).toBeVisible();
+        expect(await eventRow(id)).toEqual([{ status: "resolved", attempts: 1, resolution_note: "Factura de prueba del extremo a extremo." }]);
+        const audited = await auditRows();
+        await page.reload();
+        expect(await auditRows()).toBe(audited);
+      });
+    } finally {
+      await forgetEvent(id);
+    }
   });
 
   // PA-78 a PA-80, los periodos, el ensayo y el cierre (T-605). Van aquí porque usan a la misma persona
@@ -1727,6 +1734,15 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
         `insert into public.revenue_allocations (charge_id, profile_id, period_id, kind, part_no, parts_total, base_cents, fee_bps, rule)
          values ($1, $2, $3, 'charge', 1, 1, 28581, 500, 'charge_date_v1')`,
         [charge, student, period],
+      );
+      // Una comparación con Stripe que coincide (T-303, cuarta solicitud): el extremo a extremo no habla con Stripe, y sin ella PA-80 no ofrecería cerrar.
+      // Registrada después del fin del mes, como si ya hubiera pasado; el reloj de la base no corre en réplica.
+      await owner.query(
+        `insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                                      provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+         select p.period_id, false, p.starts_at, p.ends_at, true, 0, 0, 0, 0, 0, 0, 0, false, p.ends_at + interval '11 minutes'
+         from public.payout_periods p where p.period_id = $1`,
+        [period],
       );
       for (const [n, name] of ["Maestra Cierre Uno", "Maestra Cierre Dos"].entries()) {
         const teacher = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;

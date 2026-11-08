@@ -7,6 +7,7 @@ import { sql, type SqlQuery } from "@/adapters/supabase/sql";
 
 import {
   CLOSE_ANSWERS,
+  DIFFERENCE_SIDES,
   DOWNLOAD_ANSWERS,
   PERIOD_STATUSES,
   REHEARSE_ANSWERS,
@@ -19,6 +20,7 @@ import {
   type FinanceClose,
   type FinancePeriod,
   type FinancePeriods,
+  type Reconciliation,
   type RehearseAnswer,
   type RollupAnswer,
   type RunFigures,
@@ -97,6 +99,68 @@ const periodsSchema = z.strictObject({
 
 const missing = z.strictObject({ fresh_code: z.boolean(), period: z.null() });
 
+const reconciliationSchema = z.strictObject({
+  id,
+  registered_at: at,
+  livemode: z.boolean(),
+  complete: z.boolean(),
+  too_many: z.boolean(),
+  own_count: count,
+  own_cents: cents,
+  provider_count: count,
+  provider_cents: cents,
+  provider_pending: count,
+  provider_other_currency: count,
+  differences_total: count,
+  requested: z.boolean(),
+  matches: z.boolean(),
+  current: z.boolean(),
+  differences: z
+    .array(
+      z.strictObject({
+        side: z.enum(DIFFERENCE_SIDES),
+        charge: z.string().regex(/^[!-~]{1,255}$/),
+        own_cents: cents.nullable(),
+        provider_cents: cents.nullable(),
+        currency: z.string().regex(/^[a-z]{3}$/),
+        explained: z.boolean(),
+        note: z.string().nullable(),
+        explained_at: at.nullable(),
+      }),
+    )
+    .max(200),
+});
+
+function reconciliationOf(raw: z.infer<typeof reconciliationSchema>): Reconciliation {
+  return {
+    id: raw.id,
+    registeredAt: raw.registered_at,
+    livemode: raw.livemode,
+    complete: raw.complete,
+    tooMany: raw.too_many,
+    ownCount: raw.own_count,
+    ownCents: raw.own_cents,
+    providerCount: raw.provider_count,
+    providerCents: raw.provider_cents,
+    providerPending: raw.provider_pending,
+    providerOtherCurrency: raw.provider_other_currency,
+    differencesTotal: raw.differences_total,
+    requested: raw.requested,
+    matches: raw.matches,
+    current: raw.current,
+    differences: raw.differences.map((d) => ({
+      side: d.side,
+      charge: d.charge,
+      ownCents: d.own_cents,
+      providerCents: d.provider_cents,
+      currency: d.currency,
+      explained: d.explained,
+      note: d.note,
+      explainedAt: d.explained_at,
+    })),
+  };
+}
+
 const periodSchema = z.strictObject({
   fresh_code: z.boolean(),
   period: z.strictObject({
@@ -134,12 +198,20 @@ const periodSchema = z.strictObject({
   rollup_request: z
     .strictObject({ status: z.enum(ROLLUP_REQUEST_STATUSES), requested_at: at, started_at: at.nullable(), finished_at: at.nullable() })
     .nullable(),
+  reconciliation: reconciliationSchema.nullable(),
 });
 
 const closeSchema = z.strictObject({
   fresh_code: z.boolean(),
   period: z.strictObject({ period_id: period, status, ends_at: at, entered_closing_at: at.nullable() }),
-  checks: z.strictObject({ open_alerts: count, final_rehearsal: z.boolean(), last_rollup: z.enum(RUN_STATUSES).nullable(), rollup_marks: z.boolean() }),
+  checks: z.strictObject({
+    open_alerts: count,
+    final_rehearsal: z.boolean(),
+    last_rollup: z.enum(RUN_STATUSES).nullable(),
+    rollup_marks: z.boolean(),
+    billing_events: count,
+    charges_match: z.boolean(),
+  }),
   rehearsal: z
     .strictObject({
       ...figures,
@@ -286,6 +358,7 @@ export function periodReadOf(raw: unknown): FinancePeriod | null {
             startedAt: read.rollup_request.started_at,
             finishedAt: read.rollup_request.finished_at,
           },
+    reconciliation: read.reconciliation === null ? null : reconciliationOf(read.reconciliation),
   };
 }
 
@@ -304,6 +377,8 @@ export function closeReadOf(raw: unknown): FinanceClose | null {
       finalRehearsal: read.checks.final_rehearsal,
       lastRollup: read.checks.last_rollup,
       rollupMarks: read.checks.rollup_marks,
+      billingEvents: read.checks.billing_events,
+      chargesMatch: read.checks.charges_match,
     },
     rehearsal:
       rehearsal === null

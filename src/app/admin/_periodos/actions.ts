@@ -8,6 +8,7 @@ import { checkCode, readGiveCodeForm } from "@/app/(cuenta)/entrar/segundo-facto
 import { cookieJar } from "@/app/_lib/request-context";
 import { ROUTES } from "@/services/account/navigation";
 import { clearNotice } from "@/services/account/notice";
+import { compareNow, explainDifference } from "@/services/billing/billing";
 import {
   closePeriod,
   confirmFounderBonus,
@@ -48,9 +49,10 @@ import {
   type PayoutOutcome,
   type PayoutsState,
 } from "./payouts-outcomes";
+import { askedBy, compareOutcome, explainOutcome, readReconcileForm, type ReconcileOutcome, type ReconcileState } from "./reconcile-outcomes";
 
 // Las acciones de PA-79, PA-80 y PA-81 (el panel de un periodo, su ensayo y cierre, y sus liquidaciones;
-// FL-50 y FL-51; T-605). Ninguna
+// FL-50 y FL-51; T-605), y la conciliación con Stripe de PA-79 (T-303, cuarta solicitud). Ninguna
 // decide quién puede: el servicio corre la guarda, y la base vuelve a comprobar que quien decide tenga
 // finanzas y un código reciente. Aquí se lee qué se pidió, se llama al servicio y se traduce su
 // respuesta con la tabla de la pantalla.
@@ -183,4 +185,34 @@ export async function payoutsAction(target: unknown, previous: PayoutsState, for
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   refresh();
   return outcome.detail === undefined ? { kind: "failed", reason: outcome.reason, attempt } : { kind: "failed", reason: outcome.reason, detail: outcome.detail, attempt };
+}
+
+/**
+ * La conciliación con Stripe de PA-79 (T-303, cuarta solicitud): «Comparar ahora» y «Explicar». El periodo llega atado desde la
+ * pantalla, y se revisa; del formulario llega qué botón, con la diferencia como se vio, y la nota. Comparar le pregunta a Stripe en el
+ * momento y no pide el código reciente; explicar va en dos pasos: el primero solo pregunta en su fila, sin llamar a nadie, y confirmar
+ * sin nota vuelve a preguntar. Lo que contesta, también lo que salió bien, se dice en el bloque, y la página se vuelve a pedir: ya trae
+ * la comparación de ahora (decisión mía sin confirmar: sin aviso por cookie, que no diría si coincidió).
+ */
+export async function reconcileAction(target: unknown, previous: ReconcileState, form: FormData): Promise<ReconcileState> {
+  const request = readReconcileForm(form);
+  if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
+  const attempt = nextAttempt(previous);
+  const jar = await cookieJar();
+  clearNotice(jar);
+  const period = periodFrom(target);
+  if (period === null) return leaveFor(jar, { to: ROUTES.periods, notice: null });
+  const asked = askedBy(request);
+  if (asked !== null) return { kind: "asking", ...asked, attempt };
+
+  let outcome: ReconcileOutcome;
+  if (request.step === "compare") outcome = compareOutcome(await compareNow(jar, period), period);
+  else {
+    const { side, charge, cents, currency, note } = request;
+    outcome = explainOutcome(await explainDifference(jar, { period, side, charge, cents, currency, note }), period);
+  }
+  if (outcome.kind === "leave") return leaveFor(jar, outcome);
+  refresh();
+  if (outcome.kind === "done") return { kind: "done", answer: outcome.answer, attempt };
+  return { kind: "failed", reason: outcome.reason, note: request.step === "explain" ? request.note : undefined, attempt };
 }

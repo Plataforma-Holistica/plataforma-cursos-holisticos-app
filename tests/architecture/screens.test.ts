@@ -74,6 +74,8 @@ const ROUTE_HANDLERS: Record<string, RegExp> = {
   "src/app/api/trabajos/correo/route.ts": /if \(!mailSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
   // El barrido de los avisos de Stripe (T-303): tampoco.
   "src/app/api/trabajos/avisos/route.ts": /if \(!billingSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
+  // La conciliación con Stripe (T-303, cuarta solicitud): tampoco.
+  "src/app/api/trabajos/conciliacion/route.ts": /if \(!billingSweepAllowed\(await bearerToken\(\)\)\) return new Response\(null, \{ status: 404 \}\);/,
   // Los avisos de Stripe (T-303): sin sus llaves no existe, y lo demás lo decide la firma, en el servicio.
   "src/app/api/webhooks/stripe/route.ts":
     /if \(!stripeWebhookEnabled\(\)\) return new Response\(null, \{ status: 404 \}\);[\s\S]*receiveStripeEvent\(body, await stripeSignature\(\)\)/,
@@ -318,6 +320,10 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // sin el motivo vuelve a preguntar.
     payoutsAction:
       /const bound = payoutsPeriodFrom\(target\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+    // La conciliación con Stripe (T-303, cuarta solicitud): el periodo llega atado y se revisa; del formulario llega qué botón, con la
+    // diferencia como se vio, y la nota. Preguntar, o confirmar sin nota, no llama a nadie.
+    reconcileAction:
+      /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "asking", \.\.\.asked, attempt \};[\s\S]*compareOutcome\(await compareNow\(jar, period\), period\)[\s\S]*explainOutcome\(await explainDifference\(jar, \{ period, side, charge, cents, currency, note \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
   "src/app/admin/_textos/actions.ts": {
     // Dar el código otra vez: el de los textos legales, que comprueba lo reciente con la lectura que pide configuración.
@@ -872,6 +878,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-mi-lista",
       "bloque-nombre",
       "bloque-periodo-codigo",
+      // La conciliación con Stripe de PA-79 (T-303, cuarta solicitud). Esta y la del recálculo viven en `_periodos/outcomes.ts`, porque PA-80 enlaza a las dos.
+      "bloque-periodo-conciliacion",
       "bloque-periodo-recalculo",
       "bloque-revision-codigo",
       "bloque-revision-cola",

@@ -9,7 +9,7 @@ import { askTeacherDashboard } from "@/services/teachers/dashboard-records";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
-import { actAs, clearPeriodsBefore, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, clearPeriodsBefore, connect, type Finance, financePerson, forgetReconciliations, outcomeOf, reconciled, retire, waitBehind } from "./helpers/finance";
 import { assertPlainWindow, dropTransitionLeftovers } from "./helpers/periods";
 import { asOwner, asServer, asSystem, reverted } from "./helpers/team";
 import { completeAccountAsOwner, createTestUser, deleteTestUsers, deleteTestUsersByEmail, type TestUser } from "./helpers/users";
@@ -347,6 +347,7 @@ describe("el congelado con dos conexiones", { timeout: 120_000 }, () => {
        where period_id = any($1::int[])`,
       [OURS],
     );
+    await reconciled(owner, OURS);
     await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
     await owner.query(
       `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -396,6 +397,7 @@ describe("el congelado con dos conexiones", { timeout: 120_000 }, () => {
         [OURS],
       );
       await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
+      await forgetReconciliations(owner, OURS);
       await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
       await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
       await owner.query("delete from public.watch_rollup where period_id = any($1::int[])", [OURS]);

@@ -29,8 +29,18 @@ describe("los avisos de Stripe", () => {
     expect(naming(/provider_events\b|provider_event_actions|provider_settlements/).filter((file) => file !== "src/services/billing/records.ts")).toEqual([]);
   });
 
+  it("las funciones de la conciliación se nombran en un solo archivo, y sus tablas en ninguno (T-303, cuarta solicitud)", () => {
+    expect(naming(/private\.billing_(reconciliation_|settlement)/)).toEqual(["src/services/billing/records.ts"]);
+    expect(naming(/billing_reconciliations\b|billing_reconciliation_differences|billing_reconciliation_notes/)).toEqual([]);
+  });
+
   it("el adaptador solo lo arma el servicio", () => {
-    expect(naming(/adapters\/stripe\//)).toEqual(["src/services/billing/billing.ts", "src/services/billing/inbox.ts", "src/services/billing/stripe-read.ts"]);
+    expect(naming(/adapters\/stripe\//)).toEqual([
+      "src/services/billing/billing.ts",
+      "src/services/billing/inbox.ts",
+      "src/services/billing/reconcile.ts",
+      "src/services/billing/stripe-read.ts",
+    ]);
     expect(naming(/createStripeApi\(/).filter((file) => !file.startsWith("src/adapters/"))).toEqual(["src/services/billing/billing.ts"]);
   });
 
@@ -50,10 +60,11 @@ describe("los avisos de Stripe", () => {
   it("el barrido está programado", () => {
     const vercel = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8")) as { crons: { path: string }[] };
     expect(vercel.crons.map((cron) => cron.path)).toContain("/api/trabajos/avisos");
+    expect(vercel.crons.map((cron) => cron.path)).toContain("/api/trabajos/conciliacion");
   });
 
-  it("las dos rutas declaran su duración: el tope de la entrega, lo que sigue detrás de la respuesta y el barrido no dependen de lo que Vercel ponga por omisión", () => {
-    for (const file of ["src/app/api/webhooks/stripe/route.ts", "src/app/api/trabajos/avisos/route.ts"]) {
+  it("las tres rutas declaran su duración: el tope de la entrega, lo que sigue detrás de la respuesta, el barrido y la conciliación no dependen de lo que Vercel ponga por omisión", () => {
+    for (const file of ["src/app/api/webhooks/stripe/route.ts", "src/app/api/trabajos/avisos/route.ts", "src/app/api/trabajos/conciliacion/route.ts"]) {
       expect(readFileSync(join(ROOT, file), "utf8"), file).toMatch(/^export const maxDuration = \d+;$/m);
     }
   });
@@ -66,7 +77,7 @@ describe("los avisos de Stripe", () => {
     const matcher = new RegExp(`^${literal!.replaceAll("\\\\", "\\")}$`);
     expect(matcher.test("/api/webhooks/stripe")).toBe(false);
     // Otra ruta bajo el mismo prefijo no queda fuera sola: dejarla fuera es decidirlo aquí.
-    for (const path of ["/", "/inicio", "/api/trabajos/avisos", "/api/trabajos/correo", "/admin/periodos", "/api/webhooksx", "/api/webhooks/otra", "/api/webhooks/stripe/x", "/api/webhooks/stripex"]) {
+    for (const path of ["/", "/inicio", "/api/trabajos/avisos", "/api/trabajos/conciliacion", "/api/trabajos/correo", "/admin/periodos", "/api/webhooksx", "/api/webhooks/otra", "/api/webhooks/stripe/x", "/api/webhooks/stripex"]) {
       expect(matcher.test(path)).toBe(true);
     }
   });

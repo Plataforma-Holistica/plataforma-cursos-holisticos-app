@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire, SEEN, SHOWN } from "../integration/helpers/finance";
+import { actAs, clearPeriodsBefore, connect, financePerson, reconciled, retire, SEEN, SHOWN } from "../integration/helpers/finance";
 import { localOwnerUrl } from "../integration/helpers/local";
 import { assertPlainWindow } from "../integration/helpers/periods";
 
@@ -251,15 +251,15 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     await owner.query(
       `insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
        select ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, ('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid,
-              'manual', 'sus-escala-' || s, 'monthly', 'pending', 'MXN'
+              'stripe', 'sub_escala_' || s, 'monthly', 'pending', 'MXN'
        from generate_series(1, $1) s`,
       [STUDENTS],
     );
     const charges = await one<{ recorded: string }>(
       `select count(*) filter (where r ->> 'outcome' = 'recorded') as recorded
        from (select private.record_charge(('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid,
-                                          ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, 'manual',
-                                          'cobro-escala-' || s, null, 'monthly', now() - interval '1 hour', 'MXN', 34900,
+                                          ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, 'stripe',
+                                          'ch_escala_' || s, null, 'monthly', now() - interval '1 hour', 'MXN', 34900,
                                           null, null, 'card', 'MX', null) r
              from generate_series(1, $1) s) x`,
       [STUDENTS],
@@ -348,6 +348,8 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
         [period, STUDENTS],
       );
       await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
+      // Una comparación con Stripe que coincide (T-303, cuarta solicitud): el cierre cuenta los 13 000 cobros de Stripe del mes para ver que sigue vigente.
+      await reconciled(owner, period);
     });
     expect((await q("select * from private.schema_violations()")).length).toBe(0);
     report.load_s = Math.round(ms(start) / 1000);

@@ -8,6 +8,7 @@ import { createPayoutsPanel } from "@/services/periods/payouts";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar, secondFactorFor, type KnownUser, type MemoryJar } from "./helpers/auth";
+import { reconciled } from "./helpers/finance";
 import { payoutStoreOn, periodStoreOn } from "./helpers/period-store";
 import { asOwner, asSystem, reverted, teamStoreOn } from "./helpers/team";
 import { totpCode } from "./helpers/totp";
@@ -71,6 +72,7 @@ async function closingPeriod(owner: Client, student: string): Promise<void> {
     "update public.payout_periods set status = 'closing', entered_closing_at = now() - interval '2 days', active_students = 1, pool_bps = 6000 where period_id = $1",
     [PERIOD],
   );
+  await reconciled(owner, PERIOD);
   await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   await owner.query(
     `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -197,7 +199,7 @@ describe("los periodos, el ensayo y el cierre, contra la base", () => {
       const rehearsed = await service.financeClose(jar, claims, PERIOD);
       expect(rehearsed.kind).toBe("close");
       if (rehearsed.kind !== "close" || rehearsed.close.period === null) return;
-      expect(rehearsed.close.checks).toEqual({ openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false });
+      expect(rehearsed.close.checks).toEqual({ openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false, billingEvents: 0, chargesMatch: true });
       expect(rehearsed.close.rehearsal).toMatchObject({ status: "succeeded", statusAtRun: "closing", poolBps: 6000 });
       expect(rehearsed.close.rehearsal?.teachers.map((row) => row.name)).toEqual(["Maestra Periodos Dos", "Maestra Periodos Uno"]);
       const shared = rehearsed.close.rehearsal?.teachers.reduce((sum, row) => sum + row.totalCents, 0);

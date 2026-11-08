@@ -85,6 +85,12 @@ export function periodFrom(value: unknown): number | null {
   return typeof value === "number" && PERIOD.test(String(value)) ? value : null;
 }
 
+/**
+ * Las anclas de los bloques de PA-79 a las que lleva la lista de PA-80: `id` que ninguna otra pantalla usa.
+ * Viven aquí porque las leen la pantalla y la vista que arma el servidor.
+ */
+export const PANEL_ANCHORS = { rollup: "bloque-periodo-recalculo", reconciliation: "bloque-periodo-conciliacion" } as const;
+
 /** El valor de la casilla «Entiendo que no se puede deshacer». */
 export const UNDERSTOOD = "yes";
 
@@ -129,6 +135,8 @@ export type PeriodFailure =
   | "needs_full_rollup"
   | "rollup_marks"
   | "open_alerts"
+  | "billing_events_pending"
+  | "charges_match_provider"
   | "rehearsal_missing"
   | "rehearsal_stale"
   | "rehearsal_superseded"
@@ -266,6 +274,11 @@ export function closeOutcome(result: Closed, period: number): PeriodOutcome {
           return { kind: "failed", reason: "rollup_marks" };
         case "open_alerts":
           return { kind: "failed", reason: "open_alerts" };
+        // Lo de Stripe (T-303, cuarta solicitud): avisos de cobro sin terminar, o los cobros que no coinciden.
+        case "billing_events_pending":
+          return { kind: "failed", reason: "billing_events_pending" };
+        case "charges_match_provider":
+          return { kind: "failed", reason: "charges_match_provider" };
         case "rehearsal_missing":
           return { kind: "failed", reason: "rehearsal_missing" };
         case "rehearsal_stale":

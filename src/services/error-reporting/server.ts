@@ -137,6 +137,12 @@ const FAILURES = {
   billing_events_stuck: "Hay avisos de Stripe fallidos (frenarán el cierre) o pendientes desde hace más de un día (frenan además la foto del mes). Ver la cola de avisos.",
   billing_attempts_exhausted:
     "Un aviso de Stripe agotó sus diez intentos sin poder procesarse (Stripe o la base fallaron de paso cada vez): quedó fallido, a la vista de finanzas en la cola de avisos, que recibe CO-22. Hay que reintentarlo o resolverlo a mano.",
+  billing_reconciliation_mismatch:
+    "La comparación de los cobros de un mes terminado con Stripe no coincide: el mes no se puede cerrar. Ver el bloque de la conciliación en el panel del periodo (PA-79): lo que sobra en Stripe se explica con nota, y lo que falta en Stripe o cambió de monto se corrige.",
+  billing_reconciliation_unavailable:
+    "No se pudo comparar un mes con Stripe, o completar lo que liquidó Stripe: Stripe o la base no contestaron, o contestaron algo que el servidor no conoce. La comparación quedó incompleta o sin hacerse, y el trabajo de mañana lo intenta otra vez.",
+  billing_reconciliation_rejected:
+    "La base rechazó por su forma los cargos que el servidor leyó de Stripe para comparar un mes. No debería pasar: es una falla de código o una respuesta de Stripe que cambió de forma.",
   billing_queue_unavailable:
     "No se pudo leer, reintentar o resolver un aviso de Stripe desde la cola de finanzas (PA-84): la base no contestó, o contestó algo que el servidor no conoce. Se le dijo que no se supo, y la pantalla vuelve a leer la cola.",
 } as const;

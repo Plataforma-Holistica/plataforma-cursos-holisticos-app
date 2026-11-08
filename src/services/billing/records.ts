@@ -6,6 +6,19 @@ import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
 import { QUEUE_STATUSES, RESOLVE_ANSWERS, RETRY_ANSWERS, type BillingQueueData, type ResolveAnswer, type RetryAnswer } from "./queue";
+import {
+  EXPLAIN_ANSWERS,
+  RECORD_ANSWERS,
+  SETTLEMENT_ANSWERS,
+  WINDOW_ANSWERS,
+  type ExplainAnswer,
+  type Explanation,
+  type RecordAnswer,
+  type Settlement,
+  type SettlementAnswer,
+  type StripeCharge,
+  type WindowAnswer,
+} from "./reconcile";
 import type { FailureSnapshot, PaymentSnapshot, SubscriptionSnapshot } from "./stripe-read";
 
 // Lo que la bandeja de los avisos le pregunta a la base, como sistema (T-303), y lo que finanzas lee y decide en PA-84, como la persona. Las funciones de `t303_bandeja` se nombran solo aquí: con ellas se registran cobros.
@@ -223,4 +236,80 @@ export async function askResolve(tx: Tx, event: string, note: string, revision: 
   const answer = RESOLVE_ANSWERS.find((each) => each === rows[0]?.answer.outcome);
   if (answer === undefined) throw new Error("provider_event_resolve contestó algo que no se conoce");
   return answer;
+}
+
+// La conciliación con Stripe (T-303, cuarta solicitud). Sus funciones de `t303_conciliacion` se nombran solo aquí.
+
+const anyAnswer = z.object({ answer: z.object({ outcome: z.string() }).passthrough().nullable() });
+
+function known<Answer extends string>(list: readonly Answer[], value: unknown, fn: string): Answer {
+  const answer = list.find((each) => each === value);
+  if (answer === undefined) throw new Error(`${fn} contestó algo que no se conoce`);
+  return answer;
+}
+
+const windowAnswer = z.object({ outcome: z.literal("window"), starts_at: z.number().int(), ends_at: z.number().int() });
+
+export async function askReconcileWindow(tx: Tx, period: number): Promise<WindowAnswer> {
+  const rows = await tx.query(sql`select private.billing_reconciliation_window(${period}::integer) as answer`, anyAnswer);
+  const answer = rows[0]?.answer;
+  if (answer === undefined || answer === null) throw new Error("billing_reconciliation_window no contestó");
+  const window = windowAnswer.safeParse(answer);
+  if (window.success) return { kind: "window", startsAt: window.data.starts_at, endsAt: window.data.ends_at };
+  return { kind: "refused", answer: known(WINDOW_ANSWERS, answer.outcome, "billing_reconciliation_window") };
+}
+
+const recorded = z.object({ outcome: z.literal("recorded"), reconciliation_id: z.string(), matches: z.boolean(), differences: z.number().int() });
+
+export async function askReconcileRecord(
+  tx: Tx,
+  period: number,
+  livemode: boolean,
+  startsAt: number,
+  endsAt: number,
+  complete: boolean,
+  charges: StripeCharge[],
+): Promise<RecordAnswer> {
+  const rows = await tx.query(
+    sql`select private.billing_reconciliation_record(${period}::integer, ${livemode}::boolean, ${startsAt}::bigint, ${endsAt}::bigint, ${complete}::boolean,
+                                                     ${JSON.stringify(charges)}::jsonb) as answer`,
+    anyAnswer,
+  );
+  const answer = rows[0]?.answer;
+  if (answer === undefined || answer === null) throw new Error("billing_reconciliation_record no contestó");
+  const done = recorded.safeParse(answer);
+  if (done.success) return { kind: "recorded", id: done.data.reconciliation_id, matches: done.data.matches, differences: done.data.differences };
+  return { kind: "refused", answer: known(RECORD_ANSWERS, answer.outcome, "billing_reconciliation_record") };
+}
+
+export async function askReconcileDue(tx: Tx): Promise<number[]> {
+  const rows = await tx.query(sql`select private.billing_reconciliation_due() as answer`, z.object({ answer: z.array(z.number().int()).nullable() }));
+  const answer = rows[0]?.answer;
+  if (answer === undefined || answer === null) throw new Error("billing_reconciliation_due no contestó");
+  return answer;
+}
+
+export async function askSettlementsMissing(tx: Tx, period: number): Promise<string[]> {
+  const rows = await tx.query(sql`select private.billing_settlements_missing(${period}::integer) as answer`, z.object({ answer: z.array(z.string()).nullable() }));
+  const answer = rows[0]?.answer;
+  if (answer === undefined || answer === null) throw new Error("billing_settlements_missing no contestó");
+  return answer;
+}
+
+export async function askSettlementComplete(tx: Tx, s: Settlement): Promise<SettlementAnswer> {
+  const rows = await tx.query(
+    sql`select private.billing_settlement_complete(${s.charge}, ${s.transaction}, ${s.grossCents}::bigint, ${s.feeCents}::bigint, ${s.netCents}::bigint,
+                                                   ${s.availableOn}::timestamptz) as answer`,
+    anyAnswer,
+  );
+  return known(SETTLEMENT_ANSWERS, rows[0]?.answer?.outcome, "billing_settlement_complete");
+}
+
+export async function askReconcileExplain(tx: Tx, e: Explanation): Promise<ExplainAnswer> {
+  const rows = await tx.query(
+    sql`select private.billing_reconciliation_explain(${e.period}::integer, ${e.side}, ${e.charge}, null::bigint, ${e.providerCents}::bigint, ${e.currency},
+                                                      ${e.note}) as answer`,
+    anyAnswer,
+  );
+  return known(EXPLAIN_ANSWERS, rows[0]?.answer?.outcome, "billing_reconciliation_explain");
 }
