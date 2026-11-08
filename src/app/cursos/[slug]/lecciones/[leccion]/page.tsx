@@ -15,6 +15,8 @@ import { courseIsOpen, lessonPage, lessonResources, type LessonEntry } from "@/s
 import { lessonAccess } from "@/services/media/media";
 
 import { initialOf } from "./outcomes";
+import { commentCursor } from "@/app/_comments/view";
+
 import { LessonScreen, type LessonCommentsSlot, type SyllabusEntry } from "./screen";
 
 // La página de una lección (PA-22, T-203). Pide sesión, salvo a dónde va quien no la tiene:
@@ -56,7 +58,8 @@ const one = (search: Search, key: string): string | null => {
 async function commentsSlot(claims: Parameters<typeof lessonComments>[0], lessonId: string, path: string, search: Search, read: LessonCommentsAnswer): Promise<LessonCommentsSlot | null> {
   if (read.kind === "unavailable") return { kind: "unavailable" };
   if (read.kind !== "ready") return null;
-  const cursor = one(search, "comentarios");
+  // Un cursor sin forma lo descarta el servicio, que empieza por lo más reciente: entonces esta es la primera página.
+  const cursor = commentCursor(one(search, "comentarios"));
   let items = read.items;
   let pagedThread: string | null = null;
   const thread = one(search, "hilo");
@@ -91,7 +94,7 @@ export default async function LessonRoute({ params, searchParams }: { params: Pr
     lessonAccess(await cookieReader(), leccion),
     captionsChoice(session.claims),
     coursePage(slug),
-    lessonComments(session.claims, page.lesson.id, one(search, "comentarios")),
+    lessonComments(session.claims, page.lesson.id, commentCursor(one(search, "comentarios"))),
   ]);
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;

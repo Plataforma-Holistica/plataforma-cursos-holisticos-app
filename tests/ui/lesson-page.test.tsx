@@ -137,6 +137,12 @@ describe("los comentarios de la lección (T-501)", () => {
     });
   });
 
+  it("un cursor sin forma es la primera página", async () => {
+    mocks.lessonComments.mockResolvedValue(READY);
+    render(await LessonRoute(params({ comentarios: "basura" })));
+    expect(mocks.shown).toMatchObject({ comments: { view: { paged: false, cursor: null } } });
+  });
+
   it("desde la primera página si la dirección no dice otra", async () => {
     mocks.lessonComments.mockResolvedValue(READY);
     render(await LessonRoute(params({ comentarios: ["a", "b"] })));

@@ -25,6 +25,15 @@ export interface CommentsView {
 export const COMMENTS_ANCHOR = "comentarios";
 export const commentAnchor = (id: string) => `comentario-${id}`;
 
+/**
+ * El cursor de la dirección, si tiene forma (`<instante>_<id>`); si no, nulo. El servicio lo valida de verdad (un día que exista);
+ * esto es para que la pantalla no crea que está en otra página cuando el servicio empezó por lo más reciente.
+ */
+export function commentCursor(text: string | null): string | null {
+  if (text === null || text.length > 80) return null;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(text) ? text : null;
+}
+
 /** Por dónde sigue una página: el último que se vio, como viaja en la dirección. */
 export const cursorOf = (comment: Pick<CommentView, "createdAt" | "id">) => `${comment.createdAt}_${comment.id}`;
 

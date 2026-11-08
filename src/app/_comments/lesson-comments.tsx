@@ -360,6 +360,10 @@ function NameDialog({ shared }: { shared: Shared }) {
   const notice = noticeAt(state, { kind: "name" });
   return (
     <form action={formAction}>
+      {/* Enter en el campo pulsa el primer botón del formulario, y el diálogo pinta antes «Cancelar»: este va primero y guarda. */}
+      <button type="submit" name="do" value="name" tabIndex={-1} aria-hidden="true" className="sr-only">
+        {text.name.save}
+      </button>
       <LessonFields slug={slug} lessonId={lessonId} />
       {carry !== null && <input type="hidden" name={COMMENT_FIELDS.carry} value={carry.body} />}
       {keep !== undefined && <input type="hidden" name={COMMENT_FIELDS.keep} value={keep} />}
@@ -460,21 +464,23 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
   };
   const heading = useRef<HTMLHeadingElement>(null);
   const lastOpened = useRef<string | null>(null);
-  const shown = new Set(view.items.flatMap((thread) => [thread.id, ...thread.replies.items.map((reply) => reply.id)]));
-  // Lo que se dice de un comentario que no está en esta página (lo nuevo cae en la primera) se dice arriba del hilo.
   // Un aviso que habla de algo que esta vuelta no pinta (un comentario de otra página, el campo que se sustituyó, la respuesta a un
   // comentario que ya no la recibe, una edición de lo que se fue) se dice arriba del hilo, con lo escrito para copiarlo.
   const replyOpen = (parentId: string) => canWrite(view.write) && view.items.some((thread) => thread.id === parentId && thread.state === "published");
+  // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí.
+  const live = new Set(view.items.flatMap((thread) => [thread, ...thread.replies.items]).filter((item) => item.state !== "deleted").map((item) => item.id));
+  // Lo que cruza el diálogo del nombre está en el diálogo: no se perdió.
+  const crossing = (parentId: string) => state.open.kind === "name" && state.open.carry?.parentId === parentId;
   const painted = (at: NoticePlace): boolean => {
     switch (at.kind) {
       case "comment":
-        return shown.has(at.id);
+        return live.has(at.id);
       case "new":
         return canWrite(view.write);
       case "reply":
-        return state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId);
+        return crossing(at.parentId) || (state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId));
       case "edit":
-        return shown.has(at.id);
+        return live.has(at.id);
       default:
         return true;
     }

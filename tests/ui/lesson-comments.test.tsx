@@ -34,7 +34,7 @@ const thread = (n: number, extra: Partial<CommentView> = {}, replies: CommentVie
   replies: { items: replies, more },
 });
 
-function setup(view: Partial<LessonCommentsProps["view"]> = {}, action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1 }))) {
+function setup(view: Partial<LessonCommentsProps["view"]> = {}, action: LessonCommentsProps["action"] = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1 }))) {
   const props: LessonCommentsProps = {
     slug: "respirar",
     lessonId: LESSON,
@@ -398,6 +398,34 @@ describe("lo escrito y el foco no se pierden", () => {
     await user.click(screen.getByRole("button", { name: "Comentar" }));
     await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
     expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
+  it("Enter en el campo del nombre guarda, no cancela", async () => {
+    const seen: (string | null)[] = [];
+    const action = vi.fn(async (_previous: CommentsState, form: FormData): Promise<CommentsState> => {
+      seen.push(form.get("do") as string | null);
+      return { ...IDLE_COMMENTS, attempt: seen.length, open: { kind: "name", carry: null } };
+    });
+    const { user } = setup({}, action);
+    await user.click(screen.getByRole("button", { name: "Cambiar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Nombre o seudónimo" }), "Lucía{Enter}");
+    await waitFor(() => expect(seen).toEqual(["ask-name", "name"]), { timeout: 3_000 });
+  });
+
+  it("lo escrito en una respuesta que cruza el diálogo del nombre no se muestra como perdido", async () => {
+    const action = answers({ ...BLANK, open: { kind: "name", carry: { parentId: id(1), body: "Mi respuesta" } }, kept: { at: { kind: "reply", parentId: id(1) }, body: "Mi respuesta" } });
+    const { user } = setup({ count: 1, items: [thread(1)], me: { teacher: false, pseudonym: null } }, action);
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+    await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    expect(screen.queryByText("Esto es lo que escribiste:")).toBeNull();
+  });
+
+  it("un aviso de un comentario que quedó borrado se dice arriba del hilo", async () => {
+    const action = answers({ ...BLANK, notice: { at: { kind: "comment", id: id(1) }, kind: "changed" } });
+    const { user } = setup({ count: 1, items: [thread(1, { state: "deleted", name: null, body: null }, [comment(2)]), thread(3, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    expect(await screen.findByText("Este comentario cambió en otra pestaña. Revisa cómo quedó.")).toBeInTheDocument();
   });
 
   it("lo publicado vacía el campo de donde salió", async () => {
