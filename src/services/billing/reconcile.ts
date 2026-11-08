@@ -317,7 +317,8 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
     async compareNow(reader: CookieReader, period: number): Promise<CompareNow> {
       const admitted = await admit(reader);
       if (!admitted.ok) return admitted.result;
-      // En la acción, lo que liquidó Stripe tiene 5 s: lo que no alcance lo completa el trabajo de cada día, y la acción cabe en sus 60 s.
+      // En la acción, lo que liquidó Stripe tiene 5 s, para que la acción quepa en sus 60 s. Lo que no alcance lo completa la siguiente comparación de ese mes;
+      // si esta lo deja vigente, el trabajo de cada día ya no lo pide, y queda a medias (no frena el cierre).
       return { kind: "compared", result: await compare({ kind: "person", claims: admitted.claims }, period, Number.POSITIVE_INFINITY, 5_000) };
     },
 

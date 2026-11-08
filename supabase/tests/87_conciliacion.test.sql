@@ -8,7 +8,7 @@
 -- Octubre de 2026 ya terminó y es el mes que se compara y se cierra; el mes de ahora todavía no termina.
 begin;
 \ir _ayuda.psql
-select plan(112);
+select plan(115);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a8700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -338,7 +338,10 @@ select pruebas.como_dueno();
 select is((pruebas.compara(202609, '[]'::jsonb) ->> 'matches')::boolean, true, 'un mes sin cobros de ningún lado coincide');
 insert into r values ('panel', pruebas.compara(202609, jsonb_build_array(pruebas.cargo('ch_87_sep', 50000, p_at => '2026-09-15 12:00-06'),
                                                                          pruebas.cargo('ch_87_eur', 900, p_currency => 'eur', p_at => '2026-09-16 12:00-06'))));
-select is(pruebas.explica(202609, 'only_provider', 'ch_87_sep', null, 40000), 'not_in_comparison', 'solo se explica la diferencia exacta de la última comparación');
+-- Una incompleta más nueva (Stripe se cortó) no cambia sobre qué se explica: sobre la que se muestra, la misma que decide.
+insert into r values ('sep_incompleta', pruebas.compara(202609, jsonb_build_array(pruebas.cargo('ch_87_solo', 700, p_at => '2026-09-20 12:00-06')), false));
+select is(pruebas.explica(202609, 'only_provider', 'ch_87_solo', null, 700), 'not_in_comparison', 'lo que solo vio la incompleta no se explica');
+select is(pruebas.explica(202609, 'only_provider', 'ch_87_sep', null, 40000), 'not_in_comparison', 'solo se explica la diferencia exacta de la comparación que decide');
 select is(pruebas.explica(202609, 'only_provider', 'ch_87_sep', null, 50000), 'explained', 'lo que sobra en Stripe se explica con nota');
 select ok(not pruebas.vigente(202609), 'mientras quede otra sin explicar, no está vigente');
 select is(pruebas.explica(202609, 'other_currency', 'ch_87_eur', null, 900, 'eur'), 'explained', 'un cargo en otra moneda también se explica');
@@ -482,6 +485,15 @@ select ok(exists (select 1 from private.schema_violations_billing() where proble
   've una vigencia que ya no exige la comparación completa');
 do $$ begin execute (select cierre from definiciones where cierre like '%FUNCTION private.billing_reconciliation_current(%'); end $$;
 select is_empty($$select * from private.schema_violations_billing()$$, 'y repuesta, ya no');
+-- Lo que se muestra, sin preferir la completa: es el error que hablaba de otra comparación que la que decide.
+insert into definiciones (cierre) select pg_get_functiondef('private.billing_reconciliation_shown(public.period_id)'::regprocedure);
+do $$ begin
+  execute replace((select cierre from definiciones where cierre like '%FUNCTION private.billing_reconciliation_shown(%'), 'order by r.complete desc, ', 'order by ');
+end $$;
+select ok(exists (select 1 from private.schema_violations_billing() where problem = 'reconciliation without its rule: billing_reconciliation_shown'),
+  've lo que se muestra sin preferir la completa');
+do $$ begin execute (select cierre from definiciones where cierre like '%FUNCTION private.billing_reconciliation_shown(%'); end $$;
+select is_empty($$select * from private.schema_violations_billing()$$, 'y repuesto, ya no');
 
 select * from finish();
 rollback;

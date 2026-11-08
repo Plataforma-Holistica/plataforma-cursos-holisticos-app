@@ -349,7 +349,7 @@ revoke all on function private.billing_reconciliation_due() from public;
 grant execute on function private.billing_reconciliation_due() to app_service;
 
 -- Finanzas explica lo que Stripe cobró y el libro no tiene, con nota (decisión 6 de Sergio). Solo una diferencia exacta de la comparación que se muestra (la última
--- completa). Lo que
+-- completa, o la última si no hay ninguna completa; la nota vale para el mes, así que también sirve cuando llegue la completa). Lo que
 -- el libro tiene y Stripe no, o con otro monto, no se explica: frena hasta corregirse (decisión de Sergio del 2026-11-08).
 create function private.billing_reconciliation_explain(p_period public.period_id, p_side text, p_charge text, p_own_cents bigint, p_provider_cents bigint,
                                                        p_currency text, p_note text) returns jsonb
@@ -799,7 +799,8 @@ begin
                                                             'started_at', q.started_at, 'finished_at', q.finished_at)
                        from private.rollup_requests q where q.period_id = p_period
                        order by q.requested_at desc limit 1),
-    -- La última comparación con Stripe (T-303, cuarta solicitud), con sus diferencias y lo que las explica, y si hay una vigente.
+    -- La comparación con Stripe que se muestra (T-303, cuarta solicitud; `billing_reconciliation_shown`, la misma que decide), con sus diferencias y lo que las
+    -- explica, y si hay una vigente.
     'reconciliation', (select pg_catalog.jsonb_build_object(
                          'id', r.id, 'registered_at', r.registered_at, 'livemode', r.livemode, 'complete', r.complete, 'too_many', r.too_many,
                          'own_count', r.own_count, 'own_cents', r.own_cents, 'provider_count', r.provider_count,
@@ -973,6 +974,10 @@ as $$
                 '%r.complete and not r.too_many and r.provider_pending = 0%r.registered_at >= p.ends_at + interval ''10 minutes''%r.own_count = (select pg_catalog.count(*) from public.charges c where c.provider = ''stripe'' and c.period_id = r.period_id)%c.provider not in (''stripe'', ''manual'')%n.provider_cents = d.provider_cents and n.currency = d.currency%'),
                ('billing_reconciliation_current', 'private.billing_reconciliation_current(public.period_id)',
                 '%where r.period_id = p_period and r.complete%order by r.registered_at desc, r.id desc%limit 1%private.billing_reconciliation_ok(l.id)%'),
+               ('billing_reconciliation_shown', 'private.billing_reconciliation_shown(public.period_id)',
+                '%where r.period_id = p_period%order by r.complete desc, r.registered_at desc, r.id desc%limit 1%'),
+               ('finance_period', 'private.finance_period(public.period_id)',
+                '%from private.billing_reconciliations r where r.id = private.billing_reconciliation_shown(p_period)%'),
                ('billing_reconciliation_record', 'private.billing_reconciliation_record(public.period_id, boolean, bigint, bigint, boolean, jsonb)',
                 '%theirs as (select s.id, s.cents from s where s.status = ''succeeded'' and s.captured and s.currency = ''mxn'')%mine as (select c.provider_charge_id as id, c.gross_cents as cents from public.charges c where c.provider = ''stripe'' and c.period_id = p_period)%s.status = ''pending'' or (s.status = ''succeeded'' and not s.captured and not s.refunded)%where x.n <= 200%')
        ) f (name, signature, pattern)
