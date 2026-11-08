@@ -74,8 +74,8 @@ begin
   if v_actor is null or not exists (select 1 from public.profiles p where p.id = v_actor and p.status = 'active') then
     return '{"answer": "suspended_account"}'::jsonb;
   end if;
-  -- Con el veto no: el seudónimo renombra lo que ya publicó, y sería escribir sin derecho a comentar. Con los comentarios
-  -- cerrados sí, porque es de su privacidad (RF-808) y nadie lo ve.
+  -- Con el veto no: el seudónimo renombra lo que ya publicó, y sería escribir sin derecho a comentar. Con el interruptor
+  -- COMENTARIOS_ABIERTOS apagado sí, porque es de su privacidad (RF-808) y nadie lo ve; el cerrojo de arriba sí lo cierra.
   if exists (select 1 from public.profiles p where p.id = v_actor and p.comment_ban_until > now()) then
     return '{"answer": "banned"}'::jsonb;
   end if;

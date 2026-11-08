@@ -297,6 +297,38 @@ describe("el servicio de los comentarios contra la base (T-501)", () => {
     });
   });
 
+  it("con el veto se lee y no se escribe; con suscripción, el correo sin verificar escribe; y una lección sin listar no existe", async () => {
+    const [ana, beto, teo] = [await person(), await person(), await person()];
+    await reverted(async (owner) => {
+      const lessons = await world(owner, teo);
+      await subscribe(owner, ana.id);
+      await subscribe(owner, beto.id);
+      const vetoed = commentsAs(owner, ana);
+      expect(await vetoed.chooseCommentName(reader, "Ana")).toMatchObject({ kind: "saved" });
+      await owner.query("set local session_replication_role = replica");
+      await owner.query("update public.profiles set comment_ban_until = now() + interval '1 day' where id = $1", [ana.id]);
+      await owner.query("set local session_replication_role = origin");
+      expect(await vetoed.lessonComments(ana.claims, lessons.closed, null)).toMatchObject({ kind: "ready", write: { kind: "gate", answer: "banned" } });
+      expect(await vetoed.postLessonComment(reader, { lessonId: lessons.closed, parentId: null, body: "Con el veto" })).toEqual({ kind: "gate", answer: "banned" });
+      expect(await vetoed.chooseCommentName(reader, "Ana otra")).toEqual({ kind: "banned" });
+      expect(await countIn(owner, lessons.closed)).toBe(0);
+      // RN-01: con suscripción, el correo sin verificar no quita el acceso.
+      await owner.query("update auth.users set email_confirmed_at = null where id = $1", [beto.id]);
+      const unverified = commentsAs(owner, beto);
+      expect(await unverified.chooseCommentName(reader, "Beto")).toMatchObject({ kind: "saved" });
+      expect(await unverified.postLessonComment(reader, { lessonId: lessons.closed, parentId: null, body: "Sin verificar" })).toMatchObject({ kind: "written" });
+      expect(await countIn(owner, lessons.closed)).toBe(1);
+      // Sin listar, la lección no existe: ni se lee ni se escribe, y no es una contradicción de la base.
+      await owner.query("set local session_replication_role = replica");
+      await owner.query("update public.published_courses set is_listed = false where course_id = (select course_id from public.published_lessons where id = $1)", [lessons.closed]);
+      await owner.query("set local session_replication_role = origin");
+      expect(await unverified.lessonComments(beto.claims, lessons.closed, null)).toEqual({ kind: "not_found" });
+      expect(await unverified.postLessonComment(reader, { lessonId: lessons.closed, parentId: null, body: "Sin listar" })).toEqual({ kind: "not_found" });
+      expect(await countIn(owner, lessons.closed)).toBe(1);
+      expect([...vetoed.reported, ...unverified.reported]).toEqual([]);
+    });
+  });
+
   it("una lección que no existe o un cursor sin forma no le sacan nada a la base", async () => {
     const [ana, teo] = [await person(), await person()];
     await reverted(async (owner) => {
