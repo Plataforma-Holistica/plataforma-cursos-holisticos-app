@@ -10,7 +10,7 @@ import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealt
 
 import { asFinance, financePerson, type Finance } from "./helpers/finance";
 import { localOwnerUrl } from "./helpers/local";
-import { createTestUser, deleteTestUsers, ownerQuery, type TestUser } from "./helpers/users";
+import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // La cola de los avisos de punta a punta, contra la base local (T-303, tercera solicitud; RF-710, FL-55): finanzas de verdad reabre un aviso fallido y el servidor lo
 // procesa en el momento, con Stripe simulado; si el barrido lo toma entre reabrirlo y reclamarlo, «Reintentar» lo dice sin gastar otro intento; lo que pasa del tope
@@ -50,6 +50,9 @@ afterAll(async () => {
        delete from private.provider_events where provider_event_id like '${PREFIX}%';
      end $$`,
   );
+  // La persona de finanzas, con su sesión: lo que hizo ya no la nombra.
+  await ownerQuery("delete from private.second_factor_attempts");
+  await deleteTestUsersByEmail(emails);
   if (openedOctober) {
     await ownerQuery(
       `begin;
