@@ -36,8 +36,9 @@ import {
 // regla única, con los hechos de la base y su hora, en la misma transacción en que se llama a la base, como el latido. Cada
 // entrada pide su nivel: leer una lección, sus respuestas y si se puede escribir piden poder leer; publicar, escribir en esa
 // lección; editar, escribir en la lección que la base dice que es la del comentario, nunca en la del formulario. Borrar lo
-// propio y elegir el seudónimo piden solo la sesión: quien deja de pagar puede borrar lo suyo, y la base mira la cuenta y
-// el veto. Las lecturas reciben las claims que la guarda de la página ya dio; las escrituras corren la guarda.
+// propio y elegir el seudónimo piden solo la sesión, y la base mira la cuenta y el veto. Ojo: borrar pide el id y la revisión,
+// que hoy solo da leer la lección, así que quien perdió el acceso no llega a lo suyo; falta una lectura de lo propio (pendiente,
+// por decidir con Sergio). Las lecturas reciben las claims que la guarda de la página ya dio; las escrituras corren la guarda.
 //
 // Se acepta, como en el latido, que los hechos se lean sin candado: una suscripción que vence justo entonces deja pasar
 // un comentario (decisión mía sin confirmar).
@@ -173,6 +174,8 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     }
     if (answer.kind === "refused") return refusalOf(answer.access);
     const { comments, canWrite } = answer.value;
+    // La regla dio la lección y la base no: no deberían contradecirse, y si lo hacen, manda la base y alguien lo tiene que saber.
+    if (comments.answer === "not_found") await deps.report("comments_unavailable");
     if (comments.answer !== "ok") return { kind: comments.answer };
     return {
       kind: "ready",
@@ -199,13 +202,19 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     return { kind: "ready", items: page.items, next: cursorOf(page) };
   }
 
-  /** Lo que contestó la base al escribir, o la regla si no alcanzó. */
-  async function writeOf(answer: Guarded<WriteRow>): Promise<CommentWrite> {
+  /**
+   * Lo que contestó la base al escribir, o la regla si no alcanzó. Al publicar, `not_found` es el portón contradiciendo a la
+   * regla, y se reporta; al editar es también el comentario que se borró en otra pestaña, y no.
+   */
+  async function writeOf(answer: Guarded<WriteRow>, entry: "post" | "edit"): Promise<CommentWrite> {
     if (answer.kind === "refused") return refusalOf(answer.access);
     const row = answer.value;
     switch (row.answer) {
       case "ok":
         return { kind: "written", id: row.id, state: row.state };
+      case "not_found":
+        if (entry === "post") await deps.report("comments_unavailable");
+        return { kind: "not_found" };
       case "invalid":
         return { kind: "invalid", reason: "invalid" };
       case "bad_parent":
@@ -235,7 +244,7 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     if (!body.ok) return { kind: "invalid", reason: body.reason };
     const lessonId = input.lessonId;
     const parentId = input.parentId;
-    return withSession(reader, async (claims) => writeOf(await deps.store.post(claims, { lessonId, parentId, body: body.text })));
+    return withSession(reader, async (claims) => writeOf(await deps.store.post(claims, { lessonId, parentId, body: body.text }), "post"));
   }
 
   /** Edita un comentario propio, con la revisión que se vio (FL-15 paso 8). */
@@ -246,7 +255,7 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     const { commentId, revision } = input;
     return withSession(reader, async (claims) => {
       const answer = await deps.store.edit(claims, { commentId, body: body.text, revision });
-      return answer.kind === "missing" ? { kind: "not_found" } : writeOf(answer);
+      return answer.kind === "missing" ? { kind: "not_found" } : writeOf(answer, "edit");
     });
   }
 

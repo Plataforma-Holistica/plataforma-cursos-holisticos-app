@@ -11,12 +11,29 @@ import { sql } from "@/adapters/supabase/sql";
 // que no se conoce es «no se supo».
 
 /** El instante de un comentario, como lo da la base: con microsegundos. Viaja como texto, nunca por un `Date`. */
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export const isCommentId = (value: unknown): value is string => typeof value === "string" && ID.test(value);
-export const isCommentInstant = (value: unknown): value is string =>
-  typeof value === "string" && INSTANT.test(value) && !Number.isNaN(Date.parse(value));
+
+/** Con un día que existe: `Date.parse` acepta el 30 de febrero, y la base lo rechaza al convertirlo. */
+export function isCommentInstant(value: unknown): value is string {
+  const parts = typeof value === "string" ? INSTANT.exec(value) : null;
+  if (parts === null) return false;
+  const [year, month, day, hour, minute, second, offsetHour = 0, offsetMinute = 0] = parts.slice(1).map((part) => (part === undefined ? undefined : Number(part)));
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+  return (
+    year! >= 1 &&
+    date.getUTCFullYear() === year && // Date.UTC lee 0 a 99 como 1900 a 1999: así no pasan
+    date.getUTCMonth() === month! - 1 &&
+    date.getUTCDate() === day &&
+    hour! < 24 &&
+    minute! < 60 &&
+    second! < 60 &&
+    offsetHour! < 16 &&
+    offsetMinute! < 60
+  );
+}
 
 /** Desde dónde sigue una página: el comentario que se vio al último. */
 export interface CommentCursor {

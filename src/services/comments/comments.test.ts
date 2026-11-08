@@ -63,6 +63,13 @@ describe("el cursor", () => {
       expect(parseCommentCursor(bad)).toBeNull();
     }
   });
+
+  it("un día que no existe tampoco: `Date.parse` lo acepta y la base no", () => {
+    expect(parseCommentCursor(`2028-02-29T23:59:59.999999-06:00_${COMMENT}`)).toEqual({ at: "2028-02-29T23:59:59.999999-06:00", id: COMMENT });
+    for (const at of ["2026-02-29T00:00:00Z", "2026-02-30T00:00:00Z", "2026-04-31T00:00:00Z", "0000-01-01T00:00:00Z", "2026-11-07T24:00:00Z", "2026-11-07T20:60:00Z", "2026-11-07T20:00:60Z", "2026-11-07T20:00:00+16:00", "2026-11-07T20:00:00+05:60"]) {
+      expect(parseCommentCursor(`${at}_${COMMENT}`)).toBeNull();
+    }
+  });
 });
 
 describe("leer una lección", () => {
@@ -101,8 +108,11 @@ describe("leer una lección", () => {
     const service = commentsWith();
     service.store.lesson.mockResolvedValueOnce({ kind: "ran", value: { comments: { answer: "closed" }, canWrite: null } });
     expect(await service.lessonComments(claims, LESSON, null)).toEqual({ kind: "closed" });
+    expect(service.reported).toEqual([]);
+    // La regla dio la lección y la base no: no deberían contradecirse, y si lo hacen, manda la base y alguien lo tiene que saber.
     service.store.lesson.mockResolvedValueOnce({ kind: "ran", value: { comments: { answer: "not_found" }, canWrite: null } });
     expect(await service.lessonComments(claims, LESSON, null)).toEqual({ kind: "not_found" });
+    expect(service.reported).toEqual(["comments_unavailable"]);
   });
 
   it.each<[CommentAccess, unknown]>([
@@ -206,6 +216,13 @@ describe("publicar", () => {
     expect(service.reported).toEqual([]);
   });
 
+  it("si la regla dio la lección y el portón no, manda el portón y se reporta", async () => {
+    const service = commentsWith();
+    service.store.post.mockResolvedValueOnce({ kind: "ran", value: { answer: "not_found" } });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "not_found" });
+    expect(service.reported).toEqual(["comments_unavailable"]);
+  });
+
   it("el curso abierto sin suscripción lee y no escribe", async () => {
     const service = commentsWith();
     service.store.post.mockResolvedValueOnce(refused({ ok: true, level: "read" }));
@@ -231,6 +248,10 @@ describe("editar", () => {
     const service = commentsWith();
     service.store.edit.mockResolvedValueOnce({ kind: "missing" });
     expect(await service.editLessonComment(reader, { commentId: COMMENT, body: "Otra", revision: 2 })).toEqual({ kind: "not_found" });
+    // Borrado en otra pestaña entre leer su lección y editar: lo mismo, y no se reporta, porque puede pasar.
+    service.store.edit.mockResolvedValueOnce({ kind: "ran", value: { answer: "not_found" } });
+    expect(await service.editLessonComment(reader, { commentId: COMMENT, body: "Otra", revision: 2 })).toEqual({ kind: "not_found" });
+    expect(service.reported).toEqual([]);
   });
 
   it("otra pestaña lo cambió", async () => {

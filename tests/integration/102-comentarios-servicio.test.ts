@@ -304,7 +304,13 @@ describe("el servicio de los comentarios contra la base (T-501)", () => {
       await subscribe(owner, ana.id);
       const service = commentsAs(owner, ana);
       expect(await service.lessonComments(ana.claims, randomUUID(), null)).toEqual({ kind: "not_found" });
-      expect(await service.lessonComments(ana.claims, lessons.closed, "2026-11-07T20:00:00Z_no-es-un-id")).toMatchObject({ kind: "ready" });
+      // Con un comentario, para que se note si el cursor se usó: uno de antes de todo lo dejaría fuera.
+      const newest = await planted(owner, lessons.closed, ana.id, "El más reciente");
+      for (const cursor of ["2026-11-07T20:00:00Z_no-es-un-id", `2026-02-30T00:00:00Z_${randomUUID()}`, `0001-01-01T00:00:00Z_${randomUUID()}`]) {
+        expect(await service.lessonComments(ana.claims, lessons.closed, cursor)).toMatchObject({ kind: "ready", items: [{ id: newest }] });
+      }
+      // Y uno con forma, de antes de todo, sí se usa: no queda nada.
+      expect(await service.lessonComments(ana.claims, lessons.closed, `2001-01-01T00:00:00Z_${randomUUID()}`)).toMatchObject({ kind: "ready", items: [] });
     });
   });
 });

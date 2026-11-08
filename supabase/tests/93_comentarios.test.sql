@@ -84,11 +84,13 @@ begin
   alter table public.business_parameters enable trigger user;
 end
 $$;
--- La marca local de publicar sin filtro.
+-- La marca local de publicar sin filtro. Pone siempre la de aceptar comentarios (`t501_puertas`), que no es lo que se
+-- prueba aquí (es de la 94): en la integración continua la primera corrida va antes de `db:login`, que la pone.
 create function pruebas.marca(p_on boolean) returns void
 language plpgsql as $$
 begin
   perform pruebas.limpiar();
+  insert into private.local_flags (flag) values ('comments_accept') on conflict do nothing;
   if p_on then
     insert into private.local_flags (flag) values ('comments_unfiltered') on conflict do nothing;
   else

@@ -1068,13 +1068,17 @@ que no se ve leyendo un solo archivo:
   `media/records.ts`: `media_facts` sin `lesson_playback` ni el correo), decide con `decideComment` y su hora, y solo entonces llama a
   la base. Leer una lección, sus respuestas y si se puede escribir piden `read`; publicar, `write`; editar, `write` sobre la lección
   que da `comment_lesson_of`, nunca sobre una del formulario (si no, quien tiene acceso a una lección editaría lo suyo de otra);
-  borrar y el seudónimo, solo la sesión. `tests/architecture/comments.test.ts` exige cada nivel, la regla fija y quién nombra qué.
+  borrar y el seudónimo, solo la sesión (pero borrar pide el id y la revisión, que hoy solo da leer la lección: quien perdió el
+  acceso no llega a lo suyo, y falta una lectura de lo propio). `tests/architecture/comments.test.ts` exige cada nivel, la regla
+  fija y quién nombra qué.
   Las lecturas reciben las claims de la guarda de la página; las escrituras corren `checkSession`. El texto pasa antes por
   `src/domain/comments/comment-text.ts` (`parseCommentBody`, `parsePseudonym` y `commentTextOk`, la regla de la base copiada con sus
   listas, no `\p{Cf}`), y la integración 102 la compara con `comment_text_ok` en todos los puntos de código. El cursor viaja como
-  `<instante>_<id>` y se valida antes de la base; uno sin forma empieza por lo más reciente. Falla nueva: `comments_unavailable`
-  (también cuando la regla no supo de la cuenta). Usa pgTAP 94 e integración 102 (el almacén de la aplicación sobre una transacción
-  del dueño que se revierte). Decisiones mías sin confirmar: las dos puertas; borrar y el seudónimo con solo la sesión; «no se supo»
+  `<instante>_<id>` y se valida antes de la base, con un día que exista (`Date.parse` acepta el 30 de febrero y la base no); uno sin
+  forma empieza por lo más reciente. Falla nueva: `comments_unavailable` (también cuando la regla no supo de la cuenta, y cuando la
+  regla dio la lección y la base contesta `not_found` al leerla o al publicar; al editar no, porque es también lo borrado en otra
+  pestaña). Usa pgTAP 94 e integración 102 (el almacén de la aplicación sobre una transacción del dueño que se revierte). La 93
+  pone siempre `comments_accept` en su `pruebas.marca`: la primera corrida de la integración continua va antes de `db:login`. Decisiones mías sin confirmar: las dos puertas; borrar y el seudónimo con solo la sesión; «no se supo»
   niega también en el curso abierto; el maestro tampoco comenta en una lección suya sin listar; se acepta la carrera de una
   suscripción que vence al publicar, como en el latido. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
