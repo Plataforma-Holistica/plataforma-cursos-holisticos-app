@@ -63,10 +63,11 @@ alter table private.mail_outbox
   add constraint mail_outbox_template_known check (template in ('CO-27', 'CO-03', 'CO-22'));
 
 -- A cada persona con finanzas vigente y con correo, una fila. Lo que falla mientras su CO-22 todavía no sale (ni se ha reclamado para enviar) se le suma; si no hay,
--- nace otro, que espera hasta una hora después del último enviado o en camino. Cada persona en fila por su candado: dos fallas a la vez no dejan dos. Lleva el tipo y la
+-- nace otro, que espera hasta una hora después del último enviado o en camino. Cada persona en fila por su candado: dos fallas a la vez no dejan dos. La fila a la que
+-- se suma se toma y se vuelve a mirar al escribir: si la salida la reclamó en medio, la falla va en otra, y no en un correo que ya salió sin ella. Lleva el tipo y la
 -- hora del primero y cuántos, nunca la cuenta ni montos. Toma cada perfil para compartir su llave (la clave foránea de la salida), después del aviso y de lo que tenga
--- quien lo dejó fallido; espera a `note_session`, que lo toma para escribir, y no se encontró ciclo. Si algo falla aquí, el aviso queda fallido igual, sin CO-22: lo
--- dice PA-84, y la salud del barrido lo reporta cada día.
+-- quien lo dejó fallido; espera a `note_session`, que lo toma para escribir, y no se encontró ciclo. Cada persona va en su propio subbloque: si falla para una, las
+-- demás reciben el suyo, y el aviso queda fallido igual (lo dice PA-84, y la salud del barrido lo reporta cada día).
 create function private.queue_billing_alert() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -75,23 +76,28 @@ declare
   v_pending uuid;
   v_last timestamptz;
 begin
-  begin
-    for v_person in
-      select c.profile_id, pg_catalog.lower(u.email) as email
-      from public.admin_capabilities c
-      join public.profiles p on p.id = c.profile_id and p.status = 'active'
-      join auth.users u on u.id = c.profile_id
-      where c.capability = 'finance' and c.revoked_at is null and nullif(pg_catalog.btrim(u.email), '') is not null
-      order by c.profile_id
-    loop
+  for v_person in
+    select c.profile_id, pg_catalog.lower(u.email) as email
+    from public.admin_capabilities c
+    join public.profiles p on p.id = c.profile_id and p.status = 'active'
+    join auth.users u on u.id = c.profile_id
+    where c.capability = 'finance' and c.revoked_at is null and nullif(pg_catalog.btrim(u.email), '') is not null
+    order by c.profile_id
+  loop
+    begin
       perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('billing_alert:' || v_person.profile_id::text, 0));
       select m.id into v_pending from private.mail_outbox m
       where m.template = 'CO-22' and m.profile_id = v_person.profile_id and m.sent_at is null and m.failed_at is null and m.attempts = 0
-      order by m.created_at limit 1;
+      order by m.created_at limit 1
+      for update;
       if v_pending is not null then
         update private.mail_outbox m set params = m.params || pg_catalog.jsonb_build_object('count', (m.params ->> 'count')::integer + 1)
-        where m.id = v_pending;
-      else
+        where m.id = v_pending and m.sent_at is null and m.failed_at is null and m.attempts = 0;
+        if not found then
+          v_pending := null;
+        end if;
+      end if;
+      if v_pending is null then
         select max(coalesce(m.sent_at, m.failed_at, pg_catalog.clock_timestamp())) into v_last from private.mail_outbox m
         where m.template = 'CO-22' and m.profile_id = v_person.profile_id;
         insert into private.mail_outbox (idempotency_key, template, profile_id, recipient, params, claimed_until)
@@ -100,10 +106,10 @@ begin
                 case when v_last > pg_catalog.clock_timestamp() - interval '1 hour' then v_last + interval '1 hour' end)
         on conflict on constraint mail_outbox_key_unique do nothing;
       end if;
-    end loop;
-  exception when others then
-    raise warning 'CO-22 no se pudo encolar para el aviso %: %', new.id, sqlstate;
-  end;
+    exception when others then
+      raise warning 'CO-22 no se pudo encolar para el aviso % a una persona de finanzas: %', new.id, sqlstate;
+    end;
+  end loop;
   return null;
 end
 $$;
@@ -115,8 +121,9 @@ create trigger provider_events_alert after update of status on private.provider_
 -- ---------------------------------------------------------------------------------------
 -- Lo que lee finanzas.
 
--- PA-84: nulo si quien actúa no pasa la puerta del equipo con finanzas (como `private.finance_alerts()`); si no, si su código es reciente, cuántos hay y hasta 100,
--- del más viejo al más nuevo en Stripe: lo fallido, lo que espera a T-307 y lo pendiente que lleva más de 30 minutos desde que se recibió. Por fila, lo que la
+-- PA-84: nulo si quien actúa no pasa la puerta del equipo con finanzas (como `private.finance_alerts()`); si no, si su código es reciente, cuántos hay y hasta 100:
+-- lo fallido, lo que espera a T-307 y lo pendiente que lleva más de 30 minutos desde que se recibió. Lo fallido va primero, que es lo que pide acción: lo que espera a
+-- T-307 se acumula y no lo deja fuera. Cada grupo, del más viejo al más nuevo en Stripe. Por fila, lo que la
 -- pantalla muestra, la revisión que lleva cada acción y si es el aviso del pago propio. Nunca la nota de quien resolvió ni quién fue.
 create function private.provider_events_list() returns jsonb
 language plpgsql stable security definer set search_path = ''
@@ -136,11 +143,11 @@ begin
                'object_id', v.object_id, 'occurred_at', v.occurred_at, 'received_at', v.received_at, 'status', v.status, 'attempts', v.attempts,
                'next_attempt_at', v.next_attempt_at, 'last_error', v.last_error,
                'is_self', coalesce(v.profile_id = private.actor_id() or private.provider_event_owner(v.object_id) = private.actor_id(), false))
-             order by v.occurred_at, v.id)
+             order by v.status <> 'failed', v.occurred_at, v.id)
       from (select e.* from private.provider_events e
             where e.status in ('failed', 'deferred')
                or (e.status in ('pending', 'processing') and e.received_at < pg_catalog.now() - interval '30 minutes')
-            order by e.occurred_at, e.id limit 100) v), '[]'::jsonb));
+            order by e.status <> 'failed', e.occurred_at, e.id limit 100) v), '[]'::jsonb));
 end
 $$;
 revoke all on function private.provider_events_list() from public;

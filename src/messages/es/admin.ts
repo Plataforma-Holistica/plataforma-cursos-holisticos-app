@@ -677,7 +677,8 @@ export const admin = defineMessages({
     event: "Aviso: {id}",
     object: "Objeto: {id}",
     openInStripe: "Ver en Stripe",
-    openInStripeLabel: "Ver el aviso {id} en el panel de Stripe (se abre en otra pestaña)",
+    // Lo que oye el lector después del enlace: el nombre empieza con lo que se ve (WCAG 2.5.3).
+    openInStripeHidden: "el aviso {id} en el panel de Stripe (se abre en otra pestaña)",
     testMode: "Modo de prueba",
     waitsT307: "Espera a que los reembolsos y las disputas se puedan aplicar: no se reintenta ni se resuelve a mano.",
     onItsWay: "Se está procesando o espera su siguiente intento: no hay nada que hacer todavía.",
@@ -696,7 +697,7 @@ export const admin = defineMessages({
     done: {
       processed: "Procesado.",
       alreadyApplied: "Ya estaba aplicado.",
-      onItsWay: "Lo reabriste y ya va en camino: se procesa en unos minutos, o con el barrido de mañana.",
+      onItsWay: "Lo reabriste y ya va en camino: lo termina el intento que lo tiene, o el barrido de cada día.",
       resolved: "Resuelto a mano.",
     },
     failedAgain: "Volvió a fallar: {error} Pásalo al desarrollador con este código: {code}.",

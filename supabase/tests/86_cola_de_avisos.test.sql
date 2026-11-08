@@ -3,7 +3,7 @@
 -- por hora (decisiones de Sergio de ese día). Encolarlo nunca impide que el aviso quede fallido. Lo que la bandeja ya hacía lo prueba la 84.
 begin;
 \ir _ayuda.psql
-select plan(59);
+select plan(66);
 
 select pruebas.alta('a8600000-0000-0000-0000-000000000001', 'f1-86@prueba.test');
 select pruebas.alta('a8600000-0000-0000-0000-000000000002', 'F2-86@Prueba.test');
@@ -230,6 +230,24 @@ select results_eq(format($$select status, last_error from pruebas.aviso(%L)$$, :
 alter table private.mail_outbox drop constraint pruebas_sin_co22;
 select is((select (params ->> 'count')::integer from pruebas.co22(pruebas.f1()) offset 1), 4, 'y no dejó nada a medias');
 
+-- Si falla para una persona, las demás reciben el suyo; y el camino de uno nuevo tampoco tumba la falla.
+update private.mail_outbox set sent_at = now() - interval '2 hours', claimed_until = null where template = 'CO-22' and sent_at is null;
+alter table private.mail_outbox add constraint pruebas_sin_f2 check (not (template = 'CO-22' and profile_id = 'a8600000-0000-0000-0000-000000000002')) not valid;
+select pruebas.fallido('evt_86_f') as f \gset
+alter table private.mail_outbox drop constraint pruebas_sin_f2;
+select is((pruebas.aviso(:'f')).status, 'failed', 'el aviso queda fallido aunque una persona no pueda recibir el suyo');
+select is((select count(*)::integer from pruebas.co22(pruebas.f1()) where sent_at is null), 1, 'la otra recibe uno nuevo');
+select is((select count(*)::integer from pruebas.co22(pruebas.f2()) where sent_at is null), 0, 'y la que falló, nada a medias');
+
+-- Lo que agota el barrido también avisa.
+select pruebas.recibe('evt_86_barrido') as barrido \gset
+select pruebas.forzar(:'barrido', 10, 'pending');
+select pruebas.como_sistema();
+select is((select count(*)::integer from private.provider_event_claim_due(100) c where c.id = :'barrido'), 0, 'el barrido no lo toma');
+select pruebas.limpiar();
+select is((pruebas.aviso(:'barrido')).last_error, 'attempts_exhausted', 'lo deja fallido');
+select is((select (params ->> 'count')::integer from pruebas.co22(pruebas.f1()) where sent_at is null), 2, 'y le suma a su CO-22');
+
 -- ---------------------------------------------------------------------------------------
 -- La lista de PA-84 y su cuenta: solo finanzas.
 
@@ -269,14 +287,21 @@ select is(pruebas.fila(:'l', :'agota') -> 'revision', to_jsonb((pruebas.aviso(:'
 select is(pruebas.fila(:'l', :'mio') ->> 'is_self', 'true', 'el aviso del pago propio dice que es suyo');
 select is(pruebas.fila(:'l', :'agota') ->> 'is_self', 'false', 'y los demás no');
 select is(pruebas.fila(pruebas.lista(pruebas.f2()), :'mio') ->> 'is_self', 'false', 'para otra persona no es suyo');
-select ok((select bool_and(a.ord <= b.ord)
-           from (select (x ->> 'occurred_at')::timestamptz as ord, n from jsonb_array_elements(:'l'::jsonb -> 'events') with ordinality t (x, n)) a
-           join (select (x ->> 'occurred_at')::timestamptz as ord, n from jsonb_array_elements(:'l'::jsonb -> 'events') with ordinality t (x, n)) b
+select ok((select bool_and(a.failed > b.failed or (a.failed = b.failed and a.ord <= b.ord))
+           from (select (x ->> 'status') = 'failed' as failed, (x ->> 'occurred_at')::timestamptz as ord, n
+                 from jsonb_array_elements(:'l'::jsonb -> 'events') with ordinality t (x, n)) a
+           join (select (x ->> 'status') = 'failed' as failed, (x ->> 'occurred_at')::timestamptz as ord, n
+                 from jsonb_array_elements(:'l'::jsonb -> 'events') with ordinality t (x, n)) b
              on b.n = a.n + 1),
-  'del más viejo al más nuevo');
+  'lo fallido primero, y cada grupo del más viejo al más nuevo');
 select is((:'l'::jsonb ->> 'fresh_code')::boolean, true, 'y dice si su código es reciente');
 select is((:'l'::jsonb ->> 'total')::integer, jsonb_array_length(:'l'::jsonb -> 'events'), 'con el total');
-select is(pruebas.cuenta(pruebas.f1()), (select fallidos from antes) + 7, 'la cuenta del inicio es solo lo fallido');
+select is(pruebas.cuenta(pruebas.f1()), (select fallidos from antes) + 9, 'la cuenta del inicio es solo lo fallido');
+-- Con más de 100 en espera de T-307, más viejos, un fallido nuevo sigue en la lista.
+insert into private.provider_events (provider, provider_event_id, event_type, livemode, object_id, occurred_at, status, last_error)
+select 'stripe', 'evt_86_espera_' || g, 'charge.refunded', false, 'ch_86_' || g, now() - interval '30 days', 'deferred', 'refund_waits_t307'
+from generate_series(1, 101) g;
+select ok(pruebas.fila(pruebas.lista(pruebas.f1()), :'f') is not null, 'con más de 100 en espera, lo fallido nuevo sigue en la lista');
 select pruebas.sin_codigo(pruebas.f1());
 select is(pruebas.lista(pruebas.f1()), null, 'sin su segundo factor no pasa la puerta del equipo');
 

@@ -100,7 +100,8 @@ const TYPES: Record<string, string> = {
   "customer.subscription.deleted": text.types.subscriptionDeleted,
   "charge.refunded": text.types.chargeRefunded,
 };
-function typeText(type: string): string {
+/** El tipo de un aviso en palabras: lo dicen PA-84 y CO-22. */
+export function eventTypeText(type: string): string {
   if (type.startsWith("charge.dispute.")) return text.types.dispute;
   return TYPES[type] ?? t(text.types.other, { type });
 }
@@ -132,7 +133,7 @@ function rowOf(event: BillingQueueEvent): BillingRow {
     revision: event.revision,
     date: longDate(event.occurredAt),
     received: t(text.received, { date: longDate(event.receivedAt), time: clockTime(event.receivedAt, PRODUCT_TIME_ZONE) }),
-    type: typeText(event.eventType),
+    type: eventTypeText(event.eventType),
     status: status.label,
     tone: status.tone,
     attempts: t(plural(event.attempts, text.attempts), { count: event.attempts }),

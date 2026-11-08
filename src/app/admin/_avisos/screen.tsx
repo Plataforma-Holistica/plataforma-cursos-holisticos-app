@@ -125,14 +125,8 @@ export function BillingEventsScreen({ view, done = null }: BillingEventsScreenPr
         <span className="flex flex-col gap-1 text-body-s break-all">
           <span>{t(text.event, { id: row.eventId })}</span>
           <span className="text-text-2">{t(text.object, { id: row.objectId })}</span>
-          <a
-            href={row.stripeHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={t(text.openInStripeLabel, { id: row.eventId })}
-            className="text-accent underline underline-offset-2"
-          >
-            {text.openInStripe}
+          <a href={row.stripeHref} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">
+            {text.openInStripe} <span className="sr-only">{t(text.openInStripeHidden, { id: row.eventId })}</span>
           </a>
         </span>
       ),

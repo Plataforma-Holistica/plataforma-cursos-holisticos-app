@@ -50,7 +50,7 @@ describe("la cola de los avisos", () => {
     const first = within(rows[0]!);
     expect(first.getByText(text.errors.zeroInvoice)).toBeInTheDocument();
     expect(first.getByText("Aviso: evt_falla")).toBeInTheDocument();
-    expect(first.getByRole("link", { name: /Ver el aviso evt_falla en el panel de Stripe/ })).toHaveAttribute(
+    expect(first.getByRole("link", { name: /^Ver en Stripe el aviso evt_falla en el panel de Stripe/ })).toHaveAttribute(
       "href",
       "https://dashboard.stripe.com/test/events/evt_falla",
     );

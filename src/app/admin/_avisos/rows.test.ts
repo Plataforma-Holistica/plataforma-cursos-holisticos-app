@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { admin } from "@/messages/es/admin";
@@ -45,6 +48,35 @@ describe("la vista de PA-84", () => {
 
   it("todo código que la base, el servidor o la lectura de Stripe dejan tiene su texto", () => {
     for (const code of BILLING_ERROR_CODES) expect(errorText(code), code).not.toContain(code);
+  });
+
+  it("la lista tiene todo código que dejan las fuentes: uno nuevo hace fallar esta prueba", () => {
+    const root = join(__dirname, "..", "..", "..", "..");
+    const read = (file: string) => readFileSync(join(root, file), "utf8");
+    const found = new Set<string>();
+    for (const file of ["src/services/billing/inbox.ts", "src/services/billing/stripe-read.ts"]) {
+      for (const match of read(file).matchAll(/code: "([a-z0-9_]+)"/g)) found.add(match[1]!);
+      for (const match of read(file).matchAll(/settle\(event, \{ kind: "failed", code: "([a-z0-9_]+)" \}\)/g)) found.add(match[1]!);
+    }
+    const migrations = readdirSync(join(root, "supabase", "migrations")).filter((file) => /_t303_/.test(file));
+    for (const file of migrations) {
+      const sql = read(join("supabase", "migrations", file));
+      // Sin `'charge_' || …`, que se arma al vuelo: sus códigos salen de `record_charge`, abajo.
+      for (const match of sql.matchAll(/message = '([a-z0-9_]+)'(?! \|\|)/g)) found.add(match[1]!);
+      for (const match of sql.matchAll(/last_error = '([a-z0-9_]+)'/g)) found.add(match[1]!);
+      for (const match of sql.matchAll(/v_code := '([a-z0-9_]+)'/g)) found.add(match[1]!);
+    }
+    // `charge_<respuesta>`: lo que `record_charge` contesta y no es un cobro.
+    const bandeja = read("supabase/migrations/20261107033615_t303_bandeja.sql");
+    const recordCharge = bandeja.slice(bandeja.indexOf("create function private.record_charge("), bandeja.indexOf("create function private.billing_state("));
+    expect(recordCharge.length).toBeGreaterThan(100);
+    for (const match of recordCharge.matchAll(/'outcome', '([a-z_]+)'/g)) {
+      if (match[1] !== "recorded" && match[1] !== "already_recorded") found.add(`charge_${match[1]}`);
+    }
+    // Lo que el servidor manda a la fila sin ser un código de falla.
+    for (const code of ["stripe_signature_invalid"]) found.delete(code);
+    expect(found.size).toBeGreaterThan(20);
+    expect([...found].filter((code) => !(BILLING_ERROR_CODES as readonly string[]).includes(code)).sort()).toEqual([]);
   });
 
   it("un código que no conoce se dice tal cual, sin perderse", () => {

@@ -1641,6 +1641,14 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
         [`evt_e2e_${tag}`, `in_e2e_${tag}`],
       )
     )[0]!.id;
+  const forgetEvent = (id: string) =>
+    ownerQuery(
+      `do $$ begin
+         set local session_replication_role = replica;
+         delete from private.provider_event_actions where event_id = '${id}';
+         delete from private.provider_events where id = '${id}';
+       end $$`,
+    );
   const eventRow = (id: string) =>
     ownerQuery<{ status: string; attempts: number; resolution_note: string | null }>(
       "select status, attempts, resolution_note from private.provider_events where id = $1",
@@ -1657,6 +1665,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
     expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
     expect(await a11yViolations(page)).toEqual([]);
+    // Pendiente sin Stripe se quedaría así, y frenaría la foto de su mes y de los que siguen.
+    await forgetEvent(id);
   });
 
   test("avisos de cobro sin JavaScript: resolver a mano en dos pasos, y recargar no reenvía", async ({ browser }) => {
@@ -1675,6 +1685,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await page.reload();
       expect(await auditRows()).toBe(audited);
     });
+    await forgetEvent(id);
   });
 
   // PA-78 a PA-80, los periodos, el ensayo y el cierre (T-605). Van aquí porque usan a la misma persona

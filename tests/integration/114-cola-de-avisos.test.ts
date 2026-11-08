@@ -3,13 +3,19 @@ import { createHmac, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createMailpitSender } from "@/adapters/mailpit/send";
 import type { StripeAnswer, StripeGet } from "@/adapters/stripe/api";
 import type { Tx } from "@/adapters/supabase/db";
+import { mailCopy } from "@/app/_lib/mail-copy";
 import { createBillingInbox, type BillingFailure, type BillingStore } from "@/services/billing/inbox";
 import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealth, askQueue, askReceive, askRelease, askRetry } from "@/services/billing/records";
+import { createMailOutbox } from "@/services/mail/outbox";
+import { askMailClaim, askMailHealth, askMailRejected, askMailSent } from "@/services/mail/records";
 
 import { asFinance, financePerson, type Finance } from "./helpers/finance";
 import { localOwnerUrl } from "./helpers/local";
+import { lastMailTo, linksIn } from "./helpers/mailbox";
+import { asOwner, asSystem, reverted } from "./helpers/team";
 import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // La cola de los avisos de punta a punta, contra la base local (T-303, tercera solicitud; RF-710, FL-55): finanzas de verdad reabre un aviso fallido y el servidor lo
@@ -227,14 +233,12 @@ describe("la cola de los avisos de punta a punta", () => {
     const { providerEventId, event, state, inbox } = await failedInvoice();
     state.zero = false;
     expect(await asFinanceServer((tx) => askRetry(tx, event.id, event.revision))).toBe("retried");
-    // Reabrir lo deja listo para ya: lo puede tomar el barrido antes que «Reintentar».
-    const taken = await store.claimDue(100);
-    expect(taken.map((each) => each.id)).toContain(event.id);
+    // Reabrir lo deja listo para ya: lo puede tomar el barrido o una entrega antes que «Reintentar». Se toma por su id, sin tocar avisos ajenos.
+    const taken = await store.claim(event.id);
+    expect(taken.outcome).toBe("claimed");
     expect((await inbox.processNow(event.id)).result).toEqual({ kind: "busy" });
     expect(await eventOf(providerEventId)).toMatchObject({ status: "processing", attempts: 1 });
-    // Lo que el barrido tomó lo termina el barrido; los demás que tomó vuelven a la fila.
-    for (const each of taken.filter((claimed) => claimed.id !== event.id)) await store.release(each, "provider_unavailable");
-    await store.release(taken.find((each) => each.id === event.id)!, "provider_unavailable");
+    if (taken.outcome === "claimed") await store.release(taken.event, "provider_unavailable");
   });
 
   it("lo que pasa del tope sigue detrás de la respuesta, y termina", async () => {
@@ -263,5 +267,60 @@ describe("la cola de los avisos de punta a punta", () => {
     expect(await deliver("invoice.paid", ids.invoice, providerEventId)).toBe(500);
     expect(await eventOf(providerEventId)).toMatchObject({ status: "failed", attempts: 10, last_error: "attempts_exhausted" });
     expect(reported).toContain("billing_attempts_exhausted");
+  });
+});
+
+describe("el aviso a finanzas (CO-22) de punta a punta", () => {
+  it("un aviso que queda fallido le deja su CO-22 a quien tiene finanzas, y la salida de correo lo lleva al buzón", async () => {
+    const person = await createTestUser();
+    people.push(person);
+    const email = person.email.toLowerCase();
+    await reverted(async (owner) => {
+      // Finanzas, solo dentro de esta transacción: dar capacidades queda en la auditoría.
+      await owner.query("set local session_replication_role = replica");
+      await owner.query("insert into public.admin_capabilities (profile_id, capability) values ($1, 'finance')", [person.id]);
+      await owner.query("set local session_replication_role = origin");
+      await owner.query(
+        `insert into private.provider_events (provider, provider_event_id, event_type, livemode, api_version, object_id, occurred_at)
+         values ('stripe', $1, 'invoice.paid', false, '2026-10-28.endive', 'in_it114_correo', '2026-11-07T18:00:00Z')`,
+        [`${PREFIX}correo`],
+      );
+      await owner.query("update private.provider_events set status = 'failed', last_error = 'zero_invoice' where provider_event_id = $1", [`${PREFIX}correo`]);
+      const queued = await owner.query<{ recipient: string; params: Record<string, unknown> }>(
+        "select recipient, params from private.mail_outbox where template = 'CO-22' and profile_id = $1",
+        [person.id],
+      );
+      expect(queued.rows).toEqual([{ recipient: email, params: { count: 1, first_type: "invoice.paid", first_at: "2026-11-07T18:00:00+00:00" } }]);
+      const system = async <T,>(work: (tx: Tx) => Promise<T>): Promise<T> => {
+        await asSystem(owner);
+        await owner.query("select set_config('role', 'app_service', true)");
+        try {
+          return await work(txOf(owner));
+        } finally {
+          await asOwner(owner);
+        }
+      };
+      await createMailOutbox({
+        store: {
+          claim: (limit) => system((tx) => askMailClaim(tx, limit)),
+          sent: (id) => system((tx) => askMailSent(tx, id)),
+          rejected: (id, attempt) => system((tx) => askMailRejected(tx, id, attempt)),
+          health: () => system(askMailHealth),
+        },
+        sender: () => createMailpitSender({ url: process.env.MAILPIT_URL ?? "http://127.0.0.1:54324" }),
+        from: () => "Avisos <avisos@plataforma.local>",
+        site: () => "https://plataforma.ejemplo.test",
+        report: () => Promise.resolve(),
+      }).dispatchMail(mailCopy);
+      const sent = await owner.query<{ sent: boolean }>("select sent_at is not null as sent from private.mail_outbox where template = 'CO-22' and profile_id = $1", [
+        person.id,
+      ]);
+      expect(sent.rows).toEqual([{ sent: true }]);
+    });
+    const mail = await lastMailTo(email);
+    expect(mail.subject).toBe("Un aviso de cobro no se procesó");
+    expect(mail.text).toContain("1 aviso de cobro no se pudo procesar.");
+    expect(mail.text).toContain("Factura pagada");
+    expect(linksIn(mail)).toEqual(["https://plataforma.ejemplo.test/admin/avisos-cobro"]);
   });
 });
