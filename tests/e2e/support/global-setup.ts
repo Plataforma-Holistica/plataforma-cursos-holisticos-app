@@ -1,4 +1,4 @@
-import { removeLeftovers } from "./stack";
+import { ownerQuery, removeLeftovers } from "./stack";
 
 // Antes de la primera prueba, y después de la última: nada de lo que hacen debe quedar en
 // la base. Que todo lo que tocan es la pila local ya lo comprobó `playwright.config.ts`,
@@ -10,6 +10,10 @@ export default async function setup(): Promise<() => Promise<void>> {
   // Las del equipo son la excepción, y por eso corren aparte: dejan personas con capacidades
   // y renglones en la auditoría, que no se pueden borrar. Después de ellas la base se rehace
   // entera (`scripts/e2e-equipo.mjs`), así que aquí no se intenta limpiar.
-  if (process.env.E2E_EQUIPO === "1") return () => Promise.resolve();
+  if (process.env.E2E_EQUIPO === "1") {
+    // Los comentarios se prenden en su prueba y se apagan al terminar; si una corrida se cortó, quedaron prendidos (T-501).
+    await ownerQuery("update public.business_parameters set value = 'false'::jsonb where key = 'COMENTARIOS_ABIERTOS' and canceled_at is null");
+    return () => Promise.resolve();
+  }
   return removeLeftovers;
 }
