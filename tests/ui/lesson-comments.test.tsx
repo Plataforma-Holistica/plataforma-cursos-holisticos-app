@@ -1,0 +1,265 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { LessonComments, type LessonCommentsProps } from "@/app/_comments/lesson-comments";
+import { avatarOf } from "@/app/_comments/view";
+import { COMMENT_FIELDS, IDLE_COMMENTS, type CommentsState } from "@/app/cursos/[slug]/lecciones/[leccion]/comment-outcomes";
+import type { CommentThread, CommentView } from "@/services/comments/comments";
+
+// Los comentarios de la lección (PA-22; diseño §5.12; T-501): el hilo, cada comentario, el campo y lo que se pinta con cada
+// respuesta de la acción, que aquí está simulada. Lo que contesta la base lo prueban la 93 y la 102; el camino entero, el
+// extremo a extremo `comentarios.equipo.ts`.
+
+const LESSON = "a0000000-0000-4000-8000-000000000001";
+const BACK = `/cursos/respirar/lecciones/${LESSON}`;
+const id = (n: number) => `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+function comment(n: number, extra: Partial<CommentView> = {}): CommentView {
+  return {
+    id: id(n),
+    name: "Luz M.",
+    body: `Texto ${n}`,
+    state: "published",
+    own: false,
+    teacher: false,
+    edited: false,
+    createdAt: "2026-11-03T18:00:00.000000+00:00",
+    revision: null,
+    ...extra,
+  };
+}
+const thread = (n: number, extra: Partial<CommentView> = {}, replies: CommentView[] = [], more = false): CommentThread => ({
+  ...comment(n, extra),
+  replies: { items: replies, more },
+});
+
+function setup(view: Partial<LessonCommentsProps["view"]> = {}, action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1 }))) {
+  const props: LessonCommentsProps = {
+    slug: "respirar",
+    lessonId: LESSON,
+    back: BACK,
+    teacherName: "Ana Robles",
+    action,
+    view: {
+      count: 0,
+      items: [],
+      next: null,
+      paged: false,
+      pagedThread: null,
+      me: { teacher: false, pseudonym: "Luz M." },
+      write: { kind: "ok" },
+      ...view,
+    },
+  };
+  render(<LessonComments {...props} />);
+  return { action, user: userEvent.setup() };
+}
+
+describe("el hilo (CommentThread)", () => {
+  it("dice cuántos hay, del más reciente al más antiguo, con las respuestas debajo de su comentario", () => {
+    setup({ count: 3, items: [thread(1, {}, [comment(2, { name: "Ana Robles", teacher: true })]), thread(3, { name: "Beto" })] });
+    expect(screen.getByRole("heading", { name: "3 comentarios" })).toBeInTheDocument();
+    const articles = screen.getAllByRole("article");
+    expect(articles.map((article) => article.getAttribute("aria-label"))).toEqual(["Luz M.", "Ana Robles", "Beto"]);
+    // La respuesta va dentro del hilo de su comentario.
+    expect(within(articles[0]!).getByRole("article", { name: "Ana Robles" })).toBeInTheDocument();
+  });
+
+  it("uno solo se dice en singular, y sin ninguno, la invitación a empezar", () => {
+    setup({ count: 1, items: [thread(1)] });
+    expect(screen.getByRole("heading", { name: "1 comentario" })).toBeInTheDocument();
+  });
+
+  it("vacío", () => {
+    setup();
+    expect(screen.getByText("Nadie ha comentado esta lección. Si quieres, empieza tú.")).toBeInTheDocument();
+  });
+
+  it("de 20 en 20: «Ver más comentarios» lleva a la página siguiente, y una página que no es la primera vuelve a «Más recientes»", () => {
+    setup({ count: 40, items: [thread(1)], next: `2026-11-03T18:00:00.000000+00:00_${id(1)}`, paged: true });
+    expect(screen.getByRole("link", { name: "Ver más comentarios" })).toHaveAttribute(
+      "href",
+      `${BACK}?comentarios=${encodeURIComponent(`2026-11-03T18:00:00.000000+00:00_${id(1)}`)}#comentarios`,
+    );
+    expect(screen.getByRole("link", { name: "Más recientes" })).toHaveAttribute("href", `${BACK}#comentarios`);
+  });
+
+  it("las respuestas que no caben: «Ver más respuestas» lleva a las siguientes de ese comentario", () => {
+    setup({ count: 1, items: [thread(1, {}, [comment(2)], true)] });
+    expect(screen.getByRole("link", { name: "Ver más respuestas" })).toHaveAttribute(
+      "href",
+      `${BACK}?hilo=${id(1)}&respuestas=${encodeURIComponent(`2026-11-03T18:00:00.000000+00:00_${id(2)}`)}#comentario-${id(1)}`,
+    );
+  });
+});
+
+describe("cada comentario (Comment)", () => {
+  it("el del maestro del curso lleva «Imparte el curso»", () => {
+    setup({ count: 1, items: [thread(1, { name: "Ana Robles", teacher: true })] });
+    expect(within(screen.getByRole("article", { name: "Ana Robles" })).getByText("Imparte el curso")).toBeInTheDocument();
+  });
+
+  it("el avatar es la inicial, sobre un tono que sale del nombre", () => {
+    expect(avatarOf("Luz M.")).toEqual(avatarOf("Luz M."));
+    expect(avatarOf("luz")).toMatchObject({ initial: "L" });
+    expect(avatarOf("ñandú").initial).toBe("Ñ");
+    expect(avatarOf("").initial).toBe("?");
+    const tones = new Set(["Ana", "Beto", "Carla", "Dora", "Eli", "Fede", "Gil", "Hugo", "Iris", "Juan", "Kim", "Lía"].map((name) => avatarOf(name).tone));
+    for (const tone of tones) expect(tone).toBeGreaterThanOrEqual(1);
+    for (const tone of tones) expect(tone).toBeLessThanOrEqual(8);
+    expect(tones.size).toBeGreaterThan(1);
+  });
+
+  it("lo propio dice «Tú», ofrece editar y borrar, y en revisión lo dice solo a su autor", () => {
+    setup({ count: 0, items: [thread(1, { own: true, state: "in_review", revision: 2, edited: true })] });
+    const own = screen.getByRole("article", { name: "Tú" });
+    expect(within(own).getByText("En revisión")).toBeInTheDocument();
+    expect(within(own).getByText("Solo tú lo ves por ahora. Una persona del equipo lo va a leer.")).toBeInTheDocument();
+    expect(within(own).getByText("editado")).toBeInTheDocument();
+    expect(within(own).getByText("Opciones de tu comentario")).toBeInTheDocument();
+    expect(within(own).getByRole("button", { name: "Editar" })).toHaveAttribute("value", `ask-edit:${id(1)}`);
+    expect(within(own).getByRole("button", { name: "Borrar" })).toHaveAttribute("value", `ask-delete:${id(1)}`);
+  });
+
+  it("en lo ajeno no hay menú hasta T-502, y se puede responder", () => {
+    setup({ count: 1, items: [thread(1)] });
+    const other = screen.getByRole("article", { name: "Luz M." });
+    expect(within(other).queryByRole("button", { name: "Editar" })).toBeNull();
+    expect(within(other).getByRole("button", { name: "Responder" })).toHaveAttribute("value", `open-reply:${id(1)}`);
+  });
+
+  it("lo borrado que se ve por su respuesta dice «Comentario borrado», sin autor y sin «Responder»", () => {
+    setup({ count: 1, items: [thread(1, { state: "deleted", name: null, body: null }, [comment(2)])] });
+    const gone = screen.getByRole("article", { name: "Comentario borrado" });
+    expect(within(gone).queryByRole("button", { name: "Responder" })).toBeNull();
+  });
+
+  it("una respuesta no ofrece «Responder»: el nivel es uno, y se responde desde el comentario", () => {
+    setup({ count: 1, items: [thread(1, {}, [comment(2, { name: "Beto" })])] });
+    expect(within(screen.getByRole("article", { name: "Beto" })).queryByRole("button", { name: "Responder" })).toBeNull();
+  });
+});
+
+describe("el campo (CommentComposer)", () => {
+  it("lleva el contador, la línea de identidad con «Cambiar» y el botón; el formulario dice de qué lección es", () => {
+    setup();
+    const field = screen.getByRole("textbox", { name: "Escribe un comentario" });
+    expect(field).toHaveAttribute("name", COMMENT_FIELDS.body);
+    expect(screen.getByText("0 / 4000")).toBeInTheDocument();
+    expect(screen.getByText(/Vas a aparecer como Luz M\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cambiar" })).toHaveAttribute("value", "ask-name");
+    expect(screen.getByRole("button", { name: "Comentar" })).toHaveAttribute("value", "post");
+    const formOf = field.closest("form")!;
+    expect(new FormData(formOf).get(COMMENT_FIELDS.course)).toBe("respirar");
+    expect(new FormData(formOf).get(COMMENT_FIELDS.lesson)).toBe(LESSON);
+  });
+
+  it("sin seudónimo todavía, avisa que lo va a elegir; el maestro aparece con su nombre, sin «Cambiar»", () => {
+    setup({ me: { teacher: false, pseudonym: null } });
+    expect(screen.getByText("Antes de publicar vas a elegir con qué nombre apareces.")).toBeInTheDocument();
+  });
+
+  it("el maestro del curso", () => {
+    setup({ me: { teacher: true, pseudonym: null } });
+    expect(screen.getByText("Vas a aparecer como Ana Robles, con «Imparte el curso».")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cambiar" })).toBeNull();
+  });
+
+  it.each([
+    [{ kind: "read_only" }, "Para comentar necesitas una suscripción."],
+    [{ kind: "gate", answer: "banned" }, "Por ahora no puedes comentar. Si crees que es un error, escríbenos."],
+    [{ kind: "gate", answer: "suspended" }, "Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios."],
+    [{ kind: "gate", answer: "closed" }, "Por ahora no se pueden publicar comentarios."],
+  ] as const)("con %o el campo se sustituye por su texto, y se sigue leyendo", (write, text) => {
+    setup({ count: 1, items: [thread(1)], write });
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Escribe un comentario" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Responder" })).toBeNull();
+    expect(screen.getByRole("article", { name: "Luz M." })).toBeInTheDocument();
+  });
+
+  it("el maestro con el aviso pendiente va al portal a aceptarlo", () => {
+    setup({ write: { kind: "gate", answer: "needs_notice" } });
+    expect(screen.getByRole("link", { name: "Acepta el aviso del maestro" })).toHaveAttribute("href", "/portal");
+  });
+
+  it("sin seudónimo no se sustituye nada: el diálogo llega al enviar", () => {
+    setup({ write: { kind: "gate", answer: "needs_pseudonym" }, me: { teacher: false, pseudonym: null } });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toBeInTheDocument();
+  });
+});
+
+describe("lo que pinta cada respuesta", () => {
+  it("el diálogo del nombre llega vacío y explica; lo escrito cruza en un campo oculto", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "name", carry: { parentId: null, body: "Hola" } } }));
+    const { user } = setup({ me: { teacher: false, pseudonym: null } }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    const name = within(dialog).getByRole("textbox", { name: "Nombre o seudónimo" });
+    expect(name).toHaveValue("");
+    expect(within(dialog).getByText(/no tiene que ser tu nombre real/)).toBeInTheDocument();
+    const data = new FormData(name.closest("form")!);
+    expect(data.get(COMMENT_FIELDS.carry)).toBe("Hola");
+    expect(data.get(COMMENT_FIELDS.carryParent)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Guardar y publicar" })).toHaveAttribute("value", "name");
+  });
+
+  it("si no se pudo publicar, el texto se queda y se dice en su campo", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, notice: { at: { kind: "new" }, kind: "throttled" }, kept: { at: { kind: "new" }, body: "Hola" } }));
+    const { user } = setup({}, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getByText("Escribiste muchos comentarios seguidos. Espera unos minutos y vuelve a intentarlo.")).toBeInTheDocument(), { timeout: 3_000 });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
+  it("al publicar, el foco va al comentario nuevo", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, written: id(5), notice: { at: { kind: "comment", id: id(5) }, kind: "published" } }));
+    const { user } = setup({ count: 1, items: [thread(5, { own: true, revision: 1 })] }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Texto 5");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getByRole("article", { name: "Tú" })).toHaveFocus(), { timeout: 3_000 });
+  });
+
+  it("«Responder» abre el campo bajo su comentario, con el botón que dice a qué responde", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "reply", parentId: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1)] }, action);
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+    const reply = await screen.findByRole("textbox", { name: "Responde a Luz M." });
+    expect(within(reply.closest("form")!).getByRole("button", { name: "Responder" })).toHaveAttribute("value", `reply:${id(1)}`);
+    expect(within(reply.closest("form")!).getByRole("button", { name: "Cancelar" })).toHaveAttribute("value", "cancel");
+  });
+
+  it("editar abre lo propio con su texto y la revisión que se vio", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "edit", id: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 4 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    const field = await screen.findByRole("textbox", { name: "Edita tu comentario" });
+    expect(field).toHaveValue("Texto 1");
+    expect(screen.getByRole("button", { name: "Guardar" })).toHaveAttribute("value", `save:${id(1)}:4`);
+  });
+
+  it("borrar pregunta antes, con la revisión que se vio", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "delete", id: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 4 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Borrar tu comentario?" });
+    expect(within(dialog).getByRole("button", { name: "Sí, borrarlo" })).toHaveAttribute("value", `delete:${id(1)}:4`);
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toHaveAttribute("value", "cancel");
+  });
+
+  it.each([
+    ["changed", "Este comentario cambió en otra pestaña. Revisa cómo quedó."],
+    ["gone", "Ese comentario ya no está."],
+    ["deleted", "Borraste tu comentario."],
+    ["unavailable", "No pudimos guardar el cambio. Vuelve a intentarlo."],
+  ] as const)("el aviso %s se dice", async (kind, text) => {
+    const at = kind === "changed" || kind === "unavailable" ? ({ kind: "comment", id: id(1) } as const) : ({ kind: "thread" } as const);
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, notice: { at, kind } }));
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await waitFor(() => expect(screen.getByText(text)).toBeInTheDocument(), { timeout: 3_000 });
+  });
+});

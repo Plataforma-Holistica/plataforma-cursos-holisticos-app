@@ -282,6 +282,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // en la cuenta de esa sesión.
     rememberCaptionsAction: /if \(typeof on !== "boolean"\) return;\s*await rememberCaptions\(await cookieJar\(\), on\);/,
   },
+  "src/app/cursos/[slug]/lecciones/[leccion]/comment-actions.ts": {
+    // Los comentarios de la lección (T-501): abrir y cerrar no llaman a nadie; lo que escribe pasa por el servicio, que
+    // corre la guarda de sesión y decide el acceso con la regla única. Del formulario salen la lección y el botón.
+    lessonCommentAction:
+      /if \(lesson === null \|\| request\.kind === "none"\) return \{ \.\.\.IDLE_COMMENTS, attempt \};\s*if \(request\.kind === "open"\) return \{ \.\.\.askState\(request\.open\), attempt \};\s*const jar = await cookieJar\(\);\s*return settle\(jar, await outcomeOf\(jar, lesson, request\), attempt\);/,
+  },
   "src/app/admin/_revision/actions.ts": {
     // Dar el código otra vez: el del catálogo, que comprueba la misma puerta de Contenido.
     reviewCodeAction:
