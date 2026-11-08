@@ -27,6 +27,7 @@ const GROUPS: readonly { capability: Capability; links: SideNavGroup["links"] }[
     capability: "finance",
     links: [
       { href: ROUTES.periods, label: text.periods },
+      { href: ROUTES.billingEvents, label: text.billingEvents },
       { href: ROUTES.alerts, label: text.alerts },
     ],
   },

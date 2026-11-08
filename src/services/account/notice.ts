@@ -36,6 +36,11 @@ export const NOTICES = [
   // Finanzas propuso o retiró la suspensión de un maestro por fraude (PA-68, T-401).
   "fraud_proposed",
   "fraud_withdrawn",
+  // Lo que finanzas hizo con un aviso de cobro en PA-84 (T-303): la cola lo dice al volver a pintarse.
+  "billing_event_processed",
+  "billing_event_already_applied",
+  "billing_event_on_its_way",
+  "billing_event_resolved",
   // Las decisiones de finanzas sobre un periodo (T-605): el panel y el cierre lo dicen al volver a pintarse.
   "rollup_requested",
   "period_rehearsed",

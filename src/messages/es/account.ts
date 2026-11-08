@@ -196,6 +196,13 @@ export const account = defineMessages({
     alerts: "Alertas de anomalía",
     // PA-78. Solo se le ofrece a quien tiene finanzas.
     periods: "Periodos",
+    // PA-84. Solo se le ofrece a quien tiene finanzas.
+    billingEvents: "Avisos de cobro",
+    // Las tarjetas de PA-60 (la primera llega con T-303).
+    pendingTitle: "Lo que espera",
+    billingCard: "Avisos de cobro sin procesar",
+    billingCardLink: "Ver los avisos de cobro",
+    billingCardUnavailable: "No se pudo leer cuántos hay.",
     // PA-89. Solo se le ofrece a quien tiene configuración.
     legalTexts: "Textos legales",
     account: "Cuenta",

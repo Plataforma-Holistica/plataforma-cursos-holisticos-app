@@ -71,10 +71,27 @@ function signed(body: unknown, t = T): { body: Uint8Array; signature: string } {
 }
 
 function setup(
-  options: { stripe?: StripeGet | null; secret?: string | null; claim?: Claim; apply?: () => Promise<Applied>; status?: string; live?: boolean } = {},
+  options: {
+    stripe?: StripeGet | null;
+    secret?: string | null;
+    claim?: Claim;
+    apply?: () => Promise<Applied>;
+    status?: string;
+    live?: boolean;
+    attempt?: number;
+    type?: string;
+    object?: string;
+  } = {},
 ) {
-  const claimed = (type: string, object: string): ClaimedEvent => ({ id: "e1", attempt: 1, eventType: type, objectId: object, occurredAt: "2026-11-06T17:59:30.000Z" });
-  let last: { type: string; object: string } = { type: "", object: "" };
+  const claimed = (type: string, object: string): ClaimedEvent => ({
+    id: "e1",
+    attempt: options.attempt ?? 1,
+    eventType: type,
+    objectId: object,
+    occurredAt: "2026-11-06T17:59:30.000Z",
+  });
+  // Reintentar a mano reclama por su id, sin entrega: el tipo y el objeto los dice la base.
+  let last: { type: string; object: string } = { type: options.type ?? "", object: options.object ?? "" };
   let rejections = 0;
   const store: BillingStore = {
     countRejection: vi.fn(() => Promise.resolve(++rejections)),
@@ -84,7 +101,7 @@ function setup(
     }),
     claim: vi.fn(() => Promise.resolve(options.claim ?? { outcome: "claimed" as const, event: claimed(last.type, last.object) })),
     claimDue: vi.fn(() => Promise.resolve([] as ClaimedEvent[])),
-    release: vi.fn(() => Promise.resolve()),
+    release: vi.fn(() => Promise.resolve(true)),
     finish: vi.fn(() => Promise.resolve(true)),
     apply: vi.fn(options.apply ?? (() => Promise.resolve({ outcome: "processed" as const, subscription_id: "s1", recorded: 1 }))),
     health: vi.fn(() => Promise.resolve({ pending: 0, failed: 0, deferred: 0, oldest_pending_at: null })),
@@ -105,6 +122,7 @@ function setup(
     receiveStripeEvent: async (body: Uint8Array, signature: string | null) => (await raw.receiveStripeEvent(body, signature)).status,
     sweepBillingEvents: raw.sweepBillingEvents,
     noteOversizedBody: raw.noteOversizedBody,
+    processNow: raw.processNow,
   };
   return { inbox, raw, store, report, stripe };
 }
@@ -424,6 +442,118 @@ describe("la entrega de un aviso", () => {
   });
 });
 
+describe("lo que agota sus intentos", () => {
+  it("soltar el décimo intento lo deja fallido en la base, y se reporta", async () => {
+    const stripe = stripeWith({ "/v1/subscriptions/sub_1": { status: "unavailable" } });
+    const { inbox, store, report } = setup({ stripe, attempt: 10 });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ attempt: 10 }), "provider_unavailable");
+    expect(report).toHaveBeenCalledWith("billing_attempts_exhausted");
+  });
+
+  it("el noveno no", async () => {
+    const stripe = stripeWith({ "/v1/subscriptions/sub_1": { status: "unavailable" } });
+    const { inbox, report } = setup({ stripe, attempt: 9 });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect(report).not.toHaveBeenCalledWith("billing_attempts_exhausted");
+  });
+
+  it("ni un décimo que la base ya no soltó (otro intento lo había tomado)", async () => {
+    const stripe = stripeWith({ "/v1/subscriptions/sub_1": { status: "unavailable" } });
+    const { inbox, store, report } = setup({ stripe, attempt: 10 });
+    vi.mocked(store.release).mockResolvedValue(false);
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect(report).not.toHaveBeenCalledWith("billing_attempts_exhausted");
+  });
+
+  it("un error de la base en el décimo también lo agota", async () => {
+    const { inbox, report } = setup({ attempt: 10, apply: () => Promise.reject(new Error("se cayó")) });
+    const { body, signature } = signed(event("customer.subscription.updated", "sub_1"));
+    await inbox.receiveStripeEvent(body, signature);
+    expect(report).toHaveBeenCalledWith("billing_attempts_exhausted");
+  });
+
+  it("si lo agota el reclamo (un décimo que se cortó), la entrega lo reporta y contesta 200", async () => {
+    const { inbox, report } = setup({ claim: { outcome: "finished", exhausted: true } });
+    const { body, signature } = signed(event("invoice.paid", "in_1"));
+    expect(await inbox.receiveStripeEvent(body, signature)).toBe(200);
+    expect(report).toHaveBeenCalledWith("billing_attempts_exhausted");
+  });
+});
+
+describe("reintentar a mano procesa en el momento", () => {
+  const paid = { type: "invoice.paid", object: "in_1" };
+  const sub = { type: "customer.subscription.updated", object: "sub_1" };
+
+  it("reclama ese aviso por su id, como sistema, y lo procesa", async () => {
+    const { inbox, store } = setup(sub);
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "processed" });
+    expect(store.claim).toHaveBeenCalledWith("e1");
+    expect(store.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("una factura cuyos cobros ya estaban registrados dice que ya estaba aplicado", async () => {
+    const { inbox } = setup({ ...paid, apply: () => Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 }) });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "already_applied" });
+  });
+
+  it("una suscripción sin cobros no: se procesó", async () => {
+    const { inbox } = setup({ ...sub, apply: () => Promise.resolve({ outcome: "processed", subscription_id: "s1", recorded: 0 }) });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "processed" });
+  });
+
+  it("si vuelve a fallar, dice con qué código, y se reporta", async () => {
+    const { inbox, report } = setup({ ...sub, apply: () => Promise.resolve({ outcome: "failed", code: "unknown_account" }) });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "failed", code: "unknown_account" });
+    expect(report).toHaveBeenCalledWith("billing_event_failed");
+  });
+
+  it("una lectura que falla para siempre también", async () => {
+    const stripe = stripeWith({ "/v1/invoices/in_1": { status: "ok", body: { ...INVOICE, amount_paid: 0 } } });
+    const { inbox } = setup({ ...paid, stripe });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "failed", code: "zero_invoice" });
+  });
+
+  it("si volvió a la fila (Stripe no contestó, o una segunda suscripción viva), lo dice con su código", async () => {
+    const stripe = stripeWith({ "/v1/subscriptions/sub_1": { status: "unavailable" } });
+    expect((await setup({ ...sub, stripe }).inbox.processNow("e1")).result).toEqual({ kind: "retry", code: "provider_unavailable" });
+    const live = setup({ ...sub, apply: () => Promise.resolve({ outcome: "retry", code: "second_live_subscription" }) });
+    expect((await live.inbox.processNow("e1")).result).toEqual({ kind: "retry", code: "second_live_subscription" });
+  });
+
+  it("si otro lo tomó entre reabrirlo y reclamarlo, está en camino, sin procesarlo dos veces", async () => {
+    const { inbox, store } = setup({ ...sub, claim: { outcome: "busy" } });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "busy" });
+    expect(store.apply).not.toHaveBeenCalled();
+  });
+
+  it("si ya lo terminó otro, cambió", async () => {
+    const { inbox } = setup({ ...sub, claim: { outcome: "finished" } });
+    expect((await inbox.processNow("e1")).result).toEqual({ kind: "changed" });
+  });
+
+  it("sin la llave de Stripe, o sin base al reclamar, queda en la fila para el barrido", async () => {
+    expect((await setup({ ...sub, stripe: null }).inbox.processNow("e1")).result).toEqual({ kind: "still_pending" });
+    const down = setup(sub);
+    vi.mocked(down.store.claim).mockRejectedValueOnce(new Error("sin base"));
+    expect((await down.inbox.processNow("e1")).result).toEqual({ kind: "still_pending" });
+    expect(down.report).toHaveBeenCalledWith("billing_base_error");
+  });
+
+  it("si pasa del tope, sigue detrás de la respuesta", async () => {
+    let finish: (value: Applied) => void = () => undefined;
+    const { inbox } = setup({ ...sub, apply: () => new Promise<Applied>((resolve) => (finish = resolve)) });
+    const run = await inbox.processNow("e1");
+    expect(run.result).toEqual({ kind: "still_pending" });
+    expect(run.rest).toBeInstanceOf(Promise);
+    finish({ outcome: "processed", subscription_id: "s1", recorded: 0 });
+    await expect(run.rest).resolves.toBeUndefined();
+  });
+});
+
 describe("el barrido", () => {
   it("procesa lo que toca y reporta lo atorado", async () => {
     const { inbox, store, report } = setup();
@@ -445,7 +575,7 @@ describe("el barrido", () => {
       .mockRejectedValueOnce(new Error("la base otra vez"))
       .mockResolvedValueOnce({ outcome: "processed", subscription_id: "s1", recorded: 0 });
     // El primero vuelve a la fila; el segundo ni eso (se queda con su reclamo de 2 minutos).
-    vi.mocked(store.release).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("tampoco"));
+    vi.mocked(store.release).mockResolvedValueOnce(true).mockRejectedValueOnce(new Error("tampoco"));
     expect(await inbox.sweepBillingEvents()).toBe(true);
     expect(store.apply).toHaveBeenCalledTimes(3);
     expect(store.release).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }), "base_error");

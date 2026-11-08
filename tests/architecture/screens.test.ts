@@ -334,6 +334,14 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Los cambios: del formulario llega qué botón y lo escrito. Preguntar no llama a nadie. Lo prueba tests/actions.
     teachersAction: /if \(request\.step === "ask_suspend"\) return \{ kind: "asking"[\s\S]*if \(request\.step === "ask_confirm"\) return \{ kind: "asking"[\s\S]*await cookieJar\(\)/,
   },
+  "src/app/admin/_avisos/actions.ts": {
+    // Dar el código otra vez: el de la cola de avisos, que comprueba lo reciente con la lectura que pide Finanzas.
+    billingCodeAction:
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*billingCodeOutcome\(await giveBillingCode\(jar, code\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+    // Reintentar y resolver: del formulario llega qué botón, de qué aviso, con qué revisión y la nota. Preguntar no llama a nadie.
+    billingEventsAction:
+      /const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "confirming", asked, note: request\.note, attempt \};[\s\S]*await retryBillingEvent\(jar, \{ event: request\.event, revision: request\.revision \}\)[\s\S]*resolveOutcome\(await resolveBillingEvent\(jar, \{ event: request\.event, revision: request\.revision, note: request\.note \}\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+  },
   "src/app/admin/_alertas/actions.ts": {
     // Dar el código otra vez: el de las alertas, que comprueba lo reciente con la lectura que pide Finanzas.
     alertsCodeAction:
@@ -499,7 +507,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       it("lo demás vive en carpetas privadas, que Next no toma por rutas", () => {
         // `src/app/admin/<carpeta>/…`: lo que tiene algo debajo.
         const folders = new Set(under.map((source) => source.file.split("/")).filter((parts) => parts.length > 4).map((parts) => parts[3] ?? ""));
-        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_equipo", "_lib", "_maestros", "_periodos", "_practicas", "_revision", "_textos"]);
+        expect([...folders].sort()).toEqual(["[...resto]", "_alertas", "_avisos", "_equipo", "_lib", "_maestros", "_periodos", "_practicas", "_revision", "_textos"]);
       });
 
       it("el comodín pide la capacidad de la sección antes de pintarla, y sin sección dice que no existe", () => {
@@ -536,6 +544,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
           ["revision", "content"],
           ["alertas", "finance"],
           ["periodos", "finance"],
+          ['"avisos-cobro"', "finance"],
           ['"textos-legales"', "config"],
         ]);
         // La tabla no tiene otra forma de entrada: lo que hay entre sus llaves son esas líneas.
@@ -545,6 +554,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         const sections = under.filter((source) => /\/_[a-z]+\/section\.tsx$/.test(source.file));
         expect(sections.map((source) => source.file).sort()).toEqual([
           "src/app/admin/_alertas/section.tsx",
+          "src/app/admin/_avisos/section.tsx",
           "src/app/admin/_equipo/section.tsx",
           "src/app/admin/_maestros/section.tsx",
           "src/app/admin/_periodos/section.tsx",
@@ -828,6 +838,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
     expect(anchors.map(({ anchor }) => anchor).sort()).toEqual([
       "bloque-alertas-codigo",
       "bloque-alertas-lista",
+      "bloque-avisos-codigo",
+      "bloque-avisos-lista",
       "bloque-catalogo-codigo",
       "bloque-catalogo-niveles",
       "bloque-catalogo-practicas",

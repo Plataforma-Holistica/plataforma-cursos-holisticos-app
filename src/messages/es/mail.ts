@@ -21,4 +21,14 @@ export const mail = defineMessages({
     thanks: "Gracias por seguir aprendiendo con nosotros.",
     accountLabel: "Ver mi cuenta",
   },
+  // El aviso a finanzas (CO-22; T-303, tercera solicitud): a lo más uno por hora, con cuántos y el primero (decisión 3 de Sergio del 2026-11-07). Sin la cuenta ni montos.
+  billingAlert: {
+    subject: "Un aviso de cobro no se procesó",
+    failed: {
+      one: "{count} aviso de cobro no se pudo procesar. Llegó el {date} a las {time}, y es: {type}.",
+      other: "{count} avisos de cobro no se pudieron procesar. El primero llegó el {date} a las {time}, y es: {type}.",
+    },
+    action: "Revisa la cola: reintenta cada uno o resuélvelo a mano con una nota.",
+    linkLabel: "Ver los avisos",
+  },
 });

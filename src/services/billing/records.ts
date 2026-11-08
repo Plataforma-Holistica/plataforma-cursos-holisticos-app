@@ -5,9 +5,10 @@ import { z } from "zod";
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
 
+import { QUEUE_STATUSES, RESOLVE_ANSWERS, RETRY_ANSWERS, type BillingQueueData, type ResolveAnswer, type RetryAnswer } from "./queue";
 import type { FailureSnapshot, PaymentSnapshot, SubscriptionSnapshot } from "./stripe-read";
 
-// Lo que la bandeja de los avisos le pregunta a la base, como sistema (T-303). Las funciones de `t303_bandeja` se nombran solo aquí: con ellas se registran cobros.
+// Lo que la bandeja de los avisos le pregunta a la base, como sistema (T-303), y lo que finanzas lee y decide en PA-84, como la persona. Las funciones de `t303_bandeja` se nombran solo aquí: con ellas se registran cobros.
 
 export interface ReceivedEvent {
   provider_event_id: string;
@@ -55,17 +56,19 @@ const claimed = z.object({
     z
       .object({ outcome: z.literal("claimed"), id: z.string(), attempt: z.number().int(), event_type: z.string(), object_id: z.string(), occurred_at: z.string() })
       .strict(),
-    z.object({ outcome: z.literal("finished"), id: z.string(), status: z.string() }).strict(),
+    z.object({ outcome: z.literal("finished"), id: z.string(), status: z.string(), exhausted: z.literal(true).optional() }).strict(),
     z.object({ outcome: z.enum(["busy", "not_found"]), id: z.string() }).strict(),
   ]),
 });
 
-export type Claim = { outcome: "claimed"; event: ClaimedEvent } | { outcome: "finished" | "busy" | "not_found" };
+/** `exhausted`: este reclamo lo dejó fallido por sus intentos (un décimo que se cortó sin soltarse). */
+export type Claim = { outcome: "claimed"; event: ClaimedEvent } | { outcome: "finished"; exhausted?: boolean } | { outcome: "busy" | "not_found" };
 
 export async function askClaim(tx: Tx, id: string): Promise<Claim> {
   const rows = await tx.query(sql`select private.provider_event_claim(${id}::uuid) as answer`, claimed);
   const answer = rows[0]?.answer;
   if (answer === undefined) throw new Error("provider_event_claim no contestó");
+  if (answer.outcome === "finished") return answer.exhausted === true ? { outcome: "finished", exhausted: true } : { outcome: "finished" };
   if (answer.outcome !== "claimed") return { outcome: answer.outcome };
   return {
     outcome: "claimed",
@@ -80,8 +83,9 @@ export async function askClaimDue(tx: Tx, limit: number): Promise<ClaimedEvent[]
   return rows.map((row) => ({ id: row.id, attempt: row.attempt, eventType: row.event_type, objectId: row.object_id, occurredAt: row.occurred_at.toISOString() }));
 }
 
-export async function askRelease(tx: Tx, id: string, attempt: number, code: string): Promise<void> {
-  await tx.query(sql`select private.provider_event_release(${id}::uuid, ${attempt}::integer, ${code}) as answer`, z.object({ answer: z.boolean() }));
+export async function askRelease(tx: Tx, id: string, attempt: number, code: string): Promise<boolean> {
+  const rows = await tx.query(sql`select private.provider_event_release(${id}::uuid, ${attempt}::integer, ${code}) as answer`, z.object({ answer: z.boolean() }));
+  return rows[0]?.answer === true;
 }
 
 export async function askFinish(tx: Tx, id: string, attempt: number, status: "ignored" | "deferred" | "failed", code: string | null): Promise<boolean> {
@@ -147,4 +151,76 @@ export async function askHealth(tx: Tx): Promise<z.infer<typeof health>["answer"
   const row = rows[0];
   if (row === undefined) throw new Error("provider_events_health no contestó");
   return row.answer;
+}
+
+// Lo que lee y decide finanzas en PA-84 (la tercera solicitud), a nombre de la persona: la base pide la capacidad y, para decidir, el código reciente.
+
+const queueEvent = z
+  .object({
+    id: z.string(),
+    revision: z.number().int(),
+    provider_event_id: z.string(),
+    event_type: z.string(),
+    livemode: z.boolean(),
+    object_id: z.string(),
+    occurred_at: z.string(),
+    received_at: z.string(),
+    status: z.enum(QUEUE_STATUSES),
+    attempts: z.number().int(),
+    next_attempt_at: z.string(),
+    last_error: z.string().nullable(),
+    is_self: z.boolean(),
+  })
+  .strict();
+const queueList = z.object({
+  answer: z.object({ fresh_code: z.boolean(), total: z.number().int(), events: z.array(queueEvent) }).strict().nullable(),
+});
+
+export async function askQueue(tx: Tx): Promise<BillingQueueData | null> {
+  const rows = await tx.query(sql`select private.provider_events_list() as answer`, queueList);
+  const answer = rows[0]?.answer;
+  if (answer === undefined) throw new Error("provider_events_list no contestó");
+  if (answer === null) return null;
+  return {
+    freshCode: answer.fresh_code,
+    total: answer.total,
+    events: answer.events.map((event) => ({
+      id: event.id,
+      revision: event.revision,
+      providerEventId: event.provider_event_id,
+      eventType: event.event_type,
+      livemode: event.livemode,
+      objectId: event.object_id,
+      occurredAt: event.occurred_at,
+      receivedAt: event.received_at,
+      status: event.status,
+      attempts: event.attempts,
+      nextAttemptAt: event.next_attempt_at,
+      lastError: event.last_error,
+      isSelf: event.is_self,
+    })),
+  };
+}
+
+export async function askQueueCount(tx: Tx): Promise<number | null> {
+  const rows = await tx.query(sql`select private.provider_events_count() as answer`, z.object({ answer: z.number().int().nullable() }));
+  const row = rows[0];
+  if (row === undefined) throw new Error("provider_events_count no contestó");
+  return row.answer;
+}
+
+const outcome = z.object({ answer: z.object({ outcome: z.string() }).passthrough() });
+
+export async function askRetry(tx: Tx, event: string, revision: number): Promise<RetryAnswer> {
+  const rows = await tx.query(sql`select private.provider_event_retry(${event}::uuid, ${revision}::integer) as answer`, outcome);
+  const answer = RETRY_ANSWERS.find((each) => each === rows[0]?.answer.outcome);
+  if (answer === undefined) throw new Error("provider_event_retry contestó algo que no se conoce");
+  return answer;
+}
+
+export async function askResolve(tx: Tx, event: string, note: string, revision: number): Promise<ResolveAnswer> {
+  const rows = await tx.query(sql`select private.provider_event_resolve(${event}::uuid, ${note}, ${revision}::integer) as answer`, outcome);
+  const answer = RESOLVE_ANSWERS.find((each) => each === rows[0]?.answer.outcome);
+  if (answer === undefined) throw new Error("provider_event_resolve contestó algo que no se conoce");
+  return answer;
 }

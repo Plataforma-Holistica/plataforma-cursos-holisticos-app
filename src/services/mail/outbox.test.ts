@@ -8,6 +8,7 @@ import type { MailCopy } from "./templates";
 const COPY: MailCopy = {
   clabeNotice: { subject: "Asunto", intro: "Intro", wait: (hours) => `${hours} horas`, yours: "Tuya", notYours: "No tuya", recoverLabel: "Cambiar", reviewLabel: "Ver" },
   receipt: { subject: "Recibo", paid: (cents, plan, at) => `${cents} ${plan} ${at}`, thanks: "Gracias", accountLabel: "Cuenta" },
+  billingAlert: { subject: "Aviso", failed: (count, type, at) => `${count} ${type} ${at}`, action: "Revisa", linkLabel: "Ver" },
 };
 const ROW: ClaimedMail = { id: "1", key: "CO-27:a:1", template: "CO-27", recipient: "mara@prueba.test", params: { hours: 72 }, attempt: 3 };
 
