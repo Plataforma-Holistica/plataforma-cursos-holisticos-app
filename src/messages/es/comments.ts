@@ -68,7 +68,7 @@ export const comments = defineMessages({
     bad_parent: "Ese comentario ya no recibe respuestas.",
     throttled: "Escribiste muchos comentarios seguidos. Espera unos minutos y vuelve a intentarlo.",
     empty: "Escribe algo antes de enviar.",
-    too_long: "Tu comentario pasa de 4000 caracteres. Acórtalo y vuelve a intentarlo.",
+    too_long: "Tu comentario pasa de 4 000 caracteres. Acórtalo y vuelve a intentarlo.",
     invalid: "Tu comentario tiene caracteres que no podemos guardar. Quítalos y vuelve a intentarlo.",
     closed: "Por ahora no se pueden publicar comentarios.",
     banned: "Por ahora no puedes comentar. Si crees que es un error, escríbenos.",

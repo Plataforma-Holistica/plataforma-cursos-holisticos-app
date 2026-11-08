@@ -1,7 +1,7 @@
 "use client";
 
 import { Ellipsis } from "lucide";
-import { useActionState, useEffect, useRef, type ReactNode } from "react";
+import { useActionState, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { comments as text } from "@/messages/es/comments";
@@ -55,7 +55,22 @@ const COMMENT_MAX = 4_000;
 
 const samePlace = (a: NoticePlace, b: NoticePlace) => JSON.stringify(a) === JSON.stringify(b);
 const noticeAt = (state: CommentsState, at: NoticePlace): CommentNotice | null => (state.notice !== null && samePlace(state.notice.at, at) ? state.notice : null);
-const keptAt = (state: CommentsState, at: Place | { kind: "name" }): string | null => (state.kept !== null && samePlace(state.kept.at, at) ? state.kept.body : null);
+/** La llave de cada campo del hilo, para su borrador. */
+const placeKey = (at: Place | { kind: "name" }): string =>
+  at.kind === "new" ? "new" : at.kind === "reply" ? `reply:${at.parentId}` : at.kind === "edit" ? `edit:${at.id}` : "name";
+
+/**
+ * Los borradores de cada campo. React 19 devuelve al valor por omisión el formulario que envió, y un campo que no se ha tocado
+ * desde entonces sigue a su valor por omisión: si ese valor saliera solo del último estado, una respuesta que no habla de ese
+ * campo lo vaciaría. Por eso cada campo guarda lo suyo, y solo lo borra el formulario que lo envió (`cleared`).
+ */
+type Drafts = Readonly<Record<string, string>>;
+function nextDrafts(drafts: Drafts, state: CommentsState, cleared: readonly string[]): Drafts {
+  const next: Record<string, string> = { ...drafts };
+  for (const key of cleared) delete next[key];
+  if (state.kept !== null) next[placeKey(state.kept.at)] = state.kept.body;
+  return next;
+}
 
 /** Si se puede escribir: el campo, o el sustituto que lo dice (diseño §5.12, «Variantes que sustituyen al campo»). */
 const canWrite = (write: WriteStanding) => write.kind === "ok" || (write.kind === "gate" && write.answer === "needs_pseudonym");
@@ -140,11 +155,15 @@ interface Shared {
   formAction: (form: FormData) => void;
   pending: boolean;
   write: WriteStanding;
+  /** Lo que ese campo tiene guardado, o nulo. */
+  draft: (at: Place | { kind: "name" }) => string | null;
+  /** Al enviar: qué borradores se van con la respuesta (con «Cancelar», `onCancel`). */
+  submitting: (keys: string[], onCancel?: string[]) => (event: FormEvent<HTMLFormElement>) => void;
 }
 
 /** Un comentario o una respuesta (diseño §5.12, `Comment`). */
 function CommentItem({ comment, reply, shared, children }: { comment: CommentView; reply: boolean; shared: Shared; children?: ReactNode }) {
-  const { slug, lessonId, state, formAction, pending, write } = shared;
+  const { slug, lessonId, state, formAction, pending, write, draft, submitting } = shared;
   if (comment.state === "deleted") {
     return (
       <article id={commentAnchor(comment.id)} aria-label={text.deleted} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
@@ -175,7 +194,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         </p>
         {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
         {editing ? (
-          <form action={formAction} className="flex flex-col gap-3">
+          <form action={formAction} onSubmit={submitting([placeKey({ kind: "edit", id: comment.id })])} className="flex flex-col gap-3">
             <LessonFields slug={slug} lessonId={lessonId} />
             <CountedField
               id={`editar-${comment.id}`}
@@ -183,7 +202,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
               label={text.composer.editLabel}
               max={COMMENT_MAX}
               warnAt={COMMENT_WARN_AT}
-              defaultValue={keptAt(state, { kind: "edit", id: comment.id }) ?? comment.body ?? ""}
+              defaultValue={draft({ kind: "edit", id: comment.id }) ?? comment.body ?? ""}
               error={null}
               multiline
             />
@@ -210,7 +229,8 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
               </Button>
             )}
             {comment.own && comment.revision !== null && (
-              <details className="relative">
+              // Se vuelve a montar con cada respuesta: así se cierra, también al cancelar lo que abrió.
+              <details key={state.attempt} className="relative">
                 <summary className="grid min-h-touch min-w-touch cursor-pointer list-none place-items-center rounded-md text-text-2 hover:bg-surface-2">
                   <Icon icon={Ellipsis} size={20} />
                   <span className="sr-only">{text.options}</span>
@@ -258,12 +278,12 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
 
 /** El campo para escribir (diseño §5.12, `CommentComposer`): arriba del hilo, o bajo un comentario para responderle. */
 function Composer({ place, label, shared, identity, onCancel }: { place: Exclude<Place, { kind: "edit" }>; label: string; shared: Shared; identity: ReactNode; onCancel: boolean }) {
-  const { slug, lessonId, state, formAction, pending } = shared;
+  const { slug, lessonId, state, formAction, pending, draft, submitting } = shared;
   const id = place.kind === "new" ? "comentar" : `responder-${place.parentId}`;
   return (
-    <form action={formAction} className="flex flex-col gap-3">
+    <form action={formAction} onSubmit={submitting([placeKey(place)])} className="flex flex-col gap-3">
       <LessonFields slug={slug} lessonId={lessonId} />
-      <CountedField id={id} name={COMMENT_FIELDS.body} label={label} max={COMMENT_MAX} warnAt={COMMENT_WARN_AT} defaultValue={keptAt(state, place) ?? ""} error={null} multiline />
+      <CountedField id={id} name={COMMENT_FIELDS.body} label={label} max={COMMENT_MAX} warnAt={COMMENT_WARN_AT} defaultValue={draft(place) ?? ""} error={null} multiline />
       <Notice notice={noticeAt(state, place)} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-body-s text-text-2">{identity}</div>
@@ -306,12 +326,14 @@ function Identity({ me, teacherName, changeable }: { me: CommentsView["me"]; tea
 
 /** El diálogo del nombre (FL-15 paso 3): vacío, sin el nombre, el alias ni el correo; lo escrito cruza en campos ocultos. */
 function NameDialog({ shared }: { shared: Shared }) {
-  const { slug, lessonId, state, formAction, pending } = shared;
+  const { slug, lessonId, state, formAction, pending, draft, submitting } = shared;
   if (state.open.kind !== "name") return null;
   const carry = state.open.carry;
   const notice = noticeAt(state, { kind: "name" });
+  // Guardar el nombre publica lo que cruzaba, y su campo se vacía si sale bien; cancelar lo deja en su campo.
+  const carried = carry === null ? [] : [placeKey(carry.parentId === null ? { kind: "new" } : { kind: "reply", parentId: carry.parentId })];
   return (
-    <form action={formAction}>
+    <form action={formAction} onSubmit={submitting(["name", ...carried], ["name"])}>
       <LessonFields slug={slug} lessonId={lessonId} />
       {carry !== null && <input type="hidden" name={COMMENT_FIELDS.carry} value={carry.body} />}
       {carry?.parentId != null && <input type="hidden" name={COMMENT_FIELDS.carryParent} value={carry.parentId} />}
@@ -335,7 +357,7 @@ function NameDialog({ shared }: { shared: Shared }) {
             label={text.name.label}
             hint={text.name.hint}
             autoComplete="off"
-            defaultValue={keptAt(state, { kind: "name" }) ?? ""}
+            defaultValue={draft({ kind: "name" }) ?? ""}
             error={notice === null ? undefined : text.notice[notice.kind]}
           />
         }
@@ -390,7 +412,29 @@ const openedOn = (open: CommentsState["open"]): string | null =>
 export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
   // Sin JavaScript, el envío vuelve a lo que se estaba viendo: la misma página de comentarios.
   const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${view.here}#${COMMENTS_ANCHOR}`);
-  const shared: Shared = { slug, lessonId, state, formAction, pending, write: view.write };
+  const [drafts, setDrafts] = useState<Drafts>(() => nextDrafts({}, state, []));
+  const [cleared, setCleared] = useState<string[]>([]);
+  const [seen, setSeen] = useState(state.attempt);
+  // Con cada respuesta, los borradores se ponen al día (React vuelve a pintar antes de mostrar esta vuelta).
+  if (seen !== state.attempt) {
+    setSeen(state.attempt);
+    setDrafts(nextDrafts(drafts, state, cleared));
+    setCleared([]);
+  }
+  const submitting = (keys: string[], onCancel: string[] = keys) => (event: FormEvent<HTMLFormElement>) => {
+    const by = (event.nativeEvent as SubmitEvent).submitter;
+    setCleared(by instanceof HTMLButtonElement && by.value === "cancel" ? onCancel : keys);
+  };
+  const shared: Shared = {
+    slug,
+    lessonId,
+    state,
+    formAction,
+    pending,
+    write: view.write,
+    draft: (at) => drafts[placeKey(at)] ?? null,
+    submitting,
+  };
   const heading = useRef<HTMLHeadingElement>(null);
   const lastOpened = useRef<string | null>(null);
   const shown = new Set(view.items.flatMap((thread) => [thread.id, ...thread.replies.items.map((reply) => reply.id)]));

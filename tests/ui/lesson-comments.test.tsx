@@ -228,6 +228,57 @@ describe("lo escrito y el foco no se pierden", () => {
     expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Un borrador largo");
   });
 
+  /** Una acción que contesta, en orden, lo que se le dé. */
+  const answers = (...states: Omit<CommentsState, "attempt">[]) => {
+    let n = 0;
+    return vi.fn(async (): Promise<CommentsState> => ({ ...states[Math.min(n, states.length - 1)]!, attempt: ++n }));
+  };
+  const BLANK = { open: { kind: "none" }, notice: null, kept: null, written: null } as const;
+
+  it("cancelar el diálogo del nombre deja lo escrito en el campo", async () => {
+    const action = answers({ ...BLANK, open: { kind: "name", carry: { parentId: null, body: "Hola" } }, kept: { at: { kind: "new" }, body: "Hola" } }, BLANK);
+    const { user } = setup({ me: { teacher: false, pseudonym: null } }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 3_000 });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
+  it("después de «Cambiar» y guardar el nombre, lo escrito sigue en el campo", async () => {
+    const action = answers({ ...BLANK, open: { kind: "name", carry: null }, kept: { at: { kind: "new" }, body: "Hola" } }, { ...BLANK, notice: { at: { kind: "thread" }, kind: "name_saved" } });
+    const { user } = setup({}, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Cambiar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Nombre o seudónimo" }), "Luz");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await screen.findByText("Guardamos tu nombre.");
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+    expect(screen.getByText("4 / 4000")).toBeInTheDocument();
+  });
+
+  it("un envío que falla y después otra cosa del hilo: el texto sigue en el campo", async () => {
+    const action = answers({ ...BLANK, notice: { at: { kind: "new" }, kind: "throttled" }, kept: { at: { kind: "new" }, body: "Hola" } }, { ...BLANK, open: { kind: "reply", parentId: id(1) } });
+    const { user } = setup({ count: 1, items: [thread(1)] }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await screen.findByText("Escribiste muchos comentarios seguidos. Espera unos minutos y vuelve a intentarlo.");
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+    await screen.findByRole("textbox", { name: "Responde a Luz M." });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
+  it("lo publicado vacía el campo de donde salió", async () => {
+    const action = answers({ ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" } });
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Texto 1");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await screen.findByText("Tu comentario se publicó.");
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("");
+  });
+
   it("al abrir la edición, el foco va a su campo", async () => {
     const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "edit", id: id(1) } }));
     const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 4 })] }, action);

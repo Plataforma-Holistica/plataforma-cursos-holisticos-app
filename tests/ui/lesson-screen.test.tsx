@@ -271,7 +271,14 @@ describe("los comentarios (T-501)", () => {
   });
 
   it("con PA-33 en el lugar del reproductor no hay comentarios, también si el acceso se pierde con la página abierta", async () => {
-    show({ comments: READY, initial: { kind: "denied", denial: { kind: "no_access", account: { allowed: false, reason: "no_basis" } } } as never });
+    const denied = show({ comments: READY, initial: { kind: "denied", denial: { kind: "no_access", account: { allowed: false, reason: "no_basis" } } } as never });
+    expect(screen.queryByRole("tab", { name: "Comentarios (3)" })).toBeNull();
+    denied.view.unmount();
+    actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+    const { user } = show({ comments: READY });
+    expect(screen.getByRole("tab", { name: "Comentarios (3)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
     expect(screen.queryByRole("tab", { name: "Comentarios (3)" })).toBeNull();
   });
 

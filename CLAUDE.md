@@ -1092,15 +1092,17 @@ que no se ve leyendo un solo archivo:
   Un solo estado para todo el hilo: lo abierto (responder, editar, la pregunta de borrar, el diálogo del nombre), el aviso y dónde
   se dice, lo escrito que se queda y lo recién publicado. Cada botón es un envío con `do=` y lo que se vio (`save:<id>:<rev>`,
   `delete:<id>:<rev>`, `reply:<padre>`), así que todo funciona sin JavaScript; abrir y cerrar no llaman al servicio ni a
-  `refresh()`. **Lo escrito no se pierde:** React 19 devuelve al valor por omisión solo el formulario que envió, así que los campos
-  no llevan `key` por intento; lo que se queda viaja en `kept` y es el valor por omisión, y `CountedField` (movido de
-  `src/app/portal/_lib/` a `src/ui/`) vuelve a contar con el `reset` del formulario. «Cambiar» va dentro del campo de arriba y
+  `refresh()`. **Lo escrito no se pierde:** React 19 devuelve al valor por omisión el formulario que envió, y un campo sin tocar
+  desde entonces sigue a su valor por omisión; por eso los campos no llevan `key` por intento, y cada uno guarda su borrador en la
+  pantalla (`drafts`, que se llena con `kept` y solo lo borra el formulario que lo envió, visto en `onSubmit`). `CountedField`
+  (movido de `src/app/portal/_lib/` a `src/ui/`) vuelve a contar con el `reset` del formulario. «Cambiar» va dentro del campo de arriba y
   conserva lo escrito; sin seudónimo, publicar abre el diálogo y lo escrito cruza en campos ocultos y se queda en su campo. **Las
   páginas van por la dirección** (`?comentarios=`, y `?hilo=` con `?respuestas=` para las respuestas de un hilo), no se acumulan,
   y un envío sin JavaScript vuelve a lo que se veía (`view.here`); lo publicado que cae fuera de esta página se dice arriba del
   hilo. El foco va al campo que se abre, a lo publicado, o al comentario que se cerró. Usa `tests/ui/lesson-comments.test.tsx`,
   `tests/actions/comment-actions.test.ts` y `tests/e2e/equipo/comentarios.equipo.ts`, que prende `COMENTARIOS_ABIERTOS` y lo
-  apaga al terminar (y la preparación de la corrida del equipo lo apaga). Cambió por el requisito una prueba de los recursos de
+  apaga al terminar; el parámetro tiene guardianes que detienen también al dueño, así que se cambia en réplica, en una
+  transacción sin parámetros. Cambió por el requisito una prueba de los recursos de
   `lesson-screen.test.tsx` (en escritorio van bajo «Sobre esta lección»). Decisiones mías sin confirmar: un texto para el maestro
   suspendido y el que ya no imparte el curso (el portón contesta lo mismo); sin «Ver planes» ni el motivo del veto, hasta que
   existan; «Cambiar» abre el diálogo, no PA-28, que no existe; lo propio dice «Tú»; la fecha completa, sin «hoy»; un `pending` para

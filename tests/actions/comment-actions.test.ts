@@ -116,6 +116,13 @@ describe("la acción de los comentarios de la lección", () => {
     expect(state.written).toBe("c0000000-0000-4000-8000-000000000009");
   });
 
+  it("si el nombre se guardó y publicar falla, la página se vuelve a pintar igual: el nombre ya cambió", async () => {
+    once("postLessonComment", { kind: "throttled" });
+    const state = await lessonCommentAction(previous, form(["do", "name"], [COMMENT_FIELDS.name, "Luz"], [COMMENT_FIELDS.carry, "Hola"]));
+    expect(calls.order).toEqual(["chooseCommentName", "postLessonComment", "refresh"]);
+    expect(state).toMatchObject({ notice: { kind: "throttled" }, kept: { at: { kind: "new" }, body: "Hola" } });
+  });
+
   it("un nombre que no sirve no publica nada", async () => {
     once("chooseCommentName", { kind: "invalid", reason: "too_short" });
     const state = await lessonCommentAction(previous, form(["do", "name"], [COMMENT_FIELDS.name, "L"], [COMMENT_FIELDS.carry, "Hola"]));

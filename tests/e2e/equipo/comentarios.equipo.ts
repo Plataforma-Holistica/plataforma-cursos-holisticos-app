@@ -8,7 +8,7 @@ import { clearCounters, ownerQuery, person, type Person } from "../support/stack
 // revisión sin el filtro, y que con el interruptor apagado no hay pestaña. Lo que la base y el servicio deciden lo prueban la
 // 93, la 94, la 101 y la 102: aquí, que la pantalla lo lleve hasta ahí y lo pinte.
 //
-// El interruptor `COMENTARIOS_ABIERTOS` se prende aquí y se apaga al terminar (y en la preparación de la corrida del equipo).
+// El interruptor `COMENTARIOS_ABIERTOS` se prende aquí y se apaga al terminar.
 // Va con el camino del equipo porque cargar y publicar un curso escriben en la auditoría, que no admite borrado:
 // `pnpm test:e2e:equipo` rehace la base al terminar.
 
@@ -20,7 +20,16 @@ let lessonUrl = "";
 let luz: Person;
 let beto: Person;
 
-const setSwitch = (on: boolean) => ownerQuery("update public.business_parameters set value = $1::jsonb where key = 'COMENTARIOS_ABIERTOS' and canceled_at is null", [JSON.stringify(on)]);
+/**
+ * Prende o apaga los comentarios. El parámetro tiene sus guardianes (quién lo escribe y qué columnas cambian), que también
+ * detienen al dueño: se cambia en réplica, como en la integración 101. Va sin parámetros, para que corra en una sola petición.
+ */
+const setSwitch = (on: boolean) =>
+  ownerQuery(
+    `begin; set local session_replication_role = replica;
+     update public.business_parameters set value = '${on ? "true" : "false"}'::jsonb where key = 'COMENTARIOS_ABIERTOS' and canceled_at is null;
+     commit;`,
+  );
 
 async function subscribe(who: Person): Promise<void> {
   await ownerQuery(

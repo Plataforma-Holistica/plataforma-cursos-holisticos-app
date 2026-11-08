@@ -48,9 +48,11 @@ async function outcomeOf(jar: CookieJar, lesson: Lesson, request: Exclude<Commen
     case "name": {
       const next = nameOutcome(await chooseCommentName(jar, request.pseudonym), request.pseudonym ?? "", request.carry, lesson.back);
       if (next.kind !== "post") return next;
-      // Con el nombre ya elegido, lo que cruzaba el diálogo se publica.
+      // Con el nombre ya elegido, lo que cruzaba el diálogo se publica. Pase lo que pase, la página se vuelve a pintar: el nombre ya
+      // cambió, y la línea de identidad tiene que decirlo.
       const parentId = next.place.kind === "reply" ? next.place.parentId : null;
-      return writeOutcome(next.place, next.body, await postLessonComment(jar, { lessonId: lesson.lessonId, parentId, body: next.body }), lesson.back);
+      const posted = writeOutcome(next.place, next.body, await postLessonComment(jar, { lessonId: lesson.lessonId, parentId, body: next.body }), lesson.back);
+      return posted.kind === "state" ? { ...posted, refresh: true } : posted;
     }
   }
 }
