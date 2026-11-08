@@ -11,6 +11,7 @@
 -- ronda se deshace al terminar (con una excepción atrapada); lo que se mide vive en variables.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 \ir _con_datos_fiscales.psql
 -- Aquí, con tasas de verdad: las rondas también escriben impuestos, y la comprobación al confirmar los recalcula.
 set local session_replication_role = replica;
@@ -158,6 +159,7 @@ begin
                 '{"mode": "full"}');
         perform pruebas.como_finanzas();
         perform private.rehearse_close(v_period);
+        perform pruebas.conciliado(v_period);
         v_r := private.close_period(v_period, private.last_rehearsal(v_period));
         set constraints payout_periods_balanced immediate;
         set constraints payout_periods_balanced deferred;

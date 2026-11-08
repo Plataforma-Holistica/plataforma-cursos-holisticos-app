@@ -1,0 +1,17 @@
+-- Para las pruebas que cierran un periodo y no tratan de la conciliación con Stripe (T-303, cuarta solicitud): `pruebas.conciliado(p)` deja una comparación que
+-- coincide, como si Stripe tuviera lo mismo que el libro, registrada después del fin del periodo con su margen (también un periodo que todavía no termina, como
+-- los de 2040). Se escribe con el guardián apagado (réplica), y corre como el dueño para poder hacerlo con el rol que tenga quien llama. Lo que hace la conciliación
+-- se prueba en `87_conciliacion`. Va después de `_ayuda.psql`, y como todo en una prueba de base, se revierte al terminar.
+create function pruebas.conciliado(p_period integer) returns void language plpgsql security definer set search_path = '' as $$
+begin
+  set local session_replication_role = replica;
+  insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                               provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+  select p.period_id, false, p.starts_at, p.ends_at, true,
+         (select count(*) from public.charges c where c.provider = 'stripe' and c.period_id = p.period_id), 0, 0, 0, 0, 0, 0, false,
+         greatest(clock_timestamp(), p.ends_at + interval '11 minutes')
+  from public.payout_periods p where p.period_id = p_period;
+  set local session_replication_role = origin;
+end
+$$;
+grant execute on function pruebas.conciliado(integer) to anon, authenticated, app_service;

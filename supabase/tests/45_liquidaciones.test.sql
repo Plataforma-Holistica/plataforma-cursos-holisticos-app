@@ -9,6 +9,7 @@
 -- `pruebas.cierra()`, como en `43_cierre`.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 \ir _con_datos_fiscales.psql
 select plan(96);
 
@@ -41,6 +42,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
+  perform pruebas.conciliado(p_period);
   v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
@@ -55,6 +57,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
+  perform pruebas.conciliado(p_period);
   v := private.close_period(p_period, private.last_rehearsal(p_period));
   if v ->> 'outcome' <> 'closed' then
     raise exception 'no cerró: %', v;
