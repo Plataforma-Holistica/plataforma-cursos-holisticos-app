@@ -1052,6 +1052,31 @@ que no se ve leyendo un solo archivo:
   todo lo ya publicado), que el filtro quite U+200C y U+200D antes de buscar palabras, que su veredicto lleve la `revision` que filtró (uno que
   llegue tarde no debe publicar un texto editado después), y una purga de `rate_limit_counters`. Pendiente de preguntar antes de T-502: el TRD dice que la maestra ve también lo oculto y los
   reportes, y PA-45 solo lo publicado. Para el A: nada que le toque.
+- **Lo que T-501 suma al carril B** (segunda solicitud, `t501_puertas`, sin pantalla: PA-22 llega con la tercera; decisiones de Sergio
+  del 2026-11-07: el cerrojo de producción va en la base, y la solicitud se parte en dos; donde esto choca con la viñeta de arriba,
+  manda esto). **El cerrojo:** publicar, editar y elegir el seudónimo piden además la marca local `comments_accept`, que pone
+  `db:login` y en producción nadie pone, y sin ella contestan `closed` (también `comment_set_pseudonym`, antes que todo). Leer y
+  borrar no la piden. T-502 la quita con la otra marca. Ya no hay un `closed` de producción en el servicio. **Dos puertas nuevas**
+  de `app_service`, en la lista del área `comments`: `private.comment_can_write(lección)` (lo que contestaría el portón, solo
+  `answer`, sin escribir ni contar el freno; volátil, porque el portón toma la fila del maestro) y `private.comment_lesson_of(comentario)`
+  (la lección de un comentario propio sin borrar, o nulo). **La regla** es `resolveCommentAccess` (`src/domain/access/media-access.ts`,
+  con `commentAllows`): la de ver, sin video, y solo en la lección vigente de un curso publicado y listado, también para su maestro;
+  el maestro de la lección escribe; «no se supo» niega también en el curso abierto; el curso abierto sin suscripción, con el correo
+  verificado, lee y no escribe. Una propiedad exige que en un curso que se ve en público leer coincida con ver la lección. **El
+  servicio** es `src/services/comments/` (`comments.ts` y `records.ts`, el único archivo que nombra las funciones `comment*`).
+  `commentsStoreOn(run)` arma el almacén con una transacción por entrada, y `guarded` lee los hechos (`readCommentFacts`, en
+  `media/records.ts`: `media_facts` sin `lesson_playback` ni el correo), decide con `decideComment` y su hora, y solo entonces llama a
+  la base. Leer una lección, sus respuestas y si se puede escribir piden `read`; publicar, `write`; editar, `write` sobre la lección
+  que da `comment_lesson_of`, nunca sobre una del formulario (si no, quien tiene acceso a una lección editaría lo suyo de otra);
+  borrar y el seudónimo, solo la sesión. `tests/architecture/comments.test.ts` exige cada nivel, la regla fija y quién nombra qué.
+  Las lecturas reciben las claims de la guarda de la página; las escrituras corren `checkSession`. El texto pasa antes por
+  `src/domain/comments/comment-text.ts` (`parseCommentBody`, `parsePseudonym` y `commentTextOk`, la regla de la base copiada con sus
+  listas, no `\p{Cf}`), y la integración 102 la compara con `comment_text_ok` en todos los puntos de código. El cursor viaja como
+  `<instante>_<id>` y se valida antes de la base; uno sin forma empieza por lo más reciente. Falla nueva: `comments_unavailable`
+  (también cuando la regla no supo de la cuenta). Usa pgTAP 94 e integración 102 (el almacén de la aplicación sobre una transacción
+  del dueño que se revierte). Decisiones mías sin confirmar: las dos puertas; borrar y el seudónimo con solo la sesión; «no se supo»
+  niega también en el curso abierto; el maestro tampoco comenta en una lección suya sin listar; se acepta la carrera de una
+  suscripción que vence al publicar, como en el latido. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
