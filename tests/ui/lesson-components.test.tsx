@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { a11yViolations } from "../setup/a11y";
 
 import { BackLink } from "@/ui/back-link";
+import { CountedField } from "@/ui/counted-field";
 import { LessonRow } from "@/ui/lesson-row";
 import { ProgressBar } from "@/ui/progress-bar";
 import { Tabs } from "@/ui/tabs";
@@ -55,6 +56,52 @@ describe("Tabs al llegar el JavaScript", () => {
       act(() => (root as ReturnType<typeof hydrateRoot> | null)?.unmount());
       container.remove();
     }
+  });
+});
+
+describe("Tabs y el ancla de la dirección", () => {
+  it("al llegar el JavaScript, la pestaña activa es la que tiene el ancla: ahí vuelve un envío hecho antes", async () => {
+    window.history.replaceState(null, "", "#ancla");
+    const tabs = (
+      <Tabs
+        label="Partes"
+        idPrefix="ancla"
+        items={[
+          { id: "uno", label: "Uno", panel: <p>Panel uno</p> },
+          { id: "dos", label: "Dos", panel: <p id="ancla">Panel dos</p> },
+        ]}
+      />
+    );
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(tabs);
+    document.body.append(container);
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, tabs);
+      });
+      expect(container.querySelector("[role=tab][aria-selected=true]")).toHaveTextContent("Dos");
+      expect(container.querySelector("#ancla")?.closest("[role=tabpanel]")).not.toHaveAttribute("hidden");
+    } finally {
+      act(() => (root as ReturnType<typeof hydrateRoot> | null)?.unmount());
+      container.remove();
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  });
+});
+
+describe("CountedField", () => {
+  it("al devolver el formulario a su valor por omisión, el contador lo sigue", async () => {
+    const user = userEvent.setup();
+    render(
+      <form>
+        <CountedField id="campo" name="campo" label="Campo" max={10} warnAt={8} defaultValue="" error={null} />
+      </form>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Campo" }), "Hola");
+    expect(screen.getByText("4 / 10")).toBeInTheDocument();
+    act(() => screen.getByRole("textbox", { name: "Campo" }).closest("form")!.reset());
+    expect(await screen.findByText("0 / 10")).toBeInTheDocument();
   });
 });
 

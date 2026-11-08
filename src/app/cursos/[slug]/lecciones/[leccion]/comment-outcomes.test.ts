@@ -66,9 +66,10 @@ describe("readCommentForm: qué botón se pulsó", () => {
   });
 
   it("cancelar el diálogo del nombre devuelve lo escrito a su campo, también sin JavaScript", () => {
+    // Desde una respuesta, el campo de responder se vuelve a abrir con lo escrito.
     expect(readCommentForm(form(["do", "cancel"], [COMMENT_FIELDS.carry, "Hola"], [COMMENT_FIELDS.carryParent, PARENT]))).toEqual({
       kind: "open",
-      open: { kind: "none" },
+      open: { kind: "reply", parentId: PARENT },
       kept: { at: REPLY, body: "Hola" },
     });
     expect(readCommentForm(form(["do", "cancel"], [COMMENT_FIELDS.keep, "Hola"]))).toEqual({ kind: "open", open: { kind: "none" }, kept: { at: NEW, body: "Hola" } });

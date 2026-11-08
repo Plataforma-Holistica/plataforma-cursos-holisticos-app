@@ -113,7 +113,11 @@ function readNameForm(form: FormData): CommentRequest {
 function readCancel(form: FormData): CommentRequest {
   const text = readDialogText(form);
   const open = { kind: "none" } as const;
-  if (text?.carry != null) return { kind: "open", open, kept: { at: placeOf(text.carry), body: text.carry.body } };
+  // Desde una respuesta, su campo se vuelve a abrir con lo escrito.
+  if (text?.carry != null) {
+    const place = placeOf(text.carry);
+    return { kind: "open", open: place.kind === "reply" ? { kind: "reply", parentId: place.parentId } : open, kept: { at: place, body: text.carry.body } };
+  }
   if (text?.keep !== undefined) return { kind: "open", open, kept: { at: { kind: "new" }, body: text.keep } };
   return { kind: "open", open };
 }

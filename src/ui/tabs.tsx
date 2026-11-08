@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 
 import { cx } from "./cx";
 
@@ -65,6 +65,17 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
   // La elegida puede dejar de existir con la pantalla abierta (o al ensancharse): sin esto, ningún panel se vería y el teclado no tendría a dónde entrar.
   const active = items.some((item) => item.id === chosen) ? chosen : (items[0]?.id ?? "");
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const root = useRef<HTMLDivElement>(null);
+
+  // Al llegar el JavaScript, la pestaña activa es la que tiene el ancla de la dirección: ahí vuelve un envío hecho antes (los
+  // comentarios vuelven a `#comentarios`), y lo que trajo no puede quedar detrás de otra pestaña. Antes de pintar, para que un
+  // diálogo abierto en ese panel no quede dentro de algo escondido.
+  useLayoutEffect(() => {
+    if (!mounted || window.location.hash.length < 2) return;
+    const target = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    const owner = target === null ? null : target.closest<HTMLElement>("[data-tab]");
+    if (owner !== null && root.current?.contains(owner)) setActive(owner.dataset.tab ?? "");
+  }, [mounted]);
 
   function move(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const last = items.length - 1;
@@ -83,7 +94,7 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
   const sections = !mounted || (items.length === 1 && all.length > 1);
 
   return (
-    <div className={sections ? "flex flex-col gap-6" : "flex flex-col gap-4"}>
+    <div ref={root} className={sections ? "flex flex-col gap-6" : "flex flex-col gap-4"}>
       {sections ? null : (
         <div role="tablist" aria-label={label} className="flex gap-6 overflow-x-auto border-b border-border">
           {items.map((item, index) => {
@@ -117,6 +128,7 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
       {items.map((item) => (
         <section
           key={item.id}
+          data-tab={item.id}
           id={sections ? undefined : `${idPrefix}-${item.id}-panel`}
           role={sections ? undefined : "tabpanel"}
           aria-labelledby={sections ? `${idPrefix}-${item.id}-title` : `${idPrefix}-${item.id}-tab`}

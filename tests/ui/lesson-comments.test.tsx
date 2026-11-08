@@ -316,6 +316,41 @@ describe("lo escrito y el foco no se pierden", () => {
     expect(await screen.findByText("Por ahora no se pueden publicar comentarios.", { selector: "[role=status] *, [role=status]" })).toBeInTheDocument();
   });
 
+  it("una edición que se cancela no vuelve: al editar otra vez, el campo trae el texto de ahora", async () => {
+    const action = answers({ ...BLANK, open: { kind: "edit", id: id(1) } }, BLANK, { ...BLANK, open: { kind: "edit", id: id(1) } });
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await user.type(await screen.findByRole("textbox", { name: "Edita tu comentario" }), " descartado");
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edita tu comentario" })).toBeNull(), { timeout: 3_000 });
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    expect(await screen.findByRole("textbox", { name: "Edita tu comentario" })).toHaveValue("Texto 1");
+  });
+
+  it("vaciar una edición y guardar: el campo se queda vacío, con su aviso", async () => {
+    const action = answers({ ...BLANK, open: { kind: "edit", id: id(1) } }, { ...BLANK, open: { kind: "edit", id: id(1) }, notice: { at: { kind: "edit", id: id(1) }, kind: "empty" }, kept: { at: { kind: "edit", id: id(1) }, body: "" } });
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await user.clear(await screen.findByRole("textbox", { name: "Edita tu comentario" }));
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    await screen.findByText("Escribe algo antes de enviar.");
+    expect(screen.getByRole("textbox", { name: "Edita tu comentario" })).toHaveValue("");
+  });
+
+  it("un nombre que no sirve: el foco va a su campo, que dice por qué", async () => {
+    const action = answers(
+      { ...BLANK, open: { kind: "name", carry: null } },
+      { ...BLANK, open: { kind: "name", carry: null }, notice: { at: { kind: "name" }, kind: "name_too_short" }, kept: { at: { kind: "name" }, body: "L" } },
+    );
+    const { user } = setup({}, action);
+    await user.click(screen.getByRole("button", { name: "Cambiar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Nombre o seudónimo" }), "L");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Nombre o seudónimo" })).toHaveFocus(), { timeout: 3_000 });
+    expect(screen.getByRole("textbox", { name: "Nombre o seudónimo" })).toHaveAccessibleDescription(/al menos 2 caracteres/);
+  });
+
   it("lo publicado vacía el campo de donde salió", async () => {
     const action = answers({ ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" }, kept: { at: { kind: "new" }, body: "" } });
     const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);

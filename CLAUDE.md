@@ -1099,7 +1099,9 @@ que no se ve leyendo un solo archivo:
   Sin seudónimo, publicar abre el diálogo y lo escrito cruza (`cruza`); con «Cambiar», el diálogo conserva lo de arriba
   (`conserva`). Guardar o cancelar lo devuelve a su campo, también sin JavaScript. **`Tabs` pinta el mismo árbol antes y después
   de hidratar** (cada panel es la misma `<section>`, solo cambian sus atributos): si no, el hilo se volvía a montar y perdía el
-  estado de un envío hecho antes de que llegara el JavaScript. **Las
+  estado de un envío hecho antes de que llegara el JavaScript. Al hidratar, la pestaña activa es la que tiene el ancla de la
+  dirección (`data-tab`), para que eso no quede detrás de otra. Una edición vive solo mientras está abierta: si volviera, traería
+  lo escrito sobre la revisión anterior y pisaría lo de otra pestaña sin `changed`. **Las
   páginas van por la dirección** (`?comentarios=`, y `?hilo=` con `?respuestas=` para las respuestas de un hilo), no se acumulan,
   y un envío sin JavaScript vuelve a lo que se veía (`view.here`); lo publicado que cae fuera de esta página se dice arriba del
   hilo. El foco va al campo que se abre, a lo publicado, o al comentario que se cerró. Usa `tests/ui/lesson-comments.test.tsx`,
@@ -1109,7 +1111,8 @@ que no se ve leyendo un solo archivo:
   `lesson-screen.test.tsx` (en escritorio van bajo «Sobre esta lección»). Decisiones mías sin confirmar: un texto para el maestro
   suspendido y el que ya no imparte el curso (el portón contesta lo mismo); sin «Ver planes» ni el motivo del veto, hasta que
   existan; «Cambiar» abre el diálogo, no PA-28, que no existe; lo propio dice «Tú»; la fecha completa, sin «hoy»; un `pending` para
-  todo el hilo; una dirección con `#comentarios` no elige la pestaña al cargar. Para el A: `Tabs` ganó `narrowOnly`.
+  todo el hilo; lo que se escribe mientras va un envío se pierde al llegar la respuesta. Para el A: `Tabs` ganó `narrowOnly` y el
+  ancla.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

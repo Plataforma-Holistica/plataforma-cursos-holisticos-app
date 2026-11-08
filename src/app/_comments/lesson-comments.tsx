@@ -63,13 +63,17 @@ const placeKey = (at: Place | { kind: "name" }): string =>
  * Lo escrito en cada campo del hilo lo lleva la pantalla, no el formulario: React 19 devuelve al valor por omisión el formulario
  * que envió, y un campo que se cierra al abrir otra cosa se desmonta. Cada respuesta dice qué debe tener un campo (`kept`): lo
  * escrito que se queda, o vacío si se publicó. Sin JavaScript, el primer pintado lo trae del estado que mandó el servidor.
+ *
+ * Una edición vive solo mientras está abierta: al cerrarse, su texto se va. Si volviera, traería lo escrito sobre la revisión
+ * anterior, y guardarlo pisaría lo que otra pestaña cambió sin decir `changed`. El diálogo del nombre abre siempre vacío, salvo
+ * con el nombre que no sirvió.
  */
 type Drafts = Readonly<Record<string, string>>;
 function withKept(drafts: Drafts, state: CommentsState): Drafts {
-  if (state.kept === null) return drafts;
-  const next: Record<string, string> = { ...drafts };
-  if (state.kept.body === "") delete next[placeKey(state.kept.at)];
-  else next[placeKey(state.kept.at)] = state.kept.body;
+  const editing = state.open.kind === "edit" ? placeKey({ kind: "edit", id: state.open.id }) : null;
+  const naming = state.open.kind === "name" && state.kept?.at.kind === "name";
+  const next = Object.fromEntries(Object.entries(drafts).filter(([key]) => (key.startsWith("edit:") ? key === editing : key !== "name" || naming)));
+  if (state.kept !== null) next[placeKey(state.kept.at)] = state.kept.body;
   return next;
 }
 
@@ -428,13 +432,10 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
   const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${view.here}#${COMMENTS_ANCHOR}`);
   const [drafts, setDrafts] = useState<Drafts>(() => withKept({}, state));
   const [seen, setSeen] = useState(state.attempt);
-  // Con cada respuesta, lo que dice de un campo (React vuelve a pintar antes de mostrar esta vuelta). El diálogo del nombre
-  // abre siempre vacío, salvo con el nombre que no sirvió.
+  // Con cada respuesta, lo que dice de cada campo (React vuelve a pintar antes de mostrar esta vuelta).
   if (seen !== state.attempt) {
     setSeen(state.attempt);
-    const next = withKept(drafts, state);
-    const nameKept = state.kept !== null && state.kept.at.kind === "name";
-    setDrafts(state.open.kind === "name" && !nameKept ? Object.fromEntries(Object.entries(next).filter(([key]) => key !== "name")) : next);
+    setDrafts(withKept(drafts, state));
   }
   const shared: Shared = {
     slug,
@@ -465,6 +466,8 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
     const byId = (id: string) => document.getElementById(id);
     if (state.open.kind === "edit") return void byId(`editar-${state.open.id}`)?.focus();
     if (state.open.kind === "reply") return void byId(`responder-${state.open.parentId}`)?.focus();
+    // Un nombre que no sirvió: el foco va a su campo, que dice por qué.
+    if (state.open.kind === "name" && state.notice?.at.kind === "name") return void byId(`${COMMENTS_ANCHOR}-nombre`)?.focus();
     if (state.open.kind !== "none") return;
     const written = state.written === null ? null : byId(commentAnchor(state.written));
     if (written !== null) return void written.focus();
