@@ -227,7 +227,8 @@ as $$
   select 'billing trigger missing: ' || t.name, t.table_name
   from (values ('provider_events_guard', 'private.provider_events', '%guard_provider_event%'),
                ('provider_events_no_truncate', 'private.provider_events', '%reject_mutation%'),
-               ('provider_events_alert', 'private.provider_events', '%AFTER UPDATE OF status%queue_billing_alert%'),
+               ('provider_events_alert', 'private.provider_events',
+                '%AFTER UPDATE OF status%WHEN%old.status IS DISTINCT FROM ''failed''%new.status = ''failed''%queue_billing_alert%'),
                ('ledger_no_update_delete', 'private.provider_event_actions', '%reject_mutation%'),
                ('ledger_no_truncate', 'private.provider_event_actions', '%reject_mutation%'),
                ('audit_changes', 'private.provider_event_actions', '%audit_row_change%'),
@@ -259,6 +260,20 @@ as $$
                ('provider_events_list', 'private.provider_events_list()')) f (name, signature)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature))
                      like '%v.profile_id = private.actor_id() or private.provider_event_owner(v.object_id) = private.actor_id()%', false)
+  union all
+  select 'billing release without its exhaustion', 'provider_event_release'
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.provider_event_release(uuid, integer, text)'))
+                     like '%status = case when e.attempts >= 10 then ''failed''%last_error = case when e.attempts >= 10 then ''attempts_exhausted''%', false)
+  union all
+  select 'billing claim without its exhaustion', 'provider_event_claim'
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.provider_event_claim(uuid)'))
+                     like '%if v.attempts >= 10 then%set status = ''failed'', last_error = ''attempts_exhausted''%''exhausted'', true%', false)
+  union all
+  select 'finance read without the finance gate: ' || f.name, f.name
+  from (values ('provider_events_list', 'private.provider_events_list()'),
+               ('provider_events_count', 'private.provider_events_count()')) f (name, signature)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature))
+                     like '%if private.actor_id() is null or not private.actor_has_capability(''finance'') then%return null;%', false)
   union all
   select 'mail claim without its index', 'private.mail_outbox'
   where pg_catalog.to_regclass('private.mail_outbox_due_order_idx') is null

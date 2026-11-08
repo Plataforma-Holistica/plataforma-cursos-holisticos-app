@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 
 import { Client } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createMailpitSender } from "@/adapters/mailpit/send";
 import type { StripeAnswer, StripeGet } from "@/adapters/stripe/api";
@@ -12,7 +12,7 @@ import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealt
 import { createMailOutbox } from "@/services/mail/outbox";
 import { askMailClaim, askMailHealth, askMailRejected, askMailSent } from "@/services/mail/records";
 
-import { asFinance, financePerson, type Finance } from "./helpers/finance";
+import { asFinance, connect, financePerson, waitBehind, type Finance } from "./helpers/finance";
 import { localOwnerUrl } from "./helpers/local";
 import { lastMailTo, linksIn } from "./helpers/mailbox";
 import { asOwner, asSystem, reverted } from "./helpers/team";
@@ -20,8 +20,8 @@ import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, ty
 
 // La cola de los avisos de punta a punta, contra la base local (T-303, tercera solicitud; RF-710, FL-55): finanzas de verdad reabre un aviso fallido y el servidor lo
 // procesa en el momento, con Stripe simulado; si el barrido lo toma entre reabrirlo y reclamarlo, «Reintentar» lo dice sin gastar otro intento; lo que pasa del tope
-// sigue aparte; y el décimo intento que falla de paso queda fallido y se reporta. CO-22 lo prueba `86_cola_de_avisos`: aquí finanzas solo existe dentro de sus
-// transacciones, y nadie más recibe.
+// sigue aparte; y el décimo intento que falla de paso queda fallido y se reporta. CO-22 lo prueba `86_cola_de_avisos`; aquí, de punta a punta hasta el buzón (con
+// finanzas solo dentro de su transacción) y con dos conexiones a la vez (con finanzas confirmada sin auditoría, que se quita al terminar).
 
 const SECRET = "whsec_integracion0123456789abcdef";
 const PREFIX = `evt_it114_${randomUUID().slice(0, 8)}_`;
@@ -322,5 +322,106 @@ describe("el aviso a finanzas (CO-22) de punta a punta", () => {
     expect(mail.text).toContain("1 aviso de cobro no se pudo procesar.");
     expect(mail.text).toContain("Factura pagada");
     expect(linksIn(mail)).toEqual(["https://plataforma.ejemplo.test/admin/avisos-cobro"]);
+  });
+
+  describe("con dos conexiones a la vez", () => {
+    let person: TestUser;
+    const co22s = async () =>
+      ownerQuery<{ count: number; attempts: number; waits: boolean }>(
+        `select (params ->> 'count')::int as count, attempts, claimed_until > clock_timestamp() + interval '55 minutes' as waits
+         from private.mail_outbox where template = 'CO-22' and profile_id = $1 order by created_at`,
+        [person.id],
+      );
+    const failing = async (suffix: string) => {
+      await ownerQuery(
+        `insert into private.provider_events (provider, provider_event_id, event_type, livemode, api_version, object_id, occurred_at)
+         values ('stripe', $1, 'invoice.paid', false, '2026-10-28.endive', $2, '2026-11-07T18:00:00Z')`,
+        [`${PREFIX}${suffix}`, `in_it114_${suffix}`],
+      );
+      return `update private.provider_events set status = 'failed', last_error = 'zero_invoice' where provider_event_id = '${PREFIX}${suffix}'`;
+    };
+
+    beforeAll(async () => {
+      person = await createTestUser();
+      people.push(person);
+      // Finanzas confirmada, para que las dos conexiones la vean; sin auditoría, y se quita al terminar.
+      await ownerQuery(
+        `do $$ begin
+           set local session_replication_role = replica;
+           insert into public.admin_capabilities (profile_id, capability) values ('${person.id}', 'finance');
+         end $$`,
+      );
+    });
+
+    // La salida de correo solo se agrega: se borra sin sus guardias.
+    const forgetCo22s = () =>
+      ownerQuery(
+        `do $$ begin
+           set local session_replication_role = replica;
+           delete from private.mail_outbox where template = 'CO-22' and profile_id = '${person.id}';
+         end $$`,
+      );
+
+    afterEach(forgetCo22s);
+
+    afterAll(async () => {
+      await ownerQuery(
+        `do $$ begin
+           set local session_replication_role = replica;
+           delete from public.admin_capabilities where profile_id = '${person.id}';
+         end $$`,
+      );
+    });
+
+    it("si la salida reclama el CO-22 mientras otra falla espera para sumarse, la falla va en otro y no en el que ya sale", async () => {
+      await ownerQuery(await failing("medio_1"));
+      expect(await co22s()).toEqual([{ count: 1, attempts: 0, waits: null }]);
+      const second = await failing("medio_2");
+      const mail = await connect();
+      const failure = await connect();
+      try {
+        // La salida de correo lo tiene tomado, como `mail_claim`.
+        await mail.query("begin");
+        await mail.query("select id from private.mail_outbox where template = 'CO-22' and profile_id = $1 for update", [person.id]);
+        await failure.query("begin");
+        const failed = failure.query(second);
+        await waitBehind(mail, mail, 1);
+        await mail.query(
+          "update private.mail_outbox set attempts = 1, claimed_until = clock_timestamp() + interval '5 minutes' where template = 'CO-22' and profile_id = $1",
+          [person.id],
+        );
+        await mail.query("commit");
+        await failed;
+        await failure.query("commit");
+      } finally {
+        await mail.end();
+        await failure.end();
+      }
+      expect(await co22s()).toEqual([
+        { count: 1, attempts: 1, waits: false },
+        { count: 1, attempts: 0, waits: true },
+      ]);
+    });
+
+    it("dos fallas a la vez para la misma persona dejan un solo CO-22, con las dos", async () => {
+      const first = await failing("juntas_1");
+      const second = await failing("juntas_2");
+      const one = await connect();
+      const other = await connect();
+      try {
+        await one.query("begin");
+        await one.query(first);
+        await other.query("begin");
+        const failed = other.query(second);
+        await waitBehind(one, one, 1);
+        await one.query("commit");
+        await failed;
+        await other.query("commit");
+      } finally {
+        await one.end();
+        await other.end();
+      }
+      expect(await co22s()).toEqual([{ count: 2, attempts: 0, waits: null }]);
+    });
   });
 });

@@ -3,7 +3,7 @@
 -- por hora (decisiones de Sergio de ese día). Encolarlo nunca impide que el aviso quede fallido. Lo que la bandeja ya hacía lo prueba la 84.
 begin;
 \ir _ayuda.psql
-select plan(66);
+select plan(67);
 
 select pruebas.alta('a8600000-0000-0000-0000-000000000001', 'f1-86@prueba.test');
 select pruebas.alta('a8600000-0000-0000-0000-000000000002', 'F2-86@Prueba.test');
@@ -296,7 +296,9 @@ select ok((select bool_and(a.failed > b.failed or (a.failed = b.failed and a.ord
   'lo fallido primero, y cada grupo del más viejo al más nuevo');
 select is((:'l'::jsonb ->> 'fresh_code')::boolean, true, 'y dice si su código es reciente');
 select is((:'l'::jsonb ->> 'total')::integer, jsonb_array_length(:'l'::jsonb -> 'events'), 'con el total');
-select is(pruebas.cuenta(pruebas.f1()), (select fallidos from antes) + 9, 'la cuenta del inicio es solo lo fallido');
+select is(pruebas.cuenta(pruebas.f1()),
+  (select fallidos from antes) + (select count(*)::integer from private.provider_events where status = 'failed' and provider_event_id like 'evt\_86\_%'),
+  'la cuenta del inicio es solo lo fallido');
 -- Con más de 100 en espera de T-307, más viejos, un fallido nuevo sigue en la lista.
 insert into private.provider_events (provider, provider_event_id, event_type, livemode, object_id, occurred_at, status, last_error)
 select 'stripe', 'evt_86_espera_' || g, 'charge.refunded', false, 'ch_86_' || g, now() - interval '30 days', 'deferred', 'refund_waits_t307'
@@ -317,6 +319,33 @@ grant execute on function private.provider_events_list() to authenticated;
 select ok((select array_agg(problem) from private.schema_violations_billing()) @> array['billing door missing or wrong: provider_events_list'],
   'y si una persona pudiera leer la lista sin el servidor');
 revoke execute on function private.provider_events_list() from authenticated;
+-- Una migración que reponga el soltar o el reclamo sin el agotado, la cuenta sin la puerta de finanzas o el aviso a finanzas sin su condición.
+create temp table definiciones as
+select pg_get_functiondef('private.provider_event_release(uuid, integer, text)'::regprocedure) as soltar,
+       pg_get_functiondef('private.provider_event_claim(uuid)'::regprocedure) as reclamar,
+       pg_get_functiondef('private.provider_events_count()'::regprocedure) as cuenta,
+       (select pg_get_triggerdef(t.oid) from pg_trigger t
+        where t.tgname = 'provider_events_alert' and t.tgrelid = 'private.provider_events'::regclass) as disparador;
+create or replace function private.provider_event_release(p_id uuid, p_attempt integer, p_code text) returns boolean
+language plpgsql volatile security definer set search_path = '' as $$ begin return false; end $$;
+create or replace function private.provider_event_claim(p_id uuid) returns jsonb
+language plpgsql volatile security definer set search_path = '' as $$ begin return null; end $$;
+create or replace function private.provider_events_count() returns integer
+language plpgsql stable security definer set search_path = '' as $$ begin return 0; end $$;
+drop trigger provider_events_alert on private.provider_events;
+create trigger provider_events_alert after update of status on private.provider_events
+for each row execute function private.queue_billing_alert();
+select ok((select array_agg(problem) from private.schema_violations_billing())
+          @> array['billing release without its exhaustion', 'billing claim without its exhaustion',
+                   'finance read without the finance gate: provider_events_count', 'billing trigger missing: provider_events_alert'],
+  'y si se repusiera el soltar o el reclamo sin el agotado, la cuenta sin la puerta de finanzas o el aviso a finanzas sin su condición');
+do $$ begin
+  execute (select soltar from definiciones);
+  execute (select reclamar from definiciones);
+  execute (select cuenta from definiciones);
+end $$;
+drop trigger provider_events_alert on private.provider_events;
+do $$ begin execute (select disparador from definiciones); end $$;
 select is_empty('select * from private.schema_violations_billing()', 'todo vuelve a su lugar');
 
 select * from finish();
