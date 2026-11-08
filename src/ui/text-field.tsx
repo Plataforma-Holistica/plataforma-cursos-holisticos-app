@@ -23,6 +23,9 @@ export interface TextFieldProps {
   /** Lo que la persona ya había escrito: no se pierde al volver con errores. */
   defaultValue?: string;
   readOnly?: boolean;
+  /** Controlado: lo lleva quien lo usa, para que React no lo vacíe al terminar una acción. */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
 export function TextField({
@@ -37,6 +40,8 @@ export function TextField({
   optional = false,
   defaultValue,
   readOnly,
+  value,
+  onValueChange,
 }: TextFieldProps) {
   const generated = useId();
   const fieldId = id ?? generated;
@@ -54,7 +59,7 @@ export function TextField({
         type={type}
         inputMode={inputMode}
         autoComplete={autoComplete}
-        defaultValue={defaultValue}
+        {...(value === undefined ? { defaultValue } : { value, onChange: (event: { currentTarget: { value: string } }) => onValueChange?.(event.currentTarget.value) })}
         readOnly={readOnly}
         aria-required={optional ? undefined : true}
         aria-invalid={error ? true : undefined}

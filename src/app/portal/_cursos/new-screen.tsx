@@ -9,7 +9,7 @@ import { Button } from "@/ui/button";
 import { FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
 
-import { CountedField } from "../_lib/counted-field";
+import { CountedField } from "@/ui/counted-field";
 import { failureText, problemText } from "../_lib/words";
 import { createCourseAction } from "./actions";
 import type { NewCourseState } from "./outcomes";

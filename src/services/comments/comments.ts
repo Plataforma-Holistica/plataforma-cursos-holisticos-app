@@ -37,8 +37,9 @@ import {
 // entrada pide su nivel: leer una lección, sus respuestas y si se puede escribir piden poder leer; publicar, escribir en esa
 // lección; editar, escribir en la lección que la base dice que es la del comentario, nunca en la del formulario. Borrar lo
 // propio y elegir el seudónimo piden solo la sesión, y la base mira la cuenta y el veto. Ojo: borrar pide el id y la revisión,
-// que hoy solo da leer la lección, así que quien perdió el acceso no llega a lo suyo; falta una lectura de lo propio (pendiente,
-// por decidir con Sergio). Las lecturas reciben las claims que la guarda de la página ya dio; las escrituras corren la guarda.
+// que hoy solo da leer la lección, así que quien perdió el acceso no llega a lo suyo; lo resuelve una lectura de lo propio en
+// `/cuenta/comentarios` (decisión de Sergio del 2026-11-08), que llega después de PA-22. Las lecturas reciben las claims que la
+// guarda de la página ya dio; las escrituras corren la guarda.
 //
 // Se acepta, como en el latido, que los hechos se lean sin candado: una suscripción que vence justo entonces deja pasar
 // un comentario (decisión mía sin confirmar).
