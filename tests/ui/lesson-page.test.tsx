@@ -120,7 +120,20 @@ describe("los comentarios de la lección (T-501)", () => {
     render(await LessonRoute(params({ comentarios: "2026-11-03T18:00:00+00:00_" + C2 })));
     expect(mocks.lessonComments).toHaveBeenCalledExactlyOnceWith({ userId: "u" }, LESSON, "2026-11-03T18:00:00+00:00_" + C2);
     expect(mocks.shown).toMatchObject({
-      comments: { kind: "ready", view: { count: 21, items: READY.items, next: READY.next, paged: true, pagedThread: null, me: READY.me, write: READY.write } },
+      comments: {
+        kind: "ready",
+        view: {
+          count: 21,
+          items: READY.items,
+          next: READY.next,
+          paged: true,
+          cursor: "2026-11-03T18:00:00+00:00_" + C2,
+          pagedThread: null,
+          here: `/cursos/respirar/lecciones/${LESSON}?comentarios=${encodeURIComponent("2026-11-03T18:00:00+00:00_" + C2)}`,
+          me: READY.me,
+          write: READY.write,
+        },
+      },
     });
   });
 
@@ -137,7 +150,13 @@ describe("los comentarios de la lección (T-501)", () => {
     render(await LessonRoute(params({ hilo: C1, respuestas: "2026-11-03T18:00:00+00:00_" + C2 })));
     expect(mocks.commentReplies).toHaveBeenCalledExactlyOnceWith({ userId: "u" }, LESSON, C1, "2026-11-03T18:00:00+00:00_" + C2);
     expect(mocks.shown).toMatchObject({
-      comments: { view: { pagedThread: C1, items: [{ id: C1, replies: { items: [{ id: "c0000000-0000-4000-8000-000000000003" }], more: false } }] } },
+      comments: {
+        view: {
+          pagedThread: C1,
+          here: `/cursos/respirar/lecciones/${LESSON}?hilo=${C1}&respuestas=${encodeURIComponent("2026-11-03T18:00:00+00:00_" + C2)}`,
+          items: [{ id: C1, replies: { items: [{ id: "c0000000-0000-4000-8000-000000000003" }], more: false } }],
+        },
+      },
     });
   });
 

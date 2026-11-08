@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ui } from "@/messages/es/ui";
 import { t } from "@/messages/format";
@@ -33,10 +33,21 @@ export interface CountedFieldProps {
 
 export function CountedField({ id, name, label, max, warnAt, defaultValue, error, optional = false, multiline = false, readOnly = false }: CountedFieldProps) {
   const [count, setCount] = useState([...defaultValue].length);
+  const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  // React 19 devuelve el formulario a su valor por omisión al terminar la acción (`reset`): el contador lo sigue. El evento llega
+  // antes de que el campo cambie, así que se lee en la vuelta siguiente.
+  useEffect(() => {
+    const form = field.current?.form;
+    if (!form) return;
+    const recount = () => setTimeout(() => setCount([...(field.current?.value ?? "")].length), 0);
+    form.addEventListener("reset", recount);
+    return () => form.removeEventListener("reset", recount);
+  }, []);
   const counterId = `${id}-contador`;
   const errorId = `${id}-error`;
   const near = count > warnAt && count <= max;
   const shared = {
+    ref: field,
     id,
     name,
     defaultValue,

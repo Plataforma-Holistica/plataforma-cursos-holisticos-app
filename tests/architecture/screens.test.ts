@@ -286,7 +286,7 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Los comentarios de la lección (T-501): abrir y cerrar no llaman a nadie; lo que escribe pasa por el servicio, que
     // corre la guarda de sesión y decide el acceso con la regla única. Del formulario salen la lección y el botón.
     lessonCommentAction:
-      /if \(lesson === null \|\| request\.kind === "none"\) return \{ \.\.\.IDLE_COMMENTS, attempt \};\s*if \(request\.kind === "open"\) return \{ \.\.\.askState\(request\.open\), attempt \};\s*const jar = await cookieJar\(\);\s*return settle\(jar, await outcomeOf\(jar, lesson, request\), attempt\);/,
+      /if \(lesson === null \|\| request\.kind === "none"\) return \{ \.\.\.IDLE_COMMENTS, attempt \};\s*if \(request\.kind === "open"\) return \{ \.\.\.askState\(request\), attempt \};\s*const jar = await cookieJar\(\);\s*return settle\(jar, await outcomeOf\(jar, lesson, request\), attempt\);/,
   },
   "src/app/admin/_revision/actions.ts": {
     // Dar el código otra vez: el del catálogo, que comprueba la misma puerta de Contenido.

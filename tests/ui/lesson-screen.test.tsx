@@ -232,6 +232,8 @@ describe("los comentarios (T-501)", () => {
       next: null,
       paged: false,
       pagedThread: null,
+      here: "/cursos/respirar/lecciones/x",
+      cursor: null,
       me: { teacher: false, pseudonym: "Luz" },
       write: { kind: "ok" },
     },

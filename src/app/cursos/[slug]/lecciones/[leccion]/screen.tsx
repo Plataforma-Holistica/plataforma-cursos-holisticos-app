@@ -589,7 +589,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
       {aboutText}
       {hasResources && (
         <div className="hidden flex-col gap-3 lg:flex">
-          <h3 className="text-h3">{resourceText.lessonTitle}</h3>
+          <h2 className="text-h3">{resourceText.lessonTitle}</h2>
           {resourcesPanel}
         </div>
       )}

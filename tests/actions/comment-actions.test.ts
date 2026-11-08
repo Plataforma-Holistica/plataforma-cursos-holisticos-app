@@ -102,6 +102,12 @@ describe("la acción de los comentarios de la lección", () => {
     expect(state.open).toEqual({ kind: "name", carry: { parentId: null, body: "Hola" } });
   });
 
+  it("«Cambiar» no llama a nadie y conserva lo escrito en el campo", async () => {
+    const state = await lessonCommentAction(previous, form(["do", "ask-name"], [COMMENT_FIELDS.body, "Hola"]));
+    expect(calls.order).toEqual([]);
+    expect(state).toMatchObject({ open: { kind: "name", carry: null }, kept: { at: { kind: "new" }, body: "Hola" } });
+  });
+
   it("elegir el nombre con algo que cruzaba lo publica después, en ese orden", async () => {
     const state = await lessonCommentAction(previous, form(["do", "name"], [COMMENT_FIELDS.name, "Luz"], [COMMENT_FIELDS.carry, "Hola"], [COMMENT_FIELDS.carryParent, PARENT]));
     expect(mocks.chooseCommentName).toHaveBeenCalledExactlyOnceWith(jar, "Luz");

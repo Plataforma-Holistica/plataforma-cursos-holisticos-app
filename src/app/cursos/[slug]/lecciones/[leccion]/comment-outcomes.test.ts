@@ -51,6 +51,19 @@ describe("readCommentForm: qué botón se pulsó", () => {
     expect(readCommentForm(form(["do", "cancel"]))).toEqual({ kind: "open", open: { kind: "none" } });
   });
 
+  it("«Cambiar» va dentro del campo: lo escrito se queda en él mientras se elige el nombre", () => {
+    expect(readCommentForm(form(["do", "ask-name"], [COMMENT_FIELDS.body, "Hola"]))).toEqual({
+      kind: "open",
+      open: { kind: "name", carry: null },
+      kept: { at: NEW, body: "Hola" },
+    });
+    expect(askState({ kind: "open", open: { kind: "name", carry: null }, kept: { at: NEW, body: "Hola" } })).toEqual({
+      ...IDLE_COMMENTS,
+      open: { kind: "name", carry: null },
+      kept: { at: NEW, body: "Hola" },
+    });
+  });
+
   it("el nombre lleva lo escrito que cruza el diálogo, y a qué respondía", () => {
     expect(readCommentForm(form(["do", "name"], [COMMENT_FIELDS.name, "Luz"]))).toEqual({ kind: "name", pseudonym: "Luz", carry: null });
     expect(
@@ -98,8 +111,8 @@ describe("readCommentLesson: de qué lección es el formulario", () => {
 
 describe("askState: abrir y cerrar no llaman a nadie", () => {
   it("abre lo pedido y olvida el aviso y lo que se quedaba", () => {
-    expect(askState({ kind: "reply", parentId: PARENT })).toEqual({ ...IDLE_COMMENTS, open: { kind: "reply", parentId: PARENT } });
-    expect(askState({ kind: "none" })).toEqual(IDLE_COMMENTS);
+    expect(askState({ kind: "open", open: { kind: "reply", parentId: PARENT } })).toEqual({ ...IDLE_COMMENTS, open: { kind: "reply", parentId: PARENT } });
+    expect(askState({ kind: "open", open: { kind: "none" } })).toEqual(IDLE_COMMENTS);
   });
 });
 
@@ -119,7 +132,8 @@ describe("writeOutcome: lo que pinta la pantalla después de publicar o editar",
     expect(writeOutcome(REPLY, "Hola", { kind: "gate", answer: "needs_pseudonym" }, BACK)).toEqual({
       kind: "state",
       refresh: false,
-      state: { open: { kind: "name", carry: { parentId: PARENT, body: "Hola" } }, notice: null, kept: null, written: null },
+      // Lo escrito se queda también en su campo: si cancela el diálogo, no se pierde.
+      state: { open: { kind: "name", carry: { parentId: PARENT, body: "Hola" } }, notice: null, kept: { at: REPLY, body: "Hola" }, written: null },
     });
   });
 

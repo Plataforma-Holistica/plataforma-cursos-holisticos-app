@@ -20,7 +20,8 @@ export type CommentRequest =
   | { kind: "save"; id: string; revision: number; body: string | null }
   | { kind: "delete"; id: string; revision: number }
   | { kind: "name"; pseudonym: string | null; carry: Carry | null }
-  | { kind: "open"; open: Open }
+  /** Abrir o cerrar algo. `kept`: lo escrito en el campo desde donde se abrió, que se queda («Cambiar» va dentro del campo). */
+  | { kind: "open"; open: Open; kept?: { at: Place; body: string } }
   | { kind: "none" };
 
 type State = Omit<CommentsState, "attempt">;
@@ -63,7 +64,10 @@ export function readCommentForm(form: unknown): CommentRequest {
   const body = optional(form, COMMENT_FIELDS.body) ?? null;
   if (plain === "post") return { kind: "post", place: { kind: "new" }, body };
   if (plain === "cancel") return { kind: "open", open: { kind: "none" } };
-  if (plain === "ask-name") return { kind: "open", open: { kind: "name", carry: null } };
+  if (plain === "ask-name") {
+    const open = { kind: "name", carry: null } as const;
+    return body === null || body === "" ? { kind: "open", open } : { kind: "open", open, kept: { at: { kind: "new" }, body } };
+  }
   if (withId !== undefined && id !== undefined) {
     switch (withId) {
       case "reply":
@@ -95,9 +99,9 @@ function readNameForm(form: FormData): CommentRequest {
   return { kind: "name", pseudonym: pseudonym ?? null, carry };
 }
 
-/** Abrir o cerrar: lo pedido, sin aviso ni nada que se quede. */
-export function askState(open: Open): CommentsState {
-  return { ...IDLE_COMMENTS, open };
+/** Abrir o cerrar: lo pedido, sin aviso, y lo escrito en el campo desde donde se abrió. */
+export function askState(request: Extract<CommentRequest, { kind: "open" }>): CommentsState {
+  return { ...IDLE_COMMENTS, open: request.open, kept: request.kept ?? null };
 }
 
 const state = (fields: Partial<State>, refresh: boolean): CommentOutcome => ({
@@ -140,7 +144,8 @@ export function writeOutcome(place: Place, body: string, result: CommentWrite, b
       switch (result.answer) {
         case "needs_pseudonym":
           if (place.kind === "edit") return keep(place, body, "unavailable", false);
-          return state({ open: { kind: "name", carry: { parentId: place.kind === "reply" ? place.parentId : null, body } } }, false);
+          // Lo escrito cruza el diálogo y se queda en su campo: si se cancela, no se pierde.
+          return state({ open: { kind: "name", carry: { parentId: place.kind === "reply" ? place.parentId : null, body } }, kept: { at: place, body } }, false);
         case "not_found":
         case "suspended_account":
           return state({ notice: { at: { kind: "thread" }, kind: "no_lesson" } }, true);

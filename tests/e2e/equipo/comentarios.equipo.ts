@@ -121,7 +121,8 @@ test("con JavaScript: la primera vez pide el nombre, publica con el foco en lo n
   await expect(page.getByText("Vas a aparecer como Luz.")).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
 
-  await mine.getByText("Opciones de tu comentario").click();
+  // El texto del menú es solo para el lector de pantalla: se pulsa el botón que lo lleva.
+  await mine.locator("summary").click();
   await mine.getByRole("button", { name: "Editar" }).click();
   const editing = page.getByRole("textbox", { name: "Edita tu comentario" });
   await expect(editing).toHaveValue("Me ayudó a dormir mejor.");
@@ -156,7 +157,7 @@ test("en el teléfono, Comentarios es otra pestaña; borrar lo propio con respue
     await expect(page.getByRole("tab")).toHaveText(["Temario", "Sobre esta lección", /^Comentarios \(\d+\)$/]);
     await page.getByRole("tab", { name: /^Comentarios/ }).click();
     const mine = page.getByRole("article", { name: "Tú" });
-    await mine.getByText("Opciones de tu comentario").click();
+    await mine.locator("summary").click();
     await mine.getByRole("button", { name: "Borrar" }).click();
     const dialog = page.getByRole("dialog", { name: "¿Borrar tu comentario?" });
     await dialog.getByRole("button", { name: "Sí, borrarlo" }).click();

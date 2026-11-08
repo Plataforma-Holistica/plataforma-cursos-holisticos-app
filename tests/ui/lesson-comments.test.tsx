@@ -47,6 +47,8 @@ function setup(view: Partial<LessonCommentsProps["view"]> = {}, action = vi.fn(a
       next: null,
       paged: false,
       pagedThread: null,
+      here: BACK,
+      cursor: null,
       me: { teacher: false, pseudonym: "Luz M." },
       write: { kind: "ok" },
       ...view,
@@ -94,6 +96,27 @@ describe("el hilo (CommentThread)", () => {
   });
 });
 
+describe("desde una página que no es la primera", () => {
+  const CURSOR = `2026-11-03T18:00:00.000000+00:00_${id(9)}`;
+
+  it("las respuestas siguientes y las primeras se quedan en esa página", () => {
+    setup({ count: 40, items: [thread(1, {}, [comment(2)], true)], paged: true, cursor: CURSOR, pagedThread: id(1) });
+    expect(screen.getByRole("link", { name: "Ver más respuestas" })).toHaveAttribute(
+      "href",
+      `${BACK}?comentarios=${encodeURIComponent(CURSOR)}&hilo=${id(1)}&respuestas=${encodeURIComponent(`2026-11-03T18:00:00.000000+00:00_${id(2)}`)}#comentario-${id(1)}`,
+    );
+    expect(screen.getByRole("link", { name: "Ver las primeras respuestas" })).toHaveAttribute("href", `${BACK}?comentarios=${encodeURIComponent(CURSOR)}#comentario-${id(1)}`);
+  });
+
+  it("lo publicado que no está en esta página se dice arriba del hilo", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, written: id(50), notice: { at: { kind: "comment", id: id(50) }, kind: "published" } }));
+    const { user } = setup({ count: 40, items: [thread(1)], paged: true, cursor: CURSOR }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Nuevo");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getByText("Tu comentario se publicó.")).toBeInTheDocument(), { timeout: 3_000 });
+  });
+});
+
 describe("cada comentario (Comment)", () => {
   it("el del maestro del curso lleva «Imparte el curso»", () => {
     setup({ count: 1, items: [thread(1, { name: "Ana Robles", teacher: true })] });
@@ -127,6 +150,11 @@ describe("cada comentario (Comment)", () => {
     const other = screen.getByRole("article", { name: "Luz M." });
     expect(within(other).queryByRole("button", { name: "Editar" })).toBeNull();
     expect(within(other).getByRole("button", { name: "Responder" })).toHaveAttribute("value", `open-reply:${id(1)}`);
+  });
+
+  it("lo propio en revisión no ofrece «Responder»: solo se responde a lo publicado", () => {
+    setup({ count: 0, items: [thread(1, { own: true, state: "in_review", revision: 1 })] });
+    expect(screen.queryByRole("button", { name: "Responder" })).toBeNull();
   });
 
   it("lo borrado que se ve por su respuesta dice «Comentario borrado», sin autor y sin «Responder»", () => {
@@ -187,6 +215,44 @@ describe("el campo (CommentComposer)", () => {
   it("sin seudónimo no se sustituye nada: el diálogo llega al enviar", () => {
     setup({ write: { kind: "gate", answer: "needs_pseudonym" }, me: { teacher: false, pseudonym: null } });
     expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toBeInTheDocument();
+  });
+});
+
+describe("lo escrito y el foco no se pierden", () => {
+  it("abrir otra cosa en el hilo no vacía el campo de arriba", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "reply", parentId: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1)] }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Un borrador largo");
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+    await screen.findByRole("textbox", { name: "Responde a Luz M." });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Un borrador largo");
+  });
+
+  it("al abrir la edición, el foco va a su campo", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "edit", id: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 4 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Edita tu comentario" })).toHaveFocus(), { timeout: 3_000 });
+  });
+
+  it("al cerrar la edición, el foco vuelve a su comentario", async () => {
+    let answer: CommentsState = { ...IDLE_COMMENTS, attempt: 1, open: { kind: "edit", id: id(1) } };
+    const action = vi.fn(async () => answer);
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 4 })] }, action);
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await screen.findByRole("textbox", { name: "Edita tu comentario" });
+    answer = { ...IDLE_COMMENTS, attempt: 2 };
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.getByRole("article", { name: "Tú" })).toHaveFocus(), { timeout: 3_000 });
+  });
+
+  it("la respuesta lleva la línea de identidad, y el avatar de lo propio sale del seudónimo", async () => {
+    const action = vi.fn(async (): Promise<CommentsState> => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "reply", parentId: id(1) } }));
+    const { user } = setup({ count: 1, items: [thread(1, { name: "Beto" }), thread(3, { own: true, name: "Luz M.", revision: 1 })] }, action);
+    await user.click(screen.getAllByRole("button", { name: "Responder" })[0]!);
+    const reply = await screen.findByRole("textbox", { name: "Responde a Beto" });
+    expect(within(reply.closest("form")!).getByText(/Vas a aparecer como Luz M\./)).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Tú" }).querySelector("[data-avatar]")).toHaveTextContent("L");
   });
 });
 

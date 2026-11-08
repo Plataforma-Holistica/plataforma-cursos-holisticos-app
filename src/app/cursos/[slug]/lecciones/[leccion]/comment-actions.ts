@@ -67,7 +67,7 @@ export async function lessonCommentAction(previous: CommentsState, form: FormDat
   const lesson = readCommentLesson(form);
   const request = readCommentForm(form);
   if (lesson === null || request.kind === "none") return { ...IDLE_COMMENTS, attempt };
-  if (request.kind === "open") return { ...askState(request.open), attempt };
+  if (request.kind === "open") return { ...askState(request), attempt };
   const jar = await cookieJar();
   return settle(jar, await outcomeOf(jar, lesson, request), attempt);
 }

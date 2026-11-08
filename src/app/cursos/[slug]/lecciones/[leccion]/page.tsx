@@ -53,7 +53,7 @@ const one = (search: Search, key: string): string | null => {
 };
 
 /** Lo que la pantalla pinta de los comentarios, con las respuestas siguientes del hilo que pida la dirección. */
-async function commentsSlot(claims: Parameters<typeof lessonComments>[0], lessonId: string, search: Search, read: LessonCommentsAnswer): Promise<LessonCommentsSlot | null> {
+async function commentsSlot(claims: Parameters<typeof lessonComments>[0], lessonId: string, path: string, search: Search, read: LessonCommentsAnswer): Promise<LessonCommentsSlot | null> {
   if (read.kind === "unavailable") return { kind: "unavailable" };
   if (read.kind !== "ready") return null;
   const cursor = one(search, "comentarios");
@@ -68,7 +68,10 @@ async function commentsSlot(claims: Parameters<typeof lessonComments>[0], lesson
       pagedThread = thread;
     }
   }
-  return { kind: "ready", view: { count: read.count, items, next: read.next, paged: cursor !== null, pagedThread, me: read.me, write: read.write } };
+  // Lo que se está viendo, para que un envío sin JavaScript vuelva ahí: la página y, si las hay, las respuestas del hilo.
+  const query = [cursor === null ? null : `comentarios=${encodeURIComponent(cursor)}`, pagedThread === null || after === null ? null : `hilo=${pagedThread}&respuestas=${encodeURIComponent(after)}`].filter(Boolean);
+  const here = query.length === 0 ? path : `${path}?${query.join("&")}`;
+  return { kind: "ready", view: { count: read.count, items, next: read.next, paged: cursor !== null, cursor, here, pagedThread, me: read.me, write: read.write } };
 }
 
 export default async function LessonRoute({ params, searchParams }: { params: Promise<{ slug: string; leccion: string }>; searchParams: Promise<Search> }) {
@@ -88,13 +91,13 @@ export default async function LessonRoute({ params, searchParams }: { params: Pr
     lessonAccess(await cookieReader(), leccion),
     captionsChoice(session.claims),
     coursePage(slug),
-    lessonComments(session.claims, leccion, one(search, "comentarios")),
+    lessonComments(session.claims, page.lesson.id, one(search, "comentarios")),
   ]);
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
   if (initial.kind === "reload") redirect(path);
   const resources = initial.kind === "ready" ? await lessonResources(session.claims, page.lesson.id) : [];
-  const comments = initial.kind === "denied" ? null : await commentsSlot(session.claims, leccion, search, commentsRead);
+  const comments = initial.kind === "denied" ? null : await commentsSlot(session.claims, page.lesson.id, lessonPath(page.course.slug, page.lesson.id) ?? path, search, commentsRead);
 
   const entry = (lesson: LessonEntry): SyllabusEntry => ({
     id: lesson.id,

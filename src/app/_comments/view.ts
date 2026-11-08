@@ -11,6 +11,10 @@ export interface CommentsView {
   next: string | null;
   /** Si esta no es la primera página. */
   paged: boolean;
+  /** Desde dónde empieza esta página, como vino en la dirección; nulo en la primera. */
+  cursor: string | null;
+  /** La dirección de lo que se está viendo, sin el ancla: a ella vuelve un envío sin JavaScript. */
+  here: string;
   /** El hilo cuyas respuestas no son las primeras. */
   pagedThread: string | null;
   me: { teacher: boolean; pseudonym: string | null };
@@ -26,9 +30,11 @@ export const cursorOf = (comment: Pick<CommentView, "createdAt" | "id">) => `${c
 
 export const moreCommentsHref = (back: string, next: string) => `${back}?comentarios=${encodeURIComponent(next)}#${COMMENTS_ANCHOR}`;
 export const newestCommentsHref = (back: string) => `${back}#${COMMENTS_ANCHOR}`;
-export const moreRepliesHref = (back: string, parentId: string, last: CommentView) =>
-  `${back}?hilo=${parentId}&respuestas=${encodeURIComponent(cursorOf(last))}#${commentAnchor(parentId)}`;
-export const firstRepliesHref = (back: string, parentId: string) => `${back}#${commentAnchor(parentId)}`;
+/** La página de comentarios en la que se está, para que las respuestas de un hilo no la pierdan. */
+const pageQuery = (cursor: string | null) => (cursor === null ? "" : `comentarios=${encodeURIComponent(cursor)}`);
+export const moreRepliesHref = (back: string, cursor: string | null, parentId: string, last: CommentView) =>
+  `${back}?${[pageQuery(cursor), `hilo=${parentId}&respuestas=${encodeURIComponent(cursorOf(last))}`].filter(Boolean).join("&")}#${commentAnchor(parentId)}`;
+export const firstRepliesHref = (back: string, cursor: string | null, parentId: string) => `${back}${cursor === null ? "" : `?${pageQuery(cursor)}`}#${commentAnchor(parentId)}`;
 
 const TONES = 8;
 

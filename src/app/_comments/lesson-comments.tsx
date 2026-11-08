@@ -1,7 +1,7 @@
 "use client";
 
 import { Ellipsis } from "lucide";
-import { useActionState, useEffect, type ReactNode } from "react";
+import { useActionState, useEffect, useRef, type ReactNode } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { comments as text } from "@/messages/es/comments";
@@ -112,6 +112,7 @@ function Avatar({ name, teacher }: { name: string; teacher: boolean }) {
   const { initial, tone } = avatarOf(name);
   return (
     <span
+      data-avatar
       aria-hidden="true"
       className={cx("grid size-9 shrink-0 place-items-center rounded-full bg-linear-to-br text-body-s font-semibold text-text", TONE_CLASSES[tone], teacher && "ring-2 ring-accent")}
     >
@@ -162,7 +163,8 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
       tabIndex={-1}
       className={cx("flex gap-3 py-3 outline-none", comment.teacher && "border-l-2 border-accent pl-3")}
     >
-      <Avatar name={author} teacher={comment.teacher} />
+      {/* Lo propio dice «Tú», y su avatar sale del nombre con que lo ven los demás. */}
+      <Avatar name={comment.name ?? author} teacher={comment.teacher} />
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <p className="flex flex-wrap items-center gap-x-2 text-body-s text-text-2">
           <span className="font-semibold text-text">{author}</span>
@@ -173,7 +175,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         </p>
         {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
         {editing ? (
-          <form key={state.attempt} action={formAction} className="flex flex-col gap-3">
+          <form action={formAction} className="flex flex-col gap-3">
             <LessonFields slug={slug} lessonId={lessonId} />
             <CountedField
               id={`editar-${comment.id}`}
@@ -202,7 +204,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         {!editing && (
           <form action={formAction} className="flex flex-wrap items-center gap-3">
             <LessonFields slug={slug} lessonId={lessonId} />
-            {!reply && canWrite(write) && (
+            {!reply && canWrite(write) && comment.state === "published" && (
               <Button type="submit" variant="text" name="do" value={`open-reply:${comment.id}`}>
                 {text.reply}
               </Button>
@@ -280,16 +282,24 @@ function Composer({ place, label, shared, identity, onCancel }: { place: Exclude
   );
 }
 
-/** Quién va a aparecer: el seudónimo con «Cambiar», el maestro con su nombre, o el aviso de que lo va a elegir. */
-function Identity({ me, teacherName }: { me: CommentsView["me"]; teacherName: string }) {
+/**
+ * Quién va a aparecer: el seudónimo, el maestro con su nombre, o el aviso de que lo va a elegir. «Cambiar» va solo en el campo de
+ * arriba: lo escrito ahí se queda mientras se elige.
+ */
+function Identity({ me, teacherName, changeable }: { me: CommentsView["me"]; teacherName: string; changeable: boolean }) {
   if (me.teacher) return <p>{t(text.composer.asTeacher, { name: teacherName })}</p>;
   if (me.pseudonym === null) return <p>{text.composer.choose}</p>;
   return (
     <p className="flex flex-wrap items-center gap-x-1">
-      {t(text.composer.as, { name: me.pseudonym })}{" "}
-      <Button type="submit" variant="text" name="do" value="ask-name">
-        {text.composer.change}
-      </Button>
+      {t(text.composer.as, { name: me.pseudonym })}
+      {changeable && (
+        <>
+          {" "}
+          <Button type="submit" variant="text" name="do" value="ask-name">
+            {text.composer.change}
+          </Button>
+        </>
+      )}
     </p>
   );
 }
@@ -336,7 +346,7 @@ function NameDialog({ shared }: { shared: Shared }) {
   );
 }
 
-function Thread({ thread, back, shared, pagedThread }: { thread: CommentThread; back: string; shared: Shared; pagedThread: string | null }) {
+function Thread({ thread, back, cursor, shared, pagedThread, identity }: { thread: CommentThread; back: string; cursor: string | null; shared: Shared; pagedThread: string | null; identity: ReactNode }) {
   const { state } = shared;
   const replying = state.open.kind === "reply" && state.open.parentId === thread.id && canWrite(shared.write) && thread.state === "published";
   const last = thread.replies.items.at(-1);
@@ -346,7 +356,7 @@ function Thread({ thread, back, shared, pagedThread }: { thread: CommentThread; 
       {/* Las respuestas van dentro del comentario al que responden. */}
       {(thread.replies.items.length > 0 || replying || pagedThread === thread.id) && (
         <div className="ml-6 flex flex-col gap-1">
-          {pagedThread === thread.id && <TextLink href={firstRepliesHref(back, thread.id)}>{text.firstReplies}</TextLink>}
+          {pagedThread === thread.id && <TextLink href={firstRepliesHref(back, cursor, thread.id)}>{text.firstReplies}</TextLink>}
           {thread.replies.items.length > 0 && (
             <ol className="flex flex-col">
               {thread.replies.items.map((reply) => (
@@ -356,14 +366,13 @@ function Thread({ thread, back, shared, pagedThread }: { thread: CommentThread; 
               ))}
             </ol>
           )}
-          {thread.replies.more && last !== undefined && <TextLink href={moreRepliesHref(back, thread.id, last)}>{text.moreReplies}</TextLink>}
+          {thread.replies.more && last !== undefined && <TextLink href={moreRepliesHref(back, cursor, thread.id, last)}>{text.moreReplies}</TextLink>}
           {replying && (
             <Composer
-              key={state.attempt}
               place={{ kind: "reply", parentId: thread.id }}
               label={t(text.composer.replyLabel, { name: thread.own ? text.you : (thread.name ?? text.deleted) })}
               shared={shared}
-              identity={null}
+              identity={identity}
               onCancel
             />
           )}
@@ -374,23 +383,47 @@ function Thread({ thread, back, shared, pagedThread }: { thread: CommentThread; 
   );
 }
 
-export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
-  const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${back}#${COMMENTS_ANCHOR}`);
-  const shared: Shared = { slug, lessonId, state, formAction, pending, write: view.write };
+/** Lo que se abrió o se cerró, de qué comentario: a él vuelve el foco al cerrarse. */
+const openedOn = (open: CommentsState["open"]): string | null =>
+  open.kind === "edit" || open.kind === "delete" ? open.id : open.kind === "reply" ? open.parentId : null;
 
-  // Al publicar o guardar, el foco va al comentario (diseño §5.12, «Publicado»).
+export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
+  // Sin JavaScript, el envío vuelve a lo que se estaba viendo: la misma página de comentarios.
+  const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${view.here}#${COMMENTS_ANCHOR}`);
+  const shared: Shared = { slug, lessonId, state, formAction, pending, write: view.write };
+  const heading = useRef<HTMLHeadingElement>(null);
+  const lastOpened = useRef<string | null>(null);
+  const shown = new Set(view.items.flatMap((thread) => [thread.id, ...thread.replies.items.map((reply) => reply.id)]));
+  // Lo que se dice de un comentario que no está en esta página (lo nuevo cae en la primera) se dice arriba del hilo.
+  const threadNotice = state.notice !== null && state.notice.at.kind === "comment" && !shown.has(state.notice.at.id) ? state.notice : noticeAt(state, { kind: "thread" });
+
+  // El foco después de cada respuesta: al campo que se abrió, al comentario publicado o guardado, o al comentario que se cerró
+  // (el botón que se pulsó ya no está). Los diálogos llevan el suyo.
   useEffect(() => {
-    if (state.written === null) return;
-    document.getElementById(commentAnchor(state.written))?.focus();
-  }, [state.attempt, state.written]);
+    if (state.attempt === 0) return;
+    const before = lastOpened.current;
+    lastOpened.current = openedOn(state.open);
+    const byId = (id: string) => document.getElementById(id);
+    if (state.open.kind === "edit") return void byId(`editar-${state.open.id}`)?.focus();
+    if (state.open.kind === "reply") return void byId(`responder-${state.open.parentId}`)?.focus();
+    if (state.open.kind !== "none") return;
+    const written = state.written === null ? null : byId(commentAnchor(state.written));
+    if (written !== null) return void written.focus();
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (!lost) return;
+    const at = state.notice?.at;
+    const target = (at?.kind === "comment" ? byId(commentAnchor(at.id)) : null) ?? (before === null ? null : byId(commentAnchor(before)));
+    (target ?? heading.current)?.focus();
+  }, [state]);
 
   return (
     <div id={COMMENTS_ANCHOR} className="flex flex-col gap-4">
-      <h3 className="text-h3">{t(plural(view.count, text.title), { count: view.count })}</h3>
-      <Notice notice={noticeAt(state, { kind: "thread" })} />
+      <h2 ref={heading} tabIndex={-1} className="text-h3 outline-none">
+        {t(plural(view.count, text.title), { count: view.count })}
+      </h2>
+      <Notice notice={threadNotice} />
       {canWrite(view.write) ? (
-        // Una llave por respuesta: el campo vuelve a lo que se queda (o a vacío) y su contador con él.
-        <Composer key={state.attempt} place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} />} onCancel={false} />
+        <Composer place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} changeable />} onCancel={false} />
       ) : (
         <Instead write={view.write} />
       )}
@@ -400,7 +433,15 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
       ) : (
         <ol className="flex flex-col divide-y divide-border">
           {view.items.map((thread) => (
-            <Thread key={thread.id} thread={thread} back={back} shared={shared} pagedThread={view.pagedThread} />
+            <Thread
+              key={thread.id}
+              thread={thread}
+              back={back}
+              cursor={view.cursor}
+              shared={shared}
+              pagedThread={view.pagedThread}
+              identity={<Identity me={view.me} teacherName={teacherName} changeable={false} />}
+            />
           ))}
         </ol>
       )}
