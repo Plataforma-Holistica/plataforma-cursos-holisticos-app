@@ -191,6 +191,42 @@ export function resolveResourceAccess(viewer: MediaViewer, account: AccountAcces
   return decided.ok ? { ok: true } : decided;
 }
 
+/** Lo que deja hacer la regla de los comentarios: leer, o además escribir. */
+export const COMMENT_LEVELS = ["read", "write"] as const;
+export type CommentLevel = (typeof COMMENT_LEVELS)[number];
+
+export type CommentAccess =
+  | { ok: true; level: CommentLevel }
+  /** No existe, no es la vigente, o su curso no está publicado y listado: las tres se ven igual. */
+  | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "suspended" }
+  | { ok: false; reason: "unknown" }
+  | { ok: false; reason: "no_access"; account: AccountRefusal };
+
+/**
+ * Quién lee y quién escribe los comentarios de una lección (RF-801, RF-309; RN-01; T-501). La base no mira el acceso: esta
+ * es la única defensa, y el servidor la corre en la misma transacción en que la llama. Las reglas de ver, sin video, en este
+ * orden: la cuenta suspendida; la lección vigente de un curso publicado y listado, también para su maestro, porque la base
+ * solo acepta ahí; el maestro de la lección escribe; «no se supo» de la cuenta, también en el curso abierto; la suscripción,
+ * la gracia o la cortesía escriben; el curso abierto con el correo verificado lee (FL-15 E1); si no, sin acceso.
+ */
+export function resolveCommentAccess(viewer: MediaViewer, account: AccountAccess | null, lesson: MediaResource | null): CommentAccess {
+  if (viewer.accountSuspended || (account !== null && !account.allowed && account.reason === "suspended")) {
+    return { ok: false, reason: "suspended" };
+  }
+  if (lesson === null || !lesson.isCurrent || !publiclyVisible(lesson)) return { ok: false, reason: "not_found" };
+  if (lesson.teacherId === viewer.teacherId) return { ok: true, level: "write" };
+
+  const decided = byAccount(viewer, account, lesson.isOpen);
+  if (!decided.ok) return decided;
+  return { ok: true, level: decided.basis === "open_course" ? "read" : "write" };
+}
+
+/** Si lo que contestó la regla basta para lo que se pide: escribir también deja leer. */
+export function commentAllows(access: CommentAccess, needed: CommentLevel): boolean {
+  return access.ok && (needed === "read" || access.level === "write");
+}
+
 /** El margen de ADR-27 sobre lo que dura la lección a la velocidad mínima. */
 export const GRANT_MARGIN_SECONDS = 10 * 60;
 /** El tope de ADR-27: siempre menos de una hora. Más larga, el reproductor pide otra. */

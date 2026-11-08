@@ -175,6 +175,41 @@ export async function readWatchFacts(tx: Tx, id: string): Promise<WatchFacts | n
   };
 }
 
+/**
+ * Para los comentarios (T-501): los hechos de quien actúa y de la lección, de la misma función que al ver, sin la segunda
+ * barrera ni el correo: los comentarios no firman nada ni pintan una marca de agua. El video no entra a su regla.
+ */
+export interface CommentFacts {
+  now: Date;
+  viewer: MediaViewer;
+  account: AccountFacts;
+  graceDays: number;
+  lesson: MediaResource | null;
+}
+
+/** Nulo si la base no reconoce a quien actúa. Lo que no tenga la forma lanza: es «no se supo». */
+export async function readCommentFacts(tx: Tx, lessonId: string): Promise<CommentFacts | null> {
+  const [row] = await tx.query(sql`select private.media_facts(${lessonId}::uuid) as facts`, z.object({ facts: factsRow.nullable() }));
+  const facts = row?.facts;
+  if (!facts) return null;
+  const lesson = facts.lesson;
+  return {
+    now: facts.now,
+    viewer: {
+      accountSuspended: facts.viewer.suspended,
+      content: false,
+      teacherId: facts.viewer.teacher_id,
+      emailVerified: facts.viewer.email_verified,
+    },
+    account: accountOf(facts.viewer.suspended, facts.subscription, facts.courtesy),
+    graceDays: graceDaysOf(facts.subscription),
+    lesson:
+      lesson === null
+        ? null
+        : { isCurrent: lesson.is_current, teacherId: lesson.teacher_id, courseState: lesson.course_state, listed: lesson.listed, isOpen: lesson.is_open },
+  };
+}
+
 /** Lo que hace falta para firmar la descarga de un recurso (T-404). Nunca sale del servicio: trae la ruta. */
 export interface ResourceFile {
   path: string;
