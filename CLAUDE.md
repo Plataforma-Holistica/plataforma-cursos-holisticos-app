@@ -1092,11 +1092,14 @@ que no se ve leyendo un solo archivo:
   Un solo estado para todo el hilo: lo abierto (responder, editar, la pregunta de borrar, el diálogo del nombre), el aviso y dónde
   se dice, lo escrito que se queda y lo recién publicado. Cada botón es un envío con `do=` y lo que se vio (`save:<id>:<rev>`,
   `delete:<id>:<rev>`, `reply:<padre>`), así que todo funciona sin JavaScript; abrir y cerrar no llaman al servicio ni a
-  `refresh()`. **Lo escrito no se pierde:** React 19 devuelve al valor por omisión el formulario que envió, y un campo sin tocar
-  desde entonces sigue a su valor por omisión; por eso los campos no llevan `key` por intento, y cada uno guarda su borrador en la
-  pantalla (`drafts`, que se llena con `kept` y solo lo borra el formulario que lo envió, visto en `onSubmit`). `CountedField`
-  (movido de `src/app/portal/_lib/` a `src/ui/`) vuelve a contar con el `reset` del formulario. «Cambiar» va dentro del campo de arriba y
-  conserva lo escrito; sin seudónimo, publicar abre el diálogo y lo escrito cruza en campos ocultos y se queda en su campo. **Las
+  `refresh()`. **Lo escrito no se pierde:** los campos del hilo son controlados y lo escrito lo lleva la pantalla (`drafts`),
+  porque React 19 devuelve al valor por omisión el formulario que envió y un campo que se cierra se desmonta. Cada respuesta dice
+  qué debe tener un campo (`kept`): lo que se queda, o vacío si se publicó; sin JavaScript, el primer pintado lo trae del estado
+  del servidor. `CountedField` (movido de `src/app/portal/_lib/` a `src/ui/`) y `TextField` aceptan `value` y `onValueChange`.
+  Sin seudónimo, publicar abre el diálogo y lo escrito cruza (`cruza`); con «Cambiar», el diálogo conserva lo de arriba
+  (`conserva`). Guardar o cancelar lo devuelve a su campo, también sin JavaScript. **`Tabs` pinta el mismo árbol antes y después
+  de hidratar** (cada panel es la misma `<section>`, solo cambian sus atributos): si no, el hilo se volvía a montar y perdía el
+  estado de un envío hecho antes de que llegara el JavaScript. **Las
   páginas van por la dirección** (`?comentarios=`, y `?hilo=` con `?respuestas=` para las respuestas de un hilo), no se acumulan,
   y un envío sin JavaScript vuelve a lo que se veía (`view.here`); lo publicado que cae fuera de esta página se dice arriba del
   hilo. El foco va al campo que se abre, a lo publicado, o al comentario que se cerró. Usa `tests/ui/lesson-comments.test.tsx`,

@@ -123,6 +123,12 @@ describe("la acción de los comentarios de la lección", () => {
     expect(state).toMatchObject({ notice: { kind: "throttled" }, kept: { at: { kind: "new" }, body: "Hola" } });
   });
 
+  it("guardar el nombre después de «Cambiar» devuelve lo escrito a su campo", async () => {
+    const state = await lessonCommentAction(previous, form(["do", "name"], [COMMENT_FIELDS.name, "Luz"], [COMMENT_FIELDS.keep, "Hola"]));
+    expect(calls.order).toEqual(["chooseCommentName", "refresh"]);
+    expect(state).toMatchObject({ notice: { kind: "name_saved" }, kept: { at: { kind: "new" }, body: "Hola" } });
+  });
+
   it("un nombre que no sirve no publica nada", async () => {
     once("chooseCommentName", { kind: "invalid", reason: "too_short" });
     const state = await lessonCommentAction(previous, form(["do", "name"], [COMMENT_FIELDS.name, "L"], [COMMENT_FIELDS.carry, "Hola"]));

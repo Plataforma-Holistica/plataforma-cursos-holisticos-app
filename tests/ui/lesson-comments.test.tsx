@@ -270,13 +270,60 @@ describe("lo escrito y el foco no se pierden", () => {
     expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
   });
 
+  it("un nombre que no sirve y después cancelar: lo escrito sigue en su campo", async () => {
+    const action = answers(
+      { ...BLANK, open: { kind: "name", carry: { parentId: null, body: "Hola" } }, kept: { at: { kind: "new" }, body: "Hola" } },
+      { ...BLANK, open: { kind: "name", carry: { parentId: null, body: "Hola" } }, notice: { at: { kind: "name" }, kind: "name_too_short" }, kept: { at: { kind: "name" }, body: "L" } },
+      { ...BLANK, kept: { at: { kind: "new" }, body: "Hola" } },
+    );
+    const { user } = setup({ me: { teacher: false, pseudonym: null } }, action);
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    let dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Nombre o seudónimo" }), "L");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar y publicar" }));
+    await screen.findByText("Tiene que tener al menos 2 caracteres.");
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+    dialog = screen.getByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 3_000 });
+    expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Hola");
+  });
+
+  it("lo escrito en una respuesta vuelve si se cierra y se abre otra vez", async () => {
+    const action = answers({ ...BLANK, open: { kind: "reply", parentId: id(1) } }, { ...BLANK, open: { kind: "edit", id: id(3) } }, { ...BLANK, open: { kind: "reply", parentId: id(1) } });
+    const { user } = setup({ count: 1, items: [thread(1), thread(3, { own: true, revision: 1 })] }, action);
+    await user.click(screen.getAllByRole("button", { name: "Responder" })[0]!);
+    await user.type(await screen.findByRole("textbox", { name: "Responde a Luz M." }), "Mi respuesta");
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+    await screen.findByRole("textbox", { name: "Edita tu comentario" });
+    await user.click(screen.getAllByRole("button", { name: "Responder" })[0]!);
+    expect(await screen.findByRole("textbox", { name: "Responde a Luz M." })).toHaveValue("Mi respuesta");
+  });
+
+  it("el diálogo del nombre va junto al campo, antes del hilo, para que sin JavaScript se vea donde se escribió", async () => {
+    const action = answers({ ...BLANK, open: { kind: "name", carry: { parentId: null, body: "Hola" } }, kept: { at: { kind: "new" }, body: "Hola" } });
+    const { user } = setup({ count: 1, items: [thread(1)], me: { teacher: false, pseudonym: null } }, action);
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Con qué nombre quieres aparecer?" });
+    expect(dialog.compareDocumentPosition(screen.getByRole("article", { name: "Luz M." })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("si el campo ya no se pinta, lo que pasó se dice arriba del hilo", async () => {
+    const action = answers({ ...BLANK, notice: { at: { kind: "new" }, kind: "closed" } });
+    const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })], write: { kind: "gate", answer: "closed" } }, action);
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    expect(await screen.findByText("Por ahora no se pueden publicar comentarios.", { selector: "[role=status] *, [role=status]" })).toBeInTheDocument();
+  });
+
   it("lo publicado vacía el campo de donde salió", async () => {
-    const action = answers({ ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" } });
+    const action = answers({ ...BLANK, written: id(1), notice: { at: { kind: "comment", id: id(1) }, kind: "published" }, kept: { at: { kind: "new" }, body: "" } });
     const { user } = setup({ count: 1, items: [thread(1, { own: true, revision: 1 })] }, action);
     await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Texto 1");
     await user.click(screen.getByRole("button", { name: "Comentar" }));
     await screen.findByText("Tu comentario se publicó.");
     expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("");
+    expect(screen.getByText("0 / 4000")).toBeInTheDocument();
   });
 
   it("al abrir la edición, el foco va a su campo", async () => {

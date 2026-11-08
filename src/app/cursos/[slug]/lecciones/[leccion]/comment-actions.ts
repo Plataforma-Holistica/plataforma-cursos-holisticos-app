@@ -46,7 +46,7 @@ async function outcomeOf(jar: CookieJar, lesson: Lesson, request: Exclude<Commen
     case "delete":
       return deleteOutcome(request.id, await deleteLessonComment(jar, { commentId: request.id, revision: request.revision }), lesson.back);
     case "name": {
-      const next = nameOutcome(await chooseCommentName(jar, request.pseudonym), request.pseudonym ?? "", request.carry, lesson.back);
+      const next = nameOutcome(await chooseCommentName(jar, request.pseudonym), request.pseudonym ?? "", request.carry, lesson.back, request.keep);
       if (next.kind !== "post") return next;
       // Con el nombre ya elegido, lo que cruzaba el diálogo se publica. Pase lo que pase, la página se vuelve a pintar: el nombre ya
       // cambió, y la línea de identidad tiene que decirlo.

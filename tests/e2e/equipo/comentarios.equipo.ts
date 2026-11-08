@@ -19,6 +19,7 @@ const SLUG = "comentarios-e2e";
 let lessonUrl = "";
 let luz: Person;
 let beto: Person;
+let switchBefore = false;
 
 /**
  * Prende o apaga los comentarios. El parámetro tiene sus guardianes (quién lo escribe y qué columnas cambian), que también
@@ -77,6 +78,8 @@ test.beforeAll(async () => {
   // Pide las dos marcas locales que pone `db:login`: sin `comments_accept` nada se acepta, y sin `comments_unfiltered` todo queda en revisión.
   const flags = await ownerQuery<{ flag: string }>("select flag from private.local_flags where flag in ('comments_accept', 'comments_unfiltered') order by flag");
   expect(flags.map((row) => row.flag)).toEqual(["comments_accept", "comments_unfiltered"]);
+  const [before] = await ownerQuery<{ value: unknown }>("select value from public.business_parameters where key = 'COMENTARIOS_ABIERTOS' and canceled_at is null");
+  switchBefore = before?.value === true;
   await setSwitch(true);
   luz = await person();
   beto = await person();
@@ -85,7 +88,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await setSwitch(false);
+  await setSwitch(switchBefore);
 });
 
 async function signIn(page: Page, who: Person, path: string): Promise<void> {

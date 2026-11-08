@@ -1,7 +1,7 @@
 "use client";
 
 import { Ellipsis } from "lucide";
-import { useActionState, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { comments as text } from "@/messages/es/comments";
@@ -60,15 +60,16 @@ const placeKey = (at: Place | { kind: "name" }): string =>
   at.kind === "new" ? "new" : at.kind === "reply" ? `reply:${at.parentId}` : at.kind === "edit" ? `edit:${at.id}` : "name";
 
 /**
- * Los borradores de cada campo. React 19 devuelve al valor por omisión el formulario que envió, y un campo que no se ha tocado
- * desde entonces sigue a su valor por omisión: si ese valor saliera solo del último estado, una respuesta que no habla de ese
- * campo lo vaciaría. Por eso cada campo guarda lo suyo, y solo lo borra el formulario que lo envió (`cleared`).
+ * Lo escrito en cada campo del hilo lo lleva la pantalla, no el formulario: React 19 devuelve al valor por omisión el formulario
+ * que envió, y un campo que se cierra al abrir otra cosa se desmonta. Cada respuesta dice qué debe tener un campo (`kept`): lo
+ * escrito que se queda, o vacío si se publicó. Sin JavaScript, el primer pintado lo trae del estado que mandó el servidor.
  */
 type Drafts = Readonly<Record<string, string>>;
-function nextDrafts(drafts: Drafts, state: CommentsState, cleared: readonly string[]): Drafts {
+function withKept(drafts: Drafts, state: CommentsState): Drafts {
+  if (state.kept === null) return drafts;
   const next: Record<string, string> = { ...drafts };
-  for (const key of cleared) delete next[key];
-  if (state.kept !== null) next[placeKey(state.kept.at)] = state.kept.body;
+  if (state.kept.body === "") delete next[placeKey(state.kept.at)];
+  else next[placeKey(state.kept.at)] = state.kept.body;
   return next;
 }
 
@@ -154,16 +155,16 @@ interface Shared {
   state: CommentsState;
   formAction: (form: FormData) => void;
   pending: boolean;
-  write: WriteStanding;
-  /** Lo que ese campo tiene guardado, o nulo. */
+  standing: WriteStanding;
+  /** Lo escrito en ese campo, o nulo si no se ha escrito nada. */
   draft: (at: Place | { kind: "name" }) => string | null;
-  /** Al enviar: qué borradores se van con la respuesta (con «Cancelar», `onCancel`). */
-  submitting: (keys: string[], onCancel?: string[]) => (event: FormEvent<HTMLFormElement>) => void;
+  /** Lo que se escribe en ese campo. */
+  write: (at: Place | { kind: "name" }) => (value: string) => void;
 }
 
 /** Un comentario o una respuesta (diseño §5.12, `Comment`). */
 function CommentItem({ comment, reply, shared, children }: { comment: CommentView; reply: boolean; shared: Shared; children?: ReactNode }) {
-  const { slug, lessonId, state, formAction, pending, write, draft, submitting } = shared;
+  const { slug, lessonId, state, formAction, pending, standing, draft, write } = shared;
   if (comment.state === "deleted") {
     return (
       <article id={commentAnchor(comment.id)} aria-label={text.deleted} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
@@ -194,7 +195,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         </p>
         {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
         {editing ? (
-          <form action={formAction} onSubmit={submitting([placeKey({ kind: "edit", id: comment.id })])} className="flex flex-col gap-3">
+          <form action={formAction} className="flex flex-col gap-3">
             <LessonFields slug={slug} lessonId={lessonId} />
             <CountedField
               id={`editar-${comment.id}`}
@@ -202,7 +203,9 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
               label={text.composer.editLabel}
               max={COMMENT_MAX}
               warnAt={COMMENT_WARN_AT}
-              defaultValue={draft({ kind: "edit", id: comment.id }) ?? comment.body ?? ""}
+              defaultValue=""
+              value={draft({ kind: "edit", id: comment.id }) ?? comment.body ?? ""}
+              onValueChange={write({ kind: "edit", id: comment.id })}
               error={null}
               multiline
             />
@@ -223,7 +226,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         {!editing && (
           <form action={formAction} className="flex flex-wrap items-center gap-3">
             <LessonFields slug={slug} lessonId={lessonId} />
-            {!reply && canWrite(write) && comment.state === "published" && (
+            {!reply && canWrite(standing) && comment.state === "published" && (
               <Button type="submit" variant="text" name="do" value={`open-reply:${comment.id}`}>
                 {text.reply}
               </Button>
@@ -236,7 +239,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
                   <span className="sr-only">{text.options}</span>
                 </summary>
                 <div className="absolute z-(--z-dropdown) mt-1 flex flex-col rounded-md border border-border bg-surface-1 p-1 shadow-overlay">
-                  {canWrite(write) && (
+                  {canWrite(standing) && (
                     <Button type="submit" variant="text" name="do" value={`ask-edit:${comment.id}`}>
                       {text.edit}
                     </Button>
@@ -278,12 +281,23 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
 
 /** El campo para escribir (diseño §5.12, `CommentComposer`): arriba del hilo, o bajo un comentario para responderle. */
 function Composer({ place, label, shared, identity, onCancel }: { place: Exclude<Place, { kind: "edit" }>; label: string; shared: Shared; identity: ReactNode; onCancel: boolean }) {
-  const { slug, lessonId, state, formAction, pending, draft, submitting } = shared;
+  const { slug, lessonId, state, formAction, pending, draft, write } = shared;
   const id = place.kind === "new" ? "comentar" : `responder-${place.parentId}`;
   return (
-    <form action={formAction} onSubmit={submitting([placeKey(place)])} className="flex flex-col gap-3">
+    <form action={formAction} className="flex flex-col gap-3">
       <LessonFields slug={slug} lessonId={lessonId} />
-      <CountedField id={id} name={COMMENT_FIELDS.body} label={label} max={COMMENT_MAX} warnAt={COMMENT_WARN_AT} defaultValue={draft(place) ?? ""} error={null} multiline />
+      <CountedField
+        id={id}
+        name={COMMENT_FIELDS.body}
+        label={label}
+        max={COMMENT_MAX}
+        warnAt={COMMENT_WARN_AT}
+        defaultValue=""
+        value={draft(place) ?? ""}
+        onValueChange={write(place)}
+        error={null}
+        multiline
+      />
       <Notice notice={noticeAt(state, place)} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-body-s text-text-2">{identity}</div>
@@ -326,16 +340,15 @@ function Identity({ me, teacherName, changeable }: { me: CommentsView["me"]; tea
 
 /** El diálogo del nombre (FL-15 paso 3): vacío, sin el nombre, el alias ni el correo; lo escrito cruza en campos ocultos. */
 function NameDialog({ shared }: { shared: Shared }) {
-  const { slug, lessonId, state, formAction, pending, draft, submitting } = shared;
+  const { slug, lessonId, state, formAction, pending, draft, write } = shared;
   if (state.open.kind !== "name") return null;
-  const carry = state.open.carry;
+  const { carry, keep } = state.open;
   const notice = noticeAt(state, { kind: "name" });
-  // Guardar el nombre publica lo que cruzaba, y su campo se vacía si sale bien; cancelar lo deja en su campo.
-  const carried = carry === null ? [] : [placeKey(carry.parentId === null ? { kind: "new" } : { kind: "reply", parentId: carry.parentId })];
   return (
-    <form action={formAction} onSubmit={submitting(["name", ...carried], ["name"])}>
+    <form action={formAction}>
       <LessonFields slug={slug} lessonId={lessonId} />
       {carry !== null && <input type="hidden" name={COMMENT_FIELDS.carry} value={carry.body} />}
+      {keep !== undefined && <input type="hidden" name={COMMENT_FIELDS.keep} value={keep} />}
       {carry?.parentId != null && <input type="hidden" name={COMMENT_FIELDS.carryParent} value={carry.parentId} />}
       <Dialog
         title={text.name.title}
@@ -357,7 +370,8 @@ function NameDialog({ shared }: { shared: Shared }) {
             label={text.name.label}
             hint={text.name.hint}
             autoComplete="off"
-            defaultValue={draft({ kind: "name" }) ?? ""}
+            value={draft({ kind: "name" }) ?? ""}
+            onValueChange={write({ kind: "name" })}
             error={notice === null ? undefined : text.notice[notice.kind]}
           />
         }
@@ -370,7 +384,7 @@ function NameDialog({ shared }: { shared: Shared }) {
 
 function Thread({ thread, back, cursor, shared, pagedThread, identity }: { thread: CommentThread; back: string; cursor: string | null; shared: Shared; pagedThread: string | null; identity: ReactNode }) {
   const { state } = shared;
-  const replying = state.open.kind === "reply" && state.open.parentId === thread.id && canWrite(shared.write) && thread.state === "published";
+  const replying = state.open.kind === "reply" && state.open.parentId === thread.id && canWrite(shared.standing) && thread.state === "published";
   const last = thread.replies.items.at(-1);
   return (
     <li>
@@ -412,34 +426,35 @@ const openedOn = (open: CommentsState["open"]): string | null =>
 export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
   // Sin JavaScript, el envío vuelve a lo que se estaba viendo: la misma página de comentarios.
   const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${view.here}#${COMMENTS_ANCHOR}`);
-  const [drafts, setDrafts] = useState<Drafts>(() => nextDrafts({}, state, []));
-  const [cleared, setCleared] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<Drafts>(() => withKept({}, state));
   const [seen, setSeen] = useState(state.attempt);
-  // Con cada respuesta, los borradores se ponen al día (React vuelve a pintar antes de mostrar esta vuelta).
+  // Con cada respuesta, lo que dice de un campo (React vuelve a pintar antes de mostrar esta vuelta). El diálogo del nombre
+  // abre siempre vacío, salvo con el nombre que no sirvió.
   if (seen !== state.attempt) {
     setSeen(state.attempt);
-    setDrafts(nextDrafts(drafts, state, cleared));
-    setCleared([]);
+    const next = withKept(drafts, state);
+    const nameKept = state.kept !== null && state.kept.at.kind === "name";
+    setDrafts(state.open.kind === "name" && !nameKept ? Object.fromEntries(Object.entries(next).filter(([key]) => key !== "name")) : next);
   }
-  const submitting = (keys: string[], onCancel: string[] = keys) => (event: FormEvent<HTMLFormElement>) => {
-    const by = (event.nativeEvent as SubmitEvent).submitter;
-    setCleared(by instanceof HTMLButtonElement && by.value === "cancel" ? onCancel : keys);
-  };
   const shared: Shared = {
     slug,
     lessonId,
     state,
     formAction,
     pending,
-    write: view.write,
+    standing: view.write,
     draft: (at) => drafts[placeKey(at)] ?? null,
-    submitting,
+    write: (at) => (value) => setDrafts((current) => ({ ...current, [placeKey(at)]: value })),
   };
   const heading = useRef<HTMLHeadingElement>(null);
   const lastOpened = useRef<string | null>(null);
   const shown = new Set(view.items.flatMap((thread) => [thread.id, ...thread.replies.items.map((reply) => reply.id)]));
   // Lo que se dice de un comentario que no está en esta página (lo nuevo cae en la primera) se dice arriba del hilo.
-  const threadNotice = state.notice !== null && state.notice.at.kind === "comment" && !shown.has(state.notice.at.id) ? state.notice : noticeAt(state, { kind: "thread" });
+  const at = state.notice?.at;
+  const orphan =
+    at !== undefined &&
+    ((at.kind === "comment" && !shown.has(at.id)) || (!canWrite(view.write) && (at.kind === "new" || at.kind === "reply")));
+  const threadNotice = orphan ? state.notice : noticeAt(state, { kind: "thread" });
 
   // El foco después de cada respuesta: al campo que se abrió, al comentario publicado o guardado, o al comentario que se cerró
   // (el botón que se pulsó ya no está). Los diálogos llevan el suyo.
@@ -467,7 +482,10 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
       </h2>
       <Notice notice={threadNotice} />
       {canWrite(view.write) ? (
-        <Composer place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} changeable />} onCancel={false} />
+        <>
+          <Composer place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} changeable />} onCancel={false} />
+          <NameDialog shared={shared} />
+        </>
       ) : (
         <Instead write={view.write} />
       )}
@@ -490,7 +508,6 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
         </ol>
       )}
       {view.next !== null && <TextLink href={moreCommentsHref(back, view.next)}>{text.more}</TextLink>}
-      <NameDialog shared={shared} />
     </div>
   );
 }

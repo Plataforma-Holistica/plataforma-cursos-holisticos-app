@@ -29,10 +29,14 @@ export interface CountedFieldProps {
   optional?: boolean;
   multiline?: boolean;
   readOnly?: boolean;
+  /** Controlado: lo lleva quien lo usa (los comentarios, que no dejan que React vacíe un campo al terminar una acción). */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
-export function CountedField({ id, name, label, max, warnAt, defaultValue, error, optional = false, multiline = false, readOnly = false }: CountedFieldProps) {
-  const [count, setCount] = useState([...defaultValue].length);
+export function CountedField({ id, name, label, max, warnAt, defaultValue, error, optional = false, multiline = false, readOnly = false, value, onValueChange }: CountedFieldProps) {
+  const [typed, setCount] = useState([...defaultValue].length);
+  const count = value === undefined ? typed : [...value].length;
   const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   // React 19 devuelve el formulario a su valor por omisión al terminar la acción (`reset`): el contador lo sigue. El evento llega
   // antes de que el campo cambie, así que se lee en la vuelta siguiente.
@@ -50,7 +54,7 @@ export function CountedField({ id, name, label, max, warnAt, defaultValue, error
     ref: field,
     id,
     name,
-    defaultValue,
+    ...(value === undefined ? { defaultValue } : { value, onChange: (event: { currentTarget: { value: string } }) => onValueChange?.(event.currentTarget.value) }),
     readOnly,
     "aria-required": optional ? undefined : true,
     "aria-invalid": error ? true : undefined,

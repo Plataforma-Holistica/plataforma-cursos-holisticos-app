@@ -66,25 +66,6 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
   const active = items.some((item) => item.id === chosen) ? chosen : (items[0]?.id ?? "");
   const buttons = useRef(new Map<string, HTMLButtonElement>());
 
-  if (!mounted || (items.length === 1 && all.length > 1)) {
-    return (
-      <div className="flex flex-col gap-6">
-        {items.map((item) => (
-          <section
-            key={item.id}
-            aria-labelledby={`${idPrefix}-${item.id}-title`}
-            className={item.narrowOnly === true ? "flex flex-col gap-3 lg:hidden" : "flex flex-col gap-3"}
-          >
-            <h2 id={`${idPrefix}-${item.id}-title`} className="text-h3">
-              {item.label}
-            </h2>
-            {item.panel}
-          </section>
-        ))}
-      </div>
-    );
-  }
-
   function move(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const last = items.length - 1;
     const target = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last }[event.key];
@@ -96,47 +77,60 @@ export function Tabs({ label, items: all, idPrefix }: TabsProps) {
     buttons.current.get(item.id)?.focus();
   }
 
+  // Un solo árbol antes y después de que llegue el JavaScript: cada panel es la misma `<section>` con la misma llave, y lo que
+  // cambia son sus atributos. Así no se vuelve a montar al hidratar, y lo que trajo el servidor (el estado de un envío sin
+  // JavaScript) se conserva.
+  const sections = !mounted || (items.length === 1 && all.length > 1);
+
   return (
-    <div className="flex flex-col gap-4">
-      <div role="tablist" aria-label={label} className="flex gap-6 overflow-x-auto border-b border-border">
-        {items.map((item, index) => {
-          const selected = item.id === active;
-          return (
-            <button
-              key={item.id}
-              ref={(element) => {
-                if (element) buttons.current.set(item.id, element);
-                else buttons.current.delete(item.id);
-              }}
-              type="button"
-              role="tab"
-              id={`${idPrefix}-${item.id}-tab`}
-              aria-selected={selected}
-              aria-controls={`${idPrefix}-${item.id}-panel`}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => setActive(item.id)}
-              onKeyDown={(event) => move(event, index)}
-              className={cx(
-                "-mb-px min-h-touch shrink-0 border-b-2 text-body transition-colors duration-(--duration-fast) ease-standard",
-                selected ? "border-accent text-text" : "border-transparent text-text-2 hover:text-text",
-              )}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
-      {items.map((item) => (
-        <div
-          key={item.id}
-          role="tabpanel"
-          id={`${idPrefix}-${item.id}-panel`}
-          aria-labelledby={`${idPrefix}-${item.id}-tab`}
-          tabIndex={item.hasFocusableContent === true ? undefined : 0}
-          hidden={item.id !== active}
-        >
-          {item.panel}
+    <div className={sections ? "flex flex-col gap-6" : "flex flex-col gap-4"}>
+      {sections ? null : (
+        <div role="tablist" aria-label={label} className="flex gap-6 overflow-x-auto border-b border-border">
+          {items.map((item, index) => {
+            const selected = item.id === active;
+            return (
+              <button
+                key={item.id}
+                ref={(element) => {
+                  if (element) buttons.current.set(item.id, element);
+                  else buttons.current.delete(item.id);
+                }}
+                type="button"
+                role="tab"
+                id={`${idPrefix}-${item.id}-tab`}
+                aria-selected={selected}
+                aria-controls={`${idPrefix}-${item.id}-panel`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActive(item.id)}
+                onKeyDown={(event) => move(event, index)}
+                className={cx(
+                  "-mb-px min-h-touch shrink-0 border-b-2 text-body transition-colors duration-(--duration-fast) ease-standard",
+                  selected ? "border-accent text-text" : "border-transparent text-text-2 hover:text-text",
+                )}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
+      )}
+      {items.map((item) => (
+        <section
+          key={item.id}
+          id={sections ? undefined : `${idPrefix}-${item.id}-panel`}
+          role={sections ? undefined : "tabpanel"}
+          aria-labelledby={sections ? `${idPrefix}-${item.id}-title` : `${idPrefix}-${item.id}-tab`}
+          tabIndex={sections || item.hasFocusableContent === true ? undefined : 0}
+          hidden={sections ? undefined : item.id !== active}
+          className={sections ? cx("flex flex-col gap-3", item.narrowOnly === true && "lg:hidden") : undefined}
+        >
+          {sections ? (
+            <h2 id={`${idPrefix}-${item.id}-title`} className="text-h3">
+              {item.label}
+            </h2>
+          ) : null}
+          {item.panel}
+        </section>
       ))}
     </div>
   );

@@ -19,7 +19,7 @@ export type CommentRequest =
   | { kind: "post"; place: Exclude<Place, { kind: "edit" }>; body: string | null }
   | { kind: "save"; id: string; revision: number; body: string | null }
   | { kind: "delete"; id: string; revision: number }
-  | { kind: "name"; pseudonym: string | null; carry: Carry | null }
+  | { kind: "name"; pseudonym: string | null; carry: Carry | null; keep?: string }
   /** Abrir o cerrar algo. `kept`: lo escrito en el campo desde donde se abrió, que se queda («Cambiar» va dentro del campo). */
   | { kind: "open"; open: Open; kept?: { at: Place; body: string } }
   | { kind: "none" };
@@ -43,6 +43,8 @@ function single(form: FormData, field: string): string | null {
 
 const optional = (form: FormData, field: string): string | null | undefined => (form.getAll(field).length === 0 ? undefined : single(form, field));
 
+const placeOf = (carry: Carry): Exclude<Place, { kind: "edit" }> => (carry.parentId === null ? { kind: "new" } : { kind: "reply", parentId: carry.parentId });
+
 /** De qué lección es el formulario, y a dónde se vuelve. Sin las dos cosas con forma, ninguna. */
 export function readCommentLesson(form: unknown): { slug: string; lessonId: string; back: string } | null {
   if (!(form instanceof FormData)) return null;
@@ -63,10 +65,10 @@ export function readCommentForm(form: unknown): CommentRequest {
   const [, plain, withId, id, withRevision, revisedId, revisionText] = match;
   const body = optional(form, COMMENT_FIELDS.body) ?? null;
   if (plain === "post") return { kind: "post", place: { kind: "new" }, body };
-  if (plain === "cancel") return { kind: "open", open: { kind: "none" } };
+  if (plain === "cancel") return readCancel(form);
   if (plain === "ask-name") {
-    const open = { kind: "name", carry: null } as const;
-    return body === null || body === "" ? { kind: "open", open } : { kind: "open", open, kept: { at: { kind: "new" }, body } };
+    if (body === null || body === "") return { kind: "open", open: { kind: "name", carry: null } };
+    return { kind: "open", open: { kind: "name", carry: null, keep: body }, kept: { at: { kind: "new" }, body } };
   }
   if (withId !== undefined && id !== undefined) {
     switch (withId) {
@@ -88,15 +90,32 @@ export function readCommentForm(form: unknown): CommentRequest {
   return { kind: "none" };
 }
 
+/** Lo que el diálogo del nombre lleva consigo: lo que cruza para publicarse, o lo que conserva del campo de arriba. */
+function readDialogText(form: FormData): { carry: Carry | null; keep: string | undefined } | null {
+  const carried = optional(form, COMMENT_FIELDS.carry);
+  const parent = optional(form, COMMENT_FIELDS.carryParent);
+  const keep = optional(form, COMMENT_FIELDS.keep);
+  if (carried === null || parent === null || keep === null) return null;
+  if (parent !== undefined && (carried === undefined || !IS_ID.test(parent))) return null;
+  return { carry: carried === undefined ? null : { parentId: parent ?? null, body: carried }, keep };
+}
+
 /** Elegir el nombre: el seudónimo y, si cruzaba algo, lo escrito y a qué respondía. */
 function readNameForm(form: FormData): CommentRequest {
   const pseudonym = optional(form, COMMENT_FIELDS.name);
-  const carried = optional(form, COMMENT_FIELDS.carry);
-  const parent = optional(form, COMMENT_FIELDS.carryParent);
-  if (pseudonym === null || carried === null || parent === null) return { kind: "none" };
-  if (parent !== undefined && (carried === undefined || !IS_ID.test(parent))) return { kind: "none" };
-  const carry = carried === undefined ? null : { parentId: parent ?? null, body: carried };
-  return { kind: "name", pseudonym: pseudonym ?? null, carry };
+  const text = readDialogText(form);
+  if (pseudonym === null || text === null) return { kind: "none" };
+  const request = { kind: "name", pseudonym: pseudonym ?? null, carry: text.carry } as const;
+  return text.keep === undefined ? request : { ...request, keep: text.keep };
+}
+
+/** Cancelar. Desde el diálogo del nombre, lo que llevaba vuelve a su campo: sin JavaScript, solo así no se pierde. */
+function readCancel(form: FormData): CommentRequest {
+  const text = readDialogText(form);
+  const open = { kind: "none" } as const;
+  if (text?.carry != null) return { kind: "open", open, kept: { at: placeOf(text.carry), body: text.carry.body } };
+  if (text?.keep !== undefined) return { kind: "open", open, kept: { at: { kind: "new" }, body: text.keep } };
+  return { kind: "open", open };
 }
 
 /** Abrir o cerrar: lo pedido, sin aviso, y lo escrito en el campo desde donde se abrió. */
@@ -139,7 +158,11 @@ const keep = (place: Place, body: string, kind: NoticeKind, refresh: boolean): C
 export function writeOutcome(place: Place, body: string, result: CommentWrite, back: string): CommentOutcome {
   switch (result.kind) {
     case "written":
-      return state({ notice: { at: { kind: "comment", id: result.id }, kind: result.state === "published" ? "published" : "in_review" }, written: result.id }, true);
+      // Su campo queda vacío: lo escrito ya es el comentario.
+      return state(
+        { notice: { at: { kind: "comment", id: result.id }, kind: result.state === "published" ? "published" : "in_review" }, kept: { at: place, body: "" }, written: result.id },
+        true,
+      );
     case "gate":
       switch (result.answer) {
         case "needs_pseudonym":
@@ -155,10 +178,12 @@ export function writeOutcome(place: Place, body: string, result: CommentWrite, b
       }
     case "changed":
       // Lo escrito no vuelve: con la revisión nueva, un segundo clic pisaría lo que cambió la otra pestaña.
-      return state({ notice: { at: place.kind === "edit" ? { kind: "comment", id: place.id } : { kind: "thread" }, kind: "changed" } }, true);
+      return state({ notice: { at: place.kind === "edit" ? { kind: "comment", id: place.id } : { kind: "thread" }, kind: "changed" }, kept: { at: place, body: "" } }, true);
     case "not_found":
       // Al editar, es lo borrado en otra pestaña; al publicar, la lección que ya no se ve.
-      return place.kind === "edit" ? state({ notice: { at: { kind: "thread" }, kind: "gone" } }, true) : state({ notice: { at: { kind: "thread" }, kind: "no_lesson" } }, true);
+      return place.kind === "edit"
+        ? state({ notice: { at: { kind: "thread" }, kind: "gone" }, kept: { at: place, body: "" } }, true)
+        : state({ notice: { at: { kind: "thread" }, kind: "no_lesson" } }, true);
     case "no_access":
     case "suspended_account":
       return state({ notice: { at: { kind: "thread" }, kind: "no_lesson" } }, true);
@@ -193,8 +218,6 @@ export function deleteOutcome(id: string, result: CommentDelete, back: string): 
   }
 }
 
-const placeOf = (carry: Carry): Exclude<Place, { kind: "edit" }> => (carry.parentId === null ? { kind: "new" } : { kind: "reply", parentId: carry.parentId });
-
 /**
  * Lo que sigue a elegir el nombre: si cruzaba algo, publicarlo (`post`); si no, lo que pinta la pantalla. Un nombre que no
  * sirve deja el diálogo abierto con lo escrito; con el veto o cerrado, lo que cruzaba vuelve a su campo.
@@ -204,13 +227,17 @@ export function nameOutcome(
   typed: string,
   carry: Carry | null,
   back: string,
+  kept?: string,
 ): CommentOutcome | { kind: "post"; place: Exclude<Place, { kind: "edit" }>; body: string } {
-  const stay = (kind: NoticeKind): CommentOutcome => state({ open: { kind: "name", carry }, notice: { at: { kind: "name" }, kind }, kept: { at: { kind: "name" }, body: typed } }, false);
+  const open: Open = kept === undefined ? { kind: "name", carry } : { kind: "name", carry, keep: kept };
+  const stay = (kind: NoticeKind): CommentOutcome => state({ open, notice: { at: { kind: "name" }, kind }, kept: { at: { kind: "name" }, body: typed } }, false);
+  // Lo que el diálogo conservaba del campo de arriba («Cambiar») vuelve a su campo.
+  const restored = kept === undefined ? null : { at: { kind: "new" } as const, body: kept };
   const closeWith = (kind: NoticeKind): CommentOutcome =>
-    carry === null ? state({ notice: { at: { kind: "thread" }, kind } }, true) : keep(placeOf(carry), carry.body, kind, true);
+    carry === null ? state({ notice: { at: { kind: "thread" }, kind }, kept: restored }, true) : keep(placeOf(carry), carry.body, kind, true);
   switch (result.kind) {
     case "saved":
-      return carry === null ? state({ notice: { at: { kind: "thread" }, kind: "name_saved" } }, true) : { kind: "post", place: placeOf(carry), body: carry.body };
+      return carry === null ? state({ notice: { at: { kind: "thread" }, kind: "name_saved" }, kept: restored }, true) : { kind: "post", place: placeOf(carry), body: carry.body };
     case "invalid":
       return stay(`name_${result.reason}`);
     case "unavailable":

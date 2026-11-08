@@ -1,4 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
+import { hydrateRoot } from "react-dom/client";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -19,6 +21,42 @@ const ITEMS = [
   { id: "sobre", label: "Sobre esta lección", panel: <p>De qué trata.</p> },
   { id: "notas", label: "Notas", panel: <p>Lo que anotaste.</p> },
 ];
+
+describe("Tabs al llegar el JavaScript", () => {
+  it("los paneles no se vuelven a montar: lo que trajo el servidor (el estado de un envío) se conserva", async () => {
+    const mounts = { count: 0 };
+    function Counted() {
+      useEffect(() => {
+        mounts.count += 1;
+      }, []);
+      return <p>Panel con estado</p>;
+    }
+    const tabs = (
+      <Tabs
+        label="Partes"
+        idPrefix="hidratar"
+        items={[
+          { id: "uno", label: "Uno", panel: <p>Panel uno</p> },
+          { id: "dos", label: "Dos", panel: <Counted /> },
+        ]}
+      />
+    );
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(tabs);
+    document.body.append(container);
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, tabs);
+      });
+      expect(container.querySelector("[role=tablist]")).not.toBeNull();
+      expect(mounts.count).toBe(1);
+    } finally {
+      act(() => (root as ReturnType<typeof hydrateRoot> | null)?.unmount());
+      container.remove();
+    }
+  });
+});
 
 describe("Tabs", () => {
   it("es una lista de pestañas con su nombre; la primera activa y su panel a la vista", async () => {

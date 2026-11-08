@@ -52,16 +52,27 @@ describe("readCommentForm: qué botón se pulsó", () => {
   });
 
   it("«Cambiar» va dentro del campo: lo escrito se queda en él mientras se elige el nombre", () => {
+    // El diálogo lo conserva (`keep`) para devolverlo al campo al guardar o cancelar, también sin JavaScript.
     expect(readCommentForm(form(["do", "ask-name"], [COMMENT_FIELDS.body, "Hola"]))).toEqual({
       kind: "open",
-      open: { kind: "name", carry: null },
+      open: { kind: "name", carry: null, keep: "Hola" },
       kept: { at: NEW, body: "Hola" },
     });
-    expect(askState({ kind: "open", open: { kind: "name", carry: null }, kept: { at: NEW, body: "Hola" } })).toEqual({
+    expect(askState({ kind: "open", open: { kind: "name", carry: null, keep: "Hola" }, kept: { at: NEW, body: "Hola" } })).toEqual({
       ...IDLE_COMMENTS,
-      open: { kind: "name", carry: null },
+      open: { kind: "name", carry: null, keep: "Hola" },
       kept: { at: NEW, body: "Hola" },
     });
+  });
+
+  it("cancelar el diálogo del nombre devuelve lo escrito a su campo, también sin JavaScript", () => {
+    expect(readCommentForm(form(["do", "cancel"], [COMMENT_FIELDS.carry, "Hola"], [COMMENT_FIELDS.carryParent, PARENT]))).toEqual({
+      kind: "open",
+      open: { kind: "none" },
+      kept: { at: REPLY, body: "Hola" },
+    });
+    expect(readCommentForm(form(["do", "cancel"], [COMMENT_FIELDS.keep, "Hola"]))).toEqual({ kind: "open", open: { kind: "none" }, kept: { at: NEW, body: "Hola" } });
+    expect(readCommentForm(form(["do", "name"], [COMMENT_FIELDS.name, "Luz"], [COMMENT_FIELDS.keep, "Hola"]))).toEqual({ kind: "name", pseudonym: "Luz", carry: null, keep: "Hola" });
   });
 
   it("el nombre lleva lo escrito que cruza el diálogo, y a qué respondía", () => {
@@ -121,7 +132,8 @@ describe("writeOutcome: lo que pinta la pantalla después de publicar o editar",
     expect(writeOutcome(NEW, "Hola", { kind: "written", id: ID, state: "published" }, BACK)).toEqual({
       kind: "state",
       refresh: true,
-      state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "published" }, kept: null, written: ID },
+      // Lo publicado deja vacío el campo de donde salió (`kept` con texto vacío).
+      state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "published" }, kept: { at: NEW, body: "" }, written: ID },
     });
     expect(writeOutcome(EDIT, "Hola", { kind: "written", id: ID, state: "in_review" }, BACK)).toMatchObject({
       state: { notice: { at: { kind: "comment", id: ID }, kind: "in_review" }, written: ID },
@@ -162,9 +174,9 @@ describe("writeOutcome: lo que pinta la pantalla después de publicar o editar",
     expect(writeOutcome(EDIT, "Hola", { kind: "changed" }, BACK)).toEqual({
       kind: "state",
       refresh: true,
-      state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "changed" }, kept: null, written: null },
+      state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "changed" }, kept: { at: EDIT, body: "" }, written: null },
     });
-    expect(writeOutcome(EDIT, "Hola", { kind: "not_found" }, BACK)).toMatchObject({ state: { open: { kind: "none" }, notice: { at: { kind: "thread" }, kind: "gone" }, kept: null } });
+    expect(writeOutcome(EDIT, "Hola", { kind: "not_found" }, BACK)).toMatchObject({ state: { open: { kind: "none" }, notice: { at: { kind: "thread" }, kind: "gone" }, kept: { at: EDIT, body: "" } } });
   });
 
   it("si la lección ya no se ve, se dice arriba del hilo", () => {
@@ -229,5 +241,11 @@ describe("nameOutcome: lo que pinta la pantalla después de elegir el nombre", (
       state: { open: { kind: "reply", parentId: PARENT }, notice: { at: REPLY, kind: "banned" }, kept: { at: REPLY, body: "Hola" }, written: null },
     });
     expect(nameOutcome({ kind: "closed" }, "Luz", null, BACK)).toMatchObject({ state: { open: { kind: "none" }, notice: { at: { kind: "thread" }, kind: "closed" }, kept: null } });
+  });
+
+  it("lo que el diálogo conservaba («Cambiar») vuelve a su campo al guardar, y se queda con él si el nombre no sirve", () => {
+    expect(nameOutcome({ kind: "saved", pseudonym: "Luz" }, "Luz", null, BACK, "Hola")).toMatchObject({ state: { notice: { kind: "name_saved" }, kept: { at: NEW, body: "Hola" } } });
+    expect(nameOutcome({ kind: "invalid", reason: "too_short" }, "L", null, BACK, "Hola")).toMatchObject({ state: { open: { kind: "name", carry: null, keep: "Hola" } } });
+    expect(nameOutcome({ kind: "banned" }, "Luz", null, BACK, "Hola")).toMatchObject({ state: { kept: { at: NEW, body: "Hola" } } });
   });
 });

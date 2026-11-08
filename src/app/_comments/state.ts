@@ -11,6 +11,8 @@ export const COMMENT_FIELDS = {
   /** Lo escrito que cruza el diálogo del nombre, y a qué respondía. */
   carry: "cruza",
   carryParent: "cruza-padre",
+  /** Lo escrito en el campo de arriba cuando se abrió el diálogo con «Cambiar»: vuelve a su campo, también sin JavaScript. */
+  keep: "conserva",
 } as const;
 
 /** Dónde se escribe: el campo de arriba, el de responder a un comentario o el de editar uno propio. */
@@ -27,7 +29,8 @@ export type Open =
   | { kind: "reply"; parentId: string }
   | { kind: "edit"; id: string }
   | { kind: "delete"; id: string }
-  | { kind: "name"; carry: Carry | null };
+  /** `keep`: lo que había en el campo de arriba al pulsar «Cambiar»; no se publica, vuelve a su campo. */
+  | { kind: "name"; carry: Carry | null; keep?: string };
 
 export type NoticeKind =
   | "published"
@@ -64,7 +67,7 @@ export interface CommentsState {
   attempt: number;
   open: Open;
   notice: CommentNotice | null;
-  /** Lo escrito que se queda en su campo. */
+  /** Lo que su campo debe tener ahora: lo escrito que se queda, o vacío si se publicó. */
   kept: { at: Place | { kind: "name" }; body: string } | null;
   /** El comentario que se acaba de publicar o guardar: ahí va el foco. */
   written: string | null;
