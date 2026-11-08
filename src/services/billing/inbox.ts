@@ -20,7 +20,8 @@ import {
 // reenviarlo (procesado, ignorado, en espera de T-307, fallido para siempre, repetido ya terminado, o un tipo que no es de cobro), 500 si falló de paso o se acabó el
 // tiempo (Stripe lo reenvía, hasta 3 días en modo real, y el reenvío lo reclama otra vez), 400 con una firma mala o un aviso de cobro que no se entiende, 503 si la
 // base no contestó al guardar. Nada lanza: lo que no se esperaba se reporta. Lo que sigue corriendo después del tope se devuelve aparte, para que la ruta lo deje
-// terminar detrás de la respuesta. El barrido de cada día toma lo que quedó pendiente.
+// terminar detrás de la respuesta. El barrido de cada día toma lo que quedó pendiente. Lo que finanzas reabre en PA-84 se procesa en el momento por el mismo camino
+// (la tercera solicitud; FL-55 paso 3).
 
 export type BillingFailure =
   | "stripe_signature_invalid"
@@ -33,13 +34,15 @@ export type BillingFailure =
   | "billing_event_failed"
   | "billing_event_late"
   | "billing_events_stuck"
-  | "billing_body_too_large";
+  | "billing_body_too_large"
+  | "billing_attempts_exhausted";
 
 export interface BillingStore {
   receive: (event: ReceivedEvent) => Promise<Received>;
   claim: (id: string) => Promise<Claim>;
   claimDue: (limit: number) => Promise<ClaimedEvent[]>;
-  release: (event: ClaimedEvent, code: string) => Promise<void>;
+  /** Contesta si lo soltó: con el décimo intento, la base lo deja fallido. */
+  release: (event: ClaimedEvent, code: string) => Promise<boolean>;
   finish: (event: ClaimedEvent, status: "ignored" | "deferred" | "failed", code: string | null) => Promise<boolean>;
   apply: (event: ClaimedEvent, subscription: SubscriptionSnapshot, payments: readonly PaymentSnapshot[], failure: FailureSnapshot | null) => Promise<Applied>;
   health: () => Promise<{ pending: number; failed: number; deferred: number; oldest_pending_at: string | null }>;
@@ -69,6 +72,14 @@ export interface Delivery {
   rest?: Promise<void>;
 }
 
+/**
+ * Cómo terminó un aviso que finanzas reabrió (PA-84): procesado, ya aplicado por otro aviso, otra vez fallido o de vuelta en la fila con su código, en camino porque
+ * otro lo tomó, cambiado porque otro lo terminó, o todavía pendiente (pasó del tope y sigue detrás de la respuesta, o no se pudo reclamar: lo toma el barrido).
+ */
+export type ManualRun =
+  | { kind: "processed" | "already_applied" | "busy" | "changed" | "still_pending" }
+  | { kind: "failed" | "retry"; code: string };
+
 const BUDGET_MS = 8_000;
 // El barrido deja de reclamar a los 20 s: el último aviso, si es una factura de un pago, puede tardar otros 20 (cuatro lecturas de Stripe en cadena, de hasta
 // 5 s cada una, y 5 s más por cada pago de más), y detrás vienen la revisión y el correo, dentro de los 60 s de la ruta. El correo manda hasta 20 por pasada, de
@@ -76,6 +87,8 @@ const BUDGET_MS = 8_000;
 const SWEEP_BUDGET_MS = 20_000;
 // Lo que cualquiera puede mandar sin firmar nada se cuenta y se reporta una vez por hora, al pasar de esto: así no llena el registro de errores.
 const REJECTIONS_PER_HOUR = 5;
+// Los intentos de un aviso: soltar el último lo deja fallido en la base (`provider_event_release`).
+const MAX_ATTEMPTS = 10;
 
 // Los tipos que la base aplica y los que esperan a T-307 (`private.billing_event_kind`). Lo demás se ignora. El punto de conexión se suscribe solo a estos.
 const SUBSCRIPTION_EVENTS = new Set(["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"]);
@@ -96,6 +109,12 @@ const typeOnly = z.object({ type: z.string() });
 
 type Outcome = "done" | "retry";
 
+// Cómo terminó procesar un aviso. La entrega y el barrido solo miran si vuelve a la fila; reintentar a mano lo dice entero.
+type Run =
+  | { kind: "processed" | "already_applied" | "deferred" | "ignored" }
+  | { kind: "failed" | "retry"; code: string };
+const outcomeOf = (run: Run): Outcome => (run.kind === "retry" ? "retry" : "done");
+
 export function createBillingInbox(deps: BillingInboxDeps) {
   const { store, report } = deps;
 
@@ -105,38 +124,56 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     if (hits === null || hits === REJECTIONS_PER_HOUR + 1) await report(code);
   }
 
-  async function settle(event: ClaimedEvent, read: Read<unknown> & { kind: "retry" | "failed" }): Promise<Outcome> {
+  /** Lo devuelve a la fila. Si era su último intento, la base lo dejó fallido: nadie lo vería hasta el reporte del día. */
+  async function release(event: ClaimedEvent, code: string): Promise<void> {
+    const released = await store.release(event, code);
+    if (released && event.attempt >= MAX_ATTEMPTS) await report("billing_attempts_exhausted");
+  }
+
+  async function settle(event: ClaimedEvent, read: Read<unknown> & { kind: "retry" | "failed" }): Promise<Run> {
     if (read.kind === "failed") {
       await store.finish(event, "failed", read.code);
       await report("billing_event_failed");
-      return "done";
+      return { kind: "failed", code: read.code };
     }
-    await store.release(event, read.code);
+    await release(event, read.code);
     if (read.code === "provider_unavailable") await report("stripe_unavailable");
     if (read.code === "provider_unauthorized") await report("stripe_key_rejected");
-    return "retry";
+    return { kind: "retry", code: read.code };
   }
 
-  async function applied(answer: Applied): Promise<Outcome> {
-    if (answer.outcome === "failed") await report("billing_event_failed");
-    return answer.outcome === "retry" || answer.outcome === "stale" ? "retry" : "done";
+  /** Lo que contestó `billing_apply`. Una factura con pagos que no registró ninguno ya estaba aplicada por otro aviso (FL-55 A1). */
+  async function applied(answer: Applied, payments: number): Promise<Run> {
+    switch (answer.outcome) {
+      case "processed":
+        return { kind: payments > 0 && answer.recorded === 0 ? "already_applied" : "processed" };
+      case "failed":
+        await report("billing_event_failed");
+        return { kind: "failed", code: answer.code };
+      case "retry":
+        return { kind: "retry", code: answer.code };
+      case "stale":
+        return { kind: "retry", code: "stale" };
+      case "deferred":
+        return { kind: "deferred" };
+    }
   }
 
   /** Aplica un aviso que esta entrega ya reclamó. */
-  async function process(stripe: StripeGet, event: ClaimedEvent): Promise<Outcome> {
+  async function process(stripe: StripeGet, event: ClaimedEvent): Promise<Run> {
     const type = event.eventType;
     if (isDeferred(type)) {
       await store.finish(event, "deferred", "refund_waits_t307");
-      return "done";
+      return { kind: "deferred" };
     }
     if (SUBSCRIPTION_EVENTS.has(type)) {
       const subscription = await readSubscription(stripe, event.objectId, deps.now());
       if (subscription.kind !== "ok") return settle(event, subscription);
-      return applied(await store.apply(event, subscription.value, [], null));
+      return applied(await store.apply(event, subscription.value, [], null), 0);
     }
     if (!INVOICE_EVENTS.has(type)) {
       await store.finish(event, "ignored", null);
-      return "done";
+      return { kind: "ignored" };
     }
 
     // Una factura: se lee una vez, y su suscripción y sus pagos a la vez.
@@ -152,7 +189,7 @@ export function createBillingInbox(deps: BillingInboxDeps) {
         unpaid: invoice.value.status !== "paid",
         cycle: invoice.value.billingReason === "subscription_cycle",
       };
-      return applied(await store.apply(event, subscription.value, [], failure));
+      return applied(await store.apply(event, subscription.value, [], failure), 0);
     }
     if (invoice.value.status !== "paid") return settle(event, { kind: "failed", code: "invoice_not_paid" });
     // Una factura de 0 no tiene cobro: queda a la vista (decisión 7 de Sergio del 2026-11-06).
@@ -165,18 +202,29 @@ export function createBillingInbox(deps: BillingInboxDeps) {
     ]);
     if (subscription.kind !== "ok") return settle(event, subscription);
     if (payments.kind !== "ok") return settle(event, payments);
-    return applied(await store.apply(event, subscription.value, payments.value, null));
+    return applied(await store.apply(event, subscription.value, payments.value, null), payments.value.length);
   }
 
   /** Procesa un aviso reclamado, sin lanzar. Un error de la base o de quien sea deja el aviso en la fila. */
-  async function processSafely(stripe: StripeGet, event: ClaimedEvent): Promise<Outcome> {
+  async function processSafely(stripe: StripeGet, event: ClaimedEvent): Promise<Run> {
     try {
       return await process(stripe, event);
     } catch {
       await report("billing_base_error");
-      await store.release(event, "base_error").catch(() => undefined);
-      return "retry";
+      await release(event, "base_error").catch(() => undefined);
+      return { kind: "retry", code: "base_error" };
     }
+  }
+
+  /** Corre el trabajo hasta el tope de una entrega: lo que pase del tope sigue aparte. */
+  async function withinBudget<T>(work: Promise<T>): Promise<{ done: true; value: T } | { done: false }> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), deps.budgetMs ?? BUDGET_MS);
+    });
+    const first = await Promise.race([work.then((value) => ({ value })), late]);
+    clearTimeout(timer);
+    return first === "late" ? { done: false } : { done: true, value: first.value };
   }
 
   /** Una entrega de Stripe: el cuerpo crudo y la cabecera `Stripe-Signature`. */
@@ -235,21 +283,45 @@ export function createBillingInbox(deps: BillingInboxDeps) {
       await report("billing_base_error");
       return { status: 503 };
     }
-    if (claim.outcome === "finished") return { status: 200 };
+    if (claim.outcome === "finished") {
+      // Un décimo intento que se cortó sin soltarse: lo agotó este reclamo.
+      if (claim.exhausted === true) await report("billing_attempts_exhausted");
+      return { status: 200 };
+    }
     if (claim.outcome !== "claimed") return { status: 500 };
 
     const work = processSafely(stripe, claim.event);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<"late">((resolve) => {
-      timer = setTimeout(() => resolve("late"), deps.budgetMs ?? BUDGET_MS);
-    });
-    const first = await Promise.race([work, late]);
-    clearTimeout(timer);
-    if (first !== "late") return { status: first === "done" ? 200 : 500 };
+    const first = await withinBudget(work);
+    if (first.done) return { status: outcomeOf(first.value) === "done" ? 200 : 500 };
     // Se acabó el tiempo: Stripe lo reenvía, y lo que sigue termina detrás de la respuesta. Lo que escriba lo cuida el intento: un reenvío que lo reclame después no se
     // cruza con este.
     await report("billing_event_late");
     return { status: 500, rest: work.then(() => undefined) };
+  }
+
+  /**
+   * Un aviso que finanzas acaba de reabrir (`provider_event_retry` contestó `retried`): se reclama por su id y se procesa ya, como sistema, con el tope de una entrega.
+   * Stripe no lo reenvía (ya recibió 200), así que lo que pase del tope sigue aparte, detrás de la respuesta; si tampoco termina, lo toma el barrido.
+   */
+  async function processNow(id: string): Promise<{ result: ManualRun; rest?: Promise<void> }> {
+    const stripe = deps.stripe();
+    if (stripe === null) return { result: { kind: "still_pending" } };
+    let claim: Claim;
+    try {
+      claim = await store.claim(id);
+    } catch {
+      await report("billing_base_error");
+      return { result: { kind: "still_pending" } };
+    }
+    // Entre reabrirlo y reclamarlo lo tomó una entrega o el barrido (reabrir lo deja listo para ya): sigue en camino, sin gastar otro intento.
+    if (claim.outcome === "busy") return { result: { kind: "busy" } };
+    if (claim.outcome !== "claimed") return { result: { kind: "changed" } };
+    const work = processSafely(stripe, claim.event);
+    const first = await withinBudget(work);
+    if (!first.done) return { result: { kind: "still_pending" }, rest: work.then(() => undefined) };
+    const run = first.value;
+    if (run.kind === "failed" || run.kind === "retry") return { result: run };
+    return { result: { kind: run.kind === "already_applied" ? "already_applied" : "processed" } };
   }
 
   /** El barrido de respaldo: lo pendiente con su espera cumplida, hasta su tope. Contesta si pudo hablar con la base. Reporta lo que se quedó atorado. */
@@ -280,5 +352,5 @@ export function createBillingInbox(deps: BillingInboxDeps) {
   /** Un cuerpo de más del tope de la ruta: no se leyó, y cuenta como una firma mala. */
   const noteOversizedBody = (): Promise<void> => noteRejection("billing_body_too_large");
 
-  return { receiveStripeEvent, sweepBillingEvents, noteOversizedBody };
+  return { receiveStripeEvent, sweepBillingEvents, noteOversizedBody, processNow };
 }

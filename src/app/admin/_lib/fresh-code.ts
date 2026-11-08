@@ -2,6 +2,7 @@ import type { FreshCode } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import type { FinanceCode } from "@/services/anomalies/anomalies";
+import type { BillingCode } from "@/services/billing/billing";
 import type { CatalogCode } from "@/services/catalog/catalog";
 import type { LegalCode } from "@/services/legal/legal-admin";
 import type { PeriodsCode } from "@/services/periods/periods";
@@ -34,7 +35,10 @@ export type CodeOutcome = Leave | { kind: "failed"; reason: "wrong_code" | "unav
  * quien la guarda no dejó, se va a esa misma página: decide su guarda, y recargar no reenvía
  * un código.
  */
-export function givenCodeOutcome(result: FreshCode | CatalogCode | FinanceCode | PeriodsCode | LegalCode | TeacherCode, page: string): CodeOutcome {
+export function givenCodeOutcome(
+  result: FreshCode | CatalogCode | FinanceCode | PeriodsCode | LegalCode | TeacherCode | BillingCode,
+  page: string,
+): CodeOutcome {
   const toPage: Leave = { kind: "leave", to: page, notice: null };
   switch (result.kind) {
     case "verified":

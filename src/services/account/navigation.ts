@@ -34,6 +34,8 @@ export const ROUTES = {
   adminTeachers: "/admin/maestros",
   /** PA-78, los periodos: cuelga de administración y pide finanzas. El panel de uno y su cierre, `periodPath`. */
   periods: "/admin/periodos",
+  /** PA-84, los avisos de cobro sin procesar (T-303): cuelga de administración y pide finanzas. */
+  billingEvents: "/admin/avisos-cobro",
   /** PA-89, los textos legales: cuelga de administración y pide configuración. Una versión, `legalVersionPath`. */
   legalTexts: "/admin/textos-legales",
   /**

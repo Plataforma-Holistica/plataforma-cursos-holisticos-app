@@ -14,6 +14,12 @@ const COPY: MailCopy = {
     reviewLabel: "Ver",
   },
   receipt: { subject: "Recibo", paid: (cents, plan, at) => `Pagaste ${cents} del plan ${plan} el ${at}`, thanks: "Gracias <3", accountLabel: "Mi cuenta" },
+  billingAlert: {
+    subject: "Un aviso no se procesó",
+    failed: (count, type, at) => `${count} de ${type} desde ${at}`,
+    action: "Revisa <la cola>",
+    linkLabel: "Ver los avisos",
+  },
 };
 
 describe("el aviso de CLABE", () => {
@@ -62,5 +68,30 @@ describe("el recibo de un cobro (CO-03)", () => {
     null,
   ])("con parámetros sin forma (%j) no arma nada", (params) => {
     expect(renderMail("CO-03", params, SITE, COPY)).toBeNull();
+  });
+});
+
+describe("el aviso a finanzas (CO-22)", () => {
+  const PARAMS = { count: 3, first_type: "invoice.paid", first_at: "2026-11-07T18:00:00+00:00" };
+
+  it("dice cuántos, el tipo y la hora del primero, y enlaza a la cola", () => {
+    const mail = renderMail("CO-22", PARAMS, SITE, COPY);
+    expect(mail?.subject).toBe("Un aviso no se procesó");
+    expect(mail?.text).toContain("3 de invoice.paid desde 2026-11-07T18:00:00+00:00");
+    expect(mail?.text).toContain(`Ver los avisos: ${SITE}/admin/avisos-cobro`);
+    expect(mail?.html).toContain(`href="${SITE}/admin/avisos-cobro"`);
+    expect(mail?.html).toContain("Revisa &lt;la cola&gt;");
+  });
+
+  it.each([
+    {},
+    { ...PARAMS, count: 0 },
+    { ...PARAMS, count: "3" },
+    { ...PARAMS, first_type: "" },
+    { ...PARAMS, first_at: "ayer" },
+    { ...PARAMS, profile_id: "a0000000-0000-4000-8000-000000000001" },
+    null,
+  ])("con parámetros sin forma (%j) no arma nada", (params) => {
+    expect(renderMail("CO-22", params, SITE, COPY)).toBeNull();
   });
 });

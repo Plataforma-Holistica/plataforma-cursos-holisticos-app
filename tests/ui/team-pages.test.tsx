@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   cookieReader: vi.fn(),
   sessionEmail: vi.fn(),
   teacherStanding: vi.fn(() => Promise.resolve({ kind: "teacher", claims: {}, standing: { state: "none" } })),
+  billingQueueCount: vi.fn((): Promise<{ kind: string; count?: number }> => Promise.resolve({ kind: "none" })),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
@@ -40,6 +41,8 @@ vi.mock("@/services/teachers/teacher-admin", () => ({ teacherRoster: vi.fn() }))
 vi.mock("@/app/admin/_practicas/actions", () => ({ catalogCodeAction: vi.fn(), practicesAction: vi.fn(), levelsAction: vi.fn() }));
 vi.mock("@/app/admin/_revision/actions", () => ({ reviewCodeAction: vi.fn(), approveAction: vi.fn(), lessonVideoAction: vi.fn() }));
 vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));
+vi.mock("@/app/admin/_avisos/actions", () => ({ billingCodeAction: vi.fn(), billingEventsAction: vi.fn() }));
+vi.mock("@/services/billing/billing", () => ({ billingQueue: vi.fn(), billingQueueCount: mocks.billingQueueCount }));
 vi.mock("@/app/admin/_alertas/actions", () => ({ alertsCodeAction: vi.fn(), alertsAction: vi.fn() }));
 vi.mock("@/services/anomalies/anomalies", () => ({ anomalyAlerts: vi.fn() }));
 vi.mock("@/services/periods/periods", () => ({ financePeriods: vi.fn(), financePeriod: vi.fn(), financeClose: vi.fn() }));
@@ -106,7 +109,7 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance", "content", "moderation"] });
     render(await AdminHomePage());
     const nav = within(screen.getByRole("navigation", { name: "Administración" }));
-    expect(menuOf(nav)).toEqual(["/admin", "/admin/revision", "/admin/maestros", "/admin/practicas", "/admin/periodos", "/admin/alertas", "/cuenta", "/inicio"]);
+    expect(menuOf(nav)).toEqual(["/admin", "/admin/revision", "/admin/maestros", "/admin/practicas", "/admin/periodos", "/admin/avisos-cobro", "/admin/alertas", "/cuenta", "/inicio"]);
     // Un grupo por capacidad con pantallas, con su nombre: moderación todavía no tiene ninguna. Cada
     // cosa va dos veces: en la hoja del teléfono (cerrada) y en la columna.
     expect(nav.getAllByRole("list", { name: "Contenido" })).toHaveLength(2);
@@ -121,13 +124,39 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
   it.each<[string, string[], string[]]>([
     ["config", ["support", "config"], ["/admin/equipo", "/admin/textos-legales"]],
     ["content", ["support", "content"], ["/admin/revision", "/admin/maestros", "/admin/practicas"]],
-    ["finance", ["finance"], ["/admin/periodos", "/admin/alertas"]],
+    ["finance", ["finance"], ["/admin/periodos", "/admin/avisos-cobro", "/admin/alertas"]],
     ["ninguna con pantallas", ["support", "moderation"], []],
   ])("con %s, el menú ofrece solo sus secciones", async (_, capabilities, sections) => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities });
     render(await AdminHomePage());
     const nav = within(screen.getByRole("navigation", { name: "Administración" }));
     expect(menuOf(nav)).toEqual(["/admin", ...sections, "/cuenta", "/inicio"]);
+  });
+
+  it("con finanzas, la tarjeta de los avisos de cobro dice cuántos fallaron y lleva a la cola; con alguno, ya no dice que no hay pendientes", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance"] });
+    mocks.billingQueueCount.mockResolvedValueOnce({ kind: "count", count: 3 });
+    const { container } = render(await AdminHomePage());
+    const main = within(screen.getByRole("main"));
+    expect(mocks.billingQueueCount).toHaveBeenCalledWith(claims, ["finance"]);
+    expect(main.getByText("Avisos de cobro sin procesar")).toBeVisible();
+    expect(main.getByText("3")).toBeVisible();
+    expect(main.getByRole("link", { name: "Ver los avisos de cobro" })).toHaveAttribute("href", "/admin/avisos-cobro");
+    expect(main.queryByText("No tienes pendientes.")).not.toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin ninguno fallido sigue sin pendientes; si no se pudo leer, lo dice y no promete nada", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance"] });
+    mocks.billingQueueCount.mockResolvedValueOnce({ kind: "count", count: 0 });
+    const { unmount } = render(await AdminHomePage());
+    expect(screen.getByText("No tienes pendientes.")).toBeVisible();
+    expect(screen.getByText("0")).toBeVisible();
+    unmount();
+    mocks.billingQueueCount.mockResolvedValueOnce({ kind: "unavailable" });
+    render(await AdminHomePage());
+    expect(screen.getByText("No se pudo leer cuántos hay.")).toBeVisible();
+    expect(screen.queryByText("No tienes pendientes.")).not.toBeInTheDocument();
   });
 
   it("una capacidad que el catálogo no sabe nombrar no se pinta a medias", async () => {

@@ -3,18 +3,21 @@ import { requireAdmin } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { sessionEmail } from "@/services/account/account";
+import { billingQueueCount } from "@/services/billing/billing";
 import { ROUTES } from "@/services/account/navigation";
 import { CAPABILITIES } from "@/services/account/team";
 import { teacherStanding } from "@/services/teachers/teachers";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
+import { StatTile } from "@/ui/stat-tile";
 import { TextLink } from "@/ui/text-link";
 
 import { AdminFrame } from "./_lib/frame";
 import { ForbiddenScreen } from "./_lib/states";
 
 // PA-60 · Inicio de administración (`/admin`), en su versión mínima: el menú lateral (T-614,
-// parte 6) y, sin tarjetas todavía (llegan con cada tarea; decisión de Sergio del 2026-11-05),
-// el saludo y con qué capacidades entró. Existe para que quien es del equipo tenga a dónde
+// parte 6), el saludo, con qué capacidades entró y las tarjetas que ya existen (llegan con cada
+// tarea; decisión de Sergio del 2026-11-05). La primera es la de los avisos de cobro sin procesar
+// (T-303), solo para finanzas, con cuántos fallaron. Existe para que quien es del equipo tenga a dónde
 // llegar después de dar su código.
 //
 // Quién es del equipo lo dice la base, por la guarda: una capacidad, su factor atado y una
@@ -39,6 +42,8 @@ export default async function AdminHomePage() {
   const invited = teacher.kind === "teacher" && (teacher.standing.state === "invited" || teacher.standing.state === "invited_unproven");
   // En el orden de siempre, y solo las que el catálogo sabe nombrar.
   const capabilities = CAPABILITIES.filter((capability) => step.capabilities.includes(capability));
+  const billing = await billingQueueCount(step.claims, step.capabilities);
+  const pendingWork = billing.kind === "count" && billing.count > 0;
 
   return (
     <AdminFrame path={ROUTES.admin} capabilities={capabilities}>
@@ -46,8 +51,26 @@ export default async function AdminHomePage() {
         <h1 className="text-h1">{text.admin.title}</h1>
         <div className="flex flex-col gap-2 text-text-2">
           {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
-          <p>{text.admin.noPending}</p>
+          {billing.kind !== "unavailable" && !pendingWork && <p>{text.admin.noPending}</p>}
         </div>
+        {billing.kind !== "none" && (
+          <section aria-labelledby="inicio-pendientes" className="flex flex-col gap-3">
+            <h2 id="inicio-pendientes" className="text-h3">
+              {text.admin.pendingTitle}
+            </h2>
+            <div className="flex flex-col gap-2">
+              <StatTile
+                label={text.admin.billingCard}
+                value={billing.kind === "count" ? String(billing.count) : null}
+                context={billing.kind === "unavailable" ? text.admin.billingCardUnavailable : undefined}
+                {...(pendingWork ? { tone: "attention" as const } : {})}
+              />
+              <p className="text-body-s">
+                <TextLink href={ROUTES.billingEvents}>{text.admin.billingCardLink}</TextLink>
+              </p>
+            </div>
+          </section>
+        )}
         <section className="flex flex-col gap-2">
           <h2 className="text-h3">{text.admin.capabilitiesTitle}</h2>
           <ul className="list-disc pl-6">

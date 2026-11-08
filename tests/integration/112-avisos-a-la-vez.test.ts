@@ -17,8 +17,11 @@ let owner: Client;
 let ana: TestUser;
 let beto: TestUser;
 let openedOctober = false;
+// Desde la tercera solicitud de T-303, un aviso fallido le deja CO-22 a quien tenga finanzas en la base local: se quita lo de la corrida.
+let started: string;
 
 beforeAll(async () => {
+  started = (await ownerQuery<{ now: string }>("select clock_timestamp()::text as now"))[0]!.now;
   owner = await connect();
   await ownerQuery("grant app_service to postgres with set true, inherit false");
   openedOctober = (await ownerQuery<{ created: boolean }>("select private.open_period(202610) as created"))[0]!.created;
@@ -32,6 +35,7 @@ afterAll(async () => {
     `do $$ begin
        set local session_replication_role = replica;
        delete from private.mail_outbox where template = 'CO-03' and profile_id = any('{${people.map((person) => person.id).join(",")}}'::uuid[]);
+       delete from private.mail_outbox where template = 'CO-22' and created_at >= '${started}'::timestamptz;
      end $$`,
   );
   if (people.length > 0) await deleteTestUsers(people);

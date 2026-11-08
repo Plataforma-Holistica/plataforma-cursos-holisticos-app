@@ -224,7 +224,8 @@ select is(pruebas.reclama(pruebas.id_de('evt_84_4')) - 'id', '{"outcome": "finis
   'un reenvío no lo vuelve a intentar, aunque le queden intentos');
 select pruebas.recibe('evt_84_5', 'invoice.paid', 'in_84_5');
 select pruebas.intentos('evt_84_5', 10);
-select is(pruebas.reclama(pruebas.id_de('evt_84_5')) - 'id', '{"outcome": "finished", "status": "failed"}'::jsonb,
+-- Desde la tercera solicitud, el reclamo que lo agota lo dice, para que la entrega lo reporte (la 86).
+select is(pruebas.reclama(pruebas.id_de('evt_84_5')) - 'id', '{"outcome": "finished", "status": "failed", "exhausted": true}'::jsonb,
   'con diez intentos, el reenvío tampoco lo toma: queda fallido');
 select is((pruebas.aviso('evt_84_5')).last_error, 'attempts_exhausted', 'por sus intentos');
 -- Nadie reintenta ni resuelve el aviso de su propio pago.
