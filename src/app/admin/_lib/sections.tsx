@@ -4,6 +4,7 @@ import type { VerifiedClaims } from "@/services/account/account";
 import type { Capability } from "@/services/account/team";
 
 import { AlertsSection } from "../_alertas/section";
+import { BillingEventsSection } from "../_avisos/section";
 import { TeamSection } from "../_equipo/section";
 import { TeacherSection, TeachersSection } from "../_maestros/section";
 import { CloseSection, PayoutsSection, PeriodSection, PeriodsSection } from "../_periodos/section";
@@ -46,6 +47,8 @@ const SECTIONS: Record<string, AdminSection> = {
   alertas: { capability: "finance", render: (claims) => <AlertsSection claims={claims} /> },
   // PA-78, los periodos (T-605). El panel de uno y su cierre, abajo.
   periodos: { capability: "finance", render: (claims) => <PeriodsSection claims={claims} /> },
+  // PA-84, los avisos de cobro sin procesar (T-303): reintentar y resolver a mano.
+  "avisos-cobro": { capability: "finance", render: (claims) => <BillingEventsSection claims={claims} /> },
   // PA-89, los textos legales (T-110). El texto de una versión, abajo.
   "textos-legales": { capability: "config", render: (claims) => <LegalSection claims={claims} /> },
 };

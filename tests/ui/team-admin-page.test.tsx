@@ -35,6 +35,8 @@ vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }
 // prueba en catalog-admin-page.test.tsx).
 vi.mock("@/services/catalog/catalog", () => ({ catalogLists: vi.fn() }));
 vi.mock("@/services/teachers/teacher-admin", () => ({ teacherRoster: vi.fn() }));
+vi.mock("@/app/admin/_avisos/actions", () => ({ billingCodeAction: vi.fn(), billingEventsAction: vi.fn() }));
+vi.mock("@/services/billing/billing", () => ({ billingQueue: vi.fn(), billingQueueCount: vi.fn(() => Promise.resolve({ kind: "none" })) }));
 vi.mock("@/app/admin/_practicas/actions", () => ({ catalogCodeAction: vi.fn(), practicesAction: vi.fn(), levelsAction: vi.fn() }));
 vi.mock("@/app/admin/_revision/actions", () => ({ reviewCodeAction: vi.fn(), approveAction: vi.fn(), lessonVideoAction: vi.fn() }));
 vi.mock("@/services/review/review", () => ({ reviewQueue: vi.fn() }));

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { Client } from "pg";
@@ -1627,6 +1627,53 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await page.reload();
       expect(await auditRows()).toBe(audited);
       expect(await exclusionsOf(flagged.id)).toHaveLength(2);
+    });
+  });
+
+  // PA-84, los avisos de cobro (T-303, tercera solicitud). Van aquí porque reintentar y resolver escriben en la auditoría y usan a la misma persona con Finanzas.
+  // El aviso fallido lo escribe el dueño, y el extremo a extremo no habla con Stripe: reintentar lo deja en camino.
+  const BILLING = "/admin/avisos-cobro";
+  const failedEvent = async (tag: string) =>
+    (
+      await ownerQuery<{ id: string }>(
+        `insert into private.provider_events (provider, provider_event_id, event_type, livemode, api_version, object_id, occurred_at, status, attempts, last_error)
+         values ('stripe', $1, 'invoice.paid', false, '2026-10-28.endive', $2, now() - interval '1 hour', 'failed', 1, 'zero_invoice') returning id`,
+        [`evt_e2e_${tag}`, `in_e2e_${tag}`],
+      )
+    )[0]!.id;
+  const eventRow = (id: string) =>
+    ownerQuery<{ status: string; attempts: number; resolution_note: string | null }>(
+      "select status, attempts, resolution_note from private.provider_events where id = $1",
+      [id],
+    );
+
+  test("avisos de cobro con JavaScript: la cola dice el código en palabras, y reintentar lo deja en camino", async ({ page }) => {
+    const tag = randomUUID().slice(0, 8);
+    const id = await failedEvent(tag);
+    await enterAdmin(page, ana, BILLING);
+    const row = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+    await expect(row.getByText("Es una factura de 0: no tiene cobro que registrar.")).toBeVisible();
+    await row.getByRole("button", { name: `Reintentar el aviso evt_e2e_${tag}` }).click();
+    await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
+    expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
+  test("avisos de cobro sin JavaScript: resolver a mano en dos pasos, y recargar no reenvía", async ({ browser }) => {
+    const tag = randomUUID().slice(0, 8);
+    const id = await failedEvent(tag);
+    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+      await enterAdmin(page, ana, BILLING);
+      await page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` }).getByRole("button", { name: `Resolver a mano el aviso evt_e2e_${tag}` }).click();
+      await expect(page).toHaveURL(`${BILLING}#bloque-avisos-lista`);
+      const asked = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+      await asked.getByLabel("Qué se hizo").fill("Factura de prueba del extremo a extremo.");
+      await asked.getByRole("button", { name: "Sí, resolverlo" }).click();
+      await expect(page.getByText("Resuelto a mano.")).toBeVisible();
+      expect(await eventRow(id)).toEqual([{ status: "resolved", attempts: 1, resolution_note: "Factura de prueba del extremo a extremo." }]);
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
     });
   });
 

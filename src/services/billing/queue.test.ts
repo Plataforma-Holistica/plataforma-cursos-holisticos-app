@@ -103,18 +103,18 @@ describe("leer la cola", () => {
 describe("la cuenta del inicio", () => {
   it("solo para quien tiene finanzas: los demás no la leen", async () => {
     const finance = serviceWith();
-    expect(await finance.service.billingQueueCount(claims, standingOf(["finance"]))).toEqual({ kind: "count", count: 3 });
+    expect(await finance.service.billingQueueCount(claims, ["finance"])).toEqual({ kind: "count", count: 3 });
     const other = serviceWith();
-    expect(await other.service.billingQueueCount(claims, standingOf(["content"]))).toEqual({ kind: "none" });
+    expect(await other.service.billingQueueCount(claims, ["content"])).toEqual({ kind: "none" });
     expect(other.calls).toEqual([]);
   });
 
   it("si no se pudo leer, lo dice y se reporta; nula también", async () => {
     const down = serviceWith({ count: "throws" });
-    expect(await down.service.billingQueueCount(claims, standingOf(["finance"]))).toEqual({ kind: "unavailable" });
+    expect(await down.service.billingQueueCount(claims, ["finance"])).toEqual({ kind: "unavailable" });
     expect(down.reported).toEqual(["billing_queue_unavailable"]);
     const empty = serviceWith({ count: null });
-    expect(await empty.service.billingQueueCount(claims, standingOf(["finance"]))).toEqual({ kind: "unavailable" });
+    expect(await empty.service.billingQueueCount(claims, ["finance"])).toEqual({ kind: "unavailable" });
   });
 });
 

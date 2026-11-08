@@ -3,7 +3,7 @@ import "server-only";
 import type { CookieJar, CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 
-import { holds, type CodeGiven, type TeamCheck, type TeamStanding } from "@/services/account/team";
+import { holds, type CodeGiven, type TeamCheck } from "@/services/account/team";
 import type { FailureCode } from "@/services/error-reporting/server";
 
 import type { ManualRun } from "./inbox";
@@ -157,9 +157,9 @@ export function createBillingQueue(deps: { report: (code: FailureCode) => Promis
     return { kind: "unavailable" };
   }
 
-  /** La tarjeta del inicio de administración (PA-60): cuántos fallidos. Quien no tiene finanzas no la lee. */
-  async function billingQueueCount(claims: VerifiedClaims, standing: TeamStanding): Promise<QueueCount> {
-    if (!holds(standing, "finance")) return { kind: "none" };
+  /** La tarjeta del inicio de administración (PA-60): cuántos fallidos. Quien no tiene finanzas (según la guarda de esa página) no la lee. */
+  async function billingQueueCount(claims: VerifiedClaims, capabilities: readonly string[]): Promise<QueueCount> {
+    if (!capabilities.includes("finance")) return { kind: "none" };
     let count: number | null;
     try {
       count = await store.count(claims);

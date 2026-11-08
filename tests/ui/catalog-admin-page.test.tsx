@@ -20,6 +20,8 @@ vi.mock("@/app/_lib/request-context", () => ({ cookieReader: vi.fn() }));
 vi.mock("@/services/account/account", () => ({ teamRoster: vi.fn() }));
 vi.mock("@/services/catalog/catalog", () => ({ catalogLists: mocks.catalogLists }));
 vi.mock("@/services/teachers/teacher-admin", () => ({ teacherRoster: vi.fn() }));
+vi.mock("@/app/admin/_avisos/actions", () => ({ billingCodeAction: vi.fn(), billingEventsAction: vi.fn() }));
+vi.mock("@/services/billing/billing", () => ({ billingQueue: vi.fn(), billingQueueCount: vi.fn(() => Promise.resolve({ kind: "none" })) }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 vi.mock("@/app/admin/_equipo/actions", () => ({
   freshCodeAction: vi.fn(),
