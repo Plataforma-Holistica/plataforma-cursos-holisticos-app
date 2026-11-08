@@ -670,6 +670,35 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
     expect(Math.max(...times)).toBeLessThan(SERVER_STATEMENT_MS);
   });
 
+  it("registrar una comparación con Stripe a la escala cabe en el tope de una sentencia del servidor (T-303, cuarta solicitud)", async () => {
+    // El mes de la escala no ha terminado: se registra contra el anterior, con 13 000 cargos que el libro no tiene ahí. Es lo más caro: validar y clasificar
+    // cada cargo, y guardar las primeras 200 diferencias. La lista se arma en la misma sentencia (el servidor la manda hecha). Se deshace al terminar.
+    await owner.query("begin");
+    try {
+      await owner.query("set local statement_timeout = '10s'");
+      await owner.query("select set_config('app.actor_kind', 'system', true)");
+      const previous = Number((await one<{ p: string }>("select private.period_plus($1, -1)::text as p", [period])).p);
+      await owner.query("select private.open_period($1)", [previous]);
+      const start = performance.now();
+      const recorded = await one<{ r: { outcome: string; differences: number } }>(
+        `select private.billing_reconciliation_record(p.period_id, false, extract(epoch from p.starts_at)::bigint, extract(epoch from p.ends_at)::bigint, true,
+                  (select jsonb_agg(jsonb_build_object('id', 'ch_escala_previo_' || s, 'status', 'succeeded', 'captured', true, 'refunded', false,
+                                                       'currency', 'mxn', 'livemode', false, 'created', extract(epoch from p.starts_at)::bigint + s,
+                                                       'amount_captured', 34900))
+                   from generate_series(1, $2) s)) as r
+         from public.payout_periods p where p.period_id = $1`,
+        [previous, STUDENTS],
+      );
+      const took = ms(start);
+      report.reconciliation = { record_ms: took, charges: STUDENTS, differences: recorded.r.differences };
+      expect(recorded.r.outcome).toBe("recorded");
+      expect(recorded.r.differences).toBe(STUDENTS);
+      expect(took).toBeLessThan(SERVER_STATEMENT_MS);
+    } finally {
+      await owner.query("rollback");
+    }
+  });
+
   it("el ensayo y el cierre, como los correrá el servidor: se mide si caben", async () => {
     // El cierre va en orden desde el arranque, y no con alertas abiertas: las que dejó la noche normal
     // se revisan antes, como lo haría finanzas.

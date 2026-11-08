@@ -137,13 +137,14 @@ as $$
 $$;
 revoke all on function private.billing_reconciliation_ok(uuid) from public;
 
--- La comparación vigente de un periodo: la última, si coincide. Una más nueva que ve otra cosa en Stripe deja al periodo sin conciliar hasta explicarla o volver a
--- comparar: es la que más sabe (decisión mía sin confirmar; la otra lectura, «alguna que coincidió», confiaría en un listado que el siguiente desmiente).
+-- La comparación vigente de un periodo: la última completa, si coincide. Una completa más nueva que ve otra cosa en Stripe deja al periodo sin conciliar hasta
+-- explicarla o volver a comparar: es la que más sabe (decisión mía sin confirmar; la otra lectura, «alguna que coincidió», confiaría en un listado que el
+-- siguiente desmiente). Una incompleta sabe menos, y no tira una que ya coincidía (de la segunda revisión del diff).
 create function private.billing_reconciliation_current(p_period public.period_id) returns uuid
 language sql stable set search_path = ''
 as $$
   select l.id from (select r.id from private.billing_reconciliations r
-                    where r.period_id = p_period
+                    where r.period_id = p_period and r.complete
                     order by r.registered_at desc, r.id desc
                     limit 1) l
   where private.billing_reconciliation_ok(l.id)
@@ -252,6 +253,7 @@ begin
                                 and c ->> 'id' ~ '^[a-z]{2,4}_[A-Za-z0-9_]{1,250}$'
                                 and c ->> 'status' in ('succeeded', 'pending', 'failed')
                                 and pg_catalog.jsonb_typeof(c -> 'captured') = 'boolean'
+                                and pg_catalog.jsonb_typeof(c -> 'refunded') = 'boolean'
                                 and c ->> 'currency' ~ '^[a-z]{3}$'
                                 and pg_catalog.jsonb_typeof(c -> 'livemode') = 'boolean' and (c ->> 'livemode')::boolean = p_livemode
                                 and pg_catalog.jsonb_typeof(c -> 'created') = 'number' and c ->> 'created' ~ '^[0-9]{1,12}$'
@@ -270,7 +272,8 @@ begin
   end if;
 
   with s as (
-    select c ->> 'id' as id, c ->> 'status' as status, (c ->> 'captured')::boolean as captured, c ->> 'currency' as currency,
+    select c ->> 'id' as id, c ->> 'status' as status, (c ->> 'captured')::boolean as captured, (c ->> 'refunded')::boolean as refunded,
+           c ->> 'currency' as currency,
            (c ->> 'amount_captured')::bigint as cents
     from pg_catalog.jsonb_array_elements(p_charges) c),
   theirs as (select s.id, s.cents from s where s.status = 'succeeded' and s.captured and s.currency = 'mxn'),
@@ -286,7 +289,8 @@ begin
     select 'other_currency', s.id, null::bigint, s.cents, s.currency from s where s.status = 'succeeded' and s.captured and s.currency <> 'mxn')
   select (select pg_catalog.count(*) from mine), (select coalesce(pg_catalog.sum(m.cents), 0) from mine m),
          (select pg_catalog.count(*) from theirs), (select coalesce(pg_catalog.sum(t.cents), 0) from theirs t),
-         (select pg_catalog.count(*) from s where s.status = 'pending' or (s.status = 'succeeded' and not s.captured)),
+         -- Una autorización sin capturar que Stripe ya devolvió (vence a los 7 días y se reembolsa) no es dinero ni espera nada: se ignora, como un fallido.
+         (select pg_catalog.count(*) from s where s.status = 'pending' or (s.status = 'succeeded' and not s.captured and not s.refunded)),
          (select pg_catalog.count(*) from s where s.status = 'succeeded' and s.captured and s.currency <> 'mxn'),
          coalesce((select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(d) order by d.side, d.id) from diffs d), '[]'::jsonb)
     into v_own_count, v_own_cents, v_count, v_cents, v_pending, v_other, v_diffs;
@@ -947,6 +951,16 @@ as $$
                ('billing_settlements_missing', 'private.billing_settlements_missing(public.period_id)'),
                ('billing_settlement_complete', 'private.billing_settlement_complete(text, text, bigint, bigint, bigint, timestamptz)')) f (name, signature)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature)) like '%if not private.billing_reconciliation_allowed() then%', false)
+  union all
+  select 'reconciliation without its rule: ' || f.name, f.name
+  from (values ('billing_reconciliation_ok', 'private.billing_reconciliation_ok(uuid)',
+                '%r.complete and not r.too_many and r.provider_pending = 0%r.registered_at >= p.ends_at + interval ''10 minutes''%r.own_count = (select pg_catalog.count(*) from public.charges c where c.provider = ''stripe'' and c.period_id = r.period_id)%c.provider not in (''stripe'', ''manual'')%n.provider_cents = d.provider_cents and n.currency = d.currency%'),
+               ('billing_reconciliation_current', 'private.billing_reconciliation_current(public.period_id)',
+                '%where r.period_id = p_period and r.complete%order by r.registered_at desc, r.id desc%limit 1%private.billing_reconciliation_ok(l.id)%'),
+               ('billing_reconciliation_record', 'private.billing_reconciliation_record(public.period_id, boolean, bigint, bigint, boolean, jsonb)',
+                '%theirs as (select s.id, s.cents from s where s.status = ''succeeded'' and s.captured and s.currency = ''mxn'')%mine as (select c.provider_charge_id as id, c.gross_cents as cents from public.charges c where c.provider = ''stripe'' and c.period_id = p_period)%s.status = ''pending'' or (s.status = ''succeeded'' and not s.captured and not s.refunded)%where x.n <= 200%')
+       ) f (name, signature, pattern)
+  where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature)) like f.pattern, false)
   union all
   select 'billing blocking without its rule', 'billing_events_blocking'
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('private.billing_events_blocking(timestamptz)'))

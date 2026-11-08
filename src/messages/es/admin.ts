@@ -930,10 +930,12 @@ export const admin = defineMessages({
       own: { one: "El libro: {count} cobro por {amount}.", other: "El libro: {count} cobros por {amount}." },
       provider: { one: "Stripe: {count} cargo por {amount}.", other: "Stripe: {count} cargos por {amount}." },
       matchesCurrent: "Coincide y está vigente: no frena el cierre.",
-      matchesStale: "Coincidió, pero ya no está vigente: algo cambió después. Compara otra vez antes de cerrar.",
       mismatch: "No coincide: frena el cierre.",
       // La base dice por qué una comparación sin diferencias propias ya no vale (de la revisión del diff de la 129).
-      ledgerChanged: "Ya no vale: el libro tenía {then} cobros de Stripe al comparar y ahora tiene {now}. Compara otra vez antes de cerrar.",
+      ledgerChanged: {
+        one: "Ya no vale: el libro tenía {then} cobro de Stripe al comparar y ahora tiene {now}. Compara otra vez antes de cerrar.",
+        other: "Ya no vale: el libro tenía {then} cobros de Stripe al comparar y ahora tiene {now}. Compara otra vez antes de cerrar.",
+      },
       foreignProvider: "Ya no vale: el mes tiene cobros de un proveedor que no se compara con Stripe. Frena el cierre hasta que se corrija.",
       incomplete: "Está incompleta: no se alcanzó a leer todo lo de Stripe. Compara otra vez.",
       pending: {
@@ -975,7 +977,7 @@ export const admin = defineMessages({
       // Lo que se dice al volver.
       answers: {
         matches: "Comparado: coincide.",
-        mismatch: "Comparado: no coincide. Abajo están las diferencias.",
+        mismatch: "Comparado: no coincide. Abajo se ve por qué.",
         incomplete: "Comparado, pero incompleto: no se alcanzó a leer todo lo de Stripe. Intenta de nuevo en un momento.",
         explained: "Diferencia explicada.",
         alreadyExplained: "Esa diferencia ya estaba explicada.",

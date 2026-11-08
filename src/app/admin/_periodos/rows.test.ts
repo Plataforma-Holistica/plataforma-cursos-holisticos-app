@@ -557,7 +557,6 @@ describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () =>
   });
 
   it("coincidió pero ya no está vigente, o no coincide: lo dice", () => {
-    expect(compared(period({ reconciliation: reconciliation({ current: false }) }))).toMatchObject({ verdict: text.reconciliation.matchesStale, tone: "warning" });
     expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false }) }))).toMatchObject({ verdict: text.reconciliation.mismatch, tone: "warning" });
     // Sin diferencias propias, la base dice por qué ya no vale: el libro cambió, o hay un proveedor que no se compara.
     expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, ownCount: 2, ownCountNow: 3 }) }))).toMatchObject({

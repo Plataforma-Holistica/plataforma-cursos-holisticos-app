@@ -109,12 +109,12 @@ function differenceRow(difference: ReconciliationDifference, index: number, expl
 }
 
 function verdictOf(reconciliation: Reconciliation): { verdict: string; tone: "success" | "warning" } {
+  // La base da `matches` y `current` de la misma comparación (la última completa): coinciden o no, juntos.
   if (reconciliation.matches && reconciliation.current) return { verdict: text.matchesCurrent, tone: "success" };
-  if (reconciliation.matches) return { verdict: text.matchesStale, tone: "warning" };
   // Por qué ya no vale aunque no tenga diferencias propias: lo dice la base, con lo de ahora.
   if (reconciliation.foreignProvider) return { verdict: text.foreignProvider, tone: "warning" };
   if (reconciliation.ownCountNow !== reconciliation.ownCount) {
-    return { verdict: t(text.ledgerChanged, { then: reconciliation.ownCount, now: reconciliation.ownCountNow }), tone: "warning" };
+    return { verdict: t(plural(reconciliation.ownCount, text.ledgerChanged), { then: reconciliation.ownCount, now: reconciliation.ownCountNow }), tone: "warning" };
   }
   return { verdict: text.mismatch, tone: "warning" };
 }

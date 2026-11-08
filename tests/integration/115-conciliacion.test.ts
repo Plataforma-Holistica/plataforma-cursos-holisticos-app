@@ -94,6 +94,7 @@ function fakeStripe(charges: FakeCharge[], options: { repeat?: boolean; settled?
     object: "charge",
     status: c.status ?? "succeeded",
     captured: c.captured ?? true,
+    refunded: false,
     currency: "mxn",
     livemode: c.livemode ?? false,
     created: c.created,

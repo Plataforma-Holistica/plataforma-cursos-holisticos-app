@@ -87,7 +87,7 @@ export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
       {view.readOnly && <p className="text-body-s text-text-2">{text.readOnly}</p>}
       {view.notYet && <p className="text-body-s text-text-2">{text.notYet}</p>}
       {offersSomething && <p className="text-body-s text-text-2 md:hidden">{text.phoneOnly}</p>}
-      {!view.canExplain && !view.readOnly && <p className="hidden text-body-s text-text-2 md:block">{text.changeLocked}</p>}
+      {!view.canExplain && !view.readOnly && !view.notYet && <p className="hidden text-body-s text-text-2 md:block">{text.changeLocked}</p>}
 
       <BlockResult message={result} tone={tone} pending={pending} pendingText={pressed === "compare" ? text.comparing : text.explaining} answer={answer} spoken={spoken} />
 

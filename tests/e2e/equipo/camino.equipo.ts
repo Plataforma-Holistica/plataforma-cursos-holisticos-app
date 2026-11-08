@@ -1814,7 +1814,9 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await asked.getByLabel("Por qué").fill("Cobro de prueba sin JavaScript.");
       await asked.getByRole("button", { name: "Sí, explicarla" }).click();
       await expect(page.getByText("Diferencia explicada.")).toBeVisible();
+      const audited = await auditRows();
       await page.reload();
+      expect(await auditRows()).toBe(audited);
       expect(await notesFor(204004)).toEqual(["Cobro de prueba sin JavaScript."]);
     });
   });

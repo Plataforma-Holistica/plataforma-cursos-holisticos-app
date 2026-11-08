@@ -30,11 +30,15 @@ const CONCURRENCY = 4;
 export const LIST_BUDGET_MS = 40_000;
 /** El tope de toda la pasada del trabajo de cada día, para todos los meses que pide: cada uno recibe lo que quede. */
 export const SWEEP_BUDGET_MS = 50_000;
+/** Lo mínimo que tiene que quedar de la pasada para empezar otro mes: con menos, quedaría incompleto. */
+export const MONTH_MIN_MS = 25_000;
 
 export interface StripeCharge {
   id: string;
   status: string;
   captured: boolean;
+  /** Se devolvió entero: una autorización sin capturar que venció queda así, y no es dinero. */
+  refunded: boolean;
   currency: string;
   livemode: boolean;
   created: number;
@@ -46,6 +50,7 @@ const chargeBody = z.object({
   id: z.string(),
   status: z.string(),
   captured: z.boolean(),
+  refunded: z.boolean(),
   currency: z.string(),
   livemode: z.boolean(),
   created: z.number().int(),
@@ -290,8 +295,11 @@ export function createReconciliation(deps: { report: (code: FailureCode) => Prom
       }
       let whole = true;
       for (const { period, overdue } of due) {
-        // Lo que no alcanza queda para mañana; no es una falla.
-        if (core.now() >= end - 10_000) break;
+        // Lo que no alcanza queda para mañana, sin registrar nada; no es una falla. Si ya lleva dos días, se dice.
+        if (core.now() >= end - MONTH_MIN_MS) {
+          if (overdue) await deps.report("billing_reconciliation_overdue");
+          continue;
+        }
         const result = await compare({ kind: "system" }, period, end);
         if (result.kind === "unknown") whole = false;
         if (result.kind === "recorded" && !result.complete) await deps.report("billing_reconciliation_incomplete");

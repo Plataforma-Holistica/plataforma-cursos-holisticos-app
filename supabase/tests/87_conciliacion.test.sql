@@ -8,7 +8,7 @@
 -- Octubre de 2026 ya terminó y es el mes que se compara y se cierra; el mes de ahora todavía no termina.
 begin;
 \ir _ayuda.psql
-select plan(104);
+select plan(108);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a8700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -26,9 +26,10 @@ create function pruebas.como_finanzas(p_who uuid default null) returns void lang
 $$;
 -- Lo que el servidor lee de un cargo de Stripe.
 create function pruebas.cargo(p_id text, p_cents bigint, p_status text default 'succeeded', p_captured boolean default true,
-                              p_currency text default 'mxn', p_at timestamptz default '2026-10-10 12:00-06', p_live boolean default false)
+                              p_currency text default 'mxn', p_at timestamptz default '2026-10-10 12:00-06', p_live boolean default false,
+                              p_refunded boolean default false)
 returns jsonb language sql immutable as $$
-  select jsonb_build_object('id', p_id, 'status', p_status, 'captured', p_captured, 'currency', p_currency, 'livemode', p_live,
+  select jsonb_build_object('id', p_id, 'status', p_status, 'captured', p_captured, 'refunded', p_refunded, 'currency', p_currency, 'livemode', p_live,
                             'created', extract(epoch from p_at)::bigint, 'amount_captured', p_cents)
 $$;
 -- La ventana, como la pide quien compara (el sistema si no se dice otra cosa).
@@ -103,11 +104,19 @@ begin
   perform pruebas.limpiar();
 end
 $$;
+-- Lo reclama el sistema y lo deja en proceso. El identificador se lee como dueño, antes de tomar el rol del servidor.
+create function pruebas.reclama(p_id uuid) returns void language plpgsql as $$
+begin
+  perform pruebas.como_sistema();
+  perform private.provider_event_claim(p_id);
+  perform pruebas.limpiar();
+end
+$$;
 -- Lo termina sin aplicar, como un aviso que no es de cobro: así deja de frenar.
 create function pruebas.olvida(p_id uuid) returns void language plpgsql as $$
 begin
   set local session_replication_role = replica;
-  update private.provider_events set status = 'ignored', finished_at = now(), last_error = null where id = p_id;
+  update private.provider_events set status = 'ignored', finished_at = now(), last_error = null, locked_until = null where id = p_id;
   set local session_replication_role = origin;
 end
 $$;
@@ -243,6 +252,10 @@ insert into r values ('pendiente', pruebas.compara(202610, jsonb_build_array(pru
 select is((select (v ->> 'matches')::boolean from r where et = 'pendiente'), false, 'un cargo pendiente o sin capturar no deja coincidir');
 select is((select provider_pending from private.billing_reconciliations where id = (select (v ->> 'reconciliation_id')::uuid from r where et = 'pendiente')),
   2, 'y se cuentan los dos');
+insert into r values ('vencida', pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900),
+                                                                           pruebas.cargo('ch_87_vencida', 34900, 'succeeded', false, p_refunded => true))));
+select is((select (v ->> 'matches')::boolean from r where et = 'vencida'), true,
+  'una autorización sin capturar que Stripe ya devolvió no es dinero ni está pendiente: se ignora');
 insert into r values ('incompleta', pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900)), false));
 select is((select (v ->> 'matches')::boolean from r where et = 'incompleta'), false, 'un listado que no terminó no coincide aunque cuadre');
 
@@ -254,6 +267,8 @@ select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 3
   'un cargo repetido se rechaza');
 select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900, p_live => true))) ->> 'outcome', 'malformed',
   'un cargo de otro modo se rechaza');
+select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900) - 'refunded')) ->> 'outcome', 'malformed',
+  'un cargo sin decir si se devolvió se rechaza');
 select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch 87', 34900))) ->> 'outcome', 'malformed', 'un id con otra forma se rechaza');
 select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_raro', 34900, 'refunded'))) ->> 'outcome', 'malformed',
   'un estado que no se conoce se rechaza');
@@ -279,6 +294,8 @@ select is(pruebas.compara(202610, '[]'::jsonb, p_who => pruebas.otra(), p_starts
   'rate_limited', 'ni la registra');
 select is(pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900))) ->> 'outcome', 'recorded',
   'el sistema sí');
+select is((pruebas.compara(202610, '[]'::jsonb, false) ->> 'matches')::boolean, false, 'después, una incompleta (Stripe no contestó)');
+select ok(pruebas.vigente(202610), 'no tira la que ya coincidía: la vigencia la decide la última completa');
 select is(pruebas.compara(pruebas.ahora(), '[]'::jsonb, p_starts => 0, p_ends => 1) ->> 'outcome', 'too_early', 'el mes de ahora no se registra');
 
 -- La comparación es un libro, y su hora la pone la base.
@@ -385,9 +402,7 @@ insert into e values ('borde', pruebas.recibe('evt_87_borde', p_at => '2026-11-0
 select is(pruebas.cierra(202610), 'billing_events_pending', 'uno pendiente de 9 minutos después del fin todavía frena (el margen de la foto)');
 select pruebas.olvida((select id from e where et = 'borde'));
 insert into e values ('proceso', pruebas.recibe('evt_87_proceso', p_at => '2026-10-30 12:00-06'));
-select pruebas.como_sistema();
-select private.provider_event_claim((select id from e where et = 'proceso'));
-select pruebas.limpiar();
+select pruebas.reclama((select id from e where et = 'proceso'));
 select is(pruebas.cierra(202610), 'billing_events_pending', 'uno que se está procesando también');
 select pruebas.olvida((select id from e where et = 'proceso'));
 insert into e values ('fuera', pruebas.recibe('evt_87_fuera', p_at => '2026-11-01 00:11-06'));

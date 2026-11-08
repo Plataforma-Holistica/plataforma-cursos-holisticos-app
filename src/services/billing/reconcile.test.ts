@@ -9,6 +9,7 @@ import {
   EXPLAIN_NOTE_MAX,
   LIST_BUDGET_MS,
   listCharges,
+  MONTH_MIN_MS,
   SWEEP_BUDGET_MS,
   type Actor,
   type ReconcileStore,
@@ -36,6 +37,7 @@ const charge = (id: string, created: number, extra: Partial<StripeCharge> = {}):
   amount: 34_900,
   status: "succeeded",
   captured: true,
+  refunded: false,
   currency: "mxn",
   livemode: false,
   created,
@@ -68,7 +70,7 @@ describe("listar los cargos de una ventana", () => {
     expect(listed.failure).toBeNull();
     expect(listed.charges.map((c) => c.id).sort()).toEqual(["ch_a", "ch_b", "ch_c", "ch_d"]);
     // Solo viaja lo que la base necesita.
-    expect(Object.keys(listed.charges[0]!).sort()).toEqual(["amount_captured", "captured", "created", "currency", "id", "livemode", "status"]);
+    expect(Object.keys(listed.charges[0]!).sort()).toEqual(["amount_captured", "captured", "created", "currency", "id", "livemode", "refunded", "status"]);
     expect(asked).toContain(`/v1/charges?created[gte]=${START}&created[lt]=${START + DAY}&limit=100`);
     expect(asked).toContain(`/v1/charges?created[gte]=${START}&created[lt]=${START + DAY}&limit=100&starting_after=ch_b`);
     // El último día termina en el fin de la ventana, no un día después.
@@ -295,18 +297,20 @@ describe("el trabajo de cada día", () => {
     expect(reported).toEqual(["billing_reconciliation_unavailable", "billing_reconciliation_incomplete"]);
   });
 
-  it("toda la pasada tiene un tope: lo que no alcanza queda para mañana, sin contar como falla", async () => {
-    // El reloj fija el tope de la pasada al empezar y después ya lo pasó.
-    let reads = 0;
-    const { service, calls } = serviceWith({
+  it("toda la pasada tiene un tope: un mes sin tiempo suficiente queda para mañana, sin registrar ni contar como falla, y si ya lleva dos días se dice", async () => {
+    // El reloj fija el tope de la pasada al empezar; al segundo mes ya no quedan los 25 s que pide uno.
+    const clock = [0, 0, 0, SWEEP_BUDGET_MS - MONTH_MIN_MS];
+    const { service, calls, reported } = serviceWith({
       due: [
         { period: 202_609, overdue: false },
-        { period: 202_610, overdue: false },
+        { period: 202_610, overdue: true },
       ],
-      clock: () => (reads++ === 0 ? 0 : SWEEP_BUDGET_MS),
+      clock: () => clock.shift() ?? SWEEP_BUDGET_MS,
     });
     expect(await service.sweepReconciliations()).toBe(true);
-    expect(calls.filter((c) => c.startsWith("ventana"))).toEqual([]);
+    expect(calls.filter((c) => c.startsWith("ventana"))).toEqual(["ventana system 202609"]);
+    expect(calls.filter((c) => c === "registrar")).toHaveLength(1);
+    expect(reported).toEqual(["billing_reconciliation_overdue"]);
   });
 
   it("sin la llave de Stripe no le pregunta nada a la base, y lo dice cada día", async () => {
