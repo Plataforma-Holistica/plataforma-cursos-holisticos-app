@@ -3,10 +3,14 @@ name: Integración continua
 # El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de extremo a extremo
 # se agregan con la tarea que los crea.
 
+# Desde el 2026-11-09 (decisión de Sergio, para gastar menos corridas): corre en cada solicitud y en la cola de fusión, y ya no al
+# entrar a main, porque la cola verifica exactamente lo que entra. En una solicitud en borrador se salta el extremo a extremo del
+# equipo (el paso más largo); corre al marcarla lista y en la cola. Un cambio que solo toca documentos en Markdown fuera del código
+# no levanta nada (`scripts/ci-cambios.mjs`).
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
 
 permissions:
   contents: read
@@ -16,7 +20,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Qué cambió. Si solo son documentos, `verificar` se salta, y un trabajo saltado cuenta como pasado para la comprobación
+  # obligatoria. Si esto falla, `verificar` corre entero: saltarse la verificación lo decide solo una respuesta de aquí.
+  cambios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      codigo: ${{ steps.mira.outputs.codigo }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 2
+      - id: mira
+        name: Qué cambió
+        run: node scripts/ci-cambios.mjs HEAD^1 HEAD >> "$GITHUB_OUTPUT"
+
   verificar:
+    needs: cambios
+    if: ${{ !cancelled() && !(needs.cambios.result == 'success' && needs.cambios.outputs.codigo == 'false') }}
     runs-on: ubuntu-latest
     # Con el navegador y el extremo a extremo, una corrida completa pasa de los 20 minutos de antes,
     # y con el camino del equipo va en 28 a 29 (octubre de 2026): una instalación lenta del navegador
@@ -43,18 +64,10 @@ jobs:
 
       # Las migraciones nuevas van después de todas las de main, y las de main no se tocan (ola 0:
       # dos carriles en paralelo). En una solicitud, HEAD es la fusión de prueba con main y HEAD^1
-      # es main. Al entrar a main se compara contra lo que main tenía antes del empuje, que puede
-      # traer varios commits (una fusión con rebase). Sin dependencias: va antes de instalar.
+      # es main; en la cola de fusión, HEAD es lo que entraría y HEAD^1 lo que va antes en la cola.
+      # Sin dependencias: va antes de instalar.
       - name: Migraciones en orden
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            node scripts/migraciones-en-orden.mjs "$BEFORE" HEAD
-          else
-            node scripts/migraciones-en-orden.mjs HEAD^1 HEAD
-          fi
+        run: node scripts/migraciones-en-orden.mjs HEAD^1 HEAD
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
@@ -149,7 +162,9 @@ jobs:
       # de este paso la base ya no sirve para ellas, y aquí no corre nada más.
       # El comando va escrito aquí, por lo mismo que los de arriba. En local es
       # `pnpm test:e2e:equipo`, que además rehace la base al terminar.
+      # Se salta en una solicitud en borrador (2026-11-09): corre al marcarla lista y en la cola de fusión.
       - name: Pruebas de extremo a extremo del equipo
+        if: ${{ github.event_name == 'merge_group' || !github.event.pull_request.draft }}
         run: pnpm exec playwright test
         env:
           E2E_EQUIPO: "1"
