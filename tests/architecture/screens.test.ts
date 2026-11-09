@@ -290,6 +290,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     myCommentsAction:
       /if \(request\.kind === "none"\) return \{ \.\.\.IDLE_MINE, attempt \};\s*if \(request\.kind !== "delete"\) return \{ attempt, asking: request\.kind === "ask" \? request\.id : null, notice: null \};\s*const jar = await cookieJar\(\);\s*const outcome = myDeleteOutcome\(request\.id, await deleteLessonComment\(jar, \{ commentId: request\.id, revision: request\.revision \}\), request\.back\);/,
   },
+  "src/app/portal/_comentarios/actions.ts": {
+    // PA-45 (T-501): las mismas entradas que la lección, con la lección de cada comentario; una sesión que no pasa vuelve a PA-45.
+    teacherCommentAction:
+      /if \(lesson === null \|\| request\.kind === "none"\) return \{ \.\.\.IDLE_COMMENTS, attempt \};\s*if \(request\.kind === "open"\) return \{ \.\.\.askState\(request\), attempt \};\s*const jar = await cookieJar\(\);\s*return settle\(jar, await outcomeOf\(jar, \{ \.\.\.lesson, back: ROUTES\.portalComments \}, request\), attempt\);/,
+  },
   "src/app/cursos/[slug]/lecciones/[leccion]/comment-actions.ts": {
     // Los comentarios de la lección (T-501): abrir y cerrar no llaman a nadie; lo que escribe pasa por el servicio, que
     // corre la guarda de sesión y decide el acceso con la regla única. Del formulario salen la lección y el botón.

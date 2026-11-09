@@ -37,7 +37,13 @@ import {
 // Las páginas van por la dirección y no se acumulan: «Ver más comentarios» lleva a la siguiente y «Más recientes» vuelve a la
 // primera; igual las respuestas de un comentario. En lo ajeno no hay menú hasta T-502 (reportar).
 
-type CommentAction = (previous: CommentsState, form: FormData) => Promise<CommentsState>;
+export type CommentAction = (previous: CommentsState, form: FormData) => Promise<CommentsState>;
+
+/** La lección de un formulario: su curso y su id. En PA-22 es una sola; en PA-45, la de cada comentario. */
+export interface LessonRef {
+  slug: string;
+  lessonId: string;
+}
 
 export interface LessonCommentsProps {
   slug: string;
@@ -88,9 +94,9 @@ function carriedBy(state: CommentsState, at: Place | { kind: "name" }): string |
 }
 
 /** Si se puede escribir: el campo, o el sustituto que lo dice (diseño §5.12, «Variantes que sustituyen al campo»). */
-const canWrite = (write: WriteStanding) => write.kind === "ok" || (write.kind === "gate" && write.answer === "needs_pseudonym");
+export const canWrite = (write: WriteStanding) => write.kind === "ok" || (write.kind === "gate" && write.answer === "needs_pseudonym");
 
-function Notice({ notice }: { notice: CommentNotice | null }) {
+export function Notice({ notice }: { notice: CommentNotice | null }) {
   if (notice === null) return null;
   const good = notice.kind === "published" || notice.kind === "in_review" || notice.kind === "deleted" || notice.kind === "name_saved";
   return (
@@ -100,7 +106,7 @@ function Notice({ notice }: { notice: CommentNotice | null }) {
   );
 }
 
-function Instead({ write }: { write: WriteStanding }) {
+export function Instead({ write }: { write: WriteStanding }) {
   let body: ReactNode = text.instead.unavailable;
   if (write.kind === "read_only") body = text.instead.readOnly;
   if (write.kind === "gate") {
@@ -129,11 +135,11 @@ function Instead({ write }: { write: WriteStanding }) {
 }
 
 /** Los dos campos que dicen de qué lección es cada formulario. */
-function LessonFields({ slug, lessonId }: { slug: string; lessonId: string }) {
+function LessonFields({ lesson }: { lesson: LessonRef }) {
   return (
     <>
-      <input type="hidden" name={COMMENT_FIELDS.course} value={slug} />
-      <input type="hidden" name={COMMENT_FIELDS.lesson} value={lessonId} />
+      <input type="hidden" name={COMMENT_FIELDS.course} value={lesson.slug} />
+      <input type="hidden" name={COMMENT_FIELDS.lesson} value={lesson.lessonId} />
     </>
   );
 }
@@ -163,9 +169,9 @@ const TONE_CLASSES: Record<number, string> = {
   8: "from-cover-8-deep to-cover-8",
 };
 
-interface Shared {
-  slug: string;
-  lessonId: string;
+export interface Shared {
+  /** La lección de un hilo (`null`: la del campo de arriba y el diálogo del nombre, solo en PA-22). */
+  lessonOf: (threadId: string | null) => LessonRef;
   state: CommentsState;
   formAction: (form: FormData) => void;
   pending: boolean;
@@ -177,8 +183,8 @@ interface Shared {
 }
 
 /** Un comentario o una respuesta (diseño §5.12, `Comment`). */
-function CommentItem({ comment, reply, shared, children }: { comment: CommentView; reply: boolean; shared: Shared; children?: ReactNode }) {
-  const { slug, lessonId, state, formAction, pending, standing, draft, write } = shared;
+function CommentItem({ comment, reply, lesson, shared, children }: { comment: CommentView; reply: boolean; lesson: LessonRef; shared: Shared; children?: ReactNode }) {
+  const { state, formAction, pending, standing, draft, write } = shared;
   if (comment.state === "deleted") {
     return (
       <article id={commentAnchor(comment.id)} aria-label={text.deleted} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
@@ -210,7 +216,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
         {editing ? (
           <form action={formAction} className="flex flex-col gap-3">
-            <LessonFields slug={slug} lessonId={lessonId} />
+            <LessonFields lesson={lesson} />
             <CountedField
               id={`editar-${comment.id}`}
               name={COMMENT_FIELDS.body}
@@ -239,7 +245,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         <Notice notice={noticeAt(state, { kind: "comment", id: comment.id })} />
         {!editing && (
           <form action={formAction} className="flex flex-wrap items-center gap-3">
-            <LessonFields slug={slug} lessonId={lessonId} />
+            <LessonFields lesson={lesson} />
             {!reply && canWrite(standing) && comment.state === "published" && (
               <Button type="submit" variant="text" name="do" value={`open-reply:${comment.id}`}>
                 {text.reply}
@@ -268,7 +274,7 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
         )}
         {deleting && (
           <form action={formAction}>
-            <LessonFields slug={slug} lessonId={lessonId} />
+            <LessonFields lesson={lesson} />
             <Dialog
               title={text.confirmDelete.title}
               busy={pending}
@@ -294,12 +300,26 @@ function CommentItem({ comment, reply, shared, children }: { comment: CommentVie
 }
 
 /** El campo para escribir (diseño §5.12, `CommentComposer`): arriba del hilo, o bajo un comentario para responderle. */
-function Composer({ place, label, shared, identity, onCancel }: { place: Exclude<Place, { kind: "edit" }>; label: string; shared: Shared; identity: ReactNode; onCancel: boolean }) {
-  const { slug, lessonId, state, formAction, pending, draft, write } = shared;
+function Composer({
+  place,
+  label,
+  lesson,
+  shared,
+  identity,
+  onCancel,
+}: {
+  place: Exclude<Place, { kind: "edit" }>;
+  label: string;
+  lesson: LessonRef;
+  shared: Shared;
+  identity: ReactNode;
+  onCancel: boolean;
+}) {
+  const { state, formAction, pending, draft, write } = shared;
   const id = place.kind === "new" ? "comentar" : `responder-${place.parentId}`;
   return (
     <form action={formAction} className="flex flex-col gap-3">
-      <LessonFields slug={slug} lessonId={lessonId} />
+      <LessonFields lesson={lesson} />
       <CountedField
         id={id}
         name={COMMENT_FIELDS.body}
@@ -354,8 +374,9 @@ function Identity({ me, teacherName, changeable }: { me: CommentsView["me"]; tea
 
 /** El diálogo del nombre (FL-15 paso 3): vacío, sin el nombre, el alias ni el correo; lo escrito cruza en campos ocultos. */
 function NameDialog({ shared }: { shared: Shared }) {
-  const { slug, lessonId, state, formAction, pending, draft, write } = shared;
+  const { state, formAction, pending, draft, write } = shared;
   if (state.open.kind !== "name") return null;
+  const lesson = shared.lessonOf(null);
   const { carry, keep } = state.open;
   const notice = noticeAt(state, { kind: "name" });
   return (
@@ -364,7 +385,7 @@ function NameDialog({ shared }: { shared: Shared }) {
       <button type="submit" name="do" value="name" tabIndex={-1} aria-hidden="true" className="sr-only">
         {text.name.save}
       </button>
-      <LessonFields slug={slug} lessonId={lessonId} />
+      <LessonFields lesson={lesson} />
       {carry !== null && <input type="hidden" name={COMMENT_FIELDS.carry} value={carry.body} />}
       {keep !== undefined && <input type="hidden" name={COMMENT_FIELDS.keep} value={keep} />}
       {carry?.parentId != null && <input type="hidden" name={COMMENT_FIELDS.carryParent} value={carry.parentId} />}
@@ -400,31 +421,48 @@ function NameDialog({ shared }: { shared: Shared }) {
   );
 }
 
-function Thread({ thread, back, cursor, shared, pagedThread, identity }: { thread: CommentThread; back: string; cursor: string | null; shared: Shared; pagedThread: string | null; identity: ReactNode }) {
+/** Un hilo: el comentario y sus respuestas. `header` va arriba (la lección y el curso en PA-45); `moreReplies`, a dónde lleva «Ver más respuestas». */
+export function Thread({
+  thread,
+  shared,
+  identity,
+  header,
+  moreReplies,
+  firstReplies,
+}: {
+  thread: CommentThread;
+  shared: Shared;
+  identity: ReactNode;
+  header?: ReactNode;
+  moreReplies: string | null;
+  firstReplies: string | null;
+}) {
   const { state } = shared;
+  const lesson = shared.lessonOf(thread.id);
   const replying = state.open.kind === "reply" && state.open.parentId === thread.id && canWrite(shared.standing) && thread.state === "published";
-  const last = thread.replies.items.at(-1);
   return (
     <li>
-      <CommentItem comment={thread} reply={false} shared={shared}>
+      {header}
+      <CommentItem comment={thread} reply={false} lesson={lesson} shared={shared}>
       {/* Las respuestas van dentro del comentario al que responden. */}
-      {(thread.replies.items.length > 0 || replying || pagedThread === thread.id) && (
+      {(thread.replies.items.length > 0 || replying || firstReplies !== null) && (
         <div className="ml-6 flex flex-col gap-1">
-          {pagedThread === thread.id && <TextLink href={firstRepliesHref(back, cursor, thread.id)}>{text.firstReplies}</TextLink>}
+          {firstReplies !== null && <TextLink href={firstReplies}>{text.firstReplies}</TextLink>}
           {thread.replies.items.length > 0 && (
             <ol className="flex flex-col">
               {thread.replies.items.map((reply) => (
                 <li key={reply.id}>
-                  <CommentItem comment={reply} reply shared={shared} />
+                  <CommentItem comment={reply} reply lesson={lesson} shared={shared} />
                 </li>
               ))}
             </ol>
           )}
-          {thread.replies.more && last !== undefined && <TextLink href={moreRepliesHref(back, cursor, thread.id, last)}>{text.moreReplies}</TextLink>}
+          {thread.replies.more && moreReplies !== null && <TextLink href={moreReplies}>{text.moreReplies}</TextLink>}
           {replying && (
             <Composer
               place={{ kind: "reply", parentId: thread.id }}
               label={t(text.composer.replyLabel, { name: thread.own ? text.you : (thread.name ?? text.deleted) })}
+              lesson={lesson}
               shared={shared}
               identity={identity}
               onCancel
@@ -441,9 +479,12 @@ function Thread({ thread, back, cursor, shared, pagedThread, identity }: { threa
 const openedOn = (open: CommentsState["open"]): string | null =>
   open.kind === "edit" || open.kind === "delete" ? open.id : open.kind === "reply" ? open.parentId : null;
 
-export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
-  // Sin JavaScript, el envío vuelve a lo que se estaba viendo: la misma página de comentarios.
-  const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, `${view.here}#${COMMENTS_ANCHOR}`);
+/**
+ * El estado de un hilo: la acción, lo escrito de cada campo, el foco después de cada respuesta y lo que se dice arriba porque esta
+ * vuelta no lo pinta. Lo usan PA-22 y PA-45; `here` es a donde vuelve un envío sin JavaScript.
+ */
+export function useCommentThread({ action, here, items, write, lessonOf }: { action: CommentAction; here: string; items: CommentThread[]; write: WriteStanding; lessonOf: Shared["lessonOf"] }) {
+  const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, here);
   const [drafts, setDrafts] = useState<Drafts>(() => withKept({}, state));
   const [seen, setSeen] = useState(state.attempt);
   // Con cada respuesta, lo que dice de cada campo (React vuelve a pintar antes de mostrar esta vuelta).
@@ -452,12 +493,11 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
     setDrafts(withKept(drafts, state));
   }
   const shared: Shared = {
-    slug,
-    lessonId,
+    lessonOf,
     state,
     formAction,
     pending,
-    standing: view.write,
+    standing: write,
     // Sin JavaScript, después de un nombre que no sirvió, el estado guarda el nombre: lo del campo lo lleva el diálogo.
     draft: (at) => drafts[placeKey(at)] ?? carriedBy(state, at),
     write: (at) => (value) => setDrafts((current) => ({ ...current, [placeKey(at)]: value })),
@@ -466,9 +506,9 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
   const lastOpened = useRef<string | null>(null);
   // Un aviso que habla de algo que esta vuelta no pinta (un comentario de otra página, el campo que se sustituyó, la respuesta a un
   // comentario que ya no la recibe, una edición de lo que se fue) se dice arriba del hilo, con lo escrito para copiarlo.
-  const replyOpen = (parentId: string) => canWrite(view.write) && view.items.some((thread) => thread.id === parentId && thread.state === "published");
+  const replyOpen = (parentId: string) => canWrite(write) && items.some((thread) => thread.id === parentId && thread.state === "published");
   // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí.
-  const live = new Set(view.items.flatMap((thread) => [thread, ...thread.replies.items]).filter((item) => item.state !== "deleted").map((item) => item.id));
+  const live = new Set(items.flatMap((thread) => [thread, ...thread.replies.items]).filter((item) => item.state !== "deleted").map((item) => item.id));
   // Lo que cruza el diálogo del nombre está en el diálogo: no se perdió.
   const crossing = (parentId: string) => state.open.kind === "name" && state.open.carry?.parentId === parentId;
   const painted = (at: NoticePlace): boolean => {
@@ -476,7 +516,7 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
       case "comment":
         return live.has(at.id);
       case "new":
-        return canWrite(view.write);
+        return canWrite(write);
       case "reply":
         return crossing(at.parentId) || (state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId));
       case "edit":
@@ -510,21 +550,48 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
     (target ?? heading.current)?.focus();
   }, [state]);
 
+  return { state, shared, heading, threadNotice, strayText };
+}
+
+/** Lo escrito que la vuelta ya no pinta, para copiarlo. */
+export function StrayText({ text: body }: { text: string | null }) {
+  if (body === null) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-1 p-4">
+      <p className="text-body-s text-text-2">{text.strayText}</p>
+      <p className="text-body break-words whitespace-pre-line text-text">{body}</p>
+    </div>
+  );
+}
+
+export function LessonComments({ slug, lessonId, back, view, teacherName, action }: LessonCommentsProps) {
+  // Sin JavaScript, el envío vuelve a lo que se estaba viendo: la misma página de comentarios.
+  const { shared, heading, threadNotice, strayText } = useCommentThread({
+    action,
+    here: `${view.here}#${COMMENTS_ANCHOR}`,
+    items: view.items,
+    write: view.write,
+    lessonOf: () => ({ slug, lessonId }),
+  });
+  const lesson: LessonRef = { slug, lessonId };
+
   return (
     <div id={COMMENTS_ANCHOR} className="flex flex-col gap-4">
       <h2 ref={heading} tabIndex={-1} className="text-h3 outline-none">
         {t(plural(view.count, text.title), { count: view.count })}
       </h2>
       <Notice notice={threadNotice} />
-      {strayText !== null && (
-        <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-1 p-4">
-          <p className="text-body-s text-text-2">{text.strayText}</p>
-          <p className="text-body break-words whitespace-pre-line text-text">{strayText}</p>
-        </div>
-      )}
+      <StrayText text={strayText} />
       {canWrite(view.write) ? (
         <>
-          <Composer place={{ kind: "new" }} label={text.composer.label} shared={shared} identity={<Identity me={view.me} teacherName={teacherName} changeable />} onCancel={false} />
+          <Composer
+            place={{ kind: "new" }}
+            label={text.composer.label}
+            lesson={lesson}
+            shared={shared}
+            identity={<Identity me={view.me} teacherName={teacherName} changeable />}
+            onCancel={false}
+          />
           <NameDialog shared={shared} />
         </>
       ) : (
@@ -539,11 +606,13 @@ export function LessonComments({ slug, lessonId, back, view, teacherName, action
             <Thread
               key={thread.id}
               thread={thread}
-              back={back}
-              cursor={view.cursor}
               shared={shared}
-              pagedThread={view.pagedThread}
               identity={<Identity me={view.me} teacherName={teacherName} changeable={false} />}
+              moreReplies={(() => {
+                const last = thread.replies.items.at(-1);
+                return last === undefined ? null : moreRepliesHref(back, view.cursor, thread.id, last);
+              })()}
+              firstReplies={view.pagedThread === thread.id ? firstRepliesHref(back, view.cursor, thread.id) : null}
             />
           ))}
         </ol>

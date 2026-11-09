@@ -9,6 +9,7 @@ import { NewCourseSection } from "../_cursos/new";
 import { DiscardVersionSection } from "../_cursos/discard";
 import { DeleteCourseSection } from "../_cursos/remove";
 import { AccountSection, AnnexSection } from "../_cuenta/section";
+import { CommentsSection } from "../_comentarios/section";
 import { EditorSection } from "../_editor/section";
 import { SubmitSection } from "../_enviar/section";
 import { TaxDataSection } from "../_fiscal/section";
@@ -52,6 +53,7 @@ export function screenAt(rest: readonly string[]): PortalScreen | null {
     return PAYOUT_PERIOD_SEGMENT.test(id) && page === undefined ? { render: ({ claims, readOnly }) => <PayoutReportSection claims={claims} period={id} readOnly={readOnly} /> } : null;
   }
   if (section === "cuenta") return id === undefined ? { render: ({ claims, readOnly }) => <AccountSection claims={claims} readOnly={readOnly} /> } : null;
+  if (section === "comentarios") return id === undefined ? { render: ({ claims, readOnly, search }) => <CommentsSection claims={claims} readOnly={readOnly} search={search} /> } : null;
   if (section === "anexo") {
     return id !== undefined && ID_SEGMENT.test(id) && page === undefined ? { render: ({ claims, readOnly }) => <AnnexSection claims={claims} document={id} readOnly={readOnly} /> } : null;
   }

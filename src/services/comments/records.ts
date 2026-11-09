@@ -232,6 +232,76 @@ export async function readMyComments(tx: Tx, before: CommentCursor | null): Prom
   };
 }
 
+// PA-45: lo de las lecciones del maestro de quien actúa, cada comentario con su lección, su curso y si ya respondió.
+const teacherRow = viewRow
+  .extend({
+    lesson: z.string().regex(ID),
+    lesson_title: z.string(),
+    course: z.string().regex(ID),
+    course_title: z.string(),
+    course_slug: z.string(),
+    answered: z.boolean(),
+    replies: pageRow,
+  })
+  .strict();
+
+/** Un comentario de PA-45: el de la lección, con dónde está y si el maestro ya respondió. */
+export interface TeacherThread extends CommentThread {
+  lessonId: string;
+  lessonTitle: string;
+  courseId: string;
+  courseTitle: string;
+  courseSlug: string;
+  answered: boolean;
+}
+
+const teacherAnswer = z.union([closed, answerOnly(["not_teacher"]), z.object({ answer: z.literal("ok"), items: z.array(teacherRow), more: z.boolean() }).strict()]);
+
+export type TeacherCommentsRow = { answer: "closed" | "not_teacher" } | { answer: "ok"; items: TeacherThread[]; more: boolean };
+
+/** Lo de las lecciones del maestro de quien actúa, de un curso o de todos, todo o lo sin responder, desde `before`. */
+export async function readTeacherComments(tx: Tx, input: { course: string | null; unanswered: boolean; before: CommentCursor | null }): Promise<TeacherCommentsRow> {
+  const [row] = await tx.query(
+    sql`select private.comments_for_teacher(${input.course}::uuid, ${input.unanswered}, ${input.before?.at ?? null}::timestamptz, ${input.before?.id ?? null}::uuid) as answer`,
+    z.object({ answer: teacherAnswer }),
+  );
+  if (!row) throw new Error("comments_for_teacher no contestó");
+  const answer = row.answer;
+  if (answer.answer !== "ok") return { answer: answer.answer };
+  return {
+    answer: "ok",
+    more: answer.more,
+    items: answer.items.map(({ replies, lesson, lesson_title, course, course_title, course_slug, answered, ...view }) => ({
+      ...viewOf(view),
+      replies: pageOf(replies),
+      lessonId: lesson,
+      lessonTitle: lesson_title,
+      courseId: course,
+      courseTitle: course_title,
+      courseSlug: course_slug,
+      answered,
+    })),
+  };
+}
+
+const courseChoice = z.object({ course_id: z.string().regex(ID), title: z.string() }).strict();
+
+/**
+ * Los cursos del filtro de PA-45, como la persona: los de su maestro (también suspendido) que se ven, publicados o con una versión
+ * abierta y listados, con el título publicado, que es el que llevan sus comentarios. No nombra las tablas de comentarios.
+ */
+export async function readTeacherCommentCourses(tx: Tx): Promise<{ id: string; title: string }[]> {
+  const rows = await tx.query(
+    sql`select p.course_id, p.title
+        from public.course_registry r
+        join public.published_courses p on p.course_id = r.course_id and p.is_listed
+        where r.teacher_id = (select private.current_teacher_id()) and r.state in ('published', 'changes_pending')
+        order by p.title, p.course_id`,
+    courseChoice,
+  );
+  return rows.map((row) => ({ id: row.course_id, title: row.title }));
+}
+
 // ---------------------------------------------------------------------------------------
 // Escribir.
 
