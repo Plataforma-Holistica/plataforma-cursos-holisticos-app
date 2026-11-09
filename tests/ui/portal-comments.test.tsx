@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CommentsState } from "@/app/_comments/state";
+import { teacherHereHref } from "@/app/portal/_comentarios/outcomes";
 import type { TeacherThread } from "@/services/comments/comments";
 
 import { a11yViolations } from "../setup/a11y";
@@ -197,6 +198,17 @@ describe("PA-45 en el portal", () => {
     await expect(at()).rejects.toThrow("no encontrado");
   });
 
+  it("si lo pulsado se fue con la respuesta, el foco va al título que se ve", async () => {
+    let answer: (state: CommentsState) => void = () => {};
+    mocks.action.mockReturnValue(new Promise<CommentsState>((resolve) => (answer = resolve)));
+    render(await at());
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    answer({ attempt: 1, open: { kind: "none" }, notice: null, kept: null, written: null });
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Comentarios" })).toHaveFocus(), { timeout: 3_000 });
+  });
+
   it("al publicar desde PA-45, lo que la lista ya no pinta se dice arriba", async () => {
     mocks.action.mockResolvedValue({ attempt: 1, open: { kind: "none" }, notice: { at: { kind: "comment", id: id(50) }, kind: "published" }, kept: null, written: id(50) });
     mocks.teacherComments.mockResolvedValue({ kind: "ready", items: [thread(1)], next: null, write: "ok" });
@@ -248,6 +260,22 @@ describe("las respuestas que no caben, en PA-45", () => {
     expect(screen.queryByText("Respuesta 2")).toBeNull();
     expect(screen.queryByRole("link", { name: "Ver más respuestas" })).toBeNull();
     expect(screen.getByRole("link", { name: "Ver las primeras respuestas" })).toHaveAttribute("href", `/portal/comentarios?curso=${COURSE}#comentario-${id(1)}`);
+  });
+
+  it("un cursor de respuestas sin forma no se pide: es como sin él", async () => {
+    withMore();
+    render(await at({ hilo: id(1), respuestas: "basura" }));
+    expect(mocks.commentReplies).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: "Ver las primeras respuestas" })).toBeNull();
+  });
+
+  it("un envío sin JavaScript vuelve a lo que se veía: los filtros, la página y las respuestas del hilo", () => {
+    const filters = { course: COURSE, unanswered: true, from: `${AT}_${id(9)}` };
+    expect(teacherHereHref(filters, null, null)).toBe(`/portal/comentarios?curso=${COURSE}&sin-responder=1&desde=${encodeURIComponent(`${AT}_${id(9)}`)}`);
+    expect(teacherHereHref(filters, id(1), LAST)).toBe(
+      `/portal/comentarios?curso=${COURSE}&sin-responder=1&desde=${encodeURIComponent(`${AT}_${id(9)}`)}&hilo=${id(1)}&respuestas=${encodeURIComponent(LAST)}`,
+    );
+    expect(teacherHereHref({ course: null, unanswered: false, from: null }, id(1), LAST)).toBe(`/portal/comentarios?hilo=${id(1)}&respuestas=${encodeURIComponent(LAST)}`);
   });
 
   it("un ?hilo= que no está en la lista no se pide, y si no se supo, se quedan las primeras", async () => {

@@ -10,7 +10,9 @@ import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
 
-import { readTeacherFilters, teacherCommentsHref, type TeacherFilters } from "./outcomes";
+import { commentCursor } from "@/app/_comments/view";
+
+import { readTeacherFilters, teacherCommentsHref, teacherHereHref } from "./outcomes";
 import { PA45_TITLE, TeacherComments } from "./screen";
 
 // PA-45 · Comentarios (`/portal/comentarios`; T-501; RF-609; FL-38; plan aprobado por Sergio el 2026-11-08). Lo sirve el comodín
@@ -29,7 +31,7 @@ const one = (search: Search, key: string) => {
 /** Las respuestas siguientes del hilo que pida la dirección, si es de esta página; si no se supo, se quedan las primeras. */
 async function withPagedThread(claims: VerifiedClaims, items: TeacherThread[], search: Search): Promise<{ items: TeacherThread[]; pagedThread: string | null; after: string | null }> {
   const parent = items.find((item) => item.id === one(search, "hilo"));
-  const after = one(search, "respuestas");
+  const after = commentCursor(one(search, "respuestas"));
   if (parent === undefined || after === null) return { items, pagedThread: null, after: null };
   const replies = await commentReplies(claims, parent.lessonId, parent.id, after);
   if (replies.kind !== "ready") return { items, pagedThread: null, after: null };
@@ -38,13 +40,6 @@ async function withPagedThread(claims: VerifiedClaims, items: TeacherThread[], s
     pagedThread: parent.id,
     after,
   };
-}
-
-/** Lo que se está viendo, para que un envío sin JavaScript vuelva ahí: los filtros, la página y, si las hay, las respuestas del hilo. */
-function hereOf(filters: TeacherFilters, pagedThread: string | null, after: string | null): string {
-  const page = teacherCommentsHref(filters, filters.from);
-  if (pagedThread === null || after === null) return page;
-  return `${page}${page.includes("?") ? "&" : "?"}hilo=${pagedThread}&respuestas=${encodeURIComponent(after)}`;
 }
 
 export async function CommentsSection({ claims, readOnly, search }: { claims: VerifiedClaims; readOnly: boolean; search: Search }) {
@@ -101,7 +96,7 @@ export async function CommentsSection({ claims, readOnly, search }: { claims: Ve
           {filters.from !== null && <TextLink href={teacherCommentsHref(filters)}>{text.portal.newest}</TextLink>}
           <TeacherComments
             items={paged.items}
-            here={hereOf(filters, paged.pagedThread, paged.after)}
+            here={teacherHereHref(filters, paged.pagedThread, paged.after)}
             filters={filters}
             pagedThread={paged.pagedThread}
             write={read.write}

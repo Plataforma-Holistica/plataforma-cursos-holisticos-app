@@ -44,3 +44,10 @@ export const teacherRepliesHref = (filters: TeacherFilters, parentId: string, la
 
 /** Las primeras respuestas otra vez: la misma página, sin el hilo. */
 export const teacherFirstRepliesHref = (filters: TeacherFilters, parentId: string) => `${teacherCommentsHref(filters, filters.from)}#${commentAnchor(parentId)}`;
+
+/** Lo que se está viendo, para que un envío sin JavaScript vuelva ahí: los filtros, la página y, si las hay, las respuestas del hilo. */
+export function teacherHereHref(filters: TeacherFilters, pagedThread: string | null, after: string | null): string {
+  const page = teacherCommentsHref(filters, filters.from);
+  if (pagedThread === null || after === null) return page;
+  return `${page}${page.includes("?") ? "&" : "?"}hilo=${pagedThread}&respuestas=${encodeURIComponent(after)}`;
+}

@@ -40,8 +40,9 @@ export function TeacherComments({ items, here, filters, pagedThread, write, unan
     here,
     items,
     write: standing,
+    // Un hilo que no está no hereda la lección de otro: sin lección, la acción no hace nada.
     lessonOf: (threadId) => {
-      const thread = items.find((each) => each.id === threadId) ?? items[0];
+      const thread = items.find((each) => each.id === threadId);
       return { slug: thread?.courseSlug ?? "", lessonId: thread?.lessonId ?? "" };
     },
     fallbackId: PA45_TITLE,
