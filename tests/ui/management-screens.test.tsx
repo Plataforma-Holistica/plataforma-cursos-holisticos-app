@@ -97,6 +97,12 @@ async function saveName(typed: string, state: NameState) {
 }
 
 describe("la pantalla de la cuenta (PA-25)", () => {
+  it("lleva el bloque de los comentarios, con el enlace fijo a «Mis comentarios» (PA-24; T-501)", () => {
+    render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
+    expect(screen.getByRole("heading", { name: "Comentarios" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ver y borrar lo que escribiste" })).toHaveAttribute("href", "/cuenta/comentarios");
+  });
+
   it("en reposo: el nombre guardado en su campo, el correo a la vista y sin nada que anunciar", async () => {
     const { container } = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Cuenta");
