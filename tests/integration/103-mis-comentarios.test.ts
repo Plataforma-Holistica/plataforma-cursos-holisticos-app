@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { Client } from "pg";
+import type { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
@@ -10,7 +10,6 @@ import { commentsStoreOn, createComments } from "@/services/comments/comments";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
-import { localOwnerUrl } from "./helpers/local";
 import { asOwner, asServer, reverted } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users";
 
@@ -120,10 +119,7 @@ async function expire(owner: Client, profile: string): Promise<void> {
 describe("«Mis comentarios» contra la base", () => {
   it("quien perdió el acceso ve lo suyo y lo borra con la revisión que vio; nadie más lo ve", async () => {
     const [ana, beto] = [await person(), await person()];
-    const owner = new Client({ connectionString: localOwnerUrl() });
-    await owner.connect();
-    try {
-      await reverted(owner, async () => {
+    await reverted(async (owner) => {
         const { lesson } = await world(owner);
         await subscribe(owner, ana.id);
         const asAna = commentsAs(owner, ana);
@@ -159,18 +155,12 @@ describe("«Mis comentarios» contra la base", () => {
         expect(await asAna.deleteLessonComment(reader, { commentId: id, revision: 1 })).toEqual({ kind: "deleted" });
         expect(await asAna.myComments(ana.claims, null)).toEqual({ kind: "ready", items: [], next: null });
         expect(asAna.reported).toEqual([]);
-      });
-    } finally {
-      await owner.end();
-    }
+    });
   });
 
   it("si cambió entre leer la lista y borrar, contesta `changed` y no borra", async () => {
     const ana = await person();
-    const owner = new Client({ connectionString: localOwnerUrl() });
-    await owner.connect();
-    try {
-      await reverted(owner, async () => {
+    await reverted(async (owner) => {
         const { lesson } = await world(owner);
         await subscribe(owner, ana.id);
         const asAna = commentsAs(owner, ana);
@@ -182,18 +172,12 @@ describe("«Mis comentarios» contra la base", () => {
         expect(await asAna.editLessonComment(reader, { commentId: id, body: "Después", revision })).toMatchObject({ kind: "written" });
         expect(await asAna.deleteLessonComment(reader, { commentId: id, revision })).toEqual({ kind: "changed" });
         expect(await asAna.myComments(ana.claims, null)).toMatchObject({ kind: "ready", items: [{ id, body: "Después", revision: revision + 1, edited: true }] });
-      });
-    } finally {
-      await owner.end();
-    }
+    });
   });
 
   it("con el veto también se lee y se borra lo suyo; lo que queda en revisión aparece, lo oculto no", async () => {
     const cata = await person();
-    const owner = new Client({ connectionString: localOwnerUrl() });
-    await owner.connect();
-    try {
-      await reverted(owner, async () => {
+    await reverted(async (owner) => {
         const { lesson } = await world(owner);
         await subscribe(owner, cata.id);
         const asCata = commentsAs(owner, cata);
@@ -210,18 +194,12 @@ describe("«Mis comentarios» contra la base", () => {
         expect(mine).toMatchObject({ kind: "ready", items: [{ body: "Se ve", state: "in_review" }] });
         const item = mine.kind === "ready" ? mine.items[0] : undefined;
         expect(await asCata.deleteLessonComment(reader, { commentId: item?.id ?? "", revision: item?.revision ?? 0 })).toEqual({ kind: "deleted" });
-      });
-    } finally {
-      await owner.end();
-    }
+    });
   });
 
   it("un cursor sin forma empieza por lo más reciente; uno bien formado sigue después", async () => {
     const ana = await person();
-    const owner = new Client({ connectionString: localOwnerUrl() });
-    await owner.connect();
-    try {
-      await reverted(owner, async () => {
+    await reverted(async (owner) => {
         const { lesson } = await world(owner);
         await subscribe(owner, ana.id);
         const asAna = commentsAs(owner, ana);
@@ -234,9 +212,6 @@ describe("«Mis comentarios» contra la base", () => {
         const first = items[0]!;
         const after = await asAna.myComments(ana.claims, `${first.createdAt}_${first.id}`);
         expect(after.kind === "ready" ? after.items.map((each) => each.id) : null).toEqual(items.slice(1).map((each) => each.id));
-      });
-    } finally {
-      await owner.end();
-    }
+    });
   });
 });

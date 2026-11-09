@@ -16,6 +16,8 @@ export const ROUTES = {
   consents: "/consentimientos",
   home: "/inicio",
   account: "/cuenta",
+  /** PA-24, «Mis comentarios» (T-501): lo propio, para borrarlo también sin acceso a la lección. */
+  myComments: "/cuenta/comentarios",
   closeSession: "/sesion/cerrar",
   /** PA-12, dar el código: quien es del equipo y entra. Cuelga de entrar, pero pide sesión. */
   secondFactor: "/entrar/segundo-factor",

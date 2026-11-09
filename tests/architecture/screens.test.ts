@@ -437,6 +437,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/admin/[...resto]",
       "/consentimientos",
       "/cuenta",
+      "/cuenta/comentarios",
       "/cursos/[slug]/lecciones/[leccion]",
       "/entrar/segundo-factor",
       "/entrar/segundo-factor/configurar",

@@ -111,6 +111,8 @@ describe("la pantalla de la cuenta (PA-25)", () => {
       "Correo",
       "Contraseña",
       "Sesiones abiertas",
+      // Cambió por el requisito (T-501): el bloque de «Mis comentarios» (PA-24).
+      "Comentarios",
     ]);
     expect(nameField()).toHaveValue("Ana de Prueba");
     expect(nameField()).toHaveAttribute("autocomplete", "name");

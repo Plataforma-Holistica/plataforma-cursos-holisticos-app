@@ -3,6 +3,7 @@
 import { type FormEvent, useActionState, useState } from "react";
 
 import { account } from "@/messages/es/account";
+import { comments as commentText } from "@/messages/es/comments";
 import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
@@ -65,6 +66,8 @@ export interface AccountScreenProps {
   /** La cuenta tiene un segundo factor verificado: su contraseña se cambia recuperándola. */
   secondFactor?: boolean;
 }
+
+const COMMENTS_TITLE_ID = "cuenta-comentarios-titulo";
 
 export function AccountScreen({ name, email, sessions, secondFactor = false }: AccountScreenProps) {
   const [state, action, pending] = useActionState(changeNameAction, IDLE, NAME_PERMALINK);
@@ -152,6 +155,15 @@ export function AccountScreen({ name, email, sessions, secondFactor = false }: A
       </section>
       <PasswordBlock recoverOnly={secondFactor} state={password} action={passwordAction} pending={passwordPending} />
       <SessionsBlock sessions={sessions} state={closing} action={closeAction} pending={closingPending} />
+      {/* «Mis comentarios» (PA-24; T-501): un enlace fijo, sin leer nada (decisión de Sergio del 2026-11-08). */}
+      <section aria-labelledby={COMMENTS_TITLE_ID} className="flex flex-col gap-2">
+        <h2 id={COMMENTS_TITLE_ID} className="text-h3">
+          {commentText.mine.accountTitle}
+        </h2>
+        <p>
+          <TextLink href={ROUTES.myComments}>{commentText.mine.accountLink}</TextLink>
+        </p>
+      </section>
       <p className="text-body-s">
         <TextLink href={ROUTES.home}>{text.backHome}</TextLink>
       </p>
