@@ -1894,7 +1894,8 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
       await expect(page.getByText("El código son seis dígitos. Revísalo.").first()).toBeVisible();
       await page.getByLabel("Código", { exact: true }).fill(await nextCode(ana.secret, ana.used));
       await page.getByRole("button", { name: "Comprobar" }).click();
-      await expect(page).toHaveURL(`${PERIODS}/2040-02/cierre`);
+      // Sin JavaScript el navegador conserva el ancla del envío. Sin el campo oculto, iría a la lista de periodos.
+      await expect(page).toHaveURL(/\/admin\/periodos\/2040-02\/cierre(?:#bloque-cierre-codigo)?$/);
       await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
     });
   });

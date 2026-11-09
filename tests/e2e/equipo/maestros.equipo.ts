@@ -205,6 +205,8 @@ test("FL-46 y FL-30: invita, la persona se registra y acepta, se le marca fundad
 });
 
 test("sin JavaScript también se invita, se revoca, se suspende y se levanta", async ({ browser }) => {
+  // Cuatro códigos de la misma persona (`segunda`), y cada uno espera su ventana.
+  test.setTimeout(300_000);
   const maestra = testEmail();
   await inContext(
     browser,
@@ -253,7 +255,10 @@ test("sin JavaScript también se invita, se revoca, se suspende y se levanta", a
       await expect(page.getByText("Suspensión levantada.")).toBeVisible();
       // Se le vence el código: «Tu código» vuelve con su respuesta, en la ficha y en la lista. Con la acción atada con `bind`,
       // la página no se volvía a pintar después de enviarlo.
-      for (const path of [`${LIST}/${teacher}`, LIST]) {
+      for (const [path, anchor] of [
+        [`${LIST}/${teacher}`, "bloque-maestro-codigo"],
+        [LIST, "bloque-maestros-codigo"],
+      ] as const) {
         await ageCode(segunda.email);
         await page.goto(path);
         await page.getByLabel("Código", { exact: true }).fill("12");
@@ -261,7 +266,8 @@ test("sin JavaScript también se invita, se revoca, se suspende y se levanta", a
         await expect(page.getByText("El código son seis dígitos. Revísalo.").first()).toBeVisible();
         await page.getByLabel("Código", { exact: true }).fill(await nextCode(segunda.secret, segunda.used));
         await page.getByRole("button", { name: "Comprobar" }).click();
-        await expect(page).toHaveURL(path);
+        // Sin JavaScript el navegador conserva el ancla del envío. Desde la ficha, sin el campo oculto, iría a la lista.
+        await expect(page).toHaveURL(new RegExp(`${path}(?:#${anchor})?$`));
         await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
       }
     },

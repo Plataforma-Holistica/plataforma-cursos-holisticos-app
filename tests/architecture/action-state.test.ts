@@ -30,4 +30,13 @@ describe("las acciones de useActionState", () => {
     const bound = sources.filter((source) => /\b\w+Action\.bind\(/.test(source.text)).map((source) => source.file);
     expect(bound).toEqual([]);
   });
+
+  it("ni las pantallas que usan useActionState ni los archivos de acciones atan nada", () => {
+    // Una acción con otro nombre tampoco: en esos archivos no hay ningún `.bind(`.
+    const bound = sources
+      .filter((source) => source.text.includes("useActionState") || /^\s*["']use server["']/.test(source.text))
+      .filter((source) => /\.bind\(/.test(source.text))
+      .map((source) => source.file);
+    expect(bound).toEqual([]);
+  });
 });
