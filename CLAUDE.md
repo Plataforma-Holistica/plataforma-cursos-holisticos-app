@@ -1130,6 +1130,22 @@ que no se ve leyendo un solo archivo:
   PA-25 en `management-screens.test.tsx`. Pendiente para T-502 y T-503: que `comment_delete` no deje borrar lo oculto (hoy se puede
   conociendo el id), y que borrar lo que está en revisión conserve el caso de moderación y la reincidencia (`hidden_at` del autor).
   Para el A: nada que le toque.
+- **Lo que T-501 suma al carril B** (PA-45, sin migración; RF-609, FL-38; plan aprobado por Sergio el 2026-11-08, con sus cuatro
+  decisiones: en el teléfono la respuesta va bajo el comentario y no en una hoja; leer sin la regla de acceso; lo que no se ve
+  desaparece; «Ver en la lección» lleva a la pestaña de comentarios). `/portal/comentarios` está en `screenAt` y en el menú. El servicio
+  es `teacherComments` (sobre `comments_for_teacher`, con su esquema estricto en `records.ts`; sin `guarded` ni la regla: para el dueño
+  de la lección la regla se reduce a lo que acota la base, y la integración 104 exige la equivalencia en cada estado) y
+  `teacherCommentCourses`, los cursos del filtro, **como la persona** (`asUser`: `current_teacher_id` mira la sesión de Auth), con el
+  título publicado y solo lo listado. Si puede responder lo dice el portón (`comment_can_write`) con la lección del primer comentario,
+  en la misma transacción: sin la marca `comments_accept`, con el veto o suspendido, se lee y no se responde. `not_teacher` (dejó de
+  serlo entre la guarda y la lectura) contesta como la guarda, `notFound()`. El hilo de PA-22 se reusa: `useCommentThread` y `Thread`
+  en `src/app/_comments/lesson-comments.tsx`, con la lección por hilo (`lessonOf`); la regla de los comentarios vive en
+  `src/app/_comments/outcomes.ts` (la lección la reexporta), y lo que hacen las dos acciones con cada pedido, en `_comments/act.ts`.
+  La acción de PA-45 (`src/app/portal/_comentarios/actions.ts`) usa las mismas entradas del servicio, con la lección de cada
+  comentario; una sesión que no pasa vuelve a PA-45. Filtros y páginas por la dirección (`?curso=`, `?sin-responder=1`, `?desde=`). Usa
+  pgTAP 96, integración 104 y dos casos más en `comentarios.equipo.ts`. Decisiones mías sin confirmar: una respuesta del maestro en
+  revisión deja el comentario «sin responder»; el suspendido o con el veto borra lo suyo; las respuestas de otros se ven. Para el A:
+  nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

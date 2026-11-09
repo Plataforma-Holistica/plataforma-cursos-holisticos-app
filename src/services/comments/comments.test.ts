@@ -6,10 +6,10 @@ import type { CommentAccess } from "@/domain/access/media-access";
 import type { SessionCheck } from "@/services/account/account";
 
 import { createComments, parseCommentCursor, type CommentsStore } from "./comments";
-import type { CommentThread, LessonCommentsRow, MyCommentsRow } from "./records";
+import type { CommentThread, LessonCommentsRow, MyCommentsRow, TeacherCommentsRow } from "./records";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/adapters/supabase/db", () => ({ asServer: vi.fn() }));
+vi.mock("@/adapters/supabase/db", () => ({ asServer: vi.fn(), asUser: vi.fn() }));
 vi.mock("@/services/account/account", () => ({ checkSession: vi.fn() }));
 vi.mock("@/services/error-reporting/server", () => ({ reportFailure: vi.fn() }));
 
@@ -37,6 +37,11 @@ const THREAD: CommentThread = {
 };
 const READY: LessonCommentsRow = { answer: "ok", items: [THREAD], more: false, count: 1, me: { teacher: false, pseudonym: "Ana" } };
 const NEVER = { allowed: false, reason: "never_subscribed" } as const;
+const TEACHER: TeacherCommentsRow = {
+  answer: "ok",
+  more: false,
+  items: [{ ...THREAD, own: false, revision: null, lessonId: LESSON, lessonTitle: "Soltar", courseId: LESSON, courseTitle: "Respirar", courseSlug: "respirar", answered: false }],
+};
 const MINE: MyCommentsRow = {
   answer: "ok",
   more: true,
@@ -66,6 +71,8 @@ function commentsWith(session: SessionCheck = { kind: "pass", claims }) {
     remove: vi.fn<CommentsStore["remove"]>(() => Promise.resolve("ok")),
     pseudonym: vi.fn<CommentsStore["pseudonym"]>(() => Promise.resolve({ answer: "ok", pseudonym: "Ana" })),
     mine: vi.fn<CommentsStore["mine"]>(() => Promise.resolve(MINE)),
+    teacher: vi.fn<CommentsStore["teacher"]>(() => Promise.resolve({ comments: TEACHER, canWrite: "ok" })),
+    teacherCourses: vi.fn<CommentsStore["teacherCourses"]>(() => Promise.resolve([{ id: LESSON, title: "Respirar" }])),
   } satisfies CommentsStore;
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
   const service = createComments({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
@@ -368,5 +375,46 @@ describe("«Mis comentarios» (PA-24)", () => {
     comments.store.mine.mockRejectedValueOnce(new Error("se cayó"));
     expect(await comments.myComments(claims, null)).toEqual({ kind: "unavailable" });
     expect(comments.reported).toEqual(["comments_unavailable", "comments_unavailable"]);
+  });
+});
+
+describe("PA-45: los comentarios del maestro", () => {
+  const COURSE = "d0000000-0000-4000-8000-000000000001";
+
+  it("pide lo de sus lecciones con las claims del portal, sin la regla, y dice si puede responder", async () => {
+    const comments = commentsWith();
+    expect(await comments.teacherComments(claims, { course: COURSE, unanswered: true, before: `${AT}_${COMMENT}` })).toEqual({
+      kind: "ready",
+      items: TEACHER.items,
+      next: null,
+      write: "ok",
+    });
+    expect(comments.store.teacher).toHaveBeenCalledExactlyOnceWith(claims, { course: COURSE, unanswered: true, before: { at: AT, id: COMMENT } });
+    expect(comments.store.lesson).not.toHaveBeenCalled();
+    expect(comments.checkSession).not.toHaveBeenCalled();
+  });
+
+  it("un curso sin forma no llega a la base: es como sin filtro; un cursor sin forma, la primera página", async () => {
+    const comments = commentsWith();
+    await comments.teacherComments(claims, { course: "x", unanswered: false, before: "basura" });
+    expect(comments.store.teacher).toHaveBeenCalledWith(claims, { course: null, unanswered: false, before: null });
+  });
+
+  it("cerrados y quien ya no es maestro se dicen como tales; lo que falla, «no se supo» y se reporta", async () => {
+    const comments = commentsWith();
+    comments.store.teacher.mockResolvedValueOnce({ comments: { answer: "closed" }, canWrite: null });
+    expect(await comments.teacherComments(claims, { course: null, unanswered: false, before: null })).toEqual({ kind: "closed" });
+    comments.store.teacher.mockResolvedValueOnce({ comments: { answer: "not_teacher" }, canWrite: null });
+    expect(await comments.teacherComments(claims, { course: null, unanswered: false, before: null })).toEqual({ kind: "not_teacher" });
+    comments.store.teacher.mockRejectedValueOnce(new Error("se cayó"));
+    expect(await comments.teacherComments(claims, { course: null, unanswered: false, before: null })).toEqual({ kind: "unavailable" });
+    expect(comments.reported).toEqual(["comments_unavailable"]);
+  });
+
+  it("los cursos del filtro, o «no se supo»", async () => {
+    const comments = commentsWith();
+    expect(await comments.teacherCommentCourses(claims)).toEqual({ kind: "ready", courses: [{ id: LESSON, title: "Respirar" }] });
+    comments.store.teacherCourses.mockRejectedValueOnce(new Error("se cayó"));
+    expect(await comments.teacherCommentCourses(claims)).toEqual({ kind: "unavailable" });
   });
 });

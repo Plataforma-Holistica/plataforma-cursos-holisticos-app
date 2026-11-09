@@ -2,7 +2,7 @@ import "server-only";
 
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
-import { asServer, type Tx } from "@/adapters/supabase/db";
+import { asServer, asUser, type Tx } from "@/adapters/supabase/db";
 import { resolveAccountAccess } from "@/domain/access/account-access";
 import { commentAllows, resolveCommentAccess, type AccountRefusal, type CommentAccess, type CommentLevel } from "@/domain/access/media-access";
 import { parseCommentBody, parsePseudonym, type CommentTextResult } from "@/domain/comments/comment-text";
@@ -22,6 +22,8 @@ import {
   readCommentReplies,
   readLessonComments,
   readMyComments,
+  readTeacherCommentCourses,
+  readTeacherComments,
   setPseudonym,
   type CommentCursor,
   type CommentPage,
@@ -31,6 +33,8 @@ import {
   type MyComment,
   type MyCommentsRow,
   type PseudonymRow,
+  type TeacherCommentsRow,
+  type TeacherThread,
   type RepliesRow,
   type WriteRow,
 } from "./records";
@@ -47,7 +51,7 @@ import {
 // Se acepta, como en el latido, que los hechos se lean sin candado: una suscripción que vence justo entonces deja pasar
 // un comentario (decisión mía sin confirmar).
 
-export type { CommentCursor, CommentPage, CommentThread, CommentView, MyComment } from "./records";
+export type { CommentCursor, CommentPage, CommentThread, CommentView, GateRefusal, MyComment, TeacherThread } from "./records";
 
 /** Lo que contestó la regla cuando no alcanzó, dicho para la pantalla. */
 export type AccessRefusal =
@@ -103,6 +107,19 @@ export type PseudonymChange =
 /** «Mis comentarios» (PA-24): una página de lo propio y desde dónde sigue la siguiente. */
 export type MyCommentsAnswer = { kind: "ready"; items: MyComment[]; next: string | null } | { kind: "unavailable" };
 
+/**
+ * PA-45: una página de lo de las lecciones del maestro, desde dónde sigue, y lo que contesta el portón al maestro (nulo sin
+ * comentarios): con «ok» se ofrece responder.
+ */
+export type TeacherCommentsAnswer =
+  | { kind: "ready"; items: TeacherThread[]; next: string | null; write: "ok" | GateRefusal | null }
+  | { kind: "closed" }
+  /** Dejó de ser maestro (o su cuenta se suspendió) entre la guarda y la lectura. */
+  | { kind: "not_teacher" }
+  | { kind: "unavailable" };
+
+export type TeacherCoursesAnswer = { kind: "ready"; courses: { id: string; title: string }[] } | { kind: "unavailable" };
+
 /** Lo que corrió con el acceso decidido, o la respuesta de la regla si no alcanzó. */
 export type Guarded<T> = { kind: "refused"; access: CommentAccess } | { kind: "ran"; value: T };
 
@@ -116,6 +133,10 @@ export interface CommentsStore {
   pseudonym(claims: VerifiedClaims, pseudonym: string): Promise<PseudonymRow>;
   /** Lo propio de quien actúa, sin la regla: es su privacidad, como borrar. */
   mine(claims: VerifiedClaims, before: CommentCursor | null): Promise<MyCommentsRow>;
+  /** PA-45, sin la regla: la base acota al maestro de quien actúa; el portón, con la lección del primer comentario. */
+  teacher(claims: VerifiedClaims, input: { course: string | null; unanswered: boolean; before: CommentCursor | null }): Promise<{ comments: TeacherCommentsRow; canWrite: "ok" | GateRefusal | null }>;
+  /** Los cursos del filtro de PA-45, como la persona. */
+  teacherCourses(claims: VerifiedClaims): Promise<{ id: string; title: string }[]>;
 }
 
 /**
@@ -303,17 +324,49 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     return { kind: "ready", items: page.items, next: cursorOf(page) };
   }
 
-  return { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments };
+  /**
+   * PA-45 (RF-609): lo de las lecciones del maestro de quien trae esas claims, con las claims que dio la guarda del portal. Sin la
+   * regla de acceso (decisión de Sergio del 2026-11-08): para el dueño de la lección, la regla se reduce a lo que acota la base, y
+   * la integración 104 exige que coincidan. Un curso o un cursor sin forma no llegan a la base.
+   */
+  async function teacherComments(claims: VerifiedClaims, input: { course: string | null; unanswered: boolean; before: string | null }): Promise<TeacherCommentsAnswer> {
+    let answer: Awaited<ReturnType<CommentsStore["teacher"]>>;
+    try {
+      answer = await deps.store.teacher(claims, {
+        course: isCommentId(input.course) ? input.course : null,
+        unanswered: input.unanswered,
+        before: parseCommentCursor(input.before),
+      });
+    } catch {
+      return unavailable();
+    }
+    const { comments, canWrite } = answer;
+    if (comments.answer !== "ok") return { kind: comments.answer };
+    return { kind: "ready", items: comments.items, next: cursorOf(comments), write: canWrite };
+  }
+
+  /** Los cursos del filtro de PA-45. */
+  async function teacherCommentCourses(claims: VerifiedClaims): Promise<TeacherCoursesAnswer> {
+    try {
+      return { kind: "ready", courses: await deps.store.teacherCourses(claims) };
+    } catch {
+      return unavailable();
+    }
+  }
+
+  return { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments, teacherComments, teacherCommentCourses };
 }
 
 /** Una transacción como servidor a nombre de esas claims. La integración 102 pasa una del dueño que se revierte. */
 export type RunAsServer = <T>(claims: VerifiedClaims, reason: string, work: (tx: Tx) => Promise<T>) => Promise<T>;
+/** Una transacción como la persona (solo los cursos del filtro de PA-45). */
+export type RunAsUser = <T>(claims: VerifiedClaims, work: (tx: Tx) => Promise<T>) => Promise<T>;
 
 /**
  * Todo como servidor, a nombre de quien actúa: nadie de la aplicación lee ni escribe las tablas, solo las funciones. Cada
  * entrada decide el acceso y llama a la base en la misma transacción.
  */
-export function commentsStoreOn(run: RunAsServer): CommentsStore {
+export function commentsStoreOn(run: RunAsServer, read: RunAsUser = (claims, work) => run(claims, "comments_teacher_courses", work)): CommentsStore {
   return {
     lesson: (claims, lessonId, before) =>
       run(claims, "comments_read", (tx) =>
@@ -333,12 +386,24 @@ export function commentsStoreOn(run: RunAsServer): CommentsStore {
     remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),
     pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),
     mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),
+    teacher: (claims, input) => run(claims, "comments_teacher", async (tx) => { const comments = await readTeacherComments(tx, input); const first = comments.answer === "ok" ? comments.items[0] : undefined; return { comments, canWrite: first === undefined ? null : await readCanWrite(tx, first.lessonId) }; }),
+    teacherCourses: (claims) => read(claims, (tx) => readTeacherCommentCourses(tx)),
   };
 }
 
-export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work));
+export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work), asUser);
 
-export const { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments } = createComments({
+export const {
+  lessonComments,
+  commentReplies,
+  postLessonComment,
+  editLessonComment,
+  deleteLessonComment,
+  chooseCommentName,
+  myComments,
+  teacherComments,
+  teacherCommentCourses,
+} = createComments({
   store: databaseCommentsStore,
   checkSession,
   report: reportFailure,

@@ -21,7 +21,7 @@ const media = flat(codeOf("src/services/media/records.ts"));
 /** La entrada `name` del almacén de la base, hasta la siguiente. */
 const storeOf = (name: string) => {
   const store = service.slice(service.indexOf("export function commentsStoreOn"));
-  return store.match(new RegExp(` ${name}: \\(claims, [^)]*\\) => .*?(?= \\w+: \\(claims| \\}; \\})`))?.[0] ?? "";
+  return store.match(new RegExp(` ${name}: \\(claims(?:, [^)]*)?\\) => .*?(?= \\w+: \\(claims| \\}; \\})`))?.[0] ?? "";
 };
 const bodyOf = (name: string) => service.match(new RegExp(`async function ${name}(?:<[^>]*>)?\\(.*?(?= async function | return \\{ lessonComments)`))?.[0] ?? "";
 
@@ -62,7 +62,9 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
   it("cada entrada pide su nivel, en la misma transacción que la base", () => {
     expect(service.match(/guarded\(tx,/g)).toHaveLength(4);
     // La aplicación corre cada entrada como servidor, en una transacción.
-    expect(service).toContain("export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work));");
+    // Y como la persona solo los cursos del filtro de PA-45.
+    expect(service).toContain("export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work), asUser);");
+    expect(service.match(/\basUser\b/g)).toHaveLength(2);
     expect(service.match(/\basServer\(/g)).toHaveLength(1);
     expect(storeOf("lesson")).toMatch(/^ lesson: \(claims, lessonId, before\) => run\(claims, "comments_read", \(tx\) => guarded\(tx, lessonId, "read", /);
     expect(storeOf("lesson")).toContain('canWrite: commentAllows(access, "write") ? await readCanWrite(tx, lessonId) : null');
@@ -81,10 +83,19 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
     expect(storeOf("mine")).toBe(' mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),');
     expect(bodyOf("myComments")).not.toMatch(/guarded|readCommentFacts|decideComment|commentAllows/);
     expect(service.match(/deps\.store\.mine\(/g)).toHaveLength(1);
+    // PA-45, también sin la regla (decisión de Sergio del 2026-11-08): la base acota al maestro de quien actúa. Si puede responder lo
+    // dice el portón, con la lección del primer comentario, en la misma transacción.
+    expect(storeOf("teacher")).toMatch(/^ teacher: \(claims, input\) => run\(claims, "comments_teacher", async \(tx\) => \{ const comments = await readTeacherComments\(tx, input\);/);
+    expect(storeOf("teacher")).toContain("canWrite: first === undefined ? null : await readCanWrite(tx, first.lessonId)");
+    expect(bodyOf("teacherComments")).not.toMatch(/guarded|readCommentFacts|decideComment|commentAllows/);
+    // Los cursos del filtro, como la persona: su maestro lee lo suyo, como en Mis cursos.
+    expect(storeOf("teacherCourses")).toBe(' teacherCourses: (claims) => read(claims, (tx) => readTeacherCommentCourses(tx)),');
     // Cada consulta se llama una sola vez, desde su entrada.
-    for (const call of ["readLessonComments", "readCommentReplies", "readCanWrite", "readCommentLesson", "postComment", "editComment", "deleteComment", "setPseudonym", "readMyComments"]) {
+    for (const call of ["readLessonComments", "readCommentReplies", "readCommentLesson", "postComment", "editComment", "deleteComment", "setPseudonym", "readMyComments", "readTeacherComments", "readTeacherCommentCourses"]) {
       expect(service.match(new RegExp(`\\b${call}\\(`, "g")), call).toHaveLength(1);
     }
+    // El portón se pregunta desde la lección (PA-22) y desde el portal (PA-45).
+    expect(service.match(/\breadCanWrite\(/g)).toHaveLength(2);
     expect(records).not.toMatch(/editComment\(tx: Tx, input: \{ lessonId/);
   });
 

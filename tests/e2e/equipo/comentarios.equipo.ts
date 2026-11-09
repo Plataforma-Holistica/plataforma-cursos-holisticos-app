@@ -254,3 +254,63 @@ test("sin JavaScript, también se borra desde «Mis comentarios»", async ({ bro
     await expect(page.getByText("Todavía no has escrito comentarios.")).toBeVisible();
   });
 });
+
+// PA-45 (T-501; RF-609; FL-38): la maestra del curso, con cuenta, responde desde su portal.
+let maestra: Person;
+
+/** La maestra del curso de prueba pasa a tener cuenta, con su aviso al día; y una pregunta de `who`, publicada, en la lección. */
+async function teacherWithQuestion(who: Person, body: string): Promise<void> {
+  if (maestra === undefined) {
+    maestra = await person();
+    await ownerQuery(
+      `begin; set local session_replication_role = replica;
+       update public.teachers set profile_id = '${maestra.id}', status = 'active'
+        where id = (select teacher_id from public.published_teachers where slug = 'maestra-comentarios');
+       commit;`,
+    );
+    await ownerQuery(
+      `with declared as materialized (select set_config('app.actor_id', $1::text, true) as done)
+       insert into public.consents (profile_id, legal_document_id, origin)
+       select $1::uuid, private.current_legal_document('teacher_privacy_notice'), 'account_settings' from declared`,
+      [maestra.id],
+    );
+  }
+  const lesson = lessonUrl.split("/").at(-1) ?? "";
+  await ownerQuery(
+    `begin; set local session_replication_role = replica;
+     insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
+     select l.id, l.course_id, l.teacher_id, '${who.id}', '${body}', 'published', 'pass' from public.published_lessons l where l.id = '${lesson}';
+     commit;`,
+  );
+}
+
+test("PA-45 con JavaScript: la maestra ve lo que espera respuesta y responde desde su portal", async ({ page }) => {
+  await teacherWithQuestion(luz, "¿Cuánto dura cada respiración?");
+  await signIn(page, maestra, "/portal/comentarios");
+  await expect(page.getByRole("heading", { level: 1, name: "Comentarios" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Filtros" }).getByRole("link", { name: "Sin responder" }).click();
+  await expect(page).toHaveURL(/sin-responder=1/);
+  const question = page.getByRole("article", { name: "Luz" }).filter({ hasText: "¿Cuánto dura cada respiración?" });
+  await expect(question).toBeVisible();
+  expect(await a11yViolations(page)).toEqual([]);
+  await question.getByRole("button", { name: "Responder" }).click();
+  await page.getByRole("textbox", { name: "Responde a Luz" }).fill("Cuatro tiempos al entrar y seis al salir.");
+  await page.getByRole("button", { name: "Responder", exact: true }).last().click();
+  await expect(page.getByText("Tu comentario se publicó.")).toBeVisible();
+  await expect(page.getByText("No tienes comentarios sin responder.")).toBeVisible();
+});
+
+test("PA-45 sin JavaScript: también se responde, y la respuesta queda en su hilo", async ({ browser }) => {
+  await teacherWithQuestion(beto, "¿Se puede hacer acostado?");
+  await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+    await signIn(page, maestra, "/portal/comentarios");
+    const question = page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" });
+    await question.getByRole("button", { name: "Responder" }).click();
+    await page.getByRole("textbox", { name: "Responde a Beto" }).fill("Sí, con las rodillas dobladas.");
+    await page.getByRole("button", { name: "Responder", exact: true }).last().click();
+    await expect(page).toHaveURL(/\/portal\/comentarios/);
+    await expect(page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" }).getByRole("article", { name: "Tú" })).toContainText(
+      "Sí, con las rodillas dobladas.",
+    );
+  });
+});
