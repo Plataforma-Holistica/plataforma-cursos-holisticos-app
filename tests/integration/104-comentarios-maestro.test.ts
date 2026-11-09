@@ -100,8 +100,8 @@ async function lessonIn(owner: Client, teacherId: string, author: string, how: L
   const course = (
     await owner.query<{ id: string }>(
       `insert into public.course_registry (teacher_id, state, first_published_at, pending_version_state, withdrawn_at, withdrawal_reason)
-       values ($1, $2, now(), case when $2 = 'changes_pending' then 'draft'::public.course_version_state end,
-               case when $2 = 'withdrawn' then now() end, case when $2 = 'withdrawn' then 'Prueba de la 104' end)
+       values ($1, $2::public.course_state, now(), case when $2::text = 'changes_pending' then 'draft'::public.course_version_state end,
+               case when $2::text = 'withdrawn' then now() end, case when $2::text = 'withdrawn' then 'Prueba de la 104' end)
        returning course_id as id`,
       [teacherId, how.state],
     )
