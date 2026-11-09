@@ -59,7 +59,7 @@ export function MyCommentsScreen({ items, next, cursor, action }: MyCommentsScre
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-8 outline-none">
-      <BackLink href={ROUTES.account}>{text.mine.accountTitle}</BackLink>
+      <BackLink href={ROUTES.account}>{text.mine.back}</BackLink>
       <div className="flex flex-col gap-2">
         <h1 ref={heading} tabIndex={-1} className="text-h2 outline-none">
           {text.mine.title}

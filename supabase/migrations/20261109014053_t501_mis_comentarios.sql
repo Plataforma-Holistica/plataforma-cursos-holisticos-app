@@ -27,7 +27,8 @@ begin
     -- Lo que su autor ve: publicado, en revisión, o en el filtro (que se dice en revisión). Ni lo oculto ni lo borrado.
     where c.author_id = v_actor
       and c.status in ('published', 'in_review', 'in_filter')
-      and (p_before_at is null or p_before_id is null or (c.created_at, c.id) < (p_before_at, p_before_id))
+      -- El cursor de siempre: sin id, todo lo de ese instante cuenta como siguiente (como `comments_for_lesson`).
+      and (p_before_at is null or (c.created_at, c.id) < (p_before_at, coalesce(p_before_id, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid)))
     order by c.created_at desc, c.id desc
     limit 21)
   select coalesce(jsonb_agg(

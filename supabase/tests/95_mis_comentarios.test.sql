@@ -133,6 +133,8 @@ select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', prue
 from unnest(array['vigente', 'retirada', 'nolistado', 'version', 'retirado']) s;
 select pruebas.r(pruebas.p(1), format('private.comment_post(%L, %L, %L)', pruebas.id('vigente'), pruebas.id('b1'), 'Ana responde a Beto'), 'a_resp');
 select pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, 1)', pruebas.id('a_vigente'), 'De Ana, editado'));
+-- El freno cuenta 10 cada 10 minutos, y todo pasa en la misma transacción: se vacía para seguir escribiendo.
+delete from private.rate_limit_counters where bucket = 'comments:' || pruebas.p(1);
 select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se va'), 'a_borra');
 select pruebas.r(pruebas.p(1), format('private.comment_delete(%L, 1)', pruebas.id('a_borra')));
 select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se oculta'), 'a_oculto');

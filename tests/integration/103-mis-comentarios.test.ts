@@ -112,7 +112,7 @@ async function subscribe(owner: Client, profile: string): Promise<void> {
 async function expire(owner: Client, profile: string): Promise<void> {
   await asOwner(owner);
   await owner.query("set local session_replication_role = replica");
-  await owner.query("update public.subscriptions set status = 'canceled', current_period_end = now() - interval '60 days' where profile_id = $1", [profile]);
+  await owner.query("update public.subscriptions set status = 'canceled', current_period_start = now() - interval '90 days', current_period_end = now() - interval '60 days' where profile_id = $1", [profile]);
   await owner.query("set local session_replication_role = origin");
 }
 

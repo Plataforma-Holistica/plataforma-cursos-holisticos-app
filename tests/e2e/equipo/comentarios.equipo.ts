@@ -220,7 +220,7 @@ test("con el interruptor apagado no hay pestaña", async ({ page }) => {
 async function expire(who: Person): Promise<void> {
   await ownerQuery(
     `begin; set local session_replication_role = replica;
-     update public.subscriptions set status = 'canceled', current_period_end = now() - interval '60 days' where profile_id = '${who.id}';
+     update public.subscriptions set status = 'canceled', current_period_start = now() - interval '90 days', current_period_end = now() - interval '60 days' where profile_id = '${who.id}';
      commit;`,
   );
 }

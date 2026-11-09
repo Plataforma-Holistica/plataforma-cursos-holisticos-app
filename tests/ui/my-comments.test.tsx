@@ -54,6 +54,7 @@ describe("la página (PA-24)", () => {
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/cuenta/comentarios");
     expect(mocks.myComments).toHaveBeenCalledExactlyOnceWith(claims, `${AT}_${id(9)}`);
     expect(screen.getByRole("heading", { level: 1, name: "Mis comentarios" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Volver a Cuenta" })).toHaveAttribute("href", "/cuenta");
   });
 
   it("una cuenta suspendida ve PA-35, y no se lee nada", async () => {

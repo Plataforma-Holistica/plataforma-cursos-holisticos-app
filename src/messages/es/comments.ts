@@ -71,6 +71,7 @@ export const comments = defineMessages({
     reply: "Respuesta",
     label: "{lesson}, {course}",
     unavailable: "No pudimos borrarlo. Vuelve a intentarlo.",
+    back: "Volver a Cuenta",
     accountTitle: "Comentarios",
     accountLink: "Ver y borrar lo que escribiste",
   },
