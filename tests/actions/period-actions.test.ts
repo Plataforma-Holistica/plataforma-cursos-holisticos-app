@@ -335,8 +335,13 @@ describe("reconcileAction (T-303, cuarta solicitud)", () => {
     await expect(reconcileAction(IDLE, atPeriod(pressed(reconcileButton.compare())))).rejects.toThrow(`redirige a ${periodPath(PERIOD)}`);
   });
 
-  it("con un periodo armado a mano: a la lista, sin llamar al servicio", async () => {
-    await expect(reconcileAction(IDLE, pressed(reconcileButton.compare(), { period: "202713" }))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+  it.each([
+    ["un mes que no existe", { period: "202713" }],
+    ["un periodo que no es número", { period: "abc" }],
+    ["un periodo corto", { period: "20271" }],
+    ["sin periodo", {}],
+  ])("con %s: a la lista, sin llamar al servicio", async (_name, fields: Record<string, string>) => {
+    await expect(reconcileAction(IDLE, pressed(reconcileButton.compare(), fields))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
     expect(calls.order).toEqual(["redirect"]);
   });
 

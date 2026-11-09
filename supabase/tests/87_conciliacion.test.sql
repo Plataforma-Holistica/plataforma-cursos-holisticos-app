@@ -8,7 +8,7 @@
 -- Octubre de 2026 ya terminó y es el mes que se compara y se cierra; el mes de ahora todavía no termina.
 begin;
 \ir _ayuda.psql
-select plan(115);
+select plan(116);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a8700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -244,6 +244,12 @@ select is((select array[own_cents, provider_cents] from private.billing_reconcil
   'con los dos montos');
 insert into r values ('moneda', pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900),
                                                                           pruebas.cargo('ch_87_usd', 2000, p_currency => 'usd'))));
+-- Las cuatro clases juntas, y un cargo en dólares con el id de un cobro del libro: el cruce las separa sin confundirlas.
+insert into r values ('cuatro', pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 30000), pruebas.cargo('ch_87_dos', 2000, p_currency => 'usd'),
+                                                                          pruebas.cargo('ch_87_nuevo', 50000))));
+select is(pruebas.lados((select (v ->> 'reconciliation_id')::uuid from r where et = 'cuatro')),
+  array['amount:ch_87_uno', 'only_own:ch_87_dos', 'only_provider:ch_87_nuevo', 'other_currency:ch_87_dos'],
+  'las cuatro clases en una sola comparación, también con el mismo id de los dos lados en otra moneda');
 select is(pruebas.lados((select (v ->> 'reconciliation_id')::uuid from r where et = 'moneda')), array['other_currency:ch_87_usd'],
   'un cargo en otra moneda no se esconde: es dinero que el libro no tiene');
 insert into r values ('pendiente', pruebas.compara(202610, jsonb_build_array(pruebas.cargo('ch_87_uno', 34900), pruebas.cargo('ch_87_dos', 34900),

@@ -982,7 +982,7 @@ as $$
                ('finance_period', 'private.finance_period(public.period_id)',
                 '%from private.billing_reconciliations r where r.id = private.billing_reconciliation_shown(p_period)%'),
                ('billing_reconciliation_record', 'private.billing_reconciliation_record(public.period_id, boolean, bigint, bigint, boolean, jsonb)',
-                '%theirs as (select s.id, s.cents from s where s.status = ''succeeded'' and s.captured and s.currency = ''mxn'')%mine as (select c.provider_charge_id as id, c.gross_cents as cents from public.charges c where c.provider = ''stripe'' and c.period_id = p_period)%s.status = ''pending'' or (s.status = ''succeeded'' and not s.captured and not s.refunded)%where x.n <= 200%')
+                '%theirs as (select s.id, s.cents from s where s.status = ''succeeded'' and s.captured and s.currency = ''mxn'')%mine as (select c.provider_charge_id as id, c.gross_cents as cents from public.charges c where c.provider = ''stripe'' and c.period_id = p_period)%from theirs t full join mine m on m.id = t.id%s.status = ''pending'' or (s.status = ''succeeded'' and not s.captured and not s.refunded)%where x.n <= 200%')
        ) f (name, signature, pattern)
   where not coalesce(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(f.signature)) like f.pattern, false)
   union all
