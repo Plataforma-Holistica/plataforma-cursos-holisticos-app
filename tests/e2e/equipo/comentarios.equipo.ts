@@ -307,10 +307,53 @@ test("PA-45 sin JavaScript: también se responde, y la respuesta queda en su hil
     const question = page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" });
     await question.getByRole("button", { name: "Responder" }).click();
     await page.getByRole("textbox", { name: "Responde a Beto" }).fill("Sí, con las rodillas dobladas.");
-    await page.getByRole("button", { name: "Responder", exact: true }).last().click();
+    // El envío es el «Responder» del campo, dentro de su hilo: otros hilos también ofrecen el suyo.
+    await question.getByRole("button", { name: "Responder", exact: true }).last().click();
     await expect(page).toHaveURL(/\/portal\/comentarios/);
     await expect(page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" }).getByRole("article", { name: "Tú" })).toContainText(
       "Sí, con las rodillas dobladas.",
     );
   });
+});
+
+test("PA-45 en el teléfono: la maestra edita y borra su respuesta", async ({ browser }) => {
+  await inContext(browser, PHONE, async (page) => {
+    await signIn(page, maestra, "/portal/comentarios");
+    const thread = page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" });
+    const mine = thread.getByRole("article", { name: "Tú" });
+    await expect(mine).toContainText("Sí, con las rodillas dobladas.");
+    await mine.locator("summary").click();
+    await mine.getByRole("button", { name: "Editar" }).click();
+    await page.getByRole("textbox", { name: "Edita tu comentario" }).fill("Sí, acostada y con las rodillas dobladas.");
+    await page.getByRole("button", { name: "Guardar" }).click();
+    await expect(mine).toContainText("Sí, acostada y con las rodillas dobladas.");
+    await expect(mine).toContainText("editado");
+    expect(await a11yViolations(page)).toEqual([]);
+    await mine.locator("summary").click();
+    await mine.getByRole("button", { name: "Borrar" }).click();
+    await page.getByRole("dialog", { name: "¿Borrar tu comentario?" }).getByRole("button", { name: "Sí, borrarlo" }).click();
+    await expect(page.getByText("Borraste tu comentario.")).toBeVisible();
+    await expect(thread.getByRole("article", { name: "Tú" })).toHaveCount(0);
+  });
+});
+
+test("PA-45 con la maestra suspendida: lee, sin «Responder», y dice por qué", async ({ page }) => {
+  await ownerQuery(
+    `begin; set local session_replication_role = replica;
+     update public.teachers set status = 'suspended', suspended_at = now(), suspension_reason = 'Prueba de comentarios'
+      where profile_id = '${maestra.id}';
+     commit;`,
+  );
+  try {
+    await signIn(page, maestra, "/portal/comentarios");
+    await expect(page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" })).toBeVisible();
+    await expect(page.getByText("Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Responder" })).toHaveCount(0);
+  } finally {
+    await ownerQuery(
+      `begin; set local session_replication_role = replica;
+       update public.teachers set status = 'active', suspended_at = null, suspension_reason = null where profile_id = '${maestra.id}';
+       commit;`,
+    );
+  }
 });

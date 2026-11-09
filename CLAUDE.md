@@ -1143,7 +1143,8 @@ que no se ve leyendo un solo archivo:
   `src/app/_comments/outcomes.ts` (la lección la reexporta), y lo que hacen las dos acciones con cada pedido, en `_comments/act.ts`.
   La acción de PA-45 (`src/app/portal/_comentarios/actions.ts`) usa las mismas entradas del servicio, con la lección de cada
   comentario; una sesión que no pasa vuelve a PA-45. Filtros y páginas por la dirección (`?curso=`, `?sin-responder=1`, `?desde=`). Usa
-  pgTAP 96, integración 104 y dos casos más en `comentarios.equipo.ts`. Decisiones mías sin confirmar: una respuesta del maestro en
+  pgTAP 96, integración 104 y cuatro casos más en `comentarios.equipo.ts` (responder con JavaScript y sin él, editar y borrar en el
+  teléfono, la maestra suspendida). Sin capturas en la vitrina todavía. Decisiones mías sin confirmar: una respuesta del maestro en
   revisión deja el comentario «sin responder»; el suspendido o con el veto borra lo suyo; las respuestas de otros se ven. Para el A:
   nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la

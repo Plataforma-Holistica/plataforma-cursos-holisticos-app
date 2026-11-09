@@ -76,7 +76,6 @@ export const comments = defineMessages({
     accountLink: "Ver y borrar lo que escribiste",
   },
   portal: {
-    pageTitle: "Comentarios",
     title: "Comentarios",
     intro: "Lo que comentan tus alumnos en tus lecciones. Responde desde aquí o desde la lección.",
     filters: "Filtros",

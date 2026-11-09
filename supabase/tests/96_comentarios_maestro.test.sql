@@ -159,7 +159,8 @@ select is((select array_agg(k order by k) from vista, jsonb_object_keys(pruebas.
 select is((select pruebas.fila(v, pruebas.id('a_vigente')) ->> 'name' from vista), 'Ana', 'el autor con su nombre de comentarios');
 select is((select pruebas.fila(v, pruebas.id('a_vigente')) ->> 'revision' from vista), null, 'sin la revisión de lo ajeno');
 select is((select pruebas.fila(v, pruebas.id('a_version')) ->> 'course_title' from vista), 'Curso pa45-version', 'con el título publicado del curso');
-select is((select jsonb_array_length(pruebas.fila(v, pruebas.id('a_vigente')) -> 'replies' -> 'items') from vista), 0, 'la respuesta de Ana en revisión no sale');
+select ok(not (select pruebas.id('a_resp')::text in (select r ->> 'id' from jsonb_array_elements(pruebas.fila(v, pruebas.id('b_vigente')) -> 'replies' -> 'items') r) from vista),
+  'la respuesta de Ana en revisión no sale en el hilo de Beto');
 select is((select jsonb_path_query_array(pruebas.fila(v, pruebas.id('b_vigente')) -> 'replies' -> 'items', '$[*].id') from vista),
   jsonb_build_array(pruebas.id('m_resp')), 'la de la maestra en revisión sí, porque es suya');
 select is((select pruebas.fila(v, pruebas.id('b_vigente')) -> 'replies' -> 'items' -> 0 ->> 'state' from vista), 'in_review', 'en revisión');

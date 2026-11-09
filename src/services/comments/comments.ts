@@ -366,7 +366,10 @@ export type RunAsUser = <T>(claims: VerifiedClaims, work: (tx: Tx) => Promise<T>
  * Todo como servidor, a nombre de quien actúa: nadie de la aplicación lee ni escribe las tablas, solo las funciones. Cada
  * entrada decide el acceso y llama a la base en la misma transacción.
  */
-export function commentsStoreOn(run: RunAsServer, read: RunAsUser = (claims, work) => run(claims, "comments_teacher_courses", work)): CommentsStore {
+/** Sin lector como la persona: como servidor, `current_teacher_id` no ve la sesión y la lista saldría vacía sin fallar. */
+const noUserReads: RunAsUser = () => Promise.reject(new Error("este almacén no lee como la persona"));
+
+export function commentsStoreOn(run: RunAsServer, read: RunAsUser = noUserReads): CommentsStore {
   return {
     lesson: (claims, lessonId, before) =>
       run(claims, "comments_read", (tx) =>
@@ -386,7 +389,12 @@ export function commentsStoreOn(run: RunAsServer, read: RunAsUser = (claims, wor
     remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),
     pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),
     mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),
-    teacher: (claims, input) => run(claims, "comments_teacher", async (tx) => { const comments = await readTeacherComments(tx, input); const first = comments.answer === "ok" ? comments.items[0] : undefined; return { comments, canWrite: first === undefined ? null : await readCanWrite(tx, first.lessonId) }; }),
+    teacher: (claims, input) =>
+      run(claims, "comments_teacher", async (tx) => {
+        const comments = await readTeacherComments(tx, input);
+        const first = comments.answer === "ok" ? comments.items[0] : undefined;
+        return { comments, canWrite: first === undefined ? null : await readCanWrite(tx, first.lessonId) };
+      }),
     teacherCourses: (claims) => read(claims, (tx) => readTeacherCommentCourses(tx)),
   };
 }
