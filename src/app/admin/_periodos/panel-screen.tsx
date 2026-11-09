@@ -18,14 +18,16 @@ import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
 import { panelAction, periodCodeAction } from "./actions";
 import { FAILURES, toneOf } from "./failures";
-import type { CodeState, PanelState } from "./outcomes";
+import { PANEL_ANCHORS, type CodeState, type PanelState } from "./outcomes";
+import { ReconcileBlock } from "./reconcile-block";
 import type { PeriodView, Tile } from "./rows";
 
 // PA-79 · El panel de un periodo: si está sano y listo para cerrar. Las cifras salen del libro propio,
 // del cierre o del último ensayo, con su fecha (el panel no calcula al abrirse). Las alertas abren
 // PA-68. «Recalcular» deja un pedido en la base que un trabajo de cada minuto corre (decisión de Sergio
-// del 2026-10-27). La conciliación con el proveedor de video llega con T-209, y la del cobro con T-303:
-// mientras no existan, sus bloques no se muestran. Las liquidaciones (PA-81) llegan con la tercera
+// del 2026-10-27). La conciliación con Stripe (T-303, cuarta solicitud) tiene su bloque, con su propia
+// acción y su propio estado (`reconcile-block.tsx`); la del proveedor de video llega con T-209, y
+// mientras no exista su bloque no se muestra. Las liquidaciones (PA-81) llegan con la tercera
 // solicitud de T-605.
 //
 // Todo funciona sin JavaScript: «Recalcular» es un formulario con su acción, y lo que sale bien
@@ -38,7 +40,8 @@ const PANEL_IDLE: PanelState = { kind: "idle" };
 const CODE_BLOCK_ID = "bloque-periodo-codigo";
 const CODE_TITLE_ID = "periodo-codigo-titulo";
 const CODE_FIELD_ID = "periodo-codigo";
-const ROLLUP_BLOCK_ID = "bloque-periodo-recalculo";
+// La de la consolidación es también a donde lleva PA-80: vive con las demás que se enlazan.
+const ROLLUP_BLOCK_ID = PANEL_ANCHORS.rollup;
 const ROLLUP_HEADING_ID = "periodo-recalculo-titulo";
 
 export interface PeriodScreenProps {
@@ -148,6 +151,8 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
           />
         )}
       </section>
+
+      <ReconcileBlock periodId={view.periodId} view={view.reconciliation} />
 
       <section ref={block} id={ROLLUP_BLOCK_ID} aria-labelledby={ROLLUP_HEADING_ID} tabIndex={-1} className="flex flex-col gap-4 outline-none">
         <h2 id={ROLLUP_HEADING_ID} className="text-h2">

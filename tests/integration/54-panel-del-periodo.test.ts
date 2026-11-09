@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire, SHOWN, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, clearPeriodsBefore, connect, type Finance, financePerson, forgetReconciliations, reconciled, retire, SHOWN, waitBehind } from "./helpers/finance";
 import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // El panel del periodo, el cierre desde la aplicación y su exportación (T-605; RF-705, RF-509, RF-408)
@@ -124,6 +124,7 @@ beforeAll(async () => {
      where period_id = any($1::int[])`,
     [OURS],
   );
+  await reconciled(owner, OURS);
   await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   await owner.query(
     `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -170,6 +171,7 @@ afterAll(async () => {
       [OURS],
     );
     await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
+    await forgetReconciliations(owner, OURS);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.watch_rollup where period_id = any($1::int[])", [OURS]);

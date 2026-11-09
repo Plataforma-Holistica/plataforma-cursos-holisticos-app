@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, connect, type Finance, financePerson, forgetReconciliations, outcomeOf, reconciled, retire, waitBehind } from "./helpers/finance";
 import { createTestUser, deleteTestUsers, deleteTestUsersByEmail, ownerQuery, type TestUser } from "./helpers/users";
 
 // El ensayo y el cierre (T-602; RF-502, RF-503, RN-09) contra la base local, en lo que una transacción
@@ -131,6 +131,7 @@ beforeAll(async () => {
      where period_id = any($1::int[]) and period_id < 203607`,
     [OURS],
   );
+  await reconciled(owner, OURS);
   await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   await owner.query(
     `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -160,6 +161,7 @@ afterAll(async () => {
       [OURS],
     );
     await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
+    await forgetReconciliations(owner, OURS);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.revenue_allocations where period_id = any($1::int[])", [OURS]);
@@ -347,6 +349,7 @@ describe("el cierre, de verdad", () => {
       await skipped.query("alter table public.payout_periods disable trigger payout_periods_guard, disable trigger payout_periods_balanced");
       await skipped.query("update public.payout_periods set status = 'closing', entered_closing_at = now() - interval '2 days', active_students = 1, pool_bps = 6000 where period_id = 203607");
       await skipped.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
+      await reconciled(skipped, 203607);
       await skipped.query("commit");
     } finally {
       await skipped.query("rollback").catch(() => undefined);

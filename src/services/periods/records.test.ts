@@ -55,6 +55,7 @@ const PERIOD = {
   last_rollup: { status: "failed", mode: "dirty", started_at: "2027-11-02T09:00:00+00:00", finished_at: "2027-11-02T09:01:00+00:00" },
   last_good_rollup: { mode: "full", started_at: "2027-11-01T09:00:00+00:00", finished_at: "2027-11-01T09:05:00+00:00" },
   rollup_request: { status: "pending", requested_at: "2027-11-02T11:00:00+00:00", started_at: null, finished_at: null },
+  reconciliation: null,
 };
 const TEACHER_ROW = {
   teacher_id: TEACHER,
@@ -69,7 +70,7 @@ const TEACHER_ROW = {
 const CLOSE = {
   fresh_code: true,
   period: { period_id: 202710, status: "closed", ends_at: "2027-11-01T06:00:00+00:00", entered_closing_at: "2027-11-01T09:00:00+00:00" },
-  checks: { open_alerts: 0, final_rehearsal: true, last_rollup: "succeeded", rollup_marks: false },
+  checks: { open_alerts: 0, final_rehearsal: true, last_rollup: "succeeded", rollup_marks: false, billing_events: 0, charges_match: true },
   rehearsal: {
     ...FIGURES,
     at: "2027-11-02T10:00:00+00:00",
@@ -153,7 +154,7 @@ describe("closeReadOf", () => {
     expect(closeReadOf(CLOSE)).toMatchObject({
       freshCode: true,
       period: { periodId: 202710, status: "closed" },
-      checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false },
+      checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false, billingEvents: 0, chargesMatch: true },
       rehearsal: { status: "succeeded", teachers: [{ teacherId: TEACHER, belowMinimum: null }] },
       close: {
         closedBy: "Finanzas",

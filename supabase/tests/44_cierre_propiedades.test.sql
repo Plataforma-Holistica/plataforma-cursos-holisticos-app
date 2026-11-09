@@ -14,6 +14,7 @@
 -- Los meses van forzados (abierto, en cierre): la prueba no depende del día en que corre.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 select plan(9);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -159,6 +160,7 @@ begin
                 '{"mode": "full"}');
         perform pruebas.como_finanzas();
         v_r := private.rehearse_close(v_period);
+        perform pruebas.conciliado(v_period);
         v_c := private.close_period(v_period, private.last_rehearsal(v_period));
         set constraints payout_periods_balanced immediate;
         set constraints payout_periods_balanced deferred;

@@ -9,6 +9,7 @@
 -- La comprobación al confirmar corre al confirmar y aquí nada confirma: `pruebas.cierra()` la adelanta.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 select plan(53);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -38,6 +39,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
+  perform pruebas.conciliado(p_period);
   v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;
@@ -52,6 +54,7 @@ declare
   v jsonb;
 begin
   perform pruebas.como_finanzas();
+  perform pruebas.conciliado(p_period);
   v := private.close_period(p_period, private.last_rehearsal(p_period));
   if v ->> 'outcome' <> 'closed' then
     raise exception 'no cerró: %', v;

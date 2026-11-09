@@ -1658,34 +1658,41 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
   test("avisos de cobro con JavaScript: la cola dice el código en palabras, y reintentar lo deja en camino", async ({ page }) => {
     const tag = randomUUID().slice(0, 8);
     const id = await failedEvent(tag);
-    await enterAdmin(page, ana, BILLING);
-    const row = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
-    await expect(row.getByText("Es una factura de 0: no tiene cobro que registrar.")).toBeVisible();
-    await row.getByRole("button", { name: `Reintentar el aviso evt_e2e_${tag}` }).click();
-    await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
-    expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
-    expect(await a11yViolations(page)).toEqual([]);
-    // Pendiente sin Stripe se quedaría así, y frenaría la foto de su mes y de los que siguen.
-    await forgetEvent(id);
+    // Pendiente sin Stripe se quedaría así, y frenaría la foto de su mes y de los que siguen; fallido, frenaría además todo cierre (T-303, cuarta
+    // solicitud). Se borra aunque la prueba falle.
+    try {
+      await enterAdmin(page, ana, BILLING);
+      const row = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+      await expect(row.getByText("Es una factura de 0: no tiene cobro que registrar.")).toBeVisible();
+      await row.getByRole("button", { name: `Reintentar el aviso evt_e2e_${tag}` }).click();
+      await expect(page.getByText(/Lo reabriste y ya va en camino/)).toBeVisible();
+      expect(await eventRow(id)).toEqual([{ status: "pending", attempts: 0, resolution_note: null }]);
+      expect(await a11yViolations(page)).toEqual([]);
+    } finally {
+      await forgetEvent(id);
+    }
   });
 
   test("avisos de cobro sin JavaScript: resolver a mano en dos pasos, y recargar no reenvía", async ({ browser }) => {
     const tag = randomUUID().slice(0, 8);
     const id = await failedEvent(tag);
-    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
-      await enterAdmin(page, ana, BILLING);
-      await page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` }).getByRole("button", { name: `Resolver a mano el aviso evt_e2e_${tag}` }).click();
-      await expect(page).toHaveURL(`${BILLING}#bloque-avisos-lista`);
-      const asked = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
-      await asked.getByLabel("Qué se hizo").fill("Factura de prueba del extremo a extremo.");
-      await asked.getByRole("button", { name: "Sí, resolverlo" }).click();
-      await expect(page.getByText("Resuelto a mano.")).toBeVisible();
-      expect(await eventRow(id)).toEqual([{ status: "resolved", attempts: 1, resolution_note: "Factura de prueba del extremo a extremo." }]);
-      const audited = await auditRows();
-      await page.reload();
-      expect(await auditRows()).toBe(audited);
-    });
-    await forgetEvent(id);
+    try {
+      await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+        await enterAdmin(page, ana, BILLING);
+        await page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` }).getByRole("button", { name: `Resolver a mano el aviso evt_e2e_${tag}` }).click();
+        await expect(page).toHaveURL(`${BILLING}#bloque-avisos-lista`);
+        const asked = page.getByRole("row").filter({ hasText: `evt_e2e_${tag}` });
+        await asked.getByLabel("Qué se hizo").fill("Factura de prueba del extremo a extremo.");
+        await asked.getByRole("button", { name: "Sí, resolverlo" }).click();
+        await expect(page.getByText("Resuelto a mano.")).toBeVisible();
+        expect(await eventRow(id)).toEqual([{ status: "resolved", attempts: 1, resolution_note: "Factura de prueba del extremo a extremo." }]);
+        const audited = await auditRows();
+        await page.reload();
+        expect(await auditRows()).toBe(audited);
+      });
+    } finally {
+      await forgetEvent(id);
+    }
   });
 
   // PA-78 a PA-80, los periodos, el ensayo y el cierre (T-605). Van aquí porque usan a la misma persona
@@ -1728,6 +1735,15 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
          values ($1, $2, $3, 'charge', 1, 1, 28581, 500, 'charge_date_v1')`,
         [charge, student, period],
       );
+      // Una comparación con Stripe que coincide (T-303, cuarta solicitud): el extremo a extremo no habla con Stripe, y sin ella PA-80 no ofrecería cerrar.
+      // Registrada después del fin del mes, como si ya hubiera pasado; el reloj de la base no corre en réplica.
+      await owner.query(
+        `insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                                      provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+         select p.period_id, false, p.starts_at, p.ends_at, true, 0, 0, 0, 0, 0, 0, 0, false, p.ends_at + interval '11 minutes'
+         from public.payout_periods p where p.period_id = $1`,
+        [period],
+      );
       for (const [n, name] of ["Maestra Cierre Uno", "Maestra Cierre Dos"].entries()) {
         const teacher = (await owner.query<{ id: string }>("insert into public.teachers (status) values ('invited') returning id::text")).rows[0]!.id;
         await owner.query("insert into public.published_teachers (teacher_id, slug, display_name) values ($1, $2, $3)", [teacher, `e2e-cierre-${teacher.slice(0, 8)}`, name]);
@@ -1746,6 +1762,64 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
   }
   const closeRuns = async (period: number) =>
     Number((await ownerQuery<{ n: string }>("select count(*)::text as n from public.close_runs where period_id = $1", [period]))[0]?.n);
+
+  // La conciliación con Stripe en PA-79 (T-303, cuarta solicitud). El extremo a extremo no habla con Stripe: la comparación con una diferencia que se puede
+  // explicar la escribe el dueño, más nueva que la que deja `closingMonth`. Lo que hace la comparación lo prueban `87_conciliacion` y `115-conciliacion`.
+  async function differenceToExplain(period: number, charge: string): Promise<void> {
+    await ownerQuery(
+      `do $$ declare v uuid; begin
+         set local session_replication_role = replica;
+         insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                                      provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+         select p.period_id, false, p.starts_at, p.ends_at, true, 0, 0, 1, 50000, 0, 0, 1, false, p.ends_at + interval '12 minutes'
+         from public.payout_periods p where p.period_id = ${period}
+         returning id into v;
+         insert into private.billing_reconciliation_differences (reconciliation_id, side, provider_charge_id, own_cents, provider_cents, currency)
+         values (v, 'only_provider', '${charge}', null, 50000, 'mxn');
+       end $$`,
+    );
+  }
+  const notesFor = async (period: number) =>
+    (await ownerQuery<{ note: string }>("select note from private.billing_reconciliation_notes where period_id = $1", [period])).map((row) => row.note);
+
+  test("la conciliación con JavaScript: lo que sobra en Stripe se explica en dos pasos y la comparación queda vigente", async ({ page }) => {
+    test.setTimeout(180_000);
+    const charge = `ch_e2e_${randomUUID().slice(0, 8)}`;
+    await closingMonth(204003, flagged.id);
+    await differenceToExplain(204003, charge);
+    await enterAdmin(page, ana, `${PERIODS}/2040-03`);
+    const block = page.getByRole("region", { name: "Conciliación con Stripe" });
+    await expect(block.getByText("No coincide: frena el cierre.")).toBeVisible();
+    const row = block.getByRole("row").filter({ hasText: charge });
+    await expect(row.getByText("Stripe lo cobró y el libro no lo tiene")).toBeVisible();
+    await row.getByRole("button", { name: `Explicar el cargo ${charge}` }).click();
+    await row.getByLabel("Por qué").fill("Cobro de prueba hecho a mano en el panel de Stripe.");
+    await row.getByRole("button", { name: "Sí, explicarla" }).click();
+    await expect(page.getByText("Diferencia explicada.")).toBeVisible();
+    await expect(block.getByText("Coincide y está vigente: no frena el cierre.")).toBeVisible();
+    expect(await notesFor(204003)).toEqual(["Cobro de prueba hecho a mano en el panel de Stripe."]);
+    expect(await a11yViolations(page)).toEqual([]);
+  });
+
+  test("la conciliación sin JavaScript: explicar en dos pasos, y recargar no la guarda dos veces", async ({ browser }) => {
+    test.setTimeout(180_000);
+    const charge = `ch_e2e_${randomUUID().slice(0, 8)}`;
+    await closingMonth(204004, flagged.id);
+    await differenceToExplain(204004, charge);
+    await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+      await enterAdmin(page, ana, `${PERIODS}/2040-04`);
+      const block = page.getByRole("region", { name: "Conciliación con Stripe" });
+      await block.getByRole("row").filter({ hasText: charge }).getByRole("button", { name: `Explicar el cargo ${charge}` }).click();
+      const asked = page.getByRole("region", { name: "Conciliación con Stripe" }).getByRole("row").filter({ hasText: charge });
+      await asked.getByLabel("Por qué").fill("Cobro de prueba sin JavaScript.");
+      await asked.getByRole("button", { name: "Sí, explicarla" }).click();
+      await expect(page.getByText("Diferencia explicada.")).toBeVisible();
+      const audited = await auditRows();
+      await page.reload();
+      expect(await auditRows()).toBe(audited);
+      expect(await notesFor(204004)).toEqual(["Cobro de prueba sin JavaScript."]);
+    });
+  });
 
   test("periodos con JavaScript: la lista, el panel, recalcular, ensayar, el diálogo de cierre y su respuesta", async ({ page }) => {
     test.setTimeout(240_000);

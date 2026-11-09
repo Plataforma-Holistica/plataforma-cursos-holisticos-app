@@ -16,6 +16,7 @@ export type {
   Closed,
   CloseExportFile,
   CloseRead,
+  DifferenceSide,
   DownloadAnswer,
   ExportDownloaded,
   FinanceClose,
@@ -26,6 +27,8 @@ export type {
   PeriodsCode,
   PeriodsRead,
   PeriodStatus,
+  Reconciliation,
+  ReconciliationDifference,
   Rehearsed,
   RehearseAnswer,
   RollupAnswer,
@@ -36,7 +39,7 @@ export type {
   RunStatus,
   RunTeacher,
 } from "./panel";
-export { CLOSE_ANSWERS, DOWNLOAD_ANSWERS, PERIOD_STATUSES, REHEARSE_ANSWERS, ROLLUP_ANSWERS, periodOf } from "./panel";
+export { CLOSE_ANSWERS, DIFFERENCE_SIDES, DOWNLOAD_ANSWERS, EXPLAINABLE_SIDES, PERIOD_STATUSES, REHEARSE_ANSWERS, ROLLUP_ANSWERS, periodOf } from "./panel";
 
 export const { financePeriods, financePeriod, financeClose, requestRollup, rehearse, closePeriod, downloadExport, givePeriodsCode } = createPeriodsPanel(
   { report: reportFailure },

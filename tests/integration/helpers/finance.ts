@@ -181,3 +181,36 @@ export async function clearPeriodsBefore(owner: Client, first: number): Promise<
   );
   if ((before.rowCount ?? 0) > 0) throw new Error("hay periodos abiertos o sin liberar desde el arranque en la base local: pnpm db:reset");
 }
+
+/**
+ * Una comparación con Stripe que coincide (T-303, cuarta solicitud), para las pruebas que cierran y no tratan de la conciliación: como si Stripe tuviera lo mismo
+ * que el libro, registrada después del fin del periodo con su margen (también uno que todavía no termina). La escribe el dueño con el reloj de la base apagado, en
+ * la transacción que esté abierta en `client` o sola. Lo que hace la conciliación lo prueba `115-conciliacion`.
+ */
+export async function reconciled(client: Client, periods: number | number[]): Promise<void> {
+  await client.query("alter table private.billing_reconciliations disable trigger billing_reconciliations_guard");
+  await client.query(
+    `insert into private.billing_reconciliations (period_id, livemode, window_start, window_end, complete, own_count, own_cents, provider_count,
+                                                  provider_cents, provider_pending, provider_other_currency, differences, too_many, registered_at)
+     select p.period_id, false, p.starts_at, p.ends_at, true,
+            (select count(*) from public.charges c where c.provider = 'stripe' and c.period_id = p.period_id), 0, 0, 0, 0, 0, 0, false,
+            greatest(clock_timestamp(), p.ends_at + interval '11 minutes')
+     from public.payout_periods p where p.period_id = any($1::int[])`,
+    [Array.isArray(periods) ? periods : [periods]],
+  );
+  await client.query("alter table private.billing_reconciliations enable trigger billing_reconciliations_guard");
+}
+
+/**
+ * Borra las comparaciones de esos periodos, con sus diferencias y notas. Va en la limpieza, en réplica (son libros), antes de borrar los periodos: en réplica,
+ * nada las borra en cascada.
+ */
+export async function forgetReconciliations(owner: Client, periods: number[]): Promise<void> {
+  await owner.query(
+    `delete from private.billing_reconciliation_differences d using private.billing_reconciliations r
+     where d.reconciliation_id = r.id and r.period_id = any($1::int[])`,
+    [periods],
+  );
+  await owner.query("delete from private.billing_reconciliation_notes where period_id = any($1::int[])", [periods]);
+  await owner.query("delete from private.billing_reconciliations where period_id = any($1::int[])", [periods]);
+}

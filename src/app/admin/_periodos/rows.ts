@@ -5,7 +5,8 @@ import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/servic
 import type { AlertKind, FinanceAlerts } from "@/services/anomalies/anomalies";
 import type { FinanceClose, FinancePeriod, FinancePeriods, PeriodStatus, RunFigures, RunTeacher } from "@/services/periods/periods";
 
-import { periodsButton } from "./outcomes";
+import { PANEL_ANCHORS, periodsButton } from "./outcomes";
+import { reconciliationView, type ReconciliationView } from "./reconcile-rows";
 
 // Lo que PA-78 a PA-80 pintan, ya en palabras y con los valores de sus botones (T-605). Lo arma la página
 // con lo que leyó: el navegador no decide qué se ofrece, ni sabe leer fechas o centavos. El panel no
@@ -111,6 +112,8 @@ export interface PeriodView {
   /** De dónde salen el bote, el porcentaje y el sin consumo. */
   figuresSource: string;
   alerts: { kind: "rows"; rows: AlertRow[] } | { kind: "unavailable" };
+  /** La conciliación con Stripe (T-303, cuarta solicitud). */
+  reconciliation: ReconciliationView;
   rollup: {
     last: string;
     /** La última corrida falló: el aviso y la última que terminó bien. */
@@ -262,6 +265,7 @@ export function periodView(read: Extract<FinancePeriod, { period: object }>, ale
                 href: ROUTES.alerts,
               })),
           },
+    reconciliation: reconciliationView(read, now),
     rollup: {
       last,
       failed,
@@ -302,8 +306,8 @@ export interface RunResult {
 export interface Check {
   label: string;
   done: boolean;
-  /** A dónde se resuelve, si falta. */
-  href?: string;
+  /** A dónde se resuelve, si falta, con el texto de su enlace. */
+  link?: { href: string; label: string };
 }
 
 export interface CloseView {
@@ -371,17 +375,35 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
         : t(text.lastRehearsal, { ...dateAndTime(rehearsal.at), kind: rehearsal.statusAtRun === "closing" ? text.kindFinal : text.kindPartial });
   }
 
+  // Cada comprobación que falta lleva a donde se resuelve: las alertas a PA-68, la consolidación y la conciliación a su bloque de PA-79 y los
+  // avisos de cobro a PA-84 (T-303, cuarta solicitud). Una consolidación corriendo no tiene nada que hacer: se espera.
+  const panel = periodPath(period.periodId);
+  const toRollup = { href: `${panel}#${PANEL_ANCHORS.rollup}`, label: text.checkLinks.rollup };
   const rollupCheck: Check =
     checks.lastRollup === "succeeded"
       ? { label: text.checks.rollupOk, done: true }
-      : { label: checks.lastRollup === "running" ? text.checks.rollupRunning : checks.lastRollup === "failed" ? text.checks.rollupFailed : text.checks.rollupNone, done: false };
+      : checks.lastRollup === "running"
+        ? { label: text.checks.rollupRunning, done: false }
+        : { label: checks.lastRollup === "failed" ? text.checks.rollupFailed : text.checks.rollupNone, done: false, link: toRollup };
   const list: Check[] = [
     open ? { label: text.checks.monthOpen, done: false } : { label: text.checks.monthEnded, done: true },
     rollupCheck,
-    checks.rollupMarks ? { label: text.checks.marksPending, done: false } : { label: text.checks.marksClear, done: true },
+    checks.rollupMarks ? { label: text.checks.marksPending, done: false, link: toRollup } : { label: text.checks.marksClear, done: true },
     checks.openAlerts > 0
-      ? { label: t(plural(checks.openAlerts, text.checks.alertsPending), { count: checks.openAlerts }), done: false, href: ROUTES.alerts }
+      ? { label: t(plural(checks.openAlerts, text.checks.alertsPending), { count: checks.openAlerts }), done: false, link: { href: ROUTES.alerts, label: text.checkLinks.alerts } }
       : { label: text.checks.alertsClear, done: true },
+    // Lo fallido y lo que espera a T-307 frenan cualquier mes; lo pendiente, solo si es de antes de su fin. La cuenta es la de la base.
+    checks.billingEvents > 0
+      ? {
+          label: t(plural(checks.billingEvents, text.checks.billingEventsPending), { count: checks.billingEvents }),
+          done: false,
+          link: { href: ROUTES.billingEvents, label: text.checkLinks.billingEvents },
+        }
+      : { label: text.checks.billingEventsClear, done: true },
+    // La comparación vigente es la última del periodo, si coincide; sin la llave de Stripe no hay ninguna.
+    checks.chargesMatch
+      ? { label: text.checks.chargesMatch, done: true }
+      : { label: text.checks.chargesMatchMissing, done: false, link: { href: `${panel}#${PANEL_ANCHORS.reconciliation}`, label: text.checkLinks.reconciliation } },
     // Cerrar usa el último ensayo, el que se muestra, y exige que haya salido bien con datos finales (T-605,
     // tercera solicitud): si falló o es parcial, la lista lo dice y no se ofrece cerrar.
     rehearsal?.status === "failed"

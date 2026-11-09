@@ -10,6 +10,8 @@ import { secretMatches } from "@/services/mail/outbox";
 import { createBillingInbox } from "./inbox";
 import { createBillingQueue } from "./queue";
 import { databaseBillingQueueStore } from "./queue-store";
+import { createReconciliation } from "./reconcile";
+import { databaseReconcileStore } from "./reconcile-store";
 import { askApply, askClaim, askClaimDue, askCountRejection, askFinish, askHealth, askReceive, askRelease } from "./records";
 
 // La bandeja de los avisos de Stripe, ya armada: lo que importan la ruta del aviso y la del barrido (T-303). Corre como sistema: un aviso no tiene una persona detrás.
@@ -64,4 +66,20 @@ export { RESOLVE_NOTE_MAX } from "./queue";
 export const { billingQueue, billingQueueCount, retryBillingEvent, resolveBillingEvent, giveBillingCode } = createBillingQueue(
   { report: reportFailure },
   { teamStanding, giveSecondFactorCode, store: databaseBillingQueueStore, processNow },
+);
+
+// La conciliación con Stripe (T-303, cuarta solicitud): el trabajo de cada día, y «Comparar ahora» y «Explicar» de PA-79. Sin `STRIPE_SECRET_KEY` no compara:
+// ningún mes se puede cerrar hasta que haya llave.
+export type { CompareNow, Compared, ExplainAnswer, Explained } from "./reconcile";
+export { EXPLAIN_NOTE_MAX } from "./reconcile";
+
+export const { sweepReconciliations, compareNow, explainDifference } = createReconciliation(
+  { report: reportFailure },
+  {
+    teamStanding,
+    store: databaseReconcileStore,
+    stripe,
+    live: () => /^(sk|rk)_live_/.test(getEnv().STRIPE_SECRET_KEY ?? ""),
+    now: () => Date.now(),
+  },
 );
