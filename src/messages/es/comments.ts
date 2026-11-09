@@ -40,7 +40,7 @@ export const comments = defineMessages({
   instead: {
     readOnly: "Para comentar necesitas una suscripción.",
     banned: "Por ahora no puedes comentar. Si crees que es un error, escríbenos.",
-    suspended: "Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios.",
+    suspended: "Por ahora no puedes escribir como maestro en estos comentarios. Puedes leerlos.",
     closed: "Por ahora no se pueden publicar comentarios.",
     needsNotice: "Para responder aquí, primero tienes que aceptar el aviso del maestro.",
     needsNoticeLink: "Acepta el aviso del maestro",
@@ -104,7 +104,7 @@ export const comments = defineMessages({
     invalid: "Tu comentario tiene caracteres que no podemos guardar. Quítalos y vuelve a intentarlo.",
     closed: "Por ahora no se pueden publicar comentarios.",
     banned: "Por ahora no puedes comentar. Si crees que es un error, escríbenos.",
-    suspended: "Por ahora no puedes escribir aquí como maestro de este curso.",
+    suspended: "Por ahora no puedes escribir como maestro en estos comentarios.",
     needs_notice: "Para responder aquí, acepta antes el aviso del maestro.",
     read_only: "Para comentar necesitas una suscripción.",
     no_lesson: "Ya no puedes comentar en esta lección.",

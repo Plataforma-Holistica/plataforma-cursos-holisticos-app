@@ -1142,7 +1142,10 @@ que no se ve leyendo un solo archivo:
   en `src/app/_comments/lesson-comments.tsx`, con la lección por hilo (`lessonOf`); la regla de los comentarios vive en
   `src/app/_comments/outcomes.ts` (la lección la reexporta), y lo que hacen las dos acciones con cada pedido, en `_comments/act.ts`.
   La acción de PA-45 (`src/app/portal/_comentarios/actions.ts`) usa las mismas entradas del servicio, con la lección de cada
-  comentario; una sesión que no pasa vuelve a PA-45. Filtros y páginas por la dirección (`?curso=`, `?sin-responder=1`, `?desde=`). Usa
+  comentario; una sesión que no pasa vuelve a PA-45. Filtros y páginas por la dirección (`?curso=`, `?sin-responder=1`, `?desde=`).
+  «Ver más respuestas» se queda en PA-45 (`?hilo=` y `?respuestas=`, como en PA-22, solo de un comentario de la página): las lee
+  `commentReplies`, la entrada de la lección, con la lección de ese comentario y la regla de acceso. El foco de respaldo va al título
+  que pinta el servidor (`fallbackId` de `useCommentThread`), y el texto del maestro suspendido no dice «este curso». Usa
   pgTAP 96, integración 104 y cuatro casos más en `comentarios.equipo.ts` (responder con JavaScript y sin él, editar y borrar en el
   teléfono, la maestra suspendida). Sin capturas en la vitrina todavía. Decisiones mías sin confirmar: una respuesta del maestro en
   revisión deja el comentario «sin responder»; el suspendido o con el veto borra lo suyo; las respuestas de otros se ven. Para el A:

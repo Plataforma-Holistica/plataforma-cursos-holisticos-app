@@ -167,6 +167,8 @@ describe("PA-45 contra la base", () => {
       for (const { how, lesson, comment } of lessons) {
         const rule = await asMaestra.lessonComments(maestra.claims, lesson, null);
         expect({ how, shown: shown.has(comment) }).toEqual({ how, shown: rule.kind === "ready" });
+        // «Ver más respuestas» de PA-45 lee por la entrada de la lección: lo que PA-45 muestra, la regla le deja leer sus respuestas.
+        if (shown.has(comment)) expect({ how, replies: (await asMaestra.commentReplies(maestra.claims, lesson, comment, null)).kind }).toEqual({ how, replies: "ready" });
       }
       // La regla deja leer al menos algo: si no, la equivalencia no probaría nada.
       expect(shown.size).toBeGreaterThan(0);
