@@ -37,7 +37,8 @@ export function TeacherComments({ items, here, filters, pagedThread, write, unan
   const standing = standingOf(write);
   const { shared, threadNotice, strayText } = useCommentThread({
     action: teacherCommentAction,
-    here,
+    // Con el ancla, como en PA-22: sin JavaScript, la página vuelve a la lista, donde se dice cómo salió.
+    here: `${here}#${COMMENTS_ANCHOR}`,
     items,
     write: standing,
     // Un hilo que no está no hereda la lección de otro: sin lección, la acción no hace nada.

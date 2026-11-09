@@ -42,6 +42,7 @@ const TEACHER = "7e000000-0000-4000-8000-000000000001";
 const COURSE = "d0000000-0000-4000-8000-000000000001";
 const OTHER = "d0000000-0000-4000-8000-000000000002";
 const LESSON = "b0000000-0000-4000-8000-000000000001";
+const LESSON_2 = "b0000000-0000-4000-8000-000000000002";
 const id = (n: number) => `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const AT = "2026-11-03T18:00:00.000000+00:00";
 
@@ -128,15 +129,22 @@ describe("PA-45 en el portal", () => {
   });
 
   it("responder lleva la lección de ese comentario, por la misma acción que la lección", async () => {
-    mocks.action.mockResolvedValue({ attempt: 1, open: { kind: "reply", parentId: id(1) }, notice: null, kept: null, written: null });
+    // Dos hilos de lecciones y cursos distintos: el segundo lleva los suyos, no los del primero.
+    mocks.teacherComments.mockResolvedValue({
+      kind: "ready",
+      items: [thread(1), thread(2, { name: "Beto", lessonId: LESSON_2, courseId: OTHER, courseSlug: "yoga", courseTitle: "Yoga suave" })],
+      next: null,
+      write: "ok",
+    });
+    mocks.action.mockResolvedValue({ attempt: 1, open: { kind: "reply", parentId: id(2) }, notice: null, kept: null, written: null });
     render(await at());
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Responder" }));
-    const field = await screen.findByRole("textbox", { name: "Responde a Ana" });
+    await user.click(within(screen.getByRole("article", { name: "Beto" })).getByRole("button", { name: "Responder" }));
+    const field = await screen.findByRole("textbox", { name: "Responde a Beto" });
     const data = new FormData(field.closest("form")!);
-    expect(data.get("curso")).toBe("respirar");
-    expect(data.get("leccion")).toBe(LESSON);
-    expect(within(field.closest("form")!).getByRole("button", { name: "Responder" })).toHaveAttribute("value", `reply:${id(1)}`);
+    expect(data.get("curso")).toBe("yoga");
+    expect(data.get("leccion")).toBe(LESSON_2);
+    expect(within(field.closest("form")!).getByRole("button", { name: "Responder" })).toHaveAttribute("value", `reply:${id(2)}`);
   });
 
   it("lo propio, con «Editar» y «Borrar»", async () => {
@@ -252,7 +260,15 @@ describe("las respuestas que no caben, en PA-45", () => {
   });
 
   it("con ?hilo= de un comentario de la lista, pide las siguientes con la lección de ese comentario y las pinta en su lugar", async () => {
-    withMore();
+    mocks.teacherComments.mockResolvedValue({
+      kind: "ready",
+      items: [
+        thread(5, { name: "Eva", lessonId: LESSON_2, courseSlug: "yoga" }),
+        thread(1, { replies: { items: [thread(2, { name: "Beto", body: "Respuesta 2" })], more: true } }),
+      ],
+      next: null,
+      write: "ok",
+    });
     mocks.commentReplies.mockResolvedValue({ kind: "ready", items: [thread(3, { name: "Carla", body: "Respuesta 3" })], next: null });
     render(await at({ curso: COURSE, hilo: id(1), respuestas: LAST }));
     expect(mocks.commentReplies).toHaveBeenCalledExactlyOnceWith(claims, LESSON, id(1), LAST);
