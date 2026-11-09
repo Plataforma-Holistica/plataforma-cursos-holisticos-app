@@ -19,6 +19,7 @@ import {
   suspendTeacher,
 } from "@/services/teachers/teacher-admin";
 
+import { screenField } from "../_lib/fresh-code";
 import {
   decideOutcome,
   founderOutcome,
@@ -40,10 +41,11 @@ import {
 // llama al servicio y se traduce su respuesta con la tabla de la pantalla.
 
 /**
- * Dar el código otra vez, desde la lista o desde una ficha (`teacher`): se vuelve a la propia página. Un código sin forma no
- * llega al servicio. Verificado, se redirige: recargar no lo reenvía.
+ * Dar el código otra vez, desde la lista o desde una ficha (el campo oculto `teacher` de «Tu código»; ver `screenField`): se
+ * vuelve a la propia página. Un código sin forma no llega al servicio. Verificado, se redirige: recargar no lo reenvía.
  */
-export async function teachersCodeAction(teacher: unknown, previous: CodeState, form: FormData): Promise<CodeState> {
+export async function teachersCodeAction(previous: CodeState, form: FormData): Promise<CodeState> {
+  const teacher = screenField(form, "teacher");
   const { code } = readGiveCodeForm(form);
   const attempt = nextAttempt(previous);
   const problem = checkCode(code);

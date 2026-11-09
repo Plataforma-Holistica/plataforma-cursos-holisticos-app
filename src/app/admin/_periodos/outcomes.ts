@@ -1,7 +1,7 @@
 import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import type { Closed, ExportDownloaded, PeriodsCode, Rehearsed, RollupRequested } from "@/services/periods/periods";
 
-import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-code";
+import { givenCodeOutcome, screenField, type CodeOutcome, type Leave } from "../_lib/fresh-code";
 
 // Qué pinta y qué hace PA-79 y PA-80 (el panel de un periodo, y su ensayo y cierre; FL-50; T-605). Todo
 // aquí es puro: el servicio corre la guarda y le pregunta a la base, y esto traduce su respuesta a un
@@ -11,8 +11,9 @@ import { givenCodeOutcome, type CodeOutcome, type Leave } from "../_lib/fresh-co
 //
 //   · A quien la guarda no dejó (`refused`), o a quien la base le dijo que no tiene finanzas
 //     (`forbidden`), se le manda a la misma página, donde decide su guarda.
-//   · Lo que llega es qué botón se pulsó: el paso y de qué periodo (o de qué corrida, al descargar). Un
-//     envío sin intención, con más de una o con un valor sin forma cuenta como vacío.
+//   · Lo que llega es qué botón se pulsó: el paso y de qué periodo (y de qué corrida, al descargar). Un
+//     envío sin intención, con más de una o con un valor sin forma cuenta como vacío. Ninguna acción va
+//     atada con `bind` (ver `screenField`): lo que no dice el botón viaja en un campo oculto.
 //   · Lo que sale bien redirige a la página con su aviso: sin JavaScript, recargar no reenvía. Ensayar y
 //     cerrar redirigen al cierre; pedir el recálculo, al panel.
 //   · «No se supo» nunca se pinta como hecho: la pantalla vuelve a leer el periodo y dice cómo quedó.
@@ -40,7 +41,7 @@ export type PeriodsRequest =
   /** Cerrar lleva el ensayo que se tenía a la vista (T-605, tercera solicitud). */
   | { step: "ask_close"; period: number; run: string }
   | { step: "close"; period: number; run: string; understood: boolean }
-  | { step: "download"; run: string };
+  | { step: "download"; period: number; run: string };
 
 /** Qué se pidió. `none` si no es un formulario, no trae `do`, lo trae más de una vez o no se entiende. */
 export function readPeriodsForm(form: unknown): PeriodsRequest {
@@ -52,11 +53,11 @@ export function readPeriodsForm(form: unknown): PeriodsRequest {
   const [verb, target, shown, ...rest] = only.split(":");
   if (rest.length > 0) return { step: "none" };
   if (verb === "cancel") return target === undefined ? { step: "cancel" } : { step: "none" };
-  if (target === undefined) return { step: "none" };
-  if (verb === "download") return ID.test(target) && shown === undefined ? { step: "download", run: target } : { step: "none" };
-  if (!PERIOD.test(target)) return { step: "none" };
+  if (target === undefined || !PERIOD.test(target)) return { step: "none" };
   const period = Number(target);
   switch (verb) {
+    case "download":
+      return shown !== undefined && ID.test(shown) ? { step: "download", period, run: shown } : { step: "none" };
     case "rollup":
     case "rehearse":
       return shown === undefined ? { step: verb, period } : { step: "none" };
@@ -76,13 +77,14 @@ export const periodsButton = {
   rehearse: (period: number) => `rehearse:${period}`,
   askClose: (period: number, run: string) => `ask_close:${period}:${run}`,
   close: (period: number, run: string) => `close:${period}:${run}`,
-  download: (run: string) => `download:${run}`,
+  download: (period: number, run: string) => `download:${period}:${run}`,
   cancel: () => "cancel",
 } as const;
 
-/** Un periodo atado a una acción desde la pantalla (`202710`), si tiene forma; si no, nulo. */
-export function periodFrom(value: unknown): number | null {
-  return typeof value === "number" && PERIOD.test(String(value)) ? value : null;
+/** El periodo que la pantalla manda en su campo oculto `period` (`202710`), una sola vez y con forma; si no, nulo. */
+export function periodField(form: unknown): number | null {
+  const value = screenField(form, "period");
+  return value !== null && PERIOD.test(value) ? Number(value) : null;
 }
 
 /**
@@ -95,14 +97,13 @@ export const PANEL_ANCHORS = { rollup: "bloque-periodo-recalculo", reconciliatio
 export const UNDERSTOOD = "yes";
 
 /**
- * A dónde vuelve quien dio su código: la página de donde lo dio. Llega atado a la acción desde la
- * pantalla, y una acción es una puerta pública: lo que no sea un periodo con forma y una de sus
- * páginas (el panel, el cierre o las liquidaciones) va a la lista.
+ * A dónde vuelve quien dio su código: la página de donde lo dio. Llega en los campos ocultos de «Tu
+ * código» (`period` y `page`), y una acción es una puerta pública: lo que no sea un periodo con forma y
+ * una de sus páginas (el panel, el cierre o las liquidaciones) va a la lista.
  */
-export function periodCodeTarget(target: unknown): string {
-  if (typeof target !== "object" || target === null) return ROUTES.periods;
-  const { period: value, page } = target as { period?: unknown; page?: unknown };
-  const period = periodFrom(value);
+export function periodCodeTarget(form: unknown): string {
+  const period = periodField(form);
+  const page = screenField(form, "page");
   if (period === null) return ROUTES.periods;
   if (page === "panel") return periodPath(period);
   if (page === "close") return periodClosePath(period);

@@ -220,29 +220,38 @@ describe("lo que no salió", () => {
 });
 
 describe("dar el código", () => {
+  // La ficha de donde se dio viaja en el campo oculto `teacher` de «Tu código»; en la lista no hay campo (sin `bind`: sin
+  // JavaScript, una acción atada no deja que la página se vuelva a pintar).
   it("sin forma no llega al servicio", async () => {
-    expect(await teachersCodeAction(null, IDLE, form({ code: "12" }))).toMatchObject({ kind: "invalid" });
+    expect(await teachersCodeAction(IDLE, form({ code: "12" }))).toMatchObject({ kind: "invalid" });
     expect(mocks.giveTeacherCode).not.toHaveBeenCalled();
   });
 
   it("verificado, a la lista: recargar no lo reenvía", async () => {
     once("giveTeacherCode", { kind: "verified" });
-    await expect(teachersCodeAction(null, IDLE, form({ code: "123456" }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
+    await expect(teachersCodeAction(IDLE, form({ code: "123456" }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
     expect(mocks.giveTeacherCode).toHaveBeenCalledExactlyOnceWith(jar, "123456");
   });
 
   it("dado desde una ficha, vuelve a esa ficha", async () => {
     once("giveTeacherCode", { kind: "verified" });
-    await expect(teachersCodeAction(TEACHER, IDLE, form({ code: "123456" }))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(teachersCodeAction(IDLE, form({ code: "123456", teacher: TEACHER }))).rejects.toThrow(`redirige a ${PAGE}`);
   });
 
-  it("un maestro sin forma no arma una dirección: a la lista", async () => {
+  it("un maestro sin forma o repetido no arma una dirección: a la lista", async () => {
+    for (const teacher of ["//otro.example", TEACHER.toUpperCase(), ""]) {
+      once("giveTeacherCode", { kind: "verified" });
+      await expect(teachersCodeAction(IDLE, form({ code: "123456", teacher }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
+    }
+    const twice = form({ code: "123456" });
+    twice.append("teacher", TEACHER);
+    twice.append("teacher", TEACHER);
     once("giveTeacherCode", { kind: "verified" });
-    await expect(teachersCodeAction("//otro.example", IDLE, form({ code: "123456" }))).rejects.toThrow(/redirige a \/admin\/maestros$/);
+    await expect(teachersCodeAction(IDLE, twice)).rejects.toThrow(/redirige a \/admin\/maestros$/);
   });
 
-  it("equivocado se dice", async () => {
+  it("equivocado se dice, sin redirigir", async () => {
     once("giveTeacherCode", { kind: "wrong_code" });
-    expect(await teachersCodeAction(null, IDLE, form({ code: "123456" }))).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    expect(await teachersCodeAction(IDLE, form({ code: "123456", teacher: TEACHER }))).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
   });
 });

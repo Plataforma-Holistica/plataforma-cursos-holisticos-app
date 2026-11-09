@@ -62,7 +62,7 @@ const PROBLEMS: Record<Exclude<Field, "name" | "email">, string> = {
 
 export function TeacherScreen({ view, done = null }: { view: TeacherView; done?: TeacherDone | null }) {
   const page = adminTeacherPath(view.id);
-  const [code, codeAction, codePending] = useActionState(teachersCodeAction.bind(null, view.id), CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(teachersCodeAction, CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
   const [state, send, pending] = useActionState(teachersAction, IDLE, `${page}#${BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
 
@@ -117,6 +117,7 @@ export function TeacherScreen({ view, done = null }: { view: TeacherView; done?:
           state={code}
           action={codeAction}
           pending={codePending}
+          hidden={{ teacher: view.id }}
         />
       )}
 

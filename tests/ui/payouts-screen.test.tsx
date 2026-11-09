@@ -99,16 +99,16 @@ describe("PA-81, las liquidaciones del periodo", () => {
     const user = userEvent.setup();
     render(<PayoutsScreen view={payoutsView(read())} />);
     await user.click(screen.getByRole("button", { name: text.release }));
-    expect(sent(actions.payoutsAction)).toEqual({ do: payoutsButton.askRelease(202710, SEEN) });
-    // La acción va atada a su periodo.
-    expect(actions.payoutsAction.mock.calls[0]?.[0]).toBe(202710);
+    expect(sent(actions.payoutsAction)).toEqual({ period: "202710", do: payoutsButton.askRelease(202710, SEEN) });
+    // La acción no va atada: el periodo viaja en el campo oculto (sin JavaScript, atada, la página no se volvía a pintar).
+    expect(actions.payoutsAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
     const dialog = await screen.findByRole("dialog", { name: "¿Liberar las liquidaciones de octubre de 2027?" });
     expect(within(dialog).getByText(/^1 liquidación pasa a «en espera de factura» y 1 a «acumulada»/)).toBeInTheDocument();
     const [first, second] = within(dialog).getAllByRole("button");
     expect(first).toHaveAccessibleName(text.keepReviewing);
     expect(second).toHaveAccessibleName(text.confirmRelease);
     await user.click(within(dialog).getByRole("button", { name: text.confirmRelease }));
-    expect(sent(actions.payoutsAction, 1)).toEqual({ do: payoutsButton.release(202710, SEEN) });
+    expect(sent(actions.payoutsAction, 1)).toEqual({ period: "202710", do: payoutsButton.release(202710, SEEN) });
     // La casilla se arma de nuevo con la respuesta: una referencia tomada antes puede ser de la que ya se fue.
     await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood })).toHaveFocus());
     expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: text.understood })).toHaveAccessibleDescription(text.missingUnderstood);
@@ -151,7 +151,7 @@ describe("PA-81, las liquidaciones del periodo", () => {
     expect(screen.getByText("Liberar liquidaciones: falta decidir 1 bono de fundador.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: text.confirmBonus })).toHaveAttribute("value", payoutsButton.confirmBonus(B1));
     await user.click(screen.getByRole("button", { name: text.voidBonus }));
-    expect(sent(actions.payoutsAction)).toEqual({ do: payoutsButton.askVoid(B1) });
+    expect(sent(actions.payoutsAction)).toEqual({ period: "202710", do: payoutsButton.askVoid(B1) });
     expect(await screen.findByRole("textbox", { name: text.voidReason })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: text.confirmVoid })).toHaveAttribute("value", payoutsButton.void(B1));
   });
@@ -163,14 +163,14 @@ describe("PA-81, las liquidaciones del periodo", () => {
     render(<PayoutsScreen view={payoutsView(read())} />);
     const [first] = screen.getAllByRole("button", { name: text.hold });
     await user.click(first!);
-    expect(sent(actions.payoutsAction)).toEqual({ do: payoutsButton.askHold(Y1, "calculated") });
+    expect(sent(actions.payoutsAction)).toEqual({ period: "202710", do: payoutsButton.askHold(Y1, "calculated") });
     const reason = await screen.findByRole("textbox", { name: text.holdReason });
     // El botón pulsado se fue con la respuesta: el foco va al motivo.
     await waitFor(() => expect(reason).toHaveFocus());
     expect(screen.queryAllByRole("button", { name: text.hold })).toHaveLength(0);
     expect(screen.queryByRole("button", { name: text.release })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: text.confirmHold }));
-    expect(sent(actions.payoutsAction, 1)).toEqual({ do: payoutsButton.hold(Y1, "calculated"), reason: "" });
+    expect(sent(actions.payoutsAction, 1)).toEqual({ period: "202710", do: payoutsButton.hold(Y1, "calculated"), reason: "" });
     await waitFor(() => expect(screen.getByRole("textbox", { name: text.holdReason })).toHaveFocus());
     expect(screen.getByRole("textbox", { name: text.holdReason })).toHaveAccessibleDescription(text.holdReasonMissing);
     expect(reason).toBeDefined();
@@ -183,7 +183,7 @@ describe("PA-81, las liquidaciones del periodo", () => {
     render(<PayoutsScreen view={payoutsView(read({ release: null, payouts: [held] }, { payoutsReleasedAt: "2027-11-02T12:00:00Z" }))} />);
     expect(screen.getByText("Retenida: Se investiga.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: text.unhold }));
-    expect(sent(actions.payoutsAction)).toEqual({ do: payoutsButton.askUnhold(Y1, UNHOLD) });
+    expect(sent(actions.payoutsAction)).toEqual({ period: "202710", do: payoutsButton.askUnhold(Y1, UNHOLD) });
     const dialog = await screen.findByRole("dialog", { name: "¿Soltar la liquidación de Ana?" });
     expect(within(dialog).getByText("Este periodo ya se liberó: soltarla la libera ahora, con un bruto de $38.52. Queda «Acumulada».")).toBeInTheDocument();
     expect(within(dialog).getByRole("checkbox", { name: text.understood })).toBeInTheDocument();
@@ -203,9 +203,15 @@ describe("PA-81, las liquidaciones del periodo", () => {
     expect(screen.getByText("$244.94", { selector: "span" })).toBeInTheDocument();
   });
 
-  it("sin el código reciente: el bloque del código, y nada que decidir", () => {
+  it("sin el código reciente: el bloque del código, que lleva la página de donde se dio, y nada que decidir", async () => {
+    actions.periodCodeAction.mockResolvedValue({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    const user = userEvent.setup();
     render(<PayoutsScreen view={payoutsView(read({ freshCode: false }))} />);
     expect(screen.getByText(text.codeBody)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Código", { exact: true }), "123456");
+    await user.click(screen.getByRole("button", { name: admin.code.submit }));
+    expect(sent(actions.periodCodeAction)).toEqual({ code: "123456", period: "202710", page: "payouts" });
+    expect(actions.periodCodeAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
     expect(screen.queryByRole("button", { name: text.release })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: text.hold })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: text.columns.actions })).not.toBeInTheDocument();

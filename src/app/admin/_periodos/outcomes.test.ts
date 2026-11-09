@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { admin } from "@/messages/es/admin";
-import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
+import { periodClosePath, periodPath, periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import { CLOSE_ANSWERS, DOWNLOAD_ANSWERS, REHEARSE_ANSWERS, ROLLUP_ANSWERS } from "@/services/periods/periods";
 
 import {
@@ -9,7 +9,7 @@ import {
   csvHref,
   downloadOutcome,
   periodCodeTarget,
-  periodFrom,
+  periodField,
   periodsButton,
   readPeriodsForm,
   rehearseOutcome,
@@ -41,7 +41,7 @@ describe("readPeriodsForm", () => {
     expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)], ["understood", "yes"]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: true });
     expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: false });
     expect(readPeriodsForm(formWith(["do", periodsButton.close(PERIOD, RUN)], ["understood", "on"]))).toEqual({ step: "close", period: PERIOD, run: RUN, understood: false });
-    expect(readPeriodsForm(formWith(["do", periodsButton.download(RUN)]))).toEqual({ step: "download", run: RUN });
+    expect(readPeriodsForm(formWith(["do", periodsButton.download(PERIOD, RUN)]))).toEqual({ step: "download", period: PERIOD, run: RUN });
     expect(readPeriodsForm(formWith(["do", periodsButton.cancel()]))).toEqual({ step: "cancel" });
   });
 
@@ -58,8 +58,11 @@ describe("readPeriodsForm", () => {
     ["un periodo con letras", formWith(["do", "rehearse:2027-10"])],
     ["un periodo con decimales", formWith(["do", "rehearse:202710.0"])],
     ["un periodo con ceros a la izquierda", formWith(["do", "rehearse:0202710"])],
-    ["una corrida sin forma", formWith(["do", "download:no"])],
-    ["descargar un periodo", formWith(["do", `download:${PERIOD}`])],
+    ["una corrida sin forma", formWith(["do", `download:${PERIOD}:no`])],
+    ["descargar un periodo sin la corrida", formWith(["do", `download:${PERIOD}`])],
+    ["descargar sin el periodo (el botón de antes)", formWith(["do", `download:${RUN}`])],
+    ["descargar con un periodo sin forma", formWith(["do", `download:202713:${RUN}`])],
+    ["descargar con de más", formWith(["do", `download:${PERIOD}:${RUN}:x`])],
     ["ensayar una corrida", formWith(["do", `rehearse:${RUN}`])],
     ["de más", formWith(["do", `rehearse:${PERIOD}:x`])],
     ["cancelar con algo", formWith(["do", `cancel:${PERIOD}`])],
@@ -75,20 +78,33 @@ describe("readPeriodsForm", () => {
   });
 });
 
-describe("periodFrom", () => {
-  it("un periodo con forma, o nulo", () => {
-    expect(periodFrom(PERIOD)).toBe(PERIOD);
-    for (const value of [202713, 202700, 199912, "202710", 202710.5, null, undefined]) expect(periodFrom(value)).toBeNull();
+describe("periodField", () => {
+  it("el periodo del campo oculto, una sola vez y con forma, o nulo", () => {
+    expect(periodField(formWith(["period", String(PERIOD)]))).toBe(PERIOD);
+    for (const value of ["202713", "202700", "199912", "20271", "2027-10", "202710.0", "0202710", " 202710", ""]) {
+      expect(periodField(formWith(["period", value]))).toBeNull();
+    }
+    expect(periodField(formWith())).toBeNull();
+    expect(periodField(formWith(["period", String(PERIOD)], ["period", String(PERIOD)]))).toBeNull();
+    expect(periodField(formWith(["period", new Blob([String(PERIOD)])]))).toBeNull();
+    expect(periodField({ period: PERIOD })).toBeNull();
+    expect(periodField(null)).toBeNull();
   });
 });
 
 describe("periodCodeTarget", () => {
+  const at = (period: string, page: string) => formWith(["period", period], ["page", page]);
+
   it("a la página del periodo de donde se dio, o a la lista si no tiene forma", () => {
-    expect(periodCodeTarget({ period: PERIOD, page: "panel" })).toBe(periodPath(PERIOD));
-    expect(periodCodeTarget({ period: PERIOD, page: "close" })).toBe(periodClosePath(PERIOD));
-    expect(periodCodeTarget({ period: 202713, page: "close" })).toBe(ROUTES.periods);
-    expect(periodCodeTarget({ period: PERIOD, page: "otra" })).toBe(ROUTES.periods);
-    expect(periodCodeTarget("https://otro.example")).toBe(ROUTES.periods);
+    expect(periodCodeTarget(at(String(PERIOD), "panel"))).toBe(periodPath(PERIOD));
+    expect(periodCodeTarget(at(String(PERIOD), "close"))).toBe(periodClosePath(PERIOD));
+    expect(periodCodeTarget(at(String(PERIOD), "payouts"))).toBe(periodPayoutsPath(PERIOD));
+    expect(periodCodeTarget(at("202713", "close"))).toBe(ROUTES.periods);
+    expect(periodCodeTarget(at(String(PERIOD), "otra"))).toBe(ROUTES.periods);
+    expect(periodCodeTarget(at(String(PERIOD), "https://otro.example"))).toBe(ROUTES.periods);
+    expect(periodCodeTarget(formWith(["period", String(PERIOD)]))).toBe(ROUTES.periods);
+    expect(periodCodeTarget(formWith(["period", String(PERIOD)], ["page", "close"], ["page", "close"]))).toBe(ROUTES.periods);
+    expect(periodCodeTarget({ period: PERIOD, page: "close" })).toBe(ROUTES.periods);
     expect(periodCodeTarget(null)).toBe(ROUTES.periods);
   });
 });

@@ -64,9 +64,9 @@ export interface CloseScreenProps {
 
 export function CloseScreen({ view, done = null }: CloseScreenProps) {
   const page = periodClosePath(view.periodId);
-  const [code, codeAction, codePending] = useActionState(periodCodeAction.bind(null, { period: view.periodId, page: "close" }), CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(periodCodeAction, CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
   const [state, send, pending] = useActionState(closeAction, CLOSE_IDLE, `${page}#${CLOSE_BLOCK_ID}`);
-  const [file, sendDownload, downloading] = useActionState(downloadAction.bind(null, view.periodId), DOWNLOAD_IDLE, `${page}#${DOWNLOAD_BLOCK_ID}`);
+  const [file, sendDownload, downloading] = useActionState(downloadAction, DOWNLOAD_IDLE, `${page}#${DOWNLOAD_BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -109,6 +109,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
           state={code}
           action={codeAction}
           pending={codePending}
+          hidden={{ period: String(view.periodId), page: "close" }}
         />
       )}
 

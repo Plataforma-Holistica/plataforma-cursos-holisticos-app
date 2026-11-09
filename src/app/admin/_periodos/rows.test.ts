@@ -338,7 +338,7 @@ describe("closeView (PA-80)", () => {
     expect(closed.close).toEqual({ kind: "closed" });
     expect(closed.closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las .* por Finanzas\.$/);
     expect(closed.result?.teachers).toHaveLength(1);
-    expect(closed.download).toEqual({ kind: "offered", button: periodsButton.download(RUN) });
+    expect(closed.download).toEqual({ kind: "offered", button: periodsButton.download(202710, RUN) });
     expect(closeView(close({ freshCode: false, close: run }, "closed")).download).toEqual({ kind: "locked" });
     expect(closeView(close({ close: { ...run, export: null } }, "closed")).download).toEqual({ kind: "missing" });
     expect(closeView(close({ close: { ...run, closedBy: null } }, "closed")).closedLine).toMatch(/^Cerrado el 3 de noviembre de 2027 a las [^,]*\.$/);

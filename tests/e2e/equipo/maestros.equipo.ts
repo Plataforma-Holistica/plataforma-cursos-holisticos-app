@@ -86,6 +86,16 @@ async function enterAdmin(page: Page, who: Member, path: string): Promise<void> 
   await expect(page).toHaveURL(path);
 }
 
+/** Envejece el código de esa persona en todas sus sesiones: los cambios lo piden otra vez. */
+function ageCode(email: string) {
+  return ownerQuery(
+    `update auth.mfa_amr_claims c set updated_at = now() - interval '40 minutes'
+     from auth.sessions s join auth.users u on u.id = s.user_id
+     where c.session_id = s.id and lower(u.email) = lower($1) and c.authentication_method = 'totp'`,
+    [email],
+  );
+}
+
 /** El maestro de ese correo, a partir de su invitación. */
 async function teacherOf(email: string): Promise<string> {
   const [row] = await ownerQuery<{ id: string }>("select teacher_id::text as id from private.teacher_invitations where email = lower($1) order by created_at desc limit 1", [email]);
@@ -195,6 +205,8 @@ test("FL-46 y FL-30: invita, la persona se registra y acepta, se le marca fundad
 });
 
 test("sin JavaScript también se invita, se revoca, se suspende y se levanta", async ({ browser }) => {
+  // Cuatro códigos de la misma persona (`segunda`), y cada uno espera su ventana.
+  test.setTimeout(300_000);
   const maestra = testEmail();
   await inContext(
     browser,
@@ -241,6 +253,23 @@ test("sin JavaScript también se invita, se revoca, se suspende y se levanta", a
       await expect(page.getByText("Motivo interno: Motivo sin JavaScript")).toBeVisible();
       await page.getByRole("button", { name: "Levantar la suspensión" }).click();
       await expect(page.getByText("Suspensión levantada.")).toBeVisible();
+      // Se le vence el código: «Tu código» vuelve con su respuesta, en la ficha y en la lista. Con la acción atada con `bind`,
+      // la página no se volvía a pintar después de enviarlo.
+      for (const [path, anchor] of [
+        [`${LIST}/${teacher}`, "bloque-maestro-codigo"],
+        [LIST, "bloque-maestros-codigo"],
+      ] as const) {
+        await ageCode(segunda.email);
+        await page.goto(path);
+        await page.getByLabel("Código", { exact: true }).fill("12");
+        await page.getByRole("button", { name: "Comprobar" }).click();
+        await expect(page.getByText("El código son seis dígitos. Revísalo.").first()).toBeVisible();
+        await page.getByLabel("Código", { exact: true }).fill(await nextCode(segunda.secret, segunda.used));
+        await page.getByRole("button", { name: "Comprobar" }).click();
+        // Sin JavaScript el navegador conserva el ancla del envío. Desde la ficha, sin el campo oculto, iría a la lista.
+        await expect(page).toHaveURL(new RegExp(`${path}(?:#${anchor})?$`));
+        await expect(page.getByRole("heading", { level: 2, name: "Tu código" })).toHaveCount(0);
+      }
     },
     false,
   );

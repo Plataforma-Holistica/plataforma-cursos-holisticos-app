@@ -27,7 +27,7 @@ import {
   closeOutcome,
   downloadOutcome,
   periodCodeTarget,
-  periodFrom,
+  periodField,
   periodsCodeOutcome,
   readPeriodsForm,
   rehearseOutcome,
@@ -58,11 +58,11 @@ import { askedBy, compareOutcome, explainOutcome, readReconcileForm, type Reconc
 // respuesta con la tabla de la pantalla.
 
 /**
- * Dar el código otra vez, para que las decisiones pasen su puerta. Llega atada desde la pantalla a la
- * página de donde se dio (`{ period, page }`), que se revisa: una acción es una puerta pública. Un código
- * sin forma no llega al servicio. Verificado, se redirige a esa página: recargar no reenvía el código.
+ * Dar el código otra vez, para que las decisiones pasen su puerta. La página de donde se dio llega en los
+ * campos ocultos de «Tu código» (`period` y `page`), que se revisan: una acción es una puerta pública. Un
+ * código sin forma no llega al servicio. Verificado, se redirige a esa página: recargar no reenvía el código.
  */
-export async function periodCodeAction(target: unknown, previous: CodeState, form: FormData): Promise<CodeState> {
+export async function periodCodeAction(previous: CodeState, form: FormData): Promise<CodeState> {
   const { code } = readGiveCodeForm(form);
   const attempt = nextAttempt(previous);
 
@@ -70,7 +70,7 @@ export async function periodCodeAction(target: unknown, previous: CodeState, for
   if (problem) return { kind: "invalid", problem, attempt };
 
   const jar = await cookieJar();
-  const outcome = periodsCodeOutcome(await givePeriodsCode(jar, code), periodCodeTarget(target));
+  const outcome = periodsCodeOutcome(await givePeriodsCode(jar, code), periodCodeTarget(form));
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   return { kind: "failed", reason: outcome.reason, attempt };
 }
@@ -113,19 +113,18 @@ export async function closeAction(previous: CloseState, form: FormData): Promise
 }
 
 /**
- * Descargar la exportación del cierre (PA-80). Llega atada desde la pantalla a su periodo, que se
- * revisa. El archivo vuelve en el estado de esta acción, que es solo suyo: sin JavaScript React manda
+ * Descargar la exportación del cierre (PA-80). El botón dice el periodo y la corrida, como los de ensayar
+ * y cerrar. El archivo vuelve en el estado de esta acción, que es solo suyo: sin JavaScript React manda
  * el estado de una acción dentro de todo formulario ligado a ella, y así no viaja con los demás. No
  * cambia el periodo: no vuelve a pedir la página.
  */
-export async function downloadAction(target: unknown, previous: DownloadState, form: FormData): Promise<DownloadState> {
+export async function downloadAction(previous: DownloadState, form: FormData): Promise<DownloadState> {
   const request = readPeriodsForm(form);
   if (request.step !== "download") return { kind: "idle" };
   const attempt = nextAttempt(previous);
   const jar = await cookieJar();
   clearNotice(jar);
-  const period = periodFrom(target);
-  if (period === null) return leaveFor(jar, { to: ROUTES.periods, notice: null });
+  const { period } = request;
   const outcome = downloadOutcome(await downloadExport(jar, { run: request.run }), period);
   if (outcome.kind === "leave") return leaveFor(jar, outcome);
   if (outcome.kind === "file") return { kind: "file", filename: outcome.filename, rows: outcome.rows, href: outcome.href, attempt };
@@ -134,20 +133,22 @@ export async function downloadAction(target: unknown, previous: DownloadState, f
 
 /**
  * Las liquidaciones de un periodo (PA-81): liberar, retener, soltar, y confirmar o anular el bono del fundador.
- * El periodo llega atado desde la pantalla, y se revisa; del formulario llega qué botón, con lo que se vio, y lo
- * escrito. El primer paso de liberar, retener, soltar y anular no llama a nadie; confirmar sin la casilla o sin
+ * El periodo llega en el campo oculto del formulario, y se revisa; liberar trae además el suyo en el botón, y si no
+ * es el mismo no se llama a nadie. Del formulario llega también qué botón, con lo que se vio, y lo escrito. El primer paso de liberar, retener, soltar y anular no llama a nadie; confirmar sin la casilla o sin
  * el motivo vuelve a preguntar. Lo que sale bien redirige a la página con su aviso; lo demás la vuelve a pedir:
  * las liquidaciones pudieron cambiar.
  */
-export async function payoutsAction(target: unknown, previous: PayoutsState, form: FormData): Promise<PayoutsState> {
+export async function payoutsAction(previous: PayoutsState, form: FormData): Promise<PayoutsState> {
   const request = readPayoutsForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
   const jar = await cookieJar();
   clearNotice(jar);
-  const bound = payoutsPeriodFrom(target);
+  const bound = payoutsPeriodFrom(form);
   if ("leave" in bound) return leaveFor(jar, bound.leave);
   const { period } = bound;
+  // Liberar con el botón de otro periodo: la página y el botón no dicen lo mismo, y no se adivina cuál vale.
+  if ((request.step === "ask_release" || request.step === "release") && request.period !== period) return leaveFor(jar, { to: ROUTES.periods, notice: null });
 
   let outcome: PayoutOutcome;
   switch (request.step) {
@@ -189,8 +190,7 @@ export async function payoutsAction(target: unknown, previous: PayoutsState, for
 
 /**
  * La conciliación con Stripe de PA-79 (T-303, cuarta solicitud): «Comparar ahora» y «Explicar». El periodo llega en un campo oculto
- * del formulario, y se revisa como cualquier otro: atado con `bind` en el navegador, sin JavaScript la página no se volvía a pintar
- * después de la acción (medido el 2026-11-08 en el camino del equipo: React esperaba los argumentos atados y nunca los tenía). Del
+ * del formulario, y se revisa como cualquier otro (`periodField`; atado con `bind`, sin JavaScript la página no se volvía a pintar). Del
  * formulario llega además qué botón, con la diferencia como se vio, y la nota. Comparar le pregunta a Stripe en el
  * momento y no pide el código reciente; explicar va en dos pasos: el primero solo pregunta en su fila, sin llamar a nadie, y confirmar
  * sin nota vuelve a preguntar. Lo que contesta, también lo que salió bien, se dice en el bloque, y la página se vuelve a pedir: ya trae
@@ -202,8 +202,7 @@ export async function reconcileAction(previous: ReconcileState, form: FormData):
   const attempt = nextAttempt(previous);
   const jar = await cookieJar();
   clearNotice(jar);
-  const raw = form.get("period");
-  const period = typeof raw === "string" && /^[0-9]{6}$/.test(raw) ? periodFrom(Number(raw)) : null;
+  const period = periodField(form);
   if (period === null) return leaveFor(jar, { to: ROUTES.periods, notice: null });
   const asked = askedBy(request);
   if (asked !== null) return { kind: "asking", ...asked, attempt };

@@ -170,10 +170,15 @@ describe("PA-79, el panel de un periodo", () => {
     expect(screen.getByText(text.done.rollupRequested)).toBeInTheDocument();
   });
 
-  it("sin el código reciente: el bloque del código, y nada que decidir", () => {
+  it("sin el código reciente: el bloque del código, que lleva la página de donde se dio, y nada que decidir", async () => {
+    actions.periodCodeAction.mockResolvedValue({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    const user = userEvent.setup();
     render(<PeriodScreen view={periodView(period({ freshCode: false }), null, NOW)} />);
     expect(screen.getByRole("heading", { name: admin.code.title })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: text.recalculate })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Código", { exact: true }), "123456");
+    await user.click(screen.getByRole("button", { name: admin.code.submit }));
+    expect(sent(actions.periodCodeAction)).toEqual({ code: "123456", period: "202710", page: "panel" });
   });
 
   it("cerrado: solo lectura, sin «Recalcular» y sin pedir el código", () => {
@@ -288,9 +293,9 @@ describe("PA-80, el ensayo y el cierre", () => {
     expect(screen.getByText(/por Finanzas\.$/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: text.rehearse })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: text.download }));
-    expect(sent(actions.downloadAction)).toEqual({ do: periodsButton.download(RUN) });
-    // La acción va atada a su periodo.
-    expect(actions.downloadAction.mock.calls[0]?.[0]).toBe(202710);
+    expect(sent(actions.downloadAction)).toEqual({ do: periodsButton.download(202710, RUN) });
+    // La acción no va atada: el periodo viaja en el botón (sin JavaScript, atada, la página no se volvía a pintar).
+    expect(actions.downloadAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
     const link = await screen.findByRole("link", { name: text.saveFile });
     expect(link).toHaveAttribute("href", csvHref("x"));
     expect(link).toHaveAttribute("download", "cierre-2027-10.csv");
@@ -298,13 +303,14 @@ describe("PA-80, el ensayo y el cierre", () => {
     click.mockRestore();
   });
 
-  it("dar el código va atado a la página de donde se dio", async () => {
+  it("dar el código lleva la página de donde se dio en campos ocultos, sin ir atado", async () => {
     actions.periodCodeAction.mockResolvedValue({ kind: "failed", reason: "wrong_code", attempt: 1 });
     const user = userEvent.setup();
     render(<CloseScreen view={closeView(close({ freshCode: false }))} />);
     await user.type(screen.getByRole("textbox"), "123456");
     await user.click(screen.getByRole("button", { name: admin.code.submit }));
-    expect(actions.periodCodeAction.mock.calls[0]?.[0]).toEqual({ period: 202710, page: "close" });
+    expect(sent(actions.periodCodeAction)).toEqual({ code: "123456", period: "202710", page: "close" });
+    expect(actions.periodCodeAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
   });
 });
 

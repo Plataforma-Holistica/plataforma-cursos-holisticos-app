@@ -103,10 +103,15 @@ describe("readPayoutsForm", () => {
   });
 });
 
-describe("el periodo atado a la acción", () => {
-  it("uno con forma sigue; sin forma, a la lista de periodos", () => {
-    expect(payoutsPeriodFrom(PERIOD)).toEqual({ period: PERIOD });
-    expect(payoutsPeriodFrom("202710")).toEqual({ leave: { kind: "leave", to: ROUTES.periods, notice: null } });
+describe("el periodo del campo oculto", () => {
+  it("uno con forma sigue; sin él, sin forma o repetido, a la lista de periodos", () => {
+    const toList = { leave: { kind: "leave", to: ROUTES.periods, notice: null } };
+    expect(payoutsPeriodFrom(formWith(["period", String(PERIOD)]))).toEqual({ period: PERIOD });
+    expect(payoutsPeriodFrom(formWith())).toEqual(toList);
+    expect(payoutsPeriodFrom(formWith(["period", "202713"]))).toEqual(toList);
+    expect(payoutsPeriodFrom(formWith(["period", String(PERIOD)], ["period", String(PERIOD)]))).toEqual(toList);
+    // Antes llegaba atado como número: ya no.
+    expect(payoutsPeriodFrom(PERIOD)).toEqual(toList);
   });
 });
 

@@ -92,33 +92,60 @@ beforeEach(() => {
 });
 
 describe("periodCodeAction", () => {
-  it("un código sin forma no llega al servicio", async () => {
+  // La página de donde se dio viaja en el formulario, en los campos ocultos de «Tu código» (sin `bind`: sin JavaScript, una
+  // acción atada no deja que la página se vuelva a pintar).
+  const HERE: [string, string][] = [
+    ["period", String(PERIOD)],
+    ["page", "close"],
+  ];
+  const codeForm = (code: string, fields: [string, string][] = HERE) => {
     const form = new FormData();
-    form.append("code", "12");
-    expect(await periodCodeAction({ period: PERIOD, page: "close" }, IDLE, form)).toMatchObject({ kind: "invalid", attempt: 1 });
+    form.append("code", code);
+    for (const [name, text] of fields) form.append(name, text);
+    return form;
+  };
+
+  it("un código sin forma no llega al servicio", async () => {
+    expect(await periodCodeAction(IDLE, codeForm("12"))).toMatchObject({ kind: "invalid", attempt: 1 });
     expect(calls.order).toEqual([]);
   });
 
   it("verificado: a la página de donde se dio", async () => {
-    once("givePeriodsCode", Promise.resolve({ kind: "verified" }));
-    const form = new FormData();
-    form.append("code", "123456");
-    await expect(periodCodeAction({ period: PERIOD, page: "close" }, IDLE, form)).rejects.toThrow(`redirige a ${periodClosePath(PERIOD)}`);
-    expect(mocks.redirect).toHaveBeenCalledWith(periodClosePath(PERIOD));
+    for (const [page, path] of [
+      ["panel", periodPath(PERIOD)],
+      ["close", periodClosePath(PERIOD)],
+      ["payouts", periodPayoutsPath(PERIOD)],
+    ] as const) {
+      once("givePeriodsCode", Promise.resolve({ kind: "verified" }));
+      await expect(periodCodeAction(IDLE, codeForm("123456", [["period", String(PERIOD)], ["page", page]]))).rejects.toThrow(`redirige a ${path}`);
+      expect(mocks.redirect).toHaveBeenLastCalledWith(path);
+    }
   });
 
-  it("con una página armada a mano: a la lista", async () => {
-    once("givePeriodsCode", Promise.resolve({ kind: "verified" }));
-    const form = new FormData();
-    form.append("code", "123456");
-    await expect(periodCodeAction("https://otro.example", IDLE, form)).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+  it("sin la página, con una armada a mano o con un campo repetido: a la lista", async () => {
+    const period = ["period", String(PERIOD)] as [string, string];
+    const page = ["page", "close"] as [string, string];
+    for (const fields of [
+      [],
+      [period],
+      [page],
+      [["period", "202713"], page],
+      [["period", "20271"], page],
+      [["period", "abc"], page],
+      [period, ["page", "otra"]],
+      [period, ["page", "https://otro.example"]],
+      [period, period, page],
+      [period, page, page],
+    ] as [string, string][][]) {
+      once("givePeriodsCode", Promise.resolve({ kind: "verified" }));
+      await expect(periodCodeAction(IDLE, codeForm("123456", fields))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    }
   });
 
-  it("un código equivocado se dice en el bloque", async () => {
+  it("un código equivocado se dice en el bloque, sin redirigir", async () => {
     once("givePeriodsCode", Promise.resolve({ kind: "wrong_code" }));
-    const form = new FormData();
-    form.append("code", "123456");
-    expect(await periodCodeAction({ period: PERIOD, page: "panel" }, IDLE, form)).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    expect(await periodCodeAction(IDLE, codeForm("123456", [["period", String(PERIOD)], ["page", "panel"]]))).toEqual({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 });
 
@@ -194,7 +221,7 @@ describe("closeAction", () => {
 
   it("pedir el recálculo o descargar desde aquí no es nada", async () => {
     expect(await closeAction(IDLE, pressed(periodsButton.rollup(PERIOD)))).toEqual(IDLE);
-    expect(await closeAction(IDLE, pressed(periodsButton.download(RUN)))).toEqual(IDLE);
+    expect(await closeAction(IDLE, pressed(periodsButton.download(PERIOD, RUN)))).toEqual(IDLE);
     expect(calls.order).toEqual([]);
   });
 });
@@ -202,7 +229,7 @@ describe("closeAction", () => {
 describe("downloadAction", () => {
   it("el archivo vuelve como dirección de datos, en su propio estado, sin volver a pedir la página", async () => {
     once("downloadExport", Promise.resolve({ kind: "file", file: { filename: "cierre-2027-10.csv", content: "x", rows: 1, sha256: "ab".repeat(32) } }));
-    expect(await downloadAction(PERIOD, IDLE, pressed(periodsButton.download(RUN)))).toEqual({
+    expect(await downloadAction(IDLE, pressed(periodsButton.download(PERIOD, RUN)))).toEqual({
       kind: "file",
       filename: "cierre-2027-10.csv",
       rows: 1,
@@ -215,17 +242,19 @@ describe("downloadAction", () => {
 
   it("sin el código reciente se dice", async () => {
     once("downloadExport", Promise.resolve({ kind: "answered", answer: "needs_fresh_code" }));
-    expect(await downloadAction(PERIOD, IDLE, pressed(periodsButton.download(RUN)))).toEqual({ kind: "failed", reason: "needs_code", attempt: 1 });
+    expect(await downloadAction(IDLE, pressed(periodsButton.download(PERIOD, RUN)))).toEqual({ kind: "failed", reason: "needs_code", attempt: 1 });
   });
 
-  it("a quien la guarda no deja: al cierre; con un periodo armado a mano, a la lista", async () => {
+  it("a quien la guarda no deja: al cierre del periodo del botón", async () => {
     once("downloadExport", Promise.resolve({ kind: "refused" }));
-    await expect(downloadAction(PERIOD, IDLE, pressed(periodsButton.download(RUN)))).rejects.toThrow(`redirige a ${periodClosePath(PERIOD)}`);
-    await expect(downloadAction("202713", IDLE, pressed(periodsButton.download(RUN)))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    await expect(downloadAction(IDLE, pressed(periodsButton.download(PERIOD, RUN)))).rejects.toThrow(`redirige a ${periodClosePath(PERIOD)}`);
   });
 
-  it("otro botón no es nada", async () => {
-    expect(await downloadAction(PERIOD, IDLE, pressed(periodsButton.close(PERIOD, RUN)))).toEqual(IDLE);
+  it("otro botón, el de antes sin periodo o uno con el periodo armado a mano no es nada", async () => {
+    expect(await downloadAction(IDLE, pressed(periodsButton.close(PERIOD, RUN)))).toEqual(IDLE);
+    for (const value of [`download:${RUN}`, `download:202713:${RUN}`, `download:${PERIOD}:otra`, `download:${PERIOD}:${RUN}:x`]) {
+      expect(await downloadAction(IDLE, pressed(value))).toEqual(IDLE);
+    }
     expect(calls.order).toEqual([]);
   });
 });
@@ -235,77 +264,90 @@ describe("payoutsAction (PA-81)", () => {
   const PAYOUT = "d1000000-0000-4000-8000-000000000001";
   const BONUS = "e1000000-0000-4000-8000-000000000001";
   const PAGE = periodPayoutsPath(PERIOD);
+  // El periodo viaja en el campo oculto del formulario, como lo manda la pantalla.
+  const payoutsIn = (form: FormData, period = String(PERIOD)) => payoutsAction(IDLE, (form.append("period", period), form));
 
   it("el primer paso de liberar, retener, soltar y anular solo pregunta, sin llamar a nadie", async () => {
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.askRelease(PERIOD, SEEN)))).toEqual({
+    expect(await payoutsIn(pressed(payoutsButton.askRelease(PERIOD, SEEN)))).toEqual({
       kind: "asking",
       ask: { what: "release", seen: SEEN },
       missing: null,
       attempt: 1,
     });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.askHold(PAYOUT, "calculated")))).toMatchObject({ ask: { what: "hold", payout: PAYOUT, status: "calculated" } });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.askUnhold(PAYOUT, SEEN)))).toMatchObject({ ask: { what: "unhold", payout: PAYOUT, seen: SEEN } });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.askVoid(BONUS)))).toMatchObject({ ask: { what: "void", bonus: BONUS } });
+    expect(await payoutsIn(pressed(payoutsButton.askHold(PAYOUT, "calculated")))).toMatchObject({ ask: { what: "hold", payout: PAYOUT, status: "calculated" } });
+    expect(await payoutsIn(pressed(payoutsButton.askUnhold(PAYOUT, SEEN)))).toMatchObject({ ask: { what: "unhold", payout: PAYOUT, seen: SEEN } });
+    expect(await payoutsIn(pressed(payoutsButton.askVoid(BONUS)))).toMatchObject({ ask: { what: "void", bonus: BONUS } });
     expect(calls.order).toEqual([]);
   });
 
   it("confirmar sin la casilla, o sin el motivo, vuelve a preguntar sin llamar a nadie", async () => {
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN)))).toMatchObject({ kind: "asking", missing: "understood" });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.unhold(PAYOUT, SEEN, true)))).toMatchObject({ kind: "asking", missing: "understood" });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.hold(PAYOUT, "calculated"), { reason: "   " }))).toMatchObject({ kind: "asking", missing: "reason" });
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.void(BONUS)))).toMatchObject({ kind: "asking", missing: "reason" });
+    expect(await payoutsIn(pressed(payoutsButton.release(PERIOD, SEEN)))).toMatchObject({ kind: "asking", missing: "understood" });
+    expect(await payoutsIn(pressed(payoutsButton.unhold(PAYOUT, SEEN, true)))).toMatchObject({ kind: "asking", missing: "understood" });
+    expect(await payoutsIn(pressed(payoutsButton.hold(PAYOUT, "calculated"), { reason: "   " }))).toMatchObject({ kind: "asking", missing: "reason" });
+    expect(await payoutsIn(pressed(payoutsButton.void(BONUS)))).toMatchObject({ kind: "asking", missing: "reason" });
     expect(calls.order).toEqual([]);
   });
 
   it("liberar con la casilla: con la huella vista, y vuelve a la página con su aviso", async () => {
     once("releasePayouts", Promise.resolve({ kind: "answered", answer: "released", blockingPeriod: null, periodStatus: "closed" }));
-    await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(payoutsIn(pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.releasePayouts).toHaveBeenCalledWith(jar, { period: PERIOD, seen: SEEN });
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "payouts_released");
   });
 
   it("retener, soltar, confirmar y anular le pasan al servicio lo que se vio y lo escrito", async () => {
     once("holdPayout", Promise.resolve({ kind: "answered", answer: "held", status: null }));
-    await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.hold(PAYOUT, "awaiting_invoice"), { reason: " Se revisa. " }))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(payoutsIn(pressed(payoutsButton.hold(PAYOUT, "awaiting_invoice"), { reason: " Se revisa. " }))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.holdPayout).toHaveBeenCalledWith(jar, { payout: PAYOUT, reason: "Se revisa.", seen: "awaiting_invoice" });
     // Soltar una que no libera no pide la casilla.
     once("unholdPayout", Promise.resolve({ kind: "answered", answer: "released_from_hold", to: "awaiting_invoice" }));
-    await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.unhold(PAYOUT, SEEN, false), { note: "Bien." }))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(payoutsIn(pressed(payoutsButton.unhold(PAYOUT, SEEN, false), { note: "Bien." }))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.unholdPayout).toHaveBeenCalledWith(jar, { payout: PAYOUT, note: "Bien.", seen: SEEN });
     once("confirmFounderBonus", Promise.resolve({ kind: "answered", answer: "confirmed", status: null }));
-    await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.confirmBonus(BONUS)))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(payoutsIn(pressed(payoutsButton.confirmBonus(BONUS)))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.confirmFounderBonus).toHaveBeenCalledWith(jar, { bonus: BONUS });
     once("voidFounderBonus", Promise.resolve({ kind: "answered", answer: "voided" }));
-    await expect(payoutsAction(PERIOD, IDLE, pressed(payoutsButton.void(BONUS), { reason: "No aplica." }))).rejects.toThrow(`redirige a ${PAGE}`);
+    await expect(payoutsIn(pressed(payoutsButton.void(BONUS), { reason: "No aplica." }))).rejects.toThrow(`redirige a ${PAGE}`);
     expect(mocks.voidFounderBonus).toHaveBeenCalledWith(jar, { period: PERIOD, bonus: BONUS, reason: "No aplica." });
     expect(mocks.leaveNotice).toHaveBeenCalledWith(jar, "payouts_updated");
   });
 
   it("retener por datos no pide motivo: le pasa al servicio la liquidación y el estado que se vio", async () => {
     once("holdPayoutForTaxData", Promise.resolve({ kind: "answered", answer: "has_tax_data", status: null }));
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.holdForTax(PAYOUT, "calculated")))).toEqual({ kind: "failed", reason: "has_tax_data", attempt: 1 });
+    expect(await payoutsIn(pressed(payoutsButton.holdForTax(PAYOUT, "calculated")))).toEqual({ kind: "failed", reason: "has_tax_data", attempt: 1 });
     expect(mocks.holdPayoutForTaxData).toHaveBeenCalledWith(jar, { payout: PAYOUT, seen: "calculated" });
   });
 
   it("lo que no sale bien se dice con su detalle, y la página se vuelve a pedir", async () => {
     once("releasePayouts", Promise.resolve({ kind: "answered", answer: "previous_not_released", blockingPeriod: 202709, periodStatus: null }));
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({
+    expect(await payoutsIn(pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({
       kind: "failed",
       reason: "previous_not_released",
       detail: { period: 202709 },
       attempt: 1,
     });
     once("releasePayouts", Promise.resolve({ kind: "answered", answer: "tax_data_missing", blockingPeriod: null, periodStatus: null, teachers: [] }));
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "tax_data_missing", attempt: 1 });
+    expect(await payoutsIn(pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).toEqual({ kind: "failed", reason: "tax_data_missing", attempt: 1 });
     expect(calls.order).toEqual(["releasePayouts", "refresh", "releasePayouts", "refresh"]);
   });
 
-  it("con un periodo armado a mano: a la lista, sin llamar a nadie; cancelar u otro botón no es nada", async () => {
-    await expect(payoutsAction("202710", IDLE, pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" }))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
-    expect(mocks.releasePayouts).not.toHaveBeenCalled();
-    expect(await payoutsAction(PERIOD, IDLE, pressed(payoutsButton.cancel()))).toEqual(IDLE);
-    expect(await payoutsAction(PERIOD, IDLE, pressed(periodsButton.rehearse(PERIOD)))).toEqual(IDLE);
-    expect(calls.order).toEqual(["redirect"]);
+  it("sin periodo, con uno armado a mano o repetido: a la lista, sin llamar a nadie; cancelar u otro botón no es nada", async () => {
+    const release = () => pressed(payoutsButton.release(PERIOD, SEEN), { understood: "yes" });
+    for (const period of ["202713", "20271", "abc", ""]) await expect(payoutsIn(release(), period)).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    await expect(payoutsAction(IDLE, release())).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    const twice = release();
+    twice.append("period", String(PERIOD));
+    twice.append("period", String(PERIOD));
+    await expect(payoutsAction(IDLE, twice)).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    expect(await payoutsIn(pressed(payoutsButton.cancel()))).toEqual(IDLE);
+    expect(await payoutsIn(pressed(periodsButton.rehearse(PERIOD)))).toEqual(IDLE);
+    expect(calls.order).toEqual(Array(6).fill("redirect"));
+  });
+
+  it("preguntar o liberar con otro periodo en el botón que en la página: a la lista, sin llamar a nadie", async () => {
+    await expect(payoutsIn(pressed(payoutsButton.askRelease(202709, SEEN)))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    await expect(payoutsIn(pressed(payoutsButton.release(202709, SEEN), { understood: "yes" }))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    expect(calls.order).toEqual(["redirect", "redirect"]);
   });
 });
 

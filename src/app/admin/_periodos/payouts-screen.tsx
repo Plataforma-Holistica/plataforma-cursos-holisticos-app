@@ -72,8 +72,8 @@ function askStillShown(ask: PayoutAsk, view: PayoutsView): boolean {
 
 export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
   const page = periodPayoutsPath(view.periodId);
-  const [code, codeAction, codePending] = useActionState(periodCodeAction.bind(null, { period: view.periodId, page: "payouts" }), CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
-  const [state, send, pending] = useActionState(payoutsAction.bind(null, view.periodId), IDLE, `${page}#${BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(periodCodeAction, CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
+  const [state, send, pending] = useActionState(payoutsAction, IDLE, `${page}#${BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
   // El filtro es una ayuda de JavaScript: sin él no se pinta y se ven todas.
   const mounted = useHydrated();
@@ -134,6 +134,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
           state={code}
           action={codeAction}
           pending={codePending}
+          hidden={{ period: String(view.periodId), page: "payouts" }}
         />
       )}
 
@@ -169,6 +170,8 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
           )}
 
           <form action={send} noValidate className="flex flex-col gap-6">
+            {/* El periodo viaja en el formulario, no atado a la acción (ver `screenField`). */}
+            <input type="hidden" name="period" value={view.periodId} />
             {view.release.kind === "waits" && <p className="text-text-2">{view.release.text}</p>}
             {view.release.kind === "offered" && asking === null && (
               <div>
