@@ -1115,6 +1115,21 @@ que no se ve leyendo un solo archivo:
   existan; «Cambiar» abre el diálogo, no PA-28, que no existe; lo propio dice «Tú»; la fecha completa, sin «hoy»; un `pending` para
   todo el hilo; lo que se escribe mientras va un envío se pierde al llegar la respuesta. Para el A: `Tabs` ganó `narrowOnly` y el
   ancla.
+- **Lo que T-501 suma al carril B** («Mis comentarios», `t501_mis_comentarios`; PA-24; decisiones de Sergio del 2026-11-08: quien perdió
+  el acceso borra lo suyo desde `/cuenta/comentarios`, con un enlace fijo desde PA-25; desde ahí solo se borra; lo oculto por moderación
+  no aparece; los títulos de lo que ya no se ve, sí, sin enlace; una cuenta suspendida no llega). La puerta
+  `private.comments_of_author(antes_de, id)` da lo de `private.actor_id()`, sin parámetro de autor (sin actor, `not_found`): publicado,
+  en revisión y en el filtro (que se dice en revisión), sin lo oculto ni lo borrado, de 20 en 20 con el cursor de siempre. No pide
+  acceso, el interruptor ni `comments_accept`. Cada fila lleva una lista exacta de claves, sin nada del padre, del maestro, del filtro ni
+  de los reportes, y el enlace (`course_slug` y `lesson_id`) solo si `private.comment_lesson()` dice que la lección se ve: la regla, no
+  una copia. Está en la lista de puertas del área `comments`. El servicio es `myComments` (sin `guarded` ni la regla: lo exige
+  `tests/architecture/comments.test.ts`), y borrar reusa `deleteLessonComment`. La pantalla vive en `src/app/(cuenta)/cuenta/comentarios/`,
+  con su acción (`ask-delete:`, `delete:<id>:<rev>`, `cancel`, y la página en que se estaba en `desde`). La salida de una sesión que no
+  pasa es una sola para las dos pantallas de comentarios (`src/app/_comments/session-exit.ts`). Usa pgTAP 95, integración 103 y dos
+  casos más en `comentarios.equipo.ts`. Cambiaron por el requisito la lista de rutas con sesión de `screens.test.ts` y los títulos de
+  PA-25 en `management-screens.test.tsx`. Pendiente para T-502 y T-503: que `comment_delete` no deje borrar lo oculto (hoy se puede
+  conociendo el id), y que borrar lo que está en revisión conserve el caso de moderación y la reincidencia (`hidden_at` del autor).
+  Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
