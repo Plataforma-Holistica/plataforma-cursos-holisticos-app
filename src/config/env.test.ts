@@ -352,6 +352,16 @@ describe("el proveedor de los videos del borrador (T-403)", () => {
     }
   });
 
+  it("el proveedor de prueba de la moderación también solo en local, y sin ella no hay proveedor (T-502)", () => {
+    expect(parseEnv(valid)).not.toHaveProperty("MODERATION_PROVIDER");
+    expect(parseEnv({ ...valid, MODERATION_PROVIDER: "test" }).MODERATION_PROVIDER).toBe("test");
+    for (const APP_ENV of ["staging", "production"]) {
+      const outside = { ...hosted, ...mail, APP_ENV, SENTRY_DSN: "https://llave@sentry.example/1", MODERATION_PROVIDER: "test" };
+      expect(problemsOf(outside)).toEqual(["MODERATION_PROVIDER: tiene un valor inválido"]);
+    }
+    expect(problemsOf({ ...valid, MODERATION_PROVIDER: "otro" })).toEqual(["MODERATION_PROVIDER: tiene un valor inválido"]);
+  });
+
   it("otro nombre no se admite, y vacío cuenta como ausente", () => {
     expect(problemsOf({ ...valid, VIDEO_PROVIDER: "otro" })).toEqual(["VIDEO_PROVIDER: tiene un valor inválido"]);
     expect(parseEnv({ ...valid, VIDEO_PROVIDER: "" })).not.toHaveProperty("VIDEO_PROVIDER");

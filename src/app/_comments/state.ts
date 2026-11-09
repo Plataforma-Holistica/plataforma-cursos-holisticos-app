@@ -54,7 +54,10 @@ export type NoticeKind =
   | "name_empty"
   | "name_too_short"
   | "name_too_long"
-  | "name_invalid";
+  | "name_invalid"
+  | "name_flagged"
+  | "name_throttled"
+  | "hidden";
 
 export type NoticePlace = Place | { kind: "comment"; id: string } | { kind: "thread" } | { kind: "name" };
 

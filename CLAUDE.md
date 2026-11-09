@@ -1150,6 +1150,34 @@ que no se ve leyendo un solo archivo:
   teléfono, la maestra suspendida). Sin capturas en la vitrina todavía. Decisiones mías sin confirmar: una respuesta del maestro en
   revisión deja el comentario «sin responder»; el suspendido o con el veto borra lo suyo; las respuestas de otros se ven. Para el A:
   nada que le toque.
+- **Lo que T-502 suma al carril B** (primera solicitud, el filtro: `t502_filtro`; RF-802; plan aprobado por Sergio el 2026-11-09, con sus
+  decisiones de ese día: el proveedor de prueba ahora y el real cuando conteste el abogado; el cerrojo `comments_accept` hasta T-503; lo
+  oculto no se edita ni se borra; lo que está en revisión se borra con copia; la maestra ve solo lo publicado; donde esto choca con las
+  viñetas de T-501, manda esto). **Publicar y editar dejan el texto en el filtro, y se asienta en dos tiempos.** En la transacción de
+  publicar o editar lo mira la lista de términos de la base (`private.comment_filter_terms`, privada y sin permisos para nadie de la
+  aplicación, porque el repositorio es público; nace vacía también en local, y cada prueba pone la suya): si la marca, queda en revisión
+  ahí mismo con el proveedor `terms`. La normalización es `private.comment_normalize` (minúsculas, sin acentos ni uniones de ancho cero,
+  cifras y cirílicas que se parecen como latinas, letras sueltas juntas) y la búsqueda, por palabra o frase entera
+  (`comment_terms_hit`). Si no, publicar contesta `in_filter` con su `revision`, y el servicio (`settled` en `comments.ts`) le pregunta al
+  modelo (`src/services/comments/moderation.ts`, con el texto y nada más, tope de 5 s) fuera de la transacción y asienta en otra entrada
+  del almacén, **sin la regla**: `private.comment_settle(comentario, revisión, veredicto, proveedor)` solo cambia lo propio que sigue en
+  el filtro con esa revisión (`stale` si no) y no admite `terms`, `sweep` ni un aprobado de `none`. **Confirmada la primera, nunca un
+  error:** si asentar falla, se reporta (`comment_settle_failed`) y se dice «en revisión». Lo que se quede en el filtro lo pasa a
+  revisión el barrido (`private.comment_filter_sweep`, `pg_cron` cada minuto, a los 2 minutos de `filter_entered_at`, que también pone
+  editar). **El proveedor de prueba lo cumple la base:** `comments.filter_provider` dice quién dio el veredicto, y el guardián solo publica
+  un `pass` de `test` con la marca local `comments_test_filter` (la pone `db:login`; en producción nadie), como `video_test`;
+  `comments_unfiltered` ya no existe. `MODERATION_PROVIDER` prende el de prueba (`env.ts` lo rechaza fuera de local) y sin ella no hay
+  proveedor: todo lo que la lista no marca queda en revisión, también con `pnpm dev` si `.env.local` no la trae. El de prueba decide por
+  marcas en el texto: `[revisar]`, `[riesgo]` y `[sin-filtro]` (no contestó). **Lo oculto** (`hidden`, que llega con la segunda solicitud)
+  no se edita ni se borra (`hidden`, también en el guardián), y borrar lo que está en revisión, o lo que tiene reportes, copia antes el
+  texto y el autor a `private.comment_evidence`, sin permisos para la aplicación. El seudónimo pasa por la misma lista (`flagged`) y tiene
+  su freno de cinco cambios al día (`throttled`). Las tablas y funciones nuevas están en las listas del área `comments` del vigilante, que
+  exige además el trabajo del barrido. **Para las pruebas:** las de base y la integración 101 asientan como el servidor en su ayudante
+  (`pruebas.c`, `as`); una carga a mano en réplica pone también `filter_provider`; y un comentario que deba quedar en revisión en el
+  extremo a extremo lleva `[revisar]`. Usa pgTAP 97, integración 105 y un caso más en la 101 (un veredicto viejo espera a la edición y no
+  publica el texto nuevo). Cambiaron por el requisito la 93 a la 96 y la 101 a la 104 (el ayudante y la marca), y las claves que contestan
+  publicar y editar (`revision`). Decisiones mías sin confirmar: cinco cambios de seudónimo al día; dos minutos antes de barrer; la lista
+  vacía en local; asentar no vuelve a mirar el veto ni la suspensión de quien envió justo antes. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

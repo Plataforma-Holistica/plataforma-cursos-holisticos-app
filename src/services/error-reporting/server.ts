@@ -60,6 +60,7 @@ const FAILURES = {
   course_progress_unavailable: "No se pudo leer el avance de una cuenta en un curso (T-210): su ficha se pintó sin el avance.",
   saved_courses_unavailable: "No se pudo leer o cambiar la lista de una cuenta (Mi lista, T-210): su inicio se pintó sin el carrusel, o guardar o quitar dijo «algo falló».",
   comments_unavailable: "No se pudieron leer o escribir los comentarios de una lección, o no se supo si quien los pidió tiene acceso (T-501): la pantalla dijo «algo falló» y lo escrito se quedó.",
+  comment_settle_failed: "Un comentario ya guardado no se pudo asentar con el veredicto del filtro (T-502): a quien lo escribió se le dijo «en revisión», y el barrido de la base lo pasa a revisión en unos minutos.",
   course_submit_unavailable: "Enviar un curso a revisión se quedó sin respuesta, o con una que el servidor no conoce (T-405): no se sabe si quedó enviado, y al maestro se le dijo que revise sus cursos.",
   submit_video_gone: "Al enviar un curso, su proveedor de video ya no tenía listo un video que la base da por listo (T-405): no se envió, y la fila hay que mirarla a mano (OP-21).",
   submit_provider_unavailable: "Antes de enviar un curso no se pudo preguntarle a su proveedor de video por algún video vigente (T-405): no se envió.",

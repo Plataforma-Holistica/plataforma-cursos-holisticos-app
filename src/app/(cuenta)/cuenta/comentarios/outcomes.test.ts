@@ -42,6 +42,8 @@ describe("myDeleteOutcome: lo que pinta la lista después de borrar", () => {
     expect(myDeleteOutcome(ID, { kind: "deleted" }, BACK)).toEqual({ kind: "state", refresh: true, state: { asking: null, notice: { kind: "deleted", id: null } } });
     expect(myDeleteOutcome(ID, { kind: "not_found" }, BACK)).toEqual({ kind: "state", refresh: true, state: { asking: null, notice: { kind: "gone", id: null } } });
     expect(myDeleteOutcome(ID, { kind: "changed" }, BACK)).toEqual({ kind: "state", refresh: true, state: { asking: null, notice: { kind: "changed", id: ID } } });
+    // Lo oculto por reportes ya no sale en la lista: el aviso va arriba (T-502).
+    expect(myDeleteOutcome(ID, { kind: "hidden" }, BACK)).toEqual({ kind: "state", refresh: true, state: { asking: null, notice: { kind: "hidden", id: null } } });
   });
 
   it("si no se supo, la pregunta se queda para reintentar", () => {

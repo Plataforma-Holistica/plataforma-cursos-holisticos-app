@@ -305,9 +305,15 @@ export async function readTeacherCommentCourses(tx: Tx): Promise<{ id: string; t
 // ---------------------------------------------------------------------------------------
 // Escribir.
 
-const written = z.object({ answer: z.literal("ok"), id: z.string().regex(ID), state: z.enum(["published", "in_review"]) }).strict();
+// Publicar y editar dejan el texto en el filtro (T-502): `in_filter` espera el veredicto del proveedor, que se asienta después
+// con su revisión; `in_review` es lo que la lista de la base marcó ahí mismo.
+const written = z
+  .object({ answer: z.literal("ok"), id: z.string().regex(ID), revision: z.number().int().min(1), state: z.enum(["published", "in_review", "in_filter"]) })
+  .strict();
 
-export type WriteRow = { answer: "ok"; id: string; state: "published" | "in_review" } | { answer: GateRefusal | "invalid" | "bad_parent" | "throttled" | "changed" };
+export type WriteRow =
+  | { answer: "ok"; id: string; revision: number; state: "published" | "in_review" | "in_filter" }
+  | { answer: GateRefusal | "invalid" | "bad_parent" | "throttled" | "changed" | "hidden" };
 
 const postAnswer = z.union([written, answerOnly([...GATE_REFUSALS, "invalid", "bad_parent", "throttled"])]);
 
@@ -321,7 +327,7 @@ export async function postComment(tx: Tx, input: { lessonId: string; parentId: s
   return row.answer;
 }
 
-const editAnswer = z.union([written, answerOnly([...GATE_REFUSALS, "invalid", "throttled", "changed"])]);
+const editAnswer = z.union([written, answerOnly([...GATE_REFUSALS, "invalid", "throttled", "changed", "hidden"])]);
 
 /** Edita un comentario propio, con la revisión que se vio. */
 export async function editComment(tx: Tx, input: { commentId: string; body: string; revision: number }): Promise<WriteRow> {
@@ -333,10 +339,31 @@ export async function editComment(tx: Tx, input: { commentId: string; body: stri
   return row.answer;
 }
 
-const deleteAnswer = answerOnly(["ok", "not_found", "changed"]);
+// El veredicto del proveedor, de vuelta (T-502). `stale`: el comentario ya no está en el filtro con esa revisión (se editó
+// otra vez, o lo tomó el barrido), y dice cómo quedó.
+const settleAnswer = z.union([
+  z.object({ answer: z.enum(["ok", "stale"]), state: z.enum(["published", "in_review"]) }).strict(),
+  answerOnly(["not_found", "invalid"]),
+]);
 
-/** Borra un comentario propio, con la revisión que se vio. Lo propio siempre se borra. */
-export async function deleteComment(tx: Tx, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed"> {
+export type SettleRow = { answer: "ok" | "stale"; state: "published" | "in_review" } | { answer: "not_found" | "invalid" };
+
+/** Asienta lo propio que sigue en el filtro con esa revisión, con el veredicto y el proveedor que lo dio. */
+export async function settleComment(tx: Tx, input: { commentId: string; revision: number; verdict: FilterVerdict; provider: string }): Promise<SettleRow> {
+  const [row] = await tx.query(
+    sql`select private.comment_settle(${input.commentId}::uuid, ${input.revision}::bigint, ${input.verdict}, ${input.provider}) as answer`,
+    z.object({ answer: settleAnswer }),
+  );
+  if (!row) throw new Error("comment_settle no contestó");
+  return row.answer;
+}
+
+export type FilterVerdict = "pass" | "flagged" | "risk" | "unavailable";
+
+const deleteAnswer = answerOnly(["ok", "not_found", "changed", "hidden"]);
+
+/** Borra un comentario propio, con la revisión que se vio. Lo oculto espera a moderación (T-502). */
+export async function deleteComment(tx: Tx, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed" | "hidden"> {
   const [row] = await tx.query(
     sql`select private.comment_delete(${input.commentId}::uuid, ${input.revision}::bigint) as answer`,
     z.object({ answer: deleteAnswer }),
@@ -347,10 +374,10 @@ export async function deleteComment(tx: Tx, input: { commentId: string; revision
 
 const pseudonymAnswer = z.union([
   z.object({ answer: z.literal("ok"), pseudonym: z.string() }).strict(),
-  answerOnly(["closed", "suspended_account", "banned", "invalid"]),
+  answerOnly(["closed", "suspended_account", "banned", "invalid", "flagged", "throttled"]),
 ]);
 
-export type PseudonymRow = { answer: "ok"; pseudonym: string } | { answer: "closed" | "suspended_account" | "banned" | "invalid" };
+export type PseudonymRow = { answer: "ok"; pseudonym: string } | { answer: "closed" | "suspended_account" | "banned" | "invalid" | "flagged" | "throttled" };
 
 /** Elige o cambia el seudónimo de quien actúa. */
 export async function setPseudonym(tx: Tx, pseudonym: string): Promise<PseudonymRow> {

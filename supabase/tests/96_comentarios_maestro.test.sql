@@ -27,10 +27,20 @@ create function pruebas.c(p_actor uuid, p_call text, p_k text default null) retu
 language plpgsql as $$
 declare
   v jsonb;
+  v_test boolean;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
   perform pruebas.limpiar();
+  -- Como el servidor (T-502): lo que queda en el filtro lo asienta con el proveedor de prueba si está su marca, y si no, sin
+  -- proveedor.
+  if v ->> 'state' = 'in_filter' then
+    v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
+    perform pruebas.a_nombre_de(p_actor);
+    v := v || jsonb_build_object('state', private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end) ->> 'state');
+    perform pruebas.limpiar();
+  end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);
   end if;
@@ -128,7 +138,7 @@ where c.slug like 'pa45-%';
 insert into pruebas.ids select 'c_' || substr(c.slug, 6), c.course_id from public.published_courses c where c.slug like 'pa45-%';
 insert into private.app_sessions (session_id, profile_id) select pruebas.sesion(pruebas.p(n)), pruebas.p(n) from generate_series(1, 5) n
 on conflict (session_id) do nothing;
-select pruebas.marca('comments_accept', true), pruebas.marca('comments_unfiltered', true), pruebas.interruptor('true');
+select pruebas.marca('comments_accept', true), pruebas.marca('comments_test_filter', true), pruebas.interruptor('true');
 select count(*) as hecho from (select pruebas.r(pruebas.p(n), format('private.comment_set_pseudonym(%L)', name))
   from (values (1, 'Ana'), (2, 'Beto')) as v (n, name)) as llamada;
 
@@ -136,10 +146,10 @@ select count(*) as hecho from (select pruebas.r(pruebas.p(n), format('private.co
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id(s), 'De Ana en ' || s), 'a_' || s)
   from unnest(array['vigente', 'version', 'nolistado', 'retirada', 'otro']) s) as llamada;
 select count(*) as hecho from (select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De Beto'), 'b_vigente')) as llamada;
-select pruebas.marca('comments_unfiltered', false);
+select pruebas.marca('comments_test_filter', false);
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, %L, %L)', pruebas.id('vigente'), pruebas.id('b_vigente'), 'Ana responde, en revisión'), 'a_resp')) as llamada;
 select count(*) as hecho from (select pruebas.r(pruebas.p(3), format('private.comment_post(%L, %L, %L)', pruebas.id('vigente'), pruebas.id('b_vigente'), 'La maestra responde, en revisión'), 'm_resp')) as llamada;
-select pruebas.marca('comments_unfiltered', true);
+select pruebas.marca('comments_test_filter', true);
 -- Lo que ya no se ve: el curso sin listar y la lección retirada. El de la versión abierta, sí.
 select pruebas.forzar(format($$update public.published_courses set is_listed = false where course_id = %L$$, pruebas.id('c_nolistado')));
 select pruebas.forzar(format($$update public.published_lessons set is_current = false, retired_at = now() where id = %L$$, pruebas.id('retirada')));

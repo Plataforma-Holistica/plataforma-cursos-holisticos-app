@@ -26,10 +26,20 @@ create function pruebas.c(p_actor uuid, p_call text, p_k text default null) retu
 language plpgsql as $$
 declare
   v jsonb;
+  v_test boolean;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
   perform pruebas.limpiar();
+  -- Como el servidor (T-502): lo que queda en el filtro lo asienta con el proveedor de prueba si está su marca, y si no, sin
+  -- proveedor.
+  if v ->> 'state' = 'in_filter' then
+    v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
+    perform pruebas.a_nombre_de(p_actor);
+    v := v || jsonb_build_object('state', private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end) ->> 'state');
+    perform pruebas.limpiar();
+  end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);
   end if;
@@ -122,7 +132,7 @@ insert into pruebas.ids select substr(c.slug, 5), l.id from public.published_les
 where c.slug like 'mis-%';
 insert into private.app_sessions (session_id, profile_id) select pruebas.sesion(pruebas.p(n)), pruebas.p(n) from generate_series(1, 6) n
 on conflict (session_id) do nothing;
-select pruebas.marca('comments_accept', true), pruebas.marca('comments_unfiltered', true), pruebas.interruptor('true');
+select pruebas.marca('comments_accept', true), pruebas.marca('comments_test_filter', true), pruebas.interruptor('true');
 select count(*) as hecho from (select pruebas.r(pruebas.p(n), format('private.comment_set_pseudonym(%L)', name))
 from (values (1, 'Ana'), (2, 'Beto'), (5, 'Cata')) as v (n, name)) as llamada;
 
@@ -140,9 +150,9 @@ select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.co
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_delete(%L, 1)', pruebas.id('a_borra')))) as llamada;
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se oculta'), 'a_oculto')) as llamada;
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En el filtro'), 'a_filtro')) as llamada;
-select pruebas.marca('comments_unfiltered', false);
+select pruebas.marca('comments_test_filter', false);
 select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En revisión'), 'a_revision')) as llamada;
-select pruebas.marca('comments_unfiltered', true);
+select pruebas.marca('comments_test_filter', true);
 -- Lo que la aplicación todavía no alcanza, forzado: un oculto, uno en el filtro, y uno borrado que conserva su autor.
 select pruebas.forzar(format($$update public.comments set status = 'hidden', hidden_at = now() where id = %L$$, pruebas.id('a_oculto')));
 select pruebas.forzar(format($$update public.comments set status = 'in_filter' where id = %L$$, pruebas.id('a_filtro')));

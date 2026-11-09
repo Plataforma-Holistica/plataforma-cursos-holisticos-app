@@ -51,6 +51,9 @@ const schema = z.object({
   // Quién procesa los videos de un borrador (T-403). Sin ella, un video llega hasta «Recibido». Cada video en Mux cuesta dinero, y por
   // eso se pide por nombre: `test` no llama a nadie y solo vale en local; `mux`, solo con una base que Mux pueda alcanzar.
   VIDEO_PROVIDER: z.enum(["mux", "test"]).optional(),
+  // El modelo de moderación de los comentarios (T-502; ADR-30). Sin ella no hay proveedor, y lo que la lista de términos no marca
+  // queda en revisión. `test` no llama a nadie y solo vale en local; el real se elige cuando conteste el abogado.
+  MODERATION_PROVIDER: z.enum(["test"]).optional(),
   // Las llaves con que se cifran los datos fiscales del maestro (T-409; TRD §9.7), y cuál cifra hoy. Secretas, solo en el servidor,
   // y con una copia fuera de línea: sin la llave, lo cifrado no se vuelve a leer. Opcionales: sin ellas lo fiscal no está
   // disponible y lo demás funciona igual. Van juntas. Antes de salir a producción son obligatorias (06 §8).
@@ -173,6 +176,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     failed.add(present.MUX_TOKEN_ID === undefined ? "MUX_TOKEN_ID" : "MUX_TOKEN_SECRET");
   }
   if (present.VIDEO_PROVIDER === "test" && present.APP_ENV !== "local") failed.add("VIDEO_PROVIDER");
+  if (present.MODERATION_PROVIDER === "test" && present.APP_ENV !== "local") failed.add("MODERATION_PROVIDER");
   if ((present.STRIPE_SECRET_KEY === undefined) !== (present.STRIPE_WEBHOOK_SECRET === undefined)) {
     failed.add(present.STRIPE_SECRET_KEY === undefined ? "STRIPE_SECRET_KEY" : "STRIPE_WEBHOOK_SECRET");
   }

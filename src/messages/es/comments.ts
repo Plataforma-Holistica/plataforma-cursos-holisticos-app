@@ -113,5 +113,8 @@ export const comments = defineMessages({
     name_too_short: "Tiene que tener al menos 2 caracteres.",
     name_too_long: "Tiene que tener a lo más 40 caracteres.",
     name_invalid: "Tiene caracteres que no podemos guardar. Quítalos y vuelve a intentarlo.",
+    name_flagged: "Ese nombre no se puede usar. Elige otro.",
+    name_throttled: "Ya cambiaste tu nombre varias veces hoy. Vuelve a intentarlo mañana.",
+    hidden: "Este comentario está en revisión: no se puede cambiar ni borrar hasta que lo revise una persona del equipo.",
   },
 });

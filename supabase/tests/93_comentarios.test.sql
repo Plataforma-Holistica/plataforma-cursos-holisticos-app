@@ -23,10 +23,20 @@ create function pruebas.c(p_actor uuid, p_call text, p_k text default null) retu
 language plpgsql as $$
 declare
   v jsonb;
+  v_test boolean;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
   perform pruebas.limpiar();
+  -- Como el servidor (T-502): lo que queda en el filtro lo asienta con el proveedor de prueba si está su marca, y si no, sin
+  -- proveedor.
+  if v ->> 'state' = 'in_filter' then
+    v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
+    perform pruebas.a_nombre_de(p_actor);
+    v := v || jsonb_build_object('state', private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end) ->> 'state');
+    perform pruebas.limpiar();
+  end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);
   end if;
@@ -92,9 +102,9 @@ begin
   perform pruebas.limpiar();
   insert into private.local_flags (flag) values ('comments_accept') on conflict do nothing;
   if p_on then
-    insert into private.local_flags (flag) values ('comments_unfiltered') on conflict do nothing;
+    insert into private.local_flags (flag) values ('comments_test_filter') on conflict do nothing;
   else
-    delete from private.local_flags where flag = 'comments_unfiltered';
+    delete from private.local_flags where flag = 'comments_test_filter';
   end if;
 end
 $$;
@@ -191,7 +201,7 @@ select pruebas.como_servicio(pruebas.p(1));
 select throws_ok('select count(*) from public.comments', '42501', null, 'tampoco el servidor: solo por las funciones');
 select throws_ok($$insert into public.comments (lesson_id, course_id, teacher_id, author_id, body) values (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'x')$$,
   '42501', null, 'ni escribe');
-select throws_ok('select private.comment_settle(gen_random_uuid())', '42501', null, 'ni asienta: no elige el estado');
+select is(private.comment_settle(gen_random_uuid(), 1, 'pass', 'test') ->> 'answer', 'not_found', 'asienta solo lo propio que sigue en el filtro');
 select throws_ok('select private.comment_gate(gen_random_uuid())', '42501', null, 'ni llama al portón');
 select pruebas.limpiar();
 -- El vigilante ve un permiso de más, un guardián apagado y una función nueva sin lista.
@@ -258,8 +268,8 @@ select is(pruebas.r(null, $$private.comment_set_pseudonym('Nadie')$$), 'suspende
 -- Publicar, con la marca local: el portón.
 
 select is(pruebas.publica(pruebas.p(1), 'La', 'Primer comentario', null, 'c1'), 'ok', 'Ana publica');
-select is(pruebas.estado('c1'), 'published', 'con la marca, publicado sin veredicto');
-select is((select filter_verdict from public.comments where id = pruebas.id('c1')), null, 'y sin veredicto, para que T-502 lo distinga');
+select is(pruebas.estado('c1'), 'published', 'con la marca del proveedor de prueba, publicado');
+select is((select (filter_verdict, filter_provider) from public.comments where id = pruebas.id('c1')), ('pass'::text, 'test'::text), 'con el veredicto y el proveedor que lo dio (T-502)');
 select is((select (is_teacher_reply, author_id = pruebas.p(1), teacher_id = pruebas.id('t3')) from public.comments where id = pruebas.id('c1')),
   (false, true, true), 'de alumna, suyo, del maestro de la lección');
 select is(pruebas.publica(pruebas.p(1), 'La', ''), 'invalid', 'vacío, no');
@@ -299,7 +309,7 @@ select is(pruebas.publica(pruebas.p(2), 'Ld', 'En un curso por guion', null, 'd1
 select is((select is_teacher_reply from public.comments where id = pruebas.id('d1')), false, 'y no como su maestro');
 select is((select array_agg(k order by k) from jsonb_object_keys(
   pruebas.c(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('Ld'), 'Otra en la d'))) k),
-  array['answer', 'id', 'state'], 'publicar contesta esas claves');
+  array['answer', 'id', 'revision', 'state'], 'publicar contesta esas claves');
 
 -- Una lección retirada, un curso sin listar o en borrador: no existen para comentar.
 select pruebas.como_dueno();
@@ -415,9 +425,9 @@ select throws_ok(format($$update public.comments set status = 'in_filter' where 
   '23514', 'public.comments: only an edit goes back to the filter', 'a filtro no vuelve sin un texto nuevo');
 select throws_ok(format($$update public.comments set status = 'in_filter', body = 'otro' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: back to the filter without the verdict of the old text', 'ni con otro texto, si guarda el veredicto del de antes');
-select throws_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null where id = %L$$, pruebas.id('g1')),
+select throws_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null, filter_provider = null where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: back to the filter without the verdict of the old text', 'ni sin veredicto, si guarda cuándo se filtró');
-select lives_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null, filter_checked_at = null where id = %L$$, pruebas.id('g1')),
+select lives_ok(format($$update public.comments set status = 'in_filter', body = 'otro', filter_verdict = null, filter_provider = null, filter_checked_at = null where id = %L$$, pruebas.id('g1')),
   'lo vuelve a filtro con otro texto, sin veredicto y sin hora del filtro (como al editar)');
 select throws_ok(format($$update public.comments set status = 'published' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: nothing is published without the filter (RF-802)', 'y de filtro, sin veredicto ni marca, no se publica');
@@ -425,9 +435,9 @@ select throws_ok(format($$update public.comments set status = 'in_review' where 
   '23514', 'public.comments: a comment goes to review from the filter', 'a revisión no va sin veredicto');
 select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'pass' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a comment goes to review from the filter', 'ni con el veredicto que lo deja pasar');
-select lives_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass' where id = %L$$, pruebas.id('g1')),
-  'con el veredicto del filtro, sí (lo que hará T-502)');
-select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'flagged' where id = %L$$, pruebas.id('g1')),
+select lives_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass', filter_provider = 'modelo' where id = %L$$, pruebas.id('g1')),
+  'con el veredicto de un proveedor, sí (T-502)');
+select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'flagged', filter_provider = 'modelo' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a comment goes to review from the filter', 'lo publicado no va a revisión sin pasar por filtro');
 select throws_ok(format($$update public.comments set body = 'cambiado' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a new text goes through the filter', 'un texto nuevo no se queda publicado');
@@ -475,7 +485,7 @@ select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pru
 select is(pruebas.rev('c1'), 2::bigint, 'sin escribir nada');
 select is((select array_agg(k order by k) from jsonb_object_keys(pruebas.c(pruebas.p(1),
   format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Primer comentario, corregido', pruebas.rev('c1')))) k),
-  array['answer', 'id', 'state'], 'editar contesta esas claves');
+  array['answer', 'id', 'revision', 'state'], 'editar contesta esas claves');
 select pruebas.interruptor('false');
 select is(pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c1'), 'Cerrado', pruebas.rev('c1'))), 'closed', 'cerrados, no se edita');
 select pruebas.interruptor('true');
@@ -666,8 +676,8 @@ select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (select 
 -- Las respuestas, de 20 en 20. Se cargan a mano (en réplica, sin el guardián ni el freno), todas con la misma hora.
 select pruebas.como_dueno();
 set local session_replication_role = replica;
-insert into public.comments (lesson_id, course_id, teacher_id, author_id, parent_id, body, status, filter_verdict)
-select c.lesson_id, c.course_id, c.teacher_id, pruebas.p(2), c.id, 'Respuesta ' || n, 'published', 'pass'
+insert into public.comments (lesson_id, course_id, teacher_id, author_id, parent_id, body, status, filter_verdict, filter_provider)
+select c.lesson_id, c.course_id, c.teacher_id, pruebas.p(2), c.id, 'Respuesta ' || n, 'published', 'pass', 'test'
 from public.comments c, generate_series(1, 22) n where c.body = 'Página 1';
 reset session_replication_role;
 insert into pruebas.ids select 'p1', id from public.comments where body = 'Página 1';
@@ -728,8 +738,8 @@ select is((select array_agg(k order by k) from jsonb_object_keys(
 -- PA-45 también va de 20 en 20: Beto deja 21 más en la b (a mano, como arriba).
 select pruebas.como_dueno();
 set local session_replication_role = replica;
-insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
-select l.id, l.course_id, l.teacher_id, pruebas.p(2), 'En la b ' || n, 'published', 'pass'
+insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict, filter_provider)
+select l.id, l.course_id, l.teacher_id, pruebas.p(2), 'En la b ' || n, 'published', 'pass', 'test'
 from public.published_lessons l, generate_series(1, 21) n where l.id = pruebas.id('Lb');
 reset session_replication_role;
 select is((select (jsonb_array_length(r -> 'items'), r ->> 'more') from (

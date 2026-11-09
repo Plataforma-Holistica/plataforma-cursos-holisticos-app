@@ -6,6 +6,7 @@ import type { CommentAccess } from "@/domain/access/media-access";
 import type { SessionCheck } from "@/services/account/account";
 
 import { createComments, parseCommentCursor, type CommentsStore } from "./comments";
+import { MODERATION_TIMEOUT_MS, type Moderation } from "./moderation";
 import type { CommentThread, LessonCommentsRow, MyCommentsRow, TeacherCommentsRow } from "./records";
 
 vi.mock("server-only", () => ({}));
@@ -61,13 +62,14 @@ const MINE: MyCommentsRow = {
   ],
 };
 
-function commentsWith(session: SessionCheck = { kind: "pass", claims }) {
+function commentsWith(session: SessionCheck = { kind: "pass", claims }, moderation: Moderation | null = null) {
   const reported: string[] = [];
   const store = {
     lesson: vi.fn<CommentsStore["lesson"]>(() => Promise.resolve({ kind: "ran", value: { comments: READY, canWrite: "ok" } })),
     replies: vi.fn<CommentsStore["replies"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", items: [THREAD], more: true } })),
-    post: vi.fn<CommentsStore["post"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, state: "published" } })),
-    edit: vi.fn<CommentsStore["edit"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, state: "in_review" } })),
+    post: vi.fn<CommentsStore["post"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 1, state: "published" } })),
+    edit: vi.fn<CommentsStore["edit"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 2, state: "in_review" } })),
+    settle: vi.fn<CommentsStore["settle"]>(() => Promise.resolve({ answer: "ok", state: "published" })),
     remove: vi.fn<CommentsStore["remove"]>(() => Promise.resolve("ok")),
     pseudonym: vi.fn<CommentsStore["pseudonym"]>(() => Promise.resolve({ answer: "ok", pseudonym: "Ana" })),
     mine: vi.fn<CommentsStore["mine"]>(() => Promise.resolve(MINE)),
@@ -75,7 +77,7 @@ function commentsWith(session: SessionCheck = { kind: "pass", claims }) {
     teacherCourses: vi.fn<CommentsStore["teacherCourses"]>(() => Promise.resolve([{ id: LESSON, title: "Respirar" }])),
   } satisfies CommentsStore;
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
-  const service = createComments({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
+  const service = createComments({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()), moderation: () => moderation });
   return { ...service, store, checkSession, reported };
 }
 
@@ -416,5 +418,117 @@ describe("PA-45: los comentarios del maestro", () => {
     expect(await comments.teacherCommentCourses(claims)).toEqual({ kind: "ready", courses: [{ id: LESSON, title: "Respirar" }] });
     comments.store.teacherCourses.mockRejectedValueOnce(new Error("se cayó"));
     expect(await comments.teacherCommentCourses(claims)).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("el filtro (T-502; RF-802)", () => {
+  const inFilter = { kind: "ran" as const, value: { answer: "ok" as const, id: COMMENT, revision: 1, state: "in_filter" as const } };
+  const judge = (verdict: Awaited<ReturnType<Moderation["classify"]>> | Error) => ({
+    provider: "modelo",
+    classify: vi.fn<Moderation["classify"]>(() => (verdict instanceof Error ? Promise.reject(verdict) : Promise.resolve(verdict))),
+  });
+
+  it("lo que queda en el filtro se le pregunta al modelo con el texto y nada más, y se asienta con su revisión y su proveedor", async () => {
+    const moderation = judge("pass");
+    const service = commentsWith(undefined, moderation);
+    service.store.post.mockResolvedValueOnce(inFilter);
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: " Hola " })).toEqual({ kind: "written", id: COMMENT, state: "published" });
+    expect(moderation.classify).toHaveBeenCalledExactlyOnceWith("Hola");
+    expect(service.store.settle).toHaveBeenCalledExactlyOnceWith(claims, { commentId: COMMENT, revision: 1, verdict: "pass", provider: "modelo" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("lo que el modelo detiene queda en revisión, como lo dice la base", async () => {
+    const moderation = judge("risk");
+    const service = commentsWith(undefined, moderation);
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockResolvedValueOnce({ answer: "ok", state: "in_review" });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.store.settle).toHaveBeenCalledWith(claims, expect.objectContaining({ verdict: "risk" }));
+  });
+
+  it("sin proveedor no se pregunta a nadie: en revisión, sin proveedor", async () => {
+    const service = commentsWith();
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockResolvedValueOnce({ answer: "ok", state: "in_review" });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.store.settle).toHaveBeenCalledExactlyOnceWith(claims, { commentId: COMMENT, revision: 1, verdict: "unavailable", provider: "none" });
+  });
+
+  it("si el modelo falla o no contesta, en revisión con su proveedor", async () => {
+    const service = commentsWith(undefined, judge(new Error("sin red")));
+    service.store.post.mockResolvedValueOnce(inFilter);
+    await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" });
+    expect(service.store.settle).toHaveBeenCalledWith(claims, expect.objectContaining({ verdict: "unavailable", provider: "modelo" }));
+    const nothing = commentsWith(undefined, judge(null));
+    nothing.store.post.mockResolvedValueOnce(inFilter);
+    await nothing.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" });
+    expect(nothing.store.settle).toHaveBeenCalledWith(claims, expect.objectContaining({ verdict: "unavailable", provider: "modelo" }));
+  });
+
+  it("lo que tarda más del tope queda en revisión", async () => {
+    vi.useFakeTimers();
+    try {
+      const slow: Moderation = { provider: "modelo", classify: () => new Promise(() => {}) };
+      const service = commentsWith(undefined, slow);
+      service.store.post.mockResolvedValueOnce(inFilter);
+      const written = service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" });
+      await vi.advanceTimersByTimeAsync(MODERATION_TIMEOUT_MS);
+      await written;
+      expect(service.store.settle).toHaveBeenCalledWith(claims, expect.objectContaining({ verdict: "unavailable" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ya guardado, asentar que falla no es un error: se dice en revisión y se reporta", async () => {
+    const service = commentsWith(undefined, judge("pass"));
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockRejectedValueOnce(new Error("sin base"));
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.reported).toEqual(["comment_settle_failed"]);
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockResolvedValueOnce({ answer: "not_found" });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.reported).toEqual(["comment_settle_failed", "comment_settle_failed"]);
+  });
+
+  it("un veredicto que llegó tarde dice cómo quedó, sin reportarse", async () => {
+    const service = commentsWith(undefined, judge("pass"));
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockResolvedValueOnce({ answer: "stale", state: "in_review" });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("lo que la lista de la base ya marcó no se le pregunta al modelo", async () => {
+    const moderation = judge("pass");
+    const service = commentsWith(undefined, moderation);
+    service.store.post.mockResolvedValueOnce({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 1, state: "in_review" } });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(moderation.classify).not.toHaveBeenCalled();
+    expect(service.store.settle).not.toHaveBeenCalled();
+  });
+
+  it("editar también: con la revisión nueva", async () => {
+    const service = commentsWith(undefined, judge("pass"));
+    service.store.edit.mockResolvedValueOnce({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 4, state: "in_filter" } });
+    expect(await service.editLessonComment(reader, { commentId: COMMENT, body: "Otra", revision: 3 })).toEqual({ kind: "written", id: COMMENT, state: "published" });
+    expect(service.store.settle).toHaveBeenCalledExactlyOnceWith(claims, { commentId: COMMENT, revision: 4, verdict: "pass", provider: "modelo" });
+  });
+
+  it("lo oculto no se edita ni se borra", async () => {
+    const service = commentsWith();
+    service.store.edit.mockResolvedValueOnce({ kind: "ran", value: { answer: "hidden" } });
+    expect(await service.editLessonComment(reader, { commentId: COMMENT, body: "Otra", revision: 3 })).toEqual({ kind: "hidden" });
+    service.store.remove.mockResolvedValueOnce("hidden");
+    expect(await service.deleteLessonComment(reader, { commentId: COMMENT, revision: 3 })).toEqual({ kind: "hidden" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it.each(["flagged", "throttled"] as const)("el seudónimo: la base contesta %s", async (answer) => {
+    const service = commentsWith();
+    service.store.pseudonym.mockResolvedValueOnce({ answer });
+    expect(await service.chooseCommentName(reader, "Ana")).toEqual({ kind: answer });
   });
 });
