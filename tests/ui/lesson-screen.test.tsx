@@ -120,7 +120,15 @@ const PROPS: LessonScreenProps = {
   next: { title: "Alargar la salida", href: "/cursos/respirar/lecciones/l3" },
   initial: { kind: "ready" },
   captions: false,
+  comments: null,
 };
+
+vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/comment-actions", () => ({ lessonCommentAction: vi.fn() }));
+
+/** El ancho de la pantalla: el DOM simulado no tiene `matchMedia`, y sin él las pestañas son las del teléfono. */
+function wide(on: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: on && query.includes("min-width"), media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+}
 
 function show(props: Partial<LessonScreenProps> = {}) {
   const user = userEvent.setup();
@@ -131,6 +139,7 @@ function show(props: Partial<LessonScreenProps> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   player.last = null;
   window.localStorage.clear();
   postman.current = createCourier({
@@ -194,6 +203,13 @@ describe("lo de alrededor del reproductor", () => {
     expect(tabs).toEqual(["Temario", "Sobre esta lección"]);
   });
 
+  it("en escritorio, sin comentarios, «Sobre esta lección» va como sección y el temario en su columna", () => {
+    wide(true);
+    show();
+    expect(screen.queryAllByRole("tab")).toEqual([]);
+    expect(screen.getByRole("heading", { level: 2, name: "Sobre esta lección" })).toBeInTheDocument();
+  });
+
   it("el deslinde (RF-809) va al pie", () => {
     show();
     const disclaimer = screen.getByText(`${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`).closest("p");
@@ -204,6 +220,77 @@ describe("lo de alrededor del reproductor", () => {
   it("pasa las reglas de accesibilidad", async () => {
     const { view } = show();
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+});
+
+describe("los comentarios (T-501)", () => {
+  const READY: LessonScreenProps["comments"] = {
+    kind: "ready",
+    view: {
+      count: 3,
+      items: [],
+      next: null,
+      paged: false,
+      pagedThread: null,
+      here: "/cursos/respirar/lecciones/x",
+      cursor: null,
+      me: { teacher: false, pseudonym: "Luz" },
+      write: { kind: "ok" },
+    },
+  };
+
+  it("en teléfono, Comentarios ({n}) es la cuarta pestaña, después de Recursos", () => {
+    show({ comments: READY, resources: [{ id: "r", title: "Guía", detail: "PDF, 2 MB" }] });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Temario", "Sobre esta lección", "Recursos", "Comentarios (3)"]);
+  });
+
+  it("en escritorio, «Sobre esta lección» y «Comentarios ({n})»; el temario sigue en su columna", () => {
+    wide(true);
+    show({ comments: READY });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Sobre esta lección", "Comentarios (3)"]);
+    expect(screen.getByRole("complementary", { name: "Temario" })).toBeInTheDocument();
+  });
+
+  it("el hilo va una sola vez en el documento, con su ancla", async () => {
+    const { user, view } = show({ comments: READY });
+    await user.click(screen.getByRole("tab", { name: "Comentarios (3)" }));
+    expect(screen.getAllByRole("textbox", { name: "Escribe un comentario", hidden: true })).toHaveLength(1);
+    expect(view.container.querySelector("#comentarios")).not.toBeNull();
+  });
+
+  it("cerrados, o sin la lección: no hay pestaña", () => {
+    show({ comments: null });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Temario", "Sobre esta lección"]);
+  });
+
+  it("si no se pudieron leer, la pestaña lo dice y el video sigue", async () => {
+    const { user, area } = show({ comments: { kind: "unavailable" } });
+    await user.click(screen.getByRole("tab", { name: "Comentarios" }));
+    expect(screen.getByText("No pudimos cargar los comentarios. Vuelve a intentarlo en un momento.")).toBeVisible();
+    expect(within(area()).getByRole("button", { name: "Reproducir la lección" })).toBeInTheDocument();
+  });
+
+  it("con PA-33 en el lugar del reproductor no hay comentarios, también si el acceso se pierde con la página abierta", async () => {
+    const denied = show({ comments: READY, initial: { kind: "denied", denial: { kind: "no_access", account: { allowed: false, reason: "no_basis" } } } as never });
+    expect(screen.queryByRole("tab", { name: "Comentarios (3)" })).toBeNull();
+    denied.view.unmount();
+    actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+    const { user } = show({ comments: READY });
+    expect(screen.getByRole("tab", { name: "Comentarios (3)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
+    expect(screen.queryByRole("tab", { name: "Comentarios (3)" })).toBeNull();
+  });
+
+  it("escribir un comentario no toca el reproductor", async () => {
+    const { user } = show({ comments: READY });
+    await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+    await screen.findByTestId("reproductor");
+    const before = player.last;
+    await user.click(screen.getByRole("tab", { name: "Comentarios (3)" }));
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Hola, gracias");
+    expect(player.last).toBe(before);
+    expect(screen.getByTestId("reproductor")).toBeInTheDocument();
   });
 });
 
@@ -1126,10 +1213,16 @@ describe("el progreso, con lo que trae la página y lo que llega después (T-206
 describe("los recursos de la lección", () => {
   const GUIDE = { id: "f0000000-0000-4000-8000-000000000001", title: "Guía", detail: "PDF, 2 MB" };
 
-  it("con alguno: la lista con su botón, y su pestaña", () => {
-    show({ resources: [GUIDE] });
+  // Cambió por el requisito (T-501): desde que las pestañas son una sola lista para los dos anchos, en escritorio los recursos
+  // van dentro de «Sobre esta lección», y en el teléfono en su pestaña.
+  it("con alguno: en escritorio, la lista con su botón bajo «Sobre esta lección»; en el teléfono, su pestaña", () => {
+    wide(true);
+    const desktop = show({ resources: [GUIDE] });
     expect(screen.getByRole("heading", { name: "Recursos de esta lección" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Descargar Guía" }).length).toBeGreaterThan(0);
+    desktop.view.unmount();
+    wide(false);
+    show({ resources: [GUIDE] });
     expect(screen.getByRole("tab", { name: "Recursos" })).toBeTruthy();
   });
 

@@ -17,7 +17,7 @@ import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { Select } from "@/ui/select";
 
-import { CountedField } from "../_lib/counted-field";
+import { CountedField } from "@/ui/counted-field";
 import { failureText, problemText } from "../_lib/words";
 import { editorAction } from "./actions";
 import { DATA_ID, LESSON_ID, MODULE_ID, RESOURCES_ID, STRUCTURE_ID } from "./anchors";

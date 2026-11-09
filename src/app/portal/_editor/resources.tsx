@@ -15,7 +15,7 @@ import { FileInput } from "@/ui/file-input";
 import { InlineAlert } from "@/ui/inline-alert";
 import { ProgressBar } from "@/ui/progress-bar";
 
-import { CountedField } from "../_lib/counted-field";
+import { CountedField } from "@/ui/counted-field";
 import { checkDraftText } from "../_lib/text";
 import { failureText, problemText } from "../_lib/words";
 import { RESOURCES_ID } from "./anchors";

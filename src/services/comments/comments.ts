@@ -21,12 +21,15 @@ import {
   readCommentLesson,
   readCommentReplies,
   readLessonComments,
+  readMyComments,
   setPseudonym,
   type CommentCursor,
   type CommentPage,
   type CommentThread,
   type GateRefusal,
   type LessonCommentsRow,
+  type MyComment,
+  type MyCommentsRow,
   type PseudonymRow,
   type RepliesRow,
   type WriteRow,
@@ -36,14 +39,15 @@ import {
 // regla única, con los hechos de la base y su hora, en la misma transacción en que se llama a la base, como el latido. Cada
 // entrada pide su nivel: leer una lección, sus respuestas y si se puede escribir piden poder leer; publicar, escribir en esa
 // lección; editar, escribir en la lección que la base dice que es la del comentario, nunca en la del formulario. Borrar lo
-// propio y elegir el seudónimo piden solo la sesión, y la base mira la cuenta y el veto. Ojo: borrar pide el id y la revisión,
-// que hoy solo da leer la lección, así que quien perdió el acceso no llega a lo suyo; falta una lectura de lo propio (pendiente,
-// por decidir con Sergio). Las lecturas reciben las claims que la guarda de la página ya dio; las escrituras corren la guarda.
+// propio y elegir el seudónimo piden solo la sesión, y la base mira la cuenta y el veto. Borrar pide el id y la revisión: para
+// que quien perdió el acceso llegue a lo suyo, «Mis comentarios» (PA-24, `/cuenta/comentarios`; decisión de Sergio del
+// 2026-11-08) lee lo propio, también solo con la sesión: la base da solo lo de quien actúa. Las lecturas reciben las claims que
+// la guarda de la página ya dio; las escrituras corren la guarda.
 //
 // Se acepta, como en el latido, que los hechos se lean sin candado: una suscripción que vence justo entonces deja pasar
 // un comentario (decisión mía sin confirmar).
 
-export type { CommentCursor, CommentPage, CommentThread, CommentView } from "./records";
+export type { CommentCursor, CommentPage, CommentThread, CommentView, MyComment } from "./records";
 
 /** Lo que contestó la regla cuando no alcanzó, dicho para la pantalla. */
 export type AccessRefusal =
@@ -96,6 +100,9 @@ export type PseudonymChange =
   | { kind: "session"; check: SessionCheck }
   | { kind: "unavailable" };
 
+/** «Mis comentarios» (PA-24): una página de lo propio y desde dónde sigue la siguiente. */
+export type MyCommentsAnswer = { kind: "ready"; items: MyComment[]; next: string | null } | { kind: "unavailable" };
+
 /** Lo que corrió con el acceso decidido, o la respuesta de la regla si no alcanzó. */
 export type Guarded<T> = { kind: "refused"; access: CommentAccess } | { kind: "ran"; value: T };
 
@@ -107,6 +114,8 @@ export interface CommentsStore {
   edit(claims: VerifiedClaims, input: { commentId: string; body: string; revision: number }): Promise<Guarded<WriteRow> | { kind: "missing" }>;
   remove(claims: VerifiedClaims, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed">;
   pseudonym(claims: VerifiedClaims, pseudonym: string): Promise<PseudonymRow>;
+  /** Lo propio de quien actúa, sin la regla: es su privacidad, como borrar. */
+  mine(claims: VerifiedClaims, before: CommentCursor | null): Promise<MyCommentsRow>;
 }
 
 /**
@@ -279,7 +288,22 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     });
   }
 
-  return { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName };
+  /**
+   * Lo propio de quien trae esas claims (PA-24), desde `before`: sin la regla de acceso, porque es para borrar lo suyo también
+   * sin acceso. La base solo da lo de quien actúa; si no supo quién (no debería pasar con una sesión), «no se supo».
+   */
+  async function myComments(claims: VerifiedClaims, before: string | null): Promise<MyCommentsAnswer> {
+    let page: MyCommentsRow;
+    try {
+      page = await deps.store.mine(claims, parseCommentCursor(before));
+    } catch {
+      return unavailable();
+    }
+    if (page.answer !== "ok") return unavailable();
+    return { kind: "ready", items: page.items, next: cursorOf(page) };
+  }
+
+  return { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments };
 }
 
 /** Una transacción como servidor a nombre de esas claims. La integración 102 pasa una del dueño que se revierte. */
@@ -308,12 +332,13 @@ export function commentsStoreOn(run: RunAsServer): CommentsStore {
       }),
     remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),
     pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),
+    mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),
   };
 }
 
 export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work));
 
-export const { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName } = createComments({
+export const { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments } = createComments({
   store: databaseCommentsStore,
   checkSession,
   report: reportFailure,

@@ -6,7 +6,7 @@ import type { CommentAccess } from "@/domain/access/media-access";
 import type { SessionCheck } from "@/services/account/account";
 
 import { createComments, parseCommentCursor, type CommentsStore } from "./comments";
-import type { CommentThread, LessonCommentsRow } from "./records";
+import type { CommentThread, LessonCommentsRow, MyCommentsRow } from "./records";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/adapters/supabase/db", () => ({ asServer: vi.fn() }));
@@ -37,6 +37,24 @@ const THREAD: CommentThread = {
 };
 const READY: LessonCommentsRow = { answer: "ok", items: [THREAD], more: false, count: 1, me: { teacher: false, pseudonym: "Ana" } };
 const NEVER = { allowed: false, reason: "never_subscribed" } as const;
+const MINE: MyCommentsRow = {
+  answer: "ok",
+  more: true,
+  items: [
+    {
+      id: COMMENT,
+      revision: 2,
+      body: "Hola",
+      state: "in_review",
+      edited: true,
+      createdAt: AT,
+      isReply: false,
+      courseTitle: "Respirar",
+      lessonTitle: "Soltar",
+      link: { slug: "respirar", lessonId: LESSON },
+    },
+  ],
+};
 
 function commentsWith(session: SessionCheck = { kind: "pass", claims }) {
   const reported: string[] = [];
@@ -47,6 +65,7 @@ function commentsWith(session: SessionCheck = { kind: "pass", claims }) {
     edit: vi.fn<CommentsStore["edit"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, state: "in_review" } })),
     remove: vi.fn<CommentsStore["remove"]>(() => Promise.resolve("ok")),
     pseudonym: vi.fn<CommentsStore["pseudonym"]>(() => Promise.resolve({ answer: "ok", pseudonym: "Ana" })),
+    mine: vi.fn<CommentsStore["mine"]>(() => Promise.resolve(MINE)),
   } satisfies CommentsStore;
   const checkSession = vi.fn<(reader: CookieReader) => Promise<SessionCheck>>(() => Promise.resolve(session));
   const service = createComments({ store, checkSession, report: (code) => (reported.push(code), Promise.resolve()) });
@@ -323,5 +342,31 @@ describe("el seudónimo", () => {
     const service = commentsWith();
     service.store.pseudonym.mockResolvedValueOnce({ answer: "invalid" });
     expect(await service.chooseCommentName(reader, "Ana")).toEqual({ kind: "invalid", reason: "invalid" });
+  });
+});
+
+describe("«Mis comentarios» (PA-24)", () => {
+  it("pide lo propio con las claims de la página, sin la regla, y da por dónde sigue", async () => {
+    const comments = commentsWith();
+    expect(await comments.myComments(claims, `${AT}_${COMMENT}`)).toEqual({ kind: "ready", items: MINE.items, next: `${AT}_${COMMENT}` });
+    expect(comments.store.mine).toHaveBeenCalledExactlyOnceWith(claims, { at: AT, id: COMMENT });
+    expect(comments.store.lesson).not.toHaveBeenCalled();
+    expect(comments.checkSession).not.toHaveBeenCalled();
+  });
+
+  it("un cursor sin forma empieza por lo más reciente; sin más, no hay por dónde seguir", async () => {
+    const comments = commentsWith();
+    comments.store.mine.mockResolvedValueOnce({ ...MINE, more: false });
+    expect(await comments.myComments(claims, "basura")).toEqual({ kind: "ready", items: MINE.items, next: null });
+    expect(comments.store.mine).toHaveBeenCalledWith(claims, null);
+  });
+
+  it("si la base no supo quién actúa, o falló, «no se supo», y se reporta", async () => {
+    const comments = commentsWith();
+    comments.store.mine.mockResolvedValueOnce({ answer: "not_found" });
+    expect(await comments.myComments(claims, null)).toEqual({ kind: "unavailable" });
+    comments.store.mine.mockRejectedValueOnce(new Error("se cayó"));
+    expect(await comments.myComments(claims, null)).toEqual({ kind: "unavailable" });
+    expect(comments.reported).toEqual(["comments_unavailable", "comments_unavailable"]);
   });
 });

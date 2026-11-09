@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { portal } from "@/messages/es/portal";
+import { ui } from "@/messages/es/ui";
 import { t } from "@/messages/format";
-import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from "@/ui/field";
 
-// Un campo de texto del borrador con su contador (diseño, sección 5.3: «18 / 60»; el título del curso
+import { describedBy, FieldError, FieldHint, FieldLabel, INPUT_CLASSES } from "./field";
+
+// Un campo de texto con su contador (diseño, sección 5.3: «18 / 60»; el título del curso
 // avisa al acercarse al límite, 03 §4.1). El contador lo pinta el servidor con lo que ya trae, y con
 // JavaScript sigue lo que se escribe; el aviso de que quedan pocos se anuncia, el contador no, para no
 // hablar con cada tecla. No lleva `maxLength`: el navegador cuenta unidades de UTF-16 y la regla del
@@ -28,17 +29,32 @@ export interface CountedFieldProps {
   optional?: boolean;
   multiline?: boolean;
   readOnly?: boolean;
+  /** Controlado: lo lleva quien lo usa (los comentarios, que no dejan que React vacíe un campo al terminar una acción). */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
-export function CountedField({ id, name, label, max, warnAt, defaultValue, error, optional = false, multiline = false, readOnly = false }: CountedFieldProps) {
-  const [count, setCount] = useState([...defaultValue].length);
+export function CountedField({ id, name, label, max, warnAt, defaultValue, error, optional = false, multiline = false, readOnly = false, value, onValueChange }: CountedFieldProps) {
+  const [typed, setCount] = useState([...defaultValue].length);
+  const count = value === undefined ? typed : [...value].length;
+  const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  // React 19 devuelve el formulario a su valor por omisión al terminar la acción (`reset`): el contador lo sigue. El evento llega
+  // antes de que el campo cambie, así que se lee en la vuelta siguiente.
+  useEffect(() => {
+    const form = field.current?.form;
+    if (!form) return;
+    const recount = () => setTimeout(() => setCount([...(field.current?.value ?? "")].length), 0);
+    form.addEventListener("reset", recount);
+    return () => form.removeEventListener("reset", recount);
+  }, []);
   const counterId = `${id}-contador`;
   const errorId = `${id}-error`;
   const near = count > warnAt && count <= max;
   const shared = {
+    ref: field,
     id,
     name,
-    defaultValue,
+    ...(value === undefined ? { defaultValue } : { value, onChange: (event: { currentTarget: { value: string } }) => onValueChange?.(event.currentTarget.value) }),
     readOnly,
     "aria-required": optional ? undefined : true,
     "aria-invalid": error ? true : undefined,
@@ -52,9 +68,9 @@ export function CountedField({ id, name, label, max, warnAt, defaultValue, error
         {label}
       </FieldLabel>
       {multiline ? <textarea {...shared} rows={5} className={AREA_CLASSES} /> : <input {...shared} type="text" autoComplete="off" className={INPUT_CLASSES} />}
-      <FieldHint id={counterId}>{t(portal.field.counter, { count, max })}</FieldHint>
+      <FieldHint id={counterId}>{t(ui.field.counter, { count, max })}</FieldHint>
       <p aria-live="polite" className="text-caption text-warning">
-        {near ? t(portal.field.nearLimit, { count: max - count }) : null}
+        {near ? t(ui.field.nearLimit, { count: max - count }) : null}
       </p>
       {error && <FieldError id={errorId}>{error}</FieldError>}
     </div>

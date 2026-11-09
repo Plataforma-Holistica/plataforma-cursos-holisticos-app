@@ -9,6 +9,9 @@ import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps, WatchSignal } from "@/app/_video/player";
 import { downloadResourceAction } from "@/app/_catalog/resources/actions";
 import { ResourceList, type ResourceItem } from "@/app/_catalog/resources/resource-list";
+import { LessonComments } from "@/app/_comments/lesson-comments";
+import type { CommentsView } from "@/app/_comments/view";
+import { comments as commentText } from "@/messages/es/comments";
 import { lesson as text } from "@/messages/es/lesson";
 import { resources as resourceText } from "@/messages/es/resources";
 import { plural, t } from "@/messages/format";
@@ -28,14 +31,17 @@ import { TextLink } from "@/ui/text-link";
 import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuilder } from "@/services/media/watch-rules";
 
 import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
+import { lessonCommentAction } from "./comment-actions";
 import { paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
 import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
 // el reproductor, el título y «Sobre esta lección» a la izquierda, y el temario a la derecha. En
-// teléfono, el reproductor arriba, pegado al desplazar, y debajo las pestañas Temario y Sobre
-// esta lección. Las pestañas de Recursos y Comentarios no aparecen hasta su tarea (T-404,
-// T-501; decisión de Sergio del 2026-10-15), y con una sola, en escritorio, va como sección.
+// teléfono, el reproductor arriba, pegado al desplazar, y debajo las pestañas Temario, Sobre esta
+// lección, Recursos y Comentarios. En escritorio las pestañas son «Sobre esta lección» (con los
+// recursos) y «Comentarios ({n})», y con una sola va como sección. Es una sola lista para los dos
+// anchos (el temario y los recursos, solo en el teléfono), para que el hilo de comentarios vaya una
+// sola vez en el documento (T-501).
 //
 // El reproductor pide su dirección con la acción después de pintar (RF-305), y se descarga
 // solo entonces. Lo que se ve en su lugar lo decide la tabla (`outcomes.ts`). Arranca con los
@@ -99,7 +105,11 @@ export interface LessonScreenProps {
   initial: Exclude<InitialState, { kind: "suspended" | "reload" }>;
   /** Si la cuenta dejó los subtítulos encendidos. */
   captions: boolean;
+  /** Los comentarios (T-501): nulo si no hay (cerrados, o sin la lección); `unavailable` si no se pudieron leer. */
+  comments: LessonCommentsSlot | null;
 }
+
+export type LessonCommentsSlot = { kind: "unavailable" } | { kind: "ready"; view: CommentsView };
 
 /** Entre el curso y quien lo imparte, bajo el título: un signo, no un texto. */
 const BYLINE_SEPARATOR = " · ";
@@ -300,7 +310,7 @@ function Paywall({ denial }: { denial: Denial }) {
   );
 }
 
-export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, summary, about, modules, next, progress, initial, captions, resources }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, summary, about, modules, next, progress, initial, captions, resources, comments }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
   const [captionsOn, setCaptionsOn] = useState(captions);
@@ -556,7 +566,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
       ))}
     </div>
   );
-  const aboutPanel = (
+  const aboutText = (
     <div className="flex flex-col gap-2 text-text-2">
       {summary !== null && <p>{summary}</p>}
       <p>{about}</p>
@@ -572,6 +582,34 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
     ) : (
       <ResourceList items={resources} canDownload action={downloadResourceAction} permalink={lessonPath(slug, lessonId) ?? ROUTES.home} />
     );
+
+  // En escritorio los recursos van dentro de «Sobre esta lección»; en el teléfono, en su pestaña.
+  const aboutPanel = (
+    <div className="flex flex-col gap-3">
+      {aboutText}
+      {hasResources && (
+        <div className="hidden flex-col gap-3 lg:flex">
+          <h2 className="text-h3">{resourceText.lessonTitle}</h2>
+          {resourcesPanel}
+        </div>
+      )}
+    </div>
+  );
+  // Los comentarios (T-501): con PA-33 en el lugar del reproductor no aparecen, también si el acceso terminó con la página abierta.
+  const back = lessonPath(slug, lessonId) ?? ROUTES.home;
+  const commentsTab =
+    comments === null || video.kind === "denied"
+      ? []
+      : [
+          comments.kind === "ready"
+            ? {
+                id: "comentarios",
+                label: t(commentText.tabCount, { count: comments.view.count }),
+                panel: <LessonComments slug={slug} lessonId={lessonId} back={back} view={comments.view} teacherName={teacher.name} action={lessonCommentAction} />,
+                hasFocusableContent: true,
+              }
+            : { id: "comentarios", label: commentText.tab, panel: <InlineAlert tone="warning">{commentText.unavailable}</InlineAlert> },
+        ];
 
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-6 px-4 pt-6 pb-24 outline-none sm:pb-6">
@@ -695,29 +733,16 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
               {teacher.href === null ? teacher.name : <TextLink href={teacher.href}>{teacher.name}</TextLink>}
             </p>
           </div>
-          <section aria-labelledby="sobre-esta-leccion" className="hidden flex-col gap-3 lg:flex">
-            <h2 id="sobre-esta-leccion" className="text-h3">
-              {text.about}
-            </h2>
-            {aboutPanel}
-            {hasResources && (
-              <>
-                <h3 className="text-h3">{resourceText.lessonTitle}</h3>
-                {resourcesPanel}
-              </>
-            )}
-          </section>
-          <div className="lg:hidden">
-            <Tabs
-              label={text.tabsLabel}
-              idPrefix="leccion"
-              items={[
-                { id: "temario", label: text.syllabus, panel: syllabus("pestana-modulo", "h2"), hasFocusableContent: true },
-                { id: "sobre", label: text.about, panel: aboutPanel },
-                ...(hasResources ? [{ id: "recursos", label: resourceText.tab, panel: resourcesPanel, hasFocusableContent: resources !== null }] : []),
-              ]}
-            />
-          </div>
+          <Tabs
+            label={text.tabsLabel}
+            idPrefix="leccion"
+            items={[
+              { id: "temario", label: text.syllabus, panel: syllabus("pestana-modulo", "h2"), hasFocusableContent: true, narrowOnly: true },
+              { id: "sobre", label: text.about, panel: aboutPanel },
+              ...(hasResources ? [{ id: "recursos", label: resourceText.tab, panel: resourcesPanel, hasFocusableContent: resources !== null, narrowOnly: true }] : []),
+              ...commentsTab,
+            ]}
+          />
         </div>
         <aside aria-labelledby="temario" className="hidden flex-col gap-3 lg:col-span-3 lg:flex">
           <h2 id="temario" className="text-h3">

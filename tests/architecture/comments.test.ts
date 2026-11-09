@@ -77,8 +77,12 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
     // Borrar y el seudónimo, solo con la sesión: lo propio siempre se borra, y la base mira la cuenta y el veto.
     expect(storeOf("remove")).toBe(' remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),');
     expect(storeOf("pseudonym")).toBe(' pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),');
+    // «Mis comentarios» (PA-24), también solo con la sesión: es lo propio, y la base solo da lo de quien actúa.
+    expect(storeOf("mine")).toBe(' mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),');
+    expect(bodyOf("myComments")).not.toMatch(/guarded|readCommentFacts|decideComment|commentAllows/);
+    expect(service.match(/deps\.store\.mine\(/g)).toHaveLength(1);
     // Cada consulta se llama una sola vez, desde su entrada.
-    for (const call of ["readLessonComments", "readCommentReplies", "readCanWrite", "readCommentLesson", "postComment", "editComment", "deleteComment", "setPseudonym"]) {
+    for (const call of ["readLessonComments", "readCommentReplies", "readCanWrite", "readCommentLesson", "postComment", "editComment", "deleteComment", "setPseudonym", "readMyComments"]) {
       expect(service.match(new RegExp(`\\b${call}\\(`, "g")), call).toHaveLength(1);
     }
     expect(records).not.toMatch(/editComment\(tx: Tx, input: \{ lessonId/);
