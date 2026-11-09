@@ -188,19 +188,22 @@ export async function payoutsAction(target: unknown, previous: PayoutsState, for
 }
 
 /**
- * La conciliación con Stripe de PA-79 (T-303, cuarta solicitud): «Comparar ahora» y «Explicar». El periodo llega atado desde la
- * pantalla, y se revisa; del formulario llega qué botón, con la diferencia como se vio, y la nota. Comparar le pregunta a Stripe en el
+ * La conciliación con Stripe de PA-79 (T-303, cuarta solicitud): «Comparar ahora» y «Explicar». El periodo llega en un campo oculto
+ * del formulario, y se revisa como cualquier otro: atado con `bind` en el navegador, sin JavaScript la página no se volvía a pintar
+ * después de la acción (medido el 2026-11-08 en el camino del equipo: React esperaba los argumentos atados y nunca los tenía). Del
+ * formulario llega además qué botón, con la diferencia como se vio, y la nota. Comparar le pregunta a Stripe en el
  * momento y no pide el código reciente; explicar va en dos pasos: el primero solo pregunta en su fila, sin llamar a nadie, y confirmar
  * sin nota vuelve a preguntar. Lo que contesta, también lo que salió bien, se dice en el bloque, y la página se vuelve a pedir: ya trae
  * la comparación de ahora (decisión mía sin confirmar: sin aviso por cookie, que no diría si coincidió).
  */
-export async function reconcileAction(target: unknown, previous: ReconcileState, form: FormData): Promise<ReconcileState> {
+export async function reconcileAction(previous: ReconcileState, form: FormData): Promise<ReconcileState> {
   const request = readReconcileForm(form);
   if (request.step === "none" || request.step === "cancel") return { kind: "idle" };
   const attempt = nextAttempt(previous);
   const jar = await cookieJar();
   clearNotice(jar);
-  const period = periodFrom(target);
+  const raw = form.get("period");
+  const period = typeof raw === "string" && /^[0-9]{6}$/.test(raw) ? periodFrom(Number(raw)) : null;
   if (period === null) return leaveFor(jar, { to: ROUTES.periods, notice: null });
   const asked = askedBy(request);
   if (asked !== null) return { kind: "asking", ...asked, attempt };

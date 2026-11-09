@@ -320,10 +320,11 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // sin el motivo vuelve a preguntar.
     payoutsAction:
       /const bound = payoutsPeriodFrom\(target\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
-    // La conciliación con Stripe (T-303, cuarta solicitud): el periodo llega atado y se revisa; del formulario llega qué botón, con la
-    // diferencia como se vio, y la nota. Preguntar, o confirmar sin nota, no llama a nadie.
+    // La conciliación con Stripe (T-303, cuarta solicitud): el periodo llega en el formulario (sin `bind`: sin JavaScript, la página no se
+    // volvía a pintar) y se revisa; de ahí llegan también qué botón, con la diferencia como se vio, y la nota. Preguntar, o confirmar sin
+    // nota, no llama a nadie.
     reconcileAction:
-      /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "asking", \.\.\.asked, attempt \};[\s\S]*compareOutcome\(await compareNow\(jar, period\), period\)[\s\S]*explainOutcome\(await explainDifference\(jar, \{ period, side, charge, cents, currency, note \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+      /const raw = form\.get\("period"\);\s*const period = typeof raw === "string" && \/\^\[0-9\]\{6\}\$\/\.test\(raw\) \? periodFrom\(Number\(raw\)\) : null;\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "asking", \.\.\.asked, attempt \};[\s\S]*compareOutcome\(await compareNow\(jar, period\), period\)[\s\S]*explainOutcome\(await explainDifference\(jar, \{ period, side, charge, cents, currency, note \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
   "src/app/admin/_textos/actions.ts": {
     // Dar el código otra vez: el de los textos legales, que comprueba lo reciente con la lectura que pide configuración.

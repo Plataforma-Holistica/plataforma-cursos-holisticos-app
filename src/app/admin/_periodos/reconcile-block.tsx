@@ -35,7 +35,8 @@ export interface ReconcileBlockProps {
 }
 
 export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
-  const [state, send, pending] = useActionState(reconcileAction.bind(null, periodId), IDLE, `${periodPath(periodId)}#${BLOCK_ID}`);
+  // Sin `bind`: el periodo viaja en cada formulario (ver `reconcileAction`).
+  const [state, send, pending] = useActionState(reconcileAction, IDLE, `${periodPath(periodId)}#${BLOCK_ID}`);
   // Qué se pulsó, para decir qué está en camino: comparar tarda segundos, explicar no.
   const [pressed, setPressed] = useState<"compare" | "explain">("compare");
 
@@ -94,6 +95,7 @@ export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
       {view.compare !== null && (
         // En el teléfono solo se consulta: el botón no se pinta por debajo del ancho de tableta.
         <form action={send} noValidate onSubmit={() => setPressed("compare")} className="hidden md:block">
+          <input type="hidden" name="period" value={periodId} />
           <Button type="submit" variant="secondary" name="do" value={view.compare} loading={pending && pressed === "compare"} loadingLabel={text.comparing} disabled={pending}>
             {text.compare}
           </Button>
@@ -123,6 +125,7 @@ export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
                 provider: row.provider,
                 action: (
                   <RowAction
+                    periodId={periodId}
                     row={row}
                     asking={asking !== null && row.offer.kind === "explain" && sameDifference(asking.asked, row.offer.asked) ? asking : null}
                     answer={answer}
@@ -150,6 +153,7 @@ function withNote(message: string, note: string | undefined): string {
 }
 
 interface RowActionProps {
+  periodId: number;
   row: DifferenceRow;
   asking: Extract<ReconcileState, { kind: "asking" }> | null;
   answer: RefObject<HTMLDivElement | null>;
@@ -158,7 +162,7 @@ interface RowActionProps {
   onSubmit: () => void;
 }
 
-function RowAction({ row, asking, answer, action, pending, onSubmit }: RowActionProps) {
+function RowAction({ periodId, row, asking, answer, action, pending, onSubmit }: RowActionProps) {
   const explained = row.explained === null ? null : <span className="text-body-s break-words">{row.explained}</span>;
   if (row.offer.kind === "blocks") return <span className="text-body-s text-text-2">{text.blocks}</span>;
   if (row.offer.kind === "none") return explained;
@@ -166,6 +170,7 @@ function RowAction({ row, asking, answer, action, pending, onSubmit }: RowAction
   return (
     // En el teléfono solo se consulta: la acción no se pinta por debajo del ancho de tableta.
     <form action={action} noValidate onSubmit={onSubmit} className="hidden min-w-64 flex-col gap-3 md:flex">
+      <input type="hidden" name="period" value={periodId} />
       {asking !== null ? (
         <div ref={answer} tabIndex={-1} className="flex flex-col gap-3 outline-none">
           <p className="font-semibold">{text.explainTitle}</p>

@@ -310,11 +310,13 @@ describe("payoutsAction (PA-81)", () => {
 });
 
 describe("reconcileAction (T-303, cuarta solicitud)", () => {
+  // El periodo viaja en el formulario, como lo manda la pantalla.
+  const atPeriod = (form: FormData) => (form.append("period", String(PERIOD)), form);
   const DIFFERENCE = { side: "only_provider", currency: "mxn", cents: "34900", charge: "ch_1" } as const;
 
-  it("«Comparar ahora» le pasa el periodo atado al servicio, dice lo que salió y vuelve a pedir la página", async () => {
+  it("«Comparar ahora» le pasa al servicio el periodo del formulario, dice lo que salió y vuelve a pedir la página", async () => {
     once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "recorded", matches: true, complete: true, differences: 0 } }));
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toEqual({ kind: "done", answer: "matches", attempt: 1 });
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.compare())))).toEqual({ kind: "done", answer: "matches", attempt: 1 });
     expect(mocks.compareNow).toHaveBeenCalledWith(jar, PERIOD);
     expect(calls.order).toEqual(["compareNow", "refresh"]);
     expect(mocks.clearNotice).toHaveBeenCalledTimes(1);
@@ -322,44 +324,44 @@ describe("reconcileAction (T-303, cuarta solicitud)", () => {
 
   it("lo que no salió bien se dice, y la página se vuelve a pedir", async () => {
     once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "refused", answer: "rate_limited" } }));
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toEqual({ kind: "failed", reason: "rate_limited", note: undefined, attempt: 1 });
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.compare())))).toEqual({ kind: "failed", reason: "rate_limited", note: undefined, attempt: 1 });
     once("compareNow", Promise.resolve({ kind: "compared", result: { kind: "no_stripe" } }));
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).toMatchObject({ reason: "no_stripe" });
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.compare())))).toMatchObject({ reason: "no_stripe" });
     expect(calls.order).toEqual(["compareNow", "refresh", "compareNow", "refresh"]);
   });
 
   it("a quien la guarda no deja, al panel", async () => {
     once("compareNow", Promise.resolve({ kind: "refused" }));
-    await expect(reconcileAction(PERIOD, IDLE, pressed(reconcileButton.compare()))).rejects.toThrow(`redirige a ${periodPath(PERIOD)}`);
+    await expect(reconcileAction(IDLE, atPeriod(pressed(reconcileButton.compare())))).rejects.toThrow(`redirige a ${periodPath(PERIOD)}`);
   });
 
   it("con un periodo armado a mano: a la lista, sin llamar al servicio", async () => {
-    await expect(reconcileAction("202713", IDLE, pressed(reconcileButton.compare()))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
+    await expect(reconcileAction(IDLE, pressed(reconcileButton.compare(), { period: "202713" }))).rejects.toThrow(`redirige a ${ROUTES.periods}`);
     expect(calls.order).toEqual(["redirect"]);
   });
 
   it("«Explicar» solo pregunta en su fila, y confirmar sin nota vuelve a preguntar: sin llamar a nadie", async () => {
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.askExplain(DIFFERENCE)))).toEqual({
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.askExplain(DIFFERENCE))))).toEqual({
       kind: "asking",
       asked: DIFFERENCE,
       note: undefined,
       problem: null,
       attempt: 1,
     });
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "   " }))).toMatchObject({ kind: "asking", problem: "missing_note" });
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.explain(DIFFERENCE), { note: "   " })))).toMatchObject({ kind: "asking", problem: "missing_note" });
     expect(calls.order).toEqual([]);
   });
 
-  it("confirmado con nota: le pasa al servicio el periodo atado, la diferencia como se vio y la nota", async () => {
+  it("confirmado con nota: le pasa al servicio el periodo del formulario, la diferencia como se vio y la nota", async () => {
     once("explainDifference", Promise.resolve({ kind: "answered", answer: "explained" }));
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" }))).toEqual({ kind: "done", answer: "explained", attempt: 1 });
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" })))).toEqual({ kind: "done", answer: "explained", attempt: 1 });
     expect(mocks.explainDifference).toHaveBeenCalledWith(jar, { period: PERIOD, ...DIFFERENCE, note: "Cargo de prueba" });
     expect(calls.order).toEqual(["explainDifference", "refresh"]);
   });
 
   it("si no se pudo explicar, la nota vuelve en el estado: no se pierde", async () => {
     once("explainDifference", Promise.resolve({ kind: "answered", answer: "needs_fresh_code" }));
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" }))).toEqual({
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.explain(DIFFERENCE), { note: "Cargo de prueba" })))).toEqual({
       kind: "failed",
       reason: "needs_code",
       note: "Cargo de prueba",
@@ -368,10 +370,10 @@ describe("reconcileAction (T-303, cuarta solicitud)", () => {
   });
 
   it("cancelar, otro botón o ninguno no llaman a nadie", async () => {
-    expect(await reconcileAction(PERIOD, IDLE, pressed(reconcileButton.cancel()))).toEqual(IDLE);
-    expect(await reconcileAction(PERIOD, IDLE, pressed(periodsButton.rehearse(PERIOD)))).toEqual(IDLE);
-    expect(await reconcileAction(PERIOD, IDLE, pressed("explain:only_own:mxn:100:ch_1", { note: "x" }))).toEqual(IDLE);
-    expect(await reconcileAction(PERIOD, IDLE, new FormData())).toEqual(IDLE);
+    expect(await reconcileAction(IDLE, atPeriod(pressed(reconcileButton.cancel())))).toEqual(IDLE);
+    expect(await reconcileAction(IDLE, atPeriod(pressed(periodsButton.rehearse(PERIOD))))).toEqual(IDLE);
+    expect(await reconcileAction(IDLE, atPeriod(pressed("explain:only_own:mxn:100:ch_1", { note: "x" })))).toEqual(IDLE);
+    expect(await reconcileAction(IDLE, atPeriod(new FormData()))).toEqual(IDLE);
     expect(calls.order).toEqual([]);
   });
 });

@@ -449,9 +449,9 @@ describe("PA-79, la conciliación con Stripe (T-303, cuarta solicitud)", () => {
     const user = userEvent.setup();
     const { container } = render(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
     await user.click(screen.getByRole("button", { name: "Explicar el cargo ch_1" }));
-    expect(sent(actions.reconcileAction)).toEqual({ do: reconcileButton.askExplain(ONLY_PROVIDER) });
-    // La acción va atada a su periodo.
-    expect(actions.reconcileAction.mock.calls[0]?.[0]).toBe(202710);
+    expect(sent(actions.reconcileAction)).toEqual({ period: "202710", do: reconcileButton.askExplain(ONLY_PROVIDER) });
+    // La acción no va atada: el periodo viaja en el formulario, y el primer argumento es el estado.
+    expect(actions.reconcileAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
     const note = await screen.findByLabelText(rec.noteLabel);
     expect(note).toHaveAttribute("maxlength", "500");
     expect(screen.getByText(rec.explainBody)).toBeInTheDocument();
@@ -463,7 +463,7 @@ describe("PA-79, la conciliación con Stripe (T-303, cuarta solicitud)", () => {
     await user.click(screen.getByLabelText(rec.noteLabel));
     await user.paste("Un cargo de prueba que se registró a mano.");
     await user.click(screen.getByRole("button", { name: rec.confirmExplain }));
-    expect(sent(actions.reconcileAction, 2)).toEqual({ do: reconcileButton.explain(ONLY_PROVIDER), note: "Un cargo de prueba que se registró a mano." });
+    expect(sent(actions.reconcileAction, 2)).toEqual({ period: "202710", do: reconcileButton.explain(ONLY_PROVIDER), note: "Un cargo de prueba que se registró a mano." });
     await waitFor(() => expect(screen.getByText(rec.answers.explained)).toBeInTheDocument());
   });
 
@@ -491,7 +491,7 @@ describe("PA-79, la conciliación con Stripe (T-303, cuarta solicitud)", () => {
     const user = userEvent.setup();
     render(<PeriodScreen view={periodView(period(), null, NOW)} />);
     await user.click(screen.getByRole("button", { name: rec.compare }));
-    expect(sent(actions.reconcileAction)).toEqual({ do: reconcileButton.compare() });
+    expect(sent(actions.reconcileAction)).toEqual({ period: "202710", do: reconcileButton.compare() });
     await waitFor(() => expect(within(block()).getByText(said)).toBeInTheDocument());
   });
 

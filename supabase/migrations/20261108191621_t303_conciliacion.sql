@@ -290,13 +290,16 @@ begin
     from pg_catalog.jsonb_array_elements(p_charges) c),
   theirs as (select s.id, s.cents from s where s.status = 'succeeded' and s.captured and s.currency = 'mxn'),
   mine as (select c.provider_charge_id as id, c.gross_cents as cents from public.charges c where c.provider = 'stripe' and c.period_id = p_period),
+  -- Los dos lados en un solo cruce, que Postgres resuelve con una tabla hash: con `not exists` sobre las dos listas sin índice, 13 000 de cada lado no cabían en
+  -- los 10 s del servidor (lo midió la prueba de escala).
+  paired as (select t.id as their_id, t.cents as their_cents, m.id as my_id, m.cents as my_cents from theirs t full join mine m on m.id = t.id),
   diffs as (
-    select 'only_provider' as side, t.id, null::bigint as own_cents, t.cents as provider_cents, 'mxn' as currency
-    from theirs t where not exists (select 1 from mine m where m.id = t.id)
+    select 'only_provider' as side, pr.their_id as id, null::bigint as own_cents, pr.their_cents as provider_cents, 'mxn' as currency
+    from paired pr where pr.my_id is null
     union all
-    select 'only_own', m.id, m.cents, null::bigint, 'mxn' from mine m where not exists (select 1 from theirs t where t.id = m.id)
+    select 'only_own', pr.my_id, pr.my_cents, null::bigint, 'mxn' from paired pr where pr.their_id is null
     union all
-    select 'amount', m.id, m.cents, t.cents, 'mxn' from mine m join theirs t on t.id = m.id where m.cents <> t.cents
+    select 'amount', pr.my_id, pr.my_cents, pr.their_cents, 'mxn' from paired pr where pr.my_id is not null and pr.their_id is not null and pr.my_cents <> pr.their_cents
     union all
     select 'other_currency', s.id, null::bigint, s.cents, s.currency from s where s.status = 'succeeded' and s.captured and s.currency <> 'mxn')
   select (select pg_catalog.count(*) from mine), (select coalesce(pg_catalog.sum(m.cents), 0) from mine m),
