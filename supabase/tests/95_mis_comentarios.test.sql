@@ -20,7 +20,8 @@ create function pruebas.id(p_k text) returns uuid language sql stable as $$ sele
 grant select, insert on pruebas.ids to app_service;
 grant select on pruebas.ids to authenticated;
 
--- Lo que contesta una función como el servidor a nombre de alguien. Con `p_k`, guarda el id que devolvió.
+-- Lo que contesta una función como el servidor a nombre de alguien. Con `p_k`, guarda el id que devolvió. Una llamada suelta
+-- va dentro de un `count(*)`: un «ok» impreso lo leería `pg_prove` como una prueba.
 create function pruebas.c(p_actor uuid, p_call text, p_k text default null) returns jsonb
 language plpgsql as $$
 declare
@@ -114,33 +115,33 @@ select set_config('app.actor_id', pruebas.p(3)::text, true);
 insert into public.consents (profile_id, legal_document_id, origin)
 values (pruebas.p(3), private.current_legal_document('teacher_privacy_notice'), 'account_settings');
 select pruebas.limpiar();
-select pruebas.pide(pruebas.p(4), format('private.approve_course(%L)', course_id))
+select count(*) as hecho from (select pruebas.pide(pruebas.p(4), format('private.approve_course(%L)', course_id))
 from public.course_registry r join public.published_courses c using (course_id)
-where c.slug like 'mis-%' order by c.slug;
+where c.slug like 'mis-%' order by c.slug) as llamada;
 insert into pruebas.ids select substr(c.slug, 5), l.id from public.published_lessons l join public.published_courses c using (course_id)
 where c.slug like 'mis-%';
 insert into private.app_sessions (session_id, profile_id) select pruebas.sesion(pruebas.p(n)), pruebas.p(n) from generate_series(1, 6) n
 on conflict (session_id) do nothing;
 select pruebas.marca('comments_accept', true), pruebas.marca('comments_unfiltered', true), pruebas.interruptor('true');
-select pruebas.r(pruebas.p(n), format('private.comment_set_pseudonym(%L)', name))
-from (values (1, 'Ana'), (2, 'Beto'), (5, 'Cata')) as v (n, name);
+select count(*) as hecho from (select pruebas.r(pruebas.p(n), format('private.comment_set_pseudonym(%L)', name))
+from (values (1, 'Ana'), (2, 'Beto'), (5, 'Cata')) as v (n, name)) as llamada;
 
 -- Lo escrito. Ana: uno en cada lección, una respuesta a Beto, uno que edita, uno en revisión, uno que borra, uno oculto, uno
 -- en el filtro. Beto y la maestra, lo suyo.
-select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De Beto'), 'b1');
-select pruebas.r(pruebas.p(3), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De la maestra'), 'm1');
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id(s), 'De Ana en ' || s), 'a_' || s)
-from unnest(array['vigente', 'retirada', 'nolistado', 'version', 'retirado']) s;
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, %L, %L)', pruebas.id('vigente'), pruebas.id('b1'), 'Ana responde a Beto'), 'a_resp');
-select pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, 1)', pruebas.id('a_vigente'), 'De Ana, editado'));
+select count(*) as hecho from (select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De Beto'), 'b1')) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(3), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De la maestra'), 'm1')) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id(s), 'De Ana en ' || s), 'a_' || s)
+from unnest(array['vigente', 'retirada', 'nolistado', 'version', 'retirado']) s) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, %L, %L)', pruebas.id('vigente'), pruebas.id('b1'), 'Ana responde a Beto'), 'a_resp')) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_edit(%L, %L, 1)', pruebas.id('a_vigente'), 'De Ana, editado'))) as llamada;
 -- El freno cuenta 10 cada 10 minutos, y todo pasa en la misma transacción: se vacía para seguir escribiendo.
 delete from private.rate_limit_counters where bucket = 'comments:' || pruebas.p(1);
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se va'), 'a_borra');
-select pruebas.r(pruebas.p(1), format('private.comment_delete(%L, 1)', pruebas.id('a_borra')));
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se oculta'), 'a_oculto');
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En el filtro'), 'a_filtro');
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se va'), 'a_borra')) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_delete(%L, 1)', pruebas.id('a_borra')))) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'Lo que se oculta'), 'a_oculto')) as llamada;
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En el filtro'), 'a_filtro')) as llamada;
 select pruebas.marca('comments_unfiltered', false);
-select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En revisión'), 'a_revision');
+select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'En revisión'), 'a_revision')) as llamada;
 select pruebas.marca('comments_unfiltered', true);
 -- Lo que la aplicación todavía no alcanza, forzado: un oculto, uno en el filtro, y uno borrado que conserva su autor.
 select pruebas.forzar(format($$update public.comments set status = 'hidden', hidden_at = now() where id = %L$$, pruebas.id('a_oculto')));
@@ -214,7 +215,7 @@ select pruebas.interruptor('true');
 select pruebas.marca('comments_accept', false);
 select is(pruebas.r(pruebas.p(1), 'private.comments_of_author(null, null)'), 'ok', 'sin la marca de aceptar, también');
 select pruebas.marca('comments_accept', true);
-select pruebas.r(pruebas.p(5), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De Cata'), 'c1');
+select count(*) as hecho from (select pruebas.r(pruebas.p(5), format('private.comment_post(%L, null, %L)', pruebas.id('vigente'), 'De Cata'), 'c1')) as llamada;
 select pruebas.como_dueno_sistema();
 update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(5);
 select pruebas.limpiar();
@@ -229,14 +230,14 @@ select pruebas.limpiar();
 -- ---------------------------------------------------------------------------------------
 -- De 20 en 20, por cursor: a la misma hora (todo en una transacción) desempata el id.
 
-select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto ' || n))
-from generate_series(1, 9) n;
+select count(*) as hecho from (select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto ' || n))
+from generate_series(1, 9) n) as llamada;
 delete from private.rate_limit_counters where bucket = 'comments:' || pruebas.p(2);
-select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto más ' || n))
-from generate_series(1, 9) n;
+select count(*) as hecho from (select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto más ' || n))
+from generate_series(1, 9) n) as llamada;
 delete from private.rate_limit_counters where bucket = 'comments:' || pruebas.p(2);
-select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto todavía ' || n))
-from generate_series(1, 5) n;
+select count(*) as hecho from (select pruebas.r(pruebas.p(2), format('private.comment_post(%L, null, %L)', pruebas.id('version'), 'Beto todavía ' || n))
+from generate_series(1, 5) n) as llamada;
 create temp table primera as select pruebas.mios(pruebas.p(2)) as v;
 grant select on primera to app_service, authenticated;
 select is((select jsonb_array_length(v -> 'items') from primera), 20, 'la primera página, de 20');
