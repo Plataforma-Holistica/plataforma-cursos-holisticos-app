@@ -197,7 +197,7 @@ describe("el campo (CommentComposer)", () => {
   it.each([
     [{ kind: "read_only" }, "Para comentar necesitas una suscripción."],
     [{ kind: "gate", answer: "banned" }, "Por ahora no puedes comentar. Si crees que es un error, escríbenos."],
-    [{ kind: "gate", answer: "suspended" }, "Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios."],
+    [{ kind: "gate", answer: "suspended" }, "Por ahora no puedes escribir como maestro en estos comentarios. Puedes leerlos."],
     [{ kind: "gate", answer: "closed" }, "Por ahora no se pueden publicar comentarios."],
   ] as const)("con %o el campo se sustituye por su texto, y se sigue leyendo", (write, text) => {
     setup({ count: 1, items: [thread(1)], write });
