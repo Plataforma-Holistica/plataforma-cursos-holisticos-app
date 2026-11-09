@@ -309,9 +309,9 @@ export function createComments(deps: {
    * para quien escribió, y lo que no se pudo asentar queda en revisión (el barrido lo toma).
    */
   async function settled(claims: VerifiedClaims, row: { id: string; revision: number }, text: string): Promise<"published" | "in_review"> {
-    const moderation = deps.moderation();
-    const verdict = moderation === null ? null : await verdictOf(moderation, text);
     try {
+      const moderation = deps.moderation();
+      const verdict = moderation === null ? null : await verdictOf(moderation, text);
       const answer = await deps.store.settle(claims, {
         commentId: row.id,
         revision: row.revision,
@@ -319,6 +319,8 @@ export function createComments(deps: {
         provider: moderation?.provider ?? "none",
       });
       if (answer.answer === "ok" || answer.answer === "stale") return answer.state;
+      // Borrado en otra pestaña mientras se filtraba: no hay nada que asentar, y no es una falla.
+      if (answer.answer === "not_found") return "in_review";
       await deps.report("comment_settle_failed");
     } catch {
       await deps.report("comment_settle_failed");

@@ -488,9 +488,33 @@ describe("el filtro (T-502; RF-802)", () => {
     expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
     expect(service.reported).toEqual(["comment_settle_failed"]);
     service.store.post.mockResolvedValueOnce(inFilter);
-    service.store.settle.mockResolvedValueOnce({ answer: "not_found" });
+    service.store.settle.mockResolvedValueOnce({ answer: "invalid" });
     expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
     expect(service.reported).toEqual(["comment_settle_failed", "comment_settle_failed"]);
+  });
+
+  it("si se borró en otra pestaña mientras se filtraba, no hay falla que reportar", async () => {
+    const service = commentsWith(undefined, judge("pass"));
+    service.store.post.mockResolvedValueOnce(inFilter);
+    service.store.settle.mockResolvedValueOnce({ answer: "not_found" });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(service.reported).toEqual([]);
+  });
+
+  it("si leer qué proveedor hay falla, tampoco es un error: en revisión y se reporta", async () => {
+    const { store } = commentsWith();
+    store.post.mockResolvedValueOnce(inFilter);
+    const reported: string[] = [];
+    const service = createComments({
+      store,
+      checkSession: () => Promise.resolve({ kind: "pass", claims }),
+      report: (code) => (reported.push(code), Promise.resolve()),
+      moderation: () => {
+        throw new Error("sin configuración");
+      },
+    });
+    expect(await service.postLessonComment(reader, { lessonId: LESSON, parentId: null, body: "Hola" })).toEqual({ kind: "written", id: COMMENT, state: "in_review" });
+    expect(reported).toEqual(["comment_settle_failed"]);
   });
 
   it("un veredicto que llegó tarde dice cómo quedó, sin reportarse", async () => {

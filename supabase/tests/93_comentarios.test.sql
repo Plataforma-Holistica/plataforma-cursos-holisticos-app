@@ -4,7 +4,7 @@
 -- respuestas del portón y de cada función, con la marca local y sin ella, lo que ve cada quien y el área `comments`.
 begin;
 \ir _ayuda.psql
-select plan(212);
+select plan(213);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9300000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -24,6 +24,7 @@ language plpgsql as $$
 declare
   v jsonb;
   v_test boolean;
+  v_settled jsonb;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
@@ -33,9 +34,13 @@ begin
   if v ->> 'state' = 'in_filter' then
     v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
     perform pruebas.a_nombre_de(p_actor);
-    v := v || jsonb_build_object('state', private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
-      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end) ->> 'state');
+    v_settled := private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end);
     perform pruebas.limpiar();
+    if v_settled ->> 'answer' not in ('ok', 'stale') then
+      raise exception 'asentar contestó %', v_settled;
+    end if;
+    v := v || jsonb_build_object('state', v_settled ->> 'state');
   end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);
@@ -435,8 +440,12 @@ select throws_ok(format($$update public.comments set status = 'in_review' where 
   '23514', 'public.comments: a comment goes to review from the filter', 'a revisión no va sin veredicto');
 select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'pass' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a comment goes to review from the filter', 'ni con el veredicto que lo deja pasar');
-select lives_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass', filter_provider = 'modelo' where id = %L$$, pruebas.id('g1')),
-  'con el veredicto de un proveedor, sí (T-502)');
+select throws_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass', filter_provider = 'modelo' where id = %L$$, pruebas.id('g1')),
+  '23514', 'public.comments: nothing is published without the filter (RF-802)', 'ni con el aprobado de un proveedor que no se conoce (T-502)');
+select pruebas.marca(true);
+select lives_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass', filter_provider = 'test' where id = %L$$, pruebas.id('g1')),
+  'con el aprobado del proveedor de prueba y su marca, sí (T-502)');
+select pruebas.marca(false);
 select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'flagged', filter_provider = 'modelo' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a comment goes to review from the filter', 'lo publicado no va a revisión sin pasar por filtro');
 select throws_ok(format($$update public.comments set body = 'cambiado' where id = %L$$, pruebas.id('g1')),

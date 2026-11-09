@@ -28,6 +28,7 @@ language plpgsql as $$
 declare
   v jsonb;
   v_test boolean;
+  v_settled jsonb;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
@@ -37,9 +38,13 @@ begin
   if v ->> 'state' = 'in_filter' then
     v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
     perform pruebas.a_nombre_de(p_actor);
-    v := v || jsonb_build_object('state', private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
-      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end) ->> 'state');
+    v_settled := private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end);
     perform pruebas.limpiar();
+    if v_settled ->> 'answer' not in ('ok', 'stale') then
+      raise exception 'asentar contestó %', v_settled;
+    end if;
+    v := v || jsonb_build_object('state', v_settled ->> 'state');
   end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);

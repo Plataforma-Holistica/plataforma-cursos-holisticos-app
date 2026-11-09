@@ -51,8 +51,9 @@ async function as(client: Client, person: string, text: string, params: unknown[
   let answer = (await client.query<{ r: Answer }>(`select ${text} as r`, params)).rows[0]!.r;
   // Como el servidor (T-502): lo que queda en el filtro se asienta con el aprobado del proveedor de prueba.
   if (answer.state === "in_filter") {
-    const settled = await client.query<{ r: Answer }>("select private.comment_settle($1, $2::bigint, 'pass', 'test') as r", [answer.id, answer.revision]);
-    answer = { ...answer, state: settled.rows[0]!.r.state };
+    const settled = (await client.query<{ r: Answer }>("select private.comment_settle($1, $2::bigint, 'pass', 'test') as r", [answer.id, answer.revision])).rows[0]!.r;
+    if (settled.answer !== "ok" && settled.answer !== "stale") throw new Error(`asentar contestó ${settled.answer}`);
+    answer = { ...answer, state: settled.state };
   }
   await asOwner(client);
   return answer;

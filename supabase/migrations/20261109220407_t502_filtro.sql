@@ -14,16 +14,19 @@
 -- revisión, o lo que tiene reportes, deja antes una copia para moderación (decisiones de Sergio del 2026-11-09). El
 -- seudónimo pasa por la misma lista y tiene su freno. El cerrojo de producción (`comments_accept`) se queda hasta T-503.
 --
--- Decisiones mías sin confirmar: el freno del seudónimo (cinco cambios al día); dos minutos antes de barrer; la lista nace
--- vacía también en local (las pruebas ponen la suya); asentar no vuelve a mirar el interruptor, el veto ni la suspensión de
--- quien envió justo antes.
+-- Decisiones mías sin confirmar: el freno del seudónimo (cinco intentos al día, también los que la lista marca, para que la
+-- lista no se averigüe probando); dos minutos antes de barrer; la lista nace vacía también en local (las pruebas ponen la suya);
+-- asentar no vuelve a mirar el interruptor, el veto ni la suspensión de quien envió justo antes; editar lo que está en revisión
+-- también deja la copia, como borrarlo; un aprobado solo vale de un proveedor conocido (hoy solo el de prueba, con su marca).
 
 -- ---------------------------------------------------------------------------------------
 -- La lista de términos y la normalización.
 
--- El texto como lo mira la lista: minúsculas, sin acentos ni uniones de ancho cero, las cifras y las letras cirílicas que se
+-- El texto como lo mira la lista: en su forma de compatibilidad (las letras de ancho completo, matemáticas o en círculo son las
+-- de siempre), sin acentos ni marcas combinantes ni uniones de ancho cero, en minúsculas, las cifras y las letras cirílicas que se
 -- parecen a las latinas como esas latinas, lo que no es letra como espacio, y las letras sueltas con separadores juntas («p.u.t.a»
--- y «p u t a» son «puta»). Límite conocido: una lista de términos no ve todo lo que se parece.
+-- y «p u t a» son «puta»). Límites conocidos: una lista de términos no ve todo lo que se parece; la ñ queda como n; y juntar letras
+-- sueltas y leer cifras como letras inventa palabras («de 9 a 5»), que solo mandan de más a revisión.
 create function private.comment_normalize(p_text text) returns text
 language sql immutable set search_path = ''
 as $$
@@ -31,8 +34,9 @@ as $$
     pg_catalog.regexp_replace(
       pg_catalog.translate(
         pg_catalog.regexp_replace(
-          pg_catalog.regexp_replace(normalize(pg_catalog.lower(coalesce(p_text, '')), NFD), '[̀-ͯ]', '', 'g'),
-          '[​-‍⁠﻿]', '', 'g'),
+          pg_catalog.lower(pg_catalog.regexp_replace(normalize(coalesce(p_text, ''), NFKD),
+            '[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]', '', 'g')),
+          '[\u200b-\u200d\u2060\ufeff]', '', 'g'),
         'аеорсхуіј01345789@$',
         'aeopcxyijoieastbgas'),
       '[^a-z]+', ' ', 'g'),
@@ -46,7 +50,7 @@ create table private.comment_filter_terms (
   term text primary key,
   added_at timestamptz not null default now(),
   constraint comment_filter_terms_normalized check (
-    term ~ '^[a-z]+( [a-z]+)*$' and pg_catalog.char_length(term) between 2 and 100)
+    term ~ '^[a-z]+( [a-z]+)*$' and pg_catalog.char_length(term) between 2 and 100 and term = private.comment_normalize(term))
 );
 comment on table private.comment_filter_terms is 'La lista de términos del filtro de comentarios (RF-802, ADR-30), normalizada. Privada: el repositorio es público.';
 alter table private.comment_filter_terms enable row level security;
@@ -65,8 +69,10 @@ revoke all on function private.comment_terms_hit(text) from public;
 -- ---------------------------------------------------------------------------------------
 -- El comentario: quién dio el veredicto y desde cuándo está en el filtro.
 
+alter table public.comments add column filter_provider text;
+-- Lo que T-501 dejó en revisión sin marca local (local solamente: en producción no hay comentarios) no tuvo proveedor.
+update public.comments set filter_provider = 'none' where filter_verdict is not null;
 alter table public.comments
-  add column filter_provider text,
   add column filter_entered_at timestamptz not null default now(),
   add constraint comments_filter_provider_form check (filter_provider ~ '^[a-z][a-z0-9_]{0,30}$'),
   add constraint comments_filter_verdict_with_provider check ((filter_verdict is null) = (filter_provider is null));
@@ -130,12 +136,11 @@ begin
   if new.status is distinct from old.status then
     case new.status
       when 'published' then
-        -- Solo el aprobado de un proveedor publica: ni la lista, ni el barrido, ni la falta de proveedor. El de prueba, solo
-        -- con su marca local (RF-802).
+        -- Solo el aprobado de un proveedor conocido publica: ni la lista, ni el barrido, ni la falta de proveedor, ni un nombre
+        -- que no esté aquí. Hoy solo el de prueba, con su marca local; el real entra a esta lista cuando se elija (RF-802).
         if old.status <> 'in_filter' or new.filter_verdict is distinct from 'pass'
-           or new.filter_provider is null or new.filter_provider in ('terms', 'sweep', 'none')
-           or (new.filter_provider = 'test'
-               and not exists (select 1 from private.local_flags f where f.flag = 'comments_test_filter')) then
+           or new.filter_provider is distinct from 'test'
+           or not exists (select 1 from private.local_flags f where f.flag = 'comments_test_filter') then
           raise exception 'public.comments: nothing is published without the filter (RF-802)' using errcode = '23514';
         end if;
       when 'in_review' then
@@ -185,15 +190,15 @@ $$;
 revoke all on function private.comment_screen(uuid) from public;
 
 -- El veredicto del modelo externo, de vuelta (FL-15 E4). Solo de lo propio, solo si sigue en el filtro con la revisión que se
--- filtró. El servidor no dice que fue la lista ni el barrido; sin proveedor manda `unavailable` con `none`.
+-- filtró. Solo de un proveedor conocido (hoy, el de prueba); sin proveedor, el servidor manda `unavailable` con `none`.
 create function private.comment_settle(p_comment uuid, p_revision bigint, p_verdict text, p_provider text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_comment public.comments;
 begin
-  if p_verdict is null or p_verdict not in ('pass', 'flagged', 'risk', 'unavailable')
-     or p_provider is null or p_provider !~ '^[a-z][a-z0-9_]{0,30}$' or p_provider in ('terms', 'sweep')
+  if p_revision is null or p_verdict is null or p_verdict not in ('pass', 'flagged', 'risk', 'unavailable')
+     or p_provider is null or p_provider not in ('test', 'none')
      or (p_provider = 'none' and p_verdict <> 'unavailable') then
     return '{"answer": "invalid"}'::jsonb;
   end if;
@@ -203,7 +208,7 @@ begin
   if v_comment.id is null or private.actor_id() is null then
     return '{"answer": "not_found"}'::jsonb;
   end if;
-  if v_comment.status <> 'in_filter' or v_comment.revision <> p_revision then
+  if v_comment.status <> 'in_filter' or v_comment.revision is distinct from p_revision then
     return pg_catalog.jsonb_build_object('answer', 'stale',
       'state', case v_comment.status when 'published' then 'published' else 'in_review' end);
   end if;
@@ -324,6 +329,11 @@ begin
   if not private.comment_hit() then
     return '{"answer": "throttled"}'::jsonb;
   end if;
+  -- El texto que se reemplaza, si estaba en revisión o reportado, se queda para moderación, como al borrar.
+  if v_comment.status = 'in_review' or v_comment.report_count > 0 then
+    insert into private.comment_evidence (comment_id, author_id, body, status, filter_verdict, report_count)
+    values (v_comment.id, v_comment.author_id, v_comment.body, v_comment.status, v_comment.filter_verdict, v_comment.report_count);
+  end if;
   update public.comments
   set body = p_body, status = 'in_filter', filter_verdict = null, filter_provider = null, filter_checked_at = null,
       filter_entered_at = now(), edited_at = now(), revision = revision + 1
@@ -363,7 +373,8 @@ begin
 end
 $$;
 
--- El seudónimo, por la lista y con su freno: cinco cambios en un día, contando solo lo que se guarda.
+-- El seudónimo, por la lista y con su freno: cinco intentos en un día, contando también los que la lista marca, y el freno antes
+-- que la lista, para que no se averigüe probando palabra por palabra.
 create or replace function private.comment_set_pseudonym(p_pseudonym text) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -386,9 +397,6 @@ begin
   if not private.comment_text_ok(p_pseudonym, 40, false) or pg_catalog.char_length(p_pseudonym) < 2 then
     return '{"answer": "invalid"}'::jsonb;
   end if;
-  if private.comment_terms_hit(p_pseudonym) then
-    return '{"answer": "flagged"}'::jsonb;
-  end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_bucket, 0));
   if (select coalesce(sum(c.hits), 0) from private.rate_limit_counters c
       where c.bucket = v_bucket and c.window_start > v_minute - interval '1 day') >= 5 then
@@ -397,6 +405,9 @@ begin
   insert into private.rate_limit_counters as c (bucket, window_start, hits)
   values (v_bucket, v_minute, 1)
   on conflict (bucket, window_start) do update set hits = c.hits + 1;
+  if private.comment_terms_hit(p_pseudonym) then
+    return '{"answer": "flagged"}'::jsonb;
+  end if;
   insert into public.profile_privacy as x (profile_id, pseudonym) values (v_actor, p_pseudonym)
   on conflict (profile_id) do update set pseudonym = excluded.pseudonym;
   return pg_catalog.jsonb_build_object('answer', 'ok', 'pseudonym', p_pseudonym);

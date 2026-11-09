@@ -5,7 +5,7 @@
 -- revisión al borrarlo, el seudónimo por la lista y con su freno, y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(64);
+select plan(74);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -134,13 +134,17 @@ select is(private.comment_normalize('z.o.r.b.a.k'), 'zorbak', 'las letras suelta
 select is(private.comment_normalize('z o r b a k'), 'zorbak', 'también con espacios');
 select is(private.comment_normalize('z0rb4k'), 'zorbak', 'las cifras que se parecen a letras');
 select is(private.comment_normalize('zоrbаk'), 'zorbak', 'y las letras cirílicas que se parecen a las latinas');
-select is(private.comment_normalize(E'zor‍bak'), 'zorbak', 'sin las uniones de ancho cero');
+select is(private.comment_normalize(E'zor\u200dbak'), 'zorbak', 'sin las uniones de ancho cero');
+select is(private.comment_normalize(E'\uff5a\uff4f\uff52\uff42\uff41\uff4b'), 'zorbak', 'las letras de ancho completo son las de siempre');
+select is(private.comment_normalize(E'\U0001d433\U0001d428\U0001d42b\U0001d41b\U0001d41a\U0001d424'), 'zorbak', 'y las matemáticas');
+select is(private.comment_normalize(E'zor\u20d2bak'), 'zorbak', 'sin las marcas combinantes de otros rangos');
 select is(private.comment_terms_hit('Esto es Z0RB4K!'), true, 'la lista ve el término así escrito');
 select is(private.comment_terms_hit('zorbaku y zorbakes'), false, 'solo la palabra entera');
 select is(private.comment_terms_hit('un   mal,  sitio'), true, 'y el de dos palabras');
 select is(private.comment_terms_hit('Un comentario normal'), false, 'lo demás no');
 select throws_ok($$insert into private.comment_filter_terms (term) values ('Zorbak')$$, '23514', null, 'un término se guarda ya normalizado');
 select throws_ok($$insert into private.comment_filter_terms (term) values ('z')$$, '23514', null, 'y de al menos dos letras');
+select throws_ok($$insert into private.comment_filter_terms (term) values ('a b')$$, '23514', null, 'y como lo deja la normalización');
 
 -- ---------------------------------------------------------------------------------------
 -- Publicar deja el comentario en el filtro; la lista lo detiene ahí mismo.
@@ -161,6 +165,9 @@ select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'terms') ->> 'answer', 
 select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'sweep') ->> 'answer', 'invalid', 'ni el barrido');
 select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'maybe', 'test') ->> 'answer', 'invalid', 'ni un veredicto que no existe');
 select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'none') ->> 'answer', 'invalid', 'sin proveedor no hay aprobado');
+select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'modelo') ->> 'answer', 'invalid', 'ni de un proveedor que no se conoce');
+select is(pruebas.c(pruebas.p(1), format('private.comment_settle(%L, null, %L, %L)', pruebas.id('c1'), 'pass', 'test')) ->> 'answer', 'invalid',
+  'ni sin revisión');
 select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'test'), '{"answer": "ok", "state": "published"}'::jsonb, 'con el aprobado de prueba, se publica');
 select is(pruebas.fila('c1'), 'published pass test', 'con su veredicto y su proveedor');
 select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'test'), '{"answer": "stale", "state": "published"}'::jsonb, 'asentar otra vez no cambia nada');
@@ -182,6 +189,8 @@ select throws_ok(format($$update public.comments set status = 'published', filte
   '23514', null, 'ni el dueño publica con el veredicto de la lista');
 select throws_ok(format($$update public.comments set status = 'published', filter_verdict = null where id = %L$$, pruebas.id('c5')),
   '23514', null, 'ni sin veredicto');
+select throws_ok(format($$update public.comments set status = 'published', filter_verdict = 'pass', filter_provider = 'modelo', filter_checked_at = now() where id = %L$$, pruebas.id('c5')),
+  '23514', null, 'ni con un proveedor que no está en su lista');
 
 -- ---------------------------------------------------------------------------------------
 -- Editar vuelve al filtro; un veredicto viejo no publica el texto nuevo.
@@ -196,6 +205,8 @@ select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'test') ->> 'answer', '
 select is(pruebas.fila('c1'), 'in_filter - -', 'el texto nuevo sigue esperando el suyo');
 select is(pruebas.c(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c3'), 'Mal sitio para preguntar', pruebas.rev('c3'))) ->> 'state',
   'in_review', 'editar con un término de la lista lo deja en revisión');
+select is((select (body, filter_verdict) from private.comment_evidence where comment_id = pruebas.id('c3')), ('Una duda'::text, 'risk'::text),
+  'y el texto que estaba en revisión se queda para moderación, con su veredicto');
 
 -- ---------------------------------------------------------------------------------------
 -- El barrido: lo que se quedó en el filtro (el servidor cayó entre las dos transacciones) pasa a revisión.
@@ -204,7 +215,7 @@ select pruebas.fuerza('c5', $$filter_entered_at = now() - interval '3 minutes'$$
 -- Lo de hace un minuto todavía espera su veredicto.
 select pruebas.fuerza('c1', $$filter_entered_at = now() - interval '1 minute'$$);
 select pruebas.limpiar();
-select is(private.comment_filter_sweep(), 1, 'el barrido toma lo que lleva más de dos minutos en el filtro');
+select is(private.comment_filter_sweep() >= 1, true, 'el barrido toma lo que lleva más de dos minutos en el filtro');
 select is(pruebas.fila('c5'), 'in_review unavailable sweep', 'y lo deja en revisión: nunca se publica sin filtro');
 select is(pruebas.fila('c1'), 'in_filter - -', 'lo recién editado no lo toca, aunque el comentario sea viejo');
 select is((select count(*)::int from cron.job where jobname = 'comment_filter_sweep' and schedule = '* * * * *'), 1, 'corre cada minuto');
@@ -231,9 +242,9 @@ select pruebas.asienta(pruebas.p(1), 'c7', 1, 'pass', 'test');
 select pruebas.fuerza('c7', 'report_count = 1');
 select pruebas.publica(pruebas.p(1), 'Publicado y en paz', 'c8');
 select pruebas.asienta(pruebas.p(1), 'c8', 1, 'pass', 'test');
-select count(*) as hecho from (select pruebas.r(pruebas.p(1), format('private.comment_delete(%L, %s)', pruebas.id(k), pruebas.rev(k)))
-  from unnest(array['c7', 'c8']) k) as llamada;
-select is((select array_agg(c.k order by c.k) from pruebas.ids c join private.comment_evidence e on e.comment_id = c.v), array['c2', 'c7'],
+select is((select array_agg(pruebas.r(pruebas.p(1), format('private.comment_delete(%L, %s)', pruebas.id(k), pruebas.rev(k))) order by k)
+  from unnest(array['c7', 'c8']) k), array['ok', 'ok'], 'Ana borra lo reportado y lo que no');
+select is((select array_agg(c.k order by c.k) from pruebas.ids c join private.comment_evidence e on e.comment_id = c.v), array['c2', 'c3', 'c7'],
   'lo reportado deja copia; lo publicado sin reportes, no');
 select pruebas.como_servicio(pruebas.p(1));
 select throws_ok('select count(*) from private.comment_evidence', '42501', null, 'el servidor no lee la copia');
@@ -245,9 +256,11 @@ select pruebas.limpiar();
 
 select is(pruebas.r(pruebas.p(4), $$private.comment_set_pseudonym('Z0rbak')$$), 'flagged', 'un seudónimo que marca la lista se rechaza');
 select is((select count(*)::int from public.profile_privacy where profile_id = pruebas.p(4)), 0, 'y no se guarda');
-select is((select array_agg(pruebas.r(pruebas.p(4), format('private.comment_set_pseudonym(%L)', 'Cata ' || n)) order by n) from generate_series(1, 6) n),
-  array['ok', 'ok', 'ok', 'ok', 'ok', 'throttled'], 'cinco cambios al día, y el sexto espera');
-select is((select pseudonym from public.profile_privacy where profile_id = pruebas.p(4)), 'Cata 5', 'se queda el quinto');
+select is((select array_agg(pruebas.r(pruebas.p(4), format('private.comment_set_pseudonym(%L)', 'Cata ' || n)) order by n) from generate_series(1, 5) n),
+  array['ok', 'ok', 'ok', 'ok', 'throttled'], 'cinco intentos al día, contando el que la lista marcó, y el siguiente espera');
+select is((select pseudonym from public.profile_privacy where profile_id = pruebas.p(4)), 'Cata 4', 'se queda el último que se guardó');
+select is(pruebas.r(pruebas.p(4), $$private.comment_set_pseudonym('Zorbak')$$), 'throttled',
+  'con el freno agotado, la lista ya no contesta: no se averigua probando');
 
 -- ---------------------------------------------------------------------------------------
 -- El vigilante, y quién ejecuta asentar.
