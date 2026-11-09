@@ -1,14 +1,39 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { touchesCode } from "../../scripts/ci-cambios.mjs";
+import { changedFiles, touchesCode } from "../../scripts/ci-cambios.mjs";
 
 // La integración continua gasta menos corridas (decisión de Sergio del 2026-11-09): corre en cada solicitud y en la cola de fusión, ya
 // no al entrar a main; en un borrador se salta el extremo a extremo del equipo; y un cambio que solo toca documentos no levanta nada.
-// Lo que no debe perderse: que nada se salte la verificación por una falla, y que lo que entra a main pase entero por la cola.
+// Lo que no debe perderse: que nada entre a main sin verificar. Por eso es un solo trabajo, que siempre contesta (una corrida
+// cancelada nunca se ve como pasada), la cola siempre verifica entero, y si la detección falla todo corre.
 
 const ci = readFileSync(".github/workflows/ci.yml", "utf8").replaceAll("\r", "");
+const COND = "steps.mira.outputs.codigo != 'false'";
+
+/** Los pasos del trabajo, con su nombre y su `if`, en orden. */
+function steps(): { name: string; condition: string | null }[] {
+  const lines = ci.split("\n");
+  const found: { name: string; condition: string | null }[] = [];
+  lines.forEach((line, index) => {
+    const named = /^ {6}- (?:name: (.+)|id: (.+)|uses: (.+))$/.exec(line);
+    if (!named) return;
+    let name = named[1] ?? named[2] ?? named[3] ?? "";
+    let condition: string | null = null;
+    for (let next = index + 1; next < lines.length && /^ {8}\S/.test(lines[next]!); next += 1) {
+      const nameLine = /^ {8}name: (.+)$/.exec(lines[next]!);
+      if (nameLine) name = nameLine[1]!;
+      const ifLine = /^ {8}if: (.+)$/.exec(lines[next]!);
+      if (ifLine) condition = ifLine[1]!;
+    }
+    found.push({ name, condition });
+  });
+  return found;
+}
 
 describe("cuándo corre la integración continua", () => {
   it("en cada solicitud y en la cola de fusión, y ya no al entrar a main", () => {
@@ -16,15 +41,33 @@ describe("cuándo corre la integración continua", () => {
     expect(ci).not.toMatch(/^ {2}push:/m);
   });
 
-  it("verificar se salta solo si «cambios» contestó que no hay código; si falló, corre entero", () => {
-    expect(ci).toContain("    needs: cambios\n    if: ${{ !cancelled() && !(needs.cambios.result == 'success' && needs.cambios.outputs.codigo == 'false') }}\n");
+  it("un solo trabajo, verificar, sin condición: siempre contesta", () => {
+    const jobs = ci.slice(ci.indexOf("\njobs:\n"));
+    expect(jobs.match(/^ {2}[a-z_-]+:$/gm)).toEqual(["  verificar:"]);
+    expect(jobs).not.toMatch(/^ {4}(if|needs):/m);
   });
 
-  it("el extremo a extremo del equipo se salta solo en una solicitud en borrador", () => {
+  it("el paso que mira: en la cola siempre entero, y si falla, todo corre", () => {
     expect(ci).toContain(
-      "      - name: Pruebas de extremo a extremo del equipo\n        if: ${{ github.event_name == 'merge_group' || !github.event.pull_request.draft }}\n",
+      '      - id: mira\n        name: Qué cambió\n        continue-on-error: true\n        env:\n          EVENT: ${{ github.event_name }}\n' +
+        '        run: |\n          if [ "$EVENT" = "merge_group" ]; then\n            echo "codigo=true" >> "$GITHUB_OUTPUT"\n' +
+        '          else\n            node scripts/ci-cambios.mjs HEAD^1 HEAD >> "$GITHUB_OUTPUT"\n          fi\n',
     );
-    // Ningún otro paso se salta por el borrador.
+  });
+
+  it("después de mirar, cada paso se salta con solo documentos, salvo instalar y el escaneo de secretos", () => {
+    const all = steps();
+    const after = all.slice(all.findIndex((step) => step.name === "Qué cambió") + 1);
+    expect(after.length).toBeGreaterThan(15);
+    for (const step of after) {
+      if (step.name === "Instalar dependencias" || step.name === "Escaneo de secretos") expect(step.condition, step.name).toBeNull();
+      else expect(step.condition, step.name).toContain(`\${{ ${COND}`);
+    }
+  });
+
+  it("el extremo a extremo del equipo se salta además en una solicitud en borrador, y solo él", () => {
+    const team = steps().find((step) => step.name === "Pruebas de extremo a extremo del equipo");
+    expect(team?.condition).toBe(`\${{ ${COND} && (github.event_name == 'merge_group' || !github.event.pull_request.draft) }}`);
     expect(ci.match(/pull_request\.draft/g)).toHaveLength(1);
   });
 });
@@ -43,5 +86,25 @@ describe("qué cuenta como código", () => {
     [[], true],
   ])("%j: %s", (files, expected) => {
     expect(touchesCode(files)).toBe(expected);
+  });
+
+  it("un renombre de código a Markdown cuenta con su nombre de antes: borra código", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ci-cambios-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=ci@prueba.test", "-c", "user.name=ci", ...args], { cwd: dir, encoding: "utf8" });
+    try {
+      git("init", "-q");
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "src", "x.ts"), "export const x = 1;\n".repeat(20));
+      git("add", "-A");
+      git("commit", "-q", "-m", "uno");
+      git("mv", "src/x.ts", "notas.md");
+      git("commit", "-q", "-m", "dos");
+      const files = changedFiles("HEAD~1", "HEAD", dir);
+      expect(files.sort()).toEqual(["notas.md", "src/x.ts"]);
+      expect(touchesCode(files)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

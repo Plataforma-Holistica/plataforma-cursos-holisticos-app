@@ -1,11 +1,12 @@
-// Dice si un cambio toca algo que la integración continua tenga que verificar (2026-11-09, para gastar menos corridas). Un cambio que
-// solo toca documentos en Markdown fuera del código no levanta la base ni el navegador: el trabajo `verificar` se salta, y un trabajo
-// saltado cuenta como pasado para la comprobación obligatoria. Todo lo demás se verifica entero.
+// Dice si un cambio toca algo que la integración continua tenga que verificar (2026-11-09, para gastar menos corridas). Con un cambio que
+// solo toca documentos en Markdown fuera del código, el trabajo `verificar` no levanta la base ni el navegador: se saltan sus pasos
+// pesados, y el trabajo sigue y contesta. Todo lo demás se verifica entero. En la cola de fusión no se pregunta: siempre entero.
 //
 //   node scripts/ci-cambios.mjs <base> <cabeza>      # imprime codigo=true o codigo=false, para $GITHUB_OUTPUT
 //
 // Los Markdown de `src/`, `supabase/`, `tests/` y `scripts/` sí son código: los borradores legales de `supabase/local/legal-drafts/`
-// los carga la base y los leen las pruebas. Si git falla, o no hay archivos que comparar, falla: el trabajo `verificar` corre entero.
+// los carga la base y los leen las pruebas. Un renombre cuenta con sus dos nombres (`--no-renames`): mover `x.ts` a `notas.md` borra
+// código. Si git falla, o no hay archivos que comparar, se verifica entero.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -18,14 +19,21 @@ export function touchesCode(files) {
   return files.some((file) => !file.endsWith(".md") || CODE_DIRECTORIES.some((directory) => file.startsWith(directory)));
 }
 
+/** Los archivos que cambian entre dos commits; un renombre, con su nombre de antes y el de ahora. */
+export function changedFiles(base, head, cwd = process.cwd()) {
+  return execFileSync("git", ["diff", "--name-only", "--no-renames", base, head], { encoding: "utf8", cwd })
+    .split("\n")
+    .filter((line) => line !== "");
+}
+
 function main([base, head]) {
   if (!base || !head) {
     console.error("ci-cambios: uso: node scripts/ci-cambios.mjs <base> <cabeza>");
     process.exit(2);
   }
-  const files = execFileSync("git", ["diff", "--name-only", base, head], { encoding: "utf8" }).split("\n").filter((line) => line !== "");
+  const files = changedFiles(base, head);
   const code = touchesCode(files);
-  console.error(`ci-cambios: ${files.length} archivos; ${code ? "se verifica entero" : "solo documentos: se salta la verificación"}`);
+  console.error(`ci-cambios: ${files.length} archivos; ${code ? "se verifica entero" : "solo documentos: se saltan los pasos pesados"}`);
   for (const file of files) console.error(`  ${file}`);
   console.log(`codigo=${code}`);
 }
