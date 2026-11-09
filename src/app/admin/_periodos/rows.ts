@@ -430,7 +430,7 @@ export function closeView(read: Extract<FinanceClose, { period: object }>): Clos
   if (run !== null && run.at !== null) closedLine = run.closedBy === null ? t(text.closedAt, dateAndTime(run.at)) : t(text.closedBy, { ...dateAndTime(run.at), name: run.closedBy });
 
   let download: CloseView["download"] = { kind: "none" };
-  if (run !== null) download = run.export === null ? { kind: "missing" } : read.freshCode ? { kind: "offered", button: periodsButton.download(run.runId) } : { kind: "locked" };
+  if (run !== null) download = run.export === null ? { kind: "missing" } : read.freshCode ? { kind: "offered", button: periodsButton.download(period.periodId, run.runId) } : { kind: "locked" };
 
   return {
     periodId: period.periodId,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { givenCodeOutcome } from "./fresh-code";
+import { givenCodeOutcome, screenField } from "./fresh-code";
 
 // «Tu código», compartido por las secciones que cambian algo con un código reciente. Cada
 // una le dice cuál es su página: dado el código, se vuelve ahí, nunca a la de otra sección
@@ -31,5 +31,23 @@ describe.each(["/admin/equipo", "/admin/practicas"])("en %s", (page) => {
 
   it("no se supo quién pide: no se pinta como hecho", () => {
     expect(givenCodeOutcome({ kind: "unavailable" }, page)).toEqual({ kind: "failed", reason: "unavailable" });
+  });
+});
+
+describe("screenField", () => {
+  const formWith = (...values: [string, string | Blob][]) => {
+    const form = new FormData();
+    for (const [name, value] of values) form.append(name, value);
+    return form;
+  };
+
+  it("un campo que la pantalla manda una vez, como texto, o nulo", () => {
+    expect(screenField(formWith(["page", "close"]), "page")).toBe("close");
+    expect(screenField(formWith(["page", ""]), "page")).toBe("");
+    expect(screenField(formWith(), "page")).toBeNull();
+    expect(screenField(formWith(["page", "close"], ["page", "close"]), "page")).toBeNull();
+    expect(screenField(formWith(["page", new Blob(["close"])]), "page")).toBeNull();
+    expect(screenField({ page: "close" }, "page")).toBeNull();
+    expect(screenField(null, "page")).toBeNull();
   });
 });

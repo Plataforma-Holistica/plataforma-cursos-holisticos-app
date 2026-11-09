@@ -22,6 +22,20 @@ export interface Leave {
   notice: Notice | null;
 }
 
+/**
+ * Un campo que la pantalla manda una sola vez y como texto: lo que una acción necesita de ella (de qué periodo, de qué
+ * maestro) viaja en un campo oculto del formulario, nunca atado a la acción con `bind`. Sin JavaScript, al volver de una
+ * acción que contesta, React compara la acción de la pantalla con la enviada y espera la promesa de sus argumentos atados;
+ * `bind` arma otra en cada pintada, y la página no termina de pintarse (medido el 2026-11-08 y el 2026-11-09 en el camino
+ * del equipo). Lo que falta, se repite o no es texto es nulo, y quien lo lee lo revisa como cualquier otro campo.
+ */
+export function screenField(form: unknown, name: string): string | null {
+  if (!(form instanceof FormData)) return null;
+  const values = form.getAll(name);
+  const [only] = values;
+  return values.length === 1 && typeof only === "string" ? only : null;
+}
+
 /** Lo que el bloque del código pinta después de un envío. Nunca trae el código. */
 export type CodeState =
   | { kind: "idle" }

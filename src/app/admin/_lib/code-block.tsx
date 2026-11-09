@@ -19,6 +19,8 @@ import type { CodeState } from "./fresh-code";
 // JavaScript, y no se repite en ninguna otra pantalla) y lo que dice su cuerpo.
 
 const text = admin.code;
+/** El nombre del campo del código (`CodeField`), que lee `readGiveCodeForm`. */
+const CODE_FIELD = "code";
 
 export interface CodeBlockProps {
   /** El ancla del bloque: un `id` que ninguna otra pantalla usa. */
@@ -32,9 +34,15 @@ export interface CodeBlockProps {
   state: CodeState;
   action: (form: FormData) => void;
   pending: boolean;
+  /**
+   * Lo que la acción necesita de la pantalla (de qué periodo, de qué maestro), en campos ocultos: una acción de
+   * `useActionState` no va atada con `bind` (ver `screenField`). El nombre del campo del código no se usa.
+   */
+  hidden?: Readonly<Record<string, string>>;
 }
 
-export function CodeBlock({ blockId, titleId, fieldId, body, notAvailable, state, action, pending }: CodeBlockProps) {
+export function CodeBlock({ blockId, titleId, fieldId, body, notAvailable, state, action, pending, hidden = {} }: CodeBlockProps) {
+  if (CODE_FIELD in hidden) throw new Error("Un campo oculto de «Tu código» no puede llamarse como el del código.");
   const attempt = state.kind === "idle" ? 0 : state.attempt;
   const problem: CodeProblem | undefined =
     state.kind === "invalid" ? state.problem : state.kind === "failed" && state.reason === "wrong_code" ? "wrong" : undefined;
@@ -49,6 +57,9 @@ export function CodeBlock({ blockId, titleId, fieldId, body, notAvailable, state
       </h2>
       <p className="text-text-2">{body}</p>
       <form action={action} noValidate className="flex flex-col gap-6">
+        {Object.entries(hidden).map(([name, value]) => (
+          <input key={name} type="hidden" name={name} value={value} />
+        ))}
         <FormErrorSummary errors={errors} attempt={attempt} />
         {/* Cada hermano lleva su propia `key`: con la misma, React confunde el aviso de un
             intento con el campo del siguiente. */}

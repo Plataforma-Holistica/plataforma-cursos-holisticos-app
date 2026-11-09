@@ -46,7 +46,7 @@ const DONE: Record<TeachersDone, string> = {
 };
 
 export function TeachersScreen({ view, done = null }: { view: RosterView; done?: TeachersDone | null }) {
-  const [code, codeAction, codePending] = useActionState(teachersCodeAction.bind(null, null), CODE_IDLE, `${ROUTES.adminTeachers}#${CODE_BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(teachersCodeAction, CODE_IDLE, `${ROUTES.adminTeachers}#${CODE_BLOCK_ID}`);
   const [state, send, pending] = useActionState(teachersAction, IDLE, `${ROUTES.adminTeachers}#${LIST_BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
 

@@ -52,7 +52,7 @@ export interface PeriodScreenProps {
 
 export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
   const page = periodPath(view.periodId);
-  const [code, codeAction, codePending] = useActionState(periodCodeAction.bind(null, { period: view.periodId, page: "panel" }), CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
+  const [code, codeAction, codePending] = useActionState(periodCodeAction, CODE_IDLE, `${page}#${CODE_BLOCK_ID}`);
   const [panel, sendPanel, panelPending] = useActionState(panelAction, PANEL_IDLE, `${page}#${ROLLUP_BLOCK_ID}`);
   const doneBox = useRef<HTMLDivElement>(null);
 
@@ -100,6 +100,7 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
           state={code}
           action={codeAction}
           pending={codePending}
+          hidden={{ period: String(view.periodId), page: "panel" }}
         />
       )}
 

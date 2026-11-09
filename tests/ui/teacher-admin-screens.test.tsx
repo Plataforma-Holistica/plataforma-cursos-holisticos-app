@@ -78,6 +78,16 @@ describe("PA-66", () => {
     expect(screen.getByText(text.changeLocked)).toBeVisible();
   });
 
+  it("dar el código lleva la ficha en un campo oculto, sin ir atado", async () => {
+    actions.teachersCodeAction.mockResolvedValue({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    const { user } = showTeacher(roster(ROW, [], false));
+    await user.type(screen.getByLabelText("Código", { exact: true }), "123456");
+    await user.click(screen.getByRole("button", { name: admin.code.submit }));
+    const call = actions.teachersCodeAction.mock.calls[0] ?? [];
+    expect(Object.fromEntries(call.at(-1) as FormData)).toEqual({ code: "123456", teacher: TEACHER });
+    expect(call[0]).toEqual({ kind: "idle" });
+  });
+
   it("dice el día del fundador tal como se guardó, sin moverlo por la zona horaria", () => {
     showTeacher(roster({ ...ROW, founderSince: "2026-11-01" }));
     expect(screen.getByText("Fundador desde el 1 de noviembre de 2026")).toBeVisible();
@@ -189,5 +199,15 @@ describe("PA-65", () => {
   it("sin el código reciente no se ofrece invitar", () => {
     showList(roster(ROW, [], false));
     expect(screen.queryByRole("button", { name: text.invite.submit })).not.toBeInTheDocument();
+  });
+
+  it("dar el código desde la lista no lleva ningún maestro, y no va atado", async () => {
+    actions.teachersCodeAction.mockResolvedValue({ kind: "failed", reason: "wrong_code", attempt: 1 });
+    const { user } = showList(roster(ROW, [], false));
+    await user.type(screen.getByLabelText("Código", { exact: true }), "123456");
+    await user.click(screen.getByRole("button", { name: admin.code.submit }));
+    const call = actions.teachersCodeAction.mock.calls[0] ?? [];
+    expect(Object.fromEntries(call.at(-1) as FormData)).toEqual({ code: "123456" });
+    expect(call[0]).toEqual({ kind: "idle" });
   });
 });

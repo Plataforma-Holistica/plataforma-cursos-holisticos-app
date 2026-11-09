@@ -2,7 +2,7 @@ import { periodPayoutsPath, ROUTES } from "@/services/account/navigation";
 import type { ConfirmResult, HoldResult, PayoutStatus, ReleaseResult, UnholdResult, VoidResult } from "@/services/periods/periods";
 
 import type { Leave } from "../_lib/fresh-code";
-import { periodFrom, UNDERSTOOD } from "./outcomes";
+import { periodField, UNDERSTOOD } from "./outcomes";
 
 // Qué pinta y qué hace PA-81 (las liquidaciones de un periodo; FL-51; T-605, cuarta solicitud). Todo aquí es
 // puro: el servicio corre la guarda y le pregunta a la base, y esto traduce su respuesta a un destino o a lo
@@ -374,8 +374,8 @@ export function voidOutcome(result: VoidResult, period: number): PayoutOutcome {
   }
 }
 
-/** El periodo atado a la acción desde la pantalla, o nulo; sin él, la acción va a la lista de periodos. */
-export function payoutsPeriodFrom(target: unknown): { period: number } | { leave: Leave } {
-  const period = periodFrom(target);
+/** El periodo del campo oculto del formulario (`period`); sin él, o sin forma, la acción va a la lista de periodos. */
+export function payoutsPeriodFrom(form: unknown): { period: number } | { leave: Leave } {
+  const period = periodField(form);
   return period === null ? { leave: { kind: "leave", to: ROUTES.periods, notice: null } } : { period };
 }

@@ -316,27 +316,27 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   },
   "src/app/admin/_periodos/actions.ts": {
     // Dar el código otra vez: el de los periodos, que comprueba lo reciente con la lista que pide finanzas.
-    // A dónde vuelve llega atado desde la pantalla, y se revisa.
+    // A dónde vuelve llega en los campos ocultos de «Tu código» (sin `bind`: sin JavaScript, la página no se volvía a pintar), y se revisa.
     periodCodeAction:
-      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*periodsCodeOutcome\(await givePeriodsCode\(jar, code\), periodCodeTarget\(target\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
+      /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*periodsCodeOutcome\(await givePeriodsCode\(jar, code\), periodCodeTarget\(form\)\)[\s\S]*return leaveFor\(jar, outcome\);/,
     // Pedir el recálculo: del formulario solo llega qué botón y de qué periodo.
     panelAction: /rollupOutcome\(await requestRollup\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
     // Ensayar y cerrar: abrir el diálogo, o confirmar sin la casilla, no llama a nadie.
     closeAction:
       /if \(request\.step === "ask_close"\) return \{ kind: "confirming", period: request\.period, run: request\.run, missingUnderstood: false, attempt \};\s*if \(request\.step === "close" && !request\.understood\) return \{ kind: "confirming", period: request\.period, run: request\.run, missingUnderstood: true, attempt \};[\s\S]*rehearseOutcome\(await rehearse\(jar, \{ period: request\.period \}\), request\.period\)[\s\S]*closeOutcome\(await closePeriod\(jar, \{ period: request\.period, run: request\.run \}\), request\.period\)[\s\S]*return leaveFor\(jar, outcome\);/,
-    // Descargar: del formulario llega la corrida; el periodo, atado desde la pantalla, se revisa.
+    // Descargar: el botón dice el periodo y la corrida, como los de ensayar y cerrar.
     downloadAction:
-      /const period = periodFrom\(target\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const outcome = downloadOutcome\(await downloadExport\(jar, \{ run: request\.run \}\), period\);/,
-    // Las liquidaciones (PA-81): el periodo llega atado y se revisa; del formulario llega qué botón, con lo que
-    // se vio. El primer paso de liberar, retener, soltar y anular no llama a nadie; confirmar sin la casilla o
-    // sin el motivo vuelve a preguntar.
+      /if \(request\.step !== "download"\) return \{ kind: "idle" \};[\s\S]*const \{ period \} = request;\s*const outcome = downloadOutcome\(await downloadExport\(jar, \{ run: request\.run \}\), period\);/,
+    // Las liquidaciones (PA-81): el periodo llega en el campo oculto del formulario y se revisa, y liberar exige que sea el
+    // de su botón; del formulario llega qué botón, con lo que se vio. El primer paso de liberar, retener, soltar y anular
+    // no llama a nadie; confirmar sin la casilla o sin el motivo vuelve a preguntar.
     payoutsAction:
-      /const bound = payoutsPeriodFrom\(target\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+      /const bound = payoutsPeriodFrom\(form\);\s*if \("leave" in bound\) return leaveFor\(jar, bound\.leave\);\s*const \{ period \} = bound;[\s\S]*if \(\(request\.step === "ask_release" \|\| request\.step === "release"\) && request\.period !== period\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);[\s\S]*if \(!request\.understood\) return \{ kind: "asking"[\s\S]*releaseOutcome\(await releasePayouts\(jar, \{ period, seen: request\.seen \}\), period\)[\s\S]*holdOutcome\(await holdPayout\(jar, \{ payout: request\.payout, reason: request\.reason, seen: request\.status \}\), period\)[\s\S]*if \(request\.releases && !request\.understood\) return[\s\S]*unholdOutcome\(await unholdPayout\(jar, \{ payout: request\.payout, note: request\.note, seen: request\.seen \}\), period\)[\s\S]*confirmOutcome\(await confirmFounderBonus\(jar, \{ bonus: request\.bonus \}\), period\)[\s\S]*voidOutcome\(await voidFounderBonus\(jar, \{ period, bonus: request\.bonus, reason: request\.reason \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
     // La conciliación con Stripe (T-303, cuarta solicitud): el periodo llega en el formulario (sin `bind`: sin JavaScript, la página no se
     // volvía a pintar) y se revisa; de ahí llegan también qué botón, con la diferencia como se vio, y la nota. Preguntar, o confirmar sin
     // nota, no llama a nadie.
     reconcileAction:
-      /const raw = form\.get\("period"\);\s*const period = typeof raw === "string" && \/\^\[0-9\]\{6\}\$\/\.test\(raw\) \? periodFrom\(Number\(raw\)\) : null;\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "asking", \.\.\.asked, attempt \};[\s\S]*compareOutcome\(await compareNow\(jar, period\), period\)[\s\S]*explainOutcome\(await explainDifference\(jar, \{ period, side, charge, cents, currency, note \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+      /const period = periodField\(form\);\s*if \(period === null\) return leaveFor\(jar, \{ to: ROUTES\.periods, notice: null \}\);\s*const asked = askedBy\(request\);\s*if \(asked !== null\) return \{ kind: "asking", \.\.\.asked, attempt \};[\s\S]*compareOutcome\(await compareNow\(jar, period\), period\)[\s\S]*explainOutcome\(await explainDifference\(jar, \{ period, side, charge, cents, currency, note \}\), period\)[\s\S]*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
   },
   "src/app/admin/_textos/actions.ts": {
     // Dar el código otra vez: el de los textos legales, que comprueba lo reciente con la lectura que pide configuración.
@@ -349,7 +349,9 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
   },
   "src/app/admin/_maestros/actions.ts": {
     // Dar el código otra vez: el de los maestros, que comprueba lo reciente con la lectura que pide Contenido.
-    teachersCodeAction: /if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*teachersCodeOutcome\(await giveTeacherCode\(jar, code\), teacher\)/,
+    // La ficha de donde se dio llega en el campo oculto de «Tu código» (sin `bind`), y la revisa `teachersCodeOutcome`.
+    teachersCodeAction:
+      /const teacher = screenField\(form, "teacher"\);[\s\S]*if \(problem\) return \{ kind: "invalid", problem, attempt \};[\s\S]*teachersCodeOutcome\(await giveTeacherCode\(jar, code\), teacher\)/,
     // Los cambios: del formulario llega qué botón y lo escrito. Preguntar no llama a nadie. Lo prueba tests/actions.
     teachersAction: /if \(request\.step === "ask_suspend"\) return \{ kind: "asking"[\s\S]*if \(request\.step === "ask_confirm"\) return \{ kind: "asking"[\s\S]*await cookieJar\(\)/,
   },
