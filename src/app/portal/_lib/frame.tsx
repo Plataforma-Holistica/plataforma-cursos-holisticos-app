@@ -17,6 +17,7 @@ const text = messages.portal.nav;
 export type PortalEntry =
   | typeof ROUTES.portal
   | typeof ROUTES.portalCourses
+  | typeof ROUTES.portalComments
   | typeof ROUTES.portalPayouts
   | typeof ROUTES.portalTaxData
   | typeof ROUTES.portalAccount;
@@ -24,6 +25,7 @@ export type PortalEntry =
 const LINKS = [
   { href: ROUTES.portal, label: text.home },
   { href: ROUTES.portalCourses, label: text.courses },
+  { href: ROUTES.portalComments, label: text.comments },
   { href: ROUTES.portalPayouts, label: text.payouts },
   { href: ROUTES.portalTaxData, label: text.taxData },
   { href: ROUTES.portalAccount, label: text.account },

@@ -9,6 +9,7 @@ export const portal = defineMessages({
     menu: "Menú",
     home: "Inicio",
     courses: "Mis cursos",
+    comments: "Comentarios",
     payouts: "Pagos",
     taxData: "Datos fiscales",
     account: "Lo que aceptaste",

@@ -61,6 +61,8 @@ export const ROUTES = {
   portalAccount: "/portal/cuenta",
   /** PA-46, las liquidaciones del maestro (T-604). La de un periodo, `portalPayoutPath`. */
   portalPayouts: "/portal/pagos",
+  /** PA-45, los comentarios de sus lecciones (T-501). */
+  portalComments: "/portal/comentarios",
 } as const;
 
 /** El parámetro que guarda a dónde se quería ir. */
