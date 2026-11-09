@@ -145,7 +145,7 @@ select pruebas.forzar(format($$update public.comments set status = 'hidden', hid
 select pruebas.forzar(format($$update public.comments set status = 'in_filter' where id = %L$$, pruebas.id('a_filtro')));
 select pruebas.forzar(format($$update public.comments set author_id = %L where id = %L$$, pruebas.p(1), pruebas.id('a_borra')));
 -- Lo que ya no se ve: una lección retirada, un curso sin listar, uno con una versión abierta y uno retirado del catálogo.
-select pruebas.forzar(format($$update public.published_lessons set is_current = false where id = %L$$, pruebas.id('retirada')));
+select pruebas.forzar(format($$update public.published_lessons set is_current = false, retired_at = now() where id = %L$$, pruebas.id('retirada')));
 select pruebas.forzar(format($$update public.published_courses set is_listed = false where course_id = (select course_id from public.published_lessons where id = %L)$$, pruebas.id('nolistado')));
 select pruebas.forzar(format($$update public.course_registry set state = 'changes_pending' where course_id = (select course_id from public.published_lessons where id = %L)$$, pruebas.id('version')));
 select pruebas.forzar(format($$update public.course_registry set state = 'withdrawn' where course_id = (select course_id from public.published_lessons where id = %L)$$, pruebas.id('retirado')));
