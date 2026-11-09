@@ -1,4 +1,5 @@
-import { consentsPath, lessonPath, ROUTES, signInPath } from "@/services/account/navigation";
+import { commentSessionExit } from "@/app/_comments/session-exit";
+import { lessonPath } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import type { SessionCheck } from "@/services/account/account";
 import type { CommentDelete, CommentWrite, PseudonymChange } from "@/services/comments/comments";
@@ -134,23 +135,7 @@ const state = (fields: Partial<State>, refresh: boolean): CommentOutcome => ({
 });
 
 /** La sesión que no pasó: a entrar, a completar la cuenta o a la lección, donde decide la guarda. Nulo si no se supo. */
-function sessionExit(check: Exclude<SessionCheck, { kind: "pass" }>, back: string): CommentOutcome | null {
-  switch (check.kind) {
-    case "anonymous":
-      return { kind: "redirect", to: signInPath(back), notice: null, closeSession: false };
-    case "incomplete":
-      return { kind: "redirect", to: consentsPath(back), notice: null, closeSession: false };
-    case "suspended":
-      // La página lo dice: pinta PA-35.
-      return { kind: "redirect", to: back, notice: null, closeSession: false };
-    case "unavailable":
-      return null;
-    case "must_sign_out":
-      return check.then === "recover"
-        ? { kind: "redirect", to: ROUTES.recover, notice: "choose_password", closeSession: true }
-        : { kind: "redirect", to: ROUTES.signIn, notice: null, closeSession: true };
-  }
-}
+const sessionExit = commentSessionExit;
 
 const openOf = (place: Place): Open => (place.kind === "new" ? { kind: "none" } : place.kind === "reply" ? { kind: "reply", parentId: place.parentId } : { kind: "edit", id: place.id });
 

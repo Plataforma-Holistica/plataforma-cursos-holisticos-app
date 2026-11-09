@@ -169,6 +169,69 @@ export async function readCommentLesson(tx: Tx, commentId: string): Promise<stri
   return row?.lesson ?? null;
 }
 
+const mineRow = z
+  .object({
+    id: z.string().regex(ID),
+    revision: z.number().int().positive(),
+    body: z.string(),
+    state: z.enum(["published", "in_review"]),
+    edited: z.boolean(),
+    created_at: z.string().refine(isCommentInstant),
+    is_reply: z.boolean(),
+    course_title: z.string(),
+    lesson_title: z.string(),
+    course_slug: z.string().nullable(),
+    lesson_id: z.string().regex(ID).nullable(),
+  })
+  .strict()
+  // El enlace va entero o no va: los dos, solo si la lección se ve.
+  .refine((row) => (row.course_slug === null) === (row.lesson_id === null));
+
+/** Un comentario propio en «Mis comentarios» (PA-24): sin nada de nadie más. `link`, solo si la lección se ve. */
+export interface MyComment {
+  id: string;
+  revision: number;
+  body: string;
+  state: "published" | "in_review";
+  edited: boolean;
+  createdAt: string;
+  isReply: boolean;
+  courseTitle: string;
+  lessonTitle: string;
+  link: { slug: string; lessonId: string } | null;
+}
+
+const mineAnswer = z.union([notFound, z.object({ answer: z.literal("ok"), items: z.array(mineRow), more: z.boolean() }).strict()]);
+
+export type MyCommentsRow = { answer: "not_found" } | { answer: "ok"; items: MyComment[]; more: boolean };
+
+/** Lo propio de quien actúa, sin lo borrado ni lo oculto, del más reciente al más antiguo, desde `before`. */
+export async function readMyComments(tx: Tx, before: CommentCursor | null): Promise<MyCommentsRow> {
+  const [row] = await tx.query(
+    sql`select private.comments_of_author(${before?.at ?? null}::timestamptz, ${before?.id ?? null}::uuid) as answer`,
+    z.object({ answer: mineAnswer }),
+  );
+  if (!row) throw new Error("comments_of_author no contestó");
+  const answer = row.answer;
+  if (answer.answer !== "ok") return { answer: answer.answer };
+  return {
+    answer: "ok",
+    more: answer.more,
+    items: answer.items.map((item) => ({
+      id: item.id,
+      revision: item.revision,
+      body: item.body,
+      state: item.state,
+      edited: item.edited,
+      createdAt: item.created_at,
+      isReply: item.is_reply,
+      courseTitle: item.course_title,
+      lessonTitle: item.lesson_title,
+      link: item.course_slug !== null && item.lesson_id !== null ? { slug: item.course_slug, lessonId: item.lesson_id } : null,
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------------------
 // Escribir.
 

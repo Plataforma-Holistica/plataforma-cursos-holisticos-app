@@ -282,6 +282,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // en la cuenta de esa sesión.
     rememberCaptionsAction: /if \(typeof on !== "boolean"\) return;\s*await rememberCaptions\(await cookieJar\(\), on\);/,
   },
+  "src/app/(cuenta)/cuenta/comentarios/actions.ts": {
+    // «Mis comentarios» (PA-24; T-501): preguntar y cancelar no llaman a nadie; borrar pasa por el servicio, que corre la guarda
+    // de sesión, con el comentario y la revisión que se vieron.
+    myCommentsAction:
+      /if \(request\.kind === "none"\) return \{ \.\.\.IDLE_MINE, attempt \};\s*if \(request\.kind !== "delete"\) return \{ attempt, asking: request\.kind === "ask" \? request\.id : null, notice: null \};\s*const jar = await cookieJar\(\);\s*const outcome = myDeleteOutcome\(request\.id, await deleteLessonComment\(jar, \{ commentId: request\.id, revision: request\.revision \}\), request\.back\);/,
+  },
   "src/app/cursos/[slug]/lecciones/[leccion]/comment-actions.ts": {
     // Los comentarios de la lección (T-501): abrir y cerrar no llaman a nadie; lo que escribe pasa por el servicio, que
     // corre la guarda de sesión y decide el acceso con la regla única. Del formulario salen la lección y el botón.
@@ -431,6 +437,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/admin/[...resto]",
       "/consentimientos",
       "/cuenta",
+      "/cuenta/comentarios",
       "/cursos/[slug]/lecciones/[leccion]",
       "/entrar/segundo-factor",
       "/entrar/segundo-factor/configurar",

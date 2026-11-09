@@ -5,7 +5,7 @@ import { clearCounters, ownerQuery, person, type Person } from "../support/stack
 
 // Los comentarios de una lección (PA-22; RF-801, RF-808; FL-15; T-501), en un navegador de verdad: publicar con el diálogo del
 // nombre la primera vez, editar y borrar lo propio, responder sin JavaScript, las pestañas del teléfono, lo que queda en
-// revisión sin el filtro, y que con el interruptor apagado no hay pestaña. Lo que la base y el servicio deciden lo prueban la
+// revisión sin el filtro, que con el interruptor apagado no hay pestaña, y que sin acceso se borra lo propio desde «Mis comentarios» (PA-24). Lo que la base y el servicio deciden lo prueban la
 // 93, la 94, la 101 y la 102: aquí, que la pantalla lo lleve hasta ahí y lo pinte.
 //
 // El interruptor `COMENTARIOS_ABIERTOS` se prende aquí y se apaga al terminar.
@@ -214,4 +214,43 @@ test("con el interruptor apagado no hay pestaña", async ({ page }) => {
   } finally {
     await setSwitch(true);
   }
+});
+
+// «Mis comentarios» (PA-24; decisiones de Sergio del 2026-11-08): quien perdió el acceso a la lección borra lo suyo desde la cuenta.
+async function expire(who: Person): Promise<void> {
+  await ownerQuery(
+    `begin; set local session_replication_role = replica;
+     update public.subscriptions set status = 'canceled', current_period_start = now() - interval '90 days', current_period_end = now() - interval '60 days' where profile_id = '${who.id}';
+     commit;`,
+  );
+}
+
+test("sin acceso a la lección, Beto llega desde «Cuenta» a lo suyo y borra lo que está en revisión", async ({ browser }) => {
+  await expire(beto);
+  await inContext(browser, PHONE, async (page) => {
+    await signIn(page, beto, "/cuenta");
+    await page.getByRole("link", { name: "Ver y borrar lo que escribiste" }).click();
+    await expect(page).toHaveURL(/\/cuenta\/comentarios$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Mis comentarios" })).toBeVisible();
+    const review = page.getByRole("article").filter({ hasText: "Una pregunta sobre la postura." });
+    await expect(review).toContainText("En revisión");
+    await expect(page.getByRole("article").filter({ hasText: "A mí también." })).toContainText("Respuesta");
+    expect(await a11yViolations(page)).toEqual([]);
+    await review.getByRole("button", { name: "Borrar" }).click();
+    await page.getByRole("dialog", { name: "¿Borrar tu comentario?" }).getByRole("button", { name: "Sí, borrarlo" }).click();
+    await expect(page.getByText("Borraste tu comentario.")).toBeVisible();
+    await expect(page.getByText("Una pregunta sobre la postura.")).toHaveCount(0);
+  });
+});
+
+test("sin JavaScript, también se borra desde «Mis comentarios»", async ({ browser }) => {
+  await inContext(browser, { javaScriptEnabled: false }, async (page) => {
+    await signIn(page, beto, "/cuenta/comentarios");
+    const reply = page.getByRole("article").filter({ hasText: "A mí también." });
+    await reply.getByRole("button", { name: "Borrar" }).click();
+    await page.getByRole("dialog", { name: "¿Borrar tu comentario?" }).getByRole("button", { name: "Sí, borrarlo" }).click();
+    await expect(page).toHaveURL(/\/cuenta\/comentarios/);
+    await expect(page.getByText("Borraste tu comentario.")).toBeVisible();
+    await expect(page.getByText("Todavía no has escrito comentarios.")).toBeVisible();
+  });
 });
