@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   requireTeacher: vi.fn(),
   teacherComments: vi.fn(),
   teacherCommentCourses: vi.fn(),
+  commentReplies: vi.fn(),
   action: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
@@ -24,7 +25,11 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/app/_lib/guard", () => ({ requireTeacher: mocks.requireTeacher }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: vi.fn() }));
-vi.mock("@/services/comments/comments", () => ({ teacherComments: mocks.teacherComments, teacherCommentCourses: mocks.teacherCommentCourses }));
+vi.mock("@/services/comments/comments", () => ({
+  teacherComments: mocks.teacherComments,
+  teacherCommentCourses: mocks.teacherCommentCourses,
+  commentReplies: mocks.commentReplies,
+}));
 vi.mock("@/app/portal/_comentarios/actions", () => ({ teacherCommentAction: mocks.action }));
 vi.mock("next/navigation", async (original) => ({ ...(await original<typeof import("next/navigation")>()), notFound: mocks.notFound }));
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
@@ -91,6 +96,9 @@ describe("PA-45 en el portal", () => {
     expect(mocks.requireTeacher).toHaveBeenCalledExactlyOnceWith("/portal/comentarios", "work");
     expect(mocks.teacherComments).toHaveBeenCalledExactlyOnceWith(claims, { course: COURSE, unanswered: true, before: `${AT}_${id(9)}` });
     expect(screen.getByRole("heading", { level: 1, name: "Comentarios" })).toBeInTheDocument();
+    // Un solo título: el foco de respaldo va al que se ve, no a uno solo para el lector.
+    expect(screen.getAllByRole("heading", { name: "Comentarios" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Comentarios" })).toHaveAttribute("tabindex", "-1");
     expect(await a11yViolations(container)).toEqual([]);
   });
 
@@ -146,7 +154,8 @@ describe("PA-45 en el portal", () => {
   it.each([
     ["closed", "Por ahora no se pueden publicar comentarios."],
     ["banned", "Por ahora no puedes comentar. Si crees que es un error, escríbenos."],
-    ["suspended", "Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios."],
+    // PA-45 junta varios cursos: el texto no habla de «este curso».
+    ["suspended", "Por ahora no puedes escribir como maestro en estos comentarios. Puedes leerlos."],
   ] as const)("con %s se lee, sin «Responder», y se dice por qué", async (answer, text) => {
     mocks.teacherComments.mockResolvedValue({ kind: "ready", items: [thread(1)], next: null, write: answer });
     render(await at());
@@ -195,5 +204,60 @@ describe("PA-45 en el portal", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Responder" }));
     await waitFor(() => expect(screen.getByText("Tu comentario se publicó.")).toBeInTheDocument(), { timeout: 3_000 });
+  });
+
+  // La guarda de `tests/setup/dom.ts` hace fallar la prueba si React avisa de dos llaves iguales.
+  it("dos cursos con el mismo título no repiten la llave de sus enlaces", async () => {
+    mocks.teacherCommentCourses.mockResolvedValue({
+      kind: "ready",
+      courses: [
+        { id: COURSE, title: "Yoga suave" },
+        { id: OTHER, title: "Yoga suave" },
+      ],
+    });
+    render(await at());
+    expect(within(screen.getByRole("navigation", { name: "Filtros" })).getAllByRole("link", { name: "Yoga suave" })).toHaveLength(2);
+  });
+});
+
+describe("las respuestas que no caben, en PA-45", () => {
+  const LAST = `${AT}_${id(2)}`;
+  const withMore = () =>
+    mocks.teacherComments.mockResolvedValue({
+      kind: "ready",
+      items: [thread(1, { replies: { items: [thread(2, { name: "Beto", body: "Respuesta 2" })], more: true } })],
+      next: null,
+      write: "ok",
+    });
+
+  it("«Ver más respuestas» se queda en PA-45, con los filtros y la página", async () => {
+    withMore();
+    render(await at({ curso: COURSE, desde: `${AT}_${id(9)}` }));
+    expect(screen.getByRole("link", { name: "Ver más respuestas" })).toHaveAttribute(
+      "href",
+      `/portal/comentarios?curso=${COURSE}&desde=${encodeURIComponent(`${AT}_${id(9)}`)}&hilo=${id(1)}&respuestas=${encodeURIComponent(LAST)}#comentario-${id(1)}`,
+    );
+  });
+
+  it("con ?hilo= de un comentario de la lista, pide las siguientes con la lección de ese comentario y las pinta en su lugar", async () => {
+    withMore();
+    mocks.commentReplies.mockResolvedValue({ kind: "ready", items: [thread(3, { name: "Carla", body: "Respuesta 3" })], next: null });
+    render(await at({ curso: COURSE, hilo: id(1), respuestas: LAST }));
+    expect(mocks.commentReplies).toHaveBeenCalledExactlyOnceWith(claims, LESSON, id(1), LAST);
+    expect(screen.getByText("Respuesta 3")).toBeInTheDocument();
+    expect(screen.queryByText("Respuesta 2")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Ver más respuestas" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Ver las primeras respuestas" })).toHaveAttribute("href", `/portal/comentarios?curso=${COURSE}#comentario-${id(1)}`);
+  });
+
+  it("un ?hilo= que no está en la lista no se pide, y si no se supo, se quedan las primeras", async () => {
+    withMore();
+    const first = render(await at({ hilo: id(7), respuestas: LAST }));
+    expect(mocks.commentReplies).not.toHaveBeenCalled();
+    first.unmount();
+    mocks.commentReplies.mockResolvedValue({ kind: "unavailable" });
+    render(await at({ hilo: id(1), respuestas: LAST }));
+    expect(screen.getByText("Respuesta 2")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ver las primeras respuestas" })).toBeNull();
   });
 });

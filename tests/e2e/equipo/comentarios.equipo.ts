@@ -295,7 +295,8 @@ test("PA-45 con JavaScript: la maestra ve lo que espera respuesta y responde des
   expect(await a11yViolations(page)).toEqual([]);
   await question.getByRole("button", { name: "Responder" }).click();
   await page.getByRole("textbox", { name: "Responde a Luz" }).fill("Cuatro tiempos al entrar y seis al salir.");
-  await page.getByRole("button", { name: "Responder", exact: true }).last().click();
+  // El envío es el «Responder» del campo, dentro de su hilo: otros hilos también ofrecen el suyo.
+  await question.getByRole("button", { name: "Responder", exact: true }).last().click();
   await expect(page.getByText("Tu comentario se publicó.")).toBeVisible();
   await expect(page.getByText("No tienes comentarios sin responder.")).toBeVisible();
 });
@@ -347,7 +348,7 @@ test("PA-45 con la maestra suspendida: lee, sin «Responder», y dice por qué",
   try {
     await signIn(page, maestra, "/portal/comentarios");
     await expect(page.getByRole("article", { name: "Beto" }).filter({ hasText: "¿Se puede hacer acostado?" })).toBeVisible();
-    await expect(page.getByText("Por ahora no puedes escribir aquí como maestro de este curso. Puedes leer los comentarios.")).toBeVisible();
+    await expect(page.getByText("Por ahora no puedes escribir como maestro en estos comentarios. Puedes leerlos.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Responder" })).toHaveCount(0);
   } finally {
     await ownerQuery(

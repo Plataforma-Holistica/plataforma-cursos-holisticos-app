@@ -1,4 +1,5 @@
-import { commentCursor } from "@/app/_comments/view";
+import { commentAnchor, commentCursor, cursorOf } from "@/app/_comments/view";
+import type { CommentView } from "@/services/comments/comments";
 import { ROUTES } from "@/services/account/navigation";
 
 // PA-45 (T-501): lo que dice la dirección (el curso, «Sin responder», la página) y las direcciones que arma la pantalla. Un curso
@@ -34,3 +35,12 @@ export function teacherCommentsHref(filters: { course: string | null; unanswered
   ].filter(Boolean);
   return query.length === 0 ? ROUTES.portalComments : `${ROUTES.portalComments}?${query.join("&")}`;
 }
+
+/** Las respuestas siguientes de un comentario, en PA-45 y sin perder los filtros ni la página: reemplazan las suyas. */
+export const teacherRepliesHref = (filters: TeacherFilters, parentId: string, last: Pick<CommentView, "createdAt" | "id">) => {
+  const base = teacherCommentsHref(filters, filters.from);
+  return `${base}${base.includes("?") ? "&" : "?"}hilo=${parentId}&respuestas=${encodeURIComponent(cursorOf(last))}#${commentAnchor(parentId)}`;
+};
+
+/** Las primeras respuestas otra vez: la misma página, sin el hilo. */
+export const teacherFirstRepliesHref = (filters: TeacherFilters, parentId: string) => `${teacherCommentsHref(filters, filters.from)}#${commentAnchor(parentId)}`;

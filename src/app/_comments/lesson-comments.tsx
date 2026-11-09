@@ -481,9 +481,24 @@ const openedOn = (open: CommentsState["open"]): string | null =>
 
 /**
  * El estado de un hilo: la acción, lo escrito de cada campo, el foco después de cada respuesta y lo que se dice arriba porque esta
- * vuelta no lo pinta. Lo usan PA-22 y PA-45; `here` es a donde vuelve un envío sin JavaScript.
+ * vuelta no lo pinta. Lo usan PA-22 y PA-45; `here` es a donde vuelve un envío sin JavaScript. Si se pierde el foco, va a `heading`,
+ * o al título que nombra `fallbackId` cuando lo pinta otro (el de PA-45 lo pinta el servidor).
  */
-export function useCommentThread({ action, here, items, write, lessonOf }: { action: CommentAction; here: string; items: CommentThread[]; write: WriteStanding; lessonOf: Shared["lessonOf"] }) {
+export function useCommentThread({
+  action,
+  here,
+  items,
+  write,
+  lessonOf,
+  fallbackId,
+}: {
+  action: CommentAction;
+  here: string;
+  items: CommentThread[];
+  write: WriteStanding;
+  lessonOf: Shared["lessonOf"];
+  fallbackId?: string;
+}) {
   const [state, formAction, pending] = useActionState(action, IDLE_COMMENTS, here);
   const [drafts, setDrafts] = useState<Drafts>(() => withKept({}, state));
   const [seen, setSeen] = useState(state.attempt);
@@ -547,8 +562,8 @@ export function useCommentThread({ action, here, items, write, lessonOf }: { act
     if (!lost) return;
     const at = state.notice?.at;
     const target = (at?.kind === "comment" ? byId(commentAnchor(at.id)) : null) ?? (before === null ? null : byId(commentAnchor(before)));
-    (target ?? heading.current)?.focus();
-  }, [state]);
+    (target ?? (fallbackId === undefined ? heading.current : byId(fallbackId)))?.focus();
+  }, [state, fallbackId]);
 
   return { state, shared, heading, threadNotice, strayText };
 }

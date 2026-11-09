@@ -9,16 +9,23 @@ import type { GateRefusal, TeacherThread, WriteStanding } from "@/services/comme
 import { TextLink } from "@/ui/text-link";
 
 import { teacherCommentAction } from "./actions";
+import { teacherFirstRepliesHref, teacherRepliesHref, type TeacherFilters } from "./outcomes";
 
 // PA-45 · la lista (T-501): cada comentario con su lección y su curso, el autor por su nombre de comentarios, sus respuestas,
 // «Responder» y «Ver en la lección», y lo propio con «Editar» y «Borrar». Es el hilo de PA-22 (`useCommentThread`, `Thread`) con la
 // lección de cada comentario. Si el portón no deja responder (cerrados, el veto, suspendido, el aviso pendiente), se lee y se dice
-// por qué.
+// por qué. «Ver más respuestas» se queda en PA-45, con los filtros y la página.
+
+/** El título de PA-45, que pinta el servidor: a él va el foco cuando lo pulsado se va con la respuesta. */
+export const PA45_TITLE = "comentarios-titulo";
 
 export interface TeacherCommentsProps {
   items: TeacherThread[];
   /** A donde vuelve un envío sin JavaScript: la página del portal con sus filtros. */
   here: string;
+  filters: TeacherFilters;
+  /** El hilo cuyas respuestas no son las primeras. */
+  pagedThread: string | null;
   /** Lo que contesta el portón; nulo sin comentarios. */
   write: "ok" | GateRefusal | null;
   unanswered: boolean;
@@ -26,9 +33,9 @@ export interface TeacherCommentsProps {
 
 const standingOf = (write: TeacherCommentsProps["write"]): WriteStanding => (write === null || write === "ok" ? { kind: "ok" } : { kind: "gate", answer: write });
 
-export function TeacherComments({ items, here, write, unanswered }: TeacherCommentsProps) {
+export function TeacherComments({ items, here, filters, pagedThread, write, unanswered }: TeacherCommentsProps) {
   const standing = standingOf(write);
-  const { shared, heading, threadNotice, strayText } = useCommentThread({
+  const { shared, threadNotice, strayText } = useCommentThread({
     action: teacherCommentAction,
     here,
     items,
@@ -37,12 +44,10 @@ export function TeacherComments({ items, here, write, unanswered }: TeacherComme
       const thread = items.find((each) => each.id === threadId) ?? items[0];
       return { slug: thread?.courseSlug ?? "", lessonId: thread?.lessonId ?? "" };
     },
+    fallbackId: PA45_TITLE,
   });
   return (
     <div id={COMMENTS_ANCHOR} className="flex flex-col gap-4">
-      <h2 ref={heading} tabIndex={-1} className="sr-only">
-        {text.portal.title}
-      </h2>
       <Notice notice={threadNotice} />
       <StrayText text={strayText} />
       {!canWrite(standing) && items.length > 0 && <Instead write={standing} />}
@@ -65,8 +70,11 @@ export function TeacherComments({ items, here, write, unanswered }: TeacherComme
                     {toLesson !== null && <TextLink href={toLesson}>{text.portal.seeInLesson}</TextLink>}
                   </p>
                 }
-                moreReplies={toLesson}
-                firstReplies={null}
+                moreReplies={(() => {
+                  const last = thread.replies.items.at(-1);
+                  return last === undefined ? null : teacherRepliesHref(filters, thread.id, last);
+                })()}
+                firstReplies={pagedThread === thread.id ? teacherFirstRepliesHref(filters, thread.id) : null}
               />
             );
           })}

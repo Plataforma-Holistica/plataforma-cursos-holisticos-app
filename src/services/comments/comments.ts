@@ -362,13 +362,13 @@ export type RunAsServer = <T>(claims: VerifiedClaims, reason: string, work: (tx:
 /** Una transacción como la persona (solo los cursos del filtro de PA-45). */
 export type RunAsUser = <T>(claims: VerifiedClaims, work: (tx: Tx) => Promise<T>) => Promise<T>;
 
+/** Sin lector como la persona: como servidor, `current_teacher_id` no ve la sesión y la lista saldría vacía sin fallar. */
+const noUserReads: RunAsUser = () => Promise.reject(new Error("este almacén no lee como la persona"));
+
 /**
  * Todo como servidor, a nombre de quien actúa: nadie de la aplicación lee ni escribe las tablas, solo las funciones. Cada
  * entrada decide el acceso y llama a la base en la misma transacción.
  */
-/** Sin lector como la persona: como servidor, `current_teacher_id` no ve la sesión y la lista saldría vacía sin fallar. */
-const noUserReads: RunAsUser = () => Promise.reject(new Error("este almacén no lee como la persona"));
-
 export function commentsStoreOn(run: RunAsServer, read: RunAsUser = noUserReads): CommentsStore {
   return {
     lesson: (claims, lessonId, before) =>
