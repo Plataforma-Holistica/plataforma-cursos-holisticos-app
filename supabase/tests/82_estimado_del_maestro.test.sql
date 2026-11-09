@@ -9,6 +9,7 @@
 -- en que corre; el panel lee el mes en curso, que se limpia de corridas de estimado al empezar.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 select plan(117);
 
 select pruebas.alta('a8200000-0000-0000-0000-000000000001', 'tere-82@prueba.test');
@@ -349,6 +350,7 @@ set local session_replication_role = origin;
 insert into r values ('s2', pruebas.ensayo(204501));
 select ok((select id from r where k = 's2') is not null, 'se ensaya');
 select pruebas.como_finanzas();
+select pruebas.conciliado(204501);
 select is(private.close_period(204501, private.last_rehearsal(204501)) ->> 'outcome', 'closed', 'y se cierra');
 set constraints payout_periods_balanced immediate;
 set constraints payout_periods_balanced deferred;

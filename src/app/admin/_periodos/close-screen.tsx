@@ -149,7 +149,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
                     {SPACE}
                     {check.label}
                   </span>
-                  {!check.done && check.href !== undefined && <TextLink href={check.href}>{text.goToAlerts}</TextLink>}
+                  {!check.done && check.link !== undefined && <TextLink href={check.link.href}>{check.link.label}</TextLink>}
                 </li>
               ))}
             </ul>

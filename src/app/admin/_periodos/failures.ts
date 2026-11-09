@@ -25,6 +25,8 @@ export const FAILURES: Record<PeriodFailure, string> = {
   needs_full_rollup: text.needsFullRollup,
   rollup_marks: text.rollupMarks,
   open_alerts: text.openAlerts,
+  billing_events_pending: text.billingEventsPending,
+  charges_match_provider: text.chargesMatchProvider,
   rehearsal_missing: text.rehearsalMissing,
   rehearsal_stale: text.rehearsalStale,
   rehearsal_superseded: text.rehearsalSuperseded,

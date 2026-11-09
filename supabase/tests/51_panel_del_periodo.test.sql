@@ -7,6 +7,7 @@
 -- Octubre de 2026 es el ejemplo del PRD, como en `43_cierre`.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 select plan(57);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -26,6 +27,9 @@ begin
     perform pruebas.como_servicio(null);
   else
     perform pruebas.a_nombre_de(p_actor);
+  end if;
+  if p_call = 'close_period' then
+    perform pruebas.conciliado(p_period);
   end if;
   -- Cerrar recibe el ensayo que se tenía a la vista: el que lee la pantalla (T-605, tercera solicitud).
   execute format('select private.%I(%s)', p_call,
@@ -280,7 +284,7 @@ select is((select jsonb_path_query_array(r, '$.rehearsal.teachers[*].total_cents
 select is((select r #>> '{rehearsal,teachers,0,name}' from cierre_antes), 'Maestra m1', 'con el nombre de cada maestro');
 select is((select r #> '{rehearsal,teachers,0,below_minimum}' from cierre_antes), 'true'::jsonb, 'y si queda debajo del mínimo');
 select is((select r -> 'checks' from cierre_antes),
-  '{"open_alerts": 1, "final_rehearsal": true, "last_rollup": "succeeded", "rollup_marks": false}'::jsonb,
+  '{"open_alerts": 1, "final_rehearsal": true, "last_rollup": "succeeded", "rollup_marks": false, "billing_events": 0, "charges_match": false}'::jsonb,
   'y lo que sabe sin calcular de lo que falta para cerrar');
 select is((select r -> 'close' from cierre_antes), 'null'::jsonb, 'todavía sin cierre');
 select ok((select pruebas.sin_alumnos(r) from cierre_antes), 'sin el identificador de ningún alumno');

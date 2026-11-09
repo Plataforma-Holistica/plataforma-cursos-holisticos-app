@@ -8,6 +8,10 @@ import { AdminFrame } from "../_lib/frame";
 import { sectionAt } from "../_lib/sections";
 import { ForbiddenScreen } from "../_lib/states";
 
+// La duración de esta página es también la de sus acciones (Next 16): «Comparar ahora» de PA-79 lista Stripe en el momento, hasta 40 s más lo que liquidó
+// Stripe (T-303, cuarta solicitud), y no depende de lo que Vercel ponga por omisión.
+export const maxDuration = 60;
+
 // Todo lo que cuelga de `/admin`: sus secciones, y lo que no existe. Corre la misma guarda
 // que administración, con la capacidad que la sección pida, y después pinta la sección o
 // contesta que esa ruta no existe.

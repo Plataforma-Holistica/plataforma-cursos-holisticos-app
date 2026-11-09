@@ -106,7 +106,7 @@ describe("los periodos pasan por las funciones de la base", () => {
   });
 
   it("lo que viaja al navegador no importa nada del servidor", () => {
-    for (const file of ["outcomes.ts", "failures.ts", "panel-screen.tsx", "close-screen.tsx"]) {
+    for (const file of ["outcomes.ts", "failures.ts", "panel-screen.tsx", "close-screen.tsx", "reconcile-outcomes.ts", "reconcile-failures.ts", "reconcile-block.tsx"]) {
       const code = codeOf(`src/app/admin/_periodos/${file}`);
       expect(code.length, file).toBeGreaterThan(0);
       // Del servicio, solo tipos.

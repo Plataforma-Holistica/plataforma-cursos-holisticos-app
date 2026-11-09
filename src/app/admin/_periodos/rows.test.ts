@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { admin } from "@/messages/es/admin";
 import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
 import type { FinanceAlerts } from "@/services/anomalies/anomalies";
-import type { FinanceClose, FinancePeriod, FinancePeriods, RunTeacher } from "@/services/periods/periods";
+import type { FinanceClose, FinancePeriod, FinancePeriods, Reconciliation, ReconciliationDifference, RunTeacher } from "@/services/periods/periods";
 
 import { periodsButton } from "./outcomes";
+import { amountIn } from "./reconcile-rows";
 import { acceptedCloseNotice, acceptedRollupNotice, closeView, money, percent, periodName, periodsView, periodView } from "./rows";
 
 // Lo que PA-78 a PA-80 pintan, ya en palabras: qué cifra sale de dónde, qué se ofrece y qué falta para
@@ -55,6 +56,7 @@ function period(overrides: Partial<Period> = {}, status: Period["period"]["statu
     lastRollup: { status: "succeeded", mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     lastGoodRollup: { mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     rollupRequest: null,
+    reconciliation: null,
     ...overrides,
   };
 }
@@ -75,7 +77,7 @@ function close(overrides: Partial<Close> = {}, status: Close["period"]["status"]
   return {
     freshCode: true,
     period: { periodId: 202710, status, endsAt: "2027-11-01T06:00:00Z", enteredClosingAt: "2027-11-01T09:00:00Z" },
-    checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false },
+    checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false, billingEvents: 0, chargesMatch: true },
     rehearsal: { ...figures, at: "2027-11-02T10:00:00Z", status: "succeeded", statusAtRun: "closing", carriedInCents: 0, teachers: [teacher()] },
     close: null,
     ...overrides,
@@ -298,14 +300,14 @@ describe("closeView (PA-80)", () => {
     const ready = closeView(close());
     expect(ready.checks.every((check) => check.done)).toBe(true);
     expect(ready.close).toEqual({ kind: "ready", run: RUN, button: periodsButton.askClose(202710, RUN), confirm: periodsButton.close(202710, RUN) });
-    const missing = closeView(close({ checks: { openAlerts: 2, finalRehearsal: false, lastRollup: "failed", rollupMarks: true } }));
+    const missing = closeView(close({ checks: { openAlerts: 2, finalRehearsal: false, lastRollup: "failed", rollupMarks: true, billingEvents: 0, chargesMatch: true } }));
     expect(missing.checks.filter((check) => !check.done).map((check) => check.label)).toEqual([
       text.checks.rollupFailed,
       text.checks.marksPending,
       "Todas las alertas revisadas: faltan 2",
       text.checks.finalRehearsalMissing,
     ]);
-    expect(missing.checks.find((check) => check.label.startsWith("Todas"))?.href).toBe(ROUTES.alerts);
+    expect(missing.checks.find((check) => check.label.startsWith("Todas"))?.link).toEqual({ href: ROUTES.alerts, label: text.checkLinks.alerts });
     expect(missing.close).toEqual({ kind: "waits" });
     expect(closeView(close({ checks: { ...close().checks, lastRollup: "running" } })).checks.some((check) => check.label === text.checks.rollupRunning)).toBe(true);
     expect(closeView(close({ checks: { ...close().checks, lastRollup: null } })).checks.some((check) => check.label === text.checks.rollupNone)).toBe(true);
@@ -455,5 +457,197 @@ describe("el umbral del bote sin consumo en PA-79 (T-605, tercera solicitud)", (
 
   it("sin umbral válido, el contexto no lo nombra", () => {
     expect(periodView(period({ unconsumedAlertBps: null }), null, NOW).unconsumed.context).toBe("4.17 % del bote del mes.");
+  });
+});
+
+describe("lo de Stripe en la lista de PA-80 (T-303, cuarta solicitud)", () => {
+  it("dos comprobaciones más, hechas con cero avisos y con la comparación vigente que coincide", () => {
+    const ready = closeView(close());
+    const labels: string[] = [text.checks.billingEventsClear, text.checks.chargesMatch];
+    expect(ready.checks.filter((check) => labels.includes(check.label)).map((check) => check.done)).toEqual([true, true]);
+    expect(ready.close.kind).toBe("ready");
+  });
+
+  it("con avisos de cobro pendientes: cuántos, el enlace a la cola de avisos, y no se ofrece cerrar", () => {
+    const view = closeView(close({ checks: { ...close().checks, billingEvents: 3 } }));
+    const check = view.checks.find((each) => !each.done);
+    expect(check?.label).toBe("Sin avisos de cobro pendientes: quedan 3 sin procesar o en espera");
+    expect(check?.link).toEqual({ href: ROUTES.billingEvents, label: text.checkLinks.billingEvents });
+    expect(view.close).toEqual({ kind: "waits" });
+    expect(closeView(close({ checks: { ...close().checks, billingEvents: 1 } })).checks.find((each) => !each.done)?.label).toBe(
+      "Sin avisos de cobro pendientes: queda 1 sin procesar o en espera",
+    );
+  });
+
+  it("sin una comparación vigente que coincida: el enlace al bloque de la conciliación de PA-79, y no se ofrece cerrar", () => {
+    const view = closeView(close({ checks: { ...close().checks, chargesMatch: false } }));
+    const check = view.checks.find((each) => !each.done);
+    expect(check?.label).toBe(text.checks.chargesMatchMissing);
+    expect(check?.link).toEqual({ href: `${periodPath(202710)}#bloque-periodo-conciliacion`, label: text.checkLinks.reconciliation });
+    expect(view.close).toEqual({ kind: "waits" });
+  });
+
+  it("cada comprobación pendiente lleva su propio enlace: la consolidación a su bloque, y una corriendo ninguno", () => {
+    const toRollup = { href: `${periodPath(202710)}#bloque-periodo-recalculo`, label: text.checkLinks.rollup };
+    const failed = closeView(close({ checks: { ...close().checks, lastRollup: "failed", rollupMarks: true } }));
+    expect(failed.checks.find((check) => check.label === text.checks.rollupFailed)?.link).toEqual(toRollup);
+    expect(failed.checks.find((check) => check.label === text.checks.marksPending)?.link).toEqual(toRollup);
+    expect(closeView(close({ checks: { ...close().checks, lastRollup: null } })).checks.find((check) => check.label === text.checks.rollupNone)?.link).toEqual(toRollup);
+    expect(closeView(close({ checks: { ...close().checks, lastRollup: "running" } })).checks.find((check) => check.label === text.checks.rollupRunning)?.link).toBeUndefined();
+    // Lo hecho no enlaza a nada.
+    expect(closeView(close()).checks.every((check) => check.link === undefined)).toBe(true);
+  });
+});
+
+describe("la conciliación con Stripe de PA-79 (T-303, cuarta solicitud)", () => {
+  const difference = (overrides: Partial<ReconciliationDifference> = {}): ReconciliationDifference => ({
+    side: "only_provider",
+    charge: "ch_1",
+    ownCents: null,
+    providerCents: 34_900,
+    currency: "mxn",
+    explained: false,
+    note: null,
+    explainedAt: null,
+    ...overrides,
+  });
+  const reconciliation = (overrides: Partial<Reconciliation> = {}): Reconciliation => ({
+    id: "d0000000-0000-4000-8000-000000000001",
+    registeredAt: "2027-11-02T15:00:00Z",
+    livemode: true,
+    complete: true,
+    tooMany: false,
+    ownCount: 130,
+    ownCents: 4_537_000,
+    providerCount: 130,
+    providerCents: 4_537_000,
+    providerPending: 0,
+    providerOtherCurrency: 0,
+    differencesTotal: 0,
+    requested: false,
+    ownCountNow: overrides.ownCount ?? 130,
+    foreignProvider: false,
+    latestIncompleteAt: null,
+    matches: true,
+    current: true,
+    differences: [],
+    ...overrides,
+  });
+  const compared = (read: Period) => {
+    const last = periodView(read, null, NOW).reconciliation.last;
+    if (last.kind !== "compared") throw new Error("sin comparación");
+    return last;
+  };
+
+  it("nunca se comparó: lo dice", () => {
+    expect(periodView(period(), null, NOW).reconciliation.last).toEqual({ kind: "never" });
+  });
+
+  it("una que coincide: cuándo, hace cuántos días, quién la pidió, los dos lados en pesos, y que está vigente", () => {
+    const last = compared(period({ reconciliation: reconciliation() }));
+    expect(last.when).toMatch(/^Última comparación: el 2 de noviembre de 2027 a las .* \(hoy\)\.$/);
+    expect(last.by).toBe(text.reconciliation.bySchedule);
+    expect(last.own).toBe("El libro: 130 cobros por $45,370.00.");
+    expect(last.provider).toBe("Stripe: 130 cargos por $45,370.00.");
+    expect(last).toMatchObject({ verdict: text.reconciliation.matchesCurrent, tone: "success", notes: [], differences: [] });
+    const asked = compared(period({ reconciliation: reconciliation({ requested: true, registeredAt: "2027-10-30T15:00:00Z", ownCount: 1, providerCount: 1 }) }));
+    expect(asked.when).toMatch(/\(hace 3 días\)\.$/);
+    expect(asked.by).toBe(text.reconciliation.byPerson);
+    expect(asked.own).toMatch(/^El libro: 1 cobro por/);
+    expect(compared(period({ reconciliation: reconciliation({ registeredAt: "2027-11-01T15:00:00Z" }) })).when).toMatch(/\(hace 1 día\)\.$/);
+  });
+
+  it("coincidió pero ya no está vigente, o no coincide: lo dice", () => {
+    expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false }) }))).toMatchObject({ verdict: text.reconciliation.mismatch, tone: "warning" });
+    // Una incompleta más nueva no cambia lo que decide la última completa: si está vigente, no se dice que frena, y la incompleta va como nota.
+    const later = compared(period({ reconciliation: reconciliation({ matches: true, current: true, latestIncompleteAt: "2027-11-03T15:00:00Z" }) }));
+    expect(later).toMatchObject({ verdict: text.reconciliation.matchesCurrent, tone: "success" });
+    expect(later.notes.some((note: string) => note.startsWith("Después hubo una comparación incompleta"))).toBe(true);
+    // Sin diferencias propias, la base dice por qué ya no vale: el libro cambió, o hay un proveedor que no se compara.
+    expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, ownCount: 2, ownCountNow: 3 }) }))).toMatchObject({
+      verdict: "Ya no vale: el libro tenía 2 cobros de Stripe al comparar y ahora tiene 3. Compara otra vez antes de cerrar.",
+      tone: "warning",
+    });
+    expect(compared(period({ reconciliation: reconciliation({ matches: false, current: false, foreignProvider: true }) }))).toMatchObject({
+      verdict: text.reconciliation.foreignProvider,
+      tone: "warning",
+    });
+  });
+
+  it("incompleta, con pendientes en Stripe, con más de 200 diferencias o en modo de prueba: en palabras", () => {
+    const last = compared(period({ reconciliation: reconciliation({ matches: false, complete: false, providerPending: 2, tooMany: true, livemode: false }) }));
+    expect(last.notes).toEqual([
+      text.reconciliation.incomplete,
+      "Stripe tiene 2 cargos pendientes: hasta que se resuelvan, no coincide.",
+      text.reconciliation.tooMany,
+      text.reconciliation.testMode,
+    ]);
+  });
+
+  it("las diferencias de los cuatro lados: Explicar solo en las dos que se explican; la frase de que frena el cierre en las otras", () => {
+    const last = compared(
+      period({
+        reconciliation: reconciliation({
+          matches: false,
+          differencesTotal: 4,
+          differences: [
+            difference(),
+            difference({ side: "only_own", charge: "ch_2", ownCents: 34_900, providerCents: null }),
+            difference({ side: "amount", charge: "ch_3", ownCents: 34_900, providerCents: 30_000 }),
+            difference({ side: "other_currency", charge: "ch_4", providerCents: 1_999, currency: "usd" }),
+          ],
+        }),
+      }),
+    );
+    expect(last.differences.map((row) => [row.side, row.charge, row.own, row.provider, row.offer.kind])).toEqual([
+      [text.reconciliation.sides.onlyProvider, "ch_1", text.reconciliation.absent, "$349.00", "explain"],
+      [text.reconciliation.sides.onlyOwn, "ch_2", "$349.00", text.reconciliation.absent, "blocks"],
+      [text.reconciliation.sides.amount, "ch_3", "$349.00", "$300.00", "blocks"],
+      [text.reconciliation.sides.otherCurrency, "ch_4", text.reconciliation.absent, expect.stringMatching(/^USD\s19\.99$/), "explain"],
+    ]);
+    const [first, , , fourth] = last.differences;
+    expect(first?.offer).toEqual({
+      kind: "explain",
+      asked: { side: "only_provider", currency: "mxn", cents: "34900", charge: "ch_1" },
+      ask: "ask_explain:only_provider:mxn:34900:ch_1",
+      confirm: "explain:only_provider:mxn:34900:ch_1",
+    });
+    expect(fourth?.offer).toMatchObject({ kind: "explain", ask: "ask_explain:other_currency:usd:1999:ch_4" });
+  });
+
+  it("lo explicado dice cuándo y su nota, y ya no se ofrece explicar", () => {
+    const row = compared(period({ reconciliation: reconciliation({ differences: [difference({ explained: true, note: "Cargo de prueba", explainedAt: "2027-11-02T16:00:00Z" })] }) }))
+      .differences[0];
+    expect(row?.explained).toBe("Explicada el 2 de noviembre de 2027: Cargo de prueba");
+    expect(row?.offer).toEqual({ kind: "none" });
+  });
+
+  it("explicar pide el código reciente y un periodo sin cerrar; comparar, un periodo terminado y sin cerrar, sin código", () => {
+    const one = reconciliation({ matches: false, differences: [difference()] });
+    const locked = periodView(period({ freshCode: false, reconciliation: one }), null, NOW).reconciliation;
+    expect(locked).toMatchObject({ canExplain: false, compare: "compare", readOnly: false });
+    expect(locked.last.kind === "compared" && locked.last.differences[0]?.offer).toEqual({ kind: "none" });
+    const closed = periodView(period({ reconciliation: one, close: figures }, "closed"), null, NOW).reconciliation;
+    expect(closed).toMatchObject({ canExplain: false, compare: null, readOnly: true, notYet: false });
+    expect(closed.last.kind === "compared" && closed.last.differences[0]?.offer).toEqual({ kind: "none" });
+    // Lo que no se explica frena aunque el periodo esté cerrado: la frase no es un botón.
+    expect(periodView(period({ reconciliation: reconciliation({ differences: [difference({ side: "amount", ownCents: 1 })] }) }, "closed"), null, NOW).reconciliation.last).toMatchObject({
+      differences: [{ offer: { kind: "blocks" } }],
+    });
+  });
+
+  it("comparar se ofrece en un periodo abierto ya terminado o en cierre; abierto sin terminar, todavía no", () => {
+    expect(periodView(period(), null, NOW).reconciliation.compare).toBe("compare");
+    expect(periodView(period({}, "open"), null, NOW).reconciliation).toMatchObject({ compare: "compare", notYet: false });
+    const running = periodView(period({ period: { ...period().period, status: "open", endsAt: "2027-12-01T06:00:00Z" } }), null, NOW).reconciliation;
+    expect(running).toMatchObject({ compare: null, notYet: true });
+  });
+});
+
+describe("amountIn", () => {
+  it("cada moneda con su unidad menor, y un código que no se conoce, tal cual", () => {
+    expect(amountIn(34_900, "mxn")).toBe("$349.00");
+    expect(amountIn(500, "jpy")).toMatch(/^JPY\s500$/);
+    expect(amountIn(1_234, "zzz")).toMatch(/12\.34/);
   });
 });

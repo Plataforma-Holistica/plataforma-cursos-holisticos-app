@@ -2,7 +2,7 @@ import type { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
-import { actAs, asFinance, clearPeriodsBefore, connect, financePerson, outcomeOf, retire, waitBehind, type Finance } from "./helpers/finance";
+import { actAs, asFinance, clearPeriodsBefore, connect, type Finance, financePerson, forgetReconciliations, outcomeOf, reconciled, retire, waitBehind } from "./helpers/finance";
 import { memoryJar } from "./helpers/auth";
 import { asOwner, asServer } from "./helpers/team";
 import { completeAccountAsOwner, deleteTestUsersByEmail, ownerQuery } from "./helpers/users";
@@ -91,6 +91,7 @@ beforeAll(async () => {
     `update public.payout_periods set status = 'closing', entered_closing_at = now() - interval '2 days', active_students = 1, pool_bps = 6000 where period_id = any($1::int[])`,
     [OURS],
   );
+  await reconciled(owner, OURS);
   await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
   await owner.query(
     `insert into public.job_runs (job, period_id, status, started_at, heartbeat_at, finished_at, details)
@@ -120,6 +121,7 @@ afterAll(async () => {
     await owner.query("update public.payout_periods set close_run_id = null where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.close_run_teacher_totals where close_run_id in (select id from public.close_runs where period_id = any($1::int[]))", [OURS]);
     await owner.query("delete from private.close_exports where period_id = any($1::int[])", [OURS]);
+    await forgetReconciliations(owner, OURS);
     await owner.query("delete from public.close_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.job_runs where period_id = any($1::int[])", [OURS]);
     await owner.query("delete from public.payout_periods where period_id = any($1::int[]) or period_id = 204204", [OURS]);

@@ -5,6 +5,7 @@
 -- El escenario es el de `46_liberar`: octubre de 2026, con M3 fundador y `PAGO_MINIMO` de 100 MXN. M1 y M2 se pagan, M3 se acumula, M4 no tiene nada.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 select plan(147);
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
@@ -39,6 +40,7 @@ declare
 begin
   perform pruebas.como_finanzas();
   perform private.rehearse_close(p_period);
+  perform pruebas.conciliado(p_period);
   v := private.close_period(p_period, private.last_rehearsal(p_period));
   set constraints payout_periods_balanced immediate;
   set constraints payout_periods_balanced deferred;

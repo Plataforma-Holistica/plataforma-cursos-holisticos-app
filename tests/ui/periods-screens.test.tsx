@@ -1,21 +1,23 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // PA-78, PA-79 y PA-80: los periodos, el panel de uno y su ensayo y cierre (T-605). Las acciones de
 // servidor son la frontera con los servicios: aquí se cambian por lo que contestarían.
-const actions = vi.hoisted(() => ({ periodCodeAction: vi.fn(), panelAction: vi.fn(), closeAction: vi.fn(), downloadAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ periodCodeAction: vi.fn(), panelAction: vi.fn(), closeAction: vi.fn(), downloadAction: vi.fn(), reconcileAction: vi.fn() }));
 vi.mock("@/app/admin/_periodos/actions", () => actions);
 
 import { CloseScreen } from "@/app/admin/_periodos/close-screen";
 import { PeriodsScreen } from "@/app/admin/_periodos/list-screen";
 import { csvHref, periodsButton } from "@/app/admin/_periodos/outcomes";
 import { PeriodScreen } from "@/app/admin/_periodos/panel-screen";
+import { reconcileButton, type ReconcileState } from "@/app/admin/_periodos/reconcile-outcomes";
 import { closeView, periodsView, periodView } from "@/app/admin/_periodos/rows";
 import { admin } from "@/messages/es/admin";
 import { t } from "@/messages/format";
 import { periodClosePath, periodPath, ROUTES } from "@/services/account/navigation";
-import type { FinanceClose, FinancePeriod, RunTeacher } from "@/services/periods/periods";
+import type { FinanceClose, FinancePeriod, Reconciliation, ReconciliationDifference, RunTeacher } from "@/services/periods/periods";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -77,6 +79,7 @@ function period(overrides: Partial<Period> = {}, status: Period["period"]["statu
     lastRollup: { status: "succeeded", mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     lastGoodRollup: { mode: "full", startedAt: "2027-11-02T09:00:00Z", finishedAt: "2027-11-02T09:05:00Z" },
     rollupRequest: null,
+    reconciliation: null,
     ...overrides,
   };
 }
@@ -85,7 +88,7 @@ function close(overrides: Partial<Close> = {}, status: Close["period"]["status"]
   return {
     freshCode: true,
     period: { periodId: 202710, status, endsAt: "2027-11-01T06:00:00Z", enteredClosingAt: "2027-11-01T09:00:00Z" },
-    checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false },
+    checks: { openAlerts: 0, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false, billingEvents: 0, chargesMatch: true },
     rehearsal: { ...figures, at: "2027-11-02T10:00:00Z", status: "succeeded", statusAtRun: "closing", carriedInCents: 0, teachers: [teacher] },
     close: null,
     ...overrides,
@@ -207,10 +210,10 @@ describe("PA-80, el ensayo y el cierre", () => {
   });
 
   it("la lista de lo que falta, cada cosa con su estado en palabras; sin la lista completa, no se ofrece cerrar", () => {
-    render(<CloseScreen view={closeView(close({ checks: { openAlerts: 2, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false } }))} />);
+    render(<CloseScreen view={closeView(close({ checks: { openAlerts: 2, finalRehearsal: true, lastRollup: "succeeded", rollupMarks: false, billingEvents: 0, chargesMatch: true } }))} />);
     const item = screen.getByText("Todas las alertas revisadas: faltan 2").closest("li") as HTMLElement;
     expect(within(item).getByText(text.checkMissing)).toBeInTheDocument();
-    expect(within(item).getByRole("link", { name: text.goToAlerts })).toHaveAttribute("href", ROUTES.alerts);
+    expect(within(item).getByRole("link", { name: text.checkLinks.alerts })).toHaveAttribute("href", ROUTES.alerts);
     expect(screen.getByText(text.closeWaits)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: text.closeButton })).not.toBeInTheDocument();
   });
@@ -302,5 +305,241 @@ describe("PA-80, el ensayo y el cierre", () => {
     await user.type(screen.getByRole("textbox"), "123456");
     await user.click(screen.getByRole("button", { name: admin.code.submit }));
     expect(actions.periodCodeAction.mock.calls[0]?.[0]).toEqual({ period: 202710, page: "close" });
+  });
+});
+
+describe("PA-80, lo de Stripe en la lista (T-303, cuarta solicitud)", () => {
+  it("las dos comprobaciones nuevas, hechas", () => {
+    render(<CloseScreen view={closeView(close())} />);
+    for (const label of [text.checks.billingEventsClear, text.checks.chargesMatch]) {
+      const item = screen.getByText(label).closest("li") as HTMLElement;
+      expect(within(item).getByText(text.checkDone)).toBeInTheDocument();
+      expect(within(item).queryByRole("link")).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("button", { name: text.closeButton })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["avisos de cobro pendientes", { billingEvents: 2 }, "Sin avisos de cobro pendientes: quedan 2 sin procesar o en espera", text.checkLinks.billingEvents, ROUTES.billingEvents],
+    ["sin comparación vigente que coincida", { chargesMatch: false }, text.checks.chargesMatchMissing, text.checkLinks.reconciliation, `${periodPath(202710)}#bloque-periodo-conciliacion`],
+  ])("con %s: lo dice, enlaza a donde se resuelve y no ofrece «Cerrar periodo»", async (_name, checks, label, link, href) => {
+    const { container } = render(<CloseScreen view={closeView(close({ checks: { ...close().checks, ...checks } }))} />);
+    const item = screen.getByText(label).closest("li") as HTMLElement;
+    expect(within(item).getByText(text.checkMissing)).toBeInTheDocument();
+    expect(within(item).getByRole("link", { name: link })).toHaveAttribute("href", href);
+    expect(screen.queryByRole("button", { name: text.closeButton })).not.toBeInTheDocument();
+    expect(screen.getByText(text.closeWaits)).toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("cada comprobación pendiente lleva su propio enlace: las alertas y la consolidación no dicen lo mismo", () => {
+    render(<CloseScreen view={closeView(close({ checks: { ...close().checks, openAlerts: 1, lastRollup: "failed" } }))} />);
+    expect(screen.getByRole("link", { name: text.checkLinks.alerts })).toHaveAttribute("href", ROUTES.alerts);
+    expect(screen.getByRole("link", { name: text.checkLinks.rollup })).toHaveAttribute("href", `${periodPath(202710)}#bloque-periodo-recalculo`);
+  });
+});
+
+describe("PA-79, la conciliación con Stripe (T-303, cuarta solicitud)", () => {
+  const rec = text.reconciliation;
+  const difference = (overrides: Partial<ReconciliationDifference> = {}): ReconciliationDifference => ({
+    side: "only_provider",
+    charge: "ch_1",
+    ownCents: null,
+    providerCents: 34_900,
+    currency: "mxn",
+    explained: false,
+    note: null,
+    explainedAt: null,
+    ...overrides,
+  });
+  const reconciliation = (overrides: Partial<Reconciliation> = {}): Reconciliation => ({
+    id: "d0000000-0000-4000-8000-000000000001",
+    registeredAt: "2027-11-02T15:00:00Z",
+    livemode: true,
+    complete: true,
+    tooMany: false,
+    ownCount: 130,
+    ownCents: 4_537_000,
+    providerCount: 130,
+    providerCents: 4_537_000,
+    providerPending: 0,
+    providerOtherCurrency: 0,
+    differencesTotal: 0,
+    requested: true,
+    ownCountNow: overrides.ownCount ?? 130,
+    foreignProvider: false,
+    latestIncompleteAt: null,
+    matches: true,
+    current: true,
+    differences: [],
+    ...overrides,
+  });
+  const FOUR = reconciliation({
+    matches: false,
+    current: false,
+    differencesTotal: 4,
+    differences: [
+      difference(),
+      difference({ side: "only_own", charge: "ch_2", ownCents: 34_900, providerCents: null }),
+      difference({ side: "amount", charge: "ch_3", ownCents: 34_900, providerCents: 30_000 }),
+      difference({ side: "other_currency", charge: "ch_4", providerCents: 1_999, currency: "usd" }),
+    ],
+  });
+  const ONLY_PROVIDER = { side: "only_provider", currency: "mxn", cents: "34900", charge: "ch_1" } as const;
+  const block = () => screen.getByRole("region", { name: rec.title });
+
+  it("sin comparación: lo dice, con su ancla y «Comparar ahora»", async () => {
+    const { container } = render(<PeriodScreen view={periodView(period(), null, NOW)} />);
+    expect(block()).toHaveAttribute("id", "bloque-periodo-conciliacion");
+    expect(within(block()).getByText(rec.never)).toBeInTheDocument();
+    expect(within(block()).getByRole("button", { name: rec.compare })).toHaveAttribute("value", reconcileButton.compare());
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("una que coincide: cuándo y hace cuántos días, quién la pidió, los dos lados, y que está vigente", () => {
+    render(<PeriodScreen view={periodView(period({ reconciliation: reconciliation() }), null, NOW)} />);
+    const here = within(block());
+    expect(here.getByText(/Última comparación: el 2 de noviembre de 2027 a las .* \(hoy\)\. La pidió alguien de finanzas\./)).toBeInTheDocument();
+    expect(here.getByText("El libro: 130 cobros por $45,370.00.")).toBeInTheDocument();
+    expect(here.getByText("Stripe: 130 cargos por $45,370.00.")).toBeInTheDocument();
+    expect(here.getByText(rec.matchesCurrent)).toBeInTheDocument();
+    expect(here.getByText(rec.differencesNone)).toBeInTheDocument();
+  });
+
+  it("incompleta y con pendientes: lo dice en palabras", () => {
+    render(<PeriodScreen view={periodView(period({ reconciliation: reconciliation({ matches: false, current: false, complete: false, providerPending: 1, tooMany: true }) }), null, NOW)} />);
+    const here = within(block());
+    expect(here.getByText(rec.mismatch)).toBeInTheDocument();
+    expect(here.getByText(rec.incomplete)).toBeInTheDocument();
+    expect(here.getByText("Stripe tiene 1 cargo pendiente: hasta que se resuelva, no coincide.")).toBeInTheDocument();
+    expect(here.getByText(rec.tooMany)).toBeInTheDocument();
+  });
+
+  it("las diferencias de los cuatro lados: «Explicar» solo en las dos que se explican, y en las otras la frase de que frena el cierre", async () => {
+    const { container } = render(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
+    const table = within(block()).getByRole("table", { name: rec.differencesCaption });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(4);
+    const [onlyProvider, onlyOwn, amount, otherCurrency] = rows.map((row) => within(row));
+    expect(onlyProvider!.getByText(rec.sides.onlyProvider)).toBeInTheDocument();
+    expect(onlyProvider!.getByRole("button", { name: "Explicar el cargo ch_1" })).toHaveAttribute("value", reconcileButton.askExplain(ONLY_PROVIDER));
+    expect(onlyOwn!.getByText(rec.sides.onlyOwn)).toBeInTheDocument();
+    expect(onlyOwn!.queryByRole("button")).not.toBeInTheDocument();
+    expect(onlyOwn!.getByText(rec.blocks)).toBeInTheDocument();
+    expect(amount!.getByText(rec.sides.amount)).toBeInTheDocument();
+    expect(amount!.queryByRole("button")).not.toBeInTheDocument();
+    expect(amount!.getByText(rec.blocks)).toBeInTheDocument();
+    expect(otherCurrency!.getByText(rec.sides.otherCurrency)).toBeInTheDocument();
+    expect(otherCurrency!.getByRole("button", { name: "Explicar el cargo ch_4" })).toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("lo explicado dice su nota y cuándo, sin botón", () => {
+    const explained = reconciliation({ matches: false, differences: [difference({ explained: true, note: "Cargo de prueba", explainedAt: "2027-11-02T16:00:00Z" })] });
+    render(<PeriodScreen view={periodView(period({ reconciliation: explained }), null, NOW)} />);
+    expect(within(block()).getByText("Explicada el 2 de noviembre de 2027: Cargo de prueba")).toBeInTheDocument();
+    expect(within(block()).queryByRole("button", { name: /^Explicar/ })).not.toBeInTheDocument();
+  });
+
+  it("«Explicar» pregunta en su fila con la nota; sin nota vuelve a preguntar, y confirmar manda la diferencia como se vio", async () => {
+    const asking: ReconcileState = { kind: "asking", asked: ONLY_PROVIDER, note: undefined, problem: null, attempt: 1 };
+    actions.reconcileAction.mockResolvedValueOnce(asking);
+    actions.reconcileAction.mockResolvedValueOnce({ ...asking, note: "", problem: "missing_note", attempt: 2 });
+    actions.reconcileAction.mockResolvedValueOnce({ kind: "done", answer: "explained", attempt: 3 });
+    const user = userEvent.setup();
+    const { container } = render(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
+    await user.click(screen.getByRole("button", { name: "Explicar el cargo ch_1" }));
+    expect(sent(actions.reconcileAction)).toEqual({ period: "202710", do: reconcileButton.askExplain(ONLY_PROVIDER) });
+    // La acción no va atada: el periodo viaja en el formulario, y el primer argumento es el estado.
+    expect(actions.reconcileAction.mock.calls[0]?.[0]).toEqual({ kind: "idle" });
+    const note = await screen.findByLabelText(rec.noteLabel);
+    expect(note).toHaveAttribute("maxlength", "500");
+    expect(screen.getByText(rec.explainBody)).toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+    const confirm = screen.getByRole("button", { name: rec.confirmExplain });
+    expect(confirm).toHaveAttribute("value", reconcileButton.explain(ONLY_PROVIDER));
+    await user.click(confirm);
+    await waitFor(() => expect(screen.getByLabelText(rec.noteLabel)).toHaveAccessibleDescription(expect.stringContaining(rec.failures.missingNote)));
+    await user.click(screen.getByLabelText(rec.noteLabel));
+    await user.paste("Un cargo de prueba que se registró a mano.");
+    await user.click(screen.getByRole("button", { name: rec.confirmExplain }));
+    expect(sent(actions.reconcileAction, 2)).toEqual({ period: "202710", do: reconcileButton.explain(ONLY_PROVIDER), note: "Un cargo de prueba que se registró a mano." });
+    await waitFor(() => expect(screen.getByText(rec.answers.explained)).toBeInTheDocument());
+  });
+
+  it("cancelar cierra la pregunta", async () => {
+    actions.reconcileAction.mockResolvedValueOnce({ kind: "asking", asked: ONLY_PROVIDER, note: undefined, problem: null, attempt: 1 });
+    actions.reconcileAction.mockResolvedValueOnce({ kind: "idle" });
+    const user = userEvent.setup();
+    render(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
+    await user.click(screen.getByRole("button", { name: "Explicar el cargo ch_1" }));
+    await user.click(await screen.findByRole("button", { name: rec.cancel }));
+    expect(sent(actions.reconcileAction, 1)).toMatchObject({ do: reconcileButton.cancel() });
+    await waitFor(() => expect(screen.queryByLabelText(rec.noteLabel)).not.toBeInTheDocument());
+  });
+
+  it.each<[string, ReconcileState, string]>([
+    ["coincide", { kind: "done", answer: "matches", attempt: 1 }, text.reconciliation.answers.matches],
+    ["no coincide", { kind: "done", answer: "mismatch", attempt: 1 }, text.reconciliation.answers.mismatch],
+    ["incompleta", { kind: "done", answer: "incomplete", attempt: 1 }, text.reconciliation.answers.incomplete],
+    ["sin llave de Stripe", { kind: "failed", reason: "no_stripe", note: undefined, attempt: 1 }, text.reconciliation.failures.noStripe],
+    ["el mes no termina", { kind: "failed", reason: "too_early", note: undefined, attempt: 1 }, text.reconciliation.failures.tooEarly],
+    ["una por minuto", { kind: "failed", reason: "rate_limited", note: undefined, attempt: 1 }, text.reconciliation.failures.rateLimited],
+    ["no se supo", { kind: "failed", reason: "unknown", note: undefined, attempt: 1 }, text.reconciliation.failures.unknown],
+  ])("«Comparar ahora» manda su botón, y lo que contestó se dice en el bloque: %s", async (_name, answer, said) => {
+    actions.reconcileAction.mockResolvedValueOnce(answer);
+    const user = userEvent.setup();
+    render(<PeriodScreen view={periodView(period(), null, NOW)} />);
+    await user.click(screen.getByRole("button", { name: rec.compare }));
+    expect(sent(actions.reconcileAction)).toEqual({ period: "202710", do: reconcileButton.compare() });
+    await waitFor(() => expect(within(block()).getByText(said)).toBeInTheDocument());
+  });
+
+  it("mientras compara lo dice", async () => {
+    let finish: (state: ReconcileState) => void = () => undefined;
+    actions.reconcileAction.mockReturnValueOnce(new Promise<ReconcileState>((resolve) => (finish = resolve)));
+    const user = userEvent.setup();
+    render(<PeriodScreen view={periodView(period(), null, NOW)} />);
+    await user.click(screen.getByRole("button", { name: rec.compare }));
+    await waitFor(() => expect(within(block()).getAllByText(rec.comparing).length).toBeGreaterThan(0));
+    finish({ kind: "done", answer: "matches", attempt: 1 });
+    await waitFor(() => expect(within(block()).getByText(rec.answers.matches)).toBeInTheDocument());
+  });
+
+  it("sin el código reciente: se compara, pero no se explica", () => {
+    render(<PeriodScreen view={periodView(period({ freshCode: false, reconciliation: FOUR }), null, NOW)} />);
+    expect(within(block()).getByRole("button", { name: rec.compare })).toBeInTheDocument();
+    expect(within(block()).queryByRole("button", { name: /^Explicar/ })).not.toBeInTheDocument();
+    expect(within(block()).getByText(rec.changeLocked)).toBeInTheDocument();
+  });
+
+  it("abierto y sin terminar: todavía no se compara", () => {
+    const running = period({ period: { ...period().period, status: "open", endsAt: "2027-12-01T06:00:00Z" } });
+    render(<PeriodScreen view={periodView(running, null, NOW)} />);
+    expect(within(block()).queryByRole("button", { name: rec.compare })).not.toBeInTheDocument();
+    expect(within(block()).getByText(rec.notYet)).toBeInTheDocument();
+  });
+
+  it("cerrado: el bloque solo se consulta", () => {
+    render(<PeriodScreen view={periodView(period({ close: figures, reconciliation: FOUR }, "closed"), null, NOW)} />);
+    expect(within(block()).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(block()).getByText(rec.readOnly)).toBeInTheDocument();
+    expect(within(block()).getAllByText(rec.blocks)).toHaveLength(2);
+  });
+
+  it("en el teléfono solo se consulta: las acciones van ocultas por debajo del ancho de tableta, y se dice dónde hacerlo", () => {
+    render(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
+    expect(within(block()).getByText(rec.phoneOnly)).toHaveClass("md:hidden");
+    for (const name of [rec.compare, "Explicar el cargo ch_1"]) {
+      const form = within(block()).getByRole("button", { name }).closest("form");
+      expect(form).toHaveClass("hidden");
+      expect(form?.className).toMatch(/\bmd:(block|flex)\b/);
+    }
+  });
+
+  it("funciona sin JavaScript: comparar y explicar son formularios con su botón", () => {
+    const html = renderToString(<PeriodScreen view={periodView(period({ reconciliation: FOUR }), null, NOW)} />);
+    expect(html).toContain(`value="${reconcileButton.compare()}"`);
+    expect(html).toContain(`value="${reconcileButton.askExplain(ONLY_PROVIDER)}"`);
   });
 });

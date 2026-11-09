@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { actAs, clearPeriodsBefore, connect, financePerson, retire, SEEN, SHOWN } from "../integration/helpers/finance";
+import { actAs, clearPeriodsBefore, connect, financePerson, reconciled, retire, SEEN, SHOWN } from "../integration/helpers/finance";
 import { localOwnerUrl } from "../integration/helpers/local";
 import { assertPlainWindow } from "../integration/helpers/periods";
 
@@ -251,15 +251,15 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
     await owner.query(
       `insert into public.subscriptions (id, profile_id, provider, provider_subscription_id, plan, status, currency)
        select ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, ('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid,
-              'manual', 'sus-escala-' || s, 'monthly', 'pending', 'MXN'
+              'stripe', 'sub_escala_' || s, 'monthly', 'pending', 'MXN'
        from generate_series(1, $1) s`,
       [STUDENTS],
     );
     const charges = await one<{ recorded: string }>(
       `select count(*) filter (where r ->> 'outcome' = 'recorded') as recorded
        from (select private.record_charge(('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid,
-                                          ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, 'manual',
-                                          'cobro-escala-' || s, null, 'monthly', now() - interval '1 hour', 'MXN', 34900,
+                                          ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, 'stripe',
+                                          'ch_escala_' || s, null, 'monthly', now() - interval '1 hour', 'MXN', 34900,
                                           null, null, 'card', 'MX', null) r
              from generate_series(1, $1) s) x`,
       [STUDENTS],
@@ -348,6 +348,8 @@ describe("la consolidación a HORIZONTE_ESCALA", () => {
         [period, STUDENTS],
       );
       await owner.query("alter table public.payout_periods enable trigger payout_periods_guard, enable trigger payout_periods_balanced");
+      // Una comparación con Stripe que coincide (T-303, cuarta solicitud): el cierre cuenta los 13 000 cobros de Stripe del mes para ver que sigue vigente.
+      await reconciled(owner, period);
     });
     expect((await q("select * from private.schema_violations()")).length).toBe(0);
     report.load_s = Math.round(ms(start) / 1000);
@@ -666,6 +668,46 @@ describe("el reparto y el cierre a HORIZONTE_ESCALA", () => {
       lines: Number((await one<{ n: string }>("select cardinality(lines) as n from close_lines")).n),
     };
     expect(Math.max(...times)).toBeLessThan(SERVER_STATEMENT_MS);
+  });
+
+  it("registrar una comparación con Stripe a la escala cabe en el tope de una sentencia del servidor (T-303, cuarta solicitud)", async () => {
+    // El mes de la escala no ha terminado: se registra contra el anterior, con 13 000 cobros de Stripe en el libro (uno por alumno, por la función del libro) y
+    // los mismos 13 000 cargos de Stripe: validar y clasificar cada uno, cruzar los dos lados y contar la huella. La lista se arma en la misma sentencia (el
+    // servidor la manda hecha). Se deshace al terminar.
+    await owner.query("begin");
+    try {
+      await owner.query("select set_config('app.actor_kind', 'system', true)");
+      const previous = Number((await one<{ p: string }>("select private.period_plus($1, -1)::text as p", [period])).p);
+      await owner.query("select private.open_period($1)", [previous]);
+      const prepared = await one<{ recorded: string }>(
+        `select count(*) filter (where r ->> 'outcome' = 'recorded') as recorded
+         from (select private.record_charge(('e5ca1a00-0000-4000-8000-' || lpad(s::text, 12, '0'))::uuid,
+                                            ('e5ca1a00-0000-4000-9000-' || lpad(s::text, 12, '0'))::uuid, 'stripe', 'ch_escala_previo_' || s, null, 'monthly',
+                                            p.starts_at + s * interval '1 second', 'MXN', 34900, null, null, 'card', 'MX', null) r
+               from public.payout_periods p, generate_series(1, $2) s where p.period_id = $1) x`,
+        [previous, STUDENTS],
+      );
+      expect(Number(prepared.recorded)).toBe(STUDENTS);
+      // El tope del servidor, solo para lo que se mide.
+      await owner.query("set local statement_timeout = '10s'");
+      const start = performance.now();
+      const recorded = await one<{ r: { outcome: string; differences: number } }>(
+        `select private.billing_reconciliation_record(p.period_id, false, extract(epoch from p.starts_at)::bigint, extract(epoch from p.ends_at)::bigint, true,
+                  (select jsonb_agg(jsonb_build_object('id', 'ch_escala_previo_' || s, 'status', 'succeeded', 'captured', true, 'refunded', false,
+                                                       'currency', 'mxn', 'livemode', false, 'created', extract(epoch from p.starts_at)::bigint + s,
+                                                       'amount_captured', 34900))
+                   from generate_series(1, $2) s)) as r
+         from public.payout_periods p where p.period_id = $1`,
+        [previous, STUDENTS],
+      );
+      const took = ms(start);
+      report.reconciliation = { record_ms: took, charges: STUDENTS, differences: recorded.r.differences };
+      expect(recorded.r.outcome).toBe("recorded");
+      expect(recorded.r.differences).toBe(0);
+      expect(took).toBeLessThan(SERVER_STATEMENT_MS);
+    } finally {
+      await owner.query("rollback");
+    }
   });
 
   it("el ensayo y el cierre, como los correrá el servidor: se mide si caben", async () => {

@@ -11,6 +11,7 @@
 -- ronda se deshace al terminar (con una excepción atrapada); lo que se mide vive en variables.
 begin;
 \ir _ayuda.psql
+\ir _conciliado.psql
 \ir _con_datos_fiscales.psql
 -- Aquí, con tasas de verdad: las rondas también escriben impuestos, y la comprobación al confirmar los recalcula.
 set local session_replication_role = replica;
@@ -24,6 +25,16 @@ end
 $$;
 set local session_replication_role = origin;
 select plan(7);
+
+-- La consolidación de cada noche del `pg_cron` local corre a las 09:00 UTC sobre el mes en curso y el anterior, que esta prueba también
+-- cierra: si la prueba pasa por esa hora, el ensayo o el cierre de ese mes contestan `rollup_running` (pasó en la integración continua de
+-- la 123, el 2026-11-07). Esperarla desde aquí no es seguro (la prueba deja filas de periodos sin confirmar que la corrida puede necesitar,
+-- y se esperarían una a la otra sin que Postgres lo vea), así que de las 08:50 a las 09:30 UTC la prueba se salta y lo dice. Es la misma
+-- franja que pausa los recálculos pedidos (`private.rollup_requests_paused`, 08:00 a 09:30): si cambia la hora de la noche, cambian las dos.
+select ((now() at time zone 'UTC')::time >= time '08:50' and (now() at time zone 'UTC')::time < time '09:30') as a_la_hora_de_la_noche \gset
+\if :a_la_hora_de_la_noche
+select skip('de las 08:50 a las 09:30 UTC corre la consolidación del pg_cron local sobre estos meses: la prueba se salta', 7);
+\else
 
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6050000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -158,6 +169,7 @@ begin
                 '{"mode": "full"}');
         perform pruebas.como_finanzas();
         perform private.rehearse_close(v_period);
+        perform pruebas.conciliado(v_period);
         v_r := private.close_period(v_period, private.last_rehearsal(v_period));
         set constraints payout_periods_balanced immediate;
         set constraints payout_periods_balanced deferred;
@@ -262,6 +274,8 @@ select ok(exists (select 1 from cuenta where saldo_negativo) and exists (select 
           and exists (select 1 from cuenta where pagado),
   'hay saldos en contra, retenidas y periodos que pasan a pagados');
 select is((select count(*)::integer from public.payouts), 0, 'y nada quedó: cada ronda se deshizo');
+
+\endif
 
 select * from finish();
 rollback;
