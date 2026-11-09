@@ -17,6 +17,15 @@ begin;
 \ir _conciliado.psql
 select plan(9);
 
+-- La consolidación de cada noche del `pg_cron` local corre a las 09:00 UTC sobre el mes en curso y el anterior, que esta prueba también
+-- cierra: si la prueba pasa por esa hora, el ensayo o el cierre de ese mes contestan `rollup_running` (pasó en la integración continua de
+-- la 123, el 2026-11-07). Esperarla desde aquí no es seguro (la prueba deja filas de periodos sin confirmar que la corrida puede necesitar,
+-- y se esperarían una a la otra sin que Postgres lo vea), así que de las 08:50 a las 09:30 UTC la prueba se salta y lo dice.
+select ((now() at time zone 'UTC')::time >= time '08:50' and (now() at time zone 'UTC')::time < time '09:30') as a_la_hora_de_la_noche \gset
+\if :a_la_hora_de_la_noche
+select skip('de las 08:50 a las 09:30 UTC corre la consolidación del pg_cron local sobre estos meses: la prueba se salta', 9);
+\else
+
 create function pruebas.al(p_n integer) returns uuid language sql immutable
 as $$ select ('a6020000-0000-0000-0000-' || lpad((440 + p_n)::text, 12, '0'))::uuid $$;
 create function pruebas.finanzas() returns uuid language sql immutable as $$ select 'b6020000-0000-0000-0000-000000000044'::uuid $$;
@@ -229,6 +238,8 @@ select ok(exists (select 1 from cuenta a join cuenta b on b.ronda = a.ronda and 
                   where a.arrastre and not b.arrastre), 'algún periodo reparte lo que recibió');
 select is((select count(*)::integer from public.payout_periods where status = 'closed'), 0, 'y nada quedó: cada ronda se deshizo');
 select is((select count(*)::integer from public.close_runs), 0, 'ni sus corridas');
+
+\endif
 
 select * from finish();
 rollback;
