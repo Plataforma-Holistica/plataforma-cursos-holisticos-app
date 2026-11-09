@@ -15,22 +15,20 @@ import { changedFiles, touchesCode } from "../../scripts/ci-cambios.mjs";
 const ci = readFileSync(".github/workflows/ci.yml", "utf8").replaceAll("\r", "");
 const COND = "steps.mira.outputs.codigo != 'false'";
 
-/** Los pasos del trabajo, con su nombre y su `if`, en orden. */
+/**
+ * Los pasos del trabajo, con su nombre y su `if`, en orden. Un paso empieza con `- ` a seis espacios (con cualquier clave) y llega hasta el
+ * siguiente; sus claves van a ocho espacios, y lo anidado (`with:`, `env:`, `run: |`) más adentro, así que se lee el paso entero.
+ */
 function steps(): { name: string; condition: string | null }[] {
-  const lines = ci.split("\n");
+  const lines = ci.slice(ci.indexOf("\n    steps:\n")).split("\n");
   const found: { name: string; condition: string | null }[] = [];
   lines.forEach((line, index) => {
-    const named = /^ {6}- (?:name: (.+)|id: (.+)|uses: (.+))$/.exec(line);
-    if (!named) return;
-    let name = named[1] ?? named[2] ?? named[3] ?? "";
-    let condition: string | null = null;
-    for (let next = index + 1; next < lines.length && /^ {8}\S/.test(lines[next]!); next += 1) {
-      const nameLine = /^ {8}name: (.+)$/.exec(lines[next]!);
-      if (nameLine) name = nameLine[1]!;
-      const ifLine = /^ {8}if: (.+)$/.exec(lines[next]!);
-      if (ifLine) condition = ifLine[1]!;
-    }
-    found.push({ name, condition });
+    const start = /^ {6}- ([a-z-]+):\s*(.*)$/.exec(line);
+    if (!start) return;
+    const own = [`        ${start[1]}: ${start[2]}`];
+    for (let next = index + 1; next < lines.length && !/^ {0,6}\S/.test(lines[next]!); next += 1) own.push(lines[next]!);
+    const key = (name: string) => own.map((each) => new RegExp(`^ {8}${name}: (.+)$`).exec(each)?.[1]).find((value) => value !== undefined) ?? null;
+    found.push({ name: key("name") ?? key("id") ?? key("uses") ?? key("run") ?? "", condition: key("if") });
   });
   return found;
 }
@@ -61,8 +59,14 @@ describe("cuándo corre la integración continua", () => {
     expect(after.length).toBeGreaterThan(15);
     for (const step of after) {
       if (step.name === "Instalar dependencias" || step.name === "Escaneo de secretos") expect(step.condition, step.name).toBeNull();
-      else expect(step.condition, step.name).toContain(`\${{ ${COND}`);
+      else if (step.name !== "Pruebas de extremo a extremo del equipo") expect(step.condition, step.name).toBe(`\${{ ${COND} }}`);
     }
+  });
+
+  it("antes de mirar, ningún paso se salta; y solo el paso que mira puede fallar sin detener la corrida", () => {
+    const all = steps();
+    for (const step of all.slice(0, all.findIndex((each) => each.name === "Qué cambió"))) expect(step.condition, step.name).toBeNull();
+    expect(ci.match(/continue-on-error/g)).toHaveLength(1);
   });
 
   it("el extremo a extremo del equipo se salta además en una solicitud en borrador, y solo él", () => {
@@ -83,6 +87,8 @@ describe("qué cuenta como código", () => {
     [["scripts/LEEME.md"], true],
     [[".github/workflows/ci.yml"], true],
     [["package.json"], true],
+    // Un nombre raro sale entre comillas y con escapes (`core.quotePath`): termina en comilla, no en `.md`, y cuenta como código.
+    [['"docs/caf\\303\\251.md"'], true],
     [[], true],
   ])("%j: %s", (files, expected) => {
     expect(touchesCode(files)).toBe(expected);

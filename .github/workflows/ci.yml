@@ -32,8 +32,8 @@ jobs:
       # Cada acción va por el identificador exacto de su commit, no por su etiqueta: una
       # etiqueta se puede mover a otro código sin que aquí cambie nada. Dependabot propone
       # las actualizaciones (.github/dependabot.yml).
-      # Con la historia entera: la comprobación del orden de las migraciones compara contra lo que
-      # main tenía antes.
+      # Con la historia entera: la comprobación del orden de las migraciones mira las migraciones de
+      # HEAD^1 (main, o lo que va antes en la cola) y lo que esta rama agrega.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
