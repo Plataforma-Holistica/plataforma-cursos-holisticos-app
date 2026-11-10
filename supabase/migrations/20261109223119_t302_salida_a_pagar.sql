@@ -10,8 +10,10 @@
 --     todo lo que irá a Stripe, para que un reintento mande exactamente lo mismo (la llave de idempotencia de Stripe solo cubre la misma petición con los
 --     mismos parámetros). A lo más una salida abierta por cuenta.
 --   · Un cliente de Stripe por cuenta y modo, reservado antes de crearlo: así no se crea uno nuevo en cada salida, y reactivar (FL-22) usa el mismo.
---   · Una salida se cierra con la palabra de Stripe (rechazó crearla, la venció, se completó con su suscripción), o pasado su vencimiento, cuando Stripe ya
---     la venció por su cuenta. Antes de crear otra, el servidor además le pregunta a Stripe por las suscripciones del cliente (segunda solicitud).
+--   · Una salida se cierra con la palabra de Stripe (rechazó crearla, la venció, se completó con su suscripción), o cinco minutos después de su
+--     vencimiento, cuando Stripe ya la venció por su cuenta; si Stripe la completó, lo vencido por el reloj se corrige. Una salida completada cuya
+--     suscripción no llegó todavía con su aviso también es un pago en curso. Antes de crear otra, el servidor además le pregunta a Stripe por las
+--     suscripciones del cliente (segunda solicitud).
 --   · PA-32 lee si la sesión es de quien mira y si su suscripción ya está viva. Nunca da acceso: el acceso sigue saliendo de `billing_apply` con el aviso.
 --
 -- Nadie de la aplicación lee ni escribe las tablas: entra por estas puertas, solo del servidor. Lo prueba la 88, y las carreras la integración 116.
@@ -82,7 +84,7 @@ create table private.checkout_sessions (
   constraint checkout_sessions_amount check (amount_cents > 0),
   constraint checkout_sessions_currency check (currency = 'MXN'),
   constraint checkout_sessions_lookup_key check (lookup_key ~ '^plataforma_(monthly|annual)_[1-9][0-9]*_mxn$'),
-  constraint checkout_sessions_return_to check (length(return_to) <= 200 and return_to ~ '^/([A-Za-z0-9_.~/?=&%-]*)$' and return_to !~ '^//'),
+  constraint checkout_sessions_return_to check (length(return_to) <= 200 and return_to ~ '^/([A-Za-z0-9_.~/?=&%+-]*)$' and return_to !~ '^//'),
   constraint checkout_sessions_session_shape check (session_id is null or session_id ~ '^cs_(test|live)_[A-Za-z0-9]{1,250}$'),
   constraint checkout_sessions_url_shape check (url is null or (url ~ '^https://checkout\.stripe\.com/' and length(url) <= 2000)),
   constraint checkout_sessions_subscription_shape check (subscription_id is null or subscription_id ~ '^sub_[A-Za-z0-9]{1,250}$'),
@@ -97,7 +99,8 @@ create unique index checkout_sessions_session_uq on private.checkout_sessions (s
 alter table private.checkout_sessions enable row level security;
 revoke all on table private.checkout_sessions from public, anon, authenticated, service_role, app_service;
 
--- Nace reservada; lo reservado no cambia; los pasos van en un solo sentido, y lo cerrado no se mueve. Nada se borra.
+-- Nace reservada; lo reservado no cambia; los pasos van en un solo sentido, y lo cerrado no se mueve, salvo lo vencido por el reloj, que se corrige con la
+-- palabra de Stripe (la completó o la venció). Nada se borra.
 create function private.guard_checkout_session() returns trigger
 language plpgsql set search_path = ''
 as $$
@@ -119,7 +122,7 @@ begin
       old.return_to, old.consent_id, old.created_at) then
     raise exception '%.%: what was reserved does not change', tg_table_schema, tg_table_name using errcode = '42501';
   end if;
-  if old.state not in ('reserved', 'creating', 'open') then
+  if old.state not in ('reserved', 'creating', 'open') and not (old.state = 'lapsed' and new.state in ('completed', 'expired')) then
     raise exception '%.%: a closed checkout does not change', tg_table_schema, tg_table_name using errcode = '42501';
   end if;
   if old.session_id is not null and (new.session_id is distinct from old.session_id or new.url is distinct from old.url) then
@@ -128,7 +131,8 @@ begin
   if new.state is distinct from old.state and not (
        (old.state = 'reserved' and new.state in ('creating', 'abandoned', 'lapsed'))
        or (old.state = 'creating' and new.state in ('open', 'completed', 'expired', 'abandoned', 'lapsed'))
-       or (old.state = 'open' and new.state in ('completed', 'expired', 'lapsed'))) then
+       or (old.state = 'open' and new.state in ('completed', 'expired', 'lapsed'))
+       or (old.state = 'lapsed' and new.state in ('completed', 'expired'))) then
     raise exception '%.%: a checkout cannot go from % to %', tg_table_schema, tg_table_name, old.state, new.state using errcode = '42501';
   end if;
   if new.state in ('completed', 'expired', 'abandoned', 'lapsed') then
@@ -169,16 +173,26 @@ as $$
 $$;
 revoke all on function private.checkout_next_charge(public.subscription_plan, timestamptz) from public;
 
--- Un pago en curso: una suscripción viva, o una que no da acceso todavía y que Stripe no dio por terminada (vencida, cancelada o sin pagar). Sin plazo: una
--- `pending` que Stripe ya cobró es alguien que pagó y cuyo aviso no se aplicó, y dejarlo pagar otra vez le cobraría dos veces.
+-- Un pago en curso: una suscripción viva; una de Stripe que no da acceso todavía y que Stripe no dio por terminada (vencida, cancelada o sin pagar); o una
+-- salida que Stripe completó y cuya suscripción todavía no llegó con su aviso, o llegó sin terminar. Sin plazo: es alguien que pagó y cuyo aviso no se aplicó,
+-- y dejarlo pagar otra vez le cobraría dos veces (si el aviso no llega nunca, lo resuelve soporte, T-307).
 create function private.checkout_blocking(p_profile uuid) returns boolean
 language sql stable set search_path = ''
 as $$
   select exists (
-    select 1 from public.subscriptions s
-    where s.profile_id = p_profile
-      and (s.status in ('active', 'in_grace')
-           or (s.status = 'pending' and coalesce(s.provider_status, '') not in ('canceled', 'incomplete_expired', 'unpaid'))))
+           select 1 from public.subscriptions s
+           where s.profile_id = p_profile
+             and (s.status in ('active', 'in_grace')
+                  or (s.status = 'pending' and s.provider = 'stripe'
+                      and coalesce(s.provider_status, '') not in ('canceled', 'incomplete_expired', 'unpaid'))))
+      or exists (
+           select 1 from private.checkout_sessions c
+           where c.profile_id = p_profile and c.state = 'completed'
+             and not exists (
+               select 1 from public.subscriptions s
+               where s.provider = 'stripe' and s.provider_subscription_id = c.subscription_id
+                 and (s.status in ('canceled', 'expired', 'refunded')
+                      or (s.status = 'pending' and coalesce(s.provider_status, '') in ('canceled', 'incomplete_expired', 'unpaid')))))
 $$;
 revoke all on function private.checkout_blocking(uuid) from public;
 
@@ -265,7 +279,7 @@ begin
     return pg_catalog.jsonb_build_object('answer', 'not_allowed', 'reason', 'no_actor');
   end if;
   if p_plan is null or p_livemode is null or p_return_to is null or length(p_return_to) > 200
-     or p_return_to !~ '^/([A-Za-z0-9_.~/?=&%-]*)$' or p_return_to ~ '^//' or length(coalesce(p_user_agent, '')) > 1000 then
+     or p_return_to !~ '^/([A-Za-z0-9_.~/?=&%+-]*)$' or p_return_to ~ '^//' then
     return pg_catalog.jsonb_build_object('answer', 'invalid');
   end if;
   -- Una salida a la vez por cuenta: dos peticiones (dos pestañas, un doble clic) se esperan una a la otra.
@@ -294,21 +308,28 @@ begin
     return pg_catalog.jsonb_build_object('answer', 'changed');
   end if;
 
-  -- Lo que pasó de su vencimiento ya lo venció Stripe: se cierra por el reloj.
+  -- Lo que pasó de su vencimiento ya lo venció Stripe: se cierra por el reloj, con cinco minutos de margen para un pago que iba en camino al vencer o un
+  -- reloj desfasado. Si Stripe la completó, lo dice después (`checkout_close`), y una vencida por el reloj se corrige.
   update private.checkout_sessions s set state = 'lapsed'
-  where s.profile_id = v_actor and s.state in ('reserved', 'creating', 'open') and s.expires_at <= pg_catalog.now();
+  where s.profile_id = v_actor and s.state in ('reserved', 'creating', 'open') and s.expires_at <= pg_catalog.now() - interval '5 minutes';
 
   select b.customer_id into v_customer from private.billing_customers b where b.profile_id = v_actor and b.livemode = p_livemode;
   select * into v_open from private.checkout_sessions s where s.profile_id = v_actor and s.state in ('reserved', 'creating', 'open');
   if v_open.id is not null then
-    if v_open.plan = p_plan and v_open.amount_cents = v_amount and v_open.livemode = p_livemode then
+    -- Vencida, dentro del margen: Stripe ya no la cobra, pero un pago pudo ir en camino. Se espera.
+    if v_open.expires_at <= pg_catalog.now() then
+      return pg_catalog.jsonb_build_object('answer', 'in_progress');
+    end if;
+    -- La misma salida solo si es del mismo plan, monto y modo, y su consentimiento es del texto que se vio: si no, la evidencia sería de otro texto.
+    if v_open.plan = p_plan and v_open.amount_cents = v_amount and v_open.livemode = p_livemode
+       and (select c.legal_document_id from public.consents c where c.id = v_open.consent_id) = v_document then
       return pg_catalog.jsonb_build_object('answer', 'reuse', 'checkout', private.checkout_row(v_open), 'customer', v_customer);
     end if;
     return pg_catalog.jsonb_build_object('answer', 'open_other', 'checkout', private.checkout_row(v_open), 'customer', v_customer);
   end if;
 
   insert into public.consents (profile_id, legal_document_id, origin, ip, user_agent)
-  values (v_actor, v_document, 'checkout', p_ip, p_user_agent)
+  values (v_actor, v_document, 'checkout', p_ip, left(p_user_agent, 1000))
   returning id into v_consent;
   insert into private.billing_customers (profile_id, livemode) values (v_actor, p_livemode) on conflict do nothing;
   insert into private.checkout_sessions (profile_id, livemode, plan, lookup_key, amount_cents, next_charge_at, expires_at, return_to, consent_id)
@@ -376,8 +397,13 @@ begin
   elsif exists (select 1 from private.billing_customers b where b.livemode = p_livemode and b.customer_id = p_customer) then
     return 'conflict';
   end if;
-  update private.billing_customers b set customer_id = p_customer, recorded_at = pg_catalog.now()
-  where b.profile_id = v_actor and b.livemode = p_livemode;
+  -- Dos cuentas que anotan el mismo cliente a la vez: la segunda choca con el índice único, y es lo mismo que «es de otra cuenta».
+  begin
+    update private.billing_customers b set customer_id = p_customer, recorded_at = pg_catalog.now()
+    where b.profile_id = v_actor and b.livemode = p_livemode;
+  exception when unique_violation then
+    return 'conflict';
+  end;
   return 'recorded';
 end
 $$;
@@ -410,23 +436,27 @@ begin
   elsif v_row.state <> 'creating' then
     return 'not_allowed';
   end if;
-  update private.checkout_sessions s set state = 'open', session_id = p_session, url = p_url where s.id = v_row.id;
+  -- Una sesión que ya anotó otra salida choca con su índice único: no es de esta.
+  begin
+    update private.checkout_sessions s set state = 'open', session_id = p_session, url = p_url where s.id = v_row.id;
+  exception when unique_violation then
+    return 'conflict';
+  end;
   return 'recorded';
 end
 $$;
 
 -- Cerrar una salida con la palabra de Stripe: `abandoned` (nunca se le pidió, o rechazó crearla), `expired` (la venció) o `completed` (se pagó, con su
--- suscripción). La cierra la persona, o un trabajo del sistema. Respuestas: `closed`, `already_closed`, `not_allowed` (ese paso no se puede), `invalid` y
--- `not_found`.
+-- suscripción). Una vencida por el reloj se corrige así. La cierra la persona, y solo la suya: ningún trabajo la cierra todavía. Respuestas: `closed`,
+-- `already_closed`, `not_allowed` (ese paso no se puede), `invalid` y `not_found`.
 create function private.checkout_close(p_checkout uuid, p_state text, p_subscription text) returns text
 language plpgsql security definer set search_path = ''
 as $$
 declare
   v_actor uuid := private.actor_id();
-  v_system boolean := private.actor_is_system();
   v_row private.checkout_sessions;
 begin
-  if v_actor is null and not v_system then
+  if v_actor is null then
     return 'not_allowed';
   end if;
   if p_state is null or p_state not in ('abandoned', 'expired', 'completed')
@@ -435,13 +465,13 @@ begin
     return 'invalid';
   end if;
   select * into v_row from private.checkout_sessions s
-  where s.id = p_checkout and (v_system or s.profile_id = v_actor) for update;
+  where s.id = p_checkout and s.profile_id = v_actor for update;
   if v_row.id is null then
     return 'not_found';
-  elsif v_row.state not in ('reserved', 'creating', 'open') then
+  elsif v_row.state not in ('reserved', 'creating', 'open') and not (v_row.state = 'lapsed' and p_state in ('expired', 'completed')) then
     return 'already_closed';
   elsif not ((p_state = 'abandoned' and v_row.state in ('reserved', 'creating'))
-             or (p_state in ('expired', 'completed') and v_row.state in ('creating', 'open'))) then
+             or (p_state in ('expired', 'completed') and v_row.state in ('creating', 'open', 'lapsed'))) then
     return 'not_allowed';
   end if;
   update private.checkout_sessions s set state = p_state::private.checkout_state, subscription_id = p_subscription where s.id = v_row.id;

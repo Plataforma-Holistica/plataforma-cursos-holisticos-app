@@ -5,7 +5,7 @@
 -- ni escribe las tablas: solo las puertas, solo del servidor. Lo que Stripe contesta y las carreras entre dos peticiones los prueba la integración 116.
 begin;
 \ir _ayuda.psql
-select plan(94);
+select plan(107);
 
 select pruebas.alta('a8800000-0000-0000-0000-000000000001', 'ana-88@prueba.test');
 select pruebas.alta('a8800000-0000-0000-0000-000000000002', 'beto-88@prueba.test');
@@ -28,8 +28,11 @@ insert into public.subscriptions (profile_id, provider, provider_subscription_id
                                   provider_started_at, provider_state_at) values
   (pruebas.dani(), 'stripe', 'sub_88_dani', 'monthly', 'active', 'active', 'MXN', now() - interval '3 days', now() + interval '27 days', now() - interval '3 days', now()),
   (pruebas.fer(), 'stripe', 'sub_88_fer', 'monthly', 'pending', 'incomplete_expired', 'MXN', null, null, now() - interval '3 days', now());
-insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, provider_status, currency, provider_started_at, provider_state_at)
-  values (pruebas.eli(), 'stripe', 'sub_88_eli', 'monthly', 'pending', 'incomplete', 'MXN', now() - interval '1 hour', now());
+-- Lo de Eli lleva 30 días: el bloqueo no tiene plazo.
+insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, provider_status, currency, provider_started_at, provider_state_at,
+                                  created_at)
+  values (pruebas.eli(), 'stripe', 'sub_88_eli', 'monthly', 'pending', 'incomplete', 'MXN', now() - interval '30 days', now() - interval '30 days',
+          now() - interval '30 days');
 
 -- El texto del cobro recurrente de esta prueba: una versión 1 que rige desde ahora (la base puede tener o no el borrador).
 select pruebas.como_dueno_sistema();
@@ -138,7 +141,9 @@ select is(pruebas.empieza(pruebas.cris(), 'monthly', :mensual, :'texto') #>> '{r
 select is(pruebas.empieza(pruebas.dani(), 'monthly', :mensual, :'texto') ->> 'answer', 'in_progress', 'con una suscripción viva, no');
 select is(pruebas.empieza(pruebas.eli(), 'monthly', :mensual, :'texto') ->> 'answer', 'in_progress',
   'con un pago que Stripe no terminó, tampoco, sin importar cuánto lleva');
-select is(pruebas.empieza(pruebas.fer(), 'monthly', :mensual, :'texto') ->> 'answer', 'reserved', 'con uno que Stripe dio por vencido, sí');
+select pruebas.empieza(pruebas.fer(), 'monthly', :mensual, :'texto', '/explorar?q=yoga+suave') as de_fer \gset
+select is(:'de_fer'::jsonb ->> 'answer', 'reserved', 'con uno que Stripe dio por vencido, sí');
+select is(:'de_fer'::jsonb #>> '{checkout,return_to}', '/explorar?q=yoga+suave', 'y vuelve a su búsqueda, con su «+»');
 select is((select count(*)::int from public.consents c where c.profile_id in (pruebas.beto(), pruebas.cris(), pruebas.dani(), pruebas.eli()) and c.origin = 'checkout'), 0,
   'a quien no sale, no se le anota nada');
 select pruebas.como_sistema();
@@ -168,6 +173,12 @@ select pruebas.limpiar();
 
 select pruebas.paso(pruebas.beto(), format('private.checkout_creating(%L) ->> %L', :'salida'::text, 'answer')) as ajena \gset
 select is(:'ajena'::text, 'not_found', 'la salida de otra persona no existe para quien la pide');
+select is(pruebas.paso(pruebas.beto(), format('private.checkout_close(%L, %L, null)', :'salida'::text, 'abandoned')), 'not_found', 'ni la cierra');
+select is(pruebas.paso(pruebas.beto(), format('private.checkout_session_record(%L, %L, %L)', :'salida'::text, 'cs_test_88beto', 'https://checkout.stripe.com/c/pay/cs_test_88beto')),
+  'not_found', 'ni le anota una sesión');
+select pruebas.como_sistema();
+select is(private.checkout_close(:'salida'::uuid, 'abandoned', null), 'not_allowed', 'y un trabajo del sistema no cierra la salida de nadie');
+select pruebas.limpiar();
 select pruebas.paso(pruebas.ana(), format('private.checkout_creating(%L)', :'salida'::text)) as creando \gset
 select is(:'creando'::jsonb ->> 'answer', 'creating', 'Ana pasa su salida a «creando», antes de pedirla a Stripe');
 select is(:'creando'::jsonb #>> '{checkout,id}', :'salida', 'y recibe lo reservado, para mandarlo tal cual');
@@ -211,6 +222,8 @@ select is(pruebas.paso(pruebas.beto(), format('private.checkout_status(%L) ->> %
 
 -- Stripe dice que se completó, con su suscripción: se anota; el aviso la hace viva, y PA-32 lo ve.
 select is(pruebas.paso(pruebas.ana(), format('private.checkout_close(%L, %L, %L)', :'salida'::text, 'completed', 'sub_88ana')), 'closed', 'se completó: se anota con su suscripción');
+select is(pruebas.empieza(pruebas.ana(), 'annual', :anual, :'texto') ->> 'answer', 'in_progress',
+  'Stripe la completó y su aviso no ha llegado: ya pagó, y no sale a pagar otra vez');
 select is(pruebas.paso(pruebas.ana(), format('private.checkout_close(%L, %L, null)', :'salida'::text, 'expired')), 'already_closed', 'y ya no cambia');
 insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, provider_status, currency, provider_started_at, provider_state_at)
   values (pruebas.ana(), 'stripe', 'sub_88ana', 'monthly', 'pending', 'incomplete', 'MXN', now(), now());
@@ -240,14 +253,53 @@ select is(pruebas.paso('a8800000-0000-0000-0000-000000000007', format('private.c
   'abierta no se abandona: Stripe la tiene');
 select is(pruebas.paso('a8800000-0000-0000-0000-000000000007', format('private.checkout_close(%L, %L, null)', :'gil3'::text, 'completed')), 'invalid',
   'completada sin su suscripción, no');
--- Pasado su vencimiento, Stripe ya la venció: la siguiente salida la da por vencida y reserva.
+-- Recién vencida: un pago pudo ir en camino, y se espera cinco minutos.
 select pruebas.como_dueno();
+set local session_replication_role = replica;
+update private.checkout_sessions set expires_at = now() - interval '2 minutes' where id = :'gil3'::uuid;
+set local session_replication_role = origin;
+select is(pruebas.empieza('a8800000-0000-0000-0000-000000000007', 'annual', :anual, :'texto') ->> 'answer', 'in_progress', 'recién vencida, se espera');
+select is((select s.state::text from private.checkout_sessions s where s.id = :'gil3'::uuid), 'open', 'sin darla por vencida todavía');
+-- Pasado el margen, Stripe ya la venció: la siguiente salida la da por vencida y reserva.
 set local session_replication_role = replica;
 update private.checkout_sessions set expires_at = now() - interval '5 minutes' where id = :'gil3'::uuid;
 set local session_replication_role = origin;
 select pruebas.empieza('a8800000-0000-0000-0000-000000000007', 'annual', :anual, :'texto') as tras_vencer \gset
 select is(:'tras_vencer'::jsonb ->> 'answer', 'reserved', 'pasada la hora en que Stripe la venció, se reserva otra');
 select is((select s.state::text from private.checkout_sessions s where s.id = :'gil3'::uuid), 'lapsed', 'y la vieja queda vencida por el reloj');
+-- Si Stripe sí la completó, lo dice después, y lo vencido por el reloj se corrige.
+select is(pruebas.paso('a8800000-0000-0000-0000-000000000007', format('private.checkout_close(%L, %L, %L)', :'gil3'::text, 'completed', 'sub_88gil')), 'closed',
+  'una vencida por el reloj se corrige con la palabra de Stripe');
+select is((select s.state::text || ' ' || s.subscription_id from private.checkout_sessions s where s.id = :'gil3'::uuid), 'completed sub_88gil',
+  'completada, con su suscripción');
+
+-- El texto cambió con una salida abierta: no se reusa, porque su consentimiento es del texto anterior.
+select pruebas.alta('a8800000-0000-0000-0000-000000000008', 'hugo-88@prueba.test');
+select pruebas.confirmar('a8800000-0000-0000-0000-000000000008');
+select pruebas.empieza('a8800000-0000-0000-0000-000000000008', 'monthly', :mensual, :'texto') #>> '{checkout,id}' as de_hugo \gset
+-- De la versión 2 en adelante publica alguien con configuración: el dueño, a nombre de esa persona (como lo hace la función de PA-89).
+select pruebas.alta('a8800000-0000-0000-0000-000000000010', 'config-88@prueba.test');
+select pruebas.dar_capacidad('a8800000-0000-0000-0000-000000000010', 'config');
+select pruebas.equipar('a8800000-0000-0000-0000-000000000010');
+select pruebas.limpiar();
+select set_config('app.actor_id', 'a8800000-0000-0000-0000-000000000010', true),
+       set_config('app.actor_session', pruebas.sesion('a8800000-0000-0000-0000-000000000010')::text, true);
+insert into public.legal_documents (doc_type, version, title, body, effective_from)
+  values ('recurring_charge_consent', 2, 'Cobro recurrente', 'Acepto que el cobro se repite hasta que yo cancele, otra vez.', now())
+  returning id as texto2 \gset
+select pruebas.limpiar();
+select pruebas.empieza('a8800000-0000-0000-0000-000000000008', 'monthly', :mensual, :'texto2') as otra_version \gset
+select is(:'otra_version'::jsonb ->> 'answer', 'open_other', 'con otro texto vigente, la abierta no se reusa: se vence primero');
+select is(:'otra_version'::jsonb #>> '{checkout,id}', :'de_hugo'::text, 'la de antes');
+
+-- Un navegador desmedido se recorta: no impide salir a pagar.
+select pruebas.alta('a8800000-0000-0000-0000-000000000009', 'ivo-88@prueba.test');
+select pruebas.confirmar('a8800000-0000-0000-0000-000000000009');
+select pruebas.a_nombre_de('a8800000-0000-0000-0000-000000000009');
+select is(private.checkout_begin('monthly', :mensual, :'texto2', false, '/inicio', null, repeat('n', 2000)) ->> 'answer', 'reserved',
+  'un navegador desmedido no impide salir');
+select pruebas.limpiar();
+select is((select length(c.user_agent) from public.consents c where c.profile_id = 'a8800000-0000-0000-0000-000000000009'), 1000, 'se guarda recortado');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que la base hace cumplir aunque alguien escriba directo.
