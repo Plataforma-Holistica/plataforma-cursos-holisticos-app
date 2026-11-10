@@ -86,7 +86,7 @@ export const comments = defineMessages({
     seeInLesson: "Ver en la lección",
     empty: "Todavía nadie ha comentado tus lecciones.",
     emptyUnanswered: "No tienes comentarios sin responder.",
-    closed: "Los comentarios están cerrados en toda la Plataforma por ahora.",
+    closed: "Los comentarios están cerrados en toda la {Plataforma} por ahora.",
     more: "Ver más comentarios",
     newest: "Más recientes",
   },

@@ -17,12 +17,12 @@
     {
       "slug": "maestra-de-prueba-bosque",
       "name": "Maestra de prueba (bosque)",
-      "bio": "Una maestra que no existe, para probar la Plataforma."
+      "bio": "Una maestra que no existe, para probar la Escuela de Misterios."
     },
     {
       "slug": "maestro-de-prueba-mar",
       "name": "Maestro de prueba (mar)",
-      "bio": "Un maestro que no existe, para probar la Plataforma."
+      "bio": "Un maestro que no existe, para probar la Escuela de Misterios."
     },
     {
       "slug": "maestra-de-prueba-montana",
@@ -32,7 +32,7 @@
     {
       "slug": "maestro-de-prueba-cielo",
       "name": "Maestro de prueba (cielo)",
-      "bio": "Otro maestro que no existe, para probar la Plataforma."
+      "bio": "Otro maestro que no existe, para probar la Escuela de Misterios."
     }
   ],
   "courses": [
@@ -40,7 +40,7 @@
       "teacher": "maestra-de-prueba-bosque",
       "slug": "prueba-naturaleza",
       "title": "Naturaleza (curso de prueba)",
-      "summary": "Un curso de prueba con dos videos de naturaleza. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba con dos videos de naturaleza. No es contenido real de la Escuela de Misterios.",
       "practice": "naturaleza",
       "level": "principiante",
       "modules": [
@@ -65,7 +65,7 @@
       "teacher": "maestro-de-prueba-mar",
       "slug": "prueba-oceano",
       "title": "Océano (curso de prueba)",
-      "summary": "Un curso de prueba con dos videos del mar. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba con dos videos del mar. No es contenido real de la Escuela de Misterios.",
       "practice": "oceano",
       "level": "principiante",
       "modules": [
@@ -90,7 +90,7 @@
       "teacher": "maestra-de-prueba-montana",
       "slug": "prueba-meditacion-inicial",
       "title": "Meditación para empezar (curso de prueba)",
-      "summary": "Un curso de prueba para quien nunca ha meditado. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba para quien nunca ha meditado. No es contenido real de la Escuela de Misterios.",
       "practice": "meditacion",
       "level": "principiante",
       "modules": [
@@ -125,7 +125,7 @@
       "teacher": "maestra-de-prueba-montana",
       "slug": "prueba-meditacion-profunda",
       "title": "Meditación sostenida (curso de prueba)",
-      "summary": "Un curso de prueba con sesiones más largas. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba con sesiones más largas. No es contenido real de la Escuela de Misterios.",
       "practice": "meditacion",
       "level": "avanzado",
       "modules": [
@@ -150,7 +150,7 @@
       "teacher": "maestro-de-prueba-cielo",
       "slug": "prueba-respiracion",
       "title": "Respirar con calma (curso de prueba)",
-      "summary": "Un curso de prueba de respiración. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba de respiración. No es contenido real de la Escuela de Misterios.",
       "practice": "respiracion",
       "level": "principiante",
       "modules": [
@@ -175,7 +175,7 @@
       "teacher": "maestro-de-prueba-cielo",
       "slug": "prueba-yoga-suave",
       "title": "Yoga suave (curso de prueba)",
-      "summary": "Un curso de prueba de yoga para la mañana. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba de yoga para la mañana. No es contenido real de la Escuela de Misterios.",
       "practice": "yoga",
       "level": "intermedio",
       "modules": [
@@ -210,7 +210,7 @@
       "teacher": "maestra-de-prueba-bosque",
       "slug": "prueba-sonido",
       "title": "Sonido y descanso (curso de prueba)",
-      "summary": "Un curso de prueba para escuchar. No es contenido real de la Plataforma.",
+      "summary": "Un curso de prueba para escuchar. No es contenido real de la Escuela de Misterios.",
       "practice": "sonido",
       "level": "intermedio",
       "modules": [
@@ -235,7 +235,7 @@
       "teacher": "maestro-de-prueba-mar",
       "slug": "prueba-oceano-avanzado",
       "title": "Océano profundo (curso de prueba)",
-      "summary": "Un segundo curso de prueba del mar. No es contenido real de la Plataforma.",
+      "summary": "Un segundo curso de prueba del mar. No es contenido real de la Escuela de Misterios.",
       "practice": "oceano",
       "level": "avanzado",
       "modules": [

@@ -91,7 +91,7 @@ test("recuperación completa: pedir, abrir el enlace del buzón, guardar, y entr
   await page.getByRole("link", { name: "Olvidé mi contraseña" }).click();
   await expect(page).toHaveURL("/recuperar");
   await expect(page.getByRole("heading", { level: 1, name: "Recupera tu contraseña" })).toBeVisible();
-  await expect(page).toHaveTitle("Recuperar contraseña · La Plataforma");
+  await expect(page).toHaveTitle("Recuperar contraseña · Escuela de Misterios");
   expect(await a11yViolations(page)).toEqual([]);
 
   await page.getByLabel("Correo").fill(ana.email);
@@ -108,7 +108,7 @@ test("recuperación completa: pedir, abrir el enlace del buzón, guardar, y entr
 
   await page.goto(`/recuperar/${token}`);
   await expect(page.getByRole("heading", { level: 1, name: "Elige tu contraseña nueva" })).toBeVisible();
-  await expect(page).toHaveTitle("Contraseña nueva · La Plataforma");
+  await expect(page).toHaveTitle("Contraseña nueva · Escuela de Misterios");
   expect(await a11yViolations(page)).toEqual([]);
   // Abrir el enlace no cerró nada.
   expect(await sessionCount(ana.id)).toBe(1);

@@ -37,7 +37,7 @@ test.beforeEach(clearCounters);
 
 const PASSWORD = "una-clave-de-prueba-9";
 const LEGAL = /^Acepto los Términos.*y el Aviso de privacidad/;
-const HISTORY = "Doy mi permiso para que La Plataforma guarde mi historial de cursos con esos fines.";
+const HISTORY = "Doy mi permiso para que la Escuela de Misterios guarde mi historial de cursos con esos fines.";
 const ADULT = "Tengo 18 años cumplidos o más.";
 const SENT_GENERIC = "Te mandamos un enlace al correo que escribiste. Ábrelo para completar tu cuenta.";
 const sentTo = (email: string) => `Te mandamos un enlace a ${email}. Ábrelo para completar tu cuenta.`;
@@ -113,9 +113,9 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   const email = testEmail();
   await page.goto("/registro");
   await expect(page.getByRole("heading", { level: 1, name: "Crea tu cuenta" })).toBeVisible();
-  await expect(page).toHaveTitle("Crear cuenta · La Plataforma");
+  await expect(page).toHaveTitle("Crear cuenta · Escuela de Misterios");
   // El deslinde (RF-809) se lee antes de crear la cuenta.
-  await expect(page.getByText("La Plataforma es educativa. No sustituye la atención médica ni psicológica profesional.")).toBeVisible();
+  await expect(page.getByText("La Escuela de Misterios es educativa. No sustituye la atención médica ni psicológica profesional.")).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
 
   await page.getByLabel("Correo").fill(email);
@@ -146,7 +146,7 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   const userId = await userIdOf(email);
   await page.goto(`/verificar/${token}`);
   await expect(page.getByRole("heading", { level: 1, name: "Completa tu cuenta" })).toBeVisible();
-  await expect(page).toHaveTitle("Completa tu cuenta · La Plataforma");
+  await expect(page).toHaveTitle("Completa tu cuenta · Escuela de Misterios");
   // Ninguna casilla viene marcada.
   for (const box of await page.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
   expect(await a11yViolations(page)).toEqual([]);

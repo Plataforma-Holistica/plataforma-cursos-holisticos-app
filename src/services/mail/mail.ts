@@ -14,7 +14,7 @@ import { askMailClaim, askMailHealth, askMailRejected, askMailSent } from "./rec
 // escribe a nadie de verdad. Fuera de local manda Resend, que en producción es obligatorio (`env.ts`); en una vista previa sin llave, nada sale y nada se gasta.
 
 const LOCAL_MAILBOX = "http://127.0.0.1:54324";
-const LOCAL_FROM = "Plataforma <avisos@plataforma.local>";
+const LOCAL_FROM = "Escuela de Misterios <avisos@escuelademisterios.local>";
 
 function sender(): MailSender | null {
   const env = getEnv();

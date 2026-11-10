@@ -292,7 +292,7 @@ export const admin = defineMessages({
     unknown: "No supimos si el curso quedó publicado. Revisa la cola antes de intentarlo otra vez.",
     // Lo enviado por el editor (T-405, cuarta solicitud).
     changed: "Ese curso se volvió a enviar mientras lo revisabas: lo de arriba ya es el envío nuevo. Revísalo antes de aprobarlo.",
-    teacherSuspended: "El {maestro} de ese curso está suspendido o ya no está en la plataforma: no se publica. Se queda en revisión; si no va a volver, devuélvelo.",
+    teacherSuspended: "El {maestro} de ese curso está suspendido o ya no está en la {Plataforma}: no se publica. Se queda en revisión; si no va a volver, devuélvelo.",
     annexDraft: "El anexo que se aceptó es un borrador sin validez: fuera de una prueba local no se publica.",
     filesChanged: "Un archivo de ese curso cambió por fuera después de enviarse: no se publica. La tarjeta dice cuál; devuélvelo para que su {maestro} lo vuelva a subir.",
     captionsPending: "Mux todavía no tiene subtítulos de alguna lección de ese curso: no se publica sin ellos. Inténtalo más tarde; si no llegan, devuélvelo.",

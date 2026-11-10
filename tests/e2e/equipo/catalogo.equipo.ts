@@ -162,7 +162,7 @@ test("el visitante ve la ficha completa y su botón lleva a registrarse; un curs
     await expect(page.getByRole("link", { name: "Explorar" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Crear cuenta" })).toHaveAttribute("href", "/registro");
     // El deslinde (RF-809), al pie de la ficha.
-    await expect(page.getByRole("main").locator("> :last-child")).toHaveText("La Plataforma es educativa. No sustituye la atención médica ni psicológica profesional.");
+    await expect(page.getByRole("main").locator("> :last-child")).toHaveText("La Escuela de Misterios es educativa. No sustituye la atención médica ni psicológica profesional.");
     await page.getByRole("link", { name: `Ver la ficha de Maestra ${ADVANCED}` }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Maestra ${ADVANCED}`);
     await expect(page.getByRole("region", { name: `Cursos de Maestra ${ADVANCED}` }).getByRole("link")).toHaveCount(1);

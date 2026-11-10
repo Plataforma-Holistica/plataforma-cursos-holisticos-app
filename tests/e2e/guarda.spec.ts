@@ -35,7 +35,7 @@ const profileName = async (id: string) =>
   (await ownerQuery<{ display_name: string | null }>("select display_name from public.profiles where id = $1", [id]))[0]
     ?.display_name ?? null;
 
-const HISTORY = "Doy mi permiso para que La Plataforma guarde mi historial de cursos con esos fines.";
+const HISTORY = "Doy mi permiso para que la Escuela de Misterios guarde mi historial de cursos con esos fines.";
 
 async function tickEverything(page: Page): Promise<void> {
   await page.getByLabel("Tengo 18 años cumplidos o más.").check();
@@ -50,7 +50,7 @@ test("a una cuenta sin completar se le pide lo que falta antes que cualquier otr
 
   await expect(page).toHaveURL("/consentimientos");
   await expect(page.getByRole("heading", { level: 1, name: "Completa tu cuenta" })).toBeVisible();
-  await expect(page).toHaveTitle("Antes de seguir · La Plataforma");
+  await expect(page).toHaveTitle("Antes de seguir · Escuela de Misterios");
   // Ninguna casilla viene marcada.
   for (const box of await page.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
   // Cada texto se lee en otra pestaña, y el enlace lleva la versión que su casilla anuncia.
@@ -313,7 +313,7 @@ test("una acción enviada desde otro sitio se rechaza y no deja rastro", async (
 test("un texto legal se lee con su versión y su fecha, y uno que no existe no se encuentra @telefono", async ({ page }) => {
   await page.goto("/legal/terminos");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Términos y condiciones");
-  await expect(page).toHaveTitle(/^Términos y condiciones.* · La Plataforma$/);
+  await expect(page).toHaveTitle(/^Términos y condiciones.* · Escuela de Misterios$/);
   // El título de la página es el del texto: el cuerpo no lo repite un nivel abajo.
   await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
   await expect(page.getByText(/^Versión 0 · vigente desde el \d{1,2} de \p{L}+ de \d{4}$/u)).toBeVisible();

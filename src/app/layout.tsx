@@ -8,7 +8,7 @@ import "@/ui/theme.css";
 import { displayFont, textFont } from "./fonts";
 
 export const metadata: Metadata = {
-  // Cada pantalla pone su nombre y aquí se le agrega el de la Plataforma.
+  // Cada pantalla pone su nombre y aquí se le agrega el del producto.
   title: {
     default: t(messages.meta.titleDefault),
     template: t(messages.meta.titleTemplate, { page: "%s" }),

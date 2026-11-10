@@ -27,7 +27,7 @@ test("entra con su correo y su contraseña, llega a su inicio y sale @telefono",
   const ana = await person();
   await page.goto("/entrar");
   await expect(page.getByRole("heading", { level: 1, name: "Inicia sesión" })).toBeVisible();
-  await expect(page).toHaveTitle("Iniciar sesión · La Plataforma");
+  await expect(page).toHaveTitle("Iniciar sesión · Escuela de Misterios");
   await fillSignIn(page, ana);
   await page.getByRole("button", { name: "Entrar" }).click();
 
@@ -157,7 +157,7 @@ test("se puede entrar solo con el teclado", async ({ page }) => {
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Saltar al contenido" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("banner").getByRole("link", { name: "La Plataforma" })).toBeFocused();
+  await expect(page.getByRole("banner").getByRole("link", { name: "Escuela de Misterios" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Correo")).toBeFocused();
   await page.keyboard.type(ana.email);

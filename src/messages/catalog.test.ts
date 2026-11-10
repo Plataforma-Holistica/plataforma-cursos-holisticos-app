@@ -98,12 +98,15 @@ describe("catálogo de textos", () => {
     }
   });
 
-  it("ningún texto escribe a mano la palabra del rol ni el nombre de la Plataforma", () => {
+  it("ningún texto escribe a mano la palabra del rol ni el nombre del producto", () => {
     const role = new RegExp(stem(terms), "i");
     for (const [key, text] of texts) {
       // Lo que queda fuera de los marcadores: el nombre de un marcador del rol (`{el_maestro}`) es la manera correcta de citarlo.
       expect(text.replace(MARKER, ""), `${key} debe citar el término con un marcador`).not.toMatch(role);
       expect(text, `${key} debe citar {Plataforma}`).not.toContain(terms.Plataforma);
+      // Ni el nombre provisional de antes (PQ-13, decidido el 2026-11-09), en ninguna caja. El plural es otra cosa: un régimen
+      // del SAT habla de «Plataformas Tecnológicas».
+      expect(text.replace(MARKER, ""), `${key} no debe decir «plataforma»`).not.toMatch(/\bplataforma\b/i);
     }
   });
 

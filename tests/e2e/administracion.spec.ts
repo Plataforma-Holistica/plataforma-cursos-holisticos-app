@@ -107,7 +107,7 @@ test("una alumna recibe en administración y en las pantallas del segundo factor
   // dice de qué es la página.
   const tabs = [...screens.values()].map((screen) => screen.title);
   expect(new Set(tabs).size, tabs.join(" | ")).toBe(1);
-  expect(tabs[0]).toBe("La Plataforma");
+  expect(tabs[0]).toBe("Escuela de Misterios");
 
   // Y lo mismo cuando quien pide es el navegador ya dentro de la aplicación, que pide la
   // página por partes: ni el estado ni el cuerpo distinguen una ruta de la otra.

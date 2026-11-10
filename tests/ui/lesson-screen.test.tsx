@@ -212,7 +212,7 @@ describe("lo de alrededor del reproductor", () => {
 
   it("el deslinde (RF-809) va al pie", () => {
     show();
-    const disclaimer = screen.getByText(`${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`).closest("p");
+    const disclaimer = screen.getByText(`La ${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`).closest("p");
     expect(disclaimer).toBeVisible();
     expect(screen.getByRole("main").lastElementChild).toBe(disclaimer);
   });

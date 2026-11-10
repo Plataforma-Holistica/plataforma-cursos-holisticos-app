@@ -2,7 +2,7 @@ import { terms } from "@/messages/es/terms";
 
 import { cx } from "./cx";
 
-// El logotipo provisional (diseño, sección 3.12; T-614): el nombre de la Plataforma en la tipografía
+// El logotipo provisional (diseño, sección 3.12; T-614): el nombre del producto en la tipografía
 // de títulos, con un punto del acento al final (la variante A, elegida por Sergio el 2026-11-05). El
 // nombre sale del catálogo de textos, porque también es provisional (D-01). Cambiar al definitivo es
 // reemplazar este componente y los archivos del icono (src/app/icon.svg y apple-icon.png).
