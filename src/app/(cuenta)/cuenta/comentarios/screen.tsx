@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useRef } from "react";
 
-import { said } from "@/app/_comments/view";
 import { longDate } from "@/app/_lib/dates";
 import { comments as text } from "@/messages/es/comments";
 import { t } from "@/messages/format";
@@ -36,7 +35,7 @@ const GOOD = new Set<MineNotice["kind"]>(["deleted"]);
 
 function Notice({ notice }: { notice: MineNotice | null }) {
   if (notice === null) return null;
-  const words = notice.kind === "unavailable" ? text.mine.unavailable : said(text.notice[notice.kind]);
+  const words = notice.kind === "unavailable" ? text.mine.unavailable : text.notice[notice.kind];
   return (
     <InlineAlert tone={GOOD.has(notice.kind) ? "success" : "warning"} live>
       {words}

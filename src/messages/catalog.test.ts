@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { terms } from "./es/terms";
@@ -110,12 +112,19 @@ describe("catálogo de textos", () => {
     }
   });
 
+  // Un bloque fuera del índice no lo lee ninguna de estas guardas: así se escapó el de comentarios hasta T-615.
+  it("todo bloque de es/ está en el catálogo", () => {
+    const files = readdirSync(new URL("./es/", import.meta.url)).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"));
+    expect(files.map((name) => name.replace(/\.ts$/, "")).sort()).toEqual(Object.keys(messages).sort());
+  });
+
   // El nombre va sin artículo (T-615): cada texto pone «la» donde la frase lo pide. Solo el título de la pestaña lo cita solo.
   it("{Plataforma} lleva su artículo, salvo en el título de la pestaña", () => {
+    const alone = new Set(["meta.titleTemplate", "meta.titleDefault"]);
     for (const [key, text] of texts) {
-      if (key.startsWith("meta.")) continue;
+      if (alone.has(key)) continue;
       for (const match of text.matchAll(/\{Plataforma\}/g)) {
-        expect(text.slice(Math.max(0, match.index - 3), match.index), `${key}: «la» antes de {Plataforma}`).toMatch(/^[Ll]a $/);
+        expect(text.slice(Math.max(0, match.index - 4), match.index), `${key}: «la» antes de {Plataforma}`).toMatch(/(?:^|[^\p{L}])[Ll]a $/u);
       }
     }
   });

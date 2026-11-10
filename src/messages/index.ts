@@ -23,7 +23,8 @@ import { ui } from "./es/ui";
 //
 // Convenciones:
 //   - Un archivo por bloque en `es/`. Cada tarea agrega el suyo o amplía uno.
-//   - Claves en inglés y en camelCase, como el resto de los identificadores.
+//   - Claves en inglés y en camelCase, como el resto de los identificadores. Salvo los avisos de los
+//     comentarios (`comments.notice`), que se buscan por el código que contesta el servicio.
 //   - Las palabras que pueden cambiar por marca viven en `es/terms.ts` y se citan con un
 //     marcador. Ver `format.ts`.
 export const messages = { terms, ui, states, meta, account, admin, player, lesson, resources, browse, landing, portal, mail, comments } as const;

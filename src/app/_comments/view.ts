@@ -1,4 +1,4 @@
-import { t, type Template } from "@/messages/format";
+import { t, type DataMarkers, type Template } from "@/messages/format";
 import type { CommentThread, CommentView, WriteStanding } from "@/services/comments/comments";
 
 // Lo que la pantalla necesita para pintar los comentarios de una lección (PA-22; T-501), y lo puro de cómo se pintan: el
@@ -59,5 +59,12 @@ export function avatarOf(name: string): { initial: string; tone: number } {
   return { initial: first === undefined ? "?" : first.toLocaleUpperCase("es-MX"), tone: (hash % TONES) + 1 };
 }
 
-/** Un aviso del catálogo, que puede citar un término (`{maestro}`): así se pinta. */
-export const said = (words: string | Template<string>): string => (typeof words === "string" ? words : t(words as Template<"">));
+/**
+ * Un aviso del catálogo, que puede citar un término (`{maestro}`): así se pinta. Uno que pida un dato (`{count}`) no compila:
+ * el segundo parámetro se vuelve obligatorio y no hay valor que lo cumpla.
+ */
+export function said<Text extends string>(words: string | Template<Text>, ...noData: [DataMarkers<Text>] extends [never] ? [] : [never]): string {
+  void noData;
+  // Comprobado arriba que no pide datos: los términos los pone `t()`.
+  return typeof words === "string" ? words : t(words as Template<"">);
+}
