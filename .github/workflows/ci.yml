@@ -3,10 +3,14 @@ name: Integración continua
 # El orden es el del TRD §11.5. Si un paso falla, no sigue. Los pasos de extremo a extremo
 # se agregan con la tarea que los crea.
 
+# Desde el 2026-11-09 (decisión de Sergio, para gastar menos corridas): corre en cada solicitud y en la cola de fusión, y ya no al
+# entrar a main, porque la cola verifica exactamente lo que entra. En una solicitud en borrador se salta el extremo a extremo del
+# equipo (el paso más largo); corre al marcarla lista y en la cola. Un cambio que solo toca documentos en Markdown fuera del código
+# se salta los pasos pesados (el paso «Qué cambió», con `scripts/ci-cambios.mjs`), y el trabajo sigue y contesta.
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
 
 permissions:
   contents: read
@@ -28,8 +32,8 @@ jobs:
       # Cada acción va por el identificador exacto de su commit, no por su etiqueta: una
       # etiqueta se puede mover a otro código sin que aquí cambie nada. Dependabot propone
       # las actualizaciones (.github/dependabot.yml).
-      # Con la historia entera: la comprobación del orden de las migraciones compara contra lo que
-      # main tenía antes.
+      # Con la historia entera: la comprobación del orden de las migraciones mira las migraciones de
+      # HEAD^1 (main, o lo que va antes en la cola) y lo que esta rama agrega.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
@@ -41,28 +45,38 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
-      # Las migraciones nuevas van después de todas las de main, y las de main no se tocan (ola 0:
-      # dos carriles en paralelo). En una solicitud, HEAD es la fusión de prueba con main y HEAD^1
-      # es main. Al entrar a main se compara contra lo que main tenía antes del empuje, que puede
-      # traer varios commits (una fusión con rebase). Sin dependencias: va antes de instalar.
-      - name: Migraciones en orden
+      # Qué cambió (2026-11-09). Si solo son documentos en Markdown fuera del código, los pasos pesados se saltan; el trabajo sigue y
+      # contesta, así que una corrida cancelada nunca se ve como pasada. En la cola de fusión siempre se verifica entero: ahí HEAD^1 es
+      # el grupo anterior, no main, y el diff vería solo la última solicitud. Si este paso falla, todo corre (su salida queda vacía).
+      - id: mira
+        name: Qué cambió
+        continue-on-error: true
         env:
           EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            node scripts/migraciones-en-orden.mjs "$BEFORE" HEAD
+          if [ "$EVENT" = "merge_group" ]; then
+            echo "codigo=true" >> "$GITHUB_OUTPUT"
           else
-            node scripts/migraciones-en-orden.mjs HEAD^1 HEAD
+            node scripts/ci-cambios.mjs HEAD^1 HEAD >> "$GITHUB_OUTPUT"
           fi
+
+      # Las migraciones nuevas van después de todas las de main, y las de main no se tocan (ola 0:
+      # dos carriles en paralelo). En una solicitud, HEAD es la fusión de prueba con main y HEAD^1
+      # es main; en la cola de fusión, HEAD es lo que entraría y HEAD^1 lo que va antes en la cola.
+      # Sin dependencias: va antes de instalar.
+      - name: Migraciones en orden
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
+        run: node scripts/migraciones-en-orden.mjs HEAD^1 HEAD
 
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
       - name: Tipos
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm typecheck
 
       - name: Lint, incluida la regla de capas
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm lint
 
       - name: Escaneo de secretos
@@ -78,9 +92,11 @@ jobs:
       # desde octubre de 2026. Solo corre con el lint, pero la auditoría no distingue. Se
       # quita en cuanto ese paquete pida una versión corregida.
       - name: Auditoría de dependencias
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm audit --audit-level=high
 
       - name: Pruebas del dominio y de capas
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm test
 
       # TRD §12.2: las reglas de acceso exigen el 100 % de cobertura, archivo por archivo.
@@ -90,24 +106,29 @@ jobs:
       # `package.json` no, y cambiar allá el guion dejaría este paso sin efecto sin que
       # nadie lo aprobara.
       - name: Cobertura de las reglas de acceso
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm exec vitest run --project unit --coverage
 
       # TRD §11.5, paso 4: la base se levanta vacía, corren todas las migraciones y la
       # semilla desde cero, y después las pruebas de base (políticas por fila, libros de
       # solo inserción, tabla expuesta sin política).
       - name: Base local, migraciones desde cero
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm db:start
 
       - name: Pruebas de base
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm test:db
 
       # TRD §11.5, paso 5: el código contra la base real. Van después de las pruebas de
       # base, que cuentan renglones y esperan la base recién nacida. La contraseña de
       # app_service se inventa en cada corrida y no sale de ella.
       - name: Entorno de las pruebas de integración
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: node scripts/ci-env.mjs
 
       - name: Entrada de la aplicación a la base local
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm db:login
 
       # Los textos legales de borrador (versión 0), que solo existen en una base local: sin
@@ -115,15 +136,19 @@ jobs:
       # ellos cargados, porque tienen que dar lo mismo en los dos estados: el de una base
       # recién nacida, que es también el de una remota, y el de una máquina de desarrollo.
       - name: Borradores legales
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm db:drafts
 
       - name: Pruebas de base, con los borradores
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm test:db
 
       - name: Pruebas de integración
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm test:int
 
       - name: Compilación
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm build
 
       # TRD §11.5: el extremo a extremo de la cuenta (FL-02, FL-03, FL-05 y FL-06), con un
@@ -131,16 +156,19 @@ jobs:
       # después de compilar, pero no usa esa compilación: Playwright compila la suya, sin
       # registro de errores, para que nunca se pruebe una de antes (`playwright.config.ts`).
       - name: Navegador para el extremo a extremo
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm exec playwright install --with-deps chromium
 
       # El comando va escrito aquí y no como `pnpm test:e2e`, por lo mismo que el de la
       # cobertura: este archivo tiene dueño y `package.json` no.
       - name: Pruebas de extremo a extremo
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm exec playwright test
 
       # Las pruebas de base cuentan renglones: si el extremo a extremo dejó a una persona de
       # prueba o un contador, aquí se nota.
       - name: Pruebas de base, después del extremo a extremo
+        if: ${{ steps.mira.outputs.codigo != 'false' }}
         run: pnpm test:db
 
       # El camino de quien es del equipo (invitar, configurar el segundo factor, entrar a
@@ -149,7 +177,9 @@ jobs:
       # de este paso la base ya no sirve para ellas, y aquí no corre nada más.
       # El comando va escrito aquí, por lo mismo que los de arriba. En local es
       # `pnpm test:e2e:equipo`, que además rehace la base al terminar.
+      # Se salta en una solicitud en borrador (2026-11-09): corre al marcarla lista y en la cola de fusión.
       - name: Pruebas de extremo a extremo del equipo
+        if: ${{ steps.mira.outputs.codigo != 'false' && (github.event_name == 'merge_group' || !github.event.pull_request.draft) }}
         run: pnpm exec playwright test
         env:
           E2E_EQUIPO: "1"
