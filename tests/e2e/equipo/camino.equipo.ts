@@ -1937,6 +1937,14 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     );
 
   test("textos legales con JavaScript: nueva versión, vista previa con su consecuencia, publicar y ver el texto", async ({ page }) => {
+    // Desde T-302 los borradores cargan la política de reembolsos: se quita, para empezar sin ninguna versión (la base se rehace al terminar).
+    await ownerQuery(
+      `do $$ begin
+         set local session_replication_role = replica;
+         delete from public.consents where legal_document_id in (select id from public.legal_documents where doc_type = 'refund_policy');
+         delete from public.legal_documents where doc_type = 'refund_policy';
+       end $$`,
+    );
     await enterAdmin(page, ana, "/admin");
     await page.getByRole("link", { name: "Textos legales" }).click();
     await expect(page).toHaveURL(LEGAL);

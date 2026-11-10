@@ -24,7 +24,8 @@ const EFFECTIVE_FROM = "2026-10-01 06:00:00+00";
 
 // Los únicos tipos que se cargan como borrador: los tres textos sin los que no se puede
 // completar un registro (RF-108), los dos sin los que no se acepta una invitación de maestro
-// (T-401) y el anexo sin el que no se envía un curso (T-405). Un archivo con otro nombre es un error. Si se vuelven a pedir no lo dice el guion: lo
+// (T-401), el anexo sin el que no se envía un curso (T-405), y el cobro recurrente y la política de reembolsos sin los que no se sale
+// a pagar (T-302). Un archivo con otro nombre es un error. Si se vuelven a pedir no lo dice el guion: lo
 // decide la base por el tipo (T-110).
 const DRAFTS = new Map([
   ["terms.md", { docType: "terms" }],
@@ -33,6 +34,8 @@ const DRAFTS = new Map([
   ["teacher_agreement.md", { docType: "teacher_agreement" }],
   ["teacher_privacy_notice.md", { docType: "teacher_privacy_notice" }],
   ["license_annex.md", { docType: "license_annex" }],
+  ["recurring_charge_consent.md", { docType: "recurring_charge_consent" }],
+  ["refund_policy.md", { docType: "refund_policy" }],
 ]);
 
 function fail(message) {
