@@ -37,11 +37,28 @@ describe("los avisos de Stripe", () => {
   it("el adaptador solo lo arma el servicio", () => {
     expect(naming(/adapters\/stripe\//)).toEqual([
       "src/services/billing/billing.ts",
+      "src/services/billing/checkout-service.ts",
+      "src/services/billing/checkout-test-stripe.ts",
+      "src/services/billing/checkout.ts",
       "src/services/billing/inbox.ts",
       "src/services/billing/reconcile.ts",
       "src/services/billing/stripe-read.ts",
     ]);
-    expect(naming(/createStripeApi\(/).filter((file) => !file.startsWith("src/adapters/"))).toEqual(["src/services/billing/billing.ts"]);
+    expect(naming(/createStripeApi\(/).filter((file) => !file.startsWith("src/adapters/"))).toEqual(["src/services/billing/billing.ts", "src/services/billing/checkout-service.ts"]);
+  });
+
+  // La salida a pagar (T-302): la única que escribe en Stripe, con su propia llave; sus funciones de la base en un archivo; sus tablas en ninguno; y el Stripe de
+  // prueba de local, solo detrás de `BILLING_CHECKOUT=test`.
+  it("solo la salida a pagar escribe en Stripe, y con su propia llave", () => {
+    expect(naming(/createStripeWriter\(/).filter((file) => !file.startsWith("src/adapters/"))).toEqual(["src/services/billing/checkout-service.ts"]);
+    expect(naming(/STRIPE_CHECKOUT_KEY/)).toEqual(["src/config/env.ts", "src/services/billing/checkout-service.ts"]);
+    expect(naming(/BILLING_CHECKOUT\b/)).toEqual(["src/config/env.ts", "src/services/billing/checkout-service.ts"]);
+    expect(naming(/checkout-test-stripe/)).toEqual(["src/services/billing/checkout-service.ts"]);
+  });
+
+  it("las funciones de la salida a pagar se nombran en un solo archivo, y sus tablas en ninguno", () => {
+    expect(naming(/private\.checkout_/)).toEqual(["src/services/billing/checkout-records.ts"]);
+    expect(naming(/checkout_sessions\b|billing_customers\b/)).toEqual([]);
   });
 
   it("nadie más le habla a Stripe", () => {

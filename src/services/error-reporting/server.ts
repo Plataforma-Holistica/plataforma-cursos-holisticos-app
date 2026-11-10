@@ -152,6 +152,15 @@ const FAILURES = {
     "Lo que Stripe dice que liquidó un cobro trae otro bruto que el que registró el libro: no se guardó. Revisar el cobro en el panel de Stripe.",
   billing_reconciliation_rejected:
     "La base rechazó por su forma los cargos que el servidor leyó de Stripe para comparar un mes. No debería pasar: es una falla de código o una respuesta de Stripe que cambió de forma.",
+  checkout_unavailable: "La salida a pagar (PA-04 o PA-32) no pudo leer o escribir en la base. La persona ve «no se pudo» y puede reintentar; nada se cobró.",
+  checkout_no_key: "Alguien quiso salir a pagar y no hay llave de la salida a pagar: no se puede vender. Revisar la configuración del despliegue.",
+  checkout_key_rejected: "Stripe rechazó la llave de la salida a pagar al crear una sesión: le faltan permisos o se revocó. Nadie puede pagar hasta corregirla.",
+  checkout_price_mismatch:
+    "El precio de Stripe con la lookup_key del parámetro vigente no existe o no cuadra (monto, moneda, intervalo, IVA incluido, otras monedas o modo). Nadie puede pagar ese plan hasta crearlo en Stripe (OP-13).",
+  checkout_customer_balance: "El cliente de Stripe de una cuenta tiene saldo a favor o está borrado: su primera factura saldría en cero y quedaría fallida. No se le abrió el pago; hay que revisarlo en Stripe.",
+  checkout_customer_conflict: "El cliente que Stripe creó para una cuenta no se pudo anotar (otro cliente ya anotado, o de otra cuenta). No se le abrió el pago; hay que revisarlo.",
+  checkout_create_rejected: "Stripe rechazó crear una sesión de pago con lo reservado. La salida quedó abandonada y la persona ve «no se pudo»; si se repite, revisar los parámetros de la sesión.",
+  checkout_session_unrecorded: "Stripe creó una sesión de pago y la base no la anotó. No se mandó a la persona a pagar; la sesión vence sola en Stripe.",
   billing_queue_unavailable:
     "No se pudo leer, reintentar o resolver un aviso de Stripe desde la cola de finanzas (PA-84): la base no contestó, o contestó algo que el servidor no conoce. Se le dijo que no se supo, y la pantalla vuelve a leer la cola.",
 } as const;

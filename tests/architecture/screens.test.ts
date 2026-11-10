@@ -57,6 +57,9 @@ const PUBLIC_PAGES = [
   // pregunta quién mira (`publicViewer`), que nunca redirige ni niega nada.
   "src/app/cursos/[slug]/page.tsx",
   "src/app/maestros/[slug]/page.tsx",
+  // Los planes (PA-04; T-302): los ve cualquiera, y como la ficha del curso pregunta quién mira (`publicViewer`). Pagar lo decide la
+  // guarda de su acción.
+  "src/app/planes/page.tsx",
   // La muestra de componentes, que solo existe con `pnpm dev`.
   "src/app/muestra/page.dev.tsx",
   "src/app/muestra/error/page.dev.tsx",
@@ -147,6 +150,12 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     openVersionAction: /const outcome = openOutcome\(await openVersion\(jar, \{ course: request\.course \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
     discardVersionAction:
       /const outcome = discardOutcome\(await discardVersion\(jar, \{ course: request\.course, seen: request\.seen \}\), request\.course\);\s*if \(outcome\.kind === "leave"\) return leaveFor\(jar, outcome\);/,
+  },
+  "src/app/planes/actions.ts": {
+    // «Continuar al pago» (T-302, PA-04): el servicio corre la guarda, reserva con el consentimiento y crea la sesión de Stripe. El
+    // origen sale de la petición, nunca del formulario, y la salida a Stripe va fuera de cualquier `try`.
+    startCheckoutAction:
+      /const origin = resolveOrigin\(await requestOrigin\(\), proxyIsTrusted\(\)\);\s*const answer = await startCheckout\(jar, \{[\s\S]*ip: origin\.address,\s*userAgent: origin\.userAgent,\s*\}\);[\s\S]*if \(answer\.kind === "redirect"\) redirect\(answer\.url\);[\s\S]*if \(exit !== null\) return leaveFor\(jar, exit\);/,
   },
   "src/app/portal/_enviar/actions.ts": {
     // Enviar a revisión (T-405): el servicio corre la guarda, la casilla y Mux, y la base firma solo lo que se vio. El origen sale de la petición, nunca del formulario.
@@ -459,6 +468,8 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
       "/inicio",
       "/portal",
       "/portal/[...resto]",
+      "/suscripcion/confirmando",
+      "/suscripcion/prueba",
     ]);
   });
 
@@ -898,6 +909,7 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
       "bloque-maestros-lista",
       "bloque-mi-lista",
       "bloque-nombre",
+      "bloque-pagar",
       "bloque-periodo-codigo",
       // La conciliación con Stripe de PA-79 (T-303, cuarta solicitud). Esta y la del recálculo viven en `_periodos/outcomes.ts`, porque PA-80 enlaza a las dos.
       "bloque-periodo-conciliacion",
