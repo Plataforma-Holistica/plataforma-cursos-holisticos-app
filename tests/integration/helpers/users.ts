@@ -105,6 +105,12 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
   await owner.connect();
   try {
     await owner.query("begin");
+    // Las salidas a pagar y el cliente de Stripe (T-302) cuelgan del perfil y del consentimiento, y su guardián no deja borrarlos:
+    // se quitan en réplica, antes que los consentimientos, solo para las personas de prueba.
+    await owner.query("set local session_replication_role = replica");
+    await owner.query("delete from private.checkout_sessions where profile_id = any($1::uuid[])", [ids]);
+    await owner.query("delete from private.billing_customers where profile_id = any($1::uuid[])", [ids]);
+    await owner.query("set local session_replication_role = origin");
     // Un consentimiento es un libro: no se borra ni como dueño, y cuelga de `profiles`. Para
     // no dejar residuo, y solo aquí, se desactiva su guardián dentro de la transacción. Solo
     // corre contra la base local y solo toca a las personas de prueba; una prueba de base

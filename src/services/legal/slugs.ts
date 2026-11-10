@@ -24,13 +24,16 @@ export function isPublicDocType(docType: string): boolean {
 /**
  * La dirección de cada texto que ya tiene página (`/legal/[documento]`). Los tres que una
  * cuenta tiene que aceptar la tienen, y una prueba lo exige: no se le pide a nadie aceptar
- * un texto que no puede leer. Los demás tipos públicos reciben la suya cuando existan sus
- * textos (T-606).
+ * un texto que no puede leer. Por lo mismo, desde T-302 también el cobro recurrente y la
+ * política de reembolsos, que se aceptan y se enlazan antes de salir a pagar. Los demás
+ * tipos públicos reciben la suya cuando existan sus textos (T-606).
  */
 export const LEGAL_SLUGS = {
   terminos: "terms",
   privacidad: "student_privacy_notice",
   "historial-de-cursos": "course_history_consent",
+  "cobro-recurrente": "recurring_charge_consent",
+  reembolsos: "refund_policy",
 } as const;
 
 const slugs = new Map<string, string>(Object.entries(LEGAL_SLUGS));

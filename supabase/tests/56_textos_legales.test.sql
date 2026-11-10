@@ -23,6 +23,13 @@ select pruebas.equipar('c1100000-0000-0000-0000-000000000001');
 select pruebas.equipar('b1100000-0000-0000-0000-000000000001');
 select pruebas.reclamar('a1100000-0000-0000-0000-000000000001');
 
+-- Desde T-302 los borradores cargan también la política de reembolsos, el tipo que publica esta prueba: se quita al empezar, para
+-- dar lo mismo con borradores y sin ellos.
+set local session_replication_role = replica;
+delete from public.consents where legal_document_id in (select id from public.legal_documents where doc_type = 'refund_policy');
+delete from public.legal_documents where doc_type = 'refund_policy';
+set local session_replication_role = origin;
+
 -- Lo que contestan las funciones cuando las llama una persona con su sesión de pruebas.
 create function pruebas.publica(p_id uuid, p_type text, p_title text, p_body text, p_day date, p_seen integer)
 returns jsonb
