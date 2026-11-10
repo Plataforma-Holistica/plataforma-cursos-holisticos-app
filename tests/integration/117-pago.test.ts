@@ -125,7 +125,7 @@ async function world() {
   const tag = randomUUID().replaceAll("-", "").slice(0, 12);
   const t0 = Math.floor(Date.now() / 1000) - 60;
   const ids = { customer: `cus_it117${tag}`, sub: `sub_it117${tag}`, invoice: `in_it117${tag}`, charge: `ch_it117${tag}`, intent: `pi_it117${tag}` };
-  const state = { paid: false, sessionsCreated: new Map<string, string>(), stripeHasLive: false };
+  const state = { paid: false, sessionsCreated: new Map<string, string>(), stripeHasLive: false, awaitSecond: false, conflicts: 0 };
   const answer = (body: unknown): StripeAnswer & StripeWriteAnswer => ({ status: "ok", body });
 
   const get: StripeGet = async (path, query = {}) => {
@@ -197,14 +197,24 @@ async function world() {
   };
   const posts: string[] = [];
   const inFlight = new Set<string>();
+  let arrived: (() => void) | null = null;
   const post: StripePost = async (path, _form, key) => {
     posts.push(`${path} ${key}`);
     if (path === "/v1/customers") return answer({ id: ids.customer });
     if (path === "/v1/checkout/sessions") {
       // Como Stripe: una segunda petición con la misma llave mientras la primera sigue en curso contesta 409, que el adaptador da como «no se supo».
-      if (inFlight.has(key)) return { status: "unknown" };
+      // La primera espera a que llegue la segunda (con un tope), para que el 409 ocurra siempre y no por suerte del reloj.
+      if (inFlight.has(key)) {
+        state.conflicts += 1;
+        arrived?.();
+        return { status: "unknown" };
+      }
       inFlight.add(key);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise<void>((resolve) => {
+        arrived = resolve;
+        setTimeout(resolve, state.awaitSecond ? 2_000 : 0);
+      });
+      arrived = null;
       inFlight.delete(key);
       const id = state.sessionsCreated.get(key) ?? `cs_test_it117${tag}${state.sessionsCreated.size}`;
       state.sessionsCreated.set(key, id);
@@ -257,11 +267,14 @@ describe("salir a pagar de punta a punta", () => {
 
   it("un doble clic: una sola sesión; la segunda petición, si Stripe contesta 409, dice «no se pudo», y reintentar lleva a la misma", async () => {
     const w = await world();
+    w.state.awaitSecond = true;
     const both = await Promise.all([w.checkout.startCheckout({} as never, w.input), w.checkout.startCheckout({} as never, w.input)]);
     const sent = both.filter((each) => each.kind === "redirect");
     expect(sent.length).toBeGreaterThanOrEqual(1);
     expect(both.every((each) => each.kind === "redirect" || each.kind === "unavailable")).toBe(true);
     for (const each of sent) expect(each).toEqual(sent[0]);
+    expect(w.state.conflicts).toBe(1);
+    w.state.awaitSecond = false;
     expect(await w.checkout.startCheckout({} as never, w.input)).toEqual(sent[0]);
     expect(w.state.sessionsCreated.size).toBe(1);
     const [rows] = await ownerQuery<{ n: number }>("select count(*)::int as n from private.checkout_sessions where profile_id = $1", [w.person.id]);

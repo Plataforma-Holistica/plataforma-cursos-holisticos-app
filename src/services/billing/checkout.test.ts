@@ -158,6 +158,18 @@ describe("salir a pagar", () => {
     expect(t.store.customerRecord).toHaveBeenCalledWith(CLAIMS, false, "cus_new");
   });
 
+  it.each([
+    [{ status: "rejected" }, "checkout_customer_rejected"],
+    [{ status: "unknown" }, "checkout_stripe_unknown"],
+    [{ status: "unauthorized" }, "checkout_key_rejected"],
+  ] as const)("si crear el cliente contesta %j, no se sigue y se reporta %s", async (answer, code) => {
+    const t = setup({ begin: [{ answer: "reserved", checkout: ROW, customer: null }] });
+    t.post.mockImplementationOnce(async () => answer);
+    expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
+    expect(t.report).toHaveBeenCalledWith(code);
+    expect(t.store.customerRecord).not.toHaveBeenCalled();
+  });
+
   it("quien ya tiene acceso no sale a pagar, y no se reserva nada", async () => {
     const t = setup({ access: true });
     expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "has_access" });
@@ -189,6 +201,7 @@ describe("salir a pagar", () => {
   it("si las suscripciones del cliente no caben en una página, no se supo: no se crea nada", async () => {
     const t = setup({ subscriptionsMore: true });
     expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
+    expect(t.report).toHaveBeenCalledWith("checkout_customer_subscriptions");
     expect(t.calls.some((call) => call.startsWith("post /v1/checkout"))).toBe(false);
   });
 

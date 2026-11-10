@@ -302,7 +302,12 @@ export function createCheckout(deps: CheckoutDeps) {
 
     // Sin `status`, Stripe da todas menos las canceladas. Si no caben en una página, no se supo: una viva podría quedar fuera.
     const subscriptions = bodyOf(await stripe.get("/v1/subscriptions", { customer, limit: "100" }), subscriptionList);
-    if (subscriptions === null || subscriptions.has_more) return { kind: "unavailable" };
+    if (subscriptions === null) return { kind: "unavailable" };
+    if (subscriptions.has_more) {
+      // Más de 100 sin cancelar: no se arregla reintentando, así que se reporta.
+      await deps.report("checkout_customer_subscriptions");
+      return { kind: "unavailable" };
+    }
     if (subscriptions.data.some((each) => LIVE_IN_STRIPE.has(each.status))) {
       await abandon(null);
       return { kind: "in_progress" };
@@ -329,11 +334,12 @@ export function createCheckout(deps: CheckoutDeps) {
   }
 
   /**
-   * Lo que Stripe no contestó como se esperaba al crear: la llave rechazada, o un «no se supo» (un 5xx, un 409, un corte) o un 200 sin la forma de siempre.
-   * Se reintenta con la misma llave de idempotencia, que no cobra dos veces; pero Stripe guarda un 500 y lo repite, así que se reporta para que alguien lo vea.
+   * Lo que Stripe no contestó como se esperaba al crear: la llave rechazada, un rechazo del cliente, o un «no se supo» (un 5xx, un 409, un corte) o un 200
+   * sin la forma de siempre. Se reintenta con la misma llave de idempotencia, que no cobra dos veces; pero Stripe guarda un 500 y lo repite, así que se reporta
+   * para que alguien lo vea.
    */
   async function reportUnknown(answer: StripeWriteAnswer): Promise<void> {
-    await deps.report(answer.status === "unauthorized" ? "checkout_key_rejected" : "checkout_stripe_unknown");
+    await deps.report(answer.status === "unauthorized" ? "checkout_key_rejected" : answer.status === "rejected" ? "checkout_customer_rejected" : "checkout_stripe_unknown");
   }
 
   /** El cliente nuevo de Stripe, con su llave por cuenta y modo: un corte entre crearlo y anotarlo no crea un segundo. */
