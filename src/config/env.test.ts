@@ -446,3 +446,44 @@ describe("Stripe con una llave restringida (T-303)", () => {
     expect(problemsOf({ ...valid, STRIPE_SECRET_KEY: restricted("live"), STRIPE_WEBHOOK_SECRET: webhook })).toEqual(["STRIPE_SECRET_KEY: tiene un valor inválido"]);
   });
 });
+
+describe("la salida a pagar (T-302)", () => {
+  const key = (prefix: "sk" | "rk", mode: "test" | "live") => [prefix, mode, "prueba0123456789abcdef"].join("_");
+  const webhook = ["whsec", "prueba0123456789abcdef"].join("_");
+  const hosted = (appEnv: string) => ({ APP_ENV: appEnv, SENTRY_DSN: "https://llave@sentry.example/1", NEXT_PUBLIC_SUPABASE_URL: "https://proyecto.supabase.co" });
+  const avisos = (mode: "test" | "live") => ({ STRIPE_SECRET_KEY: key("rk", mode), STRIPE_WEBHOOK_SECRET: webhook });
+
+  it("su llave es opcional: sin ella no se sale a pagar", () => {
+    expect(parseEnv(valid)).not.toHaveProperty("STRIPE_CHECKOUT_KEY");
+  });
+
+  it("va con la de los avisos: sin ellos se cobraría sin dar acceso nunca", () => {
+    expect(problemsOf({ ...valid, STRIPE_CHECKOUT_KEY: key("rk", "test") })).toEqual(["STRIPE_CHECKOUT_KEY: tiene un valor inválido"]);
+    expect(parseEnv({ ...valid, ...avisos("test"), STRIPE_CHECKOUT_KEY: key("rk", "test") }).STRIPE_CHECKOUT_KEY).toBe(key("rk", "test"));
+  });
+
+  it.each(["local", "staging"])("en %s solo la de prueba", (appEnv) => {
+    const source = { ...valid, ...hosted(appEnv), ...mail, ...avisos("test") };
+    expect(problemsOf({ ...source, STRIPE_CHECKOUT_KEY: key("rk", "live") })).toEqual(["STRIPE_CHECKOUT_KEY: tiene un valor inválido"]);
+    expect(() => parseEnv({ ...source, STRIPE_CHECKOUT_KEY: key("sk", "test") })).not.toThrow();
+  });
+
+  it("en producción solo la real", () => {
+    const source = { ...valid, ...hosted("production"), ...mail, ...avisos("live") };
+    expect(problemsOf({ ...source, STRIPE_CHECKOUT_KEY: key("rk", "test") })).toEqual(["STRIPE_CHECKOUT_KEY: tiene un valor inválido"]);
+    expect(() => parseEnv({ ...source, STRIPE_CHECKOUT_KEY: key("rk", "live") })).not.toThrow();
+  });
+
+  it.each(["pk_test_prueba0123456789", "rk_test_", "whsec_prueba0123456789"])("una llave con otra forma (%s) no se admite", (value) => {
+    expect(problemsOf({ ...valid, ...avisos("test"), STRIPE_CHECKOUT_KEY: value })).toEqual(["STRIPE_CHECKOUT_KEY: tiene un valor inválido"]);
+  });
+
+  it("el pago de prueba, sin Stripe, solo en local", () => {
+    expect(parseEnv({ ...valid, BILLING_CHECKOUT: "test" }).BILLING_CHECKOUT).toBe("test");
+    for (const appEnv of ["staging", "production"]) {
+      const outside = { ...valid, ...hosted(appEnv), ...mail, BILLING_CHECKOUT: "test" };
+      expect(problemsOf(outside)).toEqual(["BILLING_CHECKOUT: tiene un valor inválido"]);
+    }
+    expect(problemsOf({ ...valid, BILLING_CHECKOUT: "otro" })).toEqual(["BILLING_CHECKOUT: tiene un valor inválido"]);
+  });
+});

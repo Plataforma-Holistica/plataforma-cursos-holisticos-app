@@ -71,6 +71,12 @@ const schema = z.object({
   // fuera de producción, y la real solo vale en producción. Basta una llave restringida de solo lectura (`rk_`): el servidor nunca le cobra a nadie.
   STRIPE_SECRET_KEY: z.string().regex(/^(sk|rk)_(test|live)_[A-Za-z0-9]{10,255}$/).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().regex(/^whsec_[A-Za-z0-9]{10,255}$/).optional(),
+  // La salida a pagar (T-302): la llave con que el servidor crea el cliente y la sesión de pago, aparte de la de los avisos, que sigue de solo lectura. Restringida a
+  // escribir clientes y sesiones de pago y a leer precios y suscripciones. Secreta, solo en el servidor. Sigue la regla del modo, y no va sin la de los avisos: sin
+  // ellos se cobraría y nadie daría el acceso. Sin ella no se sale a pagar.
+  STRIPE_CHECKOUT_KEY: z.string().regex(/^(sk|rk)_(test|live)_[A-Za-z0-9]{10,255}$/).optional(),
+  // El pago de prueba, sin Stripe (T-302), para el extremo a extremo: una página propia hace de la de Stripe. Solo en local.
+  BILLING_CHECKOUT: z.enum(["test"]).optional(),
 });
 
 // La llave privada de firma, en PEM o en base64, como la entrega Mux. Aquí solo se revisa su
@@ -186,6 +192,13 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   if (present.STRIPE_SECRET_KEY !== undefined && /^(sk|rk)_live_/.test(present.STRIPE_SECRET_KEY) !== stripeProduction) {
     failed.add("STRIPE_SECRET_KEY");
   }
+  if (
+    present.STRIPE_CHECKOUT_KEY !== undefined &&
+    (/^(sk|rk)_live_/.test(present.STRIPE_CHECKOUT_KEY) !== stripeProduction || present.STRIPE_SECRET_KEY === undefined || present.STRIPE_WEBHOOK_SECRET === undefined)
+  ) {
+    failed.add("STRIPE_CHECKOUT_KEY");
+  }
+  if (present.BILLING_CHECKOUT === "test" && present.APP_ENV !== "local") failed.add("BILLING_CHECKOUT");
   if (present.VIDEO_PROVIDER === "mux") {
     if (present.MUX_TOKEN_ID === undefined) failed.add("MUX_TOKEN_ID");
     if (present.MUX_TOKEN_SECRET === undefined) failed.add("MUX_TOKEN_SECRET");

@@ -210,6 +210,22 @@ export async function readCommentFacts(tx: Tx, lessonId: string): Promise<Commen
   };
 }
 
+/**
+ * Los hechos de la cuenta de quien actúa, sin lección (T-302): los mismos de ver, de la misma función, para que la salida a pagar decida con la regla única si ya
+ * tiene acceso. Con el correo, que lleva el cliente de Stripe. Nulo si la base no reconoce a quien actúa.
+ */
+export async function readAccountFacts(tx: Tx): Promise<{ now: Date; email: string | null; account: AccountFacts; graceDays: number } | null> {
+  const [row] = await tx.query(sql`select private.media_facts(null::uuid) as facts`, z.object({ facts: factsRow.nullable() }));
+  const facts = row?.facts;
+  if (!facts) return null;
+  return {
+    now: facts.now,
+    email: facts.viewer.email,
+    account: accountOf(facts.viewer.suspended, facts.subscription, facts.courtesy),
+    graceDays: graceDaysOf(facts.subscription),
+  };
+}
+
 /** Lo que hace falta para firmar la descarga de un recurso (T-404). Nunca sale del servicio: trae la ruta. */
 export interface ResourceFile {
   path: string;

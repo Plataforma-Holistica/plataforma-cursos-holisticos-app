@@ -8,6 +8,7 @@ import { landing } from "./es/landing";
 import { lesson } from "./es/lesson";
 import { mail } from "./es/mail";
 import { meta } from "./es/meta";
+import { plans } from "./es/plans";
 import { player } from "./es/player";
 import { portal } from "./es/portal";
 import { resources } from "./es/resources";
@@ -27,6 +28,6 @@ import { ui } from "./es/ui";
 //     comentarios (`comments.notice`), que se buscan por el código que contesta el servicio.
 //   - Las palabras que pueden cambiar por marca viven en `es/terms.ts` y se citan con un
 //     marcador. Ver `format.ts`.
-export const messages = { terms, ui, states, meta, account, admin, player, lesson, resources, browse, landing, portal, mail, comments } as const;
+export const messages = { terms, ui, states, meta, account, admin, player, lesson, resources, browse, landing, portal, mail, comments, plans } as const;
 
 export { plural, t } from "./format";
