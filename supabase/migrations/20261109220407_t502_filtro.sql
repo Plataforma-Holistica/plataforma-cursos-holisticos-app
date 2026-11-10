@@ -496,10 +496,11 @@ as $$
   where pg_catalog.has_function_privilege(r.rolname::name, i.signature::regprocedure, 'EXECUTE')
   union all
   -- Un término que ya no es como lo deja la normalización (si esta cambia, la migración que la cambie los renormaliza) no
-  -- coincide nunca, sin avisar.
-  select 'comment filter term not normalized', t.term
+  -- coincide nunca, sin avisar. Se dice cuántos, nunca cuáles: el servidor ejecuta el vigilante, y la lista es privada.
+  select 'comment filter terms not normalized: ' || count(*), 'private.comment_filter_terms'
   from private.comment_filter_terms t
   where t.term is distinct from private.comment_normalize(t.term)
+  having count(*) > 0
   union all
   -- El barrido corre cada minuto.
   select 'comment filter sweep not scheduled', 'cron.job comment_filter_sweep'

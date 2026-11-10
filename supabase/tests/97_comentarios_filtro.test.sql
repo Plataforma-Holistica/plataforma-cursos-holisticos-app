@@ -5,7 +5,7 @@
 -- revisión al borrarlo, el seudónimo por la lista y con su freno, y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(80);
+select plan(81);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -214,6 +214,7 @@ select pruebas.fuerza('c9', 'report_count = 1');
 select is(pruebas.r(pruebas.p(2), format('private.comment_edit(%L, %L, %s)', pruebas.id('c9'), 'Publicado y reportado, que se corrige', pruebas.rev('c9'))), 'ok',
   'editar con el mismo texto no escribe nada');
 select is((select count(*)::int from private.comment_evidence where comment_id = pruebas.id('c9')), 0, 'ni deja copia');
+select is((pruebas.fila('c9'), pruebas.rev('c9')), ('published pass test'::text, 1::bigint), 'ni cambia el estado ni la revisión');
 select is(pruebas.r(pruebas.p(2), format('private.comment_edit(%L, %L, %s)', pruebas.id('c9'), 'Ya corregido', pruebas.rev('c9'))), 'ok',
   'lo publicado con reportes se edita (Beto, para no pasar el freno de Ana)');
 select is((select (body, cause) from private.comment_evidence where comment_id = pruebas.id('c9')), ('Publicado y reportado, que se corrige'::text, 'edit'::text),
@@ -277,15 +278,18 @@ select is(pruebas.r(pruebas.p(4), $$private.comment_set_pseudonym('Zorbak')$$), 
 -- El vigilante, y quién ejecuta asentar.
 
 select is(pruebas.vigila(), '{}', 'el área comments no dice nada con lo nuevo');
--- Un término guardado de otra forma (como si la normalización hubiera cambiado), en réplica para saltar su restricción.
-set local session_replication_role = replica;
+-- Un término guardado de otra forma (como si la normalización hubiera cambiado): sin su restricción, que vuelve tal cual estaba.
+create table pruebas.restriccion as
+select pg_get_constraintdef(c.oid) as definicion from pg_constraint c
+where c.conrelid = 'private.comment_filter_terms'::regclass and c.conname = 'comment_filter_terms_normalized';
 alter table private.comment_filter_terms drop constraint comment_filter_terms_normalized;
 insert into private.comment_filter_terms (term) values ('Viejo');
-select is(pruebas.vigila(), array['comment filter term not normalized Viejo'], 'el vigilante ve un término que ya no coincide');
+select is(pruebas.vigila(), array['comment filter terms not normalized: 1 private.comment_filter_terms'],
+  'el vigilante ve un término que ya no coincide, sin decir cuál');
 delete from private.comment_filter_terms where term = 'Viejo';
-alter table private.comment_filter_terms add constraint comment_filter_terms_normalized check (
-  term ~ '^[a-z]+( [a-z]+)*$' and pg_catalog.char_length(term) between 2 and 100 and term = private.comment_normalize(term));
-set local session_replication_role = origin;
+do $$ begin
+  execute 'alter table private.comment_filter_terms add constraint comment_filter_terms_normalized ' || (select definicion from pruebas.restriccion);
+end $$;
 grant select on private.comment_evidence to app_service;
 select is(pruebas.vigila(), array['comments table reachable by app_service private.comment_evidence'], 'el vigilante ve un permiso de más sobre la copia');
 revoke select on private.comment_evidence from app_service;
