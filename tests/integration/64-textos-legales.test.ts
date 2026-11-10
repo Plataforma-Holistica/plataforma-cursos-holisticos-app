@@ -53,7 +53,8 @@ describe("el texto vigente de un tipo público", () => {
 
   it("un tipo público sin ningún texto no se encuentra, y no es un fallo", async () => {
     const service = legal(true);
-    expect(await service.currentLegalText("refund_policy")).toEqual({ kind: "not_found" });
+    // Desde T-302 la política de reembolsos tiene borrador; la de la comunidad sigue sin ningún texto.
+    expect(await service.currentLegalText("community_policy")).toEqual({ kind: "not_found" });
     expect(service.reported).toEqual([]);
   });
 });

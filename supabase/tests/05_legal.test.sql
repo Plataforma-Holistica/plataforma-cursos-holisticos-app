@@ -1,6 +1,7 @@
 -- T-104 · Textos legales con versión y consentimientos (RF-108, RF-713).
 -- Esquema de backend §5.8, §6.5 y §7. Usa tipos de documento que los borradores locales
--- no cargan, para dar lo mismo con ellos y sin ellos.
+-- no cargaban, para dar lo mismo con ellos y sin ellos. Desde T-302 los borradores cargan
+-- también los reembolsos y el cobro recurrente: la prueba los quita al empezar.
 --
 -- Desde T-110 (2026-10-28) el servidor ya no inserta en la tabla: de la versión 1 en adelante
 -- publica private.publish_legal_document(), que prueba la 56. Lo que aquí se afirma de lo que
@@ -23,6 +24,12 @@ select pruebas.alta('a0000000-0000-0000-0000-000000000001', 'alumna-legal@prueba
 select pruebas.alta('a0000000-0000-0000-0000-000000000002', 'otra-legal@prueba.test');
 select pruebas.alta('c0000000-0000-0000-0000-000000000001', 'config-legal@prueba.test');
 select pruebas.dar_capacidad('c0000000-0000-0000-0000-000000000001', 'config');
+
+-- Los borradores de los dos tipos que usa esta prueba, fuera (con ellos o sin ellos, la prueba da lo mismo).
+set local session_replication_role = replica;
+delete from public.consents where legal_document_id in (select id from public.legal_documents where doc_type in ('refund_policy', 'recurring_charge_consent'));
+delete from public.legal_documents where doc_type in ('refund_policy', 'recurring_charge_consent');
+set local session_replication_role = origin;
 
 -- ---------------------------------------------------------------------------------------
 -- Permisos: el público lee el texto y no quién lo publicó; la persona no lee su IP.
@@ -397,10 +404,12 @@ select throws_ok(
   $$delete from public.consents$$,
   '42501', 'append-only ledger public.consents: DELETE is not allowed',
   'un consentimiento no se borra');
+-- Desde T-302 una salida a pagar apunta a su consentimiento: vaciar la tabla sola la detiene antes la clave foránea (0A000), y en
+-- cascada, el guardián del libro.
 select throws_ok(
-  $$truncate public.consents$$,
+  $$truncate public.consents cascade$$,
   '42501', 'append-only ledger public.consents: TRUNCATE is not allowed',
-  'ni se vacía la tabla');
+  'ni se vacía la tabla, ni en cascada');
 
 -- El guardián está habilitado. La limpieza de las pruebas de integración lo desactiva un
 -- instante, dentro de una transacción, para borrar a sus personas de prueba: si un día

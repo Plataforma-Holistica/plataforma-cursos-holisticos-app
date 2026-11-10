@@ -4,7 +4,8 @@ import { docTypeOfSlug, isPublicDocType, LEGAL_SLUGS, PUBLIC_DOC_TYPES, slugOfDo
 
 describe("la dirección de cada texto legal", () => {
   it("cada dirección lleva a un tipo público, y de vuelta", () => {
-    expect(Object.keys(LEGAL_SLUGS).sort()).toEqual(["historial-de-cursos", "privacidad", "terminos"]);
+    // Desde T-302 también el cobro recurrente y la política de reembolsos, que se aceptan y se enlazan antes de salir a pagar.
+    expect(Object.keys(LEGAL_SLUGS).sort()).toEqual(["cobro-recurrente", "historial-de-cursos", "privacidad", "reembolsos", "terminos"]);
     for (const [slug, docType] of Object.entries(LEGAL_SLUGS)) {
       expect(docTypeOfSlug(slug)).toBe(docType);
       expect(slugOfDocType(docType)).toBe(slug);
@@ -20,7 +21,8 @@ describe("la dirección de cada texto legal", () => {
   );
 
   it("un tipo sin dirección no tiene enlace", () => {
-    expect(slugOfDocType("refund_policy")).toBeNull();
+    // La política de reembolsos tiene página desde T-302; la de la comunidad todavía no.
+    expect(slugOfDocType("community_policy")).toBeNull();
     expect(slugOfDocType("__proto__")).toBeNull();
     expect(slugOfDocType("")).toBeNull();
   });
