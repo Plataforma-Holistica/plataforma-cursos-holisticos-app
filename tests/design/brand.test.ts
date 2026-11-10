@@ -63,10 +63,13 @@ describe("el icono del sitio", () => {
   const css = readFileSync(root("src/ui/theme.css"), "utf8");
   const token = (name: string) => css.match(new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`))?.[1]?.toUpperCase();
 
-  it("la pestaña es un SVG con el fondo, el texto y el acento de los tokens, y nada más", () => {
+  // La flor de la vida (T-615; diseño §3.12; elegida por Sergio el 2026-11-09): seis círculos en el texto secundario y la roseta
+  // del centro en el acento, sobre el fondo.
+  it("la pestaña es un SVG con el fondo, el texto secundario y el acento de los tokens, y nada más", () => {
     const svg = readFileSync(root("src/app/icon.svg"), "utf8");
-    const fills = [...svg.matchAll(/fill="(#[0-9A-Fa-f]{6})"/g)].map((match) => match[1]?.toUpperCase());
-    expect(fills).toEqual([token("bg"), token("text"), token("accent")]);
+    const colors = (attribute: string) => [...svg.matchAll(new RegExp(`${attribute}="(#[0-9A-Fa-f]{6})"`, "g"))].map((match) => match[1]?.toUpperCase());
+    expect(colors("fill")).toEqual([token("bg")]);
+    expect(colors("stroke")).toEqual([token("text-2"), token("accent")]);
     expect(svg).not.toMatch(/<text|<image|href=/);
   });
 

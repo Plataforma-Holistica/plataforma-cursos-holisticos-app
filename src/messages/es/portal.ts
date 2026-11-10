@@ -159,7 +159,7 @@ export const portal = defineMessages({
     unavailable: "No pudimos leer tus cifras. Intenta de nuevo en un momento.",
     retry: "Reintentar",
     suspendedTitle: "Tu cuenta de {maestro} está en solo lectura",
-    accepted: "Ya eres {maestro} en {Plataforma}.",
+    accepted: "Ya eres {maestro} en la {Plataforma}.",
     noticeAccepted: "Anotamos que aceptaste el aviso.",
     taxDataMissing: "Sin tus datos fiscales y bancarios no se te puede pagar.",
     taxDataLink: "Capturar mis datos fiscales",
@@ -210,7 +210,7 @@ export const portal = defineMessages({
   invitation: {
     title: "Te invitamos a dar clases",
     titleNamed: "{name}, te invitamos a dar clases",
-    intro: "Lee el contrato y el aviso de privacidad. Al aceptarlos quedas como {maestro} en {Plataforma}.",
+    intro: "Lee el contrato y el aviso de privacidad. Al aceptarlos quedas como {maestro} en la {Plataforma}.",
     version: "Versión {version}, vigente desde el {date}.",
     agree: "He leído y acepto el contrato.",
     agreeNotice: "He leído y acepto el aviso de privacidad.",
@@ -454,7 +454,7 @@ export const portal = defineMessages({
     pool: "Bote del periodo",
     poolBps: "Porcentaje aplicado",
     share: "Tu reparto",
-    nothingAssigned: "Este mes ningún alumno con pago en el periodo vio lecciones en {Plataforma}. El bote entero pasó al periodo siguiente.",
+    nothingAssigned: "Este mes ningún alumno con pago en el periodo vio lecciones en la {Plataforma}. El bote entero pasó al periodo siguiente.",
     moneyTitle: "Cómo se llega a tu pago",
     lines: {
       pool: "Reparto del bote",
@@ -470,7 +470,7 @@ export const portal = defineMessages({
     },
     invoiceTitle: "Factura",
     receiver: "A nombre de: RFC {rfc}",
-    receiverMissing: "Todavía no se puede facturar: nos falta el dato de {Plataforma} para recibir tu factura. Te avisamos en cuanto esté.",
+    receiverMissing: "Todavía no se puede facturar: nos falta el dato de la {Plataforma} para recibir tu factura. Te avisamos en cuanto esté.",
     invoiceAmounts: {
       subtotal: "Subtotal",
       vat: "IVA trasladado",

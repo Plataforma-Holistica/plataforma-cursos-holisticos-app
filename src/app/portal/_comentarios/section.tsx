@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { comments as text } from "@/messages/es/comments";
+import { t } from "@/messages/format";
 import type { VerifiedClaims } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 import { commentReplies, teacherCommentCourses, teacherComments, type TeacherThread } from "@/services/comments/comments";
@@ -90,7 +91,7 @@ export async function CommentsSection({ claims, readOnly, search }: { claims: Ve
         </ul>
       </nav>
       {read.kind === "closed" || paged === null ? (
-        <InlineAlert tone="warning">{text.portal.closed}</InlineAlert>
+        <InlineAlert tone="warning">{t(text.portal.closed)}</InlineAlert>
       ) : (
         <>
           {filters.from !== null && <TextLink href={teacherCommentsHref(filters)}>{text.portal.newest}</TextLink>}

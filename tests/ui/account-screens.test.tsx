@@ -180,7 +180,7 @@ const updated: ConsentsView = {
   items: [item("terms", "Términos y condiciones")],
   signature: ID.terms,
 };
-const HISTORY = "Doy mi permiso para que La Plataforma guarde mi historial de cursos con esos fines.";
+const HISTORY = "Doy mi permiso para que la Escuela de Misterios guarde mi historial de cursos con esos fines.";
 
 describe("la pantalla que pide lo que le falta a la cuenta (PA-15)", () => {
   it("«Completa tu cuenta»: nombre, edad, una casilla por texto y el historial en su bloque, nada marcado", async () => {

@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { terms } from "./es/terms";
@@ -98,12 +100,32 @@ describe("catálogo de textos", () => {
     }
   });
 
-  it("ningún texto escribe a mano la palabra del rol ni el nombre de la Plataforma", () => {
+  it("ningún texto escribe a mano la palabra del rol ni el nombre del producto", () => {
     const role = new RegExp(stem(terms), "i");
     for (const [key, text] of texts) {
       // Lo que queda fuera de los marcadores: el nombre de un marcador del rol (`{el_maestro}`) es la manera correcta de citarlo.
       expect(text.replace(MARKER, ""), `${key} debe citar el término con un marcador`).not.toMatch(role);
-      expect(text, `${key} debe citar {Plataforma}`).not.toContain(terms.Plataforma);
+      expect(text.toLowerCase(), `${key} debe citar {Plataforma}`).not.toContain(terms.Plataforma.toLowerCase());
+      // Ni el nombre provisional de antes (PQ-13, decidido el 2026-11-09), en ninguna caja. El plural es otra cosa: un régimen
+      // del SAT habla de «Plataformas Tecnológicas».
+      expect(text.replace(MARKER, ""), `${key} no debe decir «plataforma»`).not.toMatch(/\bplataforma\b/i);
+    }
+  });
+
+  // Un bloque fuera del índice no lo lee ninguna de estas guardas: así se escapó el de comentarios hasta T-615.
+  it("todo bloque de es/ está en el catálogo", () => {
+    const files = readdirSync(new URL("./es/", import.meta.url)).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"));
+    expect(files.map((name) => name.replace(/\.ts$/, "")).sort()).toEqual(Object.keys(messages).sort());
+  });
+
+  // El nombre va sin artículo (T-615): cada texto pone «la» donde la frase lo pide. Solo el título de la pestaña lo cita solo.
+  it("{Plataforma} lleva su artículo, salvo en el título de la pestaña", () => {
+    const alone = new Set(["meta.titleTemplate", "meta.titleDefault"]);
+    for (const [key, text] of texts) {
+      if (alone.has(key)) continue;
+      for (const match of text.matchAll(/\{Plataforma\}/g)) {
+        expect(text.slice(Math.max(0, match.index - 4), match.index), `${key}: «la» antes de {Plataforma}`).toMatch(/(?:^|[^\p{L}])[Ll]a $/u);
+      }
     }
   });
 
@@ -145,7 +167,8 @@ describe("catálogo de textos", () => {
   });
 
   it("las claves van en inglés y sin acentos, como el resto de los identificadores", () => {
-    for (const key of texts.keys()) expect(key).toMatch(/^[A-Za-z0-9]+(\.[A-Za-z0-9]+)*$/);
+    // Los avisos de los comentarios se buscan por el código que contesta el servicio (`in_review`, `name_saved`): su clave es ese código.
+    for (const key of texts.keys()) expect(key).toMatch(key.startsWith("comments.notice.") ? /^comments\.notice\.[a-z_]+$/ : /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)*$/);
   });
 
   it("los textos cierran con su puntuación y no gritan", () => {

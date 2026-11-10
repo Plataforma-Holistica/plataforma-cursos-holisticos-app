@@ -88,7 +88,7 @@ async function register(page: Page, email: string): Promise<void> {
   await page.getByLabel("Contraseña", { exact: true }).fill(PASSWORD);
   await page.getByLabel("Tengo 18 años cumplidos o más.").check();
   await page.getByRole("checkbox", { name: /^Acepto los Términos.*y el Aviso de privacidad/ }).check();
-  await page.getByLabel("Doy mi permiso para que La Plataforma guarde mi historial de cursos con esos fines.").check();
+  await page.getByLabel("Doy mi permiso para que la Escuela de Misterios guarde mi historial de cursos con esos fines.").check();
   await page.getByRole("button", { name: "Confirmar mi correo" }).click();
 }
 
@@ -129,7 +129,7 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await expect(page).toHaveURL(SETUP);
   const id = await userIdOf(email);
   await expect(page.getByRole("heading", { level: 1, name: "Configura tu segundo factor" })).toBeVisible();
-  await expect(page).toHaveTitle("La Plataforma");
+  await expect(page).toHaveTitle("Escuela de Misterios");
   expect(await a11yViolations(page)).toEqual([]);
   // Nada se dio de alta por abrir la página.
   expect(await factorsOf(id)).toEqual([]);
@@ -628,7 +628,7 @@ test.describe.serial("el equipo se administra a sí mismo (PA-86)", () => {
     await expect(page).toHaveURL(TEAM);
     await expect(page.getByRole("heading", { level: 1, name: "Equipo de administración" })).toBeVisible();
     // Sin título propio: no debe poder asomarse en el «no existe» de quien no es del equipo.
-    await expect(page).toHaveTitle("La Plataforma");
+    await expect(page).toHaveTitle("Escuela de Misterios");
     expect(await a11yViolations(page)).toEqual([]);
     expect((await page.request.get(TEAM)).headers()["cache-control"]).toMatch(/no-store/);
 

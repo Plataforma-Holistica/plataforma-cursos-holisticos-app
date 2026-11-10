@@ -63,7 +63,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
   ],
   firstLesson: { id: L1, title: "Soltar los hombros" },
 });
-const DISCLAIMER = `${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`;
+const DISCLAIMER = `La ${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`;
 const params = (slug: string) => ({ params: Promise.resolve({ slug }) });
 const lesson = (id: string) => `/cursos/respirar/lecciones/${id}`;
 

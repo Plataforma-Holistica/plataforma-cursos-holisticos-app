@@ -173,10 +173,10 @@ describe("PA-45 en el portal", () => {
     expect(screen.getByRole("article", { name: "Ana" })).toBeInTheDocument();
   });
 
-  it("con los comentarios cerrados en toda la Plataforma, la pantalla lo dice", async () => {
+  it("con los comentarios cerrados en todo el producto, la pantalla lo dice", async () => {
     mocks.teacherComments.mockResolvedValue({ kind: "closed" });
     render(await at());
-    expect(screen.getByText("Los comentarios están cerrados en toda la Plataforma por ahora.")).toBeInTheDocument();
+    expect(screen.getByText("Los comentarios están cerrados en toda la Escuela de Misterios por ahora.")).toBeInTheDocument();
   });
 
   it("vacío, y vacío con «Sin responder»", async () => {

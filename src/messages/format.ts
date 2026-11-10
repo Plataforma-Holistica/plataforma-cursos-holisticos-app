@@ -39,7 +39,8 @@ type Markers<Text extends string> = Text extends `${string}{${infer Name}}${infe
   ? Name | Markers<Rest>
   : never;
 
-type DataMarkers<Text extends string> = Exclude<Markers<Text>, TermKey>;
+/** Los marcadores que piden un dato (no un término del bloque). */
+export type DataMarkers<Text extends string> = Exclude<Markers<Text>, TermKey>;
 
 // Una plantilla cuyo texto ya no se conoce al compilar (se pasó como «una plantilla
 // cualquiera») no puede decir qué datos pide: entonces los valores son obligatorios.

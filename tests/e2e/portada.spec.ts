@@ -16,7 +16,7 @@ test("el visitante ve la portada con su foto, y «Crear cuenta» lo lleva al reg
   const photo = page.waitForResponse((response) => response.url().includes("/_next/image") && response.url().includes("portada-muelle"));
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Aprende con quienes practican lo que enseñan" })).toBeVisible();
-  await expect(page).toHaveTitle("La Plataforma");
+  await expect(page).toHaveTitle("Escuela de Misterios");
 
   // La foto llega en AVIF y, en el ancho del teléfono, sin pasar del tope.
   const served = await photo;

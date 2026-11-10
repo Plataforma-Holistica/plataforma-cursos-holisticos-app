@@ -26,6 +26,7 @@ import {
   moreCommentsHref,
   moreRepliesHref,
   newestCommentsHref,
+  said,
   type CommentsView,
 } from "./view";
 
@@ -101,7 +102,7 @@ export function Notice({ notice }: { notice: CommentNotice | null }) {
   const good = notice.kind === "published" || notice.kind === "in_review" || notice.kind === "deleted" || notice.kind === "name_saved";
   return (
     <InlineAlert tone={good ? "success" : "warning"} live>
-      {text.notice[notice.kind]}
+      {said(text.notice[notice.kind])}
     </InlineAlert>
   );
 }
@@ -115,7 +116,7 @@ export function Instead({ write }: { write: WriteStanding }) {
         body = text.instead.banned;
         break;
       case "suspended":
-        body = text.instead.suspended;
+        body = said(text.instead.suspended);
         break;
       case "closed":
         body = text.instead.closed;
@@ -123,7 +124,7 @@ export function Instead({ write }: { write: WriteStanding }) {
       case "needs_notice":
         body = (
           <>
-            {text.instead.needsNotice} <TextLink href={ROUTES.portal}>{text.instead.needsNoticeLink}</TextLink>
+            {said(text.instead.needsNotice)} <TextLink href={ROUTES.portal}>{said(text.instead.needsNoticeLink)}</TextLink>
           </>
         );
         break;
@@ -411,7 +412,7 @@ function NameDialog({ shared }: { shared: Shared }) {
             autoComplete="off"
             value={draft({ kind: "name" }) ?? ""}
             onValueChange={write({ kind: "name" })}
-            error={notice === null ? undefined : text.notice[notice.kind]}
+            error={notice === null ? undefined : said(text.notice[notice.kind])}
           />
         }
       >

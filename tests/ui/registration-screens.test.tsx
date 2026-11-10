@@ -79,7 +79,7 @@ describe("la pantalla de registro (PA-10)", () => {
     for (const link of [terms, privacy]) expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar");
     // El deslinde (RF-809) se lee antes del botón.
-    const disclaimer = screen.getByText(`${termsBlock.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`);
+    const disclaimer = screen.getByText(`La ${termsBlock.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`);
     expect(disclaimer.compareDocumentPosition(screen.getByRole("button", { name: "Crear mi cuenta" }))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(await a11yViolations(container)).toEqual([]);
   });

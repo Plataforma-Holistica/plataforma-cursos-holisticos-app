@@ -85,10 +85,10 @@ describe("InlineAlert", () => {
 });
 
 describe("Disclaimer", () => {
-  it("dice que la Plataforma es educativa, con su nombre del bloque de términos", () => {
+  it("dice que el producto es educativo, con su nombre del bloque de términos", () => {
     render(<Disclaimer />);
     expect(
-      screen.getByText(`${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`),
+      screen.getByText(`La ${terms.Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.`),
     ).toBeVisible();
   });
 

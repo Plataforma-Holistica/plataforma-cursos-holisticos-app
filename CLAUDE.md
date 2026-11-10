@@ -6,7 +6,7 @@ mandan ellos y esta guía se corrige.
 
 ## Qué es este repositorio
 
-La Plataforma: cursos en video por suscripción, donde una parte del ingreso (el bote) se
+Escuela de Misterios (en el código y la planeación, «la Plataforma»): cursos en video por suscripción, donde una parte del ingreso (el bote) se
 reparte entre los maestros según lo que vio cada alumno. Una sola aplicación Next.js con
 cuatro superficies: sitio público, área del alumno, portal del maestro y administración.
 
@@ -1187,6 +1187,18 @@ que no se ve leyendo un solo archivo:
   suspensión de quien envió justo antes; editar lo que está en revisión deja copia; la lista blanca de proveedores; el proveedor de prueba en
   `src/services/comments/moderation.ts` y no en `src/adapters/` (no llama a nadie: el adaptador llega con el real). Para el A: nada que le
   toque.
+- **Lo que T-615 suma al carril B** (el nombre, sin migración; PQ-13 decidido por Pablo y Sergio el 2026-11-09, con el encargo que Sergio
+  aprobó ese día). **El producto se llama Escuela de Misterios:** `terms.Plataforma` lo dice sin artículo, como el logotipo, y cada texto que
+  lo cita pone «la» donde la frase lo pide («en la {Plataforma}», «La {Plataforma} es educativa»). La guarda de `catalog.test.ts` prohíbe
+  además «plataforma» escrito a mano en cualquier caja (el plural no: un régimen del SAT habla de «Plataformas Tecnológicas»). Los correos de
+  Auth (`supabase/templates/`), el remitente local (`avisos@escuelademisterios.local`), los borradores legales locales y las pruebas dicen el
+  nombre nuevo; después de tocar las plantillas, `pnpm db:stop` y `pnpm db:start`. **El icono es la flor de la vida** (diseño §3.12;
+  elegida por Sergio el 2026-11-09): `src/app/icon.svg`, copiado a mano de `../proximamente/favicon.svg` con los círculos expandidos (la
+  prueba de la marca prohíbe `href`), seis en `--text-2` y la roseta del centro en el acento, sobre `--bg`; `apple-icon.png` sale de ese SVG
+  con el `sharp` que trae Next. El logotipo de texto no cambió de código. Sin tocar, a propósito: los nombres de las cookies
+  (`plataforma-sesion` y demás), porque cambiarlos cierra las sesiones; el remitente de producción y el dominio, que van con la lista de
+  salida (06 §8); y los comentarios del código que dicen «la Plataforma» por el sistema, como la planeación (decisión mía sin confirmar).
+  Para el A: los borradores legales locales (de T-110) dicen el nombre nuevo, y `pnpm db:reset` los vuelve a cargar.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

@@ -69,7 +69,7 @@ export const ui = defineMessages({
     choose: "Elegir archivo",
     none: "Ningún archivo elegido",
   },
-  disclaimer: "{Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
+  disclaimer: "La {Plataforma} es educativa. No sustituye la atención médica ni psicológica profesional.",
   // Tarjetas y carruseles del catálogo (diseño, sección 5.3; T-210). Toda la tarjeta es un solo
   // enlace, y su nombre dice lo mismo que se ve.
   courseCard: {

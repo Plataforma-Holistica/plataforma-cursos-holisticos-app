@@ -294,7 +294,7 @@ describe("PA-47 · Liquidación del periodo", () => {
     mocks.payoutReport.mockResolvedValueOnce({ kind: "ready", value: { outcome: "ok", value: { ...REPORT, invoice: { receiverRfc: null, latest: null } } } });
     render(await at(["pagos", "2031-02"]));
     const invoice = screen.getByRole("region", { name: "Factura" });
-    expect(within(invoice).getByText(/Todavía no se puede facturar: nos falta el dato de La Plataforma/)).toBeInTheDocument();
+    expect(within(invoice).getByText(/Todavía no se puede facturar: nos falta el dato de la Escuela de Misterios/)).toBeInTheDocument();
     expect(within(invoice).getByText("Todavía no has enviado una factura de este periodo.")).toBeInTheDocument();
     // «Qué sigue» tampoco lo ofrece: diría lo contrario que el bloque de factura.
     expect(screen.queryByText(/Ya puedes facturar/)).not.toBeInTheDocument();
@@ -341,7 +341,7 @@ describe("PA-47 · Liquidación del periodo", () => {
       value: { outcome: "ok", value: { ...REPORT, summary: { ...REPORT.summary, nothingAssigned: true }, students: [] } },
     });
     render(await at(["pagos", "2031-02"]));
-    expect(screen.getByText(/ningún alumno con pago en el periodo vio lecciones en La Plataforma. El bote entero pasó al periodo siguiente./)).toBeInTheDocument();
+    expect(screen.getByText(/ningún alumno con pago en el periodo vio lecciones en la Escuela de Misterios. El bote entero pasó al periodo siguiente./)).toBeInTheDocument();
     expect(screen.getByText("Ningún alumno vio tus lecciones en este periodo.")).toBeInTheDocument();
   });
 

@@ -54,7 +54,7 @@ async function register(page: Page, email: string): Promise<void> {
   await page.getByLabel("Contraseña", { exact: true }).fill(PASSWORD);
   await page.getByLabel("Tengo 18 años cumplidos o más.").check();
   await page.getByRole("checkbox", { name: /^Acepto los Términos.*y el Aviso de privacidad/ }).check();
-  await page.getByLabel("Doy mi permiso para que La Plataforma guarde mi historial de cursos con esos fines.").check();
+  await page.getByLabel("Doy mi permiso para que la Escuela de Misterios guarde mi historial de cursos con esos fines.").check();
   await page.getByRole("button", { name: "Confirmar mi correo" }).click();
 }
 

@@ -337,7 +337,7 @@ export const account = defineMessages({
     accept: "Leí y acepto: {title}.",
     textDetails: "Versión {version}, vigente desde el {date}.",
     readText: "Leer el texto",
-    historyGrant: "Doy mi permiso para que {Plataforma} guarde mi historial de cursos con esos fines.",
+    historyGrant: "Doy mi permiso para que la {Plataforma} guarde mi historial de cursos con esos fines.",
     textsChanged: "Actualizamos un texto mientras llenabas el formulario. Léelo y marca de nuevo.",
     adultMissing: "Falta que declares tu edad.",
     textMissing: "Falta aceptar: {title}.",

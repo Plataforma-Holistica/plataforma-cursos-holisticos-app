@@ -66,7 +66,7 @@ test("del inicio se llega a la cuenta, que muestra el nombre y el correo, y se v
 
   await page.getByRole("link", { name: "Cuenta" }).click();
   await expect(page).toHaveURL("/cuenta");
-  await expect(page).toHaveTitle("Cuenta · La Plataforma");
+  await expect(page).toHaveTitle("Cuenta · Escuela de Misterios");
   await expect(page.getByRole("heading", { level: 1, name: "Cuenta" })).toBeVisible();
   await expect(nameField(page)).toHaveValue("Ana de Prueba");
   const email = page.getByRole("region", { name: "Correo" });
