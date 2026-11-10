@@ -75,7 +75,7 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
   });
 
   it("cada entrada pide su nivel, en la misma transacción que la base", () => {
-    expect(service.match(/guarded\(tx,/g)).toHaveLength(4);
+    expect(service.match(/guarded\(tx,/g)).toHaveLength(5);
     // La aplicación corre cada entrada como servidor, en una transacción.
     // Y como la persona solo los cursos del filtro de PA-45.
     expect(service).toContain("export const databaseCommentsStore = commentsStoreOn((claims, reason, work) => asServer({ claims, reason }, work), asUser);");
@@ -90,6 +90,11 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
     // Editar decide con la lección que da la base, nunca con una del formulario.
     expect(storeOf("edit")).toBe(
       ' edit: (claims, input) => run(claims, "comment_edit", async (tx) => { const lessonId = await readCommentLesson(tx, input.commentId); return lessonId === null ? { kind: "missing" as const } : guarded(tx, lessonId, "write", () => editComment(tx, input)); }),',
+    );
+    // Reportar (T-502): la lección la da la base desde el comentario, nunca la de quien llama; la regla pide leer ahí, y si puede
+    // escribir es lo que cuenta para ocultar (decisión de Sergio del 2026-11-09).
+    expect(storeOf("report")).toBe(
+      ' report: (claims, input) => run(claims, "comment_report", async (tx) => { const lessonId = await readReportLesson(tx, input.commentId); return lessonId === null ? { kind: "missing" as const } : guarded(tx, lessonId, "read", (access) => reportComment(tx, { ...input, counts: commentAllows(access, "write") })); }),',
     );
     // Borrar y el seudónimo, solo con la sesión: lo propio siempre se borra, y la base mira la cuenta y el veto.
     expect(storeOf("remove")).toBe(' remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),');

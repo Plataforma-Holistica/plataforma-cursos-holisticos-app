@@ -5,7 +5,7 @@ import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { asServer, asUser, type Tx } from "@/adapters/supabase/db";
 import { resolveAccountAccess } from "@/domain/access/account-access";
 import { commentAllows, resolveCommentAccess, type AccountRefusal, type CommentAccess, type CommentLevel } from "@/domain/access/media-access";
-import { parseCommentBody, parsePseudonym, type CommentTextResult } from "@/domain/comments/comment-text";
+import { parseCommentBody, parsePseudonym, parseReportNote, type CommentTextResult } from "@/domain/comments/comment-text";
 
 import { checkSession, type SessionCheck } from "@/services/account/account";
 import { reportFailure, type FailureCode } from "@/services/error-reporting/server";
@@ -24,6 +24,9 @@ import {
   readMyComments,
   readTeacherCommentCourses,
   readTeacherComments,
+  readReportLesson,
+  REPORT_REASONS,
+  reportComment,
   setPseudonym,
   settleComment,
   type CommentCursor,
@@ -37,6 +40,8 @@ import {
   type TeacherCommentsRow,
   type TeacherThread,
   type RepliesRow,
+  type ReportReason,
+  type ReportRow,
   type SettleRow,
   type WriteRow,
 } from "./records";
@@ -126,6 +131,16 @@ export type PseudonymChange =
   | { kind: "session"; check: SessionCheck }
   | { kind: "unavailable" };
 
+/** Lo que contesta reportar (T-502; RF-803). La misma respuesta oculte o no: nunca se sabe cuántos reportaron. */
+export type CommentReport =
+  | { kind: "reported" }
+  | { kind: "already" }
+  | { kind: "throttled" }
+  | { kind: "closed" }
+  | { kind: "invalid" }
+  | { kind: "session"; check: SessionCheck }
+  | AccessRefusal;
+
 /** «Mis comentarios» (PA-24): una página de lo propio y desde dónde sigue la siguiente. */
 export type MyCommentsAnswer = { kind: "ready"; items: MyComment[]; next: string | null } | { kind: "unavailable" };
 
@@ -152,6 +167,11 @@ export interface CommentsStore {
   /** `missing`: no es un comentario propio sin borrar. */
   edit(claims: VerifiedClaims, input: { commentId: string; body: string; revision: number }): Promise<Guarded<WriteRow> | { kind: "missing" }>;
   remove(claims: VerifiedClaims, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed" | "hidden">;
+  /**
+   * Reportar: la lección sale del comentario (nunca de quien llama), la regla decide si quien reporta lee ahí, y si puede
+   * escribir es lo que cuenta para ocultar (decisión de Sergio del 2026-11-09). `missing`: no es un comentario publicado.
+   */
+  report(claims: VerifiedClaims, input: { commentId: string; reason: ReportReason; note: string | null }): Promise<Guarded<ReportRow> | { kind: "missing" }>;
   /** El veredicto del filtro, de vuelta, en su propia transacción: sin la regla, porque la base solo asienta lo propio. */
   settle(claims: VerifiedClaims, input: { commentId: string; revision: number; verdict: ModerationVerdict | "unavailable"; provider: string }): Promise<SettleRow>;
   pseudonym(claims: VerifiedClaims, pseudonym: string): Promise<PseudonymRow>;
@@ -361,6 +381,31 @@ export function createComments(deps: {
     });
   }
 
+  /** Reporta un comentario ajeno con su motivo y una nota opcional (RF-803; FL-16). */
+  async function reportLessonComment(reader: CookieReader, input: { commentId: string; reason: string | null; note: string | null }): Promise<CommentReport> {
+    if (!isCommentId(input.commentId)) return { kind: "not_found" };
+    const reason = REPORT_REASONS.find((each) => each === input.reason);
+    if (reason === undefined) return { kind: "invalid" };
+    const note = parseReportNote(input.note);
+    if (note === undefined) return { kind: "invalid" };
+    const { commentId } = input;
+    return withSession(reader, async (claims) => {
+      const answer = await deps.store.report(claims, { commentId, reason, note });
+      if (answer.kind === "missing") return { kind: "not_found" };
+      if (answer.kind === "refused") return refusalOf(answer.access);
+      switch (answer.value) {
+        case "ok":
+          return { kind: "reported" };
+        case "not_found":
+          return { kind: "not_found" };
+        case "suspended_account":
+          return { kind: "suspended_account" };
+        default:
+          return { kind: answer.value };
+      }
+    });
+  }
+
   /** Borra un comentario propio, con la revisión que se vio. Lo propio siempre se borra. */
   async function deleteLessonComment(reader: CookieReader, input: { commentId: string; revision: number }): Promise<CommentDelete> {
     if (!isCommentId(input.commentId) || !isRevision(input.revision)) return { kind: "not_found" };
@@ -426,7 +471,18 @@ export function createComments(deps: {
     }
   }
 
-  return { lessonComments, commentReplies, postLessonComment, editLessonComment, deleteLessonComment, chooseCommentName, myComments, teacherComments, teacherCommentCourses };
+  return {
+    lessonComments,
+    commentReplies,
+    postLessonComment,
+    editLessonComment,
+    deleteLessonComment,
+    reportLessonComment,
+    chooseCommentName,
+    myComments,
+    teacherComments,
+    teacherCommentCourses,
+  };
 }
 
 /** Una transacción como servidor a nombre de esas claims. La integración 102 pasa una del dueño que se revierte. */
@@ -460,6 +516,13 @@ export function commentsStoreOn(run: RunAsServer, read: RunAsUser = noUserReads)
       }),
     remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),
     settle: (claims, input) => run(claims, "comment_settle", (tx) => settleComment(tx, input)),
+    report: (claims, input) =>
+      run(claims, "comment_report", async (tx) => {
+        const lessonId = await readReportLesson(tx, input.commentId);
+        return lessonId === null
+          ? { kind: "missing" as const }
+          : guarded(tx, lessonId, "read", (access) => reportComment(tx, { ...input, counts: commentAllows(access, "write") }));
+      }),
     pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),
     mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),
     teacher: (claims, input) =>
@@ -480,6 +543,7 @@ export const {
   postLessonComment,
   editLessonComment,
   deleteLessonComment,
+  reportLessonComment,
   chooseCommentName,
   myComments,
   teacherComments,

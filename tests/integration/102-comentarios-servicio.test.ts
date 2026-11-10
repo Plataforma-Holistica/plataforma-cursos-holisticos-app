@@ -350,6 +350,52 @@ describe("el servicio de los comentarios contra la base (T-501)", () => {
   });
 });
 
+const reportsOf = async (owner: Client, comment: string) =>
+  (await owner.query<{ reporter_id: string; counts: boolean }>("select reporter_id, counts from public.comment_reports where comment_id = $1 order by created_at, reporter_id", [comment])).rows;
+
+describe("reportar contra la base: si cuenta lo decide la regla (T-502; RF-803)", () => {
+  it("en el curso abierto, quien lee sin suscripción reporta y no cuenta; con suscripción, cuenta", async () => {
+    const [ana, beto, cata, teo] = [await person(), await person(), await person(), await person()];
+    await reverted(async (owner) => {
+      const lessons = await world(owner, teo);
+      await subscribe(owner, cata.id);
+      const comment = await planted(owner, lessons.open, ana.id, "En el abierto");
+      expect(await commentsAs(owner, beto).reportLessonComment(reader, { commentId: comment, reason: "spam", note: null })).toEqual({ kind: "reported" });
+      expect(await commentsAs(owner, cata).reportLessonComment(reader, { commentId: comment, reason: "abusive", note: "Un insulto" })).toEqual({ kind: "reported" });
+      const rows = await reportsOf(owner, comment);
+      expect(Object.fromEntries(rows.map((row) => [row.reporter_id, row.counts]))).toEqual({ [beto.id]: false, [cata.id]: true });
+      expect((await owner.query<{ report_count: number }>("select report_count from public.comments where id = $1", [comment])).rows[0]!.report_count).toBe(1);
+    });
+  });
+
+  it("sin suscripción, en un curso que no es el abierto, no se lee y no se reporta", async () => {
+    const [ana, beto, teo] = [await person(), await person(), await person()];
+    await reverted(async (owner) => {
+      const lessons = await world(owner, teo);
+      const comment = await planted(owner, lessons.closed, ana.id, "En el cerrado");
+      expect(await commentsAs(owner, beto).reportLessonComment(reader, { commentId: comment, reason: "spam", note: null })).toEqual({
+        kind: "no_access",
+        account: { allowed: false, reason: "never_subscribed" },
+      });
+      expect(await reportsOf(owner, comment)).toEqual([]);
+    });
+  });
+
+  it("el maestro reporta en lo suyo y cuenta; lo que no está publicado no existe", async () => {
+    const [ana, teo] = [await person(), await person()];
+    await reverted(async (owner) => {
+      const lessons = await world(owner, teo);
+      const comment = await planted(owner, lessons.own, ana.id, "En el curso de Teo");
+      expect(await commentsAs(owner, teo).reportLessonComment(reader, { commentId: comment, reason: "medical_advice", note: null })).toEqual({ kind: "reported" });
+      expect((await reportsOf(owner, comment)).map((row) => row.counts)).toEqual([true]);
+      await owner.query("set local session_replication_role = replica");
+      await owner.query("update public.comments set status = 'in_review', filter_verdict = 'flagged' where id = $1", [comment]);
+      await owner.query("set local session_replication_role = origin");
+      expect(await commentsAs(owner, teo).reportLessonComment(reader, { commentId: comment, reason: "spam", note: null })).toEqual({ kind: "not_found" });
+    });
+  });
+});
+
 describe("la regla del texto es la de la base, en todos los puntos de código", () => {
   const LAST = 0x10ffff;
   const codePoints = Array.from({ length: LAST }, (_, index) => index + 1).filter((n) => n < 0xd800 || n > 0xdfff);

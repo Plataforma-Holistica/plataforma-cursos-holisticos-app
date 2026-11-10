@@ -163,6 +163,23 @@ describe("cada comentario (Comment)", () => {
     expect(within(gone).queryByRole("button", { name: "Responder" })).toBeNull();
   });
 
+  it("lo oculto por reportes, para los demás, dice «Comentario en revisión», sin texto, autor ni opciones (T-502)", () => {
+    setup({ count: 0, items: [thread(1, { state: "hidden", name: null, body: null })] });
+    const hidden = screen.getByRole("article", { name: "Comentario en revisión" });
+    expect(within(hidden).queryByRole("button")).toBeNull();
+    expect(screen.queryByText("Texto 1")).toBeNull();
+  });
+
+  it("su autor lo ve con su texto y la etiqueta, y no lo puede editar ni borrar (T-502)", () => {
+    setup({ count: 0, items: [thread(1, { state: "hidden", own: true, revision: 2 })] });
+    const mine = screen.getByRole("article", { name: "Tú" });
+    expect(within(mine).getByText("Texto 1")).toBeInTheDocument();
+    expect(within(mine).getByText("En revisión")).toBeInTheDocument();
+    expect(within(mine).getByText("Por ahora nadie más lo ve. Una persona del equipo lo va a revisar.")).toBeInTheDocument();
+    expect(within(mine).queryByText("Opciones de tu comentario")).toBeNull();
+    expect(within(mine).queryByRole("button", { name: "Responder" })).toBeNull();
+  });
+
   it("una respuesta no ofrece «Responder»: el nivel es uno, y se responde desde el comentario", () => {
     setup({ count: 1, items: [thread(1, {}, [comment(2, { name: "Beto" })])] });
     expect(within(screen.getByRole("article", { name: "Beto" })).queryByRole("button", { name: "Responder" })).toBeNull();

@@ -1187,6 +1187,23 @@ que no se ve leyendo un solo archivo:
   suspensión de quien envió justo antes; editar lo que está en revisión deja copia; la lista blanca de proveedores; el proveedor de prueba en
   `src/services/comments/moderation.ts` y no en `src/adapters/` (no llama a nadie: el adaptador llega con el real). Para el A: nada que le
   toque.
+- **Lo que T-502 suma al carril B** (segunda solicitud, los reportes: `t502_reportes`; RF-803, FL-16; decisiones de Sergio del 2026-11-09:
+  para ocultar cuentan solo los reportes de quienes pueden escribir ahí, el valor es 3, la maestra ve lo oculto como los demás). La tabla
+  `public.comment_reports` (y el tipo `report_reason`), sin permisos para la aplicación y con su guardián (`guard_comment_report`: solo el
+  dueño escribe, nadie borra, y solo quién reportó pasa a nulo al eliminar su cuenta). Cada reporte guarda el texto que se reportó
+  (`reported_body`) y si cuenta (`counts`). **Reportar son dos pasos en una transacción:** `private.comment_report_lesson(comentario)` da la
+  lección de un comentario publicado (nunca la de quien llama), el servidor corre la regla con nivel `read` sobre esa lección, y
+  `private.comment_report(comentario, motivo, nota, cuenta)` con `cuenta` = si la regla deja escribir ahí. La puerta contesta igual
+  (`not_found`) a lo que no existe, a lo propio, a lo que no está publicado y a lo ya oculto, y lo mismo (`ok`) oculte o no; uno por persona
+  (`already`); la nota con la regla del texto (1 a 1 000, `parseReportNote`); un freno de 10 por hora por cuenta (`comment_report:`); y pide
+  el interruptor y el cerrojo `comments_accept`, como publicar. Al llegar a `REPORTES_PARA_OCULTAR` reportes que cuentan, bajo el candado de
+  la fila, el comentario pasa a `hidden` con `hidden_at` (el guardián solo deja ocultar lo publicado, con su hora); sin valor en el
+  parámetro, no se oculta. **Lo oculto**, para quien no es su autor (también la maestra), sale con `state: "hidden"` y sin texto, nombre ni
+  marca del maestro, y la pantalla pinta «Comentario en revisión»; su autor lo ve con su texto, la etiqueta «En revisión» y sin «Editar» ni
+  «Borrar». Sus respuestas se ocultan con él y salen del número de la pestaña; no aparece en PA-45 ni en «Mis comentarios», y no recibe
+  respuestas. El servicio es `reportLessonComment`. Usa pgTAP 98 y tres casos más en la integración 102. El menú «Reportar» y su diálogo
+  llegan con la tercera solicitud. Decisiones mías sin confirmar: el freno de 10 por hora; reportar pide el cerrojo; con el veto se reporta;
+  sin valor no se oculta; lo oculto fuera de PA-45; la vista de lo oculto en esta solicitud y no en la tercera. Para el A: nada que le toque.
 - **Lo que T-615 suma al carril B** (el nombre, sin migración; PQ-13 decidido por Pablo y Sergio el 2026-11-09, con el encargo que Sergio
   aprobó ese día). **El producto se llama Escuela de Misterios:** `terms.Plataforma` lo dice sin artículo, como el logotipo, y cada texto que
   lo cita pone «la» donde la frase lo pide («en la {Plataforma}», «La {Plataforma} es educativa»). La guarda de `catalog.test.ts` prohíbe
