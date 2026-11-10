@@ -27,7 +27,8 @@ export function ConfirmingPoller({ self }: { self: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="status" className="flex flex-col gap-2">
+      {/* La región de estado la pone la página, alrededor de toda respuesta. */}
+      <div className="flex flex-col gap-2">
         <h1 className="text-h1">{slow ? text.slowTitle : text.confirmingTitle}</h1>
         <p className="text-body-l text-text-2">{slow ? text.slowBody : text.confirmingBody}</p>
       </div>

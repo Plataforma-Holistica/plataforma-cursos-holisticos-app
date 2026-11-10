@@ -27,7 +27,7 @@ const ROW: CheckoutRow = {
   url: null,
 };
 const INPUT: StartInput = { plan: "monthly", amountSeen: 34900, documentSeen: "d1000000-0000-4000-8000-000000000001", returnTo: "/inicio", ip: "203.0.113.1", userAgent: "Navegador" };
-const PRICE = { id: "price_1", lookup_key: ROW.lookupKey, active: true, currency: "mxn", unit_amount: 34900, tax_behavior: "inclusive", livemode: false, recurring: { interval: "month", interval_count: 1 } };
+const PRICE = { id: "price_1", lookup_key: ROW.lookupKey, active: true, currency: "mxn", unit_amount: 34900, tax_behavior: "inclusive", livemode: false, recurring: { interval: "month", interval_count: 1 }, currency_options: { mxn: { unit_amount: 34900, tax_behavior: "inclusive" } } };
 const SESSION = { id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1", status: "open" };
 
 const ok = (body: unknown): StripeAnswer => ({ status: "ok", body });
@@ -39,6 +39,7 @@ interface Setup {
   prices?: unknown[];
   customer?: unknown;
   subscriptions?: unknown[];
+  subscriptionsMore?: boolean;
   create?: StripeWriteAnswer[];
   session?: unknown;
   status?: Awaited<ReturnType<CheckoutStore["status"]>>[];
@@ -82,7 +83,7 @@ function setup(s: Setup = {}) {
     calls.push(`get ${path}`);
     if (path === "/v1/prices") return ok({ data: s.prices ?? [PRICE] });
     if (path.startsWith("/v1/customers/")) return ok(s.customer ?? { id: "cus_1", balance: 0 });
-    if (path === "/v1/subscriptions") return ok({ data: s.subscriptions ?? [], query });
+    if (path === "/v1/subscriptions") return ok({ data: s.subscriptions ?? [], has_more: s.subscriptionsMore ?? false, query });
     if (path.startsWith("/v1/checkout/sessions/")) return ok(s.session ?? { id: "cs_test_1", status: "open", subscription: null });
     return { status: "not_found" };
   });
@@ -178,6 +179,19 @@ describe("salir a pagar", () => {
     expect((await t.service.startCheckout(READER, INPUT)).kind).toBe("redirect");
   });
 
+  it("el precio se pide con sus monedas expandidas, y las suscripciones sin las canceladas, hasta 100", async () => {
+    const t = setup();
+    await t.service.startCheckout(READER, INPUT);
+    expect(t.get).toHaveBeenCalledWith("/v1/prices", { "lookup_keys[]": [ROW.lookupKey], "expand[]": ["data.currency_options"], limit: "10" });
+    expect(t.get).toHaveBeenCalledWith("/v1/subscriptions", { customer: "cus_1", limit: "100" });
+  });
+
+  it("si las suscripciones del cliente no caben en una página, no se supo: no se crea nada", async () => {
+    const t = setup({ subscriptionsMore: true });
+    expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
+    expect(t.calls.some((call) => call.startsWith("post /v1/checkout"))).toBe(false);
+  });
+
   it("si no se pudieron leer las suscripciones del cliente, no se crea nada: la reserva queda para reintentar", async () => {
     const t = setup();
     t.get.mockImplementation(async (path: string) => (path === "/v1/subscriptions" ? { status: "unavailable" } : path === "/v1/prices" ? ok({ data: [PRICE] }) : ok({ id: "cus_1", balance: 0 })));
@@ -196,7 +210,8 @@ describe("salir a pagar", () => {
     ["cada dos meses", [{ ...PRICE, recurring: { interval: "month", interval_count: 2 } }]],
     ["inactivo", [{ ...PRICE, active: false }]],
     ["del modo real", [{ ...PRICE, livemode: true }]],
-    ["con precios en otras monedas", [{ ...PRICE, currency_options: { usd: {} } }]],
+    ["con precios en otras monedas", [{ ...PRICE, currency_options: { mxn: {}, usd: {} } }]],
+    ["sin sus monedas expandidas", [{ ...PRICE, currency_options: undefined }]],
   ])("un precio que no cuadra (%s): no se crea, se abandona y se reporta", async (_name, prices) => {
     const t = setup({ prices });
     expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
@@ -220,6 +235,20 @@ describe("salir a pagar", () => {
     const creates = t.post.mock.calls.filter(([path]) => path === "/v1/checkout/sessions");
     expect(creates).toHaveLength(2);
     expect(creates[1]).toEqual(creates[0]);
+    expect(t.report).toHaveBeenCalledWith("checkout_stripe_unknown");
+  });
+
+  it("si Stripe contesta crear sin la forma de siempre (otro dominio), no se manda a nadie y se reporta", async () => {
+    const t = setup({ create: [{ status: "ok", body: { ...SESSION, url: "https://pago.ejemplo.com/c/pay/cs_test_1" } }] });
+    expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
+    expect(t.report).toHaveBeenCalledWith("checkout_stripe_unknown");
+    expect(t.calls).not.toContain("session_record");
+  });
+
+  it("si Stripe rechaza la llave al crear, se reporta la llave", async () => {
+    const t = setup({ create: [{ status: "unauthorized" }] });
+    expect(await t.service.startCheckout(READER, INPUT)).toEqual({ kind: "unavailable" });
+    expect(t.report).toHaveBeenCalledWith("checkout_key_rejected");
   });
 
   it("si Stripe rechaza crearla, se abandona y se reporta", async () => {
@@ -348,6 +377,12 @@ describe("PA-32, cómo va el pago", () => {
     const t = setup();
     t.get.mockResolvedValue({ status: "unavailable" });
     expect(await t.service.checkoutProgress(CLAIMS, "cs_test_1")).toEqual({ kind: "waiting", returnTo: "/inicio" });
+    expect(t.store.close).not.toHaveBeenCalled();
+  });
+
+  it("si Stripe dice que la sesión sigue abierta, no se pagó: se dice, sin esperar un aviso que no va a llegar", async () => {
+    const t = setup({ session: { id: "cs_test_1", status: "open", subscription: null } });
+    expect(await t.service.checkoutProgress(CLAIMS, "cs_test_1")).toEqual({ kind: "not_paid" });
     expect(t.store.close).not.toHaveBeenCalled();
   });
 

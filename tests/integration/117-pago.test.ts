@@ -133,11 +133,23 @@ async function world() {
       const keys = query["lookup_keys[]"];
       const key = typeof keys === "string" ? keys : keys?.[0];
       return answer({
-        data: [{ id: "price_it117", lookup_key: key, active: true, currency: "mxn", unit_amount: monthly, tax_behavior: "inclusive", livemode: false, recurring: { interval: "month", interval_count: 1 } }],
+        data: [
+          {
+            id: "price_it117",
+            lookup_key: key,
+            active: true,
+            currency: "mxn",
+            unit_amount: monthly,
+            tax_behavior: "inclusive",
+            livemode: false,
+            recurring: { interval: "month", interval_count: 1 },
+            currency_options: { mxn: { unit_amount: monthly, tax_behavior: "inclusive" } },
+          },
+        ],
       });
     }
     if (path === `/v1/customers/${ids.customer}`) return answer({ id: ids.customer, balance: 0 });
-    if (path === "/v1/subscriptions") return answer({ data: state.paid || state.stripeHasLive ? [{ id: ids.sub, status: "active" }] : [] });
+    if (path === "/v1/subscriptions") return answer({ data: state.paid || state.stripeHasLive ? [{ id: ids.sub, status: "active" }] : [], has_more: false });
     if (path.startsWith("/v1/checkout/sessions/")) {
       const id = path.slice("/v1/checkout/sessions/".length);
       return answer({ id, status: state.paid ? "complete" : "open", subscription: state.paid ? ids.sub : null });
@@ -184,10 +196,16 @@ async function world() {
     return { status: "not_found" };
   };
   const posts: string[] = [];
+  const inFlight = new Set<string>();
   const post: StripePost = async (path, _form, key) => {
     posts.push(`${path} ${key}`);
     if (path === "/v1/customers") return answer({ id: ids.customer });
     if (path === "/v1/checkout/sessions") {
+      // Como Stripe: una segunda petición con la misma llave mientras la primera sigue en curso contesta 409, que el adaptador da como «no se supo».
+      if (inFlight.has(key)) return { status: "unknown" };
+      inFlight.add(key);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      inFlight.delete(key);
       const id = state.sessionsCreated.get(key) ?? `cs_test_it117${tag}${state.sessionsCreated.size}`;
       state.sessionsCreated.set(key, id);
       return answer({ id, url: `https://checkout.stripe.com/c/pay/${id}` });
@@ -237,11 +255,14 @@ describe("salir a pagar de punta a punta", () => {
     expect(await w.checkout.startCheckout({} as never, w.input)).toEqual({ kind: "has_access" });
   });
 
-  it("un doble clic: las dos peticiones a la vez llevan a la misma sesión", async () => {
+  it("un doble clic: una sola sesión; la segunda petición, si Stripe contesta 409, dice «no se pudo», y reintentar lleva a la misma", async () => {
     const w = await world();
-    const [a, b] = await Promise.all([w.checkout.startCheckout({} as never, w.input), w.checkout.startCheckout({} as never, w.input)]);
-    expect(a.kind).toBe("redirect");
-    expect(b).toEqual(a);
+    const both = await Promise.all([w.checkout.startCheckout({} as never, w.input), w.checkout.startCheckout({} as never, w.input)]);
+    const sent = both.filter((each) => each.kind === "redirect");
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(both.every((each) => each.kind === "redirect" || each.kind === "unavailable")).toBe(true);
+    for (const each of sent) expect(each).toEqual(sent[0]);
+    expect(await w.checkout.startCheckout({} as never, w.input)).toEqual(sent[0]);
     expect(w.state.sessionsCreated.size).toBe(1);
     const [rows] = await ownerQuery<{ n: number }>("select count(*)::int as n from private.checkout_sessions where profile_id = $1", [w.person.id]);
     expect(rows!.n).toBe(1);

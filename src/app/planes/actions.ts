@@ -1,12 +1,13 @@
 "use server";
 
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { leaveFor } from "@/app/(cuenta)/_lib/exit";
 import { nextAttempt } from "@/app/(cuenta)/_lib/form-state";
 import { commentSessionExit } from "@/app/_comments/session-exit";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
-import { resolveDestination } from "@/services/account/navigation";
+import { homeOf, resolveDestination } from "@/services/account/navigation";
 import { proxyIsTrusted, resolveOrigin } from "@/services/account/origin";
 import { startCheckout } from "@/services/billing/checkout-service";
 
@@ -16,6 +17,9 @@ import { plansAnswerOf, plansHref, readPlansForm, type PlansState } from "./outc
 // reserva la salida con el consentimiento y crea la sesión de pago. Lo que sale bien lleva a la página de Stripe (otro origen: con JavaScript el navegador navega
 // completo, sin él contesta 303); lo demás se dice en la pantalla. Del estado anterior solo se lee el número de intento.
 
+/** Lo más largo que la base guarda como destino: uno más largo, aunque valga, iría al inicio y no a un «no se pudo» sin salida. */
+const RETURN_TO_MAX = 200;
+
 export async function startCheckoutAction(previous: PlansState, form: FormData): Promise<PlansState> {
   const request = readPlansForm(form);
   const attempt = nextAttempt(previous);
@@ -24,7 +28,8 @@ export async function startCheckoutAction(previous: PlansState, form: FormData):
   if (!request.accepted) return { kind: "problem", problem: "must_accept", plan: request.plan, attempt };
   if (request.amount === null || request.document === null) return { kind: "answer", answer: "changed", plan: request.plan, attempt };
 
-  const returnTo = resolveDestination(request.returnTo);
+  const resolved = resolveDestination(request.returnTo);
+  const returnTo = resolved.length <= RETURN_TO_MAX ? resolved : homeOf();
   const jar = await cookieJar();
   const origin = resolveOrigin(await requestOrigin(), proxyIsTrusted());
   const answer = await startCheckout(jar, {
@@ -44,5 +49,7 @@ export async function startCheckoutAction(previous: PlansState, form: FormData):
     if (exit !== null) return leaveFor(jar, exit);
     return { kind: "answer", answer: "unavailable", plan: request.plan, attempt };
   }
+  // Con «cambió», la página se vuelve a leer: el formulario trae entonces el monto y el texto de ahora, y el siguiente envío los lleva.
+  if (answer.kind === "changed") refresh();
   return { kind: "answer", answer: plansAnswerOf(answer), plan: request.plan, attempt };
 }

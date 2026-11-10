@@ -12,14 +12,13 @@ import { TextLink } from "@/ui/text-link";
 
 import { startCheckoutAction } from "./actions";
 import { ACCEPT_FIELD, AMOUNT_FIELD, DOCUMENT_FIELD, PLAN_FIELD, RETURN_FIELD, type PlansAnswer, type PlansProblem, type PlansState } from "./outcomes";
-import type { PlanCard, PlanSummary, PlansView } from "./view";
+import { PAY_BLOCK_ID, type PlanCard, type PlanSummary, type PlansView } from "./view";
 
 // PA-04 · los planes (`/planes`; RF-201, RF-202, FL-04; T-302). Dos planes sin elegir; elegir uno es un enlace, y entonces «Antes de
 // pagar» dice el total, la periodicidad, el siguiente cobro y la casilla de ese plan. «Continuar al pago» manda el plan, el monto y el
 // texto que se vieron; lo que sale bien lleva a la página de Stripe. Sin JavaScript funciona igual: es un formulario.
 
 const IDLE: PlansState = { kind: "idle" };
-const BLOCK_ID = "bloque-pagar";
 
 const PROBLEMS: Record<PlansProblem, string> = { choose_plan: text.choosePlan, must_accept: text.mustAccept };
 const ANSWERS: Record<PlansAnswer, string> = {
@@ -111,7 +110,7 @@ function Who({ view }: { view: Ready }) {
 
 function Summary({ summary, children }: { summary: PlanSummary; children: React.ReactNode }) {
   return (
-    <section id={BLOCK_ID} aria-labelledby="planes-antes" className="flex max-w-reading flex-col gap-5">
+    <section id={PAY_BLOCK_ID} aria-labelledby="planes-antes" className="flex max-w-reading flex-col gap-5">
       <h2 id="planes-antes" className="text-h2">
         {text.beforePaying}
       </h2>
@@ -137,7 +136,7 @@ function Summary({ summary, children }: { summary: PlanSummary; children: React.
 }
 
 function PayForm({ view, summary }: { view: Ready; summary: PlanSummary }) {
-  const [state, action, pending] = useActionState(startCheckoutAction, IDLE, `${view.self}#${BLOCK_ID}`);
+  const [state, action, pending] = useActionState(startCheckoutAction, IDLE, `${view.self}#${PAY_BLOCK_ID}`);
   const answer = useRef<HTMLDivElement>(null);
   const answered = !pending && state.kind !== "idle" ? state : null;
 

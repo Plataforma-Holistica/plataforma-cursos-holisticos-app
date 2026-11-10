@@ -161,6 +161,8 @@ const FAILURES = {
   checkout_customer_conflict: "El cliente que Stripe creó para una cuenta no se pudo anotar (otro cliente ya anotado, o de otra cuenta). No se le abrió el pago; hay que revisarlo.",
   checkout_create_rejected: "Stripe rechazó crear una sesión de pago con lo reservado. La salida quedó abandonada y la persona ve «no se pudo»; si se repite, revisar los parámetros de la sesión.",
   checkout_session_unrecorded: "Stripe creó una sesión de pago y la base no la anotó. No se mandó a la persona a pagar; la sesión vence sola en Stripe.",
+  checkout_stripe_unknown:
+    "Stripe no contestó lo esperado al crear un cliente o una sesión de pago (un 5xx, un 409, un corte o una respuesta con otra forma). La persona ve «no se pudo» y se reintenta con la misma llave; si se repite, Stripe guardó un error para esa llave: revisar en Stripe.",
   billing_queue_unavailable:
     "No se pudo leer, reintentar o resolver un aviso de Stripe desde la cola de finanzas (PA-84): la base no contestó, o contestó algo que el servidor no conoce. Se le dijo que no se supo, y la pantalla vuelve a leer la cola.",
 } as const;

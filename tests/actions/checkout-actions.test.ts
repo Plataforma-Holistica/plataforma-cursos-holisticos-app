@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     signOut: logged("signOut", () => Promise.resolve("closed")),
     forgetBrowserProofs: logged("forgetBrowserProofs", () => undefined),
     leaveNotice: logged("leaveNotice", () => undefined),
+    refresh: logged("refresh", () => undefined),
     redirect: vi.fn((to: string): never => {
       calls.order.push(`redirect ${to}`);
       throw new Error(`redirige a ${to}`);
@@ -31,6 +32,7 @@ vi.mock("@/services/billing/checkout-service", () => ({ startCheckout: mocks.sta
 vi.mock("@/services/account/account", () => ({ signOut: mocks.signOut, forgetBrowserProofs: mocks.forgetBrowserProofs }));
 vi.mock("@/services/account/notice", () => ({ leaveNotice: mocks.leaveNotice }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/cache", () => ({ refresh: mocks.refresh }));
 // La huella de la dirección pide el secreto de la configuración, que aquí no hay; la acción no la usa.
 vi.mock("@/services/account/fingerprint", () => ({ fingerprint: () => "huella" }));
 vi.mock("@/services/account/origin", async (actual) => ({ ...(await actual<typeof import("@/services/account/origin")>()), proxyIsTrusted: mocks.proxyIsTrusted }));
@@ -90,6 +92,22 @@ describe("«Continuar al pago»", () => {
   it("un destino que la lista no admite se cambia por el inicio, antes del servicio", async () => {
     await expect(startCheckoutAction(previous, form(...FULL.map(([k, v]): [string, string] => (k === "volver" ? [k, "https://otro.example/"] : [k, v]))))).rejects.toThrow("redirige");
     expect(mocks.startCheckout.mock.calls[0]?.[1]).toMatchObject({ returnTo: "/inicio" });
+  });
+
+  it("un destino que vale pero no cabe en la base (más de 200) va al inicio, en vez de no poder pagar", async () => {
+    const long = `/explorar?q=${"a".repeat(200)}`;
+    await expect(startCheckoutAction(previous, form(...FULL.map(([k, v]): [string, string] => (k === "volver" ? [k, long] : [k, v]))))).rejects.toThrow("redirige");
+    expect(mocks.startCheckout.mock.calls[0]?.[1]).toMatchObject({ returnTo: "/inicio" });
+  });
+
+  it("con «cambió» vuelve a leer la página, para que el siguiente envío lleve lo de ahora", async () => {
+    once("startCheckout", { kind: "changed" });
+    await startCheckoutAction(previous, form(...FULL));
+    expect(calls.order).toEqual(["startCheckout", "refresh"]);
+    once("startCheckout", { kind: "in_progress" });
+    calls.order = [];
+    await startCheckoutAction(previous, form(...FULL));
+    expect(calls.order).toEqual(["startCheckout"]);
   });
 
   it("sin plan, o sin la casilla, no llama a nadie y lo dice", async () => {

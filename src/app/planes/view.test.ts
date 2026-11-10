@@ -23,8 +23,8 @@ describe("PA-04, la vista", () => {
     expect(view.kind).toBe("ready");
     if (view.kind !== "ready") return;
     expect(view.cards.map((card) => [card.plan, card.chosen, card.href])).toEqual([
-      ["monthly", false, "/planes?plan=monthly"],
-      ["annual", false, "/planes?plan=annual"],
+      ["monthly", false, "/planes?plan=monthly#bloque-pagar"],
+      ["annual", false, "/planes?plan=annual#bloque-pagar"],
     ]);
     expect(view.summary).toBeNull();
     expect(view.cards[1]?.equivalent).toBe("Equivale a $290.83 al mes.");
@@ -45,7 +45,7 @@ describe("PA-04, la vista", () => {
     expect(view.summary?.nextCharge).toBe("10 de noviembre de 2027, por $3,490.00");
     expect(view.summary?.consent).toContain("cada año");
     expect(view.self).toBe("/planes?plan=annual&volver=%2Fcursos%2Funo");
-    expect(view.cards.find((card) => card.plan === "monthly")?.href).toBe("/planes?plan=monthly&volver=%2Fcursos%2Funo");
+    expect(view.cards.find((card) => card.plan === "monthly")?.href).toBe("/planes?plan=monthly&volver=%2Fcursos%2Funo#bloque-pagar");
   });
 
   it("al visitante le ofrece crear su cuenta o entrar, volviendo con el plan y el destino", () => {

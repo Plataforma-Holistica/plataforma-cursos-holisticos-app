@@ -10,6 +10,9 @@ import { confirmingHref, monthlyEquivalent, plansHref, priceText, type PlansQuer
 // Elegir un plan es un enlace (`?plan=`), no un control: así «Antes de pagar» dice el total, la periodicidad, el siguiente cobro y la
 // casilla del plan elegido también sin JavaScript, y el formulario lleva exactamente lo que se ve.
 
+/** El bloque «Antes de pagar»: el ancla de los enlaces de elegir y a la que vuelve el formulario sin JavaScript. */
+export const PAY_BLOCK_ID = "bloque-pagar";
+
 export interface PlanCard {
   plan: CheckoutPlan;
   name: string;
@@ -65,7 +68,8 @@ export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, 
     price: t(each.plan === "monthly" ? text.perMonth : text.perYear, { price: priceText(each.amountCents) }),
     repeat: t(text.planNote, { repeat: each.plan === "monthly" ? text.monthlyRepeat : text.annualRepeat }),
     equivalent: each.plan === "annual" ? t(text.annualEquivalent, { price: priceText(monthlyEquivalent(each.amountCents)) }) : null,
-    href: plansHref(each.plan, query.returnTo),
+    // Al elegir, la página baja a «Antes de pagar»: en el teléfono quedaría fuera de la vista.
+    href: `${plansHref(each.plan, query.returnTo)}#${PAY_BLOCK_ID}`,
     chooseLabel: t(text.chooseThis, { plan: each.plan === "monthly" ? text.monthly : text.annual }),
     chosen: each.plan === query.plan,
   }));

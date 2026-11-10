@@ -44,8 +44,8 @@ test("el visitante ve los planes sin elegir, elige uno y se le ofrece crear su c
   await expect(page.getByRole("heading", { level: 1, name: "Elige tu plan" })).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await page.getByRole("link", { name: "Elegir el plan Mensual" }).click();
-  await expect(page).toHaveURL("/planes?plan=monthly");
-  await expect(page.getByRole("heading", { level: 2, name: "Antes de pagar" })).toBeVisible();
+  await expect(page).toHaveURL("/planes?plan=monthly#bloque-pagar");
+  await expect(page.getByRole("heading", { level: 2, name: "Antes de pagar" })).toBeInViewport();
   await expect(page.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/planes?plan=monthly")}`);
   expect(await a11yViolations(page)).toEqual([]);
 });

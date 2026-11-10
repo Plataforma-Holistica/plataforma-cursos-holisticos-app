@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { StripeAnswer, StripeGet, StripePost } from "@/adapters/stripe/api";
+import type { StripeAnswer, StripeGet, StripePost, StripeWriteAnswer } from "@/adapters/stripe/api";
 import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import { resolveAccountAccess, type AccountFacts } from "@/domain/access/account-access";
@@ -127,7 +127,13 @@ export type StartAnswer =
   | { kind: "not_allowed"; reason: "no_actor" | "suspended" | "email_unverified" }
   | { kind: "unavailable" };
 
-export type Progress = { kind: "not_found" } | { kind: "live"; returnTo: string } | { kind: "waiting"; returnTo: string } | { kind: "expired" } | { kind: "unavailable" };
+export type Progress =
+  | { kind: "not_found" }
+  | { kind: "live"; returnTo: string }
+  | { kind: "waiting"; returnTo: string }
+  | { kind: "expired" }
+  | { kind: "not_paid" }
+  | { kind: "unavailable" };
 
 export type PlanStanding = { kind: "ready"; access: boolean; blocking: boolean; open: CheckoutRow | null } | { kind: "unavailable" };
 
@@ -164,7 +170,7 @@ const priceList = z.object({
   ),
 });
 const customerRead = z.object({ id: z.string(), balance: z.number().optional(), deleted: z.boolean().optional() }).passthrough();
-const subscriptionList = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).passthrough()) });
+const subscriptionList = z.object({ data: z.array(z.object({ id: z.string(), status: z.string() }).passthrough()), has_more: z.boolean() }).passthrough();
 const sessionRead = z.object({ id: z.string(), status: z.string().nullable(), subscription: z.union([z.string(), z.object({ id: z.string() }).passthrough()]).nullable() }).passthrough();
 const sessionCreated = z.object({ id: z.string().regex(SESSION_ID), url: z.string().regex(STRIPE_URL) }).passthrough();
 const customerCreated = z.object({ id: z.string().regex(CUSTOMER_ID) }).passthrough();
@@ -173,6 +179,11 @@ function bodyOf<T>(answer: StripeAnswer | { status: string; body?: unknown }, sc
   if (answer.status !== "ok") return null;
   const parsed = schema.safeParse((answer as { body: unknown }).body);
   return parsed.success ? parsed.data : null;
+}
+
+/** Las monedas del precio, ya expandidas: solo pesos. Sin el campo, no se pidió bien o Stripe cambió, y no se sabe. */
+function onlyPesos(options: unknown): boolean {
+  return typeof options === "object" && options !== null && !Array.isArray(options) && Object.keys(options).length === 1 && "mxn" in options;
 }
 
 const subscriptionIdOf = (value: string | { id: string } | null): string | null => {
@@ -289,8 +300,9 @@ export function createCheckout(deps: CheckoutDeps) {
       return { kind: "unavailable" };
     }
 
-    const subscriptions = bodyOf(await stripe.get("/v1/subscriptions", { customer, status: "all", limit: "20" }), subscriptionList);
-    if (subscriptions === null) return { kind: "unavailable" };
+    // Sin `status`, Stripe da todas menos las canceladas. Si no caben en una página, no se supo: una viva podría quedar fuera.
+    const subscriptions = bodyOf(await stripe.get("/v1/subscriptions", { customer, limit: "100" }), subscriptionList);
+    if (subscriptions === null || subscriptions.has_more) return { kind: "unavailable" };
     if (subscriptions.data.some((each) => LIVE_IN_STRIPE.has(each.status))) {
       await abandon(null);
       return { kind: "in_progress" };
@@ -316,19 +328,32 @@ export function createCheckout(deps: CheckoutDeps) {
     return create(claims, creating.checkout, customer, price, stripe);
   }
 
+  /**
+   * Lo que Stripe no contestó como se esperaba al crear: la llave rechazada, o un «no se supo» (un 5xx, un 409, un corte) o un 200 sin la forma de siempre.
+   * Se reintenta con la misma llave de idempotencia, que no cobra dos veces; pero Stripe guarda un 500 y lo repite, así que se reporta para que alguien lo vea.
+   */
+  async function reportUnknown(answer: StripeWriteAnswer): Promise<void> {
+    await deps.report(answer.status === "unauthorized" ? "checkout_key_rejected" : "checkout_stripe_unknown");
+  }
+
   /** El cliente nuevo de Stripe, con su llave por cuenta y modo: un corte entre crearlo y anotarlo no crea un segundo. */
   async function createCustomer(claims: VerifiedClaims, row: CheckoutRow, email: string | null, stripe: CheckoutStripe): Promise<string | "conflict" | null> {
     const form: Record<string, string> = { "metadata[profile_id]": claims.userId };
     if (email !== null) form.email = email;
-    const created = bodyOf(await stripe.post("/v1/customers", form, `customer:${claims.userId}:${row.livemode ? "live" : "test"}`), customerCreated);
-    if (created === null) return null;
+    const answer = await stripe.post("/v1/customers", form, `customer:${claims.userId}:${row.livemode ? "live" : "test"}`);
+    const created = bodyOf(answer, customerCreated);
+    if (created === null) {
+      await reportUnknown(answer);
+      return null;
+    }
     const recorded = await deps.store.customerRecord(claims, row.livemode, created.id);
     return recorded === "recorded" ? created.id : "conflict";
   }
 
   /** El precio de la salida por su `lookup_key`: uno solo, que cuadre con lo que se mostró. */
   async function priceFor(row: CheckoutRow, stripe: CheckoutStripe): Promise<string | "mismatch" | "unavailable"> {
-    const list = bodyOf(await stripe.get("/v1/prices", { "lookup_keys[]": [row.lookupKey], limit: "10" }), priceList);
+    // `currency_options` solo llega si se pide expandir, y entonces trae también la moneda base (medido el 2026-11-10 en modo de prueba).
+    const list = bodyOf(await stripe.get("/v1/prices", { "lookup_keys[]": [row.lookupKey], "expand[]": ["data.currency_options"], limit: "10" }), priceList);
     if (list === null) return "unavailable";
     const [price, ...more] = list.data;
     const interval = row.plan === "monthly" ? "month" : "year";
@@ -343,7 +368,7 @@ export function createCheckout(deps: CheckoutDeps) {
       price.livemode === row.livemode &&
       price.recurring?.interval === interval &&
       price.recurring.interval_count === 1 &&
-      price.currency_options === undefined;
+      onlyPesos(price.currency_options);
     return fits ? price.id : "mismatch";
   }
 
@@ -374,9 +399,11 @@ export function createCheckout(deps: CheckoutDeps) {
       await deps.report("checkout_create_rejected");
       return { kind: "unavailable" };
     }
-    if (answer.status === "unauthorized") await deps.report("checkout_key_rejected");
     const session = bodyOf(answer, sessionCreated);
-    if (session === null) return { kind: "unavailable" };
+    if (session === null) {
+      await reportUnknown(answer);
+      return { kind: "unavailable" };
+    }
     const recorded = await deps.store.sessionRecord(claims, row.id, session.id, session.url);
     if (recorded !== "recorded") {
       await deps.report("checkout_session_unrecorded");
@@ -448,6 +475,7 @@ export function createCheckout(deps: CheckoutDeps) {
     if ((status.state === "open" || status.state === "creating" || status.state === "lapsed") && status.subscriptionId === null) {
       const stripe = deps.stripe();
       const read = stripe === null ? null : bodyOf(await stripe.get(`/v1/checkout/sessions/${session}`), sessionRead);
+      if (read !== null && read.status === "open") return { kind: "not_paid" };
       if (read !== null && read.status === "complete") {
         const subscription = subscriptionIdOf(read.subscription);
         if (subscription !== null) {

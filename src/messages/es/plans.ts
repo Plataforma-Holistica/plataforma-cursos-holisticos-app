@@ -62,6 +62,8 @@ export const plans = defineMessages({
   expiredTitle: "El pago no se completó",
   expiredBody: "No se hizo ningún cobro. Puedes intentarlo otra vez cuando quieras.",
   backToPlans: "Volver a los planes",
+  notPaidTitle: "Todavía no se completó el pago",
+  notPaidBody: "No se hizo ningún cobro. Si quieres continuar, vuelve a los planes.",
   progressUnavailable: "No pudimos saber cómo va tu pago. Si ya pagaste, no vuelvas a pagar: actualiza en un momento.",
   // La página de pago de prueba, solo en local.
   testTitle: "Pago de prueba",

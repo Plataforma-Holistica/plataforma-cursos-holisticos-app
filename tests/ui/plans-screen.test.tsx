@@ -44,7 +44,7 @@ describe("PA-04", () => {
     expect(screen.getByText("$349.00 al mes")).toBeInTheDocument();
     expect(screen.getByText("$3,490.00 al año")).toBeInTheDocument();
     expect(screen.getAllByText(/IVA incluido/)).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "Elegir el plan Anual" })).toHaveAttribute("href", "/planes?plan=annual");
+    expect(screen.getByRole("link", { name: "Elegir el plan Anual" })).toHaveAttribute("href", "/planes?plan=annual#bloque-pagar");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Continuar al pago" })).not.toBeInTheDocument();
     expect(await a11yViolations(container)).toEqual([]);

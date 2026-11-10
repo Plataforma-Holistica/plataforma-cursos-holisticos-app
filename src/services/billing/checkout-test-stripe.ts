@@ -35,13 +35,15 @@ export function testCheckoutStripe(): CheckoutStripe {
               tax_behavior: "inclusive",
               livemode: false,
               recurring: { interval: plan === "monthly" ? "month" : "year", interval_count: 1 },
+              // Expandido, como lo pide el servicio: trae también la moneda base.
+              currency_options: { mxn: { unit_amount: Number(amount), tax_behavior: "inclusive" } },
             },
           ],
         });
       }
       const customer = /^\/v1\/customers\/(cus_[A-Za-z0-9]+)$/.exec(path);
       if (customer) return ok({ id: customer[1], balance: 0 });
-      if (path === "/v1/subscriptions") return ok({ data: [] });
+      if (path === "/v1/subscriptions") return ok({ data: [], has_more: false });
       const session = /^\/v1\/checkout\/sessions\/cs_test_local([0-9a-f]+)$/.exec(path);
       if (session) return ok({ id: `cs_test_local${session[1]}`, status: "complete", subscription: `sub_local${session[1]}` });
       return { status: "not_found" };
