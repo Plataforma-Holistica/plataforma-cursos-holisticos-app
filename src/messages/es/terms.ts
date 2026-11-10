@@ -6,7 +6,7 @@
 // lo demuestra (catalog.test.ts) y otra impide que un texto escriba la palabra a mano.
 //
 // Lo que este bloque no resuelve, y se decide aparte: las direcciones públicas que llevan
-// la palabra, y el género (nadie guarda el de nadie).
+// la palabra, y el género (el producto no guarda el de nadie).
 export const terms = {
   // El nombre del producto, sin artículo, como lo muestra el logotipo (PQ-13, decidido el 2026-11-09). Cada texto que lo cita
   // pone «la» donde la frase lo pide: «en la {Plataforma}».

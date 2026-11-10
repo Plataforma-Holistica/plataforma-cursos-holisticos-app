@@ -1,3 +1,4 @@
+import { t, type Template } from "@/messages/format";
 import type { CommentThread, CommentView, WriteStanding } from "@/services/comments/comments";
 
 // Lo que la pantalla necesita para pintar los comentarios de una lección (PA-22; T-501), y lo puro de cómo se pintan: el
@@ -57,3 +58,6 @@ export function avatarOf(name: string): { initial: string; tone: number } {
   for (const point of name) hash = (hash * 31 + (point.codePointAt(0) ?? 0)) % 1_000_003;
   return { initial: first === undefined ? "?" : first.toLocaleUpperCase("es-MX"), tone: (hash % TONES) + 1 };
 }
+
+/** Un aviso del catálogo, que puede citar un término (`{maestro}`): así se pinta. */
+export const said = (words: string | Template<string>): string => (typeof words === "string" ? words : t(words as Template<"">));

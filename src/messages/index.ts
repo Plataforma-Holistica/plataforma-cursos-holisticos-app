@@ -3,6 +3,7 @@ import "server-only";
 import { account } from "./es/account";
 import { admin } from "./es/admin";
 import { browse } from "./es/browse";
+import { comments } from "./es/comments";
 import { landing } from "./es/landing";
 import { lesson } from "./es/lesson";
 import { mail } from "./es/mail";
@@ -25,6 +26,6 @@ import { ui } from "./es/ui";
 //   - Claves en inglés y en camelCase, como el resto de los identificadores.
 //   - Las palabras que pueden cambiar por marca viven en `es/terms.ts` y se citan con un
 //     marcador. Ver `format.ts`.
-export const messages = { terms, ui, states, meta, account, admin, player, lesson, resources, browse, landing, portal, mail } as const;
+export const messages = { terms, ui, states, meta, account, admin, player, lesson, resources, browse, landing, portal, mail, comments } as const;
 
 export { plural, t } from "./format";
