@@ -96,6 +96,8 @@ create table private.checkout_sessions (
 comment on table private.checkout_sessions is 'Cada salida a la página de pago de Stripe (T-302): lo que se mostró, lo que va a Stripe y cómo terminó. Una abierta por cuenta.';
 create unique index checkout_sessions_one_open_uq on private.checkout_sessions (profile_id) where state in ('reserved', 'creating', 'open');
 create unique index checkout_sessions_session_uq on private.checkout_sessions (session_id) where session_id is not null;
+-- Lo completado, que `checkout_blocking` mira en cada salida y en cada vista de PA-04.
+create index checkout_sessions_completed_idx on private.checkout_sessions (profile_id, subscription_id) where state = 'completed';
 alter table private.checkout_sessions enable row level security;
 revoke all on table private.checkout_sessions from public, anon, authenticated, service_role, app_service;
 
@@ -122,7 +124,8 @@ begin
       old.return_to, old.consent_id, old.created_at) then
     raise exception '%.%: what was reserved does not change', tg_table_schema, tg_table_name using errcode = '42501';
   end if;
-  if old.state not in ('reserved', 'creating', 'open') and not (old.state = 'lapsed' and new.state in ('completed', 'expired')) then
+  if old.state not in ('reserved', 'creating', 'open')
+     and not (old.state = 'lapsed' and old.creating_at is not null and new.state in ('completed', 'expired')) then
     raise exception '%.%: a closed checkout does not change', tg_table_schema, tg_table_name using errcode = '42501';
   end if;
   if old.session_id is not null and (new.session_id is distinct from old.session_id or new.url is distinct from old.url) then
@@ -132,7 +135,7 @@ begin
        (old.state = 'reserved' and new.state in ('creating', 'abandoned', 'lapsed'))
        or (old.state = 'creating' and new.state in ('open', 'completed', 'expired', 'abandoned', 'lapsed'))
        or (old.state = 'open' and new.state in ('completed', 'expired', 'lapsed'))
-       or (old.state = 'lapsed' and new.state in ('completed', 'expired'))) then
+       or (old.state = 'lapsed' and old.creating_at is not null and new.state in ('completed', 'expired'))) then
     raise exception '%.%: a checkout cannot go from % to %', tg_table_schema, tg_table_name, old.state, new.state using errcode = '42501';
   end if;
   if new.state in ('completed', 'expired', 'abandoned', 'lapsed') then
@@ -468,7 +471,9 @@ begin
   where s.id = p_checkout and s.profile_id = v_actor for update;
   if v_row.id is null then
     return 'not_found';
-  elsif v_row.state not in ('reserved', 'creating', 'open') and not (v_row.state = 'lapsed' and p_state in ('expired', 'completed')) then
+  -- Una vencida por el reloj se corrige solo si alguna vez se pidió a Stripe: una que nunca salió de reservada, Stripe no la conoce.
+  elsif v_row.state not in ('reserved', 'creating', 'open')
+        and not (v_row.state = 'lapsed' and v_row.creating_at is not null and p_state in ('expired', 'completed')) then
     return 'already_closed';
   elsif not ((p_state = 'abandoned' and v_row.state in ('reserved', 'creating'))
              or (p_state in ('expired', 'completed') and v_row.state in ('creating', 'open', 'lapsed'))) then

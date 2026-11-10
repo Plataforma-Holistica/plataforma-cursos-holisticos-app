@@ -5,7 +5,7 @@
 -- ni escribe las tablas: solo las puertas, solo del servidor. Lo que Stripe contesta y las carreras entre dos peticiones los prueba la integración 116.
 begin;
 \ir _ayuda.psql
-select plan(107);
+select plan(111);
 
 select pruebas.alta('a8800000-0000-0000-0000-000000000001', 'ana-88@prueba.test');
 select pruebas.alta('a8800000-0000-0000-0000-000000000002', 'beto-88@prueba.test');
@@ -272,6 +272,15 @@ select is(pruebas.paso('a8800000-0000-0000-0000-000000000007', format('private.c
   'una vencida por el reloj se corrige con la palabra de Stripe');
 select is((select s.state::text || ' ' || s.subscription_id from private.checkout_sessions s where s.id = :'gil3'::uuid), 'completed sub_88gil',
   'completada, con su suscripción');
+-- Mientras su suscripción no llega, Gil tiene un pago en curso; cuando llega y termina bien (la canceló), deja de tenerlo, y puede volver a pagar (FL-22).
+select is(pruebas.empieza('a8800000-0000-0000-0000-000000000007', 'annual', :anual, :'texto') ->> 'answer', 'in_progress',
+  'Gil completó una salida y su aviso no llegó: tiene un pago en curso');
+insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, provider_status, currency, current_period_start, current_period_end,
+                                  canceled_at, ended_at, provider_started_at, provider_state_at)
+  values ('a8800000-0000-0000-0000-000000000007', 'stripe', 'sub_88gil', 'annual', 'canceled', 'canceled', 'MXN', now() - interval '20 days', now() - interval '1 day',
+          now() - interval '1 day', now() - interval '1 day', now() - interval '20 days', now());
+select is(pruebas.empieza('a8800000-0000-0000-0000-000000000007', 'annual', :anual, :'texto') ->> 'answer', 'reuse',
+  'con su suscripción cancelada, ya no: vuelve a su salida abierta');
 
 -- El texto cambió con una salida abierta: no se reusa, porque su consentimiento es del texto anterior.
 select pruebas.alta('a8800000-0000-0000-0000-000000000008', 'hugo-88@prueba.test');
@@ -300,6 +309,16 @@ select is(private.checkout_begin('monthly', :mensual, :'texto2', false, '/inicio
   'un navegador desmedido no impide salir');
 select pruebas.limpiar();
 select is((select length(c.user_agent) from public.consents c where c.profile_id = 'a8800000-0000-0000-0000-000000000009'), 1000, 'se guarda recortado');
+
+-- Una reservada que nunca se pidió a Stripe y vence por el reloj no se corrige: Stripe no la conoce.
+select pruebas.como_dueno();
+set local session_replication_role = replica;
+update private.checkout_sessions set expires_at = now() - interval '10 minutes' where profile_id = 'a8800000-0000-0000-0000-000000000009';
+set local session_replication_role = origin;
+select (select s.id from private.checkout_sessions s where s.profile_id = 'a8800000-0000-0000-0000-000000000009') as de_ivo \gset
+select is(pruebas.empieza('a8800000-0000-0000-0000-000000000009', 'annual', :anual, :'texto2') ->> 'answer', 'reserved', 'Ivo reserva otra');
+select is(pruebas.paso('a8800000-0000-0000-0000-000000000009', format('private.checkout_close(%L, %L, %L)', :'de_ivo'::text, 'completed', 'sub_88ivo')), 'already_closed',
+  'y la vieja, que nunca se pidió a Stripe, no se da por completada');
 
 -- ---------------------------------------------------------------------------------------
 -- Lo que la base hace cumplir aunque alguien escriba directo.
