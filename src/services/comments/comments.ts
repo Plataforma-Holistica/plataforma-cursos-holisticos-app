@@ -25,6 +25,7 @@ import {
   readTeacherCommentCourses,
   readTeacherComments,
   setPseudonym,
+  settleComment,
   type CommentCursor,
   type CommentPage,
   type CommentThread,
@@ -36,8 +37,10 @@ import {
   type TeacherCommentsRow,
   type TeacherThread,
   type RepliesRow,
+  type SettleRow,
   type WriteRow,
 } from "./records";
+import { activeModeration, MODERATION_TIMEOUT_MS, type Moderation, type ModerationVerdict } from "./moderation";
 
 // Los comentarios por lección (T-501; RF-801, RF-609, RF-808; FL-15). La base no mira el acceso (RN-01): lo decide aquí la
 // regla única, con los hechos de la base y su hora, en la misma transacción en que se llama a la base, como el latido. Cada
@@ -50,6 +53,12 @@ import {
 //
 // Se acepta, como en el latido, que los hechos se lean sin candado: una suscripción que vence justo entonces deja pasar
 // un comentario (decisión mía sin confirmar).
+//
+// El filtro (T-502; RF-802): publicar y editar dejan el texto en el filtro, y si la lista de términos de la base no lo marcó, se
+// le pregunta al modelo de moderación fuera de la transacción y se asienta en otra, con la revisión que se filtró. Confirmada la
+// primera, la respuesta nunca es un error: si asentar falla, se reporta y se dice «en revisión», para que nadie reenvíe y
+// duplique (lo que se quede en el filtro lo toma el barrido de la base). Lo que pasa entre las dos (un veto, una suspensión) no
+// se vuelve a mirar al asentar.
 
 export type { CommentCursor, CommentPage, CommentThread, CommentView, GateRefusal, MyComment, TeacherThread } from "./records";
 
@@ -89,11 +98,20 @@ export type CommentWrite =
   | { kind: "bad_parent" }
   | { kind: "throttled" }
   | { kind: "changed" }
+  /** Lo oculto por reportes espera a moderación: no se edita. */
+  | { kind: "hidden" }
   | { kind: "invalid"; reason: Exclude<CommentTextResult, { ok: true }>["reason"] }
   | { kind: "session"; check: SessionCheck }
   | AccessRefusal;
 
-export type CommentDelete = { kind: "deleted" } | { kind: "not_found" } | { kind: "changed" } | { kind: "session"; check: SessionCheck } | { kind: "unavailable" };
+export type CommentDelete =
+  | { kind: "deleted" }
+  | { kind: "not_found" }
+  | { kind: "changed" }
+  /** Lo oculto por reportes espera a moderación: no se borra. */
+  | { kind: "hidden" }
+  | { kind: "session"; check: SessionCheck }
+  | { kind: "unavailable" };
 
 export type PseudonymChange =
   | { kind: "saved"; pseudonym: string }
@@ -101,6 +119,10 @@ export type PseudonymChange =
   | { kind: "suspended_account" }
   | { kind: "banned" }
   | { kind: "invalid"; reason: Exclude<CommentTextResult, { ok: true }>["reason"] }
+  /** La lista de términos de la base lo marcó: se pide otro (T-502). */
+  | { kind: "flagged" }
+  /** Cinco cambios en un día (T-502). */
+  | { kind: "throttled" }
   | { kind: "session"; check: SessionCheck }
   | { kind: "unavailable" };
 
@@ -129,7 +151,9 @@ export interface CommentsStore {
   post(claims: VerifiedClaims, input: { lessonId: string; parentId: string | null; body: string }): Promise<Guarded<WriteRow>>;
   /** `missing`: no es un comentario propio sin borrar. */
   edit(claims: VerifiedClaims, input: { commentId: string; body: string; revision: number }): Promise<Guarded<WriteRow> | { kind: "missing" }>;
-  remove(claims: VerifiedClaims, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed">;
+  remove(claims: VerifiedClaims, input: { commentId: string; revision: number }): Promise<"ok" | "not_found" | "changed" | "hidden">;
+  /** El veredicto del filtro, de vuelta, en su propia transacción: sin la regla, porque la base solo asienta lo propio. */
+  settle(claims: VerifiedClaims, input: { commentId: string; revision: number; verdict: ModerationVerdict | "unavailable"; provider: string }): Promise<SettleRow>;
   pseudonym(claims: VerifiedClaims, pseudonym: string): Promise<PseudonymRow>;
   /** Lo propio de quien actúa, sin la regla: es su privacidad, como borrar. */
   mine(claims: VerifiedClaims, before: CommentCursor | null): Promise<MyCommentsRow>;
@@ -171,7 +195,13 @@ const cursorOf = (page: { items: { createdAt: string; id: string }[]; more: bool
 const REVISION_MAX = Number.MAX_SAFE_INTEGER;
 const isRevision = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= REVISION_MAX;
 
-export function createComments(deps: { store: CommentsStore; checkSession: (reader: CookieReader) => Promise<SessionCheck>; report: (code: FailureCode) => Promise<void> }) {
+export function createComments(deps: {
+  store: CommentsStore;
+  checkSession: (reader: CookieReader) => Promise<SessionCheck>;
+  report: (code: FailureCode) => Promise<void>;
+  /** El modelo de moderación que haya, o nulo. */
+  moderation: () => Moderation | null;
+}) {
   /** Lo que contestó la regla, dicho para la pantalla. «No se supo» se reporta. */
   async function refusalOf(access: CommentAccess): Promise<AccessRefusal> {
     if (access.ok) return { kind: "read_only" };
@@ -236,12 +266,12 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
    * Lo que contestó la base al escribir, o la regla si no alcanzó. Al publicar, `not_found` es el portón contradiciendo a la
    * regla, y se reporta; al editar es también el comentario que se borró en otra pestaña, y no.
    */
-  async function writeOf(answer: Guarded<WriteRow>, entry: "post" | "edit"): Promise<CommentWrite> {
+  async function writeOf(answer: Guarded<WriteRow>, entry: "post" | "edit", claims: VerifiedClaims, text: string): Promise<CommentWrite> {
     if (answer.kind === "refused") return refusalOf(answer.access);
     const row = answer.value;
     switch (row.answer) {
       case "ok":
-        return { kind: "written", id: row.id, state: row.state };
+        return { kind: "written", id: row.id, state: row.state === "in_filter" ? await settled(claims, row, text) : row.state };
       case "not_found":
         if (entry === "post") await deps.report("comments_unavailable");
         return { kind: "not_found" };
@@ -250,10 +280,52 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
       case "bad_parent":
       case "throttled":
       case "changed":
+      case "hidden":
         return { kind: row.answer };
       default:
         return { kind: "gate", answer: row.answer };
     }
+  }
+
+  /** El veredicto del modelo, a tiempo, o nulo: sin proveedor, si no contestó o si falló. */
+  async function verdictOf(moderation: Moderation, text: string): Promise<ModerationVerdict | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        moderation.classify(text),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), MODERATION_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Lo que la lista no marcó, por el modelo, y asentado con la revisión que se filtró. Ya se escribió: nada de aquí es un error
+   * para quien escribió, y lo que no se pudo asentar queda en revisión (el barrido lo toma).
+   */
+  async function settled(claims: VerifiedClaims, row: { id: string; revision: number }, text: string): Promise<"published" | "in_review"> {
+    try {
+      const moderation = deps.moderation();
+      const verdict = moderation === null ? null : await verdictOf(moderation, text);
+      const answer = await deps.store.settle(claims, {
+        commentId: row.id,
+        revision: row.revision,
+        verdict: verdict ?? "unavailable",
+        provider: moderation?.provider ?? "none",
+      });
+      if (answer.answer === "ok" || answer.answer === "stale") return answer.state;
+      // Borrado en otra pestaña mientras se filtraba: no hay nada que asentar, y no es una falla.
+      if (answer.answer === "not_found") return "in_review";
+      await deps.report("comment_settle_failed");
+    } catch {
+      await deps.report("comment_settle_failed");
+    }
+    return "in_review";
   }
 
   /** Corre la guarda y `write` a nombre de la sesión que pasó. Lo que falla de la base se reporta. */
@@ -274,7 +346,7 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     if (!body.ok) return { kind: "invalid", reason: body.reason };
     const lessonId = input.lessonId;
     const parentId = input.parentId;
-    return withSession(reader, async (claims) => writeOf(await deps.store.post(claims, { lessonId, parentId, body: body.text }), "post"));
+    return withSession(reader, async (claims) => writeOf(await deps.store.post(claims, { lessonId, parentId, body: body.text }), "post", claims, body.text));
   }
 
   /** Edita un comentario propio, con la revisión que se vio (FL-15 paso 8). */
@@ -285,7 +357,7 @@ export function createComments(deps: { store: CommentsStore; checkSession: (read
     const { commentId, revision } = input;
     return withSession(reader, async (claims) => {
       const answer = await deps.store.edit(claims, { commentId, body: body.text, revision });
-      return answer.kind === "missing" ? { kind: "not_found" } : writeOf(answer, "edit");
+      return answer.kind === "missing" ? { kind: "not_found" } : writeOf(answer, "edit", claims, body.text);
     });
   }
 
@@ -387,6 +459,7 @@ export function commentsStoreOn(run: RunAsServer, read: RunAsUser = noUserReads)
         return lessonId === null ? { kind: "missing" as const } : guarded(tx, lessonId, "write", () => editComment(tx, input));
       }),
     remove: (claims, input) => run(claims, "comment_delete", (tx) => deleteComment(tx, input)),
+    settle: (claims, input) => run(claims, "comment_settle", (tx) => settleComment(tx, input)),
     pseudonym: (claims, pseudonym) => run(claims, "comment_pseudonym", (tx) => setPseudonym(tx, pseudonym)),
     mine: (claims, before) => run(claims, "comments_mine", (tx) => readMyComments(tx, before)),
     teacher: (claims, input) =>
@@ -415,4 +488,5 @@ export const {
   store: databaseCommentsStore,
   checkSession,
   report: reportFailure,
+  moderation: activeModeration,
 });

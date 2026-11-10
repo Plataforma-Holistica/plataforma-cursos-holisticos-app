@@ -39,13 +39,28 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
 
   it("los hechos son los de ver, sin el playback id ni el correo", () => {
     const comments = sources.filter((source) => source.file.startsWith("src/services/comments/"));
-    expect(comments.map((source) => source.file).sort()).toEqual(["src/services/comments/comments.ts", "src/services/comments/records.ts"]);
+    expect(comments.map((source) => source.file).sort()).toEqual([
+      "src/services/comments/comments.ts",
+      "src/services/comments/moderation.ts",
+      "src/services/comments/records.ts",
+    ]);
     for (const source of comments) {
       expect(source.text).not.toMatch(/readWatchFacts|watchFacts|lesson_playback|playback|email|signDownload/);
     }
     const read = media.match(/export async function readCommentFacts\(.*?\n?(?= export )/)?.[0] ?? "";
     expect(read).toMatch(/sql`select private\.media_facts\(\$\{lessonId\}::uuid\) as facts`/);
     expect(read).not.toMatch(/\.email\b|lesson_playback|playback/);
+  });
+
+  it("al modelo de moderación le llega solo el texto, y solo lo llama el servicio (T-502; ADR-30)", () => {
+    expect(naming(/["']\.\/moderation["']|@\/services\/comments\/moderation/)).toEqual(["src/services/comments/comments.ts"]);
+    expect(service.match(/\w+\.classify\([^)]*\)/g)).toEqual(["moderation.classify(text)"]);
+    expect(bodyOf("settled")).toMatch(/verdictOf\(moderation, text\)/);
+    // El texto que se filtra es el que se escribió, ya revisado: el mismo que llega a la base.
+    expect(service).toContain('writeOf(await deps.store.post(claims, { lessonId, parentId, body: body.text }), "post", claims, body.text)');
+    expect(service).toContain('writeOf(answer, "edit", claims, body.text)');
+    // Asentar no pasa por la regla: la base asienta solo lo propio que sigue en el filtro con esa revisión.
+    expect(storeOf("settle")).toBe(' settle: (claims, input) => run(claims, "comment_settle", (tx) => settleComment(tx, input)),');
   });
 
   it("la regla es la única, con los hechos de la base y su hora", () => {

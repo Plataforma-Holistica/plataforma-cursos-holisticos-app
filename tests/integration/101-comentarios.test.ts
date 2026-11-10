@@ -12,7 +12,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // dos ediciones con la misma versión, responder mientras el autor borra el comentario, y el freno con dos envíos a la vez.
 //
 // Lo publicado se arma a mano, con las guardias apagadas, y se quita al terminar igual; el interruptor se prende para esta prueba y vuelve a como estaba.
-// Pide la marca local `comments_unfiltered` (la pone `db:login`): sin ella, todo queda en revisión.
+// Pide la marca local `comments_test_filter` (la pone `db:login`): sin ella, el aprobado del proveedor de prueba no publica.
 
 let owner: Client;
 let other: Client;
@@ -23,7 +23,7 @@ let course: string;
 let lesson: string;
 let switchBefore: unknown;
 
-type Answer = { answer: string; id?: string; state?: string };
+type Answer = { answer: string; id?: string; revision?: number; state?: string };
 
 async function inTx<T>(client: Client, work: () => Promise<T>): Promise<T> {
   await client.query("begin");
@@ -37,10 +37,24 @@ async function inTx<T>(client: Client, work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Lo que contesta una función como el servidor a nombre de una persona, en la transacción abierta de esa conexión. */
-async function as(client: Client, person: string, text: string, params: unknown[]): Promise<Answer> {
+/** Lo que contesta una función como el servidor a nombre de una persona, en la transacción abierta de esa conexión, tal cual. */
+async function raw(client: Client, person: string, text: string, params: unknown[]): Promise<Answer> {
   await asServer(client, person, randomUUID());
   const answer = (await client.query<{ r: Answer }>(`select ${text} as r`, params)).rows[0]!.r;
+  await asOwner(client);
+  return answer;
+}
+
+/** Lo mismo, y lo que queda en el filtro, asentado. */
+async function as(client: Client, person: string, text: string, params: unknown[]): Promise<Answer> {
+  await asServer(client, person, randomUUID());
+  let answer = (await client.query<{ r: Answer }>(`select ${text} as r`, params)).rows[0]!.r;
+  // Como el servidor (T-502): lo que queda en el filtro se asienta con el aprobado del proveedor de prueba.
+  if (answer.state === "in_filter") {
+    const settled = (await client.query<{ r: Answer }>("select private.comment_settle($1, $2::bigint, 'pass', 'test') as r", [answer.id, answer.revision])).rows[0]!.r;
+    if (settled.answer !== "ok" && settled.answer !== "stale") throw new Error(`asentar contestó ${settled.answer}`);
+    answer = { ...answer, state: settled.state };
+  }
   await asOwner(client);
   return answer;
 }
@@ -67,7 +81,7 @@ beforeAll(async () => {
   owner = await connect();
   other = await connect();
   await owner.query("grant app_service to postgres with set true, inherit false");
-  expect((await owner.query("select 1 from private.local_flags where flag = 'comments_unfiltered'")).rowCount).toBe(1);
+  expect((await owner.query("select 1 from private.local_flags where flag = 'comments_test_filter'")).rowCount).toBe(1);
   const tag = randomUUID().slice(0, 8);
   // Un maestro activo tiene cuenta; aquí no comenta.
   const teacher = await claimedUser();
@@ -124,6 +138,29 @@ afterAll(async () => {
 });
 
 describe("los comentarios con dos conexiones (T-501)", () => {
+  it("un veredicto que llega mientras se edita espera a la edición, y no publica el texto nuevo (T-502)", async () => {
+    const ana = await student("Ana del filtro");
+    const comment = await post(ana, "El original");
+    const seen = Number(await revision(comment));
+    await owner.query("begin");
+    expect(await raw(owner, ana, "private.comment_edit($1, $2, $3::bigint)", [comment, "El nuevo", seen])).toEqual({
+      answer: "ok",
+      id: comment,
+      revision: seen + 1,
+      state: "in_filter",
+    });
+    await other.query("begin");
+    const late = raw(other, ana, "private.comment_settle($1, $2::bigint, 'pass', 'test')", [comment, seen]);
+    await waitBehind(await connectWatcher(), owner, 1);
+    await owner.query("commit");
+    expect(await late).toEqual({ answer: "stale", state: "in_review" });
+    await other.query("commit");
+    const row = (await owner.query<{ status: string; body: string }>("select status::text as status, body from public.comments where id = $1", [comment])).rows[0]!;
+    expect(row).toEqual({ status: "in_filter", body: "El nuevo" });
+    // El de su revisión, sí.
+    expect(await inTx(owner, () => raw(owner, ana, "private.comment_settle($1, $2::bigint, 'pass', 'test')", [comment, seen + 1]))).toEqual({ answer: "ok", state: "published" });
+  });
+
   it("dos ediciones con la misma versión: la segunda espera a la primera y contesta «changed»", async () => {
     const ana = await student("Ana de la 101");
     const comment = await post(ana, "El original");

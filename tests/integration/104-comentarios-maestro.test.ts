@@ -7,6 +7,7 @@ import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { commentsStoreOn, createComments } from "@/services/comments/comments";
+import { testModeration } from "@/services/comments/moderation";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -18,7 +19,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // Sergio): la base acota al maestro de quien actúa. Por eso aquí se exige la equivalencia: en cada estado de la lección, del curso y
 // del maestro, PA-45 muestra un comentario si y solo si la regla le deja leer esa lección a su dueño. Y nada de otro maestro.
 //
-// Pide las marcas locales `comments_accept` y `comments_unfiltered` (las pone `db:login`).
+// Pide las marcas locales `comments_accept` y `comments_test_filter` (las pone `db:login`).
 
 const emails: string[] = [];
 afterAll(async () => {
@@ -74,6 +75,8 @@ function commentsAs(owner: Client, who: Person) {
     store,
     checkSession: () => Promise.resolve({ kind: "pass", claims: who.claims }),
     report: (code) => (reported.push(code), Promise.resolve()),
+    // El proveedor de prueba del filtro (T-502): la base solo acepta su aprobado con la marca local que pone `db:login`.
+    moderation: () => testModeration,
   });
   return { ...service, reported };
 }
@@ -128,8 +131,8 @@ async function lessonIn(owner: Client, teacherId: string, author: string, how: L
   );
   const comment = (
     await owner.query<{ id: string }>(
-      `insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
-       values ($1, $2, $3, $4, 'Una pregunta', 'published', 'pass') returning id`,
+      `insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict, filter_provider)
+       values ($1, $2, $3, $4, 'Una pregunta', 'published', 'pass', 'test') returning id`,
       [lesson, course, teacherId, author],
     )
   ).rows[0]!.id;

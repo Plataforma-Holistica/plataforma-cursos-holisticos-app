@@ -84,6 +84,8 @@ export default defineConfig({
       MUX_SIGNING_PRIVATE_KEY: Buffer.from(TEST_SIGNING_KEY).toString("base64"),
       // Los videos de un borrador no salen de la máquina (T-403): el token de Mux que haya en .env.local no se usa aquí.
       VIDEO_PROVIDER: "test",
+      // El filtro de comentarios con el proveedor de prueba (T-502): sin él, todo quedaría en revisión.
+      MODERATION_PROVIDER: "test",
       // Ni Stripe (T-303): la llave de prueba que haya en .env.local no se usa aquí, y «Reintentar» en PA-84 deja el aviso en camino.
       STRIPE_SECRET_KEY: "",
       STRIPE_WEBHOOK_SECRET: "",

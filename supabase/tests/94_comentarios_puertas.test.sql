@@ -25,10 +25,25 @@ create function pruebas.c(p_actor uuid, p_call text, p_k text default null) retu
 language plpgsql as $$
 declare
   v jsonb;
+  v_test boolean;
+  v_settled jsonb;
 begin
   perform pruebas.a_nombre_de(p_actor);
   execute 'select ' || p_call into v;
   perform pruebas.limpiar();
+  -- Como el servidor (T-502): lo que queda en el filtro lo asienta con el proveedor de prueba si está su marca, y si no, sin
+  -- proveedor.
+  if v ->> 'state' = 'in_filter' then
+    v_test := exists (select 1 from private.local_flags where flag = 'comments_test_filter');
+    perform pruebas.a_nombre_de(p_actor);
+    v_settled := private.comment_settle((v ->> 'id')::uuid, (v ->> 'revision')::bigint,
+      case when v_test then 'pass' else 'unavailable' end, case when v_test then 'test' else 'none' end);
+    perform pruebas.limpiar();
+    if v_settled ->> 'answer' not in ('ok', 'stale') then
+      raise exception 'asentar contestó %', v_settled;
+    end if;
+    v := v || jsonb_build_object('state', v_settled ->> 'state');
+  end if;
   if p_k is not null and v ->> 'id' is not null then
     insert into pruebas.ids values (p_k, (v ->> 'id')::uuid);
   end if;
@@ -123,7 +138,7 @@ insert into pruebas.ids select 'L' || substr(l.title, 9, 1), l.id from public.pu
 where l.course_id in (select course_id from public.published_courses where slug like 'puertas-%');
 insert into private.app_sessions (session_id, profile_id) select pruebas.sesion(pruebas.p(n)), pruebas.p(n) from generate_series(1, 6) n
 on conflict (session_id) do nothing;
-select pruebas.marca('comments_accept', true), pruebas.marca('comments_unfiltered', true), pruebas.interruptor('true');
+select pruebas.marca('comments_accept', true), pruebas.marca('comments_test_filter', true), pruebas.interruptor('true');
 select is(pruebas.r(pruebas.p(1), $$private.comment_set_pseudonym('Ana')$$), 'ok', 'Ana elige su seudónimo');
 select is(pruebas.r(pruebas.p(6), $$private.comment_set_pseudonym('Cata')$$), 'ok', 'y Cata el suyo');
 select pruebas.como_dueno_sistema();
@@ -207,8 +222,8 @@ select is(pruebas.puede(pruebas.p(1), pruebas.id('Lb')), 'closed', 'y la pantall
 select is(pruebas.r(pruebas.p(1), format('private.comments_for_lesson(%L, null, null)', pruebas.id('Lb'))), 'ok', 'leer sigue');
 select is(pruebas.r(pruebas.p(1), format('private.comment_delete(%L, 1)', pruebas.id('a2'))), 'ok', 'y lo propio se borra');
 select is((select pseudonym from public.profile_privacy where profile_id = pruebas.p(1)), 'Ana', 'el seudónimo no cambió');
--- Con la marca y sin la de publicar sin filtro, se acepta y queda en revisión.
-select pruebas.marca('comments_accept', true), pruebas.marca('comments_unfiltered', false);
+-- Con la marca y sin la del proveedor de prueba (como sin proveedor), se acepta y queda en revisión.
+select pruebas.marca('comments_accept', true), pruebas.marca('comments_test_filter', false);
 select is(pruebas.r(pruebas.p(1), format('private.comment_post(%L, null, %L)', pruebas.id('Lb'), 'Se revisa'), 'a3'), 'ok',
   'sin publicar sin filtro, se acepta');
 select is((select status::text from public.comments where id = pruebas.id('a3')), 'in_review', 'y queda en revisión');

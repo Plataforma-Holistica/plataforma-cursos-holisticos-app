@@ -9,7 +9,7 @@ import type { CommentDelete } from "@/services/comments/comments";
 // lleva la página en que se estaba (`desde`), para volver a ella sin JavaScript.
 
 export interface MineNotice {
-  kind: "deleted" | "gone" | "changed" | "unavailable";
+  kind: "deleted" | "gone" | "changed" | "hidden" | "unavailable";
   /** El comentario del que habla, o nulo si ya no está en la lista. */
   id: string | null;
 }
@@ -66,6 +66,9 @@ export function myDeleteOutcome(id: string, result: CommentDelete, back: string)
       return { kind: "state", refresh: true, state: { asking: null, notice: { kind: "gone", id: null } } };
     case "changed":
       return { kind: "state", refresh: true, state: { asking: null, notice: { kind: "changed", id } } };
+    case "hidden":
+      // Lo oculto ya no sale en la lista (decisión de Sergio del 2026-11-08): el aviso va arriba.
+      return { kind: "state", refresh: true, state: { asking: null, notice: { kind: "hidden", id: null } } };
     case "unavailable":
       return { kind: "state", refresh: false, state: { asking: id, notice: { kind: "unavailable", id } } };
     case "session":

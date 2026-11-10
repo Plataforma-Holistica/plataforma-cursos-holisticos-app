@@ -180,6 +180,14 @@ describe("writeOutcome: lo que pinta la pantalla después de publicar o editar",
     expect(writeOutcome(EDIT, "Hola", { kind: "not_found" }, BACK)).toMatchObject({ state: { open: { kind: "none" }, notice: { at: { kind: "thread" }, kind: "gone" }, kept: { at: EDIT, body: "" } } });
   });
 
+  it("lo oculto por reportes no se edita: la edición se cierra y lo escrito se muestra arriba, para copiarlo (T-502)", () => {
+    expect(writeOutcome(EDIT, "Hola", { kind: "hidden" }, BACK)).toEqual({
+      kind: "state",
+      refresh: true,
+      state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "hidden" }, kept: { at: EDIT, body: "Hola" }, written: null },
+    });
+  });
+
   it("si la lección ya no se ve, se dice arriba del hilo", () => {
     for (const result of [{ kind: "not_found" }, { kind: "no_access", account: { allowed: false, reason: "no_basis" } }, { kind: "gate", answer: "not_found" }] as const) {
       expect(writeOutcome(NEW, "Hola", result as never, BACK)).toMatchObject({ kind: "state", refresh: true, state: { notice: { at: { kind: "thread" } } } });
@@ -212,6 +220,10 @@ describe("deleteOutcome: lo que pinta la pantalla después de borrar", () => {
     expect(deleteOutcome(ID, { kind: "changed" }, BACK)).toMatchObject({ refresh: true, state: { open: { kind: "none" }, notice: { at: { kind: "comment", id: ID }, kind: "changed" } } });
   });
 
+  it("lo oculto por reportes no se borra: se dice en el comentario (T-502)", () => {
+    expect(deleteOutcome(ID, { kind: "hidden" }, BACK)).toEqual({ kind: "state", refresh: true, state: { ...BLANK, notice: { at: { kind: "comment", id: ID }, kind: "hidden" } } });
+  });
+
   it("si no se supo, la pregunta se queda para reintentar", () => {
     expect(deleteOutcome(ID, { kind: "unavailable" }, BACK)).toMatchObject({ state: { open: { kind: "delete", id: ID }, notice: { at: { kind: "comment", id: ID }, kind: "unavailable" } } });
     expect(deleteOutcome(ID, { kind: "session", check: { kind: "anonymous" } }, BACK)).toMatchObject({ kind: "redirect" });
@@ -233,6 +245,9 @@ describe("nameOutcome: lo que pinta la pantalla después de elegir el nombre", (
       state: { open: { kind: "name", carry }, notice: { at: { kind: "name" }, kind: "name_too_short" }, kept: { at: { kind: "name" }, body: "L" }, written: null },
     });
     expect(nameOutcome({ kind: "unavailable" }, "Luz", carry, BACK)).toMatchObject({ state: { open: { kind: "name", carry }, notice: { kind: "unavailable" } } });
+    // La lista de términos lo marcó, o ya se cambió cinco veces hoy (T-502).
+    expect(nameOutcome({ kind: "flagged" }, "Luz", carry, BACK)).toMatchObject({ state: { open: { kind: "name", carry }, notice: { kind: "name_flagged" }, kept: { body: "Luz" } } });
+    expect(nameOutcome({ kind: "throttled" }, "Luz", carry, BACK)).toMatchObject({ state: { open: { kind: "name", carry }, notice: { kind: "name_throttled" }, kept: { body: "Luz" } } });
   });
 
   it("con el veto o cerrado, el diálogo se cierra y lo que cruzaba vuelve a su campo", () => {

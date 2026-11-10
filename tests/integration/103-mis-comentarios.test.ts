@@ -7,6 +7,7 @@ import type { CookieReader } from "@/adapters/supabase/auth-cookies";
 import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
 import { commentsStoreOn, createComments } from "@/services/comments/comments";
+import { testModeration } from "@/services/comments/moderation";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -18,7 +19,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // a la lección vea lo suyo y lo borre con la revisión que vio, que nadie vea lo de otro, y que leerla no pase por la regla de
 // acceso.
 //
-// Pide las marcas locales `comments_accept` y `comments_unfiltered` (las pone `db:login`).
+// Pide las marcas locales `comments_accept` y `comments_test_filter` (las pone `db:login`).
 
 const emails: string[] = [];
 afterAll(async () => {
@@ -60,6 +61,8 @@ function commentsAs(owner: Client, who: Person) {
     store,
     checkSession: () => Promise.resolve({ kind: "pass", claims: who.claims }),
     report: (code) => (reported.push(code), Promise.resolve()),
+    // El proveedor de prueba del filtro (T-502): la base solo acepta su aprobado con la marca local que pone `db:login`.
+    moderation: () => testModeration,
   });
   return { ...service, reported };
 }

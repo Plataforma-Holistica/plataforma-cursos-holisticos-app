@@ -92,8 +92,9 @@ try {
   await client.query(`alter role app_service login password '${verifier}'`);
   // El proveedor de video de prueba (T-403): la base solo lo acepta con esta marca, que en producción nadie pone.
   await client.query("insert into private.local_flags (flag) values ('video_test') on conflict do nothing");
-  // Publicar un comentario sin filtro (T-501): hasta T-502 no hay filtro, y sin la marca todo queda en revisión.
-  await client.query("insert into private.local_flags (flag) values ('comments_unfiltered') on conflict do nothing");
+  // El proveedor de prueba del filtro de comentarios (T-502): la base solo acepta su aprobado con esta marca, que en producción
+  // nadie pone. Sin ella, lo que aprueba el proveedor de prueba no se publica.
+  await client.query("insert into private.local_flags (flag) values ('comments_test_filter') on conflict do nothing");
   // Aceptar comentarios (T-501): hasta T-502 la base solo los acepta con esta marca, que en producción nadie pone.
   await client.query("insert into private.local_flags (flag) values ('comments_accept') on conflict do nothing");
   console.log("db:login: app_service ya puede entrar a la base local.");

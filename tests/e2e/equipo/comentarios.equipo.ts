@@ -75,9 +75,10 @@ test.beforeAll(async () => {
     [courseId],
   );
   lessonUrl = `/cursos/${SLUG}/lecciones/${found?.lesson ?? ""}`;
-  // Pide las dos marcas locales que pone `db:login`: sin `comments_accept` nada se acepta, y sin `comments_unfiltered` todo queda en revisión.
-  const flags = await ownerQuery<{ flag: string }>("select flag from private.local_flags where flag in ('comments_accept', 'comments_unfiltered') order by flag");
-  expect(flags.map((row) => row.flag)).toEqual(["comments_accept", "comments_unfiltered"]);
+  // Pide las dos marcas locales que pone `db:login`: sin `comments_accept` nada se acepta, y sin `comments_test_filter` el aprobado del
+  // proveedor de prueba no publica.
+  const flags = await ownerQuery<{ flag: string }>("select flag from private.local_flags where flag in ('comments_accept', 'comments_test_filter') order by flag");
+  expect(flags.map((row) => row.flag)).toEqual(["comments_accept", "comments_test_filter"]);
   const [before] = await ownerQuery<{ value: unknown }>("select value from public.business_parameters where key = 'COMENTARIOS_ABIERTOS' and canceled_at is null");
   switchBefore = before?.value === true;
   await setSwitch(true);
@@ -182,27 +183,23 @@ test("en el teléfono, Comentarios es otra pestaña; borrar lo propio con respue
   });
 });
 
-test("sin el filtro, lo nuevo queda en revisión: su autor lo ve con la nota, y nadie más", async ({ browser }) => {
-  await ownerQuery("delete from private.local_flags where flag = 'comments_unfiltered'");
-  try {
-    await inContext(browser, {}, async (page) => {
-      await signIn(page, beto, lessonUrl);
-      await page.getByRole("tab", { name: /^Comentarios/ }).click();
-      await page.getByRole("textbox", { name: "Escribe un comentario" }).fill("Una pregunta sobre la postura.");
-      await page.getByRole("button", { name: "Comentar" }).click();
-      const mine = page.getByRole("article", { name: "Tú" }).filter({ hasText: "Una pregunta sobre la postura." });
-      await expect(mine).toContainText("En revisión");
-      await expect(mine).toContainText("Solo tú lo ves por ahora. Una persona del equipo lo va a leer.");
-    });
-    await inContext(browser, {}, async (page) => {
-      await signIn(page, luz, lessonUrl);
-      await page.getByRole("tab", { name: /^Comentarios/ }).click();
-      await expect(page.getByRole("article", { name: "Comentario borrado" })).toBeVisible();
-      await expect(page.getByText("Una pregunta sobre la postura.")).toHaveCount(0);
-    });
-  } finally {
-    await ownerQuery("insert into private.local_flags (flag) values ('comments_unfiltered') on conflict do nothing");
-  }
+// El proveedor de prueba detiene lo que trae «[revisar]» (T-502).
+test("lo que el filtro detiene queda en revisión: su autor lo ve con la nota, y nadie más", async ({ browser }) => {
+  await inContext(browser, {}, async (page) => {
+    await signIn(page, beto, lessonUrl);
+    await page.getByRole("tab", { name: /^Comentarios/ }).click();
+    await page.getByRole("textbox", { name: "Escribe un comentario" }).fill("Una pregunta sobre la postura. [revisar]");
+    await page.getByRole("button", { name: "Comentar" }).click();
+    const mine = page.getByRole("article", { name: "Tú" }).filter({ hasText: "Una pregunta sobre la postura." });
+    await expect(mine).toContainText("En revisión");
+    await expect(mine).toContainText("Solo tú lo ves por ahora. Una persona del equipo lo va a leer.");
+  });
+  await inContext(browser, {}, async (page) => {
+    await signIn(page, luz, lessonUrl);
+    await page.getByRole("tab", { name: /^Comentarios/ }).click();
+    await expect(page.getByRole("article", { name: "Comentario borrado" })).toBeVisible();
+    await expect(page.getByText("Una pregunta sobre la postura.")).toHaveCount(0);
+  });
 });
 
 test("con el interruptor apagado no hay pestaña", async ({ page }) => {
@@ -278,8 +275,8 @@ async function teacherWithQuestion(who: Person, body: string): Promise<void> {
   const lesson = lessonUrl.split("/").at(-1) ?? "";
   await ownerQuery(
     `begin; set local session_replication_role = replica;
-     insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
-     select l.id, l.course_id, l.teacher_id, '${who.id}', '${body}', 'published', 'pass' from public.published_lessons l where l.id = '${lesson}';
+     insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict, filter_provider)
+     select l.id, l.course_id, l.teacher_id, '${who.id}', '${body}', 'published', 'pass', 'test' from public.published_lessons l where l.id = '${lesson}';
      commit;`,
   );
 }

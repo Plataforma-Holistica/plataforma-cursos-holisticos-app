@@ -180,6 +180,9 @@ export function writeOutcome(place: Place, body: string, result: CommentWrite, b
       return keep(place, body, "read_only", true);
     case "bad_parent":
       return keep(place, body, "bad_parent", true);
+    case "hidden":
+      // Lo oculto por reportes ya no se edita: el campo se cierra y lo escrito se muestra arriba, para copiarlo.
+      return state({ notice: { at: place.kind === "edit" ? { kind: "comment", id: place.id } : { kind: "thread" }, kind: "hidden" }, kept: { at: place, body } }, true);
     case "throttled":
       return keep(place, body, "throttled", false);
     case "invalid":
@@ -200,6 +203,8 @@ export function deleteOutcome(id: string, result: CommentDelete, back: string): 
       return state({ notice: { at: { kind: "thread" }, kind: "gone" } }, true);
     case "changed":
       return state({ notice: { at: { kind: "comment", id }, kind: "changed" } }, true);
+    case "hidden":
+      return state({ notice: { at: { kind: "comment", id }, kind: "hidden" } }, true);
     case "unavailable":
       return state({ open: { kind: "delete", id }, notice: { at: { kind: "comment", id }, kind: "unavailable" } }, false);
     case "session":
@@ -229,6 +234,9 @@ export function nameOutcome(
       return carry === null ? state({ notice: { at: { kind: "thread" }, kind: "name_saved" }, kept: restored }, true) : { kind: "post", place: placeOf(carry), body: carry.body };
     case "invalid":
       return stay(`name_${result.reason}`);
+    case "flagged":
+    case "throttled":
+      return stay(`name_${result.kind}`);
     case "unavailable":
       return stay("unavailable");
     case "banned":

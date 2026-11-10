@@ -8,6 +8,7 @@ import { readVerifiedClaims, type VerifiedClaims } from "@/adapters/supabase/cla
 import type { Tx } from "@/adapters/supabase/db";
 import { commentTextOk } from "@/domain/comments/comment-text";
 import { commentsStoreOn, createComments } from "@/services/comments/comments";
+import { testModeration } from "@/services/comments/moderation";
 
 import { claimedUser, freshOrigin, testServices } from "./helpers/account";
 import { memoryJar } from "./helpers/auth";
@@ -19,7 +20,7 @@ import { completeAccountAsOwner, deleteTestUsersByEmail } from "./helpers/users"
 // sobre una transacción del dueño que se revierte. La base no mira el acceso: aquí se intenta, uno por uno, lo que no debe
 // pasar, y lo que pasa. Y la regla del texto de TypeScript contra `private.comment_text_ok` en todos los puntos de código.
 //
-// Pide las marcas locales `comments_accept` y `comments_unfiltered` (las pone `db:login`).
+// Pide las marcas locales `comments_accept` y `comments_test_filter` (las pone `db:login`).
 
 const emails: string[] = [];
 afterAll(async () => {
@@ -61,6 +62,8 @@ function commentsAs(owner: Client, who: Person) {
     store,
     checkSession: () => Promise.resolve({ kind: "pass", claims: who.claims }),
     report: (code) => (reported.push(code), Promise.resolve()),
+    // El proveedor de prueba del filtro (T-502): la base solo acepta su aprobado con la marca local que pone `db:login`.
+    moderation: () => testModeration,
   });
   return { ...service, reported };
 }
@@ -146,8 +149,8 @@ async function planted(owner: Client, lesson: string, author: string, body: stri
   await owner.query("set local session_replication_role = replica");
   const id = (
     await owner.query<{ id: string }>(
-      `insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict)
-       select l.id, l.course_id, l.teacher_id, $2, $3, 'published', 'pass' from public.published_lessons l where l.id = $1 returning id`,
+      `insert into public.comments (lesson_id, course_id, teacher_id, author_id, body, status, filter_verdict, filter_provider)
+       select l.id, l.course_id, l.teacher_id, $2, $3, 'published', 'pass', 'test' from public.published_lessons l where l.id = $1 returning id`,
       [lesson, author, body],
     )
   ).rows[0]!.id;
@@ -165,8 +168,8 @@ describe("el servicio de los comentarios contra la base (T-501)", () => {
     const owner = new Client({ connectionString: localOwnerUrl() });
     await owner.connect();
     try {
-      const flags = (await owner.query<{ flag: string }>("select flag from private.local_flags where flag in ('comments_accept', 'comments_unfiltered') order by flag")).rows;
-      expect(flags.map((row) => row.flag)).toEqual(["comments_accept", "comments_unfiltered"]);
+      const flags = (await owner.query<{ flag: string }>("select flag from private.local_flags where flag in ('comments_accept', 'comments_test_filter') order by flag")).rows;
+      expect(flags.map((row) => row.flag)).toEqual(["comments_accept", "comments_test_filter"]);
     } finally {
       await owner.end();
     }
