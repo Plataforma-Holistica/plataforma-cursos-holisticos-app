@@ -89,6 +89,9 @@ export default defineConfig({
       // Ni Stripe (T-303): la llave de prueba que haya en .env.local no se usa aquí, y «Reintentar» en PA-84 deja el aviso en camino.
       STRIPE_SECRET_KEY: "",
       STRIPE_WEBHOOK_SECRET: "",
+      // La salida a pagar (T-302) con el pago de prueba: una página propia hace de la de Stripe, y la llave de escribir de .env.local no se usa.
+      STRIPE_CHECKOUT_KEY: "",
+      BILLING_CHECKOUT: "test",
       PII_ENCRYPTION_KEYS: `1:${TEST_TAX_KEY.toString("base64")}:${createHash("sha256").update(TEST_TAX_KEY).digest("hex").slice(0, 8)}`,
       PII_ENCRYPTION_ACTIVE_VERSION: "1",
     },

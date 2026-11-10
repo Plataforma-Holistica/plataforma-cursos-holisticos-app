@@ -16,6 +16,12 @@ export const ROUTES = {
   consents: "/consentimientos",
   home: "/inicio",
   account: "/cuenta",
+  /** PA-04, los planes (T-302): también para el visitante. */
+  plans: "/planes",
+  /** La salida a pagar (T-302): pide sesión. De ahí cuelgan PA-32 (`/suscripcion/confirmando`) y la página de pago de prueba de local. */
+  checkout: "/suscripcion",
+  checkoutConfirming: "/suscripcion/confirmando",
+  checkoutTest: "/suscripcion/prueba",
   /** PA-24, «Mis comentarios» (T-501): lo propio, para borrarlo también sin acceso a la lección. */
   myComments: "/cuenta/comentarios",
   closeSession: "/sesion/cerrar",
@@ -81,6 +87,7 @@ export const SESSION_ROUTES: readonly string[] = [
   ROUTES.secondFactor,
   ROUTES.admin,
   ROUTES.portal,
+  ROUTES.checkout,
 ];
 
 // La lección: `/cursos/{slug}/lecciones/{id}`, exactamente esos cuatro segmentos. No va por
@@ -206,7 +213,7 @@ export const periodPayoutsPath = (period: number): string => `${periodPath(perio
  * Administración y el portal valen con todo lo que cuelgue de ellos: por eso bajo `/admin` y
  * `/portal` no puede haber una lectura con efectos.
  */
-const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore, ROUTES.portal];
+const RETURN_DESTINATIONS: readonly string[] = [ROUTES.home, ROUTES.account, ROUTES.admin, ROUTES.courses, ROUTES.explore, ROUTES.portal, ROUTES.plans, ROUTES.checkout];
 
 /** Las rutas de `SESSION_ROUTES`: la ruta exacta y lo que cuelga de ella. */
 function underSessionRoute(pathname: string): boolean {
