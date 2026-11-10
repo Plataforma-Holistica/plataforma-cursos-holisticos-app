@@ -60,9 +60,11 @@ revoke all on private.comment_filter_terms from public;
 create function private.comment_terms_hit(p_text text) returns boolean
 language sql stable security definer set search_path = ''
 as $$
+  -- El texto se normaliza una sola vez, no una por término.
+  with texto as materialized (select ' ' || private.comment_normalize(p_text) || ' ' as normalizado)
   select exists (
-    select 1 from private.comment_filter_terms t
-    where ' ' || private.comment_normalize(p_text) || ' ' like '% ' || t.term || ' %')
+    select 1 from private.comment_filter_terms t, texto
+    where texto.normalizado like '% ' || t.term || ' %')
 $$;
 revoke all on function private.comment_terms_hit(text) from public;
 
@@ -70,8 +72,11 @@ revoke all on function private.comment_terms_hit(text) from public;
 -- El comentario: quién dio el veredicto y desde cuándo está en el filtro.
 
 alter table public.comments add column filter_provider text;
--- Lo que T-501 dejó en revisión sin marca local (local solamente: en producción no hay comentarios) no tuvo proveedor.
+-- Lo que T-501 dejó con veredicto sin marca local (local solamente: en producción no hay comentarios) no tuvo proveedor. El
+-- guardián de T-501 no deja cambiar lo borrado, que también conserva su veredicto: se apaga solo para este relleno.
+alter table public.comments disable trigger comments_guard;
 update public.comments set filter_provider = 'none' where filter_verdict is not null;
+alter table public.comments enable trigger comments_guard;
 alter table public.comments
   add column filter_entered_at timestamptz not null default now(),
   add constraint comments_filter_provider_form check (filter_provider ~ '^[a-z][a-z0-9_]{0,30}$'),
@@ -80,8 +85,8 @@ alter table public.comments
 -- Lo que está en el filtro, para el barrido.
 create index comments_in_filter_idx on public.comments (filter_entered_at) where status = 'in_filter';
 
--- La copia que deja borrar lo que está en revisión o lo reportado (decisión de Sergio del 2026-11-09): el texto y el autor,
--- para moderación. Nadie de la aplicación la lee ni la escribe; la escribe `comment_delete`.
+-- La copia que dejan borrar o editar lo que está en revisión o lo reportado (decisión de Sergio del 2026-11-09): el texto y el
+-- autor, para moderación. Nadie de la aplicación la lee ni la escribe; la escriben `comment_delete` y `comment_edit`.
 create table private.comment_evidence (
   id uuid primary key default gen_random_uuid(),
   comment_id uuid not null references public.comments (id) on delete cascade,
@@ -90,9 +95,12 @@ create table private.comment_evidence (
   status public.comment_status not null,
   filter_verdict text,
   report_count integer not null,
-  deleted_at timestamptz not null default now()
+  -- Si el texto se fue al borrarlo o al editarlo.
+  cause text not null,
+  created_at timestamptz not null default now(),
+  constraint comment_evidence_cause_known check (cause in ('delete', 'edit'))
 );
-comment on table private.comment_evidence is 'Lo que el autor borró estando en revisión o reportado (RF-801, protocolo de riesgo §8): el texto y el autor, para moderación (T-503).';
+comment on table private.comment_evidence is 'Lo que el autor borró o reemplazó estando en revisión o reportado (RF-801, protocolo de riesgo §8): el texto y el autor, para moderación (T-503).';
 alter table private.comment_evidence enable row level security;
 revoke all on private.comment_evidence from public;
 create index comment_evidence_comment_idx on private.comment_evidence (comment_id);
@@ -331,8 +339,8 @@ begin
   end if;
   -- El texto que se reemplaza, si estaba en revisión o reportado, se queda para moderación, como al borrar.
   if v_comment.status = 'in_review' or v_comment.report_count > 0 then
-    insert into private.comment_evidence (comment_id, author_id, body, status, filter_verdict, report_count)
-    values (v_comment.id, v_comment.author_id, v_comment.body, v_comment.status, v_comment.filter_verdict, v_comment.report_count);
+    insert into private.comment_evidence (comment_id, author_id, body, status, filter_verdict, report_count, cause)
+    values (v_comment.id, v_comment.author_id, v_comment.body, v_comment.status, v_comment.filter_verdict, v_comment.report_count, 'edit');
   end if;
   update public.comments
   set body = p_body, status = 'in_filter', filter_verdict = null, filter_provider = null, filter_checked_at = null,
@@ -363,8 +371,8 @@ begin
     return '{"answer": "changed"}'::jsonb;
   end if;
   if v_comment.status = 'in_review' or v_comment.report_count > 0 then
-    insert into private.comment_evidence (comment_id, author_id, body, status, filter_verdict, report_count)
-    values (v_comment.id, v_comment.author_id, v_comment.body, v_comment.status, v_comment.filter_verdict, v_comment.report_count);
+    insert into private.comment_evidence (comment_id, author_id, body, status, filter_verdict, report_count, cause)
+    values (v_comment.id, v_comment.author_id, v_comment.body, v_comment.status, v_comment.filter_verdict, v_comment.report_count, 'delete');
   end if;
   update public.comments
   set body = null, status = 'deleted', deleted_at = now(), author_id = null, revision = revision + 1
@@ -486,6 +494,12 @@ as $$
   select 'comment inner function executable by ' || r.rolname, i.signature
   from app_roles r cross join inner_parts i
   where pg_catalog.has_function_privilege(r.rolname::name, i.signature::regprocedure, 'EXECUTE')
+  union all
+  -- Un término que ya no es como lo deja la normalización (si esta cambia, la migración que la cambie los renormaliza) no
+  -- coincide nunca, sin avisar.
+  select 'comment filter term not normalized', t.term
+  from private.comment_filter_terms t
+  where t.term is distinct from private.comment_normalize(t.term)
   union all
   -- El barrido corre cada minuto.
   select 'comment filter sweep not scheduled', 'cron.job comment_filter_sweep'

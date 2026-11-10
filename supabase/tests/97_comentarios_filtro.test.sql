@@ -5,7 +5,7 @@
 -- revisión al borrarlo, el seudónimo por la lista y con su freno, y el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(74);
+select plan(80);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9700000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -138,6 +138,7 @@ select is(private.comment_normalize(E'zor\u200dbak'), 'zorbak', 'sin las uniones
 select is(private.comment_normalize(E'\uff5a\uff4f\uff52\uff42\uff41\uff4b'), 'zorbak', 'las letras de ancho completo son las de siempre');
 select is(private.comment_normalize(E'\U0001d433\U0001d428\U0001d42b\U0001d41b\U0001d41a\U0001d424'), 'zorbak', 'y las matemáticas');
 select is(private.comment_normalize(E'zor\u20d2bak'), 'zorbak', 'sin las marcas combinantes de otros rangos');
+select is(private.comment_normalize(E'\uff3a\uff2f\uff32\uff22\uff21\uff2b'), 'zorbak', 'y las mayúsculas de ancho completo bajan después de volverse las de siempre');
 select is(private.comment_terms_hit('Esto es Z0RB4K!'), true, 'la lista ve el término así escrito');
 select is(private.comment_terms_hit('zorbaku y zorbakes'), false, 'solo la palabra entera');
 select is(private.comment_terms_hit('un   mal,  sitio'), true, 'y el de dos palabras');
@@ -205,8 +206,18 @@ select is(pruebas.asienta(pruebas.p(1), 'c1', 1, 'pass', 'test') ->> 'answer', '
 select is(pruebas.fila('c1'), 'in_filter - -', 'el texto nuevo sigue esperando el suyo');
 select is(pruebas.c(pruebas.p(1), format('private.comment_edit(%L, %L, %s)', pruebas.id('c3'), 'Mal sitio para preguntar', pruebas.rev('c3'))) ->> 'state',
   'in_review', 'editar con un término de la lista lo deja en revisión');
-select is((select (body, filter_verdict) from private.comment_evidence where comment_id = pruebas.id('c3')), ('Una duda'::text, 'risk'::text),
+select is((select (body, filter_verdict, cause) from private.comment_evidence where comment_id = pruebas.id('c3')), ('Una duda'::text, 'risk'::text, 'edit'::text),
   'y el texto que estaba en revisión se queda para moderación, con su veredicto');
+select pruebas.publica(pruebas.p(2), 'Publicado y reportado, que se corrige', 'c9');
+select pruebas.asienta(pruebas.p(2), 'c9', 1, 'pass', 'test');
+select pruebas.fuerza('c9', 'report_count = 1');
+select is(pruebas.r(pruebas.p(2), format('private.comment_edit(%L, %L, %s)', pruebas.id('c9'), 'Publicado y reportado, que se corrige', pruebas.rev('c9'))), 'ok',
+  'editar con el mismo texto no escribe nada');
+select is((select count(*)::int from private.comment_evidence where comment_id = pruebas.id('c9')), 0, 'ni deja copia');
+select is(pruebas.r(pruebas.p(2), format('private.comment_edit(%L, %L, %s)', pruebas.id('c9'), 'Ya corregido', pruebas.rev('c9'))), 'ok',
+  'lo publicado con reportes se edita (Beto, para no pasar el freno de Ana)');
+select is((select (body, cause) from private.comment_evidence where comment_id = pruebas.id('c9')), ('Publicado y reportado, que se corrige'::text, 'edit'::text),
+  'y el texto reportado se queda para moderación');
 
 -- ---------------------------------------------------------------------------------------
 -- El barrido: lo que se quedó en el filtro (el servidor cayó entre las dos transacciones) pasa a revisión.
@@ -235,8 +246,8 @@ select is((select (status::text, body) from public.comments where id = pruebas.i
 
 select is(pruebas.r(pruebas.p(1), format('private.comment_delete(%L, %s)', pruebas.id('c2'), pruebas.rev('c2'))), 'ok', 'Ana borra lo suyo en revisión');
 select is((select (status::text, body, author_id) from public.comments where id = pruebas.id('c2')), ('deleted'::text, null::text, null::uuid), 'para todos se va');
-select is((select (body, author_id, status::text, filter_verdict) from private.comment_evidence where comment_id = pruebas.id('c2')),
-  ('Esto es zorbak'::text, pruebas.p(1), 'in_review'::text, 'flagged'::text), 'pero queda la copia con su texto y su autor');
+select is((select (body, author_id, status::text, filter_verdict, cause) from private.comment_evidence where comment_id = pruebas.id('c2')),
+  ('Esto es zorbak'::text, pruebas.p(1), 'in_review'::text, 'flagged'::text, 'delete'::text), 'pero queda la copia con su texto y su autor');
 select pruebas.publica(pruebas.p(1), 'Publicado y reportado', 'c7');
 select pruebas.asienta(pruebas.p(1), 'c7', 1, 'pass', 'test');
 select pruebas.fuerza('c7', 'report_count = 1');
@@ -244,7 +255,7 @@ select pruebas.publica(pruebas.p(1), 'Publicado y en paz', 'c8');
 select pruebas.asienta(pruebas.p(1), 'c8', 1, 'pass', 'test');
 select is((select array_agg(pruebas.r(pruebas.p(1), format('private.comment_delete(%L, %s)', pruebas.id(k), pruebas.rev(k))) order by k)
   from unnest(array['c7', 'c8']) k), array['ok', 'ok'], 'Ana borra lo reportado y lo que no');
-select is((select array_agg(c.k order by c.k) from pruebas.ids c join private.comment_evidence e on e.comment_id = c.v), array['c2', 'c3', 'c7'],
+select is((select array_agg(c.k order by c.k) from pruebas.ids c join private.comment_evidence e on e.comment_id = c.v), array['c2', 'c3', 'c7', 'c9'],
   'lo reportado deja copia; lo publicado sin reportes, no');
 select pruebas.como_servicio(pruebas.p(1));
 select throws_ok('select count(*) from private.comment_evidence', '42501', null, 'el servidor no lee la copia');
@@ -266,6 +277,15 @@ select is(pruebas.r(pruebas.p(4), $$private.comment_set_pseudonym('Zorbak')$$), 
 -- El vigilante, y quién ejecuta asentar.
 
 select is(pruebas.vigila(), '{}', 'el área comments no dice nada con lo nuevo');
+-- Un término guardado de otra forma (como si la normalización hubiera cambiado), en réplica para saltar su restricción.
+set local session_replication_role = replica;
+alter table private.comment_filter_terms drop constraint comment_filter_terms_normalized;
+insert into private.comment_filter_terms (term) values ('Viejo');
+select is(pruebas.vigila(), array['comment filter term not normalized Viejo'], 'el vigilante ve un término que ya no coincide');
+delete from private.comment_filter_terms where term = 'Viejo';
+alter table private.comment_filter_terms add constraint comment_filter_terms_normalized check (
+  term ~ '^[a-z]+( [a-z]+)*$' and pg_catalog.char_length(term) between 2 and 100 and term = private.comment_normalize(term));
+set local session_replication_role = origin;
 grant select on private.comment_evidence to app_service;
 select is(pruebas.vigila(), array['comments table reachable by app_service private.comment_evidence'], 'el vigilante ve un permiso de más sobre la copia');
 revoke select on private.comment_evidence from app_service;

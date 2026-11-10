@@ -1172,7 +1172,10 @@ que no se ve leyendo un solo archivo:
   proveedor: todo lo que la lista no marca queda en revisión, también con `pnpm dev` si `.env.local` no la trae. El de prueba decide por
   marcas en el texto: `[revisar]`, `[riesgo]` y `[sin-filtro]` (no contestó). **Lo oculto** (`hidden`, que llega con la segunda solicitud)
   no se edita ni se borra (`hidden`, también en el guardián), y borrar o editar lo que está en revisión, o lo que tiene reportes, copia
-  antes el texto y el autor a `private.comment_evidence`, sin permisos para la aplicación ni plazo de conservación todavía (T-503). El
+  antes el texto y el autor a `private.comment_evidence` (con `cause`: `delete` o `edit`), sin permisos para la aplicación ni plazo de
+  conservación todavía (T-503). Sin proveedor real, todo lo que la lista no marca queda en revisión, así que esa copia guarda también
+  textos que nadie marcó. El vigilante revisa que cada término siga como lo deja la normalización: una migración que la cambie
+  renormaliza la lista en el mismo cambio. El
   seudónimo tiene su freno de cinco intentos al día, que cuenta también lo que la lista marca y va antes que ella (`throttled`), para que la
   lista no se averigüe probando; después, la lista (`flagged`). Las tablas y funciones nuevas están en las listas del área `comments` del vigilante, que
   exige además el trabajo del barrido. **Para las pruebas:** las de base y la integración 101 asientan como el servidor en su ayudante
