@@ -15,7 +15,7 @@ import { comments as commentText } from "@/messages/es/comments";
 import { lesson as text } from "@/messages/es/lesson";
 import { resources as resourceText } from "@/messages/es/resources";
 import { plural, t } from "@/messages/format";
-import { lessonPath, ROUTES } from "@/services/account/navigation";
+import { lessonPath, plansPath, ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
@@ -32,7 +32,7 @@ import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuild
 
 import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
 import { lessonCommentAction } from "./comment-actions";
-import { paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
+import { paywallAction, paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
 import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
@@ -299,13 +299,18 @@ function Elsewhere({ live, onClose, onRetry }: { live: BusyRow[]; onClose: (sess
   );
 }
 
-/** PA-33: por qué no hay acceso, en el lugar del reproductor. Sin «Ver planes» hasta que exista la pantalla (T-30x). */
-function Paywall({ denial }: { denial: Denial }) {
+/** PA-33: por qué no hay acceso, en el lugar del reproductor, y la acción a los planes con esta lección como destino (T-302). */
+function Paywall({ denial, back }: { denial: Denial; back: string | null }) {
   const [title, sentence] = paywallCopy(denial);
   return (
     <div className="flex h-full flex-col justify-center gap-2 p-6">
       <h2 className="text-h3">{title}</h2>
       <p className="text-text-2">{sentence}</p>
+      <div className="pt-2">
+        <Button href={plansPath(back)} size="md">
+          {paywallAction(denial)}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -658,7 +663,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
                   }}
                 />
               ) : video.kind === "denied" ? (
-                <Paywall denial={video.denial} />
+                <Paywall denial={video.denial} back={lessonPath(slug, lessonId)} />
               ) : video.kind === "busy" ? (
                 <Elsewhere
                   live={video.live}

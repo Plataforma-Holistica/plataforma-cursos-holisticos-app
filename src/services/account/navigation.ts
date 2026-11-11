@@ -252,6 +252,9 @@ function withReturn(route: string, target: string | null | undefined): string {
   return resolved.kind === "path" ? `${route}?${RETURN_PARAM}=${encodeURIComponent(resolved.path)}` : route;
 }
 
+/** A los planes (PA-04, T-302), guardando a dónde se quería ir después de pagar. */
+export const plansPath = (target: string | null | undefined): string => withReturn(ROUTES.plans, target);
+
 /** A entrar, guardando a dónde se quería ir. */
 export const signInPath = (target: string | null | undefined): string => withReturn(ROUTES.signIn, target);
 

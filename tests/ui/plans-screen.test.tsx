@@ -95,6 +95,19 @@ describe("PA-04", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
+  it("al visitante que todavía no elige plan también se le ofrece entrar, volviendo a los planes con su destino (T-302)", () => {
+    show(null, { kind: "visitor", signUp: (to) => `/registro?volver=${encodeURIComponent(to)}`, signIn: (to) => `/entrar?volver=${encodeURIComponent(to)}` }, "/cursos/uno/lecciones/a");
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/planes?volver=%2Fcursos%2Funo%2Flecciones%2Fa")}`);
+  });
+
+  it("con acceso y un destino guardado, «Continuar» lleva ahí; sin destino, al inicio", () => {
+    const { unmount } = show(null, { kind: "has_access" }, "/cursos/uno/lecciones/a");
+    expect(screen.getByRole("link", { name: "Continuar" })).toHaveAttribute("href", "/cursos/uno/lecciones/a");
+    unmount();
+    show(null, { kind: "has_access" });
+    expect(screen.getByRole("link", { name: "Ir a mi inicio" })).toHaveAttribute("href", "/inicio");
+  });
+
   it("con acceso: que ya lo tiene, sin formulario", () => {
     show("monthly", { kind: "has_access" });
     expect(screen.getByText("Ya tienes acceso a todo el catálogo.")).toBeInTheDocument();

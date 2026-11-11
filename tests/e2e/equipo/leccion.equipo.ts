@@ -79,8 +79,9 @@ async function subscribe(who: Person): Promise<void> {
   );
 }
 
+/** Entra con `path` como destino. Sin sesión, la lección de un curso normal lleva a los planes (T-302), no a entrar. */
 async function signIn(page: Page, who: Person, path: string): Promise<void> {
-  await page.goto(path);
+  await page.goto(`/entrar?volver=${encodeURIComponent(path)}`);
   await page.getByLabel("Correo").fill(who.email);
   await page.getByLabel("Contraseña", { exact: true }).fill(who.password);
   await page.getByRole("button", { name: "Entrar" }).click();
@@ -120,9 +121,9 @@ test.beforeAll(async () => {
   openLesson = await loadListedCourse(OPEN_SLUG, true);
 });
 
-test("sin sesión: la lección de un curso normal manda a entrar; la del abierto, a registrarse (flujo §6.3)", async ({ page }) => {
+test("sin sesión: la lección de un curso normal manda a los planes (T-302); la del abierto, a registrarse (flujo §6.3)", async ({ page }) => {
   await page.goto(lessonUrl(SLUG, lesson));
-  await expect(page).toHaveURL(`/entrar?volver=${encodeURIComponent(lessonUrl(SLUG, lesson))}`);
+  await expect(page).toHaveURL(`/planes?volver=${encodeURIComponent(lessonUrl(SLUG, lesson))}`);
   await page.goto(lessonUrl(OPEN_SLUG, openLesson));
   await expect(page).toHaveURL(`/registro?volver=${encodeURIComponent(lessonUrl(OPEN_SLUG, openLesson))}`);
 });
@@ -134,6 +135,8 @@ test("sin acceso: PA-33 desde que carga, sin reproducir ni nada del video en lo 
   await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
   await expect(page.getByRole("heading", { level: 1, name: "Lección 1 · Con Mux" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Esta lección pide una suscripción" })).toBeVisible();
+  // PA-33 lleva a los planes con esta lección como destino (T-302).
+  await expect(page.getByRole("link", { name: "Ver planes" })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(lessonUrl(SLUG, lesson))}`);
   await expect(page.getByRole("button", { name: "Reproducir la lección" })).toHaveCount(0);
   const served = await (await page.request.get(lessonUrl(SLUG, lesson))).text();
   expect(served).not.toContain(`Playback${SLUG.replaceAll("-", "")}`);

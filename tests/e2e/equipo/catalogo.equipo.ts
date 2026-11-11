@@ -137,11 +137,11 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   await expect(page.getByText(HIDDEN)).toHaveCount(0);
   expect(await a11yViolations(page)).toEqual([]);
 
-  // Sin suscripción, la ficha ofrece suscribirse y lleva a la lección, donde PA-33 dice por qué.
+  // Sin suscripción, la ficha ofrece suscribirse y lleva a los planes, con la primera lección como destino (T-302).
   await newest.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` }).click();
   await expect(page).toHaveURL(new RegExp(`/cursos/${BEGINNER}$`));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Curso ${BEGINNER}`);
-  await expect(page.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", new RegExp(`^/cursos/${BEGINNER}/lecciones/`));
+  await expect(page.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", new RegExp(`^/planes\\?volver=%2Fcursos%2F${BEGINNER}%2Flecciones%2F`));
   await expect(page.getByRole("region", { name: "Temario" }).getByRole("link")).toHaveCount(2);
   expect(await a11yViolations(page)).toEqual([]);
 
@@ -151,13 +151,13 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   await expect(page.getByRole("link", { name: "Empezar" })).toHaveAttribute("href", new RegExp(`^/cursos/${BEGINNER}/lecciones/`));
 });
 
-test("el visitante ve la ficha completa y su botón lleva a registrarse; un curso sin listar no existe", async ({ browser }) => {
+test("el visitante ve la ficha completa y su botón lleva a los planes; un curso sin listar no existe", async ({ browser }) => {
   for (const javaScriptEnabled of [true, false]) {
     const context = await browser.newContext({ javaScriptEnabled });
     const page = await context.newPage();
     await page.goto(`/cursos/${ADVANCED}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Curso ${ADVANCED}`);
-    await expect(page.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", new RegExp(`^/registro\\?volver=`));
+    await expect(page.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", new RegExp(`^/planes\\?volver=`));
     // Sin la barra del alumno; con la del sitio público (T-614, parte 4).
     await expect(page.getByRole("link", { name: "Explorar" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Crear cuenta" })).toHaveAttribute("href", "/registro");

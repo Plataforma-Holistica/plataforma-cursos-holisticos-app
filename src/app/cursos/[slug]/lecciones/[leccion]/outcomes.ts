@@ -1,4 +1,4 @@
-import { denialOf, paywallCopy, type Denial } from "@/app/_catalog/paywall";
+import { denialOf, paywallAction, paywallCopy, type Denial } from "@/app/_catalog/paywall";
 import type { BatchAnswer, HeartbeatAnswer, LessonAccess, LiveElsewhere, MediaGrant, PresenceAnswer } from "@/services/media/media";
 
 // La tabla de la página de una lección (PA-22, T-203): lo que contesta la función única de
@@ -10,7 +10,7 @@ import type { BatchAnswer, HeartbeatAnswer, LessonAccess, LiveElsewhere, MediaGr
 // cuánto latir, el lugar ocupado en otro navegador (PA-34) y lo que contesta el latido; desde
 // T-205, qué pasó con los tramos vistos que llevaba.
 
-export { denialOf, paywallCopy, type Denial };
+export { denialOf, paywallAction, paywallCopy, type Denial };
 
 /** Lo que la página pinta al cargar, en el lugar del reproductor. */
 export type InitialState =

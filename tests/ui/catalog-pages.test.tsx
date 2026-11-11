@@ -120,14 +120,14 @@ describe("la ficha de un curso (PA-02)", () => {
     });
   });
 
-  it("al visitante: todo el curso, y «Suscribirme para verlo» lleva a registrarse; no se le pregunta nada más a nadie", async () => {
+  it("al visitante: todo el curso, y «Suscribirme para verlo» lleva a los planes; no se le pregunta nada más a nadie", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
     const { container } = render(await CourseRoute(params("respirar")));
     expect(mocks.coursePage).toHaveBeenCalledExactlyOnceWith("respirar");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Respirar para dormir");
     expect(screen.getByText("2 lecciones · 13 min")).toBeVisible();
     expect(screen.getByText("Un curso para volver a dormir.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", `/registro?volver=${encodeURIComponent(lesson(L1))}`);
+    expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(lesson(L1))}`);
     const syllabus = screen.getByRole("region", { name: "Temario" });
     expect(within(syllabus).getByRole("heading", { name: "Módulo 1 · Preparar el cuerpo" })).toBeVisible();
     // Las lecciones llevan candado (PA-02, «Estados»), y siguen llevando a la lección, que manda a entrar.
@@ -188,12 +188,12 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("al alumno sin acceso: «Suscribirme para verlo» lleva a la lección, donde PA-33 dice por qué", async () => {
+  it("al alumno sin acceso: «Suscribirme para verlo» lleva a los planes, con la lección como destino", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
     mocks.lessonAccess.mockResolvedValue({ kind: "denied", account: { kind: "never" } });
     mocks.courseStanding.mockResolvedValue({ kind: "ready", standing: { states: new Map(), completed: 0, total: 2, started: false, finished: false, suggested: { id: L1, number: 1 } } });
     render(await CourseRoute(params("respirar")));
-    expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", lesson(L1));
+    expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(lesson(L1))}`);
   });
 
   it("si no se sabe quién mira (no se supo, suspendida o a medias), la ficha se ve sin botón y sin preguntar más", async () => {

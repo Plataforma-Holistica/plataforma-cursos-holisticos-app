@@ -82,7 +82,7 @@ describe("requireLessonSession", () => {
 
   it.each<[boolean | null, string]>([
     [true, `/registro?volver=${back}`],
-    [false, `/entrar?volver=${back}`],
+    [false, `/planes?volver=${back}`],
     [null, `/entrar?volver=${back}`],
   ])("sin sesión, con el curso abierto %s, redirige a %s", async (open, to) => {
     answers({ kind: "anonymous" });

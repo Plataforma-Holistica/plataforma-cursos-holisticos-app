@@ -87,8 +87,8 @@ describe("la pantalla de una lección (T-203; flujo §6.3)", () => {
     expect(lessonPageStep(check(name), path, true)).toEqual(expected);
   });
 
-  it("sin sesión, la lección de un curso normal manda a entrar; la del abierto, a registrarse", () => {
-    expect(lessonPageStep(check("anonymous"), path, false)).toEqual({ kind: "redirect", to: `/entrar?volver=${back}` });
+  it("sin sesión, la lección de un curso normal manda a los planes (T-302); la del abierto, a registrarse", () => {
+    expect(lessonPageStep(check("anonymous"), path, false)).toEqual({ kind: "redirect", to: `/planes?volver=${back}` });
     expect(lessonPageStep(check("anonymous"), path, true)).toEqual({ kind: "redirect", to: `/registro?volver=${back}` });
   });
 
