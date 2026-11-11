@@ -198,7 +198,8 @@ function CommentItem({ comment, reply, lesson, shared, children }: { comment: Co
   }
   const underReview = comment.own && (comment.state === "in_review" || comment.state === "hidden");
   const author = comment.own ? text.you : (comment.name ?? text.deleted);
-  const editing = comment.own && state.open.kind === "edit" && state.open.id === comment.id && comment.revision !== null;
+  // Lo oculto no se edita: si quedó oculto con el campo abierto, el campo se va y lo escrito sale arriba del hilo.
+  const editing = comment.own && comment.state !== "hidden" && state.open.kind === "edit" && state.open.id === comment.id && comment.revision !== null;
   const deleting = comment.own && state.open.kind === "delete" && state.open.id === comment.id && comment.revision !== null;
   return (
     <article

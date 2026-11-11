@@ -7,7 +7,7 @@
 -- el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(63);
+select plan(64);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9800000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -268,6 +268,8 @@ select throws_ok(format($$update public.comments set status = 'in_review', filte
   '23514', null, 'ni pasa a revisión');
 select throws_ok(format($$update public.comments set status = 'in_filter', body = 'Otro', filter_verdict = null, filter_provider = null, filter_checked_at = null where id = %L$$, pruebas.id('c1')),
   '23514', null, 'ni vuelve al filtro');
+select throws_ok(format($$update public.comments set status = 'deleted', body = null, deleted_at = now(), author_id = null where id = %L$$, pruebas.id('c1')),
+  '23514', null, 'ni se borra: espera a moderación');
 select pruebas.como_servicio(pruebas.p(2));
 select throws_ok('select count(*) from public.comment_reports', '42501', null, 'el servidor no lee los reportes');
 select pruebas.limpiar();
