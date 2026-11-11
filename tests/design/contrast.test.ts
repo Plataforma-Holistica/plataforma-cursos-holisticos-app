@@ -84,6 +84,8 @@ const pairs: [string, string, number, number][] = [
   ["text-2", "warning-bg", 9.32, AA_TEXT],
   ["text-2", "danger-bg", 9.7, AA_TEXT],
   ["accent", "surface-3", 8.76, AA_UI], // barra de progreso sobre su pista
+  // La caja del QR del segundo factor contra la página (T-616, 2b): su zona de silencio tiene que ser clara.
+  ["qr-quiet", "bg", 18.94, AA_UI],
   // Paleta «papel», para correos y PDF.
   ["ink", "paper", 16.01, AA_TEXT],
   ["ink", "paper-2", 14.41, AA_TEXT],

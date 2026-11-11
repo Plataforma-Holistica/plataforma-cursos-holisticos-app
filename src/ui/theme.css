@@ -45,6 +45,10 @@
   --danger: #F58FA6;
   --danger-bg: #30151C;
 
+  /* La zona de silencio del código QR del segundo factor (T-616, 2b): un QR se lee oscuro sobre claro, con margen
+     claro alrededor. Es lo único blanco puro de la casa, y solo detrás del código. */
+  --qr-quiet: #FFFFFF;
+
   /* Capas sobre imagen */
   --scrim: rgb(0 0 0 / 0.72);
   --veil: linear-gradient(to bottom, rgb(0 0 0 / 0), rgb(0 0 0 / 0.80));
@@ -133,6 +137,7 @@
   --color-accent-subtle: var(--accent-subtle);
   --color-on-accent: var(--on-accent);
   --color-focus: var(--focus);
+  --color-qr-quiet: var(--qr-quiet);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);

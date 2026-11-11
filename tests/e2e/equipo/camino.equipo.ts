@@ -140,6 +140,28 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   // La imagen que Auth manda pasó la lista de permitidos, y se pinta como imagen de datos.
   expect(await qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml;base64,/);
   expect(await qr.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  // Se lee (T-616, 2b; medido el 2026-11-11): sin escalar (cada módulo en píxeles enteros), sobre una caja clara con
+  // un margen de al menos 4 módulos de 3 px por lado, que cabe a 320 px. Reducido a 192 px y sin zona de silencio
+  // sobre el fondo oscuro, una aplicación de códigos no lo leyó. La lectura con la aplicación la prueba Sergio a mano.
+  const drawn = await qr.evaluate((image: HTMLImageElement) => {
+    const box = (image.parentElement as HTMLElement).getBoundingClientRect();
+    const shown = image.getBoundingClientRect();
+    return {
+      natural: image.naturalWidth,
+      width: shown.width,
+      height: shown.height,
+      margin: Math.min(shown.left - box.left, box.right - shown.right, shown.top - box.top, box.bottom - shown.bottom),
+      boxWidth: box.width,
+      background: getComputedStyle(image.parentElement as HTMLElement).backgroundColor,
+    };
+  });
+  // A su tamaño o a un múltiplo entero, nunca reducido.
+  expect(drawn.width).toBeGreaterThanOrEqual(drawn.natural);
+  expect(Number.isInteger(drawn.width / drawn.natural)).toBe(true);
+  expect(drawn.height).toBe(drawn.width);
+  expect(drawn.margin).toBeGreaterThanOrEqual(12);
+  expect(drawn.background).toBe("rgb(255, 255, 255)");
+  expect(drawn.boxWidth).toBeLessThanOrEqual(320 - 2 * 16);
   const secret = (await page.locator("main code").innerText()).trim();
   expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
   await expect(page.getByRole("link", { name: "Abrir en mi aplicación de códigos" })).toHaveAttribute("href", new RegExp(`^otpauth://totp/.*secret=${secret}`));
