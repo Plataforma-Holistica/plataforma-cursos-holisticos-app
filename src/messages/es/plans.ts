@@ -45,7 +45,7 @@ export const plans = defineMessages({
   inProgressLink: "Ver cómo va",
   hasAccess: "Ya tienes acceso a todo el catálogo.",
   hasAccessLink: "Ir a mi inicio",
-  hasAccessContinue: "Continuar",
+  hasAccessContinue: "Continuar a donde iba",
   emailUnverified: "Antes de pagar, confirma tu correo con el enlace que te mandamos.",
   suspended: "Tu cuenta está suspendida: no puedes pagar una suscripción.",
   unavailable: "No pudimos abrir la página de pago. No se hizo ningún cobro. Intenta de nuevo en un momento.",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { confirmingHref, monthlyEquivalent, plansAnswerOf, plansHref, priceText, readPlansForm, readPlansQuery } from "./outcomes";
+import { closedPlansDetour, confirmingHref, monthlyEquivalent, plansAnswerOf, plansHref, priceText, readPlansForm, readPlansQuery } from "./outcomes";
 
 const DOC = "11111111-2222-4333-8444-555555555555";
 
@@ -99,5 +99,19 @@ describe("PA-04, cifras y direcciones", () => {
     expect(readPlansQuery({ plan: "annual", volver: "/cursos/uno", cancelado: "1" }, resolve)).toEqual({ plan: "annual", returnTo: "/cursos/uno", canceled: true });
     expect(readPlansQuery({ plan: "weekly", volver: "https://otro.example", cancelado: "si" }, resolve)).toEqual({ plan: null, returnTo: null, canceled: false });
     expect(readPlansQuery({ plan: ["monthly", "annual"] }, resolve)).toEqual({ plan: null, returnTo: null, canceled: false });
+  });
+
+  it("si los planes no se pueden mostrar, el visitante que iba a otro lado va a entrar con su destino; los demás se quedan", () => {
+    expect(closedPlansDetour("visitor", "/cursos/uno/lecciones/a")).toBe("/cursos/uno/lecciones/a");
+    expect(closedPlansDetour("visitor", null)).toBeNull();
+    expect(closedPlansDetour("student", "/cursos/uno/lecciones/a")).toBeNull();
+    expect(closedPlansDetour("unknown", "/cursos/uno/lecciones/a")).toBeNull();
+  });
+
+  it("los planes no son destino de sí mismos", () => {
+    const all = (input: string) => input;
+    expect(readPlansQuery({ volver: "/planes" }, all).returnTo).toBeNull();
+    expect(readPlansQuery({ volver: "/planes?plan=annual" }, all).returnTo).toBeNull();
+    expect(readPlansQuery({ volver: "/planes-de-estudio" }, all).returnTo).toBe("/planes-de-estudio");
   });
 });

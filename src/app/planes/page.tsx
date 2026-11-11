@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
@@ -12,8 +13,9 @@ import { slugOfDocType } from "@/services/legal/texts";
 import { cx } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
+import { TextLink } from "@/ui/text-link";
 
-import { plansHref, readPlansQuery } from "./outcomes";
+import { closedPlansDetour, plansHref, readPlansQuery } from "./outcomes";
 import { PlansScreen } from "./screen";
 import { plansView, type PlansViewer } from "./view";
 
@@ -45,6 +47,9 @@ function legalHref(doc: "recurring" | "refund", version: number | null): string 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Search> }) {
   const query = readPlansQuery(await searchParams, returnOf);
   const [who, offer] = await Promise.all([publicViewer(), planOffer()]);
+  // Sin planes que mostrar, el visitante que iba a otra pantalla va a entrar con su destino.
+  const detour = closedPlansDetour(who.kind, query.returnTo);
+  if (offer.kind === "unavailable" && detour !== null) redirect(signInPath(detour));
   if (offer.kind === "unavailable") return <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />;
 
   let viewer: PlansViewer;
@@ -60,6 +65,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   } else viewer = { kind: "pay" };
 
   const view = plansView(offer.offer, query, viewer, legalHref);
+  if (view.kind === "not_for_sale" && detour !== null) redirect(signInPath(detour));
   return (
     <>
       {who.kind === "student" && <StudentNav />}
@@ -68,7 +74,9 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         {view.kind === "not_for_sale" ? (
           <div className="flex max-w-reading flex-col gap-4">
             <h1 className="text-display-l">{text.title}</h1>
-            <InlineAlert tone="neutral">{text.notForSale}</InlineAlert>
+            <InlineAlert tone="neutral" action={who.kind === "visitor" ? <TextLink href={signInPath(plansHref(null, null))}>{text.haveAccount}</TextLink> : undefined}>
+              {text.notForSale}
+            </InlineAlert>
           </div>
         ) : (
           <PlansScreen view={view} />

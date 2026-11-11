@@ -130,7 +130,7 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(screen.getByRole("link", { name: "Suscribirme para verlo" })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(lesson(L1))}`);
     const syllabus = screen.getByRole("region", { name: "Temario" });
     expect(within(syllabus).getByRole("heading", { name: "Módulo 1 · Preparar el cuerpo" })).toBeVisible();
-    // Las lecciones llevan candado (PA-02, «Estados»), y siguen llevando a la lección, que manda a entrar.
+    // Las lecciones llevan candado (PA-02, «Estados»), y siguen llevando a la lección, que manda a los planes.
     expect(within(syllabus).getByRole("link", { name: "Lección 2, La postura, 7 min, requiere suscripción" })).toHaveAttribute("href", lesson(L2));
     expect(screen.getByRole("link", { name: "Ver la ficha de Ana Robles" })).toHaveAttribute("href", "/maestros/ana-robles");
     // Sin sesión no hay barra del alumno, ni avance, ni pregunta de acceso.

@@ -11,6 +11,7 @@ vi.mock("@/app/planes/actions", () => actions);
 
 import { PlansScreen } from "@/app/planes/screen";
 import { plansView, type PlansViewer } from "@/app/planes/view";
+import { resolveDestination, signInPath, signUpPath } from "@/services/account/navigation";
 import type { Offer } from "@/services/billing/checkout";
 
 import { a11yViolations } from "../setup/a11y";
@@ -95,14 +96,25 @@ describe("PA-04", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("al visitante que todavía no elige plan también se le ofrece entrar, volviendo a los planes con su destino (T-302)", () => {
-    show(null, { kind: "visitor", signUp: (to) => `/registro?volver=${encodeURIComponent(to)}`, signIn: (to) => `/entrar?volver=${encodeURIComponent(to)}` }, "/cursos/uno/lecciones/a");
-    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/planes?volver=%2Fcursos%2Funo%2Flecciones%2Fa")}`);
+  it("al visitante que todavía no elige plan se le ofrece entrar, directo a donde iba: quien ya paga no da la vuelta por los planes (T-302)", () => {
+    const { unmount } = show(null, { kind: "visitor", signUp: signUpPath, signIn: signInPath }, "/cursos/uno/lecciones/a");
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/cursos/uno/lecciones/a")}`);
+    unmount();
+    // Sin destino, vuelve a los planes.
+    show(null, { kind: "visitor", signUp: signUpPath, signIn: signInPath });
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/planes")}`);
+  });
+
+  it("con un plan elegido, entrar vuelve a ese plan con su destino, por las rutas de verdad", () => {
+    show("monthly", { kind: "visitor", signUp: signUpPath, signIn: signInPath }, "/cursos/uno/lecciones/a");
+    const back = "/planes?plan=monthly&volver=%2Fcursos%2Funo%2Flecciones%2Fa";
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent(back)}`);
+    expect(resolveDestination(back)).toBe(back);
   });
 
   it("con acceso y un destino guardado, «Continuar» lleva ahí; sin destino, al inicio", () => {
     const { unmount } = show(null, { kind: "has_access" }, "/cursos/uno/lecciones/a");
-    expect(screen.getByRole("link", { name: "Continuar" })).toHaveAttribute("href", "/cursos/uno/lecciones/a");
+    expect(screen.getByRole("link", { name: "Continuar a donde iba" })).toHaveAttribute("href", "/cursos/uno/lecciones/a");
     unmount();
     show(null, { kind: "has_access" });
     expect(screen.getByRole("link", { name: "Ir a mi inicio" })).toHaveAttribute("href", "/inicio");

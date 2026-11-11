@@ -124,6 +124,8 @@ test.beforeAll(async () => {
 test("sin sesión: la lección de un curso normal manda a los planes (T-302); la del abierto, a registrarse (flujo §6.3)", async ({ page }) => {
   await page.goto(lessonUrl(SLUG, lesson));
   await expect(page).toHaveURL(`/planes?volver=${encodeURIComponent(lessonUrl(SLUG, lesson))}`);
+  // Quien ya tiene cuenta entra desde ahí directo a la lección, sin dar la vuelta por los planes.
+  await expect(page.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent(lessonUrl(SLUG, lesson))}`);
   await page.goto(lessonUrl(OPEN_SLUG, openLesson));
   await expect(page).toHaveURL(`/registro?volver=${encodeURIComponent(lessonUrl(OPEN_SLUG, openLesson))}`);
 });

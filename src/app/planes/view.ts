@@ -95,7 +95,8 @@ export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, 
 
   const who: PlansWho =
     viewer.kind === "visitor"
-      ? { kind: "visitor", signUp: viewer.signUp(self), signIn: viewer.signIn(self) }
+      ? // Sin plan elegido, quien ya tiene cuenta entra directo a donde iba: si no tiene acceso, ahí se le dice (PA-33).
+        { kind: "visitor", signUp: viewer.signUp(self), signIn: viewer.signIn(chosen === null ? (query.returnTo ?? self) : self) }
       : viewer.kind === "in_progress"
         ? { kind: "in_progress", href: viewer.session === null ? null : confirmingHref(viewer.session) }
         : viewer;
