@@ -137,6 +137,7 @@ export default async function HomePage() {
                   levelName={null}
                   lessonCount={course.total}
                   progress={{ completed: course.completed, total: course.total, lessonNumber: course.lesson.number }}
+                  courseKey={course.courseSlug}
                 />
               );
             })}

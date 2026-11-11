@@ -53,10 +53,12 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
         />
       )}
       <span aria-hidden="true" className="absolute inset-0 glow-header" />
-      <div className={cx("relative mx-auto flex w-full max-w-page animate-enter flex-col gap-3 px-4 sm:px-8", hero ? "pt-24 pb-12 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
-        {eyebrow !== undefined && <p className="eyebrow text-accent">{eyebrow}</p>}
+      {/* La entrada anima solo lo que acompaña al título: el `<h1>` se pinta de inmediato, porque suele ser lo más
+          grande que se ve al llegar y arrancarlo invisible retrasaba su pintado (LCP) los 480 ms de la entrada. */}
+      <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-24 pb-12 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
+        {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
         <h1 className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l")}>{title}</h1>
-        {lead !== undefined && <div className="max-w-reading text-body-l text-text-2">{lead}</div>}
+        {lead !== undefined && <div className="max-w-reading animate-enter text-body-l text-text-2">{lead}</div>}
         {children}
       </div>
     </div>

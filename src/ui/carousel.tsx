@@ -75,7 +75,8 @@ export function Carousel({ id, title, shape = "card", action, children }: Carous
     element.scrollBy({ left: direction * element.clientWidth * 0.9, behavior: reduced ? "auto" : "smooth" });
   };
 
-  const arrow = "absolute top-1/3 z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 aria-disabled:cursor-default aria-disabled:text-text-disabled md:flex";
+  // A la altura del centro de la portada: en la vertical (4:5) cae más abajo que en la de 16:9.
+  const arrow = "absolute z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 aria-disabled:cursor-default aria-disabled:text-text-disabled md:flex";
 
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
@@ -93,7 +94,7 @@ export function Carousel({ id, title, shape = "card", action, children }: Carous
             onFocus={() => setFocused(-1)}
             onBlur={() => setFocused(null)}
             aria-disabled={!shown(-1)}
-            className={cx(arrow, "left-2")}
+            className={cx(arrow, shape === "card" ? "top-2/5" : "top-1/3", "left-2")}
           >
             <Icon icon={ChevronLeft} size={24} label={t(ui.carousel.previous, { row: title })} />
           </button>
@@ -121,7 +122,7 @@ export function Carousel({ id, title, shape = "card", action, children }: Carous
             onFocus={() => setFocused(1)}
             onBlur={() => setFocused(null)}
             aria-disabled={!shown(1)}
-            className={cx(arrow, "right-2")}
+            className={cx(arrow, shape === "card" ? "top-2/5" : "top-1/3", "right-2")}
           >
             <Icon icon={ChevronRight} size={24} label={t(ui.carousel.next, { row: title })} />
           </button>

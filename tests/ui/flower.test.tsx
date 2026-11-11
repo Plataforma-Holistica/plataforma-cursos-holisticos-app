@@ -11,6 +11,7 @@ import { FlowerState } from "@/ui/flower-state";
 import { FullScreenState } from "@/ui/full-screen-state";
 import { MOTIFS, motifFor, placementFor } from "@/ui/motifs";
 import { PageHeader } from "@/ui/page-header";
+import { TeacherCard } from "@/ui/teacher-card";
 import { Wordmark } from "@/ui/wordmark";
 
 // El sistema visual de T-616 (solicitud 1): la flor de la vida en sus lugares, los motivos de las portadas y
@@ -123,5 +124,69 @@ describe("la tarjeta de curso como cartel (T-616)", () => {
     expect(container.querySelector("svg g.stroke-text-2")).not.toBeNull();
     rerender(<CourseCard {...course} progress={{ completed: 6, total: 6, lessonNumber: 6 }} />);
     expect(container.querySelector("svg g.stroke-accent")).not.toBeNull();
+  });
+
+  it("con avance y con algo en la esquina a la vez, no se enciman: la roseta va abajo, junto a la lección", () => {
+    const { container } = render(
+      <CourseCard {...course} progress={{ completed: 2, total: 6, lessonNumber: 3 }} corner={<button type="button">Guardar en mi lista: Respirar para dormir</button>} />,
+    );
+    const rosette = container.querySelector("svg g.stroke-text-2")?.closest("span");
+    // La roseta va en la línea de abajo, fuera de la portada; la esquina de arriba queda para el botón.
+    expect(rosette).toHaveTextContent("Lección 3 de 6");
+    expect(container.querySelector("[aria-hidden='true'].overflow-hidden svg g.stroke-text-2")).toBeNull();
+    expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" }).parentElement).toHaveClass("top-2", "right-2");
+  });
+
+  it("el mismo curso se ve igual con dos enlaces distintos: la portada se siembra con el curso, no con el enlace", () => {
+    const portrait = (href: string) => {
+      const { container, unmount } = render(<CourseCard {...course} href={href} courseKey="respirar-para-dormir" />);
+      const art = container.querySelector("[aria-hidden='true'] > div");
+      const look = { classes: art?.className, motif: art?.querySelector("svg path")?.getAttribute("transform") };
+      unmount();
+      return look;
+    };
+    expect(portrait("/cursos/respirar-para-dormir")).toEqual(portrait("/cursos/respirar-para-dormir/lecciones/123"));
+  });
+
+  it("el aviso de curso abierto va en el flujo, bajo la práctica, y no encima del título", () => {
+    render(<CourseCard {...course} isOpen />);
+    const label = screen.getByText("Curso abierto");
+    expect(label).not.toHaveClass("absolute");
+    expect(label.parentElement?.textContent).toContain("Respiración");
+  });
+
+  it("la portada ancha es 16:9 y la vertical 4:5", () => {
+    const { container: wide } = render(<CourseCard {...course} shape="wide" />);
+    expect(wide.querySelector(".aspect-video")).not.toBeNull();
+    const { container: tall } = render(<CourseCard {...course} />);
+    expect(tall.querySelector(".aspect-4\\/5")).not.toBeNull();
+  });
+
+  it("una palabra larga baja el título de tamaño y se corta con guion; un título de palabras cortas no se corta", () => {
+    const { container } = render(<CourseArt title="Autoconocimiento transgeneracional" practiceName={null} tone={3} />);
+    const title = container.querySelector("p.display-narrow");
+    expect(title).toHaveClass("text-poster-s", "hyphens-auto");
+    const { container: short } = render(<CourseArt title="Yoga suave" practiceName={null} tone={1} />);
+    expect(short.querySelector("p.display-narrow")).toHaveClass("text-poster-l");
+    expect(short.querySelector("p.display-narrow")).not.toHaveClass("hyphens-auto");
+  });
+});
+
+describe("el logotipo y los retratos (T-616)", () => {
+  it("la flor del logotipo lleva el oro del acento en su roseta y el segundo tono alrededor", () => {
+    const { container } = render(<FlowerMark />);
+    expect(container.querySelector("g.stroke-accent")).not.toBeNull();
+    expect(container.querySelector("g.stroke-text-2")).not.toBeNull();
+  });
+
+  it("el retrato redondo es un solo enlace con el nombre y sus prácticas, y su anillo deja un hueco sin color propio", async () => {
+    const { container } = render(
+      <TeacherCard href="/maestros/ana-robles" name="Ana Robles" practices={["Respiración", "Yoga"]} tone={4} practicePosition={null} shape="round" />,
+    );
+    expect(screen.getByRole("link", { name: /^Ana Robles, .+ de Respiración, Yoga$/ })).toHaveAttribute("href", "/maestros/ana-robles");
+    const ring = container.querySelector(".ring-1");
+    expect(ring).toHaveClass("rounded-full", "p-1");
+    expect(ring?.className).not.toMatch(/ring-offset/);
+    expect(await a11yViolations(container)).toEqual([]);
   });
 });

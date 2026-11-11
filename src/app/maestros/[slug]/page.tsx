@@ -72,7 +72,8 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
           <h2 id="cursos-del-maestro" className="text-h2">
             {t(text.courses, { name: teacher.name })}
           </h2>
-          <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Dos, tres y cuatro columnas: con la tarjeta vertical (T-616), a tres columnas los carteles medían más de 500 px de alto. */}
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
             {courses.map((course) => {
               const href = coursePath(course.slug);
               if (href === null) return null;

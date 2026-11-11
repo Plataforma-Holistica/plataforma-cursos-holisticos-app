@@ -84,7 +84,8 @@ const SAMPLE_GRID = [
   { slug: "el-aliento-del-fuego", title: "El aliento del fuego", teacher: "Tomás Ibarra", practice: BREATH, level: "Avanzado", lessons: 4 },
   { slug: "meditacion-de-la-manana", title: "Meditación de la mañana", teacher: "Lucía Peña", practice: MEDITATION, level: "Inicial", lessons: 12 },
   { slug: "atencion-plena-en-casa", title: "Atención plena en casa, paso a paso", teacher: "Lucía Peña", practice: MEDITATION, level: "Inicial", lessons: 8 },
-  { slug: "el-silencio-interior", title: "El silencio interior", teacher: "Ramón Ortiz", practice: MEDITATION, level: "Avanzado", lessons: 10 },
+  // Una palabra larga, que no se parte entre renglones: baja de tamaño y, si aun así no cabe, se corta con guion.
+  { slug: "autoconocimiento-transgeneracional", title: "Autoconocimiento transgeneracional", teacher: "Ramón Ortiz", practice: MEDITATION, level: "Avanzado", lessons: 10 },
   { slug: "sonidos-del-cuenco", title: "Sonidos del cuenco", teacher: "Inés Valle", practice: SOUND, level: "Inicial", lessons: 5 },
   { slug: "mantras-para-empezar", title: "Mantras para empezar el día con calma", teacher: "Inés Valle", practice: SOUND, level: "Intermedio", lessons: 7 },
   { slug: "el-gong-y-la-noche", title: "El gong y la noche", teacher: "Ramón Ortiz", practice: SOUND, level: "Avanzado", lessons: 3 },
@@ -186,6 +187,8 @@ export default function SamplePage() {
                   levelName={course.level}
                   lessonCount={course.lessons}
                   isOpen={course.slug === "respirar-para-dormir"}
+                  // Con avance y con algo en la esquina a la vez: la roseta va abajo, junto a «Lección N de M».
+                  progress={course.slug === "meditacion-de-la-manana" ? { completed: 4, total: 12, lessonNumber: 5 } : undefined}
                   corner={course.slug === "meditacion-de-la-manana" || course.slug === "sonidos-del-cuenco" ? <span className="flex size-touch rounded-full float-plane" /> : undefined}
                 />
               </li>

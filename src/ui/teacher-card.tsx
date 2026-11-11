@@ -34,18 +34,18 @@ export function TeacherCard({ href, name, practices, tone, practicePosition, sha
     return (
       <Link href={href} className={cx("group flex flex-col items-center gap-4 rounded-lg p-2 text-center outline-offset-4", className)}>
         <span className="sr-only">{label}</span>
+        {/* El anillo va afuera, con un hueco transparente (`p-1`): lo que se ve entre los dos es el fondo de donde esté. */}
         <span
           aria-hidden="true"
-          className={cx(
-            "@container relative flex size-32 items-center justify-center overflow-hidden rounded-full bg-linear-to-t ring-1 ring-accent-muted ring-offset-4 ring-offset-surface-1 transition duration-(--duration-base) ease-standard group-hover:ring-accent motion-safe:group-hover:-translate-y-1 sm:size-36",
-            toneClasses(tone),
-          )}
+          className="block rounded-full p-1 ring-1 ring-accent-muted transition duration-(--duration-base) ease-standard group-hover:ring-accent motion-safe:group-hover:-translate-y-1"
         >
-          {photo === null ? (
-            <span className="font-display text-cover-initial text-text">{initial}</span>
-          ) : (
-            <Image src={photo} alt="" fill sizes="144px" className="object-cover" />
-          )}
+          <span className={cx("@container relative flex size-32 items-center justify-center overflow-hidden rounded-full bg-linear-to-t sm:size-36", toneClasses(tone))}>
+            {photo === null ? (
+              <span className="font-display text-cover-initial text-text">{initial}</span>
+            ) : (
+              <Image src={photo} alt="" fill sizes="144px" className="object-cover" />
+            )}
+          </span>
         </span>
         <span aria-hidden="true" className="flex flex-col gap-1">
           <span className="font-display text-h3 text-text">{name}</span>

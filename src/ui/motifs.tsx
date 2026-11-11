@@ -17,7 +17,8 @@ import { cx } from "./cx";
 //
 // La geometría se calcula en un cuadro de -50 a 50; los números de los trazos son del dibujo, como los radios.
 
-const round = (value: number) => Math.round(value * 100) / 100;
+// Un decimal basta a esta escala (el cuadro mide 100), y el trazo pesa menos: va en línea en cada portada.
+const round = (value: number) => Math.round(value * 10) / 10;
 
 function at(degrees: number, distance: number): readonly [number, number] {
   const radians = (degrees * Math.PI) / 180;
@@ -32,8 +33,8 @@ const crossing = [...[90, 210, 330].map((degrees) => at(degrees, 15)).map(([x, y
 /** Ondas: siete líneas que ondulan, paralelas. */
 const waves = Array.from({ length: 7 }, (_, line) => {
   const y = -42 + line * 14;
-  const points = Array.from({ length: 51 }, (_, step) => {
-    const x = -50 + step * 2;
+  const points = Array.from({ length: 26 }, (_, step) => {
+    const x = -50 + step * 4;
     return `${x} ${round(y + 4 * Math.sin((x / 100) * 4 * Math.PI + line * 0.6))}`;
   });
   return `M${points.join("L")}`;
@@ -58,8 +59,8 @@ const petals = Array.from({ length: 5 }, (_, row) =>
 ).join("");
 
 /** Espiral de arcos: una espiral logarítmica de tres vueltas. */
-const spiral = `M${Array.from({ length: 181 }, (_, step) => {
-  const theta = (step / 180) * 6 * Math.PI;
+const spiral = `M${Array.from({ length: 91 }, (_, step) => {
+  const theta = (step / 90) * 6 * Math.PI;
   const r = 1.2 * Math.exp(0.19 * theta);
   return `${round(r * Math.cos(theta))} ${round(r * Math.sin(theta))}`;
 }).join("L")}`;
@@ -100,7 +101,7 @@ export function placementFor(courseKey: string): { rotate: number; scale: number
   const value = hash(courseKey);
   return {
     rotate: (value % 24) * 15,
-    scale: 1.1 + ((value >>> 5) % 7) * 0.1,
+    scale: round(1.1 + ((value >>> 5) % 7) * 0.1),
     x: ((value >>> 9) % 9) * 5 - 20,
     y: ((value >>> 13) % 5) * 4 - 12,
   };
@@ -116,7 +117,7 @@ export function Motif({ kind, courseKey, className }: { kind: MotifKind; courseK
       preserveAspectRatio="xMidYMid slice"
       className={cx("pointer-events-none fill-none stroke-text", className)}
     >
-      <path d={MOTIFS[kind]} transform={`translate(${x} ${y}) rotate(${rotate}) scale(${round(scale)})`} vectorEffect="non-scaling-stroke" />
+      <path d={MOTIFS[kind]} transform={`translate(${x} ${y}) rotate(${rotate}) scale(${scale})`} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

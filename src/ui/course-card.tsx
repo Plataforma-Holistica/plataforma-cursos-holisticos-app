@@ -19,7 +19,10 @@ import { Rosette } from "./flower";
 // Desde T-616 (segunda vuelta del prototipo; decisión del carril A sin confirmar, que cambia el 03 §5.3):
 // - la portada es la «arte» (`CourseArt`), un cartel con el título dentro (tercera vuelta): debajo de la tarjeta
 //   van solo el maestro y la línea de datos. Vertical 4:5 en las filas y la rejilla, 16:9 en la destacada (`shape`);
-// - con avance, la roseta de la flor de la vida (en trazo a medias, en oro al terminar) y la barra en oro;
+// - con avance, la barra en oro sobre la portada y, en la línea de abajo, la roseta de la flor de la vida (en
+//   trazo a medias, en oro al terminar) junto a «Lección N de M»: así la esquina queda libre para `corner`;
+// - la portada se siembra con el curso (`courseKey`, o su título), no con el enlace: el mismo curso se ve igual
+//   en la ficha y en «Continuar viendo», que enlaza a la lección;
 // - `corner` es lo que va sobre la esquina de la portada, fuera del enlace (un botón dentro de un enlace no
 //   vale): «Guardar en mi lista» como botón de icono. Va como hermano del enlace, encima de la portada;
 // - al pasar el cursor la portada sube 4 px y su borde de luz aclara; con movimiento reducido no sube.
@@ -38,10 +41,25 @@ export interface CourseCardProps {
   shape?: "portrait" | "wide";
   /** Lo que va sobre la esquina de la portada, fuera del enlace. */
   corner?: ReactNode;
+  /** El curso (su slug): siembra la portada. Sin él, el título. Nunca el enlace, que cambia según a dónde lleva. */
+  courseKey?: string;
   className?: string;
 }
 
-export function CourseCard({ href, title, teacherName, practice, levelName, lessonCount, isOpen = false, progress, shape = "portrait", corner, className }: CourseCardProps) {
+export function CourseCard({
+  href,
+  title,
+  teacherName,
+  practice,
+  levelName,
+  lessonCount,
+  isOpen = false,
+  progress,
+  shape = "portrait",
+  corner,
+  courseKey,
+  className,
+}: CourseCardProps) {
   const text = ui.courseCard;
   const name =
     progress === undefined
@@ -69,34 +87,35 @@ export function CourseCard({ href, title, teacherName, practice, levelName, less
             practiceName={practice?.name ?? null}
             practiceKey={practice?.position ?? practice?.slug ?? practice?.name ?? null}
             tone={practice?.tone ?? null}
-            seed={href}
+            seed={courseKey ?? title}
             shape={shape}
-            corner={corner !== undefined || progress !== undefined}
+            corner={corner !== undefined}
+            badge={isOpen ? <span className="rounded-sm bg-bg px-2 py-1 text-label text-text uppercase">{text.open}</span> : undefined}
           />
-          {isOpen && (
-            <span className={cx("absolute left-3 rounded-sm bg-bg px-2 py-1 text-label text-text uppercase", practice === null ? "top-3" : "top-12")}>{text.open}</span>
-          )}
           {progress !== undefined && (
-            <>
-              <span className="absolute top-3 right-3 flex size-9 items-center justify-center rounded-full float-plane">
-                <Rosette complete={progress.completed >= progress.total} className="size-6" />
-              </span>
-              <progress
-                value={Math.min(progress.completed, progress.total)}
-                max={Math.max(progress.total, 1)}
-                className="progress-bar progress-bar-thin absolute right-0 bottom-0 left-0 w-full"
-              />
-            </>
+            <progress
+              value={Math.min(progress.completed, progress.total)}
+              max={Math.max(progress.total, 1)}
+              className="progress-bar progress-bar-thin absolute right-0 bottom-0 left-0 w-full"
+            />
           )}
         </span>
         <span aria-hidden="true" className="flex flex-col gap-1">
           <span className="text-body text-text-2">{teacherName}</span>
-          <span className="text-body-s text-text-3">
-            {progress === undefined ? meta.join(" · ") : t(text.lessonOf, { number: progress.lessonNumber, total: progress.total })}
-          </span>
+          {progress === undefined ? (
+            <span className="text-body-s text-text-3">{meta.join(" · ")}</span>
+          ) : (
+            <span className="flex items-center gap-2 text-body-s text-text-3">
+              <Rosette complete={progress.completed >= progress.total} className="size-5" />
+              {t(text.lessonOf, { number: progress.lessonNumber, total: progress.total })}
+            </span>
+          )}
         </span>
       </Link>
-      {corner !== undefined && <div className="absolute top-2 right-2">{corner}</div>}
+      {/* Sube con la portada al pasar el cursor, para no quedar desfasada. */}
+      {corner !== undefined && (
+        <div className="absolute top-2 right-2 transition duration-(--duration-base) ease-standard motion-safe:group-hover:-translate-y-1">{corner}</div>
+      )}
     </div>
   );
 }

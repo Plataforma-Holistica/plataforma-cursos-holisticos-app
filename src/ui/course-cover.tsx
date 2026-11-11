@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { cx } from "./cx";
 import { Motif, motifFor } from "./motifs";
 
@@ -29,11 +31,23 @@ export function toneClasses(tone: number | null): string {
   return TONES[tone ?? NEUTRAL_TONE] ?? (TONES[NEUTRAL_TONE] as string);
 }
 
-/** El tamaño del título de un cartel vertical: los mismos tres pasos, más grandes (todo el ancho es suyo). */
+/**
+ * El tamaño del título de un cartel vertical: los mismos tres pasos, más grandes (todo el ancho es suyo). Mira
+ * además la palabra más larga, que no se puede partir entre renglones: «Autoconocimiento» a 12cqw no cabe.
+ * Un título con una palabra de 14 caracteres o más se corta además con guion (`hyphens-auto`, con el `lang="es-MX"` del
+ * documento), como red.
+ */
+/** La palabra más larga de un título, en caracteres. */
+const longestWord = (title: string) => Math.max(0, ...title.split(/\s+/u).map((word) => [...word].length));
+
+/** El corte con guion es solo la red de una palabra que no cabe: en las demás, partía palabras cortas sin necesidad. */
+const HYPHENATE_FROM = 14;
+
 function posterSize(title: string): string {
   const length = [...title].length;
-  if (length <= 24) return "text-poster-l";
-  if (length <= 44) return "text-poster-m";
+  const longest = longestWord(title);
+  if (length <= 24 && longest <= 10) return "text-poster-l";
+  if (length <= 44 && longest <= 13) return "text-poster-m";
   return "text-poster-s";
 }
 
@@ -117,19 +131,30 @@ export interface CourseArtProps {
   shape?: keyof typeof SHAPES;
   /** Hay algo sobre la esquina de arriba a la derecha: la práctica le deja su lugar. */
   corner?: boolean;
+  /** Una etiqueta bajo la práctica (el aviso de curso abierto): va en el flujo, nunca encima del texto. */
+  badge?: ReactNode;
   className?: string;
 }
 
-export function CourseArt({ title, practiceName, practiceKey, tone, seed = "", shape = "portrait", corner = false, className }: CourseArtProps) {
+export function CourseArt({ title, practiceName, practiceKey, tone, seed = "", shape = "portrait", corner = false, badge, className }: CourseArtProps) {
   return (
     <div aria-hidden="true" className={cx("@container relative overflow-hidden grain", ART[tone ?? NEUTRAL_TONE], artFocus(seed), SHAPES[shape], className)}>
       <Motif kind={motifFor(practiceKey ?? practiceName ?? "")} courseKey={seed} className="absolute inset-x-0 top-0 h-3/5 w-full opacity-15" />
       {practiceName !== null && <span className="absolute inset-x-0 top-0 h-1/4 bg-linear-to-b from-bg/45 to-transparent" />}
       {title !== undefined && <span className="absolute inset-x-0 bottom-0 h-2/3 bg-linear-to-t from-bg/85 via-bg/40 to-transparent" />}
       <div className="relative flex h-full flex-col justify-between p-cover">
-        {practiceName !== null ? <p className={cx("truncate eyebrow text-text", corner && "pr-12")}>{practiceName}</p> : <span />}
+        <div className="flex flex-col items-start gap-2">
+          {practiceName !== null && <p className={cx("w-full truncate eyebrow text-text", corner && "pr-12")}>{practiceName}</p>}
+          {badge}
+        </div>
         {title !== undefined && (
-          <p className={cx("font-display font-bold display-narrow line-clamp-3 text-balance text-text", shape === "portrait" ? posterSize(title) : titleSize(title))}>
+          <p
+            className={cx(
+              "font-display font-bold display-narrow line-clamp-3 text-balance text-text",
+              shape === "portrait" ? posterSize(title) : titleSize(title),
+              longestWord(title) >= HYPHENATE_FROM && "hyphens-auto",
+            )}
+          >
             {title}
           </p>
         )}

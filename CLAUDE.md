@@ -1228,8 +1228,11 @@ que no se ve leyendo un solo archivo:
   lección): el tono de la práctica desaturado (`art-1` a `art-8`) en un degradado radial cuyo foco cambia por curso (`art-focus-*`), grano, el
   motivo geométrico de la práctica arriba (`src/ui/motifs.tsx`: ocho, elegidos por el orden de la práctica en PA-67 para que ocho seguidas no
   repitan, con un hash de respaldo; su ángulo, escala y recorte salen del curso) y el título abajo sobre un velo, en `text-poster-*` (no baja de
-  16 a 20 px). `CourseCard` la usa en 4:5 (`shape`), con el maestro y los datos debajo y `corner` para lo que va sobre la esquina **fuera del
-  enlace**; la práctica le deja su lugar a la esquina y a la roseta. **Tokens nuevos** (`theme.css`): la profundidad (`edge-light`, `edge-bright`,
+  16 a 20 px; mira además la palabra más larga, y corta con guion). `CourseCard` la usa en 4:5 (`shape`), con el maestro y los datos debajo y
+  `corner` para lo que va sobre la esquina **fuera del enlace** (la práctica le deja su lugar); con avance, la barra va en la portada y la roseta
+  en la línea de abajo, junto a «Lección N de M»; el aviso de curso abierto va en el flujo, bajo la práctica. **La portada se siembra con el
+  curso** (`courseKey`, o su título), nunca con el enlace: «Continuar viendo» enlaza a la lección y el curso debe verse igual que en su ficha.
+  Los motivos van en línea en cada portada (4.8 KB los ocho); pasarlos a `<symbol>` con `<use>` queda para la solicitud 3, medido. **Tokens nuevos** (`theme.css`): la profundidad (`edge-light`, `edge-bright`,
   `surface-raised`, `float-plane`, `glow-header`), `--accent-muted` (solo antetítulos sobre el fondo liso: sobre foto o resplandor va el oro
   pleno, porque el apagado no llegaba a 4.5), `radius-lg`, la sombra doble, `eyebrow` (versalitas), `animate-enter` y la escala de títulos un
   escalón arriba en el ancho angosto de Bricolage (eje `wdth` en `fonts.ts`, `--display-stretch`, solo en `h1` y display, con el tracking a
