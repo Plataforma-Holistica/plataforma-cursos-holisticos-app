@@ -24,7 +24,8 @@
   --on-accent: #1D1808;
   --focus: #F6EBC9;
 
-  /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro. */
+  /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro, salvo la zona de silencio del QR
+     (`--qr-quiet`, abajo), que tiene que serlo para que se lea. */
   --bg: #0F1019;
   --surface-1: #171926;
   --surface-2: #1F2233;
