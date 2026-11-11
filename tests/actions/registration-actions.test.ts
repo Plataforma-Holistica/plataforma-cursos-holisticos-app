@@ -300,9 +300,17 @@ describe("«Reenviar» (PA-14)", () => {
   it("si lo anotado no es un correo al que se pueda mandar nada, se olvida y se vuelve al registro", async () => {
     once("readRegistration", { email: "ana@prueba.test", sentAt: 1 });
     once("requestRegistration", { kind: "invalid_email", reason: "malformed" });
-    await expect(resendAction(IDLE)).rejects.toThrow("redirige a /registro");
+    // Sin destino anotado, al registro a secas.
+    await expect(resendAction(IDLE)).rejects.toThrow(/redirige a \/registro$/);
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
     expect(calls.order).toEqual(["readRegistration", "requestRegistration", "forgetRegistration", "redirect"]);
+  });
+
+  it("y si iba a algún lado, vuelve al registro con ese destino (FL-04)", async () => {
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
+    once("requestRegistration", { kind: "invalid_email", reason: "malformed" });
+    await expect(resendAction(IDLE)).rejects.toThrow(/redirige a \/registro\?volver=%2Fplanes%3Fplan%3Dannual$/);
+    expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
   });
 });
 
@@ -315,7 +323,7 @@ describe("«Ese no es mi correo» (PA-14)", () => {
   });
 
   it("olvida el correo anotado y vuelve al registro, sin pedirle nada a nadie", async () => {
-    await expect(notMyEmailAction()).rejects.toThrow("redirige a /registro");
+    await expect(notMyEmailAction()).rejects.toThrow(/redirige a \/registro$/);
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
     // Lo anotado se lee antes de olvidarlo, por si llevaba un destino.
     expect(calls.order).toEqual(["readRegistration", "forgetRegistration", "redirect"]);

@@ -3063,7 +3063,8 @@ falla. Veintiuna precisiones que la tabla no dice:
     sin él. Registrarse otra vez sin destino borra el anterior. En otro navegador no hay
     cookie y se termina en el inicio: es un límite aceptado, no un fallo.
     El destino es de quien se registró por su cuenta: quien completa una invitación (del equipo
-    o de maestro) no lo hereda (`completeRegistrationOutcome`), y «Ese no es mi correo» lo
+    o de maestro) no lo hereda (`completeRegistrationOutcome`; salvo que además le falte algo a
+    su cuenta: entonces viaja a consentimientos, que aplica la regla de entrar), y «Ese no es mi correo» lo
     devuelve al registro. No se compara el correo de la cookie con el verificado (el servicio
     no lo expone): dos registros por cuenta propia en un mismo navegador pueden heredarse el
     destino, que siempre es una pantalla interna de la lista.

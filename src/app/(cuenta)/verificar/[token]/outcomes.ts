@@ -205,7 +205,9 @@ export function completeRegistrationOutcome(result: RegistrationCompletion, unch
       //
       // El destino anotado es de quien se registró por su cuenta. Quien abre una invitación (del
       // equipo o de maestro) no pasó por `/registro`: lo que ese navegador tuviera anotado sería
-      // de otro registro, y no se hereda.
+      // de otro registro, y no se hereda. Con algo pendiente en su cuenta sí viaja a
+      // consentimientos, que al terminar aplica la regla de entrar: ahí todavía no se sabe su
+      // estado en el equipo (el servicio lo da nulo), y es un caso de dos rarezas a la vez.
       if (result.pending) return { kind: "redirect", to: consentsPath(returnTo), notice: null };
       return { kind: "redirect", to: entryDestination(result.team, result.team === null || result.team === "none" ? returnTo : null), notice: null };
     case "ready_sign_in":
