@@ -20,6 +20,9 @@ export const comments = defineMessages({
   edited: "editado",
   inReview: "En revisión",
   inReviewNote: "Solo tú lo ves por ahora. Una persona del equipo lo va a leer.",
+  // Lo oculto por reportes (T-502; diseño, PA-22): para los demás va en su lugar; su autor lo ve con la etiqueta.
+  hidden: "Comentario en revisión",
+  hiddenNote: "Por ahora nadie más lo ve. Una persona del equipo lo va a revisar.",
   options: "Opciones de tu comentario",
   edit: "Editar",
   delete: "Borrar",

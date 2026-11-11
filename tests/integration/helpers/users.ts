@@ -152,11 +152,14 @@ export async function deleteTestUsers(users: readonly TestUser[]): Promise<void>
     const commented = await owner.query("select 1 from public.comments where author_id = any($1::uuid[]) limit 1", [ids]);
     if ((commented.rowCount ?? 0) > 0) {
       await owner.query("alter table public.comments disable trigger comments_guard");
+      // Borrar un comentario se lleva sus reportes en cascada (T-502), y su guardián no deja borrar reportes.
+      await owner.query("alter table public.comment_reports disable trigger comment_reports_guard");
       await owner.query(
         "delete from public.comments where parent_id in (select id from public.comments where author_id = any($1::uuid[]))",
         [ids],
       );
       await owner.query("delete from public.comments where author_id = any($1::uuid[])", [ids]);
+      await owner.query("alter table public.comment_reports enable trigger comment_reports_guard");
       await owner.query("alter table public.comments enable trigger comments_guard");
     }
     await owner.query("delete from public.profile_privacy where profile_id = any($1::uuid[])", [ids]);

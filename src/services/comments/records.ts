@@ -46,7 +46,7 @@ const viewRow = z
     id: z.string().regex(ID),
     name: z.string().nullable(),
     body: z.string().nullable(),
-    state: z.enum(["published", "in_review", "deleted"]),
+    state: z.enum(["published", "in_review", "deleted", "hidden"]),
     own: z.boolean(),
     teacher: z.boolean(),
     edited: z.boolean(),
@@ -60,7 +60,8 @@ export interface CommentView {
   id: string;
   name: string | null;
   body: string | null;
-  state: "published" | "in_review" | "deleted";
+  /** `hidden`: oculto por reportes (T-502). Para quien no es su autor, sin texto ni nombre. */
+  state: "published" | "in_review" | "deleted" | "hidden";
   own: boolean;
   teacher: boolean;
   edited: boolean;
@@ -384,4 +385,29 @@ export async function setPseudonym(tx: Tx, pseudonym: string): Promise<Pseudonym
   const [row] = await tx.query(sql`select private.comment_set_pseudonym(${pseudonym}) as answer`, z.object({ answer: pseudonymAnswer }));
   if (!row) throw new Error("comment_set_pseudonym no contestó");
   return row.answer;
+}
+
+// ---------------------------------------------------------------------------------------
+// Reportar (T-502; RF-803).
+
+/** La lección de un comentario publicado, para correr la regla antes de reportarlo; nula si no lo está. */
+export async function readReportLesson(tx: Tx, commentId: string): Promise<string | null> {
+  const [row] = await tx.query(sql`select private.comment_report_lesson(${commentId}::uuid) as lesson`, z.object({ lesson: z.string().regex(ID).nullable() }));
+  return row?.lesson ?? null;
+}
+
+export const REPORT_REASONS = ["spam", "abusive", "medical_advice", "concern_for_person", "other"] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+const reportAnswer = answerOnly(["ok", "already", "not_found", "invalid", "throttled", "closed", "suspended_account"]);
+export type ReportRow = z.infer<typeof reportAnswer>["answer"];
+
+/** Reporta un comentario a nombre de quien actúa; `counts` es lo que decidió la regla: si puede escribir ahí. */
+export async function reportComment(tx: Tx, input: { commentId: string; reason: ReportReason; note: string | null; counts: boolean }): Promise<ReportRow> {
+  const [row] = await tx.query(
+    sql`select private.comment_report(${input.commentId}::uuid, ${input.reason}, ${input.note}, ${input.counts}) as answer`,
+    z.object({ answer: reportAnswer }),
+  );
+  if (!row) throw new Error("comment_report no contestó");
+  return row.answer.answer;
 }
