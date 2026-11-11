@@ -193,6 +193,17 @@ describe("cada comentario (Comment)", () => {
     expect(screen.getByText("Esto es lo que escribiste:")).toBeInTheDocument();
   });
 
+  it("si lo propio quedó oculto con la pregunta de borrar abierta, no se pregunta: lo oculto no se borra (T-502)", async () => {
+    // Lo conservado en el campo de arriba dice que la respuesta ya se aplicó.
+    const asking: CommentsState = { ...IDLE_COMMENTS, attempt: 1, open: { kind: "delete", id: id(1) }, kept: { at: { kind: "new" }, body: "Ya llegó" } };
+    const { user } = setup({ count: 0, items: [thread(1, { state: "hidden", own: true, revision: 2 })] }, vi.fn(async () => asking));
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Algo");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Escribe un comentario" })).toHaveValue("Ya llegó"), { timeout: 3_000 });
+    expect(screen.queryByRole("dialog", { name: "¿Borrar tu comentario?" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sí, borrarlo" })).toBeNull();
+  });
+
   it("lo propio en revisión sí se sigue editando: el campo está y nada sale arriba", async () => {
     const { user } = setup({ count: 0, items: [thread(1, { state: "in_review", own: true, revision: 2 })] }, vi.fn(async () => editOpen("Lo que escribí")));
     await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Algo");
