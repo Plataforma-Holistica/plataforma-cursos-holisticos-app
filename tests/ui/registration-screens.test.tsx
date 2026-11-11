@@ -84,6 +84,17 @@ describe("la pantalla de registro (PA-10)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("con un destino (FL-04): viaja con el formulario tal como llegó, y «Ya tengo cuenta» lo lleva a entrar", () => {
+    const { container } = render(<SignUpScreen termsHref="/legal/terminos" privacyHref="/legal/privacidad" returnTo="/planes?plan=anual" />);
+    expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/planes?plan=anual");
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Danual");
+  });
+
+  it("un destino que no vale no llega al enlace de entrar", () => {
+    render(<SignUpScreen termsHref={null} privacyHref={null} returnTo="https://otro.example" />);
+    expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar");
+  });
+
   it("un texto legal que todavía no tiene página se nombra sin enlace", () => {
     render(<SignUpScreen termsHref={null} privacyHref={null} />);
     expect(screen.queryByRole("link", { name: /Términos/ })).not.toBeInTheDocument();

@@ -109,3 +109,58 @@ describe("el correo de un registro a medias, para decir «revisa tu correo»", (
     expect(empty.writes).toEqual([]);
   });
 });
+
+describe("el destino de un registro a medias (FL-04: volver a donde se iba al completar la cuenta)", () => {
+  const pending = createPendingRegistration({ secure: () => true });
+
+  it("un destino permitido se guarda y se lee", () => {
+    const jar = jarOf();
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" }, 60);
+    expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" });
+  });
+
+  it.each(["https://otro.example/planes", "//otro.example", "/registro", "/entrar?volver=/inicio", "", "/planes/../admin"])(
+    "un destino que la lista no admite (%j) no se guarda, y el registro se anota igual",
+    (returnTo) => {
+      const jar = jarOf();
+      pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo }, 60);
+      expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 5 });
+      expect(JSON.parse(Buffer.from(jar.writes[0]?.value ?? "", "base64url").toString("utf8"))).toEqual({ e: "ana@prueba.test", t: 5 });
+    },
+  );
+
+  it("un destino largo no deja ilegible la cookie: se guarda sin él", () => {
+    const jar = jarOf();
+    const long = `/planes?x=${"a".repeat(600)}`;
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: long }, 60);
+    expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 5 });
+    expect((jar.writes[0]?.value ?? "").length).toBeLessThanOrEqual(1_024);
+  });
+
+  it("un correo largo y un destino que juntos no caben en la cookie: se guarda el correo, sin destino", () => {
+    const jar = jarOf();
+    const email = `${"a".repeat(64)}@${`${"b".repeat(60)}.`.repeat(3)}test`;
+    pending.rememberRegistration(jar, { email, sentAt: 5, returnTo: `/planes?x=${"a".repeat(495)}` }, 60);
+    expect(jar.writes).toHaveLength(1);
+    expect((jar.writes[0]?.value ?? "").length).toBeLessThanOrEqual(1_024);
+    expect(pending.readRegistration(jar)).toEqual({ email, sentAt: 5 });
+  });
+
+  it("una cookie de antes, sin destino, sigue valiendo", () => {
+    expect(pending.readRegistration(jarOf({ [SECURE]: encode({ e: "ana@prueba.test", t: 5 }) }))).toEqual({ email: "ana@prueba.test", sentAt: 5 });
+  });
+
+  it.each([["https://otro.example"], ["/registro"], [`/planes?x=${"a".repeat(600)}`], [7], [null]])(
+    "un destino que este código no habría escrito (%j) se lee como sin destino: no se confía en la cookie",
+    (r) => {
+      expect(pending.readRegistration(jarOf({ [SECURE]: encode({ e: "ana@prueba.test", t: 5, r }) }))).toEqual({ email: "ana@prueba.test", sentAt: 5 });
+    },
+  );
+
+  it("anotar otra vez sin destino borra el de antes", () => {
+    const jar = jarOf();
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" }, 60);
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 6 }, 60);
+    expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 6 });
+  });
+});

@@ -2,6 +2,7 @@ import "server-only";
 
 import { accountFormFacts, type AccountFormFacts, type CookieJar } from "@/services/account/account";
 import { parseEmail } from "@/services/account/field-rules";
+import { returnOrNull } from "@/services/account/navigation";
 import { forgetRegistration, readRegistration, rememberRegistration } from "@/services/account/pending-registration";
 
 import { resendWait, type ResendWait } from "../verificar/outcomes";
@@ -93,19 +94,22 @@ export async function pendingRequestFacts(sentAt: number): Promise<{ lifetimeSec
  *
  * Si no se supo cuánto dura, no se anota nada. Y si lo que este navegador tenía anotado era
  * otro correo, el de un registro anterior, se olvida: dejarlo diría que el enlace se mandó
- * ahí, y «Reenviar» lo mandaría ahí. La pantalla pinta entonces su texto genérico.
+ * ahí, y «Reenviar» lo mandaría ahí. La pantalla pinta entonces su texto genérico. Lo mismo si lo anotado iba a otro lado: el
+ * destino de un registro anterior no se hereda (FL-04).
  *
+ * @param returnTo A dónde iba quien se registra, tal como llegó, o nada. Lo valida quien guarda la cookie.
  * @returns La espera que le queda a «Reenviar», o nulo.
  */
-export async function rememberRequest(jar: CookieJar, email: string): Promise<ResendWait | null> {
+export async function rememberRequest(jar: CookieJar, email: string, returnTo: string | null = null): Promise<ResendWait | null> {
   const facts = await formFacts();
   if (facts.kind !== "ready") {
     const noted = readRegistration(jar);
     const asked = parseEmail(email);
-    if (noted !== null && !(asked.ok && asked.email === noted.email)) forgetRegistration(jar);
+    const same = noted !== null && asked.ok && asked.email === noted.email && (noted.returnTo ?? null) === returnOrNull(returnTo);
+    if (noted !== null && !same) forgetRegistration(jar);
     return null;
   }
   const sentAt = Date.now();
-  rememberRegistration(jar, { email, sentAt }, facts.linkLifetimeMinutes * 60);
+  rememberRegistration(jar, returnTo === null || returnTo === "" ? { email, sentAt } : { email, sentAt, returnTo }, facts.linkLifetimeMinutes * 60);
   return resendWait(sentAt, facts.resendWaitSeconds, sentAt);
 }

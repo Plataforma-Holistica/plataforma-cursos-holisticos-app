@@ -34,7 +34,8 @@ export async function resendAction(previous: ResendState): Promise<ResendState> 
     forgetRegistration(jar);
     return leaveFor(jar, { to: ROUTES.signUp, notice: null });
   }
-  return { kind: "sent", wait: await rememberRequest(jar, pending.email), attempt };
+  // La cookie se vuelve a escribir con la hora de este envío, y con el destino que ya llevaba (FL-04).
+  return { kind: "sent", wait: await rememberRequest(jar, pending.email, pending.returnTo ?? null), attempt };
 }
 
 /**
