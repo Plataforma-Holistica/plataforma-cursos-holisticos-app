@@ -942,7 +942,7 @@ que no se ve leyendo un solo archivo:
   ni los recursos (están en la ficha); una versión enviada se dice «En revisión»; descartar se confirma en su propia pantalla. Para el A: nada que le toque.
 - **Lo que T-614 suma al carril B** (primera parte, la marca, sin migración; diseño §3.12; elección de Sergio del 2026-11-05: el logotipo A y seis fotos de Pexels). El logotipo
   provisional es un solo componente, `src/ui/wordmark.tsx`: el nombre de `terms.Plataforma` en Bricolage con un punto del acento al final, que mide y se separa en `em` (tokens
-  `brand-dot` y `brand-dot-gap`); el tamaño y el enlace los pone quien lo usa. **El icono del sitio son dos archivos con las convenciones de Next** (`src/app/icon.svg` y
+  `brand-dot` y `brand-dot-gap`; el punto y sus tokens se retiraron en T-616, que pone la flor de la vida delante del nombre); el tamaño y el enlace los pone quien lo usa. **El icono del sitio son dos archivos con las convenciones de Next** (`src/app/icon.svg` y
   `apple-icon.png`, 180 × 180): la P de Bricolage 700 con el punto, sacada de la fuente como trazo (sin `<text>`: una pestaña no carga fuentes) y con los contornos fundidos, porque los de
   una fuente variable se enciman. Cambiar al definitivo es reemplazar el componente y esos dos archivos. **Las fotos de ambiente viven en `src/ui/photos/`** con su registro de créditos
   (`credits.ts`: fuente, autor, licencia, enlace y fecha de descarga), y `tests/design/brand.test.ts` exige una fila por archivo y un archivo por fila, el ancho y el peso, y que el icono
@@ -1217,6 +1217,33 @@ que no se ve leyendo un solo archivo:
   (`plataforma-sesion` y demás), porque cambiarlos cierra las sesiones; el remitente de producción y el dominio, que van con la lista de
   salida (06 §8); y los comentarios del código que dicen «la Plataforma» por el sistema, como la planeación (decisión mía sin confirmar).
   Para el A: los borradores legales locales (de T-110) dicen el nombre nuevo, y `pnpm db:reset` los vuelve a cargar.
+- **Lo que T-616 suma al carril B** (solicitud 1, el sistema visual del rediseño, sin migración; plan aprobado por Sergio el 2026-11-11;
+  la dirección la fijó el carril A con tres vueltas de prototipo, y sus decisiones de diseño van sin confirmar). Solo tokens, componentes y
+  `/muestra`: las pantallas llegan en las solicitudes 2 a 6. **La flor de la vida es la geometría de la casa** (`src/ui/flower.tsx`, calculada y no
+  copiada): el logotipo, la roseta del curso (en oro terminado, en trazo a medias), la filigrana de las cabeceras y la semilla de los estados
+  (`flower-state.tsx`; `FullScreenState` sin `icon` también la lleva). Todo dibujo es `aria-hidden`; los gruesos del trazo son atributos del
+  dibujo, y `vectorEffect` entró a `NON_TEXT_ATTRIBUTES` del lint. **`Wordmark` lleva siempre la flor** delante del nombre (pedido de Sergio del
+  2026-11-11: el logotipo en toda página), y el punto de oro de T-614 y sus tokens `brand-dot` se retiraron: la flor mide en `em`
+  (`brand-mark`). **La portada de la tarjeta es un cartel** (`CourseArt` en `course-cover.tsx`; `CourseCover` sigue igual en la ficha y la
+  lección): el tono de la práctica desaturado (`art-1` a `art-8`) en un degradado radial cuyo foco cambia por curso (`art-focus-*`), grano, el
+  motivo geométrico de la práctica arriba (`src/ui/motifs.tsx`: ocho, elegidos por el orden de la práctica en PA-67 para que ocho seguidas no
+  repitan, con un hash de respaldo; su ángulo, escala y recorte salen del curso) y el título abajo sobre un velo, en `text-poster-*` (no baja de
+  16 a 20 px; mira además la palabra más larga, y corta con guion). `CourseCard` la usa en 4:5 (`shape`), con el maestro y los datos debajo y
+  `corner` para lo que va sobre la esquina **fuera del enlace** (la práctica le deja su lugar); con avance, la barra va en la portada y la roseta
+  en la línea de abajo, junto a «Lección N de M»; el aviso de curso abierto va en el flujo, bajo la práctica. **La portada se siembra con el
+  curso** (`courseKey`, su slug, obligatorio), nunca con el enlace ni con el título: «Continuar viendo» enlaza a la lección, y dos cursos
+  pueden llamarse igual.
+  Los motivos van en línea en cada portada (unos 4 KB los ocho; las ondas son curvas, no puntos) y se desvanecen hacia abajo; pasarlos a
+  `<symbol>` con `<use>` queda para la solicitud 3, medido. **Tokens nuevos** (`theme.css`): la profundidad (`edge-light`, `edge-bright`,
+  `surface-raised`, `float-plane`, `glow-header`), `--accent-muted` (solo antetítulos sobre el fondo liso: sobre foto o resplandor va el oro
+  pleno, porque el apagado no llegaba a 4.5), `radius-lg`, la sombra doble, `eyebrow` (versalitas), `animate-enter` y la escala de títulos un
+  escalón arriba en el ancho angosto de Bricolage (eje `wdth` en `fonts.ts`, `--display-stretch`, solo en `h1` y display, con el tracking a
+  -0.02em). El principal de `Button` pasa a oro con texto oscuro; `Carousel` lleva por omisión la tarjeta vertical (`card`), con aire arriba para
+  que no recorte el foco ni la tarjeta que sube; `TeacherCard` gana `shape="round"`; `PageHeader` (`page-header.tsx`) es la cabecera de pantalla,
+  normal o alta, con foto o con filigrana. `tests/design/contrast.test.ts` suma el oro apagado y el texto sobre cada tono de portada, y
+  `tests/ui/flower.test.tsx` cubre la flor, los motivos y la tarjeta. Decisiones mías sin confirmar: el motivo por el orden de la práctica (el
+  carril A lo aceptó) y la práctica en el color del texto sobre la portada. Para el A: el principal en oro se ve en todas las pantallas, y una
+  sección nueva que use `CourseCard` le pasa `practice.position` para el motivo.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

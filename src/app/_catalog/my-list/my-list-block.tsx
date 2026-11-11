@@ -114,6 +114,7 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
             {courses.map((course) => (
               <div key={course.slug} className="flex h-full flex-col items-start gap-3">
                 <CourseCard
+                  courseKey={course.slug}
                   href={course.href}
                   title={course.title}
                   teacherName={course.teacherName}
