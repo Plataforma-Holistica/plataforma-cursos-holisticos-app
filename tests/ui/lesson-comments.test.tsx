@@ -180,6 +180,27 @@ describe("cada comentario (Comment)", () => {
     expect(within(mine).queryByRole("button", { name: "Responder" })).toBeNull();
   });
 
+  // Una vuelta que deja abierta la edición de algo que entretanto quedó oculto (T-502): el campo no se pinta y lo escrito sale arriba,
+  // una sola vez; lo que está en revisión sí se sigue editando.
+  const editOpen = (body: string): CommentsState => ({ ...IDLE_COMMENTS, attempt: 1, open: { kind: "edit", id: id(1) }, kept: { at: { kind: "edit", id: id(1) }, body } });
+
+  it("si lo propio quedó oculto con su edición abierta, no hay campo y lo escrito sale arriba una vez (T-502)", async () => {
+    const { user } = setup({ count: 0, items: [thread(1, { state: "hidden", own: true, revision: 2 })] }, vi.fn(async () => editOpen("Lo que escribí")));
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Algo");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getAllByText("Lo que escribí")).toHaveLength(1), { timeout: 3_000 });
+    expect(screen.queryByRole("textbox", { name: "Edita tu comentario" })).toBeNull();
+    expect(screen.getByText("Esto es lo que escribiste:")).toBeInTheDocument();
+  });
+
+  it("lo propio en revisión sí se sigue editando: el campo está y nada sale arriba", async () => {
+    const { user } = setup({ count: 0, items: [thread(1, { state: "in_review", own: true, revision: 2 })] }, vi.fn(async () => editOpen("Lo que escribí")));
+    await user.type(screen.getByRole("textbox", { name: "Escribe un comentario" }), "Algo");
+    await user.click(screen.getByRole("button", { name: "Comentar" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Edita tu comentario" })).toHaveValue("Lo que escribí"), { timeout: 3_000 });
+    expect(screen.queryByText("Esto es lo que escribiste:")).toBeNull();
+  });
+
   it("una respuesta no ofrece «Responder»: el nivel es uno, y se responde desde el comentario", () => {
     setup({ count: 1, items: [thread(1, {}, [comment(2, { name: "Beto" })])] });
     expect(within(screen.getByRole("article", { name: "Beto" })).queryByRole("button", { name: "Responder" })).toBeNull();
