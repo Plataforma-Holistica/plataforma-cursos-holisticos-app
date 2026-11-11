@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
 import { completeRegistration, isLinkToken } from "@/services/account/account";
-import { forgetRegistration } from "@/services/account/pending-registration";
+import { forgetRegistration, readRegistration } from "@/services/account/pending-registration";
 
 import { leaveFor } from "../../_lib/exit";
 import { nextAttempt } from "../../_lib/form-state";
@@ -29,12 +29,16 @@ export async function completeRegistrationAction(previous: CompleteState, form: 
   if (!isLinkToken(input.token)) return { kind: "link_dead" };
 
   const jar = await cookieJar();
+  // A dónde iba quien se registró en este navegador (FL-04). Se lee antes de olvidar la cookie,
+  // y no se confía en ella: quien la lee valida el destino, y las funciones que arman la salida
+  // lo validan otra vez. En otro navegador no hay cookie: al inicio.
+  const returnTo = readRegistration(jar)?.returnTo ?? null;
   const result = await completeRegistration(
     jar,
     { tokenHash: input.token, name: input.name, password: input.password, adultDeclared: input.adult, accepted: input.accepted },
     await requestOrigin(),
   );
-  const outcome = completeRegistrationOutcome(result, input.unchecked);
+  const outcome = completeRegistrationOutcome(result, input.unchecked, returnTo);
 
   if (outcome.kind === "redirect") {
     // La cuenta ya se completó en este navegador: no queda ningún correo por revisar.

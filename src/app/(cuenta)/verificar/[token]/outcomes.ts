@@ -1,6 +1,6 @@
 import type { FieldErrors, LegalText, RegistrationCompletion } from "@/services/account/account";
 import { checkPassword, parseDisplayName } from "@/services/account/field-rules";
-import { consentsPath, entryDestination, ROUTES } from "@/services/account/navigation";
+import { consentsPath, entryDestination, signInPath } from "@/services/account/navigation";
 import type { Notice } from "@/services/account/notice";
 import { legalBlocks } from "@/services/legal/blocks";
 
@@ -193,17 +193,26 @@ export type CompleteOutcome =
 /**
  * @param unchecked Las casillas pintadas que no se marcaron: el servicio solo dice que falta
  *   algún texto, y con esto la pantalla dice cuál.
+ * @param returnTo A dónde iba quien se registró (FL-04), o nulo. Las funciones de navegación lo
+ *   validan: uno que no vale es como no traer ninguno.
  */
-export function completeRegistrationOutcome(result: RegistrationCompletion, unchecked: readonly string[]): CompleteOutcome {
+export function completeRegistrationOutcome(result: RegistrationCompletion, unchecked: readonly string[], returnTo: string | null = null): CompleteOutcome {
   switch (result.kind) {
     case "entered":
       // Quedó dentro. Si a la cuenta todavía le falta algo, se le pide antes que nada.
       // Si no, su estado en el equipo dice a dónde va: quien abrió el enlace con una
       // invitación de administración sigue a configurar su segundo factor.
-      return { kind: "redirect", to: result.pending ? consentsPath(null) : entryDestination(result.team, null), notice: null };
+      //
+      // El destino anotado es de quien se registró por su cuenta. Quien abre una invitación (del
+      // equipo o de maestro) no pasó por `/registro`: lo que ese navegador tuviera anotado sería
+      // de otro registro, y no se hereda. Con algo pendiente en su cuenta sí viaja a
+      // consentimientos, que al terminar aplica la regla de entrar: ahí todavía no se sabe su
+      // estado en el equipo (el servicio lo da nulo), y es un caso de dos rarezas a la vez.
+      if (result.pending) return { kind: "redirect", to: consentsPath(returnTo), notice: null };
+      return { kind: "redirect", to: entryDestination(result.team, result.team === null || result.team === "none" ? returnTo : null), notice: null };
     case "ready_sign_in":
       // La cuenta quedó lista y solo falló abrir la sesión: entra con su contraseña.
-      return { kind: "redirect", to: ROUTES.signIn, notice: "account_ready" };
+      return { kind: "redirect", to: signInPath(returnTo), notice: "account_ready" };
     case "invalid": {
       // Falta un texto y el formulario no sabe cuál: no es el formulario que se pintó.
       if (result.fields.texts && unchecked.length === 0) return { kind: "repaint" };

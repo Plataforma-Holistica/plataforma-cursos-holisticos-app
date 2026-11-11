@@ -4,7 +4,7 @@ import { type FocusEvent, useActionState, useState } from "react";
 
 import { account } from "@/messages/es/account";
 import { parseEmail } from "@/services/account/field-rules";
-import { RETURN_PARAM, ROUTES } from "@/services/account/navigation";
+import { RETURN_PARAM, ROUTES, signUpPath } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
@@ -126,7 +126,7 @@ export function SignInScreen({ returnTo, notice, noticeTone = "success" }: SignI
       </form>
       <p className="flex flex-col items-start gap-3 text-body-s">
         <TextLink href={ROUTES.recover}>{text.forgot}</TextLink>
-        <TextLink href={ROUTES.signUp}>{text.createAccount}</TextLink>
+        <TextLink href={signUpPath(returnTo)}>{text.createAccount}</TextLink>
       </p>
     </main>
   );

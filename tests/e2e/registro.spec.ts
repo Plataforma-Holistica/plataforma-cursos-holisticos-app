@@ -573,3 +573,50 @@ test("pedir un registro desde otro sitio se rechaza y no deja rastro", async ({ 
   expect(await mailsTo(email)).toHaveLength(0);
   expect(await ownerQuery("select 1 from auth.users where email = $1", [email])).toHaveLength(0);
 });
+
+test("quien se registra yendo a un plan vuelve a ese plan al completar su cuenta (FL-04)", async ({ page, context }) => {
+  const email = testEmail();
+  await page.goto("/planes?plan=annual");
+  // «Crear cuenta» lleva el destino al registro.
+  const signUp = page.locator('a[href^="/registro?volver="]').first();
+  await expect(signUp).toHaveAttribute("href", "/registro?volver=%2Fplanes%3Fplan%3Dannual");
+  await signUp.click();
+  await expect(page).toHaveURL("/registro?volver=%2Fplanes%3Fplan%3Dannual");
+  // Desde ahí, «Ya tengo cuenta» tampoco lo pierde.
+  await expect(page.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Dannual");
+
+  await page.getByLabel("Correo").fill(email);
+  await page.getByRole("button", { name: "Crear mi cuenta" }).click();
+  // El destino no viaja en la dirección: va en la cookie corta, con el correo.
+  await expect(page).toHaveURL("/verificar");
+  const pending = await cookieOf(context, PENDING_COOKIE);
+  expect(JSON.parse(Buffer.from(pending?.value ?? "", "base64url").toString("utf8"))).toMatchObject({ e: email, r: "/planes?plan=annual" });
+  await expect(page.getByRole("link", { name: "Entra" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Dannual");
+
+  const token = tokenHashIn(await lastMailTo(email), "verificar");
+  await page.goto(`/verificar/${token}`);
+  await fillAccount(page);
+  await tickEverything(page);
+  await confirm(page);
+
+  await expect(page).toHaveURL("/planes?plan=annual");
+  expect(await cookieOf(context, PENDING_COOKIE)).toBeUndefined();
+});
+
+test("un destino de fuera en el registro no se anota ni se sigue", async ({ page, context }) => {
+  const email = testEmail();
+  await page.goto(`/registro?volver=${encodeURIComponent("https://otro.example/planes")}`);
+  await expect(page.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", "/entrar");
+  await page.getByLabel("Correo").fill(email);
+  await page.getByRole("button", { name: "Crear mi cuenta" }).click();
+  await expect(page).toHaveURL("/verificar");
+  const pending = await cookieOf(context, PENDING_COOKIE);
+  expect(JSON.parse(Buffer.from(pending?.value ?? "", "base64url").toString("utf8"))).toEqual({ e: email, t: expect.any(Number) });
+
+  const token = tokenHashIn(await lastMailTo(email), "verificar");
+  await page.goto(`/verificar/${token}`);
+  await fillAccount(page);
+  await tickEverything(page);
+  await confirm(page);
+  await expect(page).toHaveURL("/inicio");
+});

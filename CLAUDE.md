@@ -3082,6 +3082,20 @@ falla. Veintiuna precisiones que la tabla no dice:
     `requireLessonSession`, que pregunta `courseIsOpen` solo cuando no hay sesión; lo lee como
     sistema, del registro del curso, y solo si está listado. El registro todavía no lleva el
     `volver` hasta el final; cuando exista `/planes` (T-30x), el curso normal irá ahí.
+  - **El registro ya lleva el `volver` hasta el final** (FL-04; T-616, solicitud A). Viaja en la
+    cookie corta del registro (`pending-registration`, campo `r`), no en el correo ni en la
+    base: `/registro` lo pone en un campo oculto, la acción lo anota, «Reenviar» lo conserva y
+    completar la cuenta lo lee antes de olvidar la cookie. No se confía en la cookie: el
+    destino se valida al escribirlo, al leerlo y al armar la salida (`returnOrNull`, la misma
+    lista de `resolveDestination`), mide a lo más 512 y, si con él la cookie no cabe, se guarda
+    sin él. Registrarse otra vez sin destino borra el anterior. En otro navegador no hay
+    cookie y se termina en el inicio: es un límite aceptado, no un fallo.
+    El destino es de quien se registró por su cuenta: quien completa una invitación (del equipo
+    o de maestro) no lo hereda (`completeRegistrationOutcome`; salvo que además le falte algo a
+    su cuenta: entonces viaja a consentimientos, que aplica la regla de entrar), y «Ese no es mi correo» lo
+    devuelve al registro. No se compara el correo de la cookie con el verificado (el servicio
+    no lo expone): dos registros por cuenta propia en un mismo navegador pueden heredarse el
+    destino, que siempre es una pantalla interna de la lista.
   - **El temario se lee como la persona, filtrando a mano lo listado y lo vigente**
     (`readCourseLessons`): las políticas dejan ver más al maestro dueño y a Contenido (lo suyo
     sin listar, lo retirado). Un curso sin listar, una lección retirada, una de otro curso o

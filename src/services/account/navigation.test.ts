@@ -13,6 +13,7 @@ import {
   proxySignsIn,
   requiresSession,
   resolveDestination,
+  returnOrNull,
   RETURN_PARAM,
   returnsOutsideAdmin,
   ROUTES,
@@ -346,5 +347,19 @@ describe("las direcciones de un periodo (T-605)", () => {
     expect(periodPath(202710)).toBe("/admin/periodos/2027-10");
     expect(periodPath(202701)).toBe("/admin/periodos/2027-01");
     expect(periodClosePath(202612)).toBe("/admin/periodos/2026-12/cierre");
+  });
+});
+
+describe("un destino válido, o nada (para guardarlo sin pasear el inicio por la dirección)", () => {
+  it.each([
+    ["/planes?plan=annual", "/planes?plan=annual"],
+    ["/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001"],
+    ["/inicio", "/inicio"],
+  ])("%s se respeta", (input, expected) => {
+    expect(returnOrNull(input)).toBe(expected);
+  });
+
+  it.each([null, undefined, "", "https://otro.example", "//otro.example", "/registro", "/entrar", "/verificar"])("%j no es un destino", (input) => {
+    expect(returnOrNull(input)).toBeNull();
   });
 });

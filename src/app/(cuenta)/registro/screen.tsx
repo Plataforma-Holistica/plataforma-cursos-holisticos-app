@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 
 import { account } from "@/messages/es/account";
-import { ROUTES } from "@/services/account/navigation";
+import { RETURN_PARAM, signInPath } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
@@ -29,9 +29,11 @@ export interface SignUpScreenProps {
   /** Dónde se lee cada texto, o nulo si todavía no tiene página. */
   termsHref: string | null;
   privacyHref: string | null;
+  /** A dónde iba (`volver`), tal como llegó, o vacío. Viaja con el formulario; lo valida el servidor. */
+  returnTo?: string;
 }
 
-export function SignUpScreen({ termsHref, privacyHref }: SignUpScreenProps) {
+export function SignUpScreen({ termsHref, privacyHref, returnTo = "" }: SignUpScreenProps) {
   const [state, action, pending] = useActionState(requestRegistrationAction, IDLE);
 
   const attempt = state.kind === "idle" ? 0 : state.attempt;
@@ -51,6 +53,8 @@ export function SignUpScreen({ termsHref, privacyHref }: SignUpScreenProps) {
             {state.reason === "wait" ? text.wait : account.common.unavailable}
           </InlineAlert>
         )}
+        {/* Solo si se iba a algún lado: sin destino el formulario manda el correo y nada más. */}
+        {returnTo !== "" && <input type="hidden" name={RETURN_PARAM} value={returnTo} />}
         <EmailField key={`campo-${attempt}`} id={EMAIL_ID} defaultValue={email} problem={problem} hint={text.hint} />
         <Disclaimer variant="signUp" />
         <Button type="submit" loading={pending} loadingLabel={text.submitting}>
@@ -81,7 +85,7 @@ export function SignUpScreen({ termsHref, privacyHref }: SignUpScreenProps) {
         {text.legalEnd}
       </p>
       <p className="text-body-s">
-        <TextLink href={ROUTES.signIn}>{text.haveAccount}</TextLink>
+        <TextLink href={signInPath(returnTo)}>{text.haveAccount}</TextLink>
       </p>
     </main>
   );
