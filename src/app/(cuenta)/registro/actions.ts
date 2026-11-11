@@ -38,8 +38,9 @@ export async function requestRegistrationAction(previous: MailRequestState, form
   if (outcome.kind !== "accepted") return { ...outcome, email, attempt };
 
   const jar = await cookieJar();
-  // El correo viaja a la pantalla siguiente en una cookie corta, no en la dirección. Con él, a dónde iba (FL-04): se anota después de
-  // la respuesta y no la cambia, así que sigue sin depender de si ese correo tiene cuenta.
+  // El correo viaja a la pantalla siguiente en una cookie corta, no en la dirección. Con él, a
+  // dónde iba (FL-04): se anota después de la respuesta y no la cambia, así que sigue sin
+  // depender de si ese correo tiene cuenta.
   await rememberRequest(jar, email, readReturn(form));
   return leaveFor(jar, { to: ROUTES.verify, notice: null });
 }

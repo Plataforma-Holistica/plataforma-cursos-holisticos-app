@@ -115,8 +115,8 @@ describe("el destino de un registro a medias (FL-04: volver a donde se iba al co
 
   it("un destino permitido se guarda y se lee", () => {
     const jar = jarOf();
-    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" }, 60);
-    expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" });
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=annual" }, 60);
+    expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=annual" });
   });
 
   it.each(["https://otro.example/planes", "//otro.example", "/registro", "/entrar?volver=/inicio", "", "/planes/../admin"])(
@@ -159,7 +159,7 @@ describe("el destino de un registro a medias (FL-04: volver a donde se iba al co
 
   it("anotar otra vez sin destino borra el de antes", () => {
     const jar = jarOf();
-    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=anual" }, 60);
+    pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 5, returnTo: "/planes?plan=annual" }, 60);
     pending.rememberRegistration(jar, { email: "ana@prueba.test", sentAt: 6 }, 60);
     expect(pending.readRegistration(jar)).toEqual({ email: "ana@prueba.test", sentAt: 6 });
   });

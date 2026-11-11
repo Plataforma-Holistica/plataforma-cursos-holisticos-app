@@ -86,8 +86,8 @@ describe("la página de registro (PA-10)", () => {
   });
 
   it("el destino de la dirección (FL-04) pasa al formulario tal como llegó; repetido no es un destino", async () => {
-    const { container, unmount } = render(await SignUpPage(search({ volver: "/planes?plan=anual" })));
-    expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/planes?plan=anual");
+    const { container, unmount } = render(await SignUpPage(search({ volver: "/planes?plan=annual" })));
+    expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/planes?plan=annual");
     unmount();
     const twice = render(await SignUpPage(search({ volver: ["/planes", "/inicio"] })));
     expect(twice.container.querySelector('input[name="volver"]')).toBeNull();
@@ -111,10 +111,10 @@ describe("la página de «Revisa tu correo» (PA-14)", () => {
   });
 
   it("con un destino anotado (FL-04), «Entra» lo lleva: quien ya tenía cuenta no recibe correo y entra por ahí", async () => {
-    mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 5_000, returnTo: "/planes?plan=anual" });
+    mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 5_000, returnTo: "/planes?plan=annual" });
     mocks.accountFormFacts.mockResolvedValue(facts);
     render(await CheckMailPage());
-    expect(screen.getByRole("link", { name: "Entra" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Danual");
+    expect(screen.getByRole("link", { name: "Entra" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Dannual");
   });
 
   it("sin destino anotado, «Entra» va a entrar sin más", async () => {

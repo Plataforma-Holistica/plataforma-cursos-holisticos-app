@@ -94,10 +94,12 @@ export async function pendingRequestFacts(sentAt: number): Promise<{ lifetimeSec
  *
  * Si no se supo cuánto dura, no se anota nada. Y si lo que este navegador tenía anotado era
  * otro correo, el de un registro anterior, se olvida: dejarlo diría que el enlace se mandó
- * ahí, y «Reenviar» lo mandaría ahí. La pantalla pinta entonces su texto genérico. Lo mismo si lo anotado iba a otro lado: el
- * destino de un registro anterior no se hereda (FL-04).
+ * ahí, y «Reenviar» lo mandaría ahí. La pantalla pinta entonces su texto genérico. Lo mismo si
+ * lo anotado iba a otro lado: el destino de un registro anterior no se hereda (FL-04). Y si no
+ * había nada anotado, tampoco se anota el destino: sin saber cuánto dura no hay cookie.
  *
- * @param returnTo A dónde iba quien se registra, tal como llegó, o nada. Lo valida quien guarda la cookie.
+ * @param returnTo A dónde iba quien se registra, tal como llegó, o nada. Lo valida quien guarda
+ *   la cookie.
  * @returns La espera que le queda a «Reenviar», o nulo.
  */
 export async function rememberRequest(jar: CookieJar, email: string, returnTo: string | null = null): Promise<ResendWait | null> {

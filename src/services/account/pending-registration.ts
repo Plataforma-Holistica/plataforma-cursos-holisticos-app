@@ -17,10 +17,11 @@ import { returnOrNull } from "./navigation";
 // escribió cuenta como ausente, y el correo se vuelve a validar. La hora del último envío
 // solo sirve para pintar el botón de reenviar; la espera de verdad la lleva el servicio.
 //
-// Lleva también a dónde iba quien se registró (FL-04: el plan elegido, la lección de un curso abierto), para volver ahí al completar
-// la cuenta. Con eso sí se decide algo, una redirección, y por eso no se confía en lo guardado: el destino se valida contra la
-// lista de destinos al escribirlo y otra vez al leerlo, y quien arma la salida lo vuelve a validar. Uno que no vale se lee como
-// sin destino, sin tirar el correo.
+// Lleva también a dónde iba quien se registró (FL-04: el plan elegido, la lección de un curso
+// abierto), para volver ahí al completar la cuenta. Con eso sí se decide algo, una redirección,
+// y por eso no se confía en lo guardado: el destino se valida contra la lista de destinos al
+// escribirlo y otra vez al leerlo, y quien arma la salida lo vuelve a validar. Uno que no vale
+// se lee como sin destino, sin tirar el correo.
 
 export interface PendingRegistration {
   /** El correo, ya normalizado. */
@@ -68,8 +69,8 @@ export function createPendingRegistration(overrides: { secure?: () => boolean } 
     const bare = encode({ e: parsed.email, t: pending.sentAt });
     const returnTo = notedReturn(pending.returnTo);
     const full = returnTo === null ? bare : encode({ e: parsed.email, t: pending.sentAt, r: returnTo });
-    // Si con el destino no cabe en lo que después se lee, va sin él: perder el destino es volver al inicio; perder la cookie
-    // deja a «Revisa tu correo» sin correo y a «Reenviar» sin a quién.
+    // Si con el destino no cabe en lo que después se lee, va sin él: perder el destino es volver
+    // al inicio; perder la cookie deja a «Revisa tu correo» sin correo y a «Reenviar» sin a quién.
     jar.set(name(), full.length <= MAX_VALUE_LENGTH ? full : bare, options(maxAgeSeconds));
   }
 

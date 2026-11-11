@@ -29,8 +29,9 @@ export async function completeRegistrationAction(previous: CompleteState, form: 
   if (!isLinkToken(input.token)) return { kind: "link_dead" };
 
   const jar = await cookieJar();
-  // A dónde iba quien se registró en este navegador (FL-04). Se lee antes de olvidar la cookie, y no se confía en ella: quien la lee
-  // valida el destino, y las funciones que arman la salida lo validan otra vez. En otro navegador no hay cookie: al inicio.
+  // A dónde iba quien se registró en este navegador (FL-04). Se lee antes de olvidar la cookie,
+  // y no se confía en ella: quien la lee valida el destino, y las funciones que arman la salida
+  // lo validan otra vez. En otro navegador no hay cookie: al inicio.
   const returnTo = readRegistration(jar)?.returnTo ?? null;
   const result = await completeRegistration(
     jar,

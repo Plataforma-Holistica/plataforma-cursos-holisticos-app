@@ -159,8 +159,8 @@ describe("pedir el registro (PA-10)", () => {
 
   it("anota también a dónde iba (FL-04), tal como llegó: quien guarda la cookie lo valida", async () => {
     once("accountFormFacts", facts);
-    await expect(requestRegistrationAction(IDLE, form([["email", "ana@prueba.test"], ["volver", "/planes?plan=anual"]]))).rejects.toThrow("redirige a /verificar");
-    expect(mocks.rememberRegistration.mock.calls[0]?.[1]).toMatchObject({ email: "ana@prueba.test", returnTo: "/planes?plan=anual" });
+    await expect(requestRegistrationAction(IDLE, form([["email", "ana@prueba.test"], ["volver", "/planes?plan=annual"]]))).rejects.toThrow("redirige a /verificar");
+    expect(mocks.rememberRegistration.mock.calls[0]?.[1]).toMatchObject({ email: "ana@prueba.test", returnTo: "/planes?plan=annual" });
     // El destino no cambia lo que se le pide al servicio ni a dónde se sale: la respuesta no depende de él.
     expect(mocks.requestRegistration).toHaveBeenCalledExactlyOnceWith({ email: "ana@prueba.test" }, origin);
   });
@@ -180,15 +180,15 @@ describe("pedir el registro (PA-10)", () => {
 
   it("aceptado sin saber cuánto dura, con ese correo anotado pero con otro destino: lo olvida, para no heredar el destino viejo", async () => {
     once("accountFormFacts", { kind: "unavailable" });
-    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=anual" });
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
     await expect(requestRegistrationAction(IDLE, emailForm("ana@prueba.test"))).rejects.toThrow("redirige a /verificar");
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
   });
 
   it("aceptado sin saber cuánto dura, con ese correo y ese mismo destino anotados: lo deja", async () => {
     once("accountFormFacts", { kind: "unavailable" });
-    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=anual" });
-    await expect(requestRegistrationAction(IDLE, form([["email", "ana@prueba.test"], ["volver", "/planes?plan=anual"]]))).rejects.toThrow("redirige a /verificar");
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
+    await expect(requestRegistrationAction(IDLE, form([["email", "ana@prueba.test"], ["volver", "/planes?plan=annual"]]))).rejects.toThrow("redirige a /verificar");
     expect(mocks.forgetRegistration).not.toHaveBeenCalled();
   });
 
@@ -268,10 +268,10 @@ describe("«Reenviar» (PA-14)", () => {
   });
 
   it("al reenviar, el destino anotado se conserva", async () => {
-    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=anual" });
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
     once("accountFormFacts", facts);
     await resendAction(IDLE);
-    expect(mocks.rememberRegistration.mock.calls[0]?.[1]).toMatchObject({ email: "ana@prueba.test", returnTo: "/planes?plan=anual" });
+    expect(mocks.rememberRegistration.mock.calls[0]?.[1]).toMatchObject({ email: "ana@prueba.test", returnTo: "/planes?plan=annual" });
   });
 
   it("la espera que contesta termina cuando pasa `ESPERA_REENVIO` desde ahora", async () => {
@@ -307,10 +307,18 @@ describe("«Reenviar» (PA-14)", () => {
 });
 
 describe("«Ese no es mi correo» (PA-14)", () => {
+  it("si iba a algún lado, vuelve al registro con ese destino: escribir mal el correo no pierde el plan (FL-04)", async () => {
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
+    await expect(notMyEmailAction()).rejects.toThrow("redirige a /registro?volver=%2Fplanes%3Fplan%3Dannual");
+    expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
+    expect(calls.order).toEqual(["readRegistration", "forgetRegistration", "redirect"]);
+  });
+
   it("olvida el correo anotado y vuelve al registro, sin pedirle nada a nadie", async () => {
     await expect(notMyEmailAction()).rejects.toThrow("redirige a /registro");
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
-    expect(calls.order).toEqual(["forgetRegistration", "redirect"]);
+    // Lo anotado se lee antes de olvidarlo, por si llevaba un destino.
+    expect(calls.order).toEqual(["readRegistration", "forgetRegistration", "redirect"]);
   });
 });
 
@@ -354,20 +362,33 @@ describe("completar la cuenta desde el enlace (PA-14)", () => {
   });
 
   it("quedó dentro y este navegador tenía anotado a dónde iba: va ahí (FL-04)", async () => {
-    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=anual" });
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
     once("completeRegistration", { kind: "entered", pending: null, team: "none" });
-    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /planes?plan=anual");
+    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /planes?plan=annual");
     expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
   });
 
   it("le falta algo a su cuenta: a consentimientos, con el destino anotado", async () => {
-    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=anual" });
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
     once("completeRegistration", {
       kind: "entered",
       pending: { variant: "updated_texts", missing: { name: false, adultDeclaration: false, documents: [{ docType: "terms", why: "new_version" }] } },
       team: null,
     });
-    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /consentimientos?volver=%2Fplanes%3Fplan%3Danual");
+    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /consentimientos?volver=%2Fplanes%3Fplan%3Dannual");
+  });
+
+  it("la cuenta quedó lista y solo falló abrir la sesión: olvida lo anotado y va a entrar con el destino", async () => {
+    once("readRegistration", { email: "ana@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
+    once("completeRegistration", { kind: "ready_sign_in" });
+    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /entrar?volver=%2Fplanes%3Fplan%3Dannual");
+    expect(mocks.forgetRegistration).toHaveBeenCalledExactlyOnceWith(jar);
+  });
+
+  it("quien abre una invitación del equipo no hereda el destino que este navegador tenía anotado: sigue a su factor", async () => {
+    once("readRegistration", { email: "otra@prueba.test", sentAt: 1, returnTo: "/planes?plan=annual" });
+    once("completeRegistration", { kind: "entered", pending: null, team: "invited" });
+    await expect(completeRegistrationAction(IDLE, completeForm())).rejects.toThrow("redirige a /entrar/segundo-factor/configurar");
   });
 
   it("un destino anotado que no vale no se usa: al inicio", async () => {

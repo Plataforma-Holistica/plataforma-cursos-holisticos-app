@@ -352,7 +352,7 @@ describe("las direcciones de un periodo (T-605)", () => {
 
 describe("un destino válido, o nada (para guardarlo sin pasear el inicio por la dirección)", () => {
   it.each([
-    ["/planes?plan=anual", "/planes?plan=anual"],
+    ["/planes?plan=annual", "/planes?plan=annual"],
     ["/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001"],
     ["/inicio", "/inicio"],
   ])("%s se respeta", (input, expected) => {

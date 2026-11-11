@@ -8,8 +8,9 @@ import { slugOfDocType } from "@/services/legal/texts";
 
 import { SignUpScreen } from "./screen";
 
-// PA-10 · Registro (`/registro`). Quien ya tiene sesión se va a su inicio. Quien llega yendo a algún lado (`volver`: el plan
-// elegido, la lección de un curso abierto) lo conserva hasta completar su cuenta (FL-04).
+// PA-10 · Registro (`/registro`). Quien ya tiene sesión se va a su inicio. Quien llega yendo a
+// algún lado (`volver`: el plan elegido, la lección de un curso abierto) lo conserva hasta
+// completar su cuenta (FL-04).
 
 export const metadata: Metadata = { title: messages.account.signUp.pageTitle };
 

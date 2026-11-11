@@ -3062,6 +3062,11 @@ falla. Veintiuna precisiones que la tabla no dice:
     lista de `resolveDestination`), mide a lo más 512 y, si con él la cookie no cabe, se guarda
     sin él. Registrarse otra vez sin destino borra el anterior. En otro navegador no hay
     cookie y se termina en el inicio: es un límite aceptado, no un fallo.
+    El destino es de quien se registró por su cuenta: quien completa una invitación (del equipo
+    o de maestro) no lo hereda (`completeRegistrationOutcome`), y «Ese no es mi correo» lo
+    devuelve al registro. No se compara el correo de la cookie con el verificado (el servicio
+    no lo expone): dos registros por cuenta propia en un mismo navegador pueden heredarse el
+    destino, que siempre es una pantalla interna de la lista.
   - **El temario se lee como la persona, filtrando a mano lo listado y lo vigente**
     (`readCourseLessons`): las políticas dejan ver más al maestro dueño y a Contenido (lo suyo
     sin listar, lo retirado). Un curso sin listar, una lección retirada, una de otro curso o

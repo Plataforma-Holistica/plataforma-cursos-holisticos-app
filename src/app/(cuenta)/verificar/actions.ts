@@ -2,7 +2,7 @@
 
 import { requestRegistration } from "@/app/_lib/mail-requests";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
-import { ROUTES } from "@/services/account/navigation";
+import { ROUTES, signUpPath } from "@/services/account/navigation";
 import { forgetRegistration, readRegistration } from "@/services/account/pending-registration";
 
 import { leaveFor } from "../_lib/exit";
@@ -30,9 +30,10 @@ export async function resendAction(previous: ResendState): Promise<ResendState> 
   const outcome = mailRequestOutcome(await requestRegistration({ email: pending.email }, await requestOrigin()));
   if (outcome.kind === "failed") return { kind: "failed", reason: outcome.reason, attempt };
   if (outcome.kind === "invalid") {
-    // Lo anotado no es un correo al que se pueda mandar nada: se olvida y se escribe otra vez.
+    // Lo anotado no es un correo al que se pueda mandar nada: se olvida y se escribe otra vez,
+    // sin perder a dónde iba (FL-04).
     forgetRegistration(jar);
-    return leaveFor(jar, { to: ROUTES.signUp, notice: null });
+    return leaveFor(jar, { to: signUpPath(pending.returnTo), notice: null });
   }
   // La cookie se vuelve a escribir con la hora de este envío, y con el destino que ya llevaba (FL-04).
   return { kind: "sent", wait: await rememberRequest(jar, pending.email, pending.returnTo ?? null), attempt };
@@ -41,10 +42,12 @@ export async function resendAction(previous: ResendState): Promise<ResendState> 
 /**
  * «Ese no es mi correo» (diseño, PA-14): olvida el correo anotado y regresa al registro. Es
  * un envío y no un enlace, porque borra una cookie. La cuenta del correo equivocado se
- * queda sin verificar y no sirve para entrar.
+ * queda sin verificar y no sirve para entrar. Si iba a algún lado (FL-04), el registro lo
+ * recibe otra vez: escribir mal el correo no pierde el plan elegido.
  */
 export async function notMyEmailAction(): Promise<void> {
   const jar = await cookieJar();
+  const returnTo = readRegistration(jar)?.returnTo ?? null;
   forgetRegistration(jar);
-  return leaveFor(jar, { to: ROUTES.signUp, notice: null });
+  return leaveFor(jar, { to: signUpPath(returnTo), notice: null });
 }
