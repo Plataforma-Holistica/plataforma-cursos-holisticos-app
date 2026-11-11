@@ -20,7 +20,8 @@ import { PlansScreen } from "./screen";
 import { plansView, type PlansViewer } from "./view";
 
 // PA-04 · los planes (`/planes`; RF-201, RF-202, FL-04; T-302). Pública, como la ficha de un curso: la guarda nunca redirige
-// (`publicViewer`). Al visitante le ofrece crear su cuenta o entrar, volviendo aquí con el plan; al alumno, la casilla y «Continuar al
+// (`publicViewer`); la página solo manda a entrar al visitante que iba a otra pantalla cuando no se venden planes. Al visitante le
+// ofrece crear su cuenta o entrar (con un plan elegido, volviendo aquí; sin él, directo a donde iba); al alumno, la casilla y «Continuar al
 // pago»; a quien ya tiene acceso, que ya lo tiene (una PA-26 mínima, hasta T-304); con un pago en confirmación, que no vuelva a pagar.
 // Si no se sabe quién mira (una cuenta a medias, suspendida o «no se supo»), va el formulario, y la acción decide con su guarda.
 //
@@ -47,9 +48,7 @@ function legalHref(doc: "recurring" | "refund", version: number | null): string 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Search> }) {
   const query = readPlansQuery(await searchParams, returnOf);
   const [who, offer] = await Promise.all([publicViewer(), planOffer()]);
-  // Sin planes que mostrar, el visitante que iba a otra pantalla va a entrar con su destino.
-  const detour = closedPlansDetour(who.kind, query.returnTo);
-  if (offer.kind === "unavailable" && detour !== null) redirect(signInPath(detour));
+  // Una falla pasajera se queda aquí, con su «Reintentar».
   if (offer.kind === "unavailable") return <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />;
 
   let viewer: PlansViewer;
@@ -65,6 +64,8 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   } else viewer = { kind: "pay" };
 
   const view = plansView(offer.offer, query, viewer, legalHref);
+  // Si no se venden planes, el visitante que iba a otra pantalla va a entrar con su destino: es lo que sirve a quien ya tiene cuenta.
+  const detour = closedPlansDetour(who.kind, query.returnTo);
   if (view.kind === "not_for_sale" && detour !== null) redirect(signInPath(detour));
   return (
     <>

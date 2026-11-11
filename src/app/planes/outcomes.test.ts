@@ -112,6 +112,7 @@ describe("PA-04, cifras y direcciones", () => {
     const all = (input: string) => input;
     expect(readPlansQuery({ volver: "/planes" }, all).returnTo).toBeNull();
     expect(readPlansQuery({ volver: "/planes?plan=annual" }, all).returnTo).toBeNull();
+    expect(readPlansQuery({ volver: "/planes/algo" }, all).returnTo).toBeNull();
     expect(readPlansQuery({ volver: "/planes-de-estudio" }, all).returnTo).toBe("/planes-de-estudio");
   });
 });

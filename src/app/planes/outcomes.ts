@@ -95,7 +95,7 @@ export function readPlansQuery(search: Search, resolveReturn: (input: string) =>
   const back = single(search.volver);
   const resolved = back === null ? null : resolveReturn(back);
   // Los planes no son destino de sí mismos: «Continuar» llevaría a la misma pantalla.
-  const own = resolved !== null && (resolved === ROUTES.plans || resolved.startsWith(`${ROUTES.plans}?`));
+  const own = resolved !== null && (resolved === ROUTES.plans || resolved.startsWith(`${ROUTES.plans}?`) || resolved.startsWith(`${ROUTES.plans}/`));
   return {
     plan: PLANS.find((each) => each === plan) ?? null,
     returnTo: own ? null : resolved,
@@ -104,7 +104,7 @@ export function readPlansQuery(search: Search, resolveReturn: (input: string) =>
 }
 
 /**
- * Si los planes no se pueden mostrar (no se venden todavía, o no se pudieron leer), a dónde quería ir el visitante que llegó de otra
+ * Si los planes no se venden todavía, a dónde quería ir el visitante que llegó de otra
  * pantalla: se le manda a entrar con ese destino, que es lo que sirve a quien ya tiene cuenta. Nulo: se queda y se le dice.
  */
 export function closedPlansDetour(who: "visitor" | "student" | "unknown", returnTo: string | null): string | null {
