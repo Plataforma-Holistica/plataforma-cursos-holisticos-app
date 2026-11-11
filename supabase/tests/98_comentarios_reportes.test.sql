@@ -55,7 +55,7 @@ returns jsonb language sql as $$
   select pruebas.c(p_actor, format('private.comment_report(%L, %L, %L, %L)', pruebas.id(p_k), p_reason, p_note, p_counts))
 $$;
 create function pruebas.estado(p_k text) returns text language sql stable
-as $$ select concat_ws(' ', status, report_count, hidden_at is not null) from public.comments where id = pruebas.id(p_k) $$;
+as $$ select concat_ws(' ', status, report_count, (hidden_at is not null)::text) from public.comments where id = pruebas.id(p_k) $$;
 create function pruebas.marca(p_flag text, p_on boolean) returns void
 language plpgsql as $$
 begin
@@ -205,7 +205,8 @@ select is((select count(*)::int from jsonb_array_elements(pruebas.c(pruebas.p(1)
 -- ---------------------------------------------------------------------------------------
 -- Sin valor en el parámetro, se reporta y no se oculta.
 
-select pruebas.parametro('REPORTES_PARA_OCULTAR', null);
+-- Sin valor: el parámetro en `null` de JSON (la columna no admite el nulo de SQL).
+select pruebas.parametro('REPORTES_PARA_OCULTAR', 'null');
 select is(pruebas.publica(pruebas.p(3), 'Un comentario de Cata', 'c3'), 'ok', 'Cata publica');
 select count(*) as hecho from (select pruebas.reporta(pruebas.p(n), 'c3') from generate_series(1, 5) n where n <> 3) as llamada;
 select is(pruebas.estado('c3'), 'published 4 false', 'sin valor, cuatro reportes no lo ocultan');
