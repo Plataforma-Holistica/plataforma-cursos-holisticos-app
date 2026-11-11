@@ -46,6 +46,9 @@ export const lesson = defineMessages({
     graceEndedText: "No pudimos cobrar tu suscripción. Tu avance sigue aquí.",
     refunded: "Tu suscripción fue reembolsada",
     refundedText: "Puedes volver cuando quieras.",
+    // La acción de PA-33 (T-302): a los planes, con la lección como destino.
+    seePlans: "Ver planes",
+    resubscribe: "Volver a suscribirme",
   },
   // PA-34 (T-204, RF-107): la cuenta ya reproduce en otro lugar. Describe y resuelve: no acusa
   // de compartir la cuenta. Con `SESIONES_SIMULTANEAS` en 1 hay una sola fila; si sube, el texto

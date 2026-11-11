@@ -1,13 +1,12 @@
-import { lessonPath, signUpPath } from "@/services/account/navigation";
+import { lessonPath, plansPath, signUpPath } from "@/services/account/navigation";
 import type { CourseDetail, CourseStanding } from "@/services/browse/browse";
 import type { LessonAccess } from "@/services/media/media";
 
 // El botón principal de la ficha de un curso (PA-02, tabla «Acciones»; T-210). Cambia según quién
 // mira. Es una tabla pura: la página trae los hechos y esto decide qué botón y a dónde.
 //
-// Mientras no exista la pantalla de planes (T-30x), «Suscribirme para verlo» del visitante lleva a
-// registrarse con la lección como destino, y el del alumno sin acceso, a la lección, donde PA-33
-// explica por qué. Sin constancias (T-504), quien terminó el curso lo vuelve a ver desde la primera.
+// «Suscribirme para verlo» lleva a los planes (PA-04, T-302) con la primera lección como destino, al
+// visitante y al alumno sin acceso; el curso abierto, a registrarse. Sin constancias (T-504), quien terminó el curso lo vuelve a ver desde la primera.
 
 export type PrimaryAction =
   | { kind: "start" | "again" | "subscribe" | "open_free"; href: string }
@@ -24,11 +23,11 @@ export function primaryAction(detail: CourseDetail, viewer: Viewer): PrimaryActi
 
   // No se sabe quién mira (una cuenta suspendida o a medias, o no se supo): sin botón.
   if (viewer.kind === "unknown") return { kind: "none" };
-  if (viewer.kind === "visitor") return { kind: detail.course.isOpen ? "open_free" : "subscribe", href: signUpPath(first) };
+  if (viewer.kind === "visitor") return detail.course.isOpen ? { kind: "open_free", href: signUpPath(first) } : { kind: "subscribe", href: plansPath(first) };
 
   switch (viewer.access.kind) {
     case "denied":
-      return { kind: "subscribe", href: first };
+      return { kind: "subscribe", href: plansPath(first) };
     case "allowed":
       break;
     // Suspendida, sin video que ver, o no se supo: no se sabe qué botón le toca, y ninguno se

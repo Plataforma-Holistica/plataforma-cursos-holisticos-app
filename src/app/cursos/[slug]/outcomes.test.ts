@@ -42,10 +42,11 @@ const standing = (over: Partial<CourseStanding>): CourseStanding => ({
 const allowed: LessonAccess = { kind: "allowed" };
 const lesson = (id: string) => `/cursos/respirar/lecciones/${id}`;
 const signUp = (id: string) => `/registro?volver=${encodeURIComponent(lesson(id))}`;
+const plans = (id: string) => `/planes?volver=${encodeURIComponent(lesson(id))}`;
 
 describe("el visitante", () => {
-  it("curso normal: «Suscribirme para verlo», a registrarse con la primera lección de destino", () => {
-    expect(primaryAction(detail(), { kind: "visitor" })).toEqual({ kind: "subscribe", href: signUp(FIRST) });
+  it("curso normal: «Suscribirme para verlo», a los planes con la primera lección de destino", () => {
+    expect(primaryAction(detail(), { kind: "visitor" })).toEqual({ kind: "subscribe", href: plans(FIRST) });
   });
 
   it("curso abierto: «Verlo sin costo», también a registrarse", () => {
@@ -58,9 +59,9 @@ it("si no se sabe quién mira, sin botón: ni registrarse ni empezar", () => {
 });
 
 describe("el alumno", () => {
-  it("sin acceso: «Suscribirme para verlo», a la lección, donde PA-33 dice por qué", () => {
+  it("sin acceso: «Suscribirme para verlo», a los planes con la primera lección de destino", () => {
     const denied = { kind: "denied", account: { kind: "never" } } as unknown as LessonAccess;
-    expect(primaryAction(detail(), { kind: "student", access: denied, standing: standing({}) })).toEqual({ kind: "subscribe", href: lesson(FIRST) });
+    expect(primaryAction(detail(), { kind: "student", access: denied, standing: standing({}) })).toEqual({ kind: "subscribe", href: plans(FIRST) });
   });
 
   it("con la cuenta suspendida, sin botón", () => {
