@@ -80,6 +80,7 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
               return (
                 <li key={course.slug}>
                   <CourseCard
+                    courseKey={course.slug}
                     href={href}
                     title={course.title}
                     teacherName={course.teacherName}

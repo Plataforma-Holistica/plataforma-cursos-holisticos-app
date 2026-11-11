@@ -59,7 +59,7 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
         {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
         <h1 className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l")}>{title}</h1>
         {lead !== undefined && <div className="max-w-reading animate-enter text-body-l text-text-2">{lead}</div>}
-        {children}
+        {children !== undefined && <div className="animate-enter">{children}</div>}
       </div>
     </div>
   );

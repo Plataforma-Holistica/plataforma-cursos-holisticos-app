@@ -21,8 +21,9 @@ import { Rosette } from "./flower";
 //   van solo el maestro y la línea de datos. Vertical 4:5 en las filas y la rejilla, 16:9 en la destacada (`shape`);
 // - con avance, la barra en oro sobre la portada y, en la línea de abajo, la roseta de la flor de la vida (en
 //   trazo a medias, en oro al terminar) junto a «Lección N de M»: así la esquina queda libre para `corner`;
-// - la portada se siembra con el curso (`courseKey`, o su título), no con el enlace: el mismo curso se ve igual
-//   en la ficha y en «Continuar viendo», que enlaza a la lección;
+// - la portada se siembra con el curso (`courseKey`, su slug, obligatorio), nunca con el enlace ni con el título:
+//   el mismo curso se ve igual en «Nuevos», en su ficha y en «Continuar viendo» (que enlaza a la lección), y dos
+//   cursos con el mismo título no comparten portada;
 // - `corner` es lo que va sobre la esquina de la portada, fuera del enlace (un botón dentro de un enlace no
 //   vale): «Guardar en mi lista» como botón de icono. Va como hermano del enlace, encima de la portada;
 // - al pasar el cursor la portada sube 4 px y su borde de luz aclara; con movimiento reducido no sube.
@@ -41,8 +42,8 @@ export interface CourseCardProps {
   shape?: "portrait" | "wide";
   /** Lo que va sobre la esquina de la portada, fuera del enlace. */
   corner?: ReactNode;
-  /** El curso (su slug): siembra la portada. Sin él, el título. Nunca el enlace, que cambia según a dónde lleva. */
-  courseKey?: string;
+  /** El curso (su slug): siembra la portada. Nunca el enlace, que cambia según a dónde lleva, ni el título, que se repite. */
+  courseKey: string;
   className?: string;
 }
 
@@ -87,7 +88,7 @@ export function CourseCard({
             practiceName={practice?.name ?? null}
             practiceKey={practice?.position ?? practice?.slug ?? practice?.name ?? null}
             tone={practice?.tone ?? null}
-            seed={courseKey ?? title}
+            seed={courseKey}
             shape={shape}
             corner={corner !== undefined}
             badge={isOpen ? <span className="rounded-sm bg-bg px-2 py-1 text-label text-text uppercase">{text.open}</span> : undefined}

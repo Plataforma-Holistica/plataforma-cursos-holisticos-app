@@ -107,7 +107,7 @@ describe("los motivos de las portadas (T-616)", () => {
 });
 
 describe("la tarjeta de curso como cartel (T-616)", () => {
-  const course = { href: "/cursos/respirar", title: "Respirar para dormir", teacherName: "Ana Robles", practice: { name: "Respiración", tone: 4, position: 0 }, levelName: "Inicial", lessonCount: 6 };
+  const course = { href: "/cursos/respirar", courseKey: "respirar-para-dormir", title: "Respirar para dormir", teacherName: "Ana Robles", practice: { name: "Respiración", tone: 4, position: 0 }, levelName: "Inicial", lessonCount: 6 };
 
   it("es un solo enlace con el título y el maestro en su nombre; lo de la esquina va fuera de él", async () => {
     const { container } = render(<CourseCard {...course} corner={<button type="button">Guardar en mi lista: Respirar para dormir</button>} />);
@@ -139,13 +139,25 @@ describe("la tarjeta de curso como cartel (T-616)", () => {
 
   it("el mismo curso se ve igual con dos enlaces distintos: la portada se siembra con el curso, no con el enlace", () => {
     const portrait = (href: string) => {
-      const { container, unmount } = render(<CourseCard {...course} href={href} courseKey="respirar-para-dormir" />);
+      const { container, unmount } = render(<CourseCard {...course} href={href} />);
       const art = container.querySelector("[aria-hidden='true'] > div");
       const look = { classes: art?.className, motif: art?.querySelector("svg path")?.getAttribute("transform") };
       unmount();
       return look;
     };
     expect(portrait("/cursos/respirar-para-dormir")).toEqual(portrait("/cursos/respirar-para-dormir/lecciones/123"));
+  });
+
+  it("dos cursos con el mismo título y distinto curso no comparten portada", () => {
+    const look = (courseKey: string) => {
+      const { container, unmount } = render(<CourseCard {...course} courseKey={courseKey} />);
+      const art = container.querySelector("[aria-hidden='true'] > div");
+      const found = { classes: art?.className, motif: art?.querySelector("svg path")?.getAttribute("transform") };
+      unmount();
+      return found;
+    };
+    // Mismo título, misma práctica: lo que cambia (el foco o la colocación del motivo) sale del curso.
+    expect(look("respirar-para-dormir")).not.toEqual(look("respirar-para-dormir-2"));
   });
 
   it("el aviso de curso abierto va en el flujo, bajo la práctica, y no encima del título", () => {

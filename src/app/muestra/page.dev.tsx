@@ -8,6 +8,7 @@ import { Button } from "@/ui/button";
 import { Checkbox } from "@/ui/checkbox";
 import { ConsentCheckbox } from "@/ui/consent-checkbox";
 import { CourseCard } from "@/ui/course-card";
+import { CourseArt } from "@/ui/course-cover";
 import { DataTable } from "@/ui/data-table";
 import { Disclaimer } from "@/ui/disclaimer";
 import { Filigree, FlowerMark, Rosette, SeedMark } from "@/ui/flower";
@@ -162,10 +163,16 @@ export default function SamplePage() {
           </div>
           <ul className="grid grid-cols-2 gap-4">
             <li className="relative">
-              <CourseCard href="#" {...SAMPLE_COURSE} progress={{ completed: 2, total: 6, lessonNumber: 3 }} />
+              <CourseCard href="#" courseKey="respiracion-para-dormir" {...SAMPLE_COURSE} progress={{ completed: 2, total: 6, lessonNumber: 3 }} />
             </li>
             <li className="relative">
-              <CourseCard href="#" {...SAMPLE_COURSE} title="Meditación de la mañana" progress={{ completed: 6, total: 6, lessonNumber: 6 }} />
+              <CourseCard
+                href="#"
+                courseKey="meditacion-de-la-manana-muestra"
+                {...SAMPLE_COURSE}
+                title="Meditación de la mañana"
+                progress={{ completed: 6, total: 6, lessonNumber: 6 }}
+              />
             </li>
           </ul>
         </Section>
@@ -176,10 +183,13 @@ export default function SamplePage() {
           <h2 id="muestra-portadas" className="text-h2">
             Dirección: portadas
           </h2>
+          {/* La 16:9 grande, la de la destacada: ahí las ondas se ven más que en ningún otro lado. */}
+          <CourseArt practiceName="Meditación" practiceKey={1} tone={3} seed="destacada-ondas" shape="wide" className="rounded-lg" />
           <ul className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-5">
             {SAMPLE_GRID.map((course) => (
               <li key={course.slug} className="relative min-w-0">
                 <CourseCard
+                  courseKey={course.slug}
                   href={`#${course.slug}`}
                   title={course.title}
                   teacherName={course.teacher}

@@ -30,14 +30,17 @@ const circle = (cx: number, cy: number, r: number) => `M${round(cx - r)} ${cy}a$
 /** Círculos que se cruzan: tres grandes en triángulo, dentro de uno mayor. */
 const crossing = [...[90, 210, 330].map((degrees) => at(degrees, 15)).map(([x, y]) => circle(x, y, 26)), circle(0, 0, 41)].join("");
 
-/** Ondas: siete líneas que ondulan, paralelas. */
+/**
+ * Ondas: siete líneas que ondulan, paralelas. Cada una es una cadena de curvas cuadráticas (un medio periodo por
+ * curva, y `T` repite la curva al revés), no una línea quebrada: así se ve lisa también en la portada grande, donde
+ * el motivo se agranda. Periodo de 50, amplitud de 4, cada línea corrida un poco respecto de la anterior.
+ */
 const waves = Array.from({ length: 7 }, (_, line) => {
   const y = -42 + line * 14;
-  const points = Array.from({ length: 26 }, (_, step) => {
-    const x = -50 + step * 4;
-    return `${x} ${round(y + 4 * Math.sin((x / 100) * 4 * Math.PI + line * 0.6))}`;
-  });
-  return `M${points.join("L")}`;
+  const half = 25;
+  const start = round(-75 - ((line * 0.6) / (2 * Math.PI)) * 2 * half);
+  const steps = Array.from({ length: 6 }, (_, step) => `${round(start + (step + 2) * half)} ${y}`);
+  return `M${start} ${y}Q${round(start + half / 2)} ${y - 8} ${round(start + half)} ${y}T${steps.join(" ")}`;
 }).join("");
 
 /** Círculos concéntricos. */

@@ -139,7 +139,8 @@ export interface CourseArtProps {
 export function CourseArt({ title, practiceName, practiceKey, tone, seed = "", shape = "portrait", corner = false, badge, className }: CourseArtProps) {
   return (
     <div aria-hidden="true" className={cx("@container relative overflow-hidden grain", ART[tone ?? NEUTRAL_TONE], artFocus(seed), SHAPES[shape], className)}>
-      <Motif kind={motifFor(practiceKey ?? practiceName ?? "")} courseKey={seed} className="absolute inset-x-0 top-0 h-3/5 w-full opacity-15" />
+      {/* El motivo se desvanece hacia abajo en vez de cortarse en seco donde termina su 60 %. */}
+      <Motif kind={motifFor(practiceKey ?? practiceName ?? "")} courseKey={seed} className="absolute inset-x-0 top-0 h-3/5 w-full opacity-15 mask-b-from-50%" />
       {practiceName !== null && <span className="absolute inset-x-0 top-0 h-1/4 bg-linear-to-b from-bg/45 to-transparent" />}
       {title !== undefined && <span className="absolute inset-x-0 bottom-0 h-2/3 bg-linear-to-t from-bg/85 via-bg/40 to-transparent" />}
       <div className="relative flex h-full flex-col justify-between p-cover">
