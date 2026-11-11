@@ -7,7 +7,7 @@
 -- el vigilante.
 begin;
 \ir _ayuda.psql
-select plan(48);
+select plan(63);
 
 create function pruebas.p(p_n integer) returns uuid language sql immutable
 as $$ select ('a9800000-0000-0000-0000-' || lpad(p_n::text, 12, '0'))::uuid $$;
@@ -203,6 +203,23 @@ select is((select count(*)::int from jsonb_array_elements(pruebas.c(pruebas.p(1)
   where i ->> 'id' = pruebas.id('c1')::text), 0, 'ni en «Mis comentarios» de su autora');
 
 -- ---------------------------------------------------------------------------------------
+-- Una respuesta bajo un comentario borrado sigue a la vista, y se reporta; con el veto, el reporte se guarda y no cuenta.
+
+select is(pruebas.publica(pruebas.p(4), 'Uno de Dani que se borra', 'c6'), 'ok', 'Dani publica');
+select is(pruebas.publica(pruebas.p(5), 'Eva le responde', 'r6', 'c6'), 'ok', 'Eva le responde');
+select is(pruebas.r(pruebas.p(4), format('private.comment_delete(%L, %s)', pruebas.id('c6'), 1)), 'ok', 'Dani borra lo suyo');
+select pruebas.limpiar();
+set local session_replication_role = replica;
+update public.profiles set comment_ban_until = now() + interval '1 day' where id = pruebas.p(3);
+set local session_replication_role = origin;
+select is(pruebas.reporta(pruebas.p(3), 'r6'), '{"answer": "ok"}'::jsonb, 'Cata, con el veto, reporta la respuesta bajo lo borrado');
+select is(pruebas.estado('r6'), 'published 0 false', 'y su reporte no cuenta');
+select is((select counts from public.comment_reports where comment_id = pruebas.id('r6') and reporter_id = pruebas.p(3)), false, 'se guarda como que no cuenta');
+set local session_replication_role = replica;
+update public.profiles set comment_ban_until = null where id = pruebas.p(3);
+set local session_replication_role = origin;
+
+-- ---------------------------------------------------------------------------------------
 -- Sin valor en el parámetro, se reporta y no se oculta.
 
 -- Sin valor: el parámetro en `null` de JSON (la columna no admite el nulo de SQL).
@@ -221,9 +238,13 @@ select is((select array_agg(distinct reported_body) from public.comment_reports 
 -- El freno y el cerrojo.
 
 select is(pruebas.publica(pruebas.p(4), 'Uno de Dani', 'c4'), 'ok', 'Dani publica');
-insert into private.rate_limit_counters (bucket, window_start, hits) values ('comment_report:' || pruebas.p(5), date_trunc('minute', now()), 10)
-on conflict (bucket, window_start) do update set hits = 10;
-select is(pruebas.reporta(pruebas.p(5), 'c4') ->> 'answer', 'throttled', 'diez reportes en una hora, y el siguiente espera');
+select is(pruebas.publica(pruebas.p(4), 'Otro de Dani', 'c5'), 'ok', 'Dani publica otro');
+-- Eva ya reportó en esta hora: se completa a nueve, hace 50 minutos.
+insert into private.rate_limit_counters (bucket, window_start, hits)
+select 'comment_report:' || pruebas.p(5), date_trunc('minute', now()) - interval '50 minutes',
+  9 - (select coalesce(sum(hits), 0)::int from private.rate_limit_counters where bucket = 'comment_report:' || pruebas.p(5));
+select is(pruebas.reporta(pruebas.p(5), 'c4') ->> 'answer', 'ok', 'el décimo reporte en una hora pasa');
+select is(pruebas.reporta(pruebas.p(5), 'c5') ->> 'answer', 'throttled', 'y el siguiente espera');
 select pruebas.marca('comments_accept', false);
 select is(pruebas.reporta(pruebas.p(2), 'c4') ->> 'answer', 'closed', 'sin el cerrojo abierto, no se reporta (hasta T-503)');
 select pruebas.marca('comments_accept', true);
@@ -235,10 +256,18 @@ select pruebas.parametro('COMENTARIOS_ABIERTOS', 'true');
 -- El guardián, la tabla y el vigilante.
 
 select pruebas.limpiar();
-select throws_ok(format($$update public.comments set status = 'hidden' where id = %L$$, pruebas.id('c4')),
+select throws_ok(format($$update public.comments set status = 'hidden', report_count = 3 where id = %L$$, pruebas.id('c4')),
   '23514', null, 'ni el dueño oculta sin la hora');
-select throws_ok(format($$update public.comments set status = 'hidden', hidden_at = now() where id = %L$$, pruebas.id('c2')),
+select throws_ok(format($$update public.comments set status = 'hidden', hidden_at = now(), report_count = 3 where id = %L$$, pruebas.id('c2')),
   '23514', null, 'ni oculta lo que no está publicado');
+select throws_ok(format($$update public.comments set status = 'hidden', hidden_at = now(), report_count = 0 where id = %L$$, pruebas.id('c4')),
+  '23514', null, 'ni oculta sin reportes');
+select throws_ok(format($$update public.comments set status = 'published' where id = %L$$, pruebas.id('c1')),
+  '23514', null, 'lo oculto no vuelve a publicarse solo (es de moderación, T-503)');
+select throws_ok(format($$update public.comments set status = 'in_review', filter_verdict = 'flagged', filter_provider = 'test' where id = %L$$, pruebas.id('c1')),
+  '23514', null, 'ni pasa a revisión');
+select throws_ok(format($$update public.comments set status = 'in_filter', body = 'Otro', filter_verdict = null, filter_provider = null, filter_checked_at = null where id = %L$$, pruebas.id('c1')),
+  '23514', null, 'ni vuelve al filtro');
 select pruebas.como_servicio(pruebas.p(2));
 select throws_ok('select count(*) from public.comment_reports', '42501', null, 'el servidor no lee los reportes');
 select pruebas.limpiar();

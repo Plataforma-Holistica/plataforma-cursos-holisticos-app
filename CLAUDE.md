@@ -1200,9 +1200,10 @@ que no se ve leyendo un solo archivo:
   la fila, el comentario pasa a `hidden` con `hidden_at` (el guardián solo deja ocultar lo publicado, con su hora); sin valor en el
   parámetro, no se oculta. **Lo oculto**, para quien no es su autor (también la maestra), sale con `state: "hidden"` y sin texto, nombre ni
   marca del maestro, y la pantalla pinta «Comentario en revisión»; su autor lo ve con su texto, la etiqueta «En revisión» y sin «Editar» ni
-  «Borrar». Sus respuestas se ocultan con él y salen del número de la pestaña; no aparece en PA-45 ni en «Mis comentarios», y no recibe
-  respuestas. El servicio es `reportLessonComment`. Usa pgTAP 98 y tres casos más en la integración 102. El menú «Reportar» y su diálogo
-  llegan con la tercera solicitud. Decisiones mías sin confirmar: el freno de 10 por hora; reportar pide el cerrojo; con el veto se reporta;
+  «Borrar». Sus respuestas se ocultan con él y salen del número de la pestaña; un comentario oculto no aparece arriba en PA-45 (una
+  respuesta oculta sí, como su lugar) ni en «Mis comentarios», y no recibe respuestas. Una respuesta bajo un comentario borrado también
+  se reporta, y el reporte de quien tiene el veto se guarda y no cuenta. El servicio es `reportLessonComment`. Usa pgTAP 98 y tres casos más en la integración 102. El menú «Reportar» y su diálogo
+  llegan con la tercera solicitud. Decisiones mías sin confirmar: el freno de 10 por hora; reportar pide el cerrojo; con el veto se reporta y no cuenta;
   sin valor no se oculta; lo oculto fuera de PA-45; la vista de lo oculto en esta solicitud y no en la tercera. Para el A: nada que le toque.
 - **Lo que T-615 suma al carril B** (el nombre, sin migración; PQ-13 decidido por Pablo y Sergio el 2026-11-09, con el encargo que Sergio
   aprobó ese día). **El producto se llama Escuela de Misterios:** `terms.Plataforma` lo dice sin artículo, como el logotipo, y cada texto que

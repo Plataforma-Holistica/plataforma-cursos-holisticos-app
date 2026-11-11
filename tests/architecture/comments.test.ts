@@ -32,7 +32,9 @@ describe("los comentarios pasan por la regla y por la base como deben", () => {
 
   it("las funciones de la base las nombra un solo archivo, y las tablas ninguno", () => {
     expect(naming(/\bprivate\.comments?_/)).toEqual(["src/services/comments/records.ts"]);
-    expect(naming(/\bpublic\.(?:comments|profile_privacy)\b|\bprofile_privacy\b/)).toEqual([]);
+    expect(naming(/\bpublic\.(?:comments|profile_privacy|comment_reports)\b|\bprofile_privacy\b|\bcomment_reports\b/)).toEqual([]);
+    // Reportar existe en el servicio, y ninguna pantalla lo llama todavía: el menú y su diálogo llegan con la tercera solicitud de T-502.
+    expect(naming(/\breportLessonComment\b/).filter((file) => !file.startsWith("src/services/comments/"))).toEqual([]);
     // Al servicio solo lo importan las pantallas, nunca otro servicio.
     expect(naming(/@\/services\/comments\//).filter((file) => file.startsWith("src/services/"))).toEqual([]);
   });

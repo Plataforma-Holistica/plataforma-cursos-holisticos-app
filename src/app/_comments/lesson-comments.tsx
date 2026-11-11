@@ -527,8 +527,10 @@ export function useCommentThread({
   // Un aviso que habla de algo que esta vuelta no pinta (un comentario de otra página, el campo que se sustituyó, la respuesta a un
   // comentario que ya no la recibe, una edición de lo que se fue) se dice arriba del hilo, con lo escrito para copiarlo.
   const replyOpen = (parentId: string) => canWrite(write) && items.some((thread) => thread.id === parentId && thread.state === "published");
-  // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí.
-  const live = new Set(items.flatMap((thread) => [thread, ...thread.replies.items]).filter((item) => item.state !== "deleted").map((item) => item.id));
+  // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí. Lo oculto se pinta sin su campo de edición.
+  const shown = items.flatMap((thread) => [thread, ...thread.replies.items]);
+  const live = new Set(shown.filter((item) => item.state !== "deleted").map((item) => item.id));
+  const editable = new Set(shown.filter((item) => item.state !== "deleted" && item.state !== "hidden").map((item) => item.id));
   // Lo que cruza el diálogo del nombre está en el diálogo: no se perdió.
   const crossing = (parentId: string) => state.open.kind === "name" && state.open.carry?.parentId === parentId;
   const painted = (at: NoticePlace): boolean => {
@@ -540,7 +542,7 @@ export function useCommentThread({
       case "reply":
         return crossing(at.parentId) || (state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId));
       case "edit":
-        return live.has(at.id);
+        return editable.has(at.id);
       default:
         return true;
     }

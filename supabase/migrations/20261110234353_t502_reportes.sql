@@ -16,7 +16,9 @@
 -- número de la pestaña. En PA-45 y en «Mis comentarios» no aparece.
 --
 -- Decisiones mías sin confirmar: el freno de 10 reportes por hora por cuenta; reportar pide el interruptor y el cerrojo de producción,
--- como publicar; una cuenta con el veto sí reporta; sin valor en el parámetro no se oculta; lo oculto no aparece en PA-45.
+-- como publicar; una cuenta con el veto sí reporta, y su reporte no cuenta (con el veto no se escribe); sin valor en el parámetro no
+-- se oculta; un comentario oculto no aparece arriba en PA-45 (una respuesta oculta, sí, como su lugar); una respuesta bajo un
+-- comentario borrado también se reporta.
 
 create type public.report_reason as enum ('spam', 'abusive', 'medical_advice', 'concern_for_person', 'other');
 
@@ -222,7 +224,7 @@ begin
   if v_comment.id is null or v_comment.status <> 'published' or v_comment.author_id is not distinct from v_actor
      or (private.comment_lesson(v_comment.lesson_id)).id is null
      or (v_comment.parent_id is not null
-         and not exists (select 1 from public.comments p where p.id = v_comment.parent_id and p.status = 'published')) then
+         and not exists (select 1 from public.comments p where p.id = v_comment.parent_id and p.status in ('published', 'deleted'))) then
     return '{"answer": "not_found"}'::jsonb;
   end if;
   if exists (select 1 from public.comment_reports r where r.comment_id = p_comment and r.reporter_id = v_actor) then
@@ -236,6 +238,8 @@ begin
   insert into private.rate_limit_counters as c (bucket, window_start, hits)
   values (v_bucket, v_minute, 1)
   on conflict (bucket, window_start) do update set hits = c.hits + 1;
+  -- Con el veto no se escribe ahí: el reporte se guarda y no cuenta.
+  p_counts := p_counts and not exists (select 1 from public.profiles p where p.id = v_actor and p.comment_ban_until > now());
   insert into public.comment_reports (comment_id, reporter_id, reason, note, reported_body, counts)
   values (p_comment, v_actor, p_reason::public.report_reason, p_note, v_comment.body, p_counts);
   if p_counts then
