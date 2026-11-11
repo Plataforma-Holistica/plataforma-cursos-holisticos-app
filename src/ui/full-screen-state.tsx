@@ -2,6 +2,7 @@ import type { IconNode } from "lucide";
 import type { ReactNode } from "react";
 
 import { FocusHeading } from "./focus-heading";
+import { SeedMark } from "./flower";
 import { Icon } from "./icon";
 
 // Estado de pantalla completa (diseño, sección 5.7): lo que se muestra en lugar de la
@@ -14,7 +15,8 @@ import { Icon } from "./icon";
 // No pone el `<main>`: lo pone la pantalla, con su `id` para el enlace de salto.
 
 export interface FullScreenStateProps {
-  icon: IconNode;
+  /** El icono. Sin él, la semilla de la flor de la vida (T-616: los estados de la casa, como el 404). */
+  icon?: IconNode;
   /** El `<h1>` de la pantalla. La pestaña del navegador debe decir lo mismo. */
   title: ReactNode;
   /** Dos frases como máximo. */
@@ -46,7 +48,7 @@ export function FullScreenState({
 }: FullScreenStateProps) {
   return (
     <div className="mx-auto flex max-w-form flex-col items-start gap-6 px-4 py-16">
-      <Icon icon={icon} size={24} className="text-text-2" />
+      {icon === undefined ? <SeedMark className="size-20" /> : <Icon icon={icon} size={24} className="text-text-2" />}
       <div className="flex flex-col gap-3">
         <FocusHeading className="text-h1" focus={focusTitle}>
           {title}

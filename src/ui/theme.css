@@ -23,6 +23,8 @@
   --accent-subtle: #302C1B;
   --on-accent: #1D1808;
   --focus: #F6EBC9;
+  /* El oro apagado de los antetítulos (T-616): el mismo tono, más callado. Solo texto chico, nunca un control. */
+  --accent-muted: #B5A574;
 
   /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro. */
   --bg: #0F1019;
@@ -44,6 +46,19 @@
   --warning-bg: #2E1D12;
   --danger: #F58FA6;
   --danger-bg: #30151C;
+
+  /* La profundidad (T-616): tres planos. El fondo; las superficies, con un borde de luz arriba y un
+     contorno apenas visible; y lo que flota (la barra, los diálogos), translúcido sobre el fondo
+     desenfocado. Detrás de cada cabecera, un resplandor índigo muy tenue (el tono de la portada 6). */
+  --edge-light: rgb(255 255 255 / 0.07);
+  --edge-ring: rgb(255 255 255 / 0.045);
+  --float: rgb(15 16 25 / 0.62);
+  --glow: rgb(72 80 140 / 0.32);
+  --glow-header: radial-gradient(70% 90% at 15% 0%, var(--glow), transparent 70%);
+  /* La filigrana de la flor de la vida en las cabeceras: el tono del borde, casi invisible. */
+  --filigree: var(--border);
+  /* Los títulos van en el ancho angosto de Bricolage (su eje `wdth`, de 75 a 100). */
+  --display-stretch: 88%;
 
   /* Capas sobre imagen */
   --scrim: rgb(0 0 0 / 0.72);
@@ -81,11 +96,30 @@
   --cover-7: #6F4579; --cover-7-deep: #3A2440; /* ciruela */
   --cover-8: #8A3E55; --cover-8-deep: #481F2C; /* vino */
 
+  /* Las portadas «arte» de la tarjeta (T-616): el tono de cada práctica con un tercio menos de saturación,
+     para que las ocho sean de la misma familia nocturna, y con la luz del foco un 18 % más alta que en el
+     prototipo (solicitud 1). Van en un degradado radial desde arriba hacia el fondo de la casa (`art-N`). */
+  --art-1: #845849;
+  --art-2: #7A6540;
+  --art-3: #5C6D53;
+  --art-4: #40685D;
+  --art-5: #406474;
+  --art-6: #5C628A;
+  --art-7: #725678;
+  --art-8: #875362;
+  /* El grano de las portadas: ruido de SVG, muy tenue. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  --grain-opacity: 0.07;
+  /* El borde de luz al pasar el cursor por una tarjeta. */
+  --edge-light-strong: rgb(255 255 255 / 0.18);
+
   /* Movimiento */
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
   --delay-preview: 600ms;
+  /* La única entrada de una pantalla (T-616). */
+  --duration-enter: 480ms;
 
   /* Capas. De abajo hacia arriba; el enlace de salto va encima de todo. */
   --z-sticky: 10;
@@ -98,19 +132,20 @@
      una superficie lo redefine con `halo-surface-*`. */
   --focus-halo: var(--bg);
 
-  /* Escala de títulos en teléfono (menos de 640 px). Los demás estilos no cambian. */
-  --fs-display-xl: 2.25rem;  --lh-display-xl: 2.5rem;    /* 36 / 40 */
-  --fs-display-l: 1.875rem;  --lh-display-l: 2.125rem;   /* 30 / 34 */
-  --fs-h1: 1.625rem;         --lh-h1: 2rem;              /* 26 / 32 */
+  /* Escala de títulos en teléfono (menos de 640 px). Los demás estilos no cambian. Desde T-616, un
+     escalón más grande: con el ancho angosto, el título gana presencia sin ocupar más renglón. */
+  --fs-display-xl: 2.5rem;   --lh-display-xl: 2.625rem;  /* 40 / 42 */
+  --fs-display-l: 2.125rem;  --lh-display-l: 2.25rem;    /* 34 / 36 */
+  --fs-h1: 1.75rem;          --lh-h1: 2rem;              /* 28 / 32 */
   --fs-h2: 1.375rem;         --lh-h2: 1.75rem;           /* 22 / 28 */
 }
 
 @media (width >= 40rem) {
   :root {
-    --fs-display-xl: 3.5rem;  --lh-display-xl: 3.75rem;  /* 56 / 60 */
-    --fs-display-l: 2.5rem;   --lh-display-l: 2.75rem;   /* 40 / 44 */
-    --fs-h1: 2rem;            --lh-h1: 2.375rem;         /* 32 / 38 */
-    --fs-h2: 1.5rem;          --lh-h2: 1.875rem;         /* 24 / 30 */
+    --fs-display-xl: 4.25rem; --lh-display-xl: 4.25rem;  /* 68 / 68 */
+    --fs-display-l: 3.25rem;  --lh-display-l: 3.375rem;  /* 52 / 54 */
+    --fs-h1: 2.5rem;          --lh-h1: 2.75rem;          /* 40 / 44 */
+    --fs-h2: 1.75rem;         --lh-h2: 2.125rem;         /* 28 / 34 */
   }
 }
 
@@ -133,6 +168,9 @@
   --color-accent-subtle: var(--accent-subtle);
   --color-on-accent: var(--on-accent);
   --color-focus: var(--focus);
+  --color-accent-muted: var(--accent-muted);
+  --color-float: var(--float);
+  --color-filigree: var(--filigree);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
@@ -175,11 +213,11 @@
   --text-*: initial;
   --text-display-xl: var(--fs-display-xl);
   --text-display-xl--line-height: var(--lh-display-xl);
-  --text-display-xl--letter-spacing: -0.03em;
+  --text-display-xl--letter-spacing: -0.02em;
   --text-display-xl--font-weight: 700;
   --text-display-l: var(--fs-display-l);
   --text-display-l--line-height: var(--lh-display-l);
-  --text-display-l--letter-spacing: -0.025em;
+  --text-display-l--letter-spacing: -0.02em;
   --text-display-l--font-weight: 700;
   --text-h1: var(--fs-h1);
   --text-h1--line-height: var(--lh-h1);
@@ -211,6 +249,12 @@
   --text-label--line-height: 1rem;
   --text-label--letter-spacing: 0.12em;
   --text-label--font-weight: 600;
+  /* El antetítulo (T-616): en versalitas (`eyebrow`, abajo), en el oro apagado. */
+  /* 18 px en versalitas se ven como mayúsculas de 12 a 13 px (segunda vuelta). */
+  --text-eyebrow: 1.125rem;
+  --text-eyebrow--line-height: 1.5rem;
+  --text-eyebrow--letter-spacing: 0.14em;
+  --text-eyebrow--font-weight: 600;
   /* `stat` va con cifras tabulares (`tabular-nums`). */
   --text-stat: 2.5rem;
   --text-stat--line-height: 2.75rem;
@@ -231,6 +275,20 @@
   --text-cover-s--line-height: 1.1;
   --text-cover-s--letter-spacing: -0.02em;
   --text-cover-s--font-weight: 700;
+  /* El título de un cartel vertical (4:5, T-616): ocupa todo el ancho, así que mide más contra él, y nunca
+     baja de 16, 18 o 20 px: en las dos columnas del teléfono la portada mide unos 170 px. */
+  --text-poster-l: max(12cqw, 1.25rem);
+  --text-poster-l--line-height: 1.04;
+  --text-poster-l--letter-spacing: -0.015em;
+  --text-poster-l--font-weight: 700;
+  --text-poster-m: max(10cqw, 1.125rem);
+  --text-poster-m--line-height: 1.06;
+  --text-poster-m--letter-spacing: -0.015em;
+  --text-poster-m--font-weight: 700;
+  --text-poster-s: max(8cqw, 1rem);
+  --text-poster-s--line-height: 1.08;
+  --text-poster-s--letter-spacing: -0.015em;
+  --text-poster-s--font-weight: 700;
   /* La práctica y el maestro sobre la portada, también contra su ancho. */
   --text-cover-label: 3.2cqw;
   --text-cover-label--line-height: 1.2;
@@ -258,15 +316,22 @@
      para crecer con la letra del nombre. */
   --spacing-brand-dot: 0.17em;
   --spacing-brand-dot-gap: 0.06em;
+  /* La flor de la vida delante del nombre, en la barra (T-616): también en `em`, con su separación. */
+  --spacing-brand-mark: 1.3em;
+  --spacing-brand-mark-gap: 0.4em;
 
   --radius-*: initial;
   --radius-none: 0;
   --radius-sm: 2px;
   --radius-md: 4px;
+  /* Las piezas grandes (T-616): portadas, tarjetas, paneles y la barra. Un solo radio por tipo de pieza:
+     los controles siguen en `md`, las etiquetas en `sm`. */
+  --radius-lg: 8px;
   --radius-full: 9999px;
 
   --shadow-*: initial;
-  --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.40);
+  /* Desde T-616 la sombra de lo elevado es doble: un contacto corto y una caída larga y suave. */
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.35), 0 14px 32px -14px rgb(0 0 0 / 0.65);
   --shadow-overlay: 0 8px 32px rgb(0 0 0 / 0.55);
   /* El halo del anillo de foco, para el control que lo pinta en otro elemento (`FileInput`): el
      mismo del foco global, más abajo. */
@@ -294,6 +359,94 @@
 /* El velo sobre una imagen que lleva texto encima. */
 @utility bg-veil {
   background-image: var(--veil);
+}
+
+/* La profundidad (T-616). `edge-light` le pone a una pieza su borde de luz arriba y su contorno, encima
+   de lo que tenga dentro (una portada, una foto): va en un pseudoelemento porque una sombra interior
+   queda debajo del contenido. La pieza necesita `relative`, y el radio lo hereda. */
+@utility edge-light {
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 var(--edge-light), inset 0 0 0 1px var(--edge-ring);
+    pointer-events: none;
+  }
+}
+/* Una superficie elevada: el segundo plano. */
+@utility surface-raised {
+  background-color: var(--surface-1);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 var(--edge-light), 0 0 0 1px var(--edge-ring), var(--shadow-raised);
+}
+/* Lo que flota: translúcido, con el fondo desenfocado. Sin desenfoque (un navegador viejo), el
+   fondo casi opaco basta para leer. */
+@utility float-plane {
+  background-color: var(--float);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(20px) saturate(1.3);
+}
+/* El borde de luz que aclara: con `group-hover:` en la tarjeta. */
+@utility edge-bright {
+  --edge-light: var(--edge-light-strong);
+}
+/* El grano de una portada «arte», encima del degradado y debajo del texto. La pieza necesita `relative`. */
+@utility grain {
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: var(--grain);
+    opacity: var(--grain-opacity);
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+}
+/* El degradado radial de una portada «arte»: el tono desde la esquina de arriba a la izquierda, hacia el fondo. */
+@utility art-1 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-1), var(--bg) 92%); }
+@utility art-2 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-2), var(--bg) 92%); }
+@utility art-3 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-3), var(--bg) 92%); }
+@utility art-4 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-4), var(--bg) 92%); }
+@utility art-5 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-5), var(--bg) 92%); }
+@utility art-6 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-6), var(--bg) 92%); }
+@utility art-7 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-7), var(--bg) 92%); }
+@utility art-8 { background-image: radial-gradient(130% 110% at var(--art-focus, 0% 0%), var(--art-8), var(--bg) 92%); }
+
+/* Dónde cae el foco de luz de una portada «arte» (tercera vuelta): sembrado por curso, para que dos de la
+   misma práctica no se vean iguales. Siempre arriba: abajo va el título. */
+@utility art-focus-start { --art-focus: 0% 0%; }
+@utility art-focus-end { --art-focus: 100% 0%; }
+@utility art-focus-center { --art-focus: 50% 0%; }
+/* El ancho angosto de Bricolage, para un título que no es `h1` (el de una portada). */
+@utility display-narrow {
+  font-stretch: var(--display-stretch);
+}
+
+/* El resplandor detrás de una cabecera. */
+@utility glow-header {
+  background-image: var(--glow-header);
+}
+/* El antetítulo, en versalitas. Las da la fuente o, si no las trae, el navegador. El color lo pone quien lo usa:
+   el oro apagado sobre el fondo, el oro pleno sobre una foto. */
+@utility eyebrow {
+  font-family: var(--font-text);
+  font-size: var(--text-eyebrow);
+  line-height: var(--text-eyebrow--line-height);
+  letter-spacing: var(--text-eyebrow--letter-spacing);
+  font-weight: var(--text-eyebrow--font-weight);
+  font-variant-caps: all-small-caps;
+}
+/* La única entrada de una pantalla: aparece y sube 8 px. Con movimiento reducido, la regla del final
+   la deja en nada. */
+@keyframes enter {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+@utility animate-enter {
+  animation: enter var(--duration-enter) var(--ease-enter) both;
 }
 
 /* Un carrusel (sección 5.3) se recorre deslizando, con flechas o con el tabulador: su barra de
@@ -511,6 +664,11 @@
   h1, h2, h3 {
     @apply font-display;
     text-wrap: balance;
+  }
+  /* El ancho angosto de los títulos (T-616), solo en los grandes: en un h2, un h3 o un título chico las
+     letras se tocan, y ahí va el ancho normal (segunda vuelta). */
+  h1, .text-display-xl, .text-display-l {
+    font-stretch: var(--display-stretch);
   }
   /* El anillo de foco: 2 px, separado 2 px, con un halo del color de lo que tiene detrás.
      No se quita nunca. */

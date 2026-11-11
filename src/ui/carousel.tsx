@@ -19,6 +19,8 @@ import { Icon } from "./icon";
 // sabe medir.
 
 const WIDTHS = {
+  // 4:5, la tarjeta de curso desde T-616: en el teléfono, poco más de la mitad para que asome la siguiente.
+  card: "w-7/12 sm:w-60",
   // 16:9: en el teléfono, 3/4 del ancho para que asome la siguiente.
   wide: "w-9/12 sm:w-72",
   // 2:3: un poco menos de la mitad.
@@ -35,7 +37,7 @@ export interface CarouselProps {
   children: ReactNode;
 }
 
-export function Carousel({ id, title, shape = "wide", action, children }: CarouselProps) {
+export function Carousel({ id, title, shape = "card", action, children }: CarouselProps) {
   const list = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState<{ start: boolean; end: boolean } | null>(null);
 
