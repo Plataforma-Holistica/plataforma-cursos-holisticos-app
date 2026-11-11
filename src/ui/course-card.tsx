@@ -71,10 +71,10 @@ export function CourseCard({ href, title, teacherName, practice, levelName, less
             tone={practice?.tone ?? null}
             seed={href}
             shape={shape}
-            corner={corner !== undefined}
+            corner={corner !== undefined || progress !== undefined}
           />
           {isOpen && (
-            <span className="absolute top-12 left-3 rounded-sm bg-bg px-2 py-1 text-label text-text uppercase">{text.open}</span>
+            <span className={cx("absolute left-3 rounded-sm bg-bg px-2 py-1 text-label text-text uppercase", practice === null ? "top-3" : "top-12")}>{text.open}</span>
           )}
           {progress !== undefined && (
             <>

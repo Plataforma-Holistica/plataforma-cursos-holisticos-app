@@ -101,7 +101,9 @@ export function Carousel({ id, title, shape = "card", action, children }: Carous
         <ul
           ref={list}
           aria-labelledby={id}
-          className="flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pb-2 scrollbar-none sm:scroll-px-8 sm:px-8"
+          // Aire arriba (`pt-3`, devuelto con `-mt-3`): la lista desplaza en horizontal, y eso también recorta en
+          // vertical; sin él se cortaban la tarjeta que sube al pasar el cursor y el anillo de foco (T-616).
+          className="-mt-3 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none sm:scroll-px-8 sm:px-8"
         >
           {Children.toArray(children).map((child, index) => (
             // `toArray` ya quitó lo vacío y le dio a cada tarjeta su propia llave. `relative`: el

@@ -7,8 +7,10 @@ import { SeedMark } from "./flower";
 // hacer. Es uno de los tres lugares de la flor (flower.tsx). Va dentro de la pantalla, no la reemplaza: el
 // de pantalla completa sigue siendo `FullScreenState`.
 //
-// La espera es una región de estado: se anuncia cuando cambia. La flor no se mueve (una sola entrada por
-// pantalla); lo que dice que se espera es el texto.
+// La espera es una región de estado (`role="status"`). Un lector de pantalla anuncia lo que cambia dentro de una
+// región que ya estaba en la página, no siempre una que aparece ya con su texto: quien la use para avisar de algo
+// nuevo la deja montada y cambia su título. La flor no se mueve (una sola entrada por pantalla); lo que dice que se
+// espera es el texto.
 
 export interface FlowerStateProps {
   title: string;
