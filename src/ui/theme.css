@@ -312,11 +312,7 @@
   --spacing-sidenav: 15.5rem;
   /* El margen interior de una portada generada: 6 % de su ancho (diseño, sección 4.3). */
   --spacing-cover: 6cqw;
-  /* El punto de oro del logotipo provisional (diseño, sección 3.12): mide y se separa en `em`,
-     para crecer con la letra del nombre. */
-  --spacing-brand-dot: 0.17em;
-  --spacing-brand-dot-gap: 0.06em;
-  /* La flor de la vida delante del nombre, en la barra (T-616): también en `em`, con su separación. */
+  /* La flor de la vida delante del nombre, en el logotipo (T-616): mide y se separa en `em`, para crecer con la letra. */
   --spacing-brand-mark: 1.3em;
   --spacing-brand-mark-gap: 0.4em;
 

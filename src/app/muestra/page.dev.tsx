@@ -115,8 +115,8 @@ export default function SamplePage() {
             estados vacíos y de espera. Delante del nombre, en la barra, es el logotipo.
           </p>
           <div className="flex flex-wrap items-end gap-8">
-            <Wordmark mark className="text-h3" />
-            <Wordmark mark className="text-display-l" />
+            <Wordmark className="text-h3" />
+            <Wordmark className="text-display-l" />
             <FlowerMark className="text-display-xl" />
           </div>
           <div className="flex flex-wrap items-center gap-6">

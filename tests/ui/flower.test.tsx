@@ -42,8 +42,8 @@ describe("la flor de la vida (T-616)", () => {
     expect(filigree.querySelectorAll("circle")).toHaveLength(20);
   });
 
-  it("el logotipo con la flor lee solo el nombre y deja el punto", () => {
-    const { container } = render(<Wordmark mark />);
+  it("el logotipo lleva siempre la flor y lee solo el nombre", () => {
+    const { container } = render(<Wordmark />);
     expect(container.textContent).toBe(terms.Plataforma);
     expect(container.querySelector("[data-brand-mark]")).not.toBeNull();
     expect(container.querySelector("[data-brand-dot]")).toBeNull();
