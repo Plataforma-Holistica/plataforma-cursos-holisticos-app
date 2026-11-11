@@ -1217,6 +1217,12 @@ que no se ve leyendo un solo archivo:
   (`plataforma-sesion` y demás), porque cambiarlos cierra las sesiones; el remitente de producción y el dominio, que van con la lista de
   salida (06 §8); y los comentarios del código que dicen «la Plataforma» por el sistema, como la planeación (decisión mía sin confirmar).
   Para el A: los borradores legales locales (de T-110) dicen el nombre nuevo, y `pnpm db:reset` los vuelve a cargar.
+- **Lo que T-616 suma al carril B** (la 2b, el QR del segundo factor, sin migración; observación 8 de Sergio del 2026-11-10). El QR de
+  PA-12 se pinta a su tamaño propio (el SVG de Auth mide 231 × 231 con módulos de 3 px, sin `viewBox`), sin reducir (`max-w-none`), sobre una
+  caja del token `--qr-quiet` (#FFFFFF, lo único blanco puro de la casa, solo ahí) con `p-3`: reducido a 192 px y sin zona de silencio sobre el
+  fondo oscuro, una aplicación de códigos no lo leyó (medido el 2026-11-11; en Chromium no se recortaba). El filtro `qr.ts` no cambia.
+  `camino.equipo.ts` mide en el navegador que la imagen no esté reducida, que el margen claro sea de 12 px o más y que la caja quepa a 320; la
+  lectura con una aplicación real la prueba Sergio a mano (sin decodificador en las pruebas, decisión del carril A). Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
