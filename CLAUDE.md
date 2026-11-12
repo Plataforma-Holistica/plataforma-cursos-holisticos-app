@@ -1299,8 +1299,9 @@ que no se ve leyendo un solo archivo:
   `text-h2` nuevo, de 28 px, queda grande para una herramienta densa); en la cola de revisión el maestro va de antetítulo. Los vacíos
   de una lista que no es tabla llevan `FlowerState` (alertas, la cola de revisión, el inicio sin tarjetas); una tabla vacía lo sigue
   diciendo adentro. **El menú lateral** se viste desde afuera: `AdminFrame` envuelve a `SideFrame` en `side-plane` (`theme.css`), que
-  alcanza al `<nav>` por su lugar (`& > div > nav`) porque `side-nav.tsx` no se editó (lo tocaba la 147); si ese armazón cambia, la
-  utilidad se revisa, y el portal no la lleva todavía. `area` y `measure` entraron a `NON_TEXT_ATTRIBUTES` del lint. En maestros la
+  alcanza al menú por los marcadores que pone `side-nav.tsx` (`data-side-frame` en el marco, `data-side-nav` en el `<nav>` y
+  `data-side-group` en cada título de grupo, en la columna y en la hoja del teléfono), no por su lugar en el armazón
+  (`tests/ui/side-frame.test.tsx` los exige), y el portal no la lleva todavía. `area` y `measure` entraron a `NON_TEXT_ATTRIBUTES` del lint. En maestros la
   tabla va justo bajo «Todos» (su `caption` ya no se ve) e invitar va después. En las tablas que se desplazan (el reparto del
   cierre y las liquidaciones) el nombre del maestro lleva `min-w-32`: con el ancho único se partía palabra por palabra. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
   izquierda y no centrado; la capacidad como antetítulo; invitar después de la lista; los `<h2>` en `text-h3`; las capacidades del
@@ -1321,7 +1322,8 @@ que no se ve leyendo un solo archivo:
   curso publicado se quedó dentro de su bloque. **El menú** lleva `side-plane` también en el portal, y la utilidad pinta además la
   columna a todo el alto del envoltorio (un degradado con la misma superficie y la misma raya, desde `lg`): el `<nav>` ya era
   `sticky` y medía la ventana, así que al desplazar no se cortaba, pero en una página más larga vista entera (una captura completa,
-  una impresión) su fondo terminaba a la altura de la ventana. `side-nav.tsx` sigue sin editarse. **Las piezas** son las de la 6
+  una impresión) su fondo terminaba a la altura de la ventana. El degradado va en el marco (`data-side-frame`), con el ancho `--spacing-sidenav` y el corte `lg` de
+  `side-nav.tsx`. **Las piezas** son las de la 6
   (`surface-raised p-4 sm:p-5`, listas `surface-raised divide-y divide-border`, `<h2>` en `text-h3`, `<h3>` en `text-body-l
   font-semibold`): los avisos de una pantalla van juntos arriba (`flex flex-col gap-3 empty:hidden`, que sin avisos no ocupa lugar);
   «Para empezar» es una ficha con el número en oro apagado (`marker:`, no un número escrito: la prueba lee el texto del paso) y el
