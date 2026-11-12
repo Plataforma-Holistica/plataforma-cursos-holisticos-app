@@ -45,8 +45,9 @@ describe("PA-04", () => {
     const list = screen.getByRole("list", { name: "Cualquier plan incluye:" });
     expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "Todo el catálogo",
-      "Todos los maestros",
-      "Los recursos de cada curso",
+      // Sin ambigüedad (pedido del carril A del 2026-11-12): son sus cursos, no un trato con ellos; y no todo curso trae recursos.
+      "Los cursos de todos los maestros",
+      "Los recursos de los cursos que los traen",
     ]);
     expect(document.body.textContent).not.toMatch(/constancia/i);
   });

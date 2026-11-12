@@ -69,14 +69,14 @@ export default async function LegalPage({ params, searchParams }: Props) {
     <>
       <BrandBar />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{found.title}</h1>
-        <p className="text-body-s text-text-2">
-          {t(text.details, { version: found.version, date: longDate(found.effectiveFrom) })}
-        </p>
-      </div>
-      {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
-      <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
+        <div className="flex flex-col gap-2">
+          <h1 className="text-h1">{found.title}</h1>
+          <p className="text-body-s text-text-2">
+            {t(text.details, { version: found.version, date: longDate(found.effectiveFrom) })}
+          </p>
+        </div>
+        {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
+        <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
       </main>
     </>
   );

@@ -1289,13 +1289,15 @@ que no se ve leyendo un solo archivo:
   alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
 - **Lo que T-616 suma al carril B** (la 4a, «Planes» en la barra pública y el logotipo en toda página, sin migración; pedidos de
   Sergio del 2026-11-11 viendo la aplicación sin sesión). `PublicHeader` lleva «Planes» entre el logotipo y «Entrar», marcado en `/planes`
-  (`onPlans`, que también pasa `PublicFooter`; `TextLink` ganó `current`, que pone `aria-current`). En el teléfono «Planes» va solo en el pie, y
+  (`onPlans`, que también pasa `PublicFooter`; `TextLink` ganó `current`, que pone `aria-current` y lo distingue a la vista: color del
+  texto, peso y subrayado grueso, en lugar de las clases de siempre). En el teléfono «Planes» va solo en el pie, y
   el nombre del logotipo de la barra pública se parte en dos renglones (`max-sm:whitespace-normal`): con la flor, a 320 px «Crear cuenta» se
   salía 41 px. En el menú lateral (`SideFrame`) el nombre se parte siempre (`Wordmark wrap`): a su tamaño no cabía en la columna y se cortaba.
   **Dos clases de la misma propiedad en un elemento no las decide el orden del atributo sino el del CSS:** `FlowerMark` trae `size-brand-mark`
   y `Wordmark` `whitespace-nowrap`, así que un `size-16` o un `whitespace-normal` sueltos no ganan; se pasan con variante (`max-sm:`, `sm:`) o
   con la prop. `BrandBar` (`src/app/_public/brand-bar.tsx`), solo el logotipo hacia la portada, va arriba en los textos legales (también
-  cuando no se pudieron leer), la de no encontrado y la de error: la portada manda al inicio a quien tiene sesión, así que no pregunta quién
+  cuando no se pudieron leer), la de no encontrado, la de error y `/planes` cuando no se sabe quién mira o la oferta no se pudo leer
+  (`plans-page.test.tsx` exige una sola barra en cada caso; `global-error.tsx` no la lleva, a propósito: trae su propio documento): la portada manda al inicio a quien tiene sesión, así que no pregunta quién
   mira y el 404 sigue siendo el mismo para todos. La portada lleva la flor grande sobre el titular. En `/planes`, lo que incluye es una
   lista única (`PlanIncludes`, `src/app/planes/includes.tsx`, «Cualquier plan incluye:», sin contar planes): solo lo que existe (decisión del
   carril A del 2026-11-11), sin constancias hasta T-504. El pie se llama «Enlaces del sitio». Cambió por el requisito la prueba de la portada
