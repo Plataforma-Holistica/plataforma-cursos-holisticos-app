@@ -1244,6 +1244,37 @@ que no se ve leyendo un solo archivo:
   `tests/ui/flower.test.tsx` cubre la flor, los motivos y la tarjeta. Decisiones mías sin confirmar: el motivo por el orden de la práctica (el
   carril A lo aceptó) y la práctica en el color del texto sobre la portada. Para el A: el principal en oro se ve en todas las pantallas, y una
   sección nueva que use `CourseCard` le pasa `practice.position` para el motivo.
+- **Lo que T-616 suma al carril B** (solicitud 2, la barra única y los accesos por rol, sin migración; zona delicada, plan aprobado
+  el 2026-11-11 con la revisión independiente del diseño; quejas de Sergio del 2026-11-10: en Cuenta no había barra, y desde el inicio
+  no había cómo volver a la administración ni al portal). **Una sola barra del alumno**, `StudentNav` (`src/app/_catalog/nav.tsx`),
+  fija arriba (`sticky`, translúcida desde `sm`: un `backdrop-filter` en el teléfono volvería a la barra el marco de lo fijo y la lista de
+  abajo se pegaría a ella), en las diez pantallas que lista `screens.test.ts`, también `/cuenta` y `/cuenta/comentarios`. Lleva Inicio,
+  Explorar, Mi lista y, a quien le tocan, «Mi portal» y «Administración»; en el teléfono la lista baja con Cuenta, y los accesos van arriba
+  del menú de la persona, con su icono. El menú es un solo `<details>` (`person-menu.tsx`, sin `role="menu"`): el JavaScript solo lo
+  cierra con Escape (el foco vuelve al resumen), con un clic fuera y al elegir un enlace. Lleva «Entraste como», Cuenta, Mis comentarios y
+  Cerrar sesión; «Entraste como» sigue además bajo el saludo del inicio (TRD §9.2), y el «Salir» del pie del inicio se fue. Las dos barras
+  se retiran bajo `.player-locked` (`student-top-bar`, `student-bottom-bar`). **Quién ve cada acceso** lo decide `navAccessOf`
+  (`src/domain/access/nav-access.ts`): «Administración» a `member`, `needs_code` y `unbound`; «Mi portal» a `active`, `needs_notice` y
+  `suspended`; ninguna invitación (tampoco el restablecimiento) y nada que no se supo. **La lectura** es `readNavStates(tx)` en
+  `team-records.ts`, con `readTeamStanding(tx, null)` y `readTeacherStanding(tx, null)` (sin resguardo: la barra no depende de esa cookie),
+  y `navAccess(claims)` (`src/services/account/nav.ts`) la corre en una transacción como el servidor, con las claims de la guarda y sin
+  otro `checkSession`; falla cerrada y reporta `nav_access_unavailable`. **Nunca pasa por una memoria** (sería la única forma de mostrarle
+  «Administración» a otra persona), y `screens.test.ts` lo exige, con quién la nombra. Las pantallas la piden con
+  `studentNavFor(claims)` (`nav-facts.ts`, con el correo), después de su guarda y a la par de lo suyo; la cuenta, al final, como antes el
+  correo. **«Mi lista»** lleva a `ROUTES.myList` (el ancla `MY_LIST_ANCHOR` vive en `navigation.ts`) con un `<a>` del navegador y no
+  `next/link`: así el bloque queda como `:target`, toma el foco con `hashchange` y, sin nada guardado, dice que no hay nada solo al llegar
+  por ahí (el inicio sin nada guardado sigue sin «Mi lista»). **El menú lateral** (`SideFrame`) lleva «Ir a mi inicio» arriba, con los
+  otros lugares de la persona (`others`): en administración, «Mi portal» a quien también es maestro (`AdminFrame` pide `portal`; el inicio
+  lo saca de la lectura de `teacherStanding` que ya hacía, y el comodín, de `navAccess`). Usa integración 106, `tests/e2e/barra.spec.ts` y
+  casos en `camino.equipo.ts` y `portal.equipo.ts`. Para las pruebas: la barra trae su formulario de «Cerrar sesión» antes que la pantalla,
+  así que los formularios de una pantalla del alumno se leen desde el `<main>` (`mainOf`), y cerrar sesión o ir a la cuenta van por
+  `tests/e2e/support/nav.ts`; una prueba de página que pinte la barra simula `@/app/_catalog/nav-facts`, y una que monte el comodín de
+  administración, `@/services/account/nav`. Cambiaron por el requisito la forma de `<AdminFrame>` y las anclas en `screens.test.ts`, el
+  orden del menú en `team-pages.test.tsx`, «Salir» en `account-pages.test.tsx` y en cuatro extremo a extremo, y `cuenta.spec.ts`
+  (`mainOf`). Decisiones mías sin confirmar: «Mi lista» como ancla del navegador y su nota de vacío; sin hoja inferior en el teléfono (basta
+  con los accesos arriba del menú, como pidió el carril A); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
+  menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
+  alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
