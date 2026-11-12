@@ -783,7 +783,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
             readOnly={pending}
           />
           <div>
-            <Button type="submit" name="do" value={view.structure.addModule}>
+            <Button type="submit" name="do" value={view.structure.addModule} variant="secondary">
               {text.addModule}
             </Button>
           </div>

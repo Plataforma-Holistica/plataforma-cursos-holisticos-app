@@ -23,6 +23,9 @@ import { VideoUploadsProvider } from "./video-uploads";
 // confirmar (`unsaved.tsx`); la estructura se ordena también arrastrando (`reorder.ts`). Las subidas de video
 // viven aquí, por encima del detalle: cambiar de lección no las corta (`video-uploads.tsx`). Enviar a revisión
 // llega con T-405. Mientras tanto «Guardar» es el botón principal (decisión mía sin confirmar).
+//
+// Un solo principal por pantalla (T-616): «Guardar», que es lo que más se hace. «Enviar a revisión» y «Agregar
+// módulo» van de secundarios; `Button` no tiene una secundaria fuerte, así que «Enviar» se distingue por ir primero.
 
 const text = portal.editor;
 
@@ -40,7 +43,11 @@ export function EditorScreen({ view }: { view: EditorView }) {
             <div className="flex flex-col gap-3 pt-2">
               {(view.submitHref !== null || view.discardHref !== null) && (
                 <div className="flex flex-wrap gap-3">
-                  {view.submitHref !== null && <Button href={view.submitHref}>{text.submit}</Button>}
+                  {view.submitHref !== null && (
+                    <Button href={view.submitHref} variant="secondary">
+                      {text.submit}
+                    </Button>
+                  )}
                   {view.discardHref !== null && (
                     <Button href={view.discardHref} variant="secondary">
                       {text.discard}
