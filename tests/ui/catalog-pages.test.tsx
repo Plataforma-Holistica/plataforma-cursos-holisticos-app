@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { terms } from "@/messages/es/terms";
+import { MOTIFS, motifFor } from "@/ui/motifs";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -181,6 +182,28 @@ describe("la ficha de un curso (PA-02)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  // T-616, solicitud 3: la cabecera con la portada generada (la misma del cartel de su tarjeta, sembrada con el curso) y la
+  // filigrana, y el temario con la roseta de avance por lección.
+  it("la cabecera lleva la portada del curso y la filigrana, decorativas; el temario, la roseta de cada lección empezada", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
+    mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
+    mocks.courseStanding.mockResolvedValue({
+      kind: "ready",
+      standing: { states: new Map([[L1, "completed"], [L2, "in_progress"]]), completed: 1, total: 2, started: true, finished: false, suggested: { id: L2, number: 2 } },
+      saved: false,
+    });
+    const { container } = render(await CourseRoute(params("respirar")));
+    const header = screen.getByRole("heading", { level: 1 }).closest("header") as HTMLElement;
+    // El motivo de su práctica, por su orden en el catálogo; la flor entera detrás.
+    expect(header.querySelector("svg[preserveAspectRatio] path")).toHaveAttribute("d", MOTIFS[motifFor(COURSE.practice.position)]);
+    expect(header.querySelector(".stroke-filigree")).toHaveAttribute("aria-hidden", "true");
+    expect(header.querySelector(".glow-header")).not.toBeNull();
+    const syllabus = screen.getByRole("region", { name: "Temario" });
+    expect(within(syllabus).getByRole("link", { name: "Lección 1, Soltar los hombros, 6 min, terminada" }).querySelector("g.fill-accent-subtle")).not.toBeNull();
+    expect(within(syllabus).getByRole("link", { name: "Lección 2, La postura, 7 min, a medias" }).querySelector("g.stroke-text-2")).not.toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
   it("al alumno, si no se supo su avance, la ficha se pinta igual con «Empezar»", async () => {
     mocks.publicViewer.mockResolvedValue({ kind: "student", claims });
     mocks.lessonAccess.mockResolvedValue({ kind: "allowed" });
@@ -334,6 +357,23 @@ describe("la ficha de un maestro (PA-03)", () => {
     const again = render(await TeacherRoute(params("ana-robles")));
     expect(again.container.querySelector("main header img")).toBeNull();
     expect(within(again.container.querySelector("main header") as HTMLElement).getByText("A")).toBeInTheDocument();
+  });
+
+  // T-616, solicitud 3: la cabecera con el resplandor y la filigrana, sus prácticas de antetítulo, y sus cursos en la rejilla
+  // de explorar (hasta cinco columnas).
+  it("la cabecera lleva la filigrana, decorativa, y sus prácticas de antetítulo; sus cursos, en la rejilla de cinco", async () => {
+    mocks.teacherPage.mockResolvedValue({
+      kind: "found",
+      teacher: { slug: "ana-robles", name: "Ana Robles", bio: null, practices: ["Meditación", "Yoga"], tone: 3, practicePosition: 1, courseCount: 1 },
+      courses: [COURSE],
+    });
+    const { container } = render(await TeacherRoute(params("ana-robles")));
+    const header = container.querySelector("main header") as HTMLElement;
+    expect(header.querySelector(".stroke-filigree")).toHaveAttribute("aria-hidden", "true");
+    expect(within(header).getByText("Meditación · Yoga")).toHaveClass("eyebrow");
+    const grid = within(screen.getByRole("region", { name: "Cursos de Ana Robles" })).getByRole("list");
+    expect(grid).toHaveClass("lg:grid-cols-5");
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
   it("al visitante, la barra y el pie del sitio público (T-614)", async () => {
