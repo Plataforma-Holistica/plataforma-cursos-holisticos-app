@@ -32,7 +32,9 @@ export interface PageHeaderProps {
 export function PageHeader({ title, eyebrow, lead, photo, size = "regular", children, className }: PageHeaderProps) {
   const hero = size === "hero";
   return (
-    <div data-page-header className={cx("relative isolate overflow-hidden", hero && "flex min-h-72 flex-col justify-end sm:min-h-116", className)}>
+    // La alta mide 368 px en computadora (T-616, solicitud 3: la cabecera del inicio a 360–380 px, para que el protagonista
+    // quede en la primera pantalla).
+    <div data-page-header className={cx("relative isolate overflow-hidden", hero && "flex min-h-72 flex-col justify-end sm:min-h-92", className)}>
       {photo !== undefined && (
         <>
           <Image src={photo} alt="" fill loading="eager" fetchPriority="high" sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />

@@ -133,14 +133,23 @@ export interface CourseArtProps {
   corner?: boolean;
   /** Una etiqueta bajo la práctica (el aviso de curso abierto): va en el flujo, nunca encima del texto. */
   badge?: ReactNode;
+  /**
+   * El motivo grande (T-616, solicitud 3), para una portada sin título (el protagonista del inicio, la ficha del curso, las
+   * fichas de práctica): ocupa la portada entera y se ve más, porque ahí es lo único que dice la práctica.
+   */
+  largeMotif?: boolean;
   className?: string;
 }
 
-export function CourseArt({ title, practiceName, practiceKey, tone, seed = "", shape = "portrait", corner = false, badge, className }: CourseArtProps) {
+/** El motivo de siempre: arriba, y se desvanece hacia abajo en vez de cortarse en seco donde termina su 60 %. */
+const MOTIF_REGULAR = "inset-x-0 top-0 h-3/5 opacity-15 mask-b-from-50%";
+/** El grande: la portada entera, desvanecido hacia los bordes. */
+const MOTIF_LARGE = "inset-0 h-full opacity-25 mask-radial-from-40%";
+
+export function CourseArt({ title, practiceName, practiceKey, tone, seed = "", shape = "portrait", corner = false, badge, largeMotif = false, className }: CourseArtProps) {
   return (
     <div aria-hidden="true" className={cx("@container relative overflow-hidden grain", ART[tone ?? NEUTRAL_TONE], artFocus(seed), SHAPES[shape], className)}>
-      {/* El motivo se desvanece hacia abajo en vez de cortarse en seco donde termina su 60 %. */}
-      <Motif kind={motifFor(practiceKey ?? practiceName ?? "")} courseKey={seed} className="absolute inset-x-0 top-0 h-3/5 w-full opacity-15 mask-b-from-50%" />
+      <Motif kind={motifFor(practiceKey ?? practiceName ?? "")} courseKey={seed} className={cx("absolute w-full", largeMotif ? MOTIF_LARGE : MOTIF_REGULAR)} />
       {practiceName !== null && <span className="absolute inset-x-0 top-0 h-1/4 bg-linear-to-b from-bg/45 to-transparent" />}
       {title !== undefined && <span className="absolute inset-x-0 bottom-0 h-2/3 bg-linear-to-t from-bg/85 via-bg/40 to-transparent" />}
       <div className="relative flex h-full flex-col justify-between p-cover">

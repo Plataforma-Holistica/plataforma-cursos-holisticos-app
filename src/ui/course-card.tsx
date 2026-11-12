@@ -26,6 +26,7 @@ import { Rosette } from "./flower";
 //   cursos con el mismo título no comparten portada;
 // - `corner` es lo que va sobre la esquina de la portada, fuera del enlace (un botón dentro de un enlace no
 //   vale): «Guardar en mi lista» como botón de icono. Va como hermano del enlace, encima de la portada;
+// - la línea de datos no repite la práctica, que ya va arriba en el cartel (solicitud 3);
 // - al pasar el cursor la portada sube 4 px y su borde de luz aclara; con movimiento reducido no sube.
 
 export interface CourseCardProps {
@@ -72,7 +73,8 @@ export function CourseCard({
           total: progress.total,
           completed: t(plural(progress.total, text.completedOf), { completed: Math.min(progress.completed, progress.total), total: progress.total }),
         });
-  const meta = [practice?.name, levelName, t(plural(lessonCount, text.lessons), { count: lessonCount })].filter(
+  // Sin la práctica: ya va arriba, en el cartel (T-616, solicitud 3).
+  const meta = [levelName, t(plural(lessonCount, text.lessons), { count: lessonCount })].filter(
     (part): part is string => typeof part === "string",
   );
   return (
