@@ -181,9 +181,16 @@ export function FactorSetupScreen({ view }: FactorSetupScreenProps) {
             <ol className="flex list-decimal flex-col gap-6 pl-6">
               <li className="flex flex-col gap-3">
                 <p>{text.stepScan}</p>
-                {/* Como imagen y nunca incrustado: lo que Auth mande no corre como marcado. */}
-                {/* eslint-disable-next-line @next/next/no-img-element -- Es una dirección de datos con la clave: no pasa por el optimizador de imágenes. */}
-                {shown.qr !== null && <img src={shown.qr} alt={text.qrAlt} className="size-48" />}
+                {/* Como imagen y nunca incrustado: lo que Auth mande no corre como marcado. A su tamaño propio, sin
+                    reducir (cada módulo en píxeles enteros), y sobre una caja clara con margen: reducido a 192 px y sin
+                    zona de silencio sobre el fondo oscuro, una aplicación de códigos no lo leyó (T-616, 2b; medido el
+                    2026-11-11). El SVG de Auth mide 231 px y la caja 255: cabe a 320. */}
+                {shown.qr !== null && (
+                  <span className="self-start bg-qr-quiet p-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- Es una dirección de datos con la clave: no pasa por el optimizador de imágenes. */}
+                    <img src={shown.qr} alt={text.qrAlt} className="block max-w-none" />
+                  </span>
+                )}
                 <p className="flex flex-col gap-1">
                   <span className="text-body-s text-text-2">{text.secretLabel}</span>
                   <code className="break-all text-body-l">{shown.secret}</code>

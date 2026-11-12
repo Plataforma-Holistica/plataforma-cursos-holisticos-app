@@ -227,6 +227,21 @@ describe("la pantalla de configurar el segundo factor (PA-12, configurar)", () =
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  it("el QR se pinta a su tamaño propio, sobre una caja clara con zona de silencio (T-616, 2b)", async () => {
+    // Medido el 2026-11-11 con el SVG real del Auth local (231 × 231, módulos de 3 px, el margen transparente):
+    // reducido a 192 px y sobre el fondo oscuro, una aplicación de códigos no lo leyó. A su tamaño, sobre claro, sí.
+    await begin();
+    const qr = await screen.findByRole("img", { name: "Código QR con la clave de tu segundo factor" });
+    // Sin tamaño propio en la clase: lo da el SVG, y así cada módulo cae en píxeles enteros.
+    // (`max-w-none` sí va: impide justo que se reduzca en una columna angosta.)
+    expect(qr.className).not.toMatch(/(^|\s)(size|w|h)-/);
+    expect(qr).toHaveClass("max-w-none");
+    const box = qr.parentElement;
+    // La caja: el color claro de su token y un margen de 12 px (4 módulos) además del que trae el SVG.
+    expect(box).toHaveClass("bg-qr-quiet", "p-3");
+    expect(box?.tagName).not.toBe("BUTTON");
+  });
+
   it("la clave no viaja en ningún campo: solo el factor que se pintó, para compararlo", async () => {
     const { container } = await begin();
     await screen.findByText(SECRET);
