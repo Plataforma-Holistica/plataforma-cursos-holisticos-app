@@ -64,6 +64,8 @@ test("«Planes» en la barra lleva a los planes, que lo marcan; en el teléfono 
   if (wide) await expect(page.getByRole("banner").getByRole("link", { name: "Planes" })).toHaveAttribute("aria-current", "page");
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto("/");
+  // La flor de la cabecera es grande también en el teléfono: 64 px, no la de la letra.
+  expect((await page.getByTestId("portada-flor").locator("svg").boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(60);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   for (const each of await page.getByRole("banner").getByRole("link").all()) {
     if (!(await each.isVisible())) continue;

@@ -83,7 +83,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
           <PlansScreen view={view} />
         )}
       </main>
-      {who.kind === "visitor" && <PublicFooter />}
+      {who.kind === "visitor" && <PublicFooter onPlans />}
     </>
   );
 }

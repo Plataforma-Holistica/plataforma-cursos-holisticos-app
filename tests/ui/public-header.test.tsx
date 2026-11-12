@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { PublicFooter } from "@/app/_public/footer";
 import { PublicHeader } from "@/app/_public/header";
 import { landing } from "@/messages/es/landing";
 
@@ -19,5 +20,13 @@ describe("la barra pública", () => {
     unmount();
     render(<PublicHeader />);
     expect(within(screen.getByRole("banner")).getByRole("link", { name: landing.header.plans })).not.toHaveAttribute("aria-current");
+  });
+
+  it("el pie también marca «Planes» en los planes: en el teléfono es el único que se ve", () => {
+    const { unmount } = render(<PublicFooter onPlans />);
+    expect(within(screen.getByRole("contentinfo")).getByRole("link", { name: landing.footer.plans })).toHaveAttribute("aria-current", "page");
+    unmount();
+    render(<PublicFooter />);
+    expect(within(screen.getByRole("contentinfo")).getByRole("link", { name: landing.footer.plans })).not.toHaveAttribute("aria-current");
   });
 });

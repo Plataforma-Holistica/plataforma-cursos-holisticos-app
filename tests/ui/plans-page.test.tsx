@@ -17,7 +17,7 @@ vi.mock("@/services/billing/checkout-service", () => ({ planOffer: mocks.planOff
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/app/_catalog/nav", () => ({ StudentNav: () => null }));
 vi.mock("@/app/_public/header", () => ({ PublicHeader: ({ onPlans }: { onPlans?: boolean }) => <p data-testid="barra-publica" data-on-plans={String(onPlans)} /> }));
-vi.mock("@/app/_public/footer", () => ({ PublicFooter: () => null }));
+vi.mock("@/app/_public/footer", () => ({ PublicFooter: ({ onPlans }: { onPlans?: boolean }) => <p data-testid="pie-publico" data-on-plans={String(onPlans)} /> }));
 vi.mock("@/app/planes/screen", () => ({ PlansScreen: () => <p>planes</p> }));
 
 import PlansPage from "@/app/planes/page";
@@ -52,6 +52,8 @@ describe("PA-04, cuando no se venden planes", () => {
     mocks.planOffer.mockResolvedValue(NOT_FOR_SALE);
     await page({});
     expect(screen.getByTestId("barra-publica")).toHaveAttribute("data-on-plans", "true");
+    // En el teléfono «Planes» de la barra no se ve: el del pie lo marca.
+    expect(screen.getByTestId("pie-publico")).toHaveAttribute("data-on-plans", "true");
   });
 
   it("quien tiene sesión nunca es redirigido", async () => {

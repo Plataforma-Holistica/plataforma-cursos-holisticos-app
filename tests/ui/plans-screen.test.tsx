@@ -41,7 +41,8 @@ beforeEach(() => {
 describe("PA-04", () => {
   it("lo que incluye es una lista de lo que ya existe, sin prometer constancias (T-616, solicitud 4)", () => {
     show(null);
-    const list = screen.getByRole("list", { name: "Con cualquiera de los dos planes:" });
+    // Sin contar planes: con uno solo a la venta, «los dos» sería falso.
+    const list = screen.getByRole("list", { name: "Cualquier plan incluye:" });
     expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
       "Todo el catálogo",
       "Todos los maestros",

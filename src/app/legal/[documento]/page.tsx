@@ -56,7 +56,13 @@ export default async function LegalPage({ params, searchParams }: Props) {
   if (read.kind === "not_found") notFound();
   // No se supo: no es lo mismo que un texto que no existe. El servicio ya lo reportó.
   const self = `/legal/${slug}`;
-  if (read.kind === "unavailable") return <UnavailableScreen retryHref={self} withSession={false} />;
+  if (read.kind === "unavailable")
+    return (
+      <>
+        <BrandBar />
+        <UnavailableScreen retryHref={self} withSession={false} />
+      </>
+    );
 
   const found = read.text;
   return (

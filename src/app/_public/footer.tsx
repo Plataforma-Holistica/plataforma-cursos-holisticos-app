@@ -17,7 +17,7 @@ const LEGAL = [
   { docType: "student_privacy_notice", label: text.privacy },
 ] as const;
 
-export function PublicFooter({ withDisclaimer = true }: { withDisclaimer?: boolean }) {
+export function PublicFooter({ withDisclaimer = true, onPlans = false }: { withDisclaimer?: boolean; onPlans?: boolean }) {
   return (
     <footer className="border-t border-border bg-surface-1">
       <div className="mx-auto flex max-w-page flex-col gap-6 px-4 py-10 sm:px-8">
@@ -25,7 +25,8 @@ export function PublicFooter({ withDisclaimer = true }: { withDisclaimer?: boole
         <nav aria-label={text.label}>
           <ul className="flex flex-wrap gap-x-6 text-body-s">
             <li>
-              <TextLink href={ROUTES.plans} className="inline-flex min-h-touch items-center">
+              {/* En los planes va marcado: en el teléfono, el de la barra no se ve. */}
+              <TextLink href={ROUTES.plans} current={onPlans} className="inline-flex min-h-touch items-center">
                 {text.plans}
               </TextLink>
             </li>

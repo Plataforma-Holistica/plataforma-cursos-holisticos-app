@@ -4,8 +4,8 @@ import { t } from "@/messages/format";
 import { plans as text } from "@/messages/es/plans";
 import { Icon } from "@/ui/icon";
 
-// Lo que incluye cualquiera de los dos planes (T-616, solicitud 4): una sola lista, la misma en `/planes` y,
-// con la sección de precios, en la portada. Solo lo que ya existe: sin constancias hasta T-504. Importa solo su
+// Lo que incluye cualquiera de los dos planes (T-616, solicitud 4): una sola lista, para `/planes` y, cuando llegue
+// la sección de precios (4b), la portada; dos en la misma página llevan cada una su `id`. Solo lo que ya existe: sin constancias hasta T-504. Importa solo su
 // bloque de textos: lo usa también la pantalla de los planes, que corre en el navegador.
 
 // El de los maestros cita el término con su marcador, y es plantilla; los otros dos son texto.

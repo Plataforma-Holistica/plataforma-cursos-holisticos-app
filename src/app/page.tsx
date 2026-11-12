@@ -80,7 +80,8 @@ export default async function LandingPage() {
               {/* La flor de la casa, grande, sobre el titular (T-616, solicitud 4; pedido de Sergio del 2026-11-11:
                   el logotipo, importante en toda página). Decorativa: el nombre ya lo dice la barra. */}
               <span data-testid="portada-flor" aria-hidden="true">
-                <FlowerMark className="size-16 sm:size-20" />
+                {/* `FlowerMark` trae su tamaño de logotipo (`size-brand-mark`), que gana a un `size-16` suelto: van con su ancho. */}
+                <FlowerMark className="max-sm:size-16 sm:size-20" />
               </span>
               <h1 className="text-display-xl text-balance">
                 {text.hero.title}

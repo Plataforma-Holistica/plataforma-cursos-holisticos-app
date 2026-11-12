@@ -530,5 +530,7 @@ describe("la página de un texto legal", () => {
     expect(mocks.notFound).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/legal/historial-de-cursos");
     expect(screen.queryByRole("button", { name: "Cerrar sesión" })).not.toBeInTheDocument();
+    // También ahí, el logotipo arriba (T-616, solicitud 4).
+    expect(within(screen.getByRole("banner")).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
   });
 });
