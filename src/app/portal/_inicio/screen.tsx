@@ -41,7 +41,7 @@ function FirstTime({ steps }: { steps: readonly FirstStep[] }) {
               <li key={step.key} className="pl-1">
                 <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
                   {step.href === null ? <span>{step.label}</span> : <TextLink href={step.href}>{step.label}</TextLink>}
-                  {step.state !== null && <StatusBadge tone={step.state === text.firstTime.done ? "good" : "attention"}>{step.state}</StatusBadge>}
+                  {step.state !== null && step.tone !== null && <StatusBadge tone={step.tone}>{step.state}</StatusBadge>}
                 </span>
               </li>
             ))}

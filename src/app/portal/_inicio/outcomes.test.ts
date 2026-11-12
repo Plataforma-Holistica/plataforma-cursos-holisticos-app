@@ -137,19 +137,20 @@ describe("«Para empezar»", () => {
       label: "Captura tus datos fiscales y bancarios",
       href: "/portal/datos-fiscales",
       state: "Pendiente",
+      tone: "attention",
     });
-    expect(firstSteps({ version: 2, canSave: true }, false)[0]).toMatchObject({ href: null, state: "Listo" });
-    expect(firstSteps(null, false)[0]).toMatchObject({ href: "/portal/datos-fiscales", state: null });
+    expect(firstSteps({ version: 2, canSave: true }, false)[0]).toMatchObject({ href: null, state: "Listo", tone: "good" });
+    expect(firstSteps(null, false)[0]).toMatchObject({ href: "/portal/datos-fiscales", state: null, tone: null });
     // Un suspendido por fraude no los captura: no se le ofrece.
-    expect(firstSteps({ version: 0, canSave: false }, false)[0]).toMatchObject({ href: null, state: "Pendiente" });
+    expect(firstSteps({ version: 0, canSave: false }, false)[0]).toMatchObject({ href: null, state: "Pendiente", tone: "attention" });
   });
 
   it("un suspendido en solo lectura no recibe el enlace a crear un curso", () => {
-    expect(firstSteps(null, true)[1]).toEqual({ key: "primer-curso", label: "Crea y envía tu primer curso", href: null, state: "Pendiente" });
+    expect(firstSteps(null, true)[1]).toEqual({ key: "primer-curso", label: "Crea y envía tu primer curso", href: null, state: "Pendiente", tone: "attention" });
     expect(dashboardView(never, TAX, true).firstTime?.[1]?.href).toBeNull();
   });
 
   it("el primer curso lleva a sus cursos", () => {
-    expect(firstSteps(null, false)[1]).toEqual({ key: "primer-curso", label: "Crea y envía tu primer curso", href: "/portal/cursos", state: "Pendiente" });
+    expect(firstSteps(null, false)[1]).toEqual({ key: "primer-curso", label: "Crea y envía tu primer curso", href: "/portal/cursos", state: "Pendiente", tone: "attention" });
   });
 });
