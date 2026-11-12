@@ -3570,6 +3570,12 @@ que la integración continua pase. Lo que sigue depende de lo que toca:
 - **No toca ninguna:** entra con la integración continua en verde. La fusiona el agente
   cuando el cambio lo pidió Sergio; si lo propuso el agente por su cuenta, la deja
   propuesta.
+- **Mientras dura el rediseño** (T-616; decisión de Sergio del 2026-11-11): los `.tsx` de `src/app/_catalog/`,
+  `explorar/`, `inicio/`, `cursos/` y `portal/` no piden dueño (el bloque final de `.github/CODEOWNERS`). Una
+  solicitud que solo toca eso y `src/ui/` la fusiona el agente con la integración continua en verde y la
+  revisión independiente del diff sin bloqueantes. Las acciones y lo demás (`.ts`) de esas carpetas, la cuenta,
+  la administración, el reproductor y las pruebas con dueño siguen pidiendo la aprobación de Sergio. La cola de
+  fusión agrupa hasta cinco solicitudes desde ese día. Al cerrar T-616 el bloque se quita.
 
 La protección de `main` no se cambia para dejar pasar una solicitud: eso es reconfigurar
 un proveedor, y se pregunta. Desde la ola 0, `main` exigía además que la rama estuviera al día antes de
