@@ -129,10 +129,14 @@ describe("los accesos de la barra, contra la base", () => {
     const rosa = await person();
     await reverted(async (owner) => {
       await capability(owner, rosa);
+      // Conserva su capacidad y perdió su atadura; un restablecimiento no da capacidades.
+      await asSystem(owner);
       await owner.query(
-        "insert into private.admin_invitations (kind, email, profile_id, capabilities, created_at, expires_at) values ('rebind', $1, $2, '{content}', now(), now() + interval '1 day')",
-        [rosa.email.toLowerCase(), rosa.id],
+        `insert into private.admin_invitations (kind, email, profile_id, capabilities, handoff, created_at, expires_at)
+         values ('rebind', $1, $2, '{}', $3, clock_timestamp(), clock_timestamp() + interval '1 day')`,
+        [rosa.email.toLowerCase(), rosa.id, "a".repeat(64)],
       );
+      await asOwner(owner);
       expect(await accessOf(owner, rosa)).toEqual({ admin: false, portal: false });
     });
   });
@@ -140,10 +144,12 @@ describe("los accesos de la barra, contra la base", () => {
   it("una invitación al equipo para quien no es del equipo no lo ve", async () => {
     const lia = await person();
     await reverted(async (owner) => {
+      await asSystem(owner);
       await owner.query(
-        "insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at) values ('grant', $1, '{support}', now(), now() + interval '1 day')",
+        "insert into private.admin_invitations (kind, email, capabilities, created_at, expires_at) values ('grant', $1, '{support}', clock_timestamp(), clock_timestamp() + interval '1 day')",
         [lia.email.toLowerCase()],
       );
+      await asOwner(owner);
       expect(await accessOf(owner, lia)).toEqual({ admin: false, portal: false });
     });
   });
