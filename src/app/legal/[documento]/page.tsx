@@ -5,6 +5,7 @@ import { cache } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { LegalBody } from "@/app/_lib/legal-body";
+import { BrandBar } from "@/app/_public/brand-bar";
 import { messages, t } from "@/messages";
 import { currentLegalText, docTypeOfSlug, legalBlocks } from "@/services/legal/texts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
@@ -55,19 +56,28 @@ export default async function LegalPage({ params, searchParams }: Props) {
   if (read.kind === "not_found") notFound();
   // No se supo: no es lo mismo que un texto que no existe. El servicio ya lo reportó.
   const self = `/legal/${slug}`;
-  if (read.kind === "unavailable") return <UnavailableScreen retryHref={self} withSession={false} />;
+  if (read.kind === "unavailable")
+    return (
+      <>
+        <BrandBar />
+        <UnavailableScreen retryHref={self} withSession={false} />
+      </>
+    );
 
   const found = read.text;
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{found.title}</h1>
-        <p className="text-body-s text-text-2">
-          {t(text.details, { version: found.version, date: longDate(found.effectiveFrom) })}
-        </p>
-      </div>
-      {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
-      <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
-    </main>
+    <>
+      <BrandBar />
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-h1">{found.title}</h1>
+          <p className="text-body-s text-text-2">
+            {t(text.details, { version: found.version, date: longDate(found.effectiveFrom) })}
+          </p>
+        </div>
+        {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
+        <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
+      </main>
+    </>
   );
 }

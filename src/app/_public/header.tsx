@@ -16,15 +16,16 @@ import { Wordmark } from "@/ui/wordmark";
 // contenido sin su fondo. Sin foto debajo (las fichas del visitante, parte 4) es sólida desde el principio
 // y se queda arriba al desplazar.
 //
-// Lleva la marca, «Entrar» y «Crear cuenta». Planes, Para maestros y Ayuda entran cuando existan sus
-// pantallas (decisión de Sergio del 2026-11-05). En el teléfono, la marca y «Crear cuenta», siempre a
-// la mano; «Entrar» está en el encabezado y en el pie (decisión mía sin confirmar: a 320 px no caben
-// los tres, y un menú con una sola cosa no hace falta). El de la barra es secundario: el principal
-// de la pantalla es el del encabezado.
+// Lleva la marca, «Planes» (T-616, solicitud 4; pedido de Sergio del 2026-11-11: los planes antes de crear
+// cuenta), «Entrar» y «Crear cuenta». Para maestros y Ayuda entran cuando existan sus pantallas (decisión de
+// Sergio del 2026-11-05). En el teléfono, la marca y «Crear cuenta», siempre a la mano; «Planes» y «Entrar»
+// están en el pie, y «Entrar» también en el encabezado (decisiones mías sin confirmar: a 320 px no caben los
+// cuatro, y un menú con dos cosas no hace falta). El de la barra es secundario: el principal de la pantalla
+// es el del encabezado. En los planes, «Planes» va marcado (`onPlans`).
 
 const text = landing.header;
 
-export function PublicHeader({ overPhoto = false }: { overPhoto?: boolean }) {
+export function PublicHeader({ overPhoto = false, onPlans = false }: { overPhoto?: boolean; onPlans?: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const solid = !overPhoto || scrolled;
 
@@ -46,10 +47,17 @@ export function PublicHeader({ overPhoto = false }: { overPhoto?: boolean }) {
     >
       <div className="mx-auto flex max-w-page items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-8">
         <Link href={ROUTES.landing} className="inline-flex min-h-touch items-center text-body-l sm:text-h3">
-          <Wordmark />
+          {/* En el teléfono el nombre se parte en dos renglones: con la flor (T-616) no cabía junto a «Crear
+              cuenta» a 320 px. */}
+          <Wordmark className="max-sm:whitespace-normal max-sm:leading-tight" />
         </Link>
         <nav aria-label={text.label}>
           <ul className="flex items-center gap-4 sm:gap-6">
+            <li className="hidden sm:block">
+              <TextLink href={ROUTES.plans} current={onPlans} className="inline-flex min-h-touch items-center">
+                {text.plans}
+              </TextLink>
+            </li>
             <li className="hidden sm:block">
               <TextLink href={ROUTES.signIn} className="inline-flex min-h-touch items-center">
                 {text.signIn}
