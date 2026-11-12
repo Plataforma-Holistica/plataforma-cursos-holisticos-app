@@ -729,4 +729,19 @@ input[type="search"]::-webkit-search-cancel-button {
   & > div > nav p {
     color: var(--accent-muted);
   }
+  /* La columna del menú llega hasta abajo (solicitud 5). El `<nav>` mide la ventana y se queda pegado al desplazar,
+     pero en una página más larga su fondo terminaba a la altura de la ventana cada vez que la página se ve entera
+     (una captura completa, una impresión, el rebote al final): debajo se veía el fondo de la página. El envoltorio
+     pinta la misma superficie y la misma raya a todo su alto, detrás del menú. Desde `lg`, donde el menú es columna. */
+  @media (width >= 64rem) {
+    & > div {
+      background-image: linear-gradient(
+        to right,
+        var(--surface-1) calc(var(--spacing-sidenav) - 1px),
+        var(--edge-ring) calc(var(--spacing-sidenav) - 1px),
+        var(--edge-ring) var(--spacing-sidenav),
+        transparent var(--spacing-sidenav)
+      );
+    }
+  }
 }

@@ -38,7 +38,7 @@ export async function NoticeSection({
       ) : (
         <>
           <p className="text-body-l text-text-2">{text.intro}</p>
-          <section className="flex flex-col gap-2 rounded-md border border-border p-4">
+          <section className="flex flex-col gap-2 surface-raised p-4 sm:p-5">
             <LegalBody title={notice.title} blocks={legalBlocks(notice.body)} />
             <p className="text-small text-text-2">{t(text.version, { version: notice.version, date: longDate(notice.effectiveFrom) })}</p>
           </section>

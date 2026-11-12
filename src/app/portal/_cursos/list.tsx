@@ -7,11 +7,13 @@ import { readNotice } from "@/services/account/notice";
 import { teacherCourses } from "@/services/drafts/editor";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
+import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
 import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 import { courseRows } from "./rows";
 
 // PA-42 · Mis cursos (`/portal/cursos`; RF-603, FL-32). No es una página: la sirve el comodín del
@@ -31,69 +33,78 @@ export async function CoursesSection({ claims, readOnly }: { claims: VerifiedCla
 
   return (
     <PortalFrame current={ROUTES.portalCourses} readOnly={readOnly}>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-h1">{text.title}</h1>
-        {!readOnly && rows.length > 0 && <Button href={portalNewCoursePath()}>{text.newCourse}</Button>}
-      </div>
-      {notice === "course_deleted" && <InlineAlert tone="success">{text.deleted}</InlineAlert>}
-      {notice === "course_gone" && <InlineAlert tone="neutral">{text.gone}</InlineAlert>}
-      {notice === "course_submitted" && <InlineAlert tone="success">{text.submitted}</InlineAlert>}
-      {notice === "version_discarded" && <InlineAlert tone="success">{text.discarded}</InlineAlert>}
-      {rows.length === 0 ? (
-        <div className="flex flex-col items-start gap-4 rounded-md border border-border p-6">
-          <p className="text-body-l text-text-2">{text.empty}</p>
-          {!readOnly && <Button href={portalNewCoursePath()}>{text.firstCourse}</Button>}
+      <PortalMain
+        title={text.title}
+        section
+        header={
+          !readOnly &&
+          rows.length > 0 && (
+            <div className="pt-2">
+              <Button href={portalNewCoursePath()}>{text.newCourse}</Button>
+            </div>
+          )
+        }
+      >
+        <div className="flex flex-col gap-3 empty:hidden">
+          {notice === "course_deleted" && <InlineAlert tone="success">{text.deleted}</InlineAlert>}
+          {notice === "course_gone" && <InlineAlert tone="neutral">{text.gone}</InlineAlert>}
+          {notice === "course_submitted" && <InlineAlert tone="success">{text.submitted}</InlineAlert>}
+          {notice === "version_discarded" && <InlineAlert tone="success">{text.discarded}</InlineAlert>}
         </div>
-      ) : (
-        <ul className="flex flex-col gap-4">
-          {rows.map((row) => (
-            <li key={row.id} className="flex flex-col gap-4 rounded-md border border-border p-4 sm:flex-row sm:items-center">
-              <CourseCover
-                title={row.cover.title}
-                teacherName={row.cover.teacherName ?? ""}
-                practiceName={row.cover.practiceName}
-                tone={row.cover.tone}
-                className="w-full rounded-sm sm:w-48 sm:shrink-0"
-              />
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <h2 className="text-h3">{row.title}</h2>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-body-s text-text-2">
-                  <StatusBadge tone={row.tone}>{row.state}</StatusBadge>
-                  {row.lessons !== null && <span>{row.lessons}</span>}
-                  <span>{t(text.editedOn, { date: row.edited })}</span>
+        {rows.length === 0 ? (
+          // Sin cursos: el vacío dice qué hacer, con la semilla y el botón.
+          <FlowerState title={text.empty} action={!readOnly && <Button href={portalNewCoursePath()}>{text.firstCourse}</Button>} className="surface-raised" />
+        ) : (
+          <ul className="surface-raised divide-y divide-border">
+            {rows.map((row) => (
+              <li key={row.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:px-5">
+                <CourseCover
+                  title={row.cover.title}
+                  teacherName={row.cover.teacherName ?? ""}
+                  practiceName={row.cover.practiceName}
+                  tone={row.cover.tone}
+                  className="w-full rounded-sm sm:w-48 sm:shrink-0"
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <h2 className="text-h3 break-words">{row.title}</h2>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-body-s text-text-2">
+                    <StatusBadge tone={row.tone}>{row.state}</StatusBadge>
+                    {row.lessons !== null && <span>{row.lessons}</span>}
+                    <span>{t(text.editedOn, { date: row.edited })}</span>
+                  </div>
+                  {row.detail !== null && <p className={row.detailIsReason ? "line-clamp-2 whitespace-pre-line break-words text-body-s text-text-2" : "text-body-s text-text-2"}>{row.detail}</p>}
                 </div>
-                {row.detail !== null && <p className={row.detailIsReason ? "line-clamp-2 whitespace-pre-line break-words text-body-s text-text-2" : "text-body-s text-text-2"}>{row.detail}</p>}
-              </div>
-              <div className="flex flex-wrap gap-3 sm:flex-col sm:items-end">
-                {row.action !== null && (
-                  <Button href={row.action.href} variant="secondary">
-                    <span aria-hidden="true">{row.action.label}</span>
-                    <span className="sr-only">{row.action.name}</span>
-                  </Button>
-                )}
-                {row.publicPage !== null && (
-                  <TextLink href={row.publicPage.href}>
-                    <span aria-hidden="true">{row.publicPage.label}</span>
-                    <span className="sr-only">{row.publicPage.name}</span>
-                  </TextLink>
-                )}
-                {row.progress !== null && (
-                  <TextLink href={row.progress.href}>
-                    <span aria-hidden="true">{row.progress.label}</span>
-                    <span className="sr-only">{row.progress.name}</span>
-                  </TextLink>
-                )}
-                {row.remove !== null && (
-                  <TextLink href={row.remove.href}>
-                    <span aria-hidden="true">{row.remove.label}</span>
-                    <span className="sr-only">{row.remove.name}</span>
-                  </TextLink>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+                <div className="flex flex-wrap gap-3 sm:flex-col sm:items-end">
+                  {row.action !== null && (
+                    <Button href={row.action.href} variant="secondary">
+                      <span aria-hidden="true">{row.action.label}</span>
+                      <span className="sr-only">{row.action.name}</span>
+                    </Button>
+                  )}
+                  {row.publicPage !== null && (
+                    <TextLink href={row.publicPage.href}>
+                      <span aria-hidden="true">{row.publicPage.label}</span>
+                      <span className="sr-only">{row.publicPage.name}</span>
+                    </TextLink>
+                  )}
+                  {row.progress !== null && (
+                    <TextLink href={row.progress.href}>
+                      <span aria-hidden="true">{row.progress.label}</span>
+                      <span className="sr-only">{row.progress.name}</span>
+                    </TextLink>
+                  )}
+                  {row.remove !== null && (
+                    <TextLink href={row.remove.href}>
+                      <span aria-hidden="true">{row.remove.label}</span>
+                      <span className="sr-only">{row.remove.name}</span>
+                    </TextLink>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PortalMain>
     </PortalFrame>
   );
 }
