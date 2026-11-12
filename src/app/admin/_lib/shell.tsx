@@ -1,10 +1,6 @@
-import type { ComponentPropsWithoutRef, ReactNode } from "react";
-
+import { ToolMain, type ToolMainProps } from "@/app/_lib/tool-main";
 import { account } from "@/messages/es/account";
 import type { Capability } from "@/services/account/team";
-import { cx } from "@/ui/cx";
-import { Filigree } from "@/ui/flower";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 // El armazón de una pantalla de administración (T-616, solicitud 6): su `<main>`, la cabecera y el cuerpo, con un
 // solo ancho de contenido (`max-w-admin`) y los mismos márgenes en todas las secciones. Antes cada pantalla ponía
@@ -26,46 +22,14 @@ import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 // Los títulos: el `<h1>` de la cabecera, los `<h2>` en `text-h3` y los `<h3>` en `text-body-l font-semibold`. La
 // escala nueva de `text-h2` (28 px) queda grande para una herramienta densa.
 
-const GUTTER = "mx-auto w-full max-w-admin px-4 sm:px-8";
+// Desde la solicitud 5 el armazón mismo vive en `src/app/_lib/tool-main.tsx` (`ToolMain`), que comparte con el portal
+// del maestro: aquí queda solo lo propio de administración, la capacidad de la sección como antetítulo.
 
-export interface AdminMainProps extends Omit<ComponentPropsWithoutRef<"main">, "title" | "id" | "tabIndex" | "className"> {
-  /** El `<h1>` de la pantalla. */
-  title: ReactNode;
+export interface AdminMainProps extends Omit<ToolMainProps, "eyebrow" | "titleId" | "titleFocusable"> {
   /** La capacidad de la sección: su nombre va de antetítulo, como el grupo del menú (Contenido, Finanzas, Configuración). */
   area?: Capability;
-  /** Lo que acompaña al título, en el segundo tono. */
-  lead?: ReactNode;
-  /** Lo que va arriba del título: «Volver a…». */
-  above?: ReactNode;
-  /** Lo que va junto al título: el estado. */
-  badge?: ReactNode;
-  /** Lo demás de la cabecera, bajo el título (los pasos de un periodo, una línea más). */
-  header?: ReactNode;
-  measure?: "full" | "reading";
-  children: ReactNode;
 }
 
-export function AdminMain({ title, area, lead, above, badge, header, measure = "full", children, ...rest }: AdminMainProps) {
-  return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none" {...rest}>
-      <div data-admin-header className="relative isolate overflow-hidden">
-        <Filigree className="absolute -top-28 -right-24 size-80 sm:-top-40 sm:-right-16 sm:size-112" />
-        <span aria-hidden="true" className="absolute inset-0 glow-header" />
-        <div className={cx(GUTTER, "relative flex flex-col gap-2 pt-8 pb-6 sm:pt-12 sm:pb-8")}>
-          {above}
-          {area !== undefined && <p className="animate-enter eyebrow text-accent">{account.admin.capabilities[area]}</p>}
-          {/* El estado va junto al título, no en la otra orilla: allá quedaba suelto sobre la filigrana. */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <h1 className="text-h1 break-words text-text">{title}</h1>
-            {badge}
-          </div>
-          {lead !== undefined && <div className="flex max-w-reading animate-enter flex-col gap-1 text-text-2">{lead}</div>}
-          {header}
-        </div>
-      </div>
-      <div className={cx(GUTTER, "pt-6 pb-16 sm:pt-8")}>
-        <div className={cx("flex flex-col gap-10", measure === "reading" && "max-w-reading")}>{children}</div>
-      </div>
-    </main>
-  );
+export function AdminMain({ area, ...rest }: AdminMainProps) {
+  return <ToolMain eyebrow={area !== undefined ? account.admin.capabilities[area] : undefined} {...rest} />;
 }

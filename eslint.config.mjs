@@ -221,7 +221,8 @@ const NON_TEXT_ATTRIBUTES =
     "xmlns|viewBox|fill|stroke|strokeLinecap|strokeLinejoin|strokeWidth|vectorEffect|d|points|transform",
     "preserveAspectRatio|focusable|itemProp|itemType|property",
     // El armazón de administración (`AdminMain`): la capacidad de la sección (una llave, no su nombre) y el ancho del cuerpo.
-    "area|measure",
+    // `titleId` es el `id` del título en el armazón común (`ToolMain`).
+    "area|measure|titleId",
     "data-.+",
     "aria-(hidden|live|atomic|relevant|busy|current|invalid|required|disabled|expanded|pressed)",
     "aria-(checked|selected|haspopup|controls|describedby|labelledby|owns|activedescendant)",
