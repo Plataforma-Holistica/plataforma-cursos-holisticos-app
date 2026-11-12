@@ -168,7 +168,7 @@ const FAILURES = {
   billing_queue_unavailable:
     "No se pudo leer, reintentar o resolver un aviso de Stripe desde la cola de finanzas (PA-84): la base no contestó, o contestó algo que el servidor no conoce. Se le dijo que no se supo, y la pantalla vuelve a leer la cola.",
   nav_access_unavailable:
-    "No se pudo leer si quien mira es del equipo o maestro para la barra del alumno (T-616): la barra salió sin «Mi portal» ni «Administración». Quien lo sea entra igual por la dirección; si se repite, la base no contesta.",
+    "No se pudo leer si quien mira es del equipo o maestro, para los accesos de la barra del alumno o el menú lateral de administración (T-616): salieron sin «Mi portal» ni «Administración». Quien lo sea entra igual por la dirección; si se repite, la base no contesta.",
 } as const;
 
 export type FailureCode = keyof typeof FAILURES;

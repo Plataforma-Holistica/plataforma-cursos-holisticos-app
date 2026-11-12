@@ -14,10 +14,10 @@ import { PersonMenu } from "./person-menu";
 
 // La barra del alumno, una sola en todas sus pantallas (diseño, sección 5; T-210; T-616, solicitud 2, por las
 // quejas de Sergio del 2026-11-10: en Cuenta no había barra, y desde el inicio no había cómo volver al portal
-// ni a la administración). Fija arriba y translúcida: el logotipo, Inicio, Explorar y Mi lista; a la derecha,
-// «Mi portal» y «Administración» a quien le tocan, y el menú de la persona. En el teléfono la lista de enlaces
-// baja y se queda fija abajo, con Cuenta, y los accesos por rol van arriba del menú, como botones con su
-// icono (pedido del carril A del 2026-11-11: no solo escondidos en el menú).
+// ni a la administración). Arriba, fija al desplazar desde `lg`: el logotipo, Inicio, Explorar y Mi lista; a
+// quien le tocan, «Mi portal» y «Administración», y el menú de la persona. En computadora los accesos por rol
+// van a la vista en la barra; en el teléfono, solo dentro del menú de la cuenta, arriba, como botones con su
+// icono. En el teléfono la lista de enlaces baja y se queda fija abajo, con Cuenta.
 //
 // Una sola lista de enlaces, que el CSS acomoda: así no se repite para el lector de pantalla. Lo que va dos
 // veces (los accesos y Cuenta) se esconde con `hidden` en el ancho que no le toca, y entonces el lector
@@ -34,7 +34,7 @@ const LINKS = [
   { href: ROUTES.account, label: text.account, icon: UserRound, narrowOnly: true },
 ] as const;
 
-type Current = typeof ROUTES.home | typeof ROUTES.explore | typeof ROUTES.account;
+type Current = typeof ROUTES.home | typeof ROUTES.explore | typeof ROUTES.account | typeof ROUTES.myComments;
 
 const ACCESSES = [
   { key: "portal", href: ROUTES.portal, label: text.portal, icon: BookOpenText },
@@ -133,12 +133,12 @@ export function StudentNav({ current, access, email }: { current?: Current; acce
                   </li>
                 ))}
                 <li>
-                  <Link href={ROUTES.account} className={ENTRY}>
+                  <Link href={ROUTES.account} aria-current={current === ROUTES.account ? "page" : undefined} className={ENTRY}>
                     {text.account}
                   </Link>
                 </li>
                 <li>
-                  <Link href={ROUTES.myComments} className={ENTRY}>
+                  <Link href={ROUTES.myComments} aria-current={current === ROUTES.myComments ? "page" : undefined} className={ENTRY}>
                     {text.myComments}
                   </Link>
                 </li>

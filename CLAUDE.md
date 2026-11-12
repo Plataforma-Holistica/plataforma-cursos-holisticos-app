@@ -1274,15 +1274,17 @@ que no se ve leyendo un solo archivo:
   y, sin nada guardado, dice que no hay nada; sin JavaScript lo hace `:target` (`group-target/lista:`, un grupo con nombre: uno sin nombre
   encendía las tarjetas). Fuera de eso no dice nada (el inicio sin nada guardado sigue sin «Mi lista»). **El menú lateral** (`SideFrame`) lleva «Ir a mi inicio» arriba, con los
   otros lugares de la persona (`others`): en administración, «Mi portal» a quien también es maestro (`AdminFrame` pide `portal`; el inicio
-  lo saca de la lectura de `teacherStanding` que ya hacía, y el comodín, de `navAccess`). Usa integración 106, `tests/e2e/barra.spec.ts` y
+  lo saca de la lectura de `teacherStanding` que ya hacía, y el comodín, de `navAccess`). Usa integración 106 (con un caso que pasa por el `navAccess` de la aplicación, como `app_service`, y mira que no
+  reporte: los demás arman su propia lectura con la conexión del dueño, y no verían un permiso de menos), `tests/e2e/barra.spec.ts` y
   casos en `camino.equipo.ts` y `portal.equipo.ts`. Para las pruebas: la barra trae su formulario de «Cerrar sesión» antes que la pantalla,
   así que los formularios de una pantalla del alumno se leen desde el `<main>` (`mainOf`), y cerrar sesión o ir a la cuenta van por
   `tests/e2e/support/nav.ts`; una prueba de página que pinte la barra simula `@/app/_catalog/nav-facts`, y una que monte el comodín de
   administración, `@/services/account/nav`. Cambiaron por el requisito la forma de `<AdminFrame>` y las anclas en `screens.test.ts`, el
   orden del menú en `team-pages.test.tsx`, «Salir» en `account-pages.test.tsx` y en cuatro extremo a extremo, y `cuenta.spec.ts`
-  (`mainOf`). El resumen de los `<details>` va sin su marca con `summary-plain` (en WebKit salía el triángulo). Decisiones mías sin confirmar: «Mi lista»
-  como ancla del inicio y su nota de vacío; sin hoja inferior en el teléfono (basta
-  con los accesos arriba del menú, como pidió el carril A); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
+  (`mainOf`). El resumen de los `<details>` va sin su marca con `summary-plain` (en WebKit salía el triángulo), y la entrada del menú de la página en que se está
+  lleva `aria-current` (la cuenta y Mis comentarios). Decisiones mías sin confirmar: «Mi lista»
+  como ancla del inicio y su nota de vacío; sin hoja inferior en el teléfono (en computadora los accesos van a la vista en la barra; en el teléfono,
+  solo dentro del menú, arriba); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
   menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
   alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la

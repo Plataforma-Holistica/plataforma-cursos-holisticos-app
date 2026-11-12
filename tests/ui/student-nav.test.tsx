@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
 
-import { NO_NAV_ACCESS, type NavAccess } from "@/domain/access/nav-access";
+import { NO_NAV_ACCESS, type NavAccess } from "@/services/account/nav-access";
 
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
@@ -18,7 +18,7 @@ import { StudentNav } from "@/app/_catalog/nav";
 const EMAIL = "ana@prueba.test";
 const BOTH: NavAccess = { admin: true, portal: true };
 
-function bar(access: NavAccess = NO_NAV_ACCESS, current?: "/inicio" | "/explorar") {
+function bar(access: NavAccess = NO_NAV_ACCESS, current?: "/inicio" | "/explorar" | "/cuenta" | "/cuenta/comentarios") {
   return render(
     <>
       <StudentNav access={access} email={EMAIL} {...(current ? { current } : {})} />
@@ -109,6 +109,18 @@ describe("la barra del alumno", () => {
     expect(within(details).getByRole("link", { name: "Cuenta", hidden: true })).toHaveAttribute("href", "/cuenta");
     expect(within(details).getByRole("link", { name: "Mis comentarios", hidden: true })).toHaveAttribute("href", "/cuenta/comentarios");
     expect(within(details).getByRole("button", { name: "Cerrar sesión", hidden: true }).closest("form")).not.toBeNull();
+  });
+
+  it("en el menú, la entrada de la página en que se está va marcada", () => {
+    const { unmount } = bar(NO_NAV_ACCESS, "/cuenta");
+    expect(within(menu()).getByRole("link", { name: "Cuenta", hidden: true })).toHaveAttribute("aria-current", "page");
+    expect(within(menu()).getByRole("link", { name: "Mis comentarios", hidden: true })).not.toHaveAttribute("aria-current");
+    unmount();
+    bar(NO_NAV_ACCESS, "/cuenta/comentarios");
+    expect(within(menu()).getByRole("link", { name: "Mis comentarios", hidden: true })).toHaveAttribute("aria-current", "page");
+    expect(within(menu()).getByRole("link", { name: "Cuenta", hidden: true })).not.toHaveAttribute("aria-current");
+    // En la lista de abajo, Cuenta solo en la cuenta misma.
+    expect(within(principal()).getByRole("link", { name: "Cuenta" })).not.toHaveAttribute("aria-current");
   });
 
   it("sin correo, el menú no inventa uno", () => {

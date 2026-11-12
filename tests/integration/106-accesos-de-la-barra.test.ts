@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import type { Client } from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { VerifiedClaims } from "@/adapters/supabase/claims";
 import type { Tx } from "@/adapters/supabase/db";
+import { navAccess } from "@/services/account/nav";
 import { createNavAccess, type NavAccess } from "@/services/account/nav-access";
 import { readNavStates } from "@/services/account/team-records";
 
@@ -170,6 +171,44 @@ describe("los accesos de la barra, contra la base", () => {
       await asOwner(owner);
       expect(await accessOf(owner, lia)).toEqual({ admin: false, portal: false });
     });
+  });
+
+  it("del equipo, al revocarle su capacidad deja de ver «Administración»", async () => {
+    const ivo = await person();
+    await reverted(async (owner) => {
+      await capability(owner, ivo);
+      expect(await accessOf(owner, ivo)).toEqual({ admin: true, portal: false });
+      await asSystem(owner);
+      await owner.query("select set_config('app.actor_id', $1, true)", [ivo.id]);
+      await owner.query("update public.admin_capabilities set revoked_at = now(), revoked_by = $1 where profile_id = $1", [ivo.id]);
+      await asOwner(owner);
+      expect(await accessOf(owner, ivo)).toEqual({ admin: false, portal: false });
+    });
+  });
+
+  it("el maestro que se va deja de ver «Mi portal»", async () => {
+    const teo = await person();
+    await reverted(async (owner) => {
+      await teacher(owner, teo, "active");
+      expect(await accessOf(owner, teo)).toEqual({ admin: false, portal: true });
+      await asSystem(owner);
+      await owner.query("update public.teachers set status = 'left', left_at = now() where profile_id = $1", [teo.id]);
+      await asOwner(owner);
+      expect(await accessOf(owner, teo)).toEqual({ admin: false, portal: false });
+    });
+  });
+
+  it("el `navAccess` de la aplicación, como `app_service` y en su propia transacción, lee las dos mitades sin reportar nada", async () => {
+    // Lo que una prueba con la conexión del dueño no ve: los permisos del rol del servidor sobre las dos funciones y
+    // las tablas que leen. Si faltara uno, la mitad quedaría nula y se reportaría `nav_access_unavailable`.
+    const noe = await person();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(await navAccess(noe.claims)).toEqual({ admin: false, portal: false });
+      expect(errors.mock.calls.flat().join(" ")).not.toContain("nav_access_unavailable");
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("quien es las dos cosas ve los dos", async () => {

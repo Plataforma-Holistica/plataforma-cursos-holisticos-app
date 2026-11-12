@@ -32,7 +32,7 @@ export default async function MyCommentsPage({ searchParams }: { searchParams: P
   if (page.kind === "unavailable") return <UnavailableScreen retryHref={mineHref(cursor)} withSession />;
   return (
     <>
-      <StudentNav {...nav} />
+      <StudentNav current={ROUTES.myComments} {...nav} />
       <MyCommentsScreen items={page.items} next={page.next} cursor={cursor} action={myCommentsAction} />
     </>
   );

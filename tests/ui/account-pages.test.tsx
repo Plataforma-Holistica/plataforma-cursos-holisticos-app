@@ -311,6 +311,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     mocks.sessionEmail.mockResolvedValue(null);
     render(await HomePage());
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
+    // Sin correo que mostrar, cerrar sesión sigue a la mano en el menú de la barra.
+    expect(within(screen.getByRole("banner")).getByRole("button", { name: "Cerrar sesión", hidden: true })).toBeInTheDocument();
   });
 });
 

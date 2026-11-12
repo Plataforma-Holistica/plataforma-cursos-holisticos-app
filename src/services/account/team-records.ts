@@ -72,7 +72,8 @@ export async function readTeamStanding(tx: Tx, ticketPrint: string | null): Prom
 /**
  * Los dos estados de quien actúa para la barra del alumno (T-616): del equipo y de maestro, en la misma
  * transacción y sin resguardo del buzón (con nulo, una invitación nunca da un acceso, y la barra no depende
- * de esa cookie). Una mitad que no se entiende queda nula, y la otra sigue. No escribe nada.
+ * de esa cookie). Una mitad que no se entiende queda nula, y la otra sigue; si la base rechaza la primera consulta, la
+ * transacción queda abortada y la segunda también sale nula: no queda ningún acceso (falla cerrada). No escribe nada.
  */
 export async function readNavStates(tx: Tx): Promise<NavStates> {
   const team = await readTeamStanding(tx, null).then(
