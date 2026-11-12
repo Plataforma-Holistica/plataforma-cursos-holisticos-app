@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor, type StudentNavFacts } from "@/app/_catalog/nav-facts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
 import { PublicFooter } from "@/app/_public/footer";
@@ -52,9 +53,12 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   if (offer.kind === "unavailable") return <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />;
 
   let viewer: PlansViewer;
+  // La barra, solo al alumno.
+  let nav: StudentNavFacts | null = null;
   if (who.kind === "visitor") viewer = { kind: "visitor", signUp: signUpPath, signIn: signInPath };
   else if (who.kind === "student") {
-    const standing = await planStanding(who.claims);
+    const [standing, studentNav] = await Promise.all([planStanding(who.claims), studentNavFor(who.claims)]);
+    nav = studentNav;
     viewer =
       standing.kind === "ready" && standing.access
         ? { kind: "has_access" }
@@ -69,7 +73,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   if (view.kind === "not_for_sale" && detour !== null) redirect(signInPath(detour));
   return (
     <>
-      {who.kind === "student" && <StudentNav />}
+      {nav !== null && <StudentNav {...nav} />}
       {who.kind === "visitor" && <PublicHeader onPlans />}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         {view.kind === "not_for_sale" ? (

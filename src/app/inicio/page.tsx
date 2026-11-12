@@ -4,14 +4,14 @@ import Image from "next/image";
 import { homeListAction } from "@/app/_catalog/my-list/actions";
 import { MyListBlock } from "@/app/_catalog/my-list/my-list-block";
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { PracticeRows } from "@/app/_catalog/practice-rows";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
-import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import { requireSession } from "@/app/_lib/guard";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
-import { accountProfile, sessionEmail } from "@/services/account/account";
-import { coursePath, explorePath, lessonPath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { accountProfile } from "@/services/account/account";
+import { coursePath, explorePath, lessonPath, MY_LIST_ANCHOR, ROUTES, teacherPath } from "@/services/account/navigation";
 import { readNotice } from "@/services/account/notice";
 import { homeShelf, myList, type ShelfCourse } from "@/services/browse/browse";
 import { continueWatching } from "@/services/progress/progress";
@@ -30,8 +30,8 @@ import { TextLink } from "@/ui/text-link";
 // su fila; con el catálogo vacío, el estado vacío en lugar de las filas.
 //
 // Bajo el saludo sigue diciendo con qué correo se entró: le avisa a alguien que completó una
-// cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla. Y al pie, «Salir»,
-// mientras no haya menú de la cuenta. «Ver todo» lleva a explorar con el filtro de la fila:
+// cuenta desde un enlace que le mandó otra persona, y cuyo buzón no controla (TRD §9.2). El menú
+// de la persona en la barra lo repite, y lleva «Cerrar sesión» (T-616). «Ver todo» lleva a explorar con el filtro de la fila:
 // «Para empezar», su nivel; cada práctica, la suya. «Nuevos» no lo lleva: explorar no ordena por
 // otra cosa que lo más nuevo, y sin filtro pinta un carrusel por práctica (decisión mía sin
 // confirmar, 2026-10-28).
@@ -43,8 +43,8 @@ import { TextLink } from "@/ui/text-link";
 
 const text = messages.browse.home;
 
-/** El bloque de «Mi lista»: el ancla a la que vuelve su formulario sin JavaScript. */
-const MY_LIST_ID = "bloque-mi-lista";
+/** El bloque de «Mi lista»: el ancla a la que vuelve su formulario sin JavaScript, y a la que lleva la barra. */
+const MY_LIST_ID = MY_LIST_ANCHOR;
 
 export const metadata: Metadata = { title: text.pageTitle };
 
@@ -81,13 +81,14 @@ export default async function HomePage() {
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
   if (session.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.home} withSession />;
 
-  const [email, profile, watching, shelf, saved] = await Promise.all([
-    sessionEmail(await cookieReader()),
+  const [nav, profile, watching, shelf, saved] = await Promise.all([
+    studentNavFor(session.claims),
     accountProfile(session.claims),
     continueWatching(session.claims),
     homeShelf(),
     myList(session.claims),
   ]);
+  const { email } = nav;
   const name = profile.kind === "ready" ? profile.name : null;
   const started = watching.kind === "ready" ? watching.courses : [];
   const invitationGone = readNotice(await cookieReader()) === "teacher_invitation_gone";
@@ -95,7 +96,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <StudentNav current={ROUTES.home} />
+      <StudentNav current={ROUTES.home} {...nav} />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 pb-24 outline-none sm:pb-16">
         {/* La franja de ambiente detrás del saludo (diseño, sección 3.12; T-614): corta, para que en el teléfono «continuar
             viendo» siga en la primera pantalla. El faro y las estrellas se alternan, una por día (decisión de Sergio del 2026-11-05). */}
@@ -218,12 +219,6 @@ export default async function HomePage() {
             )}
           </>
         )}
-
-        <form action={signOutAction} className="px-4 sm:px-8">
-          <Button type="submit" variant="text">
-            {messages.account.common.signOut}
-          </Button>
-        </form>
       </main>
     </>
   );

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
     throw new Error(`redirige a ${to}`);
   }),
 }));
+// La barra del alumno (T-616): sin accesos por rol ni correo, salvo que la prueba diga otra cosa.
+vi.mock("@/app/_catalog/nav-facts", () => ({ studentNavFor: () => Promise.resolve({ access: { admin: false, portal: false }, email: null }) }));
 vi.mock("@/app/_lib/guard", () => ({ publicViewer: mocks.publicViewer }));
 vi.mock("@/services/billing/checkout-service", () => ({ planOffer: mocks.planOffer, planStanding: mocks.planStanding }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));

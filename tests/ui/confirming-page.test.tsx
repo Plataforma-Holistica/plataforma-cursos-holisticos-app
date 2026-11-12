@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
     throw new Error("no existe");
   }),
 }));
+// La barra del alumno (T-616): sin accesos por rol ni correo, salvo que la prueba diga otra cosa.
+vi.mock("@/app/_catalog/nav-facts", () => ({ studentNavFor: () => Promise.resolve({ access: { admin: false, portal: false }, email: null }) }));
 vi.mock("@/app/_lib/guard", () => ({ requireSession: mocks.requireSession }));
 vi.mock("@/services/billing/checkout-service", () => ({ checkoutProgress: mocks.checkoutProgress, SESSION_ID: /^cs_(test|live)_[A-Za-z0-9]{1,250}$/ }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, useRouter: () => ({ refresh: vi.fn() }), usePathname: () => "/suscripcion/confirmando" }));

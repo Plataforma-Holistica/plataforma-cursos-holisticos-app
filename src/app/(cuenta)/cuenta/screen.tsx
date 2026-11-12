@@ -106,7 +106,7 @@ export function AccountScreen({ name, email, sessions, secondFactor = false }: A
   const round = sent + local.checks;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-10 px-4 py-16 outline-none">
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-10 px-4 pt-16 pb-24 outline-none sm:pb-16">
       <h1 className="text-h1">{text.title}</h1>
       <section id={NAME_BLOCK_ID} aria-labelledby={NAME_TITLE_ID} className="flex flex-col gap-4">
         <h2 id={NAME_TITLE_ID} className="text-h3">

@@ -10,7 +10,8 @@ import type { Capability } from "@/services/account/team";
 // puede abrir). Es una comodidad, como los enlaces que reemplaza: quién entra a cada sección lo decide
 // su guarda. Lo pintan el inicio y el comodín, después de la guarda; cada sección trae su `<main>`.
 //
-// Moderación y soporte todavía no tienen pantallas: sus grupos llegan con ellas.
+// Moderación y soporte todavía no tienen pantallas: sus grupos llegan con ellas. A quien también es maestro,
+// «Mi portal» arriba, junto a «Ir a mi inicio» (T-616, solicitud 2).
 
 const text = messages.account.admin;
 
@@ -58,9 +59,22 @@ export function adminEntryOf(path: string): string {
   return section === undefined ? ROUTES.admin : `${ROUTES.admin}/${section}`;
 }
 
-export function AdminFrame({ path, capabilities, children }: { path: string; capabilities: readonly string[]; children: ReactNode }) {
+const PORTAL = [{ href: ROUTES.portal, label: messages.browse.nav.portal }] as const;
+
+export function AdminFrame({
+  path,
+  capabilities,
+  portal,
+  children,
+}: {
+  path: string;
+  capabilities: readonly string[];
+  /** Si quien entra también es maestro, con portal al que llegar (`opensPortal`). */
+  portal: boolean;
+  children: ReactNode;
+}) {
   return (
-    <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav}>
+    <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav} others={portal ? PORTAL : []}>
       {children}
     </SideFrame>
   );

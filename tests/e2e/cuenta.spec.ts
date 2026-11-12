@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import { a11yViolations } from "./support/a11y";
-import { actionFields, hydrated, postAction } from "./support/actions";
+import { actionFields, hydrated, mainOf, postAction } from "./support/actions";
 import {
   clearCounters,
   forgetNotedSessions,
@@ -13,6 +13,7 @@ import {
   sessionCount,
   type Person,
 } from "./support/stack";
+import { goToAccount } from "./support/nav";
 
 // La pantalla de la cuenta (diseño, PA-25; flujo de la app, FL-27): lo que la persona ve de
 // su cuenta, el cambio de nombre, el de contraseña y las sesiones abiertas, con JavaScript y
@@ -64,9 +65,11 @@ test("del inicio se llega a la cuenta, que muestra el nombre y el correo, y se v
   await signIn(page, ana);
   await expect(page).toHaveURL("/inicio");
 
-  await page.getByRole("link", { name: "Cuenta" }).click();
+  await goToAccount(page);
   await expect(page).toHaveURL("/cuenta");
   await expect(page).toHaveTitle("Cuenta · Escuela de Misterios");
+  // La barra del alumno sigue ahí (T-616): sin ella había que bajar hasta abajo para volver.
+  await expect(page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Cuenta" })).toBeVisible();
   await expect(nameField(page)).toHaveValue("Ana de Prueba");
   const email = page.getByRole("region", { name: "Correo" });
@@ -83,7 +86,7 @@ test("guardar el nombre: lo dice ahí mismo, queda en la base, y sigue al recarg
   const ana = await person();
   await signIn(page, ana);
   await expect(page).toHaveURL("/inicio");
-  await page.getByRole("link", { name: "Cuenta" }).click();
+  await goToAccount(page);
   await expect(page).toHaveURL("/cuenta");
   await hydrated(page);
 
@@ -145,7 +148,11 @@ test("solo con el teclado: se llega al campo, se guarda con Intro y el foco no s
   await openAccount(page, ana);
   await hydrated(page);
 
-  // El campo del nombre es lo primero a lo que se llega después del salto al contenido.
+  // El campo del nombre es lo primero a lo que se llega después del salto al contenido. La barra del alumno va antes
+  // (T-616): se toma el salto, como lo haría quien usa el teclado.
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Saltar al contenido" })).toBeFocused();
+  await page.keyboard.press("Enter");
   for (let presses = 0; presses < 4; presses += 1) {
     await page.keyboard.press("Tab");
     if (await nameField(page).evaluate((field) => field === document.activeElement)) break;
@@ -277,7 +284,7 @@ test("la acción de cambiar el nombre no hace nada para quien no trae sesión", 
   const ana = await person();
   await openAccount(page, ana);
   // Los campos de la acción, tomados de una sesión de verdad, enviados sin ninguna cookie.
-  const hidden = actionFields(await (await page.request.get("/cuenta")).text());
+  const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()));
 
   const response = await postAction(request, "/cuenta", { ...hidden, name: "Intrusa" });
   expect(response.status()).toBe(303);
@@ -288,7 +295,7 @@ test("la acción de cambiar el nombre no hace nada para quien no trae sesión", 
 test("la acción enviada desde otro sitio se rechaza aunque traiga la sesión, y desde el propio sí guarda", async ({ page }) => {
   const ana = await person();
   await openAccount(page, ana);
-  const hidden = actionFields(await (await page.request.get("/cuenta")).text());
+  const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()));
 
   for (const origin of ["https://otro.example", "http://localhost:3001", "null"]) {
     const rejected = await postAction(page.request, "/cuenta", { ...hidden, name: "Desde fuera" }, origin);
@@ -305,7 +312,7 @@ test("la acción aguanta un formulario que su pantalla nunca mandaría, y solo e
   const ana = await person();
   const otra = await person();
   await openAccount(page, ana);
-  const hidden = actionFields(await (await page.request.get("/cuenta")).text());
+  const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()));
   const file = { name: "x.txt", mimeType: "text/plain", buffer: Buffer.from("Intrusa") };
 
   // Ni guarda ni truena: contesta su pantalla, con el dato por corregir.
@@ -553,7 +560,7 @@ test("la acción de cerrar sesiones no hace nada para quien no trae sesión, ni 
   try {
     await openAccount(page, ana);
     // El formulario de las sesiones es el tercero de la pantalla que lleva una acción.
-    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 2);
+    const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()), 2);
     // El otro navegador entró primero: su sesión es la más antigua.
     const [theirs = ""] = await sessionIds(ana.id);
 
@@ -587,7 +594,7 @@ test("la acción de cerrar sesiones aguanta lo que su pantalla nunca mandaría, 
   const theirs = await anotherBrowser(browser, otra);
   try {
     await openAccount(page, ana);
-    const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 2);
+    const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()), 2);
     // El otro navegador entró primero: su sesión es la más antigua, y la de esta página, la segunda.
     const [minePhone = "", mine = ""] = await sessionIds(ana.id);
     const [foreign = ""] = await sessionIds(otra.id);
@@ -652,8 +659,8 @@ async function changePassword(page: Page, current: string, next: string): Promis
 async function entersWith(browser: Browser, who: Person, password: string): Promise<boolean> {
   return inContext(browser, {}, async (fresh) => {
     await signIn(fresh, { email: who.email, password });
-    // Una de dos: el inicio, con su enlace a la cuenta, o la pantalla de entrar diciendo que no.
-    const inside = fresh.getByRole("link", { name: "Cuenta", exact: true });
+    // Una de dos: el inicio, con la barra del alumno, o la pantalla de entrar diciendo que no.
+    const inside = fresh.locator("[data-student-nav]");
     const refused = fresh.getByRole("main").getByText("El correo o la contraseña no coinciden.");
     await expect(inside.or(refused)).toBeVisible();
     return (await inside.count()) > 0;
@@ -872,7 +879,7 @@ test("la acción de cambiar la contraseña no hace nada para quien no trae sesi�
   const ana = await person();
   await openAccount(page, ana);
   // El formulario de la contraseña es el segundo de la pantalla que lleva una acción.
-  const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+  const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()), 1);
   const next = chosen();
 
   // Sin ninguna cookie, aunque traiga la contraseña correcta.
@@ -892,7 +899,7 @@ test("la acción de cambiar la contraseña aguanta lo que su pantalla nunca mand
   const ana = await person();
   const otra = await person();
   await openAccount(page, ana);
-  const hidden = actionFields(await (await page.request.get("/cuenta")).text(), 1);
+  const hidden = actionFields(mainOf(await (await page.request.get("/cuenta")).text()), 1);
   const file = { name: "x.txt", mimeType: "text/plain", buffer: Buffer.from(ana.password) };
   const next = chosen();
 
@@ -992,7 +999,7 @@ test("la acción de cambiar la contraseña, mandada por una cuenta con segundo f
   // Los campos de la acción salen de la pantalla de una cuenta que sí ve el formulario.
   const hidden = await inContext(browser, {}, async (other) => {
     await openAccount(other, otra);
-    return actionFields(await (await other.request.get("/cuenta")).text(), 1);
+    return actionFields(mainOf(await (await other.request.get("/cuenta")).text()), 1);
   });
   await openAccount(page, ana);
   const attempts = async () =>

@@ -7,6 +7,7 @@ import { downloadResourceAction } from "@/app/_catalog/resources/actions";
 import { ResourceList } from "@/app/_catalog/resources/resource-list";
 import { resourceItems } from "@/app/_catalog/resources/words";
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor, type StudentNavFacts } from "@/app/_catalog/nav-facts";
 import { courseDuration, lessonMinutes } from "@/app/_catalog/format";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
@@ -85,10 +86,17 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
   let who: Viewer = viewer.kind === "unknown" ? { kind: "unknown" } : { kind: "visitor" };
   // Si está en su lista; nulo si no mira un alumno o no se supo.
   let saved: boolean | null = null;
+  // La barra, solo al alumno.
+  let nav: StudentNavFacts | null = null;
   if (viewer.kind === "student") {
-    const [access, standing] = await Promise.all([lessonAccess(await cookieReader(), detail.firstLesson.id), courseStanding(viewer.claims, detail)]);
+    const [access, standing, studentNav] = await Promise.all([
+      lessonAccess(await cookieReader(), detail.firstLesson.id),
+      courseStanding(viewer.claims, detail),
+      studentNavFor(viewer.claims),
+    ]);
     who = { kind: "student", access, standing: standing.kind === "ready" ? standing.standing : null };
     saved = standing.kind === "ready" ? standing.saved : null;
+    nav = studentNav;
   }
   const action = primaryAction(detail, who);
   const standing = who.kind === "student" ? who.standing : null;
@@ -99,7 +107,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
 
   return (
     <>
-      {who.kind === "student" && <StudentNav />}
+      {nav !== null && <StudentNav {...nav} />}
       {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). A quien no se sabe quién es, ninguna de las dos. */}
       {who.kind === "visitor" && <PublicHeader />}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>

@@ -14,6 +14,9 @@ import { Wordmark } from "@/ui/wordmark";
 //
 // Fijo a la izquierda desde `lg`; más angosto, una barra con el logotipo y «Menú», que abre una hoja
 // encima del contenido. Sin JavaScript la hoja es un `<details>`.
+//
+// Arriba de todo, «Ir a mi inicio» y los otros lugares de la persona (en administración, «Mi portal» a quien
+// también es maestro; T-616, solicitud 2): antes iba al pie, y no se encontraba cómo volver.
 
 export interface SideNavLink {
   href: string;
@@ -37,9 +40,35 @@ export interface SideNavText {
 const ENTRY = "flex min-h-touch items-center rounded-md px-3 text-body text-text-2 hover:bg-surface-2 hover:text-text";
 
 // El menú se pinta dos veces (la hoja del teléfono y la columna), así que cada copia nombra sus grupos con su prefijo.
-function Entries({ groups, current, text, idPrefix }: { groups: readonly SideNavGroup[]; current: string; text: SideNavText; idPrefix: string }) {
+function Entries({
+  groups,
+  current,
+  text,
+  others,
+  idPrefix,
+}: {
+  groups: readonly SideNavGroup[];
+  current: string;
+  text: SideNavText;
+  others: readonly SideNavLink[];
+  idPrefix: string;
+}) {
   return (
     <div className="flex flex-col gap-6">
+      <ul className="flex flex-col gap-1 border-b border-border pb-4">
+        <li>
+          <Link href={ROUTES.home} className={ENTRY}>
+            {text.platform}
+          </Link>
+        </li>
+        {others.map((link) => (
+          <li key={link.href}>
+            <Link href={link.href} className={ENTRY}>
+              {link.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
       {groups.map((group, index) => (
         <div key={group.title ?? index} className="flex flex-col gap-1">
           {group.title !== undefined && (
@@ -64,11 +93,6 @@ function Entries({ groups, current, text, idPrefix }: { groups: readonly SideNav
       ))}
       <ul className="flex flex-col gap-1 border-t border-border pt-4">
         <li>
-          <Link href={ROUTES.home} className={ENTRY}>
-            {text.platform}
-          </Link>
-        </li>
-        <li>
           {/* El editor de curso pregunta antes si hay algo sin guardar (`data-leaves`). */}
           <form action={signOutAction} data-leaves="all">
             <button type="submit" className={cx(ENTRY, "w-full text-left")}>
@@ -86,6 +110,7 @@ function Entries({ groups, current, text, idPrefix }: { groups: readonly SideNav
  * @param home A dónde lleva el logotipo: el inicio del portal o el de administración.
  * @param current La entrada que se marca, por su dirección.
  * @param banner Lo que va arriba del contenido, como la franja de solo lectura del maestro suspendido.
+ * @param others Los otros lugares de la persona, junto a «Ir a mi inicio».
  */
 export function SideFrame({
   home,
@@ -93,6 +118,7 @@ export function SideFrame({
   current,
   text,
   banner,
+  others = [],
   children,
 }: {
   home: string;
@@ -100,6 +126,7 @@ export function SideFrame({
   current: string;
   text: SideNavText;
   banner?: ReactNode;
+  others?: readonly SideNavLink[];
   children: ReactNode;
 }) {
   return (
@@ -113,17 +140,17 @@ export function SideFrame({
             <Wordmark />
           </Link>
           <details className="lg:hidden">
-            <summary className="flex min-h-touch cursor-pointer list-none items-center gap-2 text-body text-text">
+            <summary className="summary-plain flex min-h-touch cursor-pointer items-center gap-2 text-body text-text">
               <Icon icon={Menu} />
               {text.menu}
             </summary>
             <div className="absolute inset-x-0 top-full z-(--z-dropdown) border-b border-border bg-surface-1 px-4 pt-2 pb-4">
-              <Entries groups={groups} current={current} text={text} idPrefix="side-nav-sheet" />
+              <Entries groups={groups} current={current} text={text} others={others} idPrefix="side-nav-sheet" />
             </div>
           </details>
         </div>
         <div className="hidden lg:block">
-          <Entries groups={groups} current={current} text={text} idPrefix="side-nav" />
+          <Entries groups={groups} current={current} text={text} others={others} idPrefix="side-nav" />
         </div>
       </nav>
       <div className="min-w-0 flex-1">

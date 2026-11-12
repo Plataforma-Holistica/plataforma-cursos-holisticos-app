@@ -7,6 +7,9 @@ import { resolveReturnPath } from "@/domain/access/return-path";
 // Aquí no se decide quién pasa. Eso lo dice la guarda de sesión (`checkSession`), en cada
 // página y en cada acción; esto solo sabe a dónde llevar.
 
+/** El bloque de «Mi lista» en el inicio: el ancla a la que vuelve su formulario sin JavaScript, y a la que lleva la barra. */
+export const MY_LIST_ANCHOR = "bloque-mi-lista";
+
 export const ROUTES = {
   landing: "/",
   signIn: "/entrar",
@@ -15,6 +18,8 @@ export const ROUTES = {
   verify: "/verificar",
   consents: "/consentimientos",
   home: "/inicio",
+  /** «Mi lista» de la barra del alumno (T-616): el bloque del inicio. */
+  myList: `/inicio#${MY_LIST_ANCHOR}`,
   account: "/cuenta",
   /** PA-04, los planes (T-302): también para el visitante. */
   plans: "/planes",

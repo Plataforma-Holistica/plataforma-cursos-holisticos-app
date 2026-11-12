@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { a11yViolations } from "./support/a11y";
 import { hydrated } from "./support/actions";
 import { clearCounters, parameter, person, SESSION_COOKIE, sessionCount, type Person } from "./support/stack";
+import { signOutFromBar } from "./support/nav";
 
 // Entrar y salir (FL-05; diseño PA-11), de extremo a extremo: la aplicación compilada
 // contra la base y el Auth locales.
@@ -32,12 +33,12 @@ test("entra con su correo y su contraseña, llega a su inicio y sale @telefono",
   await page.getByRole("button", { name: "Entrar" }).click();
 
   await expect(page).toHaveURL("/inicio");
-  await expect(page.getByText(`Entraste como ${ana.email}`)).toBeVisible();
+  await expect(page.getByRole("main").getByText(`Entraste como ${ana.email}`)).toBeVisible();
   const cookie = await sessionCookie(page);
   expect(cookie).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
   expect(await sessionCount(ana.id)).toBe(1);
 
-  await page.getByRole("button", { name: "Salir" }).click();
+  await signOutFromBar(page);
   await expect(page).toHaveURL("/");
   expect(await sessionCookie(page)).toBeUndefined();
   expect(await sessionCount(ana.id)).toBe(0);
