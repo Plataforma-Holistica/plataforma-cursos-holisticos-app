@@ -45,6 +45,7 @@ import CheckMailPage from "@/app/(cuenta)/verificar/page";
 const reader = { get: () => undefined };
 const TOKEN = "abcdefgh12345678";
 const at = (token: string) => ({ params: Promise.resolve({ token }) });
+const search = (params: Record<string, string | string[]> = {}) => ({ searchParams: Promise.resolve(params) });
 
 let texts = 0;
 const text = (docType: string, title: string) => ({
@@ -75,7 +76,7 @@ beforeEach(() => {
 
 describe("la página de registro (PA-10)", () => {
   it("es de visitante: pasa por su guarda antes de pintar, y enlaza a los dos textos legales", async () => {
-    render(await SignUpPage());
+    render(await SignUpPage(search()));
     expect(mocks.visitorOnly).toHaveBeenCalledOnce();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Crea tu cuenta");
     expect(screen.getByRole("link", { name: /Términos/ })).toHaveAttribute("href", "/legal/terminos");
@@ -84,9 +85,17 @@ describe("la página de registro (PA-10)", () => {
     expect(mocks.accountFormFacts).not.toHaveBeenCalled();
   });
 
+  it("el destino de la dirección (FL-04) pasa al formulario tal como llegó; repetido no es un destino", async () => {
+    const { container, unmount } = render(await SignUpPage(search({ volver: "/planes?plan=annual" })));
+    expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/planes?plan=annual");
+    unmount();
+    const twice = render(await SignUpPage(search({ volver: ["/planes", "/inicio"] })));
+    expect(twice.container.querySelector('input[name="volver"]')).toBeNull();
+  });
+
   it("si la guarda redirige, no pinta nada", async () => {
     mocks.visitorOnly.mockRejectedValueOnce(new Error("NEXT_REDIRECT"));
-    await expect(SignUpPage()).rejects.toThrow("NEXT_REDIRECT");
+    await expect(SignUpPage(search())).rejects.toThrow("NEXT_REDIRECT");
   });
 });
 
@@ -99,6 +108,20 @@ describe("la página de «Revisa tu correo» (PA-14)", () => {
     expect(mocks.accountFormFacts).not.toHaveBeenCalled();
     // No pasa por la guarda de visitante: se pinta haya o no sesión.
     expect(mocks.visitorOnly).not.toHaveBeenCalled();
+  });
+
+  it("con un destino anotado (FL-04), «Entra» lo lleva: quien ya tenía cuenta no recibe correo y entra por ahí", async () => {
+    mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 5_000, returnTo: "/planes?plan=annual" });
+    mocks.accountFormFacts.mockResolvedValue(facts);
+    render(await CheckMailPage());
+    expect(screen.getByRole("link", { name: "Entra" })).toHaveAttribute("href", "/entrar?volver=%2Fplanes%3Fplan%3Dannual");
+  });
+
+  it("sin destino anotado, «Entra» va a entrar sin más", async () => {
+    mocks.readRegistration.mockReturnValue({ email: "ana@prueba.test", sentAt: Date.now() - 5_000 });
+    mocks.accountFormFacts.mockResolvedValue(facts);
+    render(await CheckMailPage());
+    expect(screen.getByRole("link", { name: "Entra" })).toHaveAttribute("href", "/entrar");
   });
 
   it("con un envío reciente: dice el correo y lo que dura el enlace, y «Reenviar» espera", async () => {

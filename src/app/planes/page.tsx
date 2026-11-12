@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
@@ -12,13 +13,15 @@ import { slugOfDocType } from "@/services/legal/texts";
 import { cx } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
+import { TextLink } from "@/ui/text-link";
 
-import { plansHref, readPlansQuery } from "./outcomes";
+import { closedPlansDetour, plansHref, readPlansQuery } from "./outcomes";
 import { PlansScreen } from "./screen";
 import { plansView, type PlansViewer } from "./view";
 
 // PA-04 · los planes (`/planes`; RF-201, RF-202, FL-04; T-302). Pública, como la ficha de un curso: la guarda nunca redirige
-// (`publicViewer`). Al visitante le ofrece crear su cuenta o entrar, volviendo aquí con el plan; al alumno, la casilla y «Continuar al
+// (`publicViewer`); la página solo manda a entrar al visitante que iba a otra pantalla cuando no se venden planes. Al visitante le
+// ofrece crear su cuenta o entrar (con un plan elegido, volviendo aquí; sin él, directo a donde iba); al alumno, la casilla y «Continuar al
 // pago»; a quien ya tiene acceso, que ya lo tiene (una PA-26 mínima, hasta T-304); con un pago en confirmación, que no vuelva a pagar.
 // Si no se sabe quién mira (una cuenta a medias, suspendida o «no se supo»), va el formulario, y la acción decide con su guarda.
 //
@@ -45,6 +48,7 @@ function legalHref(doc: "recurring" | "refund", version: number | null): string 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Search> }) {
   const query = readPlansQuery(await searchParams, returnOf);
   const [who, offer] = await Promise.all([publicViewer(), planOffer()]);
+  // Una falla pasajera se queda aquí, con su «Reintentar».
   if (offer.kind === "unavailable") return <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />;
 
   let viewer: PlansViewer;
@@ -60,6 +64,9 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   } else viewer = { kind: "pay" };
 
   const view = plansView(offer.offer, query, viewer, legalHref);
+  // Si no se venden planes, el visitante que iba a otra pantalla va a entrar con su destino: es lo que sirve a quien ya tiene cuenta.
+  const detour = closedPlansDetour(who.kind, query.returnTo);
+  if (view.kind === "not_for_sale" && detour !== null) redirect(signInPath(detour));
   return (
     <>
       {who.kind === "student" && <StudentNav />}
@@ -68,7 +75,9 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
         {view.kind === "not_for_sale" ? (
           <div className="flex max-w-reading flex-col gap-4">
             <h1 className="text-display-l">{text.title}</h1>
-            <InlineAlert tone="neutral">{text.notForSale}</InlineAlert>
+            <InlineAlert tone="neutral" action={who.kind === "visitor" ? <TextLink href={signInPath(plansHref(null, null))}>{text.haveAccount}</TextLink> : undefined}>
+              {text.notForSale}
+            </InlineAlert>
           </div>
         ) : (
           <PlansScreen view={view} />

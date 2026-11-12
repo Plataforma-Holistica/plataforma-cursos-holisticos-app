@@ -11,6 +11,8 @@
 export const COMMENT_MAX = 4000;
 export const PSEUDONYM_MIN = 2;
 export const PSEUDONYM_MAX = 40;
+/** La nota de un reporte (T-502; 05, `comment_reports.note`). */
+export const REPORT_NOTE_MAX = 1000;
 
 /** Lo que se acepta revisar: más largo es «demasiado largo» sin normalizarlo. */
 const INPUT_MAX_FACTOR = 4;
@@ -73,4 +75,11 @@ export function parsePseudonym(input: string | null): CommentTextResult {
   const result = parse(input, PSEUDONYM_MAX, false);
   if (result.ok && codePoints(result.text) < PSEUDONYM_MIN) return { ok: false, reason: "too_short" };
   return result;
+}
+
+/** La nota de un reporte, opcional: hasta 1 000, en varias líneas. Vacía es nula; `undefined` si no se puede guardar. */
+export function parseReportNote(input: string | null): string | null | undefined {
+  const result = parse(input, REPORT_NOTE_MAX, true);
+  if (result.ok) return result.text;
+  return result.reason === "empty" ? null : undefined;
 }

@@ -20,7 +20,7 @@ import { commentCursor } from "@/app/_comments/view";
 import { LessonScreen, type LessonCommentsSlot, type SyllabusEntry } from "./screen";
 
 // La página de una lección (PA-22, T-203). Pide sesión, salvo a dónde va quien no la tiene:
-// al registro si el curso es el abierto, a entrar si no (flujo §6.3).
+// al registro si el curso es el abierto, a los planes si es uno normal y a entrar si no se supo (flujo §6.3).
 //
 // Antes de pintar le pregunta a la función única de medios si esta cuenta puede ver la
 // lección, sin firmar nada (`lessonAccess`): sin acceso, PA-33 ocupa el lugar del reproductor

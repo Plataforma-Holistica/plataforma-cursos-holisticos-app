@@ -78,11 +78,16 @@ function PlanOption({ card }: { card: PlanCard }) {
   );
 }
 
+/** Con acceso: a donde iba (`volver`), o al inicio. */
+function HasAccessLink({ returnTo }: { returnTo: string | null }) {
+  return <TextLink href={returnTo ?? ROUTES.home}>{returnTo === null ? text.hasAccessLink : text.hasAccessContinue}</TextLink>;
+}
+
 function Who({ view }: { view: Ready }) {
   switch (view.who.kind) {
     case "has_access":
       return (
-        <InlineAlert tone="success" action={<TextLink href={ROUTES.home}>{text.hasAccessLink}</TextLink>}>
+        <InlineAlert tone="success" action={<HasAccessLink returnTo={view.returnTo} />}>
           {text.hasAccess}
         </InlineAlert>
       );
@@ -93,7 +98,12 @@ function Who({ view }: { view: Ready }) {
         </InlineAlert>
       );
     case "visitor":
-      return view.summary === null ? null : (
+      // Sin plan elegido, quien ya tiene cuenta puede entrar desde aquí, y vuelve a los planes con su destino.
+      return view.summary === null ? (
+        <p>
+          <TextLink href={view.who.signIn}>{text.haveAccount}</TextLink>
+        </p>
+      ) : (
         <Summary summary={view.summary}>
           <div className="flex flex-wrap gap-3">
             <Button href={view.who.signUp}>{text.signUpFirst}</Button>
@@ -151,7 +161,7 @@ function PayForm({ view, summary }: { view: Ready; summary: PlanSummary }) {
         <div ref={answer} tabIndex={-1} className="outline-none">
           <InlineAlert
             tone={answered.kind === "problem" ? "warning" : answered.answer === "has_access" ? "success" : answered.answer === "unavailable" || answered.answer === "invalid" ? "danger" : "warning"}
-            action={answered.kind === "answer" && answered.answer === "has_access" ? <TextLink href={ROUTES.home}>{text.hasAccessLink}</TextLink> : undefined}
+            action={answered.kind === "answer" && answered.answer === "has_access" ? <HasAccessLink returnTo={view.returnTo} /> : undefined}
           >
             {answered.kind === "problem" ? PROBLEMS[answered.problem] : ANSWERS[answered.answer]}
           </InlineAlert>

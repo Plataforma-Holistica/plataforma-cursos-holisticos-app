@@ -290,6 +290,30 @@ describe("lo que contesta el servicio", () => {
     expect(completeRegistrationOutcome(result, [])).toEqual(expected);
   });
 
+  // FL-04: quien se registró yendo a algún lado vuelve ahí al completar su cuenta. El destino llega anotado en la cookie del
+  // registro; aquí solo se arma la salida, y las funciones de navegación lo validan otra vez.
+  it.each<[RegistrationCompletion, string | null, CompleteOutcome]>([
+    [{ kind: "entered", pending: null, team: "none" }, "/planes?plan=annual", { kind: "redirect", to: "/planes?plan=annual", notice: null }],
+    [{ kind: "entered", pending: null, team: null }, "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001", { kind: "redirect", to: "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000001", notice: null }],
+    // Lo que le falta a su cuenta va antes, y el destino viaja con ello.
+    [{ kind: "entered", pending, team: null }, "/planes?plan=annual", { kind: "redirect", to: "/consentimientos?volver=%2Fplanes%3Fplan%3Dannual", notice: null }],
+    // Solo falló abrir la sesión: entra con su contraseña y sigue a donde iba.
+    [{ kind: "ready_sign_in" }, "/planes?plan=annual", { kind: "redirect", to: "/entrar?volver=%2Fplanes%3Fplan%3Dannual", notice: "account_ready" }],
+    // Un destino que no vale es como no traer ninguno.
+    [{ kind: "entered", pending: null, team: "none" }, "https://otro.example", { kind: "redirect", to: "/inicio", notice: null }],
+    [{ kind: "entered", pending, team: null }, "//otro.example", { kind: "redirect", to: "/consentimientos", notice: null }],
+    [{ kind: "ready_sign_in" }, "/registro", { kind: "redirect", to: "/entrar", notice: "account_ready" }],
+    // El destino es de quien se registró por su cuenta. Quien abre una invitación (del equipo o de maestro) no pasó por
+    // `/registro`: lo anotado en ese navegador sería de otro registro, y no se hereda. Sigue a lo que su invitación pide.
+    [{ kind: "entered", pending: null, team: "invited" }, "/planes?plan=annual", { kind: "redirect", to: "/entrar/segundo-factor/configurar", notice: null }],
+    [{ kind: "entered", pending: null, team: "invited_unproven" }, "/planes?plan=annual", { kind: "redirect", to: "/entrar/segundo-factor/configurar", notice: null }],
+    [{ kind: "entered", pending: null, team: "invited" }, "/admin/equipo", { kind: "redirect", to: "/entrar/segundo-factor/configurar", notice: null }],
+    [{ kind: "entered", pending: null, team: "teacher_invited" }, "/planes?plan=annual", { kind: "redirect", to: "/portal/invitacion", notice: null }],
+    [{ kind: "entered", pending: null, team: "none" }, null, { kind: "redirect", to: "/inicio", notice: null }],
+  ])("%j con destino %j", (result, returnTo, expected) => {
+    expect(completeRegistrationOutcome(result, [], returnTo)).toEqual(expected);
+  });
+
   it("un dato inválido se dice en su campo", () => {
     expect(completeRegistrationOutcome({ kind: "invalid", fields: { name: "too_long", password: "too_short", adult: "required" } }, [])).toEqual({
       kind: "invalid",

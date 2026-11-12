@@ -218,7 +218,7 @@ const NON_TEXT_ATTRIBUTES =
     "autoComplete|autoCapitalize|autoCorrect|inputMode|enterKeyHint|spellCheck|pattern|accept",
     "loading|decoding|fetchPriority|crossOrigin|referrerPolicy|integrity|nonce|sandbox|allow",
     "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",
-    "xmlns|viewBox|fill|stroke|strokeLinecap|strokeLinejoin|strokeWidth|d|points|transform",
+    "xmlns|viewBox|fill|stroke|strokeLinecap|strokeLinejoin|strokeWidth|vectorEffect|d|points|transform",
     "preserveAspectRatio|focusable|itemProp|itemType|property",
     "data-.+",
     "aria-(hidden|live|atomic|relevant|busy|current|invalid|required|disabled|expanded|pressed)",

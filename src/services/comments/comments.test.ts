@@ -70,6 +70,7 @@ function commentsWith(session: SessionCheck = { kind: "pass", claims }, moderati
     post: vi.fn<CommentsStore["post"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 1, state: "published" } })),
     edit: vi.fn<CommentsStore["edit"]>(() => Promise.resolve({ kind: "ran", value: { answer: "ok", id: COMMENT, revision: 2, state: "in_review" } })),
     settle: vi.fn<CommentsStore["settle"]>(() => Promise.resolve({ answer: "ok", state: "published" })),
+    report: vi.fn<CommentsStore["report"]>(() => Promise.resolve({ kind: "ran", value: "ok" })),
     remove: vi.fn<CommentsStore["remove"]>(() => Promise.resolve("ok")),
     pseudonym: vi.fn<CommentsStore["pseudonym"]>(() => Promise.resolve({ answer: "ok", pseudonym: "Ana" })),
     mine: vi.fn<CommentsStore["mine"]>(() => Promise.resolve(MINE)),
@@ -554,5 +555,55 @@ describe("el filtro (T-502; RF-802)", () => {
     const service = commentsWith();
     service.store.pseudonym.mockResolvedValueOnce({ answer });
     expect(await service.chooseCommentName(reader, "Ana")).toEqual({ kind: answer });
+  });
+});
+
+describe("reportar (T-502; RF-803)", () => {
+  it("con el motivo y la nota revisada, tras la guarda; la respuesta no dice si se ocultó", async () => {
+    const service = commentsWith();
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "abusive", note: " Un insulto\r\n" })).toEqual({ kind: "reported" });
+    expect(service.checkSession).toHaveBeenCalledExactlyOnceWith(reader);
+    expect(service.store.report).toHaveBeenCalledExactlyOnceWith(claims, { commentId: COMMENT, reason: "abusive", note: "Un insulto" });
+  });
+
+  it("sin nota, nula", async () => {
+    const service = commentsWith();
+    await service.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: "   " });
+    expect(service.store.report).toHaveBeenCalledWith(claims, { commentId: COMMENT, reason: "spam", note: null });
+  });
+
+  it("un motivo que no existe, una nota que no se guarda o un id sin forma no llegan a la guarda", async () => {
+    const service = commentsWith();
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "otro", note: null })).toEqual({ kind: "invalid" });
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: null, note: null })).toEqual({ kind: "invalid" });
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: "x".repeat(1001) })).toEqual({ kind: "invalid" });
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: "a\u202eb" })).toEqual({ kind: "invalid" });
+    expect(await service.reportLessonComment(reader, { commentId: "x", reason: "spam", note: null })).toEqual({ kind: "not_found" });
+    expect(service.checkSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ kind: "missing" as const }, { kind: "not_found" }],
+    [{ kind: "ran" as const, value: "not_found" as const }, { kind: "not_found" }],
+    [{ kind: "ran" as const, value: "already" as const }, { kind: "already" }],
+    [{ kind: "ran" as const, value: "throttled" as const }, { kind: "throttled" }],
+    [{ kind: "ran" as const, value: "closed" as const }, { kind: "closed" }],
+    [{ kind: "ran" as const, value: "suspended_account" as const }, { kind: "suspended_account" }],
+    [refused({ ok: false, reason: "not_found" }), { kind: "not_found" }],
+  ])("lo que contesta (%j) se dice por su nombre", async (answer, expected) => {
+    const service = commentsWith();
+    service.store.report.mockResolvedValueOnce(answer);
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: null })).toEqual(expected);
+    expect(service.reported).toEqual([]);
+  });
+
+  it("sin sesión no se reporta; si la base no contestó, se reporta la falla", async () => {
+    const anonymous = commentsWith({ kind: "anonymous" });
+    expect(await anonymous.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: null })).toEqual({ kind: "session", check: { kind: "anonymous" } });
+    expect(anonymous.store.report).not.toHaveBeenCalled();
+    const service = commentsWith();
+    service.store.report.mockRejectedValueOnce(new Error("sin base"));
+    expect(await service.reportLessonComment(reader, { commentId: COMMENT, reason: "spam", note: null })).toEqual({ kind: "unavailable" });
+    expect(service.reported).toEqual(["comments_unavailable"]);
   });
 });

@@ -47,6 +47,7 @@ function courseCard(course: ShelfCourse, saving: Saving) {
   if (href === null) return null;
   const card = (
     <CourseCard
+      courseKey={course.slug}
       href={href}
       title={course.title}
       teacherName={course.teacherName}

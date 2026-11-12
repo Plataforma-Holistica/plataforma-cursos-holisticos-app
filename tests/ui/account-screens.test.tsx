@@ -46,7 +46,8 @@ describe("la pantalla de entrar (PA-11)", () => {
     expect(screen.getByLabelText("Contraseña")).toHaveAttribute("autocomplete", "current-password");
     expect(screen.getByText("Tu cuenta está lista. Entra con tu contraseña.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Olvidé mi contraseña" })).toHaveAttribute("href", "/recuperar");
-    expect(screen.getByRole("link", { name: "Crear cuenta" })).toHaveAttribute("href", "/registro");
+    // «Crear cuenta» lleva el destino al registro, que lo conserva hasta completar la cuenta (FL-04).
+    expect(screen.getByRole("link", { name: "Crear cuenta" })).toHaveAttribute("href", "/registro?volver=%2Finicio%3Fx%3D1");
     // El destino guardado viaja con el formulario, tal como llegó: lo valida la acción.
     expect(container.querySelector('input[type="hidden"][name="volver"]')).toHaveValue("/inicio?x=1");
     expect(await a11yViolations(container)).toEqual([]);

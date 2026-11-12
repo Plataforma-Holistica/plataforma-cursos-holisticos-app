@@ -58,7 +58,7 @@ export function createLessons(deps: { store: LessonStore; report: (code: Failure
 
   /**
    * Si el curso `slug` es el abierto, para quien llega sin sesión: decide si va a registrarse
-   * o a entrar. Nulo si no existe, no está listado o no se supo, y la guarda lo trata como «a
+   * o a los planes (T-302). Nulo si no existe, no está listado o no se supo, y la guarda lo trata como «a
    * entrar». No se reporta: es una lectura de cortesía antes de una redirección.
    *
    * Se recuerda treinta segundos por curso, también el nulo y también si no se supo: sin eso,

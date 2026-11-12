@@ -93,11 +93,22 @@ const single = (value: string | string[] | undefined): string | null => (typeof 
 export function readPlansQuery(search: Search, resolveReturn: (input: string) => string | null): PlansQuery {
   const plan = single(search.plan);
   const back = single(search.volver);
+  const resolved = back === null ? null : resolveReturn(back);
+  // Los planes no son destino de sí mismos: «Continuar» llevaría a la misma pantalla.
+  const own = resolved !== null && (resolved === ROUTES.plans || resolved.startsWith(`${ROUTES.plans}?`) || resolved.startsWith(`${ROUTES.plans}/`));
   return {
     plan: PLANS.find((each) => each === plan) ?? null,
-    returnTo: back === null ? null : resolveReturn(back),
+    returnTo: own ? null : resolved,
     canceled: single(search.cancelado) === "1",
   };
+}
+
+/**
+ * Si los planes no se venden todavía, a dónde quería ir el visitante que llegó de otra
+ * pantalla: se le manda a entrar con ese destino, que es lo que sirve a quien ya tiene cuenta. Nulo: se queda y se le dice.
+ */
+export function closedPlansDetour(who: "visitor" | "student" | "unknown", returnTo: string | null): string | null {
+  return who === "visitor" ? returnTo : null;
 }
 
 /** PA-04 con un plan elegido y el destino, para los enlaces de elegir y para volver después de crear la cuenta o entrar. */

@@ -4,6 +4,7 @@ import {
   homeOf,
   resolveDestination,
   ROUTES,
+  plansPath,
   secondFactorPath,
   signInPath,
   signUpPath,
@@ -66,9 +67,9 @@ export function sessionPageStep(check: SessionCheck, path: string): { kind: "ren
 
 /**
  * La pantalla de una lección (PA-22, T-203): pide sesión como cualquiera, salvo a dónde va
- * quien no la tiene (flujo §6.3). Si el curso es el abierto, a registrarse; si no, o si no se
- * supo, a entrar, que es lo que sirve a quien ya tiene cuenta. Cuando exista `/planes`
- * (T-30x), el curso normal va ahí.
+ * quien no la tiene (flujo §6.3). Si el curso es el abierto, a registrarse; si es uno normal, a
+ * los planes (PA-04, T-302), que ofrecen también entrar; y si no se supo, a entrar, que es lo que
+ * sirve a quien ya tiene cuenta.
  * @param courseIsOpen Si el curso de la lección es el abierto, o nulo si no se supo.
  */
 export function lessonPageStep(
@@ -76,7 +77,7 @@ export function lessonPageStep(
   path: string,
   courseIsOpen: boolean | null,
 ): { kind: "render"; claims: VerifiedClaims } | Detour {
-  if (check.kind === "anonymous") return redirect(courseIsOpen === true ? signUpPath(path) : signInPath(path));
+  if (check.kind === "anonymous") return redirect(courseIsOpen === true ? signUpPath(path) : courseIsOpen === false ? plansPath(path) : signInPath(path));
   return sessionPageStep(check, path);
 }
 

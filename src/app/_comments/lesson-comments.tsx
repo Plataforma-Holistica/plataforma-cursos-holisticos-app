@@ -186,17 +186,21 @@ export interface Shared {
 /** Un comentario o una respuesta (diseño §5.12, `Comment`). */
 function CommentItem({ comment, reply, lesson, shared, children }: { comment: CommentView; reply: boolean; lesson: LessonRef; shared: Shared; children?: ReactNode }) {
   const { state, formAction, pending, standing, draft, write } = shared;
-  if (comment.state === "deleted") {
+  // Lo borrado, y lo oculto para quien no es su autor (T-502): solo su lugar, sin texto, nombre ni opciones.
+  if (comment.state === "deleted" || (comment.state === "hidden" && !comment.own)) {
+    const place = comment.state === "deleted" ? text.deleted : text.hidden;
     return (
-      <article id={commentAnchor(comment.id)} aria-label={text.deleted} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
-        <p className="text-body-s text-text-2 italic">{text.deleted}</p>
+      <article id={commentAnchor(comment.id)} aria-label={place} tabIndex={-1} className="flex flex-col gap-1 py-2 outline-none">
+        <p className="text-body-s text-text-2 italic">{place}</p>
         {children}
       </article>
     );
   }
+  const underReview = comment.own && (comment.state === "in_review" || comment.state === "hidden");
   const author = comment.own ? text.you : (comment.name ?? text.deleted);
-  const editing = comment.own && state.open.kind === "edit" && state.open.id === comment.id && comment.revision !== null;
-  const deleting = comment.own && state.open.kind === "delete" && state.open.id === comment.id && comment.revision !== null;
+  // Lo oculto no se edita: si quedó oculto con el campo abierto, el campo se va y lo escrito sale arriba del hilo.
+  const editing = comment.own && comment.state !== "hidden" && state.open.kind === "edit" && state.open.id === comment.id && comment.revision !== null;
+  const deleting = comment.own && comment.state !== "hidden" && state.open.kind === "delete" && state.open.id === comment.id && comment.revision !== null;
   return (
     <article
       id={commentAnchor(comment.id)}
@@ -212,9 +216,9 @@ function CommentItem({ comment, reply, lesson, shared, children }: { comment: Co
           {comment.teacher && <span className="text-label text-accent uppercase">{text.teacher}</span>}
           <time dateTime={comment.createdAt}>{longDate(comment.createdAt)}</time>
           {comment.edited && <span>{text.edited}</span>}
-          {comment.own && comment.state === "in_review" && <span className="text-label text-warning uppercase">{text.inReview}</span>}
+          {underReview && <span className="text-label text-warning uppercase">{text.inReview}</span>}
         </p>
-        {comment.own && comment.state === "in_review" && <p className="text-body-s text-text-2">{text.inReviewNote}</p>}
+        {underReview && <p className="text-body-s text-text-2">{comment.state === "hidden" ? text.hiddenNote : text.inReviewNote}</p>}
         {editing ? (
           <form action={formAction} className="flex flex-col gap-3">
             <LessonFields lesson={lesson} />
@@ -252,7 +256,8 @@ function CommentItem({ comment, reply, lesson, shared, children }: { comment: Co
                 {text.reply}
               </Button>
             )}
-            {comment.own && comment.revision !== null && (
+            {/* Lo oculto espera a moderación: ni se edita ni se borra. */}
+            {comment.own && comment.revision !== null && comment.state !== "hidden" && (
               // Se vuelve a montar con cada respuesta: así se cierra, también al cancelar lo que abrió.
               <details key={state.attempt} className="relative">
                 <summary className="grid min-h-touch min-w-touch cursor-pointer list-none place-items-center rounded-md text-text-2 hover:bg-surface-2">
@@ -523,8 +528,10 @@ export function useCommentThread({
   // Un aviso que habla de algo que esta vuelta no pinta (un comentario de otra página, el campo que se sustituyó, la respuesta a un
   // comentario que ya no la recibe, una edición de lo que se fue) se dice arriba del hilo, con lo escrito para copiarlo.
   const replyOpen = (parentId: string) => canWrite(write) && items.some((thread) => thread.id === parentId && thread.state === "published");
-  // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí.
-  const live = new Set(items.flatMap((thread) => [thread, ...thread.replies.items]).filter((item) => item.state !== "deleted").map((item) => item.id));
+  // Lo borrado se pinta sin avisos ni campos: lo que hable de él no se pinta ahí. Lo oculto se pinta sin su campo de edición.
+  const shown = items.flatMap((thread) => [thread, ...thread.replies.items]);
+  const live = new Set(shown.filter((item) => item.state !== "deleted").map((item) => item.id));
+  const editable = new Set(shown.filter((item) => item.state !== "deleted" && item.state !== "hidden").map((item) => item.id));
   // Lo que cruza el diálogo del nombre está en el diálogo: no se perdió.
   const crossing = (parentId: string) => state.open.kind === "name" && state.open.carry?.parentId === parentId;
   const painted = (at: NoticePlace): boolean => {
@@ -536,7 +543,7 @@ export function useCommentThread({
       case "reply":
         return crossing(at.parentId) || (state.open.kind === "reply" && state.open.parentId === at.parentId && replyOpen(at.parentId));
       case "edit":
-        return live.has(at.id);
+        return editable.has(at.id);
       default:
         return true;
     }

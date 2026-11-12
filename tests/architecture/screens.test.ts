@@ -225,8 +225,9 @@ const SERVER_ACTIONS: Record<string, Record<string, RegExp>> = {
     // Reenviar: el mismo servicio, con el correo que este navegador tiene anotado.
     resendAction:
       /const pending = readRegistration\(jar\);\s*if \(pending === null\) return leaveFor\([\s\S]*mailRequestOutcome\(await requestRegistration\(\{ email: pending\.email \}, await requestOrigin\(\)\)\)/,
-    // «Ese no es mi correo»: no le pide nada a ningún servicio. Olvida la cookie y se va.
-    notMyEmailAction: /^[^\n]*\{\s*const jar = await cookieJar\(\);\s*forgetRegistration\(jar\);\s*return leaveFor\(jar, \{ to: ROUTES\.signUp, notice: null \}\);\s*\}\s*$/,
+    // «Ese no es mi correo»: no le pide nada a ningún servicio. Lee a dónde iba (FL-04), olvida la cookie y se va al registro.
+    notMyEmailAction:
+      /^[^\n]*\{\s*const jar = await cookieJar\(\);\s*const returnTo = readRegistration\(jar\)\?\.returnTo \?\? null;\s*forgetRegistration\(jar\);\s*return leaveFor\(jar, \{ to: signUpPath\(returnTo\), notice: null \}\);\s*\}\s*$/,
   },
   "src/app/(cuenta)/verificar/[token]/actions.ts": {
     // Completar la cuenta desde el enlace: lo que no tiene forma de enlace no llega al servicio.

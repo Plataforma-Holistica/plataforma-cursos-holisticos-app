@@ -11,10 +11,11 @@ import { Bricolage_Grotesque, Source_Sans_3 } from "next/font/google";
 // Cada una deja su variable en `<html>`; src/ui/theme.css las toma de ahí. Son variables,
 // así que los pesos 400, 600 y 700 salen del mismo archivo.
 
-/** Títulos. Con el eje de tamaño óptico, que afina la letra en los tamaños grandes. */
+/** Títulos. Con el eje de tamaño óptico, que afina la letra en los tamaños grandes, y desde T-616 el
+ * de ancho, para los títulos angostos (`--display-stretch` en theme.css). */
 export const displayFont = Bricolage_Grotesque({
   subsets: ["latin"],
-  axes: ["opsz"],
+  axes: ["opsz", "wdth"],
   display: "swap",
   variable: "--brand-font-display",
 });

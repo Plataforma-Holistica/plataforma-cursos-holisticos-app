@@ -25,6 +25,11 @@ export function denialOf(account: AccountRefusal): Denial | null {
   }
 }
 
+/** La acción (T-302): quien tuvo acceso y lo perdió por el tiempo o el cobro vuelve a suscribirse; los demás ven los planes. */
+export function paywallAction(denial: Denial): string {
+  return denial.reason === "expired" || denial.reason === "grace_ended" ? text.denied.resubscribe : text.denied.seePlans;
+}
+
 /** El título y el texto. */
 export function paywallCopy(denial: Denial): [string, string] {
   const copy = text.denied;

@@ -124,7 +124,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     render(await HomePage());
     const bar = screen.getByRole("banner");
     expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/inicio");
-    expect(bar.querySelector("[data-brand-dot]")).not.toBeNull();
+    // Desde T-616 el logotipo lleva la flor de la vida en toda página (pedido de Sergio del 2026-11-11).
+    expect(bar.querySelector("[data-brand-mark]")).not.toBeNull();
   });
 
   it("el saludo va sobre una franja de ambiente, decorativa (T-614)", async () => {

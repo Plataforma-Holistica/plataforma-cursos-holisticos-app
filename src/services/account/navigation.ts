@@ -246,18 +246,33 @@ export function resolveDestination(input: string | null | undefined): string {
   return resolved.kind === "path" ? resolved.path : homeOf();
 }
 
-function withReturn(route: string, target: string | null | undefined): string {
-  const resolved = resolveReturnPath(target, RETURN_DESTINATIONS);
-  // Un destino que no vale no se guarda: no tiene caso pasearlo por la dirección.
-  return resolved.kind === "path" ? `${route}?${RETURN_PARAM}=${encodeURIComponent(resolved.path)}` : route;
+/**
+ * El destino guardado si la lista lo admite, o nulo. Para quien lo guarda o lo pasa a otra
+ * pantalla: `resolveDestination` da el inicio con lo que no vale, y un inicio que nadie pidió
+ * no se anota ni se pasea por la dirección.
+ */
+export function returnOrNull(input: string | null | undefined): string | null {
+  const resolved = resolveReturnPath(input, RETURN_DESTINATIONS);
+  return resolved.kind === "path" ? resolved.path : null;
 }
+
+function withReturn(route: string, target: string | null | undefined): string {
+  const resolved = returnOrNull(target);
+  // Un destino que no vale no se guarda: no tiene caso pasearlo por la dirección.
+  return resolved === null ? route : `${route}?${RETURN_PARAM}=${encodeURIComponent(resolved)}`;
+}
+
+/** A los planes (PA-04, T-302), guardando a dónde se quería ir después de pagar. */
+export const plansPath = (target: string | null | undefined): string => withReturn(ROUTES.plans, target);
 
 /** A entrar, guardando a dónde se quería ir. */
 export const signInPath = (target: string | null | undefined): string => withReturn(ROUTES.signIn, target);
 
 /**
- * A registrarse, guardando a dónde se quería ir (la lección de un curso abierto, flujo §6.3).
- * El registro todavía no lleva ese destino hasta el final: queda escrito para cuando lo haga.
+ * A registrarse, guardando a dónde se quería ir (la lección de un curso abierto, flujo §6.3; el
+ * plan elegido, FL-04). El registro lo lleva hasta el final en su cookie corta
+ * (`pending-registration`): quien abre el enlace del correo en ese mismo navegador termina ahí.
+ * En otro navegador no hay cookie y termina en su inicio.
  */
 export const signUpPath = (target: string | null | undefined): string => withReturn(ROUTES.signUp, target);
 

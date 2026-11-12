@@ -41,7 +41,7 @@ export async function requireSession(path: string) {
 
 /**
  * Para la pantalla de una lección (PA-22, T-203): como `requireSession`, salvo a dónde va
- * quien llega sin sesión. Si el curso es el abierto, a registrarse; si no, a entrar.
+ * quien llega sin sesión. Si el curso es el abierto, a registrarse; si es uno normal, a los planes; si no se supo, a entrar.
  * @param courseIsOpen Se pregunta solo cuando no hay sesión: es una lectura de más.
  */
 export async function requireLessonSession(path: string, courseIsOpen: () => Promise<boolean | null>) {

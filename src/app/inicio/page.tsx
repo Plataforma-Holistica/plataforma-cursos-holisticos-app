@@ -64,6 +64,7 @@ function courseCard(course: ShelfCourse) {
   return (
     <CourseCard
       key={course.slug}
+      courseKey={course.slug}
       href={href}
       title={course.title}
       teacherName={course.teacherName}
@@ -137,6 +138,7 @@ export default async function HomePage() {
                   levelName={null}
                   lessonCount={course.total}
                   progress={{ completed: course.completed, total: course.total, lessonNumber: course.lesson.number }}
+                  courseKey={course.courseSlug}
                 />
               );
             })}

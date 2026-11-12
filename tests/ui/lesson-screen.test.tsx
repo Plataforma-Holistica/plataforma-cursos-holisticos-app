@@ -323,6 +323,16 @@ describe("el lugar del reproductor", () => {
     expect(screen.getByText(sentence)).toBeVisible();
   });
 
+  it.each([
+    [{ reason: "never_subscribed" } as const, "Ver planes"],
+    [{ reason: "refunded", date: "3 de octubre de 2026" } as const, "Ver planes"],
+    [{ reason: "expired", date: "1 de octubre de 2026" } as const, "Volver a suscribirme"],
+    [{ reason: "grace_ended", date: "2 de octubre de 2026" } as const, "Volver a suscribirme"],
+  ])("PA-33 lleva a los planes, con esta lección como destino (T-302): %j", (denial, label) => {
+    show({ initial: { kind: "denied", denial } });
+    expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(`/cursos/respirar/lecciones/${LESSON}`)}`);
+  });
+
   it("si el acceso se pierde al reproducir, PA-33 en el lugar del reproductor", async () => {
     actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
     const { user } = show();

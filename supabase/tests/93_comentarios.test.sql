@@ -451,7 +451,7 @@ select throws_ok(format($$update public.comments set status = 'in_review', filte
 select throws_ok(format($$update public.comments set body = 'cambiado' where id = %L$$, pruebas.id('g1')),
   '23514', 'public.comments: a new text goes through the filter', 'un texto nuevo no se queda publicado');
 select throws_ok(format($$update public.comments set status = 'hidden' where id = %L$$, pruebas.id('g1')),
-  '23514', 'public.comments: hidden is not reachable yet', 'ocultar todavía no existe');
+  '23514', 'public.comments: only reports hide a published comment', 'ocultar sin reportes ni hora no se puede (T-502)');
 select throws_ok(format($$update public.comments set author_id = %L where id = %L$$, pruebas.p(2), pruebas.id('g1')),
   '23514', 'public.comments: what a comment is does not change', 'el autor no cambia');
 select throws_ok(format($$update public.comments set created_at = created_at - interval '1 day' where id = %L$$, pruebas.id('g1')),
