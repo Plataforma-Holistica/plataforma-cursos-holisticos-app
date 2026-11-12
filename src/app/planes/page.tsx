@@ -5,6 +5,7 @@ import { StudentNav } from "@/app/_catalog/nav";
 import { studentNavFor, type StudentNavFacts } from "@/app/_catalog/nav-facts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
+import { BrandBar } from "@/app/_public/brand-bar";
 import { PublicFooter } from "@/app/_public/footer";
 import { PublicHeader } from "@/app/_public/header";
 import { plans as text } from "@/messages/es/plans";
@@ -50,7 +51,14 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   const query = readPlansQuery(await searchParams, returnOf);
   const [who, offer] = await Promise.all([publicViewer(), planOffer()]);
   // Una falla pasajera se queda aquí, con su «Reintentar».
-  if (offer.kind === "unavailable") return <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />;
+  // Arriba, el logotipo (T-616, solicitud 4): en toda página.
+  if (offer.kind === "unavailable")
+    return (
+      <>
+        <BrandBar />
+        <UnavailableScreen retryHref={plansHref(query.plan, query.returnTo)} withSession={who.kind === "student"} />
+      </>
+    );
 
   let viewer: PlansViewer;
   // La barra, solo al alumno.
@@ -74,7 +82,9 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   return (
     <>
       {nav !== null && <StudentNav {...nav} />}
-      {who.kind === "visitor" && <PublicHeader />}
+      {who.kind === "visitor" && <PublicHeader onPlans />}
+      {/* A quien no se sabe quién es, ni la del alumno ni la pública: solo el logotipo. */}
+      {who.kind === "unknown" && <BrandBar />}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         {view.kind === "not_for_sale" ? (
           <div className="flex max-w-reading flex-col gap-4">
@@ -87,7 +97,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
           <PlansScreen view={view} />
         )}
       </main>
-      {who.kind === "visitor" && <PublicFooter />}
+      {who.kind === "visitor" && <PublicFooter onPlans />}
     </>
   );
 }

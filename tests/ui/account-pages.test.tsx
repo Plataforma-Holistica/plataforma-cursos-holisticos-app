@@ -472,6 +472,15 @@ describe("la página de un texto legal", () => {
     ]);
   });
 
+  it("lleva arriba el logotipo, que lleva a la portada (T-616, solicitud 4)", async () => {
+    mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, body: "Texto." } });
+    render(await legalPage("terminos"));
+    const bar = screen.getByRole("banner");
+    expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
+    // Solo el logotipo: quien lee un texto legal puede tener sesión, y no se le ofrece crear cuenta.
+    expect(within(bar).getAllByRole("link")).toHaveLength(1);
+  });
+
   it("un borrador lo dice", async () => {
     mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, version: 0, body: "Texto." } });
     render(await legalPage("terminos"));
@@ -530,5 +539,7 @@ describe("la página de un texto legal", () => {
     expect(mocks.notFound).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Reintentar" })).toHaveAttribute("href", "/legal/historial-de-cursos");
     expect(screen.queryByRole("button", { name: "Cerrar sesión" })).not.toBeInTheDocument();
+    // También ahí, el logotipo arriba (T-616, solicitud 4).
+    expect(within(screen.getByRole("banner")).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
   });
 });

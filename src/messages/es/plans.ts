@@ -5,7 +5,14 @@ import { defineMessages } from "../format";
 export const plans = defineMessages({
   pageTitle: "Planes",
   title: "Elige tu plan",
-  intro: "Todo el catálogo, los recursos de cada curso y tus constancias, con cualquiera de los dos planes.",
+  // Lo que incluye: solo lo que ya existe (T-616, solicitud 4; decisión del carril A del 2026-11-11, sin confirmar por
+  // Sergio). Sin constancias hasta T-504. La misma lista va en la portada con sus precios (4b).
+  includesLead: "Cualquier plan incluye:",
+  includes: {
+    catalog: "Todo el catálogo",
+    teachers: "Los cursos de todos {los_maestros}",
+    resources: "Los recursos de los cursos que los traen",
+  },
   monthly: "Mensual",
   annual: "Anual",
   perMonth: "{price} al mes",
