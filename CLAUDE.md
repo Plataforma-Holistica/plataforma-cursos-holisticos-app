@@ -1332,8 +1332,12 @@ que no se ve leyendo un solo archivo:
   `surface-raised` es una sombra; los antetítulos («Módulo 1», «Módulo 1 · Lección 1») en `eyebrow` con el oro apagado. No se tocó
   ningún elemento, manejador ni `data-*` del arrastre, de la subida, del aviso al salir ni de los formularios. En datos fiscales los
   formularios van envueltos en una ficha desde la sección (`_fiscal/section.tsx`), sin tocar `screen.tsx`. La invitación y el aviso
-  (sin menú) solo cambiaron sus cajas de texto por fichas. `titleId` entró a `NON_TEXT_ATTRIBUTES` del lint. Usa
-  `tests/ui/tool-main.test.tsx`; ninguna aserción existente cambió. Sin capturas de «Para empezar», de la lista sin cursos, de pagos con
+  (sin menú) solo cambiaron sus cajas de texto por fichas. `titleId` entró a `NON_TEXT_ATTRIBUTES` del lint. **El antetítulo de cada
+  pantalla es texto nuevo a la vista aunque el catálogo no cambió** (las palabras ya existían: «Portal», la capacidad), y la
+  administración y el portal van ahora en una sola solicitud (la 151). **Un solo botón principal en el editor:** «Guardar»; «Enviar a
+  revisión» y «Agregar módulo» son `secondary` (`Button` no tiene una secundaria fuerte). El tono de la etiqueta de «Para empezar»
+  viaja como valor (`FirstStep.tone`), no se deduce del texto. Usa `tests/ui/tool-main.test.tsx`; de las aserciones existentes solo
+  cambiaron las de `firstSteps` en `_inicio/outcomes.test.ts`, que ahora esperan el tono. Sin capturas de «Para empezar», de la lista sin cursos, de pagos con
   periodos ni de una liquidación, de comentarios con hilos, del formulario de datos fiscales (la base del prototipo no tiene periodos,
   los comentarios están cerrados y falta la llave de cifrado en local), ni del maestro suspendido. Decisiones mías sin confirmar:
   «Portal» de antetítulo; generalizar el armazón en vez de duplicarlo; el ancho de 72rem también en el editor (antes 90rem); «Nuevo
