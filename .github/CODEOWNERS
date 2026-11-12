@@ -103,3 +103,19 @@
 /vitest.config.ts          @SerchFGA @plataformaholisticadev
 /tests/scripts/            @SerchFGA @plataformaholisticadev
 /scripts/                  @SerchFGA @plataformaholisticadev
+
+# Mientras dura el rediseño (T-616; decisión de Sergio del 2026-11-11, para agilizar): los `.tsx`
+# del catálogo, de explorar, del inicio y de la ficha del curso no piden dueño, los de hoy y los
+# que se agreguen. Una línea sin dueños le quita los suyos a lo que nombra, y la última que
+# coincide es la que vale: por eso van al final. No es solo lo que pinta: las páginas de explorar
+# y del inicio llaman ahí a su guarda, y las cuidan las pruebas de arquitectura y el extremo a
+# extremo, que siguen con dueño. Siguen con dueño las acciones y lo demás (`.ts`) de esas carpetas,
+# la lección entera (su página decide el acceso y su pantalla mide lo visto), el portal del
+# maestro, la cuenta, la administración, el reproductor, los servicios, la base y las pruebas. Al
+# cerrar T-616 este bloque se quita.
+/src/app/_catalog/**/*.tsx
+/src/app/explorar/**/*.tsx
+/src/app/inicio/**/*.tsx
+/src/app/cursos/**/*.tsx
+# La lección vuelve a tener dueño: va después, para ganarle a la línea de arriba.
+/src/app/cursos/*/lecciones/ @SerchFGA @plataformaholisticadev
