@@ -72,7 +72,7 @@ function Entries({
       {groups.map((group, index) => (
         <div key={group.title ?? index} className="flex flex-col gap-1">
           {group.title !== undefined && (
-            <p id={`${idPrefix}-${index}`} className="px-3 text-label text-text-3 uppercase">
+            <p id={`${idPrefix}-${index}`} data-side-group className="px-3 text-label text-text-3 uppercase">
               {group.title}
             </p>
           )}
@@ -130,8 +130,11 @@ export function SideFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="lg:flex">
+    // Los marcadores (`data-side-frame`, `data-side-nav` y, en los títulos de grupo, `data-side-group`) son por donde
+    // `side-plane` (`theme.css`) viste al menú desde el envoltorio de cada herramienta: no pintan nada por sí solos.
+    <div data-side-frame className="lg:flex">
       <nav
+        data-side-nav
         aria-label={text.label}
         className="relative border-b border-border lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-sidenav lg:shrink-0 lg:flex-col lg:gap-6 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:p-4"
       >
