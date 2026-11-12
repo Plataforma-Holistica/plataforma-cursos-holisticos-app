@@ -8,7 +8,6 @@ import { adminTeacherPath, ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatusBadge } from "@/ui/status-badge";
 import { Textarea } from "@/ui/textarea";
 import { TextField } from "@/ui/text-field";
@@ -16,6 +15,7 @@ import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { teachersAction, teachersCodeAction } from "./actions";
 import { LIMITS, formOfState, teachersButton, type CodeState, type Drafts, type Field, type TeacherForm, type TeachersState } from "./outcomes";
 import { FAILURES, focusIsLost } from "./parts";
@@ -98,15 +98,13 @@ export function TeacherScreen({ view, done = null }: { view: TeacherView; done?:
   const questionRef = state.kind === "asking" ? answer : undefined;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{view.name}</h1>
-        {view.email !== null && <p className="text-text-2">{view.email}</p>}
-        <p>
-          <StatusBadge tone={view.status.tone}>{view.status.label}</StatusBadge>
-        </p>
-      </div>
-
+    <AdminMain
+      area="content"
+      title={view.name}
+      lead={view.email !== null ? <p className="break-all">{view.email}</p> : undefined}
+      badge={<StatusBadge tone={view.status.tone}>{view.status.label}</StatusBadge>}
+      measure="reading"
+    >
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -132,7 +130,7 @@ export function TeacherScreen({ view, done = null }: { view: TeacherView; done?:
         <BlockResult message={result} tone={tone} pending={pending} pendingText={text.working} answer={answer} spoken={spoken} />
 
         {view.request !== null && (
-          <form action={send} noValidate className="flex flex-col gap-3 rounded-md border border-border p-4">
+          <form action={send} noValidate className="flex flex-col gap-3 surface-raised p-4 sm:p-5">
             <h2 className="text-h3">{detail.fraudTitle}</h2>
             <p className="text-body-s text-text-2">
               {view.request.proposed} {view.request.metric}
@@ -296,6 +294,6 @@ export function TeacherScreen({ view, done = null }: { view: TeacherView; done?:
       <p className="text-body-s">
         <TextLink href={ROUTES.adminTeachers}>{t(text.backToList)}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }

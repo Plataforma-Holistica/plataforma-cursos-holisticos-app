@@ -11,7 +11,6 @@ import { Checkbox } from "@/ui/checkbox";
 import { DataTable } from "@/ui/data-table";
 import { Dialog } from "@/ui/dialog";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatusBadge } from "@/ui/status-badge";
 import { Textarea } from "@/ui/textarea";
 import { TextLink } from "@/ui/text-link";
@@ -20,6 +19,7 @@ import { useHydrated } from "@/app/(cuenta)/_lib/hooks";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { payoutsAction, periodCodeAction } from "./actions";
 import { UNDERSTOOD, type CodeState } from "./outcomes";
 import { payoutFailureText, payoutToneOf } from "./payouts-failures";
@@ -107,17 +107,18 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
   const unholdRow = unholdAsked === null ? null : (view.rows.find((row) => row.unhold?.ask === payoutsButton.askUnhold(unholdAsked.payout, unholdAsked.seen)) ?? null);
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-3">
-        <BackLink href={view.panelHref}>{view.name}</BackLink>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-h1">{text.title}</h1>
-          <StatusBadge tone={view.tone}>{view.status}</StatusBadge>
-        </div>
-        {view.releasedLine !== null && <p>{view.releasedLine}</p>}
-        {!view.notClosed && <p className="text-text-2">{view.minimumLine}</p>}
-      </div>
-
+    <AdminMain
+      area="finance"
+      title={text.title}
+      above={<BackLink href={view.panelHref}>{view.name}</BackLink>}
+      badge={<StatusBadge tone={view.tone}>{view.status}</StatusBadge>}
+      header={
+        <>
+          {view.releasedLine !== null && <p>{view.releasedLine}</p>}
+          {!view.notClosed && <p className="text-text-2">{view.minimumLine}</p>}
+        </>
+      }
+    >
       {view.notClosed && (
         <InlineAlert tone="neutral">
           {text.notClosed} <TextLink href={view.closeHref}>{text.goToClose}</TextLink>
@@ -315,7 +316,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.periods}>{admin.periods.backToPeriods}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 

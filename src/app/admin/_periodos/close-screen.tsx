@@ -14,13 +14,13 @@ import { DataTable } from "@/ui/data-table";
 import { Dialog } from "@/ui/dialog";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatTile } from "@/ui/stat-tile";
 import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { closeAction, downloadAction, periodCodeAction } from "./actions";
 import { FAILURES, toneOf } from "./failures";
 import { periodsButton, UNDERSTOOD, type CloseState, type CodeState, type DownloadState } from "./outcomes";
@@ -88,17 +88,14 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
   }, [missingAttempt]);
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-3">
-        <BackLink href={view.panelHref}>{view.name}</BackLink>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-h1">{text.closeTitle}</h1>
-          <StatusBadge tone={view.tone}>{view.status}</StatusBadge>
-        </div>
-        <p className="text-text-2">{view.lastRehearsal}</p>
-        {view.closedLine !== null && <p>{view.closedLine}</p>}
-      </div>
-
+    <AdminMain
+      area="finance"
+      title={text.closeTitle}
+      above={<BackLink href={view.panelHref}>{view.name}</BackLink>}
+      badge={<StatusBadge tone={view.tone}>{view.status}</StatusBadge>}
+      lead={<p>{view.lastRehearsal}</p>}
+      header={view.closedLine !== null ? <p>{view.closedLine}</p> : undefined}
+    >
       {!view.canChange && (view.close.kind !== "closed" || view.download.kind === "locked") && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -121,7 +118,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
 
       {view.close.kind !== "closed" && (
         <section ref={block} id={CLOSE_BLOCK_ID} aria-labelledby={CLOSE_HEADING_ID} tabIndex={-1} className="flex flex-col gap-6 outline-none">
-          <h2 id={CLOSE_HEADING_ID} className="text-h2">
+          <h2 id={CLOSE_HEADING_ID} className="text-h3">
             {text.resultTitle}
           </h2>
           <BlockResult message={result} tone={failure === null ? "warning" : toneOf(failure)} pending={pending} pendingText={text.rehearsing} answer={answer} spoken={spoken} />
@@ -140,7 +137,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
           )}
 
           <div className="flex flex-col gap-3">
-            <h3 className="text-h3">{text.checklistTitle}</h3>
+            <h3 className="text-body-l font-semibold">{text.checklistTitle}</h3>
             <ul className="flex flex-col gap-2">
               {view.checks.map((check) => (
                 <li key={check.label} className="flex flex-wrap items-start gap-2">
@@ -201,7 +198,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
 
       {view.result !== null && (
         <section aria-labelledby="cierre-resultado-titulo" className="flex flex-col gap-6">
-          <h2 id="cierre-resultado-titulo" className="text-h2">
+          <h2 id="cierre-resultado-titulo" className="text-h3">
             {text.closedTitle}
           </h2>
           <Result result={view.result} />
@@ -210,7 +207,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
 
       {view.download.kind !== "none" && (
         <section id={DOWNLOAD_BLOCK_ID} aria-labelledby={DOWNLOAD_HEADING_ID} className="flex flex-col gap-4">
-          <h2 id={DOWNLOAD_HEADING_ID} className="text-h2">
+          <h2 id={DOWNLOAD_HEADING_ID} className="text-h3">
             {text.downloadTitle}
           </h2>
           <p className="text-text-2">{t(text.downloadBody)}</p>
@@ -222,7 +219,7 @@ export function CloseScreen({ view, done = null }: CloseScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.periods}>{text.backToPeriods}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 

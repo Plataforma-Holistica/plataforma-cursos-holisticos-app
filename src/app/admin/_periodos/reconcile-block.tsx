@@ -58,10 +58,10 @@ export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
 
   return (
     <section ref={block} id={BLOCK_ID} aria-labelledby={HEADING_ID} tabIndex={-1} className="flex flex-col gap-4 outline-none">
-      <h2 id={HEADING_ID} className="text-h2">
+      <h2 id={HEADING_ID} className="text-h3">
         {text.title}
       </h2>
-      <p className="text-text-2">{text.intro}</p>
+      <p className="max-w-reading text-text-2">{text.intro}</p>
 
       {last.kind === "never" ? (
         <p>{text.never}</p>
@@ -104,7 +104,7 @@ export function ReconcileBlock({ periodId, view }: ReconcileBlockProps) {
 
       {last.kind === "compared" && (
         <div className="flex flex-col gap-3">
-          <h3 className="text-h3">{text.differencesTitle}</h3>
+          <h3 className="text-body-l font-semibold">{text.differencesTitle}</h3>
           <DataTable
             caption={text.differencesCaption}
             captionHidden
