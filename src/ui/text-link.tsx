@@ -19,6 +19,9 @@ export interface TextLinkProps {
 
 const CLASSES =
   "text-accent underline underline-offset-4 transition-colors duration-(--duration-fast) ease-standard hover:text-accent-strong";
+// La página en que se está: en el color del texto, con peso y el subrayado grueso. Va en lugar de las de siempre, no encima: dos
+// clases de color en el mismo elemento las decide el orden del CSS.
+const CURRENT = "font-semibold text-text underline decoration-2 underline-offset-4";
 
 export function TextLink({ href, external = false, children, className, current = false }: TextLinkProps) {
   if (external) {
@@ -31,7 +34,7 @@ export function TextLink({ href, external = false, children, className, current 
     );
   }
   return (
-    <Link href={href} aria-current={current ? "page" : undefined} className={cx(CLASSES, className)}>
+    <Link href={href} aria-current={current ? "page" : undefined} className={cx(current ? CURRENT : CLASSES, className)}>
       {children}
     </Link>
   );

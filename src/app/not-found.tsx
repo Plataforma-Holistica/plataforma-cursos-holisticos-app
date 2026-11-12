@@ -19,13 +19,13 @@ export default function NotFound() {
     <>
       <BrandBar />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
-      <FullScreenState
-        icon={SearchX}
-        title={text.title}
-        primaryAction={<Button href="/">{text.home}</Button>}
-      >
-        <p>{text.body}</p>
-      </FullScreenState>
+        <FullScreenState
+          icon={SearchX}
+          title={text.title}
+          primaryAction={<Button href="/">{text.home}</Button>}
+        >
+          <p>{text.body}</p>
+        </FullScreenState>
       </main>
     </>
   );

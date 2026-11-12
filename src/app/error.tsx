@@ -29,21 +29,21 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
     <>
       <BrandBar />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
-      {/* Esta página no puede declarar su título como las demás: se arma aquí, igual. */}
-      <title>{t(meta.titleTemplate, { page: text.title })}</title>
-      <FullScreenState
-        icon={ServerCrash}
-        title={text.title}
-        primaryAction={<Button onClick={() => retry()}>{text.retry}</Button>}
-        secondaryActions={
-          <Button href="/" variant="secondary">
-            {text.home}
-          </Button>
-        }
-        reference={error.digest ? t(text.reference, { code: error.digest }) : undefined}
-      >
-        <p>{text.body}</p>
-      </FullScreenState>
+        {/* Esta página no puede declarar su título como las demás: se arma aquí, igual. */}
+        <title>{t(meta.titleTemplate, { page: text.title })}</title>
+        <FullScreenState
+          icon={ServerCrash}
+          title={text.title}
+          primaryAction={<Button onClick={() => retry()}>{text.retry}</Button>}
+          secondaryActions={
+            <Button href="/" variant="secondary">
+              {text.home}
+            </Button>
+          }
+          reference={error.digest ? t(text.reference, { code: error.digest }) : undefined}
+        >
+          <p>{text.body}</p>
+        </FullScreenState>
       </main>
     </>
   );

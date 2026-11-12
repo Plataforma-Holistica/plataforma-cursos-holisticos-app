@@ -10,8 +10,8 @@ export const plans = defineMessages({
   includesLead: "Cualquier plan incluye:",
   includes: {
     catalog: "Todo el catálogo",
-    teachers: "Todos {los_maestros}",
-    resources: "Los recursos de cada curso",
+    teachers: "Los cursos de todos {los_maestros}",
+    resources: "Los recursos de los cursos que los traen",
   },
   monthly: "Mensual",
   annual: "Anual",

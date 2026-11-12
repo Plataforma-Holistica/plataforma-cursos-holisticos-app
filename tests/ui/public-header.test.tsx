@@ -16,7 +16,11 @@ describe("la barra pública", () => {
 
   it("en los planes, «Planes» va marcado como la página en que se está; en otra, no", () => {
     const { unmount } = render(<PublicHeader onPlans />);
-    expect(within(screen.getByRole("banner")).getByRole("link", { name: landing.header.plans })).toHaveAttribute("aria-current", "page");
+    const current = within(screen.getByRole("banner")).getByRole("link", { name: landing.header.plans });
+    expect(current).toHaveAttribute("aria-current", "page");
+    // Se distingue también a la vista, no solo para el lector: en el color del texto, con peso y el subrayado grueso (no el del acento).
+    expect(current).toHaveClass("text-text", "font-semibold", "decoration-2");
+    expect(current).not.toHaveClass("text-accent");
     unmount();
     render(<PublicHeader />);
     expect(within(screen.getByRole("banner")).getByRole("link", { name: landing.header.plans })).not.toHaveAttribute("aria-current");
