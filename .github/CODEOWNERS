@@ -71,6 +71,19 @@
 /src/domain/consumption/   @SerchFGA @plataformaholisticadev
 /src/domain/payout/        @SerchFGA @plataformaholisticadev
 
+# Cobros (decisión de Sergio del 2026-11-12): el servicio de pagos, el adaptador de Stripe, la ruta que recibe
+# sus avisos, los trabajos que los aplican y concilian, las pantallas de planes y de suscripción, y los textos
+# que acepta quien paga. Hasta hoy estas rutas no pedían dueño por sí mismas: sus solicitudes lo pidieron
+# porque también tocaban migraciones o pruebas. La portada (`/src/app/page.tsx`) queda sin dueño a propósito:
+# lee los precios por el servicio, que sí lo tiene.
+/src/services/billing/     @SerchFGA @plataformaholisticadev
+/src/adapters/stripe/      @SerchFGA @plataformaholisticadev
+/src/app/api/webhooks/     @SerchFGA @plataformaholisticadev
+/src/app/api/trabajos/     @SerchFGA @plataformaholisticadev
+/src/app/planes/           @SerchFGA @plataformaholisticadev
+/src/app/suscripcion/      @SerchFGA @plataformaholisticadev
+/src/messages/es/plans.ts  @SerchFGA @plataformaholisticadev
+
 # Toda migración del esquema propio: puede tocar un libro
 /supabase/migrations/      @SerchFGA @plataformaholisticadev
 
