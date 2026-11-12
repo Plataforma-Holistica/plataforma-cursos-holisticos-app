@@ -96,6 +96,8 @@ const pairs: [string, string, number, number][] = [
   ["text", "art-6", 5.2, AA_TEXT],
   ["text", "art-7", 5.6, AA_TEXT],
   ["text", "art-8", 5.39, AA_TEXT],
+  // La caja del QR del segundo factor contra la página (T-616, 2b): su zona de silencio tiene que ser clara.
+  ["qr-quiet", "bg", 18.94, AA_UI],
   // Paleta «papel», para correos y PDF.
   ["ink", "paper", 16.01, AA_TEXT],
   ["ink", "paper-2", 14.41, AA_TEXT],
