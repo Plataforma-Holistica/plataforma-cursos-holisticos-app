@@ -220,6 +220,8 @@ const NON_TEXT_ATTRIBUTES =
     "charSet|httpEquiv|media|sizes|scope|headers|wrap|list|step|min|max|capture",
     "xmlns|viewBox|fill|stroke|strokeLinecap|strokeLinejoin|strokeWidth|vectorEffect|d|points|transform",
     "preserveAspectRatio|focusable|itemProp|itemType|property",
+    // El armazón de administración (`AdminMain`): la capacidad de la sección (una llave, no su nombre) y el ancho del cuerpo.
+    "area|measure",
     "data-.+",
     "aria-(hidden|live|atomic|relevant|busy|current|invalid|required|disabled|expanded|pressed)",
     "aria-(checked|selected|haspopup|controls|describedby|labelledby|owns|activedescendant)",

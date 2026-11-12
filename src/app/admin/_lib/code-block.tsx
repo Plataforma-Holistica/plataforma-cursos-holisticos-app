@@ -51,7 +51,7 @@ export function CodeBlock({ blockId, titleId, fieldId, body, notAvailable, state
   const notAvailableNow = state.kind === "failed" && state.reason === "not_available";
 
   return (
-    <section id={blockId} aria-labelledby={titleId} className="flex flex-col gap-4 rounded-md border border-border p-4">
+    <section id={blockId} aria-labelledby={titleId} className="flex max-w-reading flex-col gap-4 surface-raised p-4 sm:p-5">
       <h2 id={titleId} className="text-h3">
         {text.title}
       </h2>

@@ -74,8 +74,12 @@ export function AdminFrame({
   children: ReactNode;
 }) {
   return (
-    <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav} others={portal ? PORTAL : []}>
-      {children}
-    </SideFrame>
+    // El menú como segundo plano (`side-plane`, T-616, solicitud 6): el envoltorio le pone la superficie y los
+    // antetítulos al `<nav>` de `SideFrame`, que esta solicitud no edita.
+    <div className="side-plane">
+      <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav} others={portal ? PORTAL : []}>
+        {children}
+      </SideFrame>
+    </div>
   );
 }
