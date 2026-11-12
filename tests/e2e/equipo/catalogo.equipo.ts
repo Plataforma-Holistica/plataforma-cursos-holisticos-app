@@ -131,11 +131,21 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   // El avanzado se creó después que el inicial: nunca es el más bajo.
   await expect(starters.getByRole("link", { name: new RegExp(ADVANCED) })).toHaveCount(0);
   await expect(newest.getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Meditación e2e" }).getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
   await expect(page.getByRole("list", { name: "Por maestro" }).getByRole("link", { name: `Maestra ${BEGINNER}, maestro de Respiración e2e` })).toBeVisible();
   // Solo aparece lo publicado.
   await expect(page.getByText(HIDDEN)).toHaveCount(0);
   expect(await a11yViolations(page)).toEqual([]);
+  // Cada práctica se alcanza desde el inicio. Cambió por el requisito (T-616, solicitud 3a): antes cada práctica era un carrusel con
+  // sus cursos (la lista «Meditación e2e»); ahora es una ficha en «Prácticas» que lleva a explorar con su filtro, y ahí está el curso
+  // recién publicado de esa práctica.
+  const practice = page.getByRole("list", { name: "Prácticas" }).getByRole("link", { name: /^Meditación e2e, / });
+  await expect(practice).toHaveAttribute("href", `/explorar?practica=${slugOf("Meditación e2e")}`);
+  await practice.click();
+  await expect(page).toHaveURL(new RegExp(`/explorar\\?practica=${slugOf("Meditación e2e")}$`));
+  await expect(page.getByRole("link", { name: new RegExp(`^Curso ${ADVANCED}`) })).toBeVisible();
+  await expect(page.getByText(HIDDEN)).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/inicio$/);
 
   // Sin suscripción, la ficha ofrece suscribirse y lleva a los planes, con la primera lección como destino (T-302).
   await newest.getByRole("link", { name: `Curso ${BEGINNER}, con Maestra ${BEGINNER}` }).click();
