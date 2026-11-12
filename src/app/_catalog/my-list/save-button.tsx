@@ -26,7 +26,8 @@ import type { ListState } from "./outcomes";
 // `variant="icon"` (T-616, solicitud 3; lo decidió el prototipo de la dirección, del carril A, y cambia la decisión de Sergio
 // del 2026-10-28 de ponerlo bajo la tarjeta): un marcador sobre la esquina de la portada (`corner` de `CourseCard`), de 44 px,
 // translúcido, en oro si ya está guardado. Su nombre es el mismo de siempre, con el curso, y lo que se ve es solo el icono.
-// Mientras va en camino, la rueda en su lugar, sin deshabilitarse. El aviso de lo que salió mal cuelga debajo del botón.
+// Mientras va en camino, la rueda en su lugar, sin deshabilitarse. El aviso de lo que salió mal cuelga debajo del botón, a lo
+// ancho de la tarjeta.
 
 const text = browse.myList;
 const IDLE: ListState = { kind: "idle" };
@@ -70,7 +71,8 @@ export function SaveCourseButton({ action, slug, title, saved, permalink, varian
 
   if (variant === "icon") {
     return (
-      <form action={formAction} onSubmit={onSubmit} className={cx("relative", className)}>
+      // Sin `relative`: lo que cuelga se mide con la franja de la esquina de la tarjeta, no con el botón.
+      <form action={formAction} onSubmit={onSubmit} className={className}>
         <button
           type="submit"
           name="do"
@@ -87,8 +89,10 @@ export function SaveCourseButton({ action, slug, title, saved, permalink, varian
         </button>
         {status}
         {failed && (
-          // Cabe a lo ancho de una tarjeta de la columna de la izquierda en el teléfono, sin salirse de la ventana.
-          <div className="absolute top-full right-0 z-(--z-dropdown) mt-2 w-48">
+          // A lo ancho de la tarjeta: se ancla a la franja de la esquina de `CourseCard`, que mide lo que la tarjeta menos su
+          // margen. Con un ancho fijo colgado del botón se salía por la izquierda en la columna izquierda del teléfono (a 320 px
+          // la tarjeta mide 136 y se cortaban 48).
+          <div className="absolute inset-x-0 top-full z-(--z-dropdown) mt-2">
             <InlineAlert tone="warning">{SAID[answer]}</InlineAlert>
           </div>
         )}

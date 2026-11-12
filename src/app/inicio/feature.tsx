@@ -14,12 +14,14 @@ import { Icon } from "@/ui/icon";
 //
 // - La portada va a 6 de 12 columnas, con el motivo grande de su práctica; si se está viendo, un botón de reproducir al
 //   centro y la barra de avance de 3 px abajo. A la derecha, el título, el maestro, el avance y el botón.
-// - Todo eso es un solo enlace con el nombre de siempre (el de la tarjeta: lo que dice la barra va en él), y el botón es solo
-//   su aspecto (`buttonLook`): un botón dentro de un enlace no vale. La portada lleva al mismo lugar con el ratón, pero
-//   queda fuera del teclado y del árbol de accesibilidad, para no ser otra parada ni leerse dos veces.
+// - Todo eso es un solo enlace, con el nombre de la tarjeta (lo que dice la barra va en él) y, al final, lo que dice el
+//   botón, que se lee a la vista (WCAG 2.5.3). El botón es solo su aspecto (`buttonLook`): un botón dentro de un enlace no
+//   vale. La portada lleva al mismo lugar con el ratón, pero queda fuera del teclado y del árbol de accesibilidad, para no
+//   ser otra parada ni leerse dos veces.
 // - Los demás van en la misma lista, en filas con la miniatura del motivo: tres a la vista y el resto en un `<details>`, para
 //   que FL-13 se cumpla (todos los empezados siguen en el inicio, lo más reciente primero).
-// - El antetítulo es el `<h2>` de la sección, y nombra la sección y la lista.
+// - El antetítulo es el `<h2>` de la sección, y nombra la sección y la lista; la lista plegada lo lleva con lo que dice el
+//   desplegable.
 //
 // Nada mide más que su columna: cada pieza del texto tiene `min-w-0` y las filas van a todo el ancho, para que un título
 // largo se corte en vez de ensanchar la página (en el prototipo, la columna se ajustaba a su contenido y medía 430 px en 390).
@@ -144,7 +146,8 @@ export function Feature({ id, heading, seeAll, lead, rows }: FeatureProps) {
           <ul aria-labelledby={id} className="flex min-w-0 flex-col">
             <li className="min-w-0">
               <Link href={lead.href} className="group flex min-w-0 flex-col items-start gap-3 rounded-lg outline-offset-4">
-                <span className="sr-only">{lead.name}</span>
+                {/* El nombre lleva también lo que dice el botón, que se lee a la vista (WCAG 2.5.3): quien lo pide por voz dice eso. */}
+                <span className="sr-only">{t(text.leadName, { name: lead.name, action: lead.action })}</span>
                 <span aria-hidden="true" className="w-full font-display text-h1 text-balance wrap-break-word text-text display-narrow">
                   {lead.title}
                 </span>
@@ -170,11 +173,15 @@ export function Feature({ id, heading, seeAll, lead, rows }: FeatureProps) {
           </ul>
           {rest.length > 0 && (
             <details className="group/mas">
-              <summary className="inline-flex min-h-touch cursor-pointer items-center gap-2 rounded-md px-2 text-body-s text-accent summary-plain hover:text-accent-strong">
+              <summary
+                id={`${id}-mas`}
+                className="inline-flex min-h-touch cursor-pointer items-center gap-2 rounded-md px-2 text-body-s text-accent summary-plain hover:text-accent-strong"
+              >
                 {t(plural(rest.length, text.moreRows), { count: rest.length })}
                 <Icon icon={ChevronDown} size={16} className="transition-transform duration-(--duration-fast) group-open/mas:rotate-180" />
               </summary>
-              <ul className="flex min-w-0 flex-col">
+              {/* Con nombre: el antetítulo y lo que dice el desplegable («Continuar viendo, ver los otros 2»). */}
+              <ul aria-labelledby={`${id} ${id}-mas`} className="flex min-w-0 flex-col">
                 {rest.map((row) => (
                   <li key={row.courseKey} className="min-w-0">
                     <Row row={row} />

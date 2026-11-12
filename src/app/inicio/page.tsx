@@ -7,6 +7,7 @@ import { StudentNav } from "@/app/_catalog/nav";
 import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireSession } from "@/app/_lib/guard";
+import { PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { cookieReader } from "@/app/_lib/request-context";
 import { messages, plural, t } from "@/messages";
 import { accountProfile } from "@/services/account/account";
@@ -47,8 +48,7 @@ import { Feature, type FeaturePractice, type FeatureRow } from "./feature";
 //   antetítulo, que se pinta en el servidor, a la hora de la Ciudad de México: un componente de servidor no se vuelve a
 //   pintar en el navegador, y la página es dinámica por la sesión;
 // - el protagonista (`feature.tsx`), con los demás en filas compactas;
-// - las prácticas como fichas que llevan a explorar con su filtro, en vez de un carrusel por práctica (`PracticeRows`
-//   sigue en `_catalog/` para volver);
+// - las prácticas como fichas que llevan a explorar con su filtro, en vez de un carrusel por práctica;
 // - «Por maestro» sin caja, en la rejilla, con retratos redondos de 120 px;
 // - 96 px fijos entre bloques (64 en el teléfono). El aire va arriba de cada bloque y no en un `gap`: el bloque de «Mi
 //   lista» está siempre, también vacío, y con un `gap` sumaba otro hueco entero aunque no se viera.
@@ -63,7 +63,7 @@ const BLOCK = "mt-16 sm:mt-24";
 
 export const metadata: Metadata = { title: text.pageTitle };
 
-const DATE = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Mexico_City" });
+const DATE = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long", timeZone: PRODUCT_TIME_ZONE });
 
 /** «Ver todo» de una fila: visible así, y con el nombre de la fila para quien no la ve. */
 function SeeAll({ href, row }: { href: string; row: string }) {
@@ -268,10 +268,11 @@ export default async function HomePage() {
                 <h2 id="por-maestro" className="text-h2">
                   {t(text.teachersTitle)}
                 </h2>
-                {/* En el teléfono se desliza (y se desvanece en el borde); desde `sm`, la rejilla. */}
+                {/* En el teléfono se desliza (y se desvanece en el borde); desde `sm`, la rejilla. Aire arriba (`pt-3`, devuelto
+                    con `-mt-3`), como en `Carousel`: desplazar en horizontal también recorta en vertical, y cortaba el anillo de foco. */}
                 <ul
                   aria-labelledby="por-maestro"
-                  className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-x-6 sm:gap-y-8 sm:overflow-visible sm:px-0 lg:grid-cols-6"
+                  className="-mx-4 -mt-3 flex snap-x gap-4 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-x-6 sm:gap-y-8 sm:overflow-visible sm:px-0 lg:grid-cols-6"
                 >
                   {shelf.shelf.teachers.map((teacher) => {
                     const href = teacherPath(teacher.slug);
@@ -306,16 +307,17 @@ function PracticeTiles({ rows }: { rows: readonly PracticeRow[] }) {
       <h2 id="practicas" className="text-h2">
         {text.practicesTitle}
       </h2>
+      {/* Aire arriba para el anillo de foco, como en «Por maestro». */}
       <ul
         aria-labelledby="practicas"
-        className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 lg:grid-cols-4 xl:grid-cols-6"
+        className="-mx-4 -mt-3 flex snap-x gap-3 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 lg:grid-cols-4 xl:grid-cols-6"
       >
         {rows.map((row) => {
           const position = row.courses[0]?.practice?.position ?? null;
           const count = t(plural(row.courses.length, text.practiceCount), { count: row.courses.length });
           return (
             <li key={row.slug} className="relative w-44 shrink-0 snap-start sm:w-auto">
-              <Link href={explorePath({ practice: row.slug })} className="group relative block overflow-hidden rounded-lg edge-light shadow-raised outline-offset-4">
+              <Link href={explorePath({ practice: row.slug })} className="group relative block overflow-hidden rounded-lg edge-light shadow-raised outline-offset-4 focus-visible:shadow-focus">
                 <CourseArt
                   practiceName={null}
                   practiceKey={position ?? row.slug}

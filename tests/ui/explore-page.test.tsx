@@ -137,6 +137,26 @@ describe("explorar (PA-21)", () => {
     expect(within(search).getByRole("button", { name: "Buscar" })).toHaveAttribute("type", "submit");
   });
 
+  // Revisión de la 3a: sin JavaScript la dirección sale en el orden de los campos, y FL-11 espera `/explorar?q=…`. La
+  // práctica elegida (el campo oculto) va después de la búsqueda.
+  it("la búsqueda es el primer campo que viaja, y la práctica elegida va después", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ practica: "meditacion" })));
+    const form = screen.getByRole("search") as HTMLFormElement;
+    const named = [...form.elements].map((element) => (element as HTMLInputElement).name).filter((name) => name !== "");
+    expect(named[0]).toBe("q");
+    expect(named.indexOf("practica")).toBeGreaterThan(0);
+  });
+
+  // Revisión de la 3a: lo que lleva su propia sombra la pierde con la del foco global, y el halo se iba; y lo que se desliza
+  // en horizontal también recorta arriba, donde se cortaba el anillo de foco (como en `Carousel`).
+  it("el buscador conserva el halo del foco, y las fichas de práctica tienen aire arriba para su anillo", async () => {
+    mocks.explore.mockResolvedValue(ready({}, null));
+    render(await ExplorePage(params({})));
+    expect(screen.getByRole("searchbox")).toHaveClass("shadow-raised", "focus-visible:shadow-focus");
+    expect(within(practiceChips()).getByRole("list")).toHaveClass("-mt-3", "pt-3");
+  });
+
   it("las fichas y los selectores van en una fila, y en el teléfono las fichas se desvanecen en el borde", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     render(await ExplorePage(params({})));

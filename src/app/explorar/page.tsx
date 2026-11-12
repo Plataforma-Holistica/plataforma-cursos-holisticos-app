@@ -39,7 +39,7 @@ import { ExploreForm } from "./explore-form";
 // - la cabecera de la casa (`PageHeader`) con la foto del faro, del banco actual (respuesta del carril A del 2026-11-12); el
 //   buscador sigue siendo hijo directo de `<main>`, para quedarse fijo arriba en el teléfono;
 // - sin filtro ni búsqueda, una sola rejilla con todos los cursos, ordenada por práctica, en vez de un carrusel por
-//   práctica (`PracticeRows` y `layOutRows` siguen en `_catalog/` para volver); las fichas de práctica filtran;
+//   práctica; las fichas de práctica filtran;
 // - la rejilla llega a lo más a cinco columnas;
 // - «Guardar en mi lista» es un marcador de icono sobre la esquina de la portada (`variant="icon"`), fuera del enlace;
 // - sin resultados, un estado con la flor.

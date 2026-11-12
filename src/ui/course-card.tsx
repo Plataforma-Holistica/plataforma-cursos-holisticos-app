@@ -115,9 +115,13 @@ export function CourseCard({
           )}
         </span>
       </Link>
-      {/* Sube con la portada al pasar el cursor, para no quedar desfasada. */}
+      {/* Sube con la portada al pasar el cursor, para no quedar desfasada. Es una franja a lo ancho de la tarjeta (menos su
+          margen), con lo suyo a la derecha: así lo que cuelga de la esquina (el aviso del marcador) se mide con la tarjeta y no
+          con el botón. La franja deja pasar el puntero al enlace de abajo; lo de la esquina lo recibe. */}
       {corner !== undefined && (
-        <div className="absolute top-2 right-2 transition duration-(--duration-base) ease-standard motion-safe:group-hover:-translate-y-1">{corner}</div>
+        <div className="pointer-events-none absolute top-2 right-2 left-2 flex justify-end transition duration-(--duration-base) ease-standard motion-safe:group-hover:-translate-y-1 *:pointer-events-auto">
+          {corner}
+        </div>
       )}
     </div>
   );

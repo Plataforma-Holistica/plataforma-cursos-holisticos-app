@@ -32,6 +32,8 @@ export const browse = defineMessages({
     startersTitle: "Para empezar",
     // El protagonista (T-616, solicitud 3): el botón de quien no ha empezado, y los demás en filas, con el resto plegado.
     seeCourse: "Ver el curso",
+    // El nombre del enlace del protagonista: el de la tarjeta y lo que dice su botón, a la vista (WCAG 2.5.3).
+    leadName: "{name}. {action}",
     moreRows: { one: "Ver uno más", other: "Ver los otros {count}" },
     newestTitle: "Nuevos",
     // Las prácticas como fichas, que llevan a explorar con su filtro (T-616).

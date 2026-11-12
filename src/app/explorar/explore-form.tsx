@@ -183,18 +183,16 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
           <label htmlFor={`${ids}-q`} className="sr-only">
             {t(text.searchLabel)}
           </label>
-          {/* La práctica elegida viaja con la búsqueda: las fichas de abajo son enlaces, no campos. */}
-          <input type="hidden" name="practica" value={chosen.practica} />
           <div className="relative">
             <Icon icon={Search} size={20} className="pointer-events-none absolute top-1/2 left-5 -translate-y-1/2 text-text-3" />
             <input
-                ref={box}
-                id={`${ids}-q`}
-                type="search"
-                name="q"
-                value={typed}
-                maxLength={200}
-                autoComplete="off"
+              ref={box}
+              id={`${ids}-q`}
+              type="search"
+              name="q"
+              value={typed}
+              maxLength={200}
+              autoComplete="off"
               enterKeyHint="search"
               placeholder={t(text.searchLabel)}
               onFocus={() => setTyping(true)}
@@ -207,7 +205,8 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
                 submitSoon();
               }}
               className={cx(
-                "h-14 w-full rounded-full border border-border-control bg-surface-1 pl-13 text-body-l text-text shadow-raised halo-surface-1 placeholder:text-text-3",
+                // Su sombra tapa el halo del foco global: con el foco, el halo vuelve (`shadow-focus`).
+                "h-14 w-full rounded-full border border-border-control bg-surface-1 pl-13 text-body-l text-text shadow-raised halo-surface-1 placeholder:text-text-3 focus-visible:shadow-focus",
                 query.q !== null ? "pr-28" : "pr-16",
               )}
             />
@@ -226,13 +225,18 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
               </button>
             </div>
           </div>
+          {/* La práctica elegida viaja con la búsqueda: las fichas de abajo son enlaces, no campos. Va después del buscador:
+              sin JavaScript la dirección sale en el orden de los campos, y empieza por la búsqueda (`/explorar?q=…`, FL-11). */}
+          <input type="hidden" name="practica" value={chosen.practica} />
         </Form>
       </div>
 
       <div className="px-4 sm:px-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
           <nav aria-label={text.practice} className="min-w-0 sm:flex-1">
-            <ul className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:flex-wrap sm:px-0">
+            {/* Aire arriba (`pt-3`, devuelto con `-mt-3`), como en `Carousel`: la lista desplaza en horizontal, y eso también
+                recorta en vertical; sin él se cortaba el anillo de foco de las fichas. */}
+            <ul className="-mx-4 -mt-3 flex snap-x gap-2 overflow-x-auto px-4 pt-3 pb-1 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:flex-wrap sm:px-0">
               {practices.map((chip) => (
                 <li key={chip.href} className="shrink-0 snap-start">
                   <Link

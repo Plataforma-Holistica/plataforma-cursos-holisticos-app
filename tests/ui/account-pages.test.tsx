@@ -249,8 +249,9 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     const { container } = render(await HomePage());
     expect(mocks.continueWatching).toHaveBeenCalledExactlyOnceWith(claims);
     const list = screen.getByRole("list", { name: "Continuar viendo" });
-    // Lo que dice la barra, que solo se ve, va en el nombre.
-    const link = within(list).getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, 3 de 12 terminadas" });
+    // Lo que dice la barra, que solo se ve, va en el nombre; y también lo que dice su botón, que se lee a la vista (WCAG 2.5.3;
+    // revisión de la 3a: antes el nombre terminaba en el avance).
+    const link = within(list).getByRole("link", { name: "Respirar para dormir, con Ana Robles: lección 4 de 12, 3 de 12 terminadas. Continuar: lección 4" });
     expect(link).toHaveAttribute("href", "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002");
     expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.queryByText("Roto")).toBeNull();
@@ -289,6 +290,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(more).not.toHaveAttribute("open");
     expect(within(more as HTMLElement).getByText("Ver los otros 2")).toBeInTheDocument();
     expect(named(more as HTMLElement)).toEqual(["Cinco", "Seis"]);
+    // La lista plegada también tiene nombre: el antetítulo y lo que dice el desplegable (revisión de la 3a).
+    expect(within(more as HTMLElement).getByRole("list")).toHaveAccessibleName("Continuar viendo Ver los otros 2");
     // Cada fila dice su lección, y su avance va en el nombre.
     expect(within(list).getByRole("link", { name: "Dos, con Ana Robles: lección 4 de 12, 3 de 12 terminadas" })).toHaveTextContent("Lección 4 de 12");
     expect(await a11yViolations(container)).toEqual([]);
@@ -313,12 +316,19 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(screen.queryByRole("heading", { name: "Continuar viendo" })).toBeNull();
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Para empezar", "Nuevos", "Prácticas", "Por maestro"]);
     const starters = screen.getByRole("list", { name: "Para empezar" });
-    const first = within(starters).getByRole("link", { name: "Respirar para dormir, con Ana Robles" });
+    // El nombre lleva también lo que dice su botón, a la vista (WCAG 2.5.3; revisión de la 3a: antes, solo «título, con maestro»).
+    const first = within(starters).getByRole("link", { name: "Respirar para dormir, con Ana Robles. Ver el curso" });
     expect(first).toHaveAttribute("href", "/cursos/respirar");
     expect(first).toHaveTextContent("Ver el curso");
     const teachers = screen.getByRole("list", { name: "Por maestro" });
     expect(within(teachers).getByRole("link", { name: "Ana Robles, maestro de Meditación" })).toHaveAttribute("href", "/maestros/ana-robles");
     expect(teachers.querySelector(".ring-1")).not.toBeNull();
+    // Se desliza en el teléfono, y eso recorta también arriba: el aire devuelto deja ver el anillo de foco (como `Carousel`).
+    expect(teachers).toHaveClass("-mt-3", "pt-3");
+    const practices = screen.getByRole("list", { name: "Prácticas" });
+    expect(practices).toHaveClass("-mt-3", "pt-3");
+    // Las fichas llevan su sombra, que tapaba el halo del foco global: lo devuelven al tener el foco.
+    expect(within(practices).getByRole("link")).toHaveClass("shadow-raised", "focus-visible:shadow-focus");
     expect(await a11yViolations(container)).toEqual([]);
   });
 
