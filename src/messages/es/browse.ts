@@ -30,9 +30,17 @@ export const browse = defineMessages({
     greetingAnonymous: "Hola",
     continueTitle: "Continuar viendo",
     startersTitle: "Para empezar",
+    // El protagonista (T-616, solicitud 3): el botón de quien no ha empezado, y los demás en filas, con el resto plegado.
+    seeCourse: "Ver el curso",
+    moreRows: { one: "Ver uno más", other: "Ver los otros {count}" },
     newestTitle: "Nuevos",
+    // Las prácticas como fichas, que llevan a explorar con su filtro (T-616).
+    practicesTitle: "Prácticas",
+    practiceCount: { one: "{count} curso", other: "{count} cursos" },
+    practiceTile: "{name}, {count}",
     teachersTitle: "Por {maestro}",
     empty: "Estamos preparando los primeros cursos.",
+    emptyLead: "Cuando se publiquen, aparecen aquí.",
     unavailable: "No pudimos cargar los cursos. Inténtalo de nuevo en un momento.",
     retry: "Reintentar",
     seeAll: "Ver todo",
@@ -42,6 +50,9 @@ export const browse = defineMessages({
   explore: {
     pageTitle: "Explorar",
     heading: "Explorar",
+    // La cabecera (T-616).
+    eyebrow: "El catálogo",
+    lead: "Busca por curso o por {maestro}, o recorre cada práctica.",
     searchLabel: "Buscar por curso o {maestro}",
     search: "Buscar",
     clearSearch: "Borrar la búsqueda",
@@ -57,6 +68,8 @@ export const browse = defineMessages({
     clearFilters: "Limpiar filtros",
     count: { one: "{count} curso", other: "{count} cursos" },
     resultsTitle: "Resultados",
+    // Sin filtro ni búsqueda, una sola rejilla, ordenada por práctica (T-616).
+    allTitle: "Todos los cursos",
     teachersTitle: "{Maestros}",
     empty: "No encontramos cursos con esos filtros.",
     selectionTitle: "Nuevos",
@@ -88,8 +101,9 @@ export const browse = defineMessages({
   // visible dice la acción; el nombre para quien no ve lleva además el curso.
   myList: {
     title: "Mi lista",
-    // Solo al llegar por «Mi lista» de la barra, sin nada guardado (T-616).
-    emptyHere: "Todavía no guardas ningún curso. Usa «Guardar en mi lista» en la ficha de un curso o en Explorar.",
+    // Solo al llegar por «Mi lista» de la barra, sin nada guardado (T-616): un estado con la flor, su título y qué hacer.
+    emptyHereTitle: "Todavía no guardas ningún curso.",
+    emptyHere: "Usa «Guardar en mi lista» en la ficha de un curso o en Explorar.",
     save: "Guardar en mi lista",
     remove: "Quitar de mi lista",
     removeShort: "Quitar",

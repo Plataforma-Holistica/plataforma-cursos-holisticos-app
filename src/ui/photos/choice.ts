@@ -1,12 +1,15 @@
 import type { StaticImageData } from "next/image";
 
+import faro from "./explorar-faro.jpg";
 import estrellas from "./inicio-estrellas.jpg";
-import faro from "./inicio-faro.jpg";
 import cortina from "./practica-cortina.jpg";
 import ventana from "./practica-ventana.jpg";
 
-// Qué foto de ambiente lleva cada lugar que tiene más de una (T-614, parte 4; decisiones de Sergio del
-// 2026-11-05). Es puro: la fecha la da quien llama.
+// Qué foto de ambiente lleva cada lugar (T-614, parte 4; decisiones de Sergio del 2026-11-05). Es puro.
+//
+// Desde T-616 (solicitud 3), la cabecera del inicio lleva siempre las estrellas, sin alternar con el faro (lo decidió el
+// prototipo de la dirección, del carril A), y el faro pasa a la de explorar, del mismo banco (respuesta del carril A del
+// 2026-11-12: las fotos de cabecera salen del banco actual, con el criterio del 03 §3.12). Las dos, decisiones sin confirmar.
 
 /** Las fotos por práctica, para el maestro sin retrato (diseño, sección 3.12). */
 export const PRACTICE_PHOTOS: readonly [StaticImageData, StaticImageData] = [ventana, cortina];
@@ -17,13 +20,8 @@ export function practicePhoto(position: number | null): StaticImageData | null {
   return PRACTICE_PHOTOS[Math.abs(position) % PRACTICE_PHOTOS.length] ?? null;
 }
 
-/** Las de la cabecera del inicio (PA-20). */
-export const HOME_HEADER_PHOTOS: readonly [StaticImageData, StaticImageData] = [faro, estrellas];
+/** La de la cabecera del inicio (PA-20). */
+export const HOME_HEADER_PHOTO: StaticImageData = estrellas;
 
-const MEXICO_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit" });
-
-/** La del día: alternan una por día, el mismo para todos, contado en la Ciudad de México. */
-export function homeHeaderPhoto(now: Date): StaticImageData {
-  const day = Math.floor(Date.parse(`${MEXICO_DAY.format(now)}T00:00:00Z`) / 86_400_000);
-  return HOME_HEADER_PHOTOS[day % HOME_HEADER_PHOTOS.length] ?? faro;
-}
+/** La de la cabecera de explorar (PA-21). */
+export const EXPLORE_HEADER_PHOTO: StaticImageData = faro;

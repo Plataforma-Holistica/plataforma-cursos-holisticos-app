@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { HOME_HEADER_PHOTOS, homeHeaderPhoto, PRACTICE_PHOTOS, practicePhoto } from "./choice";
+import { EXPLORE_HEADER_PHOTO, HOME_HEADER_PHOTO, PRACTICE_PHOTOS, practicePhoto } from "./choice";
 
 // Qué foto de ambiente lleva cada lugar (T-614, parte 4; decisiones de Sergio del 2026-11-05): el maestro sin
-// retrato, la de su primera práctica, siempre la misma por práctica; la cabecera del inicio, una por día,
-// alternadas e iguales para todos ese día.
+// retrato, la de su primera práctica, siempre la misma por práctica. Desde T-616 (solicitud 3, por el prototipo de la
+// dirección), la cabecera del inicio lleva siempre las estrellas y el faro va en la de explorar.
 
 describe("practicePhoto", () => {
   it("alterna las dos por el orden de la práctica en el catálogo", () => {
@@ -23,18 +23,10 @@ describe("practicePhoto", () => {
   });
 });
 
-describe("homeHeaderPhoto", () => {
-  // La Ciudad de México va seis horas detrás de UTC (sin horario de verano desde 2022).
-  const at = (iso: string) => new Date(iso);
-
-  it("alterna entre un día y el siguiente", () => {
-    expect(HOME_HEADER_PHOTOS).toHaveLength(2);
-    expect(homeHeaderPhoto(at("2026-11-05T18:00:00Z"))).not.toBe(homeHeaderPhoto(at("2026-11-06T18:00:00Z")));
-    expect(homeHeaderPhoto(at("2026-11-05T18:00:00Z"))).toBe(homeHeaderPhoto(at("2026-11-07T18:00:00Z")));
-  });
-
-  it("es la misma todo el día en la Ciudad de México, también después de las seis de la tarde", () => {
-    // 2026-11-05 a las 00:30 y a las 23:30 de la Ciudad de México: el segundo ya es 2026-11-06 en UTC.
-    expect(homeHeaderPhoto(at("2026-11-05T06:30:00Z"))).toBe(homeHeaderPhoto(at("2026-11-06T05:30:00Z")));
+describe("las cabeceras", () => {
+  it("el inicio y explorar llevan cada una la suya, y no la de una práctica", () => {
+    expect(HOME_HEADER_PHOTO).not.toBe(EXPLORE_HEADER_PHOTO);
+    expect(PRACTICE_PHOTOS).not.toContain(HOME_HEADER_PHOTO);
+    expect(PRACTICE_PHOTOS).not.toContain(EXPLORE_HEADER_PHOTO);
   });
 });

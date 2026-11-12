@@ -142,9 +142,13 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
   });
 
   // «Mi lista» de la barra del alumno lleva a este bloque (T-616, solicitud 2).
+  // Desde T-616 (solicitud 3) la nota es un estado con la flor: su título y qué hacer. Lo que se esconde es el estado entero
+  // (`data-list-empty`), no solo su texto.
   it("vacío, dice que no hay nada guardado solo cuando se llega por su ancla", () => {
     const { container } = render(page(vi.fn(), []));
-    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    const note = screen.getByText(/Todavía no guardas ningún curso/).closest<HTMLElement>("[data-list-empty]");
+    expect(note).toContainElement(screen.getByText("Usa «Guardar en mi lista» en la ficha de un curso o en Explorar."));
+    expect(note?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     // Escondido salvo con `:target`: el inicio sin nada guardado sigue sin «Mi lista» (T-210).
     expect(note).toHaveClass("hidden", "group-target/lista:block");
     // Un grupo con nombre: el de las tarjetas no tiene, y uno sin nombre las encendería todas a la vez.
@@ -155,7 +159,7 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
 
   it("vacío, al avisarle la barra que se llegó, lo dice y toma el foco", async () => {
     const { container } = render(page(vi.fn(), []));
-    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    const note = screen.getByText(/Todavía no guardas ningún curso/).closest<HTMLElement>("[data-list-empty]");
     act(() => {
       window.dispatchEvent(new Event(MY_LIST_ARRIVAL));
     });

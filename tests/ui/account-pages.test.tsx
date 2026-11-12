@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { a11yViolations } from "../setup/a11y";
 
 import { terms } from "@/messages/es/terms";
+import { MOTIFS, motifFor } from "@/ui/motifs";
 
 // Las páginas de la cuenta, con la guarda y los servicios simulados: qué pinta cada una
 // con cada respuesta. La tabla de la guarda (quién redirige a dónde) está en
@@ -100,6 +101,15 @@ const shelfWith = (over: Record<string, unknown> = {}) => ({
     ...over,
   },
 });
+/** Un curso empezado, como lo da «continuar viendo»: lo más reciente primero. */
+const watching = (slug: string, title: string, completed = 3, total = 12) => ({
+  courseSlug: slug,
+  courseTitle: title,
+  teacherName: "Ana Robles",
+  completed,
+  total,
+  lesson: { id: "b0000000-0000-4000-8000-000000000002", title: "Alargar la salida", number: completed + 1 },
+});
 
 describe("el inicio del alumno (PA-20; T-210)", () => {
   beforeEach(() => {
@@ -136,42 +146,57 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(bar.querySelector("[data-brand-mark]")).not.toBeNull();
   });
 
-  it("el saludo va sobre una franja de ambiente, decorativa (T-614)", async () => {
+  // Desde T-616 (solicitud 3, por el prototipo de la dirección): la cabecera alta de la casa, con las estrellas siempre (ya no
+  // alterna con el faro) y la fecha de antetítulo; «Entraste como» va dentro, bajo el saludo (TRD §9.2). Antes: la franja
+  // `data-home-header` con una de las dos fotos.
+  it("el saludo va en la cabecera alta, sobre las estrellas, con la fecha arriba y con qué correo se entró debajo (T-616)", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.sessionEmail.mockResolvedValue("ana@prueba.test");
     render(await HomePage());
     const greeting = screen.getByRole("heading", { level: 1 });
-    const strip = greeting.closest("[data-home-header]");
-    expect(strip).not.toBeNull();
-    const photo = strip?.querySelector("img");
+    const header = greeting.closest("[data-page-header]");
+    expect(header).not.toBeNull();
+    const photo = header?.querySelector("img");
     expect(photo).toHaveAttribute("alt", "");
-    expect(photo?.getAttribute("src")).toMatch(/inicio-(faro|estrellas)/);
+    expect(photo?.getAttribute("src")).toMatch(/inicio-estrellas/);
     // Va arriba del todo: no espera a acercarse a la vista.
     expect(photo).toHaveAttribute("loading", "eager");
+    // La fecha, en palabras, en la zona de la Ciudad de México: «jueves, 12 de noviembre».
+    expect(header?.querySelector("p.eyebrow")?.textContent).toMatch(/^[a-záéíóúñ]+, \d{1,2} de [a-z]+$/u);
+    expect(within(header as HTMLElement).getByText("Entraste como ana@prueba.test.")).toBeVisible();
   });
 
-  it("las prácticas con uno o dos cursos comparten renglón en computadora, de dos en dos y en su orden (T-614)", async () => {
+  // Antes: un carrusel por práctica, con las cortas lado a lado (T-614) y «Ver todo: <práctica>». Desde T-616 (solicitud 3),
+  // las prácticas son fichas que llevan a explorar con su filtro.
+  it("las prácticas son fichas en su orden, cada una con cuántos cursos y a explorar con su filtro (T-616)", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
-    mocks.homeShelf.mockResolvedValue(shelfWith({ practices: [row("a", "Alfa", 1), row("b", "Beta", 2), row("c", "Gama", 5), row("d", "Delta", 1)] }));
-    render(await HomePage());
-    const blockOf = (name: string) => screen.getByRole("region", { name });
-    const pair = blockOf("Alfa").parentElement;
-    expect(pair).toHaveClass("lg:grid-cols-2");
-    expect(pair).toContainElement(blockOf("Beta"));
-    expect(pair).not.toContainElement(blockOf("Gama"));
-    // Delta va sola: Gama, larga, la separa de las otras cortas.
-    expect(blockOf("Delta").parentElement).not.toHaveClass("lg:grid-cols-2");
-    // El orden de PA-67 no cambia.
-    const order = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
-    expect(order.filter((name) => ["Alfa", "Beta", "Gama", "Delta"].includes(name ?? ""))).toEqual(["Alfa", "Beta", "Gama", "Delta"]);
+    mocks.homeShelf.mockResolvedValue(shelfWith({ practices: [row("a", "Alfa", 1), row("b", "Beta", 2), row("c", "Gama", 5)] }));
+    const { container } = render(await HomePage());
+    const tiles = within(screen.getByRole("list", { name: "Prácticas" })).getAllByRole("link");
+    expect(tiles.map((tile) => tile.querySelector(".sr-only")?.textContent)).toEqual(["Alfa, 1 curso", "Beta, 2 cursos", "Gama, 5 cursos"]);
+    expect(screen.getByRole("link", { name: "Beta, 2 cursos" })).toHaveTextContent("Beta2 cursos");
+    expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual(["/explorar?practica=a", "/explorar?practica=b", "/explorar?practica=c"]);
+    // Ya no hay un carrusel por práctica.
+    expect(screen.queryByRole("region", { name: "Alfa" })).toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("«Ver todo» lleva a explorar con el filtro de la fila; «Nuevos» no lo lleva (PA-20, PA-21)", async () => {
+  it("«Ver todo» de «Para empezar» lleva a explorar con su nivel; «Nuevos» no lo lleva (PA-20, PA-21)", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     render(await HomePage());
     expect(screen.getByRole("link", { name: "Ver todo: Para empezar" })).toHaveAttribute("href", "/explorar?nivel=principiante");
-    expect(screen.getByRole("link", { name: "Ver todo: Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
     expect(screen.queryByRole("link", { name: "Ver todo: Nuevos" })).toBeNull();
+  });
+
+  // Nota del carril A al revisar la 142: las tarjetas pasan la posición de la práctica, que elige su motivo; antes caían al hash.
+  it("cada portada lleva el motivo de su práctica por su orden en el catálogo, también la de lo que se está viendo (T-616)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [watching("respirar", "Respirar para dormir")] });
+    const { container } = render(await HomePage());
+    const drawn = [...container.querySelectorAll("svg[preserveAspectRatio] path")].map((path) => path.getAttribute("d"));
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(new Set(drawn)).toEqual(new Set([MOTIFS[motifFor(COURSE.practice.position)]]));
   });
 
   it("si no se supo el nombre, saluda sin él", async () => {
@@ -233,21 +258,80 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("sin cursos empezados: «Para empezar», «Nuevos», una fila por práctica y «Por maestro»", async () => {
+  // El protagonista (T-616, solicitud 3): antes, «Continuar viendo» era un carrusel de tarjetas.
+  it("lo más reciente es el protagonista: su portada con el botón de reproducir y la barra fina, y «Continuar: lección N» a la vista", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [watching("respirar", "Respirar para dormir")] });
+    render(await HomePage());
+    const section = screen.getByRole("region", { name: "Continuar viendo" });
+    const link = within(section).getByRole("link", { name: /^Respirar para dormir, con Ana Robles: lección 4 de 12/ });
+    expect(link).toHaveTextContent("Continuar: lección 4");
+    // La portada lleva al mismo lugar con el ratón, pero no es otra parada del teclado ni se lee dos veces.
+    const cover = section.querySelector("a[tabindex='-1']");
+    expect(cover).toHaveAttribute("aria-hidden", "true");
+    expect(cover).toHaveAttribute("href", link.getAttribute("href"));
+    expect(cover?.querySelector("progress")).toHaveClass("progress-bar-thin");
+    expect(cover?.querySelector("progress")).toHaveAttribute("value", "3");
+    expect(cover?.querySelector("[data-play]")).not.toBeNull();
+  });
+
+  it("los demás empezados van en filas bajo el protagonista: tres a la vista y el resto plegado, en su orden (FL-13)", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    const titles = ["Uno", "Dos", "Tres", "Cuatro", "Cinco", "Seis"];
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: titles.map((title) => watching(title.toLowerCase(), title)) });
+    const { container } = render(await HomePage());
+    const list = screen.getByRole("list", { name: "Continuar viendo" });
+    const named = (scope: HTMLElement) => within(scope).getAllByRole("link").map((link) => (link.querySelector(".sr-only")?.textContent ?? "").split(",")[0]);
+    expect(named(list)).toEqual(["Uno", "Dos", "Tres", "Cuatro"]);
+    // El menú de la persona, en la barra, también es un `<details>`: se busca dentro de la sección.
+    const more = screen.getByRole("region", { name: "Continuar viendo" }).querySelector("details");
+    expect(more).not.toBeNull();
+    expect(more).not.toHaveAttribute("open");
+    expect(within(more as HTMLElement).getByText("Ver los otros 2")).toBeInTheDocument();
+    expect(named(more as HTMLElement)).toEqual(["Cinco", "Seis"]);
+    // Cada fila dice su lección, y su avance va en el nombre.
+    expect(within(list).getByRole("link", { name: "Dos, con Ana Robles: lección 4 de 12, 3 de 12 terminadas" })).toHaveTextContent("Lección 4 de 12");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con uno solo más, sin desplegable; con cuatro, «Ver uno más»", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: ["a", "b"].map((slug) => watching(slug, slug)) });
+    const { container, unmount } = render(await HomePage());
+    expect(container.querySelector("main details")).toBeNull();
+    unmount();
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: ["a", "b", "c", "d", "e"].map((slug) => watching(slug, slug)) });
+    const again = render(await HomePage());
+    expect(within(again.container.querySelector("main details") as HTMLElement).getByText("Ver uno más")).toBeInTheDocument();
+  });
+
+  // Desde T-616 (solicitud 3): «Para empezar» es el protagonista, las prácticas son una sola sección de fichas (antes, una fila
+  // por práctica) y «Por maestro» va sin caja, con retratos redondos.
+  it("sin cursos empezados: «Para empezar», «Nuevos», «Prácticas» y «Por maestro»", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     const { container } = render(await HomePage());
     expect(screen.queryByRole("heading", { name: "Continuar viendo" })).toBeNull();
-    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      "Para empezar",
-      "Nuevos",
-      "Meditación",
-      "Por maestro",
-    ]);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Para empezar", "Nuevos", "Prácticas", "Por maestro"]);
     const starters = screen.getByRole("list", { name: "Para empezar" });
-    expect(within(starters).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
+    const first = within(starters).getByRole("link", { name: "Respirar para dormir, con Ana Robles" });
+    expect(first).toHaveAttribute("href", "/cursos/respirar");
+    expect(first).toHaveTextContent("Ver el curso");
     const teachers = screen.getByRole("list", { name: "Por maestro" });
     expect(within(teachers).getByRole("link", { name: "Ana Robles, maestro de Meditación" })).toHaveAttribute("href", "/maestros/ana-robles");
+    expect(teachers.querySelector(".ring-1")).not.toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("«Para empezar»: el primero es el protagonista, sin botón de reproducir, y los demás en filas con su maestro y su nivel", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    const more = ["dos", "tres"].map((slug) => ({ ...COURSE, slug, title: `Curso ${slug}` }));
+    mocks.homeShelf.mockResolvedValue(shelfWith({ starters: [COURSE, ...more] }));
+    render(await HomePage());
+    const section = screen.getByRole("region", { name: "Para empezar" });
+    expect(section.querySelector("[data-play]")).toBeNull();
+    const starters = screen.getByRole("list", { name: "Para empezar" });
+    expect(within(starters).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/cursos/respirar", "/cursos/dos", "/cursos/tres"]);
+    expect(within(starters).getByRole("link", { name: "Curso dos, con Ana Robles" })).toHaveTextContent("Ana Robles · Principiante");
   });
 
   it("«Mi lista» va después de «Para empezar» y antes de «Nuevos», con «Quitar» en cada curso, y se le pide con las claims de la guarda", async () => {
@@ -259,7 +343,7 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
       "Para empezar",
       "Mi lista",
       "Nuevos",
-      "Meditación",
+      "Prácticas",
       "Por maestro",
     ]);
     const row = screen.getByRole("list", { name: "Mi lista" });
@@ -292,9 +376,13 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
   it("con el catálogo vacío, el estado vacío en lugar de las filas", async () => {
     mocks.requireSession.mockResolvedValue({ kind: "render", claims });
     mocks.homeShelf.mockResolvedValue(shelfWith({ starters: [], newest: [], practices: [], teachers: [] }));
-    render(await HomePage());
+    const { container } = render(await HomePage());
     expect(screen.getByText("Estamos preparando los primeros cursos.")).toBeVisible();
+    // Un estado con la flor (T-616): su título y lo que pasa.
+    expect(screen.getByText("Cuando se publiquen, aparecen aquí.")).toBeVisible();
+    expect(screen.getByText("Estamos preparando los primeros cursos.").parentElement?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(screen.queryAllByRole("heading", { level: 2 })).toEqual([]);
+    expect(await a11yViolations(container)).toEqual([]);
   });
 
   it("si no se pudieron leer los cursos, lo dice y ofrece reintentar", async () => {
