@@ -556,7 +556,7 @@ describe("toda página pasa por la guarda o está en la lista de públicas", () 
         const rendered = wildcard.indexOf("if (section !== null) {");
         // Con el marco de administración (T-614, parte 6), que también se pinta después de la guarda.
         expect(wildcard).toMatch(
-          /if \(section !== null\) \{\s+return \(\s+<AdminFrame path=\{path\} capabilities=\{step\.capabilities\}>\s+\{section\.render\(step\.claims\)\}\s+<\/AdminFrame>/,
+          /if \(section !== null\) \{\s+return \(\s+<AdminFrame path=\{path\} capabilities=\{step\.capabilities\} portal=\{\(await navAccess\(step\.claims\)\)\.portal\}>\s+\{section\.render\(step\.claims\)\}\s+<\/AdminFrame>/,
         );
         const forbidden = wildcard.indexOf('if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;');
         const unavailable = wildcard.indexOf('step.kind === "unavailable"');
@@ -869,7 +869,8 @@ describe("el ancla de un bloque es de su pantalla y de ninguna otra", () => {
   // Una pantalla por bloques le da a cada formulario la dirección a la que vuelve sin
   // JavaScript, con el ancla de su bloque. Si la acción redirige, el navegador se lleva el
   // ancla a la pantalla de destino: allá no debe existir, o la página se desplazaría sola.
-  const anchors = sources.flatMap((source) =>
+  // También la dirección de «Mi lista» de la barra del alumno, que lleva al bloque del inicio (T-616).
+  const anchors = [...sources, ...everything.filter((source) => source.file === "src/services/account/navigation.ts")].flatMap((source) =>
     [...source.code.matchAll(/"(bloque-[a-z0-9-]+)"/g)].map((match) => ({ file: source.file, anchor: match[1] ?? "" })),
   );
 
@@ -970,5 +971,75 @@ describe("la petición se lee en un solo archivo", () => {
     // otro alojamiento: no se nombran en ningún lado del código.
     const others = /["'`](?:x-forwarded-for|x-vercel-forwarded-for|x-client-ip|cf-connecting-ip|true-client-ip|forwarded)["'`]/i;
     expect(everything.filter((source) => others.test(source.code)).map((source) => source.file)).toEqual([]);
+  });
+});
+
+// La barra del alumno, una sola (T-616, solicitud 2). Lleva «Mi portal» y «Administración» a quien le tocan: una
+// comodidad, porque quién entra lo decide la guarda de esa pantalla, pero mostrarle «Administración» a otra
+// persona diría quién es del equipo. Por eso los accesos se leen en cada pantalla, después de su guarda y con
+// sus claims, y nunca pasan por una memoria.
+describe("la barra del alumno y sus accesos por rol", () => {
+  const STUDENT_NAV_PAGES = [
+    "src/app/(cuenta)/cuenta/comentarios/page.tsx",
+    "src/app/(cuenta)/cuenta/page.tsx",
+    "src/app/cursos/[slug]/lecciones/[leccion]/page.tsx",
+    "src/app/cursos/[slug]/page.tsx",
+    "src/app/explorar/page.tsx",
+    "src/app/inicio/page.tsx",
+    "src/app/maestros/[slug]/page.tsx",
+    "src/app/planes/page.tsx",
+    "src/app/suscripcion/confirmando/page.tsx",
+    "src/app/suscripcion/prueba/page.tsx",
+  ];
+  const named = (pattern: RegExp) => everything.filter((source) => pattern.test(source.code)).map((source) => source.file).sort();
+
+  it("la pintan exactamente estas pantallas", () => {
+    expect(named(/<StudentNav\b/)).toEqual(STUDENT_NAV_PAGES);
+  });
+
+  it.each(STUDENT_NAV_PAGES)("%s pide los accesos con las claims de su guarda, después de ella", (file) => {
+    const code = codeOf(file);
+    const body = code.slice(code.indexOf("export default async function"));
+    // Las fichas públicas piden quién mira a la par de lo suyo, en un `Promise.all`.
+    const guard = body.search(/(await |\[)(requireSession|requireLessonSession|publicViewer)\(/);
+    const asked = body.search(/studentNavFor\((session|guard|viewer|who)\.claims\)/);
+    expect(guard).toBeGreaterThan(-1);
+    expect(asked).toBeGreaterThan(guard);
+    expect(code).not.toMatch(/\bteamStanding\b|\bteacherStanding\b|\bnavAccess\b/);
+  });
+
+  it("los accesos los lee una sola función, que solo piden la barra y el comodín de administración", () => {
+    expect(named(/\bnavAccess\b/)).toEqual([
+      "src/app/_catalog/nav-facts.ts",
+      "src/app/admin/[...resto]/page.tsx",
+      "src/services/account/nav-access.ts",
+      "src/services/account/nav.ts",
+    ]);
+    expect(named(/\bstudentNavFor\b/)).toEqual(["src/app/_catalog/nav-facts.ts", ...STUDENT_NAV_PAGES].sort());
+    expect(named(/\breadNavStates\b/)).toEqual(["src/services/account/nav.ts", "src/services/account/team-records.ts"]);
+    // Con el resguardo nulo: la barra no depende de la cookie del buzón, y una invitación nunca da un acceso.
+    const records = everything.find((source) => source.file === "src/services/account/team-records.ts")?.code ?? "";
+    const reading = records.slice(records.indexOf("export async function readNavStates"));
+    expect(reading).toMatch(/^export async function readNavStates\(tx: Tx\): Promise<NavStates> \{\s+const team = await readTeamStanding\(tx, null\);\s+const teacher = await readTeacherStanding\(tx, null\);/);
+  });
+
+  it("nunca pasan por una memoria", () => {
+    for (const file of ["src/app/_catalog/nav-facts.ts", "src/services/account/nav-access.ts", "src/services/account/nav.ts"]) {
+      const code = everything.find((source) => source.file === file)?.code ?? "";
+      expect(code, file).not.toMatch(/\bnew Map\b|\bremembered\b|unstable_cache|["']use cache["']|\bcache\(|@\/services\/browse/);
+    }
+    expect(codeOf("src/app/_catalog/nav-facts.ts")).toMatch(/Promise\.all\(\[navAccess\(claims\), sessionEmail\(await cookieReader\(\)\)\]\)/);
+  });
+
+  it("solo la barra y los marcos ofrecen ir al portal o a administración por su rol", () => {
+    // Las pantallas que ya ofrecían un camino a su manera (la invitación, los estados) no leen accesos.
+    expect(named(/\bNavAccess\b/)).toEqual([
+      "src/app/_catalog/nav-facts.ts",
+      "src/app/_catalog/nav.tsx",
+      "src/domain/access/nav-access.ts",
+      "src/services/account/nav-access.ts",
+      "src/services/account/nav.ts",
+    ]);
+    expect(named(/\bopensPortal\b/)).toEqual(["src/app/admin/page.tsx", "src/domain/access/nav-access.ts", "src/services/account/nav-access.ts"]);
   });
 });

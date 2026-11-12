@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 
+import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { requireSession } from "@/app/_lib/guard";
-import { cookieReader } from "@/app/_lib/request-context";
 import { messages } from "@/messages";
-import { accountProfile, accountSecondFactor, accountSessions, sessionEmail } from "@/services/account/account";
+import { accountProfile, accountSecondFactor, accountSessions } from "@/services/account/account";
 import { ROUTES } from "@/services/account/navigation";
 
 import { SuspendedScreen, UnavailableScreen } from "../_lib/states";
@@ -14,7 +15,8 @@ import { AccountScreen } from "./screen";
 // PA-25 · Cuenta (`/cuenta`). Pide sesión y cuenta completa. Lo que pinta de la persona se
 // lee con las claims con que la guarda la dejó pasar: su nombre, como ella misma, y sus
 // sesiones abiertas, que la base solo entrega de quien actúa. Y si la cuenta tiene segundo
-// factor, porque entonces su contraseña no se cambia desde aquí.
+// factor, porque entonces su contraseña no se cambia desde aquí. Lleva la barra del alumno (T-616: sin ella,
+// había que bajar hasta abajo para volver).
 
 export const metadata: Metadata = { title: messages.account.manage.pageTitle };
 
@@ -32,13 +34,12 @@ export default async function AccountPage() {
   const factor = await accountSecondFactor(session.claims);
   if (factor.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.account} withSession />;
 
-  const email = await sessionEmail(await cookieReader());
+  // Al final, ya leído todo lo demás: una cuenta a medias no se pinta, y no se lee de más.
+  const nav = await studentNavFor(session.claims);
   return (
-    <AccountScreen
-      name={profile.name ?? ""}
-      email={email}
-      sessions={sessionRows(sessions.sessions)}
-      secondFactor={factor.verified}
-    />
+    <>
+      <StudentNav current={ROUTES.account} {...nav} />
+      <AccountScreen name={profile.name ?? ""} email={nav.email} sessions={sessionRows(sessions.sessions)} secondFactor={factor.verified} />
+    </>
   );
 }

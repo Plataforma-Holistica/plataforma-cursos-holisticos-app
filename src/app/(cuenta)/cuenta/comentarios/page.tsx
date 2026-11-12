@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
+import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { commentCursor } from "@/app/_comments/view";
 import { requireSession } from "@/app/_lib/guard";
 import { comments as text } from "@/messages/es/comments";
@@ -13,7 +15,7 @@ import { MyCommentsScreen } from "./screen";
 
 // PA-24 · «Mis comentarios» (`/cuenta/comentarios`; T-501; decisiones de Sergio del 2026-11-08). Pide sesión y cuenta completa:
 // una suspendida ve PA-35. Lee lo propio con las claims con que la guarda la dejó pasar, sin la regla de acceso: es para borrar
-// lo suyo también sin acceso a la lección. La página va en la dirección (`?desde=`), sin acumularse.
+// lo suyo también sin acceso a la lección. La página va en la dirección (`?desde=`), sin acumularse. Lleva la barra del alumno (T-616).
 
 export const metadata: Metadata = { title: text.mine.pageTitle };
 
@@ -26,7 +28,12 @@ export default async function MyCommentsPage({ searchParams }: { searchParams: P
 
   const from = (await searchParams).desde;
   const cursor = commentCursor(typeof from === "string" ? from : null);
-  const page = await myComments(session.claims, typeof from === "string" ? from : null);
+  const [page, nav] = await Promise.all([myComments(session.claims, typeof from === "string" ? from : null), studentNavFor(session.claims)]);
   if (page.kind === "unavailable") return <UnavailableScreen retryHref={mineHref(cursor)} withSession />;
-  return <MyCommentsScreen items={page.items} next={page.next} cursor={cursor} action={myCommentsAction} />;
+  return (
+    <>
+      <StudentNav {...nav} />
+      <MyCommentsScreen items={page.items} next={page.next} cursor={cursor} action={myCommentsAction} />
+    </>
+  );
 }

@@ -10,7 +10,15 @@ export const browse = defineMessages({
     label: "Principal",
     home: "Inicio",
     explore: "Explorar",
+    myList: "Mi lista",
     account: "Cuenta",
+    // Los accesos por rol (T-616): solo a quien es maestro o del equipo.
+    portal: "Mi portal",
+    admin: "Administración",
+    // El menú de la persona.
+    menu: "Tu cuenta",
+    myComments: "Mis comentarios",
+    signOut: "Cerrar sesión",
   },
   minutes: "{minutes} min",
   hoursMinutes: "{hours} h {minutes} min",
@@ -80,6 +88,8 @@ export const browse = defineMessages({
   // visible dice la acción; el nombre para quien no ve lleva además el curso.
   myList: {
     title: "Mi lista",
+    // Solo al llegar por «Mi lista» de la barra, sin nada guardado (T-616).
+    emptyHere: "Todavía no guardas ningún curso. Usa «Guardar en mi lista» en la ficha de un curso o en Explorar.",
     save: "Guardar en mi lista",
     remove: "Quitar de mi lista",
     removeShort: "Quitar",

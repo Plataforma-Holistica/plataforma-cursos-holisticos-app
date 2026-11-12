@@ -4,6 +4,7 @@ import { cookieReader } from "@/app/_lib/request-context";
 import { messages, t } from "@/messages";
 import { sessionEmail } from "@/services/account/account";
 import { billingQueueCount } from "@/services/billing/billing";
+import { opensPortal } from "@/services/account/nav-access";
 import { ROUTES } from "@/services/account/navigation";
 import { CAPABILITIES } from "@/services/account/team";
 import { teacherStanding } from "@/services/teachers/teachers";
@@ -40,13 +41,15 @@ export default async function AdminHomePage() {
   // Una comodidad, como los demás enlaces: quién acepta lo decide la guarda de esa pantalla.
   const teacher = await teacherStanding(reader);
   const invited = teacher.kind === "teacher" && (teacher.standing.state === "invited" || teacher.standing.state === "invited_unproven");
+  // La misma lectura dice si también es maestro, para «Mi portal» del menú: sin leer otra vez.
+  const portal = teacher.kind === "teacher" && opensPortal(teacher.standing.state);
   // En el orden de siempre, y solo las que el catálogo sabe nombrar.
   const capabilities = CAPABILITIES.filter((capability) => step.capabilities.includes(capability));
   const billing = await billingQueueCount(step.claims, step.capabilities);
   const pendingWork = billing.kind === "count" && billing.count > 0;
 
   return (
-    <AdminFrame path={ROUTES.admin} capabilities={capabilities}>
+    <AdminFrame path={ROUTES.admin} capabilities={capabilities} portal={portal}>
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
         <h1 className="text-h1">{text.admin.title}</h1>
         <div className="flex flex-col gap-2 text-text-2">

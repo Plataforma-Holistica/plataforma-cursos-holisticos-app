@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   accountSecondFactor: vi.fn(),
   sessionEmail: vi.fn(),
 }));
+// La barra del alumno (T-616): sin accesos por rol, y con el correo que diga la prueba.
+vi.mock("@/app/_catalog/nav-facts", () => ({
+  studentNavFor: async () => ({ access: { admin: false, portal: false }, email: (await mocks.sessionEmail(await mocks.cookieReader())) as string | null }),
+}));
 vi.mock("@/app/(cuenta)/cuenta/actions", () => ({
   changeNameAction: mocks.changeNameAction,
   closeSessionsAction: mocks.closeSessionsAction,

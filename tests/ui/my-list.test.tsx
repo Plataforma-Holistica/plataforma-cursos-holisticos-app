@@ -140,6 +140,36 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     expect(result()).toBeEmptyDOMElement();
   });
 
+  // «Mi lista» de la barra del alumno lleva a este bloque (T-616, solicitud 2).
+  it("vacío, dice que no hay nada guardado solo cuando se llega por su ancla", () => {
+    const { container } = render(page(vi.fn(), []));
+    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    // Escondido salvo con `:target`: el inicio sin nada guardado sigue sin «Mi lista» (T-210).
+    expect(note).toHaveClass("hidden", "group-target:block");
+    expect(container.querySelector("#bloque-lista")).toHaveClass("group");
+    expect(container.querySelector("#bloque-lista")).toContainElement(note);
+  });
+
+  it("con algo guardado no pinta la nota", () => {
+    render(page(vi.fn(), [A]));
+    expect(screen.queryByText(/Todavía no guardas ningún curso/)).toBeNull();
+  });
+
+  it("al llegar por su ancla toma el foco, también si ya se estaba en el inicio", async () => {
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const { container } = render(page(vi.fn(), [A]));
+    const block = container.querySelector<HTMLElement>("#bloque-lista");
+    await waitFor(() => expect(block).toHaveFocus(), { timeout: 3_000 });
+    screen.getByRole("button", { name: "Otra cosa" }).focus();
+    window.history.replaceState(null, "", "/inicio");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(screen.getByRole("button", { name: "Otra cosa" })).toHaveFocus();
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(block).toHaveFocus(), { timeout: 3_000 });
+    window.history.replaceState(null, "", "/");
+  });
+
   it("al quitar, la tarjeta se va y el foco pasa a la siguiente", async () => {
     const { action, sent, answer } = waitingAction();
     const user = userEvent.setup();

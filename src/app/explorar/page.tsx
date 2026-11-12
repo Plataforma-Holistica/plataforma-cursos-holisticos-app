@@ -5,6 +5,7 @@ import Link from "next/link";
 import { exploreListAction } from "@/app/_catalog/my-list/actions";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { PracticeRows } from "@/app/_catalog/practice-rows";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireSession } from "@/app/_lib/guard";
@@ -81,11 +82,11 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   if (session.kind === "suspended") return <SuspendedScreen withSession />;
   if (session.kind === "unavailable") return <UnavailableScreen retryHref={explorePath(asked)} withSession />;
 
-  const [answer, saved] = await Promise.all([explore(asked), myList(session.claims)]);
+  const [answer, saved, nav] = await Promise.all([explore(asked), myList(session.claims), studentNavFor(session.claims)]);
 
   return (
     <>
-      <StudentNav current={ROUTES.explore} />
+      <StudentNav current={ROUTES.explore} {...nav} />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-8 pt-6 pb-24 outline-none sm:pt-8 sm:pb-16">
         <h1 className="px-4 text-h1 sm:px-8">{text.heading}</h1>
         {answer.kind === "unavailable" ? (

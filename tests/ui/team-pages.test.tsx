@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
     throw new Error("no encontrado");
   }),
 }));
+// El menú de administración (T-616): a quien no es maestro, sin «Mi portal».
+vi.mock("@/services/account/nav", () => ({ navAccess: () => Promise.resolve({ admin: true, portal: false }) }));
 vi.mock("@/app/_lib/guard", () => ({
   requireAdmin: mocks.requireAdmin,
   requireSecondFactor: mocks.requireSecondFactor,
@@ -109,7 +111,8 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance", "content", "moderation"] });
     render(await AdminHomePage());
     const nav = within(screen.getByRole("navigation", { name: "Administración" }));
-    expect(menuOf(nav)).toEqual(["/admin", "/admin/revision", "/admin/maestros", "/admin/practicas", "/admin/periodos", "/admin/avisos-cobro", "/admin/alertas", "/cuenta", "/inicio"]);
+    // «Ir a mi inicio» va arriba, después del logotipo (T-616: al pie no se encontraba).
+    expect(menuOf(nav)).toEqual(["/admin", "/inicio", "/admin/revision", "/admin/maestros", "/admin/practicas", "/admin/periodos", "/admin/avisos-cobro", "/admin/alertas", "/cuenta"]);
     // Un grupo por capacidad con pantallas, con su nombre: moderación todavía no tiene ninguna. Cada
     // cosa va dos veces: en la hoja del teléfono (cerrada) y en la columna.
     expect(nav.getAllByRole("list", { name: "Contenido" })).toHaveLength(2);
@@ -130,7 +133,26 @@ describe("el inicio de administración (PA-60, mínimo)", () => {
     mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities });
     render(await AdminHomePage());
     const nav = within(screen.getByRole("navigation", { name: "Administración" }));
-    expect(menuOf(nav)).toEqual(["/admin", ...sections, "/cuenta", "/inicio"]);
+    expect(menuOf(nav)).toEqual(["/admin", "/inicio", ...sections, "/cuenta"]);
+  });
+
+  // T-616, solicitud 2: quien también es maestro vuelve a su portal desde el menú. La misma lectura que el enlace
+  // a la invitación: ninguna de más.
+  it.each([
+    ["active", true],
+    ["needs_notice", true],
+    ["suspended", true],
+    ["none", false],
+    ["invited", false],
+    ["invited_unproven", false],
+  ] as const)("con el estado de maestro %s, ¿«Mi portal» en el menú? %s", async (state, shown) => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance"] });
+    mocks.teacherStanding.mockResolvedValueOnce({ kind: "teacher", claims: {}, standing: { state } });
+    render(await AdminHomePage());
+    const nav = within(screen.getByRole("navigation", { name: "Administración" }));
+    expect(nav.queryAllByRole("link", { name: "Mi portal" })).toHaveLength(shown ? 2 : 0);
+    if (shown) expect(menuOf(nav).slice(0, 3)).toEqual(["/admin", "/inicio", "/portal"]);
+    expect(mocks.teacherStanding).toHaveBeenCalledTimes(1);
   });
 
   it("con finanzas, la tarjeta de los avisos de cobro dice cuántos fallaron y lleva a la cola; con alguno, ya no dice que no hay pendientes", async () => {
@@ -255,7 +277,7 @@ describe("el marco de las secciones (T-614, parte 6)", () => {
 
   it("marca la entrada de la sección, también desde lo que cuelga de ella", () => {
     render(
-      <AdminFrame path="/admin/periodos/2027-10" capabilities={["finance"]}>
+      <AdminFrame path="/admin/periodos/2027-10" capabilities={["finance"]} portal={false}>
         <main>contenido</main>
       </AdminFrame>,
     );

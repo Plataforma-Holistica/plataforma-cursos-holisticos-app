@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { publicViewer } from "@/app/_lib/guard";
 import { PublicFooter } from "@/app/_public/footer";
@@ -40,10 +41,12 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
   const { teacher, courses } = found;
   const initial = [...teacher.name.trim()][0]?.toUpperCase() ?? "";
   const photo = practicePhoto(teacher.practicePosition);
+  // La barra, solo al alumno: después de saber quién mira (la ficha se recuerda 30 s).
+  const nav = viewer.kind === "student" ? await studentNavFor(viewer.claims) : null;
 
   return (
     <>
-      {viewer.kind === "student" && <StudentNav />}
+      {nav !== null && <StudentNav {...nav} />}
       {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). */}
       {viewer.kind === "visitor" && <PublicHeader />}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 outline-none sm:px-8", viewer.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>

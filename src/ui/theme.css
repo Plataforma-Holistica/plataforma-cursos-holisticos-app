@@ -586,6 +586,12 @@
     display: none;
   }
 }
+/* La barra de arriba del alumno, fija al desplazar (T-616): se retira igual, para no quedar sobre el video. */
+@utility student-top-bar {
+  :where(.player-locked) & {
+    display: none;
+  }
+}
 /* Mientras el reproductor ocupa la ventana, la página de atrás no se desplaza. */
 @utility player-locked {
   overflow: hidden;
