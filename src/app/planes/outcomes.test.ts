@@ -79,8 +79,13 @@ describe("PA-04, cifras y direcciones", () => {
     expect(priceText(349000)).toBe("$3,490.00");
   });
 
-  it("lo que equivale al mes del anual se redondea hacia abajo al centavo", () => {
-    expect(monthlyEquivalent(349000)).toBe(29083);
+  it("lo que equivale al mes del anual se redondea hacia arriba al centavo: nunca se anuncia menos que lo real", () => {
+    // Cambió por el requisito (decisión de Sergio del 2026-11-12, T-616, solicitud 4b): antes era hacia abajo.
+    expect(monthlyEquivalent(2990)).toBe(250);
+    expect(monthlyEquivalent(299000)).toBe(24917);
+    expect(monthlyEquivalent(349000)).toBe(29084);
+    // Exacto: no sube.
+    expect(monthlyEquivalent(120000)).toBe(10000);
     expect(monthlyEquivalent(12)).toBe(1);
   });
 

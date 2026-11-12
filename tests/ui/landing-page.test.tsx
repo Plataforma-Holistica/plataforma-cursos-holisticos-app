@@ -11,9 +11,20 @@ import type { HomeShelf, ShelfCourse } from "@/services/browse/browse";
 // el visitante con cada respuesta. Quien tiene sesión no la ve: `visitorOnly` lo manda a su inicio, y
 // esa tabla está en src/app/_lib/guard-steps.test.ts; aquí se cuida que la portada la llame primero.
 
-const mocks = vi.hoisted(() => ({ visitorOnly: vi.fn(), homeShelf: vi.fn() }));
+const mocks = vi.hoisted(() => ({ visitorOnly: vi.fn(), homeShelf: vi.fn(), planShowcase: vi.fn() }));
 vi.mock("@/app/_lib/guard", () => ({ visitorOnly: mocks.visitorOnly }));
 vi.mock("@/services/browse/browse", () => ({ homeShelf: mocks.homeShelf }));
+// Los precios de la portada (T-616, solicitud 4b): la vitrina, con su memoria; nunca la oferta fresca de /planes.
+vi.mock("@/services/billing/showcase-service", () => ({ planShowcase: mocks.planShowcase }));
+
+const ON_SALE = {
+  kind: "ready",
+  plans: [
+    { plan: "monthly", amountCents: 34900 },
+    { plan: "annual", amountCents: 299000 },
+  ],
+  recurringVersion: 1,
+};
 
 import LandingPage from "@/app/page";
 
@@ -59,29 +70,96 @@ afterEach(() => {
 beforeEach(() => {
   mocks.visitorOnly.mockReset().mockResolvedValue(undefined);
   mocks.homeShelf.mockReset().mockResolvedValue({ kind: "ready", shelf: shelf([course("respirar"), course("soltar")]) });
+  mocks.planShowcase.mockReset().mockResolvedValue(ON_SALE);
 });
 
 describe("la portada (PA-01)", () => {
-  it("pasa por la guarda del visitante antes de leer el catálogo", async () => {
+  it("pasa por la guarda del visitante antes de leer el catálogo y los precios, que se leen a la par", async () => {
     const order: string[] = [];
     mocks.visitorOnly.mockImplementation(() => {
       order.push("guarda");
       return Promise.resolve();
     });
+    let finishShelf!: () => void;
     mocks.homeShelf.mockImplementation(() => {
       order.push("catálogo");
-      return Promise.resolve({ kind: "ready", shelf: shelf([]) });
+      return new Promise((resolve) => (finishShelf = () => resolve({ kind: "ready", shelf: shelf([]) })));
     });
-    await renderPage();
-    expect(order).toEqual(["guarda", "catálogo"]);
+    mocks.planShowcase.mockImplementation(() => {
+      order.push("precios");
+      return Promise.resolve(ON_SALE);
+    });
+    const page = renderPage();
+    // Los precios se pidieron sin esperar a que el catálogo terminara.
+    await vi.waitFor(() => expect(order).toEqual(["guarda", "catálogo", "precios"]), { timeout: 3_000 });
+    finishShelf();
+    await page;
   });
 
-  it("el titular, la frase y «Crear cuenta», que lleva al registro", async () => {
+  it("el titular, la frase y «Suscribirme», que lleva a los planes", async () => {
+    // Cambió por el requisito (decisión de Sergio del 2026-11-12; PA-01 del 03): con planes a la venta, el botón principal es
+    // «Suscribirme». Antes era «Crear cuenta» al registro, que sigue en la barra.
     await renderPage();
     expect(screen.getByRole("heading", { level: 1, name: landing.hero.title })).toBeInTheDocument();
     expect(screen.getByText(landing.hero.lead)).toBeInTheDocument();
     const main = screen.getByRole("main");
+    expect(within(main).getByRole("link", { name: landing.hero.subscribe })).toHaveAttribute("href", "/planes");
+    expect(within(main).queryByRole("link", { name: landing.hero.signUp })).toBeNull();
+  });
+
+  it("sin planes a la venta, el encabezado sigue con «Crear cuenta»: «Suscribirme» llevaría a una página que no vende", async () => {
+    mocks.planShowcase.mockResolvedValue({ ...ON_SALE, plans: [] });
+    await renderPage();
+    const main = screen.getByRole("main");
     expect(within(main).getByRole("link", { name: landing.hero.signUp })).toHaveAttribute("href", "/registro");
+    expect(within(main).queryByRole("link", { name: landing.hero.subscribe })).toBeNull();
+  });
+
+  it("los planes, después de «Cómo funciona»: cada total con «IVA incluido», el equivalente solo en el anual, y a elegirlos en /planes", async () => {
+    await renderPage();
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    const how = screen.getByRole("region", { name: landing.how.title });
+    expect(how.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(section).getByText("$349.00 al mes")).toBeInTheDocument();
+    expect(within(section).getByText("$2,990.00 al año")).toBeInTheDocument();
+    expect(within(section).getAllByText(/IVA incluido/)).toHaveLength(2);
+    // Hacia arriba: 2 990 entre 12 son 249.1666…
+    expect(within(section).getByText("Equivale a $249.17 al mes.")).toBeInTheDocument();
+    expect(within(section).getAllByText(/Equivale a/)).toHaveLength(1);
+    expect(within(section).getByRole("link", { name: "Elegir el plan Mensual" })).toHaveAttribute("href", "/planes?plan=monthly#bloque-pagar");
+    expect(within(section).getByRole("link", { name: "Elegir el plan Anual" })).toHaveAttribute("href", "/planes?plan=annual#bloque-pagar");
+    expect(within(section).getByRole("list", { name: "Cualquier plan incluye:" })).toBeInTheDocument();
+    expect(within(section).getByRole("link", { name: landing.plans.seeAll })).toHaveAttribute("href", "/planes");
+  });
+
+  it("con un solo plan a la venta, una tarjeta", async () => {
+    mocks.planShowcase.mockResolvedValue({ ...ON_SALE, plans: [{ plan: "monthly", amountCents: 34900 }] });
+    await renderPage();
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    expect(within(section).getAllByRole("link", { name: /^Elegir el plan/ })).toHaveLength(1);
+    expect(within(section).queryByText(/Equivale a/)).toBeNull();
+  });
+
+  it("sin planes a la venta (con el criterio de /planes), la sección no aparece", async () => {
+    for (const showcase of [
+      { ...ON_SALE, plans: [] },
+      { ...ON_SALE, recurringVersion: null },
+    ]) {
+      mocks.planShowcase.mockResolvedValue(showcase);
+      const { unmount } = render(await LandingPage());
+      expect(screen.queryByRole("region", { name: landing.plans.title })).toBeNull();
+      expect(screen.getByRole("main").textContent).not.toMatch(/\$/);
+      unmount();
+    }
+  });
+
+  it("si los precios no se pudieron leer, la sección va sin cifras: lo que incluye y «Ver planes»", async () => {
+    mocks.planShowcase.mockResolvedValue({ kind: "unavailable" });
+    await renderPage();
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    expect(section.textContent).not.toMatch(/\$|MXN|\d/);
+    expect(within(section).getByRole("list", { name: "Cualquier plan incluye:" })).toBeInTheDocument();
+    expect(within(section).getByRole("link", { name: landing.plans.seeAll })).toHaveAttribute("href", "/planes");
   });
 
   it("la foto del encabezado es decorativa y carga primero", async () => {
@@ -150,15 +228,14 @@ describe("la portada (PA-01)", () => {
     expect(how.textContent).not.toMatch(/\$|MXN|\d/);
   });
 
-  it("el contenido de la portada todavía no habla de precio, de planes ni de suscripción; la barra y el pie enlazan a los planes", async () => {
-    // Cambió por el requisito (pedido de Sergio del 2026-11-11, RF-201): «Planes» va en la barra y en el pie.
-    // Los precios en la portada llegan con su sección, aparte (T-616, solicitud 4b).
+  it("las cifras de dinero solo van en la sección de los planes", async () => {
+    // Cambió por el requisito (decisiones de Sergio del 2026-11-11 y 12, RF-201): los precios entran a la portada, en su sección.
     const open = course("abierto", { isOpen: true });
     mocks.homeShelf.mockResolvedValue({ kind: "ready", shelf: shelf([course("respirar")], open) });
     const container = await renderPage();
-    // «Sin pagar» sí: es lo que el curso abierto ya hace.
-    expect(screen.getByRole("main").textContent).not.toMatch(/precio|suscri|\bplan(es)?\b/i);
-    expect(container.textContent).not.toMatch(/\$|MXN|precio|suscri/i);
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    const outside = (container.textContent ?? "").replace(section.textContent ?? "", "");
+    expect(outside).not.toMatch(/\$|MXN/);
   });
 
   it("la cabecera lleva la flor grande, decorativa, sobre el titular", async () => {

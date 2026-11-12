@@ -1,8 +1,9 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { Offer } from "@/services/billing/checkout";
 
-import { plansView, type PlansViewer } from "./view";
+import { planCardText, plansView, showcaseView, type PlansViewer } from "./view";
 
 const OFFER: Offer = {
   plans: [
@@ -27,7 +28,8 @@ describe("PA-04, la vista", () => {
       ["annual", false, "/planes?plan=annual#bloque-pagar"],
     ]);
     expect(view.summary).toBeNull();
-    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.83 al mes.");
+    // Hacia arriba (decisión de Sergio del 2026-11-12): antes decía $290.83.
+    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.84 al mes.");
   });
 
   it("con el plan elegido, el formulario lleva el monto y el texto que se ven", () => {
@@ -76,5 +78,54 @@ describe("PA-04, la vista", () => {
   it("un texto publicado no lleva la nota de borrador", () => {
     const view = plansView({ ...OFFER, recurring: { ...OFFER.recurring!, version: 1 } }, { plan: "monthly", returnTo: null, canceled: false }, PAY, legal);
     expect(view.kind === "ready" && view.summary?.draft).toBe(false);
+  });
+});
+
+describe("la vitrina de la portada (T-616, solicitud 4b)", () => {
+  const READY = { kind: "ready" as const, plans: OFFER.plans.map(({ plan, amountCents }) => ({ plan, amountCents })), recurringVersion: 0 };
+
+  it("cada tarjeta dice lo mismo que la de /planes para el mismo plan y monto", () => {
+    fc.assert(
+      fc.property(fc.constantFrom("monthly" as const, "annual" as const), fc.integer({ min: 1, max: 10_000_000 }), (plan, amountCents) => {
+        const offer: Offer = { ...OFFER, plans: [{ plan, amountCents, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" }] };
+        const view = plansView(offer, { plan: null, returnTo: null, canceled: false }, PAY, legal);
+        if (view.kind !== "ready") return false;
+        const card = view.cards[0]!;
+        const text = planCardText(plan, amountCents);
+        return text.name === card.name && text.price === card.price && text.repeat === card.repeat && text.equivalent === card.equivalent;
+      }),
+    );
+  });
+
+  it("con los dos planes: una tarjeta por plan, cada una a elegirlo en /planes, sin el monto en la dirección", () => {
+    const view = showcaseView(READY, legal);
+    expect(view.kind).toBe("ready");
+    if (view.kind !== "ready") return;
+    expect(view.cards.map((card) => [card.plan, card.href])).toEqual([
+      ["monthly", "/planes?plan=monthly#bloque-pagar"],
+      ["annual", "/planes?plan=annual#bloque-pagar"],
+    ]);
+    expect(view.cards[0]?.equivalent).toBeNull();
+    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.84 al mes.");
+    for (const card of view.cards) expect(card.href).not.toMatch(/\d{3}/);
+    // Cada enlace con su propio nombre.
+    expect(new Set(view.cards.map((card) => card.chooseLabel)).size).toBe(2);
+  });
+
+  it("con un solo plan a la venta, una tarjeta", () => {
+    const view = showcaseView({ ...READY, plans: [READY.plans[1]!] }, legal);
+    expect(view.kind === "ready" && view.cards.map((card) => card.plan)).toEqual(["annual"]);
+  });
+
+  it("sin venta, con el criterio de /planes: sin planes, sin texto del cobro recurrente o sin su página, no se muestra", () => {
+    expect(showcaseView({ ...READY, plans: [] }, legal)).toEqual({ kind: "hidden" });
+    expect(showcaseView({ ...READY, recurringVersion: null }, legal)).toEqual({ kind: "hidden" });
+    expect(showcaseView(READY, () => null)).toEqual({ kind: "hidden" });
+    // Y /planes dice lo mismo de esa oferta.
+    expect(plansView({ ...OFFER, recurring: null }, { plan: null, returnTo: null, canceled: false }, PAY, legal)).toEqual({ kind: "not_for_sale" });
+  });
+
+  it("si no se supo, sin cifras", () => {
+    expect(showcaseView({ kind: "unavailable" }, legal)).toEqual({ kind: "unavailable" });
   });
 });
