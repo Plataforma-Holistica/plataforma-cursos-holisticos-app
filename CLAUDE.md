@@ -1287,6 +1287,24 @@ que no se ve leyendo un solo archivo:
   solo dentro del menú, arriba); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
   menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
   alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
+- **Lo que T-616 suma (solicitud 6, la administración)** (sin migración; solo lo que se pinta: ninguna guarda, acción, consulta ni
+  texto cambió). **Toda pantalla de administración pinta `AdminMain`** (`src/app/admin/_lib/shell.tsx`), que trae el `<main>`, la
+  cabecera compacta (la filigrana y el resplandor, la capacidad de la sección de antetítulo con `area`, el título en `text-h1` y no en
+  el `text-display-l` de `PageHeader`, y `above`, `badge`, `lead` y `header` para «Volver a…», el estado y lo demás) y el cuerpo.
+  **El ancho es uno solo:** el token `--container-admin` (`max-w-admin`, 72rem), con los mismos márgenes en la cabecera y el cuerpo;
+  las tablas lo usan entero y lo angosto se limita adentro, a la izquierda (`measure="reading"`, o `max-w-reading` en un bloque de una
+  pantalla ancha, como «Tu código»). Una sección nueva no pone su propio `<main>` ni su `max-w-*`. **Las piezas:** una ficha o un
+  formulario, `surface-raised p-4 sm:p-5`; una lista de renglones, `surface-raised divide-y divide-border` con `p-4 sm:px-5` en cada
+  uno; ninguna caja `border border-border`. **Los títulos:** los `<h2>` en `text-h3` y los `<h3>` en `text-body-l font-semibold` (el
+  `text-h2` nuevo, de 28 px, queda grande para una herramienta densa); en la cola de revisión el maestro va de antetítulo. Los vacíos
+  de una lista que no es tabla llevan `FlowerState` (alertas, la cola de revisión, el inicio sin tarjetas); una tabla vacía lo sigue
+  diciendo adentro. **El menú lateral** se viste desde afuera: `AdminFrame` envuelve a `SideFrame` en `side-plane` (`theme.css`), que
+  alcanza al `<nav>` por su lugar (`& > div > nav`) porque `side-nav.tsx` no se editó (lo tocaba la 147); si ese armazón cambia, la
+  utilidad se revisa, y el portal no la lleva todavía. `area` y `measure` entraron a `NON_TEXT_ATTRIBUTES` del lint. En maestros la
+  tabla va justo bajo «Todos» (su `caption` ya no se ve) e invitar va después. Sin capturas de un periodo, su cierre ni sus
+  liquidaciones: la base del prototipo no tiene periodos. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
+  izquierda y no centrado; la capacidad como antetítulo; invitar después de la lista; los `<h2>` en `text-h3`; las capacidades del
+  inicio como etiquetas; el menú sobre `surface-1` con los grupos en oro apagado.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

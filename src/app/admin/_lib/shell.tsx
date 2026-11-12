@@ -54,7 +54,8 @@ export function AdminMain({ title, area, lead, above, badge, header, measure = "
         <div className={cx(GUTTER, "relative flex flex-col gap-2 pt-8 pb-6 sm:pt-12 sm:pb-8")}>
           {above}
           {area !== undefined && <p className="animate-enter eyebrow text-accent">{account.admin.capabilities[area]}</p>}
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* El estado va junto al título, no en la otra orilla: allá quedaba suelto sobre la filigrana. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <h1 className="text-h1 break-words text-text">{title}</h1>
             {badge}
           </div>
