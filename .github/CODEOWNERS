@@ -87,6 +87,8 @@
 # quitar una línea de `vercel.json` apaga la aplicación de avisos o la conciliación sin tocar otra ruta con dueño.
 /src/config/               @SerchFGA @plataformaholisticadev
 /vercel.json               @SerchFGA @plataformaholisticadev
+# Los datos fiscales y de pago de los maestros (CLABE, RFC, CFDI): dato personal (decisión de Sergio del 2026-11-12).
+/src/domain/fiscal/        @SerchFGA @plataformaholisticadev
 
 # Toda migración del esquema propio: puede tocar un libro
 /supabase/migrations/      @SerchFGA @plataformaholisticadev
