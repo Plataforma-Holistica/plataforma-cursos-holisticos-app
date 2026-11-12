@@ -222,6 +222,8 @@ const NON_TEXT_ATTRIBUTES =
     "preserveAspectRatio|focusable|itemProp|itemType|property",
     // El armazón de administración (`AdminMain`): la capacidad de la sección (una llave, no su nombre) y el ancho del cuerpo.
     // `titleId` es el `id` del título en el armazón común (`ToolMain`).
+    // Valen en cualquier etiqueta y no solo en `ToolMain`, `AdminMain` y `PortalMain`: acotarlos por componente pide reescribir
+    // `TEXT_ATTRIBUTE`, que usan cuatro selectores. Son seguros hoy porque las únicas props con esos nombres son llaves, anchos e `id` (las de esos tres y el `titleId` de `CodeBlock`).
     "area|measure|titleId",
     "data-.+",
     "aria-(hidden|live|atomic|relevant|busy|current|invalid|required|disabled|expanded|pressed)",
