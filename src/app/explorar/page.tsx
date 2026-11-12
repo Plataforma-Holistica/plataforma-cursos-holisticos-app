@@ -6,7 +6,6 @@ import { exploreListAction } from "@/app/_catalog/my-list/actions";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
 import { StudentNav } from "@/app/_catalog/nav";
 import { studentNavFor } from "@/app/_catalog/nav-facts";
-import { PracticeRows } from "@/app/_catalog/practice-rows";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireSession } from "@/app/_lib/guard";
 import { messages, plural, t } from "@/messages";
@@ -15,8 +14,11 @@ import { explore, exploreQueryOf, myList, type ExploreQuery, type ShelfCourse } 
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
+import { FlowerState } from "@/ui/flower-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
+import { PageHeader } from "@/ui/page-header";
+import { EXPLORE_HEADER_PHOTO } from "@/ui/photos/choice";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TeacherCard } from "@/ui/teacher-card";
 import { TextLink } from "@/ui/text-link";
@@ -32,10 +34,22 @@ import { ExploreForm } from "./explore-form";
 // Bajo cada tarjeta, «Guardar en mi lista» o «Quitar de mi lista» (RF-311; decisión de Sergio del
 // 2026-10-28). Si la lista no se pudo leer, no se sabe cuál toca, y las tarjetas van sin botón.
 // Sin JavaScript el formulario vuelve a explorar con los mismos filtros, en la tarjeta.
+//
+// T-616, solicitud 3 (lo decidido en el prototipo de la dirección, del carril A; decisiones sin confirmar):
+// - la cabecera de la casa (`PageHeader`) con la foto del faro, del banco actual (respuesta del carril A del 2026-11-12); el
+//   buscador sigue siendo hijo directo de `<main>`, para quedarse fijo arriba en el teléfono;
+// - sin filtro ni búsqueda, una sola rejilla con todos los cursos, ordenada por práctica, en vez de un carrusel por
+//   práctica (`PracticeRows` y `layOutRows` siguen en `_catalog/` para volver); las fichas de práctica filtran;
+// - la rejilla llega a lo más a cinco columnas;
+// - «Guardar en mi lista» es un marcador de icono sobre la esquina de la portada (`variant="icon"`), fuera del enlace;
+// - sin resultados, un estado con la flor.
 
 const text = messages.browse.explore;
 
 export const metadata: Metadata = { title: text.pageTitle };
+
+/** La rejilla de cursos: dos columnas en el teléfono, hasta cinco en computadora. */
+const GRID = "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-5";
 
 /** Lo que hace falta para el botón de Mi lista: qué está guardado, y a dónde vuelve. Nulo si no se supo. */
 type Saving = { saved: ReadonlySet<string>; shownPath: string } | null;
@@ -46,23 +60,9 @@ const cardAnchor = (slug: string) => `bloque-explorar-${slug}`;
 function courseCard(course: ShelfCourse, saving: Saving) {
   const href = coursePath(course.slug);
   if (href === null) return null;
-  const card = (
-    <CourseCard
-      courseKey={course.slug}
-      href={href}
-      title={course.title}
-      teacherName={course.teacherName}
-      practice={course.practice}
-      levelName={course.level?.name ?? null}
-      lessonCount={course.lessonCount}
-      isOpen={course.isOpen}
-    />
-  );
-  if (saving === null) return <div key={course.slug}>{card}</div>;
-  return (
-    <div key={course.slug} id={cardAnchor(course.slug)} className="flex h-full flex-col gap-3">
-      {card}
-      {/* Con otros filtros, otro botón: lo que contestó el anterior (un aviso de error) no se queda. */}
+  // Con otros filtros, otro botón: lo que contestó el anterior (un aviso de error) no se queda.
+  const corner =
+    saving === null ? undefined : (
       <SaveCourseButton
         key={saving.shownPath}
         action={exploreListAction}
@@ -70,7 +70,21 @@ function courseCard(course: ShelfCourse, saving: Saving) {
         title={course.title}
         saved={saving.saved.has(course.slug)}
         permalink={`${saving.shownPath}#${cardAnchor(course.slug)}`}
-        className="mt-auto"
+        variant="icon"
+      />
+    );
+  return (
+    <div key={course.slug} id={saving === null ? undefined : cardAnchor(course.slug)}>
+      <CourseCard
+        courseKey={course.slug}
+        href={href}
+        title={course.title}
+        teacherName={course.teacherName}
+        practice={course.practice}
+        levelName={course.level?.name ?? null}
+        lessonCount={course.lessonCount}
+        isOpen={course.isOpen}
+        corner={corner}
       />
     </div>
   );
@@ -87,8 +101,8 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   return (
     <>
       <StudentNav current={ROUTES.explore} {...nav} />
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-8 pt-6 pb-24 outline-none sm:pt-8 sm:pb-16">
-        <h1 className="px-4 text-h1 sm:px-8">{text.heading}</h1>
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-8 pb-24 outline-none sm:gap-10 sm:pb-16">
+        <PageHeader photo={EXPLORE_HEADER_PHOTO} eyebrow={text.eyebrow} title={text.heading} lead={t(text.lead)} />
         {answer.kind === "unavailable" ? (
           <div className="px-4 sm:px-8">
             <InlineAlert tone="warning" action={<Button href={explorePath(asked)} variant="secondary">{text.retry}</Button>}>
@@ -121,7 +135,14 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
         query={query}
         shownPath={explorePath(query)}
         withoutSearch={explorePath({ ...query, q: null })}
-        practices={facets.practices}
+        practices={[
+          { name: text.anyPractice, href: explorePath({ ...query, practice: null }), current: query.practice === null },
+          ...facets.practices.map((option) => ({
+            name: option.name,
+            href: explorePath({ ...query, practice: option.slug }),
+            current: query.practice === option.slug,
+          })),
+        ]}
         teachers={facets.teachers}
         levels={facets.levels}
       />
@@ -140,7 +161,7 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
                     href={chip.without}
                     replace
                     scroll={false}
-                    className="inline-flex min-h-touch items-center gap-2 rounded-sm bg-accent-subtle px-3 text-body-s text-text hover:bg-surface-2"
+                    className="inline-flex min-h-touch items-center gap-2 rounded-full bg-accent-subtle px-4 text-body-s text-text transition-colors duration-(--duration-fast) ease-standard hover:bg-surface-2"
                   >
                     <span className="sr-only">{t(text.removeFilter, { name: chip.name })}</span>
                     <span aria-hidden="true">{chip.name}</span>
@@ -156,21 +177,22 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
 
       {results === null ? (
         shelf.practices.length === 0 ? (
-          <p className="px-4 text-body-l text-text-2 sm:px-8">{messages.browse.home.empty}</p>
+          <FlowerState title={messages.browse.home.empty}>{messages.browse.home.emptyLead}</FlowerState>
         ) : (
-          <PracticeRows
-            rows={shelf.practices}
-            render={(row) => (
-              <Carousel
-                key={row.slug}
-                id={`practica-${row.slug}`}
-                title={row.name}
-                action={<SeeAll href={explorePath({ practice: row.slug })} row={row.name} />}
-              >
-                {row.courses.map(card)}
-              </Carousel>
-            )}
-          />
+          <section aria-labelledby="todos" className="flex flex-col gap-4 px-4 sm:px-8">
+            <h2 id="todos" className="sr-only">
+              {text.allTitle}
+            </h2>
+            <ul aria-labelledby="todos" className={GRID}>
+              {shelf.practices
+                .flatMap((row) => row.courses)
+                .map((course) => (
+                  <li key={course.slug} className="relative min-w-0">
+                    {card(course)}
+                  </li>
+                ))}
+            </ul>
+          </section>
         )
       ) : (
         <>
@@ -193,7 +215,7 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
               </p>
             </div>
             {results.courses.length > 0 ? (
-              <ul aria-labelledby="resultados" className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
+              <ul aria-labelledby="resultados" className={GRID}>
                 {results.courses.map((course) => (
                   <li key={course.slug} className="relative min-w-0">
                     {card(course)}
@@ -201,18 +223,21 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
                 ))}
               </ul>
             ) : (
-              <div className="flex flex-col items-start gap-4 rounded-md bg-surface-1 p-6">
-                <p className="text-body-l text-text">{text.empty}</p>
-                {hasFilters ? (
-                  <Button href={explorePath({ q: query.q })} variant="secondary">
-                    {text.clearFilters}
-                  </Button>
-                ) : (
-                  <Button href={explorePath()} variant="secondary">
-                    {text.clearSearch}
-                  </Button>
-                )}
-              </div>
+              <FlowerState
+                title={text.empty}
+                className="surface-raised"
+                action={
+                  hasFilters ? (
+                    <Button href={explorePath({ q: query.q })} variant="secondary">
+                      {text.clearFilters}
+                    </Button>
+                  ) : (
+                    <Button href={explorePath()} variant="secondary">
+                      {text.clearSearch}
+                    </Button>
+                  )
+                }
+              />
             )}
           </section>
           {results.courses.length === 0 && shelf.newest.length > 0 && (
@@ -223,15 +248,6 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
         </>
       )}
     </>
-  );
-}
-
-function SeeAll({ href, row }: { href: string; row: string }) {
-  return (
-    <TextLink href={href}>
-      <span aria-hidden="true">{messages.browse.home.seeAll}</span>
-      <span className="sr-only">{t(messages.browse.home.seeAllOf, { row })}</span>
-    </TextLink>
   );
 }
 

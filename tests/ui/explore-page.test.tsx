@@ -83,17 +83,33 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Las fichas de práctica: enlaces, no un campo (T-616, solicitud 3). */
+const practiceChips = () => screen.getByRole("navigation", { name: "Práctica" });
+/** La práctica elegida viaja con la búsqueda en un campo oculto. */
+const chosenPractice = (container: HTMLElement) => container.querySelector<HTMLInputElement>('input[type="hidden"][name="practica"]');
+
 describe("explorar (PA-21)", () => {
-  it("sin filtro ni búsqueda: un carrusel por práctica, con «Ver todo» a su filtro", async () => {
+  // Desde T-616 (solicitud 3): la cabecera de la casa con su foto, las prácticas como fichas (antes, un selector) y, sin
+  // filtro, una sola rejilla ordenada por práctica (antes, un carrusel por práctica con «Ver todo»).
+  it("sin filtro ni búsqueda: la cabecera, las fichas de práctica con «Todas» elegida y una sola rejilla", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     const { container } = render(await ExplorePage(params({})));
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/explorar");
     expect(mocks.explore).toHaveBeenCalledExactlyOnceWith(NOTHING);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Explorar");
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent("Explorar");
+    const photo = heading.closest("[data-page-header]")?.querySelector("img");
+    expect(photo).toHaveAttribute("alt", "");
+    expect(photo?.getAttribute("src")).toMatch(/explorar-faro/);
     expect(screen.getByRole("search")).toBeVisible();
     expect(screen.getByRole("searchbox", { name: "Buscar por curso o maestro" })).toHaveValue("");
-    expect(screen.getByRole("combobox", { name: "Práctica" })).toHaveValue("");
-    expect(screen.getByRole("link", { name: "Ver todo: Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
+    expect(within(practiceChips()).getByRole("link", { name: "Todas las prácticas" })).toHaveAttribute("aria-current", "true");
+    expect(within(practiceChips()).getByRole("link", { name: "Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
+    expect(within(practiceChips()).getByRole("link", { name: "Meditación" })).not.toHaveAttribute("aria-current");
+    expect(chosenPractice(container)).toHaveValue("");
+    const all = screen.getByRole("list", { name: "Todos los cursos" });
+    expect(within(all).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
+    expect(screen.queryByRole("link", { name: /^Ver todo/ })).toBeNull();
     // La región que dice cuántos existe desde antes de la primera búsqueda, vacía.
     expect(screen.getByRole("status")).toHaveTextContent(/^$/);
     const nav = screen.getByRole("navigation", { name: "Principal" });
@@ -101,14 +117,36 @@ describe("explorar (PA-21)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("sin filtro: las prácticas con uno o dos cursos comparten renglón en computadora, en su orden (T-614)", async () => {
-    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
-    mocks.explore.mockResolvedValue({ ...ready({}, null), shelf: { ...SHELF, practices: [row("a", "Alfa", 2), row("b", "Beta", 1), row("c", "Gama", 4)] } });
+  it("sin filtro: la rejilla junta los cursos en el orden de las prácticas (PA-67), sin carrusel por práctica", async () => {
+    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}`, title: `${name} ${i}` })) });
+    mocks.explore.mockResolvedValue({ ...ready({}, null), shelf: { ...SHELF, practices: [row("a", "Alfa", 2), row("b", "Beta", 1), row("c", "Gama", 2)] } });
     render(await ExplorePage(params({})));
-    const pair = screen.getByRole("region", { name: "Alfa" }).parentElement;
-    expect(pair).toHaveClass("lg:grid-cols-2");
-    expect(pair).toContainElement(screen.getByRole("region", { name: "Beta" }));
-    expect(pair).not.toContainElement(screen.getByRole("region", { name: "Gama" }));
+    const links = within(screen.getByRole("list", { name: "Todos los cursos" })).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/cursos/a-0", "/cursos/a-1", "/cursos/b-0", "/cursos/c-0", "/cursos/c-1"]);
+    expect(screen.queryByRole("region", { name: "Alfa" })).toBeNull();
+  });
+
+  it("la rejilla llega a lo más a cinco columnas, y el buscador mide a lo más 720 px con el envío dentro", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ practica: "meditacion" })));
+    const grid = screen.getByRole("list", { name: "Resultados" });
+    expect(grid).toHaveClass("lg:grid-cols-5");
+    expect(grid.className).not.toMatch(/grid-cols-6/);
+    const search = screen.getByRole("search");
+    expect(search).toHaveClass("max-w-search");
+    expect(within(search).getByRole("button", { name: "Buscar" })).toHaveAttribute("type", "submit");
+  });
+
+  it("las fichas y los selectores van en una fila, y en el teléfono las fichas se desvanecen en el borde", async () => {
+    mocks.explore.mockResolvedValue(ready({}, null));
+    render(await ExplorePage(params({})));
+    const row = practiceChips().parentElement as HTMLElement;
+    expect(row).toContainElement(screen.getByRole("combobox", { name: "Nivel" }));
+    expect(row).toContainElement(screen.getByRole("combobox", { name: "Maestro" }));
+    expect(row).toHaveClass("sm:flex-row");
+    expect(within(practiceChips()).getByRole("list")).toHaveClass("max-sm:mask-r-from-85%");
+    // Ya no hay selector de práctica: las fichas lo reemplazan.
+    expect(screen.queryByRole("combobox", { name: "Práctica" })).toBeNull();
   });
 
   it("con búsqueda y filtro: cuántos, la cuadrícula, los maestros encontrados y cómo quitar cada cosa", async () => {
@@ -123,14 +161,19 @@ describe("explorar (PA-21)", () => {
     expect(screen.getByRole("region", { name: "Maestros" })).toBeVisible();
     expect(screen.getByRole("link", { name: /^Ana Robles, maestro/ })).toHaveAttribute("href", "/maestros/ana-robles");
     expect(screen.getByRole("searchbox")).toHaveValue("ana");
-    expect(screen.getByRole("combobox", { name: "Práctica" })).toHaveValue("meditacion");
+    // La práctica elegida: su ficha, y el campo oculto que la lleva con la búsqueda. Las fichas conservan la búsqueda.
+    expect(within(practiceChips()).getByRole("link", { name: "Meditación" })).toHaveAttribute("aria-current", "true");
+    expect(within(practiceChips()).getByRole("link", { name: "Todas las prácticas" })).toHaveAttribute("href", "/explorar?q=ana");
+    expect(chosenPractice(container)).toHaveValue("meditacion");
     expect(screen.getByRole("link", { name: "Quitar filtro: Meditación" })).toHaveAttribute("href", "/explorar?q=ana");
     expect(screen.getByRole("link", { name: "Limpiar filtros" })).toHaveAttribute("href", "/explorar?q=ana");
     expect(screen.getByRole("link", { name: "Borrar la búsqueda" })).toHaveAttribute("href", "/explorar?practica=meditacion");
     expect(await a11yViolations(container)).toEqual([]);
   });
 
-  it("Mi lista: bajo cada tarjeta, guardar o quitar según lo que tiene guardado (RF-311)", async () => {
+  // Desde T-616 (solicitud 3), el botón es un marcador de icono sobre la esquina de la portada (`variant="icon"`), fuera del
+  // enlace; antes iba con su texto bajo la tarjeta.
+  it("Mi lista: en la esquina de cada tarjeta, un marcador para guardar o quitar según lo que tiene guardado (RF-311)", async () => {
     const SOLTAR = { ...COURSE, slug: "soltar", title: "Soltar" };
     mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE, SOLTAR], teachers: [] }));
     mocks.myList.mockResolvedValue({ kind: "ready", courses: [SOLTAR] });
@@ -141,6 +184,9 @@ describe("explorar (PA-21)", () => {
     expect(save).toHaveAttribute("value", "save:respirar");
     expect(save.closest("li")).toContainElement(within(results).getByRole("link", { name: /^Respirar para dormir/ }));
     expect(save.closest("a")).toBeNull();
+    // Solo el icono a la vista: el texto es su nombre.
+    expect(save).toHaveTextContent(/^Guardar en mi lista: Respirar para dormir$/);
+    expect(save).toHaveClass("size-touch");
     expect(within(results).getByRole("button", { name: "Quitar de mi lista: Soltar" })).toHaveAttribute("value", "remove:soltar");
     expect(container.querySelector("#bloque-explorar-soltar")).not.toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
@@ -158,11 +204,12 @@ describe("explorar (PA-21)", () => {
     expect(screen.getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).not.toBe(before);
   });
 
-  it("Mi lista: también en los carruseles por práctica", async () => {
+  // Antes: «también en los carruseles por práctica»; desde T-616 no hay carruseles sin filtro, sino la rejilla.
+  it("Mi lista: también en la rejilla sin filtro", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
     render(await ExplorePage(params({})));
-    expect(within(screen.getByRole("list", { name: "Meditación" })).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "Todos los cursos" })).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBeVisible();
   });
 
   it("Mi lista: si no se pudo leer, las tarjetas van sin botón", async () => {
@@ -176,6 +223,8 @@ describe("explorar (PA-21)", () => {
     render(await ExplorePage(params({ q: "zz", nivel: "principiante" })));
     expect(screen.getByRole("status")).toHaveTextContent("0 cursos");
     expect(screen.getByText("No encontramos cursos con esos filtros.")).toBeVisible();
+    // Un estado con la flor (T-616).
+    expect(screen.getByText("No encontramos cursos con esos filtros.").parentElement?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const clear = screen.getAllByRole("link", { name: "Limpiar filtros" });
     expect(clear.map((link) => link.getAttribute("href"))).toEqual(["/explorar?q=zz", "/explorar?q=zz"]);
     expect(within(screen.getByRole("region", { name: "Nuevos" })).getByRole("link", { name: /^Respirar para dormir/ })).toBeVisible();
@@ -283,15 +332,28 @@ describe("el formulario de explorar busca solo", () => {
     submit.mockRestore();
   });
 
+  // Desde T-616 la práctica no es un campo sino fichas: el filtro de fuera del buscador que se prueba es el nivel, y la
+  // práctica vacía (el campo oculto) tampoco viaja.
   it("los campos vacíos no viajan en la dirección, y los filtros fuera del buscador sí viajan", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     render(await ExplorePage(params({})));
     vi.useFakeTimers();
     const form = capture();
-    fireEvent.change(screen.getByRole("combobox", { name: "Práctica" }), { target: { value: "meditacion" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Nivel" }), { target: { value: "principiante" } });
     act(() => vi.advanceTimersByTime(400));
     form.stop();
-    expect(form.sent()).toEqual(["practica"]);
+    expect(form.sent()).toEqual(["nivel"]);
+  });
+
+  it("la práctica elegida viaja con la búsqueda", async () => {
+    mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
+    render(await ExplorePage(params({ practica: "meditacion" })));
+    vi.useFakeTimers();
+    const form = capture();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "res" } });
+    act(() => vi.advanceTimersByTime(400));
+    form.stop();
+    expect(form.sent()?.sort()).toEqual(["practica", "q"]);
   });
 
   it("borrar la búsqueda no le quita el foco al buscador, y vuelve a tener su nombre", async () => {
@@ -313,7 +375,7 @@ describe("el formulario de explorar busca solo", () => {
 
   it("si lo pulsado se fue con la respuesta (quitar un filtro), el foco lo toma el buscador; al cargar, no", async () => {
     mocks.explore.mockResolvedValue(ready({ practice: "meditacion" }, { courses: [COURSE], teachers: [] }));
-    const { rerender } = render(await ExplorePage(params({ practica: "meditacion" })));
+    const { container, rerender } = render(await ExplorePage(params({ practica: "meditacion" })));
     expect(screen.getByRole("searchbox")).not.toHaveFocus();
     const chip = screen.getByRole("link", { name: "Quitar filtro: Meditación" });
     chip.focus();
@@ -321,6 +383,6 @@ describe("el formulario de explorar busca solo", () => {
     rerender(await ExplorePage(params({})));
     expect(screen.queryByRole("link", { name: "Quitar filtro: Meditación" })).toBeNull();
     expect(screen.getByRole("searchbox")).toHaveFocus();
-    expect(screen.getByRole("combobox", { name: "Práctica" })).toHaveValue("");
+    expect(chosenPractice(container)).toHaveValue("");
   });
 });
