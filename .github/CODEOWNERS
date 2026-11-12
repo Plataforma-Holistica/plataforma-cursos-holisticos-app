@@ -71,6 +71,25 @@
 /src/domain/consumption/   @SerchFGA @plataformaholisticadev
 /src/domain/payout/        @SerchFGA @plataformaholisticadev
 
+# Cobros (decisión de Sergio del 2026-11-12): el servicio de pagos, el adaptador de Stripe, la ruta que recibe
+# sus avisos, los trabajos programados (aplicar avisos, conciliar, y el del correo, que vive en la misma carpeta), las pantallas de planes y de suscripción, y los textos
+# que acepta quien paga. Hasta hoy estas rutas no pedían dueño por sí mismas: sus solicitudes lo pidieron
+# porque también tocaban migraciones o pruebas. La portada (`/src/app/page.tsx`) queda sin dueño a propósito:
+# lee los precios por el servicio, que sí lo tiene.
+/src/services/billing/     @SerchFGA @plataformaholisticadev
+/src/adapters/stripe/      @SerchFGA @plataformaholisticadev
+/src/app/api/webhooks/     @SerchFGA @plataformaholisticadev
+/src/app/api/trabajos/     @SerchFGA @plataformaholisticadev
+/src/app/planes/           @SerchFGA @plataformaholisticadev
+/src/app/suscripcion/      @SerchFGA @plataformaholisticadev
+/src/messages/es/plans.ts  @SerchFGA @plataformaholisticadev
+# La configuración que cuida las llaves de cobro (una llave `live` solo en producción) y la agenda de esos trabajos:
+# quitar una línea de `vercel.json` apaga la aplicación de avisos o la conciliación sin tocar otra ruta con dueño.
+/src/config/               @SerchFGA @plataformaholisticadev
+/vercel.json               @SerchFGA @plataformaholisticadev
+# Los datos fiscales y de pago de los maestros (CLABE, RFC, CFDI): dato personal (decisión de Sergio del 2026-11-12).
+/src/domain/fiscal/        @SerchFGA @plataformaholisticadev
+
 # Toda migración del esquema propio: puede tocar un libro
 /supabase/migrations/      @SerchFGA @plataformaholisticadev
 
