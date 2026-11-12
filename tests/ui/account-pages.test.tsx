@@ -290,8 +290,9 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     expect(more).not.toHaveAttribute("open");
     expect(within(more as HTMLElement).getByText("Ver los otros 2")).toBeInTheDocument();
     expect(named(more as HTMLElement)).toEqual(["Cinco", "Seis"]);
-    // La lista plegada también tiene nombre: el antetítulo y lo que dice el desplegable (revisión de la 3a).
-    expect(within(more as HTMLElement).getByRole("list")).toHaveAccessibleName("Continuar viendo Ver los otros 2");
+    // La lista plegada también tiene nombre (revisión de la 3a): lo que dice el desplegable, sin el antetítulo. Un nombre que lo
+    // contuviera haría que buscar la lista «Continuar viendo» o «Para empezar» por su nombre encontrara dos.
+    expect(within(more as HTMLElement).getByRole("list")).toHaveAccessibleName("Ver los otros 2");
     // Cada fila dice su lección, y su avance va en el nombre.
     expect(within(list).getByRole("link", { name: "Dos, con Ana Robles: lección 4 de 12, 3 de 12 terminadas" })).toHaveTextContent("Lección 4 de 12");
     expect(await a11yViolations(container)).toEqual([]);

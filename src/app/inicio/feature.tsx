@@ -181,7 +181,8 @@ export function Feature({ id, heading, seeAll, lead, rows }: FeatureProps) {
                 <Icon icon={ChevronDown} size={16} className="transition-transform duration-(--duration-fast) group-open/mas:rotate-180" />
               </summary>
               {/* Con nombre: el antetítulo y lo que dice el desplegable («Continuar viendo, ver los otros 2»). */}
-              <ul aria-labelledby={`${id} ${id}-mas`} className="flex min-w-0 flex-col">
+              {/* Su nombre es el del desplegable, sin el antetítulo: uno que lo contuviera también respondería a «Continuar viendo». */}
+              <ul aria-labelledby={`${id}-mas`} className="flex min-w-0 flex-col">
                 {rest.map((row) => (
                   <li key={row.courseKey} className="min-w-0">
                     <Row row={row} />
