@@ -1305,6 +1305,40 @@ que no se ve leyendo un solo archivo:
   liquidaciones: la base del prototipo no tiene periodos. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
   izquierda y no centrado; la capacidad como antetítulo; invitar después de la lista; los `<h2>` en `text-h3`; las capacidades del
   inicio como etiquetas; el menú sobre `surface-1` con los grupos en oro apagado.
+- **Lo que T-616 suma (solicitud 5, el portal del maestro)** (sin migración; solo lo que se pinta: ninguna guarda, acción, consulta ni
+  texto cambió; va apilada sobre la 6, y donde esto choca con su viñeta, manda esto). **El armazón es uno para las dos herramientas:**
+  `ToolMain` (`src/app/_lib/tool-main.tsx`) es el de la solicitud 6, movido tal cual (el `<main>`, la cabecera con la filigrana, el
+  ancho `max-w-admin`, `above`, `badge`, `lead`, `header`, `measure`), con el antetítulo ya en palabras (`eyebrow`) y, para el título,
+  `titleId` (un bloque que se nombra con él) y `titleFocusable` (PA-45 le manda el foco). `AdminMain` quedó como envoltura delgada (pone
+  la capacidad de antetítulo), y el portal tiene la suya, `PortalMain` (`src/app/portal/_lib/shell.tsx`): `section` pone «Portal» de
+  antetítulo en las pantallas del menú; las que cuelgan de una llevan su «Volver a…» arriba y ninguno, o el suyo («Avance de
+  alumnos»). El marcador de la cabecera pasó de `data-admin-header` a `data-tool-header`. **`PortalFrame` ya no trae el `<main>`:** es
+  solo el menú y la franja de solo lectura, y toda pantalla del portal pinta `PortalMain` adentro, sin su propio `<main>` ni su
+  `max-w-*`. `ToolMain` no importa nada del servidor, porque lo pintan también pantallas de cliente: el editor lo pinta **dentro** de
+  sus proveedores (`UnsavedProvider`, `VideoUploadsProvider`), porque «Guardado a las…» de la cabecera lee de ellos. En las pantallas
+  con un bloque con ancla (`bloque-curso-nuevo`, `bloque-curso-borrar`, `bloque-version-descartar`, `bloque-enviar`,
+  `bloque-curso-publicado`) el `<h1>` subió a la cabecera y el bloque lo sigue nombrando por su `id`; el formulario de «Editar» de un
+  curso publicado se quedó dentro de su bloque. **El menú** lleva `side-plane` también en el portal, y la utilidad pinta además la
+  columna a todo el alto del envoltorio (un degradado con la misma superficie y la misma raya, desde `lg`): el `<nav>` ya era
+  `sticky` y medía la ventana, así que al desplazar no se cortaba, pero en una página más larga vista entera (una captura completa,
+  una impresión) su fondo terminaba a la altura de la ventana. `side-nav.tsx` sigue sin editarse. **Las piezas** son las de la 6
+  (`surface-raised p-4 sm:p-5`, listas `surface-raised divide-y divide-border`, `<h2>` en `text-h3`, `<h3>` en `text-body-l
+  font-semibold`): los avisos de una pantalla van juntos arriba (`flex flex-col gap-3 empty:hidden`, que sin avisos no ocupa lugar);
+  «Para empezar» es una ficha con el número en oro apagado (`marker:`, no un número escrito: la prueba lee el texto del paso) y el
+  estado como `StatusBadge`; los vacíos llevan `FlowerState` (sin cursos, con su botón; el panel sin cursos publicados, con su enlace;
+  pagos, lo aceptado y los comentarios); en el teléfono las tarjetas de «Por curso» y de pagos son una sola pieza con filetes; los
+  importes de la liquidación van en una ficha. **En el editor solo cambiaron clases** (y la barra, que es la cabecera): los grupos, los
+  recursos y el video son `surface-raised`; el módulo también, y el elegido se marca con `outline` del acento, porque el borde de
+  `surface-raised` es una sombra; los antetítulos («Módulo 1», «Módulo 1 · Lección 1») en `eyebrow` con el oro apagado. No se tocó
+  ningún elemento, manejador ni `data-*` del arrastre, de la subida, del aviso al salir ni de los formularios. En datos fiscales los
+  formularios van envueltos en una ficha desde la sección (`_fiscal/section.tsx`), sin tocar `screen.tsx`. La invitación y el aviso
+  (sin menú) solo cambiaron sus cajas de texto por fichas. `titleId` entró a `NON_TEXT_ATTRIBUTES` del lint. Usa
+  `tests/ui/tool-main.test.tsx`; ninguna aserción existente cambió. Sin capturas de «Para empezar», de la lista sin cursos, de pagos con
+  periodos ni de una liquidación, de comentarios con hilos, del formulario de datos fiscales (la base del prototipo no tiene periodos,
+  los comentarios están cerrados y falta la llave de cifrado en local), ni del maestro suspendido. Decisiones mías sin confirmar:
+  «Portal» de antetítulo; generalizar el armazón en vez de duplicarlo; el ancho de 72rem también en el editor (antes 90rem); «Nuevo
+  curso» bajo el título y no en la otra orilla; los filtros de comentarios en una ficha; el estado de «Para empezar» como etiqueta
+  («Listo» en verde, «Pendiente» en atención); el video de la lección en su ficha.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
