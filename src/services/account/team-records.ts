@@ -4,7 +4,9 @@ import { z } from "zod";
 
 import type { Tx } from "@/adapters/supabase/db";
 import { sql } from "@/adapters/supabase/sql";
+import { readTeacherStanding } from "@/services/teachers/records";
 
+import type { NavStates } from "./nav-access";
 import { ACCEPT_ANSWERS, CAPABILITIES, type AcceptAnswer, type Capability, type TeamStanding } from "./team";
 import { RESET_VERSION, type TeamRoster } from "./team-admin";
 
@@ -65,6 +67,24 @@ export async function readTeamStanding(tx: Tx, ticketPrint: string | null): Prom
   );
   if (!row) throw new Error("La base no contestó el estado del equipo.");
   return standingOf(row);
+}
+
+/**
+ * Los dos estados de quien actúa para la barra del alumno (T-616): del equipo y de maestro, en la misma
+ * transacción y sin resguardo del buzón (con nulo, una invitación nunca da un acceso, y la barra no depende
+ * de esa cookie). Una mitad que no se entiende queda nula, y la otra sigue; si la base rechaza la primera consulta, la
+ * transacción queda abortada y la segunda también sale nula: no queda ningún acceso (falla cerrada). No escribe nada.
+ */
+export async function readNavStates(tx: Tx): Promise<NavStates> {
+  const team = await readTeamStanding(tx, null).then(
+    (standing) => standing.state,
+    () => null,
+  );
+  const teacher = await readTeacherStanding(tx, null).then(
+    (standing) => standing.state,
+    () => null,
+  );
+  return { team, teacher };
 }
 
 const acceptRow = z.object({ answer: z.string() });

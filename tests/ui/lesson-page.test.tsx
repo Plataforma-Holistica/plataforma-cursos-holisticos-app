@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   commentReplies: vi.fn(),
   shown: null as Record<string, unknown> | null,
 }));
+// La barra del alumno (T-616): sin accesos por rol ni correo, salvo que la prueba diga otra cosa.
+vi.mock("@/app/_catalog/nav-facts", () => ({ studentNavFor: () => Promise.resolve({ access: { admin: false, portal: false }, email: null }) }));
 vi.mock("@/app/_lib/guard", () => ({ requireLessonSession: mocks.requireLessonSession }));
 vi.mock("@/app/_lib/request-context", () => ({ cookieReader: mocks.cookieReader }));
 vi.mock("@/services/lessons/lessons", () => ({ lessonPage: mocks.lessonPage, lessonResources: mocks.lessonResources, courseIsOpen: vi.fn() }));

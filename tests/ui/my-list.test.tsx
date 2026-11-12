@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { MY_LIST_ARRIVAL } from "@/app/_catalog/my-list/arrival";
 import { MyListBlock, type ListCourse } from "@/app/_catalog/my-list/my-list-block";
 import type { ListState } from "@/app/_catalog/my-list/outcomes";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
@@ -138,6 +139,49 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     render(page(vi.fn(), []));
     expect(screen.queryByRole("region", { name: "Mi lista" })).not.toBeInTheDocument();
     expect(result()).toBeEmptyDOMElement();
+  });
+
+  // «Mi lista» de la barra del alumno lleva a este bloque (T-616, solicitud 2).
+  it("vacío, dice que no hay nada guardado solo cuando se llega por su ancla", () => {
+    const { container } = render(page(vi.fn(), []));
+    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    // Escondido salvo con `:target`: el inicio sin nada guardado sigue sin «Mi lista» (T-210).
+    expect(note).toHaveClass("hidden", "group-target/lista:block");
+    // Un grupo con nombre: el de las tarjetas no tiene, y uno sin nombre las encendería todas a la vez.
+    expect(container.querySelector("#bloque-lista")).toHaveClass("group/lista");
+    expect(container.querySelector("#bloque-lista")).not.toHaveClass("group");
+    expect(container.querySelector("#bloque-lista")).toContainElement(note);
+  });
+
+  it("vacío, al avisarle la barra que se llegó, lo dice y toma el foco", async () => {
+    const { container } = render(page(vi.fn(), []));
+    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    act(() => {
+      window.dispatchEvent(new Event(MY_LIST_ARRIVAL));
+    });
+    await waitFor(() => expect(note).toHaveClass("block"), { timeout: 3_000 });
+    expect(note).not.toHaveClass("hidden");
+    await waitFor(() => expect(container.querySelector("#bloque-lista")).toHaveFocus(), { timeout: 3_000 });
+  });
+
+  it("con algo guardado no pinta la nota", () => {
+    render(page(vi.fn(), [A]));
+    expect(screen.queryByText(/Todavía no guardas ningún curso/)).toBeNull();
+  });
+
+  it("al llegar por su ancla toma el foco, también si ya se estaba en el inicio", async () => {
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const { container } = render(page(vi.fn(), [A]));
+    const block = container.querySelector<HTMLElement>("#bloque-lista");
+    await waitFor(() => expect(block).toHaveFocus(), { timeout: 3_000 });
+    screen.getByRole("button", { name: "Otra cosa" }).focus();
+    window.history.replaceState(null, "", "/inicio");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(screen.getByRole("button", { name: "Otra cosa" })).toHaveFocus();
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(block).toHaveFocus(), { timeout: 3_000 });
+    window.history.replaceState(null, "", "/");
   });
 
   it("al quitar, la tarjeta se va y el foco pasa a la siguiente", async () => {

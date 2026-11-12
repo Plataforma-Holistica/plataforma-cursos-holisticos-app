@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { confirmingHref } from "@/app/planes/outcomes";
+import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { requireSession } from "@/app/_lib/guard";
 import { plans as text } from "@/messages/es/plans";
 import { ROUTES } from "@/services/account/navigation";
@@ -29,17 +31,21 @@ export default async function TestPaymentPage({ searchParams }: { searchParams: 
   if (guard.kind === "suspended") return <SuspendedScreen withSession />;
   if (guard.kind === "unavailable") return <UnavailableScreen retryHref={ROUTES.plans} withSession />;
   if (session === null) notFound();
+  const nav = await studentNavFor(guard.claims);
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 pt-10 pb-16 outline-none sm:px-8">
-      <h1 className="text-h1">{text.testTitle}</h1>
-      <p className="text-body-l text-text-2">{text.testBody}</p>
-      <div className="flex flex-wrap gap-3">
-        <Button href={confirmingHref(session)}>{text.testPay}</Button>
-        <Button href={`${ROUTES.plans}?cancelado=1`} variant="secondary">
-          {text.testCancel}
-        </Button>
-      </div>
-    </main>
+    <>
+      <StudentNav {...nav} />
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 pt-10 pb-24 outline-none sm:px-8 sm:pb-16">
+        <h1 className="text-h1">{text.testTitle}</h1>
+        <p className="text-body-l text-text-2">{text.testBody}</p>
+        <div className="flex flex-wrap gap-3">
+          <Button href={confirmingHref(session)}>{text.testPay}</Button>
+          <Button href={`${ROUTES.plans}?cancelado=1`} variant="secondary">
+            {text.testCancel}
+          </Button>
+        </div>
+      </main>
+    </>
   );
 }

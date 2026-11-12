@@ -278,6 +278,15 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await page.goto(SETUP);
   await expect(page).toHaveURL("/admin");
 
+  // Del menú lateral a su inicio, y de ahí vuelve a administración por la barra del alumno (T-616, solicitud 2):
+  // con el código dado, directo. No es maestra: no ve «Mi portal».
+  await page.getByRole("link", { name: "Ir a mi inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+  const studentBar = page.locator("[data-student-nav]");
+  await expect(studentBar.getByRole("link", { name: "Mi portal" })).toHaveCount(0);
+  await studentBar.getByRole("link", { name: "Administración" }).click();
+  await expect(page).toHaveURL("/admin");
+
   // Sale. Al volver a pedir administración entra, da su código, y regresa a donde iba.
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL("/");
@@ -288,6 +297,15 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   // Tiene configuración: esa sección es suya.
   await expect(page).toHaveURL("/admin/equipo");
   await expect(page.getByRole("heading", { level: 1, name: "Equipo de administración" })).toBeVisible();
+
+  // Con una sesión nueva, sin el código todavía, «Administración» de la barra la lleva a darlo (T-616, solicitud 2).
+  await page.getByRole("button", { name: "Cerrar sesión" }).click();
+  await expect(page).toHaveURL("/");
+  await signIn(page, { email, password: PASSWORD });
+  await page.waitForURL((url) => url.pathname !== "/entrar");
+  await page.goto("/inicio");
+  await page.locator("[data-student-nav]").getByRole("link", { name: "Administración" }).click();
+  await expect(page).toHaveURL(/^[^?]*\/entrar\/segundo-factor(\?|$)/);
 });
 
 test("sin JavaScript también se configura el segundo factor, y la clave no viaja en ningún campo", async ({ browser }) => {
@@ -362,6 +380,9 @@ test("invitada con cuenta existente: entra, se le pide probar su buzón, recuper
   // Sus otras pantallas siguen abiertas: no queda encerrada.
   await page.getByRole("link", { name: "Ir a mi inicio" }).click();
   await expect(page).toHaveURL("/inicio");
+  // Una invitación llega por su correo: la barra no le ofrece administración (T-616, solicitud 2).
+  await expect(page.locator("[data-student-nav]")).toBeVisible();
+  await expect(page.locator("[data-student-nav]").getByRole("link", { name: "Administración" })).toHaveCount(0);
   // Y administración la devuelve a la pantalla que le explica.
   await page.goto("/admin");
   await expect(page).toHaveURL(SETUP);
