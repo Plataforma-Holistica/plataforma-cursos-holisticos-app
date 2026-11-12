@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { resourceItems } from "@/app/_catalog/resources/words";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireLessonSession } from "@/app/_lib/guard";
@@ -90,11 +91,12 @@ export default async function LessonRoute({ params, searchParams }: { params: Pr
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={path} withSession />;
   const { page } = found;
 
-  const [access, captions, card, commentsRead] = await Promise.all([
+  const [access, captions, card, commentsRead, nav] = await Promise.all([
     lessonAccess(await cookieReader(), leccion),
     captionsChoice(session.claims),
     coursePage(slug),
     lessonComments(session.claims, page.lesson.id, commentCursor(one(search, "comentarios"))),
+    studentNavFor(session.claims),
   ]);
   const initial = initialOf(access);
   if (initial.kind === "suspended") return <SuspendedScreen withSession />;
@@ -117,7 +119,7 @@ export default async function LessonRoute({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <StudentNav />
+      <StudentNav {...nav} />
       <LessonScreen
         slug={page.course.slug}
         lessonId={page.lesson.id}

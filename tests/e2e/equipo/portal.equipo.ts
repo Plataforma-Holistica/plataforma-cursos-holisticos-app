@@ -247,6 +247,23 @@ test("borrar un curso nunca enviado, con confirmación, y reenviado no falla", a
   expect(again.headers().location).toBe("/portal/cursos");
 });
 
+// T-616, solicitud 2: desde su inicio, el maestro vuelve a su portal por la barra del alumno; también el suspendido
+// y al que le falta el aviso (el portal le pide el aviso).
+for (const [status, notice] of [
+  ["active", true],
+  ["suspended", true],
+  ["active", false],
+] as const) {
+  test(`el maestro (${status}${notice ? "" : ", sin el aviso"}) llega a su portal desde la barra del alumno`, async ({ page }) => {
+    const who = await person();
+    await makeTeacher(who, status, notice);
+    await signIn(page, who, "/inicio");
+    await expect(page.locator("[data-student-nav]").getByRole("link", { name: "Administración" })).toHaveCount(0);
+    await page.locator("[data-student-nav]").getByRole("link", { name: "Mi portal" }).click();
+    await expect(page).toHaveURL(notice ? "/portal" : /\/portal\/aviso/);
+  });
+}
+
 test("el maestro suspendido ve sus cursos y el editor en solo lectura", async ({ page }) => {
   const dani = await person();
   await makeTeacher(dani);
@@ -533,6 +550,8 @@ test("invitada con cuenta: se le pide probar su buzón, recupera su contraseña,
   await expect(page).toHaveURL("/portal/invitacion");
   await page.getByRole("link", { name: "Ir a mi inicio" }).click();
   await expect(page).toHaveURL("/inicio");
+  // Una invitación de maestro llega por su correo: la barra no le ofrece el portal (T-616, solicitud 2).
+  await expect(page.locator("[data-student-nav]").getByRole("link", { name: "Mi portal" })).toHaveCount(0);
 
   await recoverHere(page, ana.email);
   await enter(page, ana.email, NEW_PASSWORD);

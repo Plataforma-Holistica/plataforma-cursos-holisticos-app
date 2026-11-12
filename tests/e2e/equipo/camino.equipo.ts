@@ -140,6 +140,38 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   // La imagen que Auth manda pasó la lista de permitidos, y se pinta como imagen de datos.
   expect(await qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml;base64,/);
   expect(await qr.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  // Se lee (T-616, 2b; medido el 2026-11-11): a su tamaño propio (cada módulo en píxeles enteros), sobre una caja clara
+  // con un margen de al menos 4 módulos de 3 px por lado. Reducido a 192 px y sin zona de silencio sobre el fondo oscuro,
+  // una aplicación de códigos no lo leyó. Se mide en computadora y a 320 px de ancho, el teléfono más angosto, donde la
+  // columna de la lista mide 264 px. La lectura con la aplicación la prueba Sergio a mano.
+  const measure = () =>
+    qr.evaluate((image: HTMLImageElement) => {
+      const box = (image.parentElement as HTMLElement).getBoundingClientRect();
+      const shown = image.getBoundingClientRect();
+      const column = (image.closest("li") as HTMLElement).getBoundingClientRect();
+      return {
+        natural: image.naturalWidth,
+        width: shown.width,
+        height: shown.height,
+        margin: Math.min(shown.left - box.left, box.right - shown.right, shown.top - box.top, box.bottom - shown.bottom),
+        insideColumn: box.left >= column.left && box.right <= column.right,
+        sideScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        background: getComputedStyle(image.parentElement as HTMLElement).backgroundColor,
+      };
+    });
+  const wide = page.viewportSize();
+  for (const size of [wide, { width: 320, height: 640 }]) {
+    if (size !== null) await page.setViewportSize(size);
+    const drawn = await measure();
+    // A su tamaño propio, nunca reducido ni agrandado.
+    expect(drawn.width, `ancho a ${size?.width}`).toBe(drawn.natural);
+    expect(drawn.height).toBe(drawn.width);
+    expect(drawn.margin).toBeGreaterThanOrEqual(12);
+    expect(drawn.background).toBe("rgb(255, 255, 255)");
+    expect(drawn.insideColumn, `la caja dentro de su columna a ${size?.width}`).toBe(true);
+    expect(drawn.sideScroll, `sin desplazamiento horizontal a ${size?.width}`).toBe(false);
+  }
+  if (wide !== null) await page.setViewportSize(wide);
   const secret = (await page.locator("main code").innerText()).trim();
   expect(secret).toMatch(/^[A-Z2-7]{16,}$/);
   await expect(page.getByRole("link", { name: "Abrir en mi aplicación de códigos" })).toHaveAttribute("href", new RegExp(`^otpauth://totp/.*secret=${secret}`));
@@ -246,6 +278,15 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   await page.goto(SETUP);
   await expect(page).toHaveURL("/admin");
 
+  // Del menú lateral a su inicio, y de ahí vuelve a administración por la barra del alumno (T-616, solicitud 2):
+  // con el código dado, directo. No es maestra: no ve «Mi portal».
+  await page.getByRole("link", { name: "Ir a mi inicio" }).click();
+  await expect(page).toHaveURL("/inicio");
+  const studentBar = page.locator("[data-student-nav]");
+  await expect(studentBar.getByRole("link", { name: "Mi portal" })).toHaveCount(0);
+  await studentBar.getByRole("link", { name: "Administración" }).click();
+  await expect(page).toHaveURL("/admin");
+
   // Sale. Al volver a pedir administración entra, da su código, y regresa a donde iba.
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL("/");
@@ -256,6 +297,15 @@ test("invitada con cuenta nueva: se registra, configura su segundo factor, entra
   // Tiene configuración: esa sección es suya.
   await expect(page).toHaveURL("/admin/equipo");
   await expect(page.getByRole("heading", { level: 1, name: "Equipo de administración" })).toBeVisible();
+
+  // Con una sesión nueva, sin el código todavía, «Administración» de la barra la lleva a darlo (T-616, solicitud 2).
+  await page.getByRole("button", { name: "Cerrar sesión" }).click();
+  await expect(page).toHaveURL("/");
+  await signIn(page, { email, password: PASSWORD });
+  await page.waitForURL((url) => url.pathname !== "/entrar");
+  await page.goto("/inicio");
+  await page.locator("[data-student-nav]").getByRole("link", { name: "Administración" }).click();
+  await expect(page).toHaveURL(/^[^?]*\/entrar\/segundo-factor(\?|$)/);
 });
 
 test("sin JavaScript también se configura el segundo factor, y la clave no viaja en ningún campo", async ({ browser }) => {
@@ -330,6 +380,9 @@ test("invitada con cuenta existente: entra, se le pide probar su buzón, recuper
   // Sus otras pantallas siguen abiertas: no queda encerrada.
   await page.getByRole("link", { name: "Ir a mi inicio" }).click();
   await expect(page).toHaveURL("/inicio");
+  // Una invitación llega por su correo: la barra no le ofrece administración (T-616, solicitud 2).
+  await expect(page.locator("[data-student-nav]")).toBeVisible();
+  await expect(page.locator("[data-student-nav]").getByRole("link", { name: "Administración" })).toHaveCount(0);
   // Y administración la devuelve a la pantalla que le explica.
   await page.goto("/admin");
   await expect(page).toHaveURL(SETUP);

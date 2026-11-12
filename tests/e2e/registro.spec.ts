@@ -23,6 +23,7 @@ import {
   userIdOf,
   waitForMails,
 } from "./support/stack";
+import { signOutFromBar } from "./support/nav";
 
 // El registro, de extremo a extremo (FL-02 y FL-03; diseño PA-10 y PA-14): la aplicación
 // compilada contra la base, el Auth y el buzón locales. El enlace sale del buzón, como le
@@ -163,7 +164,7 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   expect(ticket).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
   expect(ticket?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
   expect(await page.evaluate(() => document.cookie)).not.toContain("plataforma-resguardo");
-  await expect(page.getByText(`Entraste como ${email}.`)).toBeVisible();
+  await expect(page.getByRole("main").getByText(`Entraste como ${email}.`)).toBeVisible();
   expect(await cookieOf(context, SESSION_COOKIE)).toMatchObject({ httpOnly: true });
   expect(await sessionCount(userId)).toBe(1);
   const profile = await profileOf(userId);
@@ -174,7 +175,7 @@ test("registro completo: el correo, «Revisa tu correo», el enlace del buzón, 
   expect(await cookieOf(context, PENDING_COOKIE)).toBeUndefined();
 
   // Y la contraseña que eligió es con la que entra después.
-  await page.getByRole("button", { name: "Salir" }).click();
+  await signOutFromBar(page);
   await expect(page).toHaveURL("/");
   await page.goto("/entrar");
   await page.getByLabel("Correo").fill(email);
@@ -337,7 +338,7 @@ test("quien pidió el registro no queda dentro; quien abre el enlace en otro nav
     await confirm(other);
     await expect(other).toHaveURL("/inicio");
     // Lo primero que ve le dice con qué cuenta entró.
-    await expect(other.getByText(`Entraste como ${email}.`)).toBeVisible();
+    await expect(other.getByRole("main").getByText(`Entraste como ${email}.`)).toBeVisible();
   });
 
   // El navegador que pidió el registro no tiene sesión.
@@ -431,7 +432,7 @@ test("sin JavaScript también se registra y se completa la cuenta", async ({ bro
     await tickEverything(page);
     await confirm(page);
     await expect(page).toHaveURL("/inicio");
-    await expect(page.getByText(`Entraste como ${email}.`)).toBeVisible();
+    await expect(page.getByRole("main").getByText(`Entraste como ${email}.`)).toBeVisible();
   });
   const userId = await userIdOf(email);
   expect((await profileOf(userId))?.display_name).toBe("Ana sin JavaScript");

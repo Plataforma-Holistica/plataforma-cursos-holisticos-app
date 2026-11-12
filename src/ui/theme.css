@@ -26,7 +26,8 @@
   /* El oro apagado de los antetítulos (T-616): el mismo tono, más callado. Solo texto chico, nunca un control. */
   --accent-muted: #B5A574;
 
-  /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro. */
+  /* Neutros. Índigo: intuición y concentración. Nunca negro puro ni blanco puro, salvo la zona de silencio del QR
+     (`--qr-quiet`, abajo), que tiene que serlo para que se lea. */
   --bg: #0F1019;
   --surface-1: #171926;
   --surface-2: #1F2233;
@@ -59,6 +60,9 @@
   --filigree: var(--border);
   /* Los títulos van en el ancho angosto de Bricolage (su eje `wdth`, de 75 a 100). */
   --display-stretch: 88%;
+  /* La zona de silencio del código QR del segundo factor (T-616, 2b): un QR se lee oscuro sobre claro, con margen
+     claro alrededor. Es lo único blanco puro de la casa, y solo detrás del código. */
+  --qr-quiet: #FFFFFF;
 
   /* Capas sobre imagen */
   --scrim: rgb(0 0 0 / 0.72);
@@ -170,7 +174,10 @@
   --color-focus: var(--focus);
   --color-accent-muted: var(--accent-muted);
   --color-float: var(--float);
+  /* El contorno apenas visible, también como filete (T-616: entre los accesos por rol y el menú de la persona). */
+  --color-edge-ring: var(--edge-ring);
   --color-filigree: var(--filigree);
+  --color-qr-quiet: var(--qr-quiet);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
@@ -583,6 +590,19 @@
    iPhone queda encima del video, porque la pantalla completa propia vive dentro de la capa de la sección pegada. */
 @utility student-bottom-bar {
   :where(.player-locked) & {
+    display: none;
+  }
+}
+/* La barra de arriba del alumno, fija al desplazar (T-616): se retira igual, para no quedar sobre el video. */
+@utility student-top-bar {
+  :where(.player-locked) & {
+    display: none;
+  }
+}
+/* El resumen de un `<details>` sin su triángulo, también en WebKit, que no lo quita con `list-style`. */
+@utility summary-plain {
+  list-style: none;
+  &::-webkit-details-marker {
     display: none;
   }
 }

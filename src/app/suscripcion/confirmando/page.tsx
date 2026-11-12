@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { StudentNav } from "@/app/_catalog/nav";
+import { studentNavFor } from "@/app/_catalog/nav-facts";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { confirmingHref } from "@/app/planes/outcomes";
 import { requireSession } from "@/app/_lib/guard";
@@ -33,12 +34,12 @@ export default async function ConfirmingPage({ searchParams }: { searchParams: P
   if (guard.kind === "unavailable") return <UnavailableScreen retryHref={self} withSession />;
   if (session === null) notFound();
 
-  const progress = await checkoutProgress(guard.claims, session);
+  const [progress, nav] = await Promise.all([checkoutProgress(guard.claims, session), studentNavFor(guard.claims)]);
   if (progress.kind === "not_found") notFound();
 
   return (
     <>
-      <StudentNav />
+      <StudentNav {...nav} />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 pt-10 pb-24 outline-none sm:px-8 sm:pb-16">
         {/* Una sola región de estado para todas las respuestas: al pasar de la espera a «Listo», el lector de pantalla lo anuncia. */}
         <div role="status" className="flex flex-col gap-6">

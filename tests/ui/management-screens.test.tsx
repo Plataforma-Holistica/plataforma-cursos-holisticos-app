@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   accountSecondFactor: vi.fn(),
   sessionEmail: vi.fn(),
 }));
+// La barra del alumno (T-616): sin accesos por rol, y con el correo que diga la prueba.
+vi.mock("@/app/_catalog/nav-facts", () => ({
+  studentNavFor: async () => ({ access: { admin: false, portal: false }, email: (await mocks.sessionEmail(await mocks.cookieReader())) as string | null }),
+}));
 vi.mock("@/app/(cuenta)/cuenta/actions", () => ({
   changeNameAction: mocks.changeNameAction,
   closeSessionsAction: mocks.closeSessionsAction,
@@ -646,7 +650,8 @@ describe("la página de la cuenta", () => {
     expect(screen.getByLabelText("Contraseña actual")).toBeVisible();
     expect(mocks.sessionEmail).toHaveBeenCalledExactlyOnceWith(reader);
     expect(nameField()).toHaveValue("Ana de Prueba");
-    expect(screen.getByText("ana@prueba.test")).toBeVisible();
+    // En la pantalla (el menú de la barra también lo lleva, T-616).
+    expect(within(screen.getByRole("main")).getByText("ana@prueba.test")).toBeVisible();
     // Las sesiones, ya en palabras: el navegador, y las fechas en la zona del producto.
     const rows = within(sessionsBlock()).getAllByRole("listitem");
     expect(rows).toHaveLength(2);

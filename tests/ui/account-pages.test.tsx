@@ -27,6 +27,10 @@ const mocks = vi.hoisted(() => ({
     throw new Error("no encontrado");
   }),
 }));
+// La barra del alumno (T-616): sin accesos por rol, y con el correo que diga la prueba.
+vi.mock("@/app/_catalog/nav-facts", () => ({
+  studentNavFor: async () => ({ access: { admin: false, portal: false }, email: (await mocks.sessionEmail(await mocks.cookieReader())) as string | null }),
+}));
 vi.mock("@/app/_lib/guard", () => ({
   requireSession: mocks.requireSession,
   requireIncompleteSession: mocks.requireIncompleteSession,
@@ -110,13 +114,17 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     render(await HomePage());
     expect(mocks.requireSession).toHaveBeenCalledExactlyOnceWith("/inicio");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Hola, Ana");
-    expect(screen.getByText("Entraste como ana@prueba.test.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+    // Bajo el saludo, a la vista (TRD §9.2); el menú de la persona lo repite.
+    expect(within(screen.getByRole("main")).getByText("Entraste como ana@prueba.test.")).toBeVisible();
+    // «Salir» al pie se fue: «Cerrar sesión» va en el menú de la barra (T-616).
+    expect(screen.queryByRole("button", { name: "Salir" })).toBeNull();
+    expect(within(screen.getByRole("banner")).getByRole("button", { name: "Cerrar sesión", hidden: true })).toBeInTheDocument();
     // La barra del alumno: el inicio es la página actual, y la cuenta ocupa el lugar de Perfil.
     const nav = screen.getByRole("navigation", { name: "Principal" });
     expect(within(nav).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Explorar" })).toHaveAttribute("href", "/explorar");
     expect(within(nav).getByRole("link", { name: "Cuenta" })).toHaveAttribute("href", "/cuenta");
+    expect(within(nav).getByRole("link", { name: "Mi lista" })).toHaveAttribute("href", "/inicio#bloque-mi-lista");
   });
 
   it("la barra lleva el logotipo, que vuelve al inicio (T-614)", async () => {
@@ -303,7 +311,8 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     mocks.sessionEmail.mockResolvedValue(null);
     render(await HomePage());
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Salir" })).toBeVisible();
+    // Sin correo que mostrar, cerrar sesión sigue a la mano en el menú de la barra.
+    expect(within(screen.getByRole("banner")).getByRole("button", { name: "Cerrar sesión", hidden: true })).toBeInTheDocument();
   });
 });
 

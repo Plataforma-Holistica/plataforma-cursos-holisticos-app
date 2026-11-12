@@ -1244,6 +1244,49 @@ que no se ve leyendo un solo archivo:
   `tests/ui/flower.test.tsx` cubre la flor, los motivos y la tarjeta. Decisiones mías sin confirmar: el motivo por el orden de la práctica (el
   carril A lo aceptó) y la práctica en el color del texto sobre la portada. Para el A: el principal en oro se ve en todas las pantallas, y una
   sección nueva que use `CourseCard` le pasa `practice.position` para el motivo.
+- **Lo que T-616 suma al carril B** (la 2b, el QR del segundo factor, sin migración; observación 8 de Sergio del 2026-11-10). El QR de
+  PA-12 se pinta a su tamaño propio (el SVG de Auth mide 231 × 231 con módulos de 3 px, sin `viewBox`), sin reducir (`max-w-none`), sobre una
+  caja del token `--qr-quiet` (#FFFFFF, lo único blanco puro de la casa, solo ahí) con `p-3`: reducido a 192 px y sin zona de silencio sobre el
+  fondo oscuro, una aplicación de códigos no lo leyó (medido el 2026-11-11; en Chromium no se recortaba). El filtro `qr.ts` no cambia.
+  `camino.equipo.ts` mide en el navegador que la imagen no esté reducida, que el margen claro sea de 12 px o más y que la caja quepa a 320; la
+  lectura con una aplicación real la prueba Sergio a mano (sin decodificador en las pruebas, decisión del carril A). Para el A: nada que le toque.
+- **Lo que T-616 suma al carril B** (solicitud 2, la barra única y los accesos por rol, sin migración; zona delicada, plan aprobado
+  el 2026-11-11 con la revisión independiente del diseño; quejas de Sergio del 2026-11-10: en Cuenta no había barra, y desde el inicio
+  no había cómo volver a la administración ni al portal). **Una sola barra del alumno**, `StudentNav` (`src/app/_catalog/nav.tsx`),
+  fija arriba desde `lg` (`lg:sticky`, con `z-(--z-dropdown)`: en el teléfono y la tableta el buscador de explorar y el reproductor ya se
+  pegan arriba con el mismo plano, y se taparían) y translúcida desde `sm` (un `backdrop-filter` en el teléfono volvería a la barra el
+  marco de lo fijo y la lista de abajo se pegaría a ella), en las diez pantallas que lista `screens.test.ts`, también `/cuenta` y `/cuenta/comentarios`. Lleva Inicio,
+  Explorar, Mi lista y, a quien le tocan, «Mi portal» y «Administración»; en el teléfono la lista baja con Cuenta, y los accesos van arriba
+  del menú de la persona, con su icono; en computadora los separa de «Tu cuenta» un filete de `--color-edge-ring`. El menú es un solo `<details>` (`person-menu.tsx`, sin `role="menu"`): el JavaScript solo lo
+  cierra con Escape (el foco vuelve al resumen), con un clic fuera y al elegir un enlace. Lleva el correo con que se entró (solo el correo,
+  cortado con su `title`), Cuenta, Mis comentarios y Cerrar sesión; «Entraste como» queda solo bajo el saludo del inicio (TRD §9.2), y el «Salir» del pie del inicio se fue. Las dos barras
+  se retiran bajo `.player-locked` (`student-top-bar`, `student-bottom-bar`). **Quién ve cada acceso** lo decide `navAccessOf`
+  (`src/domain/access/nav-access.ts`): «Administración» a `member`, `needs_code` y `unbound`; «Mi portal» a `active`, `needs_notice` y
+  `suspended`; ninguna invitación (tampoco el restablecimiento) y nada que no se supo. **La lectura** es `readNavStates(tx)` en
+  `team-records.ts`, con `readTeamStanding(tx, null)` y `readTeacherStanding(tx, null)` (sin resguardo: la barra no depende de esa cookie),
+  y `navAccess(claims)` (`src/services/account/nav.ts`) la corre en una transacción como el servidor, con las claims de la guarda y sin
+  otro `checkSession`; falla cerrada y reporta `nav_access_unavailable`. **Nunca pasa por una memoria** (sería la única forma de mostrarle
+  «Administración» a otra persona), y `screens.test.ts` lo exige, con quién la nombra. Las pantallas la piden con
+  `studentNavFor(claims)` (`nav-facts.ts`, con el correo), después de su guarda y a la par de lo suyo; la cuenta, al final, como antes el
+  correo. **«Mi lista»** lleva a `ROUTES.myList` (el ancla `MY_LIST_ANCHOR` vive en `navigation.ts`) con `next/link` (`my-list-link.tsx`): un
+  `<a>` del navegador rompía «Atrás», porque Next no atiende un `popstate` sin su estado. Al pulsarlo avisa con el evento
+  `MY_LIST_ARRIVAL` (`my-list/arrival.ts`), y el bloque, al llegar (por el evento, por `hashchange` o con el ancla al cargar), toma el foco
+  y, sin nada guardado, dice que no hay nada; sin JavaScript lo hace `:target` (`group-target/lista:`, un grupo con nombre: uno sin nombre
+  encendía las tarjetas). Fuera de eso no dice nada (el inicio sin nada guardado sigue sin «Mi lista»). **El menú lateral** (`SideFrame`) lleva «Ir a mi inicio» arriba, con los
+  otros lugares de la persona (`others`): en administración, «Mi portal» a quien también es maestro (`AdminFrame` pide `portal`; el inicio
+  lo saca de la lectura de `teacherStanding` que ya hacía, y el comodín, de `navAccess`). Usa integración 106 (con un caso que pasa por el `navAccess` de la aplicación, como `app_service`, y mira que no
+  reporte: los demás arman su propia lectura con la conexión del dueño, y no verían un permiso de menos), `tests/e2e/barra.spec.ts` y
+  casos en `camino.equipo.ts` y `portal.equipo.ts`. Para las pruebas: la barra trae su formulario de «Cerrar sesión» antes que la pantalla,
+  así que los formularios de una pantalla del alumno se leen desde el `<main>` (`mainOf`), y cerrar sesión o ir a la cuenta van por
+  `tests/e2e/support/nav.ts`; una prueba de página que pinte la barra simula `@/app/_catalog/nav-facts`, y una que monte el comodín de
+  administración, `@/services/account/nav`. Cambiaron por el requisito la forma de `<AdminFrame>` y las anclas en `screens.test.ts`, el
+  orden del menú en `team-pages.test.tsx`, «Salir» en `account-pages.test.tsx` y en cuatro extremo a extremo, y `cuenta.spec.ts`
+  (`mainOf`). El resumen de los `<details>` va sin su marca con `summary-plain` (en WebKit salía el triángulo), y la entrada del menú de la página en que se está
+  lleva `aria-current` (la cuenta y Mis comentarios). Decisiones mías sin confirmar: «Mi lista»
+  como ancla del inicio y su nota de vacío; sin hoja inferior en el teléfono (en computadora los accesos van a la vista en la barra; en el teléfono,
+  solo dentro del menú, arriba); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
+  menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
+  alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
@@ -3570,6 +3613,16 @@ que la integración continua pase. Lo que sigue depende de lo que toca:
 - **No toca ninguna:** entra con la integración continua en verde. La fusiona el agente
   cuando el cambio lo pidió Sergio; si lo propuso el agente por su cuenta, la deja
   propuesta.
+- **Mientras dura el rediseño** (T-616; decisión de Sergio del 2026-11-11): los `.tsx` de `src/app/_catalog/`,
+  `explorar/`, `inicio/` y `cursos/` no piden dueño, los de hoy y los nuevos (el bloque final de
+  `.github/CODEOWNERS`; el párrafo de arriba las sigue listando con dueño, y para esos `.tsx` manda este). Una
+  solicitud que solo toca eso y `src/ui/` la fusiona el agente con la integración continua en verde y la
+  revisión independiente del diff sin bloqueantes. No es solo lo que pinta: las páginas de explorar y del inicio
+  llaman ahí a su guarda, y las cuidan `tests/architecture/screens.test.ts` y el extremo a extremo. Siguen
+  pidiendo la aprobación de Sergio: las acciones y lo demás (`.ts`) de esas carpetas, la lección entera
+  (`cursos/*/lecciones/`: acceso y medición), el portal del maestro, la cuenta, la administración, el
+  reproductor, los servicios, la base y las pruebas con dueño. La cola de fusión agrupa hasta cinco solicitudes
+  desde ese día. Al cerrar T-616 el bloque se quita.
 
 La protección de `main` no se cambia para dejar pasar una solicitud: eso es reconfigurar
 un proveedor, y se pregunta. Desde la ola 0, `main` exigía además que la rama estuviera al día antes de
