@@ -1343,6 +1343,22 @@ que no se ve leyendo un solo archivo:
   «Portal» de antetítulo; generalizar el armazón en vez de duplicarlo; el ancho de 72rem también en el editor (antes 90rem); «Nuevo
   curso» bajo el título y no en la otra orilla; los filtros de comentarios en una ficha; el estado de «Para empezar» como etiqueta
   («Listo» en verde, «Pendiente» en atención); el video de la lección en su ficha.
+- **Lo que T-616 suma al carril B** (la 4a, «Planes» en la barra pública y el logotipo en toda página, sin migración; pedidos de
+  Sergio del 2026-11-11 viendo la aplicación sin sesión). `PublicHeader` lleva «Planes» entre el logotipo y «Entrar», marcado en `/planes`
+  (`onPlans`, que también pasa `PublicFooter`; `TextLink` ganó `current`, que pone `aria-current` y lo distingue a la vista: color del
+  texto, peso y subrayado grueso, en lugar de las clases de siempre). En el teléfono «Planes» va solo en el pie, y
+  el nombre del logotipo de la barra pública se parte en dos renglones (`max-sm:whitespace-normal`): con la flor, a 320 px «Crear cuenta» se
+  salía 41 px. En el menú lateral (`SideFrame`) el nombre se parte siempre (`Wordmark wrap`): a su tamaño no cabía en la columna y se cortaba.
+  **Dos clases de la misma propiedad en un elemento no las decide el orden del atributo sino el del CSS:** `FlowerMark` trae `size-brand-mark`
+  y `Wordmark` `whitespace-nowrap`, así que un `size-16` o un `whitespace-normal` sueltos no ganan; se pasan con variante (`max-sm:`, `sm:`) o
+  con la prop. `BrandBar` (`src/app/_public/brand-bar.tsx`), solo el logotipo hacia la portada, va arriba en los textos legales (también
+  cuando no se pudieron leer), la de no encontrado, la de error y `/planes` cuando no se sabe quién mira o la oferta no se pudo leer
+  (`plans-page.test.tsx` exige una sola barra en cada caso; `global-error.tsx` no la lleva, a propósito: trae su propio documento): la portada manda al inicio a quien tiene sesión, así que no pregunta quién
+  mira y el 404 sigue siendo el mismo para todos. La portada lleva la flor grande sobre el titular. En `/planes`, lo que incluye es una
+  lista única (`PlanIncludes`, `src/app/planes/includes.tsx`, «Cualquier plan incluye:», sin contar planes): solo lo que existe (decisión del
+  carril A del 2026-11-11), sin constancias hasta T-504. El pie se llama «Enlaces del sitio». Cambió por el requisito la prueba de la portada
+  que prohibía «planes» en todo el documento. Decisiones mías sin confirmar: «Planes» en el pie en el teléfono, los nombres partidos, la flor
+  de 64 y 80 px, y solo el logotipo en las pantallas sueltas. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
@@ -3669,6 +3685,11 @@ que la integración continua pase. Lo que sigue depende de lo que toca:
 - **No toca ninguna:** entra con la integración continua en verde. La fusiona el agente
   cuando el cambio lo pidió Sergio; si lo propuso el agente por su cuenta, la deja
   propuesta.
+- **Los cobros tienen dueño** (decisión de Sergio del 2026-11-12): `src/services/billing/`, `src/adapters/stripe/`,
+  `src/app/api/webhooks/`, `src/app/api/trabajos/`, `src/app/planes/`, `src/app/suscripcion/` y
+  `src/messages/es/plans.ts` están en `.github/CODEOWNERS`, y con ellas `src/config/` (la guarda de las llaves de cobro) `vercel.json` (la agenda de los trabajos) y `src/domain/fiscal/` (los datos fiscales y de pago de los maestros). Antes no lo estaban, y una solicitud de cobros que no
+  tocara migraciones ni pruebas habría entrado sin su aprobación. La portada (`src/app/page.tsx`) no tiene dueño:
+  lee los precios por el servicio.
 - **Mientras dura el rediseño** (T-616; decisión de Sergio del 2026-11-11): los `.tsx` de `src/app/_catalog/`,
   `explorar/`, `inicio/` y `cursos/` no piden dueño, los de hoy y los nuevos (el bloque final de
   `.github/CODEOWNERS`; el párrafo de arriba las sigue listando con dueño, y para esos `.tsx` manda este). Una

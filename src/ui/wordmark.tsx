@@ -13,9 +13,10 @@ import { FlowerMark } from "./flower";
 // (T-614, 2026-11-05) se retira: el oro ya está en la roseta del centro. La flor mide en `em` (los tokens
 // `brand-mark`): crece con la letra. El tamaño lo pone quien lo usa, y el enlace también, si lo lleva.
 
-export function Wordmark({ className }: { className?: string }) {
+/** `wrap`: el nombre puede partirse en dos renglones, como en la columna del menú lateral, donde a su tamaño no cabe. */
+export function Wordmark({ className, wrap = false }: { className?: string; wrap?: boolean }) {
   return (
-    <span className={cx("inline-flex items-center font-display font-bold whitespace-nowrap text-text", className)}>
+    <span className={cx("inline-flex items-center font-display font-bold text-text", wrap ? "whitespace-normal leading-tight" : "whitespace-nowrap", className)}>
       <FlowerMark className="mr-brand-mark-gap" />
       {terms.Plataforma}
     </span>

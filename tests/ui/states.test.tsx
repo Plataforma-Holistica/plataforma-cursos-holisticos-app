@@ -3,6 +3,7 @@ import { SearchX } from "lucide";
 import { describe, expect, it } from "vitest";
 
 import ErrorPage from "@/app/error";
+import NotFound from "@/app/not-found";
 import { states } from "@/messages/es/states";
 import { terms } from "@/messages/es/terms";
 import { ui } from "@/messages/es/ui";
@@ -168,6 +169,20 @@ describe("FullScreenState", () => {
   it("no tiene faltas de accesibilidad", async () => {
     const { container } = render(<main>{state}</main>);
     expect(await a11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("el logotipo en las pantallas sueltas (T-616, solicitud 4; pedido de Sergio del 2026-11-11)", () => {
+  it("la de error y la de no encontrado llevan arriba el logotipo, que lleva a la portada", () => {
+    for (const page of [<ErrorPage key="error" error={new Error("x")} retry={() => {}} />, <NotFound key="404" />]) {
+      const { unmount } = render(page);
+      const bar = screen.getByRole("banner");
+      expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
+      expect(bar.querySelector("[data-brand-mark]")).not.toBeNull();
+      // Arriba de la pantalla, fuera de su contenido.
+      expect(bar.compareDocumentPosition(screen.getByRole("main")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      unmount();
+    }
   });
 });
 
